@@ -9,6 +9,38 @@ Actr provides two levels of API abstraction:
 - **Low Level API** (`Actr` module): Direct FFI bindings to the Rust `actr` crate, providing fine-grained control
 - **High Level API** (`Actr` module): Swift-friendly wrappers with type safety and concurrency guarantees
 
+## Mobile Lifecycle Observability
+
+Host apps can pass `MobileLifecycleObserver` instances to either high-level
+`ActrNode.from` or `ActrNode.linked`. The observer receives structured network
+and app-lifecycle events, including path observations, material path changes,
+background/foreground transitions, monitor lifetime, and native event-delivery
+outcomes. Delivery outcomes cover completed sends, failed sends (with the
+error description), and events discarded because the delivery gate had already
+closed (with the discarded payload). Existing node factories remain
+source-compatible; the observer argument is additive.
+
+Callbacks may fire on internal monitor queues or detached delivery tasks, so
+observer implementations must be safe to call from any thread. Nodes hold
+mobile lifecycle observers weakly, so the host must retain each observer for
+as long as it wants to receive callbacks.
+
+```swift
+final class RemoteMobileLogger: MobileLifecycleObserver, @unchecked Sendable {
+    func onMobileLifecycleEvent(_ event: MobileLifecycleEvent) {
+        // Forward the structured event to the host logging/OTLP pipeline.
+    }
+}
+
+let mobileLogger = RemoteMobileLogger() // Retain for the node/reference lifetime.
+let node = try await ActrNode.linked(
+    config: configPath,
+    type: actorType,
+    workload: workload,
+    mobileLifecycleObservers: [mobileLogger]
+)
+```
+
 ## Low Level API
 
 The Low Level API is located in the `Actr` module and consists of UniFFI-generated bindings directly from the Rust codebase. These APIs provide direct access to the underlying Rust implementation.

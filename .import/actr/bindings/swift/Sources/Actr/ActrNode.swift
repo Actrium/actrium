@@ -18,6 +18,21 @@ public final class ActrNode: Sendable {
 
     /// Creates a package-backed node from config and package file paths.
     public static func from(packageConfig configPath: String, packagePath: String, observers: RuntimeObservers? = nil) async throws -> ActrNode {
+        try await from(
+            packageConfig: configPath,
+            packagePath: packagePath,
+            observers: observers,
+            mobileLifecycleObservers: []
+        )
+    }
+
+    /// Creates a package-backed node with additional mobile lifecycle observers.
+    public static func from(
+        packageConfig configPath: String,
+        packagePath: String,
+        observers: RuntimeObservers?,
+        mobileLifecycleObservers: [any MobileLifecycleObserver]
+    ) async throws -> ActrNode {
         do {
             let wrapper: ActrBindings.ActrNode
             if let observers {
@@ -33,11 +48,17 @@ public final class ActrNode: Sendable {
                 )
             }
             let handle = try wrapper.createNetworkEventHandle()
-            let monitor = NetworkEventMonitor(handle: handle)
-            let lifecycleMonitor = AppLifecycleMonitor(handle: handle, networkEventMonitor: monitor)
+            let eventEmitter = MobileLifecycleEventEmitter(observers: mobileLifecycleObservers)
+            let monitor = NetworkEventMonitor(handle: handle, emitter: eventEmitter)
+            let lifecycleMonitor = AppLifecycleMonitor(
+                handle: handle,
+                networkEventMonitor: monitor,
+                emitter: eventEmitter
+            )
             return ActrNode(
                 inner: wrapper,
                 monitoringResource: DefaultMobileMonitoringResource(
+                    emitter: eventEmitter,
                     networkEventMonitor: monitor,
                     appLifecycleMonitor: lifecycleMonitor
                 ),
@@ -51,19 +72,54 @@ public final class ActrNode: Sendable {
 
     /// Creates a package-backed node from config and package file URLs.
     public static func from(packageConfig configURL: URL, packageURL: URL, observers: RuntimeObservers? = nil) async throws -> ActrNode {
+        try await from(
+            packageConfig: configURL,
+            packageURL: packageURL,
+            observers: observers,
+            mobileLifecycleObservers: []
+        )
+    }
+
+    /// Creates a package-backed node from file URLs with additional mobile lifecycle observers.
+    public static func from(
+        packageConfig configURL: URL,
+        packageURL: URL,
+        observers: RuntimeObservers?,
+        mobileLifecycleObservers: [any MobileLifecycleObserver]
+    ) async throws -> ActrNode {
         guard configURL.isFileURL else {
             throw ActrError.Config(msg: "packageConfig URL must be a file URL")
         }
         guard packageURL.isFileURL else {
             throw ActrError.Config(msg: "packageURL must be a file URL")
         }
-        return try await from(packageConfig: configURL.path, packagePath: packageURL.path, observers: observers)
+        return try await from(
+            packageConfig: configURL.path,
+            packagePath: packageURL.path,
+            observers: observers,
+            mobileLifecycleObservers: mobileLifecycleObservers
+        )
     }
 
     /// Creates a linked/static node from config, explicit actor identity, and a Swift-provided workload.
     /// Pass `manifest.toml` to enable dynamic dependency alias resolution; its
     /// sibling `actr.toml` supplies runtime configuration.
     public static func linked(config configPath: String, type actorType: ActrType, workload: DynamicWorkload) async throws -> ActrNode {
+        try await linked(
+            config: configPath,
+            type: actorType,
+            workload: workload,
+            mobileLifecycleObservers: []
+        )
+    }
+
+    /// Creates a linked/static node with additional mobile lifecycle observers.
+    public static func linked(
+        config configPath: String,
+        type actorType: ActrType,
+        workload: DynamicWorkload,
+        mobileLifecycleObservers: [any MobileLifecycleObserver]
+    ) async throws -> ActrNode {
         do {
             let wrapper = try await ActrBindings.ActrNode.newFromLinkedWorkload(
                 configPath: configPath,
@@ -71,11 +127,17 @@ public final class ActrNode: Sendable {
                 workload: workload.bridge
             )
             let handle = try wrapper.createNetworkEventHandle()
-            let monitor = NetworkEventMonitor(handle: handle)
-            let lifecycleMonitor = AppLifecycleMonitor(handle: handle, networkEventMonitor: monitor)
+            let eventEmitter = MobileLifecycleEventEmitter(observers: mobileLifecycleObservers)
+            let monitor = NetworkEventMonitor(handle: handle, emitter: eventEmitter)
+            let lifecycleMonitor = AppLifecycleMonitor(
+                handle: handle,
+                networkEventMonitor: monitor,
+                emitter: eventEmitter
+            )
             return ActrNode(
                 inner: wrapper,
                 monitoringResource: DefaultMobileMonitoringResource(
+                    emitter: eventEmitter,
                     networkEventMonitor: monitor,
                     appLifecycleMonitor: lifecycleMonitor
                 ),
@@ -89,10 +151,30 @@ public final class ActrNode: Sendable {
 
     /// Creates a linked/static node from a config file URL, explicit actor identity, and a Swift-provided workload.
     public static func linked(config configURL: URL, type actorType: ActrType, workload: DynamicWorkload) async throws -> ActrNode {
+        try await linked(
+            config: configURL,
+            type: actorType,
+            workload: workload,
+            mobileLifecycleObservers: []
+        )
+    }
+
+    /// Creates a linked/static node from a config file URL with mobile lifecycle observers.
+    public static func linked(
+        config configURL: URL,
+        type actorType: ActrType,
+        workload: DynamicWorkload,
+        mobileLifecycleObservers: [any MobileLifecycleObserver]
+    ) async throws -> ActrNode {
         guard configURL.isFileURL else {
             throw ActrError.Config(msg: "config URL must be a file URL")
         }
-        return try await linked(config: configURL.path, type: actorType, workload: workload)
+        return try await linked(
+            config: configURL.path,
+            type: actorType,
+            workload: workload,
+            mobileLifecycleObservers: mobileLifecycleObservers
+        )
     }
 
     /// Starts the package-backed actor and returns a running reference.
@@ -123,19 +205,52 @@ public final class ActrNode: Sendable {
     }
 }
 
+public extension ActrNode {
+    /// Creates a package-backed node with mobile lifecycle observers.
+    static func from(
+        packageConfig configPath: String,
+        packagePath: String,
+        mobileLifecycleObservers: [any MobileLifecycleObserver]
+    ) async throws -> ActrNode {
+        try await from(
+            packageConfig: configPath,
+            packagePath: packagePath,
+            observers: nil,
+            mobileLifecycleObservers: mobileLifecycleObservers
+        )
+    }
+
+    /// Creates a package-backed node from file URLs with mobile lifecycle observers.
+    static func from(
+        packageConfig configURL: URL,
+        packageURL: URL,
+        mobileLifecycleObservers: [any MobileLifecycleObserver]
+    ) async throws -> ActrNode {
+        try await from(
+            packageConfig: configURL,
+            packageURL: packageURL,
+            observers: nil,
+            mobileLifecycleObservers: mobileLifecycleObservers
+        )
+    }
+}
+
 private final class NetworkEventMonitor: @unchecked Sendable {
     private let monitor: NWPathMonitor
     private let queue: DispatchQueue
     private let deliverySession: MobileEventDeliverySession
     private let delivery: MobileEventDeliveryGate
     private var reducer = NetworkPathEventReducer()
+    private let emitter: MobileLifecycleEventEmitter
 
-    init(handle: NetworkEventHandleWrapper) {
-        let deliverySession = MobileEventDeliverySession(handle: handle)
+    init(handle: NetworkEventHandleWrapper, emitter: MobileLifecycleEventEmitter) {
+        self.emitter = emitter
+        let deliverySession = MobileEventDeliverySession(handle: handle, emitter: emitter)
         self.deliverySession = deliverySession
         delivery = deliverySession.gate
         monitor = NWPathMonitor()
         queue = DispatchQueue(label: "actr.network.monitor")
+        emitter.emit(.monitorInitialized(.network))
         monitor.pathUpdateHandler = { [weak self] path in
             self?.process(path: path, forceNotify: false)
         }
@@ -144,6 +259,7 @@ private final class NetworkEventMonitor: @unchecked Sendable {
 
     deinit {
         monitor.cancel()
+        emitter.emit(.monitorDeinitialized(.network))
     }
 
     func notifyCurrentPath(after predecessor: Task<Void, Never>) {
@@ -174,10 +290,12 @@ private final class NetworkEventMonitor: @unchecked Sendable {
         )
         let snapshot = reduction.snapshot
         let timestamp = formattedTimestamp()
+        emitter.emit(.networkPathObserved(snapshot))
 
         print("Network path update: time=\(timestamp), status=\(path.status), availability=\(snapshot.availability), wifi=\(transport.wifi), cellular=\(transport.cellular), ethernet=\(transport.ethernet), vpn=\(transport.vpn), other=\(transport.other), expensive=\(snapshot.isExpensive), constrained=\(snapshot.isConstrained)")
 
         if reduction.isInitial {
+            emitter.emit(.networkInitialPathCaptured(snapshot, forceNotify: forceNotify))
             print("Network initial path captured: time=\(timestamp), forceNotify=\(forceNotify)")
         }
 
@@ -186,6 +304,7 @@ private final class NetworkEventMonitor: @unchecked Sendable {
         }
 
         print("Network path changed: time=\(timestamp), sequence=\(snapshot.sequence), availability=\(snapshot.availability)")
+        emitter.emit(.networkPathChanged(snapshot))
         notifyPathChanged(snapshot: snapshot, after: deliveryPredecessor)
     }
 
@@ -226,15 +345,22 @@ private final class AppLifecycleMonitor: @unchecked Sendable {
     private let queue: DispatchQueue
     private var observers: [NSObjectProtocol] = []
     private let lifecycleEvents = AppLifecycleEventSource()
+    private let emitter: MobileLifecycleEventEmitter
 
-    init(handle: NetworkEventHandleWrapper, networkEventMonitor: NetworkEventMonitor) {
-        let deliverySession = MobileEventDeliverySession(handle: handle)
+    init(
+        handle: NetworkEventHandleWrapper,
+        networkEventMonitor: NetworkEventMonitor,
+        emitter: MobileLifecycleEventEmitter
+    ) {
+        self.emitter = emitter
+        let deliverySession = MobileEventDeliverySession(handle: handle, emitter: emitter)
         let delivery = deliverySession.gate
         self.deliverySession = deliverySession
         self.delivery = delivery
         lifecycleDelivery = SerializedLifecycleDelivery(delivery: delivery)
         self.networkEventMonitor = networkEventMonitor
         self.queue = DispatchQueue(label: "actr.lifecycle.monitor")
+        emitter.emit(.monitorInitialized(.appLifecycle))
         print("AppLifecycleMonitor initialized: time=\(formattedTimestamp())")
         registerObservers()
         injectInitialLifecycleState()
@@ -242,6 +368,7 @@ private final class AppLifecycleMonitor: @unchecked Sendable {
 
     deinit {
         observers.forEach { NotificationCenter.default.removeObserver($0) }
+        emitter.emit(.monitorDeinitialized(.appLifecycle))
         print("AppLifecycleMonitor deinitialized: time=\(formattedTimestamp())")
     }
 
@@ -304,6 +431,7 @@ private final class AppLifecycleMonitor: @unchecked Sendable {
             print("AppLifecycleMonitor skipped stale initial phase: time=\(formattedTimestamp())")
             return
         }
+        emitter.emit(.appLifecycleChanged(state))
         print("AppLifecycleMonitor initial phase: time=\(formattedTimestamp()), background=\(isBackground)")
         let deliveryTask = notifyLifecycleChanged(state: state)
         if !isBackground {
@@ -314,6 +442,7 @@ private final class AppLifecycleMonitor: @unchecked Sendable {
     private func handleDidEnterBackground() {
         let timestamp = formattedTimestamp()
         if let state = lifecycleEvents.didEnterBackground() {
+            emitter.emit(.appLifecycleChanged(state))
             print("🔵 App entered background: time=\(timestamp)")
             notifyLifecycleChanged(state: state)
         } else {
@@ -332,6 +461,7 @@ private final class AppLifecycleMonitor: @unchecked Sendable {
         } else {
             print("🟢 App entered foreground: time=\(timestamp), backgroundDurationMs=\(backgroundDurationMs)")
         }
+        emitter.emit(.appLifecycleChanged(state))
         let deliveryTask = notifyLifecycleChanged(state: state)
         networkEventMonitor?.notifyCurrentPath(after: deliveryTask)
     }
@@ -350,15 +480,31 @@ private final class AppLifecycleMonitor: @unchecked Sendable {
     }
 }
 
+/// Owns the monitors and the shared lifecycle emitter for one node.
+///
+/// The monitors must be held strongly: nothing else references the lifecycle
+/// monitor, so releasing it here would unregister its platform observers and
+/// silence lifecycle delivery for the rest of the node's lifetime.
 private final class DefaultMobileMonitoringResource: MobileMonitoringResource, @unchecked Sendable {
-    private let networkEventMonitor: NetworkEventMonitor
-    private let appLifecycleMonitor: AppLifecycleMonitor
+    private let emitter: MobileLifecycleEventEmitter
+    private var networkEventMonitor: NetworkEventMonitor?
+    private var appLifecycleMonitor: AppLifecycleMonitor?
 
     init(
+        emitter: MobileLifecycleEventEmitter,
         networkEventMonitor: NetworkEventMonitor,
         appLifecycleMonitor: AppLifecycleMonitor
     ) {
+        self.emitter = emitter
         self.networkEventMonitor = networkEventMonitor
         self.appLifecycleMonitor = appLifecycleMonitor
+    }
+
+    deinit {
+        // Drop the monitors first so their `.monitorDeinitialized` fan-out
+        // still reaches observers. Outstanding delivery gates keep the emitter
+        // alive long enough to report callbacks discarded after gate close.
+        networkEventMonitor = nil
+        appLifecycleMonitor = nil
     }
 }
