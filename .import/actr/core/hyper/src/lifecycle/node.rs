@@ -766,14 +766,18 @@ pub(crate) struct Inner {
     pub(crate) workload_dispatch: Arc<crate::executor::ActorHandle>,
 
     /// Clone of the linked workload handle, retained so the pump can query
-    /// `reply_mode_for_route` before dispatch (RFC-0323). `None` for
-    /// WASM/DynClib-backed nodes — the host cannot call the guest's static
-    /// `reply_mode_for_route`, so EXPLICIT dispatch is host-side unsupported
-    /// there (the generated arm fails with `Internal` via `reply_deliver()`
-    /// returning `None`). For `Linked` nodes this is `Some`, and
-    /// `admit_incoming` reads it to decide between the RETURN and EXPLICIT
-    /// pump paths.
+    /// `reply_mode_for_route` before dispatch (RFC-0323). Foreign linked
+    /// workloads report `Explicit` for the FFI delivery boundary, while
+    /// Component Model packages use the same host-side mode because their
+    /// generated dispatchers call the WIT `reply` import for both RETURN and
+    /// EXPLICIT routes. DynClib remains on the legacy RETURN boundary until
+    /// its ABI grows an equivalent reply operation.
     pub(crate) linked_handle: Option<Arc<dyn crate::workload::LinkedWorkloadHandle>>,
+
+    /// Component packages opt into the explicit reply boundary only when the
+    /// compiled component imports `actr:workload/host@0.6.0`. V2 components
+    /// with no such import retain the direct dispatch-return contract.
+    pub(crate) package_uses_explicit_reply_boundary: bool,
 
     /// In-memory conflict-key dispatch scheduler (B2). `None` = the scheduler is
     /// not engaged (gate off, **or** — under strategy A default-on — a keyless
@@ -960,6 +964,36 @@ async fn host_operation_handler(
                     HostOperationResult::Error(e)
                 }
             }
+        }
+
+        HostOperation::Reply(payload) => {
+            use actr_framework::{Context as _, ReplyOutcome};
+            let Some(deliver) = ctx.reply_deliver() else {
+                return HostOperationResult::Error(ActrError::Internal(
+                    "guest reply requires an inbound RPC reply context".to_string(),
+                ));
+            };
+            deliver.deliver(ReplyOutcome {
+                request_id: ctx.request_id().to_string(),
+                result: Ok(bytes::Bytes::from(payload)),
+                emit_response: ctx.expects_response(),
+            });
+            HostOperationResult::Done
+        }
+
+        HostOperation::ReplyError(error) => {
+            use actr_framework::{Context as _, ReplyOutcome};
+            let Some(deliver) = ctx.reply_deliver() else {
+                return HostOperationResult::Error(ActrError::Internal(
+                    "guest reply requires an inbound RPC reply context".to_string(),
+                ));
+            };
+            deliver.deliver(ReplyOutcome {
+                request_id: ctx.request_id().to_string(),
+                result: Err(error),
+                emit_response: ctx.expects_response(),
+            });
+            HostOperationResult::Done
         }
 
         HostOperation::Call(req) => {
@@ -1167,6 +1201,8 @@ async fn stream_callback_host_operation_handler(
                 Err(e) => HostOperationResult::Error(e),
             }
         }
+        HostOperation::Reply(_) => HostOperationResult::AbiError(abi_code::UNSUPPORTED_OP),
+        HostOperation::ReplyError(_) => HostOperationResult::AbiError(abi_code::UNSUPPORTED_OP),
         HostOperation::Call(req) => {
             let dest = match decode_dest(&req.dest) {
                 Some(d) => d,
@@ -1663,8 +1699,8 @@ impl Inner {
     ///
     /// ## RFC-0323 (EXPLICIT) continuation contract
     ///
-    /// For `ReplyMode::Explicit`, the continuation's outcome is decided by the
-    /// shared `delivered` flag set by `ReplyDeliver::deliver`:
+    /// For `ReplyMode::Explicit`, the continuation routes handler errors
+    /// through the shared `ReplyDeliver` first-write-wins gate:
     ///
     /// - **`Ok`, or `Err` after the `Reply<T>` was constructed and `Drop` fired
     ///   the Deliver** → `IncomingOutcome::Deferred`. The durable mailbox
@@ -1674,10 +1710,9 @@ impl Inner {
     ///   `ReplyDeliver::deliver_async`, which also releases the
     ///   `outstanding_replies` gauge slot.
     /// - **`Err` before the `Reply<T>` was constructed** (e.g. decode failure)
-    ///   → `IncomingOutcome::Replied(Err)`. The Deliver never fired, so the
-    ///   continuation completes dedup, releases the gauge slot, and sends the
-    ///   error reply inline (the receive loop ACKs alongside). This is the
-    ///   only EXPLICIT path that ACKs at reply time, matching `Return`.
+    ///   still uses the pump-owned `ReplyDeliver` when a reply sink exists, so
+    ///   it follows the same deferred error path. If no sink exists, the
+    ///   continuation falls back to the normal inline `Replied(Err)` path.
     ///
     /// **Deadlock rule (§5):** a `Return` handler must not synchronously call
     /// back into itself (it would block on its own still-held dispatch slot);
@@ -1685,11 +1720,18 @@ impl Inner {
     /// aside and release the slot first.
     pub(crate) async fn admit_incoming(
         &self,
-        envelope: RpcEnvelope,
+        mut envelope: RpcEnvelope,
         caller_id: Option<&ActrId>,
         reply_sink: Option<crate::lifecycle::reply_deliver::ReplySink>,
         scope: Option<std::sync::Arc<crate::request_scope::RequestScope>>,
     ) -> IncomingContinuation {
+        // Package-less routes emitted by older generators had one leading
+        // dot (`.Service.Method`). Normalize it before every admission-stage
+        // consumer (reply-mode lookup, scheduler, and all runner variants)
+        // sees the envelope. The guest boundary keeps the same normalization
+        // as a defensive compatibility layer for direct internal callers.
+        crate::workload::normalize_legacy_route_key(&mut envelope.route_key);
+
         // Log received message
         if let Some(caller) = caller_id {
             tracing::debug!(
@@ -1837,17 +1879,23 @@ impl Inner {
             None => ctx,
         };
 
-        // RFC-0323: query the route's ReplyMode. For `Linked` nodes the linked
-        // handle carries the generated `reply_mode_for_route` match; for
-        // WASM/DynClib the host cannot reach the guest's dispatcher, so
-        // `linked_handle` is `None` and every route is treated as `Return`
-        // (EXPLICIT in a packaged guest fails at the dispatch arm when
-        // `ctx.reply_deliver()` returns `None`).
+        // RFC-0323: query the route's ReplyMode. Linked Rust dispatchers carry
+        // the generated route match. Foreign linked workloads and Component
+        // Model packages use an explicit host delivery boundary: generated
+        // RETURN routes submit their encoded return value through `reply_raw`,
+        // while generated EXPLICIT routes own delivery through `Reply<T>`.
+        // This keeps the runtime from maintaining a second proto route table.
         let reply_mode = self
             .linked_handle
             .as_ref()
             .map(|h| h.reply_mode_for_route(&envelope.route_key))
-            .unwrap_or(actr_protocol::ReplyMode::Return);
+            .unwrap_or_else(|| {
+                if self.package_uses_explicit_reply_boundary {
+                    actr_protocol::ReplyMode::Explicit
+                } else {
+                    actr_protocol::ReplyMode::Return
+                }
+            });
         let expects_response = Inner::dispatch_expects_response(envelope.direction).unwrap_or(true);
 
         // For EXPLICIT routes, build the `ReplyDeliver`, stash it on the
@@ -1867,57 +1915,78 @@ impl Inner {
             }
             _ => None,
         };
-        let explicit_deliver: Option<crate::lifecycle::reply_deliver::ReplyDeliver> =
-            if reply_mode == actr_protocol::ReplyMode::Explicit {
-                match reply_sink {
-                    Some(sink) => {
-                        // RFC-0323 §5/§7: register the outstanding reply for the
-                        // gauge + backpressure + leak-safety sweep. `complete`
-                        // is called from `ReplyDeliver::deliver_async`.
-                        self.outstanding_replies
-                            .register(&envelope.request_id)
-                            .await;
-                        // RFC-0323: plumb the caller deadline (arrival +
-                        // `envelope.timeout_ms`) onto the context so the
-                        // generated EXPLICIT arm builds `Reply<T>` with a
-                        // real deadline instead of `None`. `timeout_ms == 0`
-                        // means "no timeout" → `None` (a TELL or an
-                        // unbounded call). The wall-clock read lives in the
-                        // exempt dedup module — this deadline is a
-                        // caller-side bound, not a tokio-await deadline.
-                        let reply_deadline =
-                            crate::lifecycle::dedup::caller_reply_deadline(envelope.timeout_ms);
-                        #[cfg(feature = "webrtc-v020")]
-                        let v020_route: V020ResponseRoute = self.v020_manager.clone();
-                        #[cfg(not(feature = "webrtc-v020"))]
-                        let v020_route: V020ResponseRoute = ();
-                        let (deliver, _flag) = crate::lifecycle::reply_deliver::ReplyDeliver::new(
-                            self.websocket_gate.clone(),
-                            v020_route,
-                            self.dedup_state.clone(),
-                            self.outstanding_replies.clone(),
-                            envelope.request_id.clone(),
-                            envelope.route_key.clone(),
-                            envelope.traceparent.clone(),
-                            envelope.tracestate.clone(),
-                            sink,
-                        );
-                        // Pump-side clone: lets `wrap_outcome` route a
-                        // handler-Err through the same first-write-wins
-                        // `deliver` as a spawned `Reply::send` / `Drop`.
-                        let pump_deliver = deliver.clone();
-                        ctx.set_explicit_reply(
-                            std::sync::Arc::new(deliver),
-                            expects_response,
+        let explicit_deliver: Option<crate::lifecycle::reply_deliver::ReplyDeliver> = if reply_mode
+            == actr_protocol::ReplyMode::Explicit
+        {
+            match reply_sink {
+                Some(sink) => {
+                    // RFC-0323: plumb the caller deadline (arrival +
+                    // `envelope.timeout_ms`) onto the context so the
+                    // generated EXPLICIT arm builds `Reply<T>` with a
+                    // real deadline instead of `None`. `timeout_ms == 0`
+                    // means "no timeout" → `None` (a TELL or an
+                    // unbounded call). The wall-clock read lives in the
+                    // exempt dedup module — this deadline is a
+                    // caller-side bound, not a tokio-await deadline.
+                    let reply_deadline =
+                        crate::lifecycle::dedup::caller_reply_deadline(envelope.timeout_ms);
+                    #[cfg(feature = "webrtc-v020")]
+                    let v020_route: V020ResponseRoute = self.v020_manager.clone();
+                    #[cfg(not(feature = "webrtc-v020"))]
+                    let v020_route: V020ResponseRoute = ();
+                    let attempt_id = self.outstanding_replies.allocate_attempt_id();
+                    let (deliver, _flag) = crate::lifecycle::reply_deliver::ReplyDeliver::new(
+                        self.websocket_gate.clone(),
+                        v020_route,
+                        self.dedup_state.clone(),
+                        self.outstanding_replies.clone(),
+                        attempt_id,
+                        envelope.request_id.clone(),
+                        envelope.route_key.clone(),
+                        envelope.traceparent.clone(),
+                        envelope.tracestate.clone(),
+                        sink,
+                        expects_response,
+                    );
+                    // WIT 0.6 components use one host reply boundary for
+                    // both RETURN and EXPLICIT routes, so they are
+                    // admitted as deferred here. Linked workloads begin
+                    // unclaimed so older FFI dispatchers can still use
+                    // the return-byte fallback; current Rust/Kotlin/Swift
+                    // EXPLICIT dispatchers claim before handing out a
+                    // movable Reply handle.
+                    let reply_claimed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                        self.package_uses_explicit_reply_boundary,
+                    ));
+                    // Register the exact deliver for this admission. The
+                    // TTL sweep uses its first-write-wins gate, and all
+                    // asynchronous completion uses the attempt ID so an
+                    // old same-ID reply cannot release or complete a retry.
+                    self.outstanding_replies
+                        .register_with_deliver(
+                            &envelope.request_id,
+                            attempt_id,
+                            deliver.clone(),
                             reply_deadline,
-                        );
-                        Some(pump_deliver)
-                    }
-                    None => None,
+                        )
+                        .await;
+                    // Pump-side clone: lets `wrap_outcome` route a
+                    // handler-Err through the same first-write-wins
+                    // `deliver` as a spawned `Reply::send` / `Drop`.
+                    let pump_deliver = deliver.clone();
+                    ctx.set_explicit_reply(
+                        std::sync::Arc::new(deliver),
+                        expects_response,
+                        reply_deadline,
+                        reply_claimed,
+                    );
+                    Some(pump_deliver)
                 }
-            } else {
-                None
-            };
+                None => None,
+            }
+        } else {
+            None
+        };
 
         // 2. Dispatch
         let dispatch_ctx = crate::workload::InvocationContext {
@@ -2246,8 +2315,9 @@ impl Inner {
 
         // Retain a clone of the linked handle so the pump can query
         // `reply_mode_for_route` before dispatch (RFC-0323). Only the `Linked`
-        // variant carries a host-callable dispatcher; WASM/DynClib guests keep
-        // their dispatcher inside the guest and the host cannot reach it.
+        // variant carries a host-callable dispatcher; Component Model guests
+        // use the explicit host boundary selected above, while DynClib keeps
+        // its legacy RETURN boundary.
         let linked_handle = match &workload {
             crate::workload::Workload::Linked(handle) => Some(handle.clone()),
             #[cfg(feature = "wasm-engine")]
@@ -2255,6 +2325,8 @@ impl Inner {
             #[cfg(feature = "dynclib-engine")]
             crate::workload::Workload::DynClib(_) => None,
         };
+
+        let package_uses_explicit_reply_boundary = workload.uses_explicit_reply_boundary();
 
         let runner_mode = if scheduler_on {
             crate::executor::RunnerMode::Interleaved
@@ -2333,6 +2405,7 @@ impl Inner {
             )),
             workload_dispatch: Arc::new(workload_dispatch),
             linked_handle,
+            package_uses_explicit_reply_boundary,
             dispatch_scheduler,
             conflict_keys,
             hook_observer: None,
@@ -4124,16 +4197,13 @@ impl Inner {
                             // The clock reads stay inside the exempt
                             // dedup/outstanding_replies modules.
                             let leaked =
-                                outstanding_replies.leaked_ids_now(INFLIGHT_TTL).await;
+                                outstanding_replies.sweep_expired_now(INFLIGHT_TTL).await;
                             {
                                 let mut d = dedup_state.lock().await;
                                 d.evict_done_expired_now();
                                 if !leaked.is_empty() {
-                                    d.sweep_inflight_explicit_now(&leaked);
+                                    d.expire_inflight_explicit(&leaked);
                                 }
-                            }
-                            for id in &leaked {
-                                outstanding_replies.complete(id).await;
                             }
                         }
                     }

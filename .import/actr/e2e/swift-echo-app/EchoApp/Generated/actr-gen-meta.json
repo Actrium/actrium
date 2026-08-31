@@ -15,7 +15,6 @@
   "language" : "swift",
   "local_services" : [
     {
-      "dispatcher_type" : "LocalEchoServiceDispatcher",
       "handler_interface" : "LocalEchoServiceHandler",
       "methods" : [
         {
@@ -33,13 +32,13 @@
             "type_name" : "LocalEchoResponse"
           },
           "route_key" : "echoapp.LocalEchoService.Send",
+          "reply_mode" : "return",
           "snake_name" : "send"
         }
       ],
       "name" : "LocalEchoService",
       "package" : "echoapp",
-      "proto_file" : "local/local_echo.proto",
-      "workload_type" : ""
+      "proto_file" : "local/local_echo.proto"
     }
   ],
   "plugin_version" : "0.6.1",

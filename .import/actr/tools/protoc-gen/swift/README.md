@@ -66,7 +66,8 @@ A node that doesn't implement any local service but provides a package namespace
 ```bash
 protoc --actrframework-swift_out=LocalFile=client.proto:. client.proto chat.proto
 ```
-If `client.proto` has no services, it generates `ClientWorkload` (or based on package name) which proxies `chat.proto`.
+If `client.proto` has no services, it generates the shared `actr_dispatch.swift`
+entry point and the remote client definitions for `chat.proto`.
 
 ### 3. All Local (Default)
 ```bash

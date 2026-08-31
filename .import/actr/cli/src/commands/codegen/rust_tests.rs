@@ -17,8 +17,6 @@ fn scaffold_service() -> ScaffoldService {
         package: "demo.shell".to_string(),
         proto_file: PathBuf::from("bridge.proto"),
         handler_interface: Some("EmptyShellHandler".to_string()),
-        workload_type: Some("EmptyShellWorkload".to_string()),
-        dispatcher_type: Some("EmptyShellDispatcher".to_string()),
         client_type: None,
         dependency_alias: None,
         actr_type: None,

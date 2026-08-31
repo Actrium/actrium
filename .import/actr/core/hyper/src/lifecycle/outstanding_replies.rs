@@ -11,47 +11,118 @@
 //! - **Leak safety**: a `Reply` that is never `send`-ed (e.g. parked in a
 //!   waiter map that is never drained) would otherwise pin the counter
 //!   forever and, once `max_pending_replies` is reached, stall the pump. The
-//!   background sweep pairs [`leaked_ids`] / [`complete`] on this registry
-//!   with [`DedupState::sweep_inflight_explicit`] on the dedup side (which
-//!   notifies the parked duplicate waiter with `TimedOut` and evicts the
-//!   `InFlight` marker). The two sweeps share the same `INFLIGHT_TTL` and
-//!   run on the same background tick, so a leaked reply is freed on both
-//!   sides together — and only EXPLICIT entries, leaving RETURN in-flight
-//!   entries untouched.
+//!   background sweep calls the exact registered [`ReplyDeliver`] through its
+//!   first-write-wins gate, then pairs the timed-out IDs with
+//!   [`DedupState::sweep_inflight_explicit`] (which notifies parked duplicate
+//!   waiters with `TimedOut` and evicts the `InFlight` marker). The two sweeps
+//!   share the same `INFLIGHT_TTL` and run on the same background tick, so a
+//!   leaked reply is freed on both sides together — and only EXPLICIT entries,
+//!   leaving RETURN in-flight entries untouched.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use tokio::sync::Mutex;
 
+use crate::lifecycle::reply_deliver::ReplyDeliver;
+
+pub(crate) type ReplyAttemptId = u64;
+
+struct OutstandingEntry {
+    request_id: String,
+    admitted_at: Instant,
+    deadline: Option<Instant>,
+    /// The exact reply writer for this admission. Keeping it here lets the
+    /// TTL sweep race the handler's Reply::send through the same
+    /// first-write-wins gate instead of manufacturing a second completion
+    /// path.
+    deliver: Option<ReplyDeliver>,
+}
+
 pub(crate) struct OutstandingReplies {
     count: AtomicUsize,
-    entries: Mutex<HashMap<String, Instant>>,
+    next_attempt_id: AtomicU64,
+    entries: Mutex<HashMap<ReplyAttemptId, OutstandingEntry>>,
 }
 
 impl OutstandingReplies {
     pub(crate) fn new() -> Self {
         Self {
             count: AtomicUsize::new(0),
+            next_attempt_id: AtomicU64::new(1),
             entries: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Register an outstanding EXPLICIT reply (called at `ReplyDeliver`
-    /// construction in `admit_incoming`).
-    pub(crate) async fn register(&self, request_id: &str) {
-        self.count.fetch_add(1, Ordering::SeqCst);
-        self.entries
-            .lock()
-            .await
-            .insert(request_id.to_string(), Instant::now());
+    /// Allocate a process-local identity for one explicit reply admission.
+    /// The identity is deliberately independent of `request_id`: callers may
+    /// retry with the same request ID after the old attempt has timed out.
+    pub(crate) fn allocate_attempt_id(&self) -> ReplyAttemptId {
+        self.next_attempt_id.fetch_add(1, Ordering::Relaxed)
     }
 
-    /// Mark an outstanding reply complete (called from `ReplyDeliver::deliver_async`).
-    /// Idempotent: a second call (e.g. sweep racing the Deliver) is a no-op.
+    /// Register an outstanding EXPLICIT reply without a deliver. This legacy
+    /// form is retained for direct registry users; the node uses
+    /// [`register_with_deliver`] so the TTL sweep can complete the exact
+    /// `ReplyDeliver` that belongs to the entry.
+    #[cfg(test)]
+    pub(crate) async fn register(&self, request_id: &str) {
+        let attempt_id = self.allocate_attempt_id();
+        self.entries.lock().await.insert(
+            attempt_id,
+            OutstandingEntry {
+                request_id: request_id.to_string(),
+                admitted_at: Instant::now(),
+                deadline: None,
+                deliver: None,
+            },
+        );
+        self.count.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Register the exact `ReplyDeliver` for one explicit reply admission.
+    pub(crate) async fn register_with_deliver(
+        &self,
+        request_id: &str,
+        attempt_id: ReplyAttemptId,
+        deliver: ReplyDeliver,
+        deadline: Option<Instant>,
+    ) {
+        self.entries.lock().await.insert(
+            attempt_id,
+            OutstandingEntry {
+                request_id: request_id.to_string(),
+                admitted_at: Instant::now(),
+                deadline,
+                deliver: Some(deliver),
+            },
+        );
+        self.count.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Mark the exact outstanding reply attempt complete. Idempotent: a
+    /// second call (e.g. the deliver task racing the TTL sweep) is a no-op.
+    pub(crate) async fn complete_attempt(&self, attempt_id: ReplyAttemptId) {
+        if self.entries.lock().await.remove(&attempt_id).is_some() {
+            self.count.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    /// Mark an outstanding reply complete by request ID for legacy registry
+    /// users. Runtime delivery uses [`complete_attempt`] so an old attempt can
+    /// never remove a newer retry with the same request ID.
+    #[cfg(test)]
     pub(crate) async fn complete(&self, request_id: &str) {
-        if self.entries.lock().await.remove(request_id).is_some() {
+        let removed = {
+            let mut entries = self.entries.lock().await;
+            let attempt_id = entries
+                .iter()
+                .find(|(_, entry)| entry.request_id == request_id)
+                .map(|(attempt_id, _)| *attempt_id);
+            attempt_id.and_then(|id| entries.remove(&id))
+        };
+        if removed.is_some() {
             self.count.fetch_sub(1, Ordering::SeqCst);
         }
     }
@@ -62,20 +133,15 @@ impl OutstandingReplies {
     }
 
     /// Evict registry entries older than `ttl`, decrementing the counter for
-    /// each. This is the leak-safety half of the RFC-0323 §7 sweep — the
-    /// dedup-side eviction of the InFlight marker (and duplicate-waiter
-    /// notification) is handled by
-    /// `DedupState::sweep_inflight_explicit`, which runs on the same
-    /// background tick scoped to the ids this registry exposes via
-    /// [`leaked_ids`]. The node background task uses [`leaked_ids`] +
-    /// [`complete`] instead, so this whole-entry retain form is kept for
-    /// direct registry tests only.
+    /// each. This test-only legacy form does not deliver a timeout; production
+    /// uses [`sweep_expired`] so the registered `ReplyDeliver` owns the
+    /// first-write-wins decision.
     #[cfg(test)]
     pub(crate) async fn sweep(&self, ttl: Duration, now: Instant) {
         let n = {
             let mut entries = self.entries.lock().await;
             let before = entries.len();
-            entries.retain(|_, admitted_at| now.duration_since(*admitted_at) < ttl);
+            entries.retain(|_, entry| now.duration_since(entry.admitted_at) < ttl);
             before - entries.len()
         };
         if n != 0 {
@@ -83,27 +149,47 @@ impl OutstandingReplies {
         }
     }
 
-    /// Snapshot of request_ids whose outstanding reply has aged past `ttl`
-    /// (RFC-0323 §7). The caller pairs this with
-    /// `DedupState::sweep_inflight_explicit` (notify the parked duplicate
-    /// waiter + evict the dedup `InFlight` marker) and [`complete`]
-    /// (decrement the gauge). Does not mutate the registry — `complete`
-    /// does the removal, so a `deliver_async` that completes a reply between
-    /// the snapshot and the `complete` makes the latter a no-op.
-    pub(crate) async fn leaked_ids(&self, ttl: Duration, now: Instant) -> Vec<String> {
-        self.entries
-            .lock()
-            .await
-            .iter()
-            .filter(|(_, admitted_at)| now.duration_since(**admitted_at) >= ttl)
-            .map(|(id, _)| id.clone())
-            .collect()
+    /// Expire aged explicit replies through their own `ReplyDeliver`.
+    ///
+    /// The deliver's atomic first-write-wins gate is the arbitration point
+    /// between a late `Reply::send` and the TTL timeout. Entries whose normal
+    /// reply already won remain registered until that delivery task completes;
+    /// only an entry whose deliver successfully wins the timeout race is
+    /// removed and returned for the dedup-side InFlight eviction.
+    pub(crate) async fn sweep_expired(&self, ttl: Duration, now: Instant) -> Vec<String> {
+        let mut expired_ids = Vec::new();
+        let mut remove = Vec::new();
+        {
+            let mut entries = self.entries.lock().await;
+            for (attempt_id, entry) in entries.iter() {
+                let expires_at = entry.deadline.unwrap_or(entry.admitted_at + ttl);
+                if now < expires_at {
+                    continue;
+                }
+
+                let timeout_won = entry
+                    .deliver
+                    .as_ref()
+                    .map(|deliver| deliver.deliver_timeout())
+                    .unwrap_or(true);
+                if timeout_won || entry.deliver.as_ref().is_some_and(ReplyDeliver::is_pending) {
+                    remove.push(*attempt_id);
+                    expired_ids.push(entry.request_id.clone());
+                }
+            }
+            for attempt_id in remove {
+                entries.remove(&attempt_id);
+            }
+        }
+        if !expired_ids.is_empty() {
+            self.count.fetch_sub(expired_ids.len(), Ordering::SeqCst);
+        }
+        expired_ids
     }
 
-    /// Clock-reading form of [`leaked_ids`] for the background sweep task
-    /// (keeps the `Instant::now()` read in this exempt module).
-    pub(crate) async fn leaked_ids_now(&self, ttl: Duration) -> Vec<String> {
-        self.leaked_ids(ttl, Instant::now()).await
+    /// Clock-reading form of [`sweep_expired`] for the background sweep task.
+    pub(crate) async fn sweep_expired_now(&self, ttl: Duration) -> Vec<String> {
+        self.sweep_expired(ttl, Instant::now()).await
     }
 }
 

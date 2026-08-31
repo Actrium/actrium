@@ -762,6 +762,7 @@ mod tests {
                 input_type: "ask.ContinuePromptResultStreamsRequest".to_string(),
                 output_type: "ask.ContinuePromptResultStreamsResponse".to_string(),
                 payload_type: "rpcReliable".to_string(),
+                reply_mode: "return".to_string(),
                 dependency_alias: None,
             }],
             spec_hash: None,

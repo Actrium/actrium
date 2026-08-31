@@ -16,8 +16,6 @@ pub struct ScaffoldService {
     pub package: String,
     pub proto_file: PathBuf,
     pub handler_interface: Option<String>,
-    pub workload_type: Option<String>,
-    pub dispatcher_type: Option<String>,
     pub client_type: Option<String>,
     /// Manifest dependency alias for remote services (resolved at runtime
     /// via `Context::resolve_dependency`). `None` for local services or for
@@ -58,8 +56,6 @@ impl ScaffoldCatalog {
                     package: service.package.clone(),
                     proto_file: PathBuf::from(&service.proto_file),
                     handler_interface: Some(service.handler_interface.clone()),
-                    workload_type: non_empty_metadata_value(&service.workload_type),
-                    dispatcher_type: non_empty_metadata_value(&service.dispatcher_type),
                     client_type: None,
                     dependency_alias: None,
                     actr_type: None,
@@ -87,8 +83,6 @@ impl ScaffoldCatalog {
                     package: service.package.clone(),
                     proto_file: PathBuf::from(&service.proto_file),
                     handler_interface: None,
-                    workload_type: None,
-                    dispatcher_type: None,
                     client_type: Some(service.client_type.clone()),
                     dependency_alias: if service.dependency_alias.is_empty() {
                         None
@@ -127,14 +121,6 @@ impl ScaffoldCatalog {
                 .remote_services
                 .iter()
                 .any(|service| !service.methods.is_empty())
-    }
-}
-
-fn non_empty_metadata_value(value: &str) -> Option<String> {
-    if value.is_empty() {
-        None
-    } else {
-        Some(value.to_string())
     }
 }
 

@@ -32,7 +32,7 @@
 
 use std::sync::OnceLock;
 
-use actr_protocol::{ActrError, Direction, RpcEnvelope};
+use actr_protocol::{ActrError, Direction, ReplyMode, RpcEnvelope};
 use bytes::Bytes;
 
 use crate::workload::{
@@ -276,7 +276,22 @@ pub async fn run_dispatch<W: Workload>(
     let envelope = rpc_envelope_from_wit(envelope);
     let request_id = ctx.request_id().to_string();
     let route_key = envelope.route_key.clone();
+    let reply_mode =
+        <W::Dispatcher as MessageDispatcher>::reply_mode_for_route(&envelope.route_key);
     match <W::Dispatcher as MessageDispatcher>::dispatch(workload, envelope, &ctx).await {
+        Ok(bytes) if reply_mode == ReplyMode::Return && ctx.reply_enabled() => {
+            guest_log(
+                ctx.ctx_token,
+                "info",
+                format!(
+                    "wasm guest response generated: request_id={request_id} route_key={route_key} response_len={}",
+                    bytes.len(),
+                ),
+            )
+            .await;
+            ctx.reply_raw(bytes).await.map_err(actr_error_to_wit)?;
+            Ok(Vec::new())
+        }
         Ok(bytes) => {
             guest_log(
                 ctx.ctx_token,

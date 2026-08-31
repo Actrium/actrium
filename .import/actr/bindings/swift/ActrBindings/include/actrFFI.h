@@ -503,6 +503,11 @@ uint64_t uniffi_actr_fn_method_contextbridge_call_raw(uint64_t ptr, RustBuffer t
 RustBuffer uniffi_actr_fn_method_contextbridge_caller_id(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_CONTEXTBRIDGE_CLAIM_REPLY
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_CONTEXTBRIDGE_CLAIM_REPLY
+uint64_t uniffi_actr_fn_method_contextbridge_claim_reply(uint64_t ptr
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_CONTEXTBRIDGE_DISCOVER
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_CONTEXTBRIDGE_DISCOVER
 uint64_t uniffi_actr_fn_method_contextbridge_discover(uint64_t ptr, RustBuffer target_type
@@ -526,6 +531,16 @@ uint64_t uniffi_actr_fn_method_contextbridge_register_stream(uint64_t ptr, RustB
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_CONTEXTBRIDGE_REMOVE_MEDIA_TRACK
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_CONTEXTBRIDGE_REMOVE_MEDIA_TRACK
 uint64_t uniffi_actr_fn_method_contextbridge_remove_media_track(uint64_t ptr, RustBuffer target, RustBuffer track_id
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_CONTEXTBRIDGE_REPLY_ERROR
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_CONTEXTBRIDGE_REPLY_ERROR
+uint64_t uniffi_actr_fn_method_contextbridge_reply_error(uint64_t ptr, RustBuffer error
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_CONTEXTBRIDGE_REPLY_RAW
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_CONTEXTBRIDGE_REPLY_RAW
+uint64_t uniffi_actr_fn_method_contextbridge_reply_raw(uint64_t ptr, RustBuffer payload
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_CONTEXTBRIDGE_REQUEST_ID
@@ -1168,6 +1183,12 @@ uint16_t uniffi_actr_checksum_method_contextbridge_caller_id(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_CLAIM_REPLY
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_CLAIM_REPLY
+uint16_t uniffi_actr_checksum_method_contextbridge_claim_reply(void
+
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_DISCOVER
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_DISCOVER
 uint16_t uniffi_actr_checksum_method_contextbridge_discover(void
@@ -1196,6 +1217,16 @@ uint16_t uniffi_actr_checksum_method_contextbridge_register_stream(void
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_REMOVE_MEDIA_TRACK
 uint16_t uniffi_actr_checksum_method_contextbridge_remove_media_track(void
     
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_REPLY_ERROR
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_REPLY_ERROR
+uint16_t uniffi_actr_checksum_method_contextbridge_reply_error(void
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_REPLY_RAW
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_REPLY_RAW
+uint16_t uniffi_actr_checksum_method_contextbridge_reply_raw(void
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_REQUEST_ID
@@ -1534,4 +1565,3 @@ uint32_t ffi_actr_uniffi_contract_version(void
     
 );
 #endif
-

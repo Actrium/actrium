@@ -38,6 +38,8 @@ pub struct DispatchRoute {
     pub input_type: String,
     pub output_type: String,
     pub payload_type: String,
+    #[serde(default)]
+    pub reply_mode: ReplyMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dependency_alias: Option<String>,
 }
@@ -107,6 +109,7 @@ impl DispatchSpec {
                     input_type: method.input_type.clone(),
                     output_type: method.output_type.clone(),
                     payload_type: method.payload_type.clone(),
+                    reply_mode: method.reply_mode,
                     dependency_alias: dependency_alias.clone(),
                 });
             }
@@ -271,6 +274,7 @@ mod tests {
         proto_service: &str,
         method: &str,
         types: (&str, &str, &str),
+        reply_mode: ReplyMode,
         dependency_alias: Option<&str>,
     ) -> DispatchRoute {
         let (input_type, output_type, payload_type) = types;
@@ -282,6 +286,7 @@ mod tests {
             input_type: input_type.to_string(),
             output_type: output_type.to_string(),
             payload_type: payload_type.to_string(),
+            reply_mode,
             dependency_alias: dependency_alias.map(|s| s.to_string()),
         }
     }
@@ -306,6 +311,7 @@ mod tests {
                 "echo.EchoService",
                 "Echo",
                 ("EchoRequest", "EchoResponse", "rpcReliable"),
+                ReplyMode::Return,
                 None,
             ),
             make_dispatch_route(
@@ -314,6 +320,7 @@ mod tests {
                 "echo.EchoService",
                 "Echo2",
                 ("EchoRequest2", "EchoResponse2", "rpcReliable"),
+                ReplyMode::Return,
                 None,
             ),
         ];
@@ -345,6 +352,7 @@ mod tests {
             "echo.EchoService",
             "Echo",
             ("EchoRequest", "EchoResponse", "rpcReliable"),
+            ReplyMode::Return,
             None,
         )];
 
@@ -393,6 +401,7 @@ mod tests {
             "input_type": "Req",
             "output_type": "Resp",
             "payload_type": "rpcReliable",
+            "reply_mode": "return",
             "dependency_alias": null,
             "unknown_field": "should_fail"
         }"#;

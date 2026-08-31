@@ -158,6 +158,17 @@ fn descriptor_set_with_payload_type(value: Option<u64>) -> Vec<u8> {
     encode_length_delimited_field(1, &raw_file)
 }
 
+fn descriptor_set_with_reply_mode(value: Option<u64>) -> Vec<u8> {
+    let raw_method = value.map_or_else(Vec::new, |value| {
+        let mut raw_options = encode_varint(50002_u64 << 3);
+        raw_options.extend_from_slice(&encode_varint(value));
+        encode_length_delimited_field(4, &raw_options)
+    });
+    let raw_service = encode_length_delimited_field(2, &raw_method);
+    let raw_file = encode_length_delimited_field(6, &raw_service);
+    encode_length_delimited_field(1, &raw_file)
+}
+
 // --- PayloadTypeValue::from_u64 ---
 
 #[test]
@@ -262,6 +273,22 @@ fn raw_descriptor_scan_leaves_missing_payload_type_unset() {
 fn raw_descriptor_scan_rejects_unknown_payload_type_value() {
     let descriptor = descriptor_set_with_payload_type(Some(99));
     let error = extract_payload_types_from_descriptor_set(&descriptor).unwrap_err();
+    assert!(error.to_string().contains("unknown enum value 99"));
+}
+
+#[test]
+fn raw_descriptor_scan_preserves_explicit_reply_mode_extension() {
+    let options =
+        extract_method_options_from_descriptor_set(&descriptor_set_with_reply_mode(Some(1)))
+            .unwrap();
+    assert_eq!(options[0][0][0].reply_mode, Some(ReplyMode::Explicit));
+}
+
+#[test]
+fn raw_descriptor_scan_rejects_unknown_reply_mode_value() {
+    let error =
+        extract_method_options_from_descriptor_set(&descriptor_set_with_reply_mode(Some(99)))
+            .unwrap_err();
     assert!(error.to_string().contains("unknown enum value 99"));
 }
 

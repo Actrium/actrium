@@ -23,8 +23,14 @@ pub struct DispatchRoute {
     pub input_type: String,
     pub output_type: String,
     pub payload_type: String,
+    #[serde(default = "default_reply_mode")]
+    pub reply_mode: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dependency_alias: Option<String>,
+}
+
+fn default_reply_mode() -> String {
+    "return".to_string()
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -75,9 +81,10 @@ impl DispatchSpec {
         };
         let canonical = canonicalize_json(&spec_without_hash);
         let recomputed = compute_sha256_hex(&canonical);
+        let legacy_recomputed = spec.recompute_legacy_hash();
 
         if let Some(ref stored) = spec.spec_hash {
-            if stored != &recomputed {
+            if stored != &recomputed && legacy_recomputed.as_deref() != Some(stored.as_str()) {
                 return Err(format!(
                     "Dispatch spec hash integrity check failed: stored '{stored}' != recomputed '{recomputed}'"
                 ));
@@ -85,6 +92,28 @@ impl DispatchSpec {
         }
 
         Ok(spec)
+    }
+
+    /// Accept pre-RFC-0323 v1 artifacts whose canonical JSON predates the
+    /// optional `reply_mode` field. They are equivalent only when every route
+    /// has the default RETURN mode.
+    fn recompute_legacy_hash(&self) -> Option<String> {
+        if self.routes.iter().any(|route| route.reply_mode != "return") {
+            return None;
+        }
+        let mut value = serde_json::to_value(DispatchSpec {
+            schema_version: self.schema_version.clone(),
+            routes: self.routes.clone(),
+            spec_hash: None,
+        })
+        .ok()?;
+        let routes = value.get_mut("routes")?.as_array_mut()?;
+        for route in routes {
+            route.as_object_mut()?.remove("reply_mode");
+        }
+        Some(compute_sha256_hex(
+            &serde_json::to_vec(&canonicalize_value(&value)).ok()?,
+        ))
     }
 
     fn validate_routes(&self) -> Result<(), String> {
@@ -99,12 +128,22 @@ impl DispatchSpec {
                 ("input_type", route.input_type.as_str()),
                 ("output_type", route.output_type.as_str()),
                 ("payload_type", route.payload_type.as_str()),
+                ("reply_mode", route.reply_mode.as_str()),
             ] {
                 if value.is_empty() {
                     return Err(format!(
                         "Dispatch spec route field '{field}' must be non-empty"
                     ));
                 }
+            }
+            if route.reply_mode != "return" {
+                return Err(format!(
+                    concat!(
+                        "Web codegen supports only reply_mode 'return'; route '{}' uses '{}'. ",
+                        "REPLY_MODE_EXPLICIT requires a WIT v2 workload target"
+                    ),
+                    route.route_key, route.reply_mode
+                ));
             }
             if !route_keys.insert(route.route_key.as_str()) {
                 return Err(format!(
@@ -224,6 +263,7 @@ mod tests {
                     input_type: "Request".to_string(),
                     output_type: "Response".to_string(),
                     payload_type: "rpcReliable".to_string(),
+                    reply_mode: "return".to_string(),
                     dependency_alias: None,
                 },
                 DispatchRoute {
@@ -234,6 +274,7 @@ mod tests {
                     input_type: "Request".to_string(),
                     output_type: "Response".to_string(),
                     payload_type: "rpcReliable".to_string(),
+                    reply_mode: "return".to_string(),
                     dependency_alias: Some("alias".to_string()),
                 },
             ],
@@ -254,6 +295,7 @@ mod tests {
             input_type: "Request".to_string(),
             output_type: "Response".to_string(),
             payload_type: "rpcReliable".to_string(),
+            reply_mode: "return".to_string(),
             dependency_alias: Some("alias".to_string()),
         };
         let duplicate = DispatchSpec {
@@ -280,5 +322,27 @@ mod tests {
             spec_hash: None,
         };
         assert!(empty_alias.validate_routes().is_err());
+    }
+
+    #[test]
+    fn route_validation_rejects_explicit_reply_mode() {
+        let spec = DispatchSpec {
+            schema_version: "v1".to_string(),
+            routes: vec![DispatchRoute {
+                route_key: "local.Svc.Method".to_string(),
+                proto_file: "local/svc.proto".to_string(),
+                proto_service: "local.Svc".to_string(),
+                method: "Method".to_string(),
+                input_type: "Request".to_string(),
+                output_type: "Response".to_string(),
+                payload_type: "rpcReliable".to_string(),
+                reply_mode: "explicit".to_string(),
+                dependency_alias: None,
+            }],
+            spec_hash: None,
+        };
+
+        let error = spec.validate_routes().unwrap_err();
+        assert!(error.contains("WIT v2 workload target"));
     }
 }

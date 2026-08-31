@@ -48,6 +48,46 @@ fn make_reply(deliver: Arc<dyn Deliver>, emit_response: bool) -> Reply<Resp> {
 }
 
 #[test]
+fn dispatch_guard_preserves_handler_error_over_reply_drop() {
+    let deliver = CapturingDeliver::new();
+    let reply = make_reply(deliver.clone(), true);
+    let guard = reply.dispatch_guard();
+
+    // The handler-owned argument is dropped before its Result reaches the
+    // generated dispatcher. The live guard suppresses the generic fallback.
+    drop(reply);
+    assert!(deliver.outcomes().is_empty());
+
+    guard.complete_error(ActrError::InvalidArgument(
+        "handler rejected request".into(),
+    ));
+    let outcomes = deliver.outcomes();
+    assert_eq!(outcomes.len(), 1);
+    assert!(matches!(
+        &outcomes[0].result,
+        Err(ActrError::InvalidArgument(message)) if message == "handler rejected request"
+    ));
+}
+
+#[test]
+fn dispatch_guard_falls_back_after_success_without_reply() {
+    let deliver = CapturingDeliver::new();
+    let reply = make_reply(deliver.clone(), true);
+    let guard = reply.dispatch_guard();
+
+    drop(reply);
+    assert!(deliver.outcomes().is_empty());
+    drop(guard);
+
+    let outcomes = deliver.outcomes();
+    assert_eq!(outcomes.len(), 1);
+    assert!(matches!(
+        &outcomes[0].result,
+        Err(ActrError::Internal(message)) if message == "reply dropped without response"
+    ));
+}
+
+#[test]
 fn send_owns_happily_and_delivers_once() {
     let cap = CapturingDeliver::new();
     let reply = make_reply(cap.clone(), true);

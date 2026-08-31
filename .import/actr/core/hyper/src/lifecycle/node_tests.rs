@@ -1543,8 +1543,12 @@ struct ExplicitCaptureHandle {
 
 #[async_trait::async_trait]
 impl LinkedWorkloadHandle for ExplicitCaptureHandle {
-    fn reply_mode_for_route(&self, _route_key: &str) -> actr_protocol::ReplyMode {
-        actr_protocol::ReplyMode::Explicit
+    fn reply_mode_for_route(&self, route_key: &str) -> actr_protocol::ReplyMode {
+        if route_key == "pkg.Svc.ExplicitMethod" {
+            actr_protocol::ReplyMode::Explicit
+        } else {
+            actr_protocol::ReplyMode::Return
+        }
     }
     async fn dispatch(
         &self,
@@ -1658,6 +1662,30 @@ async fn explicit_deferred_balances_outstanding_counter_on_deliver() {
     .expect("gauge must return to 0 after the Deliver fires");
 
     assert_eq!(inner.outstanding_replies.len(), 0);
+}
+
+/// The legacy `.Service.Method` alias must be normalized before reply-mode
+/// selection, not merely at the guest dispatch boundary. Otherwise a linked
+/// EXPLICIT route is admitted as RETURN and receives no ReplyDeliver.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_dotted_route_alias_uses_explicit_reply_mode() {
+    let (inner, captured, _dir) = explicit_capture_harness().await;
+    let reply_sink = crate::lifecycle::reply_deliver::ReplySink::Mailbox {
+        caller: Err("test-caller".to_string()),
+        msg_id: uuid::Uuid::new_v4(),
+        span: tracing::Span::none(),
+    };
+    let mut envelope = explicit_envelope("explicit-dotted-route");
+    envelope.route_key = ".pkg.Svc.ExplicitMethod".to_string();
+
+    let outcome = inner
+        .handle_incoming(envelope, None, Some(reply_sink), None)
+        .await;
+    assert!(matches!(outcome, IncomingOutcome::Deferred));
+    assert!(
+        captured.lock().unwrap().is_some(),
+        "canonical reply-mode lookup must provide EXPLICIT routes a ReplyDeliver"
+    );
 }
 
 /// RFC-0323 §5: an EXPLICIT dispatch that returns `Err` is NOT surfaced as

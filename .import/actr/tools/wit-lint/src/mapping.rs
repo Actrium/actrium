@@ -343,7 +343,7 @@ fn check_function(
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// The canonical mapping table for actr-workload@0.5.0.
+// The canonical mapping table for actr-workload@0.6.0.
 // ─────────────────────────────────────────────────────────────────────────
 
 /// Canonical mapping used by the production lint invocation.

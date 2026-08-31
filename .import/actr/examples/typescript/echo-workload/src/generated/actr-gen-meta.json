@@ -15,14 +15,13 @@
       "name": "EchoService",
       "package": "echo",
       "proto_file": "local/echo.proto",
-      "handler_interface": "EchoServiceHandler",
-      "workload_type": "EchoServiceWorkload",
-      "dispatcher_type": "EchoServiceDispatcher",
+      "handler_interface": "ActrDispatchHandler",
       "methods": [
         {
           "name": "Echo",
           "snake_name": "echo",
           "route_key": "echo.EchoService.Echo",
+          "reply_mode": "return",
           "input_ref": {
             "proto_type": "echo.EchoRequest",
             "type_name": "EchoRequest",
@@ -40,6 +39,7 @@
           "name": "PrepareStream",
           "snake_name": "prepare_stream",
           "route_key": "echo.EchoService.PrepareStream",
+          "reply_mode": "return",
           "input_ref": {
             "proto_type": "echo.StreamPrepareRequest",
             "type_name": "StreamPrepareRequest",
@@ -57,6 +57,7 @@
           "name": "ReleaseStream",
           "snake_name": "release_stream",
           "route_key": "echo.EchoService.ReleaseStream",
+          "reply_mode": "return",
           "input_ref": {
             "proto_type": "echo.StreamReleaseRequest",
             "type_name": "StreamReleaseRequest",

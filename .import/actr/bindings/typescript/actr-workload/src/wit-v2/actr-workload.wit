@@ -1,5 +1,12 @@
 // actr workload contract — Component Model WIT, lane-aware async world
 //
+// `actr:workload@0.6.0` extends the 0.5.0 contract with the EXPLICIT reply
+// boundary: `invocation-ctx` carries `expects-response` / `reply-enabled`, and
+// the host interface adds `reply`, `reply-error`, `reply-sync`, and `reply-error-sync`.
+// Changing a record shape and adding required imports both break already-built
+// 0.5.0 components, hence the version bump; the host rejects them at load with
+// an actionable rebuild hint.
+//
 // `actr:workload@0.5.0` extends the lane-aware 0.4.0 contract with the
 // unified WebRTC peer-state export (`on-webrtc-state-changed`) carried by
 // the v0.20 RTC backend. Adding a required guest export is a contract break
@@ -14,8 +21,8 @@
 //
 // `actr:workload@0.3.0` extends the run_concurrent-ready 0.2.0 contract with
 // explicit per-call timeout arguments. The async design is a controlled fork
-// of the retired `actr:workload@0.1.0` contract that turns every host import
-// and every workload export into a real WIT `async func`. That single change
+// of the retired `actr:workload@0.1.0` contract that turns transport host
+// imports and workload exports into real WIT `async func`s. That single change
 // is what unlocks wasmtime 46's Component
 // Model Concurrency: multiple `dispatch` calls may be IN FLIGHT on one
 // component instance, cooperatively interleaving at each host-import `.await`.
@@ -23,15 +30,15 @@
 // Design decisions (locked in during the Phase 0.75 run_concurrent spike,
 // see experiments/component-spike-runconcurrent/REPORT.md):
 //
-// 1. Every function is a real WIT `async func`, never a plain `func`. wasmtime
-//    46's bindgen does NOT support mixing synchronous imports into an async
-//    world ("not yet implemented" — the store-access trait split for sync
-//    imports is incomplete), so the world must be uniformly async. wasmtime 46
-//    then emits Accessor-based host bindings for the imports (static trait
-//    methods taking `&Accessor<T, Self>` rather than `&mut self`) and
-//    `call_*(accessor, ...)` for the exports, driven by
-//    `Store::run_concurrent`. wit-bindgen 0.58 auto-generates async guest
-//    bindings from `async func` — no `async: true` flag needed.
+// 1. Transport host imports and workload exports are real WIT `async func`s.
+//    This is the shape that unlocks wasmtime 46's Component Model Concurrency:
+//    it emits Accessor-based host bindings (static trait methods taking
+//    `&Accessor<T, Self>` rather than `&mut self`) and `call_*(accessor, ...)`
+//    for the exports, driven by `Store::run_concurrent`. The two `reply-sync`
+//    imports below are deliberate synchronous exceptions used only by the
+//    Rust `Reply<T>` handle; they enqueue an outcome and do not perform
+//    transport I/O. wit-bindgen 0.58 auto-generates async guest bindings from
+//    `async func` — no `async: true` flag needed.
 //
 // 2. Per-call context is carried EXPLICITLY, not via getter imports. The
 //    0.1.0 contract exposed `get-self-id` / `get-caller-id` /
@@ -53,7 +60,7 @@
 // stdlib-ish names during binding generation (e.g. `actr-error` rather
 // than bare `error`, which clashes with `wasi:io/error`).
 
-package actr:workload@0.5.0;
+package actr:workload@0.6.0;
 
 // ─────────────────────────────────────────────────────────────────────────
 // Shared value types
@@ -276,6 +283,11 @@ interface types {
         self-id: actr-id,
         caller-id: option<actr-id>,
         request-id: string,
+        expects-response: bool,
+        // Whether this invocation is connected to the host reply boundary.
+        // Low-level host tests may call the guest export directly and keep
+        // the legacy returned-bytes contract instead.
+        reply-enabled: bool,
     }
 }
 
@@ -284,11 +296,12 @@ interface types {
 // ─────────────────────────────────────────────────────────────────────────
 //
 // Corresponds to the HostCallV1 / HostTellV1 / HostCallRawV1 /
-// HostDiscoverV1 operations routed through the host ABI bridge. Every import
-// is a real `async func` (so wasmtime 46 emits the Accessor-based, static
-// host trait) and takes a `ctx-token: u64` first parameter identifying the
-// calling invocation, which the host uses to recover the correct
-// `HostAbiFn` even when multiple invocations interleave on one instance.
+// HostDiscoverV1 operations routed through the host ABI bridge. Transport
+// imports are real `async func`s (so wasmtime 46 emits the Accessor-based,
+// static host trait) and take a `ctx-token: u64` first parameter identifying
+// the calling invocation, which the host uses to recover the correct
+// `HostAbiFn` even when multiple invocations interleave on one instance. The
+// two synchronous `reply-sync` imports only enqueue Rust `Reply<T>` outcomes.
 
 interface host {
     use types.{actr-id, actr-type, actr-error, data-chunk, dest, payload-type};
@@ -323,6 +336,23 @@ interface host {
         timeout-ms: s64,
         payload-type: payload-type,
     ) -> result<list<u8>, actr-error>;
+
+    // Deliver a response through the current inbound invocation boundary.
+    reply: async func(ctx-token: u64, payload: list<u8>) -> result<_, actr-error>;
+    reply-error: async func(ctx-token: u64, error: actr-error) -> result<_, actr-error>;
+
+    // Synchronous reply bridge used by the Rust guest Reply<T> handle. The
+    // host only enqueues the response here; transport delivery remains
+    // asynchronous on the host side. Whether to emit a RESPONSE is derived
+    // from the host-owned invocation context, never trusted to the guest.
+    reply-sync: func(
+        ctx-token: u64,
+        payload: list<u8>,
+    ) -> result<_, actr-error>;
+    reply-error-sync: func(
+        ctx-token: u64,
+        error: actr-error,
+    ) -> result<_, actr-error>;
 
     // Discovery: find a candidate actor serving the requested type.
     discover: async func(ctx-token: u64, target-type: actr-type) -> result<actr-id, actr-error>;

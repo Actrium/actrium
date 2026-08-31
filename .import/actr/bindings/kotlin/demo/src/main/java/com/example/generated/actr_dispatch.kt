@@ -16,7 +16,7 @@ import echo.Echo.*
 import local.DataStreamPeer.*
 import local.StreamClientOuterClass.*
 
-// Import individual service handlers and dispatchers.
+// Import individual service handler contracts.
 import com.example.generated.StreamClientHandler
 
 /**
@@ -29,8 +29,9 @@ interface ActrDispatchHandler : StreamClientHandler {
 /**
  * Unified dispatcher with exact route-key matching.
  *
- * Local routes decode the payload, call the handler, and encode the response.
- * Remote routes resolve the dependency alias, discover the target, and call raw.
+ * Local routes decode the payload and deliver the encoded response through the
+ * explicit host boundary. Remote routes resolve the dependency alias, discover
+ * the target, and forward the response through the same boundary.
  */
 suspend fun actrDispatch(
     ctx: ActrContext,
@@ -42,17 +43,22 @@ suspend fun actrDispatch(
     "data_stream_peer.StreamClient.StartStream" -> {
         val request = ClientStartStreamRequest.parseFrom(payload)
         val response = handler.start_stream(request, ctx)
-        response.toByteArray()
+        ctx.replyRaw(response.toByteArray())
+        ByteArray(0)
     }
     "echo.EchoService.Echo" -> {
         val actrType = ctx.resolveDependency("echo")
         val target = ctx.discover(actrType)
-        ctx.callRaw(target, routeKey, PayloadType.RPC_RELIABLE, payload, timeoutMs)
+        val response = ctx.callRaw(target, routeKey, PayloadType.RPC_RELIABLE, payload, timeoutMs)
+        ctx.replyRaw(response)
+        ByteArray(0)
     }
     "data_stream_peer.DuplexStreamService.StartStream" -> {
         val actrType = ctx.resolveDependency("stream")
         val target = ctx.discover(actrType)
-        ctx.callRaw(target, routeKey, PayloadType.RPC_RELIABLE, payload, timeoutMs)
+        val response = ctx.callRaw(target, routeKey, PayloadType.RPC_RELIABLE, payload, timeoutMs)
+        ctx.replyRaw(response)
+        ByteArray(0)
     }
     else -> throw io.actrium.actr.ActrException.UnknownRoute("Unknown route: $routeKey")
 }

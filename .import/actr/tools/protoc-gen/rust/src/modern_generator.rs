@@ -220,14 +220,19 @@ use async_trait::async_trait;
     }
 
     /// The route_key the generator emits for `method`, mirroring the runtime
-    /// dispatch match-arm key: `"{package}.{service}.{method}"`.
+    /// dispatch match-arm key. Package-less protos omit the package segment
+    /// rather than producing a leading dot.
     fn route_key_for(&self, method: &MethodDescriptorProto) -> String {
-        format!(
-            "{}.{}.{}",
-            self.package_name,
-            self.service_name,
-            method.name()
-        )
+        if self.package_name.is_empty() {
+            format!("{}.{}", self.service_name, method.name())
+        } else {
+            format!(
+                "{}.{}.{}",
+                self.package_name,
+                self.service_name,
+                method.name()
+            )
+        }
     }
 
     /// The `ReplyMode` declared for `method` via the `actr.reply_mode` proto
@@ -256,13 +261,9 @@ use async_trait::async_trait;
             let input_type_path = self.message_type_path(method.input_type())?;
             let output_type_path = self.message_type_path(method.output_type())?;
 
-            // Generate route key
-            let route_key = format!(
-                "{}.{}.{}",
-                self.package_name,
-                self.service_name,
-                method.name()
-            );
+            // Generate the same route key used for `(actr.reply_mode)` lookup
+            // and by the unified dispatcher.
+            let route_key = self.route_key_for(method);
 
             // Explicit `(actr.payload_type)` values win over the fallback.
             // The key is built from the same fields the extraction side
@@ -1081,6 +1082,45 @@ mod tests {
         assert!(
             code.contains("Context, Reply"),
             "Reply should be imported:\n{code}"
+        );
+    }
+
+    #[test]
+    fn explicit_reply_mode_matches_package_less_route_key() {
+        use actr_protocol::ReplyMode;
+
+        let mut reply_modes = HashMap::new();
+        reply_modes.insert("Svc.Transcode".to_string(), ReplyMode::Explicit);
+
+        let generator = ModernGenerator::new(
+            "",
+            "Svc",
+            GeneratorRole::ServerSide,
+            HashMap::new(),
+            reply_modes,
+        );
+        let methods = vec![MethodDescriptorProto {
+            name: Some("Transcode".to_string()),
+            input_type: Some(".Req".to_string()),
+            output_type: Some(".Resp".to_string()),
+            ..Default::default()
+        }];
+
+        let code = generator
+            .generate(&methods)
+            .expect("package-less EXPLICIT route must generate");
+
+        assert!(
+            code.contains("\"Svc.Transcode\""),
+            "package-less route key must not have a leading dot:\n{code}"
+        );
+        assert!(
+            code.contains("reply : actr_framework :: Reply"),
+            "package-less EXPLICIT route should keep the Reply handler signature:\n{code}"
+        );
+        assert!(
+            code.contains("fn reply_mode() -> ReplyMode"),
+            "package-less EXPLICIT route should override reply_mode:\n{code}"
         );
     }
 

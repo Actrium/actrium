@@ -1,8 +1,8 @@
 /**
  * Kotlin Actor Code Generator
  *
- * Generates Handler interface and Dispatcher for ACTR services. Similar to the Rust ModernGenerator
- * but for Kotlin.
+ * Generates handler interfaces and RPC contracts for ACTR services. Incoming
+ * dispatch is emitted once by the DispatchSpec-driven unified generator.
  */
 package io.actrium.codegen
 
@@ -10,6 +10,7 @@ import com.google.protobuf.DescriptorProtos.MethodDescriptorProto
 import com.google.protobuf.compiler.PluginProtos.CodeGeneratorResponse
 
 private const val ACTR_PAYLOAD_TYPE_FIELD_NUMBER = 50001
+private const val ACTR_REPLY_MODE_FIELD_NUMBER = 50002
 
 private enum class RpcPayloadType(val protoValue: Long, val kotlinVariant: String) {
     RPC_RELIABLE(0, "PayloadType.RPC_RELIABLE"),
@@ -54,8 +55,6 @@ class KotlinActorGenerator(
             appendLine(generateHandlerInterface())
             appendLine()
             appendLine(generateRpcContracts())
-            appendLine()
-            appendLine(generateDispatcher())
         }
 
         val fileName = "${serviceName.toSnakeCase()}_actor.kt"
@@ -83,8 +82,8 @@ class KotlinActorGenerator(
         return buildString {
             appendLine("import io.actrium.actr.PayloadType")
             appendLine("import io.actrium.actr.dsl.ActrContext")
+            appendLine("import io.actrium.actr.dsl.Reply")
             appendLine("import io.actrium.actr.dsl.RpcRequest")
-            appendLine("import io.actrium.actr.dsl.RpcEnvelope")
             appendLine()
             appendLine("// Protobuf message types are referenced by generated JVM owner class.")
         }
@@ -117,11 +116,19 @@ class KotlinActorGenerator(
                     val inputType = kotlinTypeName(method.inputType, "input", method.name)
                     val outputType = kotlinTypeName(method.outputType, "output", method.name)
 
+                    val replyParameter =
+                            if (replyModeFor(method) == "explicit") {
+                                ", reply: Reply<$outputType>"
+                            } else {
+                                ""
+                            }
+                    val returnType = if (replyModeFor(method) == "explicit") "Unit" else outputType
+
                     """
             |    /**
             |     * RPC method: ${method.name}
             |     */
-            |    suspend fun $methodName(request: $inputType, ctx: ActrContext): $outputType
+            |    suspend fun $methodName(request: $inputType, ctx: ActrContext$replyParameter): $returnType
             """.trimMargin()
                 }
 
@@ -180,56 +187,6 @@ class KotlinActorGenerator(
         """.trimMargin()
     }
 
-    /** Generate Dispatcher object */
-    private fun generateDispatcher(): String {
-        val dispatcherName = "${serviceName}Dispatcher"
-        val handlerName = "${serviceName}Handler"
-
-        val matchCases =
-                methods.joinToString("\n") { method ->
-                    val routeKey = routeKey(method)
-                    val methodName = method.name.toSnakeCase()
-                    val inputType = kotlinTypeName(method.inputType, "input", method.name)
-
-                    """
-            |            "$routeKey" -> {
-            |                val request = $inputType.parseFrom(envelope.payload)
-            |                val response = handler.$methodName(request, ctx)
-            |                response.toByteArray()
-            |            }
-            """.trimMargin()
-                }
-
-        return """
-            |/**
-            | * Message dispatcher for $serviceName
-            | *
-            | * Routes incoming messages to the appropriate handler method.
-            | * This is a zero-overhead dispatcher - all routing is done at compile time.
-            | */
-            |object $dispatcherName {
-            |    /**
-            |     * Dispatch an RPC envelope to the appropriate handler method
-            |     *
-            |     * @param handler The handler implementation
-            |     * @param ctx The context for making RPC calls
-            |     * @param envelope The RPC envelope containing the request
-            |     * @return The serialized response bytes
-            |     */
-            |    suspend fun dispatch(
-            |        handler: $handlerName,
-            |        ctx: ActrContext,
-            |        envelope: RpcEnvelope
-            |    ): ByteArray {
-            |        return when (envelope.routeKey) {
-            |$matchCases
-            |            else -> throw io.actrium.actr.ActrException.UnknownRoute("Unknown route key: ${'$'}{envelope.routeKey}")
-            |        }
-            |    }
-            |}
-        """.trimMargin()
-    }
-
     private fun routeKey(method: MethodDescriptorProto): String {
         return if (packageName.isEmpty()) {
             "$serviceName.${method.name}"
@@ -253,6 +210,21 @@ class KotlinActorGenerator(
             RpcPayloadType.STREAM_RELIABLE
         } else {
             RpcPayloadType.RPC_RELIABLE
+        }
+    }
+
+    private fun replyModeFor(method: MethodDescriptorProto): String {
+        val explicitValue =
+                method.options.unknownFields
+                        .getField(ACTR_REPLY_MODE_FIELD_NUMBER)
+                        .varintList
+                        .firstOrNull()
+        return when (explicitValue) {
+            null, 0L -> "return"
+            1L -> "explicit"
+            else ->
+                    throw IllegalArgumentException(
+                            "Unsupported (actr.reply_mode) value $explicitValue on ${routeKey(method)}")
         }
     }
 

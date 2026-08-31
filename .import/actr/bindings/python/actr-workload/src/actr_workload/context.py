@@ -4,11 +4,12 @@ import functools
 import importlib
 import os
 from collections.abc import Awaitable, Callable
-from typing import Any, ClassVar, Protocol, TypeVar
+from typing import Any, ClassVar, Generic, Protocol, TypeVar
 
 from .constants import DEFAULT_WORLD_MODULE
 
 ResponseT = TypeVar("ResponseT", covariant=True)
+ReplyT = TypeVar("ReplyT")
 
 
 class RpcRequest(Protocol[ResponseT]):
@@ -20,6 +21,34 @@ class RpcRequest(Protocol[ResponseT]):
     def encode_request(self) -> bytes: ...
 
     def decode_response(self, data: bytes) -> ResponseT: ...
+
+
+class Reply(Generic[ReplyT]):
+    """Explicit reply handle for generated EXPLICIT RPC handlers.
+
+    The handle may outlive its handler. If it is never sent, the host expires
+    the pending reply at the RFC-0323 in-flight TTL.
+    """
+
+    def __init__(
+        self,
+        ctx: "ActrContext",
+        encoder: Callable[[ReplyT], bytes],
+    ) -> None:
+        self._ctx = ctx
+        self._encoder = encoder
+
+    async def send(self, response: ReplyT) -> None:
+        """Deliver one encoded response through the current invocation."""
+        if not self._ctx.reply_enabled:
+            return
+        await self._ctx.reply_raw(self._encoder(response))
+
+    async def send_error(self, error: Any) -> None:
+        """Deliver one ActrError through the current invocation."""
+        if not self._ctx.reply_enabled:
+            return
+        await self._ctx.reply_error(error)
 
 
 def _world_module() -> str:
@@ -59,6 +88,10 @@ class ActrContext:
     def request_id(self) -> str:
         return self._invocation_ctx.request_id
 
+    @property
+    def reply_enabled(self) -> bool:
+        return bool(self._invocation_ctx.reply_enabled)
+
     async def call(
         self,
         target: Any,
@@ -97,6 +130,16 @@ class ActrContext:
                 _payload_type_to_wit(payload_type, types),
             )
         )
+
+    async def reply_raw(self, payload: bytes) -> None:
+        """Deliver a response through the current invocation's reply boundary."""
+        host, _ = _bindings()
+        await host.reply(self._invocation_ctx.ctx_token, payload)
+
+    async def reply_error(self, error: Any) -> None:
+        """Deliver an ActrError through the current invocation's reply boundary."""
+        host, _ = _bindings()
+        await host.reply_error(self._invocation_ctx.ctx_token, error)
 
     async def discover(self, target_type: Any) -> Any:
         host, _ = _bindings()

@@ -1,4 +1,5 @@
 use crate::commands::codegen::TypeRef;
+use crate::commands::codegen::dispatch_spec::ReplyMode;
 use crate::commands::codegen::proto_model::ProtoSide;
 use crate::commands::codegen::scaffold::ScaffoldCatalog;
 use crate::commands::codegen::traits::{GenContext, LanguageGenerator};
@@ -1110,6 +1111,7 @@ struct ProtoMethod {
     swift_name: String,
     input_type: String,
     output_type: String,
+    is_explicit: bool,
 }
 
 impl SwiftGenerator {
@@ -1129,6 +1131,7 @@ impl SwiftGenerator {
                         swift_name: lower_camel_identifier_from_alias(&method.snake_name),
                         input_type: self.swift_type_name(&method.input_ref),
                         output_type: self.swift_type_name(&method.output_ref),
+                        is_explicit: method.reply_mode == ReplyMode::Explicit,
                     })
                     .collect();
 

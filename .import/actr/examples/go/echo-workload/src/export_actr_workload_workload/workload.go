@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package export_actr_workload_workload implements every export in the
-// asynchronous actr:workload/workload@0.5.0 interface.
+// asynchronous actr:workload/workload@0.6.0 interface.
 package export_actr_workload_workload
 
 import (

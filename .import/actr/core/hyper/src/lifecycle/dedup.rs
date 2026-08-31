@@ -79,7 +79,6 @@ struct Entry {
 pub(crate) struct DedupState {
     entries: HashMap<String, Entry>,
     ttl: Duration,
-    inflight_ttl: Duration,
 }
 
 /// Outcome of `check_or_mark`.
@@ -99,7 +98,6 @@ impl DedupState {
         Self {
             entries: HashMap::new(),
             ttl: DEDUP_TTL,
-            inflight_ttl: INFLIGHT_TTL,
         }
     }
 
@@ -174,8 +172,9 @@ impl DedupState {
     /// observes a consistent timeout instead of hanging forever (an EXPLICIT
     /// `Reply` that is never `send`-ed would otherwise pin its `InFlight`
     /// marker permanently). `Done` entries are left to `evict_done_expired`.
+    #[cfg(test)]
     pub(crate) fn sweep_inflight_explicit(&mut self, now: Instant, explicit_ids: &[String]) {
-        let inflight_ttl = self.inflight_ttl;
+        let inflight_ttl = INFLIGHT_TTL;
         self.entries.retain(|id, e| match &mut e.result {
             CachedResult::InFlight { completion_tx } => {
                 let is_explicit = explicit_ids.iter().any(|s| s == id);
@@ -190,17 +189,29 @@ impl DedupState {
         });
     }
 
+    /// Expire the exact EXPLICIT entries whose reply boundary has already
+    /// timed out. Unlike [`sweep_inflight_explicit`], this does not apply the
+    /// generic in-flight TTL again: the outstanding-reply registry has
+    /// already applied either the caller deadline or that TTL. Requiring both
+    /// would leave a short-deadline request parked in dedup until 60 seconds
+    /// after its caller was told it timed out.
+    pub(crate) fn expire_inflight_explicit(&mut self, expired_ids: &[String]) {
+        self.entries.retain(|id, e| match &mut e.result {
+            CachedResult::InFlight { completion_tx }
+                if expired_ids.iter().any(|expired| expired == id) =>
+            {
+                let _ = completion_tx.send(Some(Err(ActrError::TimedOut)));
+                false
+            }
+            _ => true,
+        });
+    }
+
     /// Clock-reading form of [`evict_done_expired`] for the background sweep
     /// task (keeps the `std::time::Instant::now()` read in this exempt module
     /// rather than the caller, so non-exempt callers stay off the wall clock).
     pub(crate) fn evict_done_expired_now(&mut self) {
         self.evict_done_expired(Instant::now());
-    }
-
-    /// Clock-reading form of [`sweep_inflight_explicit`] for the background
-    /// sweep task.
-    pub(crate) fn sweep_inflight_explicit_now(&mut self, explicit_ids: &[String]) {
-        self.sweep_inflight_explicit(Instant::now(), explicit_ids);
     }
 
     /// Number of entries currently tracked (for monitoring / tests).

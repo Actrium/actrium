@@ -3,6 +3,8 @@
 //! This module replaces the old executor adapter layer. `ActrNode` dispatches
 //! directly into a runtime `Workload` enum.
 
+#[cfg(feature = "wasm-engine")]
+use actr_framework::Context as _;
 #[cfg(feature = "dynclib-engine")]
 use actr_framework::WebRtcPeerStatus;
 use actr_framework::guest::dynclib_abi::{
@@ -37,6 +39,8 @@ pub enum HostOperation {
     Discover(HostDiscoverV1),
     ResolveDependency(HostResolveDependencyV1),
     CallRaw(HostCallRawV1),
+    Reply(Vec<u8>),
+    ReplyError(ActrError),
     RegisterStream(HostRegisterStreamV1),
     UnregisterStream(HostUnregisterStreamV1),
     SendDataChunk(HostSendDataChunkV1),
@@ -601,6 +605,17 @@ impl std::fmt::Debug for Workload {
 }
 
 impl Workload {
+    /// Whether this workload delivers inbound replies through the explicit
+    /// host boundary instead of returning dispatch bytes to the pump.
+    pub(crate) fn uses_explicit_reply_boundary(&self) -> bool {
+        #[cfg(feature = "wasm-engine")]
+        if let Self::Wasm(workload) = self {
+            return workload.uses_explicit_reply_boundary();
+        }
+
+        false
+    }
+
     /// Release backend-owned execution resources after command intake closes.
     ///
     /// The normal dynclib lifecycle reaches this after `on_stop`, whose host
@@ -696,20 +711,35 @@ impl Workload {
     /// Dispatch one inbound RPC envelope.
     pub(crate) fn dispatch_envelope<'a>(
         &'a mut self,
-        envelope: RpcEnvelope,
+        mut envelope: RpcEnvelope,
         ctx: crate::context::RuntimeContext,
         invocation: InvocationContext,
         _host_abi: &'a HostAbiFn,
     ) -> Pin<Box<dyn Future<Output = ActorResult<Bytes>> + Send + 'a>> {
         Box::pin(async move {
             let _ = &invocation;
+            // Admission normalizes this before reply-mode selection. Keep the
+            // boundary normalization for direct internal callers as well.
+            normalize_legacy_route_key(&mut envelope.route_key);
             match self {
                 Workload::Linked(handle) => handle.dispatch(envelope, Arc::new(ctx)).await,
                 #[cfg(feature = "wasm-engine")]
                 Workload::Wasm(workload) => {
                     let request_bytes = envelope.encode_to_vec();
+                    let reply_deliver = ctx.reply_deliver();
+                    let expects_response = ctx.expects_response();
+                    let reply_claimed = ctx.reply_claimed_marker();
+                    let reply_deadline = ctx.reply_deadline().map(tokio::time::Instant::from_std);
                     workload
-                        .handle(&request_bytes, invocation, _host_abi)
+                        .handle_with_reply(
+                            &request_bytes,
+                            invocation,
+                            _host_abi,
+                            reply_deliver,
+                            expects_response,
+                            reply_claimed,
+                            reply_deadline,
+                        )
                         .await
                         .map(Bytes::from)
                         .map_err(|e| ActrError::Internal(format!("workload dispatch failed: {e}")))
@@ -790,6 +820,16 @@ impl Workload {
                     .map_err(|e| ActrError::Internal(format!("workload hook failed: {e}"))),
             }
         })
+    }
+}
+
+/// Canonicalize the one legacy package-less route spelling emitted by older
+/// generators. Do not trim repeatedly: `..Service.Method` remains malformed.
+pub(crate) fn normalize_legacy_route_key(route_key: &mut String) {
+    if let Some(canonical_route_key) = route_key.strip_prefix('.')
+        && !canonical_route_key.starts_with('.')
+    {
+        *route_key = canonical_route_key.to_string();
     }
 }
 

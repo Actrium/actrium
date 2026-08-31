@@ -177,12 +177,15 @@ pub mod __wasm_macro_support {
 /// ```rust,ignore
 /// use actr_framework::entry;
 ///
-/// entry!(EchoServiceWorkload<MyService>);
+/// use generated::actr_dispatch::ActrWorkload;
+/// use generated::actr_handler::ActrHandler;
+///
+/// entry!(ActrWorkload<ActrHandler<MyService>>);
 ///
 /// // Or with a custom constructor:
 /// entry!(
-///     EchoServiceWorkload<MyService>,
-///     EchoServiceWorkload::new(MyService::new())
+///     ActrWorkload<ActrHandler<MyService>>,
+///     ActrWorkload::new(ActrHandler::new(MyService::new()))
 /// );
 /// ```
 #[macro_export]

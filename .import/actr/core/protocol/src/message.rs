@@ -151,9 +151,8 @@ pub trait RpcRequest: ProstMessage + Default + Send + Sync + 'static {
     /// If not specified, defaults to `ReplyMode::Return`. The default keeps
     /// RETURN methods byte-identical to today's generated code.
     ///
-    /// Non-Rust-native targets (wasm, dynclib, and the polyglot generators)
-    /// do not yet support `ReplyMode::Explicit` and reject it at codegen time
-    /// rather than silently degrading (reject-don't-degrade).
+    /// The WASM component and foreign linked-workload generators implement
+    /// the same reply contract through their host-language `Reply<T>` handle.
     fn reply_mode() -> ReplyMode {
         ReplyMode::Return
     }

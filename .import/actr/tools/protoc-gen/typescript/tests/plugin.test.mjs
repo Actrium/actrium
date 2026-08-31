@@ -84,6 +84,7 @@ service LocalService {
         input_type: "local.SharedRequest",
         output_type: "local.FirstResponse",
         payload_type: "rpcReliable",
+        reply_mode: "return",
       },
       {
         route_key: "local.LocalService.Second",
@@ -93,6 +94,7 @@ service LocalService {
         input_type: "local.SharedRequest",
         output_type: "local.SecondResponse",
         payload_type: "rpcReliable",
+        reply_mode: "return",
       },
     ],
   );
@@ -127,6 +129,7 @@ service RemoteService {
         input_type: "remote.Request",
         output_type: "remote.Response",
         payload_type: "rpcSignal",
+        reply_mode: "return",
         dependency_alias: "remote-service",
       },
     ],
@@ -156,6 +159,44 @@ service RemoteService {
   assert.doesNotMatch(dispatcher, /remoteTargets|manufacturer|ActrType\s*\{/);
 });
 
+test("explicit local routes use the Reply handle", () => {
+  const { output, result } = generate(
+    `syntax = "proto3";
+package local;
+
+message Request {}
+message Response {}
+
+service LocalService {
+  rpc Transcode(Request) returns (Response);
+}
+`,
+    [
+      {
+        route_key: "local.LocalService.Transcode",
+        proto_file: "service.proto",
+        proto_service: "local.LocalService",
+        method: "Transcode",
+        input_type: "local.Request",
+        output_type: "local.Response",
+        payload_type: "rpcReliable",
+        reply_mode: "explicit",
+      },
+    ],
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const dispatcher = readFileSync(join(output, "actr_dispatch.ts"), "utf8");
+  assert.match(dispatcher, /reply: Reply<.*Response>/);
+  assert.match(dispatcher, /new Reply<.*Response>\(ctx/);
+  assert.match(
+    dispatcher,
+    /await handler\.localServiceTranscode\(req, ctx, replyHandle\)/,
+  );
+  assert.match(dispatcher, /return new Uint8Array\(\)/);
+  assert.doesNotMatch(dispatcher, /const resp = await handler\.localServiceTranscode/);
+});
+
 test("metadata uses canonical acronym method names and proto paths", () => {
   const { output, result } = generate(
     `syntax = "proto3";
@@ -177,6 +218,7 @@ service LocalService {
         input_type: "local.Request",
         output_type: "local.Response",
         payload_type: "rpcReliable",
+        reply_mode: "return",
       },
     ],
   );
@@ -186,10 +228,8 @@ service LocalService {
     readFileSync(join(output, "actr-gen-meta.json"), "utf8"),
   );
   assert.equal(metadata.local_services[0].proto_file, "service.proto");
-  assert.equal(
-    metadata.local_services[0].workload_type,
-    "LocalServiceWorkload",
-  );
+  assert.equal(metadata.local_services[0].workload_type, undefined);
+  assert.equal(metadata.local_services[0].dispatcher_type, undefined);
   assert.equal(metadata.local_services[0].methods[0].snake_name, "http_server");
   const dispatcher = readFileSync(join(output, "actr_dispatch.ts"), "utf8");
   assert.match(dispatcher, /localServiceHttpServer/);
@@ -204,6 +244,7 @@ test("duplicate DispatchSpec route keys are rejected", () => {
     input_type: "local.Request",
     output_type: "local.Response",
     payload_type: "rpcReliable",
+    reply_mode: "return",
   };
   const { result } = generate(
     `syntax = "proto3";

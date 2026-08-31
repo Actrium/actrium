@@ -76,14 +76,34 @@ fn probe_world_rejects_retired_v1_component_with_rebuild_hint() {
 }
 
 #[test]
-fn probe_world_accepts_current_v4_component() {
+fn probe_world_accepts_current_v6_component() {
     let src = r#"
         (component
-          (instance $v4)
-          (export "actr:workload/workload@0.5.0" (instance $v4))
+          (instance $v6)
+          (export "actr:workload/workload@0.6.0" (instance $v6))
         )
     "#;
     probe_wat(src).expect("current workload ABI should be accepted");
+}
+
+#[test]
+fn probe_world_rejects_retired_v5_component_with_rebuild_hint() {
+    let src = r#"
+        (component
+          (instance $v5)
+          (export "actr:workload/workload@0.5.0" (instance $v5))
+        )
+    "#;
+    let err = probe_wat(src).unwrap_err();
+    assert!(matches!(err, WasmError::LoadFailed(_)));
+    assert!(
+        err.to_string().contains("EXPLICIT reply")
+            && err.to_string().contains("@0.6.0")
+            && err
+                .to_string()
+                .contains("rebuild the package with the current SDK"),
+        "unexpected message: {err}"
+    );
 }
 
 #[test]
@@ -98,7 +118,7 @@ fn probe_world_rejects_retired_v4_component_with_rebuild_hint() {
     assert!(matches!(err, WasmError::LoadFailed(_)));
     assert!(
         err.to_string().contains("on-webrtc-state-changed")
-            && err.to_string().contains("@0.5.0")
+            && err.to_string().contains("@0.6.0")
             && err
                 .to_string()
                 .contains("rebuild the package with the current SDK"),
@@ -118,7 +138,7 @@ fn probe_world_rejects_retired_v3_component_with_rebuild_hint() {
     assert!(matches!(err, WasmError::LoadFailed(_)));
     assert!(
         err.to_string().contains("payload-type lane")
-            && err.to_string().contains("@0.5.0")
+            && err.to_string().contains("@0.6.0")
             && err
                 .to_string()
                 .contains("rebuild the package with the current SDK"),
@@ -137,7 +157,7 @@ fn probe_world_rejects_retired_v2_component_with_rebuild_hint() {
     let err = probe_wat(src).unwrap_err();
     assert!(matches!(err, WasmError::LoadFailed(_)));
     assert!(
-        err.to_string().contains("caller-selected timeout") && err.to_string().contains("@0.5.0"),
+        err.to_string().contains("caller-selected timeout") && err.to_string().contains("@0.6.0"),
         "unexpected message: {err}"
     );
 }
@@ -182,4 +202,124 @@ fn epoch_deadline_rounds_fractional_tick_up() {
     };
 
     assert_eq!(epoch_deadline_ticks(&limits), 3);
+}
+
+#[derive(Clone, Default)]
+struct CaptureDeliver(Arc<std::sync::Mutex<Vec<ReplyOutcome>>>);
+
+impl Deliver for CaptureDeliver {
+    fn deliver(&self, outcome: ReplyOutcome) {
+        self.0.lock().expect("capture mutex poisoned").push(outcome);
+    }
+}
+
+fn invocation_context(request_id: &str) -> InvocationContext {
+    InvocationContext {
+        self_id: actr_protocol::ActrId {
+            realm: actr_protocol::Realm { realm_id: 1 },
+            serial_number: 1,
+            r#type: actr_protocol::ActrType {
+                manufacturer: "test".to_string(),
+                name: "host-state".to_string(),
+                version: "0.1.0".to_string(),
+            },
+        },
+        caller_id: None,
+        request_id: request_id.to_string(),
+    }
+}
+
+fn noop_host_abi() -> HostAbiFn {
+    Arc::new(|_| Box::pin(async { crate::workload::HostOperationResult::Done }))
+}
+
+#[test]
+fn deferred_reply_invocation_expires_at_inflight_ttl() {
+    let limits = WasmRuntimeLimits::default();
+    let mut state = HostState::new(&limits);
+    let delivered = CaptureDeliver::default();
+    let captured = Arc::clone(&delivered.0);
+    let token = state.alloc_invocation_with_reply(
+        invocation_context("deferred-reply"),
+        noop_host_abi(),
+        Some(Arc::new(delivered)),
+        true,
+        Some(Arc::new(std::sync::atomic::AtomicBool::new(true))),
+        None,
+    );
+    let admitted_at = state.invocations[&token].admitted_at;
+
+    state.finish_invocation(token, true);
+    assert_eq!(state.invocation_count(), 1);
+
+    let expired = state.sweep_expired_deferred_replies(
+        crate::lifecycle::dedup::INFLIGHT_TTL,
+        admitted_at + crate::lifecycle::dedup::INFLIGHT_TTL,
+    );
+
+    assert_eq!(expired, 1);
+    assert_eq!(state.invocation_count(), 0);
+    let outcomes = captured.lock().expect("capture mutex poisoned");
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0].request_id, "deferred-reply");
+    assert!(matches!(
+        &outcomes[0].result,
+        Err(actr_protocol::ActrError::TimedOut)
+    ));
+    assert!(outcomes[0].emit_response);
+}
+
+#[test]
+fn running_invocation_is_not_expired_by_deferred_reply_sweep() {
+    let limits = WasmRuntimeLimits::default();
+    let mut state = HostState::new(&limits);
+    let delivered = CaptureDeliver::default();
+    let captured = Arc::clone(&delivered.0);
+    let token = state.alloc_invocation_with_reply(
+        invocation_context("running-handler"),
+        noop_host_abi(),
+        Some(Arc::new(delivered)),
+        true,
+        None,
+        None,
+    );
+    let admitted_at = state.invocations[&token].admitted_at;
+
+    let expired = state.sweep_expired_deferred_replies(
+        crate::lifecycle::dedup::INFLIGHT_TTL,
+        admitted_at + crate::lifecycle::dedup::INFLIGHT_TTL,
+    );
+
+    assert_eq!(expired, 0);
+    assert_eq!(state.invocation_count(), 1);
+    assert!(captured.lock().expect("capture mutex poisoned").is_empty());
+}
+
+#[test]
+fn deferred_tell_expiry_completes_without_response() {
+    let limits = WasmRuntimeLimits::default();
+    let mut state = HostState::new(&limits);
+    let delivered = CaptureDeliver::default();
+    let captured = Arc::clone(&delivered.0);
+    let token = state.alloc_invocation_with_reply(
+        invocation_context("deferred-tell"),
+        noop_host_abi(),
+        Some(Arc::new(delivered)),
+        false,
+        Some(Arc::new(std::sync::atomic::AtomicBool::new(true))),
+        None,
+    );
+    let admitted_at = state.invocations[&token].admitted_at;
+    state.finish_invocation(token, true);
+
+    let expired = state.sweep_expired_deferred_replies(
+        crate::lifecycle::dedup::INFLIGHT_TTL,
+        admitted_at + crate::lifecycle::dedup::INFLIGHT_TTL,
+    );
+
+    assert_eq!(expired, 1);
+    let outcomes = captured.lock().expect("capture mutex poisoned");
+    assert_eq!(outcomes.len(), 1);
+    assert!(!outcomes[0].emit_response);
+    assert!(matches!(&outcomes[0].result, Ok(bytes) if bytes.is_empty()));
 }

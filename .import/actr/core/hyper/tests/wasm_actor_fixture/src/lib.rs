@@ -27,7 +27,7 @@
 //! exercising guest→host structured error propagation.
 
 use actr_framework::{Context, Dest, MessageDispatcher, Workload, entry};
-use actr_protocol::{ActorResult, ActrError, RpcEnvelope, RpcRequest};
+use actr_protocol::{ActorResult, ActrError, ReplyMode, RpcEnvelope, RpcRequest};
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -190,6 +190,14 @@ pub struct DoubleDispatcher;
 impl MessageDispatcher for DoubleDispatcher {
     type Workload = DoubleActor;
 
+    fn reply_mode_for_route(route_key: &str) -> ReplyMode {
+        if route_key == "test/explicit" {
+            ReplyMode::Explicit
+        } else {
+            ReplyMode::Return
+        }
+    }
+
     async fn dispatch<C: Context>(
         workload: &Self::Workload,
         envelope: RpcEnvelope,
@@ -197,6 +205,24 @@ impl MessageDispatcher for DoubleDispatcher {
     ) -> ActorResult<Bytes> {
         match envelope.route_key.as_str() {
             "test/echo" => Ok(Bytes::from(envelope.payload.unwrap_or_default().to_vec())),
+            "test/explicit" => {
+                let payload = envelope.payload.unwrap_or_default();
+                if payload.len() < 4 {
+                    return Err(ActrError::InvalidArgument("payload too short".into()));
+                }
+                let value = i32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+                let deliver = ctx.reply_deliver().ok_or_else(|| {
+                    ActrError::Internal("explicit fixture route requires a reply deliver".into())
+                })?;
+                let reply = actr_framework::Reply::new(
+                    ctx.request_id().to_string(),
+                    ctx.reply_deadline(),
+                    deliver,
+                    ctx.expects_response(),
+                );
+                reply.send(Ok(TypedDoubleResponse { value: value * 2 }));
+                Ok(Bytes::new())
+            }
             "test/spin" => loop {
                 std::hint::spin_loop();
             },

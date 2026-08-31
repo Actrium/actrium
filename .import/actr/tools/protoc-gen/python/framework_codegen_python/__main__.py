@@ -3,8 +3,8 @@
 
 Reads a DispatchSpec v1 JSON file (path passed via ``dispatch_spec=<path>``)
 and a hash (``dispatch_spec_hash=<hash>``) from the protoc plugin parameters.
-All dispatch glue — per-RPC classes, per-service handlers, the unified
-``actr_dispatch`` function, and ``actr-gen-meta.json`` — is derived solely
+All dispatch glue — the unified ``actr_dispatch`` function and
+``actr-gen-meta.json`` — is derived solely
 from the DispatchSpec.  The plugin never reads the manifest lock, never
 classifies files by path, and never embeds ActrType strings.
 """
@@ -18,7 +18,6 @@ from google.protobuf.compiler import plugin_pb2 as plugin
 
 from .generators import (
     generate_metadata,
-    generate_service_module,
     generate_unified_dispatch,
     validate_spec_hash,
 )
@@ -73,20 +72,7 @@ def main() -> int:
     local_routes = [r for r in routes if r.get("dependency_alias") is None]
     remote_routes = [r for r in routes if r.get("dependency_alias") is not None]
 
-    # Group local routes by proto_service for per-service module generation.
-    local_by_service: dict[str, list] = {}
-    for route in local_routes:
-        local_by_service.setdefault(route["proto_service"], []).append(route)
-
     generated_files: list[str] = []
-
-    # Per-service modules: Rpc classes + Handler Protocol + ServiceDispatcher.
-    for service_key, service_routes in local_by_service.items():
-        generated = generate_service_module(service_key, service_routes, type_to_owner)
-        out = response.file.add()
-        out.name = generated["name"]
-        out.content = generated["content"]
-        generated_files.append(generated["name"])
 
     # Unified dispatcher module.
     dispatch_content = generate_unified_dispatch(

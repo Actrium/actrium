@@ -1,4 +1,4 @@
-//! WasmWorkloadV2 — the `actr:workload@0.5.0` async-world execution path.
+//! WasmWorkloadV2 — the `actr:workload@0.6.0` async-world execution path.
 //!
 //! The sole actr:workload execution path (the 0.1.0 synchronous serial
 //! world is retired — a component exporting it is rejected at load by
@@ -23,8 +23,8 @@ use actr_framework::guest::dynclib_abi::{
     HostSendDataChunkV1, HostTellV1, HostUnregisterStreamV1,
 };
 use actr_framework::{
-    BackpressureEvent, CredentialEvent, PeerEvent, WebRtcNetworkPath, WebRtcPeerState,
-    WebRtcPeerStatus, WebRtcUnavailableReason,
+    BackpressureEvent, Context as _, CredentialEvent, PeerEvent, WebRtcNetworkPath,
+    WebRtcPeerState, WebRtcPeerStatus, WebRtcUnavailableReason,
 };
 use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{
@@ -84,7 +84,35 @@ impl TypesHostV2 for HostState {}
 
 // Store-less marker trait (imports needing only `self`). The blanket
 // `impl Host for &mut T` needs this to exist; empty impl suffices.
-impl HostImportsV2 for HostState {}
+impl HostImportsV2 for HostState {
+    fn reply_sync(
+        &mut self,
+        ctx_token: u64,
+        payload: Vec<u8>,
+    ) -> wasmtime::Result<Result<(), WitActrError>> {
+        if self.deliver_reply(ctx_token, Ok(Bytes::from(payload))) {
+            Ok(Ok(()))
+        } else {
+            Ok(Err(WitActrError::Internal(
+                "Rust guest reply requires an inbound RPC reply context".to_string(),
+            )))
+        }
+    }
+
+    fn reply_error_sync(
+        &mut self,
+        ctx_token: u64,
+        error: WitActrError,
+    ) -> wasmtime::Result<Result<(), WitActrError>> {
+        if self.deliver_reply(ctx_token, Err(wit_actr_error_to_proto(error))) {
+            Ok(Ok(()))
+        } else {
+            Ok(Err(WitActrError::Internal(
+                "Rust guest reply requires an inbound RPC reply context".to_string(),
+            )))
+        }
+    }
+}
 
 /// Forward a guest-initiated [`HostOperation`] through a `HostAbiFn` cloned
 /// out of the per-invocation table (keyed by `ctx-token`). The `HostAbiFn`
@@ -167,6 +195,48 @@ impl HostWithStore<HostState> for HostState {
             payload_type: wit_payload_type_to_proto(payload_type) as i32,
         });
         run_host_operation(host_abi, op).await
+    }
+
+    async fn reply(
+        accessor: &Accessor<HostState, Self>,
+        ctx_token: u64,
+        payload: Vec<u8>,
+    ) -> wasmtime::Result<Result<(), WitActrError>> {
+        let host_abi = accessor.with(|mut a| a.get().invocation_host_abi(ctx_token));
+        let result = run_host_operation(host_abi, HostOperation::Reply(payload)).await?;
+        if result.is_ok() {
+            // Keep the token live until the guest dispatch export also
+            // returns. This allows a handler to reply and then continue using
+            // its context, while a moved Reply handle can still reply after
+            // the export has returned.
+            accessor.with(|mut a| a.get().complete_reply(ctx_token));
+        }
+        match result {
+            Ok(_) => Ok(Ok(())),
+            Err(error) => Ok(Err(error)),
+        }
+    }
+
+    async fn reply_error(
+        accessor: &Accessor<HostState, Self>,
+        ctx_token: u64,
+        error: WitActrError,
+    ) -> wasmtime::Result<Result<(), WitActrError>> {
+        let host_abi = accessor.with(|mut a| a.get().invocation_host_abi(ctx_token));
+        let result = run_host_operation(
+            host_abi,
+            HostOperation::ReplyError(wit_actr_error_to_proto(error)),
+        )
+        .await?;
+        if result.is_ok() {
+            // Keep the token live until the guest dispatch export also
+            // returns, matching the success reply import above.
+            accessor.with(|mut a| a.get().complete_reply(ctx_token));
+        }
+        match result {
+            Ok(_) => Ok(Ok(())),
+            Err(error) => Ok(Err(error)),
+        }
     }
 
     async fn discover(
@@ -289,9 +359,9 @@ impl HostWithStore<HostState> for HostState {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WIT (0.4.0) ↔ actr_protocol / actr_framework translation
+// WIT (0.6.0) ↔ actr_protocol / actr_framework translation
 //
-// The 0.4.0 bindgen emits its own type namespace. These helpers translate
+// The 0.6.0 bindgen emits its own type namespace. These helpers translate
 // that namespace to the protocol/framework types and the native host-operation
 // payloads still shared with DynClib.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -437,12 +507,19 @@ fn rpc_envelope_to_wit(envelope: &RpcEnvelope) -> WitRpcEnvelope {
     }
 }
 
-fn invocation_ctx_to_wit(ctx: &InvocationContext, ctx_token: u64) -> WitInvocationCtx {
+fn invocation_ctx_to_wit(
+    ctx: &InvocationContext,
+    ctx_token: u64,
+    expects_response: bool,
+    reply_enabled: bool,
+) -> WitInvocationCtx {
     WitInvocationCtx {
         ctx_token,
         self_id: proto_actr_id_to_wit(&ctx.self_id),
         caller_id: ctx.caller_id.as_ref().map(proto_actr_id_to_wit),
         request_id: ctx.request_id.clone(),
+        expects_response,
+        reply_enabled,
     }
 }
 
@@ -590,7 +667,7 @@ fn wit_payload_type_to_proto(payload_type: WitPayloadType) -> PayloadType {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Build a fresh async-world [`Store`] + component instance. Registers WASI
-/// p2 and the Accessor-based `actr:workload/host` (0.4.0) linker imports.
+/// p2 and the Accessor-based `actr:workload/host` (0.6.0) linker imports.
 async fn instantiate_parts_v2(
     engine: &Engine,
     component: &Component,
@@ -608,7 +685,7 @@ async fn instantiate_parts_v2(
     )
     .map_err(|e| {
         WasmError::LoadFailed(format!(
-            "failed to register actr:workload/host@0.4.0 linker imports: {e}"
+            "failed to register actr:workload/host@0.6.0 linker imports: {e}"
         ))
     })?;
 
@@ -649,7 +726,7 @@ async fn instantiate_parts_v2(
 // WasmWorkloadV2
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Single 0.4.0 async-world wasm actor instance.
+/// Single 0.6.0 async-world wasm actor instance.
 ///
 /// Owns the engine/component/store lifecycle (plus poison/rebuild); every
 /// guest entry runs inside a single-task `Store::run_concurrent` region. The
@@ -666,6 +743,10 @@ pub(crate) struct WasmWorkloadV2 {
     bindings: ActrWorkloadGuestV2,
     _epoch_ticker: Arc<EpochTicker>,
     _store_permit: StorePermit,
+    /// Whether the component imports the v0.6 host reply boundary. Components
+    /// without that import are legacy RETURN-style V2 guests whose dispatch
+    /// bytes must continue through the normal pump return path.
+    uses_explicit_reply_boundary: bool,
     poisoned: bool,
     rebuilds: u64,
 }
@@ -687,6 +768,7 @@ impl WasmWorkloadV2 {
         limits: &WasmRuntimeLimits,
         epoch_ticker: Arc<EpochTicker>,
         store_permit: StorePermit,
+        uses_explicit_reply_boundary: bool,
     ) -> WasmResult<Self> {
         let (store, bindings) = instantiate_parts_v2(engine, component, limits).await?;
         tracing::info!("wasm Component instantiated (v2 async world)");
@@ -698,6 +780,7 @@ impl WasmWorkloadV2 {
             bindings,
             _epoch_ticker: epoch_ticker,
             _store_permit: store_permit,
+            uses_explicit_reply_boundary,
             poisoned: false,
             rebuilds: 0,
         })
@@ -717,6 +800,13 @@ impl WasmWorkloadV2 {
     #[cfg(feature = "test-utils")]
     pub(crate) fn rebuild_count(&self) -> u64 {
         self.rebuilds
+    }
+
+    /// Whether this guest opted into the v0.6 explicit host reply boundary.
+    /// Components that omit the host import continue returning dispatch bytes
+    /// directly (for example the C and Go V2 guests).
+    pub(crate) fn uses_explicit_reply_boundary(&self) -> bool {
+        self.uses_explicit_reply_boundary
     }
 
     /// issue #346: re-seed per-entry fuel + epoch deadline. Call before every
@@ -798,11 +888,27 @@ impl WasmWorkloadV2 {
     }
 
     /// Handle one inbound RPC request through the async world.
+    #[allow(dead_code)]
     pub(crate) async fn handle(
         &mut self,
         request_bytes: &[u8],
         ctx: InvocationContext,
         host_abi: &HostAbiFn,
+    ) -> WasmResult<Vec<u8>> {
+        self.handle_with_reply(request_bytes, ctx, host_abi, None, true, None, None)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn handle_with_reply(
+        &mut self,
+        request_bytes: &[u8],
+        ctx: InvocationContext,
+        host_abi: &HostAbiFn,
+        reply_deliver: Option<Arc<dyn actr_framework::Deliver>>,
+        expects_response: bool,
+        reply_claimed: Option<Arc<std::sync::atomic::AtomicBool>>,
+        reply_deadline: Option<tokio::time::Instant>,
     ) -> WasmResult<Vec<u8>> {
         self.ensure_instance().await?;
 
@@ -828,15 +934,22 @@ impl WasmWorkloadV2 {
         let wit_envelope = rpc_envelope_to_wit(&envelope);
         let _invocation_permit = acquire_invocation(&self.limits)?;
         self.reseed_fuel()?;
-
+        let reply_enabled = reply_deliver.is_some();
         // Register this invocation and thread its token into the guest.
         let token = self
             .store
             .as_mut()
             .expect("serviceable wasm instance must have a Store")
             .data_mut()
-            .alloc_invocation(ctx.clone(), host_abi.clone());
-        let inv = invocation_ctx_to_wit(&ctx, token);
+            .alloc_invocation_with_reply(
+                ctx.clone(),
+                host_abi.clone(),
+                reply_deliver,
+                expects_response,
+                reply_claimed,
+                reply_deadline,
+            );
+        let inv = invocation_ctx_to_wit(&ctx, token, expects_response, reply_enabled);
         let bindings = &self.bindings;
         let region_fut = self
             .store
@@ -859,15 +972,31 @@ impl WasmWorkloadV2 {
             Err(_) => return Err(self.timeout_poison()),
         };
 
-        // Region closed: retire the token (unless the whole table was
-        // cleared by a trap-poison below).
-        if !self.poisoned {
-            self.store
+        // Region closed: retire the token unless the guest returned the
+        // explicit-boundary marker (`bytes == []`). A generated EXPLICIT
+        // handler may move its Reply handle into a later task; the host
+        // import retires that token when the later reply is accepted.
+        let dispatch_succeeded = matches!(&region, Ok(Ok(Ok(_))));
+        let (reply_completed, reply_claimed, fallback_deliver) = if !self.poisoned {
+            let state = self
+                .store
                 .as_mut()
                 .expect("serviceable wasm instance must have a Store")
-                .data_mut()
-                .remove_invocation(token);
-        }
+                .data_mut();
+            let reply_completed = state.invocation_reply_completed(token);
+            let reply_claimed = state.invocation_reply_claimed(token);
+            let fallback_deliver = state.unclaimed_reply_deliver(token);
+            // Only a successful dispatch may defer its reply.  A guest error
+            // is returned to the pump immediately, which completes the
+            // ReplyDeliver there; retaining its token until the TTL would
+            // leave stale invocation state after every failed request.
+            let retain_for_reply =
+                dispatch_succeeded && reply_enabled && !reply_completed && reply_claimed;
+            state.finish_invocation(token, retain_for_reply);
+            (reply_completed, reply_claimed, fallback_deliver)
+        } else {
+            (false, false, None)
+        };
 
         match region {
             // Region-level failure (trap surfaced out of run_concurrent).
@@ -882,6 +1011,21 @@ impl WasmWorkloadV2 {
             }
             Ok(call) => match call {
                 Ok(Ok(bytes)) => {
+                    let fallback_delivered = !reply_completed
+                        && !reply_claimed
+                        && fallback_deliver.is_some_and(|deliver| {
+                            deliver.deliver(actr_framework::ReplyOutcome {
+                                request_id: ctx.request_id.clone(),
+                                result: Ok(Bytes::from(bytes.clone())),
+                                emit_response: expects_response,
+                            });
+                            true
+                        });
+                    let bytes = if reply_completed || fallback_delivered {
+                        Vec::new()
+                    } else {
+                        bytes
+                    };
                     tracing::info!(
                         target: "actr_wasm_dispatch",
                         request_id = %envelope.request_id,
@@ -933,7 +1077,7 @@ impl WasmWorkloadV2 {
             .expect("serviceable wasm instance must have a Store")
             .data_mut()
             .alloc_invocation(ctx.clone(), host_abi.clone());
-        let inv = invocation_ctx_to_wit(&ctx, token);
+        let inv = invocation_ctx_to_wit(&ctx, token, false, false);
         // issue #346: re-seed fuel + epoch deadline before the guest entry,
         // then bound the whole run_concurrent region with the wall-clock
         // timeout. fuel/epoch preempt non-yielding compute; the timeout bounds
@@ -976,7 +1120,7 @@ impl WasmWorkloadV2 {
             .expect("serviceable wasm instance must have a Store")
             .data_mut()
             .alloc_invocation(ctx.clone(), host_abi.clone());
-        let inv = invocation_ctx_to_wit(&ctx, token);
+        let inv = invocation_ctx_to_wit(&ctx, token, false, false);
         let bindings = &self.bindings;
         let region_fut = self
             .store
@@ -1015,7 +1159,7 @@ impl WasmWorkloadV2 {
             .expect("serviceable wasm instance must have a Store")
             .data_mut()
             .alloc_invocation(ctx.clone(), host_abi.clone());
-        let inv = invocation_ctx_to_wit(&ctx, token);
+        let inv = invocation_ctx_to_wit(&ctx, token, false, false);
         let bindings = &self.bindings;
         let region_fut = self
             .store
@@ -1094,7 +1238,7 @@ impl WasmWorkloadV2 {
             let captured_token = state.begin_stream_callback(&stream_id, token);
             (token, captured_token)
         };
-        let inv = invocation_ctx_to_wit(&ctx, token);
+        let inv = invocation_ctx_to_wit(&ctx, token, false, false);
 
         let bindings = &self.bindings;
         let region_fut = self
@@ -1161,7 +1305,7 @@ impl WasmWorkloadV2 {
             .expect("serviceable wasm instance must have a Store")
             .data_mut()
             .alloc_invocation(ctx.clone(), host_abi.clone());
-        let inv = invocation_ctx_to_wit(&ctx, token);
+        let inv = invocation_ctx_to_wit(&ctx, token, false, false);
 
         let bindings = &self.bindings;
         let region_fut = self
@@ -1712,10 +1856,17 @@ async fn resident_region(
     let wl = bindings.actr_workload_workload();
     // The in-flight future also carries the dispatch's request_id/route_key
     // (#251) so the completion log correlates with the entry log by token.
-    let mut inflight: FuturesUnordered<BoxFuture<'_, (u64, String, String, DispatchOutcome)>> =
-        FuturesUnordered::new();
+    #[allow(clippy::type_complexity)]
+    let mut inflight: FuturesUnordered<
+        BoxFuture<'_, (u64, String, String, bool, DispatchOutcome)>,
+    > = FuturesUnordered::new();
     let mut open = true;
     let mut fuel_budget = RegionFuelBudget::default();
+    let mut deferred_reply_sweep = crate::timer::interval(
+        crate::timer::ids::INFLIGHT_TTL_SWEEP,
+        Duration::from_secs(5),
+    );
+    deferred_reply_sweep.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     loop {
         // A queued barrier runs alone, only once every in-flight dispatch has
@@ -1798,6 +1949,12 @@ async fn resident_region(
                             target_actor = %invocation.self_id,
                             "wasm host dispatch entered: RpcEnvelope delivered into wasm guest"
                         );
+                        let reply_deliver = ctx.reply_deliver();
+                        let expects_response = ctx.expects_response();
+                        let reply_enabled = reply_deliver.is_some();
+                        let reply_claimed = ctx.reply_claimed_marker();
+                        let reply_deadline =
+                            ctx.reply_deadline().map(tokio::time::Instant::from_std);
                         let permit = match acquire_invocation(&limits) {
                             Ok(permit) => permit,
                             Err(error) => {
@@ -1818,7 +1975,14 @@ async fn resident_region(
                         // host-import path already does the same).
                         let (token, live) = accessor.with(|mut a| {
                             let state = a.get();
-                            let token = state.alloc_invocation(invocation.clone(), host_abi);
+                            let token = state.alloc_invocation_with_reply(
+                                invocation.clone(),
+                                host_abi,
+                                reply_deliver,
+                                expects_response,
+                                reply_claimed,
+                                reply_deadline,
+                            );
                             (token, state.invocation_count())
                         });
                         let deadline = dispatch_timeout
@@ -1843,7 +2007,12 @@ async fn resident_region(
                         {
                             return RegionExit::GuestCallFailed { token, error };
                         }
-                        let inv = invocation_ctx_to_wit(&invocation, token);
+                        let inv = invocation_ctx_to_wit(
+                            &invocation,
+                            token,
+                            expects_response,
+                            reply_enabled,
+                        );
                         // #251: carried through the in-flight future so the
                         // completion log correlates with the entry log.
                         let dispatch_request_id = envelope.request_id.clone();
@@ -1855,7 +2024,13 @@ async fn resident_region(
                                 _ = reply.closed() => DispatchOutcome::CallerCanceled,
                                 result = call => DispatchOutcome::Completed(result),
                             };
-                            (token, dispatch_request_id, dispatch_route_key, outcome)
+                            (
+                                token,
+                                dispatch_request_id,
+                                dispatch_route_key,
+                                expects_response,
+                                outcome,
+                            )
                         };
                         inflight.push(fut.instrument(span).boxed());
                     }
@@ -1866,7 +2041,7 @@ async fn resident_region(
                     }
                 }
             }
-            Some((token, request_id, route_key, outcome)) = inflight.next(), if !inflight.is_empty() => {
+            Some((token, request_id, route_key, expects_response, outcome)) = inflight.next(), if !inflight.is_empty() => {
                 if matches!(outcome, DispatchOutcome::CallerCanceled) {
                     return RegionExit::CallerCanceled(token);
                 }
@@ -1882,10 +2057,25 @@ async fn resident_region(
                         return RegionExit::GuestCallFailed { token, error };
                     }
                 };
-                let live = accessor.with(|mut a| {
+                let (live, reply_completed, reply_claimed, fallback_deliver) = accessor.with(|mut a| {
                     let state = a.get();
-                    state.remove_invocation(token);
-                    state.invocation_count()
+                    let reply_completed = state.invocation_reply_completed(token);
+                    let reply_claimed = state.invocation_reply_claimed(token);
+                    let fallback_deliver = state.unclaimed_reply_deliver(token);
+                    // A failed guest dispatch is completed by the pump below,
+                    // not by a later guest reply import. Keep a token only
+                    // for a successful, explicitly deferred reply.
+                    let retain_for_reply = call_result.is_ok()
+                        && state.invocation_reply_enabled(token)
+                        && !reply_completed
+                        && reply_claimed;
+                    state.finish_invocation(token, retain_for_reply);
+                    (
+                        state.invocation_count(),
+                        reply_completed,
+                        reply_claimed,
+                        fallback_deliver,
+                    )
                 });
                 if let Err(error) =
                     clamp_region_budget(accessor, &limits, live, &mut fuel_budget)
@@ -1901,6 +2091,20 @@ async fn resident_region(
                     // log it before handing the bytes back to the reply tail
                     // so a caller-side timeout can be attributed to the guest
                     // vs the response send path.
+                    let call_result = match (reply_completed, reply_claimed, call_result) {
+                        (true, _, Ok(_)) => Ok(Vec::new()),
+                        (false, false, Ok(bytes)) if fallback_deliver.is_some() => {
+                            fallback_deliver.expect("checked above").deliver(
+                                actr_framework::ReplyOutcome {
+                                    request_id: request_id.clone(),
+                                    result: Ok(Bytes::from(bytes)),
+                                    emit_response: expects_response,
+                                },
+                            );
+                            Ok(Vec::new())
+                        }
+                        (_, _, result) => result,
+                    };
                     let result = classify_dispatch(call_result);
                     match &result {
                         Ok(bytes) => tracing::info!(
@@ -1919,6 +2123,27 @@ async fn resident_region(
                         ),
                     }
                     reply.send(result);
+                }
+            }
+            sweep_at = deferred_reply_sweep.tick() => {
+                let (expired, live) = accessor.with(|mut access| {
+                    let state = access.get();
+                    let expired = state.sweep_expired_deferred_replies(
+                        crate::lifecycle::dedup::INFLIGHT_TTL,
+                        sweep_at,
+                    );
+                    (expired, state.invocation_count())
+                });
+                if expired != 0 {
+                    tracing::warn!(
+                        expired,
+                        "timed out Component Model deferred replies and retired their tokens"
+                    );
+                    if let Err(error) =
+                        clamp_region_budget(accessor, &limits, live, &mut fuel_budget)
+                    {
+                        return RegionExit::GuestCallFailed { token: 0, error };
+                    }
                 }
             }
         }
@@ -1966,7 +2191,7 @@ async fn run_barrier(
                 let token = state.alloc_invocation(invocation.clone(), host_abi);
                 (token, state.invocation_count())
             });
-            let inv = invocation_ctx_to_wit(&invocation, token);
+            let inv = invocation_ctx_to_wit(&invocation, token, false, false);
             let reply = ReplySlot::new(reply);
             ledger.lock().expect("reply ledger mutex poisoned").insert(
                 token,
@@ -2041,7 +2266,7 @@ async fn run_barrier(
                 accessor.with(|mut a| a.get().begin_stream_callback(&stream_id, token));
             let wit_chunk = proto_data_chunk_to_wit(chunk);
             let wit_sender = proto_actr_id_to_wit(&sender);
-            let inv = invocation_ctx_to_wit(&invocation, token);
+            let inv = invocation_ctx_to_wit(&invocation, token, false, false);
             let reply = ReplySlot::new(reply);
             ledger.lock().expect("reply ledger mutex poisoned").insert(
                 token,
@@ -2112,7 +2337,7 @@ async fn run_barrier(
                 let token = state.alloc_invocation(invocation.clone(), host_abi);
                 (token, state.invocation_count())
             });
-            let inv = invocation_ctx_to_wit(&invocation, token);
+            let inv = invocation_ctx_to_wit(&invocation, token, false, false);
             let reply = ReplySlot::new(reply);
             ledger.lock().expect("reply ledger mutex poisoned").insert(
                 token,

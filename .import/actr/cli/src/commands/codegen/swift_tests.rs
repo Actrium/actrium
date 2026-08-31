@@ -11,6 +11,7 @@ fn sample_echo_service() -> ProtoService {
             swift_name: "echo".to_string(),
             input_type: "Echo_EchoRequest".to_string(),
             output_type: "Echo_EchoResponse".to_string(),
+            is_explicit: false,
         }],
     }
 }

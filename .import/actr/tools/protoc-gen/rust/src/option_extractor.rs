@@ -110,8 +110,9 @@ fn read_varint(buf: &[u8]) -> Option<(u64, usize)> {
 /// Build a `route_key -> ReplyMode` map from raw `FileDescriptorProto` byte
 /// slices (one per file, in topological order).
 ///
-/// `route_key` is formatted as `"{package}.{service}.{method}"`, matching the
-/// generator's own route_key construction exactly so lookups align.
+/// `route_key` is formatted as `"{package}.{service}.{method}"` when a package
+/// exists, or `"{service}.{method}"` otherwise, matching the generator's own
+/// route_key construction exactly so lookups align.
 pub fn build_reply_mode_map(proto_file_bytes: &[&[u8]]) -> Result<HashMap<String, ReplyMode>> {
     let mut pool = DescriptorPool::new();
     for file_bytes in proto_file_bytes {
@@ -126,7 +127,11 @@ pub fn build_reply_mode_map(proto_file_bytes: &[&[u8]]) -> Result<HashMap<String
         for svc in file.services() {
             let svc_name = svc.name();
             for method in svc.methods() {
-                let route_key = format!("{}.{}.{}", package, svc_name, method.name());
+                let route_key = if package.is_empty() {
+                    format!("{}.{}", svc_name, method.name())
+                } else {
+                    format!("{}.{}.{}", package, svc_name, method.name())
+                };
                 let mode = reply_mode_of(&method, reply_mode_ext.as_ref());
                 map.insert(route_key, mode);
             }

@@ -76,10 +76,6 @@ pub struct LocalServiceMetadata {
     pub package: String,
     pub proto_file: String,
     pub handler_interface: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub workload_type: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub dispatcher_type: String,
     pub methods: Vec<MethodMetadata>,
 }
 
@@ -123,9 +119,7 @@ impl ActrGenMetadata {
         let local_services = proto_model
             .local_services
             .iter()
-            .map(|service| {
-                build_local_service_metadata(language, service, &proto_model.files, &owner_index)
-            })
+            .map(|service| build_local_service_metadata(service, &proto_model.files, &owner_index))
             .collect::<Result<Vec<_>>>()?;
         let remote_services = proto_model
             .remote_services
@@ -318,7 +312,6 @@ pub(crate) fn language_key(language: SupportedLanguage) -> &'static str {
 
 #[cfg(test)]
 fn build_local_service_metadata(
-    language: SupportedLanguage,
     service: &ServiceModel,
     files: &[ProtoFileModel],
     owner_index: &TypeOwnerIndex,
@@ -326,21 +319,11 @@ fn build_local_service_metadata(
     let current_file = files
         .iter()
         .find(|file| file.relative_path == service.relative_path);
-    let (workload_type, dispatcher_type) = if language == SupportedLanguage::Rust {
-        (String::new(), String::new())
-    } else {
-        (
-            format!("{}Workload", service.name),
-            format!("{}Dispatcher", service.name),
-        )
-    };
     Ok(LocalServiceMetadata {
         name: service.name.clone(),
         package: service.package.clone(),
         proto_file: service.relative_path.to_string_lossy().to_string(),
         handler_interface: format!("{}Handler", service.name),
-        workload_type,
-        dispatcher_type,
         methods: service
             .methods
             .iter()

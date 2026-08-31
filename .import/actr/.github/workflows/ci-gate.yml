@@ -627,6 +627,7 @@ jobs:
                       "input_type": "echo.EchoRequest",
                       "output_type": "echo.EchoResponse",
                       "payload_type": "rpcReliable",
+                      "reply_mode": "return",
                   }
               ],
           }
@@ -648,11 +649,9 @@ jobs:
 
           python -m compileall "$tmp/generated"
           PYTHONPATH="$tmp" python - <<'PY'
-          import generated.echo_workload
           import generated.local.echo_pb2
           import generated.actr_dispatch
 
-          assert hasattr(generated.echo_workload, "EchoServiceDispatcher")
           assert hasattr(generated.actr_dispatch, "actr_dispatch")
           PY
 

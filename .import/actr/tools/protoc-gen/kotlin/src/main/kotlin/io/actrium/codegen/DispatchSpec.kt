@@ -21,7 +21,10 @@ data class DispatchRoute(
     val inputType: String,
     val outputType: String,
     val payloadType: String,
-    val dependencyAlias: String?,
+    val replyMode: String = "return",
+    val dependencyAlias: String? = null,
+    /** Preserve whether v1 JSON carried this later-added optional field. */
+    val replyModePresent: Boolean = true,
 )
 
 data class DispatchSpec(
@@ -63,7 +66,7 @@ data class DispatchSpec(
                     "output_type",
                     "payload_type",
                 )
-            val allowedRouteFields = requiredRouteFields + "dependency_alias"
+            val allowedRouteFields = requiredRouteFields + setOf("dependency_alias", "reply_mode")
             for (i in 0 until routesArr.length()) {
                 val route = routesArr.getJSONObject(i)
                 val missingRouteFields = requiredRouteFields - route.keySet()
@@ -83,12 +86,18 @@ data class DispatchSpec(
                         inputType = route.getString("input_type"),
                         outputType = route.getString("output_type"),
                         payloadType = route.getString("payload_type"),
+                        replyMode = route.optString("reply_mode", "return").also {
+                            require(it == "return" || it == "explicit") {
+                                "dispatch route #$i has unsupported reply_mode `$it`"
+                            }
+                        },
                         dependencyAlias =
                             if (route.has("dependency_alias") && !route.isNull("dependency_alias")) {
                                 route.getString("dependency_alias")
                             } else {
                                 null
                             },
+                        replyModePresent = route.has("reply_mode"),
                     )
                 )
             }
@@ -135,6 +144,7 @@ data class DispatchSpec(
                     route.inputType,
                     route.outputType,
                     route.payloadType,
+                    route.replyMode,
                 )
             require(requiredValues.all { it.isNotEmpty() }) {
                 "dispatch route `${route.routeKey}` contains an empty required field"
@@ -185,6 +195,9 @@ data class DispatchSpec(
             routeObj.put("input_type", route.inputType)
             routeObj.put("output_type", route.outputType)
             routeObj.put("payload_type", route.payloadType)
+            if (route.replyModePresent) {
+                routeObj.put("reply_mode", route.replyMode)
+            }
             if (route.dependencyAlias != null) {
                 routeObj.put("dependency_alias", route.dependencyAlias)
             }

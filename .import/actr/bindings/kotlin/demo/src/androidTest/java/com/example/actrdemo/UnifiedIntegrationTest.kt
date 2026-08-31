@@ -6,8 +6,8 @@
  * 2. DataStream transfer (via StreamClient.StartStream)
  *
  * Advantages of UnifiedWorkload:
- * - Local service requests: routed through UnifiedDispatcher to StreamClientHandler implementation
- * - Remote service requests: automatically forwarded through UnifiedDispatcher to discovered remote Actors
+ * - Local service requests: routed through actrDispatch to StreamClientHandler implementation
+ * - Remote service requests: automatically forwarded through actrDispatch to discovered remote Actors
  * - Unified onStart automatically discovers all remote services
  */
 package com.example.actrdemo
@@ -109,8 +109,8 @@ class UnifiedIntegrationTest {
      *   ├── UnifiedHandler (implements StreamClientHandler)
      *   │     ├── start_stream() - locally trigger stream transfer
      *   │     └── prepare_client_stream() - server callback registers data stream receiver
-     *   └── UnifiedDispatcher
-     *         ├── local routes -> StreamClientDispatcher -> handler methods
+     *   └── actrDispatch
+     *         ├── local routes -> handler methods
      *         └── remote routes -> ctx.callRaw() -> remote actors
      * ```
      */
@@ -137,7 +137,7 @@ class UnifiedIntegrationTest {
                 val testMessage = "Hello from Android Unified Test!"
                 val expectedResponse = "Echo: $testMessage"
 
-                Log.i(TAG, "📞 Sending RPC to EchoService via UnifiedDispatcher...")
+                Log.i(TAG, "📞 Sending RPC to EchoService via actrDispatch...")
                 val echoRequestPayload = encodeEchoRequest(testMessage)
 
                 val echoResponsePayload =
@@ -158,7 +158,7 @@ class UnifiedIntegrationTest {
                 Log.i(TAG, "")
                 Log.i(TAG, "==================== Part 2: DataStream Transfer ====================")
 
-                Log.i(TAG, "📞 Calling StartStream via UnifiedDispatcher (local service)...")
+                Log.i(TAG, "📞 Calling StartStream via actrDispatch (local service)...")
                 val startStreamRequest =
                     ClientStartStreamRequest
                         .newBuilder()

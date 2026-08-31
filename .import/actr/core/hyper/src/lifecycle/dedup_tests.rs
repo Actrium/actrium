@@ -168,6 +168,33 @@ async fn explicit_inflight_sweep_does_not_evict_unaged_entry() {
 }
 
 #[tokio::test]
+async fn expired_reply_boundary_evicts_dedup_before_generic_ttl() {
+    let mut d = DedupState::new();
+    assert!(matches!(
+        d.check_or_mark("req-deadline"),
+        DedupOutcome::Fresh
+    ));
+    let mut waiter = match d.check_or_mark("req-deadline") {
+        DedupOutcome::InFlight(waiter) => waiter,
+        other => panic!("expected InFlight waiter, got {other:?}"),
+    };
+
+    // The reply registry has already decided this request crossed its caller
+    // deadline. It must free dedup now, rather than waiting for INFLIGHT_TTL.
+    d.expire_inflight_explicit(&["req-deadline".to_string()]);
+
+    let _ = waiter.changed().await;
+    assert!(matches!(
+        waiter.borrow().clone(),
+        Some(Err(actr_protocol::ActrError::TimedOut))
+    ));
+    assert!(matches!(
+        d.check_or_mark("req-deadline"),
+        DedupOutcome::Fresh
+    ));
+}
+
+#[tokio::test]
 async fn return_inflight_is_not_evicted_by_explicit_sweep() {
     // RFC-0323 §5: a RETURN handler may legitimately run longer than
     // INFLIGHT_TTL. Its InFlight marker is NOT in the outstanding_replies
