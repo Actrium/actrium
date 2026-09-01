@@ -31,7 +31,8 @@ the script is used across multiple top-level areas.
   have README files, `internal/` remains git-ignored, and temporary import
   trees under `.import/actro/` are absent.
 - `check-retired-protocol-names.sh` rejects identifiers from the superseded
-  package split in source text and paths.
+  package split in the current tree, retained history, and local Git object
+  database. CI checks out the full history before invoking it.
 - `rewrite-retired-protocol-history.sh` performs the corresponding one-time,
   confirmation-gated rewrite after an external backup has been created.
 - `check-generated-contracts.sh` regenerates the lightweight Rust-owned

@@ -6,9 +6,9 @@
  */
 
 export type { EngineOptions } from './engine';
-export type { ComponentMap } from './registry';
 // Core exports
 export { Engine } from './engine';
+export type { ComponentMap } from './registry';
 
 // Sandbox provider selection is internal and automatic (DefaultProvider / TenantManagerProvider).
 

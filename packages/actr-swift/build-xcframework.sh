@@ -4,7 +4,7 @@ set -euo pipefail
 # Build the Rust library as an XCFramework and generate UniFFI Swift bindings.
 #
 # Inputs:
-# - ../ffi (Rust FFI crate with the UniFFI configuration)
+# - ../../crates/actr-ffi (Rust FFI crate with the UniFFI configuration)
 #
 # Outputs:
 # - ./ActrBindings/** (Actr.swift + headers + modulemap)
@@ -14,7 +14,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${ROOT_DIR}"
 
 WORKSPACE_ROOT="$(cd "${ROOT_DIR}/../.." && pwd)"
-CRATE_DIR="${ROOT_DIR}/../ffi"
+CRATE_DIR="${WORKSPACE_ROOT}/crates/actr-ffi"
 CRATE_LIB_NAME="actr"
 FRAMEWORK_NAME="ActrFFI"
 TARGET_DIR="${WORKSPACE_ROOT}/target"

@@ -19,7 +19,8 @@ const CLIENT_PACKAGE: &str = "acme-echo-client-app-0.1.0-wasm32-unknown-unknown.
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
+        .ancestors()
+        .find(|candidate| candidate.join("crates/actr-cli").is_dir())
         .expect("actr-cli should live under the workspace root")
         .to_path_buf()
 }

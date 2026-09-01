@@ -455,7 +455,7 @@ EOF
     cat >>"$cargo_toml" <<EOF
 
 [patch.crates-io]
-actr = { path = "$repo_path" }
+actr = { path = "$repo_path/crates/actr" }
 actr-config = { path = "$repo_path/crates/actr-config" }
 actr-protocol = { path = "$repo_path/crates/actr-protocol" }
 actr-framework = { path = "$repo_path/crates/actr-framework" }

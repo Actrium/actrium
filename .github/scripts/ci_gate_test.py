@@ -425,7 +425,7 @@ def test_e2e_no_private_actrix_checkout() -> None:
     assert "Configure git for private Actrix checkout" not in workflow
     assert "Actrium/actrix" not in common
     assert "git clone" not in common
-    assert 'actrix_repo_dir="$repo_root/actrix"' in common
+    assert 'actrix_crate_dir="$repo_root/crates/loran-server"' in common
     assert "Actrium/actrix" not in cli_support
     assert "DEFAULT_ACTRIX_REPO" not in cli_support
     assert "ACTR_E2E_ACTRIX_REPO" not in cli_support
@@ -437,7 +437,7 @@ def test_e2e_no_private_actrix_checkout() -> None:
     assert "latest_successful_actrix_run" not in cli_support
     assert "try_ensure_actrix_artifact_binary" not in cli_support
     assert 'std::env::var("ACTRIX_BIN")' in cli_support
-    assert 'workspace_root().join("actrix")' in cli_support
+    assert 'workspace_root().join("crates/loran-server/Cargo.toml")' in cli_support
 
 
 def test_e2e_no_inline_archive_download_url() -> None:

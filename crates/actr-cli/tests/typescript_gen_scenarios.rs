@@ -21,7 +21,8 @@ fn actr_bin() -> PathBuf {
 
 fn framework_codegen_typescript_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
+        .ancestors()
+        .find(|candidate| candidate.join("tools/actr/protoc-gen/typescript").is_dir())
         .expect("actr-cli should live under the workspace root")
         .join("tools/actr/protoc-gen/typescript")
 }
