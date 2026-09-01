@@ -1,4 +1,0 @@
-packages:
-  - "apps/android/actro"
-  - "packages/*"
-  - "examples/apps/*"

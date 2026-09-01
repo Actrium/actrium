@@ -14,7 +14,7 @@ resolver = "2"
 version = "0.10.0-alpha.4"
 edition = "2024"
 license = "Apache-2.0"
-authors = ["kookyleo@gmail.com"]
+authors = ["kookyleo"]
 repository = "https://github.com/Actrium/actrium"
 
 [workspace.lints.clippy]

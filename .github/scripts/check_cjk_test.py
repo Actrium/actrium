@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-# cjk-allow-file: this file is the checker's own test corpus; its fixtures must
-# contain literal CJK to exercise the detector, and escapes would defeat them.
-"""Negative tests for the CJK checker's pragma handling.
-
-The two cases that must NOT be exempt are the heart of the rule:
-  - a pragma with no reason (bare ``cjk-allow:``)
-  - a file pragma declared past the scan window
-
-Run: python .github/scripts/check_cjk_test.py
-"""
+"""Tests for the repository language-policy checker."""
 from __future__ import annotations
 
 import json
@@ -19,180 +10,149 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CHECKER = ROOT / ".github/scripts/check_cjk.py"
-
-# Written as escapes, not literals, so this test file passes the checker itself.
-CJK_PROSE = "# 这是中文注释  # Chinese prose"
-CJK_LINE = "let s = \"你好\";"
+CJK_PROSE = "# \u8fd9\u662f\u4e2d\u6587\u6ce8\u91ca"
+CYRILLIC_PROSE = "# \u042d\u0442\u043e \u0440\u0443\u0441\u0441\u043a\u0438\u0439 \u0442\u0435\u043a\u0441\u0442"
+LATIN_TRANSLATION = "# D\u00e9j\u00e0 vu"
 
 
 def _make_repo(tmpdir: Path) -> Path:
     subprocess.run(["git", "init", "-q"], cwd=tmpdir, check=True)
     subprocess.run(
         ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"],
-        cwd=tmpdir, check=True,
+        cwd=tmpdir,
+        check=True,
     )
     return tmpdir
 
 
-def _run_checker(repo: Path) -> dict:
-    result = subprocess.run(
-        [sys.executable, str(CHECKER), "--json"],
-        cwd=repo, capture_output=True, text=True,
-    )
-    assert result.returncode in (0, 1), f"checker crashed: {result.stderr}"
-    return json.loads(result.stdout)
-
-
-def test_bare_line_pragma_without_reason_is_flagged() -> None:
-    with tempfile.TemporaryDirectory() as td:
-        repo = _make_repo(Path(td))
-        (repo / "bare.rs").write_text(
-            f"// cjk-allow:\n{CJK_PROSE}\n", encoding="utf-8"
+def _check(files: dict[str, str]) -> dict:
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = _make_repo(Path(tmp))
+        for relative, content in files.items():
+            path = repo / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        subprocess.run(["git", "add", "--all"], cwd=repo, check=True)
+        result = subprocess.run(
+            [sys.executable, str(CHECKER), "--json"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
         )
-        subprocess.run(["git", "add", "bare.rs"], cwd=repo, check=True)
-        subprocess.run(
-            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "x"],
-            cwd=repo, check=True,
-        )
-        data = _run_checker(repo)
-        files = {f["file"] for f in data["findings"]}
-        assert "bare.rs" in files, "bare cjk-allow: with no reason must be flagged"
+        assert result.returncode in (0, 1), f"checker crashed: {result.stderr}"
+        return json.loads(result.stdout)
 
 
-def test_line_pragma_with_reason_exempts_next_line() -> None:
-    with tempfile.TemporaryDirectory() as td:
-        repo = _make_repo(Path(td))
-        (repo / "lined.rs").write_text(
-            f"// cjk-allow: parsing wide chars in this token\n{CJK_LINE}\n", encoding="utf-8"
-        )
-        subprocess.run(["git", "add", "lined.rs"], cwd=repo, check=True)
-        subprocess.run(
-            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "x"],
-            cwd=repo, check=True,
-        )
-        data = _run_checker(repo)
-        files = {f["file"] for f in data["findings"]}
-        assert "lined.rs" not in files, "cjk-allow: <reason> must exempt the next line"
+def _files(data: dict) -> set[str]:
+    return {finding["file"] for finding in data["findings"]}
 
 
-def test_file_pragma_with_reason_exempts_whole_file() -> None:
-    with tempfile.TemporaryDirectory() as td:
-        repo = _make_repo(Path(td))
-        (repo / "filed.rs").write_text(
-            f"// cjk-allow-file: this crate parses CJK headers\n{CJK_PROSE}\n{CJK_LINE}\n",
-            encoding="utf-8",
-        )
-        subprocess.run(["git", "add", "filed.rs"], cwd=repo, check=True)
-        subprocess.run(
-            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "x"],
-            cwd=repo, check=True,
-        )
-        data = _run_checker(repo)
-        files = {f["file"] for f in data["findings"]}
-        assert "filed.rs" not in files, "cjk-allow-file: <reason> must exempt the file"
+def test_default_source_rejects_cjk() -> None:
+    assert "src/main.rs" in _files(_check({"src/main.rs": CJK_PROSE}))
 
 
-def test_file_pragma_past_scan_window_is_not_honored() -> None:
-    with tempfile.TemporaryDirectory() as td:
-        repo = _make_repo(Path(td))
-        # 50 blank-ish lines before the pragma - past the 40-line scan window.
-        content = "\n".join(["// padding"] * 50)
-        content += "\n// cjk-allow-file: declared too late\n" + CJK_PROSE + "\n"
-        (repo / "late.rs").write_text(content, encoding="utf-8")
-        subprocess.run(["git", "add", "late.rs"], cwd=repo, check=True)
-        subprocess.run(
-            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "x"],
-            cwd=repo, check=True,
-        )
-        data = _run_checker(repo)
-        files = {f["file"] for f in data["findings"]}
-        assert "late.rs" in files, "file pragma past scan window must not exempt"
+def test_default_markdown_rejects_cjk() -> None:
+    assert "README.md" in _files(_check({"README.md": CJK_PROSE}))
 
 
-def test_zh_md_suffix_is_allowed() -> None:
-    with tempfile.TemporaryDirectory() as td:
-        repo = _make_repo(Path(td))
-        (repo / "doc.zh.md").write_text(CJK_PROSE + "\n", encoding="utf-8")
-        subprocess.run(["git", "add", "doc.zh.md"], cwd=repo, check=True)
-        subprocess.run(
-            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "x"],
-            cwd=repo, check=True,
-        )
-        data = _run_checker(repo)
-        files = {f["file"] for f in data["findings"]}
-        assert "doc.zh.md" not in files, ".zh.md must be allowed"
+def test_other_non_english_script_is_rejected() -> None:
+    assert "README.md" in _files(_check({"README.md": CYRILLIC_PROSE}))
 
 
-def test_allowed_dirs_are_skipped() -> None:
-    with tempfile.TemporaryDirectory() as td:
-        repo = _make_repo(Path(td))
-        (repo / "tests/fixtures").mkdir(parents=True)
-        (repo / "tests/fixtures/case.rs").write_text(CJK_PROSE + "\n", encoding="utf-8")
-        subprocess.run(["git", "add", "tests/fixtures/case.rs"], cwd=repo, check=True)
-        subprocess.run(
-            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "x"],
-            cwd=repo, check=True,
-        )
-        data = _run_checker(repo)
-        files = {f["file"] for f in data["findings"]}
-        assert "tests/fixtures/case.rs" not in files, "tests/fixtures/ must be allowed"
+def test_unmarked_non_ascii_latin_text_is_rejected() -> None:
+    assert "README.md" in _files(_check({"README.md": LATIN_TRANSLATION}))
 
 
-def test_markdown_language_switcher_link_is_allowed() -> None:
-    with tempfile.TemporaryDirectory() as td:
-        repo = _make_repo(Path(td))
-        # English README whose only CJK is the switcher label pointing at the
-        # .zh.md counterpart. This is navigation, not prose.
-        content = "# Project\n\n[Chinese](README.zh.md) | English\n"
-        (repo / "README.md").write_text(content, encoding="utf-8")
-        subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-        subprocess.run(
-            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "x"],
-            cwd=repo, check=True,
-        )
-        data = _run_checker(repo)
-        files = {f["file"] for f in data["findings"]}
-        assert "README.md" not in files, "language switcher link to .zh.md must be allowed"
+def test_emoji_and_unit_symbols_are_not_languages() -> None:
+    content = "# Status\n\nInformation \u2139\ufe0f, key 1\ufe0f\u20e3, 50 \u00b5s\n"
+    assert not _files(_check({"README.md": content}))
 
 
-def test_markdown_line_pragma_with_reason_exempts_next_line() -> None:
-    with tempfile.TemporaryDirectory() as td:
-        repo = _make_repo(Path(td))
-        content = (
-            "# Wire fixture\n\n"
-            "<!-- cjk-allow: the literal text is UTF-8 fixture data -->\n"
-            f"- `{CJK_LINE}`\n"
-        )
-        (repo / "contract.md").write_text(content, encoding="utf-8")
-        subprocess.run(["git", "add", "contract.md"], cwd=repo, check=True)
-        subprocess.run(
-            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "x"],
-            cwd=repo, check=True,
-        )
-        data = _run_checker(repo)
-        files = {f["file"] for f in data["findings"]}
-        assert "contract.md" not in files, "Markdown line pragma must exempt fixture data"
+def test_zh_markdown_is_localized() -> None:
+    assert not _files(_check({"README.zh.md": CJK_PROSE}))
+
+
+def test_standard_locale_directories_are_localized() -> None:
+    files = {
+        "locales/zh-Hans/messages.json": CJK_PROSE,
+        "locales/zh-Hans.json": CJK_PROSE,
+        "locales/zh.ts": CJK_PROSE,
+        "android/res/values-zh-rCN/strings.xml": CJK_PROSE,
+        "ios/zh-Hans.lproj/Localizable.strings": CJK_PROSE,
+    }
+    assert not _files(_check(files))
+
+
+def test_short_source_stem_is_not_a_locale_suffix() -> None:
+    assert _files(_check({"src/ffi.rs": CJK_PROSE})) == {"src/ffi.rs"}
+    assert _files(_check({"src/api.ts": CJK_PROSE})) == {"src/api.ts"}
+    assert _files(_check({"src/app.tsx": CJK_PROSE})) == {"src/app.tsx"}
+    assert not _files(_check({"src/messages.fr.ts": CJK_PROSE}))
+
+
+def test_unmarked_i18n_and_fixture_files_are_not_blanket_allowed() -> None:
+    data = _check({
+        "i18n/messages.json": CJK_PROSE,
+        "tests/fixtures/case.txt": CJK_PROSE,
+    })
+    assert _files(data) == {"i18n/messages.json", "tests/fixtures/case.txt"}
+
+
+def test_non_ascii_path_is_rejected_even_when_localized() -> None:
+    data = _check({"locales/zh-Hans/\u8bf4\u660e.md": CJK_PROSE})
+    findings = data["findings"]
+    assert any(finding["kind"] == "non-ascii-path" for finding in findings)
+
+
+def test_line_pragma_requires_reason() -> None:
+    bare = _check({"bare.rs": f"// language-allow:\n{CJK_PROSE}\n"})
+    allowed = _check({
+        "allowed.rs": f"// language-allow: literal parser fixture\n{CJK_PROSE}\n"
+    })
+    assert "bare.rs" in _files(bare)
+    assert "allowed.rs" not in _files(allowed)
+
+
+def test_file_pragma_is_early_and_requires_reason() -> None:
+    allowed = _check({
+        "allowed.rs": f"// language-allow-file: protocol fixture corpus\n{CJK_PROSE}\n"
+    })
+    late_content = "\n".join(["// padding"] * 50)
+    late_content += f"\n// language-allow-file: too late\n{CJK_PROSE}\n"
+    late = _check({"late.rs": late_content})
+    assert "allowed.rs" not in _files(allowed)
+    assert "late.rs" in _files(late)
+
+
+def test_language_switcher_label_is_allowed() -> None:
+    content = "# Project\n\n[\u4e2d\u6587](README.zh.md) | English\n"
+    assert "README.md" not in _files(_check({"README.md": content}))
 
 
 def main() -> int:
     tests = [
-        test_bare_line_pragma_without_reason_is_flagged,
-        test_line_pragma_with_reason_exempts_next_line,
-        test_file_pragma_with_reason_exempts_whole_file,
-        test_file_pragma_past_scan_window_is_not_honored,
-        test_zh_md_suffix_is_allowed,
-        test_allowed_dirs_are_skipped,
-        test_markdown_language_switcher_link_is_allowed,
-        test_markdown_line_pragma_with_reason_exempts_next_line,
+        test_default_source_rejects_cjk,
+        test_default_markdown_rejects_cjk,
+        test_other_non_english_script_is_rejected,
+        test_unmarked_non_ascii_latin_text_is_rejected,
+        test_emoji_and_unit_symbols_are_not_languages,
+        test_zh_markdown_is_localized,
+        test_standard_locale_directories_are_localized,
+        test_short_source_stem_is_not_a_locale_suffix,
+        test_unmarked_i18n_and_fixture_files_are_not_blanket_allowed,
+        test_non_ascii_path_is_rejected_even_when_localized,
+        test_line_pragma_requires_reason,
+        test_file_pragma_is_early_and_requires_reason,
+        test_language_switcher_label_is_allowed,
     ]
     failures = 0
-    for t in tests:
+    for test in tests:
         try:
-            t()
-            print(f"  PASS  {t.__name__}")
-        except AssertionError as e:
+            test()
+            print(f"  PASS  {test.__name__}")
+        except AssertionError as error:
             failures += 1
-            print(f"  FAIL  {t.__name__}: {e}")
+            print(f"  FAIL  {test.__name__}: {error}")
     print(f"\n{len(tests) - failures}/{len(tests)} passed")
     return 1 if failures else 0
 

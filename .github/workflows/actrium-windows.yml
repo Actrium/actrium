@@ -1,0 +1,145 @@
+# Windows client verification.
+#
+# Scope: the Windows client only (windows) plus the Rust core it links
+# against (crates/actrium-core). Sibling platform workflows (macos-verify.yml,
+# android-verify.yml, ...) should follow the same <platform>-verify.yml
+# naming when they land; this file deliberately does not try to cover them.
+#
+# Two jobs, both on windows-latest:
+#   verify  - layout contract, actro_core.dll build, the full rg-based +
+#             P/Invoke test harness (scripts/actrium/verify-windows.sh, zero-warning
+#             gate), and a Release build of the app.
+#   package - the portable zip via scripts/actrium/package-windows.ps1 -SkipInstaller
+#             (no Inno Setup, no WebView2 bootstrapper download, so the job
+#             is deterministic and network-independent beyond registries),
+#             uploaded as a run artifact.
+#
+# The Rust toolchain is pinned by rust-toolchain.toml (1.88); the
+# dtolnay/rust-toolchain step installs rustup's stable and the pin file then
+# governs the actual compiler cargo uses.
+
+name: Windows Verify
+
+on:
+  push:
+    branches: [main, master, develop]
+    paths:
+      - "windows/**"
+      - "crates/actrium-core/**"
+      - "scripts/actrium/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/actrium-windows.yml"
+  pull_request:
+    paths:
+      - "windows/**"
+      - "crates/actrium-core/**"
+      - "scripts/actrium/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/actrium-windows.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: windows-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: 1
+
+jobs:
+  verify:
+    name: Harness and app build
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      # The contract scripts and the harness prologue are rg-based; ripgrep
+      # is not preinstalled on the windows-latest image.
+      - name: Install ripgrep
+        run: choco install ripgrep --no-progress --yes
+
+      - name: Check Windows packaging layout contract
+        shell: bash
+        run: bash scripts/actrium/check-windows-layout.sh
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows-verify
+
+      - name: Build actro_core.dll
+        run: cargo build --release -p actro-core
+
+      # Both csprojs copy windows/native/*.dll into their output;
+      # the harness makes real P/Invoke calls into actro_core, so the DLL
+      # must be staged before any dotnet step.
+      - name: Stage actro_core.dll for the app and tests
+        shell: bash
+        run: cp target/release/actro_core.dll windows/native/
+
+      - name: Setup .NET SDK 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      # Runs the full contract-grep + build + 162-case harness with the
+      # zero-warning gate, exactly as on a developer Windows host.
+      - name: Run Windows verification harness
+        shell: bash
+        run: bash scripts/actrium/verify-windows.sh
+
+      - name: Build app (Release)
+        run: dotnet build windows/Actro.Windows.csproj --configuration Release -p:NuGetAudit=false
+
+  package:
+    name: Portable zip
+    runs-on: windows-latest
+    needs: verify
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows-verify
+
+      - name: Build actro_core.dll
+        run: cargo build --release -p actro-core
+
+      # dotnet publish flattens native/*.dll to the app root and
+      # package-windows.ps1 fails fast when actro_core.dll is absent there.
+      - name: Stage actro_core.dll for publish
+        shell: bash
+        run: cp target/release/actro_core.dll windows/native/
+
+      - name: Setup .NET SDK 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Package portable zip
+        shell: pwsh
+        run: ./scripts/actrium/package-windows.ps1 -SkipInstaller
+
+      - name: Upload portable zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: actro-windows-portable-zip
+          path: dist/windows/*.zip
+          if-no-files-found: error

@@ -1,0 +1,33 @@
+{
+  "name": "actrium",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Actrium browser applications and shared runtime",
+  "scripts": {
+    "check": "pnpm -r --if-present check",
+    "check:language": "python3 .github/scripts/check_cjk.py",
+    "check:migration": "bash scripts/actrium/check-migration-hygiene.sh",
+    "check:generated": "bash scripts/actrium/check-generated-contracts.sh",
+    "check:rust-boundary": "bash scripts/actrium/check-rust-boundary-hygiene.sh",
+    "check:windows-layout": "bash scripts/actrium/check-windows-layout.sh",
+    "check:repository-assets": "java scripts/actrium/PrepareAndroidBinaryAssets.java --lock android/android/binary-assets.lock.properties --validate-only && bash scripts/actrium/check-large-files.sh && bash scripts/actrium/verify-vendored-assets.sh",
+    "check:bundles": "npm run bundle:ios && npm run bundle:android && npm run bundle:macos:all",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "pnpm -r --if-present lint",
+    "test": "pnpm -r --if-present test",
+    "bundle:ios": "cd packages/actrium && env -u NO_COLOR node node_modules/react-native/scripts/bundle.js --platform ios --dev false --entry-file index.ts --bundle-output /tmp/actrium-ios-index.bundle --assets-dest /tmp/actrium-ios-assets",
+    "bundle:android": "cd android && env -u NO_COLOR node node_modules/react-native/cli.js bundle --platform android --dev false --entry-file index.js --bundle-output /tmp/actrium-android-index.bundle --assets-dest /tmp/actrium-android-assets",
+    "bundle:macos:system": "cd macos && ./scripts/bundle-actro-runtime.sh --target system --dev",
+    "bundle:macos:actr": "cd macos && ./scripts/bundle-actro-runtime.sh --target actr --dev",
+    "bundle:macos:all": "cd macos && ./scripts/bundle-actro-runtime.sh --target all --dev",
+    "verify:all": "npm run check:language && npm run check:repository-assets && npm run check:migration && npm run verify:rust && npm run verify:apple-core && npm run check:generated && npm run check:rust-boundary && npm run check:windows-layout && npm run verify:runtime && npm run check:bundles && npm run verify:android && npm run verify:ios && npm run verify:macos && npm run verify:windows",
+    "verify:rust": "cargo test -p actro-core -p actro-vault -p actro-sync-server",
+    "verify:apple-core": "swift test --package-path packages/actrium-platform/apple/ActroCore",
+    "verify:runtime": "cd packages/actrium && npm run typecheck",
+    "verify:android": "cd android/android && ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --console=plain --stacktrace --no-daemon",
+    "verify:android-device": "cd android/android && ./gradlew :app:connectedDebugAndroidTest --console=plain --stacktrace --no-daemon",
+    "verify:ios": "scripts/actrium/filter-xcodebuild-output.sh xcodebuild -workspace ios/Actro.xcworkspace -scheme Actro -configuration Debug -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build",
+    "verify:macos": "scripts/actrium/filter-xcodebuild-output.sh xcodebuild -workspace macos/Actro.xcworkspace -scheme Actro -configuration Debug -destination \"platform=macOS,arch=$(uname -m)\" CODE_SIGNING_ALLOWED=NO build",
+    "verify:windows": "bash scripts/actrium/verify-windows.sh"
+  }
+}

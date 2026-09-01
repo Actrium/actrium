@@ -63,7 +63,7 @@ const BUDGET_CONSTS: &[(&str, &str, &str, &str)] = &[
         "maxPixels",
         "MAX_PIXELS",
         "u64",
-        "Max estimated SHADED pixels (fill-rate proxy = Σ viewport_area × primitives).",
+        "Max estimated SHADED pixels (fill-rate proxy = sum viewport_area × primitives).",
     ),
     (
         "maxBufferBytes",

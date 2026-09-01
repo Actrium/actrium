@@ -65,7 +65,7 @@ windows-demo/
 │       ├── KeelSandboxNativeModule.cpp  # QuickJS JSI binding installer
 │       ├── CMakeLists.txt     # Build config for QuickJS static lib
 │       └── pch.h              # Precompiled header
-├── RCTNApps/                  # React Native JS source
+├── ReactNativeApp/                  # React Native JS source
 │   ├── index.tsx              # App entry point (sandbox init)
 │   ├── tsconfig.json
 │   └── src/

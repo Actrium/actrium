@@ -1870,7 +1870,7 @@ pub mod gpu {
         pub primitives: u64,
         /// Instances summed over the submit.
         pub instances: u64,
-        /// Estimated shaded pixels (Σ current-viewport-area × instances).
+    /// Estimated shaded pixels (sum of current viewport area times instances).
         pub pixels: u64,
     }
 

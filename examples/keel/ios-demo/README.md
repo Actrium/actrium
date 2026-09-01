@@ -66,7 +66,7 @@ ios-demo/
 │   ├── ReactNativeFactory.h/.mm
 │   ├── KeelConfiguration.h/.mm
 │   └── KeelSandboxBridge.h/.mm
-├── RCTNApps/                  # React Native JS source
+├── ReactNativeApp/                  # React Native JS source
 │   ├── index.tsx
 │   └── src/App.tsx
 └── TestCode/                  # JS performance benchmarks

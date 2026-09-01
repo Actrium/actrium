@@ -1858,15 +1858,15 @@ mod tests {
                 realm_id: 33_554_433,
             },
             r#type: ActrType {
-                manufacturer: "goaskaway".to_string(),
+                manufacturer: "acme".to_string(),
                 name: "BotService".to_string(),
                 version: "4.0.0".to_string(),
             },
         };
         let service = ServiceInfo {
             actor_id: actor_id.clone(),
-            service_name: "goaskaway:BotService".to_string(),
-            message_types: vec!["goaskaway.Ask".to_string()],
+            service_name: "acme:BotService".to_string(),
+            message_types: vec!["acme.Ask".to_string()],
             capabilities: None,
             status: ServiceStatus::Available,
             last_heartbeat_time_secs: current_timestamp(),
@@ -1932,10 +1932,10 @@ mod tests {
         assert_eq!(candidates_after_retry.len(), 1);
         assert_eq!(candidates_after_retry[0].power_reserve, Some(0.75));
 
-        let services_by_message = registry.discover_by_message_type("goaskaway.Ask");
+        let services_by_message = registry.discover_by_message_type("acme.Ask");
         assert_eq!(services_by_message.len(), 1);
         assert_eq!(
-            registry.get_message_type_stats().get("goaskaway.Ask"),
+            registry.get_message_type_stats().get("acme.Ask"),
             Some(&1)
         );
 
@@ -1956,10 +1956,10 @@ mod tests {
         assert_eq!(candidates_after_registration[0].actor_id, actor_id);
         assert!(!candidates_after_registration[0].is_restored_from_storage);
 
-        let services_by_message = registry.discover_by_message_type("goaskaway.Ask");
+        let services_by_message = registry.discover_by_message_type("acme.Ask");
         assert_eq!(services_by_message.len(), 1);
         assert_eq!(
-            registry.get_message_type_stats().get("goaskaway.Ask"),
+            registry.get_message_type_stats().get("acme.Ask"),
             Some(&1)
         );
         assert_eq!(

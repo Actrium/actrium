@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/flTabItem"
+    android:layout_width="18dp"
+    android:layout_height="54dp"
+    android:clipChildren="false">
+
+    <!-- Right Virtual item: Only reserved rcvBottomLeft -->
+
+    <io.actrium.actro.tablet.ReverseCornerView
+        android:id="@+id/rcvBottomLeft"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="-2dp"
+        android:visibility="gone"
+        app:reverseDirection="bottomLeft"
+        app:fillColor="#F2F2F6" />
+</FrameLayout>

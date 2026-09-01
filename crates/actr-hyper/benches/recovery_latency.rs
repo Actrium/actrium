@@ -66,8 +66,8 @@
 //! round, so no state leaks across rounds), each collecting `SAMPLES`
 //! measurements after a short discarded warmup. Per round we report
 //! p50/p95/p99 (µs); across rounds we report the mean and standard deviation
-//! of each percentile, so a reader can check that run-to-run noise (σ) is
-//! small relative to the effect being measured (|Δ| between old and new, or
+//! of each percentile, so a reader can check that run-to-run noise (sigma) is
+//! small relative to the effect being measured (|Delta| between old and new, or
 //! between M1 and M2).
 //!
 //! M1 samples are paced: after each `force_reconnect` call we wait (via a

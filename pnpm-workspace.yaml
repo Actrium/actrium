@@ -1,0 +1,4 @@
+packages:
+  - "android"
+  - "packages/actrium"
+  - "packages/actrium-app-sdk"

@@ -16,6 +16,10 @@ members = [
     "crates/actr-hlc",
     # === Keel ===
     "crates/keel-native-guest",
+    # === Actrium applications ===
+    "crates/actrium-core",
+    "crates/actrium-sync",
+    "crates/actrium-vault",
     # === Developer Tools ===
     "tools/actr/protoc-gen/rust",
     "tools/actr/protoc-gen/web",

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Android 12+ (API 31+) The system works. application Themes (in the context of theAppTheme) To generate Splash Screen.
+        Overwrite here AppTheme♪ Will Splash Sets the background to black, the icon to be transparent and visually unsensitized.
+    -->
+    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <!-- Override System Splash Screen: Background black -->
+        <item name="android:windowSplashScreenBackground">#000000</item>
+        <!-- Icons are transparent, no icons are shown -->
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_transparent</item>
+        <!-- The icon background is also black -->
+        <item name="android:windowSplashScreenIconBackgroundColor">#000000</item>
+    </style>
+</resources>
