@@ -12,6 +12,7 @@ The consolidation is expected to proceed in small, reversible stages:
 6. Remove temporary compatibility paths only after downstream users migrate.
 
 This directory holds import maps, compatibility notes, and cutover checklists.
-The Actr history and current Actr/Loran source tree have completed steps 2 and
-3. Actro and Keel have not yet been imported; the Actrix-to-Loran semantic
-rename remains part of step 5.
+The Actr/Loran source tree has completed steps 2 and 3. Keel's privacy-scrubbed
+history has completed step 2 and its relocated build is completing step 3.
+Actro has not yet been imported; the Actrix-to-Loran semantic rename remains
+part of step 5.

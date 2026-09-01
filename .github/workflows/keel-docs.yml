@@ -1,0 +1,44 @@
+# Keel's VitePress site is built here as a component-level correctness gate.
+# Publishing is intentionally deferred until Actrium has one repository-wide
+# documentation deployment plan.
+name: Keel Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "keel/docs/**"
+      - "keel/package.json"
+      - "keel/package-lock.json"
+      - ".github/workflows/keel-docs.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "keel/docs/**"
+      - "keel/package.json"
+      - "keel/package-lock.json"
+      - ".github/workflows/keel-docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # lastUpdated reads git blame; a shallow clone would stamp every
+          # page with the merge commit instead of the authoring commit.
+          fetch-depth: 0
+
+      - name: Install dependencies
+        working-directory: keel
+        run: npm ci
+
+      - name: Build docs
+        working-directory: keel
+        run: npm run docs:build

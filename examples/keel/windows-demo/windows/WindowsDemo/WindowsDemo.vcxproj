@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This project was created with react-native-windows 0.81.3 -->
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(SolutionDir)\ExperimentalFeatures.props" Condition="Exists('$(SolutionDir)\ExperimentalFeatures.props')" />
+  <PropertyGroup Label="Globals">
+    <CppWinRTOptimized>true</CppWinRTOptimized>
+    <MinimalCoreWin>true</MinimalCoreWin>
+    <ProjectGuid>{875D994A-7463-457C-BB14-D2C8B7FA1E4C}</ProjectGuid>
+    <ProjectName>WindowsDemo</ProjectName>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>WindowsDemo</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <DefaultLanguage>en-US</DefaultLanguage>
+    <MinimumVisualStudioVersion>17.0</MinimumVisualStudioVersion>
+    <AppxPackage>false</AppxPackage>
+    <!-- Force UWP variant of hermes.dll: depends on system icu.dll instead of icuuc/icuin.dll
+         which are unavailable inside AppX packaged desktop apps -->
+    <HermesAppPlatform>uwp</HermesAppPlatform>
+  </PropertyGroup>
+  <PropertyGroup Label="ReactNativeWindowsProps">
+    <ReactNativeWindowsDir Condition="'$(ReactNativeWindowsDir)' == ''">$([MSBuild]::GetDirectoryNameOfFileAbove($(MSBuildThisFileDirectory), 'node_modules\react-native-windows\package.json'))\node_modules\react-native-windows\</ReactNativeWindowsDir>
+  </PropertyGroup>
+  <Import Project="$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.WindowsSdk.Default.props" />
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|ARM64">
+      <Configuration>Debug</Configuration>
+      <Platform>ARM64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|ARM64">
+      <Configuration>Release</Configuration>
+      <Platform>ARM64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>Unicode</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
+    <UseDebugLibraries>true</UseDebugLibraries>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Release'" Label="Configuration">
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="ReactNativeWindowsPropertySheets">
+    <Import Project="$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.Composition.CppApp.props" />
+  </ImportGroup>
+  <!-- Engine selection: quickjs (default) or hermes. Override via /p:KeelSandboxEngine=hermes -->
+  <PropertyGroup>
+    <KeelSandboxEngine Condition="'$(KeelSandboxEngine)'==''">quickjs</KeelSandboxEngine>
+    <KeelSandboxEngineDefine Condition="'$(KeelSandboxEngine)'=='hermes'">KEEL_SANDBOX_ENGINE=2</KeelSandboxEngineDefine>
+    <KeelSandboxEngineDefine Condition="'$(KeelSandboxEngine)'!='hermes'">KEEL_SANDBOX_ENGINE=3</KeelSandboxEngineDefine>
+    <KeelHermesLib Condition="'$(KeelSandboxEngine)'=='hermes'">$(PkgMicrosoft_JavaScript_Hermes)\build\native\$(HermesAppPlatform)\$(HermesPlatform)\hermes.lib;</KeelHermesLib>
+    <KeelHermesLib Condition="'$(KeelSandboxEngine)'!='hermes'"></KeelHermesLib>
+    <!-- Bundling is handled by examples/keel/windows-demo/dev.cmd step [2]. -->
+    <Bundle>false</Bundle>
+    <ReactNativeBundle>false</ReactNativeBundle>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)pch.pch</PrecompiledHeaderOutputFile>
+      <WarningLevel>Level4</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalOptions>%(AdditionalOptions) /bigobj /utf-8</AdditionalOptions>
+      <DisableSpecificWarnings>4453;28204;4100;4244</DisableSpecificWarnings>
+      <AdditionalIncludeDirectories>
+        $(MSBuildThisFileDirectory);
+        $(MSBuildThisFileDirectory)..\KeelSandboxNative;
+        $(MSBuildThisFileDirectory)..\KeelSandboxNative\build;
+        $(MSBuildThisFileDirectory)..\..\..\..\native;
+        $(MSBuildThisFileDirectory)..\..\..\..\native\core\src;
+        $(MSBuildThisFileDirectory)..\..\..\..\native\quickjs\src;
+        $(MSBuildThisFileDirectory)..\..\..\..\native\quickjs\vendor;
+        $(MSBuildThisFileDirectory)..\..\..\..\native\hermes\src;
+        $(PkgMicrosoft_JavaScript_Hermes)\build\native\include;
+        $(PkgMicrosoft_JavaScript_Hermes)\build\native\include\node-api;
+        %(AdditionalIncludeDirectories)
+      </AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>shell32.lib;user32.lib;psapi.lib;windowsapp.lib;$(MSBuildThisFileDirectory)..\KeelSandboxNative\build\$(Configuration)\keel_sandbox.lib;$(KeelHermesLib)%(AdditionalDependenices)</AdditionalDependencies>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <StackReserveSize>8388608</StackReserveSize>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <PreprocessorDefinitions>BUNDLE;_DEBUG;BUILDING_NODE_EXTENSION;$(KeelSandboxEngineDefine);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <PreprocessorDefinitions>BUNDLE;NDEBUG;BUILDING_NODE_EXTENSION;$(KeelSandboxEngineDefine);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <PropertyGroup Label="UserMacros" />
+  <ItemGroup>
+    <ClInclude Include="WindowsDemo.h" />
+    <ClInclude Include="resource.h" />
+    <ClInclude Include="AutolinkedNativeModules.g.h" />
+    <ClInclude Include="pch.h" />
+    <ClInclude Include="targetver.h" />
+    <ClInclude Include="..\KeelSandboxNative\KeelSandboxNativeModule.h" />
+    <ClInclude Include="..\..\..\..\native\core\src\SandboxEngineConfig.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="WindowsDemo.cpp" />
+    <ClCompile Include="AutolinkedNativeModules.g.cpp" />
+    <ClCompile Include="..\KeelSandboxNative\KeelSandboxNativeModule.cpp">
+      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)..\KeelSandboxNative;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="pch.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">Create</PrecompiledHeader>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="WindowsDemo.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="WindowsDemo.ico" />
+    <Image Include="small.ico" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ReactNativeWindowsTargets">
+    <Import Project="$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.Composition.CppApp.targets" Condition="Exists('$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.Composition.CppApp.targets')" />
+  </ImportGroup>
+  <!-- Copy Microsoft.ReactNative.winmd to output for reg-free WinRT activation.
+       The NuGet package sets Private="false" which skips the winmd copy, but packaged
+       desktop apps need it alongside the DLL for class activation. -->
+  <ItemGroup>
+    <ReferenceCopyLocalPaths Include="$(_rnwFolder)\..\..\..\lib\uap10.0$(_rnwArch)\Microsoft.ReactNative.winmd"
+                             Condition="Exists('$(_rnwFolder)\..\..\..\lib\uap10.0$(_rnwArch)\Microsoft.ReactNative.winmd')" />
+  </ItemGroup>
+  <Target Name="EnsureReactNativeWindowsTargets" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>This project references targets in your node_modules\react-native-windows folder. The missing file is {0}.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.Composition.CppApp.props')" Text="$([System.String]::Format('$(ErrorText)', '$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.Composition.CppApp.props'))" />
+    <Error Condition="!Exists('$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.Composition.CppApp.targets')" Text="$([System.String]::Format('$(ErrorText)', '$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.Composition.CppApp.targets'))" />
+  </Target>
+  <!-- KeelSandboxNativeModule.cpp includes <quickjs.h> as C++. The vendored
+       header is C-only there: JS_MKVAL/JS_MKPTR/JS_NAN are compound literals,
+       which MSVC rejects outside C. The header this project must see is the
+       patched copy CMake writes into KeelSandboxNative\build, which is why that
+       directory precedes native\quickjs\vendor in AdditionalIncludeDirectories.
+       Without this check a missing CMake step is not reported as a missing step:
+       the include search silently falls through to the vendor header and the
+       build dies with four C4576 errors pointing INTO third-party code, which
+       is how it was first reported (issue #100). -->
+  <Target Name="EnsureKeelSandboxNative" BeforeTargets="ClCompile">
+    <Error Condition="'$(KeelSandboxEngine)'!='hermes' And !Exists('$(MSBuildThisFileDirectory)..\KeelSandboxNative\build\quickjs.h')"
+           Text="Patched quickjs.h not found at windows\KeelSandboxNative\build\quickjs.h. Run the CMake sandbox step first (dev.cmd does this as step [3]): cmake -S windows\KeelSandboxNative -B windows\KeelSandboxNative\build -A x64 -DKEEL_SANDBOX_ENGINE=quickjs &amp;&amp; cmake --build windows\KeelSandboxNative\build --config $(Configuration)" />
+  </Target>
+</Project>

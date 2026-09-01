@@ -1,0 +1,180 @@
+require 'json'
+
+package = JSON.parse(File.read(File.join(__dir__, 'package.json')))
+repository = package['repository']
+repository = repository['url'] if repository.is_a?(Hash)
+
+# Sandbox engine selection: 'jsc' (default), 'hermes', or 'quickjs'
+sandbox_engine = ENV['KEEL_SANDBOX_ENGINE'] || 'jsc'
+
+Pod::Spec.new do |s|
+  s.name         = "KeelSandboxNative"
+  s.version      = package['version']
+  s.summary      = package['description']
+  s.homepage     = package['homepage'] || "https://github.com/Actrium/actrium"
+  s.license      = package['license'] || "Apache-2.0"
+  s.authors      = package['authors'] || "Actrium contributors"
+  s.platforms    = { :ios => "13.0", :osx => "10.15", :tvos => "13.0", :visionos => "1.0" }
+  s.source       = { :git => repository || "https://github.com/Actrium/actrium.git", :tag => "v#{s.version}" }
+  # CocoaPods executes `prepare_command` during `pod install`.
+  #
+  # We use it as a safety net to apply known `react-native-macos` 0.81.x fixes even when:
+  #   - npm/yarn/pnpm skips dependency lifecycle scripts (e.g. `file:` / workspace links)
+  #   - project installs with `--ignore-scripts`
+  #
+  # IMPORTANT:
+  #   - Default behavior is fail-fast during `pod install` when we detect a known
+  #     react-native-macos 0.81.x issue that we cannot auto-fix (for example, a
+  #     read-only dependency layout under Yarn PnP/zipfs).
+  #   - To skip this check/patch, set: KEEL_SKIP_RN_MACOS_PATCH=1
+  s.prepare_command = <<~CMD
+    if command -v node >/dev/null 2>&1; then
+      KEEL_RN_MACOS_PATCH_STRICT=1 node scripts/keel_postinstall.js
+    fi
+  CMD
+
+  # Common source files: TurboModule entry + TenantManager infrastructure
+  common_sources = [
+    "native/core/src/SandboxEngineConfig.h",
+    "native/core/src/KeelSandboxNativeTurboModule.{h,mm}",
+    "native/core/src/KeelTenantManager.{h,mm}",
+    "native/core/src/TenantHandle.{h,cpp}",
+    "native/core/src/TimerWheel.{h,cpp}",
+    "native/core/src/TenantThread.{h,cpp}",
+    "native/core/src/ThreadPool.{h,cpp}",
+    "native/core/src/TenantContext.{h,cpp}",
+    "native/core/src/TenantRegistry.{h,cpp}",
+    "native/core/src/EventBus.{h,cpp}",
+    # WIP subsystems. Their bodies are wrapped in #if KEEL_WIP_* (off by default),
+    # so these files compile to empty translation units in a normal build — no
+    # binary weight, no accidental use. Enable for evaluation with
+    # KEEL_WIP_CDP_DEVTOOLS=1 / KEEL_WIP_NATIVE_SECURITY=1 (forwarded below).
+    # See devtools/CDPServer.h and security/SecurityManager.h for status/TODO.
+    "native/core/src/security/*.{h,cpp}",
+    "native/core/src/devtools/*.{h,cpp}",
+    "native/core/src/devtools/CDPTransportApple.{h,mm}"
+  ]
+
+  # Engine-specific source files
+  if sandbox_engine == 'quickjs'
+    s.source_files = common_sources + [
+      "native/quickjs/src/*.{h,cpp}",
+      "native/quickjs/vendor/*.{h,c}"
+    ]
+    # Full jsi::Runtime hosts kept only as the test host for native sandbox unit/
+    # leak tests (native/{quickjs,jsc}/Makefile); excluded from the shipped pod -
+    # production installs the *SandboxJSI HostObject into the app's own runtime and
+    # never links these. See each file's header for details.
+    s.exclude_files = [
+      "native/quickjs/src/wasm_bindings.c",
+      "native/quickjs/src/QuickJSRuntime.{h,cpp}",
+      "native/quickjs/src/QuickJSRuntimeFactory.{h,cpp}",
+      "native/quickjs/src/HostProxy.{h,cpp}",
+      "native/quickjs/src/JSIValueConverter.{h,cpp}",
+      "native/quickjs/src/QuickJSPointerValue.{h,cpp}",
+      "native/quickjs/src/ScopedJSValue.h",
+      "native/quickjs/src/QuickJSInstrumentation.{h,cpp}"
+    ]
+    s.public_header_files = [
+      "native/core/src/SandboxEngineConfig.h",
+      "native/core/src/KeelSandboxNativeTurboModule.h",
+      "native/core/src/KeelTenantManager.h",
+      "native/quickjs/src/*.h",
+      "native/quickjs/vendor/*.h"
+    ]
+  elsif sandbox_engine == 'hermes'
+    s.source_files = common_sources + [
+      "native/hermes/src/HermesSandboxJSI.{h,cpp}",
+      # CDP DevTools relay for guest debugging. Whole TU is gated on
+      # KEEL_WIP_CDP_DEVTOOLS && !NDEBUG, so it compiles to nothing unless the
+      # dev flag is on (see the ENV opt-in below).
+      "native/hermes/src/devtools/*.{h,cpp}"
+    ]
+    s.public_header_files = [
+      "native/core/src/SandboxEngineConfig.h",
+      "native/core/src/KeelSandboxNativeTurboModule.h",
+      "native/core/src/KeelTenantManager.h",
+      "native/hermes/src/HermesSandboxJSI.h"
+    ]
+    # Hermes sandbox needs hermes-engine from React Native (not CocoaPods trunk which is outdated 0.11.0)
+    # The app's Podfile must either:
+    # 1. Enable Hermes as main runtime (:hermes_enabled => true), or
+    # 2. Manually add: pod 'hermes-engine', :path => "#{react_native_path}/sdks/hermes-engine"
+  else
+    # Default: JSC sandbox
+    s.source_files = common_sources + [
+      "native/jsc/src/**/*.{h,mm}"
+    ]
+    # Full jsi::Runtime hosts kept only as the test host for native sandbox unit/
+    # leak tests (native/{quickjs,jsc}/Makefile); excluded from the shipped pod -
+    # production installs the *SandboxJSI HostObject into the app's own runtime and
+    # never links these. See each file's header for details.
+    s.exclude_files = [
+      "native/jsc/src/JSCRuntime.{h,mm}"
+    ]
+    s.public_header_files = [
+      "native/core/src/SandboxEngineConfig.h",
+      "native/core/src/KeelSandboxNativeTurboModule.h",
+      "native/core/src/KeelTenantManager.h",
+      "native/jsc/src/**/*.h"
+    ]
+  end
+  s.static_framework = true
+  s.requires_arc = true
+
+  s.dependency "React-jsi"
+  s.dependency "React-callinvoker"
+  s.dependency "React-Core"
+  s.dependency "React-NativeModulesApple"
+  s.dependency "React-RuntimeApple"
+
+  frameworks = ["Network"]
+  # JSC sandbox directly links against JavaScriptCore.framework.
+  frameworks << "JavaScriptCore" if sandbox_engine == 'jsc'
+  s.frameworks = frameworks
+
+  preprocessor_defs = '$(inherited) RCT_NEW_ARCH_ENABLED=1'
+  preprocessor_defs += ' FOLLY_NO_CONFIG=1 FOLLY_MOBILE=1 FOLLY_USE_LIBCPP=1 FOLLY_CFG_NO_COROUTINES=1 FOLLY_HAVE_CLOCK_GETTIME=1'
+
+  if sandbox_engine == 'quickjs'
+    preprocessor_defs += ' KEEL_SANDBOX_ENGINE=3'
+  elsif sandbox_engine == 'hermes'
+    preprocessor_defs += ' KEEL_SANDBOX_ENGINE=2'
+  else
+    preprocessor_defs += ' KEEL_SANDBOX_ENGINE=1'
+  end
+
+  # Dev-only: opt JSC sandbox contexts into Apple's Remote Inspector (Safari Web
+  # Inspector) when explicitly requested via ENV. The code path is ALSO gated on
+  # !NDEBUG, so a Release archive strips it even if this define leaks in — never
+  # ship an inspectable sandbox. Only meaningful for sandbox_engine == 'jsc'.
+  preprocessor_defs += ' KEEL_WIP_JSC_INSPECTOR=1' if ENV['KEEL_WIP_JSC_INSPECTOR'] == '1'
+
+  # Dev-only: opt guest sandboxes into the CDP DevTools relay (debugging over
+  # Chrome DevTools Protocol) when explicitly requested via ENV. The code paths
+  # are ALSO gated on !NDEBUG, so a Release archive strips them even if this
+  # define leaks in — never ship an inspectable sandbox. Each engine gets its
+  # own debug enabler alongside the relay flag:
+  #   - Hermes: HERMES_ENABLE_DEBUGGER so our TUs bind the real cdp::CDPAgent /
+  #     AsyncDebuggerAPI (a debug Hermes build ships them);
+  #   - QuickJS: KEEL_QJS_DEBUG, which compiles the interpreter debug hook in.
+  if ENV['KEEL_WIP_CDP_DEVTOOLS'] == '1'
+    preprocessor_defs += ' KEEL_WIP_CDP_DEVTOOLS=1'
+    if sandbox_engine == 'hermes'
+      preprocessor_defs += ' HERMES_ENABLE_DEBUGGER=1'
+    elsif sandbox_engine == 'quickjs'
+      preprocessor_defs += ' KEEL_QJS_DEBUG=1'
+    end
+  end
+  # Other WIP subsystem, opt-in for evaluation builds (off by default).
+  preprocessor_defs += ' KEEL_WIP_NATIVE_SECURITY=1' if ENV['KEEL_WIP_NATIVE_SECURITY'] == '1'
+
+  s.pod_target_xcconfig = {
+    'GCC_PREPROCESSOR_DEFINITIONS' => preprocessor_defs,
+    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
+    # native/core/src on the path lets the Hermes CDP relay resolve its
+    # cross-module quoted includes ("devtools/CdpDebuggable.h",
+    # "devtools/EngineDebugTarget.h") when KEEL_WIP_CDP_DEVTOOLS is on.
+    'HEADER_SEARCH_PATHS' => '$(inherited) $(PODS_ROOT)/Headers/Public/ReactCommon $(PODS_ROOT)/Headers/Private/ReactCommon $(PODS_ROOT)/Headers/Public/React-RuntimeApple $(PODS_TARGET_SRCROOT)/native/core/src $(PODS_TARGET_SRCROOT)/native/hermes/src'
+  }
+end

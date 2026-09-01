@@ -1,0 +1,13 @@
+[package]
+name = "seq-guest"
+version.workspace = true
+edition.workspace = true
+description = "Demo native keel guest exercising two sequential host awaits (put then get) and JSON escaping."
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+keel-native-guest = { path = "../../../../../crates/keel-native-guest" }

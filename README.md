@@ -4,9 +4,9 @@ Actrium is the private monorepo for the Actrium browser applications, the Actr
 foundation, the Keel sandbox UI framework, and Loran—the default shore-side
 service suite.
 
-Actr's implementation and its former Actrix service suite have been migrated
-into this repository. Actro and Keel remain separate until their own reviewed
-history imports are complete.
+Actr, its former Actrix service suite, and Keel have been migrated into this
+repository through reviewed history imports. Actro remains separate until its
+own import is complete.
 
 ## Project shape
 
@@ -19,7 +19,7 @@ history imports are complete.
     ├── macos/           Actrium macOS application
     ├── windows/         Actrium Windows application
     ├── crates/          Reusable Rust crates, including Actr and Loran
-    ├── packages/        Actr bindings and other non-Rust packages
+    ├── packages/        Actr bindings, Keel, and other non-Rust packages
     ├── contracts/       Cross-language and cross-process protocol boundaries
     ├── examples/        Focused examples for each component
     ├── tests/           Cross-component conformance, integration, and e2e tests

@@ -1,0 +1,22 @@
+[package]
+name = "ui-guest"
+version.workspace = true
+edition.workspace = true
+description = "Demo native keel guest that renders UI (View > Text) via the keel-native-guest SDK."
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+# Feature forward so build.sh can produce BOTH a default (binary-capable) fixture
+# and a `--no-default-features` JSON-only back-compat fixture from this one crate.
+# In build.sh's main invocation cargo unifies `binary-protocol` in from sibling
+# guests anyway, so the default ui-guest.wasm is binary-capable; the isolated
+# `--no-default-features` build (no siblings) is the pre-promotion JSON-only guest.
+[features]
+default = ["binary-protocol"]
+binary-protocol = ["keel-native-guest/binary-protocol"]
+
+[dependencies]
+keel-native-guest = { path = "../../../../../crates/keel-native-guest", default-features = false }
