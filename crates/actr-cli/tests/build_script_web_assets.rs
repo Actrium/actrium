@@ -35,7 +35,7 @@ fn actor_service_worker_executes_only_authenticated_guest_artifacts() {
 fn missing_generated_web_assets_copy_from_canonical_sources_without_mutating_cli_assets() {
     let temp = TempRepo::new("actr-cli-build-script");
     let repo_root = temp.path();
-    let cli_dir = repo_root.join("cli");
+    let cli_dir = repo_root.join("crates/actr-cli");
     let asset_dir = cli_dir.join("assets/web-runtime");
     fs::create_dir_all(&asset_dir).expect("create cli asset dir");
     let actor_asset = asset_dir.join("actor.sw.js");

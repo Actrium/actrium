@@ -36,9 +36,9 @@ filename = filename.replace(b"As" + b"kc", b"Actr")
 filename = filename.replace(primary, b"actr")
 regex = __import__("re")
 peer = b"as" + b"ks"
-filename = regex.sub(rb"(?<![A-Za-z0-9_])" + peer + rb"(?![A-Za-z0-9_])", b"requests", filename)
-filename = regex.sub(rb"(?<![A-Za-z0-9_])" + peer.title() + rb"(?![A-Za-z0-9_])", b"Requests", filename)
-filename = regex.sub(rb"(?<![A-Za-z0-9_])" + peer.upper() + rb"(?![A-Za-z0-9_])", b"REQUESTS", filename)
+filename = regex.sub(rb"(?<![A-Za-z0-9])" + peer + rb"(?![A-Za-z0-9])", b"requests", filename)
+filename = regex.sub(rb"(?<![A-Za-z0-9])" + peer.title() + rb"(?![A-Za-z0-9])", b"Requests", filename)
+filename = regex.sub(rb"(?<![A-Za-z0-9])" + peer.upper() + rb"(?![A-Za-z0-9])", b"REQUESTS", filename)
 return filename
 ' \
   --blob-callback '
@@ -51,9 +51,10 @@ data = data.replace(b"As" + b"kc", b"Actr")
 data = data.replace(primary, b"actr")
 regex = __import__("re")
 peer = b"as" + b"ks"
-data = regex.sub(rb"(?<![A-Za-z0-9_])" + peer + rb"(?![A-Za-z0-9_])", b"requests", data)
-data = regex.sub(rb"(?<![A-Za-z0-9_])" + peer.title() + rb"(?![A-Za-z0-9_])", b"Requests", data)
-data = regex.sub(rb"(?<![A-Za-z0-9_])" + peer.upper() + rb"(?![A-Za-z0-9_])", b"REQUESTS", data)
+data = data.replace(b"Pending" + peer.title(), b"PendingRequests")
+data = regex.sub(rb"(?<![A-Za-z0-9])" + peer + rb"(?![A-Za-z0-9])", b"requests", data)
+data = regex.sub(rb"(?<![A-Za-z0-9])" + peer.title() + rb"(?![A-Za-z0-9])", b"Requests", data)
+data = regex.sub(rb"(?<![A-Za-z0-9])" + peer.upper() + rb"(?![A-Za-z0-9])", b"REQUESTS", data)
 blob.data = data
 ' \
   --message-callback '
@@ -63,9 +64,10 @@ message = message.replace(b"As" + b"kc", b"Actr")
 message = message.replace(primary, b"actr")
 regex = __import__("re")
 peer = b"as" + b"ks"
-message = regex.sub(rb"(?<![A-Za-z0-9_])" + peer + rb"(?![A-Za-z0-9_])", b"requests", message)
-message = regex.sub(rb"(?<![A-Za-z0-9_])" + peer.title() + rb"(?![A-Za-z0-9_])", b"Requests", message)
-message = regex.sub(rb"(?<![A-Za-z0-9_])" + peer.upper() + rb"(?![A-Za-z0-9_])", b"REQUESTS", message)
+message = message.replace(b"Pending" + peer.title(), b"PendingRequests")
+message = regex.sub(rb"(?<![A-Za-z0-9])" + peer + rb"(?![A-Za-z0-9])", b"requests", message)
+message = regex.sub(rb"(?<![A-Za-z0-9])" + peer.title() + rb"(?![A-Za-z0-9])", b"Requests", message)
+message = regex.sub(rb"(?<![A-Za-z0-9])" + peer.upper() + rb"(?![A-Za-z0-9])", b"REQUESTS", message)
 return message
 '
 
