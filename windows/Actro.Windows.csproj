@@ -13,7 +13,7 @@
          for AssemblyVersion, FileVersion and InformationalVersion, and
          scripts/actrium/package-windows.ps1 reads the same file for artifact and
          installer version stamping. -->
-    <ActroWindowsVersionFile>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '..', 'VERSION'))</ActroWindowsVersionFile>
+    <ActroWindowsVersionFile>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', 'VERSION'))</ActroWindowsVersionFile>
     <Version>$([System.IO.File]::ReadAllText('$(ActroWindowsVersionFile)').Trim())</Version>
     <!-- No app icon asset exists in the repo yet (macOS/iOS icon sets carry
          only Contents.json); the executable keeps the default icon until an
@@ -31,6 +31,12 @@
     <!-- DPAPI protection for the browser sync credential file; not part of
          the .NET 8 shared framework. -->
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The test project lives below this project root. Keep its sources and
+         generated obj files out of the application project's default glob. -->
+    <Compile Remove="tests\**\*.cs" />
   </ItemGroup>
 
   <ItemGroup>

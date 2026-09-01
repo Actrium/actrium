@@ -469,7 +469,7 @@ SDK.
 To build and copy the Rust DLL on a Windows Rust host:
 
 ```text
-scripts/build-actro-rust-bindings.sh windows
+scripts/actrium/build-actro-rust-bindings.sh windows
 ```
 
 ## Packaging

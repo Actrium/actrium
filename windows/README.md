@@ -186,7 +186,7 @@ The current shell reads shared ActroCore metadata through `actro_core.dll` when
 that DLL is present. Build and copy it on a Windows Rust host with:
 
 ```text
-scripts/build-actro-rust-bindings.sh windows
+scripts/actrium/build-actro-rust-bindings.sh windows
 ```
 
 Generated DLLs live under `windows/native/` locally and are ignored by
