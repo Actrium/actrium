@@ -1,0 +1,18 @@
+/*
+ * VitePress caps .VPHero .text at 576px from the tablet breakpoint
+ * upward. Desktop type is 56px, so "Sandboxed dynamic UI" overflows
+ * by a few characters and orphans "UI" on its own line.
+ *
+ * Drop the cap at desktop so the line follows the hero column instead.
+ * text-wrap: balance keeps a two-letter last line from happening when
+ * the column itself is narrower than the phrase (just above 960px).
+ */
+.VPHero .text {
+  text-wrap: balance;
+}
+
+@media (min-width: 960px) {
+  .VPHero .text {
+    max-width: none;
+  }
+}

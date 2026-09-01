@@ -1,0 +1,31 @@
+{
+  "reactNativeVersion": "0.81.5",
+  "dependencies": {
+    "keel": {
+      "root": "../../..",
+      "name": "keel",
+      "platforms": {
+        "android": {
+          "sourceDir": "../../../android",
+          "packageImportPath": "import com.keel.sandbox.KeelSandboxNativePackage;",
+          "packageInstance": "new KeelSandboxNativePackage()",
+          "buildTypes": ["debug", "release"],
+          "componentDescriptors": [],
+          "dependencyConfiguration": "implementation",
+          "isPureCxxDependency": false
+        }
+      }
+    }
+  },
+  "project": {
+    "android": {
+      "sourceDir": ".",
+      "appName": "app",
+      "packageName": "com.keel.demo",
+      "applicationId": "com.keel.demo",
+      "mainActivity": ".MainActivity",
+      "watchModeCommandParams": [],
+      "dependencyConfiguration": "implementation"
+    }
+  }
+}

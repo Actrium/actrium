@@ -1,0 +1,13 @@
+[package]
+name = "canvas-guest"
+version.workspace = true
+edition.workspace = true
+description = "Demo native keel guest that draws a recognizable 2D scene via the keel-native-guest canvas::draw display list."
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+keel-native-guest = { path = "../keel-native-guest" }

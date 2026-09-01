@@ -1,0 +1,22 @@
+# stack/* on this repository is a GitHub compare base for stacked PRs, not a
+# landing branch. This job is required by the "stack bases are pointers"
+# ruleset, so a PR whose base is stack/* cannot be merged.
+name: stack-not-merge-target
+
+on:
+  pull_request:
+    branches:
+      - "stack/**"
+
+jobs:
+  stack-not-merge-target:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Refuse merge into stack/*
+        run: |
+          echo "::error::stack/* is a pointer for stacked PR review, not a merge target."
+          echo "Retarget this pull request at main (after the stack base lands) and merge there."
+          echo "base=${GITHUB_BASE_REF}"
+          echo "head=${GITHUB_HEAD_REF}"
+          exit 1

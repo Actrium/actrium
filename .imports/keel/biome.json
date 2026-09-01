@@ -1,0 +1,87 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.3.10/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true
+  },
+  "overrides": [
+    {
+      "includes": [
+        "**/__tests__/**",
+        "**/__mocks__/**",
+        "**/__benchmarks__/**",
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/*.bench.ts",
+        "tests/**",
+        "examples/**",
+        "src/guest/build/**",
+        "src/host/engine/sandbox-runtime-bundle.ts",
+        "src/host/sandbox/wasm/**"
+      ],
+      "linter": {
+        "enabled": false
+      },
+      "formatter": {
+        "enabled": false
+      },
+      "assist": {
+        "enabled": false
+      }
+    },
+    {
+      "includes": ["contracts/*.golden.json", "contracts/*.matrix.json"],
+      "formatter": {
+        "enabled": false
+      },
+      "assist": {
+        "enabled": false
+      }
+    }
+  ],
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "suspicious": {
+        "noExplicitAny": "warn",
+        "noArrayIndexKey": "off",
+        "useIterableCallbackReturn": "off",
+        "noAssignInExpressions": "off"
+      },
+      "style": {
+        "noNonNullAssertion": "off",
+        "useNodejsImportProtocol": "off"
+      },
+      "complexity": {
+        "noUselessCatch": "off",
+        "noStaticOnlyClass": "off",
+        "noCommaOperator": "off",
+        "noArguments": "off"
+      },
+      "correctness": {
+        "noInnerDeclarations": "off"
+      },
+      "security": {
+        "noGlobalEval": "off"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "always",
+      "trailingCommas": "es5"
+    }
+  }
+}

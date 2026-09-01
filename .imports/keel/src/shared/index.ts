@@ -1,0 +1,123 @@
+/**
+ * @keel/shared - Protocol Layer
+ *
+ * Host <-> Guest shared protocol surface:
+ * - Bridge
+ * - serialization / type rules
+ * - CallbackRegistry
+ */
+
+// Bridge (Host <-> Guest transport)
+export {
+  Bridge,
+  type BridgeOptions,
+  type EncodeBatchResult,
+  PromiseManager,
+  type PromiseManagerOptions,
+  type PromiseSettleResult,
+} from './bridge';
+// CallbackRegistry
+export {
+  CallbackRegistry as CallbackRegistryImpl,
+  globalCallbackRegistry,
+} from './callback-registry';
+// Host <-> guest boundary event names
+export { CONFIG_UPDATE_EVENT, REF_RESULT_EVENT, RENDER_ERROR_EVENT } from './events';
+// Web keyboard bridge protocol (issue #19, L3)
+export {
+  KBD_EVENT,
+  KBD_SUBSCRIBE,
+  KBD_UNSUBSCRIBE,
+  type KeelKeyEvent,
+  type KeyboardSubscribePayload,
+  type KeyboardUnsubscribePayload,
+} from './keyboard';
+// Serialization utilities ()
+export {
+  createDecoder,
+  createEncoder,
+  decodeObject,
+  encodeObject,
+} from './serialization';
+// TypeRules
+export {
+  type CodecCallbacks,
+  DEFAULT_TYPE_RULES,
+  type TransportStrategy,
+  type TypeRule,
+} from './type-rules';
+export type {
+  AppendOperation,
+  BaseOperation,
+  // Bridge
+  BridgeValue,
+  BridgeValueArray,
+  BridgeValueObject,
+  //
+  CallbackRegistry,
+  CallFunctionMessage,
+  ConfigUpdateMessage,
+  CreateOperation,
+  DeleteOperation,
+  DestroyMessage,
+  HostEventMessage,
+  HostMessage,
+  InsertOperation,
+  // JSI
+  JSIPrimitive,
+  JSISafe,
+  JSISafeArray,
+  JSISafeObject,
+  Operation,
+  OperationBatch,
+  //
+  OperationType,
+  PromiseSettleMessage,
+  RefCallOperation,
+  RefMethodResultMessage,
+  RemoveOperation,
+  ReorderOperation,
+  //  Bridge
+  RequiresBridge,
+  ReviewedUnknown,
+  SendToHost,
+  SerializedCreateOperation,
+  SerializedDate,
+  SerializedError,
+  SerializedFunction,
+  SerializedHostMessage,
+  SerializedMap,
+  SerializedOperation,
+  SerializedOperationBatch,
+  SerializedPromise,
+  SerializedPromiseSettleMessage,
+  SerializedProps,
+  SerializedRefCallOperation,
+  SerializedRefMethodResultMessage,
+  SerializedRegExp,
+  SerializedSet,
+  SerializedSpecialType,
+  SerializedUpdateOperation,
+  //
+  SerializedValue,
+  SerializedValueArray,
+  SerializedValueObject,
+  TextOperation,
+  UpdateOperation,
+} from './types';
+//
+// Type Guards
+export {
+  HostMsg,
+  isJSIPrimitive,
+  isSerializedDate,
+  isSerializedError,
+  isSerializedFunction,
+  isSerializedMap,
+  isSerializedPromise,
+  isSerializedRegExp,
+  isSerializedSet,
+  isSerializedSpecialType,
+  OPERATION_TYPES,
+  operationHasProps,
+} from './types';

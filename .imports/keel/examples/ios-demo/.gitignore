@@ -1,0 +1,8 @@
+Pods/
+node_modules/
+build/
+*.xcworkspace/
+DerivedData/
+package-lock.json
+.keel_pod_cache
+*.jsbundle
