@@ -1,0 +1,36 @@
+/* 韩语 (ko) */
+
+/* 隐私弹窗 */
+"privateTitle" = "Welcome to Actro";
+"privateMessage" = "Before using this application, please carefully read and fully understand the [**User Agreement**](https://www.actrium.example/corp/en/user.html) and [**Privacy Policy**](https://www.actrium.example/corp/en/privacy.html).<br>
+To provide intelligent Q&A and related services, we may collect and use necessary information.\n
+Please note:
+* Do not share your personal sensitive information in conversations.
+* Your chat content may be used for security review and service optimization.
+* This application is a technical platform. Content is provided and managed by the Application Provider. The platform does not guarantee the accuracy, completeness, or legality of the content.\n
+We will strictly protect your personal information and only use it within the scope permitted by law and required for providing services.<br>
+By clicking “Agree”, you confirm that you have read and agreed to the above agreements.<br>
+If you do not agree, you will not be able to use the features of this application.";
+"privateDisagree" = "Disagree";
+"privateAgree" = "Agree";
+
+/* 起始页 */
+"activity" = "활동";
+"preferences" = "환경설정";
+"bookmarks" = "즐겨찾기";
+"search" = "검색";
+"goback" = "뒤로";
+"blackTab" = "새 탭";
+
+/* 길게 누르기 메뉴 */
+"bookmark" = "북마크";
+"unbookmark" = "북마크 해제";
+"closeTab" = "탭 닫기";
+"closeOtherTabs" = "다른 탭 닫기";
+
+/* 탭 상태 */
+"serverClosed" = "서비스 종료";
+
+/* 빈 데이터 페이지 */
+"emptyActiveTitle" = "앱이 여기에 표시";
+"emptyActiveSubtitle" = "위의 \"+\" 누르기";

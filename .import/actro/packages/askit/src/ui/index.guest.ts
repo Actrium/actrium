@@ -1,0 +1,29 @@
+/**
+ * UI Components - Guest exports
+ *
+ * These are DSL identifiers that map to host components.
+ */
+
+// Re-export types (same types for both environments)
+export type {
+  ChatBubbleProps,
+  StepItem,
+  StepListProps,
+  StepStatus,
+  ThemeViewProps,
+  UserAvatarProps,
+  GlobalAlertProps,
+} from '../types';
+export { ChatBubble } from './ChatBubble/ChatBubble.guest';
+export { GlobalAlert } from './GlobalAlert/GlobalAlert.guest';
+export { Panel } from './Panel/Panel.guest';
+export { StepList } from './StepList/StepList.guest';
+export { ThemeView } from './ThemeView/ThemeView.guest';
+export { UserAvatar } from './UserAvatar/UserAvatar.guest';
+export { MyTouchableOpacity } from './MyTouchableOpacity/MyTouchableOpacity.guest';
+export {
+  DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuText,
+  DropdownMenuSubText,
+} from './DropdownMenu/DropdownMenu.guest';

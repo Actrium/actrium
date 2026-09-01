@@ -1,0 +1,44 @@
+diff --git a/node_modules/react-native-haptic-feedback/android/build.gradle b/node_modules/react-native-haptic-feedback/android/build.gradle
+index 1de5320..b16b09a 100644
+--- a/node_modules/react-native-haptic-feedback/android/build.gradle
++++ b/node_modules/react-native-haptic-feedback/android/build.gradle
+@@ -9,7 +9,7 @@ buildscript {
+     }
+ 
+     dependencies {
+-        classpath 'com.android.tools.build:gradle:8.+'
++        classpath 'com.android.tools.build:gradle:8.8.2'
+     }
+ }
+ 
+@@ -27,17 +27,17 @@ if (isNewArchitectureEnabled()) {
+ }
+ 
+ android {
+-    namespace "com.mkuczera.haptic"
++    namespace = "com.mkuczera.haptic"
+ 
+     buildFeatures {
+         buildConfig = true
+     }
+ 
+-    compileSdk safeExtGet('compileSdkVersion', DEFAULT_COMPILE_SDK_VERSION)
++    compileSdk = safeExtGet('compileSdkVersion', DEFAULT_COMPILE_SDK_VERSION)
+ 
+     defaultConfig {
+-        minSdk safeExtGet('minSdkVersion', DEFAULT_MIN_SDK_VERSION)
+-        targetSdk safeExtGet('targetSdkVersion', DEFAULT_TARGET_SDK_VERSION)
++        minSdk = safeExtGet('minSdkVersion', DEFAULT_MIN_SDK_VERSION)
++        targetSdk = safeExtGet('targetSdkVersion', DEFAULT_TARGET_SDK_VERSION)
+         buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", isNewArchitectureEnabled().toString()
+     }
+ 
+@@ -52,7 +52,7 @@ android {
+     }
+ 
+     lint {
+-        abortOnError false
++        abortOnError = false
+     }
+ }
+ 

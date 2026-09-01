@@ -1,0 +1,4 @@
+module actro_coreFFI {
+    header "actro_coreFFI.h"
+    export *
+}

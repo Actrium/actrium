@@ -1,0 +1,10 @@
+# Maximum bytes<TAB>tracked path
+#
+# Entries are exceptional, reviewed runtime/source inputs. A lower size is
+# always accepted; growth beyond the recorded budget requires an explicit
+# policy update.
+1000242	apps/ios/actro/Actro/Resources/actro-logo.icon/Assets/颜色和文字 [已恢复].svg
+1900000	crates/actro-core/src/browser_data.rs
+1769811	packages/rill/native/quickjs/vendor/quickjs.c
+1798602	packages/supramark/crates/d2-little/mathjax.js
+1173288	packages/supramark/crates/mermaid-little/src/cose_bilkent_js/vendor/cytoscape.umd.js

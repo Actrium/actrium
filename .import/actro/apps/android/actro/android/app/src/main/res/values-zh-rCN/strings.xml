@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Actro</string>
+    <string name="tab_active">活跃</string>
+    <string name="tab_bookmark">书签</string>
+    <string name="tab_set">偏好设置</string>
+    <string name="search">搜索...</string>
+    <string name="goback">返回</string>
+    <string name="blank_tab">新页签</string>
+    <string name="menu_bookmark">收藏</string>
+    <string name="menu_close_tab">关闭页签</string>
+    <string name="menu_close_other_tabs">关闭其他页签</string>
+    <string name="menu_cancel_bookmark">取消收藏</string>
+    <string name="active_empty_text">您打开的应用会显示在此处\n点击上面 \"+\" 打开应用</string>
+    <string name="server_closed">已停服</string>
+</resources>

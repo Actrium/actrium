@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/flTabItem"
+    android:layout_width="240dp"
+    android:layout_height="54dp"
+    android:paddingTop="1dp">
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:paddingHorizontal="2dp">
+
+        <LinearLayout
+            android:id="@+id/llContent"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_gravity="bottom"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="8dp">
+
+            <io.actrium.actro.view.RoundedCornerLayout
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:layout_marginEnd="6dp"
+                app:cornerRadius="10dp">
+
+                <ImageView
+                    android:id="@+id/ivAppIcon"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp" />
+            </io.actrium.actro.view.RoundedCornerLayout>
+
+            <TextView
+                android:id="@+id/tvAppName"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="8dp"
+                android:layout_weight="1" />
+
+            <ImageView
+                android:id="@+id/ivDel"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:padding="8dp"
+                android:src="@drawable/ic_close" />
+        </LinearLayout>
+    </FrameLayout>
+
+    <!-- 选中项左侧桥接：填补本item左间距，连接左邻居的rcvBottomRight -->
+
+    <io.actrium.actro.tablet.ReverseCornerView
+        android:id="@+id/vBridgeLeft"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="-18dp"
+        android:visibility="visible"
+        app:fillColor="#F2F2F6"
+        app:reverseDirection="bottomRight" />
+
+    <io.actrium.actro.tablet.ReverseCornerView
+        android:id="@+id/vBridgeRight"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="-18dp"
+        android:visibility="visible"
+        app:fillColor="#F2F2F6"
+        app:reverseDirection="bottomLeft" />
+
+    <io.actrium.actro.tablet.ReverseCornerView
+        android:id="@+id/rcvBottomLeft"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="-2dp"
+        android:visibility="gone"
+        app:fillColor="#F2F2F6"
+        app:reverseDirection="bottomLeft" />
+
+    <io.actrium.actro.tablet.ReverseCornerView
+        android:id="@+id/rcvBottomRight"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="-2dp"
+        android:visibility="gone"
+        app:fillColor="#F2F2F6"
+        app:reverseDirection="bottomRight" />
+</FrameLayout>
