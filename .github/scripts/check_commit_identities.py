@@ -13,8 +13,7 @@ from pathlib import Path
 
 USER_NOREPLY_RE = re.compile(r"^[^@\s<>]+@users\.noreply\.github\.com$", re.IGNORECASE)
 EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
-GITHUB_SERVICE_NAME = "GitHub"
-GITHUB_SERVICE_EMAIL = "noreply@github.com"
+ANONYMOUS_ROOT_NAME = "root"
 ZERO_SHA = "0" * 40
 
 
@@ -41,11 +40,11 @@ def run_git(repo: Path, *args: str) -> str:
 def is_allowed_identity(name: str, email: str) -> bool:
     if USER_NOREPLY_RE.fullmatch(email):
         return True
-    return name == GITHUB_SERVICE_NAME and email.casefold() == GITHUB_SERVICE_EMAIL
+    return name == ANONYMOUS_ROOT_NAME and not email
 
 
 def is_allowed_message_email(email: str) -> bool:
-    return bool(USER_NOREPLY_RE.fullmatch(email)) or email.casefold() == GITHUB_SERVICE_EMAIL
+    return bool(USER_NOREPLY_RE.fullmatch(email))
 
 
 def commit_range(repo: Path, base_sha: str, head_sha: str) -> list[str]:
