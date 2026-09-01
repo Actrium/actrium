@@ -74,6 +74,12 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ vars.PROTOC_VERSION }}
+
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: windows-verify
@@ -114,6 +120,12 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ vars.PROTOC_VERSION }}
 
       - uses: Swatinem/rust-cache@v2
         with:

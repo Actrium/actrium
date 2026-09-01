@@ -8038,13 +8038,13 @@ pub fn browser_storage_sync_cloud_store_capability_preflight(
                 .to_string(),
         );
     }
-    if let Some(max_object_bytes) = capabilities.max_object_bytes {
-        if max_object_bytes < MIN_BROWSER_STORAGE_SYNC_CLOUD_OBJECT_BYTES {
-            missing_required_capabilities.push("maxObjectBytes".to_string());
-            warnings.push(format!(
+    if let Some(max_object_bytes) = capabilities.max_object_bytes
+        && max_object_bytes < MIN_BROWSER_STORAGE_SYNC_CLOUD_OBJECT_BYTES
+    {
+        missing_required_capabilities.push("maxObjectBytes".to_string());
+        warnings.push(format!(
                 "Provider maxObjectBytes must be at least {MIN_BROWSER_STORAGE_SYNC_CLOUD_OBJECT_BYTES} for browser sync log and snapshot objects."
             ));
-        }
     }
 
     if !capabilities.supports_prefix_list {
@@ -12803,19 +12803,18 @@ pub fn browser_storage_sync_cloud_compaction_result_plan(
         }
     } else {
         for operation in &compaction_plan.delete_operations {
-            if let Some(result) = delete_results_by_index.get(&operation.operation_index) {
-                if result.success
-                    && browser_storage_sync_cloud_delete_result_matches_operation(result, operation)
-                {
-                    delete_succeeded_count = delete_succeeded_count.saturating_add(1);
-                    deleted_paths.push(operation.path.clone());
-                    issues.push(browser_storage_sync_cloud_compaction_delete_issue(
+            if let Some(result) = delete_results_by_index.get(&operation.operation_index)
+                && result.success
+                && browser_storage_sync_cloud_delete_result_matches_operation(result, operation)
+            {
+                delete_succeeded_count = delete_succeeded_count.saturating_add(1);
+                deleted_paths.push(operation.path.clone());
+                issues.push(browser_storage_sync_cloud_compaction_delete_issue(
                         operation,
                         "deleteBeforeManifestCommit",
                         Some("Provider adapter reported a log delete before the compaction manifest write committed."),
                         false,
                     ));
-                }
             }
         }
     }
@@ -19799,16 +19798,16 @@ fn browser_storage_sync_cloud_compacted_snapshot(
 
     if let Some(snapshot) = snapshot
         .and_then(|snapshot| normalize_browser_storage_sync_cloud_snapshot_object(Some(snapshot)))
+        && snapshot.scope == scope
+        && snapshot.collection == collection
     {
-        if snapshot.scope == scope && snapshot.collection == collection {
-            cursors.extend(snapshot.high_watermarks);
-            for record in snapshot.records {
-                browser_storage_sync_cloud_insert_snapshot_record(
-                    &mut records_by_id,
-                    collection,
-                    record,
-                );
-            }
+        cursors.extend(snapshot.high_watermarks);
+        for record in snapshot.records {
+            browser_storage_sync_cloud_insert_snapshot_record(
+                &mut records_by_id,
+                collection,
+                record,
+            );
         }
     }
 
@@ -20313,20 +20312,20 @@ fn browser_storage_sync_cloud_membership_round_summary(
         if !result.read_reason.is_empty() {
             read_reasons.insert(result.read_reason.clone());
         }
-        if !result.success {
-            if let Some(error_kind) = &result.error_kind {
-                failed_read_error_kinds.insert(error_kind.clone());
-            }
+        if !result.success
+            && let Some(error_kind) = &result.error_kind
+        {
+            failed_read_error_kinds.insert(error_kind.clone());
         }
     }
 
     let mut write_reasons = BTreeSet::new();
     let mut failed_write_error_kinds = BTreeSet::new();
     for result in write_results {
-        if !result.success {
-            if let Some(error_kind) = &result.error_kind {
-                failed_write_error_kinds.insert(error_kind.clone());
-            }
+        if !result.success
+            && let Some(error_kind) = &result.error_kind
+        {
+            failed_write_error_kinds.insert(error_kind.clone());
         }
     }
     if let Some(plan) = membership_plan {
@@ -20548,19 +20547,19 @@ fn browser_storage_sync_cloud_recovery_snapshot_round_summary(
         if !result.read_reason.is_empty() {
             read_reasons.insert(result.read_reason.clone());
         }
-        if !result.success {
-            if let Some(error_kind) = &result.error_kind {
-                failed_read_error_kinds.insert(error_kind.clone());
-            }
+        if !result.success
+            && let Some(error_kind) = &result.error_kind
+        {
+            failed_read_error_kinds.insert(error_kind.clone());
         }
     }
 
     let mut failed_write_error_kinds = BTreeSet::new();
     for result in write_results {
-        if !result.success {
-            if let Some(error_kind) = &result.error_kind {
-                failed_write_error_kinds.insert(error_kind.clone());
-            }
+        if !result.success
+            && let Some(error_kind) = &result.error_kind
+        {
+            failed_write_error_kinds.insert(error_kind.clone());
         }
     }
 
@@ -20793,28 +20792,28 @@ fn browser_storage_sync_cloud_compaction_round_summary(
         if !result.read_reason.is_empty() {
             read_reasons.insert(result.read_reason.clone());
         }
-        if !result.success {
-            if let Some(error_kind) = &result.error_kind {
-                failed_read_error_kinds.insert(error_kind.clone());
-            }
+        if !result.success
+            && let Some(error_kind) = &result.error_kind
+        {
+            failed_read_error_kinds.insert(error_kind.clone());
         }
     }
 
     let mut failed_write_error_kinds = BTreeSet::new();
     for result in write_results {
-        if !result.success {
-            if let Some(error_kind) = &result.error_kind {
-                failed_write_error_kinds.insert(error_kind.clone());
-            }
+        if !result.success
+            && let Some(error_kind) = &result.error_kind
+        {
+            failed_write_error_kinds.insert(error_kind.clone());
         }
     }
 
     let mut failed_delete_error_kinds = BTreeSet::new();
     for result in delete_results {
-        if !result.success {
-            if let Some(error_kind) = &result.error_kind {
-                failed_delete_error_kinds.insert(error_kind.clone());
-            }
+        if !result.success
+            && let Some(error_kind) = &result.error_kind
+        {
+            failed_delete_error_kinds.insert(error_kind.clone());
         }
     }
 
@@ -21036,19 +21035,19 @@ fn browser_storage_sync_cloud_cleanup_round_summary(
         if !result.read_reason.is_empty() {
             read_reasons.insert(result.read_reason.clone());
         }
-        if !result.success {
-            if let Some(error_kind) = &result.error_kind {
-                failed_read_error_kinds.insert(error_kind.clone());
-            }
+        if !result.success
+            && let Some(error_kind) = &result.error_kind
+        {
+            failed_read_error_kinds.insert(error_kind.clone());
         }
     }
 
     let mut failed_delete_error_kinds = BTreeSet::new();
     for result in delete_results {
-        if !result.success {
-            if let Some(error_kind) = &result.error_kind {
-                failed_delete_error_kinds.insert(error_kind.clone());
-            }
+        if !result.success
+            && let Some(error_kind) = &result.error_kind
+        {
+            failed_delete_error_kinds.insert(error_kind.clone());
         }
     }
 
@@ -21267,19 +21266,19 @@ fn browser_storage_sync_cloud_recovery_retention_round_summary(
         if !result.read_reason.is_empty() {
             read_reasons.insert(result.read_reason.clone());
         }
-        if !result.success {
-            if let Some(error_kind) = &result.error_kind {
-                failed_read_error_kinds.insert(error_kind.clone());
-            }
+        if !result.success
+            && let Some(error_kind) = &result.error_kind
+        {
+            failed_read_error_kinds.insert(error_kind.clone());
         }
     }
 
     let mut failed_delete_error_kinds = BTreeSet::new();
     for result in delete_results {
-        if !result.success {
-            if let Some(error_kind) = &result.error_kind {
-                failed_delete_error_kinds.insert(error_kind.clone());
-            }
+        if !result.success
+            && let Some(error_kind) = &result.error_kind
+        {
+            failed_delete_error_kinds.insert(error_kind.clone());
         }
     }
 
@@ -21470,19 +21469,19 @@ fn browser_storage_sync_cloud_push_round_summary(
         if !result.read_reason.is_empty() {
             read_reasons.insert(result.read_reason.clone());
         }
-        if !result.success {
-            if let Some(error_kind) = &result.error_kind {
-                failed_read_error_kinds.insert(error_kind.clone());
-            }
+        if !result.success
+            && let Some(error_kind) = &result.error_kind
+        {
+            failed_read_error_kinds.insert(error_kind.clone());
         }
     }
 
     let mut failed_write_error_kinds = BTreeSet::new();
     for result in write_results {
-        if !result.success {
-            if let Some(error_kind) = &result.error_kind {
-                failed_write_error_kinds.insert(error_kind.clone());
-            }
+        if !result.success
+            && let Some(error_kind) = &result.error_kind
+        {
+            failed_write_error_kinds.insert(error_kind.clone());
         }
     }
 
@@ -21682,10 +21681,10 @@ fn browser_storage_sync_cloud_pull_round_summary(
         if !result.read_reason.is_empty() {
             read_reasons.insert(result.read_reason.clone());
         }
-        if !result.success {
-            if let Some(error_kind) = &result.error_kind {
-                failed_read_error_kinds.insert(error_kind.clone());
-            }
+        if !result.success
+            && let Some(error_kind) = &result.error_kind
+        {
+            failed_read_error_kinds.insert(error_kind.clone());
         }
     }
 
@@ -24670,10 +24669,9 @@ fn browser_storage_sync_cloud_observability_insert_attr(
     value: &str,
 ) {
     if let Some(value) = normalize_optional_sync_text(Some(value.to_string()), MAX_SYNC_TEXT_LENGTH)
+        && !value.is_empty()
     {
-        if !value.is_empty() {
-            attributes.insert(key.to_string(), value);
-        }
+        attributes.insert(key.to_string(), value);
     }
 }
 
@@ -28443,10 +28441,8 @@ fn canonicalize_external_address_with_reason(
     let (raw_scheme, remainder) = trimmed.split_once(':').ok_or("invalidUrl")?;
     let scheme = raw_scheme.to_ascii_lowercase();
     match scheme.as_str() {
-        "http" | "https" | "file" => {
-            if !remainder.starts_with("//") {
-                return Err("invalidUrl");
-            }
+        "http" | "https" | "file" if !remainder.starts_with("//") => {
+            return Err("invalidUrl");
         }
         _ => {}
     }
@@ -32389,15 +32385,8 @@ fn serialize_json<T: Serialize>(value: &T) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "null".to_string())
 }
 
-struct BrowserStorageSyncNoopWake;
-
-impl std::task::Wake for BrowserStorageSyncNoopWake {
-    fn wake(self: Arc<Self>) {}
-}
-
 fn block_on_browser_storage_sync_ready<F: Future>(future: F) -> Option<F::Output> {
-    let waker = std::task::Waker::from(Arc::new(BrowserStorageSyncNoopWake));
-    let mut context = std::task::Context::from_waker(&waker);
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
     let mut future = Box::pin(future);
     match future.as_mut().poll(&mut context) {
         std::task::Poll::Ready(value) => Some(value),
@@ -32409,15 +32398,8 @@ fn block_on_browser_storage_sync_ready<F: Future>(future: F) -> Option<F::Output
 mod tests {
     use super::*;
 
-    struct NoopWake;
-
-    impl std::task::Wake for NoopWake {
-        fn wake(self: std::sync::Arc<Self>) {}
-    }
-
     fn block_on_immediate<F: std::future::Future>(future: F) -> F::Output {
-        let waker = std::task::Waker::from(std::sync::Arc::new(NoopWake));
-        let mut context = std::task::Context::from_waker(&waker);
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
         let mut future = Box::pin(future);
         match future.as_mut().poll(&mut context) {
             std::task::Poll::Ready(value) => value,
@@ -32568,18 +32550,16 @@ mod tests {
                 && !self
                     .conflict_written
                     .swap(true, std::sync::atomic::Ordering::SeqCst)
+                && let Ok(Some(object)) = &result
             {
-                if let Ok(Some(object)) = &result {
-                    let expected_revision = object.metadata.revision.clone();
-                    let bytes = object.bytes.clone();
-                    let _ =
-                        block_on_immediate(self.inner.write(BrowserStorageSyncCloudWriteRequest {
-                            path: BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH,
-                            bytes: &bytes,
-                            expected_revision: expected_revision.as_deref(),
-                            content_type: Some(BROWSER_STORAGE_SYNC_CLOUD_CONTENT_TYPE_JSON),
-                        }));
-                }
+                let expected_revision = object.metadata.revision.clone();
+                let bytes = object.bytes.clone();
+                let _ = block_on_immediate(self.inner.write(BrowserStorageSyncCloudWriteRequest {
+                    path: BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH,
+                    bytes: &bytes,
+                    expected_revision: expected_revision.as_deref(),
+                    content_type: Some(BROWSER_STORAGE_SYNC_CLOUD_CONTENT_TYPE_JSON),
+                }));
             }
             Box::pin(ready(result))
         }

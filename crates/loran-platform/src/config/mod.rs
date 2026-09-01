@@ -854,8 +854,8 @@ mod tests {
 
     #[test]
     fn example_config_loads_and_validates() {
-        let path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config.example.toml");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../loran/config/actrix.example.toml");
         let cfg = ActrixConfig::from_file(&path).expect("example config should parse");
         cfg.validate().expect("example config should validate");
         assert!(

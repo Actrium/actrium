@@ -78,18 +78,19 @@ fn deps_group_has_install() {
 }
 
 #[test]
-fn pkg_group_is_sign_verify_keygen_only() {
+fn pkg_group_exposes_pack_sign_verify_keygen() {
     let mut subs = subcommand_names("pkg");
     subs.sort();
     assert_eq!(
         subs,
         vec![
             "keygen".to_string(),
+            "pack".to_string(),
             "sign".to_string(),
             "verify".to_string()
         ],
-        "pkg should only expose sign/verify/keygen (build moved to top-level `build`, \
-         publish moved to `registry publish`)"
+        "pkg should expose pack/sign/verify/keygen (build stays top-level, \
+         publish stays under `registry publish`)"
     );
 }
 
