@@ -1,0 +1,48 @@
+pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
+plugins { id("com.facebook.react.settings") }
+
+// Read node path from local.properties
+def localProperties = new Properties()
+def localPropertiesFile = file('local.properties')
+if (localPropertiesFile.exists()) {
+    localProperties.load(new FileInputStream(localPropertiesFile))
+}
+def nodeExecutable = localProperties.getProperty('reactNative.nodeExecutableAndArgs', 'node')
+
+def autolinkConfigFile = file('build/generated/autolinking/react-native-config.json')
+autolinkConfigFile.parentFile.mkdirs()
+
+def autolinkCommand = [
+  nodeExecutable,
+  file('../node_modules/@react-native-community/cli/build/bin.js').absolutePath,
+  'config'
+]
+def autolinkProcess = new ProcessBuilder(autolinkCommand)
+  .directory(file('..'))
+  .redirectError(ProcessBuilder.Redirect.INHERIT)
+  .start()
+def autolinkOutput = autolinkProcess.inputStream.getText('UTF-8')
+def autolinkExitCode = autolinkProcess.waitFor()
+if (autolinkExitCode != 0) {
+  throw new GradleException("React Native autolinking config failed: ${autolinkCommand.join(' ')} exited with ${autolinkExitCode}")
+}
+autolinkConfigFile.text = autolinkOutput
+
+extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
+  ex.autolinkLibrariesFromConfigFile(autolinkConfigFile)
+}
+rootProject.name = 'actro'
+include ':app'
+includeBuild('../node_modules/@react-native/gradle-plugin')
+
+include ':actr-kotlin'
+project(':actr-kotlin').projectDir = file('../../../../packages/actr-kotlin')
+
+include ':actro-native-kotlin'
+project(':actro-native-kotlin').projectDir = file('../../../../packages/actrium-platform/android')
+
+include ':react-native-safe-area-context'
+project(':react-native-safe-area-context').projectDir = file('../node_modules/react-native-safe-area-context/android')
+
+include ':react-native-view-shot'
+project(':react-native-view-shot').projectDir = file('../node_modules/react-native-view-shot/android')

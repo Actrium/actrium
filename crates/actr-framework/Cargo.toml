@@ -34,7 +34,7 @@ cdylib = ["dep:tokio"]
 # `test-utils`: enable testing helpers such as `DummyContext` (includes UUID v4 generation and is not compatible with `wasm32`)
 test-utils = ["uuid/v4"]
 # `web`: opt-in `WebContext` implementation targeting
-# `wasm32-unknown-unknown` via wasm-bindgen (Option U γ-unified).
+# `wasm32-unknown-unknown` via wasm-bindgen (Option U gamma-unified).
 # The feature only pulls in the wasm-bindgen toolchain crates; native
 # builds (`default = []`) never see them.
 web = [
@@ -71,7 +71,7 @@ serde-wasm-bindgen = { version = "0.6", optional = true }
 # `actr-web-abi` is the WIT-lowered browser ABI crate that lives in the
 # separately-gated `packages/actr-web` workspace. `WebContext` routes every
 # outbound call through its `guest::*_with_request_id` wrappers (Option U
-# γ-unified §3.3/§3.4). Kept optional + path+version so native builds never
+# gamma-unified §3.3/§3.4). Kept optional + path+version so native builds never
 # pull it (or its wasm-bindgen tail) and so the cross-workspace path is
 # explicit.
 actr-web-abi = { path = "../../packages/actr-web/crates/actr-web-abi", version = "0.10.0-alpha.4", optional = true }

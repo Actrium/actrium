@@ -335,8 +335,8 @@ describe('canvas guests — guest->host JSON escaping', () => {
     // A color string containing a quote + backslash survives verbatim.
     expect(fillStyle?.color).toBe('#ff0000"\\');
     const text = ops(list).find((o) => asStr(o.op) === 'fillText');
-    // Metacharacters mixed with 2-byte (é) and 4-byte (emoji) UTF-8 all round-trip.
-    expect(text?.text).toBe('hé"llo\\\n\t😀');
+    // Metacharacters mixed with 2-byte (U+00E9) and 4-byte UTF-8 all round-trip.
+    expect(text?.text).toBe('h\u00e9"llo\\\n\t\u{1F600}');
   });
 });
 

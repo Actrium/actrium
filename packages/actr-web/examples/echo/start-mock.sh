@@ -32,7 +32,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ACTR_ROOT="$(cd "$PROJECT_ROOT/../.." && pwd)"
 
-# Unified guest crates (Option U γ-unified Phase 6c). The browser package
+# Unified guest crates (Option U gamma-unified Phase 6c). The browser package
 # is built for wasm32-unknown-unknown with `--features web
 # --no-default-features` and carries both wasm and glue in the signed archive.
 SERVER_GUEST_DIR="$SCRIPT_DIR/server-guest"

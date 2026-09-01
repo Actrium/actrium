@@ -24,7 +24,7 @@
 //! - **Web ABI / wasm-bindgen** (`target_arch = "wasm32"` + `feature = "web"`):
 //!   expands to a [`wasm_bindgen(start)`][wbgstart] bootstrap that wraps the
 //!   user [`Workload`] in `web::WebWorkloadAdapter` and hands it to
-//!   `actr_web_abi::host::register_workload`. Per Option U γ-unified §4.5
+//!   `actr_web_abi::host::register_workload`. Per Option U gamma-unified section 4.5
 //!   the same user source compiles against both wasm32 ABIs; only the
 //!   macro expansion differs. Targets `wasm32-unknown-unknown`.
 //! - **cdylib** (`feature = "cdylib"`): HostVTable function-pointer

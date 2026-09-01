@@ -4,7 +4,7 @@ const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
 const { resolve } = require('metro-resolver');
 
 const rootDir = __dirname;
-const projectRoot = path.resolve(rootDir, 'RCTNApps');
+const projectRoot = path.resolve(rootDir, 'ReactNativeApp');
 
 // Resolve keel from symlink in node_modules
 const keelPath = fs.realpathSync(path.resolve(rootDir, 'node_modules/keel'));

@@ -1,4 +1,4 @@
-//! Echo Server Guest WASM for Web — unified source (Option U γ-unified Phase 6c).
+//! Echo Server Guest WASM for Web - unified source (Option U gamma-unified Phase 6c).
 //!
 //! One source tree, two wasm32 ABIs:
 //!
@@ -59,7 +59,7 @@ use generated::{EchoServiceHandler, EchoServiceWorkload};
 pub struct EchoService;
 
 // `?Send` on wasm32 so the generated `EchoServiceHandler` trait (whose
-// async methods are `async_trait(?Send)` on wasm32 per γ-unified §3.1)
+    // Async methods are `async_trait(?Send)` on wasm32 per gamma-unified section 3.1.
 // and this impl agree on the future's auto-trait. Native builds keep
 // the default Send-future form.
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]

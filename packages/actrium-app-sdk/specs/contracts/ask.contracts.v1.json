@@ -1,0 +1,46 @@
+{
+  "name": "ask",
+  "version": 1,
+  "hostToGuest": {
+    "HOST_VISIBILITY": {
+      "summary": "Host Announcements Guest Current tab Whether to be visible, for use cooperative sleep/resume(Down) CPU).",
+      "payload": {
+        "visible": "boolean",
+        "tabId": "string?"
+      }
+    },
+    "RECEIVER_BACKPRESSURE": {
+      "summary": "Host/Receiver Back pressure occurs (jumping part) ops) ,Tip Guest Drop.",
+      "payload": {
+        "skipped": "number",
+        "batchId": "number?",
+        "applied": "number",
+        "total": "number"
+      }
+    }
+  },
+  "guestToHost": {
+    "ASKIT_TOAST_SHOW": {
+      "summary": "Internal: Guest requests host to show toast.",
+      "payload": {
+        "message": "string",
+        "options": "unknown?"
+      }
+    },
+    "ASKIT_HAPTIC_TRIGGER": {
+      "summary": "Internal: Guest requests host to trigger haptic.",
+      "payload": {
+        "type": "string?"
+      }
+    },
+    "GUEST_SLEEP_STATE": {
+      "summary": "Guest I'll report it to you. sleep Status (for surveillance and supervision).",
+      "payload": {
+        "sleeping": "boolean",
+        "tabId": "string?",
+        "reason": "string?"
+      }
+    }
+  }
+}
+

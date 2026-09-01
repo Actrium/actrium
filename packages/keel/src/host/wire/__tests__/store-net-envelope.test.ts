@@ -334,7 +334,7 @@ describe('store-net-envelope — at-cap acceptance', () => {
   });
 
   it('a frame whose total length is exactly maxEnvelopeBytes is accepted', () => {
-    // Layout = 12 + jsonLen + Σ(4 + segLen). Use the full 16 MiB segment
+    // Layout = 12 + jsonLen + sum(4 + segLen). Use the full 16 MiB segment
     // budget, then size a valid JSON string to consume the remaining headroom.
     const segs = Array.from(
       { length: LIMITS.maxSegments },

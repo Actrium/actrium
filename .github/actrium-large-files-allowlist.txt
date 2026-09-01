@@ -1,0 +1,8 @@
+# Maximum bytes<TAB>tracked path
+#
+# Entries are exceptional, reviewed runtime/source inputs. A lower size is
+# always accepted; growth beyond the recorded budget requires an explicit
+# policy update.
+1000242	ios/Actro/Resources/actro-logo.icon/Assets/color-and-text-restored.svg
+1900000	crates/actrium-core/src/browser_data.rs
+1800000	packages/keel/native/quickjs/vendor/quickjs.c

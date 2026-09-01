@@ -6,6 +6,7 @@
  */
 
 export type { EngineOptions } from './engine';
+export type { ComponentMap } from './registry';
 // Core exports
 export { Engine } from './engine';
 

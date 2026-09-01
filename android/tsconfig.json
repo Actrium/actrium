@@ -1,0 +1,17 @@
+{
+  "extends": "@react-native/typescript-config",
+  "compilerOptions": {
+    "types": ["jest"],
+    "paths": {
+      "react": ["./node_modules/@types/react/index.d.ts"],
+      "react-native": ["./node_modules/@types/react-native/index.d.ts"],
+      "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime.d.ts"],
+      "askit": ["../../../packages/actrium-app-sdk/src/index.host.ts"],
+      "askit/core": ["../../../packages/actrium-app-sdk/src/core/index.ts"],
+      "askit/contracts": ["../../../packages/actrium-app-sdk/src/contracts/index.ts"],
+      "keel": ["../../../packages/keel/src/host/index.ts"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["**/node_modules", "**/Pods"]
+}

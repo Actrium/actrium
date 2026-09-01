@@ -283,7 +283,7 @@ where
 {
     async fn dispatch(&self, envelope: wit::RpcEnvelope) -> Result<Vec<u8>, wit::ActrError> {
         // The per-dispatch WebContext binds `request_id` at construction
-        // time (γ-unified §3.3); outbound host imports issued from the
+        // time (gamma-unified §3.3); outbound host imports issued from the
         // handler will thread this id through `DISPATCH_CTXS`.
         let ctx = WebContext::new(ActrId::default(), None, envelope.request_id.clone());
         let envelope = envelope_from_wit(envelope);

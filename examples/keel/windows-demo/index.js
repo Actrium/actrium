@@ -1,2 +1,2 @@
-// Entry point — delegates to RCTNApps/index.tsx
-require('./RCTNApps/index');
+// Entry point — delegates to ReactNativeApp/index.tsx
+require('./ReactNativeApp/index');

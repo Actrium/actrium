@@ -2,7 +2,7 @@
   "name": "ios-demo",
   "version": "1.0.0",
   "description": "ios-demo - keel hello world for iOS",
-  "main": "RCTNApps/index.tsx",
+  "main": "ReactNativeApp/index.tsx",
   "scripts": {
     "start": "react-native start --verbose",
     "typecheck": "tsc --noEmit",

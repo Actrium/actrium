@@ -51,7 +51,7 @@
     "p2p",
     "distributed"
   ],
-  "author": "kookyleo@gmail.com",
+  "author": "kookyleo",
   "license": "Apache-2.0",
   "dependencies": {
     "@bufbuild/protobuf": "^2.11.0"

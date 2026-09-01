@@ -19,7 +19,7 @@ pub type MaybeSendBoxFuture<'a, T> = futures_util::future::LocalBoxFuture<'a, T>
 // ── MaybeSendSync marker ────────────────────────────────────────────────
 //
 // Auto-trait-style marker that is `Send + Sync` on native targets and empty
-// on `wasm32`. Per Option U γ-unified §3.1 the user-facing `Context` bound
+// on `wasm32`. Per Option U gamma-unified §3.1 the user-facing `Context` bound
 // is `Clone + 'static`, but native runtime layers (tokio multi-thread,
 // `WorkloadHookObserver`) must produce `Send` futures; pinning `Send + Sync`
 // behind this marker lets the framework trait carry a single `?Send`
@@ -61,7 +61,7 @@ impl<T: ?Sized> MaybeSendSync for T {}
 /// legitimately not be `Send`) and `#[async_trait]` (Send mode) on native
 /// targets so tokio-multi-thread spawners downstream keep working. The
 /// `MaybeSendSync` supertrait adds `Send + Sync` on native only — per
-/// Option U γ-unified §3.1 the user-visible bound stays `Clone + 'static`
+/// Option U gamma-unified §3.1 the user-visible bound stays `Clone + 'static`
 /// while `Workload` default method bodies (which need `Send` futures under
 /// the native `async_trait`) compile without any extra constraint on the
 /// generic `C`.

@@ -1,6 +1,6 @@
 //! `WebContext` — wasm-bindgen path `Context` implementation.
 //!
-//! Per Option U γ-unified §3.3 this is the browser-side counterpart of the
+//! Per Option U gamma-unified §3.3 this is the browser-side counterpart of the
 //! native `RuntimeContext` and the `wasip2` `WasmContext`. It is created
 //! once per inbound dispatch (by the entry-point glue generated from
 //! `register_workload`), binds `(self_id, caller_id, request_id)` at
@@ -17,7 +17,7 @@
 //!
 //! `call_raw` / `call` / `tell` / `discover_route_candidate` thread
 //! `self.request_id()` into the `actr_web_abi::guest::*_with_request_id`
-//! wrappers. The sw-host `DISPATCH_CTXS` HashMap (γ-unified §3.6) keys
+//! wrappers. The sw-host `DISPATCH_CTXS` HashMap (gamma-unified §3.6) keys
 //! every per-dispatch `RuntimeContext` by that string, so multiple
 //! concurrent dispatches never cross wires on the shared JS thread.
 //!
@@ -27,7 +27,7 @@
 //! `ActrError::NotImplemented` for those two shapes; if a future phase
 //! adds same-realm shortcuts we can revisit.
 //!
-//! DataChunk / MediaTrack fast paths are not part of Phase 6 γ and
+//! DataChunk / MediaTrack fast paths are not part of Phase 6 gamma and
 //! remain permanently `NotImplemented` on the web target.
 
 use std::rc::Rc;
@@ -56,7 +56,7 @@ struct WebContextInner {
     /// Per-dispatch request id. Supplied by the host bridge when the
     /// workload is invoked; every outgoing `call_raw` from this context
     /// carries the same id so the sw-host `DISPATCH_CTXS` HashMap can
-    /// find the right runtime context (see γ-unified §3.6).
+    /// find the right runtime context (see gamma-unified §3.6).
     request_id: String,
 }
 
@@ -221,7 +221,7 @@ impl Context for WebContext {
     //
     // The four methods below will route through actr-web-abi host imports
     // once agent P6-C regenerates guest.rs with the request_id-carrying
-    // signatures (γ-unified §3.4). Agent P6-I wires them up during the
+    // signatures (gamma-unified §3.4). Agent P6-I wires them up during the
     // integration phase. Leaving them as `todo!()` here lets dependents
     // type-check against the contract while the integration lands.
 
@@ -283,7 +283,7 @@ impl Context for WebContext {
     ) -> ActorResult<bytes::Bytes> {
         // The raw entry point is the one the typed `call` delegates to and
         // the only shape that actually traverses the sw-host HashMap
-        // keyed by `request_id` (γ-unified §3.6).
+        // keyed by `request_id` (gamma-unified §3.6).
         let outcome = actr_web_abi::guest::call_raw_with_request_id(
             self.request_id(),
             actr_id_to_wit(target),

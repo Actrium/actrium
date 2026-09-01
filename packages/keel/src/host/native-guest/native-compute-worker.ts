@@ -36,9 +36,6 @@ async function init(msg: Extract<ComputePoolToWorker, { kind: 'init' }>): Promis
       keel_host_call: ignored,
       keel_log: ignored,
       keel_send_batch: ignored,
-      rill_host_call: ignored,
-      rill_log: ignored,
-      rill_send_batch: ignored,
     },
   };
   const loaded = await WebAssembly.instantiate(msg.wasm, imports);

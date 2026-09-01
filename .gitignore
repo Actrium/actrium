@@ -9,14 +9,24 @@ target/
 node_modules/
 dist/
 build/
+out/
 .turbo/
+.next/
 **/*.rs.bk
+DerivedData/
+.build/
+*.xcuserdata/
+*.profraw
+*.profdata
+vcpkg_installed/
 
 # Local configuration and secrets
 .env
 .env.*
 !.env.example
 *.local
+internal/
+.gemini-clipboard/
 
 # Logs and test artifacts
 *.log
@@ -26,6 +36,22 @@ test-results/
 lcov.info
 coverage-html/
 coverage.lcov
+
+# Actrium native build and staging outputs
+crates/actrium-core/generated/
+crates/actrium-core/xcframework-staging/
+crates/actrium-core/ActroCore.xcframework/**/libactro_core.a
+crates/actrium-vault/generated/
+crates/actrium-vault/xcframework-staging/
+crates/actrium-vault/ActroVault.xcframework/**/libactro_vault.a
+windows/bin/
+windows/obj/
+windows/native/*.dll
+windows/native/*.dylib
+windows/tests/bin/
+windows/tests/obj/
+packages/actr-kotlin/src/main/jniLibs/
+android/android/app/src/main/assets/model/asr/
 
 # Editor swap files
 *.swp

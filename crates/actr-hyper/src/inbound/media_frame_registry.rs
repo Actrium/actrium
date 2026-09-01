@@ -103,7 +103,7 @@ impl MediaFrameRegistry {
     ///
     /// # Performance
     /// - Direct callback invocation, no queueing overhead
-    /// - Latency: ~1-2μs dispatch time (excluding callback execution)
+    /// - Latency: ~1-2micros dispatch time (excluding callback execution)
     /// - Concurrent execution, doesn't block other tracks
     pub async fn dispatch(&self, track_id: &str, sample: MediaSample, sender_id: ActrId) {
         let start = std::time::Instant::now();

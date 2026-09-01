@@ -121,7 +121,7 @@ Transport strategies are orthogonal to integration modes — any integration mod
 
 - **Responsibility**: Bidirectional communication between Shell and Workload within the same process
 - **Implementation**: `tokio::sync::mpsc` channel, zero serialization
-- **Latency**: ~10μs
+- **Latency**: ~10micros
 - **Bidirectional Design**: Two independent HostTransport instances
   - Shell → Workload (REQUEST)
   - Workload → Shell (RESPONSE)
@@ -336,7 +336,7 @@ Design Constraints:
 **HostGate**:
 - Responsibility: Send in-process messages via HostTransport
 - Features: Zero serialization, directly passes RpcEnvelope object
-- Latency: ~10μs
+- Latency: ~10micros
 
 **PeerGate**:
 - Responsibility: Send cross-process messages via PeerTransport

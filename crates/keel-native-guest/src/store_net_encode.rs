@@ -153,7 +153,7 @@ pub fn encode_envelope(json: &str, segments: &[&[u8]]) -> Result<Vec<u8>, Reason
     if segments.len() > MAX_SEGMENTS {
         return Err(Reason::TooManySegments);
     }
-    // magic(4) + jsonLen(4) + json + segCount(4) + Σ(segLen(4) + seg)
+    // magic(4) + jsonLen(4) + json + segCount(4) + sum(segLen(4) + seg)
     let mut total = 12usize.saturating_add(json_bytes.len());
     for s in segments {
         if s.len() > MAX_SEGMENT_BYTES {
