@@ -39,6 +39,22 @@ def test_gate_aggregates_webrtc_v020_domain() -> None:
     assert "WEBRTC_V020_RESULT" in gate
 
 
+def test_gate_enforces_anonymous_commit_identities() -> None:
+    workflow = CI_GATE_WORKFLOW.read_text(encoding="utf-8")
+    identity_job = _job(workflow, "identity", "determine")
+    gate = workflow[workflow.index("  gate:\n") :]
+
+    assert "fetch-depth: 0" in identity_job
+    assert "python .github/scripts/check_commit_identities_test.py" in identity_job
+    assert "python .github/scripts/check_commit_identities.py" in identity_job
+    assert "github.event.pull_request.base.sha || github.event.before" in identity_job
+    assert "--base-sha \"$BASE_SHA\"" in identity_job
+    assert "--head-sha \"$HEAD_SHA\"" in identity_job
+    assert "      - identity\n" in gate
+    assert "IDENTITY_RESULT: ${{ needs.identity.result }}" in gate
+    assert '"identity": os.environ["IDENTITY_RESULT"]' in gate
+
+
 def test_rust_gate_avoids_slow_workspace_tests_and_unused_prewarm() -> None:
     workflow = CI_GATE_WORKFLOW.read_text(encoding="utf-8")
     rust_job = _job(workflow, "rust", "test")
@@ -857,6 +873,7 @@ def test_service_readiness_waits_for_exact_registration() -> None:
 
 if __name__ == "__main__":
     test_gate_aggregates_webrtc_v020_domain()
+    test_gate_enforces_anonymous_commit_identities()
     test_rust_gate_avoids_slow_workspace_tests_and_unused_prewarm()
     test_rust_test_gate_restores_cache_before_installing_tools()
     test_msrv_gate_builds_full_workspace_on_pinned_toolchain()
