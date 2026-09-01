@@ -186,8 +186,18 @@ fn ends_with_punctuation(text: &str) -> bool {
     text.chars().last().is_some_and(|ch| {
         matches!(
             ch,
-            '\u{3002}' | '\u{ff1f}' | '\u{ff01}' | '\u{ff0c}' | '\u{ff1b}' | '\u{ff1a}'
-                | '.' | '?' | '!' | ',' | ';' | ':'
+            '\u{3002}'
+                | '\u{ff1f}'
+                | '\u{ff01}'
+                | '\u{ff0c}'
+                | '\u{ff1b}'
+                | '\u{ff1a}'
+                | '.'
+                | '?'
+                | '!'
+                | ','
+                | ';'
+                | ':'
         )
     })
 }
@@ -286,7 +296,10 @@ mod tests {
         ];
 
         assert_eq!(
-            post_process_zh_asr_segments("\u{4eca}\u{5929} \u{5929}\u{6c14} \u{5f88}\u{597d}", &segments),
+            post_process_zh_asr_segments(
+                "\u{4eca}\u{5929} \u{5929}\u{6c14} \u{5f88}\u{597d}",
+                &segments
+            ),
             "\u{4eca}\u{5929}\u{ff0c}\u{5929}\u{6c14}\u{5f88}\u{597d}\u{3002}"
         );
     }

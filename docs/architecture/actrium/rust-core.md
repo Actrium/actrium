@@ -44,7 +44,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
 ## Current Adapter Audit
 
 - TypeScript runtime code consumes Rust-generated contracts through
-  `packages/actrium/src/actr-host/coreContract.ts`; direct imports from the
+  `packages/actrium/src/runtime-host/coreContract.ts`; direct imports from the
   generated contract file are blocked by `npm run check:generated`.
 - Android runtime bridge keys, event names, payload builders, and `openTab`
   classification are grouped under `RuntimeBridgeParams`. Rust-generated
@@ -906,7 +906,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
      - Legacy Apple `layout.leftPanel/rightPanel` fallback in
        `BrowserViewModel`.
      - RN archive download/unzip, entry loading, and asset copy/rewrite in
-       `packages/actrium/src/actr-host/utils`.
+       `packages/actrium/src/runtime-host/utils`.
 
 2. **Cross-platform browser/client domain models**
    - `TabRecord`, `SystemAppType`, `TabStatus`, history, bookmarks, tags, and
@@ -1139,11 +1139,11 @@ schema creation rules before larger repository/vault migrations begin.
 The React Native runtime consumes Rust-owned TypeScript contracts through one
 stable local adapter:
 
-- `packages/actrium/src/actr-host/coreContract.ts`
+- `packages/actrium/src/runtime-host/coreContract.ts`
 
 That adapter re-exports the generated source artifact:
 
-- `packages/actrium/src/actr-host/generated/actroCoreContract.ts`
+- `packages/actrium/src/runtime-host/generated/actroCoreContract.ts`
 
 The generator lives in `crates/actrium-core/src/bin/generate-ts-contracts.rs` and
 uses `actro-core` constants/types for:
@@ -1195,11 +1195,11 @@ generated module:
 - `types.ts` aliases generated `SystemAppType`
 - `utils/index.ts` delegates `evaluateTabGate` and `extractAppIdFromUrl`
 - `AppSessionService.ts` passes the server-provided `actr_hash_code` into
-  `ActrLoader.ts`; the loader downloads the `.actr` once, verifies that same
+  `ActrPackageLoader.ts`; the loader downloads the `.actr` once, verifies that same
   temporary zip with `RNFS.hash`, then extracts the verified archive. This keeps
   network IO/hash execution inside the RN loader without adding Rust bridge
   hops or JS byte-array hashing.
-- `ActrLoader.ts` also delegates manifest parsing, path/asset helpers, and
+- `ActrPackageLoader.ts` also delegates manifest parsing, path/asset helpers, and
   optional manifest-level integrity verification planning to generated
   Rust-owned rules.
 - `Sqlite.init.ts` delegates runtime DB schema/version/migration SQL to
@@ -1315,7 +1315,7 @@ tag relation writes, SQLite execution, UUID/URL/Date conversion, and error
 behavior local.
 
 The macOS and iOS `BrowserViewModel.readManifestJSON` implementations now use
-`ActroCore.parseActrManifest` for the main ACTR manifest path, including
+`ActroCore.parseActrPackageManifest` for the main ACTR manifest path, including
 contract gating, app id normalization, permissions, visibility defaults, system
 app type parsing, and theme/background color normalization. Swift still reads
 legacy `layout.leftPanel/rightPanel` script names because that fallback is a
@@ -1325,7 +1325,7 @@ iOS links the same `ActroCore` and `ActroVault` Swift Package products as
 macOS. Its schema/default-tag and ACTR manifest call sites now use `ActroCore`;
 vault call sites remain pending until iOS exposes the vault feature.
 
-`ActroCore` also exposes `createActrIntegrityPlan`,
+`ActroCore` also exposes `createPackageIntegrityPlan`,
 `normalizeIntegrityAlgorithm`, `normalizeIntegrityPath`, and
 `normalizeSha256Hex` to Apple clients. The shared
 `AppleActrPackageManifestReader` helper in the `ActroCore` Swift package uses

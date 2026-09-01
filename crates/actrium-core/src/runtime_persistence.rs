@@ -255,8 +255,7 @@ ORDER BY bi.sort_order ASC
 
         pub const DELETE_CATEGORY_BY_ID: &str = "DELETE FROM bookmark_categories WHERE id = ?";
 
-        pub const INSERT_BOOKMARK: &str =
-            "INSERT OR IGNORE INTO bookmark_items (category_id, app_id, sort_order) VALUES (?, ?, ?)";
+        pub const INSERT_BOOKMARK: &str = "INSERT OR IGNORE INTO bookmark_items (category_id, app_id, sort_order) VALUES (?, ?, ?)";
 
         pub const DELETE_BOOKMARK_BY_ID: &str = "DELETE FROM bookmark_items WHERE id = ?";
 

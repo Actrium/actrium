@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 usage() {
     cat <<'USAGE'
-Usage: scripts/actrium/build-actro-rust-bindings.sh [runtime|apple|android|windows|all]
+Usage: scripts/actrium/build-actro-rust-bindings.sh [runtime|apple|apple-macos|android|windows|all]
 
 Builds generated native bindings and local binary artifacts for Actro Rust
 client crates.
@@ -14,6 +14,7 @@ client crates.
 Targets:
   runtime  Generate TypeScript runtime contracts from actro-core.
   apple    Build Apple XCFrameworks and Swift bindings.
+  apple-macos  Build only the universal macOS XCFramework slices.
   android  Build ActroCore/ActroVault Kotlin bindings and JNI libraries.
   windows  Build the ActroCore C ABI DLL used by the Windows WebView2 shell.
   all      Build runtime, apple, and android targets. This is the default.
@@ -23,7 +24,7 @@ USAGE
 target="${1:-all}"
 
 case "$target" in
-    runtime|apple|android|windows|all)
+    runtime|apple|apple-macos|android|windows|all)
         ;;
     -h|--help|help)
         usage
@@ -37,17 +38,28 @@ esac
 
 build_runtime() {
     cargo run -p actro-core --bin generate-ts-contracts -- \
-        "$REPO_ROOT/packages/actrium/src/actr-host/generated/actroCoreContract.ts"
+        "$REPO_ROOT/packages/actrium/src/runtime-host/generated/actroCoreContract.ts"
 }
 
 build_apple() {
+    local mode="${1:-all}"
     if [[ "$(uname -s)" != "Darwin" ]]; then
         echo "Apple bindings require macOS with Xcode." >&2
         exit 1
     fi
 
-    "$REPO_ROOT/crates/actrium-core/build-xcframework.sh"
-    "$REPO_ROOT/crates/actrium-vault/build-xcframework.sh"
+    rustup target add aarch64-apple-darwin x86_64-apple-darwin
+    if [[ "$mode" == "all" ]]; then
+        rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+    fi
+
+    if [[ "$mode" == "macos" ]]; then
+        "$REPO_ROOT/crates/actrium-core/build-xcframework.sh" --macos-only
+        "$REPO_ROOT/crates/actrium-vault/build-xcframework.sh" --macos-only
+    else
+        "$REPO_ROOT/crates/actrium-core/build-xcframework.sh"
+        "$REPO_ROOT/crates/actrium-vault/build-xcframework.sh"
+    fi
 }
 
 build_android() {
@@ -98,6 +110,9 @@ case "$target" in
         ;;
     apple)
         build_apple
+        ;;
+    apple-macos)
+        build_apple macos
         ;;
     android)
         build_android

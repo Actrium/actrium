@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
-use crate::{actr, auth, browser, browser_data, persistence, runtime_persistence, PRODUCT_NAME};
+use crate::{
+    PRODUCT_NAME, actr_package, auth, browser, browser_data, persistence, runtime_persistence,
+};
 
 pub const ACTRO_CORE_C_API_VERSION: u32 = 1;
 
@@ -19,12 +21,12 @@ pub extern "C" fn actro_core_product_name() -> *const c_char {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn actro_core_supported_contract_name() -> *const c_char {
-    c_str_ptr(actr::SUPPORTED_CONTRACT_NAME)
+    c_str_ptr(actr_package::SUPPORTED_CONTRACT_NAME)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn actro_core_supported_contract_version() -> u32 {
-    actr::SUPPORTED_CONTRACT_VERSION
+    actr_package::SUPPORTED_CONTRACT_VERSION
 }
 
 #[unsafe(no_mangle)]
@@ -2060,7 +2062,7 @@ mod tests {
             );
             assert_eq!(
                 CStr::from_ptr(actro_core_supported_contract_name()).to_str(),
-                Ok("ask")
+                Ok("keel.guest")
             );
         }
 
@@ -2785,7 +2787,9 @@ mod tests {
             assert!(required > 0);
             let output = CStr::from_ptr(storage_buffer.as_ptr()).to_str().unwrap();
             assert!(output.contains("\"classification\":\"cloudConflict\""));
-            assert!(output.contains("\"providerErrorClassification\":\"cloudStateRereadRequired\""));
+            assert!(
+                output.contains("\"providerErrorClassification\":\"cloudStateRereadRequired\"")
+            );
             assert!(output.contains("\"pendingCloudReread\":true"));
 
             let required =

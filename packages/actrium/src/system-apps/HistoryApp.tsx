@@ -12,7 +12,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import type { HistoryItemData, HistoryGroupData } from '../actr-host/types';
+import type { HistoryItemData, HistoryGroupData } from '../runtime-host/types';
 import { AppText } from '../components';
 import {
   clearBrowserHistory,

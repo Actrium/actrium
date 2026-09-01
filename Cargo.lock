@@ -788,6 +788,7 @@ dependencies = [
 name = "actro-core"
 version = "0.0.0"
 dependencies = [
+ "actr-pack",
  "serde",
  "serde_json",
  "sha2",

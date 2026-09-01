@@ -1,5 +1,5 @@
 import { NativeModules } from 'react-native';
-import { ASR_BRIDGE_CONTRACT } from '../../actr-host/coreContract';
+import { ASR_BRIDGE_CONTRACT } from '../../runtime-host/coreContract';
 
 const AsrModule = NativeModules[ASR_BRIDGE_CONTRACT.moduleName];
 

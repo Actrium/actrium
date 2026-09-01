@@ -12,13 +12,15 @@
 #   ./start.sh "Hello"                # Send custom message
 #   ./start.sh --backend cdylib       # Use native cdylib backend (default: wasm)
 #   ./start.sh --backend cdylib "Hi"  # cdylib backend with custom message
+#   ./start.sh --client-mode http     # Expose the client Actor on 127.0.0.1:8391
+#   ./start.sh --client-mode http --keep-running
 
 set -e
 set -o pipefail
 
 # ── Shared ports & defaults (single source of truth for this example) ────
 ACTRIX_HTTP_PORT=${ACTRIX_HTTP_PORT:-8081}
-ACTRIX_ICE_PORT=${ACTRIX_ICE_PORT:-3478}
+ACTRIX_ICE_PORT=${ACTRIX_ICE_PORT:-13478}
 ACTRIX_HTTP_URL="http://localhost:${ACTRIX_HTTP_PORT}"
 ACTRIX_WS_URL="ws://localhost:${ACTRIX_HTTP_PORT}"
 ACTRIX_ADMIN_PASSWORD=${ACTRIX_ADMIN_PASSWORD:-testpassword123}
@@ -32,6 +34,9 @@ NC='\033[0m' # No Color
 
 # ── Argument parsing ─────────────────────────────────────────────────────
 BACKEND="wasm"
+CLIENT_MODE="cli"
+HTTP_LISTEN="${ECHO_HTTP_LISTEN:-127.0.0.1:8391}"
+KEEP_RUNNING="${ECHO_KEEP_RUNNING:-0}"
 TEST_INPUT="TestMsg"
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -39,6 +44,16 @@ while [[ $# -gt 0 ]]; do
             BACKEND="$2"; shift 2 ;;
         --backend=*)
             BACKEND="${1#--backend=}"; shift ;;
+        --client-mode)
+            CLIENT_MODE="$2"; shift 2 ;;
+        --client-mode=*)
+            CLIENT_MODE="${1#--client-mode=}"; shift ;;
+        --http-listen)
+            HTTP_LISTEN="$2"; shift 2 ;;
+        --http-listen=*)
+            HTTP_LISTEN="${1#--http-listen=}"; shift ;;
+        --keep-running)
+            KEEP_RUNNING=1; shift ;;
         -*)
             echo "Unknown option: $1" >&2; exit 1 ;;
         *)
@@ -49,10 +64,15 @@ if [[ "$BACKEND" != "wasm" && "$BACKEND" != "cdylib" ]]; then
     echo "Invalid --backend value: '$BACKEND' (must be 'wasm' or 'cdylib')" >&2
     exit 1
 fi
+if [[ "$CLIENT_MODE" != "cli" && "$CLIENT_MODE" != "http" ]]; then
+    echo "Invalid --client-mode value: '$CLIENT_MODE' (must be 'cli' or 'http')" >&2
+    exit 1
+fi
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "🧪 Testing package-echo (backend: $BACKEND)"
-echo "    Using Actrix as signaling server"
+echo "    Using Loran as the Actor infrastructure service"
+echo "    Client Host mode: $CLIENT_MODE"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # ── Paths ────────────────────────────────────────────────────────────────
@@ -210,8 +230,33 @@ ensure_actr_toml "$CLIENT_GUEST_DIR"
 # actr.toml = runtime config (from Actr.example.toml)
 echo -e "${GREEN}✅ Synchronized actr.toml from Actr.example.toml${NC}"
 
-# Ensure actrix-config.toml exists
+# Keep the disposable Loran config synchronized with the tracked template.
+cp "$WORKSPACE_ROOT/actrix-config.example.toml" "$ACTRIX_CONFIG"
 ensure_actrix_config "$WORKSPACE_ROOT"
+
+# Keep every disposable runtime config on this demo's ports.  The non-standard
+# TURN port deliberately avoids colliding with a machine-wide TURN service.
+python3 - "$ACTRIX_CONFIG" "$CLIENT_DIR/actr.toml" "$CLIENT_GUEST_DIR/actr.toml" \
+    "$ACTRIX_HTTP_PORT" "$ACTRIX_ICE_PORT" <<'PY'
+from pathlib import Path
+import sys
+
+config_path, client_path, guest_path, http_port, ice_port = sys.argv[1:]
+
+loran = Path(config_path)
+text = loran.read_text(encoding="utf-8")
+text = text.replace('port = 8081', f'port = {http_port}', 1)
+text = text.replace('advertised_port = 3478', f'advertised_port = {ice_port}', 1)
+text = text.replace('port = 3478', f'port = {ice_port}', 1)
+loran.write_text(text, encoding="utf-8")
+
+for runtime_path in (client_path, guest_path):
+    path = Path(runtime_path)
+    text = path.read_text(encoding="utf-8")
+    text = text.replace('localhost:8081', f'localhost:{http_port}')
+    text = text.replace('localhost:3478', f'localhost:{ice_port}')
+    path.write_text(text, encoding="utf-8")
+PY
 
 # ── Cleanup ──────────────────────────────────────────────────────────────
 
@@ -223,19 +268,19 @@ cleanup() {
     echo ""
     echo "🧹 Cleaning up..."
 
-    if [ -n "$ACTRIX_PID" ]; then
-        echo "Stopping actrix (PID: $ACTRIX_PID)"
-        kill $ACTRIX_PID 2>/dev/null || true
+    if [ -n "$CLIENT_PID" ]; then
+        echo "Stopping package-echo-client (PID: $CLIENT_PID)"
+        kill "$CLIENT_PID" 2>/dev/null || true
     fi
 
     if [ -n "$SERVER_PID" ]; then
         echo "Stopping package-echo-server (PID: $SERVER_PID)"
-        kill $SERVER_PID 2>/dev/null || true
+        kill "$SERVER_PID" 2>/dev/null || true
     fi
 
-    if [ -n "$CLIENT_PID" ]; then
-        echo "Stopping package-echo-client (PID: $CLIENT_PID)"
-        kill $CLIENT_PID 2>/dev/null || true
+    if [ -n "$ACTRIX_PID" ]; then
+        echo "Stopping Loran (PID: $ACTRIX_PID)"
+        kill "$ACTRIX_PID" 2>/dev/null || true
     fi
 
     wait 2>/dev/null || true
@@ -298,10 +343,18 @@ if [ -z "$CODEGEN_INPUT_DIR" ]; then
     echo -e "${RED}❌ Unable to detect codegen input dir under $ECHO_ACTR_DIR (expected proto/ or protos/)${NC}"
     exit 1
 fi
+
+# Build the workspace plugin before codegen. `actr gen` checks the workload,
+# which runs its build script; allowing that build script to invoke Cargo for
+# the same plugin would wait on Cargo's own target lock.
+CARGO_TARGET_DIR="$ACTR_REPO_DIR/target" cargo build \
+    --manifest-path "$ACTR_REPO_DIR/tools/actr/protoc-gen/rust/Cargo.toml" \
+    --bin protoc-gen-actrframework >/dev/null
+export PATH="$ACTR_REPO_DIR/target/debug:$PATH"
 (
     cd "$ECHO_ACTR_DIR"
-    cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr -- install >/dev/null
-    cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr -- gen \
+    cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr --features wasm-engine -- deps install >/dev/null
+    cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr --features wasm-engine -- gen \
         -l rust \
         --input "$CODEGEN_INPUT_DIR" \
         --output src/generated \
@@ -322,7 +375,7 @@ if [ "$BACKEND" = "cdylib" ]; then
     echo "Target:        $ECHO_ACTR_TARGET (cdylib)"
     ACTR_PACKAGE="$ECHO_ACTR_DIR/dist/actrium-EchoService-${ECHO_ACTR_VERSION}-${ECHO_ACTR_TARGET}.actr"
 
-    cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr -- build \
+    cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr --features wasm-engine -- build \
         --manifest-path "$ECHO_ACTR_BUILD_MANIFEST" \
         --key "$SIGNING_KEY" \
         --output "$ACTR_PACKAGE"
@@ -337,6 +390,32 @@ else
     echo "Target:        $ECHO_ACTR_TARGET (Component Model)"
     rustup target add "$ECHO_ACTR_TARGET" >/dev/null
 
+    # A clean Rust installation does not include the Component Model linker.
+    # Keep the demo self-bootstrapping, while reusing any compatible version
+    # that the developer already has installed.
+    WASM_COMPONENT_LD_MIN_VERSION="0.5.22"
+    WASM_COMPONENT_LD_INSTALL_VERSION="0.5.26"
+    WASM_COMPONENT_LD_VERSION="$(wasm-component-ld --version 2>/dev/null | awk '{ print $2 }' || true)"
+    if ! python3 - "$WASM_COMPONENT_LD_VERSION" "$WASM_COMPONENT_LD_MIN_VERSION" <<'PY'
+import sys
+
+def version_tuple(value: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(part) for part in value.split("."))
+    except ValueError:
+        return ()
+
+installed = version_tuple(sys.argv[1])
+minimum = version_tuple(sys.argv[2])
+raise SystemExit(0 if installed and installed >= minimum else 1)
+PY
+    then
+        echo "Installing wasm-component-ld ${WASM_COMPONENT_LD_INSTALL_VERSION}..."
+        cargo install wasm-component-ld \
+            --version "$WASM_COMPONENT_LD_INSTALL_VERSION" \
+            --locked
+    fi
+
     # ── Step 0.5: Pack .actr with actr build ──────────────────────────
 
     echo ""
@@ -345,7 +424,7 @@ else
 
     ACTR_PACKAGE="$ECHO_ACTR_DIR/dist/actrium-EchoService-${ECHO_ACTR_VERSION}-${ECHO_ACTR_TARGET}.actr"
 
-    cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr -- build \
+    cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr --features wasm-engine -- build \
         --manifest-path "$ECHO_ACTR_BUILD_MANIFEST" \
         --key "$SIGNING_KEY" \
         --target "$ECHO_ACTR_TARGET" \
@@ -359,7 +438,7 @@ else
 fi
 
 # Verify the package signature
-cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr -- pkg verify \
+cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr --features wasm-engine -- pkg verify \
     --pubkey "$PUBLIC_KEY_PATH" \
     --package "$ACTR_PACKAGE" >/dev/null
 echo -e "${GREEN}✅ Package signature verified${NC}"
@@ -370,6 +449,8 @@ echo ""
 echo -e "${BLUE}📦 Building client-guest cdylib package...${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+CLIENT_GUEST_MANUFACTURER="acme"
+CLIENT_GUEST_NAME="package-echo-client-guest"
 CLIENT_GUEST_VERSION="0.1.0"
 CLIENT_GUEST_TARGET="$(rustc -vV | awk '/host:/ {print $2}')"
 CLIENT_GUEST_DIST_DIR="$CLIENT_GUEST_DIR/dist"
@@ -386,9 +467,13 @@ perl -0pi -e "s/actr_type = \"actrium:EchoService:[^\"]+\"/actr_type = \"actrium
     "$CLIENT_GUEST_BUILD_CONFIG_DIR/manifest.toml" \
     "$CLIENT_GUEST_BUILD_CONFIG_DIR/manifest.lock.toml"
 
-# Build the cdylib (runs in workspace root, so target is at workspace level)
-# Use workspace-level target dir from .cargo/config.toml (target-dir = "../../target/examples")
-WORKSPACE_TARGET_DIR="$ACTR_REPO_DIR/target/examples"
+# Resolve Cargo's effective target directory instead of duplicating the
+# relative `.cargo/config.toml` calculation here.
+WORKSPACE_TARGET_DIR="$(cargo metadata \
+    --manifest-path "$CLIENT_GUEST_DIR/Cargo.toml" \
+    --no-deps \
+    --format-version 1 \
+    | jq -r '.target_directory')"
 if ! cargo build --manifest-path "$CLIENT_GUEST_DIR/Cargo.toml" 2>&1; then
     echo -e "${RED}❌ Failed to build client-guest cdylib${NC}"
     exit 1
@@ -408,17 +493,24 @@ if [ ! -f "$CLIENT_GUEST_BINARY" ]; then
     exit 1
 fi
 
+cat >> "$CLIENT_GUEST_BUILD_CONFIG_DIR/manifest.toml" << TOML
+
+[binary]
+path = "$CLIENT_GUEST_BINARY"
+target = "$CLIENT_GUEST_TARGET"
+TOML
+
 CLIENT_GUEST_DEV_KEY="$PACKAGE_ECHO_DIR/dev-key.json"
-CLIENT_GUEST_PACKAGE_NAME="acme-package-echo-client-guest-${CLIENT_GUEST_VERSION}-cdylib.actr"
+CLIENT_GUEST_PACKAGE_NAME="${CLIENT_GUEST_MANUFACTURER}-${CLIENT_GUEST_NAME}-${CLIENT_GUEST_VERSION}-cdylib.actr"
 CLIENT_GUEST_PACKAGE="$CLIENT_GUEST_DIST_DIR/$CLIENT_GUEST_PACKAGE_NAME"
 CLIENT_GUEST_PUBLIC_KEY="$CLIENT_GUEST_DIST_DIR/public-key.json"
 
-# Package the client-guest binary (uses manifest.toml = Actr.example.toml)
-cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr -- pkg build \
-    --binary "$CLIENT_GUEST_BINARY" \
-    --config "$CLIENT_GUEST_BUILD_CONFIG_DIR/manifest.toml" \
+# Package the already-built client workload through the unified build command.
+cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr --features wasm-engine -- build \
+    --manifest-path "$CLIENT_GUEST_BUILD_CONFIG_DIR/manifest.toml" \
     --key "$CLIENT_GUEST_DEV_KEY" \
     --target "$CLIENT_GUEST_TARGET" \
+    --no-compile \
     --output "$CLIENT_GUEST_PACKAGE"
 
 if [ ! -f "$CLIENT_GUEST_PACKAGE" ]; then
@@ -432,7 +524,7 @@ jq '{public_key: .public_key}' "$CLIENT_GUEST_DEV_KEY" > "$CLIENT_GUEST_PUBLIC_K
 echo -e "${GREEN}✅ client-guest package ready: $(du -h "$CLIENT_GUEST_PACKAGE" | cut -f1)${NC}"
 
 # Verify client-guest package
-cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr -- pkg verify \
+cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr --features wasm-engine -- pkg verify \
     --pubkey "$CLIENT_GUEST_PUBLIC_KEY" \
     --package "$CLIENT_GUEST_PACKAGE" >/dev/null
 
@@ -441,52 +533,51 @@ echo -e "${GREEN}✅ client-guest package verified${NC}"
 # ── Step 1: Ensure actrix is available ──────────────────────────────────
 
 echo ""
-echo "📦 Checking actrix availability..."
+echo "📦 Checking Loran availability..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 ACTRIX_CMD=""
 # Always build from source when ACTRIX_DIR is available to ensure latest migrations
 if [ -n "$ACTRIX_DIR" ] && [ -d "$ACTRIX_DIR" ]; then
-    echo -e "${BLUE}🔧 Building actrix from source ($ACTRIX_DIR)...${NC}"
+    echo -e "${BLUE}🔧 Building Loran from source ($ACTRIX_DIR)...${NC}"
     CARGO_TARGET_DIR="$ACTRIX_DIR/target" cargo build --manifest-path "$ACTRIX_DIR/Cargo.toml" --bin actrix 2>&1 | tail -5
     if [ -x "$ACTRIX_DIR/target/debug/actrix" ]; then
         ACTRIX_CMD="$ACTRIX_DIR/target/debug/actrix"
-        echo -e "${GREEN}✅ Actrix built from source: $ACTRIX_CMD${NC}"
+        echo -e "${GREEN}✅ Loran built from source: $ACTRIX_CMD${NC}"
     else
-        echo -e "${RED}❌ Failed to build actrix from source${NC}"
+        echo -e "${RED}❌ Failed to build Loran from source${NC}"
         exit 1
     fi
 elif command -v actrix > /dev/null 2>&1; then
     ACTRIX_CMD="actrix"
-    echo -e "${GREEN}✅ Using actrix from PATH: $(which actrix)${NC}"
+    echo -e "${GREEN}✅ Using Loran from PATH: $(which actrix)${NC}"
 else
-    echo -e "${RED}❌ Actrix not available. Set ACTRIX_DIR to a local actrix repository or install actrix${NC}"
+    echo -e "${RED}❌ Loran not available. Set ACTRIX_DIR to this monorepo or install its server binary${NC}"
     exit 1
 fi
 
 # ── Step 2: Start actrix ────────────────────────────────────────────────
 
 echo ""
-echo "🚀 Starting actrix (signaling server)..."
+echo "🚀 Starting Loran (Actor infrastructure server)..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Ensure we do not talk to a stale actrix from another working directory.
+# Never stop an unrelated service. Use ACTRIX_HTTP_PORT/ACTRIX_ICE_PORT to
+# select another pair when either requested port is occupied.
 if lsof -tiTCP:${ACTRIX_HTTP_PORT} -sTCP:LISTEN >/dev/null 2>&1; then
-    echo "Removing stale listener on ${ACTRIX_HTTP_PORT}..."
-    kill $(lsof -tiTCP:${ACTRIX_HTTP_PORT} -sTCP:LISTEN) 2>/dev/null || true
-    sleep 1
+    echo -e "${RED}❌ ${ACTRIX_HTTP_PORT}/tcp is already in use; set ACTRIX_HTTP_PORT to a free port${NC}"
+    exit 1
 fi
 if lsof -tiUDP:${ACTRIX_ICE_PORT} >/dev/null 2>&1; then
-    echo "Removing stale listener on ${ACTRIX_ICE_PORT}/udp..."
-    kill $(lsof -tiUDP:${ACTRIX_ICE_PORT}) 2>/dev/null || true
-    sleep 1
+    echo -e "${RED}❌ ${ACTRIX_ICE_PORT}/udp is already in use; set ACTRIX_ICE_PORT to a free port${NC}"
+    exit 1
 fi
 
 $ACTRIX_CMD --config "$ACTRIX_CONFIG" > "$LOG_DIR/actrix.log" 2>&1 &
 ACTRIX_PID=$!
 
-echo "Actrix started (PID: $ACTRIX_PID)"
-echo "Waiting for actrix to be ready..."
+echo "Loran started (PID: $ACTRIX_PID)"
+echo "Waiting for Loran to be ready..."
 
 actrix_http_ready() {
     lsof -nP -iTCP:${ACTRIX_HTTP_PORT} -sTCP:LISTEN > /dev/null 2>&1 \
@@ -502,13 +593,13 @@ MAX_WAIT=20
 COUNTER=0
 while [ $COUNTER -lt $MAX_WAIT ]; do
     if ! kill -0 $ACTRIX_PID 2>/dev/null; then
-        echo -e "${RED}❌ Actrix failed to start${NC}"
+        echo -e "${RED}❌ Loran failed to start${NC}"
         cat "$LOG_DIR/actrix.log"
         exit 1
     fi
 
     if actrix_http_ready; then
-        echo -e "${GREEN}✅ Actrix HTTP is ready on port ${ACTRIX_HTTP_PORT}/tcp${NC}"
+        echo -e "${GREEN}✅ Loran HTTP is ready on port ${ACTRIX_HTTP_PORT}/tcp${NC}"
         break
     fi
 
@@ -517,7 +608,7 @@ while [ $COUNTER -lt $MAX_WAIT ]; do
 done
 
 if [ $COUNTER -eq $MAX_WAIT ]; then
-    echo -e "${RED}❌ Actrix not listening on ${ACTRIX_HTTP_PORT}/tcp after ${MAX_WAIT} seconds${NC}"
+    echo -e "${RED}❌ Loran not listening on ${ACTRIX_HTTP_PORT}/tcp after ${MAX_WAIT} seconds${NC}"
     cat "$LOG_DIR/actrix.log"
     exit 1
 fi
@@ -526,7 +617,7 @@ fi
 ICE_COUNTER=0
 while [ $ICE_COUNTER -lt 5 ]; do
     if actrix_ice_ready 2>/dev/null; then
-        echo -e "${GREEN}✅ Actrix ICE/TURN ready on ${ACTRIX_ICE_PORT}/udp${NC}"
+        echo -e "${GREEN}✅ Loran ICE/TURN ready on ${ACTRIX_ICE_PORT}/udp${NC}"
         break
     fi
     sleep 1 || true
@@ -662,19 +753,19 @@ SQL
 
 echo -e "${GREEN}✅ MFR manufacturer 'actrium' registered (key_id: $MFR_KEY_ID, pubkey: ${MFR_PUBKEY:0:20}...)${NC}"
 
-# ── Step 2.7: Publish package via actr pkg publish ───────────────────────
+# ── Step 2.7: Publish package via actr registry publish ──────────────────
 
 echo ""
 echo "📡 Publishing package to MFR (challenge-response flow)..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr -- pkg publish \
+cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr --features wasm-engine -- registry publish \
     --package "$ACTR_PACKAGE" \
     --keychain "$SIGNING_KEY" \
     --endpoint "${ACTRIX_HTTP_URL}"
 
 if [ $? -ne 0 ]; then
-    echo -e "${RED}❌ actr pkg publish failed${NC}"
+    echo -e "${RED}❌ actr registry publish failed${NC}"
     echo "Actrix logs (last 20 lines):"
     tail -20 "$LOG_DIR/actrix.log"
     exit 1
@@ -713,31 +804,42 @@ echo ""
 echo "🏷️  Seeding client-guest MFR package metadata..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-python3 - <<'PY' "$ACTRIX_DB" "$CLIENT_GUEST_PACKAGE" "$CLIENT_GUEST_PUBLIC_KEY"
+python3 - \
+    "$ACTRIX_DB" \
+    "$CLIENT_GUEST_PACKAGE" \
+    "$CLIENT_GUEST_PUBLIC_KEY" \
+    "$CLIENT_GUEST_MANUFACTURER" \
+    "$CLIENT_GUEST_NAME" \
+    "$CLIENT_GUEST_VERSION" \
+    "$CLIENT_GUEST_TARGET" <<'PY'
 import base64
+import hashlib
 import json
 import sqlite3
 import sys
 import time
-import tomllib
 import zipfile
 
-db_path, package_path, public_key_path = sys.argv[1:]
+(
+    db_path,
+    package_path,
+    public_key_path,
+    manufacturer,
+    name,
+    version,
+    target,
+) = sys.argv[1:]
 now = int(time.time())
 key_expires_at = now + 365 * 24 * 3600
 
 with open(public_key_path, "r", encoding="utf-8") as fh:
     public_key = json.load(fh)["public_key"]
+key_id = "mfr-" + hashlib.sha256(base64.b64decode(public_key)).hexdigest()[:16]
 
 with zipfile.ZipFile(package_path, "r") as zf:
     manifest = zf.read("manifest.toml").decode("utf-8")
     signature = base64.b64encode(zf.read("manifest.sig")).decode("ascii")
 
-manifest_data = tomllib.loads(manifest)
-manufacturer = manifest_data["manufacturer"]
-name = manifest_data["name"]
-version = manifest_data["version"]
-target = manifest_data.get("binary", {}).get("target", "cdylib")
 type_str = f"{manufacturer}:{name}:{version}"
 
 conn = sqlite3.connect(db_path)
@@ -746,15 +848,16 @@ try:
     cur.execute(
         """
         INSERT OR IGNORE INTO mfr
-            (name, public_key, contact, status, created_at, updated_at, verified_at, key_expires_at)
-        VALUES (?, ?, ?, 'active', ?, ?, ?, ?)
+            (name, public_key, key_id, contact, status, created_at, updated_at, verified_at, key_expires_at)
+        VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)
         """,
-        (manufacturer, public_key, "examples@actrium.local", now, now, now, key_expires_at),
+        (manufacturer, public_key, key_id, "examples@actrium.local", now, now, now, key_expires_at),
     )
     cur.execute(
         """
         UPDATE mfr
            SET public_key = ?,
+               key_id = ?,
                status = 'active',
                updated_at = ?,
                verified_at = ?,
@@ -763,7 +866,7 @@ try:
                revoked_at = NULL
          WHERE name = ?
         """,
-        (public_key, now, now, key_expires_at, manufacturer),
+        (public_key, key_id, now, now, key_expires_at, manufacturer),
     )
     cur.execute("SELECT id FROM mfr WHERE name = ?", (manufacturer,))
     row = cur.fetchone()
@@ -816,7 +919,7 @@ echo "🚀 Starting package-echo-server via actr run..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Generate server actr.toml with the actual package path and trust mode
-SERVER_ACTR_CONFIG="${SERVER_ACTR_CONFIG:-$PACKAGE_ECHO_DIR/server-actr.toml}"
+SERVER_ACTR_CONFIG="${SERVER_ACTR_CONFIG:-$LOG_DIR/server-actr.toml}"
 cat > "$SERVER_ACTR_CONFIG" << TOML
 edition = 1
 
@@ -857,20 +960,26 @@ permission = "allow"
 type = "acme:package-echo-client-guest:0.1.0"
 TOML
 
-ACTR_CLI_BIN="$ACTR_REPO_DIR/target/debug/actr"
+ACTR_CLI_BIN="$WORKSPACE_TARGET_DIR/debug/actr"
 if [ ! -x "$ACTR_CLI_BIN" ]; then
     echo "Building actr CLI..."
-    cargo build --manifest-path "$ACTR_CLI_MANIFEST" --bin actr 2>&1 | tail -3
+    cargo build --manifest-path "$ACTR_CLI_MANIFEST" --bin actr --features wasm-engine 2>&1 | tail -3
 fi
 
-RUST_LOG="${RUST_LOG:-info}" \
-"$ACTR_CLI_BIN" run -c "$SERVER_ACTR_CONFIG" > "$LOG_DIR/package-echo-server.log" 2>&1 &
+(
+    # `actr run` resolves `.actr/config.toml` from its working directory.
+    # Run from the package project so a stale user-global keychain cannot
+    # override this demo's manufacturer signing key.
+    cd "$ECHO_ACTR_DIR"
+    RUST_LOG="${RUST_LOG:-info}" \
+        "$ACTR_CLI_BIN" run -c "$SERVER_ACTR_CONFIG"
+) > "$LOG_DIR/package-echo-server.log" 2>&1 &
 SERVER_PID=$!
 
 echo "Server started (PID: $SERVER_PID)"
 echo "Waiting for package-backed server to register..."
 
-MAX_WAIT=15
+MAX_WAIT=30
 COUNTER=0
 while [ $COUNTER -lt $MAX_WAIT ]; do
     if ! kill -0 $SERVER_PID 2>/dev/null; then
@@ -902,30 +1011,160 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 echo "Sending test message: \"$TEST_INPUT\""
 
-(
-    sleep 3
-    echo "$TEST_INPUT"
-    sleep 2
-    echo "quit"
-) | ECHO_ACTR_VERSION="$ECHO_ACTR_VERSION" \
-    CLIENT_GUEST_PACKAGE_PATH="$CLIENT_GUEST_PACKAGE" \
-    CLIENT_GUEST_PUBLIC_KEY_PATH="$CLIENT_GUEST_PUBLIC_KEY" \
-    RUST_LOG="${RUST_LOG:-info}" \
-    cargo run --bin package-echo-client > "$LOG_DIR/package-echo-client.log" 2>&1 &
-CLIENT_PID=$!
+if [ "$CLIENT_MODE" = "http" ]; then
+    cargo build --bin package-echo-client 2>&1 | tail -3
+    CLIENT_BIN="$WORKSPACE_TARGET_DIR/debug/package-echo-client"
+    ECHO_HTTP_LISTEN="$HTTP_LISTEN" \
+        ECHO_ACTR_VERSION="$ECHO_ACTR_VERSION" \
+        CLIENT_GUEST_PACKAGE_PATH="$CLIENT_GUEST_PACKAGE" \
+        CLIENT_GUEST_PUBLIC_KEY_PATH="$CLIENT_GUEST_PUBLIC_KEY" \
+        RUST_LOG="${RUST_LOG:-info}" \
+        "$CLIENT_BIN" > "$LOG_DIR/package-echo-client.log" 2>&1 &
+    CLIENT_PID=$!
 
-# Wait long enough for the WebRTC connection factory to use its built-in retry path.
-# A single attempt can take 10s, and the factory may back off before retrying.
-CLIENT_TIMEOUT_SECONDS="${CLIENT_TIMEOUT_SECONDS:-40}"
-COUNTER=0
-while kill -0 $CLIENT_PID 2>/dev/null && [ $COUNTER -lt "$CLIENT_TIMEOUT_SECONDS" ]; do
-    sleep 1
-    COUNTER=$((COUNTER + 1))
-done
+    GATEWAY_URL="http://${HTTP_LISTEN}"
+    GATEWAY_TIMEOUT_SECONDS="${GATEWAY_TIMEOUT_SECONDS:-60}"
+    COUNTER=0
+    until curl --silent --fail "$GATEWAY_URL/health" > "$LOG_DIR/package-echo-health.json"; do
+        if ! kill -0 "$CLIENT_PID" 2>/dev/null; then
+            echo -e "${RED}❌ Actrium Actor gateway failed to start${NC}"
+            cat "$LOG_DIR/package-echo-client.log"
+            exit 1
+        fi
+        if [ "$COUNTER" -ge "$GATEWAY_TIMEOUT_SECONDS" ]; then
+            echo -e "${RED}❌ Timed out waiting for Actrium Actor gateway${NC}"
+            cat "$LOG_DIR/package-echo-client.log"
+            exit 1
+        fi
+        sleep 1
+        COUNTER=$((COUNTER + 1))
+    done
+    echo -e "${GREEN}✅ Actrium Actor gateway is ready at $GATEWAY_URL${NC}"
 
-if kill -0 $CLIENT_PID 2>/dev/null; then
-    echo -e "${YELLOW}⚠️  Client still running after ${CLIENT_TIMEOUT_SECONDS} seconds, killing...${NC}"
-    kill $CLIENT_PID 2>/dev/null || true
+    REQUEST_JSON="$(python3 - "$TEST_INPUT" <<'PY'
+import base64
+import json
+import sys
+
+
+def varint(value):
+    result = bytearray()
+    while True:
+        byte = value & 0x7f
+        value >>= 7
+        result.append(byte | (0x80 if value else 0))
+        if not value:
+            return result
+
+
+message = sys.argv[1].encode("utf-8")
+payload = bytes([0x0a]) + varint(len(message)) + message
+print(json.dumps({
+    "routeKey": "echo.EchoService.Echo",
+    "payloadBase64": base64.b64encode(payload).decode("ascii"),
+    "timeoutMs": 30000,
+}))
+PY
+)"
+
+    # A cold WebRTC host can occasionally time out before its first ICE pair
+    # is available. Retry the complete Actor call, while keeping each attempt
+    # independently bounded by the request timeout above.
+    ECHO_CALL_ATTEMPTS="${ECHO_CALL_ATTEMPTS:-3}"
+    HTTP_STATUS="000"
+    CALL_SUCCEEDED=0
+    for ATTEMPT in $(seq 1 "$ECHO_CALL_ATTEMPTS"); do
+        if HTTP_STATUS="$(curl --silent --show-error \
+            --output "$LOG_DIR/package-echo-call.json" \
+            --write-out '%{http_code}' \
+            --header 'Content-Type: application/json' \
+            --data "$REQUEST_JSON" \
+            "$GATEWAY_URL/v1/call")" \
+            && [ "$HTTP_STATUS" = "200" ] \
+            && jq -e '.success == true' "$LOG_DIR/package-echo-call.json" >/dev/null; then
+            CALL_SUCCEEDED=1
+            break
+        fi
+
+        if [ "$ATTEMPT" -lt "$ECHO_CALL_ATTEMPTS" ]; then
+            echo -e "${YELLOW}⚠️  Actor call attempt $ATTEMPT/$ECHO_CALL_ATTEMPTS failed; retrying...${NC}"
+            sleep 2
+        fi
+    done
+
+    if [ "$CALL_SUCCEEDED" != "1" ]; then
+        echo -e "${RED}❌ Actor gateway call failed after $ECHO_CALL_ATTEMPTS attempts (last HTTP $HTTP_STATUS)${NC}"
+        cat "$LOG_DIR/package-echo-call.json"
+        echo ""
+        cat "$LOG_DIR/package-echo-client.log"
+        exit 1
+    fi
+
+    RESPONSE_PAYLOAD="$(jq -r '.payloadBase64' "$LOG_DIR/package-echo-call.json")"
+    RECEIVED_REPLY="$(python3 - "$RESPONSE_PAYLOAD" <<'PY'
+import base64
+import sys
+
+
+def varint(data, cursor):
+    value = 0
+    shift = 0
+    while cursor < len(data):
+        byte = data[cursor]
+        cursor += 1
+        value |= (byte & 0x7f) << shift
+        if byte & 0x80 == 0:
+            return value, cursor
+        shift += 7
+    raise ValueError("invalid protobuf varint")
+
+
+data = base64.b64decode(sys.argv[1])
+cursor = 0
+reply = ""
+while cursor < len(data):
+    tag, cursor = varint(data, cursor)
+    field = tag >> 3
+    wire = tag & 7
+    if wire == 0:
+        _, cursor = varint(data, cursor)
+    elif wire == 2:
+        length, cursor = varint(data, cursor)
+        value = data[cursor:cursor + length]
+        cursor += length
+        if field == 1:
+            reply = value.decode("utf-8")
+    else:
+        raise ValueError(f"unsupported protobuf wire type: {wire}")
+print(reply)
+PY
+)"
+else
+    (
+        sleep 3
+        echo "$TEST_INPUT"
+        sleep 2
+        echo "quit"
+    ) | ECHO_ACTR_VERSION="$ECHO_ACTR_VERSION" \
+        CLIENT_GUEST_PACKAGE_PATH="$CLIENT_GUEST_PACKAGE" \
+        CLIENT_GUEST_PUBLIC_KEY_PATH="$CLIENT_GUEST_PUBLIC_KEY" \
+        RUST_LOG="${RUST_LOG:-info}" \
+        cargo run --bin package-echo-client > "$LOG_DIR/package-echo-client.log" 2>&1 &
+    CLIENT_PID=$!
+
+    # Wait long enough for the WebRTC connection factory to use its built-in retry path.
+    # A single attempt can take 10s, and the factory may back off before retrying.
+    CLIENT_TIMEOUT_SECONDS="${CLIENT_TIMEOUT_SECONDS:-40}"
+    COUNTER=0
+    while kill -0 "$CLIENT_PID" 2>/dev/null && [ "$COUNTER" -lt "$CLIENT_TIMEOUT_SECONDS" ]; do
+        sleep 1
+        COUNTER=$((COUNTER + 1))
+    done
+
+    if kill -0 "$CLIENT_PID" 2>/dev/null; then
+        echo -e "${YELLOW}⚠️  Client still running after ${CLIENT_TIMEOUT_SECONDS} seconds, killing...${NC}"
+        kill "$CLIENT_PID" 2>/dev/null || true
+    fi
 fi
 
 # ── Step 6: Verify output ────────────────────────────────────────────────
@@ -934,7 +1173,8 @@ echo ""
 echo "🔍 Verifying output..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-if grep -q "\[Received reply\].*Echo: $TEST_INPUT" "$LOG_DIR/package-echo-client.log" \
+if { [ "$CLIENT_MODE" = "http" ] && { [ "$RECEIVED_REPLY" = "Echo: $TEST_INPUT" ] || [ "$RECEIVED_REPLY" = "$TEST_INPUT" ]; }; } \
+    || grep -q "\[Received reply\].*Echo: $TEST_INPUT" "$LOG_DIR/package-echo-client.log" \
     || grep -q "\[Received reply\] $TEST_INPUT" "$LOG_DIR/package-echo-client.log"; then
     echo -e "${GREEN}✅ Test PASSED: package-backed echo server response received${NC}"
     echo ""
@@ -945,7 +1185,7 @@ if grep -q "\[Received reply\].*Echo: $TEST_INPUT" "$LOG_DIR/package-echo-client
     echo "✅ Validated:"
     echo "   1. $BACKEND artifact built from $ECHO_ACTR_DIR"
     echo "   2. signed .actr package created (key: $SIGNING_KEY)"
-    echo "   3. actr pkg publish → registered via challenge-response nonce"
+    echo "   3. actr registry publish → registered via challenge-response nonce"
     echo "   4. Hyper (TRUST_MODE=production) fetched pubkey from MFR, verified .actr"
     echo "   5. AIS issued credential (Path 1: published package lookup)"
     echo "   6. Client ↔ server echo confirmed via WebRTC"
@@ -956,8 +1196,23 @@ if grep -q "\[Received reply\].*Echo: $TEST_INPUT" "$LOG_DIR/package-echo-client
     echo "📖 View full logs:"
     echo "   cat $LOG_DIR/package-echo-client.log  # Client logs"
     echo "   cat $LOG_DIR/package-echo-server.log  # Server logs"
-    echo "   tail -f $LOG_DIR/actrix.log           # Actrix logs"
+    echo "   tail -f $LOG_DIR/actrix.log           # Loran logs"
     echo ""
+    if [ "$CLIENT_MODE" = "http" ]; then
+        echo "Gateway response: $RECEIVED_REPLY"
+        if [ "$KEEP_RUNNING" = "1" ]; then
+            echo ""
+            echo -e "${GREEN}✅ Echo stack is ready for Actrium at $GATEWAY_URL${NC}"
+            echo "Press Ctrl-C to stop Loran, the echo server, and the client Host."
+            while kill -0 "$ACTRIX_PID" 2>/dev/null \
+                && kill -0 "$SERVER_PID" 2>/dev/null \
+                && kill -0 "$CLIENT_PID" 2>/dev/null; do
+                sleep 1
+            done
+            echo -e "${RED}❌ An echo stack process exited unexpectedly${NC}"
+            exit 1
+        fi
+    fi
     exit 0
 else
     echo -e "${RED}❌ Test FAILED: Expected package-backed echo server response not found${NC}"
@@ -970,7 +1225,7 @@ else
     echo "Server output (last 30 lines):"
     tail -30 "$LOG_DIR/package-echo-server.log"
     echo ""
-    echo "Actrix output (last 30 lines):"
+    echo "Loran output (last 30 lines):"
     tail -30 "$LOG_DIR/actrix.log"
     exit 1
 fi

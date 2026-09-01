@@ -1,0 +1,20 @@
+{
+  "name": "@actrium/counter-guest",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "bun ../../../keel/src/cli/bin.ts build src/unified-app.tsx -o workload/guest.js --footer ../../../actrium-app-sdk/src/cli/keel-guest-footer.js --no-minify --dev",
+    "build:package": "cargo run --manifest-path ../../../../Cargo.toml -p actr-cli -- pkg pack --manifest-path manifest.toml --payload-root . --key ../../../../examples/actr/rust/package-echo/dev-key.json --output dist/actrium-counter-1.0.0.actr",
+    "verify:package": "cargo run --manifest-path ../../../../Cargo.toml -p actr-cli -- pkg verify --package dist/actrium-counter-1.0.0.actr --pubkey ../../../../examples/actr/rust/package-echo/dev-key.json"
+  },
+  "dependencies": {
+    "askit": "file:../../../actrium-app-sdk",
+    "dayjs": "^1.11.19",
+    "react": "^19.0.0",
+    "keel": "file:../../../keel"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "typescript": "^5.7.2"
+  }
+}

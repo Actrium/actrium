@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { AuthorizeContent } from './AuthorizeContent';
-import { useAppStore } from '../../actr-host/store/useAppStore';
+import { useAppStore } from '../../runtime-host/store/useAppStore';
 import { useAuthorize } from '../../hooks/auth';
 import { HostIconButton } from '../../components';
 import { getHostLayoutTokens } from '../../utils/layout';

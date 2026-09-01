@@ -1,5 +1,5 @@
 import { NativeModules } from 'react-native';
-import { ACTR_BRIDGE_CONTRACT } from '../../actr-host/coreContract';
+import { ACTR_BRIDGE_CONTRACT } from '../../runtime-host/coreContract';
 
 const ActrBridge = NativeModules[ACTR_BRIDGE_CONTRACT.moduleName];
 

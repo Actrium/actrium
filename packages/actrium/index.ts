@@ -134,7 +134,7 @@ const TestComponent = (props: any) => {
   );
 };
 
-// Import Full Version ActrApp Component (Use keel/askit)
+// Import Full Version RuntimeApp Component (Use keel/askit)
 let Component;
 const USE_TEST_COMPONENT = false; // 🟢 Cut back to the formal component test logic
 
@@ -238,8 +238,8 @@ const originalErrorHandler = (globalThis as any).ErrorUtils?.getGlobalHandler?.(
 });
 
 try {
-  AppRegistry.registerComponent('ActrApp', () => Component);
-  nlog('✅ ActrApp Component registered');
+  AppRegistry.registerComponent('RuntimeApp', () => Component);
+  nlog('✅ RuntimeApp Component registered');
 
   // 🔴 Verify whether registration is successful
   const registered = (AppRegistry as any).getAppKeys?.();

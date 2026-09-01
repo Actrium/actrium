@@ -8,7 +8,7 @@ import {
   TAttachmentUploadResult,
 } from './ActrConnection.type';
 import { ActrConnection } from './ActrConnection';
-import { ACTR_BRIDGE_CONTRACT } from '../../actr-host/coreContract';
+import { ACTR_BRIDGE_CONTRACT } from '../../runtime-host/coreContract';
 
 export type TActrStreamMap = {
   requestStreamId: string;

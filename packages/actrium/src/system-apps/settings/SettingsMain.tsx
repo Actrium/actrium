@@ -13,7 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../../components';
 import { AppText } from '../../components';
 import { getTypographyStyle, spacing } from '../../theme/tokens';
-import { useUserStore } from '../../actr-host/store/useUserStore';
+import { useUserStore } from '../../runtime-host/store/useUserStore';
 import { SettingsItem } from './SettingsItem';
 import { PhoneNavigationBar } from '../../components/PhoneNavigationBar';
 import {

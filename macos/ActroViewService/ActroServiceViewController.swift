@@ -1419,6 +1419,9 @@ final class ServiceReactNativeHost {
         if let s = config["leftPanelScript"] as? String { tabDict["leftPanelScript"] = s }
         if let s = config["rightPanelScript"] as? String { tabDict["rightPanelScript"] = s }
         if let s = config["guestScript"] as? String { tabDict["guestScript"] = s }
+        if let permissions = config["permissions"] as? [String] {
+            tabDict["permissions"] = permissions
+        }
         if let reloadKey = config["reloadKey"] { tabDict["reloadKey"] = reloadKey }
 
         // System app data
@@ -1481,9 +1484,9 @@ final class ServiceReactNativeHost {
         properties["containerHeight"] = entry.containerSize.height
         entry.currentProperties = properties
 
-        ipcLog("📦 createRootView: calling rootViewFactory.view with moduleName=ActrApp")
+        ipcLog("📦 createRootView: calling rootViewFactory.view with moduleName=RuntimeApp")
         let view = factory.rootViewFactory.view(
-            withModuleName: "ActrApp",
+            withModuleName: "RuntimeApp",
             initialProperties: properties,
             launchOptions: nil
         )
@@ -1885,6 +1888,9 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
     }
     if let unifiedScript = config["unifiedScript"] as? String {
         tabDict["unifiedScript"] = unifiedScript
+    }
+    if let permissions = config["permissions"] as? [String] {
+        tabDict["permissions"] = permissions
     }
     if let reloadKey = config["reloadKey"] { tabDict["reloadKey"] = reloadKey }
     // Copy other tab properties

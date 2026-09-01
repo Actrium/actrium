@@ -12,7 +12,7 @@
 #
 # Bundles:
 #   system  -> Actro/Resources/system.jsbundle  (for RCTViewService0)
-#   actr    -> Actro/Resources/actr.jsbundle    (for RCTViewService1-N)
+#   actr    -> Actro/Resources/runtime.jsbundle    (for RCTViewService1-N)
 #
 # Examples:
 #   ./scripts/bundle-actro-runtime.sh                    # Build both bundles (release)
@@ -100,6 +100,15 @@ rm -rf "$OUTPUT_DIR/.generated-assets" "$GENERATED_ASSETS_DIR"
 
 cd "$ACTRO_RUNTIME_DIR"
 
+# The shared runtime also contains the iOS/Android React Native package, whose
+# CLI does not register the out-of-tree macOS platform. Bundle this macOS app
+# through react-native-macos so the matching platform and Metro defaults load.
+REACT_NATIVE_CLI="node_modules/react-native-macos/cli.js"
+if [ ! -f "$REACT_NATIVE_CLI" ]; then
+    echo "❌ Error: react-native-macos CLI not found at $ACTRO_RUNTIME_DIR/$REACT_NATIVE_CLI"
+    exit 1
+fi
+
 copy_assets_for_xcode() {
     local assets_dir="$GENERATED_ASSETS_DIR/assets"
     if [ -z "${TARGET_BUILD_DIR:-}" ] || [ -z "${UNLOCALIZED_RESOURCES_FOLDER_PATH:-}" ]; then
@@ -126,7 +135,7 @@ bundle_target() {
     echo "   Output: $output_file"
 
     if [ "$DEV_MODE" = true ]; then
-        node node_modules/react-native/cli.js bundle \
+        node "$REACT_NATIVE_CLI" bundle \
             --platform macos \
             --dev true \
             --entry-file "$entry_file" \
@@ -135,7 +144,7 @@ bundle_target() {
             --sourcemap-output "$output_file.map"
         echo "   ✅ Dev bundle created (with source map)"
     else
-        node node_modules/react-native/cli.js bundle \
+        node "$REACT_NATIVE_CLI" bundle \
             --platform macos \
             --dev false \
             --entry-file "$entry_file" \
@@ -161,7 +170,7 @@ if [ "$TARGET" = "system" ] || [ "$TARGET" = "all" ]; then
 fi
 
 if [ "$TARGET" = "actr" ] || [ "$TARGET" = "all" ]; then
-    bundle_target "Actr Host" "index-actr.tsx" "$OUTPUT_DIR/actr.jsbundle"
+    bundle_target "Actr Host" "index-runtime.tsx" "$OUTPUT_DIR/runtime.jsbundle"
 fi
 
 echo "🎉 Done!"
@@ -171,7 +180,7 @@ if [ "$TARGET" = "system" ] || [ "$TARGET" = "all" ]; then
     echo "   System Apps: $OUTPUT_DIR/system.jsbundle"
 fi
 if [ "$TARGET" = "actr" ] || [ "$TARGET" = "all" ]; then
-    echo "   Actr Host:   $OUTPUT_DIR/actr.jsbundle"
+    echo "   Actr Host:   $OUTPUT_DIR/runtime.jsbundle"
 fi
 echo ""
 echo "Note: Make sure bundle files are added to Xcode project resources."

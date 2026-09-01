@@ -941,6 +941,7 @@ final class ViewBridgeCoordinator {
             if let script = tabConfig.leftPanelScript { config["leftPanelScript"] = script }
             config["leftPanelVisible"] = tabConfig.leftPanelVisible
             config["rightPanelVisible"] = tabConfig.rightPanelVisible
+            config["permissions"] = tabConfig.permissions
             config["reloadKey"] = tabConfig.reloadKey
             // 🔑 StartPage Data required
             if !tabConfig.bookmarks.isEmpty { config["bookmarks"] = tabConfig.bookmarks }
@@ -2260,6 +2261,7 @@ struct UnifiedReactNativeLayer: View {
                 leftPanelScript: tab.leftPanelScript,
                 leftPanelVisible: tab.leftPanelDefaultVisible,
                 rightPanelVisible: tab.rightPanelDefaultVisible,
+                permissions: tab.permissions,
                 bookmarks: bookmarks,
                 recentHistory: recentHistory,
                 reloadKey: tab.reloadNonce
@@ -2306,6 +2308,7 @@ struct UnifiedReactNativeLayer: View {
                 leftPanelScript: tab.leftPanelScript,
                 leftPanelVisible: tab.leftPanelDefaultVisible,
                 rightPanelVisible: tab.rightPanelDefaultVisible,
+                permissions: tab.permissions,
                 bookmarks: bookmarks,
                 recentHistory: recentHistory,
                 reloadKey: tab.reloadNonce
@@ -2328,6 +2331,7 @@ struct UnifiedReactNativeLayer: View {
             "isOverviewMode": !isFocused,
             "leftPanelVisible": tab.leftPanelDefaultVisible,
             "rightPanelVisible": tab.rightPanelDefaultVisible,
+            "permissions": tab.permissions,
             "bookmarks": bookmarks,
             "recentHistory": recentHistory,
             "reloadKey": tab.reloadNonce
@@ -2528,6 +2532,9 @@ struct UnifiedReactNativeLayer: View {
         if let systemTabType = tab.systemTabType {
             tabConfig[RuntimeBridgeContract.systemAppType] = systemTabType.rawValue
         }
+        if !tab.permissions.isEmpty {
+            tabConfig["permissions"] = tab.permissions
+        }
 
         // Add system app data (for StartPageApp)
         if !bookmarks.isEmpty {
@@ -2602,4 +2609,3 @@ struct ViewBridgeTabView: NSViewRepresentable {
         // Note: Old design calls. nsView.disconnect(), but this will accidentally disconnect the connection when size changes.
     }
 }
-

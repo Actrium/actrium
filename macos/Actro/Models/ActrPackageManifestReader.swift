@@ -45,25 +45,16 @@ enum ActrPackageManifestReader {
     }
 
     private static func logManifest(_ manifest: AppleActrPackageManifestInfo) {
-        if manifest.usesLegacyLayoutFallback {
-            actrManifestLogger.warning(" [ActrPackageManifestReader] manifest Missing entryPress legacy layout Format Load")
-        }
         if let color = manifest.themeColor {
-            actrManifestLogger.notice("🎨 [ActrPackageManifestReader] From manifest Read themeColor: \(color)")
+            actrManifestLogger.notice("[ActrPackageManifestReader] theme color: \(color)")
         }
         if let contractName = manifest.contractName,
            let contractVersion = manifest.contractVersion {
-            actrManifestLogger.notice(" [ActrPackageManifestReader] contract: \(contractName)@v\(contractVersion)")
-        } else if manifest.usesLegacyLayoutFallback {
-            actrManifestLogger.warning(" [ActrPackageManifestReader] manifest.contract Field incomplete, checkout")
-        } else {
-            actrManifestLogger.warning(" [ActrPackageManifestReader] manifest Missing contract(Compatibility mode continues)")
+            actrManifestLogger.notice("[ActrPackageManifestReader] workload contract: \(contractName)@v\(contractVersion)")
         }
         if !manifest.permissions.isEmpty {
-            actrManifestLogger.debug("🔐 [ActrPackageManifestReader] permissions: \(manifest.permissions.joined(separator: ", "))")
+            actrManifestLogger.debug("[ActrPackageManifestReader] capabilities: \(manifest.permissions.joined(separator: ", "))")
         }
-        if let algorithm = manifest.integrityAlgorithm {
-            actrManifestLogger.notice(" [ActrPackageManifestReader] ACTR integrity verified: \(manifest.integrityFileCount) files, \(algorithm)")
-        }
+        actrManifestLogger.notice("[ActrPackageManifestReader] payload integrity verified: \(manifest.integrityFileCount) files, \(manifest.integrityAlgorithm)")
     }
 }

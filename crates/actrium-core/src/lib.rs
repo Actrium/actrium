@@ -7,7 +7,7 @@
 //! package manifest validation, and native bridge payload contracts.
 
 pub mod actr_config;
-pub mod actr;
+pub mod actr_package;
 pub mod auth;
 pub mod bridge;
 pub mod browser;

@@ -2,7 +2,7 @@ use std::{env, fs, path::PathBuf};
 
 use actro_core::{
     actr_config,
-    actr::{
+    actr_package::{
         ASSET_EXTENSIONS, SUPPORTED_CONTRACT_NAME, SUPPORTED_CONTRACT_VERSION,
         SUPPORTED_INTEGRITY_ALGORITHM,
     },
@@ -21,7 +21,7 @@ use actro_core::{
 
 fn main() {
     let output_path = env::args_os().nth(1).map(PathBuf::from).unwrap_or_else(|| {
-        PathBuf::from("packages/actrium/src/actr-host/generated/actroCoreContract.ts")
+        PathBuf::from("packages/actrium/src/runtime-host/generated/actroCoreContract.ts")
     });
 
     if let Some(parent) = output_path.parent() {
@@ -228,49 +228,16 @@ export const RUNTIME_DB_QUERIES = {{
 }} as const;
 
 export const SUPPORTED_INTEGRITY_ALGORITHM = '{supported_integrity_algorithm}' as const;
-export type ActrIntegrityAlgorithm = typeof SUPPORTED_INTEGRITY_ALGORITHM;
+export type PackageIntegrityAlgorithm = typeof SUPPORTED_INTEGRITY_ALGORITHM;
 
 export interface ActrContract {{
   name: string;
   version: number;
 }}
 
-export interface ManifestIntegrity {{
-  algorithm: string;
-  files: Record<string, string>;
-}}
-
-export interface ActrManifest {{
-  name: string;
-  version: string;
-  description?: string;
-  id?: string;
-  bundleId?: string;
-  icon?: string;
-  entry: string;
-  leftPanelDefaultVisible: boolean;
-  rightPanelDefaultVisible: boolean;
-  contract?: ActrContract;
-  permissions: string[];
-  integrity?: ManifestIntegrity;
-  systemAppType?: SystemAppType;
-  themeColor?: string;
-  backgroundColor?: string;
-}}
-
 export interface ContractGateInfo {{
   status: ContractGateStatus;
   blockedReason: string | null;
-}}
-
-export interface ActrIntegrityFilePlan {{
-  path: string;
-  expectedHash: string;
-}}
-
-export interface ActrIntegrityPlan {{
-  algorithm: ActrIntegrityAlgorithm;
-  files: ActrIntegrityFilePlan[];
 }}
 
 export function evaluateContract(contract?: ActrContract | null): ContractGateInfo {{
@@ -293,85 +260,6 @@ export function evaluateContract(contract?: ActrContract | null): ContractGateIn
   }}
 
   return {{ status: 'ok', blockedReason: null }};
-}}
-
-export function parseActrManifest(json: string): ActrManifest {{
-  let raw: unknown;
-  try {{
-    raw = JSON.parse(json);
-  }} catch (error) {{
-    throw new Error(`manifest JSON is invalid: ${{errorMessage(error)}}`);
-  }}
-
-  if (!isRecord(raw)) {{
-    throw new Error('manifest JSON is invalid: root must be an object');
-  }}
-
-  const name = requiredString(raw, 'name');
-  const version = requiredString(raw, 'version');
-  const entry = requiredString(raw, 'entry');
-  const contract = optionalContract(raw, 'contract');
-  const gate = evaluateContract(contract);
-  if (gate.status === 'blocked') {{
-    throw new Error(gate.blockedReason ?? 'Not enough for the host. contract/Permission Policy');
-  }}
-
-  const systemAppType = optionalSystemAppType(raw, 'systemAppType');
-
-  return {{
-    name,
-    version,
-    description: optionalString(raw, 'description'),
-    id: optionalString(raw, 'id'),
-    bundleId: optionalString(raw, 'bundleId'),
-    icon: optionalString(raw, 'icon'),
-    entry,
-    leftPanelDefaultVisible: optionalBoolean(raw, 'leftPanelDefaultVisible') ?? false,
-    rightPanelDefaultVisible: optionalBoolean(raw, 'rightPanelDefaultVisible') ?? false,
-    contract,
-    permissions: optionalStringArray(raw, 'permissions') ?? [],
-    integrity: optionalIntegrity(raw, 'integrity'),
-    systemAppType,
-    themeColor: optionalString(raw, 'themeColor'),
-    backgroundColor: optionalString(raw, 'backgroundColor'),
-  }};
-}}
-
-export function validateActrManifest(json: string): void {{
-  parseActrManifest(json);
-}}
-
-export function createActrIntegrityPlan(manifest: ActrManifest): ActrIntegrityPlan | null {{
-  const integrity = manifest.integrity;
-  if (!integrity) {{
-    return null;
-  }}
-
-  const algorithm = normalizeIntegrityAlgorithm(integrity.algorithm);
-  if (!algorithm) {{
-    throw new Error(
-      `unsupported integrity algorithm \`${{integrity.algorithm}}\`, expected \`${{SUPPORTED_INTEGRITY_ALGORITHM}}\``,
-    );
-  }}
-
-  const files = Object.entries(integrity.files).map(([path, expectedHash]) => {{
-    const normalizedPath = normalizeIntegrityPath(path);
-    if (!normalizedPath) {{
-      throw new Error(`manifest integrity path \`${{path}}\` is invalid`);
-    }}
-
-    const normalizedHash = normalizeSha256Hex(expectedHash);
-    if (!normalizedHash) {{
-      throw new Error(`manifest integrity hash for \`${{normalizedPath}}\` is invalid`);
-    }}
-
-    return {{
-      path: normalizedPath,
-      expectedHash: normalizedHash,
-    }};
-  }});
-
-  return {{ algorithm, files }};
 }}
 
 export function extractAppIdFromUrl(url: string): string | null {{
@@ -421,25 +309,6 @@ export function isAssetPath(path: string): boolean {{
   return ASSET_EXTENSIONS.some((extension) => lower.endsWith(extension));
 }}
 
-export function normalizeIntegrityAlgorithm(raw: string): ActrIntegrityAlgorithm | null {{
-  const normalized = raw.trim().toLowerCase().replace(/-/g, '');
-  return normalized === SUPPORTED_INTEGRITY_ALGORITHM
-    ? SUPPORTED_INTEGRITY_ALGORITHM
-    : null;
-}}
-
-export function normalizeIntegrityPath(path: string): string | null {{
-  const normalized = normalizePath(path).replace(/^\/+/, '');
-  if (normalized.length === 0) {{
-    return null;
-  }}
-
-  const hasInvalidComponent = normalized
-    .split('/')
-    .some((component) => component.length === 0 || component === '.' || component === '..');
-  return hasInvalidComponent ? null : normalized;
-}}
-
 export function normalizeSha256Hex(hash: string): string | null {{
   const normalized = hash.trim().toLowerCase();
   return /^[0-9a-f]{{64}}$/.test(normalized) ? normalized : null;
@@ -454,126 +323,6 @@ export function parseSystemAppType(raw: string): SystemAppType | null {{
     : null;
 }}
 
-function requiredString(record: Record<string, unknown>, field: string): string {{
-  const value = record[field];
-  if (typeof value !== 'string' || value.trim().length === 0) {{
-    throw new Error(`manifest is missing required field \`${{field}}\``);
-  }}
-  return value;
-}}
-
-function optionalString(record: Record<string, unknown>, field: string): string | undefined {{
-  const value = record[field];
-  if (value === undefined || value === null) {{
-    return undefined;
-  }}
-  if (typeof value !== 'string') {{
-    throw invalidField(field, 'a string');
-  }}
-  return typeof value === 'string' ? value : undefined;
-}}
-
-function optionalBoolean(record: Record<string, unknown>, field: string): boolean | undefined {{
-  const value = record[field];
-  if (value === undefined || value === null) {{
-    return undefined;
-  }}
-  if (typeof value !== 'boolean') {{
-    throw invalidField(field, 'a boolean');
-  }}
-  return value;
-}}
-
-function optionalStringArray(record: Record<string, unknown>, field: string): string[] | undefined {{
-  const value = record[field];
-  if (value === undefined || value === null) {{
-    return undefined;
-  }}
-  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {{
-    throw invalidField(field, 'an array of strings');
-  }}
-  return value;
-}}
-
-function optionalContract(record: Record<string, unknown>, field: string): ActrContract | undefined {{
-  const value = record[field];
-  if (value === undefined || value === null) {{
-    return undefined;
-  }}
-  if (!isRecord(value)) {{
-    throw invalidField(field, 'an object');
-  }}
-
-  const name = value.name;
-  const version = value.version;
-  if (typeof name !== 'string' || name.trim().length === 0) {{
-    throw invalidField(`${{field}}.name`, 'a non-empty string');
-  }}
-  if (typeof version !== 'number' || !Number.isInteger(version) || version < 0) {{
-    throw invalidField(`${{field}}.version`, 'a non-negative integer');
-  }}
-
-  return {{ name, version }};
-}}
-
-function optionalIntegrity(record: Record<string, unknown>, field: string): ManifestIntegrity | undefined {{
-  const value = record[field];
-  if (value === undefined || value === null) {{
-    return undefined;
-  }}
-  if (!isRecord(value)) {{
-    throw invalidField(field, 'an object');
-  }}
-  const algorithm = value.algorithm;
-  if (typeof algorithm !== 'string' || algorithm.trim().length === 0) {{
-    throw invalidField(`${{field}}.algorithm`, 'a non-empty string');
-  }}
-
-  const files: Record<string, string> = {{}};
-  if (value.files !== undefined && value.files !== null) {{
-    if (!isRecord(value.files)) {{
-      throw invalidField(`${{field}}.files`, 'an object');
-    }}
-    for (const [file, hash] of Object.entries(value.files)) {{
-      if (typeof hash !== 'string') {{
-        throw invalidField(`${{field}}.files.${{file}}`, 'a string');
-      }}
-      files[file] = hash;
-    }}
-  }}
-
-  return {{
-    algorithm,
-    files,
-  }};
-}}
-
-function optionalSystemAppType(record: Record<string, unknown>, field: string): SystemAppType | undefined {{
-  const value = record[field];
-  if (value === undefined || value === null) {{
-    return undefined;
-  }}
-  if (typeof value !== 'string') {{
-    throw invalidField(field, 'a string');
-  }}
-  const parsed = parseSystemAppType(value);
-  if (!parsed) {{
-    throw new Error(`unknown system app type \`${{value}}\``);
-  }}
-  return parsed;
-}}
-
-function invalidField(field: string, expected: string): Error {{
-  return new Error(`manifest JSON is invalid: field \`${{field}}\` must be ${{expected}}`);
-}}
-
-function isRecord(value: unknown): value is Record<string, unknown> {{
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}}
-
-function errorMessage(error: unknown): string {{
-  return error instanceof Error ? error.message : String(error);
-}}
 "#,
         supported_contract_name = quote_ts(SUPPORTED_CONTRACT_NAME),
         supported_contract_version = SUPPORTED_CONTRACT_VERSION,

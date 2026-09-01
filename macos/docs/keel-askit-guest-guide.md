@@ -1,254 +1,90 @@
-# Keel + Askit Guest Development Guide
+# Keel Guest development for Actrium
 
-## Overview
+A UI running in Actrium is still an Actor workload. It is built as one
+`keel.guest/1` workload and distributed as the same signed `.actr` package used
+by every other Actor workload profile.
 
-**Keel** is a sandbox-based React rendering engine:
-- **Guest**: App code running in QuickJS sandbox, produces UI operation commands
-- **Host**: React Native environment, receives commands and renders native components
+## Responsibilities
 
-**Askit** is an isomorphic UI component library with shared code between Guest and Host.
+- Keel serializes Guest React operations and renders them through the Host's
+  registered native components.
+- The Actrium app SDK exposes capability-scoped Host/Guest APIs.
+- The `.actr` manifest declares Actor identity, workload entry, Host API range,
+  requested capabilities, every payload digest, and publisher signature.
+- Actrium verifies the package before creating the sandbox and does not execute
+  undeclared files.
 
-## Architecture
+## Project shape
 
-```
-┌─────────────────────────────────────────┐
-│            Guest Sandbox                │
-│  (QuickJS)                              │
-│                                         │
-│  User Code (TSX/JSX)                    │
-│         ↓                               │
-│  React Virtual DOM                      │
-│         ↓                               │
-│  Keel Operation Serialization           │
-│   CREATE / UPDATE / DELETE / CALL       │
-└─────────────────────────────────────────┘
-                    ↓ (JSON)
-┌─────────────────────────────────────────┐
-│            Host Environment             │
-│  (React Native)                         │
-│                                         │
-│  Keel Engine receives operations        │
-│         ↓                               │
-│  Native component rendering             │
-│   <View> <Text> <TouchableOpacity>      │
-└─────────────────────────────────────────┘
-```
-
-## Guest App Structure
-
-```
-my-guest-app/
-├── manifest.json       # App metadata
+```text
+my-guest/
+├── manifest.toml
 ├── src/
-│   ├── left-panel.tsx  # Left panel component
-│   └── right-panel.tsx # Right panel component
-└── dist/               # Built output
-    ├── left-panel.js
-    └── right-panel.js
+│   └── app.tsx
+└── workload/
+    └── guest.js
 ```
 
-### manifest.json
-
-```json
-{
-  "name": "MyApp",
-  "version": "1.0.0",
-  "description": "App description",
-  "layout": {
-    "leftPanel": "left-panel.js",
-    "rightPanel": "right-panel.js",
-    "rightPanelDefaultVisible": true
-  }
-}
-```
-
-## Basic Component Example
+The source entry exports the Guest application contract expected by Keel. The
+Counter example exports `usePanels`; the Echo example demonstrates Actor RPC.
 
 ```tsx
-// src/left-panel.tsx
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
+import { Text, TouchableOpacity, View } from 'react-native';
 
-export default function LeftPanel() {
+export function App() {
   const [count, setCount] = useState(0);
-
   return (
-    <ScrollView style={{ flex: 1, padding: 16 }}>
-      <Text style={{ fontSize: 24, color: '#fff' }}>
-        Count: {count}
-      </Text>
-      <TouchableOpacity
-        onPress={() => setCount(count + 1)}
-        style={{ padding: 12, backgroundColor: '#007AFF', borderRadius: 8 }}
-      >
-        <Text style={{ color: '#fff' }}>Increment</Text>
+    <View style={{ padding: 16 }}>
+      <Text>Count: {count}</Text>
+      <TouchableOpacity onPress={() => setCount((value) => value + 1)}>
+        <Text>Increment</Text>
       </TouchableOpacity>
-    </ScrollView>
+    </View>
   );
 }
 ```
 
-## Using Askit Components
+## Build and package
 
-```tsx
-import { ThemeView, StepList, ChatBubble, UserAvatar } from 'askit';
-
-// Theme container
-<ThemeView variant="surface" padding="medium">
-  <Text>Auto-themed content</Text>
-</ThemeView>
-
-// Step list
-<StepList
-  steps={[
-    { title: 'Step 1', status: 'completed' },
-    { title: 'Step 2', status: 'active' },
-    { title: 'Step 3', status: 'pending' },
-  ]}
-/>
-
-// Chat bubble
-<ChatBubble
-  message="Hello!"
-  sender="user"
-  timestamp={Date.now()}
-/>
-
-// User avatar
-<UserAvatar name="John" size="medium" />
-```
-
-## Guest ↔ Host Communication
-
-### Send to Host
-
-```tsx
-import { useSendToHost } from 'keel/sdk';
-
-function MyComponent() {
-  const sendToHost = useSendToHost();
-
-  const handleAction = () => {
-    sendToHost('USER_ACTION', { type: 'button_click' });
-  };
-
-  return (
-    <TouchableOpacity onPress={handleAction}>
-      <Text>Send Event</Text>
-    </TouchableOpacity>
-  );
-}
-```
-
-### Receive from Host
-
-```tsx
-import { useHostEvent } from 'keel/sdk';
-
-function MyComponent() {
-  useHostEvent('DATA_UPDATED', (payload) => {
-    console.log('Received:', payload);
-  });
-
-  return <View>...</View>;
-}
-```
-
-### Event Bus (Askit)
-
-```tsx
-import { EventEmitter } from 'askit';
-
-// Emit event
-EventEmitter.emit('REFRESH', { force: true });
-
-// Listen to event
-EventEmitter.on('REFRESH', (data) => {
-  console.log('Refresh event:', data);
-});
-```
-
-## Build Process
-
-### Using Keel CLI
+Use Keel's build command with the Actrium app SDK Guest footer:
 
 ```bash
-# Build single panel
-keel build src/left-panel.tsx --outfile dist/left-panel.js
-
-# Build with options
-keel build src/app.tsx -o dist/bundle.js --watch --sourcemap --no-minify
+bun packages/keel/src/cli/bin.ts build src/app.tsx \
+  -o workload/guest.js \
+  --footer packages/actrium-app-sdk/src/cli/keel-guest-footer.js
 ```
 
-### Package as .actr
+Then package and verify through the shared Rust implementation:
 
 ```bash
-# Create .actr package (zip format)
-cd my-app
-zip -r ../my-app.actr manifest.json dist/*.js
+cargo run -p actr-cli -- pkg pack \
+  --manifest-path manifest.toml \
+  --payload-root . \
+  --key path/to/development-key.json \
+  --output dist/my-guest.actr
+
+cargo run -p actr-cli -- pkg verify \
+  --package dist/my-guest.actr \
+  --pubkey path/to/development-key.json
 ```
 
-Or use the provided script:
-```bash
-cd packages/actrium/actr-app-examples
-./pack-actr.sh my-app
-```
+Do not create the archive with a generic ZIP command: the packer canonicalizes
+file metadata, updates payload digests and key identity, enforces ZIP `STORE`,
+and signs the exact manifest bytes.
 
-## Sandbox Limitations
+## Sandbox boundary
 
-| Allowed | Not Allowed |
-|---------|-------------|
-| React Hooks | Node.js APIs (fs, path) |
-| JavaScript standard library | Browser APIs (window, document) |
-| Askit APIs (Toast, Haptic) | Direct native module access |
-| Host communication | External network requests |
+Guest code may use React, Keel Guest APIs, and Host capabilities explicitly
+granted to the package. It may not use Node.js file APIs, browser globals,
+native modules, ambient network access, or dynamic code loading. New Host
+capabilities require a versioned contract plus an implementation and policy in
+the Host.
 
-## Style System
+Runnable examples:
 
-Use React Native StyleSheet format:
+- [`packages/actrium/keel-guest-examples/counterapp`](../../packages/actrium/keel-guest-examples/counterapp)
+- [`examples/actrium/echo`](../../examples/actrium/echo)
 
-```tsx
-// Inline styles
-<View style={{ flex: 1, padding: 20 }}>
-
-// Style objects
-const styles = {
-  container: { flex: 1, padding: 20 },
-  text: { fontSize: 16, color: '#fff' }
-};
-
-// NOT supported: CSS class names
-<View className="container">  // Invalid
-```
-
-## Debugging
-
-Enable debug mode in Host:
-```typescript
-const engine = new Engine({ debug: true });
-```
-
-Guest console output appears in Host logs:
-```javascript
-console.log('Guest: current state', state);
-console.error('Guest: error', error);
-```
-
-## Best Practices
-
-1. **State Management**: Use React Hooks (`useState`, `useReducer`)
-2. **Component Splitting**: Break into small, reusable components
-3. **Error Handling**: Wrap risky operations in try-catch
-4. **Performance**: Use `React.memo` to optimize re-renders
-5. **Communication**: Batch updates to reduce cross-boundary overhead
-
-## Available Components
-
-**React Native (registered in Host):**
-- View, Text, Image, ScrollView
-- TouchableOpacity, TextInput, Button
-- FlatList, SectionList
-
-**Askit:**
-- ThemeView, StepList, ChatBubble, UserAvatar
-- Toast, Haptic, EventEmitter
+See the [Actor Package manifest](manifest-specification.md) and normative
+[Actor Package specification](../../actr/protocols/actor-package.zh.md).

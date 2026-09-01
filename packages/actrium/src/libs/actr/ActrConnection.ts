@@ -12,7 +12,7 @@ import { ActrNativeBridge } from '../../native-bridge/actr/ActrNativeBridge';
 import { Utils } from '../../utils/utils';
 import { ActrStreamRouter, TActrStreamMap } from './ActrStreamRouter';
 import { errorNote } from './LocalTestMessage';
-import { ACTR_BRIDGE_CONTRACT } from '../../actr-host/coreContract';
+import { ACTR_BRIDGE_CONTRACT } from '../../runtime-host/coreContract';
 
 // Attachment Upload By 48KB Fixed fractions,RN with native Relying on the promise of all sizes chunk The order is consistent with the boundary.
 const ATTACHMENT_CHUNK_SIZE = ACTR_BRIDGE_CONTRACT.attachment.chunkSizeBytes;

@@ -1,0 +1,6 @@
+
+# Debug project (generated)
+.debug/
+workload/guest.js
+workload/*.png
+dist/

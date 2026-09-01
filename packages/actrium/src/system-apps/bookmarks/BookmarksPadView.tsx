@@ -16,8 +16,8 @@ import {
   DropdownMenu,
   DropdownMenuItem,
   DropdownMenuText,
-} from '../../actr-host/features/shared/DropdownMenu';
-import { Toast, type ToastRef } from '../../actr-host/features/shared/Toast';
+} from '../../runtime-host/features/shared/DropdownMenu';
+import { Toast, type ToastRef } from '../../runtime-host/features/shared/Toast';
 import { getTypographyStyle, spacing, radius, longPressMenu } from '../../theme/tokens';
 import type { TBookmarkItem } from '../../repository/BookmarkRepository';
 import type { UseBookmarksPageResult } from './useBookmarksPage';

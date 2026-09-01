@@ -1,6 +1,6 @@
 // Actro/ActroRuntime/src/api/https.ts
 import { HostHttpHandler } from 'askit';
-import { authApiResponseSuccess } from '../actr-host/coreContract';
+import { authApiResponseSuccess } from '../runtime-host/coreContract';
 
 /**
  * The results of the business level are finally coming.

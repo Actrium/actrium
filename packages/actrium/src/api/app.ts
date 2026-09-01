@@ -1,6 +1,6 @@
 import { AppInfo } from './types';
 import { http } from './https';
-import { authClientAppPath } from '../actr-host/coreContract';
+import { authClientAppPath } from '../runtime-host/coreContract';
 
 // export const CONSOLE_BASE = 'https://console-actrium.actrium-beta.example';
 export const CONSOLE_BASE = 'https://console-v2.actrium.example';

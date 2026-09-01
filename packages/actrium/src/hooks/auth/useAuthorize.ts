@@ -1,15 +1,15 @@
 import { useState, useCallback } from 'react';
 import { Alert, NativeModules } from 'react-native';
 import { authApi } from '../../api/auth';
-import { useUserStore } from '../../actr-host/store/useUserStore';
-import { useAuthTaskStore } from '../../actr-host/store/useAuthTaskStore';
-import { useTabIdMapStore } from '../../actr-host/store/useTabIdMapStore';
+import { useUserStore } from '../../runtime-host/store/useUserStore';
+import { useAuthTaskStore } from '../../runtime-host/store/useAuthTaskStore';
+import { useTabIdMapStore } from '../../runtime-host/store/useTabIdMapStore';
 import { useTranslation } from 'react-i18next';
 import { GlobalAlert } from '../../components';
 import {
   AUTH_ACCESS_CONTROL_RESPONSE_CONTRACT,
   authAccessControlStatus,
-} from '../../actr-host/coreContract';
+} from '../../runtime-host/coreContract';
 
 export type AuthorizeStep = 'idle' | 'authorizing' | 'authorized' | 'failed';
 

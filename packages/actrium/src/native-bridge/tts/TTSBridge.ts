@@ -1,5 +1,5 @@
 import { NativeModules, Platform } from 'react-native';
-import { TTS_BRIDGE_CONTRACT } from '../../actr-host/coreContract';
+import { TTS_BRIDGE_CONTRACT } from '../../runtime-host/coreContract';
 
 const TTSModule = NativeModules[TTS_BRIDGE_CONTRACT.moduleName];
 

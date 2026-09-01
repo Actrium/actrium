@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { EventEmitter } from './EventEmitter.guest';
 
 type PendingRequest<T> = {
   resolve: (value: T) => void;
@@ -16,6 +15,19 @@ type RequestPayload = {
   [key: string]: unknown;
 };
 
+const runtimeGlobal = globalThis as typeof globalThis & {
+  __keel_emitEvent?: (eventName: string, payload?: unknown) => void;
+  __keel_onHostEvent?: (
+    eventName: string,
+    callback: (payload: unknown) => void
+  ) => () => void;
+  __sendEventToHost?: (eventName: string, payload?: unknown) => void;
+  __useHostEvent?: (
+    eventName: string,
+    callback: (payload: unknown) => void
+  ) => () => void;
+};
+
 function createRequestId(eventName: string): string {
   return `${eventName}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
 }
@@ -29,7 +41,12 @@ export function useEventBridge<TRequest extends RequestPayload = RequestPayload,
   const pendingRef = useRef(new Map<string, PendingRequest<TResponse>>());
 
   useEffect(() => {
-    return EventEmitter.on<TResponse & { requestId?: string }>(responseEvent, (payload) => {
+    const subscribe =
+      runtimeGlobal.__keel_onHostEvent ?? runtimeGlobal.__useHostEvent;
+    if (!subscribe) return undefined;
+
+    return subscribe(responseEvent, (value) => {
+      const payload = value as TResponse & { requestId?: string };
       const requestId = payload?.requestId;
       if (!requestId) return;
 
@@ -58,16 +75,23 @@ export function useEventBridge<TRequest extends RequestPayload = RequestPayload,
       const message = { ...payload, requestId };
 
       return new Promise<TResponse>((resolve, reject) => {
+        const sendToHost =
+          runtimeGlobal.__keel_emitEvent ?? runtimeGlobal.__sendEventToHost;
+        if (!sendToHost) {
+          reject(new Error('[useEventBridge] Keel event bridge is unavailable'));
+          return;
+        }
+
         const timer = setTimeout(() => {
           pendingRef.current.delete(requestId);
           reject(new Error(`[useEventBridge] Timeout: ${requestEvent} -> ${responseEvent} (${requestId})`));
         }, timeoutMs);
 
         pendingRef.current.set(requestId, { resolve, reject, timer });
-        EventEmitter.emit(requestEvent, message);
+        sendToHost(requestEvent, message);
       });
     },
-    [requestEvent, responseEvent, timeoutMs]
+    [requestEvent, timeoutMs]
   );
 
   return { request };

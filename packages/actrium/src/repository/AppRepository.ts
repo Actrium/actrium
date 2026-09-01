@@ -4,7 +4,7 @@ import {
   RUNTIME_APP_STATUS,
   RUNTIME_DB_QUERIES,
   type RuntimeAppStatus,
-} from '../actr-host/coreContract';
+} from '../runtime-host/coreContract';
 
 export class AppRepository {
   /**

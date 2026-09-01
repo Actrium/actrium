@@ -1,5 +1,5 @@
 import { NativeModules, NativeEventEmitter } from 'react-native';
-import { RUNTIME_NATIVE_EVENTS } from '../../actr-host/coreContract';
+import { RUNTIME_NATIVE_EVENTS } from '../../runtime-host/coreContract';
 
 const { TabEventEmitter } = NativeModules;
 const eventEmitter = new NativeEventEmitter(TabEventEmitter);

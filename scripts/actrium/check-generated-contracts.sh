@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$repo_root"
 
-ts_contract="packages/actrium/src/actr-host/generated/actroCoreContract.ts"
+ts_contract="packages/actrium/src/runtime-host/generated/actroCoreContract.ts"
 android_contract="android/android/app/src/main/java/io/actrium/actro/generated/ActroAndroidPersistenceContract.kt"
 
 failures=0
@@ -33,8 +33,8 @@ done
 
 direct_ts_imports="$(
   rg -n "generated/actroCoreContract" packages/actrium/src \
-    --glob '!**/actr-host/generated/**' \
-    --glob '!**/actr-host/coreContract.ts' || true
+    --glob '!**/runtime-host/generated/**' \
+    --glob '!**/runtime-host/coreContract.ts' || true
 )"
 
 if [[ -n "$direct_ts_imports" ]]; then

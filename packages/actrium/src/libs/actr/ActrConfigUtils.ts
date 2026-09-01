@@ -4,10 +4,10 @@ export {
   normalizeActrSignalingUrl,
   normalizeActrStunUrl,
   normalizeActrTurnUrl,
-} from '../../actr-host/coreContract';
+} from '../../runtime-host/coreContract';
 
 export type {
   ActrLockTomlConfig,
   ActrServiceEndpointConfig,
   ActrTomlConfig,
-} from '../../actr-host/coreContract';
+} from '../../runtime-host/coreContract';
