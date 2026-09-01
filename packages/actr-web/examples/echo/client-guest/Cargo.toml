@@ -17,8 +17,8 @@ description = "Echo Client Guest WASM for Web — unified (CM wasm32-wasip2 + WB
 crate-type = ["cdylib"]
 
 [dependencies]
-actr-framework = { path = "../../../../../core/framework" }
-actr-protocol = { path = "../../../../../core/protocol" }
+actr-framework = { path = "../../../../../crates/actr-framework" }
+actr-protocol = { path = "../../../../../crates/actr-protocol" }
 async-trait = "0.1"
 bytes = "1.0"
 prost = "0.14"

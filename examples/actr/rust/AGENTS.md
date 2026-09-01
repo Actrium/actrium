@@ -4,7 +4,7 @@ This document summarizes the expectations for anyone operating or extending the 
 
 ## Scope & Goals
 
-- Keep the examples aligned with the upstream `../actr` crates (framework, protocol, runtime, config).
+- Keep the examples aligned with the monorepo's root `crates/actr*` packages.
 - Maintain runnable demos that illustrate data streaming, media relay, and shell echo flows.
 - Ensure every addition preserves the developer experience: `cargo check`, `cargo fmt`, and `cargo run` must succeed from the workspace root.
 
@@ -18,7 +18,7 @@ Each crate is a workspace member (see root `Cargo.toml`) and targets Rust editio
 
 ## Daily Workflow
 
-1. **Sync Dependencies** – verify paths pointing to `../../../actr/crates/...` still resolve after upstream changes. Run `cargo metadata` to confirm.
+1. **Sync Dependencies** – verify paths pointing to the root `crates/actr*` directories still resolve after workspace changes. Run `cargo metadata` to confirm.
 2. **Format & Lint** – execute `cargo fmt --all` and `cargo clippy --all-targets` before sending patches.
 3. **Check & Test** – use `cargo check` for quick validation, `cargo test -p <crate>` for focused coverage, and `cargo test --workspace` for full verification when touching shared code.
 4. **Run Examples** – Use `cargo run --bin <name>` or `cargo run -p <package>` to run individual examples:
@@ -58,10 +58,13 @@ Each crate is a workspace member (see root `Cargo.toml`) and targets Rust editio
 - Update `README.md` and example-specific docs whenever interfaces, commands, or prerequisites change.
 - When adding public APIs, include doc comments plus short usage examples in the relevant crate.
 
-## Actrix Configuration & Start Scripts
+## Loran Configuration & Start Scripts
 
-- Use only the workspace-root `actrix-config.toml`; do not add per-example copies.
-- When modifying any `start.sh`, start actrix from the workspace root with the root config path.
+- Use the Loran configuration under `../../../loran/config/`; do not add
+  per-example copies. The imported runtime still recognizes Actrix
+  compatibility names until its semantic rename is complete.
+- When modifying any `start.sh`, start the service from
+  `../../../crates/loran-server/` with the shared Loran config path.
 - Distinguish the three examples in docs and scripts: `data-stream`, `shell-actr-echo`, and `media-relay` (each has its own `start.sh` entrypoint; all share the root config).
 
 ## Release & Review Tips

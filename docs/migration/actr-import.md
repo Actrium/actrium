@@ -8,9 +8,10 @@ Status: accepted for the initial Actr migration.
   history, old branches, and release tags.
 - Preserve author and committer names, timestamps, messages, and parent
   relationships for retained commits.
-- Remove email values from commit identities and redact email addresses in
-  commit messages. Source files are not rewritten merely because they contain
-  email-shaped test data or package metadata.
+- Replace known contributor identities with their GitHub noreply address,
+  leave the single historical `root` identity empty, and redact email
+  addresses in commit messages. Source files are not rewritten merely because
+  they contain email-shaped test data or package metadata.
 - Move the current tree into the monorepo ownership layout without pretending
   that the old repository already used that layout.
 - Leave the source repository unchanged.
@@ -24,8 +25,9 @@ The import is prepared in an isolated clone of the source repository:
    through Git rename detection.
 3. Remove all other paths from the rewritten history and prune commits that
    consequently become empty or degenerate.
-4. Clear `author_email` and `committer_email`, redact email addresses in commit
-   messages, and remove invalidated commit signatures.
+4. Map `author_email` and `committer_email` to verified GitHub noreply
+   addresses, leave `root` empty, redact email addresses in commit messages,
+   and remove invalidated commit signatures.
 5. Prefix the prepared source tree with `.import/actr/` and merge it as an
    unrelated history.
 
@@ -67,10 +69,10 @@ repository layout truthfully.
 | `docker/runner/` | `tools/ci/runner/` | Repository CI runner support, not Loran deployment |
 | `.github/`, shared style files | repository root | Monorepo-wide automation baseline |
 
-The old workspace manifest is split during relocation: its package section
-moves to `crates/actr/Cargo.toml`, while workspace configuration and shared
-dependencies remain in the repository-root `Cargo.toml`. Path dependencies
-are updated in the same relocation commit.
+The old workspace manifest is split after the pure relocation commit: its
+package section moves to `crates/actr/Cargo.toml`, while workspace
+configuration and shared dependencies remain in the repository-root
+`Cargo.toml`. A following build-system commit updates path dependencies.
 
 ## Actrix to Loran rename boundary
 
@@ -93,8 +95,8 @@ documented breaking change instead of an unqualified text replacement.
 ## Verification
 
 - The source repository remains byte-for-byte untouched.
-- The imported branch contains no real email value in commit or annotated-tag
-  metadata or messages.
+- The imported branch contains only verified noreply values or an empty value
+  for `root`; messages contain no email address.
 - The final tree contains no `.import/actr/` files.
 - `git log --follow` crosses the relocation for representative files.
 - `cargo metadata --no-deps` resolves the relocated workspace.

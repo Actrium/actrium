@@ -15,7 +15,8 @@ use tempfile::TempDir;
 
 /// The canonical `actr/options.proto` content, inlined so the test is
 /// self-contained.
-const OPTIONS_PROTO: &str = include_str!("../../../../core/protocol/proto/actr/options.proto");
+const OPTIONS_PROTO: &str =
+    include_str!("../../../../../crates/actr-protocol/proto/actr/options.proto");
 
 const SERVICE_PROTO: &str = r#"syntax = "proto2";
 package demo;

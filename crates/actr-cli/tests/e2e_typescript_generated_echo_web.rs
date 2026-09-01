@@ -29,7 +29,7 @@ fn typescript_echo_example_dir() -> PathBuf {
 }
 
 fn web_echo_dir() -> PathBuf {
-    workspace_root().join("bindings/web/examples/echo")
+    workspace_root().join("packages/actr-web/examples/echo")
 }
 
 fn actr_bin() -> PathBuf {
@@ -395,7 +395,7 @@ function findChrome() {{
 
 fn puppeteer_node_path() -> OsString {
     let candidates = [
-        workspace_root().join("bindings/web/node_modules"),
+        workspace_root().join("packages/actr-web/node_modules"),
         workspace_root().join("node_modules"),
     ];
 
@@ -411,7 +411,7 @@ fn puppeteer_node_path() -> OsString {
         }
     }
 
-    let web_dir = workspace_root().join("bindings/web");
+    let web_dir = workspace_root().join("packages/actr-web");
     if which("pnpm").is_none() {
         assert!(
             which("corepack").is_some(),
@@ -436,7 +436,7 @@ fn puppeteer_node_path() -> OsString {
                 ("PUPPETEER_SKIP_CHROMIUM_DOWNLOAD", OsString::from("true")),
             ],
         ),
-        "pnpm install (bindings/web)",
+        "pnpm install (packages/actr-web)",
     );
     web_dir.join("node_modules").into_os_string()
 }

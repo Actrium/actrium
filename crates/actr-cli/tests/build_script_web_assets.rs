@@ -6,21 +6,22 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[test]
 fn embedded_actor_service_worker_matches_web_sdk_source() {
     let root = workspace_root();
-    let source = fs::read(root.join("bindings/web/packages/web-sdk/src/actor.sw.js"))
+    let source = fs::read(root.join("packages/actr-web/packages/web-sdk/src/actor.sw.js"))
         .expect("read canonical actor.sw.js");
     let embedded = fs::read(root.join("cli/assets/web-runtime/actor.sw.js"))
         .expect("read embedded actor.sw.js");
     assert_eq!(
         embedded, source,
-        "run bindings/web/scripts/sync-cli-assets.sh after editing actor.sw.js"
+        "run packages/actr-web/scripts/sync-cli-assets.sh after editing actor.sw.js"
     );
 }
 
 #[test]
 fn actor_service_worker_executes_only_authenticated_guest_artifacts() {
-    let source =
-        fs::read_to_string(workspace_root().join("bindings/web/packages/web-sdk/src/actor.sw.js"))
-            .expect("read canonical actor.sw.js");
+    let source = fs::read_to_string(
+        workspace_root().join("packages/actr-web/packages/web-sdk/src/actor.sw.js"),
+    )
+    .expect("read canonical actor.sw.js");
 
     assert!(source.contains("validateRuntimeConfig"));
     assert!(source.contains("wasmInitPromise"));
@@ -42,13 +43,13 @@ fn missing_generated_web_assets_copy_from_canonical_sources_without_mutating_cli
     fs::write(asset_dir.join("actr-host.html"), "<!doctype html>\n")
         .expect("write stable host asset");
 
-    let generated_dir = repo_root.join("bindings/web/dist/sw");
+    let generated_dir = repo_root.join("packages/actr-web/dist/sw");
     fs::create_dir_all(&generated_dir).expect("create fake generated asset dir");
     fs::write(generated_dir.join("actr_sw_host_bg.wasm"), "fake wasm")
         .expect("write canonical wasm asset");
     fs::write(generated_dir.join("actr_sw_host.js"), "fake js").expect("write canonical js asset");
 
-    let script_dir = repo_root.join("bindings/web/scripts");
+    let script_dir = repo_root.join("packages/actr-web/scripts");
     fs::create_dir_all(&script_dir).expect("create fake script dir");
     fs::write(
         script_dir.join("sync-cli-assets.sh"),

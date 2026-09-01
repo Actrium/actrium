@@ -50,13 +50,13 @@ actr-service-compat = {{ path = "{}" }}
 actr-runtime-mailbox = {{ path = "{}" }}
 "#,
         workspace.display(),
-        workspace.join("core/protocol").display(),
-        workspace.join("core/framework").display(),
-        workspace.join("core/hyper").display(),
-        workspace.join("core/runtime").display(),
-        workspace.join("core/config").display(),
-        workspace.join("core/service-compat").display(),
-        workspace.join("core/runtime-mailbox").display(),
+        workspace.join("crates/actr-protocol").display(),
+        workspace.join("crates/actr-framework").display(),
+        workspace.join("crates/actr-hyper").display(),
+        workspace.join("crates/actr-runtime").display(),
+        workspace.join("crates/actr-config").display(),
+        workspace.join("crates/actr-service-compat").display(),
+        workspace.join("crates/actr-runtime-mailbox").display(),
     );
     let mut content = std::fs::read_to_string(&cargo_toml).unwrap();
     content.push_str(&patch);

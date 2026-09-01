@@ -9,10 +9,10 @@ description = "Rust forwarding workload for the WinUI EchoApp E2E — mirrors sw
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-actr-framework = { path = "../../../core/framework" }
-actr-protocol = { path = "../../../core/protocol" }
-actr-hyper = { path = "../../../core/hyper" }
-actr-cabi = { path = "../../../crates/actr-cabi" }
+actr-framework = { path = "../../../../../crates/actr-framework" }
+actr-protocol = { path = "../../../../../crates/actr-protocol" }
+actr-hyper = { path = "../../../../../crates/actr-hyper" }
+actr-cabi = { path = "../../../../../crates/actr-cabi" }
 async-trait = "0.1"
 bytes = "1"
 tokio = { version = "1", features = ["rt", "time"] }
