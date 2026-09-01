@@ -12,7 +12,8 @@ rather than making each component invent its own package topology.
     └── README.md          Public Actr boundary and component-level guidance
 
     keel/
-    └── README.md          Public Keel boundary and component-level guidance
+    ├── README.md          Public Keel boundary and component-level guidance
+    └── docs/              Keel product and contributor documentation
 
     loran/
     ├── config/            Service composition and local/development configuration
@@ -27,13 +28,13 @@ rather than making each component invent its own package topology.
     crates/
     ├── actr-*/            Actr runtime, protocol, CLI, and Rust bindings
     ├── actrium-*/         Browser core, sync, vault, and native services
-    ├── keel-*/            Keel Rust host/guest support where applicable
+    ├── keel-native-guest/ Keel's reusable Rust guest SDK
     └── loran-*/           Loran daemon, signaling, STUN/TURN, signing, and control
 
     packages/
     ├── actr-*/            Language bindings and package-facing runtime APIs
     ├── actrium-*/         Browser model, app SDK, system apps, and platform glue
-    └── keel-*/            Runtime, host, guest, SDK, devtools, and backends
+    └── keel/              Runtime, host, guest SDK, devtools, and native backends
 
     tools/
     ├── actr/              Actr-only generation and developer tooling
@@ -67,11 +68,12 @@ platform projects follow their native ecosystem's conventional layouts.
 - **actro/crates → crates/actrium-*** and **actro/packages →
   packages/actrium-***. **actro/platform → packages/actrium-platform**.
 - **actro/schemas → contracts/actrium/** and **contracts/ipc/**.
-- **keel/src → packages/keel-***, preserving the runtime, trusted host,
-  untrusted guest, SDK, devtools, and backend boundaries. Rust guest support
-  belongs in **crates/keel-***.
-- **keel/native → packages/keel-platform/**. There is intentionally no generic
-  `native/` root; native code stays with the package or platform that owns it.
+- **keel/src + keel/native → packages/keel/**. The implementation remains one
+  package during import; it should split only when independent publishing or
+  dependency boundaries become real. There is intentionally no generic
+  `native/` root; native code stays with the package that owns it.
+- **keel/crates/keel-native-guest → crates/keel-native-guest/**. Demo guest
+  crates form the independent **examples/keel/guests/rust/** workspace.
 - **keel/contracts → contracts/sandbox/**.
 
 ## Boundary rules

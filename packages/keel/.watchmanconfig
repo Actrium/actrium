@@ -1,0 +1,6 @@
+{
+  "ignore_dirs": [
+    "tests/rn-macos-bridgeless/build",
+    "tests/rn-macos-bridgeless/macos/build"
+  ]
+}

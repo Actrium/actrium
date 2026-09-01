@@ -1,0 +1,13 @@
+[package]
+name = "event-guest"
+version.workspace = true
+edition.workspace = true
+description = "Demo native keel guest that receives host->guest events via keel_on_event."
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+keel-native-guest = { path = "../../../../../crates/keel-native-guest" }

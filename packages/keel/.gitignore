@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+native/quickjs/build/
+native/quickjs/build-wasm/
+native/jsc/build/
+native/core/test/build_fuzz/
+tests/wasm-sandbox/wasm/
+tests/cdp-debug/serve/

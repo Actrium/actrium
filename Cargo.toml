@@ -14,6 +14,8 @@ members = [
     "crates/actr-platform-native",
     "crates/actr-pack",
     "crates/actr-hlc",
+    # === Keel ===
+    "crates/keel-native-guest",
     # === Developer Tools ===
     "tools/actr/protoc-gen/rust",
     "tools/actr/protoc-gen/web",
@@ -48,6 +50,8 @@ exclude = [
     "tools/actr/protoc-gen/python",
     "tools/actr/protoc-gen/swift",
     "tools/actr/protoc-gen/kotlin",
+    # Keel's demo guests retain their own WASM-oriented workspace.
+    "examples/keel/guests/rust",
     # Loran deploy is an independent sub-workspace (own [workspace]).
     "loran/deploy",
 ]
