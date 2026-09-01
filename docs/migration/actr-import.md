@@ -72,6 +72,24 @@ moves to `crates/actr/Cargo.toml`, while workspace configuration and shared
 dependencies remain in the repository-root `Cargo.toml`. Path dependencies
 are updated in the same relocation commit.
 
+## Actrix to Loran rename boundary
+
+The imported history keeps `Actrix` in historical commit messages and in
+historical snapshots because that was the name at the time. The relocated
+current tree uses Loran ownership paths immediately:
+
+- `actrix/crates/*` becomes `crates/loran-*`;
+- deploy, configuration, and operations material moves under `loran/`;
+- service workflows and benchmarks move under `scripts/loran/` and
+  `tests/benchmarks/loran/`.
+
+Current user-facing names, documentation, binaries, Cargo packages, artifact
+names, workflow names, and environment variables are renamed in a separate
+semantic migration commit. Published package names, protocol values, stored
+configuration keys, endpoint paths, and other compatibility surfaces must be
+reviewed individually; they receive an explicit compatibility alias or a
+documented breaking change instead of an unqualified text replacement.
+
 ## Verification
 
 - The source repository remains byte-for-byte untouched.
