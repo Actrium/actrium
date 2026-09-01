@@ -31,7 +31,7 @@ function resolveMetroHost(): string {
       return match[1];
     }
   } catch {
-    // 开发环境读取 SourceCode 失败时，回退到本机模拟器常用地址。
+    // Fall back to the conventional simulator address when SourceCode is unavailable.
   }
 
   return 'localhost';
@@ -51,7 +51,7 @@ export class DevActrPackageLoader extends ActrPackageLoader {
   }
 
   /**
-   * 'actr' 模式：直接加载本地 .actr 包文件，走完整的解压解析流程
+   * Load a local .actr package through the complete extraction and parsing path.
    */
   private async loadLocalActr(url: string, appId: string): Promise<ActrPackage> {
     const actrUrl = resolveDevLocalActrUrl();
