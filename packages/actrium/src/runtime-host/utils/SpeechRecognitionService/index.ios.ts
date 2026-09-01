@@ -39,14 +39,13 @@ const DEFAULT_OPTIONS = {
 };
 
 /**
- * 对 expo-speech-recognition 的轻量封装。
+ * A lightweight adapter for expo-speech-recognition.
  *
- * 问题依据：
- * 1. 当前语音识别库已经迁移到标准 React Native Native Module
- * 2. Actro Runtime 需要直接从 NativeModules 读取原生桥，而不是继续走 Expo 时代的 JS 包装假设
+ * The speech-recognition library now exposes a standard React Native native
+ * module. Actro Runtime therefore reads the bridge from NativeModules instead
+ * of relying on the earlier Expo Modules JavaScript wrapper.
  *
- * 因此这里统一通过 NativeModules + NativeEventEmitter 接入，
- * 避免再依赖 Expo Modules 的加载前提。
+ * NativeModules and NativeEventEmitter provide the single integration path.
  */
 export class SpeechRecognitionService {
   private state: SpeechRecognitionState = 'idle';
@@ -172,7 +171,7 @@ export class SpeechRecognitionService {
         return null;
       }
 
-      // 事件订阅通过 NativeEventEmitter 提供，方法调用仍直接落到原生模块对象。
+      // NativeEventEmitter owns subscriptions; method calls use the native module directly.
       this.nativeEventEmitter = new NativeEventEmitter(
         nativeModule as unknown as NativeModule,
       );
@@ -250,7 +249,7 @@ export class SpeechRecognitionService {
     const error: SpeechRecognitionErrorEvent = {
       error: 'service-not-allowed',
       message:
-        'speech recognition 当前不可用：标准 React Native 原生模块 ExpoSpeechRecognition 未注册或未正确链接。',
+        'Speech recognition is unavailable because the ExpoSpeechRecognition native module is not registered or linked correctly.',
     };
     this.callbacks.forEach((callbacks) => callbacks.onError?.(error));
   }
@@ -263,7 +262,7 @@ export class SpeechRecognitionService {
   private toTranscriptEvent(
     event: SpeechRecognitionResultEvent,
   ): SpeechRecognitionTranscriptEvent {
-    // 统一取第一候选文本，避免上层每次处理 alternatives 数组。
+    // Normalize on the first candidate so callers do not repeatedly inspect alternatives.
     const text = event.results[0]?.transcript?.trim() ?? '';
     return {
       text,
