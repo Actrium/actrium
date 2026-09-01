@@ -22,6 +22,8 @@ Thumbs.db
 **/generated/
 !typescript/echo-workload/src/generated/
 !typescript/echo-workload/src/generated/**
+!rust/echo-actr/src/generated/
+!rust/echo-actr/src/generated/**
 
 # Actrix integration files
 # actrix-*.toml
