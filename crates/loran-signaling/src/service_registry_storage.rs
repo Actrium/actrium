@@ -138,6 +138,15 @@ impl ServiceRegistryStorage {
             .execute(&self.pool)
             .await; // Ignore error if column already exists
 
+        // Migration: add actor_version column to pre-#389 service_registry tables.
+        // CREATE TABLE IF NOT EXISTS is a no-op on them, leaving INSERT/SELECT to
+        // fail with "no such column: actor_version" (#648).
+        let _ = sqlx::query(
+            "ALTER TABLE service_registry ADD COLUMN actor_version TEXT NOT NULL DEFAULT ''",
+        )
+        .execute(&self.pool)
+        .await; // Ignore error if column already exists
+
         platform::recording::info!("Database schema initialized");
         Ok(())
     }
@@ -711,6 +720,69 @@ mod tests {
         // Verify deletion
         let stats = storage.get_stats().await.unwrap();
         assert_eq!(stats.total_services, 0);
+    }
+
+    #[tokio::test]
+    async fn test_migrates_legacy_table_missing_actor_version() {
+        let storage = ServiceRegistryStorage::new(":memory:", Some(3600))
+            .await
+            .unwrap();
+
+        // Recreate the pre-#389 schema (22 columns, no actor_version)
+        sqlx::query("DROP TABLE service_registry")
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            r#"
+            CREATE TABLE service_registry (
+                actor_serial_number INTEGER NOT NULL,
+                actor_realm_id INTEGER NOT NULL,
+                actor_manufacturer TEXT NOT NULL,
+                actor_device_name TEXT NOT NULL,
+                service_name TEXT NOT NULL,
+                message_types TEXT NOT NULL,
+                capabilities_json TEXT,
+                status TEXT NOT NULL,
+                service_spec_blob BLOB,
+                acl_blob BLOB,
+                service_availability_state INTEGER,
+                power_reserve REAL,
+                mailbox_backlog REAL,
+                worst_dependency_health_state INTEGER,
+                geo_region TEXT,
+                geo_longitude REAL,
+                geo_latitude REAL,
+                sticky_client_ids TEXT,
+                ws_address TEXT,
+                registered_at INTEGER NOT NULL,
+                last_heartbeat_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL,
+                PRIMARY KEY (actor_serial_number, actor_realm_id, service_name)
+            );
+            "#,
+        )
+        .execute(&storage.pool)
+        .await
+        .unwrap();
+
+        // Re-run schema init as if reopening a legacy database: CREATE TABLE
+        // IF NOT EXISTS is a no-op, so the ALTER TABLE migrations must run
+        storage.init_schema().await.unwrap();
+
+        let service = create_test_service(1, "legacy-service");
+        storage.save_service(&service).await.unwrap();
+
+        let loaded = storage.load_all_services().await.unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].actor_id, service.actor_id);
+
+        let loaded_by_actor = storage
+            .load_services_by_actor_id(&service.actor_id)
+            .await
+            .unwrap();
+        assert_eq!(loaded_by_actor.len(), 1);
+        assert_eq!(loaded_by_actor[0].actor_id, service.actor_id);
     }
 
     #[tokio::test]
