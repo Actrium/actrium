@@ -1598,7 +1598,7 @@ checks, `WritableMap` construction, and actual event dispatch.
 
 ## Rust Binding Artifact Policy
 
-Use `scripts/build-actro-rust-bindings.sh` as the repository-level entrypoint for
+Use `scripts/actrium/build-actro-rust-bindings.sh` as the repository-level entrypoint for
 local or CI regeneration:
 
 - `runtime` regenerates the React Native TypeScript contract module from
