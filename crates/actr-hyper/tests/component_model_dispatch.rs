@@ -216,6 +216,32 @@ async fn component_model_basic_echo_round_trip() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn component_model_zero_byte_return_is_not_deferred() {
+    let host = fixture_host();
+    let mut workload = instantiate_wasm_workload(host).await.expect("instantiate");
+    let deliver = Arc::new(CapturingDeliver::default());
+
+    let result = workload
+        .handle_with_reply(
+            &make_envelope("test/zero-byte-return", Vec::new()),
+            test_ctx(),
+            &unreachable_bridge(),
+            Some(deliver.clone()),
+            true,
+        )
+        .await
+        .expect("zero-byte return dispatch should succeed");
+
+    assert!(result.is_empty(), "zero-byte return must stay empty");
+    let outcomes = deliver
+        .outcomes
+        .lock()
+        .expect("capturing deliver mutex poisoned");
+    assert_eq!(outcomes.len(), 1);
+    assert!(matches!(&outcomes[0].result, Ok(bytes) if bytes.is_empty()));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn component_model_explicit_reply_uses_sync_host_bridge() {
     let host = fixture_host();
     let mut workload = instantiate_wasm_workload(host).await.expect("instantiate");

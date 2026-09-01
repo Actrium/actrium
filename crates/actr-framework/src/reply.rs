@@ -83,6 +83,13 @@ pub type ReplyDeadline = Instant;
 /// completes dedup with empty bytes but emits no RESPONSE).
 pub trait Deliver: Send + Sync + 'static {
     fn deliver(&self, outcome: ReplyOutcome);
+
+    /// Deliver a timeout without completing the dedup entry as a normal
+    /// response. Implementations with a first-write-wins timeout path may
+    /// override this; simple test sinks can use the normal delivery behavior.
+    fn deliver_timeout(&self, outcome: ReplyOutcome) {
+        self.deliver(outcome);
+    }
 }
 
 /// What a `Reply` hands to the runtime when it completes.

@@ -191,7 +191,7 @@ impl MessageDispatcher for DoubleDispatcher {
     type Workload = DoubleActor;
 
     fn reply_mode_for_route(route_key: &str) -> ReplyMode {
-        if route_key == "test/explicit" {
+        if matches!(route_key, "test/explicit" | "test/forget-explicit") {
             ReplyMode::Explicit
         } else {
             ReplyMode::Return
@@ -223,6 +223,10 @@ impl MessageDispatcher for DoubleDispatcher {
                 reply.send(Ok(TypedDoubleResponse { value: value * 2 }));
                 Ok(Bytes::new())
             }
+            "test/forget-explicit" => Ok(Bytes::new()),
+            // A RETURN route may legitimately encode to zero bytes. This must
+            // not be mistaken for the EXPLICIT deferred sentinel.
+            "test/zero-byte-return" => Ok(Bytes::new()),
             "test/spin" => loop {
                 std::hint::spin_loop();
             },

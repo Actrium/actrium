@@ -51,20 +51,44 @@ export async function actrDispatch(
     case "echo.EchoService.Echo": {
       const req = fromBinary(EchoRequestSchema, payload);
       const resp = await handler.echoServiceEcho(req, ctx);
-      await ctx.replyRaw(toBinary(EchoResponseSchema, resp));
-      return new Uint8Array();
+      const bytes = toBinary(EchoResponseSchema, resp);
+      if (ctx.replyEnabled) {
+        try {
+          await ctx.replyRaw(bytes);
+          return new Uint8Array();
+        } catch {
+          return bytes;
+        }
+      }
+      return bytes;
     }
     case "echo.EchoService.PrepareStream": {
       const req = fromBinary(StreamPrepareRequestSchema, payload);
       const resp = await handler.echoServicePrepareStream(req, ctx);
-      await ctx.replyRaw(toBinary(StreamPrepareResponseSchema, resp));
-      return new Uint8Array();
+      const bytes = toBinary(StreamPrepareResponseSchema, resp);
+      if (ctx.replyEnabled) {
+        try {
+          await ctx.replyRaw(bytes);
+          return new Uint8Array();
+        } catch {
+          return bytes;
+        }
+      }
+      return bytes;
     }
     case "echo.EchoService.ReleaseStream": {
       const req = fromBinary(StreamReleaseRequestSchema, payload);
       const resp = await handler.echoServiceReleaseStream(req, ctx);
-      await ctx.replyRaw(toBinary(StreamReleaseResponseSchema, resp));
-      return new Uint8Array();
+      const bytes = toBinary(StreamReleaseResponseSchema, resp);
+      if (ctx.replyEnabled) {
+        try {
+          await ctx.replyRaw(bytes);
+          return new Uint8Array();
+        } catch {
+          return bytes;
+        }
+      }
+      return bytes;
     }
     default:
       throw new Error(`UnknownRoute: ${routeKey}`);

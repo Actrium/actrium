@@ -160,8 +160,9 @@ pub(crate) struct InvocationEntry {
     /// Admission time on the runtime's monotonic clock. Deferred reply tokens
     /// are retired after the same TTL as the pump's outstanding-reply entry.
     pub(crate) admitted_at: Instant,
-    /// The guest dispatch export has returned. An empty return value keeps the
-    /// entry alive for a deferred EXPLICIT reply until the reply import wins.
+    /// The guest dispatch export has returned. A claimed deferred reply keeps
+    /// the entry alive until the reply import wins or the caller deadline
+    /// expires.
     pub(crate) dispatch_finished: bool,
     /// The guest has accepted responsibility for the response by calling the
     /// EXPLICIT reply import. Keep the entry available until dispatch also
@@ -220,6 +221,11 @@ impl HostState {
         if self.next_token == 0 {
             self.next_token = 1;
         }
+        let reply_claimed = reply_claimed.or_else(|| {
+            reply_deliver
+                .as_ref()
+                .map(|_| Arc::new(AtomicBool::new(false)))
+        });
         self.invocations.insert(
             token,
             InvocationEntry {
@@ -252,6 +258,11 @@ impl HostState {
             .map(|e| Arc::clone(&e.host_abi))
     }
 
+    pub(crate) fn invocation_exists(&self, token: u64) -> bool {
+        let token = self.effective_invocation_token(token);
+        self.invocations.contains_key(&token)
+    }
+
     pub(crate) fn invocation_reply_enabled(&self, token: u64) -> bool {
         let token = self.effective_invocation_token(token);
         self.invocations
@@ -280,6 +291,18 @@ impl HostState {
         (!entry.reply_completed && !self.invocation_reply_claimed(token))
             .then(|| entry.reply_deliver.clone())
             .flatten()
+    }
+
+    pub(crate) fn claim_invocation_reply(&self, token: u64) -> bool {
+        let token = self.effective_invocation_token(token);
+        self.invocations
+            .get(&token)
+            .and_then(|entry| entry.reply_claimed.as_ref())
+            .map(|claimed| {
+                claimed.store(true, Ordering::Release);
+                true
+            })
+            .unwrap_or(false)
     }
 
     /// Associate a successfully registered stream with the token embedded in
@@ -339,7 +362,7 @@ impl HostState {
     }
 
     /// Mark the guest dispatch export complete. Retain the invocation only for
-    /// an empty EXPLICIT-boundary result that still needs a deferred reply.
+    /// a successful EXPLICIT dispatch whose claimed reply is still pending.
     pub(crate) fn finish_invocation(&mut self, token: u64, retain_for_reply: bool) {
         let token = self.effective_invocation_token(token);
         let should_remove = match self.invocations.get_mut(&token) {
@@ -431,7 +454,7 @@ impl HostState {
                     .reply_deliver
                     .as_ref()
                     .expect("deferred invocation has a reply sink")
-                    .deliver(ReplyOutcome {
+                    .deliver_timeout(ReplyOutcome {
                         request_id: entry.ctx.request_id.clone(),
                         result,
                         emit_response: expects_response,

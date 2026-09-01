@@ -2,19 +2,19 @@ name: CI
 env:
   DEBUG: napi:*
   APP_NAME: actr
-  MACOSX_DEPLOYMENT_TARGET: "10.13"
+  MACOSX_DEPLOYMENT_TARGET: '10.13'
 permissions:
   contents: write
-"on":
+'on':
   push:
     branches:
       - main
     tags:
-      - "v*"
+      - 'v*'
     paths-ignore:
-      - "**/*.md"
+      - '**/*.md'
       - LICENSE
-      - "**/*.txt"
+      - '**/*.txt'
   pull_request: null
 jobs:
   check-version:
