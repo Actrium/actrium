@@ -7,13 +7,13 @@
 //! of an Actro-operated sync service.
 
 use actro_core::browser_data::{
-    self, BrowserStorageSyncExecutionPlan, BrowserStorageSyncExecutionResultBatch,
-    BrowserStorageSyncOperation, BrowserStorageSyncOperationResult, BROWSER_STORAGE_SCHEMA_VERSION,
-    BROWSER_STORAGE_SYNC_CONTRACT_VERSION,
+    self, BROWSER_STORAGE_SCHEMA_VERSION, BROWSER_STORAGE_SYNC_CONTRACT_VERSION,
+    BrowserStorageSyncExecutionPlan, BrowserStorageSyncExecutionResultBatch,
+    BrowserStorageSyncOperation, BrowserStorageSyncOperationResult,
 };
 use rusqlite::types::{Value as SqlValue, ValueRef};
-use rusqlite::{params_from_iter, Connection, Transaction};
-use serde_json::{json, Value};
+use rusqlite::{Connection, Transaction, params_from_iter};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -1390,9 +1390,11 @@ mod tests {
             "",
         ));
         assert_eq!(contract_response.status_code, 200);
-        assert!(contract_response
-            .body
-            .contains(browser_data::BROWSER_STORAGE_SYNC_TRANSPORT_CYCLE_PATH));
+        assert!(
+            contract_response
+                .body
+                .contains(browser_data::BROWSER_STORAGE_SYNC_TRANSPORT_CYCLE_PATH)
+        );
 
         let device_a_push = push_request(
             "profile-a",
@@ -1571,9 +1573,11 @@ mod tests {
             .to_string(),
         ));
         assert_eq!(unsupported_pull.status_code, 426);
-        assert!(unsupported_pull
-            .body
-            .contains(browser_data::BROWSER_STORAGE_SYNC_UNSUPPORTED_SCHEMA_ERROR_CODE));
+        assert!(
+            unsupported_pull
+                .body
+                .contains(browser_data::BROWSER_STORAGE_SYNC_UNSUPPORTED_SCHEMA_ERROR_CODE)
+        );
     }
 
     #[test]
@@ -1592,10 +1596,12 @@ mod tests {
             110,
             vec![history_record("device-a", "https://example.com/a", 110)],
         );
-        assert!(service
-            .merge_push_request_json(&context, &valid_push)
-            .unwrap()
-            .contains(r#""acceptedCount":1"#));
+        assert!(
+            service
+                .merge_push_request_json(&context, &valid_push)
+                .unwrap()
+                .contains(r#""acceptedCount":1"#)
+        );
 
         let bad_token = BrowserSyncRequestContext {
             account_id: "profile-a".to_string(),

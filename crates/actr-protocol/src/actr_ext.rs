@@ -328,7 +328,16 @@ mod tests {
         assert!(ty("acme", "echo", "").validate().is_err()); // empty
         assert!(ty("acme", "echo", &"1".repeat(65)).validate().is_err()); // >64 bytes
         // protocol separators, backslash, whitespace, non-ASCII
-        for v in ["1:0", "1/0", "1@0", "1\\0", "1 0", "1.0 ", " 1.0", "caf\u{e9}"] {
+        for v in [
+            "1:0",
+            "1/0",
+            "1@0",
+            "1\\0",
+            "1 0",
+            "1.0 ",
+            " 1.0",
+            "caf\u{e9}",
+        ] {
             assert!(
                 ty("acme", "echo", v).validate().is_err(),
                 "version {v:?} must be rejected"

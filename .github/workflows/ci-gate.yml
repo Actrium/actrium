@@ -735,6 +735,8 @@ jobs:
           python -m build packages/actr-python/actr-workload
       - name: Install actr-workload build extra
         run: python -m pip install -e 'packages/actr-python/actr-workload[build]'
+      - name: Install Python protocol generator
+        run: python -m pip install -e tools/actr/protoc-gen/python
       - name: Verify componentize-py pin
         run: componentize-py --version | grep 'componentize-py 0.25.0'
       - name: Test Python workload authoring bridge

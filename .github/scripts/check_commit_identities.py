@@ -14,6 +14,8 @@ from pathlib import Path
 USER_NOREPLY_RE = re.compile(r"^[^@\s<>]+@users\.noreply\.github\.com$", re.IGNORECASE)
 EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
 ANONYMOUS_ROOT_NAME = "root"
+GITHUB_MERGE_COMMITTER_NAME = "GitHub"
+GITHUB_MERGE_COMMITTER_EMAIL = "noreply@github.com"
 ZERO_SHA = "0" * 40
 
 
@@ -24,6 +26,7 @@ class CommitIdentity:
     author_email: str
     committer_name: str
     committer_email: str
+    parent_count: int
     message: str
 
 
@@ -45,6 +48,18 @@ def is_allowed_identity(name: str, email: str) -> bool:
 
 def is_allowed_message_email(email: str) -> bool:
     return bool(USER_NOREPLY_RE.fullmatch(email))
+
+
+def is_allowed_committer(commit: CommitIdentity) -> bool:
+    if is_allowed_identity(commit.committer_name, commit.committer_email):
+        return True
+    # GitHub.com signs PR merge commits with this fixed service identity. Keep
+    # the exception narrow so it cannot be used for an ordinary human commit.
+    return (
+        commit.parent_count >= 2
+        and commit.committer_name == GITHUB_MERGE_COMMITTER_NAME
+        and commit.committer_email == GITHUB_MERGE_COMMITTER_EMAIL
+    )
 
 
 def commit_range(repo: Path, base_sha: str, head_sha: str) -> list[str]:
@@ -76,11 +91,11 @@ def read_identity(repo: Path, sha: str) -> CommitIdentity:
         repo,
         "show",
         "-s",
-        "--format=%an%x00%ae%x00%cn%x00%ce%x00%B",
+        "--format=%an%x00%ae%x00%cn%x00%ce%x00%P%x00%B",
         sha,
     )
-    author_name, author_email, committer_name, committer_email, message = output.split(
-        "\0", 4
+    author_name, author_email, committer_name, committer_email, parents, message = output.split(
+        "\0", 5
     )
     return CommitIdentity(
         sha=sha,
@@ -88,6 +103,7 @@ def read_identity(repo: Path, sha: str) -> CommitIdentity:
         author_email=author_email,
         committer_name=committer_name,
         committer_email=committer_email,
+        parent_count=len(parents.split()),
         message=message,
     )
 
@@ -101,7 +117,7 @@ def validate_identity(commit: CommitIdentity) -> list[str]:
             f"{short_sha}: author must use a GitHub noreply identity; "
             "the configured address is not printed to avoid repeating it in CI logs"
         )
-    if not is_allowed_identity(commit.committer_name, commit.committer_email):
+    if not is_allowed_committer(commit):
         errors.append(
             f"{short_sha}: committer must use a GitHub noreply identity; "
             "the configured address is not printed to avoid repeating it in CI logs"

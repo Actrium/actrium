@@ -5,7 +5,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd "${ROOT_DIR}/../.." && pwd)"
-CRATE_DIR="${ROOT_DIR}/../ffi"
+CRATE_DIR="${WORKSPACE_ROOT}/crates/actr-ffi"
 MODULE_DIR="${ROOT_DIR}/actr-kotlin"
 KOTLIN_SRC_DIR="${MODULE_DIR}/src/main/kotlin"
 GENERATED_PACKAGE_DIR="${KOTLIN_SRC_DIR}/io/actrium/actr"
