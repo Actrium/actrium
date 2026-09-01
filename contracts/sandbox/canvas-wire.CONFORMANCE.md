@@ -293,7 +293,7 @@ byte 1 (`0x43 'C'` vs `0x45 'E'`), so the `u32` compare rejects immediately,
 before any field is read.
 
 The zero-DOM TS decoder is on the public export surface (`import { decodeCanvasBatch }
-from 'keel/wire'`), and as of issue #45 the Rust canvas encoder is **compiled into the
+from 'keel/wire'`), and as of issue #147 the Rust canvas encoder is **compiled into the
 shipped guest by default** (the `binary-protocol` feature is default-on). At RUNTIME
 the guest still emits JSON unless the async `host:canvas.getInfo` handshake answers
 `binaryDraw:true` for the encoder's `wireVersion` — and no keel-shipped host answers

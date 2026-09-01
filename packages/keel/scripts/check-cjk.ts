@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Enforce English-only source (issue #90).
+ * Enforce English-only source (issue #166).
  *
  * Source and prose in this repository are English. This scans tracked files for
  * CJK characters and fails on any that is not covered by one of the exemptions

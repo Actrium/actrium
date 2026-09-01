@@ -19,7 +19,7 @@ const KIB = 1024;
 const CEILINGS: Record<string, number> = {
   'kv-guest.wasm': 32,
   'seq-guest.wasm': 32,
-  // ui-guest is binary-capable by default post-promotion (issue #45): the
+  // ui-guest is binary-capable by default post-promotion (issue #147): the
   // op-batch encoder adds ~14 KiB over the JSON-only build (ui-guest-json).
   'ui-guest.wasm': 48,
   'ui-guest-json.wasm': 32,

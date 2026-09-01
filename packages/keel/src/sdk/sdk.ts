@@ -557,7 +557,7 @@ export interface BaseProps {
    * (`src/guest/runtime/reconciler/host-config.ts`), so a remote ref is
    * meaningful on any of them — not only on the components that happen to expose
    * imperative methods today. The host preset already declared `ref` on its side
-   * of this seam; before #80 the guest side did not, which made `useRemoteRef`'s
+   * of this seam; before #162 the guest side did not, which made `useRemoteRef`'s
    * own documented example fail to type-check.
    *
    * Not a React ref: `ref` is stripped from the props that reach the host
@@ -1089,7 +1089,7 @@ const DEFAULT_REMOTE_REF_TIMEOUT = 4000;
  * ```
  *
  * The `ref={inputRef}` line compiles as written: `ref` is declared on
- * {@link BaseProps}, so every guest component accepts one (#80). The
+ * {@link BaseProps}, so every guest component accepts one (#162). The
  * `check:guest-types` gate compiles this exact shape.
  */
 export function useRemoteRef<T = unknown>(options?: {

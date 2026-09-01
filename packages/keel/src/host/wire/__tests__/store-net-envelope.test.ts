@@ -687,10 +687,10 @@ describe('hoistSentinels toJSON semantics (byte-carrying results)', () => {
 });
 
 // ============================================================
-// one logical value across several segments (issue #84)
+// one logical value across several segments (issue #164)
 // ============================================================
 
-describe('store-net-envelope — multi-segment values (#84)', () => {
+describe('store-net-envelope — multi-segment values (#164)', () => {
   const reasonOf = (fn: () => unknown): StoreNetReason | 'no-throw' => {
     try {
       fn();

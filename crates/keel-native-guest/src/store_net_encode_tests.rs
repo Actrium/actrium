@@ -352,7 +352,7 @@ fn segment_too_big_rejected() {
 
 #[test]
 fn a_value_past_the_segment_cap_is_split_not_rejected() {
-    // Issue #84: MAX_SEGMENT_BYTES caps a SEGMENT, not a logical value. One byte
+    // Issue #164: MAX_SEGMENT_BYTES caps a SEGMENT, not a logical value. One byte
     // past the cap is two segments named by the array sentinel form.
     let value = std::vec![0xabu8; MAX_SEGMENT_BYTES + 1];
     let encoded = encode_value(&Value::Bytes(value.clone())).expect("splits, does not reject");
@@ -721,7 +721,7 @@ fn golden_vectors() -> StdVec<Vector> {
         },
         Vector {
             name: "one-value-split-at-the-segment-cap",
-            note: "issue #84: the shape an ENCODER must produce for a value ONE BYTE past maxSegmentBytes -- chunks of exactly maxSegmentBytes then the remainder, in order, named by the array sentinel. Locks the split threshold and the chunk boundaries cross-language. Envelope hex omitted for size; length + structure locked.",
+            note: "issue #164: the shape an ENCODER must produce for a value ONE BYTE past maxSegmentBytes -- chunks of exactly maxSegmentBytes then the remainder, in order, named by the array sentinel. Locks the split threshold and the chunk boundaries cross-language. Envelope hex omitted for size; length + structure locked.",
             direction: "both",
             control_plane: "{\"value\":{\"$b\":[0,1]}}",
             segments: std::vec![Seg::Fill(0xab, MAX_SEGMENT_BYTES), Seg::Fill(0xab, 1)],

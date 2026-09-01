@@ -1,5 +1,5 @@
 /**
- * Thin-DOM web preset component tests (issue #19, L2).
+ * Thin-DOM web preset component tests (issue #139, L2).
  *
  * Uses react-test-renderer (no real DOM needed) to assert each keel primitive maps to the
  * right host element with the expected props/handlers — View→div (flex column), Text→span,

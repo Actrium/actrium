@@ -335,7 +335,7 @@ describe('keel/contract binary field-name types (compile-time)', () => {
 });
 
 describe('keel/contract optional binary fields (trailing ? marker)', () => {
-  // issue #29: an optional/nullable binary FIELD (an absent optional body, a
+  // issue #140: an optional/nullable binary FIELD (an absent optional body, a
   // null value inside a present result) could not be declared — the backstop
   // rejected legitimate absence. The trailing '?' marker tolerates absence
   // while keeping the Uint8Array requirement when the field is present.

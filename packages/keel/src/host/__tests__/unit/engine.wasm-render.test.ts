@@ -1,5 +1,5 @@
 /**
- * Engine render round-trip on the wasm-quickjs provider (issue #8)
+ * Engine render round-trip on the wasm-quickjs provider (issue #136)
  *
  * Regression guard for the render channel: a guest `__keel_sendBatch(batch)` call must
  * reach the host Bridge/Receiver. Before the WASM provider's inject(fn) fix, the engine
@@ -19,7 +19,7 @@ import type { OperationBatch } from '../../types';
 
 const describeIfWASM = typeof WebAssembly !== 'undefined' ? describe : describe.skip;
 
-describeIfWASM('Engine render channel on wasm-quickjs (issue #8)', () => {
+describeIfWASM('Engine render channel on wasm-quickjs (issue #136)', () => {
   it('delivers a guest render batch to the host Receiver', async () => {
     const engine = new Engine({ sandbox: 'wasm-quickjs' });
     // Reason: mock host components for the receiver registry

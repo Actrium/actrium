@@ -1,6 +1,6 @@
 /**
  * Bare-sandbox probe — run as a SUBPROCESS by `sandbox-compat-bare.test.ts`
- * (issue #68). NOT a test file itself: no `.test.ts` suffix, so `bun test` does
+ * (issue #158). NOT a test file itself: no `.test.ts` suffix, so `bun test` does
  * not collect it, and it must stay that way.
  *
  * The point of a separate process is the fresh realm. The globals are deleted

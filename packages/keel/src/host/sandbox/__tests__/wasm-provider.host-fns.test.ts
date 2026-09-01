@@ -1,5 +1,5 @@
 /**
- * WASM provider by-name host-function bridge (issue #8)
+ * WASM provider by-name host-function bridge (issue #136)
  *
  * Before the fix, the WASM provider's inject(name, fn) installed a single broken
  * stub for ANY function: a guest shim that called the (non-existent, self-referential)
@@ -90,7 +90,7 @@ describeIfWASM('QuickJSNativeWASMProvider by-name host-fn bridge', () => {
       throw new Error('host fn exploded');
     });
     // The host swallows the throw and writes null back; the guest must not crash
-    // (this is the exact failure class — host-fn error reaching the guest realm — #8 guards).
+    // (this is the exact failure class — host-fn error reaching the guest realm — #136 guards).
     let result: unknown;
     expect(() => {
       result = context.eval('globalThis.__boom()');
@@ -114,7 +114,7 @@ describeIfWASM('QuickJSNativeWASMProvider by-name host-fn bridge', () => {
     expect(context.eval('"still alive"')).toBe('still alive');
   });
 
-  // ---- callback ARGUMENTS across the bridge (issue #10, approach B) ----
+  // ---- callback ARGUMENTS across the bridge (issue #137, approach B) ----
   // A function arg can't cross the JSON bridge; the guest shim registers it in
   // __keel.callbacks and passes a {__keel_cb:id} marker, the host reconstructs a proxy
   // that invokes the guest callback by id. This is what makes the engine's TimerManager
@@ -238,7 +238,7 @@ describeIfWASM('QuickJSNativeWASMProvider by-name host-fn bridge', () => {
     expect(context.extract('__ticks')).toBe(2);
   });
 
-  // ---- fixed regression guards for the other by-name host fns (issue #17 #3) ----
+  // ---- fixed regression guards for the other by-name host fns (issue #138 #134) ----
   // sendOperation / registerComponentType go through the SAME generic shim as the render
   // channel. They had no fixed test, so a future special-case in buildHostFnShim could break
   // them silently. Pin their bridge behavior.

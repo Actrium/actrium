@@ -72,7 +72,7 @@ then segCount times, tightly packed:
 - **Encode:** the codec walks the value, hoists every byte-stream value to new
   segments (in walk order), and replaces it with the sentinel naming them.
 
-### 2a. One logical value across several segments (issue #84)
+### 2a. One logical value across several segments (issue #164)
 
 `maxSegmentBytes` caps **one segment** — i.e. one decoder allocation — **not** one
 logical value. Before the array form existed it was therefore also the ceiling on a

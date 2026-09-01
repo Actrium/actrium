@@ -1,4 +1,4 @@
-//! Tests for the TWO status levels a host reply carries (issue #85).
+//! Tests for the TWO status levels a host reply carries (issue #165).
 //!
 //! `host_call` resolves with the TRANSPORT status: `ok == 1` means the host module
 //! ran and answered. A module whose seam declares an `"ok":boolean` response also

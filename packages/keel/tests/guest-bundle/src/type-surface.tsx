@@ -16,11 +16,11 @@
 import { FlatList, SectionList, Text, TextInput, useRemoteRef, View, VirtualizedList } from 'keel/guest';
 
 // ============================================================
-// #79 — list components take an element type
+// #161 — list components take an element type
 // ============================================================
 
 /**
- * The case from #79. `item` must narrow to `string` from `data` alone: no
+ * The case from #161. `item` must narrow to `string` from `data` alone: no
  * annotation, no cast, no explicit type argument. Before the fix `item` was
  * stuck at `unknown` (TS2322 on `ReactNode`), and neither escape hatch worked —
  * annotating the callback failed on contravariance, and `<FlatList<string>>` gave
@@ -88,12 +88,12 @@ export function VirtualizedInfersFromData() {
 }
 
 // ============================================================
-// #80 — every component accepts a remote ref
+// #162 — every component accepts a remote ref
 // ============================================================
 
 /**
  * Verbatim the shape in `useRemoteRef`'s own JSDoc, which did not compile before
- * #80: no prop interface declared `ref` and `GuestComponent<P>` is not a
+ * #162: no prop interface declared `ref` and `GuestComponent<P>` is not a
  * forwardRef shape, so this was TS2322 ("Property 'ref' does not exist").
  */
 export function RefOnTextInput() {
@@ -110,7 +110,7 @@ export function RefOnTextInput() {
 
 /**
  * `ref` is declared on `BaseProps`, so it is accepted on ANY component — which is
- * the public-surface decision #80 recorded, and it matches the runtime (the
+ * the public-surface decision #162 recorded, and it matches the runtime (the
  * reconciler assigns a nodeId to every node). A `ref` that only worked on
  * `TextInput` would be the narrower contract this case rules out.
  */

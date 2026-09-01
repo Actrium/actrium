@@ -309,7 +309,7 @@ export function hoistSentinels(value: unknown): Hoisted {
       // ONE value, possibly MANY segments. `maxSegmentBytes` caps a single
       // SEGMENT — one decoder allocation — not a logical value, so a longer value
       // is split into chunks named by the array sentinel form, keeping each
-      // allocation bounded while lifting the ceiling on the value (issue #84).
+      // allocation bounded while lifting the ceiling on the value (issue #164).
       //
       // A value that fits in one segment MUST still emit the scalar form: that
       // keeps every frame expressible before this extension byte-for-byte

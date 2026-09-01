@@ -1,5 +1,5 @@
 /**
- * WASM provider host:* module bridge (issue #5)
+ * WASM provider host:* module bridge (issue #135)
  *
  * The isolated QuickJS-WASM realm can't hold host function references, so host:*
  * capabilities are bridged as a JSON request/response over __sendToHost. This test

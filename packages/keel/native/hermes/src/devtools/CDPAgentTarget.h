@@ -14,7 +14,7 @@
  * the interrupt path. Our only obligation is the integrator enqueue callback
  * (a thin callInvoker adapter, injected) and the per-connection outbound sink.
  *
- * Lifetime (issue #40): every entry point that reaches into the runtime /
+ * Lifetime (issue #142): every entry point that reaches into the runtime /
  * AsyncDebuggerAPI (dispatch, connect, disconnect — all of which enqueue via
  * triggerInterrupt_TS, which touches the runtime AT ENQUEUE TIME) runs inside
  * a CdpTeardownGate section shared with the sandbox's dispose(). Once dispose
@@ -52,7 +52,7 @@ public:
   // must be the same gate that the owner closes in dispose(). `clientsAttached`
   // is the sandbox's shared connection counter, bumped on connect/disconnect so
   // the sandbox's watchdog pause callback can auto-resume a client-less pause
-  // (#77); must be non-null.
+  // (#160); must be non-null.
   CDPAgentTarget(int32_t executionContextId,
                  std::shared_ptr<facebook::hermes::cdp::CDPDebugAPI> debugAPI,
                  facebook::hermes::debugger::EnqueueRuntimeTaskFunc enqueue,
@@ -82,7 +82,7 @@ private:
   // Shared with the sandbox context: incremented while a connection has a live
   // CDPAgent, decremented when it goes away. Lets the sandbox's watchdog pause
   // callback distinguish "a client is driving the debugger" from "nobody is,
-  // resume or the runtime hangs" (#77).
+  // resume or the runtime hangs" (#160).
   const std::shared_ptr<std::atomic<int>> clientsAttached_;
 
   std::mutex agentsMutex_;

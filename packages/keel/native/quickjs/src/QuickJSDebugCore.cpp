@@ -249,7 +249,7 @@ void QuickJSDebugCore::onStep(JSContext* ctx, const void* token, int line,
   // different depth (recursion, or a step that returns to it) must re-evaluate.
   // A pending pause request must defeat the dedup: on a single-line loop the
   // key never changes, and skipping here would starve Debugger.pause forever
-  // (issue #39). Relaxed is enough — the mutex below is the authoritative read.
+  // (issue #141). Relaxed is enough — the mutex below is the authoritative read.
   const bool pausePending = pauseRequested_.load(std::memory_order_relaxed);
   if (!pausePending && token == lastToken_ && line == lastLine_ &&
       depth == lastDepth_)

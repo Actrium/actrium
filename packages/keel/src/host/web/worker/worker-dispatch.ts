@@ -1,5 +1,5 @@
 /**
- * WorkerDispatch (issue #19 L1 + Milestone B web-debug) — the pure, headless core
+ * WorkerDispatch (issue #139 L1 + Milestone B web-debug) — the pure, headless core
  * of the in-worker harness. It owns the message state machine that {@link WorkerEngine}
  * talks to: guest-eval entry, lifecycle, and the debugger (`dbg.*`) sub-protocol.
  *

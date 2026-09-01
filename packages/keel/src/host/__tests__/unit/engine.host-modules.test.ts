@@ -1,5 +1,5 @@
 /**
- * Engine host:* module runtime wiring (issue #3)
+ * Engine host:* module runtime wiring (issue #134)
  *
  * Exercises the runtime backend for the `keel/contract` host-module capability
  * layer: the Engine pairs the contract's boundary schemas with the host

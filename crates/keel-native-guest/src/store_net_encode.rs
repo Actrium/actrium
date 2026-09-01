@@ -254,7 +254,7 @@ fn read_slice<'a>(buf: &'a [u8], pos: &mut usize, len: usize) -> Result<&'a [u8]
 /// control plane by hand (`store::put_bytes`, `net::fetch_bytes`). Those wrappers
 /// used to pass a single slice straight to [`encode_envelope`], which is why
 /// `MAX_SEGMENT_BYTES` was the ceiling on one stored value; routing them through
-/// here is what actually lifts it (issue #84).
+/// here is what actually lifts it (issue #164).
 ///
 /// `MAX_SEGMENT_BYTES` caps a single SEGMENT — one decoder allocation — not a
 /// logical value, so a longer value is split into chunks and named by the array
@@ -494,7 +494,7 @@ fn revive(value: Value, segments: &[&[u8]], used: &mut [bool]) -> Result<Value, 
                         return Ok(Value::Bytes(seg.to_vec()));
                     }
                     // Form (b): one logical value spanning several segments,
-                    // joined in list order (issue #84). An empty list carries no
+                    // joined in list order (issue #164). An empty list carries no
                     // bytes and no meaning, so it is malformed rather than "empty
                     // value" — an empty value is one empty segment.
                     Value::Arr(items) => {

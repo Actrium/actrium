@@ -8,7 +8,7 @@
  *
  * PURPOSE
  * -------
- * Quantify the approach-B (#57) parallel speedup: box-blur one large image across
+ * Quantify the approach-B (#151) parallel speedup: box-blur one large image across
  * 1 / 2 / 4 / 8 workers (each an independent native-wasm guest instance, tiles
  * moved as transferable ArrayBuffers) and report wall time vs the 1-worker
  * baseline. This is the perf evidence; correctness (pooled == whole-image,

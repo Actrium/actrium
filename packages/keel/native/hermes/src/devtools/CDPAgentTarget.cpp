@@ -119,12 +119,12 @@ void CDPAgentTarget::onClientConnect(ConnectionId conn, CdpOutboundFn persistent
   std::lock_guard<std::mutex> lock(agentsMutex_);
   agents_[conn] = std::move(agent);
   // A client is now driving the debugger: the sandbox's watchdog callback must
-  // stop auto-resuming its pauses (#77).
+  // stop auto-resuming its pauses (#160).
   clientsAttached_->fetch_add(1, std::memory_order_relaxed);
 }
 
 void CDPAgentTarget::dispatch(ConnectionId conn, const RawCdpMessage& raw) {
-  // Hold the teardown gate for the WHOLE call (issue #40, B1). handleCommand
+  // Hold the teardown gate for the WHOLE call (issue #142, B1). handleCommand
   // routes through RuntimeTaskRunner (TaskQueues::All), whose
   // triggerInterrupt_TS leg dereferences the AsyncDebuggerAPI and the runtime
   // AT ENQUEUE TIME — a liveness token inside the queued closure cannot
@@ -178,7 +178,7 @@ void CDPAgentTarget::onClientDisconnect(ConnectionId conn) {
     dead = std::move(it->second);
     agents_.erase(it);
     // Last driver for this connection is gone; if it was the last client the
-    // sandbox's watchdog callback resumes future pauses itself (#77).
+    // sandbox's watchdog callback resumes future pauses itself (#160).
     clientsAttached_->fetch_sub(1, std::memory_order_relaxed);
   }
   // If this client left the runtime paused at a breakpoint, no one else will
@@ -187,7 +187,7 @@ void CDPAgentTarget::onClientDisconnect(ConnectionId conn) {
   // Guard with isWaitingForCommand() (NOT isPaused()): resumeFromPaused is
   // only valid when the next command is expected.
   //
-  // The closure captures the CDPDebugAPI WEAKLY (issue #40, B2). A strong
+  // The closure captures the CDPDebugAPI WEAKLY (issue #142, B2). A strong
   // capture would store a shared_ptr inside the interrupt queue that the SAME
   // CDPDebugAPI owns; if the runtime never runs again (tenant destroyed right
   // after this disconnect) the interrupt never fires and the reference cycle

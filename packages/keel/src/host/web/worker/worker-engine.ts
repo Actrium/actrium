@@ -1,5 +1,5 @@
 /**
- * WorkerEngine (issue #19, L1) — main-thread proxy for an Engine that runs off the UI thread.
+ * WorkerEngine (issue #139, L1) — main-thread proxy for an Engine that runs off the UI thread.
  *
  * The real {@link Engine} + QuickJS-WASM sandbox live in a Web Worker (see `worker-host.ts`), so
  * a guest infinite loop or heavy compute no longer freezes the host page. Two robustness wins an

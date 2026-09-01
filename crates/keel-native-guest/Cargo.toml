@@ -17,7 +17,7 @@ required-features = ["binary-protocol"]
 
 [features]
 default = ["binary-protocol"]
-# PROMOTED, DEFAULT ON (issue #45): the guest-side encoders for the binary
+# PROMOTED, DEFAULT ON (issue #147): the guest-side encoders for the binary
 # op-batch (contracts/sandbox/op-batch-wire.json) and canvas (contracts/sandbox/canvas-wire.json)
 # wire protocols. Compiled into the shipped guest by default and negotiated at
 # RUNTIME, never a flag-day:

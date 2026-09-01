@@ -424,7 +424,7 @@ int main() {
   runtimeThread.join();
   check(true, "clean teardown without deadlock");
 
-  // Additional adversarial teardown scenarios (issue #40).
+  // Additional adversarial teardown scenarios (issue #142).
   test_disconnect_while_paused();
   test_dispatch_vs_teardown_race();
   test_destroy_with_pending_interrupt();

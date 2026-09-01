@@ -753,12 +753,12 @@ HermesSandboxContext::HermesSandboxContext(jsi::Runtime &hostRuntime,
   // DebuggerEventCallback is registered; note the watchdog callback added just
   // below is itself such a callback, so it takes the runtime OUT of inert mode.
   // Inert behavior for the no-client case is therefore emulated in that
-  // callback (#77), not inherent to the API. Dev-only.
+  // callback (#160), not inherent to the API. Dev-only.
   cdpDebugAPI_ = facebook::hermes::cdp::CDPDebugAPI::create(*sandboxRuntime_);
   runtimeAlive_ = std::make_shared<int>(1);
   // Teardown gate shared with the CDPAgentTarget: guards the CDP enqueue paths
   // (dispatch/connect/disconnect) that touch the runtime at enqueue time
-  // against a racing dispose() (issue #40, B1).
+  // against a racing dispose() (issue #142, B1).
   cdpTeardownGate_ = std::make_shared<keel::devtools::CdpTeardownGate>();
 
   // How many DevTools clients are currently attached (bumped by the
@@ -770,7 +770,7 @@ HermesSandboxContext::HermesSandboxContext(jsi::Runtime &hostRuntime,
 
   // One callback, two jobs, both on the runtime thread (so the plain bool/id
   // state below stays single-threaded):
-  //   1. #77 — registering ANY DebuggerEventCallback takes Hermes OUT of inert
+  //   1. #160 — registering ANY DebuggerEventCallback takes Hermes OUT of inert
   //      mode, so a `debugger;`/breakpoint pauses even when no DevTools client
   //      is attached. With nobody to call resumeFromPaused the runtime — and,
   //      since the Hermes sandbox runs on the host JS thread, the whole RN host
@@ -800,7 +800,7 @@ HermesSandboxContext::HermesSandboxContext(jsi::Runtime &hostRuntime,
               case ET::Exception:
                 if (!hasClient) {
                   // No one is driving the debugger; resume at once so the
-                  // runtime never hangs (#77). Guard with isWaitingForCommand()
+                  // runtime never hangs (#160). Guard with isWaitingForCommand()
                   // (NOT isPaused()): resumeFromPaused is only valid when the
                   // next command is expected. Leave the watchdog budget alone —
                   // we never really stopped.
@@ -850,7 +850,7 @@ void HermesSandboxContext::dispose() {
     watchdogPauseCallbackId_ = 0;
   }
   // Close the teardown gate and wait for every open CDP section to drain
-  // (issue #40, B1): after this returns no dispatch/connect/disconnect can be
+  // (issue #142, B1): after this returns no dispatch/connect/disconnect can be
   // mid-flight touching the runtime or AsyncDebuggerAPI, and none can start.
   // A section held open by a pause blocks here until it resumes, which
   // mechanically enforces the "resume before dispose" order. Do this BEFORE
@@ -861,7 +861,7 @@ void HermesSandboxContext::dispose() {
   // With the gate closed, sweep any CDPAgents still attached to the target,
   // destroying them while the CDPDebugAPI + runtime are still alive (~CDPAgent
   // enqueues its cleanup through the AsyncDebuggerAPI, so it must not run after
-  // them — issue #40, B2).
+  // them — issue #142, B2).
   if (auto target = cdpTarget_.lock()) {
     target->detachAllAgentsForTeardown();
   }
@@ -912,7 +912,7 @@ HermesSandboxContext::createCdpDebugTarget(
       executionContextId, cdpDebugAPI_, std::move(enqueue), cdpTeardownGate_,
       cdpClientsAttached_);
   // Retain a weak handle so dispose() can sweep any still-attached CDPAgents
-  // while the runtime + CDPDebugAPI are alive (issue #40, B2 ordering).
+  // while the runtime + CDPDebugAPI are alive (issue #142, B2 ordering).
   cdpTarget_ = target;
   return target;
 }

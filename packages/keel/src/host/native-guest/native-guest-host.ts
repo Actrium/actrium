@@ -87,7 +87,7 @@ export interface NativeGuestHostOptions {
    */
   onRenderBatch?: (batch: OperationBatch) => void;
   /**
-   * Enable the binary op-batch render wire (default TRUE — promoted, issue #45).
+   * Enable the binary op-batch render wire (default TRUE — promoted, issue #147).
    * When true, the host pushes `keel_wire_caps(bit0)` to a guest that exports it
    * (before `keel_init`, so the first render is already negotiated) and accepts
    * KEEL-magic binary frames on the render channel. A guest without the export

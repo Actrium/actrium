@@ -1,5 +1,5 @@
 /**
- * Thin-DOM component preset for the web host (issue #19, L2).
+ * Thin-DOM component preset for the web host (issue #139, L2).
  *
  * A tiny, auditable mapping of the common keel primitives onto native DOM elements
  * (View→div, Text→span, Pressable→button, ScrollView→div, TextInput→input/textarea, …) —

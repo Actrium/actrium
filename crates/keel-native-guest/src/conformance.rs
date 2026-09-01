@@ -187,7 +187,7 @@ impl<F: Future> Issued<F> {
 
 /// `HostCall::poll_now` lets a native guest keep a call in flight WITHOUT
 /// awaiting it, so the single root task can keep presenting instead of freezing
-/// on an in-flight host call (issue #65). This locks the level-triggered
+/// on an in-flight host call (issue #155). This locks the level-triggered
 /// contract: the result the host stashes via `keel_resolve` is observed on a
 /// later `poll_now` with no waker wakeup, the first poll issues exactly one
 /// `keel_host_call`, and the result is taken exactly once.

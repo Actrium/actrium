@@ -1,5 +1,5 @@
 /**
- * Pre-rename spellings of the native-guest host API (issue #58).
+ * Pre-rename spellings of the native-guest host API (issue #152).
  *
  * These five names were the public surface of `keel/host` before the
  * native-guest line got a self-describing name, so they stay exported rather

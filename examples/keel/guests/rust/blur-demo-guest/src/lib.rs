@@ -11,7 +11,7 @@
 //! Both divide the per-pixel window sum by the same window count with the SAME
 //! integer division, so the SIMD result is bit-identical to the scalar one — the
 //! correctness gate in `src/host/native-guest/__tests__/blur-demo-guest.test.ts`
-//! asserts exactly that. This is the reference for #57's "documented +simd128
+//! asserts exactly that. This is the reference for #151's "documented +simd128
 //! build path + one baseline filter's SIMD version, verifiable byte-for-byte".
 //!
 //! The SIMD path is enabled per function via `#[target_feature(enable =

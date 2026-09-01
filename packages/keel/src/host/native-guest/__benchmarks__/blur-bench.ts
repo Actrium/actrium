@@ -13,7 +13,7 @@
  * examples/keel/guests/rust/blur-demo-guest: the hand-vectorized `box_blur_simd` (core::arch::wasm32
  * v128) vs the `box_blur_scalar` reference, on the same source pixels, across a
  * couple of representative image sizes / radii. This is the perf evidence behind
- * #57; it is NOT the correctness gate (that lives in the sibling
+ * #151; it is NOT the correctness gate (that lives in the sibling
  * __tests__/blur-demo-guest.test.ts and asserts byte-for-byte equality).
  *
  * FAITHFULNESS: before any timing, this harness asserts the two paths are
@@ -24,7 +24,7 @@
  * fixture/kernel, the SIMD win is strongly engine-dependent:
  *
  *     engine        512x512 r=4 speedup
- *     V8 (node)     ~2.07x   <- the browser / web-host engine that #57 targets
+ *     V8 (node)     ~2.07x   <- the browser / web-host engine that #151 targets
  *     JSC (bun)     ~1.11x   <- weaker wasm-SIMD codegen; this harness's runtime
  *
  * So the ~1.1x you see here UNDERSTATES the real web-host win (~2x on V8, which

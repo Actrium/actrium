@@ -1,5 +1,5 @@
 /**
- * Worker host protocol (issue #19, L1) — message contract between the main-thread
+ * Worker host protocol (issue #139, L1) — message contract between the main-thread
  * {@link WorkerEngine} and the in-worker harness (`worker-host.ts`).
  *
  * Design notes:

@@ -92,7 +92,7 @@ fn put_bytes_request_is_an_kbs1_frame_with_no_number_array() {
 
 #[test]
 fn put_bytes_past_the_segment_cap_is_split_across_segments() {
-    // Issue #84: this is the API the 1 MiB ceiling actually bit — `put_bytes`
+    // Issue #164: this is the API the 1 MiB ceiling actually bit — `put_bytes`
     // handed its value to `encode_envelope` as a single slice, so the per-segment
     // cap was the ceiling on one STORED value. A 1076x722 two-layer raster
     // serialises to ~3.96 MB, so this is the ordinary case, not the extreme one.

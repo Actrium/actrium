@@ -278,7 +278,7 @@ describe('WorkerEngine debugger surface', () => {
   });
 
   it('sendEvent after an explicit dbgPause is not watchdog-killed while suspended', async () => {
-    // The issue-#41 timeline: dbgEnable() -> dbgPause() -> sendEvent(). The event
+    // The issue-#143 timeline: dbgEnable() -> dbgPause() -> sendEvent(). The event
     // turn queues behind the paused gate; before the fix its watchdog kept
     // counting and terminate()d the worker after the budget although nothing hung.
     const s = setup({ watchdogTimeout: 60 });

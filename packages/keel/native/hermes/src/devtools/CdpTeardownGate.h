@@ -2,7 +2,7 @@
  * CdpTeardownGate.h
  *
  * Teardown gate between the Hermes CDP plumbing and the runtime owner's
- * dispose path (issue #40, bug B1).
+ * dispose path (issue #142, bug B1).
  *
  * Problem: CDPAgent::handleCommand routes through RuntimeTaskRunner
  * (TaskQueues::All), whose triggerInterrupt_TS leg dereferences the

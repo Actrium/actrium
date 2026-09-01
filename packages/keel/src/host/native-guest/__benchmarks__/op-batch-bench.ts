@@ -25,7 +25,7 @@
  * conformant encoder in the tree — the schema-locked Rust encoder
  * (`crates/keel-native-guest/src/wire_encode.rs`), reached through the dev-harness CLI
  * `examples/op_batch_oracle.rs` (the retired TS `BinaryEncoder` is gone; see
- * issue #47). Before any timing, this harness (a) pushes the checked-in golden
+ * issue #149). Before any timing, this harness (a) pushes the checked-in golden
  * vectors through the CLI and asserts BYTE-FOR-BYTE equality with their oracle
  * hex — confirming the CLI reproduces the same bytes the golden corpus was
  * generated with — and (b) round-trips every generated batch through the
@@ -206,7 +206,7 @@ function cratesDir(): string {
  * oracle CLI (`examples/op_batch_oracle.rs`). ONE subprocess call for the whole
  * array — the CLI prints one lowercase-hex line per input batch, in order. This
  * is the schema-locked encoder the golden vectors are generated with, and the
- * only conformant producer in the tree now that the TS pair is retired (#47).
+ * only conformant producer in the tree now that the TS pair is retired (#149).
  */
 function encodeViaOracle(batches: SerializedOperationBatch[]): ArrayBuffer[] {
   const stdout = execFileSync(

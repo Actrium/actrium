@@ -5,7 +5,7 @@ import { NativeGuestHost } from '../native-guest-host';
 
 // blur-demo-guest ships one baseline pixel filter (a straight-alpha RGBA8 box
 // blur) in two forms — a scalar reference and a hand-vectorized wasm SIMD128
-// version (core::arch::wasm32 v128). The correctness contract of #57 is that the
+// version (core::arch::wasm32 v128). The correctness contract of #151 is that the
 // SIMD output is byte-for-byte identical to the scalar reference. This suite is
 // that gate: for a spread of sizes and radii it drives both exports over the
 // same source pixels and asserts the two framebuffers are equal, byte for byte.

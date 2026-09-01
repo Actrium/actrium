@@ -17,7 +17,7 @@ import type React from 'react';
  * unknown", it demands "every prop is optional". That rules out any component
  * with a REQUIRED prop, including the library's own preset `Image` (`source`),
  * which made `register(DefaultComponents)` a type error for every consumer that
- * resolves real react-native types (issue #105). Whether the guest actually sent
+ * resolves real react-native types (issue #172). Whether the guest actually sent
  * a required prop is a runtime question the component itself answers; the
  * registry cannot answer it and should not pretend to.
  */
