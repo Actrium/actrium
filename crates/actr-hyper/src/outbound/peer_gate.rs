@@ -9,8 +9,8 @@ use super::ensure_stream_payload_type;
 use crate::lifecycle::SendProjection;
 use crate::transport::correlation::{CompleteOutcome, PendingRequestsMap, RpcCorrelation};
 use crate::transport::{
-    Dest, DestTransportRef, NetworkResult, PayloadTypeExt, PeerTransport, SentTransportSlot,
-    WireIdentity,
+    DATA_CHUNK_SEND_TIMEOUT, Dest, DestTransportRef, NetworkResult, PayloadTypeExt, PeerTransport,
+    RpcDeadline, SentTransportSlot, WireIdentity,
 };
 use actr_framework::{Bytes, MediaSample};
 use actr_protocol::prost::Message as ProstMessage;
@@ -23,22 +23,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, oneshot, watch};
 
-/// Internal upper bound for a single DataChunk send operation.
-///
-/// DataChunk has no caller-provided request deadline like RPC envelopes, so
-/// this prevents a stalled WebRTC DataChannel send from holding the mobile
-/// caller forever during unrecoverable network loss.
-const DATA_CHUNK_SEND_TIMEOUT: Duration = Duration::from_secs(15);
-/// Total budget for fire-and-forget RPC sends, including transient retries.
-///
-/// `tell` does not wait for a response, so it is bounded by the transport
-/// send budget rather than a caller RPC deadline (`timeout_ms` is 0 for tell).
-/// In practice tell dispatches via `RpcReliable`, whose retry policy is
-/// 5 attempts with a 1s→2s→4s→5s backoff (4 retries, 12s cumulative delay);
-/// this timeout covers that full backoff plus a small margin for the send
-/// attempts themselves, so a reliable tell can still complete all retries
-/// while a stalled transport is capped instead of hanging indefinitely.
-const TELL_SEND_TIMEOUT: Duration = Duration::from_secs(13);
 /// Preserve in-flight reliable RPCs across a brief sendability dip, but do not
 /// let a remote-side recovery leave response waits parked until their much
 /// longer business deadline.
@@ -887,56 +871,58 @@ impl PeerGate {
         payload_type: PayloadType,
         envelope: RpcEnvelope,
     ) -> ActorResult<Bytes> {
+        let deadline = RpcDeadline::from_timeout_ms(envelope.timeout_ms)?;
+        self.send_request_with_type_until(target, payload_type, envelope, deadline)
+            .await
+    }
+
+    /// Send a request under an absolute deadline created by the API entry
+    /// point.  Preflight, pending registration, serialization, transport
+    /// selection/retry, and response waiting all share this one budget.
+    pub(crate) async fn send_request_with_type_until(
+        &self,
+        target: &ActrId,
+        payload_type: PayloadType,
+        envelope: RpcEnvelope,
+        deadline: RpcDeadline,
+    ) -> ActorResult<Bytes> {
+        deadline.ensure_remaining()?;
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Request);
-
-        // 0. Sender-side deadline validation (#254): reject non-positive
-        // timeouts before registering pending state. This also prevents the
-        // `as u64` sign wrap that would turn a negative timeout into an
-        // effectively infinite one.
-        let timeout = crate::transport::validate_rpc_timeout_ms(envelope.timeout_ms)?;
-
-        // 1. Convert ActrId to Dest and fail fast during recovery before
-        // registering pending_requests.
         let dest = Self::actr_id_to_dest(target);
-        let admission = self.preflight_send(target, &dest).await?;
-
-        // 2/3. Register the pending request. The RAII guard removes the entry
-        // on every early exit (send failure, channel closed, deadline expiry,
-        // caller future dropped), so the manual cleanup branches below only
-        // keep the transport-side close.
-        let pending = self
-            .pending_requests
-            .register(envelope.request_id.clone(), target.clone());
-
-        // 4. Serialize RpcEnvelope
-        let data = Self::serialize_envelope(&envelope);
-
-        // 5. Unified timeout: covers both retry + wait-for-response
-        //    so the user-perceived latency never exceeds envelope.timeout_ms.
-        let stale_target = target.clone();
-        let dest_for_timeout = dest.clone();
+        let request_id = envelope.request_id.clone();
         let sent_transport = Arc::new(Mutex::new(None));
         let sent_transport_for_send = Arc::clone(&sent_transport);
+        let mut send_started = false;
 
-        let result = crate::timer::timeout(
+        let result = crate::timer::timeout_at(
             crate::timer::ids::PEER_REQUEST_DEADLINE,
-            timeout,
-            Box::pin(async move {
-                // 5a. Send with per-PayloadType retry on transient failures
+            deadline.instant(),
+            async {
+                let admission = self.preflight_send(target, &dest).await?;
+                deadline.ensure_remaining()?;
+
+                // The RAII guard removes pending state on send failure,
+                // response-channel closure, timeout, or caller cancellation.
+                let pending = self
+                    .pending_requests
+                    .register(request_id.clone(), target.clone());
+                let data = Self::serialize_envelope(&envelope);
+                deadline.ensure_remaining()?;
+                send_started = true;
+
                 self.send_with_retry_record_identity(
-                    &dest_for_timeout,
+                    &dest,
                     payload_type,
                     &data,
                     admission,
                     Some(&sent_transport_for_send),
                 )
                 .await?;
-                tracing::debug!("Sent request to {:?}", stale_target);
+                tracing::debug!("Sent request to {:?}", target);
 
-                // 5b. Wait for response (guard Drop cleans the entry if the
-                // caller's future is dropped mid-wait).
+                // The outer timeout owns the combined send + response budget.
                 pending.recv().await
-            }),
+            },
         )
         .await;
 
@@ -947,19 +933,21 @@ impl PeerGate {
                 // Unavailable so callers and language bindings can distinguish
                 // "request never reached the server" from "server did not reply
                 // in time".
-                let transport_manager = self.transport_manager.clone();
-                let stale_dest = dest.clone();
-                let stale_target = target.clone();
-                let sent_transport = sent_transport.lock().await.clone();
-                tokio::spawn(async move {
-                    Self::close_timed_out_request_transport(
-                        transport_manager,
-                        stale_dest,
-                        stale_target,
-                        sent_transport,
-                    )
-                    .await;
-                });
+                if send_started {
+                    let transport_manager = self.transport_manager.clone();
+                    let stale_dest = dest.clone();
+                    let stale_target = target.clone();
+                    let sent_transport = sent_transport.lock().await.clone();
+                    tokio::spawn(async move {
+                        Self::close_timed_out_request_transport(
+                            transport_manager,
+                            stale_dest,
+                            stale_target,
+                            sent_transport,
+                        )
+                        .await;
+                    });
+                }
                 Err(ActrError::TimedOut)
             }
         }
@@ -1028,16 +1016,39 @@ impl PeerGate {
             .await
     }
 
-    pub(crate) async fn send_tell_with_type(
+    /// Send a Tell under the absolute budget created by the runtime context.
+    /// The retry policy is intentionally unchanged in this deadline-only PR;
+    /// retry ownership is split into its own RFC-0507 follow-up.
+    pub(crate) async fn send_tell_with_type_until(
         &self,
         target: &ActrId,
         payload_type: PayloadType,
         envelope: RpcEnvelope,
+        deadline: RpcDeadline,
     ) -> ActorResult<()> {
-        self.send_message_with_type_inner(target, payload_type, envelope, Some(TELL_SEND_TIMEOUT))
-            .await
+        deadline.ensure_remaining()?;
+        let envelope = Self::stamp_envelope_direction(envelope, Direction::Tell);
+        let dest = Self::actr_id_to_dest(target);
+
+        match crate::timer::timeout_at(
+            crate::timer::ids::OUTBOUND_TELL_DEADLINE,
+            deadline.instant(),
+            async {
+                let data = Self::serialize_envelope(&envelope);
+                let admission = self.preflight_send(target, &dest).await?;
+                deadline.ensure_remaining()?;
+                self.send_with_retry(&dest, payload_type, &data, admission)
+                    .await
+            },
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(ActrError::TimedOut),
+        }
     }
 
+    #[cfg(any(test, feature = "test-utils"))]
     async fn send_message_with_type_inner(
         &self,
         target: &ActrId,
@@ -1242,6 +1253,19 @@ impl PeerGate {
         data: Bytes,
         send_timeout: Duration,
     ) -> ActorResult<()> {
+        let deadline = RpcDeadline::from_duration(send_timeout);
+        self.send_data_chunk_until(target, payload_type, stream_id, data, deadline)
+            .await
+    }
+
+    pub(crate) async fn send_data_chunk_until(
+        &self,
+        target: &ActrId,
+        payload_type: PayloadType,
+        stream_id: &str,
+        data: Bytes,
+        deadline: RpcDeadline,
+    ) -> ActorResult<()> {
         tracing::debug!(
             "PeerGate::send_data_chunk to {:?}, stream_id={}, payload_type={:?}, size={} bytes",
             target,
@@ -1254,7 +1278,6 @@ impl PeerGate {
 
         // Convert ActrId to Dest
         let dest = Self::actr_id_to_dest(target);
-        let admission = self.preflight_send(target, &dest).await?;
 
         // Delivery uncertainty on a session close mid-flight is surfaced by
         // the v0.20 lane send itself (RtcSendError::DataChunkDeliveryUncertain
@@ -1268,10 +1291,15 @@ impl PeerGate {
         // session. A chunk-send timeout therefore only fails this send; it
         // deliberately does not tear down the transport (a timeout is not
         // proof the transport is bad — the remote may simply be slow).
-        match crate::timer::timeout(
-            crate::timer::ids::PEER_REQUEST_DEADLINE,
-            send_timeout,
-            self.send_once_with_admission(&dest, payload_type, &data, admission, None),
+        match crate::timer::timeout_at(
+            crate::timer::ids::OUTBOUND_DATA_CHUNK_DEADLINE,
+            deadline.instant(),
+            async {
+                let admission = self.preflight_send(target, &dest).await?;
+                deadline.ensure_remaining()?;
+                self.send_once_with_admission(&dest, payload_type, &data, admission, None)
+                    .await
+            },
         )
         .await
         {
@@ -1581,6 +1609,66 @@ mod tests {
         assert!(matches!(error, ActrError::ConnectionNotReady(_)));
         assert!(gate.get_pending_requests().len() == 0);
         assert_eq!(builds.load(Ordering::SeqCst), 0);
+    }
+
+    #[cfg(feature = "webrtc-v020")]
+    #[tokio::test(start_paused = true)]
+    async fn request_deadline_covers_preflight_wait() {
+        let (gate, transport, _projection_tx, builds, sends) =
+            gate_with_projection(SendProjection::Normal);
+        let gate = Arc::new(gate);
+        let target = test_actor_id(2);
+
+        // Keep a healthy committed transport in the map. Expiring before the
+        // send phase must not run the transport-reclaim path against it.
+        gate.send_message_with_type(&target, PayloadType::RpcReliable, RpcEnvelope::default())
+            .await
+            .expect("preparing a healthy transport should succeed");
+        assert_eq!(transport.dest_count().await, 1);
+
+        // Hold the manager peers-map write lock so the preflight `is_closing`
+        // read blocks. A caller deadline must bound this wait even though no
+        // pending request or transport send has started yet.
+        let preflight_guard = gate.v020_manager.hold_peers_write_for_test().await;
+        let request_gate = Arc::clone(&gate);
+        let request = tokio::spawn(async move {
+            request_gate
+                .send_request_with_type(
+                    &target,
+                    PayloadType::RpcReliable,
+                    RpcEnvelope {
+                        request_id: "preflight-deadline".to_string(),
+                        timeout_ms: 100,
+                        ..Default::default()
+                    },
+                )
+                .await
+        });
+
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
+        assert!(
+            request.is_finished(),
+            "preflight lock wait must be covered by the request deadline"
+        );
+
+        let error = request
+            .await
+            .expect("request task should not panic")
+            .expect_err("blocked preflight should time out");
+        assert!(matches!(error, ActrError::TimedOut), "got {error:?}");
+        assert!(gate.get_pending_requests().len() == 0);
+        tokio::task::yield_now().await;
+        assert_eq!(builds.load(Ordering::SeqCst), 1);
+        assert_eq!(sends.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            transport.dest_count().await,
+            1,
+            "pre-send timeout must not close a healthy transport"
+        );
+
+        drop(preflight_guard);
     }
 
     #[tokio::test]
