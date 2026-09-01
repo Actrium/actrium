@@ -21,7 +21,7 @@ macOS example app demonstrating **keel sandbox** with `react-native-macos`.
 macos-demo/
 ├── macos-demo.xcodeproj/
 ├── macos-demo/        # Swift/ObjC source
-├── RCTNApps/          # Shared React Native JS layer
+├── ReactNativeApp/          # Shared React Native JS layer
 ├── Podfile
 └── TestCode/
 ```

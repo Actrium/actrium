@@ -123,7 +123,7 @@ function makePrng(seed: number): () => number {
 }
 // Adversarial chars incl. JSON metachars + multi-byte UTF-8 (u00e9 = 2 bytes,
 // u{1F600} = 4 bytes / surrogate pair). Escapes keep the source ASCII-only.
-const FUZZ_CHARS = ['a', 'Z', '0', ' ', '"', '\\', '\n', '\t', 'é', '\u{1F600}', ':', '{', '}', '[', ']'];
+const FUZZ_CHARS = ['a', 'Z', '0', ' ', '"', '\\', '\n', '\t', '\u00e9', '\u{1F600}', ':', '{', '}', '[', ']'];
 function randomString(rng: () => number): string {
   const n = rng() % 10;
   let out = '';

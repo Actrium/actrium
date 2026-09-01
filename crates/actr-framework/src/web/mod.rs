@@ -8,7 +8,7 @@
 //! Native builds and `wasm32-wasip2` Component Model builds never see this
 //! module.
 //!
-//! Per Option U γ-unified §3.3 the `WebContext` struct implements the
+//! Per Option U gamma-unified section 3.3 the `WebContext` struct implements the
 //! shared `Context` trait for the wasm-bindgen (`wasm32-unknown-unknown`)
 //! path, capturing `(self_id, caller_id, request_id)` once at dispatch
 //! construction and exposing it through the same trait the `wasip2`

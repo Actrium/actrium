@@ -1,7 +1,7 @@
 //! Native (non-JS) keel guest that exercises the canvas SDK's guest->host JSON
 //! ESCAPING. It draws a one-op display list whose `canvasId`, fill color and text
 //! all carry JSON metacharacters (quote, backslash, newline, tab) plus multi-byte
-//! UTF-8 (`é`, an emoji). The host decodes the batch with a strict `JSON.parse`,
+//! UTF-8 (U+00E9 and a four-byte emoji). The host decodes the batch with a strict `JSON.parse`,
 //! so if the SDK mis-escaped any byte the call would fail closed (ok=0) and the
 //! recorded draw would be absent; a recorded draw whose strings match EXACTLY
 //! proves the escaping round-trips.
@@ -18,8 +18,8 @@ keel_native_guest::guest_main!(guest_main);
 const CANVAS_ID: &str = "scene\"\\\n\tid";
 /// A CSS color string with an embedded quote + backslash (still a valid string).
 const COLOR: &str = "#ff0000\"\\";
-/// Text mixing metacharacters with multi-byte UTF-8 (2-byte `é`, 4-byte emoji).
-const TEXT: &str = "hé\"llo\\\n\t😀";
+/// Text mixing metacharacters with two-byte and four-byte UTF-8.
+const TEXT: &str = "h\u{00e9}\"llo\\\n\t\u{1f600}";
 
 async fn guest_main() {
     let mut dl = DrawList::new();

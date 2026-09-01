@@ -282,7 +282,7 @@ pub struct BackpressureEvent {
 // Workload trait is `?Send` on `wasm32` (browser single-threaded) and keeps
 // the native default `Send` auto trait elsewhere so tokio-multi-thread-backed
 // adapters on the native side continue to produce `Send` futures without
-// fighting `async_trait`. Per Option U γ-unified §3.2 the user-facing bound
+// fighting `async_trait`. Per Option U gamma-unified §3.2 the user-facing bound
 // is `'static`; `MaybeSendSync` silently re-adds `Send + Sync` on native so
 // the lifecycle-hook default bodies and the hyper `WorkloadAdapter`
 // downstream see the `Send` futures they require.

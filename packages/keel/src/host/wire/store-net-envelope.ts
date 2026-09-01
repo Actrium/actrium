@@ -115,7 +115,7 @@ export function encodeEnvelope(jsonControl: string, segments: Uint8Array[]): Uin
       `${segments.length} > ${LIMITS.maxSegments}`
     );
   }
-  // magic(4) + jsonLen(4) + json + segCount(4) + Σ(segLen(4) + seg)
+  // magic(4) + jsonLen(4) + json + segCount(4) + sum(segLen(4) + seg)
   let total = 12 + json.length;
   for (const seg of segments) {
     if (seg.length > LIMITS.maxSegmentBytes) {

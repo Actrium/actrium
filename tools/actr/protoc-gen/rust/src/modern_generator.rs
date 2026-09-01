@@ -358,7 +358,7 @@ impl RpcRequest for {input_type_path} {{
             }
         }
 
-        // Per Option U γ-unified §4.5 / Phase 6b the handler trait keeps
+        // Per Option U gamma-unified §4.5 / Phase 6b the handler trait keeps
         // its minimal bound (`MaybeSendSync + 'static`) so user structs do
         // not need an extra `Sized` clause.
         let handler_trait_without_attr = quote! {
@@ -385,7 +385,7 @@ impl RpcRequest for {input_type_path} {{
         // Manually add #[async_trait] attribute to avoid quote! inserting spaces.
         //
         // `?Send` on wasm32 so the generated impl matches `Context`'s
-        // per-target auto-trait contract (γ-unified §3.1). Native keeps the
+        // per-target auto-trait contract (gamma-unified §3.1). Native keeps the
         // default Send-future form so handler futures compose with tokio
         // multi-threaded executors.
         Ok(format!(

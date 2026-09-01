@@ -12,8 +12,9 @@ The consolidation is expected to proceed in small, reversible stages:
 6. Remove temporary compatibility paths only after downstream users migrate.
 
 This directory holds import maps, compatibility notes, and cutover checklists.
-The Actr/Loran source tree has completed steps 2 and 3. Keel's privacy-scrubbed
-history and relocated build have completed steps 2 and 3. See the
-[Actr import plan](actr-import.md) and [Keel import record](keel-import.md).
-Actro has not yet been imported; the Actrix-to-Loran semantic rename remains
-part of step 5.
+The Actr/Loran source tree, Keel, and Actro have completed the history-import
+stage. Keel and Actro have also been relocated into the shared monorepo shape.
+See the [Actr import plan](actr-import.md), [Keel import record](keel-import.md),
+and [Actro import record](actro-import.md). The Actrix-to-Loran and
+Actro-to-Actrium product-facing renames remain compatibility-aware work under
+step 5.

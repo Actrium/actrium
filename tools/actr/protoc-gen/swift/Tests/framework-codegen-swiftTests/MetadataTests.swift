@@ -14,11 +14,11 @@ final class MetadataTests: XCTestCase {
   func testCanonicalJSONUsesJCSStringEscaping() throws {
     let separator = "\u{2028}"
     let canonical = try ActrFrameworkGenerator.canonicalizeJSONObject([
-      "route": "local/\(separator)/é.proto"
+      "route": "local/\(separator)/\u{00E9}.proto"
     ])
     XCTAssertEqual(
       String(bytes: canonical, encoding: .utf8)!,
-      "{\"route\":\"local/\(separator)/é.proto\"}"
+      "{\"route\":\"local/\(separator)/\u{00E9}.proto\"}"
     )
   }
 

@@ -103,7 +103,7 @@ extern "C" {
 /// Guest-side wrapper for WIT `host.call`.
 ///
 /// The `request_id` first parameter threads per-dispatch context
-/// through to the SW host (Phase 6 γ-unified §3.4). Callers are
+/// through to the SW host (Phase 6 gamma-unified §3.4). Callers are
 /// expected to pass `Context::request_id()`; manual construction
 /// is discouraged.
 pub async fn call_with_request_id(
@@ -128,7 +128,7 @@ pub async fn call_with_request_id(
 /// Guest-side wrapper for WIT `host.call-raw`.
 ///
 /// The `request_id` first parameter threads per-dispatch context
-/// through to the SW host (Phase 6 γ-unified §3.4). Callers are
+/// through to the SW host (Phase 6 gamma-unified §3.4). Callers are
 /// expected to pass `Context::request_id()`; manual construction
 /// is discouraged.
 pub async fn call_raw_with_request_id(
@@ -153,7 +153,7 @@ pub async fn call_raw_with_request_id(
 /// Guest-side wrapper for WIT `host.discover`.
 ///
 /// The `request_id` first parameter threads per-dispatch context
-/// through to the SW host (Phase 6 γ-unified §3.4). Callers are
+/// through to the SW host (Phase 6 gamma-unified §3.4). Callers are
 /// expected to pass `Context::request_id()`; manual construction
 /// is discouraged.
 pub async fn discover_with_request_id(
@@ -171,7 +171,7 @@ pub async fn discover_with_request_id(
 /// Guest-side wrapper for WIT `host.get-caller-id`.
 ///
 /// The `request_id` first parameter threads per-dispatch context
-/// through to the SW host (Phase 6 γ-unified §3.4). Callers are
+/// through to the SW host (Phase 6 gamma-unified §3.4). Callers are
 /// expected to pass `Context::request_id()`; manual construction
 /// is discouraged.
 pub async fn get_caller_id_with_request_id(request_id: &str) -> Result<Option<ActrId>, JsValue> {
@@ -185,7 +185,7 @@ pub async fn get_caller_id_with_request_id(request_id: &str) -> Result<Option<Ac
 /// Guest-side wrapper for WIT `host.get-request-id`.
 ///
 /// The `request_id` first parameter threads per-dispatch context
-/// through to the SW host (Phase 6 γ-unified §3.4). Callers are
+/// through to the SW host (Phase 6 gamma-unified §3.4). Callers are
 /// expected to pass `Context::request_id()`; manual construction
 /// is discouraged.
 pub async fn get_request_id_with_request_id(request_id: &str) -> Result<String, JsValue> {
@@ -199,7 +199,7 @@ pub async fn get_request_id_with_request_id(request_id: &str) -> Result<String, 
 /// Guest-side wrapper for WIT `host.get-self-id`.
 ///
 /// The `request_id` first parameter threads per-dispatch context
-/// through to the SW host (Phase 6 γ-unified §3.4). Callers are
+/// through to the SW host (Phase 6 gamma-unified §3.4). Callers are
 /// expected to pass `Context::request_id()`; manual construction
 /// is discouraged.
 pub async fn get_self_id_with_request_id(request_id: &str) -> Result<ActrId, JsValue> {
@@ -213,7 +213,7 @@ pub async fn get_self_id_with_request_id(request_id: &str) -> Result<ActrId, JsV
 /// Guest-side wrapper for WIT `host.log-message`.
 ///
 /// The `request_id` first parameter threads per-dispatch context
-/// through to the SW host (Phase 6 γ-unified §3.4). Callers are
+/// through to the SW host (Phase 6 gamma-unified §3.4). Callers are
 /// expected to pass `Context::request_id()`; manual construction
 /// is discouraged.
 pub async fn log_message_with_request_id(
@@ -233,7 +233,7 @@ pub async fn log_message_with_request_id(
 /// Guest-side wrapper for WIT `host.register-stream`.
 ///
 /// The `request_id` first parameter threads per-dispatch context
-/// through to the SW host (Phase 6 γ-unified §3.4). Callers are
+/// through to the SW host (Phase 6 gamma-unified §3.4). Callers are
 /// expected to pass `Context::request_id()`; manual construction
 /// is discouraged.
 pub async fn register_stream_with_request_id(
@@ -251,7 +251,7 @@ pub async fn register_stream_with_request_id(
 /// Guest-side wrapper for WIT `host.resolve-dependency`.
 ///
 /// The `request_id` first parameter threads per-dispatch context
-/// through to the SW host (Phase 6 γ-unified §3.4). Callers are
+/// through to the SW host (Phase 6 gamma-unified §3.4). Callers are
 /// expected to pass `Context::request_id()`; manual construction
 /// is discouraged.
 pub async fn resolve_dependency_with_request_id(
@@ -269,7 +269,7 @@ pub async fn resolve_dependency_with_request_id(
 /// Guest-side wrapper for WIT `host.send-data-chunk`.
 ///
 /// The `request_id` first parameter threads per-dispatch context
-/// through to the SW host (Phase 6 γ-unified §3.4). Callers are
+/// through to the SW host (Phase 6 gamma-unified §3.4). Callers are
 /// expected to pass `Context::request_id()`; manual construction
 /// is discouraged.
 pub async fn send_data_chunk_with_request_id(
@@ -292,7 +292,7 @@ pub async fn send_data_chunk_with_request_id(
 /// Guest-side wrapper for WIT `host.tell`.
 ///
 /// The `request_id` first parameter threads per-dispatch context
-/// through to the SW host (Phase 6 γ-unified §3.4). Callers are
+/// through to the SW host (Phase 6 gamma-unified §3.4). Callers are
 /// expected to pass `Context::request_id()`; manual construction
 /// is discouraged.
 pub async fn tell_with_request_id(
@@ -314,7 +314,7 @@ pub async fn tell_with_request_id(
 /// Guest-side wrapper for WIT `host.unregister-stream`.
 ///
 /// The `request_id` first parameter threads per-dispatch context
-/// through to the SW host (Phase 6 γ-unified §3.4). Callers are
+/// through to the SW host (Phase 6 gamma-unified §3.4). Callers are
 /// expected to pass `Context::request_id()`; manual construction
 /// is discouraged.
 pub async fn unregister_stream_with_request_id(

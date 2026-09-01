@@ -1,4 +1,4 @@
-//! Echo Client Guest WASM for Web — unified source (Option U γ-unified Phase 6c).
+//! Echo Client Guest WASM for Web - unified source (Option U gamma-unified Phase 6c).
 //!
 //! Implements the transparent proxy for `echo.EchoService.Echo`:
 //! 1. Resolve the `EchoService` dependency alias and discover it (cached after

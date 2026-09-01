@@ -84,7 +84,7 @@ jobs:
         run: python .github/scripts/ci_targets_test.py
       - name: Test CI configuration
         run: python .github/scripts/ci_gate_test.py
-      - name: Test CJK checker
+      - name: Test repository language policy
         run: python .github/scripts/check_cjk_test.py
 
       - id: targets
@@ -1036,7 +1036,7 @@ jobs:
         run: cargo nextest run -p actr-hyper --features webrtc-v020 -E 'test(/^wire::webrtc::v020/)' --no-fail-fast
 
   cjk:
-    name: CJK Gate
+    name: Language Policy
     runs-on: [self-hosted, Linux, X64]
     if: always()
     permissions:
@@ -1047,7 +1047,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Check English-only source
+      - name: Check default-language content and portable paths
         run: python .github/scripts/check_cjk.py
 
   csharp:
