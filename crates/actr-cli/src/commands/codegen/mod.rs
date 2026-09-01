@@ -49,6 +49,19 @@ fn should_validate(skip_validation: bool) -> bool {
     !skip_validation
 }
 
+/// Extracts the version token from a protoc plugin `--version` output.
+///
+/// Plugins print either a bare version (`0.10.0-alpha.3`) or a
+/// `name version` pair (`protoc-gen-actrframework-swift 0.1.10`). Returns the
+/// first whitespace token starting with an ASCII digit so pre-release and
+/// build-metadata suffixes (`-alpha.3`, `+build`) parse correctly (#644).
+pub(crate) fn parse_plugin_version(output: &str) -> Option<String> {
+    output
+        .split_whitespace()
+        .find(|part| part.chars().next().is_some_and(|ch| ch.is_ascii_digit()))
+        .map(str::to_string)
+}
+
 pub async fn execute_codegen(language: SupportedLanguage, context: &GenContext) -> Result<()> {
     let generator = GeneratorFactory::get_generator(language);
     run_codegen_pipeline(language, generator.as_ref(), context).await

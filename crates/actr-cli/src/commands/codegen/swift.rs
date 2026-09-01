@@ -884,13 +884,10 @@ impl SwiftGenerator {
         match output {
             Ok(output) if output.status.success() => {
                 let version_info = String::from_utf8_lossy(&output.stdout);
-                // Parse version from output, e.g., "protoc-gen-actrframework-swift 0.1.10"
-                let version = version_info.lines().next().and_then(|line| {
-                    // Try to find version number (e.g., "0.1.10")
-                    line.split_whitespace()
-                        .find(|s| s.chars().all(|c| c.is_ascii_digit() || c == '.'))
-                        .map(|v| v.to_string())
-                });
+                // The plugin prints a bare version (`0.10.0-alpha.3`); the
+                // shared parser also accepts `name version` pairs and
+                // pre-release/build suffixes (#644).
+                let version = super::parse_plugin_version(&version_info);
 
                 debug!(
                     "Detected protoc-gen-actrframework-swift version: {:?}",
