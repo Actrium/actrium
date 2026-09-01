@@ -1569,6 +1569,7 @@ EOF
   # Stub out all Cargo.toml paths.
   for f in \
     Cargo.toml \
+    crates/actr/Cargo.toml \
     packages/actr-web/Cargo.toml \
     crates/actr-protocol/Cargo.toml \
     crates/actr-service-compat/Cargo.toml \
@@ -1647,6 +1648,11 @@ EOF
 
   update_versions
 
+  assert_eq \
+    'version = "0.3.0"' \
+    "$(sed -n '/^version = /p' "$temp_dir/crates/actr/Cargo.toml")" \
+    "actr facade crate version"
+
   # Verify optionalDependencies were synced.
   local darwin_ver
   darwin_ver=$(python3 -c "import json; d=json.load(open('$temp_dir/packages/actr-typescript/package.json')); print(d['optionalDependencies']['@actrium/actr-darwin-x64'])")
@@ -1715,6 +1721,7 @@ test_update_versions_rewrites_prerelease_embedded_versions() {
   # Stub out all Cargo.toml paths.
   for f in \
     Cargo.toml \
+    crates/actr/Cargo.toml \
     packages/actr-web/Cargo.toml \
     crates/actr-protocol/Cargo.toml \
     crates/actr-service-compat/Cargo.toml \

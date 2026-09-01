@@ -601,7 +601,7 @@ fn at_cap_boundaries_are_accepted() {
 
 fn contract_path(name: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../contracts/sandbox/sandbox")
+        .join("../../contracts/sandbox")
         .join(name)
 }
 
