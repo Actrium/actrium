@@ -30,6 +30,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - name: Test identity policy
         run: python .github/scripts/check_commit_identities_test.py
       - name: Check newly introduced commits
