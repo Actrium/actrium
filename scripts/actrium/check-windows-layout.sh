@@ -1956,7 +1956,12 @@ fi
 # Packaging: windows/VERSION is the single version source; the csproj
 # reads it into <Version> and scripts/actrium/package-windows.ps1 reads it for
 # artifact and installer stamping.
-if [[ -f windows/VERSION ]] && rg -q '^[0-9]+\.[0-9]+\.[0-9]+$' windows/VERSION; then
+windows_version=""
+if [[ -f windows/VERSION ]]; then
+  windows_version="$(tr -d '\r\n' < windows/VERSION)"
+fi
+
+if [[ "$windows_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   print_ok "Windows version file carries a MAJOR.MINOR.PATCH version"
 else
   print_failure "windows/VERSION is missing or not a MAJOR.MINOR.PATCH version"
