@@ -32,25 +32,23 @@ class CommitIdentityTest(unittest.TestCase):
             )
         )
 
-    def test_github_service_identity_is_allowed(self) -> None:
-        self.assertTrue(
-            identity_check.is_allowed_identity("GitHub", "noreply@github.com")
-        )
+    def test_anonymous_root_identity_is_allowed(self) -> None:
+        self.assertTrue(identity_check.is_allowed_identity("root", ""))
         self.assertFalse(
-            identity_check.is_allowed_identity("Developer", "noreply@github.com")
+            identity_check.is_allowed_identity("GitHub", "noreply@github.com")
         )
 
     def test_personal_and_blank_emails_are_rejected(self) -> None:
         self.assertFalse(identity_check.is_allowed_identity("Developer", "dev@example.com"))
-        self.assertFalse(identity_check.is_allowed_identity("root", ""))
+        self.assertFalse(identity_check.is_allowed_identity("Developer", ""))
 
     def test_message_email_privacy(self) -> None:
         allowed = identity_check.CommitIdentity(
             sha="a" * 40,
             author_name="Developer",
             author_email="developer@users.noreply.github.com",
-            committer_name="GitHub",
-            committer_email="noreply@github.com",
+            committer_name="Developer",
+            committer_email="developer@users.noreply.github.com",
             message="Co-authored-by: Peer <123+peer@users.noreply.github.com>",
         )
         exposed = identity_check.CommitIdentity(
