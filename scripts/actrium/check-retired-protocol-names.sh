@@ -15,7 +15,7 @@ failures="$(mktemp)"
 trap 'rm -f "$failures"' EXIT
 
 while IFS= read -r -d '' path; do
-  normalized="/${path,,}/"
+  normalized="$(printf '/%s/' "$path" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
   if [[ "$normalized" =~ (^|[^a-z0-9])${primary_lower}([^a-z0-9]|$) ]] ||
      [[ "$normalized" =~ (^|[^a-z0-9])${peer_lower}([^a-z0-9]|$) ]]; then
     printf 'retired identifier in path: %s\n' "$path" >>"$failures"
