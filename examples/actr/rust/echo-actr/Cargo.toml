@@ -19,16 +19,15 @@ cdylib = ["actr-framework/cdylib"]
 [dependencies]
 actr-framework = { workspace = true }
 actr-protocol = { workspace = true }
-anyhow = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 prost = { workspace = true }
-serde = { version = "1.0", features = ["derive"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 actr-hyper = { workspace = true, features = ["wasm-engine", "test-utils"] }
 actr-pack = { workspace = true }
 actr-platform-native = { workspace = true }
+anyhow = { workspace = true }
 base64 = "0.22"
 ed25519-dalek = { version = "2" }
 libloading = "0.8"
