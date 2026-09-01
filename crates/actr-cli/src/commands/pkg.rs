@@ -1,8 +1,9 @@
-//! `actr pkg` — local package operations (sign, verify, keygen).
+//! `actr pkg` — local package operations (pack, sign, verify, keygen).
 //!
 //! ## Subcommands
 //!
 //! ```text
+//! actr pkg pack     [--manifest-path FILE] [--payload-root DIR] --output FILE
 //! actr pkg sign     [--manifest-path FILE] [--key FILE] [--binary FILE]
 //! actr pkg verify   --package FILE [--pubkey FILE]
 //! actr pkg keygen   [--output FILE] [--force]
@@ -33,12 +34,38 @@ pub struct PkgArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum PkgCommand {
+    /// Build and sign a versioned actr-package/1 archive from a manifest and payload tree.
+    Pack(PkgPackArgs),
     /// Sign a manifest.toml manifest with an MFR private key (offline signing).
     Sign(PkgSignArgs),
     /// Verify a signed .actr package.
     Verify(PkgVerifyArgs),
     /// Generate an Ed25519 MFR signing key pair.
     Keygen(PkgKeygenArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct PkgPackArgs {
+    /// Path to an actr-package/1 manifest.toml template.
+    #[arg(
+        long = "manifest-path",
+        short = 'm',
+        default_value = "manifest.toml",
+        value_name = "FILE"
+    )]
+    pub manifest_path: PathBuf,
+
+    /// Directory containing every path declared by [[files]].
+    #[arg(long, default_value = ".", value_name = "DIR")]
+    pub payload_root: PathBuf,
+
+    /// Path to MFR signing key file (overrides config mfr.keychain).
+    #[arg(long, short = 'k', value_name = "FILE")]
+    pub key: Option<PathBuf>,
+
+    /// Output .actr package path.
+    #[arg(long, short = 'o', value_name = "FILE")]
+    pub output: PathBuf,
 }
 
 #[derive(Args, Debug)]
@@ -101,6 +128,7 @@ impl Command for PkgArgs {
         let keychain_ref = cli_config.mfr.keychain.as_deref();
 
         match &self.command {
+            PkgCommand::Pack(a) => execute_pack(a, keychain_ref)?,
             PkgCommand::Sign(a) => execute_sign(a, keychain_ref).await?,
             PkgCommand::Verify(a) => execute_verify(a, keychain_ref).await?,
             PkgCommand::Keygen(a) => execute_keygen(a)?,
@@ -119,6 +147,58 @@ impl Command for PkgArgs {
     fn description(&self) -> &str {
         "Local package operations (sign, verify, keygen)"
     }
+}
+
+fn execute_pack(args: &PkgPackArgs, config_keychain: Option<&str>) -> Result<()> {
+    let key_path = resolve_key_path(args.key.as_deref(), config_keychain)?;
+    let (signing_key, keychain_manufacturer) = load_signing_key_with_manufacturer(&key_path)?;
+    let manifest_source = std::fs::read_to_string(&args.manifest_path)
+        .with_context(|| format!("Failed to read manifest: {}", args.manifest_path.display()))?;
+    let manifest = actr_pack::ActorPackageManifest::from_toml(&manifest_source)?;
+    ensure_manufacturer_matches(
+        keychain_manufacturer.as_deref(),
+        &manifest.actor.manufacturer,
+    )?;
+
+    let canonical_root = args.payload_root.canonicalize().with_context(|| {
+        format!(
+            "Failed to resolve payload root: {}",
+            args.payload_root.display()
+        )
+    })?;
+    let mut payloads = std::collections::BTreeMap::new();
+    for file in &manifest.files {
+        let path = canonical_root.join(&file.path);
+        let canonical_path = path
+            .canonicalize()
+            .with_context(|| format!("Failed to resolve payload `{}`", path.display()))?;
+        if !canonical_path.starts_with(&canonical_root) || !canonical_path.is_file() {
+            anyhow::bail!(
+                "Payload `{}` must be a regular file below {}",
+                file.path,
+                canonical_root.display()
+            );
+        }
+        payloads.insert(
+            file.path.clone(),
+            std::fs::read(&canonical_path)
+                .with_context(|| format!("Failed to read payload: {}", canonical_path.display()))?,
+        );
+    }
+
+    let package = actr_pack::pack_actor_package(&actr_pack::ActorPackOptions {
+        manifest,
+        payloads,
+        signing_key,
+    })?;
+    if let Some(parent) = args.output.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create {}", parent.display()))?;
+    }
+    std::fs::write(&args.output, package)
+        .with_context(|| format!("Failed to write package: {}", args.output.display()))?;
+    println!("Actor package created: {}", args.output.display());
+    Ok(())
 }
 
 // ── keygen ───────────────────────────────────────────────────────────────────
@@ -403,6 +483,21 @@ async fn execute_verify(args: &PkgVerifyArgs, config_keychain: Option<&str>) -> 
         let key_path = resolve_key_path(None, config_keychain)?;
         load_verifying_key_from_dev_key(&key_path)?
     };
+
+    if let Ok(manifest_source) = actr_pack::read_manifest_raw(&package_bytes) {
+        if let Ok(manifest) = actr_pack::ActorPackageManifest::from_toml(&manifest_source) {
+            let verified = actr_pack::verify_actor_package(&package_bytes, &pubkey)?;
+            println!("Package verification passed");
+            println!();
+            println!("  manufacturer: {}", manifest.actor.manufacturer);
+            println!("  type:         {}", verified.manifest.actor_type());
+            println!("  workload:     {}", manifest.workload.entry);
+            println!("  profile:      {}", manifest.workload.profile);
+            println!("  signing_key:  {}", manifest.signature.key_id);
+            println!("  files:        {}", manifest.files.len());
+            return Ok(());
+        }
+    }
 
     let verified = actr_pack::verify(&package_bytes, &pubkey)?;
 

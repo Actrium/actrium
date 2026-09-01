@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::future::{ready, Future};
+use std::future::{Future, ready};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -640,8 +640,7 @@ WHERE deleted_at IS NULL
 ORDER BY last_visited_at DESC
 LIMIT ?
 "#,
-        delete_history_by_address:
-            "UPDATE browser_history_pages SET deleted_at = CAST(strftime('%s', 'now') AS INTEGER), updated_at = CAST(strftime('%s', 'now') AS INTEGER), sync_state = 'local', sync_revision = sync_revision + 1 WHERE LOWER(address) = LOWER(?) AND deleted_at IS NULL",
+        delete_history_by_address: "UPDATE browser_history_pages SET deleted_at = CAST(strftime('%s', 'now') AS INTEGER), updated_at = CAST(strftime('%s', 'now') AS INTEGER), sync_state = 'local', sync_revision = sync_revision + 1 WHERE LOWER(address) = LOWER(?) AND deleted_at IS NULL",
         delete_all_history: "UPDATE browser_history_pages SET deleted_at = CAST(strftime('%s', 'now') AS INTEGER), updated_at = CAST(strftime('%s', 'now') AS INTEGER), sync_state = 'local', sync_revision = sync_revision + 1 WHERE deleted_at IS NULL",
         upsert_bookmark: r#"
 INSERT INTO browser_bookmarks (id, folder_id, title, address, created_at, updated_at, sort_order, favicon, owner_kind, owner_id, is_deleted)
@@ -6467,8 +6466,8 @@ pub fn browser_storage_sync_merge_policy_json() -> String {
     serialize_json(&browser_storage_sync_merge_policy())
 }
 
-pub fn browser_storage_address_canonicalization_policy(
-) -> BrowserStorageAddressCanonicalizationPolicy {
+pub fn browser_storage_address_canonicalization_policy()
+-> BrowserStorageAddressCanonicalizationPolicy {
     BrowserStorageAddressCanonicalizationPolicy {
         version: BROWSER_STORAGE_SYNC_CONTRACT_VERSION,
         storage_schema_version: BROWSER_STORAGE_SCHEMA_VERSION,
@@ -6505,8 +6504,8 @@ pub fn browser_storage_address_canonicalization_policy(
     }
 }
 
-pub fn browser_storage_bookmark_folder_tree_integrity_policy(
-) -> BrowserStorageBookmarkFolderTreeIntegrityPolicy {
+pub fn browser_storage_bookmark_folder_tree_integrity_policy()
+-> BrowserStorageBookmarkFolderTreeIntegrityPolicy {
     BrowserStorageBookmarkFolderTreeIntegrityPolicy {
         version: BROWSER_STORAGE_SYNC_CONTRACT_VERSION,
         storage_schema_version: BROWSER_STORAGE_SCHEMA_VERSION,
@@ -6531,8 +6530,8 @@ pub fn browser_storage_bookmark_folder_tree_integrity_policy(
     }
 }
 
-pub fn browser_storage_bookmark_restore_placement_policy(
-) -> BrowserStorageBookmarkRestorePlacementPolicy {
+pub fn browser_storage_bookmark_restore_placement_policy()
+-> BrowserStorageBookmarkRestorePlacementPolicy {
     BrowserStorageBookmarkRestorePlacementPolicy {
         version: BROWSER_STORAGE_SYNC_CONTRACT_VERSION,
         storage_schema_version: BROWSER_STORAGE_SCHEMA_VERSION,
@@ -6583,8 +6582,8 @@ pub fn browser_storage_bookmark_ownership_policy() -> BrowserStorageBookmarkOwne
     }
 }
 
-pub fn browser_storage_history_visit_aggregation_policy(
-) -> BrowserStorageHistoryVisitAggregationPolicy {
+pub fn browser_storage_history_visit_aggregation_policy()
+-> BrowserStorageHistoryVisitAggregationPolicy {
     BrowserStorageHistoryVisitAggregationPolicy {
         version: BROWSER_STORAGE_SYNC_CONTRACT_VERSION,
         storage_schema_version: BROWSER_STORAGE_SCHEMA_VERSION,
@@ -6635,8 +6634,8 @@ pub fn browser_storage_session_tab_ordering_policy() -> BrowserStorageSessionTab
     }
 }
 
-pub fn browser_storage_session_active_tab_consistency_policy(
-) -> BrowserStorageSessionActiveTabConsistencyPolicy {
+pub fn browser_storage_session_active_tab_consistency_policy()
+-> BrowserStorageSessionActiveTabConsistencyPolicy {
     BrowserStorageSessionActiveTabConsistencyPolicy {
         version: BROWSER_STORAGE_SYNC_CONTRACT_VERSION,
         storage_schema_version: BROWSER_STORAGE_SCHEMA_VERSION,
@@ -9757,8 +9756,8 @@ fn browser_storage_sync_cloud_provider_adapter_actions(
     }
 }
 
-fn browser_storage_sync_cloud_provider_adapter_required_objects(
-) -> Vec<BrowserStorageSyncCloudProviderAdapterObjectPlan> {
+fn browser_storage_sync_cloud_provider_adapter_required_objects()
+-> Vec<BrowserStorageSyncCloudProviderAdapterObjectPlan> {
     vec![
         BrowserStorageSyncCloudProviderAdapterObjectPlan {
             object_kind: "manifest".to_string(),
@@ -9795,8 +9794,8 @@ fn browser_storage_sync_cloud_provider_adapter_required_objects(
     ]
 }
 
-fn browser_storage_sync_cloud_provider_adapter_required_prefixes(
-) -> Vec<BrowserStorageSyncCloudProviderAdapterPrefixPlan> {
+fn browser_storage_sync_cloud_provider_adapter_required_prefixes()
+-> Vec<BrowserStorageSyncCloudProviderAdapterPrefixPlan> {
     vec![
         BrowserStorageSyncCloudProviderAdapterPrefixPlan {
             prefix_kind: "devices".to_string(),
@@ -9829,8 +9828,8 @@ fn browser_storage_sync_cloud_provider_adapter_required_prefixes(
     ]
 }
 
-fn browser_storage_sync_cloud_provider_adapter_operation_groups(
-) -> Vec<BrowserStorageSyncCloudProviderAdapterOperationGroupPlan> {
+fn browser_storage_sync_cloud_provider_adapter_operation_groups()
+-> Vec<BrowserStorageSyncCloudProviderAdapterOperationGroupPlan> {
     vec![
         BrowserStorageSyncCloudProviderAdapterOperationGroupPlan {
             group: "connectionPreflight".to_string(),
@@ -9865,8 +9864,8 @@ fn browser_storage_sync_cloud_provider_adapter_operation_groups(
     ]
 }
 
-pub fn browser_storage_sync_cloud_local_folder_capabilities(
-) -> BrowserStorageSyncCloudStoreCapabilities {
+pub fn browser_storage_sync_cloud_local_folder_capabilities()
+-> BrowserStorageSyncCloudStoreCapabilities {
     BrowserStorageSyncCloudStoreCapabilities {
         provider_kind: BROWSER_SYNC_PROVIDER_LOCAL_FOLDER_KIND.to_string(),
         root_path: BROWSER_STORAGE_SYNC_CLOUD_ROOT_PATH.to_string(),
@@ -11643,8 +11642,8 @@ pub fn browser_storage_sync_cloud_pull_continuation_plan(
     })
 }
 
-pub fn browser_storage_sync_cloud_high_watermark_policy(
-) -> BrowserStorageSyncCloudHighWatermarkPolicy {
+pub fn browser_storage_sync_cloud_high_watermark_policy()
+-> BrowserStorageSyncCloudHighWatermarkPolicy {
     BrowserStorageSyncCloudHighWatermarkPolicy {
         version: BROWSER_STORAGE_SYNC_CLOUD_PLAN_VERSION,
         storage_schema_version: BROWSER_STORAGE_SCHEMA_VERSION,
@@ -12117,8 +12116,8 @@ fn browser_storage_sync_cloud_recovery_retention_result_client_action(
     "finishCloudRecoveryRetentionCleanup".to_string()
 }
 
-fn browser_storage_sync_cloud_recovery_retention_reread_operations(
-) -> Vec<BrowserStorageSyncCloudPlannedReadOperation> {
+fn browser_storage_sync_cloud_recovery_retention_reread_operations()
+-> Vec<BrowserStorageSyncCloudPlannedReadOperation> {
     vec![browser_storage_sync_cloud_planned_read(
         0,
         "listRecoverySnapshots",
@@ -26656,11 +26655,7 @@ fn browser_storage_sync_default_scheduler_action() -> String {
 
 fn browser_storage_sync_scheduler_last_result(last_result_json: &str) -> Option<Value> {
     let value = serde_json::from_str::<Value>(last_result_json).ok()?;
-    if value.is_null() {
-        None
-    } else {
-        Some(value)
-    }
+    if value.is_null() { None } else { Some(value) }
 }
 
 fn browser_storage_sync_scheduler_status_name(
@@ -32362,11 +32357,7 @@ fn address_host(address: &str) -> Option<&str> {
         .next()
         .unwrap_or_default()
         .trim();
-    if host.is_empty() {
-        None
-    } else {
-        Some(host)
-    }
+    if host.is_empty() { None } else { Some(host) }
 }
 
 fn normalize_unix_seconds(value: i64) -> i64 {
@@ -32758,31 +32749,39 @@ mod tests {
             policy["policy"],
             json!(BROWSER_STORAGE_ADDRESS_CANONICALIZATION_POLICY)
         );
-        assert!(policy["acceptedExternalSchemes"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("https")));
-        assert!(policy["canonicalRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule.as_str().unwrap_or_default().contains("default ports")));
-        assert!(policy["canonicalRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule
-                .as_str()
-                .unwrap_or_default()
-                .contains("username/password")));
-        assert!(policy["canonicalRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule
-                .as_str()
-                .unwrap_or_default()
-                .contains("canonicalizationSummary")));
+        assert!(
+            policy["acceptedExternalSchemes"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("https"))
+        );
+        assert!(
+            policy["canonicalRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule.as_str().unwrap_or_default().contains("default ports"))
+        );
+        assert!(
+            policy["canonicalRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("username/password"))
+        );
+        assert!(
+            policy["canonicalRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("canonicalizationSummary"))
+        );
 
         let batch = serde_json::from_str::<Value>(&browser_storage_canonicalize_addresses_json(
             r#"{"addresses":[
@@ -32903,14 +32902,16 @@ mod tests {
             serde_json::from_str::<Value>(&browser_storage_address_canonicalization_policy_json())
                 .unwrap();
         let rules = policy["canonicalRules"].as_array().unwrap();
-        assert!(rules.iter().any(|rule| rule
-            .as_str()
-            .unwrap_or_default()
-            .contains("empty query or fragment")));
-        assert!(rules.iter().any(|rule| rule
-            .as_str()
-            .unwrap_or_default()
-            .contains("about scheme and its well-known tokens are case-insensitive")));
+        assert!(rules.iter().any(|rule| {
+            rule.as_str()
+                .unwrap_or_default()
+                .contains("empty query or fragment")
+        }));
+        assert!(rules.iter().any(|rule| {
+            rule.as_str()
+                .unwrap_or_default()
+                .contains("about scheme and its well-known tokens are case-insensitive")
+        }));
 
         let batch = serde_json::from_str::<Value>(&browser_storage_canonicalize_addresses_json(
             r#"{"addresses":[
@@ -33147,18 +33148,21 @@ mod tests {
         // Oldest two roots are physically deleted; newest two remain on disk.
         for root_name in ["000000000100-migration", "000000000200-repair"] {
             for object in ["payload.json", "state/data.json"] {
-                assert!(!root
-                    .path
-                    .join(format!("Actro/BrowserSync/recovery/{root_name}/{object}"))
-                    .exists());
+                assert!(
+                    !root
+                        .path
+                        .join(format!("Actro/BrowserSync/recovery/{root_name}/{object}"))
+                        .exists()
+                );
             }
         }
         for root_name in ["000000000300-preflight", "000000000400-migration"] {
             for object in ["payload.json", "state/data.json"] {
-                assert!(root
-                    .path
-                    .join(format!("Actro/BrowserSync/recovery/{root_name}/{object}"))
-                    .exists());
+                assert!(
+                    root.path
+                        .join(format!("Actro/BrowserSync/recovery/{root_name}/{object}"))
+                        .exists()
+                );
             }
         }
 
@@ -33249,35 +33253,43 @@ mod tests {
             policy["policy"],
             json!(BROWSER_STORAGE_BOOKMARK_FOLDER_TREE_INTEGRITY_POLICY)
         );
-        assert!(policy["acceptedInputShapes"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|shape| shape
-                .as_str()
-                .unwrap_or_default()
-                .contains("currentFolders")));
-        assert!(policy["integrityRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule.as_str().unwrap_or_default().contains("cycles")));
-        assert!(policy["integrityRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule
-                .as_str()
-                .unwrap_or_default()
-                .contains("integrityAction")));
-        assert!(policy["integrityRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule
-                .as_str()
-                .unwrap_or_default()
-                .contains("integritySummary")));
+        assert!(
+            policy["acceptedInputShapes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|shape| shape
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("currentFolders"))
+        );
+        assert!(
+            policy["integrityRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule.as_str().unwrap_or_default().contains("cycles"))
+        );
+        assert!(
+            policy["integrityRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("integrityAction"))
+        );
+        assert!(
+            policy["integrityRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("integritySummary"))
+        );
 
         let plan = serde_json::from_str::<Value>(
             &browser_storage_bookmark_folder_tree_integrity_plan_json(
@@ -33370,16 +33382,20 @@ mod tests {
         assert!(cycle_path.contains(&json!("root")));
         assert!(cycle_path.contains(&json!("child")));
         assert!(cycle_path.contains(&json!("leaf")));
-        assert!(plan["normalizedFolders"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|folder| folder["integrityAction"] == json!("rejectFolderMove")));
-        assert!(plan["normalizedFolders"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|folder| folder["integrityReason"] == json!("activeParentCycleDetected")));
+        assert!(
+            plan["normalizedFolders"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|folder| folder["integrityAction"] == json!("rejectFolderMove"))
+        );
+        assert!(
+            plan["normalizedFolders"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|folder| folder["integrityReason"] == json!("activeParentCycleDetected"))
+        );
     }
 
     #[test]
@@ -33528,46 +33544,56 @@ mod tests {
             policy["policy"],
             json!(BROWSER_STORAGE_BOOKMARK_RESTORE_PLACEMENT_POLICY)
         );
-        assert!(policy["acceptedInputShapes"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|shape| shape
-                .as_str()
-                .unwrap_or_default()
-                .contains("currentBookmarks")));
-        assert!(policy["placementRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule
-                .as_str()
-                .unwrap_or_default()
-                .contains("resolvedFolderId")));
-        assert!(policy["placementRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule
-                .as_str()
-                .unwrap_or_default()
-                .contains("delete/restore state timestamp")));
-        assert!(policy["placementRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule
-                .as_str()
-                .unwrap_or_default()
-                .contains("placementReason")));
-        assert!(policy["placementRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule
-                .as_str()
-                .unwrap_or_default()
-                .contains("stateConflictSummary")));
+        assert!(
+            policy["acceptedInputShapes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|shape| shape
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("currentBookmarks"))
+        );
+        assert!(
+            policy["placementRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("resolvedFolderId"))
+        );
+        assert!(
+            policy["placementRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("delete/restore state timestamp"))
+        );
+        assert!(
+            policy["placementRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("placementReason"))
+        );
+        assert!(
+            policy["placementRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("stateConflictSummary"))
+        );
 
         let plan = serde_json::from_str::<Value>(
             &browser_storage_bookmark_restore_placement_plan_json(
@@ -33899,27 +33925,33 @@ mod tests {
             policy["storageSchemaVersion"],
             json!(BROWSER_STORAGE_SCHEMA_VERSION)
         );
-        assert!(policy["acceptedInputShapes"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|shape| shape
-                .as_str()
-                .unwrap_or_default()
-                .contains("currentBookmarks")));
-        assert!(policy["ownershipRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule.as_str().unwrap_or_default().contains("unstar")));
-        assert!(policy["ownershipRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule
-                .as_str()
-                .unwrap_or_default()
-                .contains("ownershipSummary")));
+        assert!(
+            policy["acceptedInputShapes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|shape| shape
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("currentBookmarks"))
+        );
+        assert!(
+            policy["ownershipRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule.as_str().unwrap_or_default().contains("unstar"))
+        );
+        assert!(
+            policy["ownershipRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("ownershipSummary"))
+        );
     }
 
     #[test]
@@ -34251,35 +34283,43 @@ mod tests {
             policy["policy"],
             json!(BROWSER_STORAGE_HISTORY_VISIT_AGGREGATION_POLICY)
         );
-        assert!(policy["acceptedInputShapes"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|shape| shape.as_str().unwrap_or_default().contains("currentVisits")));
-        assert!(policy["aggregationRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule
-                .as_str()
-                .unwrap_or_default()
-                .contains("unique active visit ids")));
-        assert!(policy["aggregationRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule
-                .as_str()
-                .unwrap_or_default()
-                .contains("aggregationAction")));
-        assert!(policy["aggregationRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule
-                .as_str()
-                .unwrap_or_default()
-                .contains("aggregationSummary")));
+        assert!(
+            policy["acceptedInputShapes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|shape| shape.as_str().unwrap_or_default().contains("currentVisits"))
+        );
+        assert!(
+            policy["aggregationRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("unique active visit ids"))
+        );
+        assert!(
+            policy["aggregationRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("aggregationAction"))
+        );
+        assert!(
+            policy["aggregationRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("aggregationSummary"))
+        );
 
         let plan = serde_json::from_str::<Value>(
             &browser_storage_history_visit_aggregation_plan_json(
@@ -34487,32 +34527,40 @@ mod tests {
             policy["policy"],
             json!(BROWSER_STORAGE_SESSION_TAB_ORDERING_POLICY)
         );
-        assert!(policy["acceptedInputShapes"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|shape| shape
-                .as_str()
-                .unwrap_or_default()
-                .contains("currentSessionTabs")));
-        assert!(policy["orderingRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule.as_str().unwrap_or_default().contains("contiguous")));
-        assert!(policy["orderingRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule.as_str().unwrap_or_default().contains("orderingAction")));
-        assert!(policy["orderingRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule
-                .as_str()
-                .unwrap_or_default()
-                .contains("orderingSummary")));
+        assert!(
+            policy["acceptedInputShapes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|shape| shape
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("currentSessionTabs"))
+        );
+        assert!(
+            policy["orderingRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule.as_str().unwrap_or_default().contains("contiguous"))
+        );
+        assert!(
+            policy["orderingRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule.as_str().unwrap_or_default().contains("orderingAction"))
+        );
+        assert!(
+            policy["orderingRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("orderingSummary"))
+        );
 
         let plan = serde_json::from_str::<Value>(&browser_storage_session_tab_ordering_plan_json(
             r#"{
@@ -34575,10 +34623,12 @@ mod tests {
         );
         assert_eq!(plan["normalizedTabs"][1]["tabIndex"], json!(1));
         assert_eq!(plan["normalizedTabs"][2]["sessionId"], json!("session-b"));
-        assert!(plan["normalizedTabs"][2]["tabId"]
-            .as_str()
-            .unwrap_or_default()
-            .contains('-'));
+        assert!(
+            plan["normalizedTabs"][2]["tabId"]
+                .as_str()
+                .unwrap_or_default()
+                .contains('-')
+        );
         assert_eq!(plan["normalizedTabs"][2]["title"], json!("New Tab"));
         assert_eq!(
             plan["normalizedTabs"][2]["orderingAction"],
@@ -34828,32 +34878,40 @@ mod tests {
             policy["policy"],
             json!(BROWSER_STORAGE_SESSION_ACTIVE_TAB_CONSISTENCY_POLICY)
         );
-        assert!(policy["consistencyRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule.as_str().unwrap_or_default().contains("activeTabIndex")));
-        assert!(policy["consistencyRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule.as_str().unwrap_or_default().contains("platform-owned")));
-        assert!(policy["consistencyRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule
-                .as_str()
-                .unwrap_or_default()
-                .contains("consistencyReason")));
-        assert!(policy["consistencyRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule
-                .as_str()
-                .unwrap_or_default()
-                .contains("consistencySummary")));
+        assert!(
+            policy["consistencyRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule.as_str().unwrap_or_default().contains("activeTabIndex"))
+        );
+        assert!(
+            policy["consistencyRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule.as_str().unwrap_or_default().contains("platform-owned"))
+        );
+        assert!(
+            policy["consistencyRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("consistencyReason"))
+        );
+        assert!(
+            policy["consistencyRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("consistencySummary"))
+        );
     }
 
     #[test]
@@ -35087,10 +35145,12 @@ mod tests {
             plan["normalizedSessions"][0]["consistencyReason"],
             json!("activeTabIndexWithinRange")
         );
-        assert!(plan["normalizedSessions"][0]["orderedTabIds"][0]
-            .as_str()
-            .unwrap_or_default()
-            .contains('-'));
+        assert!(
+            plan["normalizedSessions"][0]["orderedTabIds"][0]
+                .as_str()
+                .unwrap_or_default()
+                .contains('-')
+        );
         assert_eq!(
             browser_storage_session_active_tab_consistency_plan_json(
                 r#"{"records":[{"recordType":"session","payload":{"activeTabIndex":0}}]}"#
@@ -35136,40 +35196,50 @@ mod tests {
         assert_eq!(policy["maxHistoryPagesPerOriginDevice"], json!({}));
         assert_eq!(policy["maxSessionTabsPerSession"], json!(MAX_SESSION_TABS));
         assert_eq!(policy["maxSessionTabsPerOriginDevice"], json!({}));
-        assert!(policy["acceptedInputShapes"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|shape| shape.as_str().unwrap_or_default().contains("records")));
-        assert!(policy["pruningRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule.as_str().unwrap_or_default().contains("provider IO")));
-        assert!(policy["pruningRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule
-                .as_str()
-                .unwrap_or_default()
-                .contains("maxSessionTabsPerOriginDevice")));
-        assert!(policy["pruningRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule
-                .as_str()
-                .unwrap_or_default()
-                .contains("retentionReason")));
-        assert!(policy["pruningRules"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|rule| rule
-                .as_str()
-                .unwrap_or_default()
-                .contains("retentionSummary")));
+        assert!(
+            policy["acceptedInputShapes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|shape| shape.as_str().unwrap_or_default().contains("records"))
+        );
+        assert!(
+            policy["pruningRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule.as_str().unwrap_or_default().contains("provider IO"))
+        );
+        assert!(
+            policy["pruningRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("maxSessionTabsPerOriginDevice"))
+        );
+        assert!(
+            policy["pruningRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("retentionReason"))
+        );
+        assert!(
+            policy["pruningRules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|rule| rule
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("retentionSummary"))
+        );
     }
 
     #[test]
@@ -35334,19 +35404,23 @@ mod tests {
         assert_eq!(legacy["retentionAction"], json!("keep"));
         assert_eq!(legacy["retentionReason"], json!("withinHistoryPageLimits"));
 
-        assert!(plan["pruneOperations"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|operation| {
-                operation["recordId"] == json!("https://example.com/a-old")
-                    && operation["reason"] == json!("originDeviceHistoryPageLimitExceeded")
-            }));
-        assert!(plan["normalizedHistoryVisits"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|visit| visit["retentionAction"] == json!("pruneWithHistoryPage")));
+        assert!(
+            plan["pruneOperations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|operation| {
+                    operation["recordId"] == json!("https://example.com/a-old")
+                        && operation["reason"] == json!("originDeviceHistoryPageLimitExceeded")
+                })
+        );
+        assert!(
+            plan["normalizedHistoryVisits"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|visit| visit["retentionAction"] == json!("pruneWithHistoryPage"))
+        );
     }
 
     #[test]
@@ -35472,14 +35546,16 @@ mod tests {
         );
         assert_eq!(legacy["retentionAction"], json!("keep"));
         assert_eq!(legacy["retentionReason"], json!("withinSessionTabLimits"));
-        assert!(plan["pruneOperations"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|operation| {
-                operation["recordId"] == json!("session-a:tab-old")
-                    && operation["reason"] == json!("originDeviceSessionTabLimitExceeded")
-            }));
+        assert!(
+            plan["pruneOperations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|operation| {
+                    operation["recordId"] == json!("session-a:tab-old")
+                        && operation["reason"] == json!("originDeviceSessionTabLimitExceeded")
+                })
+        );
     }
 
     #[test]
@@ -35507,11 +35583,13 @@ mod tests {
         assert_eq!(plan["normalizedSessionTabCount"], json!(2));
         assert_eq!(plan["prunedSessionTabCount"], json!(1));
         assert_eq!(plan["pruneOperations"].as_array().unwrap().len(), 3);
-        assert!(plan["pruneOperations"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|operation| operation["recordId"] == json!("session-a:tab-b")));
+        assert!(
+            plan["pruneOperations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|operation| operation["recordId"] == json!("session-a:tab-b"))
+        );
     }
 
     #[test]
@@ -35839,10 +35917,12 @@ mod tests {
         assert_eq!(history_page.local_tables, vec!["browser_history_pages"]);
         assert_eq!(history_page.local_primary_key_columns, vec!["address"]);
         assert_eq!(history_page.stable_identity_fields, vec!["address"]);
-        assert!(history_page
-            .payload_fields
-            .iter()
-            .any(|field| field.name == "lastVisitedAtUnixSeconds"));
+        assert!(
+            history_page
+                .payload_fields
+                .iter()
+                .any(|field| field.name == "lastVisitedAtUnixSeconds")
+        );
 
         let bookmark = contract
             .sync_record_models
@@ -35850,10 +35930,12 @@ mod tests {
             .find(|record| record.record_type == "bookmark")
             .unwrap();
         assert_eq!(bookmark.local_tables, vec!["browser_bookmarks"]);
-        assert!(bookmark
-            .payload_fields
-            .iter()
-            .any(|field| field.name == "isDeleted" && field.field_type == "bool"));
+        assert!(
+            bookmark
+                .payload_fields
+                .iter()
+                .any(|field| field.name == "isDeleted" && field.field_type == "bool")
+        );
         assert!(bookmark.tombstone_policy.contains("isDeleted"));
 
         let session_tab = contract
@@ -35873,12 +35955,16 @@ mod tests {
         assert_eq!(session_tab.ordering_fields, vec!["tabIndex"]);
         assert!(session_tab.record_id_rule.contains("sessionId:tabId"));
 
-        assert!(contract
-            .cursor_collections
-            .contains(&"historyPages".to_string()));
-        assert!(contract
-            .cursor_collections
-            .contains(&"sessionTabs".to_string()));
+        assert!(
+            contract
+                .cursor_collections
+                .contains(&"historyPages".to_string())
+        );
+        assert!(
+            contract
+                .cursor_collections
+                .contains(&"sessionTabs".to_string())
+        );
 
         let json = serde_json::from_str::<Value>(&browser_storage_data_model_json()).unwrap();
         assert_eq!(json["storageSchemaVersion"], BROWSER_STORAGE_SCHEMA_VERSION);
@@ -35894,38 +35980,58 @@ mod tests {
     fn browser_storage_repository_sql_matches_schema() {
         let repository_sql = browser_storage_repository_sql();
 
-        assert!(repository_sql
-            .upsert_history_page
-            .contains("INSERT INTO browser_history_pages"));
-        assert!(repository_sql
-            .insert_history_visit
-            .contains("INSERT INTO browser_history_visits"));
-        assert!(repository_sql
-            .upsert_bookmark
-            .contains("INSERT INTO browser_bookmarks"));
-        assert!(repository_sql
-            .upsert_session
-            .contains("INSERT INTO browser_sessions"));
-        assert!(repository_sql
-            .select_session
-            .contains("SELECT active_tab_index"));
-        assert!(repository_sql
-            .insert_session_tab
-            .contains("INSERT INTO browser_session_tabs"));
+        assert!(
+            repository_sql
+                .upsert_history_page
+                .contains("INSERT INTO browser_history_pages")
+        );
+        assert!(
+            repository_sql
+                .insert_history_visit
+                .contains("INSERT INTO browser_history_visits")
+        );
+        assert!(
+            repository_sql
+                .upsert_bookmark
+                .contains("INSERT INTO browser_bookmarks")
+        );
+        assert!(
+            repository_sql
+                .upsert_session
+                .contains("INSERT INTO browser_sessions")
+        );
+        assert!(
+            repository_sql
+                .select_session
+                .contains("SELECT active_tab_index")
+        );
+        assert!(
+            repository_sql
+                .insert_session_tab
+                .contains("INSERT INTO browser_session_tabs")
+        );
         assert!(repository_sql.insert_session_tab.contains("tab_id"));
         assert!(repository_sql.select_session_tabs.contains("tab_id"));
-        assert!(repository_sql
-            .select_history_recent
-            .contains("deleted_at IS NULL"));
-        assert!(repository_sql
-            .select_bookmarks_recent
-            .contains("deleted_at IS NULL"));
-        assert!(repository_sql
-            .delete_history_by_address
-            .contains("UPDATE browser_history_pages"));
-        assert!(repository_sql
-            .delete_bookmark_by_address
-            .contains("UPDATE browser_bookmarks"));
+        assert!(
+            repository_sql
+                .select_history_recent
+                .contains("deleted_at IS NULL")
+        );
+        assert!(
+            repository_sql
+                .select_bookmarks_recent
+                .contains("deleted_at IS NULL")
+        );
+        assert!(
+            repository_sql
+                .delete_history_by_address
+                .contains("UPDATE browser_history_pages")
+        );
+        assert!(
+            repository_sql
+                .delete_bookmark_by_address
+                .contains("UPDATE browser_bookmarks")
+        );
         assert!(browser_storage_repository_sql_json().contains("upsertHistoryPage"));
         assert!(browser_storage_table_names_json().contains("browser_bookmarks"));
     }
@@ -35934,18 +36040,26 @@ mod tests {
     fn browser_storage_sync_sql_covers_pending_rows_and_cursors() {
         let sync_sql = browser_storage_sync_sql();
 
-        assert!(sync_sql
-            .select_dirty_history_pages
-            .contains("FROM browser_history_pages"));
-        assert!(sync_sql
-            .select_dirty_bookmarks
-            .contains("sync_state <> 'synced'"));
-        assert!(sync_sql
-            .select_dirty_session_tabs
-            .contains("session_id || ':'"));
-        assert!(sync_sql
-            .apply_remote_history_page
-            .contains("ON CONFLICT(address)"));
+        assert!(
+            sync_sql
+                .select_dirty_history_pages
+                .contains("FROM browser_history_pages")
+        );
+        assert!(
+            sync_sql
+                .select_dirty_bookmarks
+                .contains("sync_state <> 'synced'")
+        );
+        assert!(
+            sync_sql
+                .select_dirty_session_tabs
+                .contains("session_id || ':'")
+        );
+        assert!(
+            sync_sql
+                .apply_remote_history_page
+                .contains("ON CONFLICT(address)")
+        );
         assert!(
             sync_sql
                 .apply_remote_bookmark
@@ -35954,13 +36068,17 @@ mod tests {
                     .apply_remote_bookmark
                     .contains("sync_state = 'synced'")
         );
-        assert!(sync_sql
-            .apply_remote_session_tab
-            .contains("ON CONFLICT(session_id, tab_index)"));
+        assert!(
+            sync_sql
+                .apply_remote_session_tab
+                .contains("ON CONFLICT(session_id, tab_index)")
+        );
         assert!(sync_sql.mark_bookmark_synced.contains("sync_revision <= ?"));
-        assert!(sync_sql
-            .mark_session_tab_synced
-            .contains("session_id || ':'"));
+        assert!(
+            sync_sql
+                .mark_session_tab_synced
+                .contains("session_id || ':'")
+        );
         assert!(sync_sql.upsert_sync_cursor.contains("browser_sync_cursors"));
         assert!(
             sync_sql
@@ -36004,28 +36122,42 @@ mod tests {
         assert!(schema_sql.contains("PRIMARY KEY (scope, session_id, tab_id)"));
 
         let server_sql = browser_storage_sync_server_sql();
-        assert!(server_sql
-            .server_revision_param_rule
-            .contains("prepend returned serverRevision"));
-        assert!(server_sql
-            .allocate_server_revision
-            .contains("RETURNING revision"));
-        assert!(server_sql
-            .merge_pushed_history_page
-            .contains("browser_sync_server_history_pages"));
+        assert!(
+            server_sql
+                .server_revision_param_rule
+                .contains("prepend returned serverRevision")
+        );
+        assert!(
+            server_sql
+                .allocate_server_revision
+                .contains("RETURNING revision")
+        );
+        assert!(
+            server_sql
+                .merge_pushed_history_page
+                .contains("browser_sync_server_history_pages")
+        );
         assert!(server_sql.merge_pushed_history_page.contains("?1"));
-        assert!(server_sql
-            .merge_pushed_bookmark
-            .contains("is_deleted = CASE"));
-        assert!(server_sql
-            .merge_pushed_session_tab
-            .contains("ON CONFLICT(scope, session_id, tab_id)"));
-        assert!(server_sql
-            .select_remote_history_pages
-            .contains("server_revision AS sync_revision"));
-        assert!(server_sql
-            .select_remote_session_tabs
-            .contains("session_id || ':' || tab_id AS record_id"));
+        assert!(
+            server_sql
+                .merge_pushed_bookmark
+                .contains("is_deleted = CASE")
+        );
+        assert!(
+            server_sql
+                .merge_pushed_session_tab
+                .contains("ON CONFLICT(scope, session_id, tab_id)")
+        );
+        assert!(
+            server_sql
+                .select_remote_history_pages
+                .contains("server_revision AS sync_revision")
+        );
+        assert!(
+            server_sql
+                .select_remote_session_tabs
+                .contains("session_id || ':' || tab_id AS record_id")
+        );
 
         let schema_json =
             serde_json::from_str::<Value>(&browser_storage_sync_server_schema_json()).unwrap();
@@ -36033,25 +36165,33 @@ mod tests {
             schema_json["databaseName"],
             json!("actro_browser_sync_server.db")
         );
-        assert!(schema_json["tableNames"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("browser_sync_server_revisions")));
+        assert!(
+            schema_json["tableNames"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("browser_sync_server_revisions"))
+        );
 
         let sql_json =
             serde_json::from_str::<Value>(&browser_storage_sync_server_sql_json()).unwrap();
         assert_eq!(
             sql_json["serverRevisionParamRule"],
-            json!("execute allocateServerRevision, then prepend returned serverRevision to merge operation params")
+            json!(
+                "execute allocateServerRevision, then prepend returned serverRevision to merge operation params"
+            )
         );
-        assert!(sql_json["mergePushedHistoryPage"]
-            .as_str()
-            .unwrap()
-            .contains("VALUES (?2, ?4"));
-        assert!(sql_json["selectRemoteBookmarks"]
-            .as_str()
-            .unwrap()
-            .contains("'bookmark' AS record_type"));
+        assert!(
+            sql_json["mergePushedHistoryPage"]
+                .as_str()
+                .unwrap()
+                .contains("VALUES (?2, ?4")
+        );
+        assert!(
+            sql_json["selectRemoteBookmarks"]
+                .as_str()
+                .unwrap()
+                .contains("'bookmark' AS record_type")
+        );
     }
 
     #[test]
@@ -36152,9 +36292,11 @@ mod tests {
             ]
         );
         assert!(policy.sql_guard.contains("sync_state = 'synced'"));
-        assert!(policy
-            .sql_guard
-            .contains("sync_revision <= remote.sync_revision"));
+        assert!(
+            policy
+                .sql_guard
+                .contains("sync_revision <= remote.sync_revision")
+        );
         assert!(policy.client_action.contains("keep the local row dirty"));
 
         let policy_json =
@@ -36205,13 +36347,17 @@ mod tests {
             history_policy.merge_policy,
             BROWSER_STORAGE_SYNC_MERGE_POLICY_HISTORY_PAGES
         );
-        assert!(history_policy
-            .identity
-            .contains("canonical external address"));
-        assert!(history_policy
-            .field_rules
-            .iter()
-            .any(|rule| rule.field == "visitCount"));
+        assert!(
+            history_policy
+                .identity
+                .contains("canonical external address")
+        );
+        assert!(
+            history_policy
+                .field_rules
+                .iter()
+                .any(|rule| rule.field == "visitCount")
+        );
 
         let bookmark_policy = contract
             .policies
@@ -36223,9 +36369,11 @@ mod tests {
             BROWSER_STORAGE_SYNC_MERGE_POLICY_BOOKMARKS
         );
         assert!(bookmark_policy.identity.contains("canonical address"));
-        assert!(bookmark_policy
-            .server_merge_rule
-            .contains("duplicate active addresses"));
+        assert!(
+            bookmark_policy
+                .server_merge_rule
+                .contains("duplicate active addresses")
+        );
 
         let tab_policy = contract
             .policies
@@ -36237,9 +36385,11 @@ mod tests {
             BROWSER_STORAGE_SYNC_MERGE_POLICY_SESSION_TABS
         );
         assert!(tab_policy.identity.contains("stable tab id"));
-        assert!(tab_policy
-            .platform_owned_rule
-            .contains("Live WebView lifecycle"));
+        assert!(
+            tab_policy
+                .platform_owned_rule
+                .contains("Live WebView lifecycle")
+        );
 
         let policy_json =
             serde_json::from_str::<Value>(&browser_storage_sync_merge_policy_json()).unwrap();
@@ -36436,9 +36586,11 @@ mod tests {
             operation_names,
             vec!["capabilities", "list", "read", "write", "delete"]
         );
-        assert!(operations
-            .iter()
-            .all(|operation| operation["required"] == json!(true)));
+        assert!(
+            operations
+                .iter()
+                .all(|operation| operation["required"] == json!(true))
+        );
         assert!(operations.iter().any(|operation| {
             operation["operation"] == json!("write")
                 && operation["conflictBehavior"]
@@ -36455,31 +36607,39 @@ mod tests {
         }));
 
         let metadata = contract["requiredMetadata"].as_array().unwrap();
-        assert!(metadata
-            .iter()
-            .any(|field| field["name"] == json!("revision")
+        assert!(metadata.iter().any(|field| {
+            field["name"] == json!("revision")
                 && field["semantics"]
                     .as_str()
                     .unwrap()
-                    .contains("compare-and-swap")));
-        assert!(contract["adapterFamilies"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|family| family["adapterKind"] == json!("opendal")));
-        assert!(contract["adapterFamilies"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|family| family["adapterKind"] == json!("appleNative")));
-        assert!(contract["optimisticWritePolicy"]
-            .as_str()
-            .unwrap()
-            .contains("expectedRevision"));
-        assert!(contract["productConstraint"]
-            .as_str()
-            .unwrap()
-            .contains("must not require or embed"));
+                    .contains("compare-and-swap")
+        }));
+        assert!(
+            contract["adapterFamilies"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|family| family["adapterKind"] == json!("opendal"))
+        );
+        assert!(
+            contract["adapterFamilies"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|family| family["adapterKind"] == json!("appleNative"))
+        );
+        assert!(
+            contract["optimisticWritePolicy"]
+                .as_str()
+                .unwrap()
+                .contains("expectedRevision")
+        );
+        assert!(
+            contract["productConstraint"]
+                .as_str()
+                .unwrap()
+                .contains("must not require or embed")
+        );
     }
 
     #[test]
@@ -36526,11 +36686,13 @@ mod tests {
             degraded["clientAction"],
             json!("continueWithProviderAdapterEmulation")
         );
-        assert!(degraded["degradedCapabilities"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|capability| capability == "supportsPrefixList"));
+        assert!(
+            degraded["degradedCapabilities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|capability| capability == "supportsPrefixList")
+        );
 
         let mut unsafe_capabilities = store.capabilities();
         unsafe_capabilities.supports_conditional_write = false;
@@ -36551,16 +36713,20 @@ mod tests {
             unsafe_plan["providerAction"],
             json!("enableOptimisticRevisionWrites")
         );
-        assert!(unsafe_plan["missingRequiredCapabilities"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|capability| capability == "supportsConditionalWrite"));
-        assert!(unsafe_plan["missingRequiredCapabilities"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|capability| capability == "revisionKind"));
+        assert!(
+            unsafe_plan["missingRequiredCapabilities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|capability| capability == "supportsConditionalWrite")
+        );
+        assert!(
+            unsafe_plan["missingRequiredCapabilities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|capability| capability == "revisionKind")
+        );
 
         let invalid = serde_json::from_str::<Value>(
             &browser_storage_sync_cloud_store_capability_preflight_json("{bad", 103),
@@ -36696,14 +36862,15 @@ mod tests {
             compatible_preflight["compatibleCount"],
             compatible_preflight["documentCount"]
         );
-        assert!(compatible_preflight["documents"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(
-                |document| document["path"] == json!(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH)
-                    && document["status"]["documentKind"] == json!("manifest")
-            ));
+        assert!(
+            compatible_preflight["documents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|document| document["path"]
+                    == json!(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH)
+                    && document["status"]["documentKind"] == json!("manifest"))
+        );
 
         let manifest_path = root.path.join(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH);
         let mut manifest = serde_json::from_str::<Value>(
@@ -36723,14 +36890,15 @@ mod tests {
         );
         assert_eq!(blocked_preflight["shouldBlockSync"], json!(true));
         assert_eq!(blocked_preflight["clientUpgradeRequiredCount"], json!(1));
-        assert!(blocked_preflight["documents"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(
-                |document| document["path"] == json!(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH)
-                    && document["status"]["classification"] == json!("clientUpgradeRequired")
-            ));
+        assert!(
+            blocked_preflight["documents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|document| document["path"]
+                    == json!(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH)
+                    && document["status"]["classification"] == json!("clientUpgradeRequired"))
+        );
 
         assert_eq!(
             browser_storage_sync_cloud_local_folder_compatibility_preflight_json("", 109),
@@ -36763,12 +36931,13 @@ mod tests {
             .unwrap();
         assert_eq!(read.bytes, br#"{"version":1}"#);
         assert_eq!(read.metadata.revision, Some(first_revision.clone()));
-        assert!(read
-            .metadata
-            .content_hash
-            .as_deref()
-            .unwrap()
-            .starts_with("sha256:"));
+        assert!(
+            read.metadata
+                .content_hash
+                .as_deref()
+                .unwrap()
+                .starts_with("sha256:")
+        );
 
         let stale_write = block_on_immediate(store.write(BrowserStorageSyncCloudWriteRequest {
             path: BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH,
@@ -36856,10 +37025,11 @@ mod tests {
         assert!(first_write.created);
         assert!(!first_write.replaced);
         assert_eq!(store.object_count().unwrap(), 1);
-        assert!(root
-            .path
-            .join(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH)
-            .exists());
+        assert!(
+            root.path
+                .join(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH)
+                .exists()
+        );
 
         let read = block_on_immediate(store.read(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH))
             .unwrap()
@@ -36958,10 +37128,11 @@ mod tests {
         assert!(result.completed);
         assert!(result.should_ack_local);
         assert_eq!(result.write_results.len(), 3);
-        assert!(root
-            .path
-            .join(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH)
-            .exists());
+        assert!(
+            root.path
+                .join(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH)
+                .exists()
+        );
         let manifest = block_on_immediate(store.read(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH))
             .unwrap()
             .unwrap();
@@ -36992,10 +37163,11 @@ mod tests {
         assert_eq!(seed["shouldAckLocal"], json!(true));
         assert_eq!(seed["shouldApplyRemote"], json!(false));
         assert_eq!(seed["clientPlan"]["action"], json!("applyLocalAck"));
-        assert!(root
-            .path
-            .join(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH)
-            .exists());
+        assert!(
+            root.path
+                .join(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH)
+                .exists()
+        );
 
         let pull_remote = serde_json::from_str::<Value>(
             &browser_storage_sync_cloud_local_folder_cycle_round_json(
@@ -37070,14 +37242,16 @@ mod tests {
             json!("compatible")
         );
         assert_eq!(join["compatibilityPreflight"]["documentCount"], json!(0));
-        assert!(root
-            .path
-            .join(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH)
-            .exists());
-        assert!(root
-            .path
-            .join(browser_storage_sync_cloud_device_path("device-a"))
-            .exists());
+        assert!(
+            root.path
+                .join(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH)
+                .exists()
+        );
+        assert!(
+            root.path
+                .join(browser_storage_sync_cloud_device_path("device-a"))
+                .exists()
+        );
 
         let revoke_request = serialize_json(&json!({
             "scope": "profile-a",
@@ -37114,12 +37288,14 @@ mod tests {
             std::fs::read_to_string(root.path.join(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH))
                 .unwrap();
         let mut manifest = serde_json::from_str::<Value>(&manifest).unwrap();
-        assert!(manifest["devices"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|device| device["deviceId"] == json!("device-a")
-                && device["status"] == json!("revoked")));
+        assert!(
+            manifest["devices"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|device| device["deviceId"] == json!("device-a")
+                    && device["status"] == json!("revoked"))
+        );
 
         let manifest_path = root.path.join(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH);
         manifest["storageSchemaVersion"] = json!(BROWSER_STORAGE_SCHEMA_VERSION + 1);
@@ -37155,10 +37331,12 @@ mod tests {
             json!("clientUpgradeRequired")
         );
         assert_eq!(blocked_join["writeResults"], json!([]));
-        assert!(!root
-            .path
-            .join(browser_storage_sync_cloud_device_path("device-b"))
-            .exists());
+        assert!(
+            !root
+                .path
+                .join(browser_storage_sync_cloud_device_path("device-b"))
+                .exists()
+        );
         assert_eq!(
             browser_storage_sync_cloud_local_folder_membership_round_json("", &join_request),
             "null"
@@ -37270,34 +37448,40 @@ mod tests {
             round["deleteResults"][0]["operationType"],
             json!("deleteLog")
         );
-        assert!(root
-            .path
-            .join(browser_storage_sync_cloud_snapshot_path("historyPages"))
-            .exists());
-        assert!(!root
-            .path
-            .join(browser_storage_sync_cloud_log_path(
-                "historyPages",
-                "device-b",
-                1
-            ))
-            .exists());
-        assert!(!root
-            .path
-            .join(browser_storage_sync_cloud_log_path(
-                "historyPages",
-                "device-b",
-                2
-            ))
-            .exists());
-        assert!(root
-            .path
-            .join(browser_storage_sync_cloud_log_path(
-                "historyPages",
-                "device-b",
-                3
-            ))
-            .exists());
+        assert!(
+            root.path
+                .join(browser_storage_sync_cloud_snapshot_path("historyPages"))
+                .exists()
+        );
+        assert!(
+            !root
+                .path
+                .join(browser_storage_sync_cloud_log_path(
+                    "historyPages",
+                    "device-b",
+                    1
+                ))
+                .exists()
+        );
+        assert!(
+            !root
+                .path
+                .join(browser_storage_sync_cloud_log_path(
+                    "historyPages",
+                    "device-b",
+                    2
+                ))
+                .exists()
+        );
+        assert!(
+            root.path
+                .join(browser_storage_sync_cloud_log_path(
+                    "historyPages",
+                    "device-b",
+                    3
+                ))
+                .exists()
+        );
 
         let manifest_after =
             fs::read_to_string(root.path.join(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH)).unwrap();
@@ -37378,10 +37562,12 @@ mod tests {
         assert_eq!(blocked_round["roundSummary"]["writeResultCount"], json!(0));
         assert_eq!(blocked_round["roundSummary"]["deleteResultCount"], json!(0));
         assert!(blocked_round["writeResults"].as_array().unwrap().is_empty());
-        assert!(blocked_round["deleteResults"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            blocked_round["deleteResults"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
 
         assert_eq!(
             browser_storage_sync_cloud_local_folder_compaction_round_json("", "device-a", 93),
@@ -37511,43 +37697,52 @@ mod tests {
             round["deleteResults"][0]["operationType"],
             json!("candidateDeleteLog")
         );
-        assert!(round["readResults"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|result| {
-                result["readReason"] == json!("listSnapshotsForHighWatermarkCleanup")
-            }));
-        assert!(round["readResults"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|result| { result["readReason"] == json!("readLogForHighWatermarkCleanup") }));
-        assert!(!root
-            .path
-            .join(browser_storage_sync_cloud_log_path(
-                "historyPages",
-                "device-b",
-                1
-            ))
-            .exists());
-        assert!(!root
-            .path
-            .join(browser_storage_sync_cloud_log_path(
-                "historyPages",
-                "device-b",
-                2
-            ))
-            .exists());
-        for sequence in 3..=5 {
-            assert!(root
+        assert!(
+            round["readResults"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|result| {
+                    result["readReason"] == json!("listSnapshotsForHighWatermarkCleanup")
+                })
+        );
+        assert!(
+            round["readResults"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|result| { result["readReason"] == json!("readLogForHighWatermarkCleanup") })
+        );
+        assert!(
+            !root
                 .path
                 .join(browser_storage_sync_cloud_log_path(
                     "historyPages",
                     "device-b",
-                    sequence
+                    1
                 ))
-                .exists());
+                .exists()
+        );
+        assert!(
+            !root
+                .path
+                .join(browser_storage_sync_cloud_log_path(
+                    "historyPages",
+                    "device-b",
+                    2
+                ))
+                .exists()
+        );
+        for sequence in 3..=5 {
+            assert!(
+                root.path
+                    .join(browser_storage_sync_cloud_log_path(
+                        "historyPages",
+                        "device-b",
+                        sequence
+                    ))
+                    .exists()
+            );
         }
 
         let noop_round = serde_json::from_str::<Value>(
@@ -37622,10 +37817,12 @@ mod tests {
             json!("clientUpgradeRequired")
         );
         assert_eq!(blocked_round["roundSummary"]["deleteResultCount"], json!(0));
-        assert!(blocked_round["deleteResults"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            blocked_round["deleteResults"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             browser_storage_sync_cloud_local_folder_cleanup_round_json(
                 "", &cursors, "device-a", 93
@@ -38049,14 +38246,16 @@ mod tests {
         );
         assert_eq!(result.read_results[0].operation_type, "readManifest");
         assert!(result.read_results[0].exists);
-        assert!(result
-            .write_results
-            .iter()
-            .any(
-                |write| write.operation_type.as_deref() == Some("writeManifest")
-                    && !write.success
-                    && write.error_kind.as_deref() == Some("conflict")
-            ));
+        assert!(
+            result
+                .write_results
+                .iter()
+                .any(
+                    |write| write.operation_type.as_deref() == Some("writeManifest")
+                        && !write.success
+                        && write.error_kind.as_deref() == Some("conflict")
+                )
+        );
         let result_plan = result.result_plan.as_ref().unwrap();
         assert_eq!(result_plan.conflict_count, 1);
         assert_eq!(result.round_summary.write_result_count, 3);
@@ -38191,10 +38390,12 @@ mod tests {
             result.round_summary.collections,
             vec!["bookmarks".to_string()]
         );
-        assert!(result
-            .read_results
-            .iter()
-            .all(|read_result| read_result.success));
+        assert!(
+            result
+                .read_results
+                .iter()
+                .all(|read_result| read_result.success)
+        );
         assert!(result.read_results.iter().any(|read_result| {
             read_result.operation_type == "listLogs"
                 && read_result.collection.as_deref() == Some("bookmarks")
@@ -38212,8 +38413,7 @@ mod tests {
         assert_eq!(apply_plan.record_count, 1);
         assert_eq!(apply_plan.collections, vec!["bookmarks".to_string()]);
         assert_eq!(
-            serde_json::from_str::<Value>(&apply_plan.remote_batch_json).unwrap()["records"][0]
-                ["recordType"],
+            serde_json::from_str::<Value>(&apply_plan.remote_batch_json).unwrap()["records"][0]["recordType"],
             json!("bookmark")
         );
     }
@@ -39116,14 +39316,18 @@ mod tests {
             contract["objectSpace"]["logsPrefix"],
             json!(BROWSER_STORAGE_SYNC_CLOUD_LOGS_PREFIX)
         );
-        assert!(contract["operationBoundary"]
-            .as_str()
-            .unwrap()
-            .contains("coarse rounds"));
-        assert!(contract["productConstraint"]
-            .as_str()
-            .unwrap()
-            .contains("not an Actro-operated browser sync server"));
+        assert!(
+            contract["operationBoundary"]
+                .as_str()
+                .unwrap()
+                .contains("coarse rounds")
+        );
+        assert!(
+            contract["productConstraint"]
+                .as_str()
+                .unwrap()
+                .contains("not an Actro-operated browser sync server")
+        );
     }
 
     #[test]
@@ -39145,11 +39349,13 @@ mod tests {
             ready_plan["objectLayout"]["manifestPath"],
             json!(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH)
         );
-        assert!(ready_plan["requiredPrefixes"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|prefix| prefix["prefix"] == json!(BROWSER_STORAGE_SYNC_CLOUD_LOGS_PREFIX)));
+        assert!(
+            ready_plan["requiredPrefixes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|prefix| prefix["prefix"] == json!(BROWSER_STORAGE_SYNC_CLOUD_LOGS_PREFIX))
+        );
 
         let mut degraded_capabilities = browser_storage_sync_cloud_local_folder_capabilities();
         degraded_capabilities.supports_prefix_list = false;
@@ -39188,10 +39394,12 @@ mod tests {
             setup_plan["rootPathAction"],
             json!("configureActroBrowserSyncRoot")
         );
-        assert!(setup_plan["blockedReasons"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("rootPath")));
+        assert!(
+            setup_plan["blockedReasons"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("rootPath"))
+        );
         assert_eq!(
             browser_storage_sync_cloud_provider_adapter_plan_json("{bad", 103),
             "null"
@@ -39213,11 +39421,13 @@ mod tests {
         assert_eq!(plan["productionReady"], json!(false));
         assert_eq!(plan["shouldAllowSync"], json!(true));
         assert_eq!(plan["rootPathAction"], json!("useForTestsOnly"));
-        assert!(plan["warnings"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|warning| warning.as_str().unwrap().contains("not a production")));
+        assert!(
+            plan["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|warning| warning.as_str().unwrap().contains("not a production"))
+        );
     }
 
     #[test]
@@ -39231,18 +39441,24 @@ mod tests {
             contract["planType"],
             json!("cloudProviderConnectionStatusPolicy")
         );
-        assert!(contract["classifications"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("membershipRequired")));
-        assert!(contract["policyBoundary"]
-            .as_str()
-            .unwrap()
-            .contains("Platforms own OAuth"));
-        assert!(contract["productConstraint"]
-            .as_str()
-            .unwrap()
-            .contains("No Actro product server"));
+        assert!(
+            contract["classifications"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("membershipRequired"))
+        );
+        assert!(
+            contract["policyBoundary"]
+                .as_str()
+                .unwrap()
+                .contains("Platforms own OAuth")
+        );
+        assert!(
+            contract["productConstraint"]
+                .as_str()
+                .unwrap()
+                .contains("No Actro product server")
+        );
     }
 
     #[test]
@@ -39314,10 +39530,12 @@ mod tests {
         );
         assert_eq!(membership_policy["shouldAttemptMembership"], json!(true));
         assert_eq!(membership_policy["shouldAttemptSync"], json!(false));
-        assert!(membership_policy["diagnosticReasons"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("deviceMembershipMissing")));
+        assert!(
+            membership_policy["diagnosticReasons"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("deviceMembershipMissing"))
+        );
     }
 
     #[test]
@@ -39374,10 +39592,12 @@ mod tests {
         );
         assert_eq!(retry_policy["shouldRetry"], json!(true));
         assert_eq!(retry_policy["retryDelaySeconds"], json!(10));
-        assert!(retry_policy["diagnosticReasons"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("network")));
+        assert!(
+            retry_policy["diagnosticReasons"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("network"))
+        );
 
         let unsupported_snapshot = json!({
             "providerKind": "customDrive",
@@ -39412,10 +39632,12 @@ mod tests {
             unsupported_policy["providerAction"],
             json!("reportProviderBug")
         );
-        assert!(unsupported_policy["diagnosticReasons"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("supportsConditionalWrite")));
+        assert!(
+            unsupported_policy["diagnosticReasons"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("supportsConditionalWrite"))
+        );
         assert_eq!(
             browser_storage_sync_cloud_provider_connection_status_policy_json("{bad", 0, 105),
             "null"
@@ -39593,14 +39815,18 @@ mod tests {
             policy["planType"],
             json!("cloudProviderErrorClassification")
         );
-        assert!(policy["policyBoundary"]
-            .as_str()
-            .unwrap()
-            .contains("coarse native/provider rounds"));
-        assert!(policy["canonicalErrorKinds"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("conflict")));
+        assert!(
+            policy["policyBoundary"]
+                .as_str()
+                .unwrap()
+                .contains("coarse native/provider rounds")
+        );
+        assert!(
+            policy["canonicalErrorKinds"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("conflict"))
+        );
 
         let result = serde_json::from_str::<Value>(
             &browser_storage_sync_cloud_provider_error_classification_json(
@@ -39740,7 +39966,9 @@ mod tests {
         assert_eq!(success_policy["retryDelaySeconds"], Value::Null);
         assert_eq!(
             success_policy["resultPolicy"],
-            json!("Classify one cloud-drive cycle round for platform schedulers without turning provider SDK calls or native SQLite execution into Rust-owned micro-steps.")
+            json!(
+                "Classify one cloud-drive cycle round for platform schedulers without turning provider SDK calls or native SQLite execution into Rust-owned micro-steps."
+            )
         );
 
         let inner = BrowserStorageSyncMemoryCloudStore::new();
@@ -39810,14 +40038,18 @@ mod tests {
         );
         assert_eq!(retry_policy["readFailureCount"], json!(1));
         assert_eq!(retry_policy["retryDelaySeconds"], json!(5));
-        assert!(retry_policy["diagnosticReasons"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("network")));
-        assert!(retry_policy["diagnosticReasons"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("providerReadFailed")));
+        assert!(
+            retry_policy["diagnosticReasons"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("network"))
+        );
+        assert!(
+            retry_policy["diagnosticReasons"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("providerReadFailed"))
+        );
         assert_eq!(
             browser_storage_sync_cloud_cycle_status_policy_json("{bad", 0),
             "null"
@@ -39955,7 +40187,9 @@ mod tests {
         assert_eq!(success_policy["retryDelaySeconds"], Value::Null);
         assert_eq!(
             success_policy["resultPolicy"],
-            json!("Classify one cloud-drive membership round for connect/revoke UX without turning provider SDK calls or cloud file writes into Rust-owned micro-steps.")
+            json!(
+                "Classify one cloud-drive membership round for connect/revoke UX without turning provider SDK calls or cloud file writes into Rust-owned micro-steps."
+            )
         );
 
         let provider_auth_round = json!({
@@ -40127,7 +40361,9 @@ mod tests {
         assert_eq!(conflict_state["requiresUserAction"], json!(false));
         assert_eq!(
             conflict_state["resultPolicy"],
-            json!("Derive platform-consumable cloud-drive membership scheduling state from the Rust-owned membership status policy, keeping connect/revoke retry and provider recovery decisions consistent across native clients.")
+            json!(
+                "Derive platform-consumable cloud-drive membership scheduling state from the Rust-owned membership status policy, keeping connect/revoke retry and provider recovery decisions consistent across native clients."
+            )
         );
 
         let provider_auth_policy = browser_storage_sync_cloud_membership_status_policy_json(
@@ -40289,7 +40525,9 @@ mod tests {
         assert_eq!(conflict_plan["nextRunAtUnixSeconds"], json!(10_020));
         assert_eq!(
             conflict_plan["resultPolicy"],
-            json!("Compose the Rust-owned cloud membership status policy and schedule state into one provider-neutral connect/revoke attempt plan. Native adapters still execute provider SDK calls, OS scheduling, and membership UI.")
+            json!(
+                "Compose the Rust-owned cloud membership status policy and schedule state into one provider-neutral connect/revoke attempt plan. Native adapters still execute provider SDK calls, OS scheduling, and membership UI."
+            )
         );
 
         let provider_auth_round = json!({
@@ -40840,11 +41078,13 @@ mod tests {
         assert_eq!(degraded["severity"], json!("warning"));
         assert_eq!(degraded["shouldAllowSync"], json!(true));
         assert_eq!(degraded["shouldBlockSync"], json!(false));
-        assert!(degraded["warnings"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|warning| warning == "degradedCapability:supportsPrefixList"));
+        assert!(
+            degraded["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|warning| warning == "degradedCapability:supportsPrefixList")
+        );
 
         let mut wrong_root_capabilities = BrowserStorageSyncMemoryCloudStore::new().capabilities();
         wrong_root_capabilities.root_path = "Other/Folder".to_string();
@@ -40971,11 +41211,13 @@ mod tests {
             runtime_diagnostics["userAction"],
             json!("reconnectProvider")
         );
-        assert!(runtime_diagnostics["diagnosticReasons"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|reason| reason == "unauthorized"));
+        assert!(
+            runtime_diagnostics["diagnosticReasons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|reason| reason == "unauthorized")
+        );
 
         assert_eq!(
             browser_storage_sync_cloud_provider_diagnostics_json("", "", "", "", "", 222),
@@ -41035,11 +41277,13 @@ mod tests {
             auth_diagnostics["providerAction"],
             json!("reconnectProvider")
         );
-        assert!(auth_diagnostics["diagnosticReasons"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|reason| reason == "unauthorized"));
+        assert!(
+            auth_diagnostics["diagnosticReasons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|reason| reason == "unauthorized")
+        );
 
         let conflict_errors = browser_storage_sync_cloud_provider_error_classification_json(
             &serialize_json(&json!({
@@ -41156,23 +41400,27 @@ mod tests {
         );
         assert_eq!(nested_cycle_errors["shouldRereadCloud"], json!(true));
         assert_eq!(nested_cycle_errors["shouldRetry"], json!(true));
-        assert!(nested_cycle_errors["errors"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|error| {
-                error["operationType"] == json!("writeManifest")
-                    && error["canonicalErrorKind"] == json!("conflict")
-                    && error["path"] == json!(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH)
-            }));
-        assert!(nested_cycle_errors["errors"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|error| {
-                error["operationType"] == json!("listLogs")
-                    && error["canonicalErrorKind"] == json!("network")
-            }));
+        assert!(
+            nested_cycle_errors["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|error| {
+                    error["operationType"] == json!("writeManifest")
+                        && error["canonicalErrorKind"] == json!("conflict")
+                        && error["path"] == json!(BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_PATH)
+                })
+        );
+        assert!(
+            nested_cycle_errors["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|error| {
+                    error["operationType"] == json!("listLogs")
+                        && error["canonicalErrorKind"] == json!("network")
+                })
+        );
 
         let nested_membership_errors =
             browser_storage_sync_cloud_provider_error_classification_json(
@@ -41228,11 +41476,13 @@ mod tests {
             membership_diagnostics["sources"][1]["source"],
             json!("providerErrorClassification")
         );
-        assert!(membership_diagnostics["diagnosticReasons"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|reason| reason == "unauthorized"));
+        assert!(
+            membership_diagnostics["diagnosticReasons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|reason| reason == "unauthorized")
+        );
     }
 
     #[test]
@@ -41345,11 +41595,13 @@ mod tests {
             json!("true")
         );
         assert_eq!(event["localAttributes"]["deviceId"], json!("device-a"));
-        assert!(event["diagnosticReasons"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|reason| reason == "unauthorized"));
+        assert!(
+            event["diagnosticReasons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|reason| reason == "unauthorized")
+        );
         assert_eq!(
             browser_storage_sync_cloud_observability_event_json("", "", "", 1),
             "null"
@@ -41499,7 +41751,9 @@ mod tests {
         assert_eq!(provider_auth_plan["nextRunAtUnixSeconds"], Value::Null);
         assert_eq!(
             provider_auth_plan["resultPolicy"],
-            json!("Compose the Rust-owned cloud cycle client plan, status policy, and schedule state into one provider-neutral attempt orchestration plan. Native adapters still execute provider SDK calls, OS scheduling, and SQLite apply work.")
+            json!(
+                "Compose the Rust-owned cloud cycle client plan, status policy, and schedule state into one provider-neutral attempt orchestration plan. Native adapters still execute provider SDK calls, OS scheduling, and SQLite apply work."
+            )
         );
         assert_eq!(
             browser_storage_sync_cloud_cycle_attempt_plan_json("{bad", 0, 1),
@@ -41794,18 +42048,24 @@ mod tests {
             document_types,
             vec!["manifest", "device", "log", "snapshot"]
         );
-        assert!(contract["membershipPolicy"]
-            .as_str()
-            .unwrap()
-            .contains("no Actro account/device service"));
-        assert!(contract["readPlanningPolicy"]
-            .as_str()
-            .unwrap()
-            .contains("browserStorageSyncCloudPullPlanJson"));
-        assert!(contract["readPlanningPolicy"]
-            .as_str()
-            .unwrap()
-            .contains("browserStorageSyncCloudPullApplyPlanJson"));
+        assert!(
+            contract["membershipPolicy"]
+                .as_str()
+                .unwrap()
+                .contains("no Actro account/device service")
+        );
+        assert!(
+            contract["readPlanningPolicy"]
+                .as_str()
+                .unwrap()
+                .contains("browserStorageSyncCloudPullPlanJson")
+        );
+        assert!(
+            contract["readPlanningPolicy"]
+                .as_str()
+                .unwrap()
+                .contains("browserStorageSyncCloudPullApplyPlanJson")
+        );
         assert_eq!(
             contract["retentionPolicy"]["retainLogSequences"],
             json!(BROWSER_STORAGE_SYNC_CLOUD_RETAIN_LOG_SEQUENCES)
@@ -42076,11 +42336,13 @@ mod tests {
         assert_eq!(future["shouldBlockSync"], json!(true));
         assert_eq!(future["schedulerAction"], json!("stopUntilClientUpdate"));
         assert_eq!(future["userAction"], json!("upgradeClient"));
-        assert!(future["diagnosticReasons"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|reason| reason == "storageSchemaTooNew"));
+        assert!(
+            future["diagnosticReasons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|reason| reason == "storageSchemaTooNew")
+        );
 
         let batch = empty_browser_storage_sync_batch("profile-a", "device-a", 100);
         let log_json =
@@ -42235,21 +42497,27 @@ mod tests {
         assert_eq!(legacy["canAutoExecuteMigration"], json!(false));
         assert_eq!(legacy["canAutoMigrateCloudFiles"], json!(false));
         assert_eq!(legacy["providerAction"], json!("snapshotCloudFiles"));
-        assert!(legacy["prerequisiteSteps"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|step| step == "snapshotAffectedCloudDocuments"));
-        assert!(legacy["validationSteps"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|step| step == "rerunCompatibilityPreflightAfterMigration"));
-        assert!(legacy["rollbackSteps"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|step| step == "restoreProviderBackupOnFailure"));
+        assert!(
+            legacy["prerequisiteSteps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|step| step == "snapshotAffectedCloudDocuments")
+        );
+        assert!(
+            legacy["validationSteps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|step| step == "rerunCompatibilityPreflightAfterMigration")
+        );
+        assert!(
+            legacy["rollbackSteps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|step| step == "restoreProviderBackupOnFailure")
+        );
 
         let invalid_preflight = browser_storage_sync_cloud_compatibility_preflight_json(
             &serialize_json(&json!([
@@ -42273,11 +42541,13 @@ mod tests {
             invalid["providerAction"],
             json!("snapshotInvalidCloudFiles")
         );
-        assert!(invalid["migrationSteps"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|step| step == "repairOrRestore1CloudDocuments"));
+        assert!(
+            invalid["migrationSteps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|step| step == "repairOrRestore1CloudDocuments")
+        );
 
         assert_eq!(
             browser_storage_sync_cloud_schema_migration_playbook_json("", 113),
@@ -42407,7 +42677,9 @@ mod tests {
         );
         assert_eq!(
             legacy_snapshot["operations"][0]["snapshotPath"],
-            json!("Actro/BrowserSync/recovery/000000000112-migration/logs/bookmarks/device-a-0000000000000001.json")
+            json!(
+                "Actro/BrowserSync/recovery/000000000112-migration/logs/bookmarks/device-a-0000000000000001.json"
+            )
         );
         assert_eq!(
             legacy_snapshot["operations"][0]["snapshotReason"],
@@ -42718,16 +42990,20 @@ mod tests {
 
         assert_eq!(normalized["scope"], json!("fallback-scope"));
         assert_eq!(normalized["writerDeviceId"], json!("device-a"));
-        assert!(normalized["devices"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|device| device["deviceId"] == json!("device-a")));
-        assert!(normalized["devices"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|device| device["status"] == json!("revoked")));
+        assert!(
+            normalized["devices"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|device| device["deviceId"] == json!("device-a"))
+        );
+        assert!(
+            normalized["devices"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|device| device["status"] == json!("revoked"))
+        );
         assert_eq!(normalized["collections"].as_array().unwrap().len(), 6);
         assert_eq!(normalized["retention"]["retainLogSequences"], json!(1));
         assert_eq!(
@@ -42823,18 +43099,22 @@ mod tests {
 
         let join_manifest =
             serde_json::from_str::<Value>(join["nextManifestJson"].as_str().unwrap()).unwrap();
-        assert!(join_manifest["devices"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|device| device["deviceId"] == json!("device-a")
-                && device["status"] == json!("active")));
-        assert!(join_manifest["devices"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|device| device["deviceId"] == json!("device-b")
-                && device["status"] == json!("active")));
+        assert!(
+            join_manifest["devices"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|device| device["deviceId"] == json!("device-a")
+                    && device["status"] == json!("active"))
+        );
+        assert!(
+            join_manifest["devices"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|device| device["deviceId"] == json!("device-b")
+                    && device["status"] == json!("active"))
+        );
 
         let revoke_request = serialize_json(&json!({
             "manifest": join_manifest,
@@ -42867,12 +43147,14 @@ mod tests {
 
         let revoked_manifest =
             serde_json::from_str::<Value>(revoke["nextManifestJson"].as_str().unwrap()).unwrap();
-        assert!(revoked_manifest["devices"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|device| device["deviceId"] == json!("device-b")
-                && device["status"] == json!("revoked")));
+        assert!(
+            revoked_manifest["devices"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|device| device["deviceId"] == json!("device-b")
+                    && device["status"] == json!("revoked"))
+        );
         let revoked_device =
             serde_json::from_str::<Value>(revoke["nextDeviceJson"].as_str().unwrap()).unwrap();
         assert_eq!(revoked_device["deviceId"], json!("device-b"));
@@ -43090,12 +43372,14 @@ mod tests {
             .unwrap();
         let manifest_json = std::str::from_utf8(&manifest.bytes).unwrap();
         let manifest = serde_json::from_str::<Value>(manifest_json).unwrap();
-        assert!(manifest["devices"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|device| device["deviceId"] == json!("device-a")
-                && device["status"] == json!("revoked")));
+        assert!(
+            manifest["devices"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|device| device["deviceId"] == json!("device-a")
+                    && device["status"] == json!("revoked"))
+        );
     }
 
     #[test]
@@ -43159,10 +43443,12 @@ mod tests {
         let result_plan = conflict.result_plan.unwrap();
         assert_eq!(result_plan.conflict_count, 1);
         assert_eq!(result_plan.issues[0].reason, "conflict");
-        assert!(result_plan
-            .reread_operations
-            .iter()
-            .any(|operation| operation.operation_type == "readManifest"));
+        assert!(
+            result_plan
+                .reread_operations
+                .iter()
+                .any(|operation| operation.operation_type == "readManifest")
+        );
     }
 
     #[test]
@@ -43571,32 +43857,40 @@ mod tests {
         let ack_batch =
             serde_json::from_str::<Value>(result["ackBatchJson"].as_str().unwrap()).unwrap();
         assert_eq!(ack_batch["records"].as_array().unwrap().len(), 2);
-        assert!(ack_batch["records"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|record| {
-                record["recordType"] == json!("bookmark")
-                    && record["recordId"] == json!("bookmark-1")
-            }));
-        assert!(ack_batch["records"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|record| {
-                record["recordType"] == json!("historyPage")
-                    && record["recordId"] == json!("https://example.com/")
-            }));
+        assert!(
+            ack_batch["records"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|record| {
+                    record["recordType"] == json!("bookmark")
+                        && record["recordId"] == json!("bookmark-1")
+                })
+        );
+        assert!(
+            ack_batch["records"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|record| {
+                    record["recordType"] == json!("historyPage")
+                        && record["recordId"] == json!("https://example.com/")
+                })
+        );
         assert_eq!(ack_batch["cursors"].as_array().unwrap().len(), 2);
 
         let ack_operations = result["ackPlan"]["operations"].as_array().unwrap();
         assert_eq!(ack_operations.len(), 4);
-        assert!(ack_operations
-            .iter()
-            .any(|operation| operation["statementKey"] == json!("markBookmarkSynced")));
-        assert!(ack_operations
-            .iter()
-            .any(|operation| operation["statementKey"] == json!("markHistoryPageSynced")));
+        assert!(
+            ack_operations
+                .iter()
+                .any(|operation| operation["statementKey"] == json!("markBookmarkSynced"))
+        );
+        assert!(
+            ack_operations
+                .iter()
+                .any(|operation| operation["statementKey"] == json!("markHistoryPageSynced"))
+        );
     }
 
     #[test]
@@ -44115,19 +44409,23 @@ mod tests {
         assert_eq!(plan["skippedRedundantLogCount"], json!(1));
         let skipped_logs = plan["skippedLogs"].as_array().unwrap();
         assert_eq!(skipped_logs.len(), 2);
-        assert!(skipped_logs
-            .iter()
-            .any(|log| log["collection"] == json!("historyVisits")
-                && log["deviceId"] == json!("device-a")
-                && log["skipReason"] == json!("currentDeviceLog")
-                && log["action"] == json!("skipSelfOriginatedLog")));
-        assert!(skipped_logs
-            .iter()
-            .any(|log| log["collection"] == json!("bookmarks")
-                && log["deviceId"] == json!("device-b")
-                && log["sequence"] == json!(2)
-                && log["skipReason"] == json!("collectionAlreadyCurrent")
-                && log["action"] == json!("skipRedundantLog")));
+        assert!(
+            skipped_logs
+                .iter()
+                .any(|log| log["collection"] == json!("historyVisits")
+                    && log["deviceId"] == json!("device-a")
+                    && log["skipReason"] == json!("currentDeviceLog")
+                    && log["action"] == json!("skipSelfOriginatedLog"))
+        );
+        assert!(
+            skipped_logs
+                .iter()
+                .any(|log| log["collection"] == json!("bookmarks")
+                    && log["deviceId"] == json!("device-b")
+                    && log["sequence"] == json!(2)
+                    && log["skipReason"] == json!("collectionAlreadyCurrent")
+                    && log["action"] == json!("skipRedundantLog"))
+        );
         assert_eq!(plan["applySummary"]["collectionCount"], json!(2));
         assert_eq!(plan["applySummary"]["importedSnapshotCount"], json!(1));
         assert_eq!(plan["applySummary"]["importedLogCount"], json!(1));
@@ -44224,18 +44522,22 @@ mod tests {
         assert_eq!(batch["scope"], json!("profile-a"));
         assert_eq!(batch["deviceId"], json!("device-a"));
         assert_eq!(batch["records"].as_array().unwrap().len(), 2);
-        assert!(batch["cursors"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|cursor| cursor["collection"] == json!("historyPages")
-                && cursor["cursor"] == json!("1")));
-        assert!(batch["cursors"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|cursor| cursor["collection"] == json!("sessions")
-                && cursor["cursor"] == json!("5")));
+        assert!(
+            batch["cursors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|cursor| cursor["collection"] == json!("historyPages")
+                    && cursor["cursor"] == json!("1"))
+        );
+        assert!(
+            batch["cursors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|cursor| cursor["collection"] == json!("sessions")
+                    && cursor["cursor"] == json!("5"))
+        );
     }
 
     #[test]
@@ -44253,14 +44555,18 @@ mod tests {
             json!(BROWSER_STORAGE_SCHEMA_VERSION)
         );
         assert!(policy["nativeBoundary"].as_str().unwrap().contains("once"));
-        assert!(policy["cleanupRule"]
-            .as_str()
-            .unwrap()
-            .contains("candidateDeleteLog"));
-        assert!(policy["cleanupRule"]
-            .as_str()
-            .unwrap()
-            .contains("must not execute cleanup before Rust compaction"));
+        assert!(
+            policy["cleanupRule"]
+                .as_str()
+                .unwrap()
+                .contains("candidateDeleteLog")
+        );
+        assert!(
+            policy["cleanupRule"]
+                .as_str()
+                .unwrap()
+                .contains("must not execute cleanup before Rust compaction")
+        );
     }
 
     #[test]
@@ -44353,10 +44659,12 @@ mod tests {
             plan["cleanupCandidates"][0]["path"],
             json!("Actro/BrowserSync/logs/historyPages/device-b-0000000000000001.json")
         );
-        assert!(plan["resultPolicy"]
-            .as_str()
-            .unwrap()
-            .contains("after Rust compaction/result planning has committed"));
+        assert!(
+            plan["resultPolicy"]
+                .as_str()
+                .unwrap()
+                .contains("after Rust compaction/result planning has committed")
+        );
     }
 
     #[test]
@@ -44474,10 +44782,12 @@ mod tests {
         assert_eq!(plan["deleteSucceededCount"], json!(2));
         assert_eq!(plan["deleteFailedCount"], json!(0));
         assert_eq!(plan["deletedPaths"].as_array().unwrap().len(), 2);
-        assert!(plan["cleanupRetryOperations"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            plan["cleanupRetryOperations"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
         assert!(plan["rereadOperations"].as_array().unwrap().is_empty());
     }
 
@@ -44566,29 +44876,31 @@ mod tests {
             plan["clientAction"],
             json!("rereadCloudRetentionStateAndRetryCleanup")
         );
-        assert!(plan["cleanupRetryOperations"]
-            .as_array()
-            .unwrap()
-            .is_empty());
-        assert!(plan["rereadOperations"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|operation| operation["operationType"] == json!("readManifest")));
-        assert!(plan["rereadOperations"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(
-                |operation| operation["operationType"] == json!("readSnapshot")
-                    && operation["collection"] == json!("historyPages")
-            ));
-        assert!(plan["rereadOperations"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|operation| operation["operationType"] == json!("listLogs")
-                && operation["collection"] == json!("historyPages")));
+        assert!(
+            plan["cleanupRetryOperations"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            plan["rereadOperations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|operation| operation["operationType"] == json!("readManifest"))
+        );
+        assert!(plan["rereadOperations"].as_array().unwrap().iter().any(
+            |operation| operation["operationType"] == json!("readSnapshot")
+                && operation["collection"] == json!("historyPages")
+        ));
+        assert!(
+            plan["rereadOperations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|operation| operation["operationType"] == json!("listLogs")
+                    && operation["collection"] == json!("historyPages"))
+        );
     }
 
     #[test]
@@ -44993,10 +45305,12 @@ mod tests {
             json!("commitCloudManifestState")
         );
         assert!(result["issues"][0].get("deleteReason").is_none());
-        assert!(result["cleanupRetryOperations"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            result["cleanupRetryOperations"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
 
         let reread_operations = result["rereadOperations"].as_array().unwrap();
         assert_eq!(reread_operations[0]["operationType"], json!("readManifest"));
@@ -45710,11 +46024,11 @@ mod tests {
             contract["basePath"],
             json!(BROWSER_STORAGE_SYNC_TRANSPORT_BASE_PATH)
         );
-        assert!(contract["endpoints"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|endpoint| endpoint["path"] == json!(BROWSER_STORAGE_SYNC_TRANSPORT_CYCLE_PATH)));
+        assert!(
+            contract["endpoints"].as_array().unwrap().iter().any(
+                |endpoint| endpoint["path"] == json!(BROWSER_STORAGE_SYNC_TRANSPORT_CYCLE_PATH)
+            )
+        );
 
         let push_request_json = browser_storage_sync_push_request_json(
             &empty_browser_storage_sync_batch_json(" profile-a ", " device-a ", 903),
@@ -46541,9 +46855,11 @@ mod tests {
         assert!(operations.iter().all(|operation| {
             operation["conflictPolicy"] == json!(BROWSER_STORAGE_SYNC_REMOTE_APPLY_CONFLICT_POLICY)
         }));
-        assert!(operations
-            .iter()
-            .all(|operation| operation["mergePolicy"].is_string()));
+        assert!(
+            operations
+                .iter()
+                .all(|operation| operation["mergePolicy"].is_string())
+        );
 
         assert_eq!(operations[0]["operationType"], json!("applyRemote"));
         assert_eq!(

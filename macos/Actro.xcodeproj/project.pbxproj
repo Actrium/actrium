@@ -770,7 +770,7 @@
 					"$(inherited)",
 					" ",
 				);
-				REACT_NATIVE_PATH = "${PODS_ROOT}/../../../../packages/actrium/node_modules/react-native-macos";
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../../packages/actrium/node_modules/react-native-macos";
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -833,7 +833,7 @@
 					"$(inherited)",
 					" ",
 				);
-				REACT_NATIVE_PATH = "${PODS_ROOT}/../../../../packages/actrium/node_modules/react-native-macos";
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../../packages/actrium/node_modules/react-native-macos";
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				USE_HERMES = true;
@@ -1054,15 +1054,15 @@
 /* Begin XCLocalSwiftPackageReference section */
 		1A2B3C4D5E6F7890ABCD0005 /* XCLocalSwiftPackageReference "ActroIPC" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../../packages/actrium-platform/apple/ActroIPC;
+			relativePath = ../packages/actrium-platform/apple/ActroIPC;
 		};
 		AA00110022003300AA00BB05 /* XCLocalSwiftPackageReference "ActroVault" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../../packages/actrium-platform/apple/ActroVault;
+			relativePath = ../packages/actrium-platform/apple/ActroVault;
 		};
 		AB00110022003300AA00BB05 /* XCLocalSwiftPackageReference "ActroCore" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../../packages/actrium-platform/apple/ActroCore;
+			relativePath = ../packages/actrium-platform/apple/ActroCore;
 		};
 /* End XCLocalSwiftPackageReference section */
 

@@ -344,17 +344,17 @@ struct SourceFile: Identifiable, Hashable, Sendable {
     }
 
     /// Relative path for file tree display
-    /// Two fixed root directories: Host (actr-host) and Guest (embedded app)
+    /// Two fixed root directories: Host (runtime-host) and Guest (embedded app)
     var relativePath: String {
-        // Host = actr-host directory (the host application code)
-        if let range = fullPath.range(of: "/actr-host/") {
+        // Host = runtime-host directory (the host application code)
+        if let range = fullPath.range(of: "/runtime-host/") {
             return "Host/" + String(fullPath[range.upperBound...])
         }
         // Also include runtime-level files under Host.
         if let range = fullPath.range(of: "/packages/actrium/src/") {
             let remainder = String(fullPath[range.upperBound...])
-            // Files directly in the runtime src root but not in actr-host
-            if !remainder.contains("actr-host") {
+            // Files directly in the runtime src root but not in runtime-host
+            if !remainder.contains("runtime-host") {
                 return "Host/" + remainder
             }
         }

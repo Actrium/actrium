@@ -6,13 +6,13 @@
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           主进程 (Actro.app)                                │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ 1. BrowserViewModel.init()                                                   │
-│    ├─ 检测 counterapp 开发目录                                               │
-│    └─ Task { loadFromDevDirectory() }                                        │
+│ 1. BrowserViewModel 接收 .actr 包                                            │
+│    ├─ 验证 Manifest、签名及 payload 摘要                                     │
+│    └─ 使用声明的 Workload 创建运行时标签页                                   │
 │                                                                             │
-│ 2. loadFromDevDirectory()                                                    │
-│    ├─ 读取 unified-app.js                                                    │
-│    └─ appendACTRTab() → tabs.append(newTab)                                  │
+│ 2. 装载包                                                                    │
+│    ├─ 读取 manifest.toml 声明的 Workload 入口                                │
+│    └─ appendRuntimeTab() → tabs.append(newTab)                               │
 │                                                                             │
 │ 3. UnifiedActroView 渲染                                                    │
 │    └─ ActroView                                                             │

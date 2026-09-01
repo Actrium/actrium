@@ -1,145 +1,46 @@
-# Actro + Keel Architecture Overview
+# Actrium macOS architecture
 
-## System Overview
+Actrium is an Actor Host built with Swift, React Native, Rust, and Keel. The
+native shell owns windows, tabs, package storage, process isolation, and the
+Rust bridge. The React Native runtime owns system applications and the Keel
+Host UI. A third-party UI workload runs only as a `keel.guest/1` workload from
+a signed `.actr` package.
 
-Actro is a React Native macOS application with a sandboxed plugin system based on the **Keel** dynamic UI engine.
-
-**Core Components:**
-- **Host (actr-host)**: React Native macOS app, responsible for rendering and secure execution
-- **Guest (.actr)**: Independently bundled plugin apps running in QuickJS sandbox
-- **Keel**: Bridge layer connecting Host and Guest with secure communication
-- **Askit**: Isomorphic UI component library providing unified APIs for Host and Guest
-
-## Architecture Diagram
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Actro actr-host                        │
-│  (React Native macOS App)                                   │
-│                                                             │
-│  ┌──────────────┐         ┌──────────────────┐             │
-│  │  index.ts    │────────►│  ActrApp.tsx     │             │
-│  │  (Entry)     │         │  (3-Panel Layout)│             │
-│  └──────────────┘         └────────┬─────────┘             │
-│                                    │                        │
-│                           ┌────────▼─────────┐             │
-│                           │ GuestAppView.tsx │             │
-│                           │ (Plugin Loader)  │             │
-│                           └────────┬─────────┘             │
-│                                    │                        │
-│       ┌────────────────────────────┼────────────────┐      │
-│       │                            │                │      │
-│  ┌────▼──────┐          ┌─────────▼──────┐   ┌─────▼────┐ │
-│  │  Engine   │          │FunctionQuickJS │   │ Component│ │
-│  │ (keel)    │          │   Provider     │   │ Registry │ │
-│  └───────────┘          └────────────────┘   └──────────┘ │
-└─────────────────────────────────────────────────────────────┘
-                    │
-┌───────────────────▼─────────────────────────────────────────┐
-│                    Keel Core Library                        │
-│                                                             │
-│  ┌─────────────┐    ┌──────────────┐    ┌────────────┐    │
-│  │  Engine.ts  │───►│ Receiver.ts  │───►│ Registry   │    │
-│  │  (Sandbox)  │    │ (Ops→React)  │    │ (Components)│   │
-│  └─────────────┘    └──────────────┘    └────────────┘    │
-│                                                             │
-│  SDK: View, Text, Image, ScrollView, useHostEvent, etc.    │
-└─────────────────────────────────────────────────────────────┘
-                    │
-┌───────────────────▼─────────────────────────────────────────┐
-│                    askit                                    │
-│                                                             │
-│  APIs: EventEmitter, Toast, Haptic, Bridge                 │
-│  Components: ChatBubble, StepList, ThemeView, UserAvatar   │
-└─────────────────────────────────────────────────────────────┘
-                    │
-┌───────────────────▼─────────────────────────────────────────┐
-│              Guest App (.actr package)                      │
-│                                                             │
-│  manifest.json + left-panel.js + right-panel.js            │
-└─────────────────────────────────────────────────────────────┘
+```text
+Actrium native shell
+├── Rust core and Actor runtime bridge
+├── React Native system bundle
+└── React Native Actor Host bundle
+    └── Keel Host
+        └── signed .actr package
+            ├── manifest.toml
+            ├── manifest.sig
+            └── workload/guest.js
 ```
 
-## Data Flow
+The package loading boundary is strict:
 
-```
-Guest Sandbox (QuickJS)          Host (React Native)
-─────────────────────           ──────────────────────
-React Component
-      ↓
-React.createElement()
-      ↓
-Keel Reconciler
-      ↓
-OperationBatch (JSON)  ──────►  Receiver.applyBatch()
-                                       ↓
-                                NodeMap + Registry
-                                       ↓
-                                React.createElement()
-                                       ↓
-                                Native UI Rendering
-```
+1. download or open the `.actr` archive;
+2. verify the pinned archive digest when package resolution supplies one;
+3. read `manifest.toml` and require `actr-package/1` plus `keel.guest/1`;
+4. verify every declared payload digest and the publisher signature;
+5. load only the workload entry declared by the manifest;
+6. grant only Host capabilities permitted by package and deployment policy.
 
-## Key Files
+There is no raw JavaScript distribution path and no second application archive
+layer around `.actr`.
 
-**Host App:**
-- `actr-host/index.ts` - Entry point
-- `actr-host/src/ActrApp.tsx` - Main app with 3-panel layout
-- `actr-host/src/GuestAppView.tsx` - Plugin loader
-- `actr-host/metro.config.js` - Metro bundler config
+Important paths:
 
-**Keel Core:**
-- `keel/packages/core/src/runtime/engine.ts` - Sandbox engine
-- `keel/packages/core/src/runtime/receiver.ts` - Operation receiver
-- `keel/packages/core/src/reconciler/index.ts` - React reconciler
+- `packages/actrium/index-runtime.tsx`: React Native Actor Host entry;
+- `packages/actrium/src/runtime-host/`: Keel Host and application UI;
+- `packages/keel/`: sandbox engine, reconciler, and Guest build tooling;
+- `packages/actrium-app-sdk/`: Host/Guest bridge APIs;
+- `crates/actrium-core/`: shared Rust/native policy and bindings;
+- `macos/Actro/Models/ActrPackageManifestReader.swift`: macOS package reader;
+- `packages/actrium/keel-guest-examples/counterapp/`: reusable Guest example;
+- `examples/actrium/echo/`: complete Loran + Actor + Actrium Echo demo.
 
-**Askit:**
-- `askit/src/api/` - EventEmitter, Toast, Haptic
-- `askit/src/ui/` - UI components
-- `askit/src/core/` - Bridge and registry
-
-**Guest App:**
-- `packages/actrium/actr-app-examples/counterapp/` - Example app
-- `packages/actrium/actr-app-examples/pack-actr.sh` - Packaging script
-
-## Build Process
-
-**Guest App → .actr:**
-```bash
-# 1. Build with keel CLI
-keel build src/left-panel.tsx --outfile dist/left-panel.js
-
-# 2. Package as .actr
-zip -r app.actr manifest.json left-panel.js right-panel.js
-```
-
-**Host App:**
-```bash
-# Metro bundles the host app
-cd actr-host && npm start
-```
-
-## Security
-
-- **Module Whitelist**: Only `react`, `react-native`, `keel/reconciler`, `keel/sdk` allowed
-- **No eval()**: Build-time analysis rejects any eval usage
-- **Execution Timeout**: 5s default timeout with force destroy
-- **Callback Cleanup**: Auto-cleanup on node deletion
-
-## Development
-
-```bash
-# Start log server (optional)
-node actr-host/log-server.js
-
-# Run Metro bundler
-cd actr-host && npm start
-
-# Build Xcode project
-open Actro.xcworkspace
-```
-
-## Related Documentation
-
-- [Manifest Specification](docs/manifest-specification.md)
-- [Guest Development Guide](docs/keel-askit-guest-guide.md)
+See [Actor Package manifest](docs/manifest-specification.md),
+[Keel Guest development](docs/keel-askit-guest-guide.md), and the normative
+[Actor Package specification](../actr/protocols/actor-package.zh.md).

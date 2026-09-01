@@ -1,5 +1,24 @@
-ACTRO_RUNTIME_RELATIVE_PATH = '../../../packages/actrium'
+ACTRO_RUNTIME_RELATIVE_PATH = '../packages/actrium'
 ACTRO_RUNTIME_PATH = File.expand_path(ACTRO_RUNTIME_RELATIVE_PATH, __dir__)
+require 'fileutils'
+
+# CocoaPods 1.16 can intermittently pass a valid pnpm-backed Pathname to
+# Pathname#realdirpath and still raise "path name contains null byte" while
+# generating file references. Fall back to the already-normalized absolute
+# path only for that known failure; preserve every other filesystem error.
+class ::Pathname
+  unless method_defined?(:actrium_realdirpath_without_pnpm_workaround)
+    alias_method :actrium_realdirpath_without_pnpm_workaround, :realdirpath
+
+    def realdirpath(base_directory = nil)
+      actrium_realdirpath_without_pnpm_workaround(base_directory)
+    rescue ArgumentError => error
+      raise unless error.message.include?('null byte')
+
+      expand_path(base_directory)
+    end
+  end
+end
 # Keep react-native-macos path RELATIVE. RN CocoaPods helpers assume `path` is relative and will
 # incorrectly prefix it if an absolute path is passed (leading to paths like "./Users/..." or "../Users/...").
 REACT_NATIVE_MACOS_PATH = File.join(ACTRO_RUNTIME_RELATIVE_PATH, 'node_modules/react-native-macos')
@@ -44,6 +63,41 @@ post_install do |installer|
   # Tell React Native Right source position. Avoid. Codegen Misreporting
   react_native_post_install(installer, REACT_NATIVE_MACOS_PATH)
   keel_post_install(installer, react_native_path: REACT_NATIVE_MACOS_PATH)
+
+  # CocoaPods 1.16 does not always expose Yoga's nested headers when the
+  # React Native macOS source is reached through pnpm symlinks.
+  yoga_source = File.join(
+    ACTRO_RUNTIME_PATH,
+    'node_modules',
+    'react-native-macos',
+    'ReactCommon',
+    'yoga',
+    'yoga'
+  )
+  yoga_headers = File.join(installer.sandbox.root, 'Headers', 'Public', 'Yoga')
+  yoga_namespace = File.join(yoga_headers, 'yoga')
+  FileUtils.mkdir_p(yoga_namespace)
+  Dir.children(yoga_source).each do |entry|
+    source = File.join(yoga_source, entry)
+    next unless File.directory?(source)
+
+    FileUtils.ln_sf(source, File.join(yoga_namespace, entry))
+  end
+
+  react_common_root = File.join(
+    ACTRO_RUNTIME_PATH,
+    'node_modules',
+    'react-native-macos',
+    'ReactCommon'
+  )
+  {
+    'React-callinvoker' => ['ReactCommon', File.join(react_common_root, 'callinvoker', 'ReactCommon')],
+    'React-perflogger' => ['reactperflogger', File.join(react_common_root, 'reactperflogger', 'reactperflogger')]
+  }.each do |pod_name, (header_name, source)|
+    header_root = File.join(installer.sandbox.root, 'Headers', 'Public', pod_name)
+    FileUtils.mkdir_p(header_root)
+    FileUtils.ln_sf(source, File.join(header_root, header_name))
+  end
 
   # NOTE: hermes.framework embedding for ActroViewService XPC target is done via
   # a manually-added build phase in Actro.xcodeproj (not via CocoaPods).

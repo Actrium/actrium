@@ -1,5 +1,5 @@
-import Foundation
 import CryptoKit
+import Foundation
 
 public struct AppleActrPackageManifestInfo {
     public let name: String?
@@ -17,213 +17,113 @@ public struct AppleActrPackageManifestInfo {
     public let unifiedScript: String?
     public let systemAppType: String?
     public let themeColor: String?
-    public let usesLegacyLayoutFallback: Bool
-    public let integrityAlgorithm: String?
+    public let integrityAlgorithm: String
     public let integrityFileCount: Int
 }
 
 public enum AppleActrPackageManifestReader {
     public static func read(fromRoot root: URL) throws -> AppleActrPackageManifestInfo {
-        guard let manifestURL = findManifestJSON(in: root) else {
-            throw NSError(
-                domain: "ACTRPackage",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Not found in bag manifest.json"]
-            )
+        guard let manifestURL = findManifest(in: root) else {
+            throw packageError(code: 1, message: "manifest.toml was not found")
         }
-
-        let data = try Data(contentsOf: manifestURL)
-        guard let manifestJSON = String(data: data, encoding: .utf8) else {
-            throw NSError(
-                domain: "ACTRPackage",
-                code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "manifest.json It's not working. UTF-8 Text"]
-            )
-        }
-
-        let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
-        let layout = json?["layout"] as? [String: Any]
-        let leftPanelScript = layout?["leftPanel"] as? String
-        let rightPanelScript = layout?["rightPanel"] as? String
-
-        do {
-            let manifest = try parseActrManifest(json: manifestJSON)
-            let integrity = try verifyACTRIntegrity(fromRoot: root, manifestJSON: manifestJSON)
-            let contractVersion = manifest.contractVersion.map(Int.init)
-
-            return AppleActrPackageManifestInfo(
-                name: manifest.name,
-                version: manifest.version,
-                description: manifest.description,
-                appId: manifest.appId,
-                icon: manifest.icon,
-                contractName: manifest.contractName,
-                contractVersion: contractVersion,
-                permissions: manifest.permissions,
-                leftPanelDefaultVisible: manifest.leftPanelDefaultVisible,
-                rightPanelDefaultVisible: manifest.rightPanelDefaultVisible,
-                leftPanelScript: leftPanelScript,
-                rightPanelScript: rightPanelScript,
-                unifiedScript: manifest.entry,
-                systemAppType: manifest.systemAppType,
-                themeColor: manifest.themeColor,
-                usesLegacyLayoutFallback: false,
-                integrityAlgorithm: integrity?.algorithm,
-                integrityFileCount: integrity?.fileCount ?? 0
-            )
-        } catch CoreError.MissingField(let field) where field == "entry" && (leftPanelScript != nil || rightPanelScript != nil) {
-            return try readLegacyLayoutManifest(
-                json: json,
-                leftPanelScript: leftPanelScript,
-                rightPanelScript: rightPanelScript
-            )
-        }
-    }
-
-    private static func readLegacyLayoutManifest(
-        json: [String: Any]?,
-        leftPanelScript: String?,
-        rightPanelScript: String?
-    ) throws -> AppleActrPackageManifestInfo {
-        let name = json?["name"] as? String
-        let version = json?["version"] as? String
-        let description = json?["description"] as? String
-        let appId = (json?["id"] as? String) ?? (json?["bundleId"] as? String)
-        let icon = json?["icon"] as? String
-        let themeColor = (json?["themeColor"] as? String) ?? (json?["backgroundColor"] as? String)
-        let leftPanelDefaultVisible = json?["leftPanelDefaultVisible"] as? Bool ?? true
-        let rightPanelDefaultVisible = json?["rightPanelDefaultVisible"] as? Bool ?? false
-        let permissions = json?["permissions"] as? [String] ?? []
-        let systemAppType = json?["systemAppType"] as? String
-
-        var contractName: String? = nil
-        var contractVersion: Int? = nil
-        if let contract = json?["contract"] as? [String: Any] {
-            contractName = contract["name"] as? String
-            contractVersion = {
-                if let value = contract["version"] as? Int { return value }
-                if let value = contract["version"] as? Double { return Int(value) }
-                return nil
-            }()
-
-            if let contractName, let contractVersion {
-                let gate = evaluateContract(name: contractName, version: UInt32(contractVersion))
-                if gate.status == .blocked {
-                    throw NSError(
-                        domain: "ACTRContract",
-                        code: 1,
-                        userInfo: [NSLocalizedDescriptionKey: gate.blockedReason ?? "Unsupported contract"]
-                    )
-                }
-            }
-        }
+        let source = try String(contentsOf: manifestURL, encoding: .utf8)
+        let manifest = try parseActrPackageManifest(source: source)
+        let plan = try createActrIntegrityPlan(manifestToml: source)
+        try verifyPayloads(fromRoot: manifestURL.deletingLastPathComponent(), plan: plan)
 
         return AppleActrPackageManifestInfo(
-            name: name,
-            version: version,
-            description: description,
-            appId: appId,
-            icon: icon,
-            contractName: contractName,
-            contractVersion: contractVersion,
-            permissions: permissions,
-            leftPanelDefaultVisible: leftPanelDefaultVisible,
-            rightPanelDefaultVisible: rightPanelDefaultVisible,
-            leftPanelScript: leftPanelScript,
-            rightPanelScript: rightPanelScript,
-            unifiedScript: nil,
-            systemAppType: systemAppType,
-            themeColor: themeColor,
-            usesLegacyLayoutFallback: true,
-            integrityAlgorithm: nil,
-            integrityFileCount: 0
+            name: manifest.name,
+            version: manifest.version,
+            description: manifest.description,
+            appId: manifest.appId,
+            icon: manifest.icon,
+            contractName: manifest.contractName,
+            contractVersion: manifest.contractVersion.map(Int.init),
+            permissions: manifest.permissions,
+            leftPanelDefaultVisible: manifest.leftPanelDefaultVisible,
+            rightPanelDefaultVisible: manifest.rightPanelDefaultVisible,
+            leftPanelScript: nil,
+            rightPanelScript: nil,
+            unifiedScript: manifest.entry,
+            systemAppType: manifest.systemAppType,
+            themeColor: manifest.themeColor,
+            integrityAlgorithm: plan?.algorithm ?? "sha256",
+            integrityFileCount: plan?.files.count ?? 0
         )
     }
 
-    private static func verifyACTRIntegrity(
+    private static func verifyPayloads(
         fromRoot root: URL,
-        manifestJSON: String
-    ) throws -> (algorithm: String, fileCount: Int)? {
-        guard let plan = try createActrIntegrityPlan(manifestJson: manifestJSON) else {
-            return nil
+        plan: PackageIntegrityPlanInfo?
+    ) throws {
+        guard let plan else {
+            throw packageError(code: 2, message: "the package does not declare payload files")
         }
-
         for file in plan.files {
-            let fileURL = try resolvedACTRIntegrityFileURL(root: root, path: file.path)
+            let fileURL = try resolvedPayloadURL(root: root, path: file.path)
             let actualHash = try sha256Hex(for: fileURL)
             guard actualHash == file.expectedHash else {
-                throw NSError(
-                    domain: "ACTRIntegrity",
+                throw packageError(
                     code: 3,
-                    userInfo: [NSLocalizedDescriptionKey: "ACTR integrity check failed for \(file.path)"]
+                    message: "payload digest mismatch for \(file.path)"
                 )
             }
         }
-
-        return (algorithm: plan.algorithm, fileCount: plan.files.count)
     }
 
-    private static func resolvedACTRIntegrityFileURL(root: URL, path: String) throws -> URL {
+    private static func resolvedPayloadURL(root: URL, path: String) throws -> URL {
         let rootURL = root.standardizedFileURL.resolvingSymlinksInPath()
         let fileURL = root
             .appendingPathComponent(path, isDirectory: false)
             .standardizedFileURL
             .resolvingSymlinksInPath()
-
         let rootPath = rootURL.path
         let filePath = fileURL.path
-        guard filePath == rootPath || filePath.hasPrefix(rootPath + "/") else {
-            throw NSError(
-                domain: "ACTRIntegrity",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "ACTR integrity path escapes package: \(path)"]
-            )
+        guard filePath.hasPrefix(rootPath + "/") else {
+            throw packageError(code: 4, message: "payload path escapes package: \(path)")
         }
-
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: filePath, isDirectory: &isDirectory),
               !isDirectory.boolValue else {
-            throw NSError(
-                domain: "ACTRIntegrity",
-                code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "ACTR integrity file missing: \(path)"]
-            )
+            throw packageError(code: 5, message: "payload file is missing: \(path)")
         }
-
         return fileURL
     }
 
     private static func sha256Hex(for fileURL: URL) throws -> String {
         let handle = try FileHandle(forReadingFrom: fileURL)
-        defer {
-            try? handle.close()
-        }
-
+        defer { try? handle.close() }
         var hasher = SHA256()
         while true {
             let chunk = try handle.read(upToCount: 1024 * 1024) ?? Data()
-            if chunk.isEmpty {
-                break
-            }
+            if chunk.isEmpty { break }
             hasher.update(data: chunk)
         }
-
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
-    private static func findManifestJSON(in root: URL) -> URL? {
-        let fm = FileManager.default
-        if let direct = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
-            .first(where: { $0.lastPathComponent == "manifest.json" }) {
+    private static func findManifest(in root: URL) -> URL? {
+        let direct = root.appendingPathComponent("manifest.toml", isDirectory: false)
+        if FileManager.default.fileExists(atPath: direct.path) {
             return direct
         }
-
-        if let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: nil) {
-            for case let fileURL as URL in enumerator where fileURL.lastPathComponent == "manifest.json" {
+        if let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: nil
+        ) {
+            for case let fileURL as URL in enumerator
+            where fileURL.lastPathComponent == "manifest.toml" {
                 return fileURL
             }
         }
         return nil
     }
-}
 
+    private static func packageError(code: Int, message: String) -> NSError {
+        NSError(
+            domain: "ActrPackage",
+            code: code,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
+    }
+}

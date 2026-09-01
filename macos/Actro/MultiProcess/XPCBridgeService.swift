@@ -33,6 +33,7 @@ struct XPCTabConfig {
     let leftPanelScript: String?
     let leftPanelVisible: Bool
     let rightPanelVisible: Bool
+    let permissions: [String]
     let bookmarks: [[String: Any]]
     let recentHistory: [[String: Any]]
     let reloadKey: Int
@@ -47,6 +48,7 @@ struct XPCTabConfig {
             "isOverviewMode": isOverviewMode,
             "leftPanelVisible": leftPanelVisible,
             "rightPanelVisible": rightPanelVisible,
+            "permissions": permissions,
             "bookmarks": bookmarks,
             "recentHistory": recentHistory,
             "reloadKey": reloadKey

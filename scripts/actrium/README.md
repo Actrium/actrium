@@ -30,11 +30,15 @@ the script is used across multiple top-level areas.
   points at monorepo package/runtime locations, reserved package boundaries
   have README files, `internal/` remains git-ignored, and temporary import
   trees under `.import/actro/` are absent.
+- `check-retired-protocol-names.sh` rejects identifiers from the superseded
+  package split in source text and paths.
+- `rewrite-retired-protocol-history.sh` performs the corresponding one-time,
+  confirmation-gated rewrite after an external backup has been created.
 - `check-generated-contracts.sh` regenerates the lightweight Rust-owned
   TypeScript and Android compile-time contract sources into a temporary
   directory and verifies that the checked-in copies are current. It also checks
   that React Native runtime source imports the TypeScript contract through the
-  stable `actr-host/coreContract.ts` adapter instead of directly importing the
+  stable `runtime-host/coreContract.ts` adapter instead of directly importing the
   generated file.
 - `check-rust-boundary-hygiene.sh` protects the native RN/UI boundary files that
   have already been moved behind local Swift/Kotlin adapters. It intentionally

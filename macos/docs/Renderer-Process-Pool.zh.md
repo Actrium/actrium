@@ -188,12 +188,12 @@ Bundle 中；主程序不再链接 RN/Hermes。运行 N 个实例时，磁盘仍
 - 旧 Debug App 约 347 MiB；新 Debug App 为 143,144 KiB（约 139.8 MiB），减少约
   60%。安装内容为
   0 个 `.xpc`、1 个 `ActroRenderer.app`、1 个 `system.jsbundle`。
-- ACTR / REQUESTS 本轮验收范围只到宿主视图结构、装载链路和 fingerprint 隔离边界；
+- ACTR / Keel Guest 本轮验收范围只到宿主视图结构、装载链路和 fingerprint 隔离边界；
   其应用内部行为留给后续格式调整后再做完整适配。
 - 薄 Helper 当前不链接移动端页面才使用的 WebView、DeviceInfo、Reanimated 和
   GestureHandler 原生实现；React Native 生成模块表仍会对未链接的可选 WebView
   provider 记录一次探测告警，但当前 macOS 可达的 History / Bookmarks 不依赖它，
-  两个页面的 Surface 均实测进入 Running 状态。后续 ACTR / REQUESTS 定型时再按实际
+  两个页面的 Surface 均实测进入 Running 状态。后续 ACTR / Keel Guest 定型时再按实际
   capability 选择原生模块或 macOS 平台视图，避免提前把整套移动依赖塞回安装包。
 
 ## 10. 签名与平台边界

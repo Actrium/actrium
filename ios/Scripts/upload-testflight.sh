@@ -203,32 +203,12 @@ node node_modules/react-native/scripts/bundle.js \
     --platform ios \
     --dev false \
     --entry-file index.ts \
-    --bundle-output "$PROJECT_ROOT/Actro/actr.jsbundle" \
+    --bundle-output "$PROJECT_ROOT/Actro/runtime.jsbundle" \
     --assets-dest "$PROJECT_ROOT/Actro"
 
 cd "$PROJECT_ROOT"
 
 log_success "React Native Bundle And the resources are packed."
-
-# ==============================================================================
-# Packing example .actr Apply
-# ==============================================================================
-
-log_step "Packing example App (counterapp.actr)"
-
-COUNTER_APP_DIR="$PROJECT_ROOT/ActroRuntime/actr-app-examples/counterapp"
-OUTPUT_ASSET_DIR="$PROJECT_ROOT/Actro/Resources"
-
-if [ -d "$COUNTER_APP_DIR" ]; then
-    cd "$COUNTER_APP_DIR"
-    # Will manifest.json and unified-app.js Compress, rename as .actr And output to Resources
-    zip -j "$OUTPUT_ASSET_DIR/counterapp.actr" manifest.json unified-app.js
-    log_success "counterapp.actr Updated to $OUTPUT_ASSET_DIR"
-else
-    log_warning "Not found counterapp Directory, Skip .actr Pack up."
-fi
-
-cd "$PROJECT_ROOT"
 
 # ==============================================================================
 # Install CocoaPods Dependency

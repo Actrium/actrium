@@ -5,7 +5,7 @@ Actro The project contains a stand-alone project React Native bundle. Current He
 | Bundle | Entry files | Output File | Purpose |
 |--------|----------|----------|------|
 | System Apps | `index-system.tsx` | `system.jsbundle` | System Renderer(`system.*`) |
-| Actr Host | `index-actr.tsx` | `actr.jsbundle` | Normal Renderer |
+| Actr Host | `index-runtime.tsx` | `runtime.jsbundle` | Normal Renderer |
 
 ## Quick Use
 
@@ -40,23 +40,23 @@ Actro The project contains a stand-alone project React Native bundle. Current He
 
 **Entry files**: `packages/actrium/index-system.tsx`
 
-### Actr Host (`actr.jsbundle`)
+### Actr Host (`runtime.jsbundle`)
 
 **Purpose**: By RCTViewService1-N Load, render `.actr` Plugin application.
 
 **Include Functions**:
-- `ActrApp` - Plugin Host Environment
+- `RuntimeApp` - Plugin Host Environment
 - `keel` / `askit` Engine support
 - Guest sandbox Run-time
 
-**Entry files**: `packages/actrium/index-actr.tsx`
+**Entry files**: `packages/actrium/index-runtime.tsx`
 
 ## Source Structure
 
 ```
 packages/actrium/
 ├── index-system.tsx      # System Apps Entry
-├── index-actr.tsx        # Actr Host Entry
+├── index-runtime.tsx        # Actr Host Entry
 ├── index.ts              # Legacy Unified entrance (disused)
 └── src/
     ├── system-apps/      # System application source code
@@ -64,8 +64,8 @@ packages/actrium/
     │   ├── HistoryApp.tsx
     │   ├── BookmarksApp.tsx
     │   └── DebugApp.tsx
-    ├── actr-host/        # Actr Host Source
-    │   ├── ActrApp.tsx
+    ├── runtime-host/        # Actr Host Source
+    │   ├── RuntimeApp.tsx
     │   └── BundleView.tsx
     ├── TabRouter.tsx     # Router (Log)Legacy)
     └── logger.ts         # Log Tool

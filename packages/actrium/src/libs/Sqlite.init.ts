@@ -5,7 +5,7 @@ import {
   RUNTIME_DB_MIGRATION_SQL,
   RUNTIME_DB_SCHEMA_VERSION,
   RUNTIME_DB_TABLES,
-} from '../actr-host/coreContract';
+} from '../runtime-host/coreContract';
 
 type UserVersionRow = {
   user_version: number;

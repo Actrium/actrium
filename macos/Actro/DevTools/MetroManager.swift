@@ -19,7 +19,7 @@ enum ActroRuntimePaths {
     }
 
     static var actrHostSourcePath: String {
-        (runtimePath as NSString).appendingPathComponent("src/actr-host")
+        (runtimePath as NSString).appendingPathComponent("src/runtime-host")
     }
 
     private static var sourceRuntimePath: String {

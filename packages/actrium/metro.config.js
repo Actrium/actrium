@@ -9,9 +9,12 @@ const workspaceNodeModules = path.resolve(workspaceRoot, 'node_modules');
 const projectNodeModules = path.resolve(projectRoot, 'node_modules');
 const keelRoot = path.resolve(workspacePackagesRoot, 'keel');
 const appSdkRoot = path.resolve(workspacePackagesRoot, 'actrium-app-sdk');
+const reactNativeMetroConfigRoot = path.dirname(
+  require.resolve('@react-native/metro-config/package.json'),
+);
 const asyncRequireModulePath = require.resolve(
   'metro-runtime/src/modules/asyncRequire',
-  { paths: [projectRoot] },
+  { paths: [reactNativeMetroConfigRoot] },
 );
 
 const existingDirs = (paths) =>
@@ -85,13 +88,14 @@ const customConfig = {
           type: 'sourceFile',
           filePath: path.resolve(
             projectRoot,
-            'src/actr-host/shims/react-native-safe-area-context.js',
+            'src/runtime-host/shims/react-native-safe-area-context.js',
           ),
         };
       }
 
       const localModules = {
         keel: path.resolve(keelRoot, 'src/host/index.ts'),
+        'keel/host': path.resolve(keelRoot, 'src/host/index.ts'),
         'keel/host/preset': path.resolve(keelRoot, 'src/host/preset/index.ts'),
         askit: path.resolve(appSdkRoot, 'src/index.host.ts'),
         'askit/core': path.resolve(appSdkRoot, 'src/core/index.ts'),
@@ -124,7 +128,7 @@ const customConfig = {
       if (moduleName === 'tslib') {
         return {
           type: 'sourceFile',
-          filePath: path.resolve(projectRoot, 'src/actr-host/shims/tslib.js'),
+          filePath: path.resolve(projectRoot, 'src/runtime-host/shims/tslib.js'),
         };
       }
 

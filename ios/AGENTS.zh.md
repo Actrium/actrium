@@ -14,7 +14,7 @@ graph TD
 
     subgraph "Core Layer (ActroRuntime 子项目)"
         B --> C[native-bridge]
-        C --> D[actr-host]
+        C --> D[runtime-host]
         D --> E[Infrastructure]
     end
 
@@ -37,8 +37,8 @@ graph TD
 ## 2. 模块职责与协作关系
 
 ### 关键组件协作
-- **TabRouter** (RN 入口)：接收 Native 传入的配置，按类型路由到 `ActrApp` (插件) 或系统内置应用 (登录/历史)。
-- **ActrApp / ActrTabView**：管理 Keel Engine 实例池。负责下载、校验插件包，初始化渲染沙箱，并向原生推送监控快照。
+- **TabRouter** (RN 入口)：接收 Native 传入的配置，按类型路由到 `RuntimeApp` (插件) 或系统内置应用 (登录/历史)。
+- **RuntimeApp / RuntimeTabView**：管理 Keel Engine 实例池。负责下载、校验插件包，初始化渲染沙箱，并向原生推送监控快照。
 - **native-bridge**：作为 JS 与原生 SDK 间的唯一通道，处理复杂的 WebRTC 连接逻辑，实现消息流的端到端路由。
 - **Infrastructure (api/repo/services)**：`AppSessionService` 负责会话的完整初始化流程（获取信息 -> 校验包 -> 解析脚本）。
 
@@ -64,10 +64,10 @@ graph TD
 ## 4. 核心数据流
 
 ### A. 应用加载流
-Native 启动 -> `TabRouter` 分发 -> `AppSessionService` 初始化插件容器 -> `ActrTabView` 激活插件运行时。
+Native 启动 -> `TabRouter` 分发 -> `AppSessionService` 初始化插件容器 -> `RuntimeTabView` 激活插件运行时。
 
 ### B. 消息交互闭环
-1.  **发送**: 用户输入 -> `ActrInput` -> `native-bridge` -> `Native Actr SDK` -> `Server`。
+1.  **发送**: 用户输入 -> `AppInput` -> `native-bridge` -> `Native Actr SDK` -> `Server`。
 2.  **接收**: `Native Event` -> `native-bridge` (流式分发) -> `useMessageStore` (内容累加) -> `UI` 呈现。
 
 ---

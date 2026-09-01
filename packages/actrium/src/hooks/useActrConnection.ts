@@ -9,9 +9,9 @@ import {
   TLocation,
 } from '../libs/actr';
 import { AppInfo } from '../api/types';
-import { IAttachmentItem } from '../actr-host/types/attachment';
+import { IAttachmentItem } from '../runtime-host/types/attachment';
 import { Utils } from '../utils/utils';
-import { useMessageStore } from '../actr-host/store/useMessageStore';
+import { useMessageStore } from '../runtime-host/store/useMessageStore';
 import { Progress } from '../repository/MessageRepository';
 import { GlobalAlert } from '../components';
 import i18n from '../i18n';

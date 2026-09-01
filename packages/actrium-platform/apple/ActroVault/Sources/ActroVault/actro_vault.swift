@@ -8,11 +8,11 @@ import Foundation
 // might be in a separate module, or it might be compiled inline into
 // this module. This is a bit of light hackery to work with both.
 #if canImport(actro_vaultFFI)
-    import actro_vaultFFI
+import actro_vaultFFI
 #endif
 
-private extension RustBuffer {
-    /// Allocate a new buffer, copying the contents of a `UInt8` array.
+fileprivate extension RustBuffer {
+    // Allocate a new buffer, copying the contents of a `UInt8` array.
     init(bytes: [UInt8]) {
         let rbuf = bytes.withUnsafeBufferPointer { ptr in
             RustBuffer.from(ptr)
@@ -21,21 +21,21 @@ private extension RustBuffer {
     }
 
     static func empty() -> RustBuffer {
-        RustBuffer(capacity: 0, len: 0, data: nil)
+        RustBuffer(capacity: 0, len:0, data: nil)
     }
 
     static func from(_ ptr: UnsafeBufferPointer<UInt8>) -> RustBuffer {
         try! rustCall { ffi_actro_vault_rustbuffer_from_bytes(ForeignBytes(bufferPointer: ptr), $0) }
     }
 
-    /// Frees the buffer in place.
-    /// The buffer must not be used after this is called.
+    // Frees the buffer in place.
+    // The buffer must not be used after this is called.
     func deallocate() {
         try! rustCall { ffi_actro_vault_rustbuffer_free(self, $0) }
     }
 }
 
-private extension ForeignBytes {
+fileprivate extension ForeignBytes {
     init(bufferPointer: UnsafeBufferPointer<UInt8>) {
         self.init(len: Int32(bufferPointer.count), data: bufferPointer.baseAddress)
     }
@@ -48,7 +48,7 @@ private extension ForeignBytes {
 // Helper classes/extensions that don't change.
 // Someday, this will be in a library of its own.
 
-private extension Data {
+fileprivate extension Data {
     init(rustBuffer: RustBuffer) {
         self.init(
             bytesNoCopy: rustBuffer.data!,
@@ -72,15 +72,15 @@ private extension Data {
 //
 // Instead, the read() method and these helper functions input a tuple of data
 
-private func createReader(data: Data) -> (data: Data, offset: Data.Index) {
+fileprivate func createReader(data: Data) -> (data: Data, offset: Data.Index) {
     (data: data, offset: 0)
 }
 
-/// Reads an integer at the current offset, in big-endian order, and advances
-/// the offset on success. Throws if reading the integer would move the
-/// offset past the end of the buffer.
-private func readInt<T: FixedWidthInteger>(_ reader: inout (data: Data, offset: Data.Index)) throws -> T {
-    let range = reader.offset ..< reader.offset + MemoryLayout<T>.size
+// Reads an integer at the current offset, in big-endian order, and advances
+// the offset on success. Throws if reading the integer would move the
+// offset past the end of the buffer.
+fileprivate func readInt<T: FixedWidthInteger>(_ reader: inout (data: Data, offset: Data.Index)) throws -> T {
+    let range = reader.offset..<reader.offset + MemoryLayout<T>.size
     guard reader.data.count >= range.upperBound else {
         throw UniffiInternalError.bufferOverflow
     }
@@ -90,38 +90,38 @@ private func readInt<T: FixedWidthInteger>(_ reader: inout (data: Data, offset: 
         return value as! T
     }
     var value: T = 0
-    let _ = withUnsafeMutableBytes(of: &value) { reader.data.copyBytes(to: $0, from: range) }
+    let _ = withUnsafeMutableBytes(of: &value, { reader.data.copyBytes(to: $0, from: range)})
     reader.offset = range.upperBound
     return value.bigEndian
 }
 
-/// Reads an arbitrary number of bytes, to be used to read
-/// raw bytes, this is useful when lifting strings
-private func readBytes(_ reader: inout (data: Data, offset: Data.Index), count: Int) throws -> [UInt8] {
-    let range = reader.offset ..< (reader.offset + count)
+// Reads an arbitrary number of bytes, to be used to read
+// raw bytes, this is useful when lifting strings
+fileprivate func readBytes(_ reader: inout (data: Data, offset: Data.Index), count: Int) throws -> Array<UInt8> {
+    let range = reader.offset..<(reader.offset+count)
     guard reader.data.count >= range.upperBound else {
         throw UniffiInternalError.bufferOverflow
     }
     var value = [UInt8](repeating: 0, count: count)
-    value.withUnsafeMutableBufferPointer { buffer in
+    value.withUnsafeMutableBufferPointer({ buffer in
         reader.data.copyBytes(to: buffer, from: range)
-    }
+    })
     reader.offset = range.upperBound
     return value
 }
 
-/// Reads a float at the current offset.
-private func readFloat(_ reader: inout (data: Data, offset: Data.Index)) throws -> Float {
-    return try Float(bitPattern: readInt(&reader))
+// Reads a float at the current offset.
+fileprivate func readFloat(_ reader: inout (data: Data, offset: Data.Index)) throws -> Float {
+    return Float(bitPattern: try readInt(&reader))
 }
 
-/// Reads a float at the current offset.
-private func readDouble(_ reader: inout (data: Data, offset: Data.Index)) throws -> Double {
-    return try Double(bitPattern: readInt(&reader))
+// Reads a float at the current offset.
+fileprivate func readDouble(_ reader: inout (data: Data, offset: Data.Index)) throws -> Double {
+    return Double(bitPattern: try readInt(&reader))
 }
 
-/// Indicates if the offset has reached the end of the buffer.
-private func hasRemaining(_ reader: (data: Data, offset: Data.Index)) -> Bool {
+// Indicates if the offset has reached the end of the buffer.
+fileprivate func hasRemaining(_ reader: (data: Data, offset: Data.Index)) -> Bool {
     return reader.offset < reader.data.count
 }
 
@@ -129,34 +129,34 @@ private func hasRemaining(_ reader: (data: Data, offset: Data.Index)) -> Bool {
 // struct, but we use standalone functions instead in order to make external
 // types work.  See the above discussion on Readers for details.
 
-private func createWriter() -> [UInt8] {
+fileprivate func createWriter() -> [UInt8] {
     return []
 }
 
-private func writeBytes<S: Sequence>(_ writer: inout [UInt8], _ byteArr: S) where S.Element == UInt8 {
+fileprivate func writeBytes<S>(_ writer: inout [UInt8], _ byteArr: S) where S: Sequence, S.Element == UInt8 {
     writer.append(contentsOf: byteArr)
 }
 
-/// Writes an integer in big-endian order.
-///
-/// Warning: make sure what you are trying to write
-/// is in the correct type!
-private func writeInt<T: FixedWidthInteger>(_ writer: inout [UInt8], _ value: T) {
+// Writes an integer in big-endian order.
+//
+// Warning: make sure what you are trying to write
+// is in the correct type!
+fileprivate func writeInt<T: FixedWidthInteger>(_ writer: inout [UInt8], _ value: T) {
     var value = value.bigEndian
     withUnsafeBytes(of: &value) { writer.append(contentsOf: $0) }
 }
 
-private func writeFloat(_ writer: inout [UInt8], _ value: Float) {
+fileprivate func writeFloat(_ writer: inout [UInt8], _ value: Float) {
     writeInt(&writer, value.bitPattern)
 }
 
-private func writeDouble(_ writer: inout [UInt8], _ value: Double) {
+fileprivate func writeDouble(_ writer: inout [UInt8], _ value: Double) {
     writeInt(&writer, value.bitPattern)
 }
 
-/// Protocol for types that transfer other types across the FFI. This is
-/// analogous to the Rust trait of the same name.
-private protocol FfiConverter {
+// Protocol for types that transfer other types across the FFI. This is
+// analogous to the Rust trait of the same name.
+fileprivate protocol FfiConverter {
     associatedtype FfiType
     associatedtype SwiftType
 
@@ -166,33 +166,33 @@ private protocol FfiConverter {
     static func write(_ value: SwiftType, into buf: inout [UInt8])
 }
 
-/// Types conforming to `Primitive` pass themselves directly over the FFI.
-private protocol FfiConverterPrimitive: FfiConverter where FfiType == SwiftType {}
+// Types conforming to `Primitive` pass themselves directly over the FFI.
+fileprivate protocol FfiConverterPrimitive: FfiConverter where FfiType == SwiftType { }
 
 extension FfiConverterPrimitive {
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func lift(_ value: FfiType) throws -> SwiftType {
         return value
     }
 
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func lower(_ value: SwiftType) -> FfiType {
         return value
     }
 }
 
-/// Types conforming to `FfiConverterRustBuffer` lift and lower into a `RustBuffer`.
-/// Used for complex types where it's hard to write a custom lift/lower.
-private protocol FfiConverterRustBuffer: FfiConverter where FfiType == RustBuffer {}
+// Types conforming to `FfiConverterRustBuffer` lift and lower into a `RustBuffer`.
+// Used for complex types where it's hard to write a custom lift/lower.
+fileprivate protocol FfiConverterRustBuffer: FfiConverter where FfiType == RustBuffer {}
 
 extension FfiConverterRustBuffer {
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func lift(_ buf: RustBuffer) throws -> SwiftType {
         var reader = createReader(data: Data(rustBuffer: buf))
         let value = try read(from: &reader)
@@ -203,19 +203,18 @@ extension FfiConverterRustBuffer {
         return value
     }
 
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func lower(_ value: SwiftType) -> RustBuffer {
-        var writer = createWriter()
-        write(value, into: &writer)
-        return RustBuffer(bytes: writer)
+          var writer = createWriter()
+          write(value, into: &writer)
+          return RustBuffer(bytes: writer)
     }
 }
-
-/// An error type for FFI errors. These errors occur at the UniFFI level, not
-/// the library level.
-private enum UniffiInternalError: LocalizedError {
+// An error type for FFI errors. These errors occur at the UniFFI level, not
+// the library level.
+fileprivate enum UniffiInternalError: LocalizedError {
     case bufferOverflow
     case incompleteData
     case unexpectedOptionalTag
@@ -226,7 +225,7 @@ private enum UniffiInternalError: LocalizedError {
     case unexpectedStaleHandle
     case rustPanic(_ message: String)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .bufferOverflow: return "Reading the requested value would read past the end of the buffer"
         case .incompleteData: return "The buffer still has data after lifting its containing value"
@@ -241,24 +240,24 @@ private enum UniffiInternalError: LocalizedError {
     }
 }
 
-private extension NSLock {
+fileprivate extension NSLock {
     func withLock<T>(f: () throws -> T) rethrows -> T {
-        lock()
+        self.lock()
         defer { self.unlock() }
         return try f()
     }
 }
 
-private let CALL_SUCCESS: Int8 = 0
-private let CALL_ERROR: Int8 = 1
-private let CALL_UNEXPECTED_ERROR: Int8 = 2
-private let CALL_CANCELLED: Int8 = 3
+fileprivate let CALL_SUCCESS: Int8 = 0
+fileprivate let CALL_ERROR: Int8 = 1
+fileprivate let CALL_UNEXPECTED_ERROR: Int8 = 2
+fileprivate let CALL_CANCELLED: Int8 = 3
 
-private extension RustCallStatus {
+fileprivate extension RustCallStatus {
     init() {
         self.init(
             code: CALL_SUCCESS,
-            errorBuf: RustBuffer(
+            errorBuf: RustBuffer.init(
                 capacity: 0,
                 len: 0,
                 data: nil
@@ -274,8 +273,7 @@ private func rustCall<T>(_ callback: (UnsafeMutablePointer<RustCallStatus>) -> T
 
 private func rustCallWithError<T, E: Swift.Error>(
     _ errorHandler: @escaping (RustBuffer) throws -> E,
-    _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T
-) throws -> T {
+    _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T) throws -> T {
     try makeRustCall(callback, errorHandler: errorHandler)
 }
 
@@ -283,8 +281,8 @@ private func makeRustCall<T, E: Swift.Error>(
     _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T,
     errorHandler: ((RustBuffer) throws -> E)?
 ) throws -> T {
-    uniffiEnsureInitialized()
-    var callStatus = RustCallStatus()
+    uniffiEnsureActroVaultInitialized()
+    var callStatus = RustCallStatus.init()
     let returnedVal = callback(&callStatus)
     try uniffiCheckCallStatus(callStatus: callStatus, errorHandler: errorHandler)
     return returnedVal
@@ -295,44 +293,44 @@ private func uniffiCheckCallStatus<E: Swift.Error>(
     errorHandler: ((RustBuffer) throws -> E)?
 ) throws {
     switch callStatus.code {
-    case CALL_SUCCESS:
-        return
+        case CALL_SUCCESS:
+            return
 
-    case CALL_ERROR:
-        if let errorHandler = errorHandler {
-            throw try errorHandler(callStatus.errorBuf)
-        } else {
-            callStatus.errorBuf.deallocate()
-            throw UniffiInternalError.unexpectedRustCallError
-        }
+        case CALL_ERROR:
+            if let errorHandler = errorHandler {
+                throw try errorHandler(callStatus.errorBuf)
+            } else {
+                callStatus.errorBuf.deallocate()
+                throw UniffiInternalError.unexpectedRustCallError
+            }
 
-    case CALL_UNEXPECTED_ERROR:
-        // When the rust code sees a panic, it tries to construct a RustBuffer
-        // with the message.  But if that code panics, then it just sends back
-        // an empty buffer.
-        if callStatus.errorBuf.len > 0 {
-            throw try UniffiInternalError.rustPanic(FfiConverterString.lift(callStatus.errorBuf))
-        } else {
-            callStatus.errorBuf.deallocate()
-            throw UniffiInternalError.rustPanic("Rust panic")
-        }
+        case CALL_UNEXPECTED_ERROR:
+            // When the rust code sees a panic, it tries to construct a RustBuffer
+            // with the message.  But if that code panics, then it just sends back
+            // an empty buffer.
+            if callStatus.errorBuf.len > 0 {
+                throw UniffiInternalError.rustPanic(try FfiConverterString.lift(callStatus.errorBuf))
+            } else {
+                callStatus.errorBuf.deallocate()
+                throw UniffiInternalError.rustPanic("Rust panic")
+            }
 
-    case CALL_CANCELLED:
-        fatalError("Cancellation not supported yet")
+        case CALL_CANCELLED:
+            fatalError("Cancellation not supported yet")
 
-    default:
-        throw UniffiInternalError.unexpectedRustCallStatusCode
+        default:
+            throw UniffiInternalError.unexpectedRustCallStatusCode
     }
 }
 
 private func uniffiTraitInterfaceCall<T>(
     callStatus: UnsafeMutablePointer<RustCallStatus>,
     makeCall: () throws -> T,
-    writeReturn: (T) -> Void
+    writeReturn: (T) -> ()
 ) {
     do {
         try writeReturn(makeCall())
-    } catch {
+    } catch let error {
         callStatus.pointee.code = CALL_UNEXPECTED_ERROR
         callStatus.pointee.errorBuf = FfiConverterString.lower(String(describing: error))
     }
@@ -341,7 +339,7 @@ private func uniffiTraitInterfaceCall<T>(
 private func uniffiTraitInterfaceCallWithError<T, E>(
     callStatus: UnsafeMutablePointer<RustCallStatus>,
     makeCall: () throws -> T,
-    writeReturn: (T) -> Void,
+    writeReturn: (T) -> (),
     lowerError: (E) -> RustBuffer
 ) {
     do {
@@ -354,10 +352,10 @@ private func uniffiTraitInterfaceCallWithError<T, E>(
         callStatus.pointee.errorBuf = FfiConverterString.lower(String(describing: error))
     }
 }
-
-private class UniffiHandleMap<T> {
-    private var map: [UInt64: T] = [:]
+fileprivate final class UniffiHandleMap<T>: @unchecked Sendable {
+    // All mutation happens with this lock held, which is why we implement @unchecked Sendable.
     private let lock = NSLock()
+    private var map: [UInt64: T] = [:]
     private var currentHandle: UInt64 = 1
 
     func insert(obj: T) -> UInt64 {
@@ -369,7 +367,7 @@ private class UniffiHandleMap<T> {
         }
     }
 
-    func get(handle: UInt64) throws -> T {
+     func get(handle: UInt64) throws -> T {
         try lock.withLock {
             guard let obj = map[handle] else {
                 throw UniffiInternalError.unexpectedStaleHandle
@@ -389,60 +387,64 @@ private class UniffiHandleMap<T> {
     }
 
     var count: Int {
-        map.count
+        get {
+            map.count
+        }
     }
 }
+
 
 // Public interface members begin here.
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterUInt32: FfiConverterPrimitive {
+fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
     typealias FfiType = UInt32
     typealias SwiftType = UInt32
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt32 {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt32 {
         return try lift(readInt(&buf))
     }
 
-    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterBool: FfiConverter {
+fileprivate struct FfiConverterBool : FfiConverter {
     typealias FfiType = Int8
     typealias SwiftType = Bool
 
-    static func lift(_ value: Int8) throws -> Bool {
+    public static func lift(_ value: Int8) throws -> Bool {
         return value != 0
     }
 
-    static func lower(_ value: Bool) -> Int8 {
+    public static func lower(_ value: Bool) -> Int8 {
         return value ? 1 : 0
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Bool {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Bool {
         return try lift(readInt(&buf))
     }
 
-    static func write(_ value: Bool, into buf: inout [UInt8]) {
+    public static func write(_ value: Bool, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterString: FfiConverter {
+fileprivate struct FfiConverterString: FfiConverter {
     typealias SwiftType = String
     typealias FfiType = RustBuffer
 
-    static func lift(_ value: RustBuffer) throws -> String {
+    public static func lift(_ value: RustBuffer) throws -> String {
         defer {
             value.deallocate()
         }
@@ -453,7 +455,7 @@ private struct FfiConverterString: FfiConverter {
         return String(bytes: bytes, encoding: String.Encoding.utf8)!
     }
 
-    static func lower(_ value: String) -> RustBuffer {
+    public static func lower(_ value: String) -> RustBuffer {
         return value.utf8CString.withUnsafeBufferPointer { ptr in
             // The swift string gives us int8_t, we want uint8_t.
             ptr.withMemoryRebound(to: UInt8.self) { ptr in
@@ -464,17 +466,18 @@ private struct FfiConverterString: FfiConverter {
         }
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> String {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> String {
         let len: Int32 = try readInt(&buf)
-        return try String(bytes: readBytes(&buf, count: Int(len)), encoding: String.Encoding.utf8)!
+        return String(bytes: try readBytes(&buf, count: Int(len)), encoding: String.Encoding.utf8)!
     }
 
-    static func write(_ value: String, into buf: inout [UInt8]) {
+    public static func write(_ value: String, into buf: inout [UInt8]) {
         let len = Int32(value.utf8.count)
         writeInt(&buf, len)
         writeBytes(&buf, value.utf8)
     }
 }
+
 
 public struct PasswordStrengthInfo {
     public var level: PasswordStrengthLevel
@@ -482,8 +485,8 @@ public struct PasswordStrengthInfo {
     public var score: UInt32
     public var label: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(level: PasswordStrengthLevel, meterLevel: UInt32, score: UInt32, label: String) {
         self.level = level
         self.meterLevel = meterLevel
@@ -492,8 +495,13 @@ public struct PasswordStrengthInfo {
     }
 }
 
+#if compiler(>=6)
+extension PasswordStrengthInfo: Sendable {}
+#endif
+
+
 extension PasswordStrengthInfo: Equatable, Hashable {
-    public static func == (lhs: PasswordStrengthInfo, rhs: PasswordStrengthInfo) -> Bool {
+    public static func ==(lhs: PasswordStrengthInfo, rhs: PasswordStrengthInfo) -> Bool {
         if lhs.level != rhs.level {
             return false
         }
@@ -517,8 +525,10 @@ extension PasswordStrengthInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypePasswordStrengthInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PasswordStrengthInfo {
@@ -528,7 +538,7 @@ public struct FfiConverterTypePasswordStrengthInfo: FfiConverterRustBuffer {
                 meterLevel: FfiConverterUInt32.read(from: &buf),
                 score: FfiConverterUInt32.read(from: &buf),
                 label: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: PasswordStrengthInfo, into buf: inout [UInt8]) {
@@ -539,27 +549,29 @@ public struct FfiConverterTypePasswordStrengthInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypePasswordStrengthInfo_lift(_ buf: RustBuffer) throws -> PasswordStrengthInfo {
     return try FfiConverterTypePasswordStrengthInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypePasswordStrengthInfo_lower(_ value: PasswordStrengthInfo) -> RustBuffer {
     return FfiConverterTypePasswordStrengthInfo.lower(value)
 }
+
 
 public struct VaultCategoryInfo {
     public var kind: String
     public var label: String
     public var template: [VaultFieldTemplateInfo]
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(kind: String, label: String, template: [VaultFieldTemplateInfo]) {
         self.kind = kind
         self.label = label
@@ -567,8 +579,13 @@ public struct VaultCategoryInfo {
     }
 }
 
+#if compiler(>=6)
+extension VaultCategoryInfo: Sendable {}
+#endif
+
+
 extension VaultCategoryInfo: Equatable, Hashable {
-    public static func == (lhs: VaultCategoryInfo, rhs: VaultCategoryInfo) -> Bool {
+    public static func ==(lhs: VaultCategoryInfo, rhs: VaultCategoryInfo) -> Bool {
         if lhs.kind != rhs.kind {
             return false
         }
@@ -588,8 +605,10 @@ extension VaultCategoryInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeVaultCategoryInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaultCategoryInfo {
@@ -598,7 +617,7 @@ public struct FfiConverterTypeVaultCategoryInfo: FfiConverterRustBuffer {
                 kind: FfiConverterString.read(from: &buf),
                 label: FfiConverterString.read(from: &buf),
                 template: FfiConverterSequenceTypeVaultFieldTemplateInfo.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: VaultCategoryInfo, into buf: inout [UInt8]) {
@@ -608,19 +627,21 @@ public struct FfiConverterTypeVaultCategoryInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeVaultCategoryInfo_lift(_ buf: RustBuffer) throws -> VaultCategoryInfo {
     return try FfiConverterTypeVaultCategoryInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeVaultCategoryInfo_lower(_ value: VaultCategoryInfo) -> RustBuffer {
     return FfiConverterTypeVaultCategoryInfo.lower(value)
 }
+
 
 public struct VaultFieldInfo {
     public var id: String
@@ -628,8 +649,8 @@ public struct VaultFieldInfo {
     public var value: String
     public var isSensitive: Bool
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(id: String, label: String, value: String, isSensitive: Bool) {
         self.id = id
         self.label = label
@@ -638,8 +659,13 @@ public struct VaultFieldInfo {
     }
 }
 
+#if compiler(>=6)
+extension VaultFieldInfo: Sendable {}
+#endif
+
+
 extension VaultFieldInfo: Equatable, Hashable {
-    public static func == (lhs: VaultFieldInfo, rhs: VaultFieldInfo) -> Bool {
+    public static func ==(lhs: VaultFieldInfo, rhs: VaultFieldInfo) -> Bool {
         if lhs.id != rhs.id {
             return false
         }
@@ -663,8 +689,10 @@ extension VaultFieldInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeVaultFieldInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaultFieldInfo {
@@ -674,7 +702,7 @@ public struct FfiConverterTypeVaultFieldInfo: FfiConverterRustBuffer {
                 label: FfiConverterString.read(from: &buf),
                 value: FfiConverterString.read(from: &buf),
                 isSensitive: FfiConverterBool.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: VaultFieldInfo, into buf: inout [UInt8]) {
@@ -685,34 +713,41 @@ public struct FfiConverterTypeVaultFieldInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeVaultFieldInfo_lift(_ buf: RustBuffer) throws -> VaultFieldInfo {
     return try FfiConverterTypeVaultFieldInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeVaultFieldInfo_lower(_ value: VaultFieldInfo) -> RustBuffer {
     return FfiConverterTypeVaultFieldInfo.lower(value)
 }
 
+
 public struct VaultFieldTemplateInfo {
     public var label: String
     public var isSensitive: Bool
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(label: String, isSensitive: Bool) {
         self.label = label
         self.isSensitive = isSensitive
     }
 }
 
+#if compiler(>=6)
+extension VaultFieldTemplateInfo: Sendable {}
+#endif
+
+
 extension VaultFieldTemplateInfo: Equatable, Hashable {
-    public static func == (lhs: VaultFieldTemplateInfo, rhs: VaultFieldTemplateInfo) -> Bool {
+    public static func ==(lhs: VaultFieldTemplateInfo, rhs: VaultFieldTemplateInfo) -> Bool {
         if lhs.label != rhs.label {
             return false
         }
@@ -728,8 +763,10 @@ extension VaultFieldTemplateInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeVaultFieldTemplateInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaultFieldTemplateInfo {
@@ -737,7 +774,7 @@ public struct FfiConverterTypeVaultFieldTemplateInfo: FfiConverterRustBuffer {
             try VaultFieldTemplateInfo(
                 label: FfiConverterString.read(from: &buf),
                 isSensitive: FfiConverterBool.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: VaultFieldTemplateInfo, into buf: inout [UInt8]) {
@@ -746,15 +783,16 @@ public struct FfiConverterTypeVaultFieldTemplateInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeVaultFieldTemplateInfo_lift(_ buf: RustBuffer) throws -> VaultFieldTemplateInfo {
     return try FfiConverterTypeVaultFieldTemplateInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeVaultFieldTemplateInfo_lower(_ value: VaultFieldTemplateInfo) -> RustBuffer {
     return FfiConverterTypeVaultFieldTemplateInfo.lower(value)
@@ -764,14 +802,20 @@ public func FfiConverterTypeVaultFieldTemplateInfo_lower(_ value: VaultFieldTemp
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
 public enum PasswordStrengthLevel {
+
     case weak
     case fair
     case good
     case strong
 }
 
+
+#if compiler(>=6)
+extension PasswordStrengthLevel: Sendable {}
+#endif
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypePasswordStrengthLevel: FfiConverterRustBuffer {
     typealias SwiftType = PasswordStrengthLevel
@@ -779,6 +823,7 @@ public struct FfiConverterTypePasswordStrengthLevel: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PasswordStrengthLevel {
         let variant: Int32 = try readInt(&buf)
         switch variant {
+
         case 1: return .weak
 
         case 2: return .fair
@@ -793,38 +838,55 @@ public struct FfiConverterTypePasswordStrengthLevel: FfiConverterRustBuffer {
 
     public static func write(_ value: PasswordStrengthLevel, into buf: inout [UInt8]) {
         switch value {
+
+
         case .weak:
             writeInt(&buf, Int32(1))
+
 
         case .fair:
             writeInt(&buf, Int32(2))
 
+
         case .good:
             writeInt(&buf, Int32(3))
 
+
         case .strong:
             writeInt(&buf, Int32(4))
+
         }
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypePasswordStrengthLevel_lift(_ buf: RustBuffer) throws -> PasswordStrengthLevel {
     return try FfiConverterTypePasswordStrengthLevel.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypePasswordStrengthLevel_lower(_ value: PasswordStrengthLevel) -> RustBuffer {
     return FfiConverterTypePasswordStrengthLevel.lower(value)
 }
 
+
 extension PasswordStrengthLevel: Equatable, Hashable {}
 
-public enum VaultCoreError {
+
+
+
+
+
+
+public enum VaultCoreError: Swift.Error {
+
+
+
     case InvalidBase64(message: String)
 
     case InvalidKey(message: String)
@@ -844,10 +906,12 @@ public enum VaultCoreError {
     case InvalidJson(message: String)
 
     case UnknownCategory(message: String)
+
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeVaultCoreError: FfiConverterRustBuffer {
     typealias SwiftType = VaultCoreError
@@ -855,45 +919,50 @@ public struct FfiConverterTypeVaultCoreError: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaultCoreError {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-        case 1: return try .InvalidBase64(
-                message: FfiConverterString.read(from: &buf)
-            )
 
-        case 2: return try .InvalidKey(
-                message: FfiConverterString.read(from: &buf)
-            )
 
-        case 3: return try .InvalidSalt(
-                message: FfiConverterString.read(from: &buf)
-            )
 
-        case 4: return try .InvalidNonce(
-                message: FfiConverterString.read(from: &buf)
-            )
 
-        case 5: return try .InvalidCiphertext(
-                message: FfiConverterString.read(from: &buf)
-            )
+        case 1: return .InvalidBase64(
+            message: try FfiConverterString.read(from: &buf)
+        )
 
-        case 6: return try .EncryptionFailed(
-                message: FfiConverterString.read(from: &buf)
-            )
+        case 2: return .InvalidKey(
+            message: try FfiConverterString.read(from: &buf)
+        )
 
-        case 7: return try .DecryptionFailed(
-                message: FfiConverterString.read(from: &buf)
-            )
+        case 3: return .InvalidSalt(
+            message: try FfiConverterString.read(from: &buf)
+        )
 
-        case 8: return try .InvalidUtf8(
-                message: FfiConverterString.read(from: &buf)
-            )
+        case 4: return .InvalidNonce(
+            message: try FfiConverterString.read(from: &buf)
+        )
 
-        case 9: return try .InvalidJson(
-                message: FfiConverterString.read(from: &buf)
-            )
+        case 5: return .InvalidCiphertext(
+            message: try FfiConverterString.read(from: &buf)
+        )
 
-        case 10: return try .UnknownCategory(
-                message: FfiConverterString.read(from: &buf)
-            )
+        case 6: return .EncryptionFailed(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+        case 7: return .DecryptionFailed(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+        case 8: return .InvalidUtf8(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+        case 9: return .InvalidJson(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+        case 10: return .UnknownCategory(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
 
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -901,31 +970,56 @@ public struct FfiConverterTypeVaultCoreError: FfiConverterRustBuffer {
 
     public static func write(_ value: VaultCoreError, into buf: inout [UInt8]) {
         switch value {
-        case .InvalidBase64(_ /* message is ignored*/ ):
+
+
+
+
+        case .InvalidBase64(_ /* message is ignored*/):
             writeInt(&buf, Int32(1))
-        case .InvalidKey(_ /* message is ignored*/ ):
+        case .InvalidKey(_ /* message is ignored*/):
             writeInt(&buf, Int32(2))
-        case .InvalidSalt(_ /* message is ignored*/ ):
+        case .InvalidSalt(_ /* message is ignored*/):
             writeInt(&buf, Int32(3))
-        case .InvalidNonce(_ /* message is ignored*/ ):
+        case .InvalidNonce(_ /* message is ignored*/):
             writeInt(&buf, Int32(4))
-        case .InvalidCiphertext(_ /* message is ignored*/ ):
+        case .InvalidCiphertext(_ /* message is ignored*/):
             writeInt(&buf, Int32(5))
-        case .EncryptionFailed(_ /* message is ignored*/ ):
+        case .EncryptionFailed(_ /* message is ignored*/):
             writeInt(&buf, Int32(6))
-        case .DecryptionFailed(_ /* message is ignored*/ ):
+        case .DecryptionFailed(_ /* message is ignored*/):
             writeInt(&buf, Int32(7))
-        case .InvalidUtf8(_ /* message is ignored*/ ):
+        case .InvalidUtf8(_ /* message is ignored*/):
             writeInt(&buf, Int32(8))
-        case .InvalidJson(_ /* message is ignored*/ ):
+        case .InvalidJson(_ /* message is ignored*/):
             writeInt(&buf, Int32(9))
-        case .UnknownCategory(_ /* message is ignored*/ ):
+        case .UnknownCategory(_ /* message is ignored*/):
             writeInt(&buf, Int32(10))
+
+
         }
     }
 }
 
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaultCoreError_lift(_ buf: RustBuffer) throws -> VaultCoreError {
+    return try FfiConverterTypeVaultCoreError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaultCoreError_lower(_ value: VaultCoreError) -> RustBuffer {
+    return FfiConverterTypeVaultCoreError.lower(value)
+}
+
+
 extension VaultCoreError: Equatable, Hashable {}
+
+
+
 
 extension VaultCoreError: Foundation.LocalizedError {
     public var errorDescription: String? {
@@ -933,13 +1027,16 @@ extension VaultCoreError: Foundation.LocalizedError {
     }
 }
 
+
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterOptionString: FfiConverterRustBuffer {
+fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
     typealias SwiftType = String?
 
-    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         guard let value = value else {
             writeInt(&buf, Int8(0))
             return
@@ -948,7 +1045,7 @@ private struct FfiConverterOptionString: FfiConverterRustBuffer {
         FfiConverterString.write(value, into: &buf)
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterString.read(from: &buf)
@@ -958,12 +1055,12 @@ private struct FfiConverterOptionString: FfiConverterRustBuffer {
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterSequenceTypeVaultCategoryInfo: FfiConverterRustBuffer {
+fileprivate struct FfiConverterSequenceTypeVaultCategoryInfo: FfiConverterRustBuffer {
     typealias SwiftType = [VaultCategoryInfo]
 
-    static func write(_ value: [VaultCategoryInfo], into buf: inout [UInt8]) {
+    public static func write(_ value: [VaultCategoryInfo], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         for item in value {
@@ -971,24 +1068,24 @@ private struct FfiConverterSequenceTypeVaultCategoryInfo: FfiConverterRustBuffer
         }
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [VaultCategoryInfo] {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [VaultCategoryInfo] {
         let len: Int32 = try readInt(&buf)
         var seq = [VaultCategoryInfo]()
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
-            try seq.append(FfiConverterTypeVaultCategoryInfo.read(from: &buf))
+            seq.append(try FfiConverterTypeVaultCategoryInfo.read(from: &buf))
         }
         return seq
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterSequenceTypeVaultFieldInfo: FfiConverterRustBuffer {
+fileprivate struct FfiConverterSequenceTypeVaultFieldInfo: FfiConverterRustBuffer {
     typealias SwiftType = [VaultFieldInfo]
 
-    static func write(_ value: [VaultFieldInfo], into buf: inout [UInt8]) {
+    public static func write(_ value: [VaultFieldInfo], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         for item in value {
@@ -996,24 +1093,24 @@ private struct FfiConverterSequenceTypeVaultFieldInfo: FfiConverterRustBuffer {
         }
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [VaultFieldInfo] {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [VaultFieldInfo] {
         let len: Int32 = try readInt(&buf)
         var seq = [VaultFieldInfo]()
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
-            try seq.append(FfiConverterTypeVaultFieldInfo.read(from: &buf))
+            seq.append(try FfiConverterTypeVaultFieldInfo.read(from: &buf))
         }
         return seq
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterSequenceTypeVaultFieldTemplateInfo: FfiConverterRustBuffer {
+fileprivate struct FfiConverterSequenceTypeVaultFieldTemplateInfo: FfiConverterRustBuffer {
     typealias SwiftType = [VaultFieldTemplateInfo]
 
-    static func write(_ value: [VaultFieldTemplateInfo], into buf: inout [UInt8]) {
+    public static func write(_ value: [VaultFieldTemplateInfo], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         for item in value {
@@ -1021,196 +1118,186 @@ private struct FfiConverterSequenceTypeVaultFieldTemplateInfo: FfiConverterRustB
         }
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [VaultFieldTemplateInfo] {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [VaultFieldTemplateInfo] {
         let len: Int32 = try readInt(&buf)
         var seq = [VaultFieldTemplateInfo]()
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
-            try seq.append(FfiConverterTypeVaultFieldTemplateInfo.read(from: &buf))
+            seq.append(try FfiConverterTypeVaultFieldTemplateInfo.read(from: &buf))
         }
         return seq
     }
 }
-
 /**
  * Create a base64 verification hash for initial vault setup.
  */
-public func createVaultVerificationHash(password: String, saltBase64: String) throws -> String {
-    return try FfiConverterString.lift(rustCallWithError(FfiConverterTypeVaultCoreError.lift) {
-        uniffi_actro_vault_fn_func_create_vault_verification_hash(
-            FfiConverterString.lower(password),
-            FfiConverterString.lower(saltBase64), $0
-        )
-    })
+public func createVaultVerificationHash(password: String, saltBase64: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeVaultCoreError_lift) {
+    uniffi_actro_vault_fn_func_create_vault_verification_hash(
+        FfiConverterString.lower(password),
+        FfiConverterString.lower(saltBase64),$0
+    )
+})
 }
-
 /**
  * Decrypt and JSON-decode vault fields using the current Swift-compatible shape.
  */
-public func decryptVaultFields(keyBase64: String, ciphertextBase64: String) throws -> [VaultFieldInfo] {
-    return try FfiConverterSequenceTypeVaultFieldInfo.lift(rustCallWithError(FfiConverterTypeVaultCoreError.lift) {
-        uniffi_actro_vault_fn_func_decrypt_vault_fields(
-            FfiConverterString.lower(keyBase64),
-            FfiConverterString.lower(ciphertextBase64), $0
-        )
-    })
+public func decryptVaultFields(keyBase64: String, ciphertextBase64: String)throws  -> [VaultFieldInfo]  {
+    return try  FfiConverterSequenceTypeVaultFieldInfo.lift(try rustCallWithError(FfiConverterTypeVaultCoreError_lift) {
+    uniffi_actro_vault_fn_func_decrypt_vault_fields(
+        FfiConverterString.lower(keyBase64),
+        FfiConverterString.lower(ciphertextBase64),$0
+    )
+})
 }
-
 /**
  * Decrypt a UTF-8 string using an existing base64 vault key.
  */
-public func decryptVaultString(keyBase64: String, ciphertextBase64: String) throws -> String {
-    return try FfiConverterString.lift(rustCallWithError(FfiConverterTypeVaultCoreError.lift) {
-        uniffi_actro_vault_fn_func_decrypt_vault_string(
-            FfiConverterString.lower(keyBase64),
-            FfiConverterString.lower(ciphertextBase64), $0
-        )
-    })
+public func decryptVaultString(keyBase64: String, ciphertextBase64: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeVaultCoreError_lift) {
+    uniffi_actro_vault_fn_func_decrypt_vault_string(
+        FfiConverterString.lower(keyBase64),
+        FfiConverterString.lower(ciphertextBase64),$0
+    )
+})
 }
-
 /**
  * Derive the 32-byte vault key from a password and base64 salt.
  */
-public func deriveVaultKeyBase64(password: String, saltBase64: String) throws -> String {
-    return try FfiConverterString.lift(rustCallWithError(FfiConverterTypeVaultCoreError.lift) {
-        uniffi_actro_vault_fn_func_derive_vault_key_base64(
-            FfiConverterString.lower(password),
-            FfiConverterString.lower(saltBase64), $0
-        )
-    })
+public func deriveVaultKeyBase64(password: String, saltBase64: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeVaultCoreError_lift) {
+    uniffi_actro_vault_fn_func_derive_vault_key_base64(
+        FfiConverterString.lower(password),
+        FfiConverterString.lower(saltBase64),$0
+    )
+})
 }
-
 /**
  * JSON-encode and encrypt vault fields using the current Swift-compatible shape.
  */
-public func encryptVaultFields(keyBase64: String, fields: [VaultFieldInfo]) throws -> String {
-    return try FfiConverterString.lift(rustCallWithError(FfiConverterTypeVaultCoreError.lift) {
-        uniffi_actro_vault_fn_func_encrypt_vault_fields(
-            FfiConverterString.lower(keyBase64),
-            FfiConverterSequenceTypeVaultFieldInfo.lower(fields), $0
-        )
-    })
+public func encryptVaultFields(keyBase64: String, fields: [VaultFieldInfo])throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeVaultCoreError_lift) {
+    uniffi_actro_vault_fn_func_encrypt_vault_fields(
+        FfiConverterString.lower(keyBase64),
+        FfiConverterSequenceTypeVaultFieldInfo.lower(fields),$0
+    )
+})
 }
-
 /**
  * Encrypt a UTF-8 string using an existing base64 vault key.
  */
-public func encryptVaultString(keyBase64: String, plaintext: String) throws -> String {
-    return try FfiConverterString.lift(rustCallWithError(FfiConverterTypeVaultCoreError.lift) {
-        uniffi_actro_vault_fn_func_encrypt_vault_string(
-            FfiConverterString.lower(keyBase64),
-            FfiConverterString.lower(plaintext), $0
-        )
-    })
+public func encryptVaultString(keyBase64: String, plaintext: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeVaultCoreError_lift) {
+    uniffi_actro_vault_fn_func_encrypt_vault_string(
+        FfiConverterString.lower(keyBase64),
+        FfiConverterString.lower(plaintext),$0
+    )
+})
 }
-
 /**
  * Generate a 32-byte random salt encoded as base64.
  */
-public func generateVaultSaltBase64() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_vault_fn_func_generate_vault_salt_base64($0)
-    })
+public func generateVaultSaltBase64() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_vault_fn_func_generate_vault_salt_base64($0
+    )
+})
 }
-
 /**
  * Parse a vault category and return its canonical wire value, if known.
  */
-public func parseVaultCategory(raw: String) -> String? {
-    return try! FfiConverterOptionString.lift(try! rustCall {
-        uniffi_actro_vault_fn_func_parse_vault_category(
-            FfiConverterString.lower(raw), $0
-        )
-    })
+public func parseVaultCategory(raw: String) -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_actro_vault_fn_func_parse_vault_category(
+        FfiConverterString.lower(raw),$0
+    )
+})
 }
-
 /**
  * Return metadata and default fields for a vault category.
  */
-public func vaultCategoryInfo(raw: String) throws -> VaultCategoryInfo {
-    return try FfiConverterTypeVaultCategoryInfo.lift(rustCallWithError(FfiConverterTypeVaultCoreError.lift) {
-        uniffi_actro_vault_fn_func_vault_category_info(
-            FfiConverterString.lower(raw), $0
-        )
-    })
+public func vaultCategoryInfo(raw: String)throws  -> VaultCategoryInfo  {
+    return try  FfiConverterTypeVaultCategoryInfo_lift(try rustCallWithError(FfiConverterTypeVaultCoreError_lift) {
+    uniffi_actro_vault_fn_func_vault_category_info(
+        FfiConverterString.lower(raw),$0
+    )
+})
 }
-
 /**
  * Return all canonical vault category templates.
  */
-public func vaultCategoryTemplates() -> [VaultCategoryInfo] {
-    return try! FfiConverterSequenceTypeVaultCategoryInfo.lift(try! rustCall {
-        uniffi_actro_vault_fn_func_vault_category_templates($0)
-    })
+public func vaultCategoryTemplates() -> [VaultCategoryInfo]  {
+    return try!  FfiConverterSequenceTypeVaultCategoryInfo.lift(try! rustCall() {
+    uniffi_actro_vault_fn_func_vault_category_templates($0
+    )
+})
 }
-
 /**
  * Return the canonical vault key length in bytes.
  */
-public func vaultKeyByteLength() -> UInt32 {
-    return try! FfiConverterUInt32.lift(try! rustCall {
-        uniffi_actro_vault_fn_func_vault_key_byte_length($0)
-    })
+public func vaultKeyByteLength() -> UInt32  {
+    return try!  FfiConverterUInt32.lift(try! rustCall() {
+    uniffi_actro_vault_fn_func_vault_key_byte_length($0
+    )
+})
 }
-
 /**
  * Return the canonical AES-GCM nonce length in bytes.
  */
-public func vaultNonceByteLength() -> UInt32 {
-    return try! FfiConverterUInt32.lift(try! rustCall {
-        uniffi_actro_vault_fn_func_vault_nonce_byte_length($0)
-    })
+public func vaultNonceByteLength() -> UInt32  {
+    return try!  FfiConverterUInt32.lift(try! rustCall() {
+    uniffi_actro_vault_fn_func_vault_nonce_byte_length($0
+    )
+})
 }
-
 /**
  * Evaluate password strength with Actro's current shared thresholds.
  */
-public func vaultPasswordStrength(password: String) -> PasswordStrengthInfo {
-    return try! FfiConverterTypePasswordStrengthInfo.lift(try! rustCall {
-        uniffi_actro_vault_fn_func_vault_password_strength(
-            FfiConverterString.lower(password), $0
-        )
-    })
+public func vaultPasswordStrength(password: String) -> PasswordStrengthInfo  {
+    return try!  FfiConverterTypePasswordStrengthInfo_lift(try! rustCall() {
+    uniffi_actro_vault_fn_func_vault_password_strength(
+        FfiConverterString.lower(password),$0
+    )
+})
 }
-
 /**
  * Return the canonical PBKDF2 iteration count.
  */
-public func vaultPbkdf2Iterations() -> UInt32 {
-    return try! FfiConverterUInt32.lift(try! rustCall {
-        uniffi_actro_vault_fn_func_vault_pbkdf2_iterations($0)
-    })
+public func vaultPbkdf2Iterations() -> UInt32  {
+    return try!  FfiConverterUInt32.lift(try! rustCall() {
+    uniffi_actro_vault_fn_func_vault_pbkdf2_iterations($0
+    )
+})
 }
-
 /**
  * Return the canonical vault salt length in bytes.
  */
-public func vaultSaltByteLength() -> UInt32 {
-    return try! FfiConverterUInt32.lift(try! rustCall {
-        uniffi_actro_vault_fn_func_vault_salt_byte_length($0)
-    })
+public func vaultSaltByteLength() -> UInt32  {
+    return try!  FfiConverterUInt32.lift(try! rustCall() {
+    uniffi_actro_vault_fn_func_vault_salt_byte_length($0
+    )
+})
 }
-
 /**
  * Return the fixed plaintext token used to verify a derived vault key.
  */
-public func vaultVerificationToken() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_vault_fn_func_vault_verification_token($0)
-    })
+public func vaultVerificationToken() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_vault_fn_func_vault_verification_token($0
+    )
+})
 }
-
 /**
  * Verify a password against the stored salt and verification hash.
  */
-public func verifyVaultPassword(password: String, saltBase64: String, verificationHashBase64: String) throws -> Bool {
-    return try FfiConverterBool.lift(rustCallWithError(FfiConverterTypeVaultCoreError.lift) {
-        uniffi_actro_vault_fn_func_verify_vault_password(
-            FfiConverterString.lower(password),
-            FfiConverterString.lower(saltBase64),
-            FfiConverterString.lower(verificationHashBase64), $0
-        )
-    })
+public func verifyVaultPassword(password: String, saltBase64: String, verificationHashBase64: String)throws  -> Bool  {
+    return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeVaultCoreError_lift) {
+    uniffi_actro_vault_fn_func_verify_vault_password(
+        FfiConverterString.lower(password),
+        FfiConverterString.lower(saltBase64),
+        FfiConverterString.lower(verificationHashBase64),$0
+    )
+})
 }
 
 private enum InitializationResult {
@@ -1218,73 +1305,74 @@ private enum InitializationResult {
     case contractVersionMismatch
     case apiChecksumMismatch
 }
-
-/// Use a global variable to perform the versioning checks. Swift ensures that
-/// the code inside is only computed once.
-private var initializationResult: InitializationResult = {
+// Use a global variable to perform the versioning checks. Swift ensures that
+// the code inside is only computed once.
+private let initializationResult: InitializationResult = {
     // Get the bindings contract version from our ComponentInterface
-    let bindings_contract_version = 26
+    let bindings_contract_version = 29
     // Get the scaffolding contract version by calling the into the dylib
     let scaffolding_contract_version = ffi_actro_vault_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if uniffi_actro_vault_checksum_func_create_vault_verification_hash() != 62010 {
+    if (uniffi_actro_vault_checksum_func_create_vault_verification_hash() != 62010) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_vault_checksum_func_decrypt_vault_fields() != 12744 {
+    if (uniffi_actro_vault_checksum_func_decrypt_vault_fields() != 12744) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_vault_checksum_func_decrypt_vault_string() != 39761 {
+    if (uniffi_actro_vault_checksum_func_decrypt_vault_string() != 39761) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_vault_checksum_func_derive_vault_key_base64() != 43766 {
+    if (uniffi_actro_vault_checksum_func_derive_vault_key_base64() != 43766) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_vault_checksum_func_encrypt_vault_fields() != 39284 {
+    if (uniffi_actro_vault_checksum_func_encrypt_vault_fields() != 39284) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_vault_checksum_func_encrypt_vault_string() != 12847 {
+    if (uniffi_actro_vault_checksum_func_encrypt_vault_string() != 12847) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_vault_checksum_func_generate_vault_salt_base64() != 48768 {
+    if (uniffi_actro_vault_checksum_func_generate_vault_salt_base64() != 48768) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_vault_checksum_func_parse_vault_category() != 56546 {
+    if (uniffi_actro_vault_checksum_func_parse_vault_category() != 56546) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_vault_checksum_func_vault_category_info() != 2819 {
+    if (uniffi_actro_vault_checksum_func_vault_category_info() != 2819) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_vault_checksum_func_vault_category_templates() != 15594 {
+    if (uniffi_actro_vault_checksum_func_vault_category_templates() != 15594) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_vault_checksum_func_vault_key_byte_length() != 4725 {
+    if (uniffi_actro_vault_checksum_func_vault_key_byte_length() != 4725) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_vault_checksum_func_vault_nonce_byte_length() != 55085 {
+    if (uniffi_actro_vault_checksum_func_vault_nonce_byte_length() != 55085) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_vault_checksum_func_vault_password_strength() != 15022 {
+    if (uniffi_actro_vault_checksum_func_vault_password_strength() != 15022) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_vault_checksum_func_vault_pbkdf2_iterations() != 60256 {
+    if (uniffi_actro_vault_checksum_func_vault_pbkdf2_iterations() != 60256) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_vault_checksum_func_vault_salt_byte_length() != 45182 {
+    if (uniffi_actro_vault_checksum_func_vault_salt_byte_length() != 45182) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_vault_checksum_func_vault_verification_token() != 15577 {
+    if (uniffi_actro_vault_checksum_func_vault_verification_token() != 15577) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_vault_checksum_func_verify_vault_password() != 438 {
+    if (uniffi_actro_vault_checksum_func_verify_vault_password() != 438) {
         return InitializationResult.apiChecksumMismatch
     }
 
     return InitializationResult.ok
 }()
 
-private func uniffiEnsureInitialized() {
+// Make the ensure init function public so that other modules which have external type references to
+// our types can call it.
+public func uniffiEnsureActroVaultInitialized() {
     switch initializationResult {
     case .ok:
         break

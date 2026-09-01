@@ -284,7 +284,7 @@ RustBuffer uniffi_actro_vault_fn_func_encrypt_vault_string(RustBuffer key_base64
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_FN_FUNC_GENERATE_VAULT_SALT_BASE64
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_FN_FUNC_GENERATE_VAULT_SALT_BASE64
 RustBuffer uniffi_actro_vault_fn_func_generate_vault_salt_base64(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_FN_FUNC_PARSE_VAULT_CATEGORY
@@ -300,19 +300,19 @@ RustBuffer uniffi_actro_vault_fn_func_vault_category_info(RustBuffer raw, RustCa
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_FN_FUNC_VAULT_CATEGORY_TEMPLATES
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_FN_FUNC_VAULT_CATEGORY_TEMPLATES
 RustBuffer uniffi_actro_vault_fn_func_vault_category_templates(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_FN_FUNC_VAULT_KEY_BYTE_LENGTH
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_FN_FUNC_VAULT_KEY_BYTE_LENGTH
 uint32_t uniffi_actro_vault_fn_func_vault_key_byte_length(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_FN_FUNC_VAULT_NONCE_BYTE_LENGTH
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_FN_FUNC_VAULT_NONCE_BYTE_LENGTH
 uint32_t uniffi_actro_vault_fn_func_vault_nonce_byte_length(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_FN_FUNC_VAULT_PASSWORD_STRENGTH
@@ -323,19 +323,19 @@ RustBuffer uniffi_actro_vault_fn_func_vault_password_strength(RustBuffer passwor
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_FN_FUNC_VAULT_PBKDF2_ITERATIONS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_FN_FUNC_VAULT_PBKDF2_ITERATIONS
 uint32_t uniffi_actro_vault_fn_func_vault_pbkdf2_iterations(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_FN_FUNC_VAULT_SALT_BYTE_LENGTH
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_FN_FUNC_VAULT_SALT_BYTE_LENGTH
 uint32_t uniffi_actro_vault_fn_func_vault_salt_byte_length(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_FN_FUNC_VAULT_VERIFICATION_TOKEN
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_FN_FUNC_VAULT_VERIFICATION_TOKEN
 RustBuffer uniffi_actro_vault_fn_func_vault_verification_token(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_FN_FUNC_VERIFY_VAULT_PASSWORD
@@ -626,109 +626,109 @@ void ffi_actro_vault_rust_future_complete_void(uint64_t handle, RustCallStatus *
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_CREATE_VAULT_VERIFICATION_HASH
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_CREATE_VAULT_VERIFICATION_HASH
 uint16_t uniffi_actro_vault_checksum_func_create_vault_verification_hash(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_DECRYPT_VAULT_FIELDS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_DECRYPT_VAULT_FIELDS
 uint16_t uniffi_actro_vault_checksum_func_decrypt_vault_fields(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_DECRYPT_VAULT_STRING
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_DECRYPT_VAULT_STRING
 uint16_t uniffi_actro_vault_checksum_func_decrypt_vault_string(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_DERIVE_VAULT_KEY_BASE64
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_DERIVE_VAULT_KEY_BASE64
 uint16_t uniffi_actro_vault_checksum_func_derive_vault_key_base64(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_ENCRYPT_VAULT_FIELDS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_ENCRYPT_VAULT_FIELDS
 uint16_t uniffi_actro_vault_checksum_func_encrypt_vault_fields(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_ENCRYPT_VAULT_STRING
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_ENCRYPT_VAULT_STRING
 uint16_t uniffi_actro_vault_checksum_func_encrypt_vault_string(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_GENERATE_VAULT_SALT_BASE64
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_GENERATE_VAULT_SALT_BASE64
 uint16_t uniffi_actro_vault_checksum_func_generate_vault_salt_base64(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_PARSE_VAULT_CATEGORY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_PARSE_VAULT_CATEGORY
 uint16_t uniffi_actro_vault_checksum_func_parse_vault_category(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_VAULT_CATEGORY_INFO
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_VAULT_CATEGORY_INFO
 uint16_t uniffi_actro_vault_checksum_func_vault_category_info(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_VAULT_CATEGORY_TEMPLATES
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_VAULT_CATEGORY_TEMPLATES
 uint16_t uniffi_actro_vault_checksum_func_vault_category_templates(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_VAULT_KEY_BYTE_LENGTH
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_VAULT_KEY_BYTE_LENGTH
 uint16_t uniffi_actro_vault_checksum_func_vault_key_byte_length(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_VAULT_NONCE_BYTE_LENGTH
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_VAULT_NONCE_BYTE_LENGTH
 uint16_t uniffi_actro_vault_checksum_func_vault_nonce_byte_length(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_VAULT_PASSWORD_STRENGTH
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_VAULT_PASSWORD_STRENGTH
 uint16_t uniffi_actro_vault_checksum_func_vault_password_strength(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_VAULT_PBKDF2_ITERATIONS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_VAULT_PBKDF2_ITERATIONS
 uint16_t uniffi_actro_vault_checksum_func_vault_pbkdf2_iterations(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_VAULT_SALT_BYTE_LENGTH
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_VAULT_SALT_BYTE_LENGTH
 uint16_t uniffi_actro_vault_checksum_func_vault_salt_byte_length(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_VAULT_VERIFICATION_TOKEN
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_VAULT_VERIFICATION_TOKEN
 uint16_t uniffi_actro_vault_checksum_func_vault_verification_token(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_VERIFY_VAULT_PASSWORD
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_VAULT_CHECKSUM_FUNC_VERIFY_VAULT_PASSWORD
 uint16_t uniffi_actro_vault_checksum_func_verify_vault_password(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_FFI_ACTRO_VAULT_UNIFFI_CONTRACT_VERSION
 #define UNIFFI_FFIDEF_FFI_ACTRO_VAULT_UNIFFI_CONTRACT_VERSION
 uint32_t ffi_actro_vault_uniffi_contract_version(void
-    
+
 );
 #endif
 

@@ -1,5 +1,5 @@
 import { NativeModules, Platform } from 'react-native';
-import { EMAIL_BRIDGE_CONTRACT } from '../../actr-host/coreContract';
+import { EMAIL_BRIDGE_CONTRACT } from '../../runtime-host/coreContract';
 
 type NativeEmailModule = {
   [EMAIL_BRIDGE_CONTRACT.methods.composeEmail]?: (

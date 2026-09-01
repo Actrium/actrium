@@ -32,6 +32,8 @@ path = "ks.db"
 [services.ais]
 [services.ais.server]
 token_ttl_secs = 3600
+# Development-only 32-byte renewal-token key.
+renewal_token_secret = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 [services.mfr]
 

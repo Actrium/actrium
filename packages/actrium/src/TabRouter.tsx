@@ -2,7 +2,7 @@
  * TabRouter - Top-level routing for Actro tabs
  *
  * Routes to:
- * - ActrApp: for .actr plugin tabs (via keel Engine)
+ * - RuntimeApp: for .actr plugin tabs (via keel Engine)
  * - HistoryApp: for chrome://history
  * - BookmarksApp: for chrome://bookmarks
  */
@@ -13,15 +13,15 @@ import { I18nextProvider, useTranslation } from 'react-i18next';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import './i18n'; // Ensure i18n is initialized
-import type { TabRouterProps } from './actr-host/types';
-import { TabProvider } from './actr-host/contexts/TabContext';
+import type { TabRouterProps } from './runtime-host/types';
+import { TabProvider } from './runtime-host/contexts/TabContext';
 import { SettingsApp } from './system-apps';
 import { GlobalAlertHost } from './components';
 
 // Lazy imports to avoid circular dependencies
-const ActrApp = React.lazy(() =>
-  import('./actr-host/features/app/ActrApp').then((m) => ({
-    default: m.ActrApp,
+const RuntimeApp = React.lazy(() =>
+  import('./runtime-host/features/app/RuntimeApp').then((m) => ({
+    default: m.RuntimeApp,
   })),
 );
 const HistoryApp = React.lazy(() => import('./system-apps/HistoryApp'));
@@ -124,7 +124,7 @@ const TabRouterInner: React.FC<TabRouterProps> = (props) => {
     return (
       <View style={containerStyle} key={`${tab.id}-${tab.reloadKey ?? 0}`}>
         <React.Suspense fallback={<LoadingFallback />}>
-          <ActrApp
+          <RuntimeApp
             tabs={[{ ...tab, appUrl }]}
             currentTabId={tab.id}
             isLeftPanelVisible={isLeftPanelVisible}
@@ -167,7 +167,7 @@ const TabRouterInner: React.FC<TabRouterProps> = (props) => {
 
   return (
     <View style={styles.container}>
-      {/* Actr tabs - rendered by ActrApp */}
+      {/* Actr tabs - rendered by RuntimeApp */}
       {actrTabs.length > 0 && (
         <React.Suspense fallback={<LoadingFallback />}>
           <View
@@ -180,7 +180,7 @@ const TabRouterInner: React.FC<TabRouterProps> = (props) => {
               },
             ]}
           >
-            <ActrApp
+            <RuntimeApp
               tabs={actrTabs}
               currentTabId={activeTabId}
               isLeftPanelVisible={isLeftPanelVisible}

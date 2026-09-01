@@ -17,7 +17,7 @@ update_ios_config() {
   
   # Absolute path to fetching the root of the item (script directory)
   local project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  local abs_path="$project_root/ActroRuntime/actr-app-examples/counterapp"
+  local abs_path="$project_root/ActroRuntime/keel-guest-examples/counterapp"
   
   # Verify if the target path exists
   if [[ ! -d "$abs_path" ]]; then

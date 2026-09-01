@@ -3,7 +3,7 @@ import {
   authAccountBaseUrl,
   RUNTIME_DB_QUERIES,
   type AuthEnvironment,
-} from '../actr-host/coreContract';
+} from '../runtime-host/coreContract';
 import {
   clearBrowserSyncSession,
   saveBrowserSyncSession,

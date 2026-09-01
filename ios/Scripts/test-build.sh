@@ -70,7 +70,7 @@ node node_modules/react-native/scripts/bundle.js \
     --platform ios \
     --dev false \
     --entry-file index.ts \
-    --bundle-output "$PROJECT_ROOT/Actro/actr.jsbundle" \
+    --bundle-output "$PROJECT_ROOT/Actro/runtime.jsbundle" \
     --assets-dest "$PROJECT_ROOT/Actro"
 
 cd "$PROJECT_ROOT"

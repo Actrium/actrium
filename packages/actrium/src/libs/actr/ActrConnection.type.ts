@@ -1,5 +1,5 @@
 import { AppInfo } from '../../api/types';
-import { ACTR_BRIDGE_CONTRACT } from '../../actr-host/coreContract';
+import { ACTR_BRIDGE_CONTRACT } from '../../runtime-host/coreContract';
 
 export interface IActrConfigOptions {
   app_id: string;

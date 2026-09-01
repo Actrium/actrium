@@ -188,12 +188,12 @@ The completion of the migration requires that it be met simultaneously:
 - Old Debug App About 347 MiB;new Debug App Yes 143,144 KiB(About 139.8 MiB) ) , reduction approximately
   60%. Installed as
   0 individual `.xpc`, 1 individual `ActroRenderer.app`, 1 individual `system.jsbundle`.
-- ACTR / REQUESTS The acceptance range for this round is only for host viewing structures, loading links and fingerprint (a) Separation of borders;
+- ACTR / Keel Guest The acceptance range for this round is only for host viewing structures, loading links and fingerprint (a) Separation of borders;
   Its internal behaviour is left for subsequent adjustments before it is fully adapted.
 - Thin Helper Current non-link to moving-end page WebView, DeviceInfo, Reanimated and
   GestureHandler (a) Realization of primary;React Native The option to generate a module table will still be unconnected WebView
   provider Recording a detection alarm, but now macOS - It's a real tactful. History / Bookmarks Not dependent on it,
-  Two pages. Surface Average physical access Running Status. Follow-up ACTR / REQUESTS When you are in a situation, you press the actual.
+  Two pages. Surface Average physical access Running Status. Follow-up ACTR / Keel Guest When you are in a situation, you press the actual.
   capability Select a parent module or macOS Platform view to avoid pre-positioning the entire mobile package to plug back in.
 
 ## 10. Signing and Platform Boundary

@@ -5,7 +5,7 @@ import {
   RUNTIME_LOGIN_TYPES,
   USER_INFO_BRIDGE_CONTRACT,
   type RuntimeLoginType,
-} from '../../actr-host/coreContract';
+} from '../../runtime-host/coreContract';
 
 type NativeUserInfoModule = {
   addListener: (eventName: string) => void;

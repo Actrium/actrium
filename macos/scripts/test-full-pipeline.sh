@@ -3,7 +3,7 @@
 # Actro Full Pipeline Test Script
 #
 # 1. Kill old processes
-# 2. Rebuild: keel guest-bundle -> actr.jsbundle -> Actro.app
+# 2. Rebuild: keel guest-bundle -> runtime.jsbundle -> Actro.app
 # 3. Launch app, collect logs for N seconds
 # 4. Kill, parse & filter logs
 # 5. Generate categorised report
@@ -72,13 +72,13 @@ else
 fi
 
 # 2b. All jsbundles (system + actr — both share Engine.ts)
-info "Building actr.jsbundle..."
+info "Building runtime.jsbundle..."
 ACTR_OUT=$(cd "$ACTRO_DIR" && ./scripts/bundle-actro-runtime.sh --target all 2>&1)
 if echo "$ACTR_OUT" | grep -q 'Done!'; then
     ACTR_SIZE=$(echo "$ACTR_OUT" | grep -oE 'Size: [0-9A-Za-z.]+' | head -1)
-    ok "actr.jsbundle built ($ACTR_SIZE)"
+    ok "runtime.jsbundle built ($ACTR_SIZE)"
 else
-    fail "actr.jsbundle build failed:"
+    fail "runtime.jsbundle build failed:"
     echo "$ACTR_OUT" | tail -15
     exit 1
 fi
@@ -261,7 +261,7 @@ header "Step 5: Generating report"
     fi
 
     # E2. Engine created / JS loaded?
-    if grep -q 'Engine created\|Engine init\|ActrApp registered\|Bundle loaded' "$IPC_LOG" 2>/dev/null; then
+    if grep -q 'Engine created\|Engine init\|RuntimeApp registered\|Bundle loaded' "$IPC_LOG" 2>/dev/null; then
         echo "  [OK]   Engine / JS runtime active"
     else
         echo "  [FAIL] Engine / JS runtime NOT active"

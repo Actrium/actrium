@@ -21,6 +21,7 @@
 //!                          manifest.toml bytes -> Ed25519 sign -> manifest.sig
 //! ```
 
+pub mod actor_package;
 pub mod error;
 pub mod identity;
 pub mod load;
@@ -30,6 +31,13 @@ pub mod verify;
 
 mod util;
 
+pub use actor_package::{
+    ACTOR_PACKAGE_FORMAT_V1, ActorDependency, ActorDescriptor, ActorPackOptions,
+    ActorPackageManifest, ActriumExtension, HostRequirements, InspectedActorPackage,
+    KEEL_GUEST_PROFILE_V1, KeelGuestDescriptor, PackageExtensions, PackageFileEntry,
+    SignatureDescriptor, WorkloadDescriptor, inspect_actor_package, inspect_actor_package_bounded,
+    pack_actor_package, read_actor_package_file, read_actor_workload, verify_actor_package,
+};
 pub use error::PackError;
 pub use identity::{StorageNamespaceId, ValidatedActorIdentity};
 pub use load::{

@@ -17,8 +17,8 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Icon } from '../../components';
-import { useBookmarkStore } from '../../actr-host/store/useBookmarkStore';
-import { useUserStore } from '../../actr-host/store/useUserStore';
+import { useBookmarkStore } from '../../runtime-host/store/useBookmarkStore';
+import { useUserStore } from '../../runtime-host/store/useUserStore';
 import { getTypographyStyle, globalSearch } from '../../theme/tokens';
 import { TBookmarkItem } from '../../repository/BookmarkRepository';
 import {

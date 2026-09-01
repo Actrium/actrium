@@ -1,5 +1,5 @@
 import { db } from '../libs/Sqlite';
-import { RUNTIME_DB_QUERIES } from '../actr-host/coreContract';
+import { RUNTIME_DB_QUERIES } from '../runtime-host/coreContract';
 
 // 1. Bookmark Type: Corresponding bookmark_items Table + apps Table Associated Fields
 export type TBookmarkItem = {

@@ -47,15 +47,15 @@ struct ContentView: View {
                         return false
                     }
                     
-                    // Check if it's a .actr file or a directory with manifest.json
+                    // Check if it's a .actr file or a directory with manifest.toml
                     var isDirectory: ObjCBool = false
                     guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
                         return false
                     }
                     
                     if isDirectory.boolValue {
-                        // Directory - check if it has manifest.json
-                        let manifestPath = url.appendingPathComponent("manifest.json").path
+                        // Directory - check if it has manifest.toml
+                        let manifestPath = url.appendingPathComponent("manifest.toml").path
                         guard FileManager.default.fileExists(atPath: manifestPath) else {
                             return false
                         }

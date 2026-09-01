@@ -6,7 +6,7 @@ import {
   AUTH_ENVIRONMENT_CONTRACT,
   authResourceUploaderBaseUrl,
   type AuthEnvironment,
-} from '../actr-host/coreContract';
+} from '../runtime-host/coreContract';
 
 // Polyfill for COS SDK which expects navigator.userAgent and location in browser environments
 if (typeof navigator === 'object' && !navigator.userAgent) {

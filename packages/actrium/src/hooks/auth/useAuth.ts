@@ -1,11 +1,11 @@
-import { useAppStore } from '../../actr-host/store/useAppStore';
-import { useAuthTaskStore } from '../../actr-host/store/useAuthTaskStore';
-import { useUserStore } from '../../actr-host/store/useUserStore';
+import { useAppStore } from '../../runtime-host/store/useAppStore';
+import { useAuthTaskStore } from '../../runtime-host/store/useAuthTaskStore';
+import { useUserStore } from '../../runtime-host/store/useUserStore';
 import { authApi } from '../../api/auth';
 import {
   AUTH_ACCESS_CONTROL_RESPONSE_CONTRACT,
   authAccessControlStatus,
-} from '../../actr-host/coreContract';
+} from '../../runtime-host/coreContract';
 
 export type AuthStatus = 'authorized' | 'not_logged_in' | 'not_authorized';
 

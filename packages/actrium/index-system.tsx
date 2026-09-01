@@ -7,6 +7,10 @@
  * Output: system.jsbundle
  */
 
+// Custom bridgeless RCTHost instances do not preload React Native's JS core.
+// Initialize globals and timers before React or any application module runs.
+import 'react-native/Libraries/Core/InitializeCore';
+
 // Ensure console.assert exists as early as possible
 try {
   const c: any = (globalThis as any).console || ((globalThis as any).console = {} as any);
@@ -25,14 +29,12 @@ try {
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { AppRegistry, LogBox, View, Text, NativeModules, Platform, StyleSheet, DeviceEventEmitter, LayoutChangeEvent } from 'react-native';
+import { StandaloneGuestApp } from './src/runtime-host/StandaloneGuestApp';
 
 // System apps share one Renderer runtime and are already present in this
 // bundle. Resolve them synchronously on first use: React.lazy's Promise state
 // can leak across independent surfaces, while top-level imports eagerly execute
 // optional native integrations that an unrelated system page does not use.
-
-// Lazy import for ACTR apps (with unifiedScript)
-const ActrApp = React.lazy(() => import('./src/actr-host/ActrApp').then(m => ({ default: m.ActrApp })));
 
 const NativeLogger = NativeModules.NativeLogger;
 const nlog = (msg: string) => { try { NativeLogger?.log?.(msg); } catch {} };
@@ -95,6 +97,7 @@ interface SystemAppProps {
     leftPanelScript?: string;
     rightPanelScript?: string;
     guestScript?: string;
+    permissions?: string[];
     backgroundColor?: string;
     bookmarks?: any[];
     recentHistory?: any[];
@@ -219,19 +222,15 @@ const SystemAppRouter: React.FC<SystemAppProps> = (initialProps) => {
 
   // 🔑 ACTR app: has script but no systemAppType
   if (!tab?.systemAppType && hasActrScript && tab) {
-    nlog(`[SystemAppRouter] Rendering ActrApp for tab=${tab.id?.substring(0, 8)}`);
+    nlog(`[SystemAppRouter] Rendering RuntimeApp for tab=${tab.id?.substring(0, 8)}`);
     return (
       <View style={styles.container} onLayout={handleLayout}>
         <ErrorBoundary>
           <React.Suspense fallback={<LoadingFallback />}>
-            <ActrApp
-              tabs={[tab]}
-              currentTabId={tab.id}
-              isLeftPanelVisible={isLeftPanelVisible}
-              isRightPanelVisible={isRightPanelVisible}
+            <StandaloneGuestApp
+              tab={tab}
               containerWidth={containerWidth}
               containerHeight={containerHeight}
-              isOverviewMode={isOverviewMode}
             />
           </React.Suspense>
         </ErrorBoundary>
@@ -333,5 +332,5 @@ try {
 } catch {}
 
 // Register the app
-AppRegistry.registerComponent('ActrApp', () => SystemAppRouter);
-nlog('✅ [System Apps] ActrApp registered');
+AppRegistry.registerComponent('RuntimeApp', () => SystemAppRouter);
+nlog('✅ [System Apps] RuntimeApp registered');

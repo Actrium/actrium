@@ -111,7 +111,7 @@ class BrowserViewModel: ObservableObject {
                 </html>
                 """,
             // 🟢 Trick: Give an empty script, force SwiftUI Think it's a... RN Tab
-            // Even if it's like this. content Yes. HTMLIt'll be wrapped outside. ActrApp It's... RN Shells (Address Bar, etc.)
+            // Even if it's like this. content Yes. HTMLIt'll be wrapped outside. RuntimeApp It's... RN Shells (Address Bar, etc.)
             unifiedScript: "/* welcome page shell */"
         )
         tabs.append(defaultTab)
@@ -288,7 +288,7 @@ class BrowserViewModel: ObservableObject {
                 </html>
                 """,
             // 🟢 Trick: Give an empty script, force SwiftUI Think it's a... RN Tab
-            // Even if it's like this. content Yes. HTMLIt'll be wrapped outside. ActrApp It's... RN Shells (Address Bar, etc.)
+            // Even if it's like this. content Yes. HTMLIt'll be wrapped outside. RuntimeApp It's... RN Shells (Address Bar, etc.)
             unifiedScript: "/* welcome page shell */"
         )
 
@@ -865,7 +865,7 @@ class BrowserViewModel: ObservableObject {
         for historyTab in historyGroup.tabs {
             if let appURL = historyTab.appURL {
                 // Import the ACTR package
-                importACTRPackageToGroup(from: appURL, groupId: newGroup.id)
+                importActrPackageToGroup(from: appURL, groupId: newGroup.id)
             }
         }
 
@@ -873,7 +873,7 @@ class BrowserViewModel: ObservableObject {
     }
 
     /// Import ACTR package and add to a specific group
-    private func importACTRPackageToGroup(from fileURL: URL, groupId: UUID) {
+    private func importActrPackageToGroup(from fileURL: URL, groupId: UUID) {
         let resolvedURL = fileURL.standardizedFileURL
         guard FileManager.default.fileExists(atPath: resolvedURL.path) else {
             logger.error(" Not found .actr Documents:\(resolvedURL.path)")
@@ -892,12 +892,12 @@ class BrowserViewModel: ObservableObject {
             rootDir = resolvedURL
             tempDir = nil
         } else {
-            // Archive mode - extract to temp
+            // Package archive mode - extract to temp
             let temp = FileManager.default.temporaryDirectory
                 .appendingPathComponent("actr-\(UUID().uuidString)", isDirectory: true)
             do {
                 try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
-                try unzipACTR(archive: resolvedURL, to: temp)
+                try unzipActrPackage(archive: resolvedURL, to: temp)
             } catch {
                 logger.error(" [restoreGroup] .actr Loading failed:\(error.localizedDescription)")
                 return
@@ -910,7 +910,7 @@ class BrowserViewModel: ObservableObject {
         if tempDir != nil { }
 
         do {
-            let manifestInfo = try readManifestJSON(fromRoot: rootDir)
+            let manifestInfo = try readPackageManifest(fromRoot: rootDir)
             let tabTitle = manifestInfo.name ?? resolvedURL.deletingPathExtension().lastPathComponent
 
             let guestScript = readGuestScript(fromRoot: rootDir)
@@ -1173,12 +1173,12 @@ class BrowserViewModel: ObservableObject {
             // Directory mode - use directly
             rootDir = resolvedURL
         } else {
-            // Archive mode - extract to temp
+            // Package archive mode - extract to temp
             let tempDir = FileManager.default.temporaryDirectory
                 .appendingPathComponent("actr-\(UUID().uuidString)", isDirectory: true)
             do {
                 try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-                try unzipACTR(archive: resolvedURL, to: tempDir)
+                try unzipActrPackage(archive: resolvedURL, to: tempDir)
             } catch {
                 logger.error(" [reloadCurrentTab] Depression failed:\(error.localizedDescription)")
                 return
@@ -1187,7 +1187,7 @@ class BrowserViewModel: ObservableObject {
         }
 
         do {
-            let manifestInfo = try readManifestJSON(fromRoot: rootDir)
+            let manifestInfo = try readPackageManifest(fromRoot: rootDir)
 
             // Read scripts
             var unifiedScript: String? = nil
@@ -1282,12 +1282,12 @@ class BrowserViewModel: ObservableObject {
             // Directory mode - use directly
             rootDir = resolvedURL
         } else {
-            // Archive mode - extract to temp
+            // Package archive mode - extract to temp
             let tempDir = FileManager.default.temporaryDirectory
                 .appendingPathComponent("actr-\(UUID().uuidString)", isDirectory: true)
             do {
                 try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-                try unzipACTR(archive: resolvedURL, to: tempDir)
+                try unzipActrPackage(archive: resolvedURL, to: tempDir)
             } catch {
                 logger.error(" .actr Loading failed:\(error.localizedDescription)")
                 return
@@ -1296,7 +1296,7 @@ class BrowserViewModel: ObservableObject {
         }
 
         do {
-            let manifestInfo = try readManifestJSON(fromRoot: rootDir)
+            let manifestInfo = try readPackageManifest(fromRoot: rootDir)
             let tabTitle = manifestInfo.name ?? resolvedURL.deletingPathExtension().lastPathComponent
 
             // Read guest Script
@@ -1306,27 +1306,27 @@ class BrowserViewModel: ObservableObject {
             var unifiedScript: String? = nil
             if let unifiedFileName = manifestInfo.unifiedScript {
                 unifiedScript = readScript(fromRoot: rootDir, fileName: unifiedFileName)
-                logger.notice(" [BrowserViewModel] From manifest.json Read unified: \(unifiedFileName), Script exists: \(unifiedScript != nil)")
+                logger.notice(" [BrowserViewModel] From manifest.toml Read unified: \(unifiedFileName), Script exists: \(unifiedScript != nil)")
             }
 
-            // Legacy: From manifest.json Read Panel Script File Name
+            // From manifest.toml Read Panel Script File Name
             var leftPanelScript: String? = nil
             var rightPanelScript: String? = nil
 
             if let leftFileName = manifestInfo.leftPanelScript {
                 leftPanelScript = readScript(fromRoot: rootDir, fileName: leftFileName)
-                logger.debug("🔍 [BrowserViewModel] From manifest.json Read leftPanel: \(leftFileName), Script exists: \(leftPanelScript != nil)")
+                logger.debug("🔍 [BrowserViewModel] From manifest.toml Read leftPanel: \(leftFileName), Script exists: \(leftPanelScript != nil)")
             }
 
             if let rightFileName = manifestInfo.rightPanelScript {
                 rightPanelScript = readScript(fromRoot: rootDir, fileName: rightFileName)
-                logger.debug("🔍 [BrowserViewModel] From manifest.json Read rightPanel: \(rightFileName), Script exists: \(rightPanelScript != nil)")
+                logger.debug("🔍 [BrowserViewModel] From manifest.toml Read rightPanel: \(rightFileName), Script exists: \(rightPanelScript != nil)")
             }
 
             // v2.0: Use Priority Single Engine Structure
             if let unified = unifiedScript {
                 logger.debug("🚀 [BrowserViewModel] Use Single Engine Structure (unified bundle)")
-                appendACTRTab(
+                appendRuntimeTab(
                     title: tabTitle,
                     sourceURL: resolvedURL,
                     appId: manifestInfo.appId,
@@ -1341,7 +1341,7 @@ class BrowserViewModel: ObservableObject {
             // Legacy: Double Engine Structure
             else if leftPanelScript != nil || rightPanelScript != nil {
                 logger.debug("🔄 [BrowserViewModel] Use Legacy Double Engine Structure")
-                appendACTRTab(
+                appendRuntimeTab(
                     title: tabTitle,
                     sourceURL: resolvedURL,
                     appId: manifestInfo.appId,
@@ -1356,7 +1356,7 @@ class BrowserViewModel: ObservableObject {
             } else if let script = guestScript {
                 // Old architecture: one compatible guest.js
                 logger.debug("🔄 [BrowserViewModel] Use compatible mode (guestScript)")
-                appendACTRTab(
+                appendRuntimeTab(
                     title: tabTitle,
                     sourceURL: resolvedURL,
                     appId: manifestInfo.appId,
@@ -1373,7 +1373,7 @@ class BrowserViewModel: ObservableObject {
                     description: manifestInfo.description ?? "No description provided.",
                     sourcePath: resolvedURL.path
                 )
-                appendACTRTab(
+                appendRuntimeTab(
                     title: tabTitle,
                     sourceURL: resolvedURL,
                     appId: manifestInfo.appId,
@@ -1388,7 +1388,7 @@ class BrowserViewModel: ObservableObject {
                 description: "Loading failed:\(error.localizedDescription)",
                 sourcePath: resolvedURL.path
             )
-            appendACTRTab(
+            appendRuntimeTab(
                 title: resolvedURL.deletingPathExtension().lastPathComponent,
                 sourceURL: resolvedURL,
                 htmlContent: fallbackHTML
@@ -1415,12 +1415,12 @@ class BrowserViewModel: ObservableObject {
             // Directory mode - use directly
             rootDir = resolvedURL
         } else {
-            // Archive mode - extract to temp
+            // Package archive mode - extract to temp
             let tempDir = FileManager.default.temporaryDirectory
                 .appendingPathComponent("actr-\(UUID().uuidString)", isDirectory: true)
             do {
                 try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-                try unzipACTR(archive: resolvedURL, to: tempDir)
+                try unzipActrPackage(archive: resolvedURL, to: tempDir)
             } catch {
                 logger.error(" .actr Loading failed:\(error.localizedDescription)")
                 return
@@ -1429,7 +1429,7 @@ class BrowserViewModel: ObservableObject {
         }
 
         do {
-            let manifestInfo = try readManifestJSON(fromRoot: rootDir)
+            let manifestInfo = try readPackageManifest(fromRoot: rootDir)
             let tabTitle = manifestInfo.name ?? resolvedURL.deletingPathExtension().lastPathComponent
 
             let guestScript = readGuestScript(fromRoot: rootDir)
@@ -1451,7 +1451,7 @@ class BrowserViewModel: ObservableObject {
             // Update UI on main thread
             DispatchQueue.main.async { [weak self] in
                 if let unified = unifiedScript {
-                    self?.appendACTRTab(
+                    self?.appendRuntimeTab(
                         title: tabTitle,
                         sourceURL: resolvedURL,
                         appId: manifestInfo.appId,
@@ -1463,7 +1463,7 @@ class BrowserViewModel: ObservableObject {
                         rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible
                     )
                 } else if leftPanelScript != nil || rightPanelScript != nil {
-                    self?.appendACTRTab(
+                    self?.appendRuntimeTab(
                         title: tabTitle,
                         sourceURL: resolvedURL,
                         appId: manifestInfo.appId,
@@ -1476,7 +1476,7 @@ class BrowserViewModel: ObservableObject {
                         rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible
                     )
                 } else if let script = guestScript {
-                    self?.appendACTRTab(
+                    self?.appendRuntimeTab(
                         title: tabTitle,
                         sourceURL: resolvedURL,
                         appId: manifestInfo.appId,
@@ -1492,7 +1492,7 @@ class BrowserViewModel: ObservableObject {
                         description: manifestInfo.description ?? "No description provided.",
                         sourcePath: resolvedURL.path
                     ) ?? ""
-                    self?.appendACTRTab(
+                    self?.appendRuntimeTab(
                         title: tabTitle,
                         sourceURL: resolvedURL,
                         appId: manifestInfo.appId,
@@ -1509,7 +1509,7 @@ class BrowserViewModel: ObservableObject {
                     description: "Loading failed:\(error.localizedDescription)",
                     sourcePath: resolvedURL.path
                 ) ?? ""
-                self?.appendACTRTab(
+                self?.appendRuntimeTab(
                     title: resolvedURL.deletingPathExtension().lastPathComponent,
                     sourceURL: resolvedURL,
                     htmlContent: fallbackHTML
@@ -1527,7 +1527,7 @@ class BrowserViewModel: ObservableObject {
         }
 
         do {
-            let manifestInfo = try readManifestJSON(fromRoot: directoryURL)
+            let manifestInfo = try readPackageManifest(fromRoot: directoryURL)
             let tabTitle = manifestInfo.name ?? directoryURL.lastPathComponent
             logger.debug("📂 [loadFromDevDirectory] Load Development Directory: \(tabTitle)")
 
@@ -1553,7 +1553,7 @@ class BrowserViewModel: ObservableObject {
             // Update UI on main thread
             DispatchQueue.main.async { [weak self] in
                 if let unified = unifiedScript {
-                    self?.appendACTRTab(
+                    self?.appendRuntimeTab(
                         title: tabTitle,
                         sourceURL: directoryURL,
                         appId: manifestInfo.appId,
@@ -1565,7 +1565,7 @@ class BrowserViewModel: ObservableObject {
                         rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible
                     )
                 } else if leftPanelScript != nil || rightPanelScript != nil {
-                    self?.appendACTRTab(
+                    self?.appendRuntimeTab(
                         title: tabTitle,
                         sourceURL: directoryURL,
                         appId: manifestInfo.appId,
@@ -1578,7 +1578,7 @@ class BrowserViewModel: ObservableObject {
                         rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible
                     )
                 } else if let script = guestScript {
-                    self?.appendACTRTab(
+                    self?.appendRuntimeTab(
                         title: tabTitle,
                         sourceURL: directoryURL,
                         appId: manifestInfo.appId,
@@ -1596,7 +1596,7 @@ class BrowserViewModel: ObservableObject {
         }
     }
 
-    private func appendACTRTab(
+    private func appendRuntimeTab(
         title: String,
         sourceURL: URL,
         appId: String? = nil,
@@ -1655,7 +1655,7 @@ class BrowserViewModel: ObservableObject {
         )
     }
 
-    private func unzipACTR(archive: URL, to destination: URL) throws {
+    private func unzipActrPackage(archive: URL, to destination: URL) throws {
         let fileManager = FileManager.default
 
         if !fileManager.fileExists(atPath: destination.path) {
@@ -1671,7 +1671,7 @@ class BrowserViewModel: ObservableObject {
         )
     }
 
-    private func readManifestJSON(fromRoot root: URL) throws -> ActrPackageManifestInfo {
+    private func readPackageManifest(fromRoot root: URL) throws -> ActrPackageManifestInfo {
         try ActrPackageManifestReader.read(fromRoot: root)
     }
 

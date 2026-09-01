@@ -6,13 +6,13 @@
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           Main Process (Actro.app)                                │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ 1. BrowserViewModel.init()                                                   │
-│    ├─ Test counterapp Develop Directory                                               │
-│    └─ Task { loadFromDevDirectory() }                                        │
+│ 1. BrowserViewModel receives an .actr package                                │
+│    ├─ Verify manifest, signature, and payload digests                        │
+│    └─ Create a runtime tab from the declared workload                        │
 │                                                                             │
-│ 2. loadFromDevDirectory()                                                    │
-│    ├─ Read unified-app.js                                                    │
-│    └─ appendACTRTab() → tabs.append(newTab)                                  │
+│ 2. Package loading                                                          │
+│    ├─ Read the workload entry declared in manifest.toml                      │
+│    └─ appendRuntimeTab() → tabs.append(newTab)                               │
 │                                                                             │
 │ 3. UnifiedActroView Render                                                    │
 │    └─ ActroView                                                             │

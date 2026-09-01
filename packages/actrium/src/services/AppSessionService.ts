@@ -2,17 +2,17 @@ import { getAppInfo } from '../api/app';
 import { authApi, CURRENT_ENV } from '../api/auth';
 import { AppRepository } from '../repository/AppRepository';
 import { AuthRepository } from '../repository/AuthRepository';
-import { useAppStore } from '../actr-host/store/useAppStore';
-import { useUserStore } from '../actr-host/store/useUserStore';
-import { useAuthTaskStore } from '../actr-host/store/useAuthTaskStore';
+import { useAppStore } from '../runtime-host/store/useAppStore';
+import { useUserStore } from '../runtime-host/store/useUserStore';
+import { useAuthTaskStore } from '../runtime-host/store/useAuthTaskStore';
 import { AccountUserInfo } from '../api/types';
-import { actrLoader } from '../actr-host/utils';
+import { actrLoader } from '../runtime-host/utils';
 import { updateTabInfo } from '../native-bridge/tab/TabModule';
 import {
   AUTH_ACCESS_CONTROL_RESPONSE_CONTRACT,
   authAccessControlStatus,
   authIsClientAppNotFoundResponse,
-} from '../actr-host/coreContract';
+} from '../runtime-host/coreContract';
 
 export type TInitSessionResult =
   | {
@@ -109,7 +109,7 @@ export class AppSessionService {
             `[AppSessionService] Loading and verifying .actr: ${guestUrl}`,
           );
 
-          // Download,zip hash Validate, depress and manifest Read it all. ActrLoader The project is now being completed.
+          // Download,zip hash Validate, depress and manifest Read it all. ActrPackageLoader The project is now being completed.
           // Avoid checking for the double-net request for the first download, and for the second download.
           const actrPackage = await actrLoader.load(guestUrl, appId, {
             expectedSha256: guestHashCode,

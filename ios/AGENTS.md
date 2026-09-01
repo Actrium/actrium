@@ -14,7 +14,7 @@ graph TD
 
     subgraph "Core Layer (ActroRuntime Sub-projects)"
         B --> C[native-bridge]
-        C --> D[actr-host]
+        C --> D[runtime-host]
         D --> E[Infrastructure]
     end
 
@@ -37,8 +37,8 @@ graph TD
 ## 2. Module responsibilities and collaborative relationships
 
 ### Key component collaboration
-- **TabRouter** (RN Entry): Receiving Native Enter configuration, by type to `ActrApp` (Plugin) or application in the system (Login/History).
-- **ActrApp / ActrTabView**: Management Keel Engine Example pool. Downloads, validates plugin packages, initials the rendering of sandboxes and sends a surveillance snapshot to the natives.
+- **TabRouter** (RN Entry): Receiving Native Enter configuration, by type to `RuntimeApp` (Plugin) or application in the system (Login/History).
+- **RuntimeApp / RuntimeTabView**: Management Keel Engine Example pool. Downloads, validates plugin packages, initials the rendering of sandboxes and sends a surveillance snapshot to the natives.
 - **native-bridge**: as: JS With birth SDK The only way between them, dealing with complex things. WebRTC Connects to logic, and you achieve the end-to-end route of the stream.
 - **Infrastructure (api/repo/services)**: `AppSessionService` Responsible for the full initialization of sessions (access to information) -> Verify Package -> Parsing scripts.
 
@@ -64,10 +64,10 @@ graph TD
 ## 4. Core data stream
 
 ### A. Apply Load Stream
-Native Start -> `TabRouter` Distribution -> `AppSessionService` Initialization Plugin -> `ActrTabView` Activate plugin run.
+Native Start -> `TabRouter` Distribution -> `AppSessionService` Initialization Plugin -> `RuntimeTabView` Activate plugin run.
 
 ### B. Message Interact Closed Ring
-1.  **Send**: User Input -> `ActrInput` -> `native-bridge` -> `Native Actr SDK` -> `Server`.
+1.  **Send**: User Input -> `AppInput` -> `native-bridge` -> `Native Actr SDK` -> `Server`.
 2.  **Receive**: `Native Event` -> `native-bridge` (Fluent distribution) -> `useMessageStore` (Add) -> `UI` Present.
 
 ---

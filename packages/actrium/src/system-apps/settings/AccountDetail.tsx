@@ -12,7 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { AppText } from '../../components';
 import { getTypographyStyle, spacing, controlHeight } from '../../theme/tokens';
-import { useUserStore } from '../../actr-host/store/useUserStore';
+import { useUserStore } from '../../runtime-host/store/useUserStore';
 import { SettingsBackHeader } from './SettingsBackHeader';
 
 interface AccountDetailProps {

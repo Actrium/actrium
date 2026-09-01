@@ -407,9 +407,11 @@ mod tests {
     fn schema_version_is_recorded_by_latest_migration() {
         assert_eq!(CORE_SCHEMA_VERSION, 1);
         assert_eq!(MIGRATIONS.last().unwrap().version, CORE_SCHEMA_VERSION);
-        assert!(schema_statements()
-            .iter()
-            .any(|statement| statement.contains("core_schema_version")));
+        assert!(
+            schema_statements()
+                .iter()
+                .any(|statement| statement.contains("core_schema_version"))
+        );
     }
 
     #[test]

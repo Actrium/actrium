@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { useUserStore } from '../../actr-host/store/useUserStore';
+import { useUserStore } from '../../runtime-host/store/useUserStore';
 import { Icon } from '../../components';
 import { useColors } from '../../theme/useColors';
 import type { ColorTokens } from '../../theme/colors';

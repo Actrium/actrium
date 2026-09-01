@@ -6,6 +6,7 @@
   "scripts": {
     "check": "pnpm -r --if-present check",
     "check:language": "python3 .github/scripts/check_cjk.py",
+    "check:retired-protocols": "bash scripts/actrium/check-retired-protocol-names.sh",
     "check:migration": "bash scripts/actrium/check-migration-hygiene.sh",
     "check:generated": "bash scripts/actrium/check-generated-contracts.sh",
     "check:rust-boundary": "bash scripts/actrium/check-rust-boundary-hygiene.sh",
@@ -20,7 +21,7 @@
     "bundle:macos:system": "cd macos && ./scripts/bundle-actro-runtime.sh --target system --dev",
     "bundle:macos:actr": "cd macos && ./scripts/bundle-actro-runtime.sh --target actr --dev",
     "bundle:macos:all": "cd macos && ./scripts/bundle-actro-runtime.sh --target all --dev",
-    "verify:all": "npm run check:language && npm run check:repository-assets && npm run check:migration && npm run verify:rust && npm run verify:apple-core && npm run check:generated && npm run check:rust-boundary && npm run check:windows-layout && npm run verify:runtime && npm run check:bundles && npm run verify:android && npm run verify:ios && npm run verify:macos && npm run verify:windows",
+    "verify:all": "npm run check:language && npm run check:retired-protocols && npm run check:repository-assets && npm run check:migration && npm run verify:rust && npm run verify:apple-core && npm run check:generated && npm run check:rust-boundary && npm run check:windows-layout && npm run verify:runtime && npm run check:bundles && npm run verify:android && npm run verify:ios && npm run verify:macos && npm run verify:windows",
     "verify:rust": "cargo test -p actro-core -p actro-vault -p actro-sync-server",
     "verify:apple-core": "swift test --package-path packages/actrium-platform/apple/ActroCore",
     "verify:runtime": "cd packages/actrium && npm run typecheck",
