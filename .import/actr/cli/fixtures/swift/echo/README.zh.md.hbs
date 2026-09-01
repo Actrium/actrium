@@ -1,0 +1,114 @@
+# {{PROJECT_NAME_PASCAL}}
+
+基于 Actr 框架构建的 iOS 应用程序，演示了 echo 服务功能。
+
+Template: echo
+
+[English](README.md) | 简体中文
+
+## 项目结构
+
+```
+{{PROJECT_NAME}}/
+├── manifest.toml          # 包身份、导出和依赖
+├── actr.toml              # 运行时和网络配置
+├── project.yml            # XcodeGen 项目配置
+├── {{PROJECT_NAME_PASCAL}}/                  # iOS 应用程序源代码
+│   ├── {{PROJECT_NAME_PASCAL}}.swift         # 应用程序入口
+│   ├── ActrService.swift                     # linked ActrNode 启动代码
+│   ├── <ServiceName>HandlerImpl.swift        # 用户维护的 RPC 实现
+│   ├── <ServiceName>LifecycleAdapter.swift   # 用户维护的生命周期钩子
+│   ├── ContentView.swift                     # 主界面视图
+│   └── Generated/                            # 不可变生成代码
+├── protos/                # Protocol buffer 定义
+│   ├── local/             # 本地服务定义
+│   └── remote/            # 远程服务定义
+└── src/                   # Rust 源代码（如适用）
+```
+
+## 前置要求
+
+在构建此项目之前，请确保已安装以下工具：
+
+- **Xcode**（推荐最新版本）
+- **XcodeGen** - 用于生成 Xcode 项目文件
+  ```bash
+  brew install xcodegen
+  ```
+- **Actr CLI** - 用于生成 Actr 框架代码
+- **Swift Package Manager** 依赖项：
+  - `actr-swift` (本地包)
+  - `SwiftProtobuf` (来自 GitHub)
+
+## 项目创建
+
+要从头创建新的 {{PROJECT_NAME_PASCAL}} 项目，请按照以下三个步骤操作：
+
+1. **初始化项目**，使用 echo 模板：
+   ```bash
+   actr init --template echo -l swift {{PROJECT_NAME}}
+   ```
+   这将使用 echo 模板配置创建项目结构。
+
+2. **安装依赖项**：
+   ```bash
+   actr deps install
+   ```
+   这将安装项目中定义的所有必需依赖项。
+
+3. **生成 Swift 代码**：
+   ```bash
+   actr gen -l swift
+   ```
+   这会把不可变代码写入 `{{PROJECT_NAME_PASCAL}}/Generated`，并在同级生成用户维护的 Handler、LifecycleAdapter 和 linked `ActrService` 脚手架。
+
+## 启动和设置注意事项
+
+### 重要：Xcode Team 配置
+
+**在 Xcode 中打开项目后，必须手动配置签名团队：**
+
+1. 在 Xcode 中打开 `{{PROJECT_NAME_PASCAL}}.xcodeproj`
+2. 在项目导航器中选择 `{{PROJECT_NAME_PASCAL}}` target
+3. 转到 **Signing & Capabilities** 标签页
+4. 在 **Signing** 下，勾选 **Automatically manage signing**
+5. 从下拉菜单中选择您的 **Team**
+   - 如果看不到您的团队，您可能需要：
+     - 在 Xcode 偏好设置 -> Accounts 中添加您的 Apple ID
+     - 确保您拥有有效的 Apple Developer 账户
+6. Xcode 将自动生成配置文件
+
+**注意：** 团队设置未包含在 `project.yml` 中，因为每个开发者的设置不同。每个开发者必须在 Xcode 中配置自己的团队。
+
+### 配置
+
+配置按职责拆分：
+
+- `manifest.toml`：包身份、导出和依赖。
+- `actr.toml`：信令、realm、WebRTC、ACL 和可观测性配置。
+
+根据您的部署环境需要修改这些设置。
+
+生成的 iOS 启动代码使用 `ActrNode.linked` 和静态链接的 `DynamicWorkload`，不会从应用资源中加载 `.actr` 包。运行时从 `manifest.toml` 读取本地身份和依赖 alias；生成的 dispatcher 在使用远端依赖时通过 `ActrContext` 解析 alias。
+
+## 开发工作流程
+
+1. 如需要，修改 `protos/` 中的协议定义
+2. 使用 `actr discovery` 查看服务并将其添加到 `manifest.toml`
+3. 使用 `actr deps install` 下载依赖 proto 文件
+4. 重新生成不可变代码：`actr gen -l swift`
+5. 在 `{{PROJECT_NAME_PASCAL}}/<ServiceName>HandlerImpl.swift` 中实现 RPC 方法
+6. 按需修改 `<ServiceName>LifecycleAdapter.swift` 中的生命周期钩子
+7. 在 Xcode 中构建和测试
+
+## 代码归属
+
+- `{{PROJECT_NAME_PASCAL}}/Generated/` 由 `actr gen -l swift` 负责生成，不要手工修改。
+- `<ServiceName>HandlerImpl.swift` 是用户维护的 RPC 实现。
+- `<ServiceName>LifecycleAdapter.swift` 是用户维护的生命周期定制。
+- `ActrService.swift` 负责将这些组件接入 `ActrNode.linked`；生成的 dispatcher 在运行时从 linked manifest 解析 alias。
+- `ContentView.swift` 等 UI 文件由 `actr init` 创建，`actr gen` 不会重写。
+
+## 许可证
+
+Apache-2.0

@@ -1,0 +1,25 @@
+<Window x:Class="WinUiEchoApp.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="EchoApp">
+    <Grid Padding="24" RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <TextBlock Grid.Row="0" Text="EchoApp" FontSize="28" FontWeight="Bold"/>
+        <TextBlock Grid.Row="1" x:Name="StatusText" FontSize="12" Foreground="Gray" Text="Starting..."/>
+        <TextBox  Grid.Row="2" x:Name="InputBox" PlaceholderText="Message" MinWidth="320"/>
+        <Button   Grid.Row="3" x:Name="SendButton" Content="Send"
+                  Click="SendButton_Click" IsEnabled="False"
+                  Style="{StaticResource AccentButtonStyle}"/>
+        <TextBlock Grid.Row="4" Text="Reply" FontSize="18" FontWeight="SemiBold"/>
+        <Border Grid.Row="5" Background="#1F1F1F20" CornerRadius="8" Padding="12">
+            <TextBlock x:Name="ReplyText" Text="No reply yet" TextWrapping="Wrap"/>
+        </Border>
+    </Grid>
+</Window>

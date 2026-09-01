@@ -1,0 +1,62 @@
+[package]
+name = "actrix-signaling"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "WebRTC signaling server implementation, as a component of aux-servers"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = []
+opentelemetry = ["dep:opentelemetry", "dep:tracing-opentelemetry"]
+
+[dependencies]
+tokio = { workspace = true }
+tokio-util = "0.7"
+futures-util = { workspace = true }
+tracing = { workspace = true }
+bytes = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+uuid = { workspace = true, features = ["v4"] }
+
+# WebSocket implementation
+axum = { workspace = true, features = ["ws"] }
+
+# Actrix Protocol
+actr-protocol = { workspace = true }
+# Protobuf
+prost = { workspace = true }
+base64 = { workspace = true }
+
+# Internal dependencies
+platform = { path = "../platform", package = "actrix-platform", version = "0.10.0-alpha.4" }
+
+# Database
+sqlx = { workspace = true }
+
+# Rate limiting
+governor = "0.10"
+
+# OpenTelemetry (W3C trace context inject/extract)
+opentelemetry = { version = "0.32.0", features = ["trace"], optional = true }
+tracing-opentelemetry = { version = "0.33.0", optional = true }
+
+[dev-dependencies]
+uuid = { workspace = true, features = ["v4"] }
+tracing-subscriber = { workspace = true }
+tokio-tungstenite = { workspace = true }
+toml = { version = "0.8" }
+serial_test = "3.2"
+
+[lib]
+name = "signaling"
+
+[lints]
+workspace = true

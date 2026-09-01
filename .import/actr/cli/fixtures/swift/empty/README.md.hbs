@@ -1,0 +1,14 @@
+# {{PROJECT_NAME}}
+
+Empty Actrium Swift app shell.
+
+## Next steps
+
+1. Add local proto definitions under `protos/local/local.proto`.
+2. Run `actr gen -l swift`.
+3. Implement RPC methods in `<ServiceName>HandlerImpl.swift`.
+4. Customize lifecycle hooks in `<ServiceName>LifecycleAdapter.swift` when needed.
+5. Use the generated `ActrService.swift` linked-node bootstrap from your UI.
+6. Run `xcodegen generate` after editing `project.yml`.
+
+`manifest.toml` defines package identity and dependencies. `actr.toml` defines runtime and network settings. The iOS scaffold uses `ActrNode.linked`; it does not load a `.actr` package. When remote dependencies exist, `ActrService.swift` resolves their targets from `manifest.toml`.

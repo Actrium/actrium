@@ -1,0 +1,66 @@
+[package]
+name = "libactr"
+version = "0.3.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+name = "actr"
+
+[dependencies]
+# actr dependencies (workspace members)
+actr-protocol.workspace = true
+actr-framework.workspace = true
+actr-runtime.workspace = true
+actr-hyper = { workspace = true, features = ["opentelemetry"] }
+actr-config = { workspace = true, features = ["opentelemetry"] }
+actr-pack.workspace = true
+
+# UniFFI
+uniffi = { version = "0.31.1", features = ["tokio"] }
+
+# Async runtime
+tokio = { version = "1.48", features = ["full", "rt-multi-thread"] }
+bytes = "1.10"
+
+# Utilities
+thiserror = { workspace = true }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-android = "0.2"
+tracing-oslog = { version = "0.2", optional = true }
+url = "2.5"
+async-trait = "0.1"
+parking_lot = "0.12"
+futures-util = "0.3.31"
+opus = "0.3.1"
+audiopus_sys = { version = "0.2", features = ["static"] }
+
+# OpenSSL (vendored for cross-compilation)
+openssl = { version = "0.10", features = ["vendored"] }
+openssl-sys = { version = "0.9", features = ["vendored"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.14"
+log = "0.4"
+
+[dev-dependencies]
+actr-mock-actrix = { workspace = true }
+tempfile.workspace = true
+
+[features]
+# actr-hyper's only backend is webrtc-v020 (the 0.14 stack is removed), so
+# the RTC status/observation FFI is part of the supported surface and enabled
+# by default. Without this, mobile builds exposed get/list_rtc_peer_statuses
+# as compile-correct stubs that always reported "no RTC support" (a dependency
+# feature cannot enable this crate's own cfg gate).
+default = ["webrtc-v020"]
+opentelemetry = []
+macos-oslog = ["tracing-oslog"]
+# v0.20 WebRTC backend status/observation APIs (Stage 6). Forwards to
+# actr-hyper's backend feature.
+webrtc-v020 = ["actr-hyper/webrtc-v020"]

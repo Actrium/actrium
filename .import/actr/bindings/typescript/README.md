@@ -1,0 +1,174 @@
+# actr-ts
+
+[中文](./README.zh.md) | English
+
+TypeScript/Node.js bindings for ACTR. The binding is now `package-first`:
+local source-defined workloads were removed. `actr-ts` currently supports
+an `ActrNode` wrapper booted from `manifest.toml` plus a sibling
+`actr.toml`, then uses discovery plus explicit remote calls.
+
+## Overview
+
+actr-ts provides native Node.js bindings for the ACTR framework through
+napi-rs, with a TypeScript API centered on `ActrNode` and `ActrRef`.
+
+## Features
+
+- Native performance through Rust and napi-rs
+- Type-safe TypeScript API
+- Built-in service discovery
+- Remote RPC and one-way messaging
+- Package-first runtime model
+
+## Installation
+
+```bash
+npm install @actrium/actr
+```
+
+## Quick Start
+
+```typescript
+import { ActrNode, PayloadType } from '@actrium/actr';
+
+async function main() {
+  const node = await ActrNode.fromConfig('./manifest.toml');
+  const actorRef = await node.start();
+
+  const [serverId] = await actorRef.discover(
+    { manufacturer: 'actrium', name: 'EchoService', version: '0.2.1-beta' },
+    1,
+  );
+
+  if (!serverId) {
+    throw new Error('No EchoService target discovered');
+  }
+
+  const response = await actorRef.call(
+    serverId,
+    'echo.EchoService.Echo',
+    PayloadType.RpcReliable,
+    Buffer.from('hello'),
+    5000,
+  );
+
+  console.log(response.toString());
+  actorRef.shutdown();
+  await actorRef.waitForShutdown();
+}
+
+main().catch(console.error);
+```
+
+## API
+
+- `ActrNode.fromConfig(configPath)` boots an `ActrNode` wrapper from
+  `manifest.toml`
+  and auto-loads `actr.toml` from the same directory.
+- `ActrRef.discover(targetType, count)` resolves remote actors.
+- `ActrRef.resolveDependency(alias)` resolves a manifest alias before discovery.
+- `ActrRef.call(target, routeKey, payloadType, payload, timeoutMs)` sends a remote RPC.
+- `ActrRef.tell(target, routeKey, payloadType, payload)` sends a one-way remote message.
+- `ActrRef.shutdown()` and `waitForShutdown()` stop the actor.
+
+## Relationship to the Rust Node Typestate
+
+The Rust host exposes a typestate chain
+`Node<Init> → Node<Attached> → Node<Registered> → ActrRef`
+(`from_config_file` → `attach_*` → `register` → `start`) so system-level
+code can observe and customize each transition. The TypeScript binding
+deliberately collapses that pipeline into a single
+`ActrNode.fromConfig(path).start()` call: application developers rarely
+need the intermediate states, and the flatter surface is the simplest
+shape for the current TypeScript binding surface. If you need
+fine-grained control (custom `TrustProvider`, pre-built `Hyper`,
+workload hosting, etc.), drop down to the `actr_hyper::{Hyper, Node}`
+API in native Rust.
+
+## Current Scope
+
+- Supported today: manifest bootstrap, discovery, remote RPC, and shutdown.
+- Removed: source-defined local workloads, `ActrSystem`, `system.attach(...)`, `Workload`.
+- For service hosting, build a verified `.actr` package and run it with Rust `Node::attach(...)` (`wasm` / `dyn lib`).
+
+## Configuration
+
+Create a `manifest.toml` file plus a sibling `actr.toml` runtime file:
+
+```toml
+edition = 1
+exports = []
+
+[package]
+name = "my-actor"
+description = "My Actor"
+
+[package.actor]
+manufacturer = "actr"
+name = "my-actor"
+
+```
+
+```toml
+# actr.toml
+edition = 1
+
+[network]
+signaling_url = "ws://localhost:8081/signaling/ws"
+ais_endpoint = "http://localhost:8080"
+
+[network.realm]
+realm_id = 1
+
+[network.discovery]
+multicast_address = "239.255.42.99:4242"
+interface = "0.0.0.0"
+
+[system.observability]
+filter_level = "info"
+tracing_enabled = false
+```
+
+## Generated Code (Examples)
+
+The example clients use generated files under `examples/**/generated`, which
+are git-ignored. After cloning the repository, run the codegen script before
+running the examples.
+
+Prerequisites:
+
+- `npm install`
+
+Generate for echo-client:
+
+```bash
+npm run codegen -- --config examples/echo-client/manifest.toml
+```
+
+Notes:
+
+- `manifest.lock.toml` is optional for codegen. When it is absent, dependency
+  aliases come from `manifest.toml` and proto files are discovered recursively
+  under the proto root. If a lock is present, it must use the v2 alias format.
+- Proto sources default to `examples/echo-client/protos/remote`.
+- Outputs include protobuf codecs, route helpers, and `local.actor.ts`.
+
+## Build
+
+```bash
+npm install
+npm run build
+npm run compile:ts
+```
+
+## Publishing (Maintainers)
+
+TypeScript package releases are managed from this monorepo through the manual
+GitHub Actions workflow `Publish TypeScript Package`.
+
+- Package name: `@actrium/actr`
+- Workflow file: `.github/workflows/publish-typescript.yml`
+- Authentication: npm trusted publishing via GitHub Actions OIDC
+- Required workflow permission: `id-token: write`
+- Initial release requirement: publish `@actrium/actr` once manually before
+  adding the npm trusted publisher for this workflow

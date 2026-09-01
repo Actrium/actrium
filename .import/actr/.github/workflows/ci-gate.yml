@@ -1,0 +1,1136 @@
+name: CI Gate
+
+on:
+  push:
+    branches: [main, develop, "release-*"]
+  pull_request:
+    branches: [main, "release-*"]
+  workflow_dispatch:
+    inputs:
+      full_run:
+        description: Run every domain workflow instead of affected-only detection
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  determine:
+    name: Determine Affected Targets
+    runs-on: [self-hosted, Linux, X64]
+    outputs:
+      mode: ${{ steps.targets.outputs.mode }}
+      changed_files_json: ${{ steps.targets.outputs.changed_files_json }}
+      reasons_json: ${{ steps.targets.outputs.reasons_json }}
+      rust_core: ${{ steps.targets.outputs.rust_core }}
+      ts_binding: ${{ steps.targets.outputs.ts_binding }}
+      ts_workload: ${{ steps.targets.outputs.ts_workload }}
+      python_codegen: ${{ steps.targets.outputs.python_codegen }}
+      python_workload: ${{ steps.targets.outputs.python_workload }}
+      swift_binding: ${{ steps.targets.outputs.swift_binding }}
+      kotlin_binding: ${{ steps.targets.outputs.kotlin_binding }}
+      csharp_binding: ${{ steps.targets.outputs.csharp_binding }}
+      web_binding: ${{ steps.targets.outputs.web_binding }}
+      c_go_workloads: ${{ steps.targets.outputs.c_go_workloads }}
+      e2e_rust: ${{ steps.targets.outputs.e2e_rust }}
+      e2e_package_runtime: ${{ steps.targets.outputs.e2e_package_runtime }}
+      release_related: ${{ steps.targets.outputs.release_related }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install SQLite CLI
+        run: |
+          if ! command -v sqlite3 >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y sqlite3
+          fi
+      - name: Test target detection
+        run: python .github/scripts/ci_targets_test.py
+      - name: Test CI configuration
+        run: python .github/scripts/ci_gate_test.py
+      - name: Test CJK checker
+        run: python .github/scripts/check_cjk_test.py
+
+      - id: targets
+        name: Compute targets
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          MANUAL_FULL: ${{ github.event_name == 'workflow_dispatch' && inputs.full_run || false }}
+        run: |
+          python .github/scripts/ci_targets.py \
+            --event-name "$EVENT_NAME" \
+            --base-sha "$BASE_SHA" \
+            --head-sha "$HEAD_SHA" \
+            --manual-full "$MANUAL_FULL"
+
+  e2e_rust:
+    name: Rust E2E Compile
+    needs: determine
+    if: needs.determine.outputs.e2e_rust == 'true'
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopus-dev
+      - name: Resolve e2e workspace with the committed lockfile
+        run: |
+          cargo metadata \
+            --manifest-path e2e/Cargo.toml \
+            --format-version 1 \
+            --locked \
+            > "$RUNNER_TEMP/e2e-metadata.json"
+          python3 - "$RUNNER_TEMP/e2e-metadata.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          metadata = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          registry_actr = [
+              package["name"]
+              for package in metadata["packages"]
+              if package["name"].startswith("actr") and package["source"] is not None
+          ]
+          if registry_actr:
+              raise SystemExit(
+                  "e2e actr dependencies must resolve from local paths: "
+                  + ", ".join(sorted(registry_actr))
+              )
+          PY
+      - name: Compile the Rust E2E workspace
+        run: cargo check --manifest-path e2e/Cargo.toml --workspace --locked
+
+  e2e_package_runtime:
+    name: E2E Package Runtime
+    needs: determine
+    if: needs.determine.outputs.e2e_package_runtime == 'true'
+    runs-on: ubuntu-latest-m
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install Linux e2e dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*
+          sudo apt-get update
+          sudo apt-get install -y jq sqlite3 lsof perl
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ vars.PROTOC_VERSION }}
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+      - uses: Swatinem/rust-cache@v2
+      - name: Generate CLI web runtime assets
+        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+      - name: Run package runtime echo e2e (PR gate, MODE=path1)
+        run: bash e2e/package-runtime-echo/run.sh
+
+  audit:
+    name: Dependency Audit
+    needs: determine
+    if: needs.determine.outputs.rust_core == 'true'
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --version 0.22.2 --locked --force
+      - name: Audit Cargo.lock
+        # Existing advisories outside the WASM host are tracked separately:
+        # maxminddb (framework GeoIP), protobuf 2 (prometheus), rsa (TURN).
+        run: >-
+          cargo audit
+          --ignore RUSTSEC-2025-0132
+          --ignore RUSTSEC-2024-0437
+          --ignore RUSTSEC-2023-0071
+
+  rust:
+    name: Rust
+    needs: determine
+    if: needs.determine.outputs.rust_core == 'true'
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+      actions: read
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+      # Fail the build if core/hyper/build.rs can't compile the wasm fixture
+      # (missing wasm32-wasip2 / wasm-component-ld) rather than silently
+      # compiling the fixture tests out.
+      ACTR_REQUIRE_WASM_FIXTURE: "1"
+      # rustc-level compilation cache shared with the Test (Rust) shards.
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.9
+      - name: OTel payload-logging guard
+        # Anti-regression guard for issue #484: the OTel tracing bridge exports
+        # every tracing event that passes the filter to vector → VictoriaLogs
+        # (unauthenticated query port). This step must run in the PR-gating
+        # path, not only in the manual-dispatch ci-rust.yml job, otherwise it
+        # provides zero regression prevention for merges.
+        run: bash .github/workflows/scripts/check-payload-logging.sh
+      - name: Install native build dependencies
+        run: |
+          if ! command -v pkg-config >/dev/null 2>&1 || ! pkg-config --exists openssl || ! command -v cmake >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y pkg-config libssl-dev cmake
+          fi
+      - name: Verify actr-hyper WIT drift
+        # The V2 WIT is shipped in the actr-hyper tarball so host bindgen works
+        # without the sibling framework crate. Fail fast if the copy drifts.
+        run: |
+          cmp core/framework/wit-v2/actr-workload.wit core/hyper/wit-v2/actr-workload.wit
+      - name: Cache cargo-installed tools
+        id: cargo-tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/wasm-pack
+            ~/.cargo/bin/wasm-component-ld
+            ~/.cargo/bin/wasm-tools
+          key: cargo-tools-v1-${{ runner.os }}-wp0.15.0-wcld0.5.26-wt1.253.0
+      - name: Install wasm-pack
+        run: |
+          if ! command -v wasm-pack >/dev/null 2>&1; then
+            cargo install wasm-pack --version 0.15.0 --locked --force
+          fi
+      - name: Install wasm Component Model toolchain
+        run: |
+          if ! command -v wasm-component-ld >/dev/null 2>&1; then
+            cargo install wasm-component-ld --version 0.5.26 --locked --force
+          fi
+          if ! command -v wasm-tools >/dev/null 2>&1; then
+            cargo install wasm-tools --version 1.253.0 --locked --force
+          fi
+      - name: Cache CLI web runtime assets
+        # Same source-hash key as the Test (Rust) shards: the sw-host wasm is
+        # a release wasm-pack compile (~2 min) derived only from bindings/web.
+        uses: actions/cache@v4
+        with:
+          path: cli/assets/web-runtime
+          key: cli-web-runtime-v1-${{ hashFiles('bindings/web/packages/**', 'bindings/web/crates/**', 'bindings/web/scripts/**') }}
+      - name: Generate CLI web runtime assets
+        run: |
+          if [ -f cli/assets/web-runtime/actr_sw_host_bg.wasm ]; then
+            bash bindings/web/scripts/sync-cli-assets.sh --skip-sw-host
+          else
+            bash bindings/web/scripts/sync-cli-assets.sh --build
+          fi
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Test Rust protoc plugin well-known types
+        run: cargo test -p actr-framework-protoc-codegen --test well_known_type_smoke
+      - name: Verify RFC-0400 timer inventory
+        run: cargo test -p actr-hyper --lib timer::tests::inv24_production_timer_calls_and_inventory_do_not_drift
+      - name: Clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+
+  test:
+    name: Test (Rust, ${{ matrix.shard }})
+    needs: determine
+    if: needs.determine.outputs.rust_core == 'true'
+    runs-on: ubuntu-latest-m
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Two semantic shards on separate runners:
+        # - realtime: suites driving real PeerConnections / real child
+        #   processes. They are wall-clock sensitive (ICE/DTLS handshakes,
+        #   soft-recovery escalation windows) and flake when they contend with
+        #   ~2.7k unit tests for CPU; isolating them on their own runner cut
+        #   both flake rate and wall time (measured per-binary durations in
+        #   the CI nextest summary drove this list).
+        # - rest: everything else (mostly in-process unit tests).
+        shard: [realtime, rest]
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+      # Fail the build if core/hyper/build.rs can't compile the wasm fixture
+      # (missing wasm32-wasip2 / wasm-component-ld) rather than silently
+      # compiling the fixture tests out.
+      ACTR_REQUIRE_WASM_FIXTURE: "1"
+      # ~2.7k test binaries with debug info blow the runner's ~14 GB SSD and
+      # slow linking; CI failures do not need local-variable debug info.
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      # sccache (GitHub Actions cache backend) replaces per-job target
+      # caching, which `cache-targets: false` above cannot provide at this
+      # workspace size. Covers rustc invocations across shards/jobs.
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+      # nextest filterset selecting the realtime shard's binaries; the rest
+      # shard runs `not(...)`. Keep in sync with the shard rationale above.
+      REALTIME_BINARIES: >-
+        binary(mobile_rtc_pair_contract)
+        | binary(mobile_rtc_multi_peer)
+        | binary(webrtc_large_mobile_recovery)
+        | binary(mobile_full_disconnect_recovery)
+        | binary(mobile_network_event_scenarios)
+        | binary(ice_restart)
+        | binary(ice_restart_with_signaling_disruption)
+        | binary(webrtc_large_data_transfer)
+        | binary(webrtc_initial_connection_timeout)
+        | binary(media_loopback)
+        | binary(dynclib_actor_e2e)
+        | binary(rust_echo)
+        | binary(outproc_disconnect_reconnect)
+        | binary(outproc_connection_rebuild)
+        | binary(recovery_vnet_supervisor)
+        | binary(mock_actrix_integration)
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # wasm32-wasip2 is required by core/hyper/build.rs to compile the
+          # wasm_actor_fixture Component under --all-features (wasm-engine).
+          targets: wasm32-wasip2,wasm32-unknown-unknown
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION }}
+      - name: Verify actr-hyper WIT drift
+        # The V2 WIT is shipped in the actr-hyper tarball so host bindgen works
+        # without the sibling framework crate. Fail fast if the copy drifts.
+        run: |
+          cmp core/framework/wit-v2/actr-workload.wit core/hyper/wit-v2/actr-workload.wit
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: false
+      - name: Run sccache-cache
+        # rustc-level compilation cache backed by the GitHub Actions cache.
+        # The workspace's full test-target set exceeds what rust-cache can
+        # store on the runner disk; sccache keeps only a working set locally.
+        uses: mozilla-actions/sccache-action@v0.0.9
+      - name: Install prebuilt WebAssembly tools
+        env:
+          WASM_PACK_SHA256: c09f971ecaed9a2efc80fdcea7a00ef6b53c7fadc8c57d1f61b53a6aa66b668a
+          WASM_COMPONENT_LD_SHA256: e5cee677052c0eb6b5d0605f85e3bbc46d076050cd3403406f49b3503f22622c
+          WASM_TOOLS_SHA256: 4e2898f7ca3bd0536218ed9b7b36ff7b86954c57ae0e6272fde69728cbe01088
+        run: |
+          install_binary() {
+            local name="$1"
+            local url="$2"
+            local sha256="$3"
+            local archive="$RUNNER_TEMP/$name.tar.gz"
+            local extract_dir
+            extract_dir=$(mktemp -d "$RUNNER_TEMP/$name.XXXXXX")
+
+            curl --fail --location --retry 3 --retry-all-errors --output "$archive" "$url"
+            echo "$sha256  $archive" | sha256sum --check --status
+            tar --extract --gzip --file "$archive" --strip-components=1 --directory "$extract_dir"
+            install --mode=0755 "$extract_dir/$name" "$HOME/.cargo/bin/$name"
+          }
+
+          install_binary wasm-pack \
+            https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz \
+            "$WASM_PACK_SHA256"
+          install_binary wasm-component-ld \
+            https://github.com/bytecodealliance/wasm-component-ld/releases/download/v0.5.26/wasm-component-ld-v0.5.26-x86_64-linux.tar.gz \
+            "$WASM_COMPONENT_LD_SHA256"
+          install_binary wasm-tools \
+            https://github.com/bytecodealliance/wasm-tools/releases/download/v1.253.0/wasm-tools-1.253.0-x86_64-linux.tar.gz \
+            "$WASM_TOOLS_SHA256"
+
+          wasm-pack --version
+          wasm-component-ld --version
+          wasm-tools --version
+      - name: Cache CLI web runtime assets
+        # The sw-host wasm build is a full wasm-pack release compile (~2 min)
+        # whose output depends only on bindings/web sources. Restore it by
+        # source hash; on a hit only the cheap non-wasm asset sync runs.
+        uses: actions/cache@v4
+        with:
+          path: cli/assets/web-runtime
+          key: cli-web-runtime-v1-${{ hashFiles('bindings/web/packages/**', 'bindings/web/crates/**', 'bindings/web/scripts/**') }}
+      - name: Generate CLI web runtime assets
+        run: |
+          if [ -f cli/assets/web-runtime/actr_sw_host_bg.wasm ]; then
+            bash bindings/web/scripts/sync-cli-assets.sh --skip-sw-host
+          else
+            bash bindings/web/scripts/sync-cli-assets.sh --build
+          fi
+      - name: Free disk space
+        # `cargo nextest run --workspace --all-features` builds every test
+        # target into a cold target/ (cache-targets: false), which can exceed
+        # the runner's ~14 GB SSD (`No space left on device`). Reclaim space
+        # held by preinstalled software the Rust build does not need.
+        run: |
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/share/boost || true
+          sudo docker system prune --all --force || true
+          df -h /
+      - name: Install cargo-nextest
+        # Prebuilt binary. Pin to a fixed release for reproducibility if
+        # desired via `taiki-e/install-action@v2` with `tool: cargo-nextest@<ver>`.
+        uses: taiki-e/install-action@cargo-nextest
+      - name: Run tests (nextest, ${{ matrix.shard }} shard)
+        # Integration tests (tests/) get bounded retries via .config/nextest.toml.
+        # --no-fail-fast: run the whole suite even when a test fails. With the
+        # default fail-fast, a single failure (e.g. a retry-free unit test that
+        # flakes) cancels the remaining ~1.9k tests, hiding their results and
+        # wasting the cold build. Surface every failure in one run instead.
+        run: |
+          if [ "${{ matrix.shard }}" = realtime ]; then
+            cargo nextest run --workspace --all-features --no-fail-fast -E "$REALTIME_BINARIES"
+          else
+            cargo nextest run --workspace --all-features --no-fail-fast -E "not($REALTIME_BINARIES)"
+          fi
+      - name: Run doctests
+        # nextest does not run doctests; keep them on the libtest harness.
+        if: matrix.shard == 'rest'
+        run: cargo test --doc --workspace --all-features
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats || true
+
+  rust_msrv:
+    name: Rust MSRV (1.95)
+    needs: determine
+    if: needs.determine.outputs.rust_core == 'true'
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+      actions: read
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+      # Force the wasip2 guest fixture to link under the pinned MSRV toolchain
+      # instead of silently compiling the fixture tests out.
+      ACTR_REQUIRE_WASM_FIXTURE: "1"
+      # rustc-level compilation cache (MSRV entries are namespaced by the
+      # compiler version, so they never collide with the stable-toolchain
+      # shards but do accelerate subsequent MSRV runs).
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.9
+      - name: Setup Rust (MSRV)
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: wasm32-wasip2,wasm32-unknown-unknown
+      - name: Clear repository Rust toolchain override
+        run: rustup override unset || true
+      - name: Install native build dependencies
+        run: |
+          if ! command -v pkg-config >/dev/null 2>&1 || ! pkg-config --exists openssl || ! command -v cmake >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y pkg-config libssl-dev cmake
+          fi
+      - name: Cache cargo-installed tools
+        id: cargo-tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/wasm-pack
+            ~/.cargo/bin/wasm-component-ld
+            ~/.cargo/bin/wasm-tools
+          key: cargo-tools-v1-${{ runner.os }}-wp0.15.0-wcld0.5.26-wt1.253.0
+      - name: Install wasm-pack
+        run: |
+          if ! command -v wasm-pack >/dev/null 2>&1; then
+            cargo install wasm-pack --version 0.15.0 --locked --force
+          fi
+      - name: Install wasm Component Model toolchain
+        run: |
+          if ! command -v wasm-component-ld >/dev/null 2>&1; then
+            cargo install wasm-component-ld --version 0.5.26 --locked --force
+          fi
+          if ! command -v wasm-tools >/dev/null 2>&1; then
+            cargo install wasm-tools --version 1.253.0 --locked --force
+          fi
+      - name: Cache CLI web runtime assets
+        uses: actions/cache@v4
+        with:
+          path: cli/assets/web-runtime
+          key: cli-web-runtime-v1-${{ hashFiles('bindings/web/packages/**', 'bindings/web/crates/**', 'bindings/web/scripts/**') }}
+      - name: Generate CLI web runtime assets
+        run: |
+          if [ -f cli/assets/web-runtime/actr_sw_host_bg.wasm ]; then
+            bash bindings/web/scripts/sync-cli-assets.sh --skip-sw-host
+          else
+            bash bindings/web/scripts/sync-cli-assets.sh --build
+          fi
+      - name: Build at MSRV (locked)
+        run: cargo build --workspace --all-targets --all-features --locked
+
+  typescript:
+    name: TypeScript
+    needs: determine
+    if: needs.determine.outputs.ts_binding == 'true'
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: |
+            bindings/typescript/package.json
+            tools/protoc-gen/typescript/package-lock.json
+      - name: Install dependencies
+        working-directory: bindings/typescript
+        run: npm install
+      - name: Check formatting
+        working-directory: bindings/typescript
+        run: npm run format
+      - name: Run lint
+        working-directory: bindings/typescript
+        run: npm run lint
+      - name: Build
+        working-directory: bindings/typescript
+        run: npm run build
+      - name: Run unit tests
+        working-directory: bindings/typescript
+        run: npm test
+      - name: Test TypeScript protoc plugin
+        working-directory: tools/protoc-gen/typescript
+        run: |
+          npm ci
+          npm test
+      - name: Cargo check
+        working-directory: bindings/typescript
+        run: cargo check --locked --manifest-path Cargo.toml
+
+  typescript_workload:
+    name: TypeScript Workload
+    needs: determine
+    if: needs.determine.outputs.ts_workload == 'true'
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: |
+            bindings/typescript/actr-workload/package-lock.json
+            examples/typescript/echo-workload/package-lock.json
+      - name: Verify TypeScript workload WIT drift
+        run: |
+          cmp core/framework/wit-v2/actr-workload.wit bindings/typescript/actr-workload/src/wit-v2/actr-workload.wit
+      - name: Build TypeScript workload package
+        working-directory: bindings/typescript/actr-workload
+        run: |
+          npm ci
+          npm run build
+          npm test
+          node dist/cli.js bindings /tmp/actr-workload-ts-bindings --wit ../../../core/framework/wit-v2/actr-workload.wit
+          npm pack --dry-run
+      - name: Build TypeScript EchoService sources
+        working-directory: examples/typescript/echo-workload
+        run: |
+          npm ci
+          npm run build
+      # ComponentizeJS#335 / #427: accept only the known async-func bindgen
+      # panic. Any unrelated componentization failure must still fail CI.
+      - name: Componentize TypeScript EchoService workload
+        run: bash .github/scripts/verify-typescript-componentize-blocker.sh
+
+  python_codegen:
+    name: Python Codegen
+    needs: determine
+    if: needs.determine.outputs.python_codegen == 'true'
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: tools/protoc-gen/python
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: tools/protoc-gen/python/pyproject.toml
+      - name: Install package
+        run: pip install -e .
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Smoke generate typed workload
+        run: |
+          tmp="$(mktemp -d)"
+          mkdir -p "$tmp/protos/local" "$tmp/generated"
+          cat > "$tmp/protos/local/echo.proto" <<'PROTO'
+          syntax = "proto3";
+          package echo;
+
+          message EchoRequest {
+            string message = 1;
+          }
+
+          message EchoResponse {
+            string reply = 1;
+          }
+
+          service EchoService {
+            rpc Echo(EchoRequest) returns (EchoResponse);
+          }
+          PROTO
+
+          python3 - "$tmp" <<'PY'
+          import hashlib, json, os, pathlib, sys
+          tmp = sys.argv[1]
+          spec = {
+              "schema_version": "v1",
+              "routes": [
+                  {
+                      "route_key": "echo.EchoService.Echo",
+                      "proto_file": "local/echo.proto",
+                      "proto_service": "echo.EchoService",
+                      "method": "Echo",
+                      "input_type": "echo.EchoRequest",
+                      "output_type": "echo.EchoResponse",
+                      "payload_type": "rpcReliable",
+                      "reply_mode": "return",
+                  }
+              ],
+          }
+          canonical = json.dumps(spec, sort_keys=True, separators=(",", ":"))
+          spec["spec_hash"] = hashlib.sha256(canonical.encode()).hexdigest()
+          pathlib.Path(os.path.join(tmp, "dispatch_spec.json")).write_text(
+              json.dumps(spec)
+          )
+          PY
+
+          spec_hash=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["spec_hash"])' "$tmp/dispatch_spec.json")
+          protoc \
+            --proto_path="$tmp/protos" \
+            --python_out="$tmp/generated" \
+            --plugin="protoc-gen-actrframework-python=$(command -v protoc-gen-actrframework-python)" \
+            --actrframework-python_opt="dispatch_spec=$tmp/dispatch_spec.json,dispatch_spec_hash=$spec_hash" \
+            --actrframework-python_out="$tmp/generated" \
+            "$tmp/protos/local/echo.proto"
+
+          python -m compileall "$tmp/generated"
+          PYTHONPATH="$tmp" python - <<'PY'
+          import generated.local.echo_pb2
+          import generated.actr_dispatch
+
+          assert hasattr(generated.actr_dispatch, "actr_dispatch")
+          PY
+
+          if grep -R -E "from actr import|import actr" "$tmp/generated"; then
+            echo "legacy actr runtime import leaked into generated Python" >&2
+            exit 1
+          fi
+      - name: Build package
+        run: |
+          python -m pip install -U build
+          python -m build
+
+  python_workload:
+    name: Python Workload
+    needs: determine
+    if: needs.determine.outputs.python_workload == 'true'
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: bindings/python/actr-workload/pyproject.toml
+      - name: Verify actr-hyper WIT drift
+        # The V2 WIT is shipped in the actr-hyper tarball so host bindgen works
+        # without the sibling framework crate. Fail fast if the copy drifts.
+        run: |
+          cmp core/framework/wit-v2/actr-workload.wit core/hyper/wit-v2/actr-workload.wit
+      - name: Cache cargo-installed tools
+        id: cargo-tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/wasm-tools
+            ~/.cargo/bin/wasm-pack
+          key: cargo-tools-v1-${{ runner.os }}-wt1.253.0-wp0.15.0
+      - name: Install wasm-tools
+        run: |
+          if ! command -v wasm-tools >/dev/null 2>&1; then
+            cargo install wasm-tools --version 1.253.0 --locked --force
+          fi
+      - name: Install wasm-pack
+        run: |
+          if ! command -v wasm-pack >/dev/null 2>&1; then
+            cargo install wasm-pack --version 0.15.0 --locked --force
+          fi
+      - name: Verify TypeScript workload WIT drift
+        run: |
+          cmp core/framework/wit-v2/actr-workload.wit bindings/typescript/actr-workload/src/wit-v2/actr-workload.wit
+      - name: Build actr-workload package
+        run: |
+          python -m pip install -U build
+          python -m build bindings/python/actr-workload
+      - name: Install actr-workload build extra
+        run: python -m pip install -e 'bindings/python/actr-workload[build]'
+      - name: Verify componentize-py pin
+        run: componentize-py --version | grep 'componentize-py 0.25.0'
+      - name: Test Python workload authoring bridge
+        run: python -m unittest discover -s bindings/python/actr-workload/tests -v
+      - name: Generate workload bindings
+        run: |
+          rm -rf /tmp/actr-workload-bindings
+          actr-workload bindings /tmp/actr-workload-bindings
+          test -f /tmp/actr-workload-bindings/actr_workload_bindings/exports/workload.py
+          test -f /tmp/actr-workload-bindings/actr_workload_bindings/imports/host.py
+      - name: Compile Python sources
+        run: python -m compileall bindings/python/actr-workload/src examples/python/echo-workload/workload.py
+      - name: Build Python echo workload
+        working-directory: examples/python/echo-workload
+        run: ./build.sh package
+      - name: Build generated Python scaffold
+        # The first build preserves the hand-written workload. Move it aside so
+        # `actr gen` stamps the real CLI scaffold, then componentize that output
+        # against the V2 bindings as a regression guard.
+        working-directory: examples/python/echo-workload
+        run: |
+          mv workload.py workload.py.handwritten
+          ./build.sh
+
+  swift:
+    name: Swift
+    needs: determine
+    if: needs.determine.outputs.swift_binding == 'true'
+    runs-on: macos-arm64-larger
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION }}
+      - name: Cache uniffi-bindgen binary
+        id: cache-uniffi
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/uniffi-bindgen*
+          key: uniffi-bindgen-0.31.1-${{ runner.os }}-${{ runner.arch }}
+      - name: Install UniFFI bindgen
+        if: steps.cache-uniffi.outputs.cache-hit != 'true'
+        run: |
+          # Swatinem/rust-cache may already restore ~/.cargo/bin/uniffi-bindgen
+          # from a prior run with a different key; skip the install when the
+          # binary is present so the unguarded `cargo install` doesn't abort
+          # with "binary already exists in destination".
+          if ! command -v uniffi-bindgen >/dev/null 2>&1; then
+            cargo install --locked uniffi --version 0.31.1 --features cli --bin uniffi-bindgen
+          fi
+      - name: Install Swift tools and libraries
+        run: brew install swiftlint opus
+      - name: Run SwiftLint
+        run: swiftlint lint --strict
+      - name: Check actr-cabi header sync
+        run: >-
+          git diff --no-index --exit-code --
+          crates/actr-cabi/actr-cabi.h
+          bindings/cabi/swift/Sources/ActrCabi/include/actr-cabi.h
+      - name: Type-check actr-cabi Swift wrapper
+        run: >-
+          swiftc -typecheck -swift-version 6
+          -I bindings/cabi/swift/Sources/ActrCabi/include
+          bindings/cabi/swift/Sources/ActrCabi/ActrCabi.swift
+      - name: Build local Swift XCFramework
+        working-directory: bindings/swift
+        env:
+          ACTR_BUILD_PROFILE: debug
+          ACTR_XCFRAMEWORK_TARGETS: macos
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+        run: |
+          ACTR_BINDINGS_PATH=dist/ActrBindings \
+          ACTR_BINARY_PATH=dist/ActrFFI.xcframework \
+          ./build-xcframework.sh
+      - name: Build Swift bindings package
+        working-directory: bindings/swift
+        run: |
+          ACTR_BINDINGS_PATH=dist/ActrBindings \
+          ACTR_BINARY_PATH=dist/ActrFFI.xcframework \
+          swift build
+      - name: Pre-build mock-actrix
+        run: cargo build -p actr-mock-actrix --bin mock-actrix
+      - name: Test Swift bindings package
+        working-directory: bindings/swift
+        env:
+          ACTR_SWIFT_E2E: "1"
+        run: |
+          ../../target/debug/mock-actrix --port 8081 > "$RUNNER_TEMP/mock-actrix.log" 2>&1 &
+          mock_pid="$!"
+          trap 'kill "$mock_pid" || true' EXIT
+          for _ in {1..60}; do
+            if grep -q "mock-actrix listening" "$RUNNER_TEMP/mock-actrix.log"; then
+              cat "$RUNNER_TEMP/mock-actrix.log"
+              break
+            fi
+            if ! kill -0 "$mock_pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/mock-actrix.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          if ! grep -q "mock-actrix listening" "$RUNNER_TEMP/mock-actrix.log"; then
+            cat "$RUNNER_TEMP/mock-actrix.log"
+            exit 1
+          fi
+          ACTR_BINDINGS_PATH=dist/ActrBindings \
+          ACTR_BINARY_PATH=dist/ActrFFI.xcframework \
+          swift test
+      - name: Build Swift codegen package
+        working-directory: tools/protoc-gen/swift
+        run: swift build
+
+  kotlin:
+    name: Kotlin
+    needs: determine
+    if: needs.determine.outputs.kotlin_binding == 'true'
+    uses: ./.github/workflows/ci-kotlin.yml
+
+  web:
+    name: Web
+    needs: determine
+    if: needs.determine.outputs.web_binding == 'true'
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+    steps:
+      - uses: actions/checkout@v5
+      - name: Cache cargo-installed tools
+        id: cargo-tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/wasm-pack
+          key: cargo-tools-v1-${{ runner.os }}-wp0.15.0
+      - name: Install wasm-pack
+        run: |
+          if ! command -v wasm-pack >/dev/null 2>&1; then
+            cargo install wasm-pack --version 0.15.0 --locked --force
+          fi
+      - name: Check formatting
+        working-directory: bindings/web
+        run: cargo fmt --all -- --check
+      - name: Check web workspace
+        working-directory: bindings/web
+        run: cargo check --workspace --target wasm32-unknown-unknown --locked
+      - name: WIT codegen drift gate (Option U)
+        run: cargo run -p actr-wit-compile-web -- --check
+      - name: Build sw-host runtime assets
+        working-directory: bindings/web/crates/sw-host
+        env:
+          ACTR_SKIP_CLI_ASSET_SYNC: "1"
+        run: bash build.sh
+      - name: cli/assets sync drift gate
+        run: bash bindings/web/scripts/sync-cli-assets.sh --check --skip-sw-host
+
+  c_go_workloads:
+    name: C and Go Workloads
+    needs: determine
+    if: needs.determine.outputs.c_go_workloads == 'true'
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install native build dependencies
+        run: |
+          if ! command -v pkg-config >/dev/null 2>&1 || ! pkg-config --exists openssl || ! command -v cmake >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y pkg-config libssl-dev cmake
+          fi
+      - name: Install pinned native workload toolchains
+        env:
+          WIT_BINDGEN_SHA256: 06b173e5aa3f3a0f5b5597c3502e2885fc9c63300f59a21151971249dda82bf4
+          WASM_TOOLS_SHA256: 4e2898f7ca3bd0536218ed9b7b36ff7b86954c57ae0e6272fde69728cbe01088
+          WASI_SDK_SHA256: c6c38aab56e5de88adf6c1ebc9c3ae8da72f88ec2b656fb024eda8d4167a0bc5
+          WASI_ADAPTER_SHA256: 0acb10959bd3c1d2e7903ef82212910bfc156ab5698ef3f2ff669474ba59fb0a
+        run: |
+          tool_root="$RUNNER_TEMP/actr-native-workload-tools"
+          mkdir -p "$tool_root"
+
+          download() {
+            local url="$1"
+            local output="$2"
+            local sha256="$3"
+            curl --fail --location --retry 3 --retry-all-errors \
+              --output "$output" \
+              "$url"
+            echo "$sha256  $output" | sha256sum --check --status
+          }
+
+          download \
+            https://github.com/bytecodealliance/wit-bindgen/releases/download/v0.59.0/wit-bindgen-0.59.0-x86_64-linux.tar.gz \
+            "$tool_root/wit-bindgen.tar.gz" \
+            "$WIT_BINDGEN_SHA256"
+          mkdir "$tool_root/wit-bindgen"
+          tar --extract --gzip --file "$tool_root/wit-bindgen.tar.gz" \
+            --strip-components=1 --directory "$tool_root/wit-bindgen"
+
+          download \
+            https://github.com/bytecodealliance/wasm-tools/releases/download/v1.253.0/wasm-tools-1.253.0-x86_64-linux.tar.gz \
+            "$tool_root/wasm-tools.tar.gz" \
+            "$WASM_TOOLS_SHA256"
+          mkdir "$tool_root/wasm-tools"
+          tar --extract --gzip --file "$tool_root/wasm-tools.tar.gz" \
+            --strip-components=1 --directory "$tool_root/wasm-tools"
+
+          download \
+            https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-24/wasi-sdk-24.0-x86_64-linux.tar.gz \
+            "$tool_root/wasi-sdk.tar.gz" \
+            "$WASI_SDK_SHA256"
+          mkdir "$tool_root/wasi-sdk"
+          tar --extract --gzip --file "$tool_root/wasi-sdk.tar.gz" \
+            --strip-components=1 --directory "$tool_root/wasi-sdk"
+
+          download \
+            https://github.com/bytecodealliance/wasmtime/releases/download/v46.0.1/wasi_snapshot_preview1.reactor.wasm \
+            "$tool_root/wasi_snapshot_preview1.reactor.wasm" \
+            "$WASI_ADAPTER_SHA256"
+
+          {
+            echo "WIT_BINDGEN=$tool_root/wit-bindgen/wit-bindgen"
+            echo "WASM_TOOLS=$tool_root/wasm-tools/wasm-tools"
+            echo "WASI_SDK=$tool_root/wasi-sdk"
+            echo "WASI_ADAPTER=$tool_root/wasi_snapshot_preview1.reactor.wasm"
+          } >> "$GITHUB_ENV"
+
+      - name: Build and validate C V2 workload
+        run: >-
+          make -C examples/c/echo-workload verify
+          WIT_BINDGEN="$WIT_BINDGEN"
+          WASM_TOOLS="$WASM_TOOLS"
+          WASI_SDK="$WASI_SDK"
+          WASI_ADAPTER="$WASI_ADAPTER"
+
+      - name: Build and validate Go V2 workload
+        run: bash examples/go/echo-workload/build.sh
+
+      - name: Execute C and Go workloads through the actr host
+        env:
+          ACTR_C_ECHO_COMPONENT: ${{ github.workspace }}/examples/c/echo-workload/dist/echo-c-0.1.0-wasm32-wasip2.wasm
+          ACTR_GO_ECHO_COMPONENT: ${{ github.workspace }}/examples/go/echo-workload/dist/echo-go-0.1.0-wasm32-wasip2.wasm
+          ACTR_WASM_FAST_COMPILE: "1"
+        run: >-
+          cargo test -p actr-hyper
+          --test native_workload_smoke
+          --features wasm-engine,test-utils
+          --locked
+          --
+          --ignored
+          --nocapture
+
+  webrtc_v020:
+    name: WebRTC v0.20
+    needs: determine
+    if: needs.determine.outputs.rust_core == 'true'
+    runs-on: ubuntu-latest-m
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2,wasm32-unknown-unknown
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@cargo-nextest
+      # Gate the parallel webrtc-rs v0.20 migration path (the `webrtc-v020`
+      # optional feature), which is otherwise not exercised by CI.
+      - name: Check (webrtc-v020)
+        run: cargo check -p actr-hyper --features webrtc-v020 --all-targets
+      - name: Clippy (webrtc-v020, deny warnings)
+        run: cargo clippy -p actr-hyper --all-targets --features webrtc-v020 -- -D warnings
+      # nextest (not bare cargo test): the real-PC suites in this filter hit
+      # CI-load handshake-timing flakes, and libtest would fail the whole job
+      # on the first one without retries or running the rest. nextest picks up
+      # the .config/nextest.toml retry overrides and --no-fail-fast semantics.
+      - name: Test (webrtc-v020)
+        run: cargo nextest run -p actr-hyper --features webrtc-v020 -E 'test(/^wire::webrtc::v020/)' --no-fail-fast
+
+  cjk:
+    name: CJK Gate
+    runs-on: [self-hosted, Linux, X64]
+    if: always()
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check English-only source
+        run: python .github/scripts/check_cjk.py
+
+  csharp:
+    name: C#
+    needs: determine
+    if: needs.determine.outputs.csharp_binding == 'true'
+    uses: ./.github/workflows/ci-csharp.yml
+
+  gate:
+    name: Gate
+    runs-on: [self-hosted, Linux, X64]
+    if: always()
+    needs:
+      - determine
+      - e2e_rust
+      - e2e_package_runtime
+      - audit
+      - rust
+      - typescript
+      - typescript_workload
+      - python_codegen
+      - python_workload
+      - swift
+      - kotlin
+      - csharp
+      - web
+      - c_go_workloads
+      - test
+      - webrtc_v020
+      - cjk
+    env:
+      MODE: ${{ needs.determine.outputs.mode }}
+      CHANGED_FILES_JSON: ${{ needs.determine.outputs.changed_files_json }}
+      REASONS_JSON: ${{ needs.determine.outputs.reasons_json }}
+      RUST_RESULT: ${{ needs.rust.result }}
+      AUDIT_RESULT: ${{ needs.audit.result }}
+      TYPESCRIPT_RESULT: ${{ needs.typescript.result }}
+      TYPESCRIPT_WORKLOAD_RESULT: ${{ needs.typescript_workload.result }}
+      PYTHON_CODEGEN_RESULT: ${{ needs.python_codegen.result }}
+      PYTHON_WORKLOAD_RESULT: ${{ needs.python_workload.result }}
+      SWIFT_RESULT: ${{ needs.swift.result }}
+      KOTLIN_RESULT: ${{ needs.kotlin.result }}
+      CSHARP_RESULT: ${{ needs.csharp.result }}
+      WEB_RESULT: ${{ needs.web.result }}
+      C_GO_WORKLOADS_RESULT: ${{ needs.c_go_workloads.result }}
+      E2E_RUST_RESULT: ${{ needs.e2e_rust.result }}
+      E2E_PACKAGE_RUNTIME_RESULT: ${{ needs.e2e_package_runtime.result }}
+      TEST_RESULT: ${{ needs.test.result }}
+      WEBRTC_V020_RESULT: ${{ needs.webrtc_v020.result }}
+      CJK_RESULT: ${{ needs.cjk.result }}
+    steps:
+      - name: Summarize gate
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          results = {
+              "audit": os.environ["AUDIT_RESULT"],
+              "rust": os.environ["RUST_RESULT"],
+              "typescript": os.environ["TYPESCRIPT_RESULT"],
+              "typescript_workload": os.environ["TYPESCRIPT_WORKLOAD_RESULT"],
+              "python_codegen": os.environ["PYTHON_CODEGEN_RESULT"],
+              "python_workload": os.environ["PYTHON_WORKLOAD_RESULT"],
+              "swift": os.environ["SWIFT_RESULT"],
+              "kotlin": os.environ["KOTLIN_RESULT"],
+              "csharp": os.environ["CSHARP_RESULT"],
+              "web": os.environ["WEB_RESULT"],
+              "c_go_workloads": os.environ["C_GO_WORKLOADS_RESULT"],
+              "e2e_rust": os.environ["E2E_RUST_RESULT"],
+              "e2e_package_runtime": os.environ["E2E_PACKAGE_RUNTIME_RESULT"],
+              "test": os.environ["TEST_RESULT"],
+              "webrtc_v020": os.environ["WEBRTC_V020_RESULT"],
+              "cjk": os.environ["CJK_RESULT"],
+          }
+
+          changed_files = json.loads(os.environ["CHANGED_FILES_JSON"])
+          reasons = json.loads(os.environ["REASONS_JSON"])
+          mode = os.environ["MODE"]
+
+          summary_lines = [
+              "## CI Gate",
+              "",
+              f"- Mode: `{mode}`",
+              f"- Changed files: `{len(changed_files)}`",
+              "",
+              "### Domain Results",
+          ]
+          summary_lines.extend([f"- `{name}`: `{result}`" for name, result in results.items()])
+
+          if reasons:
+              summary_lines.append("")
+              summary_lines.append("### Trigger Reasons")
+              summary_lines.extend([f"- `{reason}`" for reason in reasons])
+
+          if changed_files:
+              summary_lines.append("")
+              summary_lines.append("### Changed Files")
+              summary_lines.extend([f"- `{path}`" for path in changed_files])
+
+          if os.environ.get("GITHUB_STEP_SUMMARY"):
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+                  fh.write("\n".join(summary_lines) + "\n")
+
+          failed = [name for name, result in results.items() if result not in {"success", "skipped"}]
+          if failed:
+              print(f"CI gate failed because these domains did not pass: {', '.join(failed)}", file=sys.stderr)
+              sys.exit(1)
+          PY

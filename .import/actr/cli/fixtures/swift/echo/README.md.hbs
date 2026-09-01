@@ -1,0 +1,114 @@
+# {{PROJECT_NAME_PASCAL}}
+
+An iOS application built with the Actr framework that demonstrates echo service functionality.
+
+Template: echo
+
+English | [简体中文](README.zh.md)
+
+## Project Structure
+
+```
+{{PROJECT_NAME}}/
+├── manifest.toml          # Package identity, exports, and dependencies
+├── actr.toml              # Runtime and network configuration
+├── project.yml            # XcodeGen project configuration
+├── {{PROJECT_NAME_PASCAL}}/                  # iOS application source code
+│   ├── {{PROJECT_NAME_PASCAL}}.swift         # App entry point
+│   ├── ActrService.swift                     # Linked ActrNode bootstrap
+│   ├── <ServiceName>HandlerImpl.swift        # User-owned RPC implementation
+│   ├── <ServiceName>LifecycleAdapter.swift   # User-owned lifecycle hooks
+│   ├── ContentView.swift                     # Main UI view
+│   └── Generated/                            # Immutable generated code
+├── protos/                # Protocol buffer definitions
+│   ├── local/             # Local service definitions
+│   └── remote/            # Remote service definitions
+└── src/                   # Rust source code (if applicable)
+```
+
+## Prerequisites
+
+Before building this project, ensure you have the following installed:
+
+- **Xcode** (latest version recommended)
+- **XcodeGen** - For generating Xcode project files
+  ```bash
+  brew install xcodegen
+  ```
+- **Actr CLI** - For generating Actr framework code
+- **Swift Package Manager** dependencies:
+  - `actr-swift` (local package)
+  - `SwiftProtobuf` (from GitHub)
+
+## Project Creation
+
+To create a new {{PROJECT_NAME_PASCAL}} project from scratch, follow these three steps:
+
+1. **Initialize the project** using the echo template:
+   ```bash
+   actr init --template echo -l swift {{PROJECT_NAME}}
+   ```
+   This creates the project structure with the echo template configuration.
+
+2. **Install dependencies**:
+   ```bash
+   actr deps install
+   ```
+   This installs all required dependencies defined in the project.
+
+3. **Generate Swift code**:
+   ```bash
+   actr gen -l swift
+   ```
+   This generates immutable Swift code under `{{PROJECT_NAME_PASCAL}}/Generated` and user-owned Handler, LifecycleAdapter, and linked `ActrService` scaffolds beside it.
+
+## Launch and Setup Notes
+
+### Important: Xcode Team Configuration
+
+**After opening the project in Xcode, you must manually configure the signing team:**
+
+1. Open `{{PROJECT_NAME_PASCAL}}.xcodeproj` in Xcode
+2. Select the `{{PROJECT_NAME_PASCAL}}` target in the project navigator
+3. Go to the **Signing & Capabilities** tab
+4. Under **Signing**, check **Automatically manage signing**
+5. Select your **Team** from the dropdown menu
+   - If you don't see your team, you may need to:
+     - Add your Apple ID in Xcode Preferences -> Accounts
+     - Ensure you have a valid Apple Developer account
+6. Xcode will automatically generate a provisioning profile
+
+**Note:** The team setting is not included in `project.yml` because it varies per developer. Each developer must configure their own team in Xcode.
+
+### Configuration
+
+Configuration is split by responsibility:
+
+- `manifest.toml` defines package identity, exports, and dependencies.
+- `actr.toml` defines signaling, realm, WebRTC, ACL, and observability settings.
+
+Modify these settings as needed for your deployment environment.
+
+The generated iOS bootstrap uses `ActrNode.linked` with a statically linked `DynamicWorkload`. It does not load a `.actr` package from application resources. The runtime reads local identity and dependency aliases from `manifest.toml`; generated dispatchers resolve each remote alias through `ActrContext` when it is used.
+
+## Development Workflow
+
+1. Modify protocol definitions in `protos/` if needed
+2. Use `actr discovery` to view services and add them to `manifest.toml`
+3. Use `actr deps install` to download dependency proto files
+4. Regenerate immutable code: `actr gen -l swift`
+5. Implement RPC methods in `{{PROJECT_NAME_PASCAL}}/<ServiceName>HandlerImpl.swift`
+6. Customize lifecycle hooks in `<ServiceName>LifecycleAdapter.swift` when needed
+7. Build and test in Xcode
+
+## Code Ownership
+
+- `{{PROJECT_NAME_PASCAL}}/Generated/` is owned by `actr gen -l swift`. Do not edit these files manually.
+- `<ServiceName>HandlerImpl.swift` is the user-owned RPC implementation.
+- `<ServiceName>LifecycleAdapter.swift` is the user-owned lifecycle customization.
+- `ActrService.swift` wires those components into `ActrNode.linked`; generated dispatchers resolve aliases from the linked manifest at runtime.
+- `ContentView.swift` and other UI files are created by `actr init` and are not rewritten by `actr gen`.
+
+## License
+
+Apache-2.0

@@ -1,0 +1,14 @@
+import { defineWorkload } from '@actrium/actr-workload';
+
+export default defineWorkload({
+  async onStart(): Promise<void> {
+    console.log('TypeScript Echo workload started');
+  },
+
+  async dispatch(envelope): Promise<Uint8Array> {
+    console.log('Received workload RPC:', envelope.method);
+    throw new Error(
+      'Implement EchoService with @actrium/actr-workload and build it with actr-workload-ts.',
+    );
+  },
+});

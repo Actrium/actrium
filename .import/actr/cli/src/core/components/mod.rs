@@ -1,0 +1,536 @@
+//! Core reusable component definitions
+//!
+//! Defines trait interfaces for 8 core components, supporting dependency injection and composition
+
+pub mod cache_manager;
+pub mod config_manager;
+pub mod dependency_resolver;
+pub mod fingerprint_validator;
+pub mod network_validator;
+pub mod proto_processor;
+pub mod service_discovery;
+pub mod user_interface;
+use actr_protocol::{ActrType, discovery_response::TypeEntry};
+pub use cache_manager::DefaultCacheManager;
+pub use config_manager::TomlConfigManager;
+pub use dependency_resolver::DefaultDependencyResolver;
+pub use fingerprint_validator::DefaultFingerprintValidator;
+pub use network_validator::DefaultNetworkValidator;
+pub use proto_processor::DefaultProtoProcessor;
+pub use service_discovery::{DiscoveryContext, NetworkServiceDiscovery};
+pub use user_interface::ConsoleUI;
+
+use actr_config::ManifestConfig;
+use anyhow::Result;
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+// ============================================================================
+// Core data types
+// ============================================================================
+
+/// Dependency specification
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DependencySpec {
+    pub alias: String,
+    pub name: String,
+    pub actr_type: Option<ActrType>,
+    pub fingerprint: Option<String>,
+}
+
+/// Resolved dependency information
+#[derive(Debug, Clone)]
+pub struct ResolvedDependency {
+    pub spec: DependencySpec,
+    pub fingerprint: String,
+    pub proto_files: Vec<ProtoFile>,
+}
+
+/// Proto file information
+#[derive(Debug, Clone)]
+pub struct ProtoFile {
+    pub name: String,
+    pub path: PathBuf,
+    pub content: String,
+    pub services: Vec<ServiceDefinition>,
+}
+
+/// Service definition
+#[derive(Debug, Clone)]
+pub struct ServiceDefinition {
+    pub name: String,
+    pub methods: Vec<MethodDefinition>,
+}
+
+/// Method definition
+#[derive(Debug, Clone)]
+pub struct MethodDefinition {
+    pub name: String,
+    pub input_type: String,
+    pub output_type: String,
+}
+
+/// Service information
+#[derive(Debug, Clone)]
+pub struct ServiceInfo {
+    /// Registry discovery key/display name. Actrix currently emits its
+    /// internal `manufacturer:ActrTypeName` service key here.
+    ///
+    /// Do not persist this as a manifest service reference; use
+    /// [`Self::dependency_service_name`] instead.
+    pub name: String,
+    pub tags: Vec<String>,
+    pub fingerprint: String,
+    pub actr_type: ActrType,
+    pub published_at: Option<i64>,
+    pub description: Option<String>,
+    pub methods: Vec<MethodDefinition>,
+}
+
+impl ServiceInfo {
+    /// Canonical service name persisted in manifest and lock dependency
+    /// metadata. The service-spec lookup protocol is keyed by `ActrType.name`,
+    /// while `name` above is a registry index key.
+    pub fn dependency_service_name(&self) -> &str {
+        &self.actr_type.name
+    }
+}
+
+/// Service details
+#[derive(Debug, Clone)]
+pub struct ServiceDetails {
+    pub info: ServiceInfo,
+    pub proto_files: Vec<ProtoFile>,
+    pub dependencies: Vec<String>,
+}
+
+/// Fingerprint information
+#[derive(Debug, Clone, PartialEq)]
+pub struct Fingerprint {
+    pub algorithm: String,
+    pub value: String,
+}
+
+/// Validation report
+#[derive(Debug, Clone)]
+pub struct ValidationReport {
+    pub is_valid: bool,
+    pub config_validation: ConfigValidation,
+    pub dependency_validation: Vec<DependencyValidation>,
+    pub network_validation: Vec<NetworkValidation>,
+    pub fingerprint_validation: Vec<FingerprintValidation>,
+    pub conflicts: Vec<ConflictReport>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConfigValidation {
+    pub is_valid: bool,
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DependencyValidation {
+    pub dependency: String,
+    pub is_available: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NetworkValidation {
+    pub is_reachable: bool,
+    pub health: HealthStatus,
+    pub latency_ms: Option<u64>,
+    pub error: Option<String>,
+    pub is_applicable: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct FingerprintValidation {
+    pub dependency: String,
+    pub expected: Fingerprint,
+    pub actual: Option<Fingerprint>,
+    pub is_valid: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConflictReport {
+    pub dependency_a: String,
+    pub dependency_b: String,
+    pub conflict_type: ConflictType,
+    pub description: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum ConflictType {
+    VersionConflict,
+    FingerprintMismatch,
+    CircularDependency,
+}
+
+impl ValidationReport {
+    pub fn is_success(&self) -> bool {
+        self.is_valid
+            && self.config_validation.is_valid
+            && self.dependency_validation.iter().all(|d| d.is_available)
+            && self
+                .network_validation
+                .iter()
+                .all(|n| !n.is_applicable || n.is_reachable)
+            && self.fingerprint_validation.iter().all(|f| f.is_valid)
+            && self.conflicts.is_empty()
+    }
+}
+
+// ============================================================================
+// 1. Configuration Management Component (ConfigManager)
+// ============================================================================
+
+/// Unified configuration management interface
+#[async_trait]
+pub trait ConfigManager: Send + Sync {
+    /// Load configuration file
+    async fn load_config(&self, path: &Path) -> Result<ManifestConfig>;
+
+    /// Save configuration file
+    async fn save_config(&self, config: &ManifestConfig, path: &Path) -> Result<()>;
+
+    /// Update dependency configuration
+    async fn update_dependency(&self, spec: &DependencySpec) -> Result<()>;
+
+    /// Validate configuration file
+    async fn validate_config(&self) -> Result<ConfigValidation>;
+
+    /// Get project root directory
+    fn get_project_root(&self) -> &Path;
+
+    /// Back up current configuration
+    async fn backup_config(&self) -> Result<ConfigBackup>;
+
+    /// Restore configuration backup
+    async fn restore_backup(&self, backup: ConfigBackup) -> Result<()>;
+
+    /// Remove configuration backup
+    async fn remove_backup(&self, backup: ConfigBackup) -> Result<()>;
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackageConfig {
+    pub name: String,
+    pub version: String,
+    #[serde(rename = "type")]
+    pub package_type: Option<String>,
+}
+
+/// Configuration backup
+#[derive(Debug, Clone)]
+pub struct ConfigBackup {
+    pub original_path: PathBuf,
+    pub backup_path: PathBuf,
+    pub timestamp: std::time::SystemTime,
+}
+
+// ============================================================================
+// 2. Dependency Resolver Component (DependencyResolver)
+// ============================================================================
+
+/// Dependency resolution and conflict detection
+#[async_trait]
+pub trait DependencyResolver: Send + Sync {
+    /// Parse dependencies from config
+    async fn resolve_spec(&self, config: &ManifestConfig) -> Result<Vec<DependencySpec>>;
+
+    /// Resolve dependencies and fetch proto files
+    async fn resolve_dependencies(
+        &self,
+        specs: &[DependencySpec],
+        service_details: &[ServiceDetails],
+    ) -> Result<Vec<ResolvedDependency>>;
+
+    /// Check dependency conflicts
+    async fn check_conflicts(&self, deps: &[ResolvedDependency]) -> Result<Vec<ConflictReport>>;
+
+    /// Build dependency graph
+    async fn build_dependency_graph(&self, deps: &[ResolvedDependency]) -> Result<DependencyGraph>;
+}
+
+#[derive(Debug, Clone)]
+pub struct DependencyGraph {
+    pub nodes: Vec<String>,
+    pub edges: Vec<(String, String)>,
+    pub has_cycles: bool,
+}
+
+// ============================================================================
+// 3. Service Discovery Component (ServiceDiscovery)
+// ============================================================================
+
+/// Service discovery and network interaction
+#[async_trait]
+pub trait ServiceDiscovery: Send + Sync {
+    /// Discover services in the network
+    async fn discover_services(&self, filter: Option<&ServiceFilter>) -> Result<Vec<ServiceInfo>>;
+
+    /// Get detailed service information
+    async fn get_service_details(&self, name: &str) -> Result<ServiceDetails>;
+
+    /// Check service availability
+    async fn check_service_availability(&self, name: &str) -> Result<AvailabilityStatus>;
+
+    /// Get service proto files
+    async fn get_service_proto(&self, name: &str) -> Result<Vec<ProtoFile>>;
+}
+
+#[derive(Debug, Clone)]
+pub struct ServiceFilter {
+    pub name_pattern: Option<String>,
+    pub version_range: Option<String>,
+    pub tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AvailabilityStatus {
+    pub is_available: bool,
+    pub last_seen: Option<std::time::SystemTime>,
+    pub health: HealthStatus,
+}
+
+#[derive(Debug, Clone)]
+pub enum HealthStatus {
+    Healthy,
+    Degraded,
+    Unhealthy,
+    Unknown,
+}
+
+// ============================================================================
+// 4. Network Validator Component (NetworkValidator)
+// ============================================================================
+
+/// Network connectivity validation
+#[async_trait]
+pub trait NetworkValidator: Send + Sync {
+    /// Check connectivity
+    async fn check_connectivity(
+        &self,
+        service_name: &str,
+        options: &NetworkCheckOptions,
+    ) -> Result<ConnectivityStatus>;
+
+    /// Verify service health status
+    async fn verify_service_health(
+        &self,
+        service_name: &str,
+        options: &NetworkCheckOptions,
+    ) -> Result<HealthStatus>;
+
+    /// Test latency
+    async fn test_latency(
+        &self,
+        service_name: &str,
+        options: &NetworkCheckOptions,
+    ) -> Result<LatencyInfo>;
+
+    /// Batch check
+    async fn batch_check(
+        &self,
+        service_names: &[String],
+        options: &NetworkCheckOptions,
+    ) -> Result<Vec<NetworkCheckResult>>;
+}
+
+#[derive(Debug, Clone)]
+pub struct ConnectivityStatus {
+    pub is_reachable: bool,
+    pub response_time_ms: Option<u64>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LatencyInfo {
+    pub min_ms: u64,
+    pub max_ms: u64,
+    pub avg_ms: u64,
+    pub samples: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct NetworkCheckResult {
+    pub connectivity: ConnectivityStatus,
+    pub health: HealthStatus,
+    pub latency: Option<LatencyInfo>,
+}
+
+/// Options for network checks.
+#[derive(Debug, Clone)]
+pub struct NetworkCheckOptions {
+    pub timeout: Duration,
+}
+
+impl NetworkCheckOptions {
+    pub fn with_timeout(timeout: Duration) -> Self {
+        Self { timeout }
+    }
+
+    pub fn with_timeout_secs(timeout_secs: u64) -> Self {
+        Self::with_timeout(Duration::from_secs(timeout_secs))
+    }
+}
+
+impl Default for NetworkCheckOptions {
+    fn default() -> Self {
+        Self {
+            timeout: Duration::from_secs(5),
+        }
+    }
+}
+
+// ============================================================================
+// 5. Fingerprint Validator Component (FingerprintValidator)
+// ============================================================================
+
+/// Fingerprint computation and validation
+#[async_trait]
+pub trait FingerprintValidator: Send + Sync {
+    /// Compute service fingerprint
+    async fn compute_service_fingerprint(&self, service: &ServiceInfo) -> Result<Fingerprint>;
+
+    /// Verify fingerprint match
+    async fn verify_fingerprint(
+        &self,
+        expected: &Fingerprint,
+        actual: &Fingerprint,
+    ) -> Result<bool>;
+
+    /// Compute project fingerprint
+    async fn compute_project_fingerprint(&self, project_path: &Path) -> Result<Fingerprint>;
+
+    /// Generate lock file fingerprint
+    async fn generate_lock_fingerprint(&self, deps: &[ResolvedDependency]) -> Result<Fingerprint>;
+}
+
+// ============================================================================
+// 6. Proto Processor Component (ProtoProcessor)
+// ============================================================================
+
+/// Protocol Buffers file processing
+#[async_trait]
+pub trait ProtoProcessor: Send + Sync {
+    /// Discover proto files
+    async fn discover_proto_files(&self, path: &Path) -> Result<Vec<ProtoFile>>;
+
+    /// Parse proto services
+    async fn parse_proto_services(&self, files: &[ProtoFile]) -> Result<Vec<ServiceDefinition>>;
+
+    /// Generate code
+    async fn generate_code(&self, input: &Path, output: &Path) -> Result<GenerationResult>;
+
+    /// Validate proto syntax
+    async fn validate_proto_syntax(&self, files: &[ProtoFile]) -> Result<ValidationReport>;
+}
+
+#[derive(Debug, Clone)]
+pub struct GenerationResult {
+    pub generated_files: Vec<PathBuf>,
+    pub warnings: Vec<String>,
+    pub errors: Vec<String>,
+}
+
+// ============================================================================
+// 7. Cache Manager Component (CacheManager)
+// ============================================================================
+
+/// Dependency cache management
+#[async_trait]
+pub trait CacheManager: Send + Sync {
+    /// Get cached proto
+    async fn get_cached_proto(&self, service_name: &str) -> Result<Option<CachedProto>>;
+
+    /// Cache proto files
+    async fn cache_proto(&self, service_name: &str, proto: &[ProtoFile]) -> Result<()>;
+
+    /// Invalidate cache
+    async fn invalidate_cache(&self, service_name: &str) -> Result<()>;
+
+    /// Remove cached dependency directories whose aliases are no longer in
+    /// the manifest snapshot.
+    async fn retain_aliases(&self, aliases: &std::collections::HashSet<String>) -> Result<()>;
+
+    /// Clear cache
+    async fn clear_cache(&self) -> Result<()>;
+
+    /// Get cache statistics
+    async fn get_cache_stats(&self) -> Result<CacheStats>;
+}
+
+#[derive(Debug, Clone)]
+pub struct CachedProto {
+    pub files: Vec<ProtoFile>,
+    pub fingerprint: Fingerprint,
+    pub cached_at: std::time::SystemTime,
+    pub expires_at: Option<std::time::SystemTime>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CacheStats {
+    pub total_entries: usize,
+    pub total_size_bytes: u64,
+    pub hit_rate: f64,
+    pub miss_rate: f64,
+}
+
+// ============================================================================
+// 8. User Interface Component (UserInterface)
+// ============================================================================
+
+/// User interaction interface
+#[async_trait]
+pub trait UserInterface: Send + Sync {
+    /// Prompt for input
+    async fn prompt_input(&self, prompt: &str) -> Result<String>;
+
+    /// Confirm an operation
+    async fn confirm(&self, message: &str) -> Result<bool>;
+
+    /// Select one item from a list
+    async fn select_from_list(&self, items: &[String], prompt: &str) -> Result<usize>;
+
+    /// Display a service table
+    async fn display_service_table(
+        &self,
+        items: &[ServiceInfo],
+        headers: &[&str],
+        formatter: fn(&ServiceInfo) -> Vec<String>,
+    );
+
+    /// Show a progress bar
+    async fn show_progress(&self, message: &str) -> Result<Box<dyn ProgressBar>>;
+}
+
+/// Progress bar interface
+pub trait ProgressBar: Send + Sync {
+    fn update(&self, progress: f64);
+    fn set_message(&self, message: &str);
+    fn finish(&self);
+}
+
+impl From<TypeEntry> for ServiceInfo {
+    fn from(entry: TypeEntry) -> Self {
+        let name = entry.name.clone();
+        let tags = entry.tags.clone();
+        let actr_type = entry.actr_type.clone();
+
+        Self {
+            name,
+            actr_type,
+            tags,
+            published_at: entry.published_at,
+            fingerprint: entry.service_fingerprint,
+            description: entry.description,
+            methods: Vec::new(),
+        }
+    }
+}

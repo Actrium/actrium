@@ -1,0 +1,47 @@
+[package]
+name = "echo-actr"
+version = "0.2.2"
+edition = "2024"
+rust-version.workspace = true
+license = "Apache-2.0"
+repository = "https://github.com/Actrium/echo-actr"
+authors = ["Actrium Contributors"]
+description = "Signed Echo guest actor packages for Actrium"
+
+[lib]
+name = "echo_guest"
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = []
+cdylib = ["actr-framework/cdylib"]
+
+[dependencies]
+actr-framework = { workspace = true }
+actr-protocol = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+prost = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
+
+[build-dependencies]
+prost-build = "0.14"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+actr-hyper = { version = "0.4", features = ["wasm-engine", "test-utils"] }
+actr-pack = { workspace = true }
+actr-platform-native = { workspace = true }
+base64 = "0.22"
+ed25519-dalek = { version = "2" }
+libloading = "0.8"
+serde_json = "1.0"
+tempfile = "3.23"
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
+
+[lints.clippy]
+collapsible_if = "allow"
+collapsible_else_if = "allow"
+
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(feature, values("cdylib"))'] }

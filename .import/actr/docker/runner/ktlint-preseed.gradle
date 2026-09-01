@@ -1,0 +1,33 @@
+repositories {
+    maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
+    maven { url = uri("https://maven.aliyun.com/repository/central") }
+    maven { url = uri("https://plugins.gradle.org/m2") }
+    mavenCentral()
+}
+
+def ktlint = configurations.create("ktlintPreseed")
+ktlint.attributes {
+    attribute(
+        org.gradle.api.attributes.Usage.USAGE_ATTRIBUTE,
+        objects.named(org.gradle.api.attributes.Usage, org.gradle.api.attributes.Usage.JAVA_RUNTIME),
+    )
+    attribute(
+        org.gradle.api.attributes.Bundling.BUNDLING_ATTRIBUTE,
+        objects.named(org.gradle.api.attributes.Bundling, org.gradle.api.attributes.Bundling.EXTERNAL),
+    )
+}
+def ktlintVersion = providers.gradleProperty("ktlintVersion").get()
+def ktlintGradleVersion = providers.gradleProperty("ktlintGradleVersion").get()
+
+dependencies {
+    add(ktlint.name, "org.jlleitschuh.gradle.ktlint:org.jlleitschuh.gradle.ktlint.gradle.plugin:${ktlintGradleVersion}")
+    add(ktlint.name, "org.jlleitschuh.gradle:ktlint-gradle:${ktlintGradleVersion}")
+    add(ktlint.name, "com.pinterest.ktlint:ktlint-cli:${ktlintVersion}")
+    add(ktlint.name, "com.pinterest.ktlint:ktlint-ruleset-standard:${ktlintVersion}")
+    add(ktlint.name, "io.github.oshai:kotlin-logging:5.1.0")
+    add(ktlint.name, "io.github.detekt.sarif4k:sarif4k:0.5.0")
+}
+
+tasks.register("resolveKtlint") {
+    doLast { ktlint.resolve() }
+}

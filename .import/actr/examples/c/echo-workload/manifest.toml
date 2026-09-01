@@ -1,0 +1,17 @@
+edition = 1
+
+[package]
+name = "EchoWorkloadC"
+manufacturer = "acme"
+version = "0.1.0"
+description = "C echo workload for actr:workload@0.6.0, authored with wit-bindgen c."
+authors = ["Actr Dev Team"]
+license = "Apache-2.0"
+tags = ["dev", "example", "c-guest", "component-model"]
+exports = []
+
+[binary]
+path = "dist/echo-c-0.1.0-wasm32-wasip2.wasm"
+target = "wasm32-wasip2"
+
+[dependencies]

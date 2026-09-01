@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package example.user.v1;
+
+// User service
+service UserService {
+  // Get user information
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+
+  // Create user
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+
+  // Update user
+  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
+
+  // Delete user
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+
+  // List users (streaming response)
+  rpc ListUsers(ListUsersRequest) returns (stream User);
+
+  // Watch user events (streaming)
+  rpc WatchUsers(WatchUsersRequest) returns (stream UserEvent);
+}
+
+// Get user request
+message GetUserRequest {
+  string user_id = 1;
+}
+
+// Get user response
+message GetUserResponse {
+  User user = 1;
+}
+
+// Create user request
+message CreateUserRequest {
+  string name = 1;
+  string email = 2;
+  optional int32 age = 3;
+  repeated string tags = 4;
+}
+
+// Create user response
+message CreateUserResponse {
+  User user = 1;
+}
+
+// Update user request
+message UpdateUserRequest {
+  string user_id = 1;
+  optional string name = 2;
+  optional string email = 3;
+  optional int32 age = 4;
+}
+
+// Update user response
+message UpdateUserResponse {
+  User user = 1;
+  bool updated = 2;
+}
+
+// Delete user request
+message DeleteUserRequest {
+  string user_id = 1;
+}
+
+// Delete user response
+message DeleteUserResponse {
+  bool deleted = 1;
+}
+
+// List users request
+message ListUsersRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+  optional string filter = 3;
+}
+
+// Watch user events request
+message WatchUsersRequest {
+  repeated string user_ids = 1;
+}
+
+// User
+message User {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+  int32 age = 4;
+  repeated string tags = 5;
+  int64 created_at = 6;
+  int64 updated_at = 7;
+  bool is_active = 8;
+}
+
+// User event
+message UserEvent {
+  string event_type = 1;
+  User user = 2;
+  int64 timestamp = 3;
+}

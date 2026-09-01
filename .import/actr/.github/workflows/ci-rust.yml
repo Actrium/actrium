@@ -1,0 +1,146 @@
+name: CI (Rust)
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Fail the build if core/hyper/build.rs can't compile the wasm fixture
+  # (missing wasm32-wasip2 / wasm-component-ld) rather than silently compiling
+  # the fixture tests out — symmetric with ci-gate.yml.
+  ACTR_REQUIRE_WASM_FIXTURE: "1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Dependency Audit
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --version 0.22.2 --locked --force
+      - name: Audit Cargo.lock
+        # Existing advisories outside the WASM host are tracked separately:
+        # maxminddb (framework GeoIP), protobuf 2 (prometheus), rsa (TURN).
+        run: >-
+          cargo audit
+          --ignore RUSTSEC-2025-0132
+          --ignore RUSTSEC-2024-0437
+          --ignore RUSTSEC-2023-0071
+
+  format:
+    name: Format Check
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  # DynClib cannot consume `wit-bindgen c` output (it is wasm-targeted, not
+  # portable C ABI), so its hand-written ABI lives in
+  # core/framework/src/guest/dynclib_abi.rs. `wit-lint` is the drift guard that
+  # keeps that file aligned with the WIT contract. Runs separately and
+  # fast-fails before the heavier build / test jobs.
+  wit-lint:
+    name: WIT shape consistency
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: WIT <-> DynClib ABI drift check
+        run: cargo run -p wit-lint --release
+
+  payload-logging:
+    name: OTel payload-logging guard
+    runs-on: ubuntu-latest-m
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check no payload is formatted in core/hyper tracing macros
+        # OpenTelemetryTracingBridge exports every tracing log event that
+        # passes the filter as an OTLP log record to vector → VictoriaLogs
+        # (unauthenticated query port). Flagging payload-bearing variables
+        # (envelope/payload/message/data/body) in tracing macros prevents
+        # user-data leakage at debug/trace filter levels. See issue #484.
+        run: bash .github/workflows/scripts/check-payload-logging.sh
+
+  build:
+    name: Build
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+      # Component Model toolchain:
+      # - wasm-component-ld >= 0.5.22 is required to link the V2 async-world
+      #   guest fixture (actr:workload@0.6.0) built by core/hyper/build.rs; that
+      #   is the first release that accepts its async custom sections. CI pins
+      #   0.5.26; the runtime check in `cli/src/commands/build.rs` enforces the
+      #   minimum.
+      # - wasm-tools 1.253 is the latest release (wasmparser 0.253); wasmtime
+      #   46.0.1 embeds 0.251/0.252. Runtime validation is authoritative;
+      #   wasm-tools is used for local inspection / `component wit`.
+      - name: Install wasm Component Model toolchain
+        run: |
+          cargo install wasm-component-ld --version 0.5.26 --locked
+          cargo install wasm-tools --version 1.253.0 --locked
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+      - name: Generate CLI web runtime assets
+        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+      - name: Build workspace
+        run: cargo build --verbose --all-features
+      - name: Build release
+        run: cargo build --release --verbose --all-features
+
+  test:
+    name: Test
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+      # Phase 1 Component Model toolchain — see `build` job for rationale.
+      - name: Install wasm Component Model toolchain
+        run: |
+          cargo install wasm-component-ld --version 0.5.26 --locked
+          cargo install wasm-tools --version 1.253.0 --locked
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+      - name: Generate CLI web runtime assets
+        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+      - name: Verify RFC-0400 timer inventory
+        run: cargo test -p actr-hyper --lib timer::tests::inv24_production_timer_calls_and_inventory_do_not_drift
+      - name: Run tests
+        run: cargo test --workspace --verbose --all-features
+
+  dynclib-e2e:
+    name: Dynclib E2E
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run dynclib tests
+        run: |
+          set -euo pipefail
+          # dynclib_actor_e2e tests serialise themselves via DYNCLIB_SERIAL,
+          # so a single invocation is safe.
+          cargo test -p actr-hyper --features dynclib-engine,test-utils --test dynclib_actor_e2e -- --nocapture

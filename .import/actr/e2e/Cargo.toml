@@ -1,0 +1,29 @@
+[workspace]
+members = [
+    "package-runtime-echo/client",
+    "package-runtime-echo/client-guest",
+    "polyglot-echo/clients/rust",
+    "polyglot-echo/server",
+    "polyglot-echo/services/linked-rust",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.4.0"
+edition = "2024"
+rust-version = "1.95"
+
+[workspace.dependencies]
+actr-framework = { path = "../core/framework" }
+actr-protocol = { path = "../core/protocol" }
+actr-runtime = { path = "../core/runtime" }
+actr-hyper = { path = "../core/hyper", features = ["opentelemetry"] }
+actr-config = { path = "../core/config" }
+actr-platform-native = { path = "../core/platform-native" }
+actr-pack = { path = "../core/pack" }
+tokio = { version = "1.0", features = ["full"] }
+anyhow = "1.0"
+tracing = "0.1"
+prost = "0.14"
+bytes = "1.11"
+async-trait = "0.1"

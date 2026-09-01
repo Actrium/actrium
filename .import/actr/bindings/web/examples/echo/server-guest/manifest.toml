@@ -1,0 +1,15 @@
+edition = 1
+exports = ["../proto/echo.proto"]
+
+[package]
+name = "EchoService"
+manufacturer = "acme"
+version = "0.2.0"
+description = "Echo Server - Browser-side Actor Service"
+authors = ["Actr Dev Team"]
+license = "Apache-2.0"
+tags = ["dev", "server"]
+
+[binary]
+path = "pkg/echo_guest_bg.wasm"
+target = "wasm32-unknown-unknown"

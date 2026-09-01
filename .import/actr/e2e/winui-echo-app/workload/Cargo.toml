@@ -1,0 +1,31 @@
+[package]
+name = "winui-echo-app-workload"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Rust forwarding workload for the WinUI EchoApp E2E — mirrors swift-echo-app's LocalEchoServiceHandlerImpl over the actr-cabi C ABI."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+actr-framework = { path = "../../../core/framework" }
+actr-protocol = { path = "../../../core/protocol" }
+actr-hyper = { path = "../../../core/hyper" }
+actr-cabi = { path = "../../../crates/actr-cabi" }
+async-trait = "0.1"
+bytes = "1"
+tokio = { version = "1", features = ["rt", "time"] }
+
+# This crate is a standalone workspace so it does not inherit the e2e
+# workspace's actr-* version requirements. Path deps above resolve directly
+# to the local source trees.
+[workspace]
+
+# PR CI only needs a loadable fixture to validate NuGet RID resolution and the
+# C ABI. Keep it low-optimization and non-incremental; nightly full-matrix runs
+# continue to use the standard release profile.
+[profile.ci]
+inherits = "dev"
+debug = 0
+incremental = false

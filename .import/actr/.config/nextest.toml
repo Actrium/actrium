@@ -1,0 +1,54 @@
+# cargo-nextest configuration for the workspace.
+#
+# Many integration tests under tests/ bring up real WebRTC peers and full
+# nodes. Under CI CPU contention a DTLS/ICE handshake can occasionally exceed
+# a test's own timeout on the first attempt (observed as intermittent, not
+# deterministic, failures). Give integration tests a bounded number of retries
+# so one slow draw does not fail the whole run.
+#
+# Retries are scoped to integration tests (kind = test). Unit tests
+# (kind = lib) are deterministic and stay retry-free, so a genuine regression
+# there fails immediately instead of being masked by a retry.
+#
+# A test that fails every attempt still fails the run; a test that passes only
+# on retry is reported as FLAKY in the summary, so a rising flake rate stays
+# visible rather than being silently absorbed.
+[profile.default]
+
+# Hard per-test time cap (issue #500 follow-up).
+#
+# A test that hangs on an unguarded await (e.g. a `recv().await` with no
+# timeout waiting on a delivery that never arrives) otherwise runs until the
+# job's wall-clock limit — observed as a 6h+ "SLOW" test that cancels the
+# whole run. The 60s period preserves the SLOW diagnostic lines already shown
+# in CI logs; `terminate-after = 5` hard-kills a test 5 × 60s = 5m in, so a
+# hung test fails bounded and fast instead of blocking the suite for hours.
+# 5m is well above every CI-run test's own internal budget (the largest
+# non-`#[ignore]` real-time budget is 60s; larger values elsewhere are
+# `start_paused` virtual-clock time or `#[ignore]`d stress tests).
+slow-timeout = { period = "60s", terminate-after = 5 }
+
+# The v0.20 mobile pair contract is deliberately deterministic and is the PR
+# recovery gate. A retry would hide exactly the race/storm regressions this
+# suite is intended to expose. Keep this before the general integration-test
+# override: nextest uses the first matching override for each setting.
+[[profile.default.overrides]]
+filter = 'binary(mobile_rtc_pair_contract) | binary(mobile_rtc_multi_peer)'
+retries = 0
+
+# The v0.20 validation/interop/wiring suites live in the lib target but build
+# REAL PeerConnections (ICE + DTLS handshakes over loopback), so they are not
+# the deterministic unit tests the kind(lib) retry-free assumption describes.
+# Under the full workspace run's CPU contention their handshake can exceed the
+# test's own timeout on a slow draw (observed in CI as
+# `v020_offer_answer_bidirectional_close_loop` timing out at its 15s
+# OP_TIMEOUT while passing in the dedicated, less-loaded v0.20 gate job).
+# Scope the same bounded retries the integration tests get to exactly these
+# real-PC modules; every other lib test stays retry-free.
+[[profile.default.overrides]]
+filter = 'package(actr-hyper) and (test(wire::webrtc::v020::validation_tests) | test(wire::webrtc::v020::interop_tests) | test(wire::webrtc::v020::wiring_tests))'
+retries = 2
+
+[[profile.default.overrides]]
+filter = 'kind(test)'
+retries = 2

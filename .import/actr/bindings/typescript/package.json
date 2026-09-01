@@ -1,0 +1,84 @@
+{
+  "name": "@actrium/actr",
+  "version": "0.10.0-alpha.4",
+  "description": "TypeScript/Node.js bindings for the ACTR (Actor-RTC) framework",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "napi": {
+    "binaryName": "actr",
+    "targets": [
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "aarch64-unknown-linux-gnu",
+      "aarch64-unknown-linux-musl",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "scripts": {
+    "artifacts": "napi artifacts",
+    "build": "napi build --platform --release && npm run compile:ts",
+    "build:debug": "napi build --platform",
+    "codegen": "node scripts/codegen.js",
+    "format": "prettier --check \"**/*.{js,ts,mjs,cjs,json,md}\"",
+    "format:write": "prettier --write \"**/*.{js,ts,mjs,cjs,json,md}\"",
+    "lint": "eslint .",
+    "prepublishOnly": "napi prepublish -t npm --skip-optional-publish",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "version": "napi version",
+    "compile:ts": "tsc",
+    "strip-version-check": "node scripts/strip-napi-version-check.js"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.22.0",
+    "@iarna/toml": "^2.2.5",
+    "@napi-rs/cli": "^3.5.1",
+    "@types/node": "^20",
+    "@vitest/coverage-v8": "^1.0.0",
+    "eslint": "^9.22.0",
+    "globals": "^16.0.0",
+    "prettier": "3.9.6",
+    "protobufjs": "^8.0.0",
+    "tsx": "^4.7.0",
+    "typescript-eslint": "^8.26.1",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  },
+  "engines": {
+    "node": ">= 16"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Actrium/actr.git"
+  },
+  "keywords": [
+    "actor",
+    "webrtc",
+    "distributed-systems",
+    "napi-rs",
+    "rust",
+    "typescript"
+  ],
+  "author": "Actor-RTC Contributors",
+  "license": "Apache-2.0",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "*.node",
+    "dist/**/*"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "optionalDependencies": {
+    "@actrium/actr-darwin-x64": "0.10.0-alpha.4",
+    "@actrium/actr-darwin-arm64": "0.10.0-alpha.4",
+    "@actrium/actr-linux-x64-gnu": "0.10.0-alpha.4",
+    "@actrium/actr-linux-x64-musl": "0.10.0-alpha.4",
+    "@actrium/actr-linux-arm64-gnu": "0.10.0-alpha.4",
+    "@actrium/actr-linux-arm64-musl": "0.10.0-alpha.4",
+    "@actrium/actr-win32-x64-msvc": "0.10.0-alpha.4"
+  }
+}

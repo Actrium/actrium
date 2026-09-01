@@ -1,0 +1,205 @@
+//! Production mode MFR public key cache
+//!
+//! `MfrCertCache` fetches manufacturer Ed25519 public keys on demand from
+//! AIS `GET /mfr/{name}/verifying_key`, caching locally (TTL 1 hour).
+//!
+//! Uses `std::sync::RwLock` (not tokio) internally because:
+//! - Cache reads/writes are extremely short memory operations that won't block the tokio executor
+//! - Provides a synchronous read path for `RegistryTrust::verify_package` to call directly
+
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
+
+use base64::Engine;
+use ed25519_dalek::VerifyingKey;
+
+use crate::error::{HyperError, HyperResult};
+
+/// MFR public key cache entry
+struct CacheEntry {
+    key: VerifyingKey,
+    fetched_at: Instant,
+}
+
+/// Structured cert cache key: `(manufacturer, signing_key_id)`.
+///
+/// A tuple avoids the `manufacturer:key_id` string-concatenation collision, where
+/// e.g. `("a", "b:c")` and `("a:b", "c")` would otherwise map to the same key.
+type CertCacheKey = (String, Option<String>);
+
+fn cert_cache_key(manufacturer: &str, key_id: Option<&str>) -> CertCacheKey {
+    (manufacturer.to_string(), key_id.map(str::to_string))
+}
+
+/// Production mode MFR Ed25519 public key cache
+///
+/// Fetches manufacturer public keys on demand from the AIS endpoint, cache TTL defaults to 1 hour.
+/// Shared across tasks via `Arc<MfrCertCache>`.
+pub struct MfrCertCache {
+    ais_endpoint: String,
+    http: reqwest::Client,
+    ttl: Duration,
+    cache: RwLock<HashMap<CertCacheKey, CacheEntry>>,
+}
+
+impl std::fmt::Debug for MfrCertCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MfrCertCache")
+            .field("ais_endpoint", &self.ais_endpoint)
+            .field("ttl", &self.ttl)
+            .finish_non_exhaustive()
+    }
+}
+
+impl MfrCertCache {
+    pub fn new(ais_endpoint: impl Into<String>) -> Arc<Self> {
+        Arc::new(Self {
+            ais_endpoint: ais_endpoint.into(),
+            http: reqwest::Client::new(),
+            ttl: Duration::from_secs(3600),
+            cache: RwLock::new(HashMap::new()),
+        })
+    }
+
+    /// Used in `RegistryTrust::verify_package` synchronous path;
+    /// caller must ensure the cache has been warmed via `get_or_fetch` beforehand.
+    pub fn get_from_cache(&self, manufacturer: &str, key_id: Option<&str>) -> Option<VerifyingKey> {
+        let cache_key = cert_cache_key(manufacturer, key_id);
+        let cache = self.cache.read().expect("cert_cache read lock poisoned");
+        cache.get(&cache_key).and_then(|entry| {
+            // Instant-based TTL is a deliberate in-process freshness policy:
+            // it cannot be skewed by wall-clock changes, but it freezes while
+            // the process is suspended, so after a long suspend entries look
+            // fresher than they really are. Known and accepted trade-off.
+            if entry.fetched_at.elapsed() < self.ttl {
+                Some(entry.key)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Get the Ed25519 verifying key for the specified manufacturer
+    ///
+    /// Reads from cache first (if not expired); on miss, fetches from AIS and updates cache.
+    pub async fn get_or_fetch(
+        &self,
+        manufacturer: &str,
+        key_id: Option<&str>,
+    ) -> HyperResult<VerifyingKey> {
+        // fast path: read cache
+        if let Some(key) = self.get_from_cache(manufacturer, key_id) {
+            tracing::debug!(manufacturer, ?key_id, "MFR pubkey cache hit");
+            return Ok(key);
+        }
+
+        tracing::debug!(
+            manufacturer,
+            ?key_id,
+            "MFR pubkey cache miss, fetching from AIS"
+        );
+
+        // slow path: HTTP fetch
+        let key = self.fetch_from_ais(manufacturer, key_id).await?;
+
+        // write to cache (brief blocking lock, just a HashMap insert)
+        let cache_key = cert_cache_key(manufacturer, key_id);
+        {
+            let mut cache = self.cache.write().expect("cert_cache write lock poisoned");
+            cache.insert(
+                cache_key,
+                CacheEntry {
+                    key,
+                    // Monotonic stamp; see the TTL note in `get_from_cache`.
+                    fetched_at: Instant::now(),
+                },
+            );
+        }
+
+        tracing::info!(
+            manufacturer,
+            ?key_id,
+            "MFR pubkey fetched from AIS and cached"
+        );
+        Ok(key)
+    }
+
+    /// Fetch public key from AIS `GET /mfr/{manufacturer}/verifying_key`
+    async fn fetch_from_ais(
+        &self,
+        manufacturer: &str,
+        key_id: Option<&str>,
+    ) -> HyperResult<VerifyingKey> {
+        // Build the URL with the url crate (not `format!`) so the manufacturer
+        // and key_id are percent-encoded as path segments / query pairs and can
+        // never inject extra path or query structure into the AIS request.
+        let mut url = reqwest::Url::parse(&self.ais_endpoint).map_err(|e| {
+            HyperError::Config(format!("invalid AIS endpoint `{}`: {e}", self.ais_endpoint))
+        })?;
+        url.path_segments_mut()
+            .map_err(|_| HyperError::Config("AIS endpoint cannot be a base URL".to_string()))?
+            .extend(["mfr", manufacturer, "verifying_key"]);
+        if let Some(id) = key_id {
+            url.query_pairs_mut().append_pair("key_id", id);
+        }
+        tracing::debug!(url = %url, "fetching MFR pubkey from AIS");
+
+        let resp = self.http.get(url).send().await.map_err(|e| {
+            HyperError::UntrustedManufacturer(format!(
+                "failed to fetch MFR pubkey ({manufacturer}): {e}"
+            ))
+        })?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            tracing::warn!(
+                manufacturer,
+                status = status.as_u16(),
+                body,
+                "AIS returned non-2xx, MFR pubkey fetch failed"
+            );
+            return Err(HyperError::UntrustedManufacturer(format!(
+                "AIS refused to provide MFR pubkey ({manufacturer}), status={status}"
+            )));
+        }
+
+        #[derive(serde::Deserialize)]
+        struct VerifyingKeyResp {
+            /// Base64-encoded Ed25519 verifying key (32 bytes)
+            public_key: String,
+        }
+
+        let body: VerifyingKeyResp = resp.json().await.map_err(|e| {
+            HyperError::UntrustedManufacturer(format!(
+                "failed to parse MFR pubkey response ({manufacturer}): {e}"
+            ))
+        })?;
+
+        let key_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&body.public_key)
+            .map_err(|e| {
+                HyperError::UntrustedManufacturer(format!(
+                    "MFR pubkey base64 decode failed ({manufacturer}): {e}"
+                ))
+            })?;
+
+        let key_arr: [u8; 32] = key_bytes.try_into().map_err(|v: Vec<u8>| {
+            HyperError::UntrustedManufacturer(format!(
+                "MFR pubkey length incorrect ({manufacturer}), expected 32 bytes, got {} bytes",
+                v.len()
+            ))
+        })?;
+
+        VerifyingKey::from_bytes(&key_arr).map_err(|e| {
+            HyperError::UntrustedManufacturer(format!(
+                "MFR pubkey format invalid ({manufacturer}): {e}"
+            ))
+        })
+    }
+}
+
+#[cfg(test)]
+#[path = "cert_cache_tests.rs"]
+mod tests;

@@ -1,0 +1,718 @@
+//! Systemd service template processing
+
+use anyhow::Result;
+use serde::Deserialize;
+use std::collections::{BTreeSet, HashMap};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use crate::config::InstallConfig;
+
+// Keep template and rendering logic colocated for this minimal deploy helper.
+const SYSTEMD_SERVICE_TEMPLATE: &str = r#"# actrix systemd service file template
+# This file is a template, actual deployment will generate real service file based on configured paths
+
+[Unit]
+Description=Actrix Auxiliary Servers
+Documentation=https://github.com/Actrium/actrix
+After=network.target
+
+[Service]
+Type=simple
+User={{SERVICE_USER}}
+Group={{SERVICE_GROUP}}
+WorkingDirectory={{WORKING_DIRECTORY}}
+ExecStart={{INSTALL_DIR}}/bin/actrix --config {{CONFIG_PATH}}
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=actrix
+{{CAPABILITY_BLOCK}}
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{READ_WRITE_PATHS}}
+ReadOnlyPaths={{READ_ONLY_PATHS}}
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target
+"#;
+
+#[derive(Debug, Default, Deserialize)]
+struct RuntimeConfig {
+    pid: Option<String>,
+    sqlite_path: Option<String>,
+    #[serde(default)]
+    bind: RuntimeBindConfig,
+    #[serde(default)]
+    services: RuntimeServicesConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RuntimeServicesConfig {
+    #[serde(default)]
+    signer: Option<RuntimeSignerConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RuntimeSignerConfig {
+    #[serde(default)]
+    storage: Option<RuntimeSignerStorageConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RuntimeSignerStorageConfig {
+    #[serde(default)]
+    sqlite: Option<RuntimeSqlitePathConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RuntimeSqlitePathConfig {
+    path: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RuntimeBindConfig {
+    #[serde(default)]
+    http: Option<RuntimeListenerConfig>,
+    #[serde(default)]
+    https: Option<RuntimeListenerConfig>,
+    #[serde(default)]
+    ice: Option<RuntimeListenerConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RuntimeListenerConfig {
+    port: Option<u16>,
+}
+
+/// Systemd service template processor
+pub struct SystemdServiceTemplate {
+    install_config: InstallConfig,
+    config_path: std::path::PathBuf,
+    service_name: String,
+    working_directory: PathBuf,
+}
+
+impl SystemdServiceTemplate {
+    pub fn new(
+        install_config: InstallConfig,
+        config_path: std::path::PathBuf,
+        service_name: String,
+        working_directory: PathBuf,
+    ) -> Self {
+        Self {
+            install_config,
+            config_path,
+            service_name,
+            working_directory,
+        }
+    }
+
+    /// Generate systemd service file.
+    ///
+    /// Refuses to overwrite an existing unit unless `force_overwrite` is set,
+    /// protecting `User=`/`ProtectSystem=`/`ReadWritePaths=` hardening from
+    /// being clobbered by a re-deploy.
+    pub fn generate_service_file(
+        &self,
+        service_user: &str,
+        service_group: &str,
+        force_overwrite: bool,
+    ) -> Result<()> {
+        let service_name = &self.service_name;
+        let service_file = format!("/etc/systemd/system/{}.service", service_name);
+
+        println!("📄 Creating systemd service: {}", service_name);
+
+        // Overwrite guard: preserve existing hardening unless explicitly forced.
+        if Path::new(&service_file).exists() {
+            if !force_overwrite {
+                anyhow::bail!(
+                    "systemd unit already exists: {service_file}\n\
+                     Refusing to overwrite (this would discard User=/ProtectSystem=/ReadWritePaths= hardening).\n\
+                     Re-run with --force-overwrite-unit to replace it."
+                );
+            }
+            println!("⚠️  Overwriting existing unit: {service_file}");
+            println!(
+                "⚠️  Existing hardening (User=/ProtectSystem=/ReadWritePaths=) will be replaced."
+            );
+        }
+
+        // Create service content
+        let service_content = self.create_service_content(service_user, service_group)?;
+
+        // Write service file using sudo
+        self.write_service_file(&service_content, &service_file)?;
+
+        // Reload systemd daemon
+        self.reload_systemd()?;
+
+        // Enable service
+        self.enable_service(service_name)?;
+
+        // Start service
+        self.start_service(service_name)?;
+
+        // Show service status
+        self.show_service_status(service_name)?;
+
+        println!(
+            "✅ Systemd service '{}' deployed successfully",
+            service_name
+        );
+        println!("   • Service file: {}", service_file);
+        println!("   • Status: systemctl status {}", service_name);
+        println!("   • Logs: journalctl -u {} -f", service_name);
+
+        Ok(())
+    }
+
+    fn create_service_content(&self, service_user: &str, service_group: &str) -> Result<String> {
+        let install_dir_str = self
+            .install_config
+            .install_dir
+            .to_string_lossy()
+            .to_string();
+        let working_dir_str = self.working_directory.to_string_lossy().to_string();
+        let config_path_str = self.config_path.to_string_lossy().to_string();
+        let read_write_paths = self.collect_read_write_paths()?.join(" ");
+        let read_only_paths = self.collect_read_only_paths()?.join(" ");
+        let capability_block = if self.requires_low_port_capability() {
+            "# Allow binding privileged ports (<1024) while running as non-root\nAmbientCapabilities=CAP_NET_BIND_SERVICE\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE"
+        } else {
+            ""
+        };
+
+        // Every value substituted into the unit must be single-line. A newline
+        // in any of them (user, group, paths from config) would let the value
+        // inject arbitrary [Service]/[Unit] directives — a unit-injection
+        // vector. The capability block is a trusted literal and is exempt.
+        for (label, value) in [
+            ("service user", service_user),
+            ("service group", service_group),
+            ("install dir", &install_dir_str),
+            ("working directory", &working_dir_str),
+            ("config path", &config_path_str),
+            ("read-write paths", &read_write_paths),
+            ("read-only paths", &read_only_paths),
+        ] {
+            assert_single_line(label, value)?;
+        }
+
+        println!("ℹ️  ReadWritePaths: {}", read_write_paths);
+        println!("ℹ️  ReadOnlyPaths: {}", read_only_paths);
+
+        let mut placeholders = HashMap::new();
+        placeholders.insert("SERVICE_USER".to_string(), service_user.to_string());
+        placeholders.insert("SERVICE_GROUP".to_string(), service_group.to_string());
+        placeholders.insert("INSTALL_DIR".to_string(), install_dir_str);
+        placeholders.insert("WORKING_DIRECTORY".to_string(), working_dir_str);
+        placeholders.insert("CONFIG_PATH".to_string(), config_path_str);
+        placeholders.insert("READ_WRITE_PATHS".to_string(), read_write_paths);
+        placeholders.insert("READ_ONLY_PATHS".to_string(), read_only_paths);
+        placeholders.insert("CAPABILITY_BLOCK".to_string(), capability_block.to_string());
+
+        let mut result = SYSTEMD_SERVICE_TEMPLATE.to_string();
+        for (key, value) in placeholders {
+            let placeholder = format!("{{{{{}}}}}", key);
+            result = result.replace(&placeholder, &value);
+        }
+
+        Ok(result)
+    }
+
+    fn write_service_file(&self, content: &str, service_file: &str) -> Result<()> {
+        let mut output = Command::new("sudo")
+            .arg("tee")
+            .arg(service_file)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
+
+        if let Some(ref mut stdin) = output.stdin {
+            use std::io::Write;
+            stdin.write_all(content.as_bytes())?;
+        }
+
+        let result = output.wait_with_output()?;
+        if !result.status.success() {
+            let error = String::from_utf8_lossy(&result.stderr);
+            anyhow::bail!("Failed to write service file: {}", error);
+        }
+
+        println!("✅ Service file created: {}", service_file);
+        Ok(())
+    }
+
+    fn reload_systemd(&self) -> Result<()> {
+        println!("🔄 Reloading systemd daemon...");
+        let output = Command::new("sudo")
+            .args(["systemctl", "daemon-reload"])
+            .output()?;
+
+        if !output.status.success() {
+            let error = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("Failed to reload systemd: {}", error);
+        }
+
+        println!("✅ Systemd daemon reloaded");
+        Ok(())
+    }
+
+    fn enable_service(&self, service_name: &str) -> Result<()> {
+        println!("⚡ Enabling service for auto-start...");
+        let output = Command::new("sudo")
+            .args(["systemctl", "enable", service_name])
+            .output()?;
+
+        if !output.status.success() {
+            let error = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("Failed to enable service: {}", error);
+        }
+
+        println!("✅ Service enabled for auto-start");
+        Ok(())
+    }
+
+    fn start_service(&self, service_name: &str) -> Result<()> {
+        println!("🚀 Starting service...");
+        let output = Command::new("sudo")
+            .args(["systemctl", "start", service_name])
+            .output()?;
+
+        if !output.status.success() {
+            let error = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("Failed to start service: {}", error);
+        }
+
+        // Check if service is actually running
+        let status_output = Command::new("sudo")
+            .args(["systemctl", "is-active", service_name])
+            .output()?;
+
+        let status_str = String::from_utf8_lossy(&status_output.stdout);
+        let status = status_str.trim();
+        if status == "active" {
+            println!("✅ Service started successfully");
+        } else if !status.is_empty() {
+            println!("⚠️  Service status: {}", status);
+        } else {
+            let error = String::from_utf8_lossy(&status_output.stderr);
+            println!("⚠️  Unable to read service status after start: {}", error);
+        }
+
+        Ok(())
+    }
+
+    fn show_service_status(&self, service_name: &str) -> Result<()> {
+        println!();
+        println!("📊 Service Status");
+        println!("════════════════");
+
+        let output = Command::new("sudo")
+            .args([
+                "systemctl",
+                "status",
+                service_name,
+                "--no-pager",
+                "--lines=10",
+            ])
+            .output()?;
+
+        if output.status.success() {
+            let status_output = String::from_utf8_lossy(&output.stdout);
+            println!("{}", status_output);
+        } else {
+            let error = String::from_utf8_lossy(&output.stderr);
+            println!("⚠️  Failed to get service status: {}", error);
+        }
+
+        Ok(())
+    }
+
+    fn resolve_runtime_path(&self, raw_path: &str) -> PathBuf {
+        let path = PathBuf::from(raw_path);
+        if path.is_absolute() {
+            path
+        } else {
+            // Relative runtime paths (certs, db, sqlite) resolve against the
+            // unit's WorkingDirectory, not the install dir.
+            self.working_directory.join(path)
+        }
+    }
+
+    fn collect_read_write_paths(&self) -> Result<Vec<String>> {
+        let mut paths = BTreeSet::new();
+        self.add_read_write_path(
+            &mut paths,
+            self.install_config.logs_dir(),
+            "install logs dir",
+        )?;
+        self.add_read_write_path(&mut paths, self.install_config.db_dir(), "install db dir")?;
+        self.add_read_write_path(
+            &mut paths,
+            self.install_config.shared_dir(),
+            "install shared dir",
+        )?;
+        self.add_read_write_path(
+            &mut paths,
+            self.working_directory.join("logs"),
+            "working directory logs dir",
+        )?;
+
+        match std::fs::read_to_string(&self.config_path) {
+            Ok(config_text) => match toml::from_str::<RuntimeConfig>(&config_text) {
+                Ok(runtime_cfg) => {
+                    if let Some(sqlite_path) = runtime_cfg.sqlite_path
+                        && !sqlite_path.trim().is_empty()
+                    {
+                        let resolved = self.resolve_runtime_path(sqlite_path.trim());
+                        self.add_read_write_path(&mut paths, resolved, "config sqlite_path")?;
+                    }
+
+                    if let Some(pid_path) = runtime_cfg.pid
+                        && !pid_path.trim().is_empty()
+                    {
+                        let resolved = self.resolve_runtime_path(pid_path.trim());
+                        if let Some(parent) = resolved.parent() {
+                            self.add_read_write_path(
+                                &mut paths,
+                                parent.to_path_buf(),
+                                "config pid parent",
+                            )?;
+                        }
+                    }
+
+                    // services.signer.storage.sqlite.path
+                    if let Some(sqlite_path) = runtime_cfg
+                        .services
+                        .signer
+                        .as_ref()
+                        .and_then(|s| s.storage.as_ref())
+                        .and_then(|st| st.sqlite.as_ref())
+                        .and_then(|sq| sq.path.as_deref())
+                        .map(str::trim)
+                        .filter(|p| !p.is_empty())
+                    {
+                        let resolved = self.resolve_runtime_path(sqlite_path);
+                        self.add_read_write_path(
+                            &mut paths,
+                            resolved,
+                            "config signer sqlite path",
+                        )?;
+                    }
+                }
+                Err(err) => {
+                    println!(
+                        "⚠️  Failed to parse config TOML for runtime paths (using defaults): {}",
+                        err
+                    );
+                }
+            },
+            Err(err) => {
+                println!(
+                    "⚠️  Failed to read config file for runtime paths (using defaults): {}",
+                    err
+                );
+            }
+        }
+
+        Ok(paths.into_iter().collect())
+    }
+
+    fn add_read_write_path(
+        &self,
+        paths: &mut BTreeSet<String>,
+        path: PathBuf,
+        label: &str,
+    ) -> Result<()> {
+        self.validate_unit_path(&path, label)?;
+        self.validate_runtime_write_path_scope(&path, label)?;
+        paths.insert(path.to_string_lossy().to_string());
+        Ok(())
+    }
+
+    fn collect_read_only_paths(&self) -> Result<Vec<String>> {
+        let paths = vec![
+            self.install_config.bin_dir(),
+            self.install_config.releases_dir(),
+        ];
+        for path in &paths {
+            self.validate_unit_path(path, "read-only path")?;
+        }
+        Ok(paths
+            .into_iter()
+            .map(|path| path.to_string_lossy().to_string())
+            .collect())
+    }
+
+    fn validate_unit_path(&self, path: &Path, label: &str) -> Result<()> {
+        if !path.is_absolute() {
+            anyhow::bail!(
+                "invalid {label} for systemd unit: {} is not absolute",
+                path.display()
+            );
+        }
+        if path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::CurDir | std::path::Component::ParentDir
+            )
+        }) {
+            anyhow::bail!(
+                "invalid {label} for systemd unit: {} contains '.' or '..'",
+                path.display()
+            );
+        }
+        let text = path.to_string_lossy();
+        if text.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            anyhow::bail!(
+                "invalid {label} for systemd unit: {} contains whitespace or control characters",
+                path.display()
+            );
+        }
+        if has_existing_symlink_component(path)? {
+            anyhow::bail!(
+                "invalid {label} for systemd unit: {} contains an existing symlink component",
+                path.display()
+            );
+        }
+        Ok(())
+    }
+
+    fn validate_runtime_write_path_scope(&self, path: &Path, label: &str) -> Result<()> {
+        let normalized = normalize_path(path);
+        let install_dir = normalize_path(&self.install_config.install_dir);
+        let working_directory = normalize_path(&self.working_directory);
+        if normalized.starts_with(&install_dir) || normalized.starts_with(&working_directory) {
+            return Ok(());
+        }
+        anyhow::bail!(
+            "refusing {label} {} in ReadWritePaths: path must stay under install-dir ({}) or working-directory ({})",
+            path.display(),
+            self.install_config.install_dir.display(),
+            self.working_directory.display()
+        );
+    }
+
+    fn requires_low_port_capability(&self) -> bool {
+        const DEFAULT_HTTP_PORT: u16 = 8080;
+        const DEFAULT_HTTPS_PORT: u16 = 8443;
+        const DEFAULT_ICE_PORT: u16 = 3478;
+
+        let config_text = match std::fs::read_to_string(&self.config_path) {
+            Ok(text) => text,
+            Err(_) => return false,
+        };
+        let runtime_cfg = match toml::from_str::<RuntimeConfig>(&config_text) {
+            Ok(cfg) => cfg,
+            Err(_) => return false,
+        };
+
+        [
+            runtime_cfg
+                .bind
+                .http
+                .map(|cfg| cfg.port.unwrap_or(DEFAULT_HTTP_PORT)),
+            runtime_cfg
+                .bind
+                .https
+                .map(|cfg| cfg.port.unwrap_or(DEFAULT_HTTPS_PORT)),
+            runtime_cfg
+                .bind
+                .ice
+                .map(|cfg| cfg.port.unwrap_or(DEFAULT_ICE_PORT)),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|port| port < 1024)
+    }
+}
+
+/// Reject values that span more than one line.
+///
+/// Any substituted unit field containing a newline (or other control char) can
+/// break out of its directive and inject new `[Service]`/`[Unit]` lines. The
+/// capability block is the only intentionally multi-line substitution and is
+/// not passed through this check.
+fn assert_single_line(label: &str, value: &str) -> Result<()> {
+    if value
+        .chars()
+        .any(|c| c == '\n' || c == '\r' || c.is_control())
+    {
+        anyhow::bail!(
+            "invalid {label} for systemd unit: contains a newline or control character \
+             (refusing to generate a unit that could be injected via '{}')",
+            value.escape_debug()
+        );
+    }
+    Ok(())
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            std::path::Component::RootDir => normalized.push(Path::new("/")),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::Normal(part) => normalized.push(part),
+        }
+    }
+    normalized
+}
+
+fn has_existing_symlink_component(path: &Path) -> Result<bool> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        match std::fs::symlink_metadata(&current) {
+            Ok(meta) if meta.file_type().is_symlink() => return Ok(true),
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => break,
+            Err(err) => return Err(err.into()),
+        }
+    }
+    Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SystemdServiceTemplate, assert_single_line};
+    use crate::config::InstallConfig;
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
+    use std::path::PathBuf;
+
+    #[test]
+    fn single_line_rejects_newlines_and_control_chars() {
+        assert!(assert_single_line("x", "plain-value").is_ok());
+        assert!(assert_single_line("x", "a\nb").is_err());
+        assert!(assert_single_line("x", "a\rb").is_err());
+        assert!(assert_single_line("x", "a\tb").is_err());
+    }
+
+    #[test]
+    fn read_write_paths_include_default_pid_logs_dir() {
+        let install_dir = PathBuf::from("/opt/actrix-test");
+        let working_directory = PathBuf::from("/opt/actr-project/actrix");
+        let template = SystemdServiceTemplate::new(
+            InstallConfig {
+                install_dir,
+                binary_name: "actrix".to_string(),
+                add_to_path: false,
+            },
+            PathBuf::from("/no/such/config.toml"),
+            "actrix-test".to_string(),
+            working_directory.clone(),
+        );
+
+        let paths = template.collect_read_write_paths().unwrap();
+        assert!(paths.contains(&working_directory.join("logs").to_string_lossy().to_string()));
+    }
+
+    fn template_with_config(config_text: &str) -> (SystemdServiceTemplate, PathBuf) {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join(format!(
+                "actrix-deploy-systemd-path-test-{}-{unique}",
+                std::process::id(),
+            ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("config.toml");
+        std::fs::write(&config_path, config_text).unwrap();
+
+        let template = SystemdServiceTemplate::new(
+            InstallConfig {
+                install_dir: dir.join("install"),
+                binary_name: "actrix".to_string(),
+                add_to_path: false,
+            },
+            config_path,
+            "actrix-test".to_string(),
+            dir.join("work"),
+        );
+        (template, dir)
+    }
+
+    #[test]
+    fn read_write_paths_allow_config_paths_under_allowed_roots() {
+        let (template, dir) = template_with_config(
+            r#"
+sqlite_path = "database"
+pid = "logs/actrix.pid"
+
+[services.signer.storage.sqlite]
+path = "database/signer.db"
+"#,
+        );
+
+        let paths = template.collect_read_write_paths().unwrap();
+        assert!(paths.contains(&dir.join("work/database").to_string_lossy().to_string()));
+        assert!(paths.contains(&dir.join("work/logs").to_string_lossy().to_string()));
+        assert!(
+            paths.contains(
+                &dir.join("work/database/signer.db")
+                    .to_string_lossy()
+                    .to_string()
+            )
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn read_write_paths_reject_config_paths_outside_allowed_roots() {
+        let (template, dir) = template_with_config(r#"sqlite_path = "/etc""#);
+
+        assert!(template.collect_read_write_paths().is_err());
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn read_write_paths_reject_parent_refs_and_whitespace() {
+        let (parent_template, parent_dir) = template_with_config(r#"sqlite_path = "../escape""#);
+        assert!(parent_template.collect_read_write_paths().is_err());
+        let _ = std::fs::remove_dir_all(parent_dir);
+
+        let (space_template, space_dir) = template_with_config(r#"sqlite_path = "my db""#);
+        assert!(space_template.collect_read_write_paths().is_err());
+        let _ = std::fs::remove_dir_all(space_dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_write_paths_reject_symlink_components_under_allowed_roots() {
+        let (template, dir) = template_with_config(r#"sqlite_path = "database""#);
+        let outside = dir.join("outside");
+        std::fs::create_dir_all(&template.working_directory).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, template.working_directory.join("database")).unwrap();
+
+        assert!(template.collect_read_write_paths().is_err());
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}

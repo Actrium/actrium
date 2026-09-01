@@ -1,0 +1,62 @@
+extends:
+  - '@commitlint/config-conventional'
+
+rules:
+  # Type enum
+  type-enum:
+    - 2
+    - always
+    - [
+        'feat',     # new feature
+        'fix',      # bug fix
+        'docs',     # documentation update
+        'style',    # code formatting (no runtime-affecting changes)
+        'refactor', # refactoring (neither new feature nor bug fix)
+        'perf',     # performance optimization
+        'test',     # adding tests
+        'chore',    # build process or auxiliary tool changes
+        'ci',       # CI configuration changes
+        'build',    # build system changes
+        'revert'    # rollback
+      ]
+
+  # Subject max length
+  subject-max-length:
+    - 2
+    - always
+    - 72
+
+  # Subject must not be empty
+  subject-empty:
+    - 2
+    - never
+
+  # Subject format
+  subject-case:
+    - 2
+    - never
+    - ['sentence-case', 'start-case', 'pascal-case', 'upper-case']
+
+  # Body max line length
+  body-max-line-length:
+    - 2
+    - always
+    - 100
+
+  # Footer max line length
+  footer-max-line-length:
+    - 2
+    - always
+    - 100
+
+  # Type must be lowercase
+  type-case:
+    - 2
+    - always
+    - 'lower-case'
+
+  # Scope must be lowercase
+  scope-case:
+    - 2
+    - always
+    - 'lower-case'

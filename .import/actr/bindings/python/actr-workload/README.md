@@ -1,0 +1,105 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
+# actr-workload
+
+`actr-workload` is the Python authoring package for actr workload
+Components. It provides:
+
+- A lightweight `Workload` `Protocol` for user code.
+- A small CLI/API wrapper around `componentize-py`.
+- Default WIT resolution against the repository source of truth at
+  `core/framework/wit-v2/actr-workload.wit`.
+
+The build extra pins the currently supported componentizer:
+
+```bash
+python -m pip install 'actr-workload[build]'
+componentize-py --version  # componentize-py 0.25.0
+```
+
+## WIT Resolution
+
+The canonical workload WIT source is:
+
+```text
+core/framework/wit-v2/actr-workload.wit
+```
+
+`actr-workload` resolves WIT in this order:
+
+1. An explicit `--wit PATH` argument or API `wit=` argument.
+2. The `ACTR_WORKLOAD_WIT` environment variable.
+3. The nearest checked-out repo WIT at `core/framework/wit-v2/actr-workload.wit`.
+4. A packaged resource copied from that repo WIT when building a wheel or sdist.
+
+Package-specific WIT copies, such as the TypeScript workload package
+fallback, must stay byte-for-byte identical to this source and are
+guarded by CI drift checks. The Python packaged resource is copied from
+the canonical WIT when building a wheel or sdist, so it remains only an
+artifact fallback for `pip install` ergonomics.
+
+## Generate Bindings
+
+```bash
+actr-workload bindings bindings
+```
+
+This runs:
+
+```bash
+componentize-py \
+  -w actr-workload-guest-v2 \
+  -d <resolved actr-workload.wit> \
+  --world-module actr_workload_bindings \
+  bindings bindings
+```
+
+Generated bindings are written under the `actr_workload_bindings`
+module so they do not shadow the authoring package named
+`actr_workload`.
+
+Use `--wit PATH` to override the resolved WIT file.
+
+## Componentize
+
+```bash
+actr-workload componentize workload \
+  -o dist/echo-python-0.2.0-wasm32-wasip2.wasm \
+  --project-dir . \
+  --bindings-dir bindings
+```
+
+This runs `componentize-py componentize` with both the project directory
+and generated bindings directory on the Python import path.
+
+## Python API
+
+```python
+from actr_workload import Workload as WorkloadProtocol
+
+
+class Workload(WorkloadProtocol):
+    async def dispatch(self, envelope, ctx) -> bytes:
+        return bytes(envelope.payload)
+```
+
+`Workload` automatically uses the runtime-generated
+`actr_workload_bindings.exports.Workload` base when componentize-py imports
+the workload.  That base supplies the private `_async_start_*` shims required
+by async WIT exports.  The authoring package falls back to a plain base when
+bindings are not present, so source modules remain importable before a build.
+Lifecycle and dispatch methods are still wrapped so their raw invocation
+context arrives as `ActrContext`.
+
+Host imports (`ctx.call` / `ctx.call_raw` / `ctx.tell` / `ctx.log` / …) work
+without any per-workload setup: importing `actr_workload` eagerly imports
+the generated `imports.host` / `imports.types` bindings, so componentize-py's
+pre-init snapshot retains them (issue #638). Workloads must not add static
+`import actr_workload_bindings.imports.host` statements themselves.
+
+The package intentionally does not implement runtime hosting. Host
+execution belongs to the actr runtime; this package only supports Python
+workload authoring and build-time componentization.
+
+Importing `actr_workload.Workload` is guest-safe: build helpers are loaded
+only when `actr-workload` CLI commands or the build API are used.

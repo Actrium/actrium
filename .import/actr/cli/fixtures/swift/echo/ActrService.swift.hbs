@@ -1,0 +1,44 @@
+import Actr
+import Foundation
+import SwiftUI
+
+// ActrService is not implemented.
+// Run `actr gen -l swift` to replace this placeholder with the linked runtime scaffold.
+
+@MainActor
+final class ActrService: ObservableObject {
+    @Published var connectionStatus: ConnectionStatus = .disconnected
+    @Published var errorMessage: String?
+
+    func initialize() async throws {
+        let error = ActrError.NotImplemented(
+            msg: "Run `actr gen -l swift` before building the app"
+        )
+        connectionStatus = .error
+        errorMessage = error.localizedDescription
+        throw error
+    }
+
+    func sendEcho(_ message: String) async throws -> String {
+        _ = message
+        throw ActrError.NotImplemented(
+            msg: "Run `actr gen -l swift` and wire the generated Echo client"
+        )
+    }
+
+    enum ConnectionStatus {
+        case disconnected
+        case initializing
+        case connected
+        case error
+
+        var description: String {
+            switch self {
+            case .disconnected: return "Disconnected"
+            case .initializing: return "Initializing..."
+            case .connected: return "Connected"
+            case .error: return "Error"
+            }
+        }
+    }
+}

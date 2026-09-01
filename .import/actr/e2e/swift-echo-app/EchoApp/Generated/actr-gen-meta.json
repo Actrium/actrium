@@ -1,0 +1,74 @@
+{
+  "dispatch_spec_hash" : "4b97d882bf8d29f5b91208d9a28399b756356590de53fa2d7979190300126384",
+  "generated_files" : [
+    "echo.client.swift",
+    "local_echo.actor.swift",
+    "actr_dispatch.swift",
+    "actr-gen-meta.json"
+  ],
+  "generated_local_routes" : [
+    "echoapp.LocalEchoService.Send"
+  ],
+  "generated_remote_routes" : [
+    "echo.EchoService.Echo"
+  ],
+  "language" : "swift",
+  "local_services" : [
+    {
+      "handler_interface" : "LocalEchoServiceHandler",
+      "methods" : [
+        {
+          "input_ref" : {
+            "proto_file" : "local/local_echo.proto",
+            "proto_package" : "echoapp",
+            "proto_type" : "echoapp.LocalEchoRequest",
+            "type_name" : "LocalEchoRequest"
+          },
+          "name" : "Send",
+          "output_ref" : {
+            "proto_file" : "local/local_echo.proto",
+            "proto_package" : "echoapp",
+            "proto_type" : "echoapp.LocalEchoResponse",
+            "type_name" : "LocalEchoResponse"
+          },
+          "route_key" : "echoapp.LocalEchoService.Send",
+          "reply_mode" : "return",
+          "snake_name" : "send"
+        }
+      ],
+      "name" : "LocalEchoService",
+      "package" : "echoapp",
+      "proto_file" : "local/local_echo.proto"
+    }
+  ],
+  "plugin_version" : "0.6.1",
+  "remote_services" : [
+    {
+      "client_type" : "EchoServiceClient",
+      "dependency_alias" : "echo",
+      "methods" : [
+        {
+          "input_ref" : {
+            "proto_file" : "remote/echo/echo.proto",
+            "proto_package" : "echo",
+            "proto_type" : "echo.EchoRequest",
+            "type_name" : "EchoRequest"
+          },
+          "name" : "Echo",
+          "output_ref" : {
+            "proto_file" : "remote/echo/echo.proto",
+            "proto_package" : "echo",
+            "proto_type" : "echo.EchoResponse",
+            "type_name" : "EchoResponse"
+          },
+          "route_key" : "echo.EchoService.Echo",
+          "snake_name" : "echo"
+        }
+      ],
+      "name" : "EchoService",
+      "package" : "echo",
+      "proto_file" : "remote/echo/echo.proto"
+    }
+  ],
+  "schema_version" : "v1"
+}

@@ -1,0 +1,68 @@
+[workspace]
+members = [
+    "data-stream/receiver",
+    "data-stream/sender",
+    "media-relay/common",
+    "media-relay/actr-a",
+    "media-relay/actr-b",
+    # "shell-actr-echo/server",
+    # "shell-actr-echo/client",
+    "ws-actr-echo/server",
+    "ws-actr-echo/client",
+    "mutil-actr/server",
+    "mutil-actr/client",
+    "acl/allowed-client",
+    "acl/blocked-client",
+    "acl/server",
+    "package-echo/client",
+    "package-echo/client-guest",
+    "echo-actr",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.2.1"
+edition = "2024"
+rust-version = "1.95"
+
+[workspace.dependencies]
+# Actr Framework Dependencies (used by all members)
+actr = { version = "0.4" }
+actr-framework = { version = "0.4" }
+actr-protocol = { version = "0.4" }
+actr-runtime = { version = "0.4" }
+actr-hyper = { version = "0.4", features = ["opentelemetry"] }
+actr-config = { version = "0.4" }
+actr-platform-native = { version = "0.4" }
+actr-pack = { version = "0.4" }
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Error handling
+anyhow = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Protobuf
+prost = "0.14"
+prost-types = "0.14"
+bytes = "1.11"
+
+# Async utilities
+async-trait = "0.1"
+
+# URL parsing
+url = "2.0"
+
+[patch.crates-io]
+actr = { path = "../.." }
+actr-framework = { path = "../../core/framework" }
+actr-protocol = { path = "../../core/protocol" }
+actr-runtime = { path = "../../core/runtime" }
+actr-hyper = { path = "../../core/hyper" }
+actr-config = { path = "../../core/config" }
+actr-platform-native = { path = "../../core/platform-native" }
+actr-pack = { path = "../../core/pack" }

@@ -1,0 +1,18 @@
+
+[package]
+name = "echo-real-server"
+version = "0.2.1"
+edition = "2024"
+rust-version = "1.95"
+
+[dependencies]
+actr = { path = "../../../..", features = ["opentelemetry"] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+tracing = "0.1"
+prost = "0.14"
+bytes = "1"
+async-trait = "0.1"
+
+[dev-dependencies]
+actr-framework = { path = "../../../../core/framework", features = ["test-utils"] }

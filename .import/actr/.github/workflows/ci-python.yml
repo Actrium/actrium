@@ -1,0 +1,63 @@
+name: CI (Python)
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workload:
+    name: Python Workload Authoring Check
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: bindings/python/actr-workload/pyproject.toml
+
+
+      - name: Install wasm-tools
+        run: cargo install wasm-tools --version 1.253.0 --locked
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+
+      - name: Verify TypeScript workload WIT drift
+        run: |
+          cmp core/framework/wit-v2/actr-workload.wit bindings/typescript/actr-workload/src/wit-v2/actr-workload.wit
+
+      - name: Build actr-workload package
+        run: |
+          python -m pip install -U build
+          python -m build bindings/python/actr-workload
+
+      - name: Install actr-workload build extra
+        run: python -m pip install -e 'bindings/python/actr-workload[build]'
+
+      - name: Verify componentize-py pin
+        run: componentize-py --version | grep 'componentize-py 0.25.0'
+
+      - name: Generate workload bindings
+        run: |
+          rm -rf /tmp/actr-workload-bindings
+          actr-workload bindings /tmp/actr-workload-bindings
+          test -f /tmp/actr-workload-bindings/actr_workload_bindings/exports/workload.py
+          test -f /tmp/actr-workload-bindings/actr_workload_bindings/imports/host.py
+
+      - name: Compile Python sources
+        run: python -m compileall bindings/python/actr-workload/src examples/python/echo-workload/workload.py
+
+      - name: Build Python echo workload
+        working-directory: examples/python/echo-workload
+        run: ./build.sh package

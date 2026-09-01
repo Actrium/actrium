@@ -1,0 +1,57 @@
+//! # actr-platform-traits
+//!
+//! Platform abstraction traits for Actor-RTC.
+//!
+//! This crate defines the boundary between platform-agnostic orchestration logic
+//! (Hyper, ActrNode runtime) and platform-specific implementations (native, web).
+//!
+//! ## Traits
+//!
+//! - [`KvStore`] — key-value storage (SQLite on native, IndexedDB on web)
+//! - [`CryptoProvider`] — cryptographic primitives (ed25519-dalek on native, Web Crypto on web)
+//! - [`PlatformProvider`] — composite provider grouping all platform services
+//! - [`MonotonicClock`] — process-local monotonic time for timeouts, deadlines
+//!   and backoff (`std::time::Instant` on native, `performance.now()` on web);
+//!   a deterministic virtual `TestClock` for runtime tests is exported from
+//!   [`clock`] under the `test-utils` feature
+
+pub mod clock;
+pub mod crypto;
+pub mod platform;
+pub mod storage;
+
+pub use clock::MonotonicClock;
+#[cfg(any(test, feature = "test-utils"))]
+pub use clock::{TestClock, TestInstant, assert_monotonic_clock_contract};
+pub use crypto::CryptoProvider;
+pub use platform::PlatformProvider;
+pub use storage::{KvOp, KvStore, KvStoreClone, StorageNamespace};
+
+use thiserror::Error;
+
+/// Unified error type for platform operations
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum PlatformError {
+    /// Storage operation failed
+    #[error("storage error: {0}")]
+    Storage(String),
+
+    /// Cryptographic operation failed
+    #[error("crypto error: {0}")]
+    Crypto(String),
+
+    /// I/O error
+    #[error("io error: {0}")]
+    Io(String),
+
+    /// Other error
+    #[error("{0}")]
+    Other(String),
+}
+
+impl From<std::io::Error> for PlatformError {
+    fn from(e: std::io::Error) -> Self {
+        PlatformError::Io(e.to_string())
+    }
+}

@@ -1,0 +1,180 @@
+//! {{PROJECT_NAME}} — package-backed Actor-RTC EchoService workload
+//!
+//! Run `actr gen -l rust` to create `src/generated/` from `protos/local/echo.proto`.
+
+#[cfg(actr_has_generated)]
+pub mod generated;
+
+#[cfg(not(actr_has_generated))]
+pub mod generated_stub {
+    pub mod echo {
+        #[derive(Clone, PartialEq, prost::Message)]
+        pub struct EchoRequest {
+            #[prost(string, tag = "1")]
+            pub message: String,
+        }
+
+        #[derive(Clone, PartialEq, prost::Message)]
+        pub struct EchoResponse {
+            #[prost(string, tag = "1")]
+            pub reply: String,
+            #[prost(uint64, tag = "2")]
+            pub timestamp: u64,
+        }
+    }
+
+    pub mod echo_actor {
+        use actr_framework::Context;
+        use actr_protocol::{ActorResult, PayloadType, RpcRequest};
+        use async_trait::async_trait;
+
+        use super::echo::{EchoRequest, EchoResponse};
+
+        impl RpcRequest for EchoRequest {
+            type Response = EchoResponse;
+
+            fn route_key() -> &'static str {
+                "echo.EchoService.Echo"
+            }
+
+            fn payload_type() -> PayloadType {
+                PayloadType::RpcReliable
+            }
+        }
+
+        #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+        #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+        pub trait EchoServiceHandler: actr_framework::MaybeSendSync + 'static {
+            async fn echo<C: Context>(&self, req: EchoRequest, ctx: &C) -> ActorResult<EchoResponse>;
+        }
+    }
+
+    pub mod actr_dispatch {
+        use actr_framework::{Context, MessageDispatcher, Workload};
+        use actr_protocol::{ActorResult, ActrError, RpcEnvelope};
+        use async_trait::async_trait;
+        use bytes::Bytes;
+        use prost::Message as ProstMessage;
+
+        use super::echo::{EchoRequest, EchoResponse};
+
+        pub(super) mod private {
+            pub trait Sealed {}
+        }
+
+        #[allow(private_bounds)]
+        #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+        #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+        pub trait ActrDispatchHandler:
+            private::Sealed + actr_framework::MaybeSendSync + 'static
+        {
+            async fn echo_service_echo<C: Context>(
+                &self,
+                req: EchoRequest,
+                ctx: &C,
+            ) -> ActorResult<EchoResponse>;
+        }
+
+        pub struct ActrWorkload<H: ActrDispatchHandler>(pub H);
+
+        impl<H: ActrDispatchHandler> ActrWorkload<H> {
+            pub fn new(handler: H) -> Self {
+                Self(handler)
+            }
+        }
+
+        pub struct ActrDispatcher<H: ActrDispatchHandler>(std::marker::PhantomData<H>);
+
+        #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+        #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+        impl<H: ActrDispatchHandler> MessageDispatcher for ActrDispatcher<H> {
+            type Workload = ActrWorkload<H>;
+
+            async fn dispatch<C: Context>(
+                workload: &Self::Workload,
+                envelope: RpcEnvelope,
+                ctx: &C,
+            ) -> ActorResult<Bytes> {
+                match envelope.route_key.as_str() {
+                    "echo.EchoService.Echo" => {
+                        let payload = envelope.payload.as_ref().ok_or_else(|| {
+                            ActrError::DecodeFailure(
+                                "Missing payload in RpcEnvelope".to_string(),
+                            )
+                        })?;
+                        let req = EchoRequest::decode(&**payload).map_err(|error| {
+                            ActrError::DecodeFailure(format!(
+                                "Failed to decode EchoRequest: {error}"
+                            ))
+                        })?;
+                        let response = workload.0.echo_service_echo(req, ctx).await?;
+                        Ok(Bytes::from(response.encode_to_vec()))
+                    }
+                    _ => Err(ActrError::UnknownRoute(
+                        envelope.route_key.to_string(),
+                    )),
+                }
+            }
+        }
+
+        impl<H: ActrDispatchHandler> Workload for ActrWorkload<H> {
+            type Dispatcher = ActrDispatcher<H>;
+        }
+    }
+
+    pub mod actr_handler {
+        use actr_framework::Context;
+        use actr_protocol::ActorResult;
+        use async_trait::async_trait;
+
+        use super::actr_dispatch::ActrDispatchHandler;
+        use super::echo::{EchoRequest, EchoResponse};
+
+        pub struct ActrHandler<EchoServiceHandler: super::echo_actor::EchoServiceHandler> {
+            pub echo_service: EchoServiceHandler,
+        }
+
+        impl<EchoServiceHandler: super::echo_actor::EchoServiceHandler>
+            ActrHandler<EchoServiceHandler>
+        {
+            pub fn new(echo_service: EchoServiceHandler) -> Self {
+                Self { echo_service }
+            }
+        }
+
+        impl<EchoServiceHandler: super::echo_actor::EchoServiceHandler>
+            super::actr_dispatch::private::Sealed for ActrHandler<EchoServiceHandler>
+        {
+        }
+
+        #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+        #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+        impl<EchoServiceHandler: super::echo_actor::EchoServiceHandler> ActrDispatchHandler
+            for ActrHandler<EchoServiceHandler>
+        {
+            async fn echo_service_echo<C: Context>(
+                &self,
+                req: EchoRequest,
+                ctx: &C,
+            ) -> ActorResult<EchoResponse> {
+                self.echo_service.echo(req, ctx).await
+            }
+        }
+    }
+}
+
+#[cfg(not(actr_has_generated))]
+pub use generated_stub as generated;
+
+pub mod echo_service;
+
+use actr_framework::entry;
+use generated::actr_dispatch::ActrWorkload;
+use generated::actr_handler::ActrHandler;
+
+pub use crate::echo_service::EchoServiceImpl;
+
+entry!(
+    ActrWorkload<ActrHandler<EchoServiceImpl>>,
+    ActrWorkload::new(ActrHandler::new(EchoServiceImpl::new()))
+);

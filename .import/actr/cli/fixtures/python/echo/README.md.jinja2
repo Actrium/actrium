@@ -1,0 +1,30 @@
+# {{PROJECT_NAME}} Python Workload
+
+This project is a Python actr workload component. It builds a `wasm32-wasip2`
+Component Model module with `actr-workload` and packages it as a `.actr`
+archive.
+
+## Generate
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+actr deps install
+actr gen --language python --input protos --output generated
+```
+
+## Build
+
+```bash
+./build.sh
+```
+
+## Package
+
+```bash
+./build.sh package
+```
+
+The generated `workload.py` contains typed protobuf handler methods after
+`actr gen` runs.

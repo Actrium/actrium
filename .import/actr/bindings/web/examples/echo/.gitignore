@@ -1,0 +1,35 @@
+# Server (TS Hono wrapper)
+server/target/
+server/Cargo.lock
+
+# Client (Vite + React)
+client/node_modules/
+client/dist/
+
+# Unified guest crates (Option U Phase 6c)
+server-guest/target/
+server-guest/Cargo.lock
+client-guest/target/
+client-guest/Cargo.lock
+
+# Generated TS bindings (proto -> ts)
+client/src/generated/
+
+# Release directory (ignore everything except dev-key.json)
+/release/*
+!/release/dev-key.json
+
+# Development certificates
+client/.certs/
+
+# Logs
+*.log
+
+# PIDs
+.server.pid
+.client.pid
+
+# Runtime artifacts
+actrix*.log
+actrix-dev-db/
+actrix-dev.toml

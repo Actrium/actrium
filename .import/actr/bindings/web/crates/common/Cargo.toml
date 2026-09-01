@@ -1,0 +1,47 @@
+[package]
+name = "actr-web-common"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Actor-RTC Web Common Library (shared between SW and DOM)"
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["rlib"] # Pure Rust library, no WASM output
+
+[dependencies]
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Utilities
+thiserror.workspace = true
+log.workspace = true
+
+# Data structures
+bytes = "1.5"
+
+# WASM-related
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+js-sys = "0.3"
+gloo-timers.workspace = true
+web-sys = { workspace = true, features = [
+    "Request",
+    "RequestInit",
+    "Response",
+    "Headers",
+    "AbortController",
+    "AbortSignal",
+    "WorkerGlobalScope",
+] }
+
+# Actor-RTC Core
+actr-protocol.workspace = true
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

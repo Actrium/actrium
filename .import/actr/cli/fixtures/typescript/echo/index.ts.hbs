@@ -1,0 +1,41 @@
+import { ActrNode } from '@actrium/actr';
+{{#if IS_BOTH}}
+import { EchoRequest } from './generated/{{SERVICE_NAME}}/echo_client';
+{{else}}
+import { EchoRequest } from './generated/echo-echo-server/echo_client';
+{{/if}}
+
+const RPC_TIMEOUT_MS = 15000;
+
+async function main(): Promise<void> {
+  const node = await ActrNode.fromConfig('./manifest.toml');
+  const actorRef = await node.start();
+
+  const [target] = await actorRef.discover(
+    {
+      manufacturer: 'actrium',
+      name: 'EchoService',
+      version: process.env.ECHO_ACTR_VERSION ?? '0.2.1-beta',
+    },
+    1,
+  );
+
+  if (!target) {
+    throw new Error('No EchoService target discovered');
+  }
+
+  const response = await actorRef.callRpc(
+    target,
+    EchoRequest,
+    { message: 'hello' },
+    RPC_TIMEOUT_MS,
+  );
+  console.log('Echo reply:', response.reply);
+
+  await actorRef.stop();
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

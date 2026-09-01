@@ -1,0 +1,31 @@
+use crate::generated::echo::{EchoRequest, EchoResponse};
+use crate::generated::echo_actor::EchoServiceHandler;
+use actr_framework::Context;
+use actr_protocol::ActorResult;
+
+pub struct EchoServiceImpl;
+
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+impl EchoServiceHandler for EchoServiceImpl {
+    async fn echo<C: Context>(
+        &self,
+        req: EchoRequest,
+        _ctx: &C,
+    ) -> ActorResult<EchoResponse> {
+        println!("Received echo request: {}", req.message);
+        Ok(EchoResponse {
+            reply: format!("Echo: {}", req.message),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+        })
+    }
+}
+
+impl EchoServiceImpl {
+    pub fn new() -> Self {
+        Self
+    }
+}

@@ -1,0 +1,405 @@
+name: CI Coverage
+
+on:
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  coverage-rust:
+    name: Rust Coverage
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install wasm Component Model toolchain
+        run: |
+          cargo install wasm-component-ld --version 0.5.26 --locked
+          cargo install wasm-tools --version 1.253.0 --locked
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Generate CLI web runtime assets
+        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+      - name: Run coverage
+        run: |
+          cargo llvm-cov clean --workspace
+          cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
+          cargo llvm-cov --workspace --all-features --html --no-run
+          grep -q '^LF:' lcov.info
+          test "$(find target/llvm-cov/html -type f | wc -l)" -gt 3
+      - name: Upload lcov
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-rust-lcov
+          path: lcov.info
+          retention-days: 7
+      - name: Upload HTML
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-rust-html
+          path: target/llvm-cov/html/
+          retention-days: 7
+
+  coverage-web-rust:
+    name: Web Rust Host Unit Coverage
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: bindings/web
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Run coverage
+        run: |
+          host_target="$(rustc -vV | sed -n 's/^host: //p')"
+          packages=(
+            -p actr-web-common
+            -p actr-web-abi
+            -p actr-mailbox-web
+            -p actr-dom-bridge
+          )
+          cargo llvm-cov clean --workspace
+          cargo llvm-cov \
+            --target "$host_target" \
+            "${packages[@]}" \
+            --all-features \
+            --lcov \
+            --output-path web-rust-lcov.info
+          cargo llvm-cov \
+            --target "$host_target" \
+            "${packages[@]}" \
+            --all-features \
+            --html \
+            --no-run
+          grep -q '^LF:' web-rust-lcov.info
+          test "$(find ../../target/bindings-web/llvm-cov/html -type f | wc -l)" -gt 3
+      - name: Upload lcov
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-web-rust-lcov
+          path: bindings/web/web-rust-lcov.info
+          retention-days: 7
+      - name: Upload HTML
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-web-rust-html
+          path: target/bindings-web/llvm-cov/html/
+          retention-days: 7
+
+  coverage-web-wasm:
+    name: Web Rust Wasm Coverage
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: bindings/web
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install wasm-capable clang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm
+          echo "CC_wasm32_unknown_unknown=$(command -v clang)" >> "$GITHUB_ENV"
+          echo "TARGET_CC=$(command -v clang)" >> "$GITHUB_ENV"
+          echo "CC=$(command -v clang)" >> "$GITHUB_ENV"
+          clang --target=wasm32-unknown-unknown -x c -c /dev/null -o /tmp/clang-wasm-test.o
+      - name: Install wasm test tools
+        run: |
+          wasm_bindgen_version="$(
+            awk '
+              $0 == "name = \"wasm-bindgen\"" { in_pkg = 1; next }
+              in_pkg && /^version = / { gsub(/"/, "", $3); print $3; exit }
+              /^\[\[package\]\]/ { in_pkg = 0 }
+            ' Cargo.lock
+          )"
+          test -n "$wasm_bindgen_version"
+          cargo install wasm-bindgen-cli --version "$wasm_bindgen_version" --locked
+          wasm-bindgen-test-runner --version
+      - name: Setup Chrome
+        uses: browser-actions/setup-chrome@v1
+      - name: Setup ChromeDriver
+        uses: nanasess/setup-chromedriver@v2
+      - name: Configure ChromeDriver
+        run: |
+          echo "CHROMEDRIVER=$(command -v chromedriver)" >> "$GITHUB_ENV"
+          google-chrome --version || chrome --version
+          chromedriver --version
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Run wasm coverage
+        env:
+          WASM_BINDGEN_USE_BROWSER: "1"
+        run: bash scripts/wasm-coverage.sh
+      - name: Upload lcov
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-web-wasm-lcov
+          path: bindings/web/web-wasm-lcov.info
+          retention-days: 7
+      - name: Upload HTML
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-web-wasm-html
+          path: bindings/web/target/wasm-coverage-html/
+          retention-days: 7
+
+  coverage-typescript:
+    name: TypeScript Coverage
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: bindings/typescript
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: bindings/typescript/package.json
+      - name: Install dependencies
+        run: npm install
+      - name: Build native binding
+        run: npm run build:debug
+      - name: Run coverage
+        run: npx vitest run --coverage
+      - name: Upload lcov
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-typescript-lcov
+          path: bindings/typescript/coverage/lcov.info
+          retention-days: 7
+      - name: Upload HTML
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-typescript-html
+          path: bindings/typescript/coverage/
+          retention-days: 7
+
+  coverage-kotlin:
+    name: Kotlin Coverage
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: bindings/kotlin
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+      - name: Run Kover coverage
+        run: ./gradlew :actr-kotlin:koverXmlReport :actr-kotlin:koverHtmlReport --no-daemon
+      - name: Upload XML
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-kotlin-xml
+          path: bindings/kotlin/actr-kotlin/build/reports/kover/report.xml
+          retention-days: 7
+      - name: Upload HTML
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-kotlin-html
+          path: bindings/kotlin/actr-kotlin/build/reports/kover/
+          retention-days: 7
+
+  coverage-summary:
+    name: Coverage Summary
+    runs-on: [self-hosted, Linux, X64]
+    needs:
+      - coverage-rust
+      - coverage-web-rust
+      - coverage-web-wasm
+      - coverage-typescript
+      - coverage-kotlin
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Download Rust lcov
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-rust-lcov
+          path: coverage-artifacts/rust
+      - name: Download Web Rust host lcov
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-web-rust-lcov
+          path: coverage-artifacts/web-rust
+      - name: Download Web Rust wasm lcov
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-web-wasm-lcov
+          path: coverage-artifacts/web-wasm
+      - name: Download TypeScript lcov
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-typescript-lcov
+          path: coverage-artifacts/typescript
+      - name: Download Kotlin XML
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-kotlin-xml
+          path: coverage-artifacts/kotlin
+      - name: Build coverage summary
+        run: |
+          python3 .github/scripts/coverage_summary.py \
+            --rust-lcov coverage-artifacts/rust/lcov.info \
+            --web-rust-lcov coverage-artifacts/web-rust/web-rust-lcov.info \
+            --web-wasm-lcov coverage-artifacts/web-wasm/web-wasm-lcov.info \
+            --typescript-lcov coverage-artifacts/typescript/lcov.info \
+            --kotlin-xml coverage-artifacts/kotlin/report.xml \
+            --output-dir coverage-summary
+          cat coverage-summary/coverage-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-summary
+          path: coverage-summary/
+          retention-days: 7
+
+  publish-pages:
+    name: Publish Coverage Pages
+    runs-on: [self-hosted, Linux, X64]
+    needs:
+      - coverage-rust
+      - coverage-web-rust
+      - coverage-web-wasm
+      - coverage-typescript
+      - coverage-kotlin
+      - coverage-summary
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - name: Download coverage HTML reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*-html
+          path: pages-artifacts
+      - name: Download coverage summary
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-summary
+          path: pages-site/coverage
+      - name: Build Pages site
+        run: |
+          mkdir -p \
+            pages-site/coverage/rust \
+            pages-site/coverage/web-rust \
+            pages-site/coverage/web-wasm \
+            pages-site/coverage/typescript \
+            pages-site/coverage/kotlin
+          cp -R pages-artifacts/coverage-rust-html/. pages-site/coverage/rust/
+          cp -R pages-artifacts/coverage-web-rust-html/. pages-site/coverage/web-rust/
+          cp -R pages-artifacts/coverage-web-wasm-html/. pages-site/coverage/web-wasm/
+          cp -R pages-artifacts/coverage-typescript-html/. pages-site/coverage/typescript/
+          cp -R pages-artifacts/coverage-kotlin-html/html/. pages-site/coverage/kotlin/
+          python3 - <<'PY'
+          import json
+          from html import escape
+          from pathlib import Path
+
+          site = Path("pages-site")
+          coverage = site / "coverage"
+          summary = json.loads((coverage / "coverage-summary.json").read_text())
+          rows = "\n".join(
+              "<tr>"
+              f"<td>{escape(item['language'])}</td>"
+              f"<td>{item['covered_lines']}</td>"
+              f"<td>{item['total_lines']}</td>"
+              f"<td>{item['line_coverage']:.2f}%</td>"
+              "</tr>"
+              for item in summary["languages"]
+          )
+          total = summary["aggregate"]
+          html = f"""<!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>ACTR Coverage</title>
+            <style>
+              body {{ font-family: system-ui, sans-serif; margin: 2rem; color: #1f2328; }}
+              table {{ border-collapse: collapse; margin: 1rem 0; }}
+              th, td {{ border: 1px solid #d0d7de; padding: .5rem .75rem; text-align: left; }}
+              th {{ background: #f6f8fa; }}
+              a {{ color: #0969da; }}
+            </style>
+          </head>
+          <body>
+            <h1>ACTR Coverage</h1>
+            <p>Total weighted line coverage: <strong>{total['line_coverage']:.2f}%</strong>
+            ({total['covered_lines']} / {total['total_lines']} lines).</p>
+            <table>
+              <thead><tr><th>Language</th><th>Covered</th><th>Total</th><th>Line coverage</th></tr></thead>
+              <tbody>{rows}</tbody>
+            </table>
+            <h2>Reports</h2>
+            <ul>
+              <li><a href="rust/">Rust</a></li>
+              <li><a href="web-rust/">Web Rust (host unit)</a></li>
+              <li><a href="web-wasm/">Web Rust (wasm)</a></li>
+              <li><a href="typescript/">TypeScript</a></li>
+              <li><a href="kotlin/">Kotlin</a></li>
+            </ul>
+            <p>Web Rust (host unit) covers only the host-compatible bindings/web crates
+            that can run under the native test harness. Web Rust (wasm) covers browser
+            tests executed through wasm-bindgen-test. Puppeteer E2E remains functional
+            validation unless a separate profiler export path is added.</p>
+            <p><a href="coverage-summary.json">coverage-summary.json</a> |
+            <a href="coverage-badge.json">coverage-badge.json</a></p>
+          </body>
+          </html>
+          """
+          (coverage / "index.html").write_text(html)
+          (site / "index.html").write_text(
+              '<!doctype html><meta charset="utf-8">'
+              '<meta http-equiv="refresh" content="0; url=coverage/">'
+              '<a href="coverage/">Coverage report</a>'
+          )
+          PY
+          test -s pages-site/index.html
+          test -s pages-site/coverage/index.html
+          test -s pages-site/coverage/coverage-badge.json
+          test -s pages-site/coverage/rust/index.html
+          test -s pages-site/coverage/web-rust/index.html
+          test -s pages-site/coverage/web-wasm/index.html
+          test -s pages-site/coverage/typescript/index.html
+          test -s pages-site/coverage/kotlin/index.html
+      - name: Configure Pages
+        uses: actions/configure-pages@v6
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: pages-site
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

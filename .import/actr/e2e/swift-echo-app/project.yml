@@ -1,0 +1,64 @@
+name: EchoApp
+options:
+  bundleIdPrefix: io.actrium
+  deploymentTarget:
+    iOS: "26.2"
+settings:
+  configs:
+    Debug:
+      DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+      GCC_GENERATE_DEBUGGING_SYMBOLS: YES
+      COPY_PHASE_STRIP: NO
+      STRIP_INSTALLED_PRODUCT: NO
+  base:
+    SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+packages:
+  actr-swift:
+    path: ../../bindings/swift
+  swift-protobuf:
+    url: https://github.com/apple/swift-protobuf.git
+    from: 1.32.0
+schemes:
+  EchoApp:
+    build:
+      targets:
+        EchoApp: all
+    run:
+      config: Debug
+
+
+targets:
+  EchoApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: EchoApp
+      - path: actr.toml
+        type: file
+        buildPhase: resources
+      - path: actr.lock.toml
+        type: file
+        buildPhase: resources
+      - path: manifest.toml
+        type: file
+        buildPhase: resources
+    dependencies:
+      - package: actr-swift
+        product: Actr
+      - package: swift-protobuf
+        product: SwiftProtobuf
+    info:
+      path: EchoApp/Info.plist
+      properties:
+        CFBundleDisplayName: EchoApp
+        UILaunchScreen: {}
+        NSLocalNetworkUsageDescription: EchoApp connects to the local actrix development server.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.actrium.EchoApp
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+        CODE_SIGN_STYLE: Automatic

@@ -1,0 +1,117 @@
+syntax = "proto2";
+
+package signer.v1;
+
+// Import NonceCredential from admin common definitions
+import "common.proto";
+
+// Signer service definition
+// Generates and manages Ed25519 signing keys; private keys never leave the Signer
+service Signer {
+  // Generate a new Ed25519 signing key pair, returning the key_id and verifying key
+  rpc GenerateSigningKey(GenerateSigningKeyRequest) returns (GenerateSigningKeyResponse);
+
+  // Sign a message with the specified key using Ed25519
+  rpc Sign(SignRequest) returns (SignResponse);
+
+  // Retrieve the verifying key for the given key_id
+  rpc GetVerifyingKey(GetVerifyingKeyRequest) returns (GetVerifyingKeyResponse);
+
+  // Health check
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+// ============================================================================
+// Signing key generation messages
+// ============================================================================
+
+message GenerateSigningKeyRequest {
+  // nonce-auth credential
+  required admin.v1.NonceCredential credential = 1;
+}
+
+message GenerateSigningKeyResponse {
+  // The generated key ID
+  required uint32 key_id = 1;
+
+  // Verifying key (Base64-encoded Ed25519 verifying key, 32 bytes)
+  required string verifying_key = 2;
+
+  // Key expiry time (Unix timestamp, seconds)
+  required uint64 expires_at = 3;
+
+  // Tolerance period (seconds)
+  required uint64 tolerance_seconds = 4;
+}
+
+// ============================================================================
+// Signing messages
+// ============================================================================
+
+message SignRequest {
+  // The key ID to use
+  required uint32 key_id = 1;
+
+  // The message to sign (raw bytes)
+  required bytes message = 2;
+
+  // nonce-auth credential
+  required admin.v1.NonceCredential credential = 3;
+}
+
+message SignResponse {
+  // Ed25519 signature (64 bytes)
+  required bytes signature = 1;
+}
+
+// ============================================================================
+// Verifying key retrieval messages
+// ============================================================================
+
+message GetVerifyingKeyRequest {
+  // The key ID to query
+  required uint32 key_id = 1;
+
+  // nonce-auth credential
+  required admin.v1.NonceCredential credential = 2;
+}
+
+message GetVerifyingKeyResponse {
+  // Key ID
+  required uint32 key_id = 1;
+
+  // Verifying key (Base64-encoded Ed25519 verifying key, 32 bytes)
+  required string verifying_key = 2;
+
+  // Key expiry time (Unix timestamp, seconds)
+  required uint64 expires_at = 3;
+
+  // Tolerance period (seconds)
+  required uint64 tolerance_seconds = 4;
+}
+
+// ============================================================================
+// Health check messages
+// ============================================================================
+
+message HealthCheckRequest {
+  // nonce-auth credential
+  required admin.v1.NonceCredential credential = 1;
+}
+
+message HealthCheckResponse {
+  // Service status
+  required string status = 1;
+
+  // Service name
+  required string service = 2;
+
+  // Storage backend name
+  required string backend = 3;
+
+  // Current key count
+  required uint32 key_count = 4;
+
+  // Current timestamp (Unix timestamp, seconds)
+  required uint64 timestamp = 5;
+}

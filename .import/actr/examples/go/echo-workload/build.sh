@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build the Go echo workload for the async actr:workload@0.6.0 world.
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WIT_FILE="${HERE}/../../../core/framework/wit-v2/actr-workload.wit"
+WORLD="actr-workload-guest-v2"
+GEN_DIR="${HERE}/gen"
+BUILD_DIR="${HERE}/build"
+DIST_DIR="${HERE}/dist"
+CORE_WASM="${BUILD_DIR}/echo-go.core.wasm"
+EMBEDDED_WASM="${BUILD_DIR}/echo-go.embedded.wasm"
+OUT_WASM="${DIST_DIR}/echo-go-0.1.0-wasm32-wasip2.wasm"
+WIT_DUMP="${DIST_DIR}/echo-go.wit.txt"
+
+WIT_BINDGEN="${WIT_BINDGEN:-wit-bindgen}"
+WASM_TOOLS="${WASM_TOOLS:-wasm-tools}"
+
+WIT_BINDGEN_VERSION="wit-bindgen-cli 0.59.0"
+GO_VERSION="go1.25.5"
+GO_RELEASE="go1.25.5-wasi-on-idle"
+GO_URL="https://github.com/dicej/go/releases/download/${GO_RELEASE}/go-linux-amd64-bootstrap.tbz"
+GO_SHA256="63a9efff8601bdf9d3577b1d9d2ddd9b4d7a45dc09d78b73ebf03873e8c23766"
+GO_ARCHIVE="${HERE}/.cache/${GO_RELEASE}-linux-amd64.tbz"
+GO_ROOT="${HERE}/.cache/${GO_RELEASE}-linux-amd64"
+GO_BIN="${GO_ROOT}/bin/go"
+WASM_TOOLS_VERSION="wasm-tools 1.253.0"
+ADAPTER_URL="https://github.com/bytecodealliance/wasmtime/releases/download/v46.0.1/wasi_snapshot_preview1.reactor.wasm"
+ADAPTER_SHA256="0acb10959bd3c1d2e7903ef82212910bfc156ab5698ef3f2ff669474ba59fb0a"
+WASI_ADAPTER="${WASI_ADAPTER:-${HERE}/.cache/wasi_snapshot_preview1.reactor-v46.0.1.wasm}"
+
+download_checked() {
+    local url="$1"
+    local output="$2"
+    local sha256="$3"
+
+    mkdir -p "$(dirname "${output}")"
+    if [[ ! -f "${output}" ]]; then
+        local partial="${output}.partial"
+        rm -f "${partial}"
+        if ! curl --fail --location --retry 3 --retry-all-errors \
+            --output "${partial}" \
+            "${url}"; then
+            rm -f "${partial}"
+            return 1
+        fi
+        if ! echo "${sha256}  ${partial}" | sha256sum --check --status; then
+            rm -f "${partial}"
+            echo "error: checksum verification failed for ${url}" >&2
+            return 1
+        fi
+        mv "${partial}" "${output}"
+    fi
+    if ! echo "${sha256}  ${output}" | sha256sum --check --status; then
+        echo "error: checksum verification failed for ${output}" >&2
+        return 1
+    fi
+}
+
+prepare_go_toolchain() {
+    if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "x86_64" ]]; then
+        echo "error: the pinned ${GO_RELEASE} toolchain supports Linux x86_64 only" >&2
+        exit 1
+    fi
+
+    download_checked "${GO_URL}" "${GO_ARCHIVE}" "${GO_SHA256}"
+    if [[ ! -x "${GO_BIN}" ]]; then
+        rm -rf "${GO_ROOT}"
+        mkdir -p "${GO_ROOT}"
+        tar --extract --bzip2 --file "${GO_ARCHIVE}" \
+            --strip-components=1 --directory "${GO_ROOT}"
+    fi
+}
+
+require_version() {
+    local actual="$1"
+    local expected="$2"
+    local tool="$3"
+    if [[ "${actual}" != *"${expected}"* ]]; then
+        echo "error: ${tool} must report ${expected}; got: ${actual}" >&2
+        exit 1
+    fi
+}
+
+prepare_go_toolchain
+require_version "$("${WIT_BINDGEN}" --version)" "${WIT_BINDGEN_VERSION}" "wit-bindgen"
+require_version "$("${GO_BIN}" version)" "${GO_VERSION}" "fork Go"
+require_version "$("${WASM_TOOLS}" --version)" "${WASM_TOOLS_VERSION}" "wasm-tools"
+
+if [[ ! -f "${WIT_FILE}" ]]; then
+    echo "error: V2 WIT contract not found at ${WIT_FILE}" >&2
+    exit 1
+fi
+
+if [[ ! -f "${WASI_ADAPTER}" ]]; then
+    mkdir -p "$(dirname "${WASI_ADAPTER}")"
+    curl --fail --location --retry 3 --retry-all-errors \
+        --output "${WASI_ADAPTER}" \
+        "${ADAPTER_URL}"
+fi
+echo "${ADAPTER_SHA256}  ${WASI_ADAPTER}" | sha256sum --check --status
+
+rm -rf "${GEN_DIR}" "${BUILD_DIR}" "${DIST_DIR}"
+mkdir -p \
+    "${GEN_DIR}/export_actr_workload_workload" \
+    "${BUILD_DIR}" \
+    "${DIST_DIR}"
+
+echo "[1/5] Generate async Go bindings ..."
+"${WIT_BINDGEN}" go \
+    --world "${WORLD}" \
+    --out-dir "${GEN_DIR}" \
+    "${WIT_FILE}"
+cp \
+    "${HERE}/src/export_actr_workload_workload/workload.go" \
+    "${GEN_DIR}/export_actr_workload_workload/workload.go"
+
+echo "[2/5] Resolve the generated Go module ..."
+(
+    cd "${GEN_DIR}"
+    "${GO_BIN}" mod tidy
+)
+
+echo "[3/5] Build the wasm32-wasip1 reactor core module ..."
+(
+    cd "${GEN_DIR}"
+    GOOS=wasip1 GOARCH=wasm "${GO_BIN}" build \
+        -buildmode=c-shared \
+        -ldflags=-checklinkname=0 \
+        -o "${CORE_WASM}"
+)
+
+echo "[4/5] Embed V2 WIT and create the Component ..."
+"${WASM_TOOLS}" component embed \
+    --world "${WORLD}" \
+    "${WIT_FILE}" \
+    "${CORE_WASM}" \
+    -o "${EMBEDDED_WASM}"
+"${WASM_TOOLS}" component new \
+    --adapt "${WASI_ADAPTER}" \
+    "${EMBEDDED_WASM}" \
+    -o "${OUT_WASM}"
+
+echo "[5/5] Validate the V2 component ..."
+"${WASM_TOOLS}" validate "${OUT_WASM}"
+"${WASM_TOOLS}" component wit "${OUT_WASM}" | tee "${WIT_DUMP}"
+grep -q "actr:workload/types@0.6.0" "${WIT_DUMP}"
+grep -q "actr:workload/workload@0.6.0" "${WIT_DUMP}"
+grep -q "dispatch: async func" "${WIT_DUMP}"
+grep -q "ctx: invocation-ctx" "${WIT_DUMP}"
+if grep -q "actr:workload/.*@0.1.0" "${WIT_DUMP}"; then
+    echo "error: generated component still contains the retired V1 ABI" >&2
+    exit 1
+fi
+
+if [[ "${1:-}" == "package" ]]; then
+    echo "[+] Package with actr ..."
+    (
+        cd "${HERE}"
+        cargo run --manifest-path "${HERE}/../../../Cargo.toml" -p actr-cli -- \
+            build --no-compile -m manifest.toml
+    )
+fi
+
+echo "Done. Component at: ${OUT_WASM}"
