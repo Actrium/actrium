@@ -123,16 +123,12 @@ impl TryFrom<&str> for AppSourceType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum TabStatus {
     Alive,
     Dead,
+    #[default]
     Unknown,
-}
-
-impl Default for TabStatus {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -223,7 +219,9 @@ pub struct HistoryGroup {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum TabGroupColor {
+    #[default]
     Gray,
     Blue,
     Red,
@@ -233,12 +231,6 @@ pub enum TabGroupColor {
     Purple,
     Cyan,
     Orange,
-}
-
-impl Default for TabGroupColor {
-    fn default() -> Self {
-        Self::Gray
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
