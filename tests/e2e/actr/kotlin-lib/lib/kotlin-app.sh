@@ -58,14 +58,14 @@ build_local_actr_cli() {
 }
 
 # Build actrix from source into the e2e cache and export ACTRIX_BIN.
-# Source dir defaults to the vendored $REPO_ROOT/actrix; override with
-# ACTRIX_SOURCE_DIR (e.g. a sibling actrix checkout that has newer STUN/TURN
-# fixes). Always building from source avoids picking up an unrelated `actrix`
-# on PATH and guarantees control over which actrix is exercised.
+# Source dir defaults to the monorepo's Loran server crate; override with
+# ACTRIX_SOURCE_DIR when validating another compatible server implementation.
+# Always building from source avoids picking up an unrelated `actrix` on PATH
+# and guarantees control over which implementation is exercised.
 build_local_actrix() {
     section "🔨 Building local actrix from source"
-    local actrix_src="${ACTRIX_SOURCE_DIR:-$REPO_ROOT/actrix}"
-    local actrix_manifest="$actrix_src/crates/actrixd/Cargo.toml"
+    local actrix_src="${ACTRIX_SOURCE_DIR:-$REPO_ROOT/crates/loran-server}"
+    local actrix_manifest="$actrix_src/Cargo.toml"
     [ -f "$actrix_manifest" ] || fail "actrix manifest not found: $actrix_manifest"
     CARGO_TARGET_DIR="$ACTR_TARGET_DIR" cargo build --manifest-path "$actrix_manifest" --bin actrix >/dev/null
     ACTRIX_BIN="$ACTR_TARGET_DIR/debug/actrix"
@@ -90,7 +90,7 @@ append_workspace_patch() {
     cat >>"$cargo_toml" <<EOF
 
 [patch.crates-io]
-actr = { path = "$repo_path" }
+actr = { path = "$repo_path/crates/actr" }
 actr-config = { path = "$repo_path/crates/actr-config" }
 actr-protocol = { path = "$repo_path/crates/actr-protocol" }
 actr-framework = { path = "$repo_path/crates/actr-framework" }

@@ -20,7 +20,8 @@ const EXPECTED_ACTR_TS_VERSION: &str = "0.1.14";
 
 fn framework_codegen_typescript_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
+        .ancestors()
+        .find(|candidate| candidate.join("tools/actr/protoc-gen/typescript").is_dir())
         .expect("actr-cli should live under the workspace root")
         .join("tools/actr/protoc-gen/typescript")
 }

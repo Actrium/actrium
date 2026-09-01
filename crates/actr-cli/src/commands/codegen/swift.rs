@@ -609,8 +609,9 @@ impl SwiftGenerator {
         #[cfg(target_os = "macos")]
         {
             let plugin_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-                .parent()
+                .ancestors()
                 .map(|path| path.join("tools/actr/protoc-gen/swift"))
+                .find(|path| path.is_dir())
                 .unwrap_or_else(|| PathBuf::from("tools/actr/protoc-gen/swift"));
             let package_swift = plugin_root.join("Package.swift");
             if !package_swift.is_file() {

@@ -1,9 +1,9 @@
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use pbkdf2::pbkdf2_hmac;
-use rand::rngs::OsRng;
 use rand::RngCore;
+use rand::rngs::OsRng;
 use sha2::Sha256;
 
 use crate::model::{VaultCoreError, VaultField};
@@ -149,7 +149,7 @@ fn derive_key_with_iterations(password: &str, salt: &[u8], iterations: u32) -> V
 
 #[cfg(test)]
 mod tests {
-    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
 
     use super::*;
 

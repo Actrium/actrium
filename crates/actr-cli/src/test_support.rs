@@ -156,7 +156,7 @@ pub fn align_rust_project_with_workspace(project_dir: &Path) -> Result<()> {
     let workspace = workspace_root();
     let mut patch = String::from("\n[patch.crates-io]\n");
     let crates = [
-        ("actr", workspace.clone()),
+        ("actr", workspace.join("crates/actr")),
         ("actr-protocol", workspace.join("crates/actr-protocol")),
         ("actr-framework", workspace.join("crates/actr-framework")),
         ("actr-hyper", workspace.join("crates/actr-hyper")),
@@ -820,8 +820,7 @@ fn ensure_actrix_binary() -> Result<PathBuf> {
 }
 
 fn build_in_tree_actrix_binary(cache_root: &Path) -> Result<PathBuf> {
-    let actrix_dir = workspace_root().join("actrix");
-    let manifest_path = actrix_dir.join("crates/actrixd/Cargo.toml");
+    let manifest_path = workspace_root().join("crates/loran-server/Cargo.toml");
     if !manifest_path.is_file() {
         bail!(
             "in-tree actrix manifest not found at {}",
@@ -942,7 +941,8 @@ fn normalize_path_for_toml(path: &Path) -> String {
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
+        .ancestors()
+        .find(|candidate| candidate.join("crates/actr-cli").is_dir())
         .expect("actr-cli should live under workspace root")
         .to_path_buf()
 }

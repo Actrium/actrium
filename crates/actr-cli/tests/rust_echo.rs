@@ -22,8 +22,10 @@ fn run_actr(args: &[&str], cwd: &std::path::Path) -> Output {
 }
 
 fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .ancestors()
+        .find(|candidate| candidate.join("crates/actr-cli").is_dir())
         .expect("cli crate should live under workspace root")
         .to_path_buf()
 }
@@ -49,7 +51,7 @@ actr-config = {{ path = "{}" }}
 actr-service-compat = {{ path = "{}" }}
 actr-runtime-mailbox = {{ path = "{}" }}
 "#,
-        workspace.display(),
+        workspace.join("crates/actr").display(),
         workspace.join("crates/actr-protocol").display(),
         workspace.join("crates/actr-framework").display(),
         workspace.join("crates/actr-hyper").display(),

@@ -122,7 +122,8 @@ fn compile_build_script(repo_root: &Path) -> PathBuf {
 fn workspace_root() -> PathBuf {
     if let Some(manifest_dir) = option_env!("CARGO_MANIFEST_DIR") {
         return PathBuf::from(manifest_dir)
-            .parent()
+            .ancestors()
+            .find(|candidate| candidate.join("crates/actr-cli").is_dir())
             .expect("cli crate should live under the workspace root")
             .to_path_buf();
     }
@@ -131,6 +132,7 @@ fn workspace_root() -> PathBuf {
         .canonicalize()
         .expect("canonicalize test file path")
         .parent()
+        .and_then(Path::parent)
         .and_then(Path::parent)
         .and_then(Path::parent)
         .expect("derive workspace root from test path")
