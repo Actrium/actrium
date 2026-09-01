@@ -36,7 +36,15 @@ data class DispatchSpec(
         /** Load a `DispatchSpec` from a JSON file at `path`. */
         fun fromPath(path: String): DispatchSpec {
             val content = File(path).readText()
-            return fromJson(content)
+            return try {
+                fromJson(content)
+            } catch (error: RuntimeException) {
+                throw IllegalArgumentException(
+                    "failed to parse dispatch spec at $path; " +
+                        "rerun `actr gen` to refresh generated metadata: ${error.message}",
+                    error,
+                )
+            }
         }
 
         /** Parse a `DispatchSpec` from a JSON string. */

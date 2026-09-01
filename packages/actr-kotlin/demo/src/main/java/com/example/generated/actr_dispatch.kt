@@ -43,22 +43,38 @@ suspend fun actrDispatch(
     "data_stream_peer.StreamClient.StartStream" -> {
         val request = ClientStartStreamRequest.parseFrom(payload)
         val response = handler.start_stream(request, ctx)
-        ctx.replyRaw(response.toByteArray())
-        ByteArray(0)
+        val responseBytes = response.toByteArray()
+        try {
+            ctx.replyRaw(responseBytes)
+            ByteArray(0)
+        } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            responseBytes
+        }
     }
     "echo.EchoService.Echo" -> {
         val actrType = ctx.resolveDependency("echo")
         val target = ctx.discover(actrType)
         val response = ctx.callRaw(target, routeKey, PayloadType.RPC_RELIABLE, payload, timeoutMs)
-        ctx.replyRaw(response)
-        ByteArray(0)
+        try {
+            ctx.replyRaw(response)
+            ByteArray(0)
+        } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            response
+        }
     }
     "data_stream_peer.DuplexStreamService.StartStream" -> {
         val actrType = ctx.resolveDependency("stream")
         val target = ctx.discover(actrType)
         val response = ctx.callRaw(target, routeKey, PayloadType.RPC_RELIABLE, payload, timeoutMs)
-        ctx.replyRaw(response)
-        ByteArray(0)
+        try {
+            ctx.replyRaw(response)
+            ByteArray(0)
+        } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            response
+        }
     }
     else -> throw io.actrium.actr.ActrException.UnknownRoute("Unknown route: $routeKey")
 }

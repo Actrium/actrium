@@ -170,7 +170,7 @@ impl OutstandingReplies {
                 let timeout_won = entry
                     .deliver
                     .as_ref()
-                    .map(|deliver| deliver.deliver_timeout())
+                    .map(|deliver| deliver.try_deliver_timeout())
                     .unwrap_or(true);
                 if timeout_won || entry.deliver.as_ref().is_some_and(ReplyDeliver::is_pending) {
                     remove.push(*attempt_id);

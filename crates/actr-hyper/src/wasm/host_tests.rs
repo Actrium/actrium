@@ -323,3 +323,31 @@ fn deferred_tell_expiry_completes_without_response() {
     assert!(!outcomes[0].emit_response);
     assert!(matches!(&outcomes[0].result, Ok(bytes) if bytes.is_empty()));
 }
+
+#[test]
+fn reply_import_completion_retires_token_when_dispatch_finishes() {
+    let limits = WasmRuntimeLimits::default();
+    let mut state = HostState::new(&limits);
+    let delivered = CaptureDeliver::default();
+    let captured = Arc::clone(&delivered.0);
+    let token = state.alloc_invocation_with_reply(
+        invocation_context("reply-import-wins"),
+        noop_host_abi(),
+        Some(Arc::new(delivered)),
+        true,
+        None,
+        None,
+    );
+
+    assert!(state.deliver_reply(token, Ok(actr_framework::Bytes::from_static(b"explicit"))));
+    assert_eq!(
+        state.invocation_count(),
+        1,
+        "token stays live until the dispatch export returns"
+    );
+    assert!(state.invocation_reply_completed(token));
+
+    state.finish_invocation(token, false);
+    assert_eq!(state.invocation_count(), 0);
+    assert_eq!(captured.lock().expect("capture mutex poisoned").len(), 1);
+}
