@@ -151,10 +151,18 @@ def scan() -> tuple[list[dict], dict]:
 
         if is_markdown:
             without_switcher = LANGUAGE_SWITCHER_RE.sub("", text)
-            if not CJK_PATTERN.search(without_switcher):
+            markdown_lines = without_switcher.splitlines()
+            offending_lines = [
+                line
+                for index, line in enumerate(markdown_lines)
+                if CJK_PATTERN.search(line)
+                and not LINE_PRAGMA.search(line)
+                and not (index > 0 and LINE_PRAGMA.search(markdown_lines[index - 1]))
+            ]
+            if not offending_lines:
                 skipped["allowedLocation"] += 1
                 continue
-            count = len(CJK_PATTERN.findall(without_switcher))
+            count = sum(len(CJK_PATTERN.findall(line)) for line in offending_lines)
             renamed = re.sub(r"\.md$", ".zh.md", posix)
             findings.append({
                 "file": posix,

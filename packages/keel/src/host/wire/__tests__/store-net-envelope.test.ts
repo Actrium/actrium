@@ -15,7 +15,7 @@ import {
   type StoreNetReason,
 } from '../store-net-envelope';
 
-const CONTRACTS = join(import.meta.dir, '../../../../../../contracts/sandbox/sandbox');
+const CONTRACTS = join(import.meta.dir, '../../../../../../contracts/sandbox');
 
 function fromHex(hex: string): Uint8Array {
   const out = new Uint8Array(hex.length / 2);
