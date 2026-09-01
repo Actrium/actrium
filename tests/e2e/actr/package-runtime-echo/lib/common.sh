@@ -102,11 +102,8 @@ resolve_actrix_bin() {
 
 ensure_actrix_available() {
     local repo_root="$1"
-    local actrix_repo_dir
-    actrix_repo_dir="$repo_root/actrix"
-    actrix_repo_dir="$(absolute_path "$actrix_repo_dir")"
-    local actrix_crate_dir="$actrix_repo_dir/crates/actrixd"
-    local actrix_manifest_path="$actrix_repo_dir/crates/actrixd/Cargo.toml"
+    local actrix_crate_dir="$repo_root/crates/loran-server"
+    local actrix_manifest_path="$actrix_crate_dir/Cargo.toml"
     local cargo_bin
     cargo_bin="$(cargo_bin_dir)"
     local resolved=""

@@ -101,8 +101,9 @@ impl KotlinGenerator {
     /// `tools/actr/protoc-gen/kotlin/` and return its path on success.
     fn try_build_workspace_kotlin_plugin(&self) -> Result<Option<PathBuf>> {
         let plugin_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
+            .ancestors()
             .map(|path| path.join("tools/actr/protoc-gen/kotlin"))
+            .find(|path| path.is_dir())
             .unwrap_or_else(|| PathBuf::from("tools/actr/protoc-gen/kotlin"));
 
         let build_gradle = plugin_root.join("build.gradle.kts");

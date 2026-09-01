@@ -1934,10 +1934,7 @@ mod tests {
 
         let services_by_message = registry.discover_by_message_type("acme.Ask");
         assert_eq!(services_by_message.len(), 1);
-        assert_eq!(
-            registry.get_message_type_stats().get("acme.Ask"),
-            Some(&1)
-        );
+        assert_eq!(registry.get_message_type_stats().get("acme.Ask"), Some(&1));
 
         registry
             .register_service_full(
@@ -1958,10 +1955,7 @@ mod tests {
 
         let services_by_message = registry.discover_by_message_type("acme.Ask");
         assert_eq!(services_by_message.len(), 1);
-        assert_eq!(
-            registry.get_message_type_stats().get("acme.Ask"),
-            Some(&1)
-        );
+        assert_eq!(registry.get_message_type_stats().get("acme.Ask"), Some(&1));
         assert_eq!(
             registry.actor_index.get(&actor_id),
             Some(&vec![service.service_name])
