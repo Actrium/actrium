@@ -6,7 +6,7 @@ cd "$repo_root"
 
 primary_lower="$(printf '%s%s' 'as' 'kc')"
 peer_lower="$(printf '%s%s' 'as' 'ks')"
-token_pattern="(^|[^A-Za-z0-9_])(${primary_lower}|${peer_lower})([^A-Za-z0-9_]|$)"
+token_pattern="(^|[^A-Za-z0-9])(${primary_lower}|${peer_lower})([^A-Za-z0-9]|$)"
 
 failures="$(mktemp)"
 trap 'rm -f "$failures"' EXIT
@@ -19,9 +19,8 @@ while IFS= read -r -d '' path; do
   fi
 done < <(git ls-files -co --exclude-standard -z)
 
-git grep -niI -w \
-  -e "$primary_lower" \
-  -e "$peer_lower" \
+git grep -niIE \
+  -e "$token_pattern" \
   -- . >>"$failures" 2>/dev/null || true
 
 if [[ "$(git rev-parse --is-shallow-repository)" == "true" ]]; then
