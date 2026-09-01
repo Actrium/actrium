@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-script_path="${repo_root}/bindings/kotlin/build-android.sh"
-publication_path="${repo_root}/bindings/kotlin/actr-kotlin/build.gradle.kts"
-harness_path="${repo_root}/e2e/kotlin-lib/lib/kotlin-app.sh"
-fixture_path="${repo_root}/cli/fixtures/kotlin/app/build.gradle.kts"
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+script_path="${repo_root}/packages/actr-kotlin/build-android.sh"
+publication_path="${repo_root}/packages/actr-kotlin/actr-kotlin/build.gradle.kts"
+harness_path="${repo_root}/tests/e2e/actr/kotlin-lib/lib/kotlin-app.sh"
+fixture_path="${repo_root}/crates/actr-cli/fixtures/kotlin/app/build.gradle.kts"
 
 bash -n "${script_path}"
 

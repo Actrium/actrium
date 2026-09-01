@@ -35,7 +35,7 @@ type HmacSha256 = Hmac<Sha256>;
 ///
 /// Accepting an up-to-30-day-expired possession proof extends the recovery
 /// authority of a leaked old token; the attack surface, bounds, and mitigations
-/// are analysed in `actrix/docs/reissue-grace-threat-model.zh.md`.
+/// are analysed in `loran/docs/reissue-grace-threat-model.zh.md`.
 pub const REISSUE_BINDING_GRACE_SECS: i64 = 30 * 86_400;
 
 // -------- public API ---------------------------------------------------------

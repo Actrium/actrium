@@ -1,6 +1,6 @@
 # WinUI EchoApp E2E
 
-Windows mirror of [`e2e/swift-echo-app`](../swift-echo-app/), built on the
+Windows mirror of [`tests/e2e/actr/swift-echo-app`](../swift-echo-app/), built on the
 **actr-cabi** C ABI line instead of the Swift UniFFI line.
 
 ## Architecture
@@ -37,7 +37,7 @@ Windows SDK, Rust `x86_64-pc-windows-msvc` target, `jq`, and `sqlite3`:
 
 ```bash
 rustup target add x86_64-pc-windows-msvc
-bash e2e/winui-echo-app/run.sh
+bash tests/e2e/actr/winui-echo-app/run.sh
 ```
 
 Known risks / assumptions (see also the commit message):
@@ -63,7 +63,7 @@ Known risks / assumptions (see also the commit message):
   check the script's `lib_dir` against the actual build output.
 - **`export_workload!` dead-stripping.** If `actr_workload_create("cabi.EchoApp")`
   returns null at runtime, the linker stripped the inventory entry. The
-  README at `bindings/cabi/csharp/README.md` documents the
+  README at `packages/actr-cabi/csharp/README.md` documents the
   `/WHOLEARCHIVE:actr_cabi` (MSBuild) / `-Wl,-all_load` (macOS) fix; the
   cdylib build may need it.
 - **WinUI exe output path.** `run.sh` assumes

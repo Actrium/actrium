@@ -59,7 +59,7 @@ url = "2.0"
 
 [patch.crates-io]
 actr = { path = "../../../crates/actr" }
-actr-framework = { path = "../../../crates/actr-framework" }
+actr-framework = { path = "../../../../crates/actr-framework" }
 actr-protocol = { path = "../../../crates/actr-protocol" }
 actr-runtime = { path = "../../../crates/actr-runtime" }
 actr-hyper = { path = "../../../crates/actr-hyper" }

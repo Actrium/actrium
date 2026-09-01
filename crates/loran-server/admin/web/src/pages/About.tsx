@@ -7,7 +7,7 @@ export function AboutPage() {
       </p>
       <div className="space-y-3 text-sm text-gray-700 leading-6">
         <p>License: Apache 2.0</p>
-        <p>Repository: github.com/Actrium/actrix</p>
+        <p>Repository: github.com/Actrium/actrium</p>
         <p>Version: (see Releases)</p>
       </div>
       <div className="border-t border-gray-100 pt-4 text-xs text-gray-400">

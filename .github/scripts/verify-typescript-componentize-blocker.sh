@@ -11,7 +11,7 @@ trap cleanup EXIT
 
 set +e
 (
-    cd "${repository_root}/examples/typescript/echo-workload"
+    cd "${repository_root}/examples/actr/typescript/echo-workload"
     npm run componentize
 ) 2>&1 | tee "${componentize_log}"
 componentize_status=${PIPESTATUS[0]}

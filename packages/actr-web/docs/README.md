@@ -13,7 +13,7 @@ Component Model and jco documents are retained as historical design context only
 
 ## Current Examples
 
-- [Echo example](../examples/echo/README.md): primary browser smoke path. Run with `bash examples/echo/start-mock.sh` from `bindings/web`.
+- [Echo example](../examples/echo/README.md): primary browser smoke path. Run with `bash examples/echo/start-mock.sh` from `packages/actr-web`.
 
 ## Legacy Examples
 
@@ -22,12 +22,12 @@ Component Model and jco documents are retained as historical design context only
 ## Current Build and Asset Commands
 
 ```bash
-cd bindings/web
+cd packages/actr-web
 pnpm install
 ```
 
 ```bash
-cd bindings/web
+cd packages/actr-web
 bash crates/sw-host/build.sh
 bash scripts/sync-cli-assets.sh --build
 ```
@@ -47,5 +47,5 @@ Use these when you need implementation background. They are not the canonical us
 - `packages/web-sdk/src/actor.sw.js`: Service Worker entry used by the current wasm-bindgen browser path.
 - `crates/sw-host/src/guest_bridge.rs`: `register_guest_workload` and guest dispatch bridge.
 - `crates/sw-host/build.sh`: builds the Service Worker host wasm-bindgen artifacts.
-- `scripts/sync-cli-assets.sh`: syncs canonical web assets into `cli/assets/web-runtime/`.
+- `scripts/sync-cli-assets.sh`: syncs canonical web assets into `crates/actr-cli/assets/web-runtime/`.
 - `packages/web-react/src/index.ts`: public React hook exports.

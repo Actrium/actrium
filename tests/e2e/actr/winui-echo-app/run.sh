@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# WinUI EchoApp E2E — Windows mirror of e2e/swift-echo-app/run.sh.
+# WinUI EchoApp E2E — Windows mirror of tests/e2e/actr/swift-echo-app/run.sh.
 #
 # Flow: build actrix + actr CLI + EchoService (Rust) + the cabi.EchoApp
 # workload dll + the WinUI app; start actrix; provision realm/mfr keychain;
@@ -10,7 +10,7 @@
 # WinUI cannot initialize, so the app itself is started through an interactive
 # Task Scheduler task in the logged-in desktop session.
 #
-# Reuses e2e/package-runtime-echo/lib/common.sh for the actrix / realm /
+# Reuses tests/e2e/actr/package-runtime-echo/lib/common.sh for the actrix / realm /
 # keychain / service-package lifecycle. Windows-specific: port cleanup
 # (netstat+taskkill instead of lsof), dotnet build for the app, no simulator.
 #
@@ -20,7 +20,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 
 source "$SCRIPT_DIR/../package-runtime-echo/lib/common.sh"
 source "$SCRIPT_DIR/../swift-echo-app/lib/readiness.sh"
@@ -31,7 +31,7 @@ REALM_ID=""
 ADMIN_PASSWORD="e2e-test-password"
 MANUFACTURER="actrium"
 ACTRIX_BIN="${ACTRIX_BIN:-}"
-ACTR_CLI_MANIFEST="$REPO_ROOT/cli/Cargo.toml"
+ACTR_CLI_MANIFEST="$REPO_ROOT/crates/actr-cli/Cargo.toml"
 ACTRIX_CONFIG_TEMPLATE="$SCRIPT_DIR/actrix.toml"
 E2E_TARGET_ROOT="$REPO_ROOT/target/e2e-cache/winui-echo-app"
 ACTR_TARGET_DIR="$E2E_TARGET_ROOT/actr-cli"
@@ -245,7 +245,7 @@ build_local_actrix() {
     fi
     section "🔨 Building local actrix from source"
     CARGO_TARGET_DIR="$ACTR_TARGET_DIR" cargo build \
-        --manifest-path "$REPO_ROOT/actrix/crates/actrixd/Cargo.toml" \
+        --manifest-path "$REPO_ROOT/crates/loran-server/Cargo.toml" \
         --bin actrix >/dev/null
     ACTRIX_BIN="$ACTR_TARGET_DIR/debug/actrix"
     [ -x "$ACTRIX_BIN" ] || fail "actrix binary missing at $ACTRIX_BIN"
@@ -263,8 +263,8 @@ build_workload_dll() {
     ACTR_CABI_WORKLOAD_CRATE="$SCRIPT_DIR/workload" \
     ACTR_CABI_TARGETS="x86_64-pc-windows-msvc" \
     ACTR_BUILD_PROFILE="release" \
-        bash "$REPO_ROOT/bindings/cabi/csharp/build-actr-cabi-dll.sh"
-    CABI_DLL="$REPO_ROOT/bindings/cabi/csharp/dist/actr_cabi.dll"
+        bash "$REPO_ROOT/packages/actr-cabi/csharp/build-actr-cabi-dll.sh"
+    CABI_DLL="$REPO_ROOT/packages/actr-cabi/csharp/dist/actr_cabi.dll"
     [ -f "$CABI_DLL" ] || fail "actr_cabi.dll not built at $CABI_DLL"
     success "actr_cabi.dll ready: $CABI_DLL"
 }
@@ -274,7 +274,7 @@ build_workload_dll() {
 build_winui_app() {
     section "🏗️  Building WinUI EchoApp"
     local csproj="$SCRIPT_DIR/WinUiEchoApp/WinUiEchoApp.csproj"
-    local actrsharp_csproj="$REPO_ROOT/bindings/cabi/csharp/ActrSharp/ActrSharp.csproj"
+    local actrsharp_csproj="$REPO_ROOT/packages/actr-cabi/csharp/ActrSharp/ActrSharp.csproj"
     local actr_version actrsharp_framework actrsharp_dll managed_actrsharp_dll
     actr_version="$(awk '
         /^\[workspace\.package\]$/ { in_workspace_package = 1; next }
@@ -319,16 +319,16 @@ EOF
 
 [patch.crates-io]
 actr = { path = "$repo_path" }
-actr-config = { path = "$repo_path/core/config" }
-actr-protocol = { path = "$repo_path/core/protocol" }
-actr-framework = { path = "$repo_path/core/framework" }
-actr-hyper = { path = "$repo_path/core/hyper" }
-actr-pack = { path = "$repo_path/core/pack" }
-actr-platform-native = { path = "$repo_path/core/platform-native" }
-actr-platform-traits = { path = "$repo_path/core/platform-traits" }
-actr-runtime = { path = "$repo_path/core/runtime" }
-actr-runtime-mailbox = { path = "$repo_path/core/runtime-mailbox" }
-actr-service-compat = { path = "$repo_path/core/service-compat" }
+actr-config = { path = "$repo_path/crates/actr-config" }
+actr-protocol = { path = "$repo_path/crates/actr-protocol" }
+actr-framework = { path = "$repo_path/crates/actr-framework" }
+actr-hyper = { path = "$repo_path/crates/actr-hyper" }
+actr-pack = { path = "$repo_path/crates/actr-pack" }
+actr-platform-native = { path = "$repo_path/crates/actr-platform-native" }
+actr-platform-traits = { path = "$repo_path/crates/actr-platform-traits" }
+actr-runtime = { path = "$repo_path/crates/actr-runtime" }
+actr-runtime-mailbox = { path = "$repo_path/crates/actr-runtime-mailbox" }
+actr-service-compat = { path = "$repo_path/crates/actr-service-compat" }
 EOF
 }
 
@@ -336,16 +336,16 @@ pin_workspace_actr_dependencies() {
     local cargo_toml="$1"
     local repo_path
     repo_path="$(cargo_path "$REPO_ROOT")"
-    ACTR_FRAMEWORK_PATH="$repo_path/core/framework" \
-    ACTR_PROTOCOL_PATH="$repo_path/core/protocol" \
+    ACTR_FRAMEWORK_PATH="$repo_path/crates/actr-framework" \
+    ACTR_PROTOCOL_PATH="$repo_path/crates/actr-protocol" \
         perl -i -pe '
             if (/^actr-framework = /) { $_ = qq{actr-framework = { path = "$ENV{ACTR_FRAMEWORK_PATH}" }\n}; }
             elsif (/^actr-protocol = /) { $_ = qq{actr-protocol = { path = "$ENV{ACTR_PROTOCOL_PATH}" }\n}; }
         ' "$cargo_toml"
 
-    grep -Fq "actr-framework = { path = \"$repo_path/core/framework\" }" "$cargo_toml" ||
+    grep -Fq "actr-framework = { path = \"$repo_path/crates/actr-framework\" }" "$cargo_toml" ||
         fail "Failed to pin actr-framework to the workspace"
-    grep -Fq "actr-protocol = { path = \"$repo_path/core/protocol\" }" "$cargo_toml" ||
+    grep -Fq "actr-protocol = { path = \"$repo_path/crates/actr-protocol\" }" "$cargo_toml" ||
         fail "Failed to pin actr-protocol to the workspace"
 }
 

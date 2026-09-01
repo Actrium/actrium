@@ -1,7 +1,7 @@
 // polyglot-echo — TypeScript bindings driver (CommonJS).
 //
 // Counterpart to clients/rust/src/main.rs but talks to mock-actrix through
-// `bindings/typescript`. The script loads the napi binding directly from
+// `packages/actr-typescript`. The script loads the napi binding directly from
 // the in-tree `dist/` output so the scenario doesn't have to npm-install
 // against a published version of @actrium/actr.
 //
@@ -24,8 +24,8 @@ const DIST_ENTRY = path.join(BINDINGS_DIR, 'dist', 'index.js');
 
 if (!fs.existsSync(DIST_ENTRY)) {
   console.error(
-    `bindings/typescript dist not built at ${DIST_ENTRY}. ` +
-      'Run `npm install && npm run build` in bindings/typescript first.',
+    `packages/actr-typescript dist not built at ${DIST_ENTRY}. ` +
+      'Run `npm install && npm run build` in packages/actr-typescript first.',
   );
   process.exit(2);
 }

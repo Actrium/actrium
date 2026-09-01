@@ -14,11 +14,11 @@ CI_CSHARP_E2E_WORKFLOW = ROOT / ".github/workflows/ci-csharp-e2e.yml"
 CI_TYPESCRIPT_WORKFLOW = ROOT / ".github/workflows/ci-typescript.yml"
 RELEASE_TRAIN_WORKFLOW = ROOT / ".github/workflows/release-train.yml"
 RELEASE_TRAIN_VERIFY_WORKFLOW = ROOT / ".github/workflows/release-train-verify.yml"
-RELEASE_TRAIN_SCRIPT = ROOT / "scripts/release-train.sh"
+RELEASE_TRAIN_SCRIPT = ROOT / "scripts/actr/release-train.sh"
 PUBLISH_ACTRSHARP_WORKFLOW = ROOT / ".github/workflows/publish-actrsharp.yml"
-GO_WORKLOAD_BUILD = ROOT / "examples/go/echo-workload/build.sh"
-CLI_TEST_SUPPORT = ROOT / "cli/src/test_support.rs"
-SWIFT_E2E_READINESS = ROOT / "e2e/swift-echo-app/lib/readiness.sh"
+GO_WORKLOAD_BUILD = ROOT / "examples/actr/go/echo-workload/build.sh"
+CLI_TEST_SUPPORT = ROOT / "crates/actr-cli/src/test_support.rs"
+SWIFT_E2E_READINESS = ROOT / "tests/e2e/actr/swift-echo-app/lib/readiness.sh"
 TS_COMPONENTIZE_GUARD = ROOT / ".github/scripts/verify-typescript-componentize-blocker.sh"
 
 
@@ -106,7 +106,7 @@ def test_pr_gate_compiles_rust_e2e_workspace_with_committed_lockfile() -> None:
     assert "needs.determine.outputs.e2e_rust == 'true'" in e2e_job
     normalized = " ".join(e2e_job.split())
     assert "cargo metadata" in normalized
-    assert "--manifest-path e2e/Cargo.toml" in normalized
+    assert "--manifest-path tests/e2e/actr/Cargo.toml" in normalized
     assert "--format-version 1" in normalized
     assert "--locked" in normalized
     # e2e_rust runs on the self-hosted image which preinstalls protoc, so
@@ -126,7 +126,7 @@ def test_pr_gate_runs_package_runtime_scenario_when_targeted() -> None:
     # The scenario runs on PRs only when its directory changed (#618), and
     # the gate aggregates its result like every other domain.
     assert "needs.determine.outputs.e2e_package_runtime == 'true'" in package_job
-    assert "bash e2e/package-runtime-echo/run.sh" in package_job
+    assert "bash tests/e2e/actr/package-runtime-echo/run.sh" in package_job
     assert "sync-cli-assets.sh" in package_job
 
     gate = workflow[workflow.index("  gate:\n"):]
@@ -147,8 +147,8 @@ def test_native_workload_gate_builds_c_and_go_with_pinned_tools() -> None:
         assert version in native_job
 
     assert "sha256sum --check --status" in native_job
-    assert "make -C examples/c/echo-workload verify" in native_job
-    assert "bash examples/go/echo-workload/build.sh" in native_job
+    assert "make -C examples/actr/c/echo-workload verify" in native_job
+    assert "bash examples/actr/go/echo-workload/build.sh" in native_job
     assert "native_workload_smoke" in native_job
     assert "ACTR_C_ECHO_COMPONENT" in native_job
     assert "ACTR_GO_ECHO_COMPONENT" in native_job
@@ -180,8 +180,8 @@ def test_blocked_typescript_component_e2e_jobs_share_disable_gate() -> None:
         assert "if: ${{ false }}" in job
         assert "#431" in job
 
-    assert "bash e2e/typescript-stream/run.sh" in typescript_job
-    assert "bash e2e/web-browser/run.sh" in web_browser_job
+    assert "bash tests/e2e/actr/typescript-stream/run.sh" in typescript_job
+    assert "bash tests/e2e/actr/web-browser/run.sh" in web_browser_job
 
 
 def test_typescript_componentize_only_allows_known_upstream_failure() -> None:
@@ -211,10 +211,10 @@ def test_python_workload_gate_builds_generated_cli_scaffold() -> None:
 
 def test_python_template_keeps_project_and_abi_versions_distinct() -> None:
     manifest = (
-        ROOT / "cli/fixtures/python/echo/manifest.toml.jinja2"
+        ROOT / "crates/actr-cli/fixtures/python/echo/manifest.toml.jinja2"
     ).read_text(encoding="utf-8")
     build_script = (
-        ROOT / "cli/fixtures/python/echo/build.sh.jinja2"
+        ROOT / "crates/actr-cli/fixtures/python/echo/build.sh.jinja2"
     ).read_text(encoding="utf-8")
 
     assert 'version = "0.1.0"' in manifest
@@ -289,7 +289,7 @@ def test_release_train_reuses_actrsharp_workflow() -> None:
     assert "<licenseExpression>" not in publish_workflow
     release_script = RELEASE_TRAIN_SCRIPT.read_text(encoding="utf-8")
     assert '"publish-actrsharp"' in release_script
-    assert release_script.count("bindings/cabi/csharp/ActrSharp/ActrSharp.csproj") >= 2
+    assert release_script.count("packages/actr-cabi/csharp/ActrSharp/ActrSharp.csproj") >= 2
 
 
 def test_csharp_pr_gate_uses_light_fixture_and_nightly_keeps_full_matrix() -> None:
@@ -298,7 +298,7 @@ def test_csharp_pr_gate_uses_light_fixture_and_nightly_keeps_full_matrix() -> No
     workflow = CI_CSHARP_WORKFLOW.read_text(encoding="utf-8")
     nightly = CI_CSHARP_E2E_WORKFLOW.read_text(encoding="utf-8")
     workload_manifest = (
-        ROOT / "e2e/winui-echo-app/workload/Cargo.toml"
+        ROOT / "tests/e2e/actr/winui-echo-app/workload/Cargo.toml"
     ).read_text(encoding="utf-8")
 
     assert "needs.determine.outputs.csharp_binding == 'true'" in csharp_job
@@ -306,7 +306,7 @@ def test_csharp_pr_gate_uses_light_fixture_and_nightly_keeps_full_matrix() -> No
     assert "full_matrix:" in workflow
     assert "default: false" in workflow
     assert "cache-on-failure: true" in workflow
-    assert "workspaces: e2e/winui-echo-app/workload" in workflow
+    assert "workspaces: tests/e2e/actr/winui-echo-app/workload" in workflow
     assert workflow.count("https://api.nuget.org/v3/index.json") == 3
     assert workflow.count("<packageSourceMapping>") == 3
     assert workflow.count('<package pattern="ActrSharp.*" />') == 3
@@ -380,7 +380,7 @@ def test_swift_echoapp_e2e_job_present() -> None:
     swift_job = _job(workflow, "swift-echo-app-e2e", "python-web-e2e")
 
     assert "runs-on: macos-arm64-larger" in swift_job
-    assert "bash e2e/swift-echo-app/run.sh" in swift_job
+    assert "bash tests/e2e/actr/swift-echo-app/run.sh" in swift_job
 
 
 def test_e2e_actrix_uses_in_tree_install_instead_of_artifact_download() -> None:
@@ -400,7 +400,7 @@ def test_e2e_actrix_uses_in_tree_install_instead_of_artifact_download() -> None:
 
 def test_e2e_no_private_actrix_checkout() -> None:
     workflow = CI_E2E_WORKFLOW.read_text(encoding="utf-8")
-    common = (ROOT / "e2e/package-runtime-echo/lib/common.sh").read_text(encoding="utf-8")
+    common = (ROOT / "tests/e2e/actr/package-runtime-echo/lib/common.sh").read_text(encoding="utf-8")
     cli_support = CLI_TEST_SUPPORT.read_text(encoding="utf-8")
 
     # No private Actrix checkout git config in any job
@@ -449,7 +449,7 @@ def test_e2e_linux_job_has_no_ios_rust_targets() -> None:
 
 def test_e2e_workspace_prebuilds_use_locked_cargo_resolution() -> None:
     workflow = CI_E2E_WORKFLOW.read_text(encoding="utf-8")
-    ts_stream = (ROOT / "e2e/typescript-stream/run.sh").read_text(encoding="utf-8")
+    ts_stream = (ROOT / "tests/e2e/actr/typescript-stream/run.sh").read_text(encoding="utf-8")
 
     assert "cargo build --release -p actr-cli --bin actr --features wasm-engine" not in workflow
     assert "cargo build --release -p actr-cli --bin actr --features wasm-engine" not in ts_stream
@@ -468,9 +468,9 @@ def test_e2e_workspace_prebuilds_use_locked_cargo_resolution() -> None:
 def test_swift_e2e_upload_artifact_on_failure() -> None:
     workflow = CI_E2E_WORKFLOW.read_text(encoding="utf-8")
     swift_jobs = {
-        "swift-echo-app-e2e": "e2e/swift-echo-app/.tmp/sanitized-logs/",
-        "swift-datastream-app-e2e": "e2e/swift-datastream-app/.tmp/sanitized-logs/",
-        "swift-ts-workload-e2e": "e2e/swift-ts-workload/.tmp/sanitized-logs/",
+        "swift-echo-app-e2e": "tests/e2e/actr/swift-echo-app/.tmp/sanitized-logs/",
+        "swift-datastream-app-e2e": "tests/e2e/actr/swift-datastream-app/.tmp/sanitized-logs/",
+        "swift-ts-workload-e2e": "tests/e2e/actr/swift-ts-workload/.tmp/sanitized-logs/",
     }
 
     for job_name, upload_path in swift_jobs.items():
@@ -483,9 +483,9 @@ def test_swift_e2e_upload_artifact_on_failure() -> None:
         assert upload_path in swift_job
 
     for script_path in (
-        "e2e/swift-echo-app/run.sh",
-        "e2e/swift-datastream-app/run.sh",
-        "e2e/swift-ts-workload/run.sh",
+        "tests/e2e/actr/swift-echo-app/run.sh",
+        "tests/e2e/actr/swift-datastream-app/run.sh",
+        "tests/e2e/actr/swift-ts-workload/run.sh",
     ):
         run_sh = (ROOT / script_path).read_text(encoding="utf-8")
         # Cleanup must output sanitized logs to the same fixed path the workflow uploads.
@@ -494,9 +494,9 @@ def test_swift_e2e_upload_artifact_on_failure() -> None:
 
 def test_swift_e2e_scripts_capture_app_diagnostics() -> None:
     swift_scripts = {
-        "e2e/swift-echo-app/run.sh": "io.actrium.EchoApp",
-        "e2e/swift-datastream-app/run.sh": "io.actrium.DataStreamApp",
-        "e2e/swift-ts-workload/run.sh": "io.actrium.SwiftTsWorkloadApp",
+        "tests/e2e/actr/swift-echo-app/run.sh": "io.actrium.EchoApp",
+        "tests/e2e/actr/swift-datastream-app/run.sh": "io.actrium.DataStreamApp",
+        "tests/e2e/actr/swift-ts-workload/run.sh": "io.actrium.SwiftTsWorkloadApp",
     }
 
     for script_path, bundle_id in swift_scripts.items():
@@ -531,16 +531,16 @@ def test_swift_e2e_uploads_debug_symbols_separately() -> None:
     )
 
     for project_path in (
-        "e2e/swift-echo-app/project.yml",
-        "e2e/swift-datastream-app/project.yml",
+        "tests/e2e/actr/swift-echo-app/project.yml",
+        "tests/e2e/actr/swift-datastream-app/project.yml",
     ):
         project_yml = (ROOT / project_path).read_text(encoding="utf-8")
         assert debug_symbol_settings in project_yml
 
     for script_path in (
-        "e2e/swift-echo-app/run.sh",
-        "e2e/swift-datastream-app/run.sh",
-        "e2e/swift-ts-workload/run.sh",
+        "tests/e2e/actr/swift-echo-app/run.sh",
+        "tests/e2e/actr/swift-datastream-app/run.sh",
+        "tests/e2e/actr/swift-ts-workload/run.sh",
     ):
         run_sh = (ROOT / script_path).read_text(encoding="utf-8")
         assert 'SYMBOL_DIR="$RUN_DIR/symbols"' in run_sh
@@ -574,8 +574,8 @@ def test_swift_e2e_uploads_debug_symbols_separately() -> None:
         assert "wait_for_lldb_capture" in run_sh
 
     for script_path in (
-        "e2e/swift-datastream-app/run.sh",
-        "e2e/swift-ts-workload/run.sh",
+        "tests/e2e/actr/swift-datastream-app/run.sh",
+        "tests/e2e/actr/swift-ts-workload/run.sh",
     ):
         run_sh = (ROOT / script_path).read_text(encoding="utf-8")
         assert debug_symbol_settings in run_sh
@@ -585,17 +585,17 @@ def test_swift_e2e_uploads_debug_symbols_separately() -> None:
         (
             "swift-echo-app-e2e",
             "swift-datastream-app-e2e",
-            "e2e/swift-echo-app/.tmp/symbols/",
+            "tests/e2e/actr/swift-echo-app/.tmp/symbols/",
         ),
         (
             "swift-datastream-app-e2e",
             "swift-ts-workload-e2e",
-            "e2e/swift-datastream-app/.tmp/symbols/",
+            "tests/e2e/actr/swift-datastream-app/.tmp/symbols/",
         ),
         (
             "swift-ts-workload-e2e",
             "python-web-e2e",
-            "e2e/swift-ts-workload/.tmp/symbols/",
+            "tests/e2e/actr/swift-ts-workload/.tmp/symbols/",
         ),
     )
     for job_name, next_job_name, symbol_path in swift_jobs:
@@ -611,8 +611,8 @@ def test_swift_e2e_uploads_debug_symbols_separately() -> None:
 
 
 def test_e2e_no_call_remote_in_ffi() -> None:
-    ffi_runtime = (ROOT / "bindings/ffi/src/runtime.rs").read_text(encoding="utf-8")
-    swift_actr_ref = (ROOT / "bindings/swift/Sources/Actr/ActrRef.swift").read_text(encoding="utf-8")
+    ffi_runtime = (ROOT / "crates/actr-ffi/src/runtime.rs").read_text(encoding="utf-8")
+    swift_actr_ref = (ROOT / "packages/actr-swift/Sources/Actr/ActrRef.swift").read_text(encoding="utf-8")
 
     # callRemote was an exploratory API, removed to keep the established
     # local-workload-forwarding path
@@ -625,7 +625,7 @@ def test_no_actrix_release_train_artifact_download_script() -> None:
 
 
 def test_run_sh_uses_correct_signaling_cache_table() -> None:
-    run_sh = (ROOT / "e2e/swift-echo-app/run.sh").read_text(encoding="utf-8")
+    run_sh = (ROOT / "tests/e2e/actr/swift-echo-app/run.sh").read_text(encoding="utf-8")
 
     # Must query the actual table name (service_registry, not service_registrations)
     assert "service_registry" in run_sh
@@ -634,15 +634,15 @@ def test_run_sh_uses_correct_signaling_cache_table() -> None:
 
 
 def test_swift_e2e_only_shuts_down_its_selected_simulator() -> None:
-    run_sh = (ROOT / "e2e/swift-echo-app/run.sh").read_text(encoding="utf-8")
+    run_sh = (ROOT / "tests/e2e/actr/swift-echo-app/run.sh").read_text(encoding="utf-8")
 
     assert 'xcrun simctl shutdown "$DEVICE_UDID"' in run_sh
     assert "xcrun simctl shutdown all" not in run_sh
 
 
 def test_swift_e2e_covers_short_and_long_background_recovery() -> None:
-    run_sh = (ROOT / "e2e/swift-echo-app/run.sh").read_text(encoding="utf-8")
-    content_view = (ROOT / "e2e/swift-echo-app/EchoApp/ContentView.swift").read_text(
+    run_sh = (ROOT / "tests/e2e/actr/swift-echo-app/run.sh").read_text(encoding="utf-8")
+    content_view = (ROOT / "tests/e2e/actr/swift-echo-app/EchoApp/ContentView.swift").read_text(
         encoding="utf-8"
     )
 
@@ -656,7 +656,7 @@ def test_swift_e2e_covers_short_and_long_background_recovery() -> None:
 
 
 def test_swift_e2e_retries_bounded_connection_not_ready() -> None:
-    service = (ROOT / "e2e/swift-echo-app/EchoApp/ActrService.swift").read_text(
+    service = (ROOT / "tests/e2e/actr/swift-echo-app/EchoApp/ActrService.swift").read_text(
         encoding="utf-8"
     )
 
@@ -769,7 +769,7 @@ def test_swift_datastream_job_not_in_pr_gate() -> None:
 
 def test_swift_datastream_cleanup_only_removes_owned_simulator() -> None:
     """Verify local cleanup cannot shut down unrelated iOS Simulators."""
-    run_sh = (ROOT / "e2e/swift-datastream-app/run.sh").read_text(encoding="utf-8")
+    run_sh = (ROOT / "tests/e2e/actr/swift-datastream-app/run.sh").read_text(encoding="utf-8")
 
     assert "xcrun simctl shutdown all" not in run_sh
     assert 'DEVICE_CREATED="0"' in run_sh
@@ -781,8 +781,8 @@ def test_swift_datastream_cleanup_only_removes_owned_simulator() -> None:
 
 def test_datastream_cli_templates_use_empty_scaffolds() -> None:
     """Verify Rust/Swift DataStream init starts from empty templates only."""
-    rust_mod = (ROOT / "cli/src/templates/rust/mod.rs").read_text(encoding="utf-8")
-    swift_mod = (ROOT / "cli/src/templates/swift/mod.rs").read_text(encoding="utf-8")
+    rust_mod = (ROOT / "crates/actr-cli/src/templates/rust/mod.rs").read_text(encoding="utf-8")
+    swift_mod = (ROOT / "crates/actr-cli/src/templates/swift/mod.rs").read_text(encoding="utf-8")
 
     assert "pub mod data_stream;" not in rust_mod
     assert "pub mod data_stream;" not in swift_mod
@@ -792,20 +792,20 @@ def test_datastream_cli_templates_use_empty_scaffolds() -> None:
     assert "ProjectTemplateName::DataStream" in swift_mod
     assert rust_mod.count("empty::load(&mut files)?;") >= 2
     assert swift_mod.count("empty::load(&mut files)?;") >= 2
-    assert not (ROOT / "cli/src/templates/rust/data_stream.rs").exists()
-    assert not (ROOT / "cli/src/templates/swift/data_stream.rs").exists()
-    assert not any((ROOT / "cli/fixtures/rust/data-stream").glob("*"))
-    assert not any((ROOT / "cli/fixtures/swift/data-stream").glob("*"))
+    assert not (ROOT / "crates/actr-cli/src/templates/rust/data_stream.rs").exists()
+    assert not (ROOT / "crates/actr-cli/src/templates/swift/data_stream.rs").exists()
+    assert not any((ROOT / "crates/actr-cli/fixtures/rust/data-stream").glob("*"))
+    assert not any((ROOT / "crates/actr-cli/fixtures/swift/data-stream").glob("*"))
 
 
 def test_swift_datastream_e2e_builds_custom_proto_flow_from_empty() -> None:
     """Verify DataStreamApp E2E creates custom proto/service after empty init."""
-    run_sh = (ROOT / "e2e/swift-datastream-app/run.sh").read_text(encoding="utf-8")
-    actr_toml = (ROOT / "e2e/swift-datastream-app/actr.toml.tpl").read_text(
+    run_sh = (ROOT / "tests/e2e/actr/swift-datastream-app/run.sh").read_text(encoding="utf-8")
+    actr_toml = (ROOT / "tests/e2e/actr/swift-datastream-app/actr.toml.tpl").read_text(
         encoding="utf-8"
     )
     actr_service = (
-        ROOT / "e2e/swift-datastream-app/DataStreamApp/Services/ActrService.swift"
+        ROOT / "tests/e2e/actr/swift-datastream-app/DataStreamApp/Services/ActrService.swift"
     ).read_text(encoding="utf-8")
 
     assert "--template empty" in run_sh

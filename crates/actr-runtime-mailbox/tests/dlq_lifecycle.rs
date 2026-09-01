@@ -15,11 +15,11 @@
 //! # DLQ dispatch wiring status (as of 2026-04-27)
 //!
 //! The SQLite DLQ **is** wired into the dispatch path:
-//! `core/hyper/src/lifecycle/node.rs:2188` enqueues a `DlqRecord` whenever
+//! `crates/actr-hyper/src/lifecycle/node.rs:2188` enqueues a `DlqRecord` whenever
 //! `prost::decode` fails for an inbound mailbox message
 //! (`error_category = "protobuf_decode"`).
 //!
-//! `requires_dlq()` in `core/hyper/src/transport/error.rs` is defined on
+//! `requires_dlq()` in `crates/actr-hyper/src/transport/error.rs` is defined on
 //! `NetworkError` for `Corrupt` variants, but that code-path (transport-layer
 //! corrupted envelope) does **not** currently call `dlq.enqueue` — only the
 //! mailbox dispatch loop does. Tracking issue: "transport-level DLQ routing".

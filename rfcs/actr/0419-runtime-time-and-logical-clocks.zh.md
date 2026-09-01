@@ -39,14 +39,14 @@ actr 当前存在多种看起来像“时间”的值：
 
 仓库现状同时提供了误用实例和不能一刀切的证据：
 
-- `core/hyper/src/lifecycle/node.rs` 用系统时钟差值计算队列耗时，属于应使用
+- `crates/actr-hyper/src/lifecycle/node.rs` 用系统时钟差值计算队列耗时，属于应使用
   单调时钟的相对耗时；
-- `core/hyper/src/lifecycle/compat_lock.rs`（兼容协商缓存，当前为预留能力）把
+- `crates/actr-hyper/src/lifecycle/compat_lock.rs`（兼容协商缓存，当前为预留能力）把
   绝对 UTC 期限持久化到磁盘做跨进程共享的缓存过期时间——这类用途系统时钟是唯一
   可行时基，说明需要的是按用途分类，而不是一刀切的禁令；
-- Kotlin 与 Swift 绑定（`bindings/kotlin/.../NetworkMonitor.kt`、
-  `bindings/swift/.../ActrNode.swift`）用系统时钟测量应用后台时长，交给
-  `core/hyper/src/lifecycle/network_event.rs` 的长后台重连判定——因为进程内
+- Kotlin 与 Swift 绑定（`packages/actr-kotlin/.../NetworkMonitor.kt`、
+  `packages/actr-swift/.../ActrNode.swift`）用系统时钟测量应用后台时长，交给
+  `crates/actr-hyper/src/lifecycle/network_event.rs` 的长后台重连判定——因为进程内
   单调时钟在设备挂起期间冻结，测不出跨挂起的真实流逝。
 
 另一方面，HLC 对部分上层协议有通用价值，但并非每个 RPC、信令包或数据分块都需要
@@ -240,7 +240,7 @@ actr 不实现 NTP、offset estimation、clock slewing、holdover 或可信授�
 既有字段按上述纪律逐条固定语义如下：
 
 - `SignalingEnvelope.timestamp` 已移除：退役已完成——该字段随信封版本 2
-  （`envelope_version` = 2）从 `core/protocol/proto/signaling.proto` 删除，
+  （`envelope_version` = 2）从 `crates/actr-protocol/proto/signaling.proto` 删除，
   并以 `reserved 4;` / `reserved "timestamp";` 永久保留字段号与字段名、
   禁止复用（#434，已于 2026-07-24 合入）。历史上它是创建方（客户端或服务端
   自身）系统时钟在创建信封时的读数，全部流程的信封（含 envelope_error）
@@ -514,13 +514,13 @@ Disciplined 时钟需要 offset 与 round-trip 样本的注入接口和信任模
    能力缺失的平台按第 2 节回退策略处理）、持久化或远端签发的绝对 UTC 有效期
    （保留系统时钟时基，补跳变容忍）、观测用途的系统时钟读数（保留）。
    不得不加分类地机械替换；审计清单在跟踪 issue 维护；
-2. 修正误导性注释与文档；其中 `core/protocol/proto/signaling.proto` 中的
+2. 修正误导性注释与文档；其中 `crates/actr-protocol/proto/signaling.proto` 中的
    timestamp 字段及其 “enqueue time (server clock)” 注释已随信封版本 2 整体
    移除（#434），字段号与字段名以 `reserved` 永久保留；实施时须确认仓库外的
    信令服务端实现没有依赖“服务端授时”语义，也不再盖章或读取该字段；
 3. 统一原生、Web 和测试运行时的单调时钟抽象与虚拟时间测试；
    Web 侧现存以 `Date.now()` 差值实现的超时判断是主要工作量；
-4. 增加独立、可选且不依赖 `core/protocol` 的 HLC 工具库。
+4. 增加独立、可选且不依赖 `crates/actr-protocol` 的 HLC 工具库。
 
 验收标准：除 `SignalingEnvelope.timestamp` 已随信封版本 2 移除（#434，字段号
 与字段名以 `reserved` 永久保留）外，核心报文无其它格式差异；现有 RPC 和

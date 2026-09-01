@@ -81,12 +81,12 @@ MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY in this document are normative requi
 Actr currently uses `webrtc = "0.14"` in `Cargo.toml`. RTC related responsibilities mainly focus on:
 | Current path | Current responsibility |
 | --- | --- |
-| `core/hyper/src/wire/webrtc/coordinator.rs` | Peer registry, role, SDP, ICE, recovery, task, Hook and close-all |
-| `core/hyper/src/wire/webrtc/connection.rs` | PeerConnection, DataChannel, Track, lane cache and shutdown |
-| `core/hyper/src/wire/webrtc/negotiator.rs` | Codec, SettingEngine, socket, mux, offer/answer |
-| `core/hyper/src/wire/webrtc/signaling.rs` | WebSocket signaling life cycle and message processing |
-| `core/hyper/src/outbound/peer_gate.rs` | Pre-send check and an independent recovering peer status |
-| `core/framework/src/workload.rs` | `WebRtcPeerStatus` and WebRTC Hook |
+| `crates/actr-hyper/src/wire/webrtc/coordinator.rs` | Peer registry, role, SDP, ICE, recovery, task, Hook and close-all |
+| `crates/actr-hyper/src/wire/webrtc/connection.rs` | PeerConnection, DataChannel, Track, lane cache and shutdown |
+| `crates/actr-hyper/src/wire/webrtc/negotiator.rs` | Codec, SettingEngine, socket, mux, offer/answer |
+| `crates/actr-hyper/src/wire/webrtc/signaling.rs` | WebSocket signaling life cycle and message processing |
+| `crates/actr-hyper/src/outbound/peer_gate.rs` | Pre-send check and an independent recovering peer status |
+| `crates/actr-framework/src/workload.rs` | `WebRtcPeerStatus` and WebRTC Hook |
 The current implementation already supports multiple PeerConnections, four DataChannel lanes, network
 recovery, role negotiation, and mobile terminals. However, RTC status is scattered across the Coordinator,
 `PeerState`, `WebRtcConnection`, PeerGate, task state, and callback captures. As recovery, mobile lifecycle,
@@ -1789,7 +1789,7 @@ Stats sampling must be performed at staggered peaks or on demand, and `get_stats
 
 Suggested final directory:
 ```text
-core/hyper/src/wire/webrtc/
+crates/actr-hyper/src/wire/webrtc/
 ├── manager.rs
 ├── factory.rs
 ├── event_handler.rs
@@ -1825,14 +1825,14 @@ Current file migration relationship:
 | `signaling.rs` | Retain signaling transport; Peer routing is split to Router |
 | `peer_gate.rs` | Remove recovering set and use Snapshot and SendPermit instead |
 | `framework/src/workload.rs` | Add Snapshot query/subscribe and unified status Hook |
-| `bindings/ffi/src/workload.rs` | Add Snapshot observer and initial replay |
+| `crates/actr-ffi/src/workload.rs` | Add Snapshot observer and initial replay |
 | migration adapter | final removal |
 
 ## Drawbacks
 
 ### Large refactor surface
 
-The migration touches `core/hyper`, framework Hooks, PeerGate, FFI, and mobile bindings. The review and
+The migration touches `crates/actr-hyper`, framework Hooks, PeerGate, FFI, and mobile bindings. The review and
 regression surface is larger than a dependency-only upgrade.
 
 ### Temporary duplication
@@ -2106,13 +2106,13 @@ profile while maintaining process-level configuration consistency.
 - [sansio 1.0.1 `Protocol` source](https://github.com/webrtc-rs/sansio/blob/c10077d311406070693168dfa493389d57638f7c/src/lib.rs)
 - [rtc v0.20.0 statistics source](https://github.com/webrtc-rs/rtc/tree/v0.20.0/src/statistics)
 - [webrtc-rs issue #848: TURN/TCP support](https://github.com/webrtc-rs/webrtc/issues/848)
-- `core/hyper/src/wire/webrtc/coordinator.rs`
-- `core/hyper/src/wire/webrtc/connection.rs`
-- `core/hyper/src/wire/webrtc/negotiator.rs`
-- `core/hyper/src/wire/webrtc/signaling.rs`
-- `core/hyper/src/outbound/peer_gate.rs`
-- `core/framework/src/workload.rs`
-- `bindings/ffi/src/workload.rs`
+- `crates/actr-hyper/src/wire/webrtc/coordinator.rs`
+- `crates/actr-hyper/src/wire/webrtc/connection.rs`
+- `crates/actr-hyper/src/wire/webrtc/negotiator.rs`
+- `crates/actr-hyper/src/wire/webrtc/signaling.rs`
+- `crates/actr-hyper/src/outbound/peer_gate.rs`
+- `crates/actr-framework/src/workload.rs`
+- `crates/actr-ffi/src/workload.rs`
 
 ## Compatibility and phasing
 

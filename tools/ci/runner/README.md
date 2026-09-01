@@ -15,10 +15,10 @@ minutes on `apt-get install` / `rustup` every run.
 
 ## Build
 
-Build context is this directory (`docker/runner/`):
+Build context is this directory (`tools/ci/runner/`):
 
 ```bash
-docker build -t actrium-runner:dev -f docker/runner/Dockerfile docker/runner/
+docker build -t actrium-runner:dev -f tools/ci/runner/Dockerfile tools/ci/runner/
 ```
 
 All versions are pinned with `ARG`; override at build time to upgrade
@@ -39,7 +39,7 @@ mirrors where the defaults are slow — see the Dockerfile header.
 | wasm-pack / wasm-component-ld / wasm-tools | 0.15.0 / 0.5.26 / 1.253.0 | sha256-pinned; sha values match `ci-gate.yml`, so a tampered upstream release fails the build loudly |
 | hosted toolcache | Python 3.11.16 / 3.13.15, Node 24.19.0, Temurin JDK 17.0.20+8 | `RUNNER_TOOL_CACHE=/opt/hostedtoolcache`; `setup-*` steps resolve locally, zero download |
 | Android SDK | cmdline-tools 12266719 (16.0), platforms;android-34, build-tools;34.0.0/35.0.0, platform-tools | `ANDROID_SDK_ROOT=/usr/local/lib/android/sdk`; cmdline-tools version matches `setup-android`'s default so it does not re-download |
-| Gradle user home | Gradle 9.2.1 distribution + KtLint 1.5.0 / ktlint-gradle 12.1.2 dependencies | `GRADLE_USER_HOME=/home/runner/.gradle`; matches the `bindings/kotlin` wrapper and plugin pins, removes per-job tool downloads |
+| Gradle user home | Gradle 9.2.1 distribution + KtLint 1.5.0 / ktlint-gradle 12.1.2 dependencies | `GRADLE_USER_HOME=/home/runner/.gradle`; matches the `packages/actr-kotlin` wrapper and plugin pins, removes per-job tool downloads |
 
 `rust_msrv` jobs still pin `dtolnay/rust-toolchain@1.95.0` (historical
 toolchain, not preinstalled). Installed apt packages mirror the
@@ -103,7 +103,7 @@ so the PEM survives byte-for-byte.
 ### Build and push the image
 
 ```bash
-docker build -t ghcr.io/actrium/runner:latest -f docker/runner/Dockerfile docker/runner/
+docker build -t ghcr.io/actrium/runner:latest -f tools/ci/runner/Dockerfile tools/ci/runner/
 docker push ghcr.io/actrium/runner:latest
 ```
 
@@ -125,7 +125,7 @@ registry-neutral.
 ### Apply the manifest
 
 ```bash
-kubectl apply -f docker/runner/autoscaling-runner-set.yaml
+kubectl apply -f tools/ci/runner/autoscaling-runner-set.yaml
 kubectl -n arc-runners get autoscalingrunnerset,ephemeralrunner -w
 ```
 

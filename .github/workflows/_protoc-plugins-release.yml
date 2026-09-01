@@ -136,13 +136,13 @@ jobs:
         with:
           xcode-version: latest-stable
       - name: Build release artifact
-        run: bash tools/protoc-gen/swift/scripts/build-release.sh
+        run: bash tools/actr/protoc-gen/swift/scripts/build-release.sh
       - name: Verify plugin version
         env:
           EXPECTED_VERSION: ${{ needs.validate.outputs.version }}
         run: |
           set -euo pipefail
-          PLUGIN=tools/protoc-gen/swift/dist/protoc-gen-actrframework-swift
+          PLUGIN=tools/actr/protoc-gen/swift/dist/protoc-gen-actrframework-swift
           ACTUAL_VERSION=$("$PLUGIN" --version | tail -1 | xargs)
           [[ "$ACTUAL_VERSION" == "$EXPECTED_VERSION" ]] || {
             echo "::error::Swift plugin reports $ACTUAL_VERSION, expected $EXPECTED_VERSION"
@@ -153,8 +153,8 @@ jobs:
         with:
           name: protoc-gen-actrframework-swift
           path: |
-            tools/protoc-gen/swift/dist/protoc-gen-actrframework-swift-macos-arm64.zip
-            tools/protoc-gen/swift/dist/protoc-gen-actrframework-swift-macos-arm64.zip.sha256
+            tools/actr/protoc-gen/swift/dist/protoc-gen-actrframework-swift-macos-arm64.zip
+            tools/actr/protoc-gen/swift/dist/protoc-gen-actrframework-swift-macos-arm64.zip.sha256
           if-no-files-found: error
 
   build-web:
@@ -206,15 +206,15 @@ jobs:
           distribution: temurin
           java-version: 17
       - name: Build fat JAR
-        run: (cd tools/protoc-gen/kotlin && ./gradlew protocPluginJar --no-daemon)
+        run: (cd tools/actr/protoc-gen/kotlin && ./gradlew protocPluginJar --no-daemon)
       - name: Package
         env:
           EXPECTED_VERSION: ${{ needs.validate.outputs.version }}
         run: |
           set -euo pipefail
           mkdir -p dist/build/libs
-          cp tools/protoc-gen/kotlin/protoc-gen-actrframework-kotlin dist/protoc-gen-actrframework-kotlin
-          cp tools/protoc-gen/kotlin/build/libs/protoc-gen-actrframework-kotlin.jar dist/build/libs/protoc-gen-actrframework-kotlin.jar
+          cp tools/actr/protoc-gen/kotlin/protoc-gen-actrframework-kotlin dist/protoc-gen-actrframework-kotlin
+          cp tools/actr/protoc-gen/kotlin/build/libs/protoc-gen-actrframework-kotlin.jar dist/build/libs/protoc-gen-actrframework-kotlin.jar
           chmod +x dist/protoc-gen-actrframework-kotlin
           ACTUAL_VERSION=$(cd dist && ./protoc-gen-actrframework-kotlin --version | awk '{print $NF}')
           [[ "$ACTUAL_VERSION" == "$EXPECTED_VERSION" ]] || {
@@ -247,21 +247,21 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: tools/protoc-gen/typescript/package-lock.json
+          cache-dependency-path: tools/actr/protoc-gen/typescript/package-lock.json
       - name: Build
-        run: (cd tools/protoc-gen/typescript && npm ci && npm run bundle)
+        run: (cd tools/actr/protoc-gen/typescript && npm ci && npm run bundle)
       - name: Package
         run: |
           set -euo pipefail
           mkdir -p dist/scripts dist/dist
-          cp tools/protoc-gen/typescript/scripts/protoc-gen-actrframework-typescript dist/scripts/protoc-gen-actrframework-typescript
-          cp tools/protoc-gen/typescript/dist/bundle.js dist/dist/bundle.js
-          cp tools/protoc-gen/typescript/package.json dist/package.json
+          cp tools/actr/protoc-gen/typescript/scripts/protoc-gen-actrframework-typescript dist/scripts/protoc-gen-actrframework-typescript
+          cp tools/actr/protoc-gen/typescript/dist/bundle.js dist/dist/bundle.js
+          cp tools/actr/protoc-gen/typescript/package.json dist/package.json
           chmod +x dist/scripts/protoc-gen-actrframework-typescript
           ZIP_INPUTS=(scripts/protoc-gen-actrframework-typescript dist/bundle.js package.json)
           if grep -q 'require("typescript")' dist/dist/bundle.js; then
             mkdir -p dist/node_modules
-            cp -R tools/protoc-gen/typescript/node_modules/typescript dist/node_modules/typescript
+            cp -R tools/actr/protoc-gen/typescript/node_modules/typescript dist/node_modules/typescript
             ZIP_INPUTS+=(node_modules/typescript)
           fi
           ZIP_NAME="protoc-gen-actrframework-typescript.zip"
@@ -307,14 +307,14 @@ jobs:
       - name: Install build tools
         run: python -m pip install -U build twine
       - name: Build
-        run: (cd tools/protoc-gen/python && python -m build)
+        run: (cd tools/actr/protoc-gen/python && python -m build)
       - name: Validate distributions
-        run: python -m twine check tools/protoc-gen/python/dist/*
+        run: python -m twine check tools/actr/protoc-gen/python/dist/*
       - name: Package
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp tools/protoc-gen/python/dist/* dist/
+          cp tools/actr/protoc-gen/python/dist/* dist/
           ( cd dist && for f in *.whl *.tar.gz; do shasum -a 256 "$f" > "$f.sha256"; done )
       - name: Upload artifact
         uses: actions/upload-artifact@v4

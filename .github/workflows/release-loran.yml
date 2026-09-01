@@ -1,8 +1,8 @@
-name: Release actrix binaries
+name: Release Loran server binaries
 
-# Manually rebuild and replace actrix server binaries for an existing release.
+# Manually rebuild and replace Loran server binaries for an existing release.
 # For automatic release-train integration, see release-train.yml which calls
-# _actrix-release.yml directly in parallel with the CLI release.
+# _loran-release.yml directly in parallel with the CLI release.
 
 on:
   workflow_dispatch:
@@ -23,7 +23,7 @@ on:
         type: boolean
 
 concurrency:
-  group: release-actrix-${{ inputs.tag }}
+  group: release-loran-${{ inputs.tag }}
   cancel-in-progress: false
 
 permissions:
@@ -60,9 +60,9 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" >/dev/null
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
 
-  publish-actrix:
+  publish-loran:
     needs: validate-release
-    uses: ./.github/workflows/_actrix-release.yml
+    uses: ./.github/workflows/_loran-release.yml
     with:
       tag: ${{ needs.validate-release.outputs.tag }}
       source_ref: ${{ needs.validate-release.outputs.tag }}

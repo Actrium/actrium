@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 RUN_ID="${ACTR_E2E_RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
 RUN_ROOT="${ACTR_E2E_RUN_ROOT:-$REPO_ROOT/target/e2e-cache/typescript-stream/$RUN_ID}"
 LOG_DIR="$RUN_ROOT/logs"
@@ -309,10 +309,10 @@ write_ts_echo_project_overrides() {
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "componentize": "actr-workload-ts componentize dist/actr_service.js -o dist/echo-service-ts.wasm --wit $REPO_ROOT/core/framework/wit-v2/actr-workload.wit"
+    "componentize": "actr-workload-ts componentize dist/actr_service.js -o dist/echo-service-ts.wasm --wit $REPO_ROOT/crates/actr-framework/wit-v2/actr-workload.wit"
   },
   "dependencies": {
-    "@actrium/actr-workload": "file:$REPO_ROOT/bindings/typescript/actr-workload",
+    "@actrium/actr-workload": "file:$REPO_ROOT/packages/actr-typescript/actr-workload",
     "@bufbuild/protobuf": "2.11.0"
   },
   "devDependencies": {
@@ -430,13 +430,13 @@ unexpected_cfgs = { level = "allow", check-cfg = ['cfg(actr_has_generated)'] }
 
 [patch.crates-io]
 actr = { path = "$REPO_ROOT" }
-actr-config = { path = "$REPO_ROOT/core/config" }
-actr-framework = { path = "$REPO_ROOT/core/framework" }
-actr-hyper = { path = "$REPO_ROOT/core/hyper" }
-actr-protocol = { path = "$REPO_ROOT/core/protocol" }
-actr-runtime = { path = "$REPO_ROOT/core/runtime" }
-actr-runtime-mailbox = { path = "$REPO_ROOT/core/runtime-mailbox" }
-actr-service-compat = { path = "$REPO_ROOT/core/service-compat" }
+actr-config = { path = "$REPO_ROOT/crates/actr-config" }
+actr-framework = { path = "$REPO_ROOT/crates/actr-framework" }
+actr-hyper = { path = "$REPO_ROOT/crates/actr-hyper" }
+actr-protocol = { path = "$REPO_ROOT/crates/actr-protocol" }
+actr-runtime = { path = "$REPO_ROOT/crates/actr-runtime" }
+actr-runtime-mailbox = { path = "$REPO_ROOT/crates/actr-runtime-mailbox" }
+actr-service-compat = { path = "$REPO_ROOT/crates/actr-service-compat" }
 EOF_CARGO
 
   cat >"$RELAY/build.rs" <<'EOF_BUILD'
@@ -787,13 +787,13 @@ tracing = { version = "0.1", optional = true }
 
 [patch.crates-io]
 actr = { path = "$REPO_ROOT" }
-actr-config = { path = "$REPO_ROOT/core/config" }
-actr-framework = { path = "$REPO_ROOT/core/framework" }
-actr-hyper = { path = "$REPO_ROOT/core/hyper" }
-actr-protocol = { path = "$REPO_ROOT/core/protocol" }
-actr-runtime = { path = "$REPO_ROOT/core/runtime" }
-actr-runtime-mailbox = { path = "$REPO_ROOT/core/runtime-mailbox" }
-actr-service-compat = { path = "$REPO_ROOT/core/service-compat" }
+actr-config = { path = "$REPO_ROOT/crates/actr-config" }
+actr-framework = { path = "$REPO_ROOT/crates/actr-framework" }
+actr-hyper = { path = "$REPO_ROOT/crates/actr-hyper" }
+actr-protocol = { path = "$REPO_ROOT/crates/actr-protocol" }
+actr-runtime = { path = "$REPO_ROOT/crates/actr-runtime" }
+actr-runtime-mailbox = { path = "$REPO_ROOT/crates/actr-runtime-mailbox" }
+actr-service-compat = { path = "$REPO_ROOT/crates/actr-service-compat" }
 EOF_CARGO
 
   cat >"$CLIENT/manifest.toml" <<'EOF_MANIFEST'
@@ -1093,7 +1093,7 @@ export PATH="$RUN_ROOT/bin:$PATH"
 run_logged "rust protoc plugin" protoc-gen-actrframework --version
 
 log "Build local TypeScript workload package"
-(cd "$REPO_ROOT/bindings/typescript/actr-workload" && npm ci && npm run build)
+(cd "$REPO_ROOT/packages/actr-typescript/actr-workload" && npm ci && npm run build)
 
 MOCK_PORT="${ACTR_E2E_MOCK_PORT:-$(
   python3 - <<'PY'

@@ -1,2 +1,2 @@
--e ../../../bindings/python/actr-workload[build]
+-e ../../../../packages/actr-python/actr-workload[build]
 protobuf>=6.33.3

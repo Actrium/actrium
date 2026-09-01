@@ -19,8 +19,8 @@
 
 1. **浏览器路径整体替换** —— CM (Component Model) + jco transpile 改为 Option U（WIT → wasm-bindgen 直产物）。jco / Component Model 在浏览器侧**完全删除**。原生 wasmtime 端 CM 路径**不变**。
 2. **原生宿主重构** —— `Hyper<State>` 引入 typestate，旧 `Hyper::attach` API 拆为 `Hyper` + `Node<State>` 两阶段；`PlatformProvider` 收敛为 3 个领域问题；`TrustProvider` 可插拔。
-3. **API 公共面收窄** —— `core/hyper` / `core/framework` 系统性地把内部实现降级为 `pub(crate)`，仅保留稳定的对外 API。
-4. **测试基建升级** —— `mock-actrix` 取代外部 actrix 依赖；浏览器 e2e（BasicFunction + MultiTab）`12/12` 稳过；CI 加 WIT codegen + cli/assets 双 drift gate。
+3. **API 公共面收窄** —— `crates/actr-hyper` / `crates/actr-framework` 系统性地把内部实现降级为 `pub(crate)`，仅保留稳定的对外 API。
+4. **测试基建升级** —— `mock-actrix` 取代外部 actrix 依赖；浏览器 e2e（BasicFunction + MultiTab）`12/12` 稳过；CI 加 WIT codegen + crates/actr-cli/assets 双 drift gate。
 5. **技术债批量结案** —— TD-001 / TD-002 / TD-003 / TD-004 / TD-005 / TD-006 全部关闭。
 
 **变更体量**：
@@ -31,7 +31,7 @@
 | 改动文件 | 531 |
 | 行净增 | +64,527 / -23,150 (净 +41,377，主要是新增 `actr-web-abi` 生成产物 + WIT 契约 + 新 codegen 工具) |
 | 删除整模块 | 5 (`webrtc_recovery`, `dom-bridge::WebRtcCoordinator`, CM browser bridge, `transpile-component.sh`, TS echo-workload polyglot demo) |
-| 新增整模块 | 4 (`tools/wit-compile-web`, `actr-web-abi`, `core/framework/web/`, `mock-actrix`) |
+| 新增整模块 | 4 (`tools/actr/wit-compile-web`, `actr-web-abi`, `crates/actr-framework/web/`, `mock-actrix`) |
 
 ---
 
@@ -41,7 +41,7 @@
 
 ```
                     ┌──────────────────────────────────────┐
-                    │  core/framework/wit/actr-workload.wit │
+                    │  crates/actr-framework/wit/actr-workload.wit │
                     │       （单一契约真源）                 │
                     └──────┬───────────────┬───────────┬───┘
                            │               │           │
@@ -53,7 +53,7 @@
   │ (server) │                       │  (SW)   │                    │(static) │
   └────┬─────┘                       └────┬────┘                    └────┬────┘
        │                                  │                              │
-   wit-bindgen                  tools/wit-compile-web              wit-bindgen c
+   wit-bindgen                  tools/actr/wit-compile-web              wit-bindgen c
        │                                  │                              │
    wasm-component-ld              wasm-pack --target                hand-written
        │                          no-modules                        C ABI
@@ -64,7 +64,7 @@
   │ +JSPI ❌ │                       │ +async  │                    │         │
   │not needed│                       │原生     │                    │         │
   └──────────┘                       └─────────┘                    └─────────┘
-   core/hyper                bindings/web                       bindings/{ffi,
+   crates/actr-hyper                packages/actr-web                       bindings/{ffi,
                                                                 kotlin,swift}
 ```
 
@@ -105,11 +105,11 @@
 
 ```
    WIT 契约
-   core/framework/wit/actr-workload.wit
+   crates/actr-framework/wit/actr-workload.wit
         │
-        │ tools/wit-compile-web (本批次新增)
+        │ tools/actr/wit-compile-web (本批次新增)
         ▼
-   bindings/web/crates/actr-web-abi/src/
+   packages/actr-web/crates/actr-web-abi/src/
         ├── types.rs    （10 record + 3 variant 镜像）
         ├── guest.rs    （8 host imports + async wrappers）
         └── host.rs     （Workload trait + 17 #[wasm_bindgen] exports）
@@ -137,7 +137,7 @@
    优点：1. 不依赖 JSPI / 浏览器版本特性
          2. 不依赖 jco 工具链
          3. Rust async fn 原生工作
-   代价：~600 行自维护 codegen (tools/wit-compile-web)，但可控且 CI 守
+   代价：~600 行自维护 codegen (tools/actr/wit-compile-web)，但可控且 CI 守
 ```
 
 #### 关键决策时间线（从 T18 → Option U）
@@ -184,7 +184,7 @@ T18 诊断 (4 轮 spike)
                 │ (跨 target unified macro) │
                 ▼                           ▼
    ┌─────────────────────────┐   ┌──────────────────────┐
-   │ core/framework          │   │ actr-web-abi         │
+   │ crates/actr-framework          │   │ actr-web-abi         │
    │  ├── web/               │   │ (生成自 WIT)         │
    │  │   ├── adapter.rs     │   │  ├── types.rs        │
    │  │   ├── context.rs     │◄──┤  ├── guest.rs        │
@@ -272,7 +272,7 @@ T18 诊断 (4 轮 spike)
 │ actr CLI ── actr run --web -c <config>.actr.toml   │
 └────────────────────────────────────────────────────┘
        │
-       │ axum Router (cli/src/commands/run.rs)
+       │ axum Router (crates/actr-cli/src/commands/run.rs)
        ▼
    Routes:
    ┌──────────────────────────────────────────────┐
@@ -386,7 +386,7 @@ T18 诊断 (4 轮 spike)
 
 **Before**：浏览器 e2e 必须依赖外部 `actrix` 二进制（peer 仓库 `../../actrix`）+ `sqlite3` 种数据。CI 需要预装这俩。
 
-**After**：`testing/mock-actrix` crate（commit `40309a0e testing: expand mock-signaling into full mock-actrix`），单一进程提供：
+**After**：`crates/actr-mock-actrix` crate（commit `40309a0e testing: expand mock-signaling into full mock-actrix`），单一进程提供：
 
 ```
    ┌─────────────────────────────────────────┐
@@ -401,8 +401,8 @@ T18 诊断 (4 轮 spike)
 ```
 
 **配套**：
-- `bindings/web/examples/echo/start-mock.sh` ── 一行起来 mock + actr run --web + 跑 puppeteer
-- `bindings/web/examples/echo/register-mock.sh` ── HTTP 写 /admin/* 种数据
+- `packages/actr-web/examples/echo/start-mock.sh` ── 一行起来 mock + actr run --web + 跑 puppeteer
+- `packages/actr-web/examples/echo/register-mock.sh` ── HTTP 写 /admin/* 种数据
 
 ### 4.2 浏览器 e2e 测试矩阵
 
@@ -421,7 +421,7 @@ T18 诊断 (4 轮 spike)
 | MultiTab | 6-5 | Multiple Server Instances | ✓ |
 | MultiTab | 6-6 | Shared SW Isolation | ✓ |
 
-**`12/12 PASS`** —— `bash bindings/web/examples/echo/start-mock.sh` (默认 BasicFunction，传 `SUITES='BasicFunction MultiTab'` 跑全套)
+**`12/12 PASS`** —— `bash packages/actr-web/examples/echo/start-mock.sh` (默认 BasicFunction，传 `SUITES='BasicFunction MultiTab'` 跑全套)
 
 ### 4.3 CI Drift Gates（Phase 5 新增）
 
@@ -431,14 +431,14 @@ T18 诊断 (4 轮 spike)
 - name: WIT codegen drift gate (Option U)
   run: cargo run -p actr-wit-compile-web -- --check
 
-- name: cli/assets sync drift gate
-  run: bash bindings/web/scripts/sync-cli-assets.sh --check
+- name: crates/actr-cli/assets sync drift gate
+  run: bash packages/actr-web/scripts/sync-cli-assets.sh --check
 ```
 
 捕获两类漂移：
 
 1. WIT 改了但忘记重新 generate `actr-web-abi/src/{types,guest,host}.rs`
-2. sw-host wasm 或 actor.sw.js 改了但忘记 sync 到 `cli/assets/web-runtime/`（这是 TD-002 的核心痛点）
+2. sw-host wasm 或 actor.sw.js 改了但忘记 sync 到 `crates/actr-cli/assets/web-runtime/`（这是 TD-002 的核心痛点）
 
 ---
 
@@ -447,7 +447,7 @@ T18 诊断 (4 轮 spike)
 | TD | 问题 | 修复 | commit |
 |----|------|------|--------|
 | **TD-001** | dom-bridge / sw-host 5 个 zero-call DataLane setter（548ad7d9 后绕开未删） | 删除整个 setter cascade（-703 LOC）+ 后续 `WebRtcCoordinator` 整模块 + `webrtc_recovery` 整模块 | `ec6ffafd` `15fa2aa1` `67736e2d` |
-| **TD-002** | sw-host wasm 产物到 cli/assets 无自动同步 | `bindings/web/scripts/sync-cli-assets.sh` + sw-host build.sh 末尾自动调 + CI `--check` | `cd5971da` `f4986dd0` |
+| **TD-002** | sw-host wasm 产物到 crates/actr-cli/assets 无自动同步 | `packages/actr-web/scripts/sync-cli-assets.sh` + sw-host build.sh 末尾自动调 + CI `--check` | `cd5971da` `f4986dd0` |
 | **TD-003** | `GUEST_CTX: thread_local Option<Ctx>` 单例覆盖（多 client 并发踩） | γ-unified：改 `DISPATCH_CTXS: HashMap<RequestId, Ctx>`；WIT 所有 host import 加 request_id 参数 | Phase 6 系列 |
 | **TD-004** | 同源 SW 下第二个 client 复用第一个 client 的 IndexedDB 凭据 | cred_kv_namespace 改为 `actr_credentials_{actr_type}_{client_id}`；mock-actrix 加 rebind WARN | `eb034d94` `b658d4f0` |
 | **TD-005** | "WebWorkloadAdapter Reflect.get called on non-object" | 误报：stale `target/debug/actr` binary。重 build 即过 | （无 commit，文档结案） |
@@ -463,33 +463,33 @@ T18 诊断 (4 轮 spike)
 
 | 删除项 | 类型 | 说明 |
 |--------|------|------|
-| `bindings/web/packages/web-sdk/src/actor.sw.js` (CM 旧版) | 文件 | `loadWithComponentBridge` + jco import 表 |
-| `bindings/web/scripts/transpile-component.sh` | 文件 | 调 `jco transpile` 的 wrapper |
-| `bindings/web/examples/echo/start.sh` | 文件 | CM-only launcher (`jco transpile` + `ACTR_WEB_GUEST_MODE=cm`) |
-| `bindings/web/examples/echo/server/wasm/` | 目录 | pre-Phase-6 的 `echo-server-web` 独立 crate |
-| `bindings/web/examples/echo/{server,client}-guest-wbg/` | 目录 | Phase 6c 删 source 但 disk 留下 target/pkg |
-| `bindings/web/examples/echo/release/*.jco` | 目录 | jco 转译产物 |
-| `cli/src/commands/run.rs::serve_actor_sw_js` 的 env 选择器 | 代码 | `ACTR_WEB_GUEST_MODE` 不再有意义 |
-| `cli/src/commands/run.rs` 的 `jco_dir` mount 路由 | 代码 | `<package_url>.jco/*` SW 不再请求 |
-| `cli/src/web_assets.rs::ACTOR_WBG_SW_JS` const | 代码 | 与 `ACTOR_SW_JS` 合并 |
-| `bindings/web/package.json` 的 `@bytecodealliance/jco@1.18.1` | 依赖 | npm devDep |
-| `bindings/web/package.json` 的 `transpile-component` script | 配置 | 引用已删脚本 |
+| `packages/actr-web/packages/web-sdk/src/actor.sw.js` (CM 旧版) | 文件 | `loadWithComponentBridge` + jco import 表 |
+| `packages/actr-web/scripts/transpile-component.sh` | 文件 | 调 `jco transpile` 的 wrapper |
+| `packages/actr-web/examples/echo/start.sh` | 文件 | CM-only launcher (`jco transpile` + `ACTR_WEB_GUEST_MODE=cm`) |
+| `packages/actr-web/examples/echo/server/wasm/` | 目录 | pre-Phase-6 的 `echo-server-web` 独立 crate |
+| `packages/actr-web/examples/echo/{server,client}-guest-wbg/` | 目录 | Phase 6c 删 source 但 disk 留下 target/pkg |
+| `packages/actr-web/examples/echo/release/*.jco` | 目录 | jco 转译产物 |
+| `crates/actr-cli/src/commands/run.rs::serve_actor_sw_js` 的 env 选择器 | 代码 | `ACTR_WEB_GUEST_MODE` 不再有意义 |
+| `crates/actr-cli/src/commands/run.rs` 的 `jco_dir` mount 路由 | 代码 | `<package_url>.jco/*` SW 不再请求 |
+| `crates/actr-cli/src/web_assets.rs::ACTOR_WBG_SW_JS` const | 代码 | 与 `ACTOR_SW_JS` 合并 |
+| `packages/actr-web/package.json` 的 `@bytecodealliance/jco@1.18.1` | 依赖 | npm devDep |
+| `packages/actr-web/package.json` 的 `transpile-component` script | 配置 | 引用已删脚本 |
 
 ### 6.2 死代码模块
 
 | 模块 | 删除原因 | commit |
 |------|---------|--------|
-| `bindings/web/crates/sw-host/src/webrtc_recovery.rs` | `WebRtcRecoveryManager` 零外部消费，`request_webrtc_rebuild` 自带 `#[allow(dead_code)]` | `67736e2d` |
-| `bindings/web/crates/dom-bridge/src/webrtc/coordinator.rs` (整模块) | TD-001 cascade 收尾；`WebRtcCoordinator` 在 dom-bridge 这一份零调用 | `15fa2aa1` |
-| `bindings/web/examples/{fastpath-demo,zerocopy-comparison}/` | README-only（无源码），移到 `bindings/web/docs/` | `15fa2aa1` |
-| `examples/typescript/echo-workload/` | jco componentize polyglot demo，"experimental / not in CI"，零代码引用 | `67736e2d` |
+| `packages/actr-web/crates/sw-host/src/webrtc_recovery.rs` | `WebRtcRecoveryManager` 零外部消费，`request_webrtc_rebuild` 自带 `#[allow(dead_code)]` | `67736e2d` |
+| `packages/actr-web/crates/dom-bridge/src/webrtc/coordinator.rs` (整模块) | TD-001 cascade 收尾；`WebRtcCoordinator` 在 dom-bridge 这一份零调用 | `15fa2aa1` |
+| `packages/actr-web/examples/{fastpath-demo,zerocopy-comparison}/` | README-only（无源码），移到 `packages/actr-web/docs/` | `15fa2aa1` |
+| `examples/actr/typescript/echo-workload/` | jco componentize polyglot demo，"experimental / not in CI"，零代码引用 | `67736e2d` |
 
 ### 6.3 重命名（向后兼容打破点）
 
 | 旧名 | 新名 | 范围 | commit |
 |------|------|------|--------|
-| `actor.sw.js` (CM) | 已删 | web-sdk + cli/assets | `855bb658` |
-| `actor-wbg.sw.js` | `actor.sw.js` | web-sdk + cli/assets | `855bb658` |
+| `actor.sw.js` (CM) | 已删 | web-sdk + crates/actr-cli/assets | `855bb658` |
+| `actor-wbg.sw.js` | `actor.sw.js` | web-sdk + crates/actr-cli/assets | `855bb658` |
 | `start-mock-wbg.sh` | `start-mock.sh` | echo example | `855bb658` |
 | `register_component_workload` | `register_guest_workload` | sw-host 公开面 + JS 调用 | `855bb658` |
 
@@ -502,24 +502,24 @@ T18 诊断 (4 轮 spike)
 **新增**：
 
 ```rust
-// core/framework
+// crates/actr-framework
 pub mod web;                          // WebContext / WebWorkloadAdapter
 pub use entry;                        // entry! macro 加 web target arm
 
-// bindings/web/crates/actr-web-abi
+// packages/actr-web/crates/actr-web-abi
 pub mod types;  pub mod guest;  pub mod host;  // 自 WIT 生成
 
-// tools/wit-compile-web
+// tools/actr/wit-compile-web
 // 不是 lib，只有 bin
 ```
 
 **删除 / 收窄**：
 
 ```rust
-// core/hyper 大量 pub → pub(crate)
+// crates/actr-hyper 大量 pub → pub(crate)
 // 对外仍提供：Node / Hyper / WorkloadPackage / Context / RpcRequest 等核心类型
 
-// bindings/web/crates/sw-host
+// packages/actr-web/crates/sw-host
 - pub fn register_component_workload  →  + pub fn register_guest_workload
 - pub use webrtc_recovery::{...}       →  整模块删除
 - pub use webrtc::WebRtcCoordinator    →  整模块删除 (dom-bridge)
@@ -566,19 +566,19 @@ WIT 本身**结构稳定**（17 个方法 + 10 record + 3 variant）。**重要*
 
 ```bash
 # 旧
-cd bindings/web/examples/echo
+cd packages/actr-web/examples/echo
 ./start.sh             # CM-only, 已删
 ./start-mock-wbg.sh    # 已重命名
 
 # 新
-cd bindings/web/examples/echo
+cd packages/actr-web/examples/echo
 ./start-mock.sh                                   # default BasicFunction
 SUITES='BasicFunction MultiTab' ./start-mock.sh   # 全套 12/12
 ```
 
 ### 8.4 给 protoc-gen 用户
 
-`bindings/web/examples/codegen-test` 是 codegen 的 smoke target。本批次 `tools/protoc-gen/rust/src/modern_generator.rs` 曾增 `ServiceHandler` impl 自动 emit（commit `cd372f94`）；该 witness 后经核查全仓无消费方，已作为死代码删除（#292），生成物不再包含。
+`packages/actr-web/examples/codegen-test` 是 codegen 的 smoke target。本批次 `tools/actr/protoc-gen/rust/src/modern_generator.rs` 曾增 `ServiceHandler` impl 自动 emit（commit `cd372f94`）；该 witness 后经核查全仓无消费方，已作为死代码删除（#292），生成物不再包含。
 
 ---
 
@@ -588,10 +588,10 @@ SUITES='BasicFunction MultiTab' ./start-mock.sh   # 全套 12/12
 
 | 风险 | 缓解 |
 |------|------|
-| `tools/wit-compile-web` 是自建 codegen，要跟随 wit-parser / wasm-bindgen 升级 | 钉死 `wit-parser=0.247.0` 与 `wit-lint` 同版本；CI drift gate 守 |
+| `tools/actr/wit-compile-web` 是自建 codegen，要跟随 wit-parser / wasm-bindgen 升级 | 钉死 `wit-parser=0.247.0` 与 `wit-lint` 同版本；CI drift gate 守 |
 | 浏览器侧失去 Component Model "可组合性" | 当前没用到这个特性；如果未来要用，得重新评估 |
 | 169 commits 一次性合入 main 的审查负担 | 拆 review 分支已开（`review/main-pending-2026-04`），可按 commit 拆细 PR |
-| 隔壁同学 `bindings/python/examples/` WIP 误放位置 | 已清理（不属于 git tree） |
+| 隔壁同学 `packages/actr-python/examples/` WIP 误放位置 | 已清理（不属于 git tree） |
 
 ### 9.2 后续工作（非本批次）
 
@@ -603,8 +603,8 @@ SUITES='BasicFunction MultiTab' ./start-mock.sh   # 全套 12/12
 ### 9.3 数据流死角检查
 
 本批次未触及但仍带 TODO 的领域：
-- `core/hyper/src/wasm/host.rs::call_on_start` ── 已 gate 在 `feature = "test-utils"`，生产路径未拉起 lifecycle
-- `bindings/web/crates/dom-bridge/src/lifecycle.rs::DOM_PING` ── 发送侧（dom-bridge crate）在 production 未真正跑（用 TS @actrium/actr-dom）
+- `crates/actr-hyper/src/wasm/host.rs::call_on_start` ── 已 gate 在 `feature = "test-utils"`，生产路径未拉起 lifecycle
+- `packages/actr-web/crates/dom-bridge/src/lifecycle.rs::DOM_PING` ── 发送侧（dom-bridge crate）在 production 未真正跑（用 TS @actrium/actr-dom）
 
 ---
 
@@ -649,7 +649,7 @@ b46dee70  docs(web): spec Option U Phase 6 γ-unified detailed design
 fd3bc05c  feat(web/examples/echo): adapt wbg guests to request_id imports
 eb034d94  fix(sw-host): namespace stored credentials by client_id
 b658d4f0  chore(mock-actrix): warn on WS actor rebind
-1ac5afd4  chore(cli/assets): sync sw-host wasm
+1ac5afd4  chore(crates/actr-cli/assets): sync sw-host wasm
 
 [Phase 6c echo unification]
 87b3401d  feat(web/examples/echo): unify guest crates via entry! macro
@@ -662,9 +662,9 @@ cff7f71a  chore: build unified guests in start-mock-wbg.sh
 
 [本 session]
 cd5971da  chore(web): add sync-cli-assets script (TD-002)
-f4986dd0  ci(web): add WIT codegen + cli/assets drift gates (Phase 5)
+f4986dd0  ci(web): add WIT codegen + crates/actr-cli/assets drift gates (Phase 5)
 ec6ffafd  chore(web): drop orphan DataLane setter cascade (TD-001)
-0db0c424  chore(cli/assets): sync sw-host wasm after TD-001
+0db0c424  chore(crates/actr-cli/assets): sync sw-host wasm after TD-001
 855bb658  refactor(web): drop Component Model + jco path (Phase 8)
 5561ffe1  chore: ignore .claude/ and smoke crate's Cargo.lock
 15fa2aa1  chore: post-Phase-8 cleanup
@@ -682,8 +682,8 @@ d1fad7f5  docs(examples/ts): clarify jco componentize vs transpile
 1. **Option U 主线**（核心架构变更）
    - 先读 [option-u-wit-compile-web.zh.md](./option-u-wit-compile-web.zh.md) §0-§4
    - 再读 [option-u-phase6-gamma-unified.zh.md](./option-u-phase6-gamma-unified.zh.md) §3 / §6
-   - 看代码：`tools/wit-compile-web/src/lib.rs` 主入口
-   - 看代码：`bindings/web/crates/actr-web-abi/src/{types,guest,host}.rs` 生成产物
+   - 看代码：`tools/actr/wit-compile-web/src/lib.rs` 主入口
+   - 看代码：`packages/actr-web/crates/actr-web-abi/src/{types,guest,host}.rs` 生成产物
 
 2. **TD-006 修复**（最复杂 bug）
    - 读 [td-006-multi-client-rpc-analysis.zh.md](./td-006-multi-client-rpc-analysis.zh.md) §0-§5
@@ -691,20 +691,20 @@ d1fad7f5  docs(examples/ts): clarify jco componentize vs transpile
 
 3. **原生 typestate 重构**
    - 看 commit `48ba2f42` + `e8df80ec` + `eae01427` + `fa1a0f45` 的串
-   - 重点是 `core/hyper/src/lib.rs` + `core/hyper/src/lifecycle/node.rs`
+   - 重点是 `crates/actr-hyper/src/lib.rs` + `crates/actr-hyper/src/lifecycle/node.rs`
 
 4. **API 收敛批量**
    - 不必逐 commit 看；整理思路见上节「API 公共面收敛」（§3.5）
 
 5. **Phase 8 删除清单 + 后续清理**
    - commit `855bb658` + `cae0d55b` + `15fa2aa1` + `67736e2d` 一组
-   - 验证：`grep -rn "jco\|Component Model" bindings/web/ --include='*.rs'` 不应命中浏览器路径，只命中 wasmtime native 路径
+   - 验证：`grep -rn "jco\|Component Model" packages/actr-web/ --include='*.rs'` 不应命中浏览器路径，只命中 wasmtime native 路径
 
 如果时间紧，最关键的 2 个文件读：
 
 ```
-bindings/web/docs/option-u-wit-compile-web.zh.md   # 整体设计
-bindings/web/docs/td-006-multi-client-rpc-analysis.zh.md   # 最难的 bug
+packages/actr-web/docs/option-u-wit-compile-web.zh.md   # 整体设计
+packages/actr-web/docs/td-006-multi-client-rpc-analysis.zh.md   # 最难的 bug
 ```
 
 ---

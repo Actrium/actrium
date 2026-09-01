@@ -17,9 +17,9 @@ Web 环境的特殊性：
 
 **当前状态**：生命周期 baseline 已落地。
 
-- DOM 侧 `bindings/web/crates/dom-bridge/src/lifecycle.rs` 已实现 session id、`DOM_READY`、`DOM_UNLOADING`、`DOM_PING`、load/beforeunload/visibilitychange listener。
-- SW 侧 `bindings/web/crates/sw-host/src/lifecycle.rs` 已实现 message listener、active session tracking、DOM_READY/DOM_UNLOADING/DOM_PING 处理、错误报告转发，以及可选 `WirePool` stale WebRTC cleanup。
-- SW 全局初始化路径 `bindings/web/crates/sw-host/src/runtime.rs::init_global` 已创建并初始化 `SwLifecycleManager`。
+- DOM 侧 `packages/actr-web/crates/dom-bridge/src/lifecycle.rs` 已实现 session id、`DOM_READY`、`DOM_UNLOADING`、`DOM_PING`、load/beforeunload/visibilitychange listener。
+- SW 侧 `packages/actr-web/crates/sw-host/src/lifecycle.rs` 已实现 message listener、active session tracking、DOM_READY/DOM_UNLOADING/DOM_PING 处理、错误报告转发，以及可选 `WirePool` stale WebRTC cleanup。
+- SW 全局初始化路径 `packages/actr-web/crates/sw-host/src/runtime.rs::init_global` 已创建并初始化 `SwLifecycleManager`。
 - 剩余缺口：`WirePool` 绑定到 lifecycle manager 的完整接线、DOM 无 controller 时的 re-registration、DOM 重启后的 WebRTC/MessagePort 重建闭环、stream/media handler 重新注册策略。
 
 ---
@@ -109,7 +109,7 @@ SW 长时间空闲，被浏览器终止
 
 ```rust
 // ========== DOM 侧 ==========
-// bindings/web/crates/dom-bridge/src/lifecycle.rs (已实现 baseline)
+// packages/actr-web/crates/dom-bridge/src/lifecycle.rs (已实现 baseline)
 
 use web_sys::{window, MessageEvent, Navigator};
 use wasm_bindgen::prelude::*;
@@ -248,7 +248,7 @@ fn check_sw_alive() {
 }
 
 // ========== SW 侧 ==========
-// bindings/web/crates/sw-host/src/lifecycle.rs (已实现 baseline)
+// packages/actr-web/crates/sw-host/src/lifecycle.rs (已实现 baseline)
 
 use wasm_bindgen::prelude::*;
 use web_sys::ExtendableMessageEvent;
@@ -655,8 +655,8 @@ fn setup_lifecycle_listener(system: &DomSystem) {
 ### Phase 1: 基础生命周期（P0，已实现 baseline）
 
 **文件**：
-- `bindings/web/crates/dom-bridge/src/lifecycle.rs`
-- `bindings/web/crates/sw-host/src/lifecycle.rs`
+- `packages/actr-web/crates/dom-bridge/src/lifecycle.rs`
+- `packages/actr-web/crates/sw-host/src/lifecycle.rs`
 
 **功能**：
 - ✅ DOM 加载时发送 "DOM_READY"

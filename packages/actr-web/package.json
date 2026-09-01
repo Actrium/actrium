@@ -40,7 +40,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Actrium/actr.git"
+    "url": "git+https://github.com/Actrium/actrium.git"
   },
   "keywords": [
     "actor",

@@ -80,7 +80,7 @@ stage.
 
 ## 5. Binding observation surface
 
-- FFI (`bindings/ffi`): `WebRtcPeerStateBridge` (+ network-path /
+- FFI (`crates/actr-ffi`): `WebRtcPeerStateBridge` (+ network-path /
   unavailable-reason enums), `WebRtcObserverBridge::on_state_changed`,
   `ActrRefWrapper` get/list/subscribe with a `RtcPeerStateListener`
   callback + drop-to-stop `RtcPeerStateSubscription`. The `webrtc-v020`

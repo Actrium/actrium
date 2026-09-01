@@ -9,7 +9,7 @@ permissions:
 
 defaults:
   run:
-    working-directory: tools/protoc-gen/python
+    working-directory: tools/actr/protoc-gen/python
 
 jobs:
   build:
@@ -24,7 +24,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
-          cache-dependency-path: tools/protoc-gen/python/pyproject.toml
+          cache-dependency-path: tools/actr/protoc-gen/python/pyproject.toml
 
       - name: Install package
         run: pip install -e .

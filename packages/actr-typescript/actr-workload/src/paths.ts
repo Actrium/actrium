@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ENV_WIT_PATH = 'ACTR_WORKLOAD_WIT';
-const REPO_WIT_PATH = 'core/framework/wit-v2/actr-workload.wit';
+const REPO_WIT_PATH = 'crates/actr-framework/wit-v2/actr-workload.wit';
 const PACKAGED_WIT_PATH = 'wit-v2/actr-workload.wit';
 
 function assertExistingFile(path: string, source: string): string {
@@ -62,7 +62,7 @@ export function resolveWorkloadWit(explicitPath?: string): string {
   throw new Error(
     [
       'ACTR workload WIT not found.',
-      'Checked explicit path, ACTR_WORKLOAD_WIT, nearest core/framework/wit-v2/actr-workload.wit,',
+      'Checked explicit path, ACTR_WORKLOAD_WIT, nearest crates/actr-framework/wit-v2/actr-workload.wit,',
       `and packaged fallbacks: ${packagedWitCandidates().join(', ')}`,
     ].join(' '),
   );

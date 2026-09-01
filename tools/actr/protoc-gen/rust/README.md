@@ -4,7 +4,7 @@ Protoc plugin for generating actr-framework code from protobuf service definitio
 
 ## Status
 
-🚧 **Placeholder** - Code will be moved from `cli/crates/protoc-gen-actrframework`
+🚧 **Placeholder** - Code will be moved from `crates/actr-cli/crates/protoc-gen-actrframework`
 
 ## What it generates
 
@@ -41,7 +41,7 @@ protoc --actrframework_out=src/generated proto/*.proto
 
 ## Install (macOS arm64 release asset)
 
-Prebuilt binaries are published on [Actrium/actr releases](https://github.com/Actrium/actr/releases).
+Prebuilt binaries are published on [Actrium/actr releases](https://github.com/Actrium/actrium/releases).
 
 ```bash
 # Download protoc-gen-actrframework-macos-arm64.zip and its .sha256, then:
@@ -52,7 +52,7 @@ cp protoc-gen-actrframework /usr/local/bin/
 
 ## TODO
 
-- [ ] Move code from cli/crates/protoc-gen-actrframework
+- [ ] Move code from crates/actr-cli/crates/protoc-gen-actrframework
 - [ ] Update templates to use MessageDispatcher
 - [ ] Update templates to use Workload::Dispatcher
 - [ ] Add integration tests

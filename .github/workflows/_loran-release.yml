@@ -1,4 +1,4 @@
-name: Reusable actrix Release
+name: Reusable Loran Server Release
 
 on:
   workflow_call:
@@ -18,7 +18,7 @@ env:
 
 jobs:
   validate:
-    name: Validate actrix release tag
+    name: Validate Loran server release tag
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.release.outputs.version }}
@@ -154,7 +154,7 @@ jobs:
       # (rust-embed). build.rs would also try this, but doing it explicitly
       # keeps the release reproducible (frozen lockfile).
       - name: Build Admin UI
-        working-directory: source/actrix/crates/actrixd/admin/web
+        working-directory: source/crates/loran-server/admin/web
         run: |
           pnpm install --frozen-lockfile
           pnpm run build
@@ -197,15 +197,15 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: source/actrix/deploy
+          workspaces: source/loran/deploy
       - name: Build actrix-deploy (release)
-        working-directory: source/actrix/deploy
+        working-directory: source/loran/deploy
         run: cargo build --release
       - name: Stage binary
         shell: bash
         run: |
           mkdir -p dist
-          cp "source/actrix/deploy/target/release/deploy" "dist/actrix-deploy-linux-${{ matrix.arch }}"
+          cp "source/loran/deploy/target/release/deploy" "dist/actrix-deploy-linux-${{ matrix.arch }}"
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -264,11 +264,11 @@ jobs:
           done
 
   report:
-    name: Collect actrix release state
+    name: Collect Loran server release state
     if: always()
     needs: [validate, build, build-deploy, publish]
     runs-on: ubuntu-latest
     steps:
       - name: Report
         run: |
-          echo "actrix release complete for ${{ inputs.tag }}"
+          echo "Loran server release complete for ${{ inputs.tag }}"

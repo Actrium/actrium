@@ -40,24 +40,24 @@ jobs:
         run: cargo install wasm-pack --version 0.15.0 --locked
 
       - name: Check formatting
-        working-directory: bindings/web
+        working-directory: packages/actr-web
         run: cargo fmt --all -- --check
 
       - name: Check web workspace
-        working-directory: bindings/web
+        working-directory: packages/actr-web
         run: cargo check --workspace --target wasm32-unknown-unknown --locked
 
       - name: WIT codegen drift gate (Option U)
         run: cargo run -p actr-wit-compile-web -- --check
 
       - name: Build sw-host runtime assets
-        working-directory: bindings/web/crates/sw-host
+        working-directory: packages/actr-web/crates/sw-host
         env:
           ACTR_SKIP_CLI_ASSET_SYNC: "1"
         run: bash build.sh
 
-      - name: cli/assets sync drift gate
-        run: bash bindings/web/scripts/sync-cli-assets.sh --check --skip-sw-host
+      - name: crates/actr-cli/assets sync drift gate
+        run: bash packages/actr-web/scripts/sync-cli-assets.sh --check --skip-sw-host
 
   browser-e2e:
     name: Web Browser E2E (Puppeteer)
@@ -108,7 +108,7 @@ jobs:
           google-chrome --version || google-chrome-stable --version || true
 
       - name: Install web binding root deps (puppeteer)
-        working-directory: bindings/web
+        working-directory: packages/actr-web
         env:
           PUPPETEER_SKIP_DOWNLOAD: "true"
           PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
@@ -118,7 +118,7 @@ jobs:
           pnpm install --frozen-lockfile
 
       - name: Generate CLI web runtime assets
-        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+        run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
 
       - name: Pre-build actr CLI (release, embeds web assets)
         run: cargo build --release -p actr-cli --bin actr --features wasm-engine
@@ -127,7 +127,7 @@ jobs:
         run: cargo build --release -p actr-mock-actrix --bin mock-actrix
 
       - name: Run echo browser e2e
-        working-directory: bindings/web/examples/echo
+        working-directory: packages/actr-web/examples/echo
         env:
           ACTR_CMD: ${{ github.workspace }}/target/release/actr
           PUPPETEER_EXECUTABLE_PATH: /usr/bin/google-chrome

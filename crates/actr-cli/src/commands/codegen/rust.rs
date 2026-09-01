@@ -909,7 +909,7 @@ impl {handler_trait} for {impl_name} {{
         let current_dir = std::env::current_dir()?;
         let workspace_root = current_dir.ancestors().find(|p| {
             let is_workspace =
-                p.join("Cargo.toml").exists() && p.join("tools/protoc-gen/rust").exists();
+                p.join("Cargo.toml").exists() && p.join("tools/actr/protoc-gen/rust").exists();
             if is_workspace {
                 debug!("Found workspace root: {:?}", p);
             }
@@ -927,14 +927,16 @@ impl {handler_trait} for {impl_name} {{
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
         if let Some(parent_workspace) = manifest_dir.parent()
             && parent_workspace.join("Cargo.toml").exists()
-            && parent_workspace.join("tools/protoc-gen/rust").exists()
+            && parent_workspace.join("tools/actr/protoc-gen/rust").exists()
         {
             return Ok(Some(parent_workspace.to_path_buf()));
         }
 
         let sibling_workspace = manifest_dir.join("../actr");
         if sibling_workspace.join("Cargo.toml").exists()
-            && sibling_workspace.join("tools/protoc-gen/rust").exists()
+            && sibling_workspace
+                .join("tools/actr/protoc-gen/rust")
+                .exists()
         {
             return Ok(Some(sibling_workspace));
         }
@@ -966,7 +968,7 @@ impl {handler_trait} for {impl_name} {{
         install_cmd
             .arg("install")
             .arg("--path")
-            .arg(workspace_root.join("tools/protoc-gen/rust"))
+            .arg(workspace_root.join("tools/actr/protoc-gen/rust"))
             .arg("--bin")
             .arg("protoc-gen-actrframework")
             .arg("--force");
@@ -1025,7 +1027,7 @@ impl {handler_trait} for {impl_name} {{
     fn install_plugin_from_github_source(&self) -> Result<PathBuf> {
         const PACKAGE_NAME: &str = "actr-framework-protoc-codegen";
         const PLUGIN_NAME: &str = "protoc-gen-actrframework";
-        const REPOSITORY_URL: &str = "https://github.com/Actrium/actr.git";
+        const REPOSITORY_URL: &str = "https://github.com/Actrium/actrium.git";
 
         let mut install_cmd = StdCommand::new("cargo");
         install_cmd

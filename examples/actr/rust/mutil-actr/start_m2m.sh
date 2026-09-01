@@ -27,19 +27,19 @@ echo "📊 Starting $NUM_CLIENTS concurrent clients and $NUM_SERVERS servers"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ACTOR_RTC_DIR="$(cd "$WORKSPACE_ROOT/../../.." && pwd)"
-ACTRIX_DIR="$ACTOR_RTC_DIR/actrix"
+ACTRIX_DIR="$ACTOR_RTC_DIR"
 # Try multiple config locations
 ACTRIX_CONFIG=""
-for candidate in "$SCRIPT_DIR/actrix-config.toml" "$WORKSPACE_ROOT/actrix-config.toml" "$ACTRIX_DIR/config.example.toml"; do
+for candidate in "$SCRIPT_DIR/actrix-config.toml" "$WORKSPACE_ROOT/actrix-config.toml" "$ACTRIX_DIR/loran/config/actrix.example.toml"; do
     if [ -f "$candidate" ]; then
         ACTRIX_CONFIG="$candidate"
         break
     fi
 done
 if [ -z "$ACTRIX_CONFIG" ]; then
-    if [ -f "$ACTRIX_DIR/config.example.toml" ]; then
+    if [ -f "$ACTRIX_DIR/loran/config/actrix.example.toml" ]; then
         ACTRIX_CONFIG="$WORKSPACE_ROOT/actrix-config.toml"
-        cp "$ACTRIX_DIR/config.example.toml" "$ACTRIX_CONFIG"
+        cp "$ACTRIX_DIR/loran/config/actrix.example.toml" "$ACTRIX_CONFIG"
     fi
 fi
 ECHO_SERVER_DIR="$WORKSPACE_ROOT/mutil-actr/server"
@@ -163,7 +163,7 @@ fi
 # Build actrix with opentelemetry feature
 echo "Building actrix from source (with opentelemetry feature)..."
 cd "$ACTRIX_DIR"
-cargo build --features opentelemetry 2>&1 | grep -v "^warning:" || true
+cargo build --manifest-path "$ACTRIX_DIR/crates/loran-server/Cargo.toml" --features opentelemetry 2>&1 | grep -v "^warning:" || true
 
 # Check if build was successful
 if [ ! -f "$ACTRIX_DIR/target/debug/actrix" ]; then
@@ -210,13 +210,13 @@ while [ $COUNTER -lt $MAX_WAIT ]; do
         cat "$LOG_DIR/actrix.log"
         exit 1
     fi
-    
+
     # Check if port 8081 is listening (actrix WebSocket server)
     if lsof -i:8081 > /dev/null 2>&1 || nc -z localhost 8081 2>/dev/null; then
         echo -e "${GREEN}✅ Actrix is running and listening on port 8081${NC}"
         break
     fi
-    
+
     sleep 1
     COUNTER=$((COUNTER + 1))
 done
@@ -303,24 +303,24 @@ REGISTERED_COUNT=0
 for i in $(seq 1 $NUM_SERVERS); do
     LOG_FILE="$LOG_DIR/mutil-actr-server-$i.log"
     COUNTER=0
-    
+
     while [ $COUNTER -lt $MAX_WAIT ]; do
         if ! kill -0 ${SERVER_PIDS[$((i-1))]} 2>/dev/null; then
             echo -e "${RED}❌ Server #$i failed to start${NC}"
             cat "$LOG_FILE"
             exit 1
         fi
-        
+
         if grep -q "ActrNode started\|Echo Server fully started and registered\|ActrNode started" "$LOG_FILE" 2>/dev/null; then
             echo -e "${GREEN}✅ Server #$i registered${NC}"
             REGISTERED_COUNT=$((REGISTERED_COUNT + 1))
             break
         fi
-        
+
         sleep 1
         COUNTER=$((COUNTER + 1))
     done
-    
+
     if [ $COUNTER -eq $MAX_WAIT ]; then
         echo -e "${YELLOW}⚠️  Server #$i may not have fully registered, continuing...${NC}"
     fi
@@ -392,12 +392,12 @@ while [ $COUNTER -lt $MAX_WAIT ]; do
             RUNNING=$((RUNNING + 1))
         fi
     done
-    
+
     if [ $RUNNING -eq 0 ]; then
         echo "✅ All clients completed"
         break
     fi
-    
+
     sleep 1
     COUNTER=$((COUNTER + 1))
 done
@@ -420,7 +420,7 @@ FAIL_COUNT=0
 
 for i in $(seq 1 $NUM_CLIENTS); do
     LOG_FILE="$LOG_DIR/mutil-actr-client-$i.log"
-    
+
     # Check if response is successful
     if grep -q "success\|Got response from server" "$LOG_FILE"; then
         SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
@@ -451,7 +451,7 @@ if [ $SUCCESS_COUNT -eq $NUM_CLIENTS ]; then
     echo "   • Response contains corresponding client ID"
     echo "   • Using actrix as signaling server"
     echo ""
-    
+
     # Show all successful client outputs
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "📝 All client outputs:"
@@ -465,7 +465,7 @@ if [ $SUCCESS_COUNT -eq $NUM_CLIENTS ]; then
         fi
     done
     echo ""
-    
+
     # Show server statistics
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "📝 Server processing stats:"
@@ -481,7 +481,7 @@ if [ $SUCCESS_COUNT -eq $NUM_CLIENTS ]; then
         fi
     done
     echo ""
-    
+
     exit 0
 else
     echo -e "${RED}❌ Test failed!${NC}"

@@ -1,6 +1,6 @@
 # Phase 3 零拷贝优化技术分析
 
-> **历史设计快照 / 非当前实现指南**（2026-01-08）：本文是零拷贝优化实施前后的方案分析材料，保留用于理解当时的设计取舍。当前 helper 与传输路径事实请以 `bindings/web/crates/common/src/zero_copy.rs`、`bindings/web/crates/sw-host/src/transport/lane.rs`、`bindings/web/crates/dom-bridge/src/transport/lane.rs` 和 postmessage 相关实现为准。文中的 Phase 规划、性能估算和 feature gate 例子不是当前 roadmap。
+> **历史设计快照 / 非当前实现指南**（2026-01-08）：本文是零拷贝优化实施前后的方案分析材料，保留用于理解当时的设计取舍。当前 helper 与传输路径事实请以 `packages/actr-web/crates/common/src/zero_copy.rs`、`packages/actr-web/crates/sw-host/src/transport/lane.rs`、`packages/actr-web/crates/dom-bridge/src/transport/lane.rs` 和 postmessage 相关实现为准。文中的 Phase 规划、性能估算和 feature gate 例子不是当前 roadmap。
 
 ## 概述
 

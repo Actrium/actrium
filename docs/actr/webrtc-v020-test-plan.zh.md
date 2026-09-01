@@ -15,7 +15,7 @@
 
 关联文档：
 
-- [架构 RFC](../rfcs/0504-webrtc-v020-rtc-controller-architecture.md)
+- [架构 RFC](../../rfcs/actr/0504-webrtc-v020-rtc-controller-architecture.md)
 - [T1/T2/T3 测试契约](webrtc-v020-test-contract.md)
 - [恢复测试与发布门禁](webrtc-v020-recovery-test-plan.md)
 - [Runtime 时钟能力跟踪](webrtc-v020-clock-patch-tracking.md)
@@ -149,7 +149,7 @@ flowchart RL
 
 ### 4.1 v0.20 模块内测试
 
-`core/hyper/src/wire/webrtc/v020` 下共 236 个测试标注，且没有 `#[ignore]`：
+`crates/actr-hyper/src/wire/webrtc/v020` 下共 236 个测试标注，且没有 `#[ignore]`：
 
 | 领域 | 数量 | 主要内容 |
 | --- | ---: | --- |
@@ -694,13 +694,13 @@ cargo nextest run --workspace --all-features --no-fail-fast
 
 ## 14. 关键代码入口
 
-- v0.20 实现：`core/hyper/src/wire/webrtc/v020/`
-- 统一 Handler：`core/hyper/src/wire/webrtc/v020/event_handler.rs`
-- PC factory/Runtime 注入：`core/hyper/src/wire/webrtc/v020/factory.rs`
-- 已有 Runtime fault：`core/hyper/src/wire/webrtc/v020/fault.rs`
-- 当前 packet filter：`core/hyper/src/wire/webrtc/test_runtime.rs`
-- 完整集成 harness：`core/hyper/src/test_support/rtc_harness.rs`
-- 旧 VNet 兼容 fixture：`core/hyper/tests/common/vnet.rs`
-- 公开状态：`core/framework/src/workload.rs`
+- v0.20 实现：`crates/actr-hyper/src/wire/webrtc/v020/`
+- 统一 Handler：`crates/actr-hyper/src/wire/webrtc/v020/event_handler.rs`
+- PC factory/Runtime 注入：`crates/actr-hyper/src/wire/webrtc/v020/factory.rs`
+- 已有 Runtime fault：`crates/actr-hyper/src/wire/webrtc/v020/fault.rs`
+- 当前 packet filter：`crates/actr-hyper/src/wire/webrtc/test_runtime.rs`
+- 完整集成 harness：`crates/actr-hyper/src/test_support/rtc_harness.rs`
+- 旧 VNet 兼容 fixture：`crates/actr-hyper/tests/common/vnet.rs`
+- 公开状态：`crates/actr-framework/src/workload.rs`
 - nextest 策略：`.config/nextest.toml`
 - CI：`.github/workflows/ci-gate.yml`、`.github/workflows/ci-e2e.yml`

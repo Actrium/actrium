@@ -2,7 +2,7 @@
 #
 # kotlin-echo-app/run.sh — Kotlin Android nightly e2e (echo scenario).
 #
-# Mirrors e2e/swift-echo-app: a Rust EchoService is scaffolded, built, published
+# Mirrors tests/e2e/actr/swift-echo-app: a Rust EchoService is scaffolded, built, published
 # to local actrix and run; a Kotlin Android client (linked mode, scaffolded via
 # `actr init -l kotlin --template echo`) calls echo.EchoService.Echo on it; the
 # EchoIntegrationTest asserts the reply. Verification is `./gradlew
@@ -14,9 +14,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 
-source "$REPO_ROOT/e2e/package-runtime-echo/lib/common.sh"
+source "$REPO_ROOT/tests/e2e/actr/package-runtime-echo/lib/common.sh"
 source "$SCRIPT_DIR/../kotlin-lib/lib/readiness.sh"
 source "$SCRIPT_DIR/../kotlin-lib/lib/kotlin-app.sh"
 
@@ -24,8 +24,8 @@ HTTP_PORT=8081
 ICE_PORT=3478
 ADMIN_PASSWORD="e2e-test-password"
 MANUFACTURER="actrium"
-ACTR_CLI_MANIFEST="$REPO_ROOT/cli/Cargo.toml"
-ACTRIX_CONFIG_TEMPLATE="$REPO_ROOT/e2e/package-runtime-echo/config/actrix.toml"
+ACTR_CLI_MANIFEST="$REPO_ROOT/crates/actr-cli/Cargo.toml"
+ACTRIX_CONFIG_TEMPLATE="$REPO_ROOT/tests/e2e/actr/package-runtime-echo/config/actrix.toml"
 E2E_TARGET_ROOT="$REPO_ROOT/target/e2e-cache/kotlin-echo-app"
 ACTR_TARGET_DIR="$E2E_TARGET_ROOT/actr-cli"
 TEMP_SERVICE_TARGET_DIR="$E2E_TARGET_ROOT/temp-service"
@@ -131,7 +131,7 @@ EOF
 seed_client_protos() {
     section "📄 Seeding client protos"
     mkdir -p "$TMP_APP_DIR/protos/remote/${SERVICE_ACTOR}"
-    cp "$REPO_ROOT/e2e/package-runtime-echo/proto/echo.proto" \
+    cp "$REPO_ROOT/tests/e2e/actr/package-runtime-echo/proto/echo.proto" \
        "$TMP_APP_DIR/protos/remote/${SERVICE_ACTOR}/echo.proto"
     success "Remote echo.proto written for dependency alias ${SERVICE_ACTOR}"
 }
@@ -146,13 +146,13 @@ write_instrumentation_test() {
     mkdir -p "$pkg_dir" "$main_dir"
 
     render_template \
-        "$REPO_ROOT/e2e/kotlin-lib/EchoIntegrationTest.kt" \
+        "$REPO_ROOT/tests/e2e/actr/kotlin-lib/EchoIntegrationTest.kt" \
         "$pkg_dir/EchoIntegrationTest.kt" \
         "__PACKAGE__=$APPLICATION_ID"
     rm -f "$pkg_dir/EchoIntegrationTest.kt.bak"
 
     render_template \
-        "$REPO_ROOT/e2e/kotlin-lib/MainActivity.kt.tpl" \
+        "$REPO_ROOT/tests/e2e/actr/kotlin-lib/MainActivity.kt.tpl" \
         "$main_dir/MainActivity.kt" \
         "__PACKAGE__=$APPLICATION_ID"
     rm -f "$main_dir/MainActivity.kt.bak"

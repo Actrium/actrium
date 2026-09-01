@@ -7,12 +7,12 @@ on:
   push:
     branches: [main]
     paths:
-      - "actrix/crates/actrixd/admin/web/**"
+      - "crates/loran-server/admin/web/**"
       - ".github/workflows/ci-admin-ui.yml"
   pull_request:
     branches: [main]
     paths:
-      - "actrix/crates/actrixd/admin/web/**"
+      - "crates/loran-server/admin/web/**"
       - ".github/workflows/ci-admin-ui.yml"
 
 permissions:
@@ -20,7 +20,7 @@ permissions:
 
 defaults:
   run:
-    working-directory: actrix/crates/actrixd/admin/web
+    working-directory: crates/loran-server/admin/web
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

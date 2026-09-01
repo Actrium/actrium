@@ -25,12 +25,12 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 # Determine paths and switch to workspace root
 # Use BASH_SOURCE[0] to reliably locate this script regardless of CWD
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# SCRIPT_DIR       = .../Actrium/actr/examples/rust/data-stream
+# SCRIPT_DIR       = .../Actrium/actrium/examples/actr/rust/data-stream
 # WORKSPACE_ROOT   = .../Actrium/actr/examples/rust  (the Cargo workspace)
 # ACTOR_RTC_DIR    = .../Actrium                     (repo root, parent of both actr/ and actrix/)
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ACTOR_RTC_DIR="$(cd "$WORKSPACE_ROOT/../../.." && pwd)"
-ACTRIX_DIR="$ACTOR_RTC_DIR/actrix"
+ACTRIX_DIR="$ACTOR_RTC_DIR"
 ACTRIX_CONFIG="$WORKSPACE_ROOT/actrix-config.toml"
 PROTO_DIR="$SCRIPT_DIR/proto"
 
@@ -183,7 +183,7 @@ fi
 # Build actrix with opentelemetry feature
 echo "Building actrix from source (with opentelemetry feature)..."
 cd "$ACTRIX_DIR"
-cargo build --features opentelemetry 2>&1 | tail -5
+cargo build --manifest-path "$ACTRIX_DIR/crates/loran-server/Cargo.toml" --features opentelemetry 2>&1 | tail -5
 
 # Check if build was successful
 if [ ! -f "$ACTRIX_DIR/target/debug/actrix" ]; then
@@ -206,8 +206,8 @@ if [ -f "$WORKSPACE_ROOT/actrix-config.toml" ]; then
 elif [ -f "$WORKSPACE_ROOT/actrix-config.example.toml" ]; then
     cp "$WORKSPACE_ROOT/actrix-config.example.toml" "$WORKSPACE_ROOT/actrix-config.toml"
     ACTRIX_CONFIG="$WORKSPACE_ROOT/actrix-config.toml"
-elif [ -f "$ACTRIX_DIR/config.example.toml" ]; then
-    cp "$ACTRIX_DIR/config.example.toml" "$WORKSPACE_ROOT/actrix-config.toml"
+elif [ -f "$ACTRIX_DIR/loran/config/actrix.example.toml" ]; then
+    cp "$ACTRIX_DIR/loran/config/actrix.example.toml" "$WORKSPACE_ROOT/actrix-config.toml"
     ACTRIX_CONFIG="$WORKSPACE_ROOT/actrix-config.toml"
 else
     echo -e "${RED}❌ Cannot find actrix config file${NC}"
@@ -245,7 +245,7 @@ if [ ! -f "$ACTRIX_DB" ]; then
     echo "   Database not found, starting actrix briefly to initialize..."
     $ACTRIX_CMD --config "$ACTRIX_CONFIG" > "$LOG_DIR/actrix-init.log" 2>&1 &
     ACTRIX_INIT_PID=$!
-    
+
     MAX_WAIT=15
     COUNTER=0
     while [ $COUNTER -lt $MAX_WAIT ]; do
@@ -255,12 +255,12 @@ if [ ! -f "$ACTRIX_DB" ]; then
         sleep 1
         COUNTER=$((COUNTER + 1))
     done
-    
+
     # Stop the init instance
     kill $ACTRIX_INIT_PID 2>/dev/null
     wait $ACTRIX_INIT_PID 2>/dev/null || true
     sleep 2
-    
+
     # Kill any leftover process on port 8081
     if lsof -ti:8081 > /dev/null 2>&1; then
         kill $(lsof -ti:8081) 2>/dev/null || true
@@ -340,12 +340,12 @@ while [ $COUNTER -lt $MAX_WAIT ]; do
         cat "$LOG_DIR/actrix.log"
         exit 1
     fi
-    
+
     if lsof -i:8081 > /dev/null 2>&1 || nc -z localhost 8081 2>/dev/null; then
         echo -e "${GREEN}✅ Actrix is running and listening on port 8081${NC}"
         break
     fi
-    
+
     sleep 1
     COUNTER=$((COUNTER + 1))
 done
@@ -388,13 +388,13 @@ while [ $COUNTER -lt $MAX_WAIT ]; do
         cat "$LOG_DIR/data-stream-receiver.log"
         exit 1
     fi
-    
+
     # Check if receiver has successfully connected to signaling server
     if grep -q "ActrNode started\|Receiver ready to accept file transfers\|ActrNode started" "$LOG_DIR/data-stream-receiver.log" 2>/dev/null; then
         echo -e "${GREEN}✅ Receiver is running and registered${NC}"
         break
     fi
-    
+
     sleep 1
     COUNTER=$((COUNTER + 1))
 done

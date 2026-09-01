@@ -4,8 +4,8 @@
 //!
 //! Two modes:
 //!
-//! - default: read `core/framework/wit/actr-workload.wit`, emit the
-//!   three sources under `bindings/web/crates/actr-web-abi/src/`
+//! - default: read `crates/actr-framework/wit/actr-workload.wit`, emit the
+//!   three sources under `packages/actr-web/crates/actr-web-abi/src/`
 //! - `--check`: regenerate in memory and compare against what is on
 //!   disk, exit non-zero on drift (used by CI)
 
@@ -51,8 +51,8 @@ fn parse_args() -> Result<Args, String> {
                 eprintln!(
                     "usage: wit-compile-web [--check] [--wit <PATH>] [--out <DIR>]\n\n\
                      Defaults:\n  \
-                       --wit core/framework/wit/actr-workload.wit\n  \
-                       --out bindings/web/crates/actr-web-abi/src\n\n\
+                       --wit crates/actr-framework/wit/actr-workload.wit\n  \
+                       --out packages/actr-web/crates/actr-web-abi/src\n\n\
                      --check regenerates in memory and compares against files\n\
                      on disk, exiting 1 on drift. Intended for CI drift gates."
                 );

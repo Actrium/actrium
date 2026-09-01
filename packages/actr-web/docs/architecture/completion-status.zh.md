@@ -3,7 +3,7 @@
 **评估日期**: 2025-11-11（最后更新: 2026-02-28）
 **评估范围**: `/mnt/sdb1/actor-rtc/actr/` vs `/mnt/sdb1/actor-rtc/actr-web/`
 
-> **历史快照说明**：本文主体保留早期完成度评估，不作为当前事实入口。当前源码事实以 `bindings/web/packages/web-sdk/src/actor.sw.js`、`bindings/web/packages/actr-dom/src/fast-path-forwarder.ts`、`bindings/web/crates/sw-host/src/runtime.rs`、`cli/src/web_assets.rs`、`cli/src/commands/run.rs` 为准。
+> **历史快照说明**：本文主体保留早期完成度评估，不作为当前事实入口。当前源码事实以 `packages/actr-web/packages/web-sdk/src/actor.sw.js`、`packages/actr-web/packages/actr-dom/src/fast-path-forwarder.ts`、`packages/actr-web/crates/sw-host/src/runtime.rs`、`crates/actr-cli/src/web_assets.rs`、`crates/actr-cli/src/commands/run.rs` 为准。
 >
 > 当前修正摘要：
 > - 浏览器 guest 路径已经是 Option U / wasm-bindgen 唯一路径；`actor.sw.js` 验证 `.actr`，并从包内加载 wasm-bindgen binary 与签名资源 `resources/glue.js`。
@@ -366,7 +366,7 @@
    - 影响: 流式数据和媒体支持不完整
 
 4. **代码生成工具**
-   - 当前已有 `tools/wit-compile-web` → `actr-web-abi`
+   - 当前已有 `tools/actr/wit-compile-web` → `actr-web-abi`
    - 当前已有 CLI 自包含 `.actr` Web package route
    - 后续重点是补齐更多 guest/API 生成场景，而不是从零实现 Web 平台支持
 

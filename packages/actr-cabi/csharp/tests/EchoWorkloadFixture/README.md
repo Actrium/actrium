@@ -2,7 +2,7 @@
 
 **This package is a CI-only fixture. It is never published to any NuGet feed.**
 
-It bundles the `actr_cabi.dll` built from [`e2e/winui-echo-app/workload`](../../../../../e2e/winui-echo-app/workload).
+It bundles the `actr_cabi.dll` built from [`tests/e2e/actr/winui-echo-app/workload`](../../../../../tests/e2e/actr/winui-echo-app/workload).
 The blocking PR gate validates `win-x64`; the scheduled/manual full-matrix run
 also validates `win-arm64`. Together they cover:
 

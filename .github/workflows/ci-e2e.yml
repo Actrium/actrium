@@ -41,9 +41,9 @@ jobs:
         run: cargo install wasm-pack --version 0.15.0 --locked
       - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
-        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+        run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
       - name: Run package runtime echo e2e
-        run: bash e2e/package-runtime-echo/run.sh
+        run: bash tests/e2e/actr/package-runtime-echo/run.sh
 
   # The standalone Rust echo e2e (`cargo test --test e2e_rust_echo`) was
   # superseded by `package-runtime-echo` once the Rust service template moved
@@ -104,16 +104,16 @@ jobs:
             . -> target/e2e-cache/polyglot-echo/actr-cli
             . -> target/e2e-cache/polyglot-echo/mock-actrix
       - name: Generate CLI web runtime assets
-        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+        run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "24"
       # ── server forms (Rust client, echo scenario) ──────────────────────────
       - name: Run polyglot-echo (--server cdylib-rust --client rust)
-        run: bash e2e/polyglot-echo/run.sh --server cdylib-rust --client rust polyglot-ci-cdylib
+        run: bash tests/e2e/actr/polyglot-echo/run.sh --server cdylib-rust --client rust polyglot-ci-cdylib
       - name: Run polyglot-echo (--server linked-rust --client rust)
-        run: bash e2e/polyglot-echo/run.sh --server linked-rust --client rust polyglot-ci-linked
+        run: bash tests/e2e/actr/polyglot-echo/run.sh --server linked-rust --client rust polyglot-ci-linked
       # linked-rust is used only by the scenario above; reclaim its target dir
       # immediately to cap peak disk usage (#314).
       - name: Clean linked-rust target dir
@@ -126,12 +126,12 @@ jobs:
         # distinguishable from the known-transient flake in the logs.
         run: |
           set +e
-          bash e2e/polyglot-echo/run.sh --server wasm-rust --client rust polyglot-ci-wasm
+          bash tests/e2e/actr/polyglot-echo/run.sh --server wasm-rust --client rust polyglot-ci-wasm
           attempt1=$?
           if [ "$attempt1" -ne 0 ]; then
             echo "::warning::wasm-rust echo attempt 1 failed with exit code $attempt1; retrying once with fresh processes"
             set -e
-            bash e2e/polyglot-echo/run.sh --server wasm-rust --client rust polyglot-ci-wasm
+            bash tests/e2e/actr/polyglot-echo/run.sh --server wasm-rust --client rust polyglot-ci-wasm
           fi
       # wasm-rust is used only by the scenario above; reclaim its target dir.
       - name: Clean wasm-rust target dir
@@ -140,9 +140,9 @@ jobs:
           df -h /
       # ── streaming scenarios (Rust client, dedicated linked stream server) ───
       - name: Run polyglot-echo (--client rust --scenario server-stream)
-        run: bash e2e/polyglot-echo/run.sh --client rust --scenario server-stream polyglot-ci-stream
+        run: bash tests/e2e/actr/polyglot-echo/run.sh --client rust --scenario server-stream polyglot-ci-stream
       - name: Run polyglot-echo (--client rust --scenario bidi)
-        run: bash e2e/polyglot-echo/run.sh --client rust --scenario bidi polyglot-ci-bidi
+        run: bash tests/e2e/actr/polyglot-echo/run.sh --client rust --scenario bidi polyglot-ci-bidi
       # bidi is the last streaming scenario and the last Rust-client scenario, so
       # both stream-server and driver-rust are done after it; reclaim both.
       - name: Clean stream-server and driver-rust target dirs
@@ -151,7 +151,7 @@ jobs:
           df -h /
       # ── cross-language client (TypeScript driver, echo scenario) ────────────
       - name: Run polyglot-echo (--server cdylib-rust --client ts)
-        run: bash e2e/polyglot-echo/run.sh --server cdylib-rust --client ts polyglot-ci-ts
+        run: bash tests/e2e/actr/polyglot-echo/run.sh --server cdylib-rust --client ts polyglot-ci-ts
       # Disk-usage observability: runs regardless of scenario outcome so future
       # disk-pressure issues are immediately locatable in the logs (#314). The
       # per-scenario trees should already have been reclaimed by the steps above.
@@ -175,10 +175,10 @@ jobs:
         with:
           name: polyglot-echo-e2e-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            e2e/polyglot-echo/.tmp/**
-            !e2e/polyglot-echo/.tmp/*/dist/**
-            !e2e/polyglot-echo/.tmp/*/dev-key.json
-            !e2e/polyglot-echo/.tmp/*/service-keychain.json
+            tests/e2e/actr/polyglot-echo/.tmp/**
+            !tests/e2e/actr/polyglot-echo/.tmp/*/dist/**
+            !tests/e2e/actr/polyglot-echo/.tmp/*/dev-key.json
+            !tests/e2e/actr/polyglot-echo/.tmp/*/service-keychain.json
           retention-days: 7
           if-no-files-found: warn
 
@@ -217,17 +217,17 @@ jobs:
         run: cargo install wasm-pack --version 0.15.0 --locked
       - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
-        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+        run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
       - name: Pre-build actr and mock-actrix
         run: |
           cargo build --locked --release -p actr-cli --bin actr --features wasm-engine
           cargo build --locked --release -p actr-mock-actrix --bin mock-actrix
       - name: Run TypeScript stream e2e
-        run: bash e2e/typescript-stream/run.sh
+        run: bash tests/e2e/actr/typescript-stream/run.sh
 
   web-browser-e2e:
     name: Web Browser E2E
-    # e2e/web-browser/run.sh packages the same currently-unbuildable V2
+    # tests/e2e/actr/web-browser/run.sh packages the same currently-unbuildable V2
     # TypeScript workload as typescript-e2e. Re-enable under #431 after #427.
     if: ${{ false }}
     runs-on: ubuntu-latest-m
@@ -263,7 +263,7 @@ jobs:
         run: cargo install wasm-pack --version 0.15.0 --locked
       - uses: Swatinem/rust-cache@v2
       - name: Install web binding root deps (puppeteer)
-        working-directory: bindings/web
+        working-directory: packages/actr-web
         env:
           PUPPETEER_SKIP_DOWNLOAD: "true"
           PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
@@ -272,7 +272,7 @@ jobs:
           corepack prepare pnpm@9.15.9 --activate
           pnpm install --frozen-lockfile
       - name: Generate CLI web runtime assets
-        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+        run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
       - name: Pre-build actr CLI and mock-actrix
         run: |
           cargo build --locked --release -p actr-cli --bin actr --features wasm-engine
@@ -283,7 +283,7 @@ jobs:
           ACTR_E2E_ACTR_BIN: ${{ github.workspace }}/target/release/actr
           PUPPETEER_EXECUTABLE_PATH: /usr/bin/google-chrome
           SUITES: BasicFunction
-        run: bash e2e/web-browser/run.sh
+        run: bash tests/e2e/actr/web-browser/run.sh
 
   swift-echo-app-e2e:
     name: Swift EchoApp E2E
@@ -297,7 +297,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/Library/Caches/org.swift.swiftpm
-          key: spm-${{ runner.os }}-${{ hashFiles('e2e/swift-echo-app/project.yml') }}
+          key: spm-${{ runner.os }}-${{ hashFiles('tests/e2e/actr/swift-echo-app/project.yml') }}
           restore-keys: |
             spm-${{ runner.os }}-
       - name: Setup Rust
@@ -321,7 +321,7 @@ jobs:
         run: cargo install wasm-pack --version 0.15.0 --locked
       - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
-        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+        run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
       - name: Cache uniffi-bindgen binary
         id: cache-uniffi
         uses: actions/cache@v4
@@ -334,7 +334,7 @@ jobs:
         run: cargo install --locked --force uniffi --version 0.31.1 --features cli --bin uniffi-bindgen
 
       - name: Build local Swift XCFramework (iOS + macOS)
-        working-directory: bindings/swift
+        working-directory: packages/actr-swift
         env:
           ACTR_BUILD_PROFILE: debug
           ACTR_XCFRAMEWORK_TARGETS: all
@@ -350,14 +350,14 @@ jobs:
         env:
           CAPTURE_DIAGNOSTICS_ON_SUCCESS: "1"
           CAPTURE_CRASH_BACKTRACE: "1"
-        run: bash e2e/swift-echo-app/run.sh
+        run: bash tests/e2e/actr/swift-echo-app/run.sh
 
       - name: Upload sanitized diagnostic logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: swift-echo-app-e2e-logs-${{ github.run_id }}-${{ github.run_attempt }}
-          path: e2e/swift-echo-app/.tmp/sanitized-logs/
+          path: tests/e2e/actr/swift-echo-app/.tmp/sanitized-logs/
           retention-days: 7
           if-no-files-found: warn
       - name: Upload Swift EchoApp debug symbols
@@ -365,7 +365,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: swift-echo-app-e2e-symbols-${{ github.run_id }}-${{ github.run_attempt }}
-          path: e2e/swift-echo-app/.tmp/symbols/
+          path: tests/e2e/actr/swift-echo-app/.tmp/symbols/
           retention-days: 7
           if-no-files-found: warn
 
@@ -381,7 +381,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/Library/Caches/org.swift.swiftpm
-          key: spm-${{ runner.os }}-${{ hashFiles('e2e/swift-datastream-app/project.yml') }}
+          key: spm-${{ runner.os }}-${{ hashFiles('tests/e2e/actr/swift-datastream-app/project.yml') }}
           restore-keys: |
             spm-${{ runner.os }}-
       - name: Setup Rust
@@ -405,7 +405,7 @@ jobs:
         run: cargo install wasm-pack --version 0.15.0 --locked
       - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
-        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+        run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
       - name: Cache uniffi-bindgen binary
         id: cache-uniffi
         uses: actions/cache@v4
@@ -416,7 +416,7 @@ jobs:
         if: steps.cache-uniffi.outputs.cache-hit != 'true'
         run: cargo install --locked --force uniffi --version 0.31.1 --features cli --bin uniffi-bindgen
       - name: Build local Swift XCFramework (iOS + macOS)
-        working-directory: bindings/swift
+        working-directory: packages/actr-swift
         env:
           ACTR_BUILD_PROFILE: debug
           ACTR_XCFRAMEWORK_TARGETS: all
@@ -430,13 +430,13 @@ jobs:
       - name: Run Swift DataStreamApp e2e
         env:
           CAPTURE_DIAGNOSTICS_ON_SUCCESS: "1"
-        run: bash e2e/swift-datastream-app/run.sh
+        run: bash tests/e2e/actr/swift-datastream-app/run.sh
       - name: Upload sanitized diagnostic logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: swift-datastream-app-e2e-logs-${{ github.run_id }}-${{ github.run_attempt }}
-          path: e2e/swift-datastream-app/.tmp/sanitized-logs/
+          path: tests/e2e/actr/swift-datastream-app/.tmp/sanitized-logs/
           retention-days: 7
           if-no-files-found: warn
       - name: Upload Swift DataStreamApp debug symbols
@@ -444,7 +444,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: swift-datastream-app-e2e-symbols-${{ github.run_id }}-${{ github.run_attempt }}
-          path: e2e/swift-datastream-app/.tmp/symbols/
+          path: tests/e2e/actr/swift-datastream-app/.tmp/symbols/
           retention-days: 7
           if-no-files-found: warn
 
@@ -465,7 +465,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/Library/Caches/org.swift.swiftpm
-          key: spm-${{ runner.os }}-${{ hashFiles('e2e/swift-ts-workload/manifest.toml') }}
+          key: spm-${{ runner.os }}-${{ hashFiles('tests/e2e/actr/swift-ts-workload/manifest.toml') }}
           restore-keys: |
             spm-${{ runner.os }}-
       - name: Setup Rust
@@ -497,7 +497,7 @@ jobs:
           cargo install wasm-tools --version 1.253.0 --locked
       - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
-        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+        run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
       - name: Cache uniffi-bindgen binary
         id: cache-uniffi
         uses: actions/cache@v4
@@ -508,7 +508,7 @@ jobs:
         if: steps.cache-uniffi.outputs.cache-hit != 'true'
         run: cargo install --locked --force uniffi --version 0.31.1 --features cli --bin uniffi-bindgen
       - name: Build local Swift XCFramework (iOS + macOS)
-        working-directory: bindings/swift
+        working-directory: packages/actr-swift
         env:
           ACTR_BUILD_PROFILE: debug
           ACTR_XCFRAMEWORK_TARGETS: all
@@ -522,13 +522,13 @@ jobs:
       - name: Run Swift TS Workload e2e
         env:
           CAPTURE_DIAGNOSTICS_ON_SUCCESS: "1"
-        run: bash e2e/swift-ts-workload/run.sh
+        run: bash tests/e2e/actr/swift-ts-workload/run.sh
       - name: Upload sanitized diagnostic logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: swift-ts-workload-e2e-logs-${{ github.run_id }}-${{ github.run_attempt }}
-          path: e2e/swift-ts-workload/.tmp/sanitized-logs/
+          path: tests/e2e/actr/swift-ts-workload/.tmp/sanitized-logs/
           retention-days: 7
           if-no-files-found: warn
       - name: Upload Swift TS Workload debug symbols
@@ -536,7 +536,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: swift-ts-workload-e2e-symbols-${{ github.run_id }}-${{ github.run_attempt }}
-          path: e2e/swift-ts-workload/.tmp/symbols/
+          path: tests/e2e/actr/swift-ts-workload/.tmp/symbols/
           retention-days: 7
           if-no-files-found: warn
 
@@ -578,7 +578,7 @@ jobs:
           sudo apt-get install -y lsof netcat-openbsd
           google-chrome --version || google-chrome-stable --version || true
       - name: Install web binding root deps (puppeteer)
-        working-directory: bindings/web
+        working-directory: packages/actr-web
         env:
           PUPPETEER_SKIP_DOWNLOAD: "true"
           PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
@@ -587,11 +587,11 @@ jobs:
           corepack prepare pnpm@9.15.9 --activate
           pnpm install --frozen-lockfile
       - name: Generate CLI web runtime assets
-        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+        run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
       - name: Pre-build actr CLI (release)
         run: cargo build --locked --release -p actr-cli --bin actr --features wasm-engine
       - name: Run generated Python echo browser e2e
-        working-directory: bindings/web/examples/echo
+        working-directory: packages/actr-web/examples/echo
         env:
           ACTR_CMD: ${{ github.workspace }}/target/release/actr
           PUPPETEER_EXECUTABLE_PATH: /usr/bin/google-chrome
@@ -644,14 +644,14 @@ jobs:
         run: cargo install uniffi --version 0.31.1 --locked --features cli --bin uniffi-bindgen
       - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
-        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+        run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
       - name: Build Android native lib (x86_64) + publish AAR to mavenLocal
         env:
           ACTR_ANDROID_TARGETS: x86_64-linux-android
           ACTR_COPY_DEMO_JNILIBS: "false"
         run: |
-          bash bindings/kotlin/build-android.sh
-          cd bindings/kotlin && ./gradlew :actr-kotlin:publishToMavenLocal --no-daemon
+          bash packages/actr-kotlin/build-android.sh
+          cd packages/actr-kotlin && ./gradlew :actr-kotlin:publishToMavenLocal --no-daemon
       - name: Run Kotlin EchoApp e2e (emulator)
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -664,12 +664,12 @@ jobs:
           ram-size: 4096M
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           disable-animations: true
-          script: bash e2e/kotlin-echo-app/run.sh
+          script: bash tests/e2e/actr/kotlin-echo-app/run.sh
       - name: Upload sanitized diagnostic logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: kotlin-echo-app-e2e-logs-${{ github.run_id }}-${{ github.run_attempt }}
-          path: e2e/kotlin-echo-app/.tmp/sanitized-logs/
+          path: tests/e2e/actr/kotlin-echo-app/.tmp/sanitized-logs/
           retention-days: 7
           if-no-files-found: warn

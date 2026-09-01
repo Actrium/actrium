@@ -57,9 +57,9 @@ const hostItems: NavItem[] = [
 ];
 
 const resourceItems: NavItem[] = [
-  { to: "https://github.com/Actrium/actrix", icon: BookOpen, label: "Documentation" },
-  { to: "https://github.com/Actrium/actrix/releases", icon: BookOpen, label: "Releases" },
-  { to: "https://github.com/Actrium/actrix/discussions", icon: LifeBuoy, label: "Community" },
+  { to: "https://github.com/Actrium/actrium", icon: BookOpen, label: "Documentation" },
+  { to: "https://github.com/Actrium/actrium/releases", icon: BookOpen, label: "Releases" },
+  { to: "https://github.com/Actrium/actrium/discussions", icon: LifeBuoy, label: "Community" },
   { to: "/admin/about", icon: Info, label: "About" },
 ];
 

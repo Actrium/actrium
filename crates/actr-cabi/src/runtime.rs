@@ -1,6 +1,6 @@
 //! Global Tokio runtime for actr-cabi.
 //!
-//! Mirrors `core/framework/src/guest/dynclib/runtime.rs` but simplified: the
+//! Mirrors `crates/actr-framework/src/guest/dynclib/runtime.rs` but simplified: the
 //! runtime is process-scoped (actr-cabi runs in the host process, not a
 //! dlopen/dlclose image), so we cache the runtime's initialization result and
 //! do not support

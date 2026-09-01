@@ -21,7 +21,7 @@
 //! thread `request_id` through the host bridge.
 //!
 //! `cargo build --target wasm32-wasip2` produces a Component Model binary
-//! consumed by the native wasmtime host (see core/hyper). Browser-side
+//! consumed by the native wasmtime host (see crates/actr-hyper). Browser-side
 //! consumption goes through the `--features web` build instead — the
 //! Component Model + jco transpile path was deleted in Option U Phase 8.
 

@@ -58,12 +58,17 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 # ── Paths ────────────────────────────────────────────────────────────────
 
 WORKSPACE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# Repo root is 2 levels up from WORKSPACE_ROOT (examples/rust)
-ACTR_REPO_DIR="$(cd "$WORKSPACE_ROOT/../.." && pwd)"
+# Repo root is 3 levels up from WORKSPACE_ROOT (examples/actr/rust).
+ACTR_REPO_DIR="$(cd "$WORKSPACE_ROOT/../../.." && pwd)"
 
 resolve_actrix_dir() {
     local repo_dir="$1"
     local candidate=""
+
+    if [ -f "$repo_dir/crates/loran-server/Cargo.toml" ]; then
+        printf '%s\n' "$repo_dir"
+        return 0
+    fi
 
     if [ -n "${ACTRIX_DIR:-}" ] && [ -d "${ACTRIX_DIR}" ]; then
         printf '%s\n' "${ACTRIX_DIR}"
@@ -89,7 +94,7 @@ EOF
 }
 
 ACTRIX_DIR="$(resolve_actrix_dir "$ACTR_REPO_DIR" || true)"
-ACTR_CLI_MANIFEST="$ACTR_REPO_DIR/cli/Cargo.toml"
+ACTR_CLI_MANIFEST="$ACTR_REPO_DIR/crates/actr-cli/Cargo.toml"
 ACTRIX_CONFIG="$WORKSPACE_ROOT/actrix-config.toml"
 PACKAGE_ECHO_DIR="$WORKSPACE_ROOT/package-echo"
 CLIENT_DIR="$PACKAGE_ECHO_DIR/client"

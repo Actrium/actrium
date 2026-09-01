@@ -2,7 +2,7 @@
 #
 # EchoApp uses the linked runtime (actr-cabi) and is not built through
 # `actr build`. This file declares the package identity and the remote
-# EchoService dependency, mirroring e2e/swift-echo-app/manifest.toml.
+# EchoService dependency, mirroring tests/e2e/actr/swift-echo-app/manifest.toml.
 
 edition = 1
 

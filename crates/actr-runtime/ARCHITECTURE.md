@@ -80,7 +80,7 @@ Hyper currently supports two runtime workload backends.
 ### 2.1 WASM Integration
 
 WASM Component Model binaries are loaded by WasmHost. Guest/host calls use the
-WIT contract in `core/framework/wit-v2/actr-workload.wit` and the Component Model
+WIT contract in `crates/actr-framework/wit-v2/actr-workload.wit` and the Component Model
 canonical ABI; legacy core-module packages are no longer loadable.
 
 - **Dispatch Path**: `ActrNode::handle_incoming` → `Workload::handle` → `WasmWorkloadV2` (wasmtime)
@@ -560,4 +560,4 @@ actr-runtime
 ---
 
 **Maintainers**: actr Core Team
-**Issues**: https://github.com/Actrium/actr/issues
+**Issues**: https://github.com/Actrium/actrium/issues

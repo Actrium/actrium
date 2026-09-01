@@ -335,7 +335,7 @@ package is hand-authored by the workload's repository. The contract:
 
 The DLLs are produced by building the workload crate (cdylib) and renaming the
 output to `actr_cabi.dll` per RID — see
-[`bindings/cabi/csharp/build-actr-cabi-dll.sh`](../../bindings/cabi/csharp/build-actr-cabi-dll.sh).
+[`packages/actr-cabi/csharp/build-actr-cabi-dll.sh`](../../../packages/actr-cabi/csharp/build-actr-cabi-dll.sh).
 
 ### Manual .nuspec alternative
 

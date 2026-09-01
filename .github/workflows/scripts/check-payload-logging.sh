@@ -14,12 +14,12 @@
 # exists to prevent.
 #
 # This guard flags tracing macros that format payload-bearing variables. It is
-# intentionally narrow to keep false positives low: only core/hyper, only the
+# intentionally narrow to keep false positives low: only crates/actr-hyper, only the
 # payload-flavored identifiers listed below, only value-formatted usages.
 set -euo pipefail
 
-if ! [ -d core/hyper ]; then
-  echo "check-payload-logging: core/hyper not found, skipping (wrong workdir?)"
+if ! [ -d crates/actr-hyper ]; then
+  echo "check-payload-logging: crates/actr-hyper not found, skipping (wrong workdir?)"
   exit 0
 fi
 
@@ -27,13 +27,13 @@ fi
 # actor_id / realm_id and network metadata are intentionally NOT included).
 PAYLOAD_VARS='envelope|payload|message|data|body'
 
-# The macro-name prefix is `tracing::` OR bare: several core/hyper modules
+# The macro-name prefix is `tracing::` OR bare: several crates/actr-hyper modules
 # import the macros via `use tracing::{debug, info, warn, ...}` and call them
 # unqualified (`info!(...)`), so anchoring on the FQN alone leaves ~45 call
 # sites in security-sensitive files (ais_client.rs, storage/db.rs, ...) outside
-# the guard's view. This is safe because core/hyper does NOT pull in the `log`
+# the guard's view. This is safe because crates/actr-hyper does NOT pull in the `log`
 # crate's macros, so a bare `info!(...)` here can only resolve to `tracing`. If
-# that assumption ever changes (a `use log::{...}` lands in core/hyper), this
+# that assumption ever changes (a `use log::{...}` lands in crates/actr-hyper), this
 # guard must be revisited — it could start producing false positives.
 MACRO_PREFIX='(?:tracing::)?'
 
@@ -49,7 +49,7 @@ PATTERN="${MACRO_PREFIX}(debug|trace|info|warn|error)!\(.*(\{($PAYLOAD_VARS)(:[#
 # "guard never actually ran" failure mode this script exists to prevent.
 # git grep exit codes: 0 = match, 1 = no match, 2/128 = usage/fatal error.
 set +e
-git grep -nP 'PROBE_PAYLOAD_GUARD_NEVER_MATCH' -- 'core/hyper/' >/dev/null 2>&1
+git grep -nP 'PROBE_PAYLOAD_GUARD_NEVER_MATCH' -- 'crates/actr-hyper/' >/dev/null 2>&1
 probe_rc=$?
 set -e
 if [ "$probe_rc" -ne 0 ] && [ "$probe_rc" -ne 1 ]; then
@@ -59,7 +59,7 @@ if [ "$probe_rc" -ne 0 ] && [ "$probe_rc" -ne 1 ]; then
 fi
 
 set +e
-matches=$(git grep -nP "$PATTERN" -- 'core/hyper/**/*.rs' || true)
+matches=$(git grep -nP "$PATTERN" -- 'crates/actr-hyper/**/*.rs' || true)
 set -e
 
 # Honor the per-line opt-out marker `// allow-payload-logging`. It is meant for
@@ -72,7 +72,7 @@ if [ -n "$matches" ]; then
 fi
 
 if [ -n "$matches" ]; then
-  echo "::error::Payload-bearing variables are formatted in tracing macros within core/hyper."
+  echo "::error::Payload-bearing variables are formatted in tracing macros within crates/actr-hyper."
   echo "These macros bridge to OTLP log records (VictoriaLogs) when the feature is enabled."
   echo "Log only non-payload metadata (length, type, envelope_id/reply_for). See issue #484."
   echo
@@ -80,4 +80,4 @@ if [ -n "$matches" ]; then
   exit 1
 fi
 
-echo "check-payload-logging: no payload formatting in core/hyper tracing macros."
+echo "check-payload-logging: no payload formatting in crates/actr-hyper tracing macros."

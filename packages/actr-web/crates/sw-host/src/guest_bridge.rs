@@ -8,7 +8,7 @@
 //! 1. **Guest dispatch driver** — [`register_guest_workload`] accepts a JS
 //!    callback that forwards to the wasm-bindgen guest module's `dispatch`
 //!    export (emitted by `actr-web-abi`, see Option U in
-//!    `bindings/web/docs/option-u-wit-compile-web.zh.md`). The runtime wraps
+//!    `packages/actr-web/docs/option-u-wit-compile-web.zh.md`). The runtime wraps
 //!    that callback behind the [`WasmWorkload`] abstraction used by the
 //!    inbound packet dispatcher, threading per-dispatch `RuntimeContext`
 //!    into [`DISPATCH_CTXS`] keyed by `request_id`.
@@ -606,7 +606,7 @@ pub fn host_get_request_id(request_id: String) -> Result<String, JsValue> {
 ///    `actr-web-abi` shim.
 /// 2. Installing the `actrHost*` JS globals that the guest imports — they
 ///    proxy onto the `host_*_async` / `host_*` wasm-bindgen exports from
-///    this crate (see `bindings/web/packages/web-sdk/src/actor.sw.js`).
+///    this crate (see `packages/actr-web/packages/web-sdk/src/actor.sw.js`).
 /// 3. Passing `(envelope) => guestBindgen.dispatch(envelope)` here as
 ///    `dispatch_fn`.
 ///

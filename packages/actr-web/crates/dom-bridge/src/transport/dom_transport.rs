@@ -8,7 +8,7 @@
 //!
 //! The PostMessage channel to the Service Worker is owned by the JS bridge
 //! (see `actor.sw.js` + `actr-dom`); the historical Rust-side SW lane was
-//! retired (see TD-001 in `bindings/web/docs/tech-debt.zh.md`). RPC traffic
+//! retired (see TD-001 in `packages/actr-web/docs/tech-debt.zh.md`). RPC traffic
 //! reaches the SW through the JS layer, so this transport handles only the
 //! DOM-local P2P paths.
 

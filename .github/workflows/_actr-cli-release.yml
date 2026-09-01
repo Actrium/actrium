@@ -108,12 +108,12 @@ jobs:
       - name: Build web runtime assets
         run: |
           cd source
-          bash bindings/web/scripts/sync-cli-assets.sh --build
+          bash packages/actr-web/scripts/sync-cli-assets.sh --build
       - name: Upload prebuilt assets
         uses: actions/upload-artifact@v4
         with:
           name: cli-web-runtime-assets
-          path: source/cli/assets/web-runtime/
+          path: source/crates/actr-cli/assets/web-runtime/
           if-no-files-found: error
 
   build:
@@ -162,7 +162,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: cli-web-runtime-assets
-          path: source/cli/assets/web-runtime
+          path: source/crates/actr-cli/assets/web-runtime
       - name: Build and package actr CLI
         shell: bash
         env:
@@ -171,7 +171,7 @@ jobs:
           ACTR_RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_SHA: ${{ needs.validate.outputs.source_sha }}
         run: |
-          automation/scripts/release-actr-cli.sh build \
+          automation/scripts/actr/release-actr-cli.sh build \
             --target "${{ matrix.target }}" \
             --version "${{ needs.validate.outputs.version }}" \
             --output "$GITHUB_WORKSPACE/artifacts" \
@@ -231,7 +231,7 @@ jobs:
           set -euo pipefail
           args=(publish --tag "${{ inputs.tag }}" --assets "$GITHUB_WORKSPACE/artifacts" --state-file "$GITHUB_WORKSPACE/release-train-v${{ needs.validate.outputs.version }}.publish-cli-binaries.state.tsv")
           [[ "${{ inputs.replace_assets }}" == true ]] && args+=(--replace)
-          automation/scripts/release-actr-cli.sh "${args[@]}"
+          automation/scripts/actr/release-actr-cli.sh "${args[@]}"
       - name: Upload publish state
         if: always()
         uses: actions/upload-artifact@v4

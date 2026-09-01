@@ -12,7 +12,7 @@ NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ACTR_REPO_DIR="$(cd "$WORKSPACE_ROOT/../.." && pwd)"
+ACTR_REPO_DIR="$(cd "$WORKSPACE_ROOT/../../.." && pwd)"
 LOG_DIR="$WORKSPACE_ROOT/logs"
 DEFAULT_SIGNING_KEY="$WORKSPACE_ROOT/echo-actr/packaging/keys/dev-signing-key.json"
 WORKSPACE_TARGET_DIR="$ACTR_REPO_DIR/target/examples"
@@ -81,13 +81,13 @@ append_workspace_patch() {
 
 [patch.crates-io]
 actr = { path = "$ACTR_REPO_DIR" }
-actr-protocol = { path = "$ACTR_REPO_DIR/core/protocol" }
-actr-framework = { path = "$ACTR_REPO_DIR/core/framework" }
-actr-hyper = { path = "$ACTR_REPO_DIR/core/hyper" }
-actr-runtime = { path = "$ACTR_REPO_DIR/core/runtime" }
-actr-config = { path = "$ACTR_REPO_DIR/core/config" }
-actr-service-compat = { path = "$ACTR_REPO_DIR/core/service-compat" }
-actr-runtime-mailbox = { path = "$ACTR_REPO_DIR/core/runtime-mailbox" }
+actr-protocol = { path = "$ACTR_REPO_DIR/crates/actr-protocol" }
+actr-framework = { path = "$ACTR_REPO_DIR/crates/actr-framework" }
+actr-hyper = { path = "$ACTR_REPO_DIR/crates/actr-hyper" }
+actr-runtime = { path = "$ACTR_REPO_DIR/crates/actr-runtime" }
+actr-config = { path = "$ACTR_REPO_DIR/crates/actr-config" }
+actr-service-compat = { path = "$ACTR_REPO_DIR/crates/actr-service-compat" }
+actr-runtime-mailbox = { path = "$ACTR_REPO_DIR/crates/actr-runtime-mailbox" }
 EOF
 }
 
@@ -132,7 +132,7 @@ ensure_cargo_bin "protoc-gen-prost" "protoc-gen-prost" "$LOG_DIR"
 echo ""
 echo -e "${BLUE}🔧 Building local actr CLI...${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-cargo build --manifest-path "$ACTR_REPO_DIR/cli/Cargo.toml" --bin actr >/dev/null
+cargo build --manifest-path "$ACTR_REPO_DIR/crates/actr-cli/Cargo.toml" --bin actr >/dev/null
 ACTR_CLI_BIN="$ACTR_REPO_DIR/target/debug/actr"
 echo -e "${GREEN}✅ actr CLI ready: $ACTR_CLI_BIN${NC}"
 

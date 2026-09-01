@@ -29,15 +29,15 @@ quotas.
 ## Motivation
 
 Connection recovery crosses several independently changing layers in
-`core/hyper`:
+`crates/actr-hyper`:
 
-- `core/hyper/src/lifecycle/network_event.rs` receives app and network facts;
-- `core/hyper/src/lifecycle/node.rs` owns the runtime lifecycle;
-- `core/hyper/src/wire/webrtc/signaling.rs` owns the signaling socket and
+- `crates/actr-hyper/src/lifecycle/network_event.rs` receives app and network facts;
+- `crates/actr-hyper/src/lifecycle/node.rs` owns the runtime lifecycle;
+- `crates/actr-hyper/src/wire/webrtc/signaling.rs` owns the signaling socket and
   automatic reconnect work;
-- `core/hyper/src/wire/webrtc/coordinator.rs` owns WebRTC peer recovery;
-- `core/hyper/src/transport/peer_transport.rs` and
-  `core/hyper/src/transport/wire_pool.rs` publish destination transports;
+- `crates/actr-hyper/src/wire/webrtc/coordinator.rs` owns WebRTC peer recovery;
+- `crates/actr-hyper/src/transport/peer_transport.rs` and
+  `crates/actr-hyper/src/transport/wire_pool.rs` publish destination transports;
 - mailbox and WASM runtime code wait for work or capacity.
 
 Historically, these paths combined independent facts in booleans and
@@ -2300,7 +2300,7 @@ is observed separately by revision and `action_id`.
 ### Public API migration
 
 These changes are not confined to private types: they alter items that
-`core/hyper` re-exports through `actr_hyper::lifecycle`. Because the
+`crates/actr-hyper` re-exports through `actr_hyper::lifecycle`. Because the
 motivating implementation removes the old policy type outright, no
 source-compatible adapter of the same name is possible, so this RFC declares
 the break explicitly rather than describing it as internal. This closes the

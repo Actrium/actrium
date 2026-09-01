@@ -1,6 +1,6 @@
 # 零拷贝优化阶段 2 完成总结
 
-> **历史快照 / 非当前实现指南**：本文记录 2026-01-08 阶段 2 Transferable Objects 优化的完成摘要。当前实现请以 `bindings/web/crates/common/src/zero_copy.rs`、`sw-host/src/transport/lane.rs`、`dom-bridge/src/transport/lane.rs` 为准；本文中的测试数、文件清单和性能收益是当时记录，不代表当前覆盖率事实。
+> **历史快照 / 非当前实现指南**：本文记录 2026-01-08 阶段 2 Transferable Objects 优化的完成摘要。当前实现请以 `packages/actr-web/crates/common/src/zero_copy.rs`、`sw-host/src/transport/lane.rs`、`dom-bridge/src/transport/lane.rs` 为准；本文中的测试数、文件清单和性能收益是当时记录，不代表当前覆盖率事实。
 
 ## 实施日期
 2026-01-08

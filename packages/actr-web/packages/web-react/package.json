@@ -42,8 +42,8 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Actrium/actr.git",
-    "directory": "bindings/web/packages/web-react"
+    "url": "git+https://github.com/Actrium/actrium.git",
+    "directory": "packages/actr-web/packages/web-react"
   },
   "publishConfig": {
     "access": "public"

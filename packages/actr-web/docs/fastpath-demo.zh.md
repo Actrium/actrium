@@ -1,6 +1,6 @@
 # Fast Path Demo - 高性能数据流示例
 
-> **概念说明 / 非可运行示例**：原 `examples/fastpath-demo/` 只有 README 型材料，已移入 docs。本文保留为 Fast Path 数据流概念说明，不代表仓库里存在可直接访问的 demo URL。当前代码锚点是 `bindings/web/packages/actr-dom/src/fast-path-forwarder.ts` 的 `FastPathForwarder`、`bindings/web/packages/web-sdk/src/actor.sw.js` 的 `fast_path_data` handler，以及 `sw-host` / `dom-bridge` 的 lane 实现。
+> **概念说明 / 非可运行示例**：原 `examples/fastpath-demo/` 只有 README 型材料，已移入 docs。本文保留为 Fast Path 数据流概念说明，不代表仓库里存在可直接访问的 demo URL。当前代码锚点是 `packages/actr-web/packages/actr-dom/src/fast-path-forwarder.ts` 的 `FastPathForwarder`、`packages/actr-web/packages/web-sdk/src/actor.sw.js` 的 `fast_path_data` handler，以及 `sw-host` / `dom-bridge` 的 lane 实现。
 
 说明 Actor-RTC Web 的 Fast Path 数据流处理模型。
 
@@ -241,6 +241,6 @@ setInterval(() => {
 
 ## 相关文档
 
-- 当前实现：`bindings/web/packages/actr-dom/src/fast-path-forwarder.ts`
-- SW 入口：`bindings/web/packages/web-sdk/src/actor.sw.js`
-- Rust lane：`bindings/web/crates/sw-host/src/transport/lane.rs`、`bindings/web/crates/dom-bridge/src/transport/lane.rs`
+- 当前实现：`packages/actr-web/packages/actr-dom/src/fast-path-forwarder.ts`
+- SW 入口：`packages/actr-web/packages/web-sdk/src/actor.sw.js`
+- Rust lane：`packages/actr-web/crates/sw-host/src/transport/lane.rs`、`packages/actr-web/crates/dom-bridge/src/transport/lane.rs`

@@ -4,11 +4,11 @@
   "private": true,
   "scripts": {
     "build": "tsc",
-    "componentize": "actr-workload-ts componentize dist/actr_service.js -o dist/duplex-echo-service.wasm --wit __REPO_ROOT__/core/framework/wit-v2/actr-workload.wit",
+    "componentize": "actr-workload-ts componentize dist/actr_service.js -o dist/duplex-echo-service.wasm --wit __REPO_ROOT__/crates/actr-framework/wit-v2/actr-workload.wit",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@actrium/actr-workload": "file:__REPO_ROOT__/bindings/typescript/actr-workload",
+    "@actrium/actr-workload": "file:__REPO_ROOT__/packages/actr-typescript/actr-workload",
     "@bufbuild/protobuf": "2.11.0"
   },
   "devDependencies": {

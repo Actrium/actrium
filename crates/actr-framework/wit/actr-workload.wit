@@ -5,12 +5,12 @@
 // runtime uses the async `actr:workload@0.6.0` contract in `wit-v2/`.
 //
 // Phase 1 migration target: replaces the handwritten ptr/len ABI
-// (core/hyper/src/wasm/abi.rs, core/framework/src/guest/dynclib_abi.rs,
+// (crates/actr-hyper/src/wasm/abi.rs, crates/actr-framework/src/guest/dynclib_abi.rs,
 // entry!-generated actr_init / actr_handle / actr_alloc / actr_free)
 // with the Component Model canonical ABI.
 //
 // Design decisions (locked in during Phase 0.5 async spike, see
-// experiments/component-spike-async/REPORT.md):
+// examples/actr/experimental/component-spike-async/REPORT.md):
 //
 // 1. Every function is a plain WIT `func`, never `async func`. The WIT-level
 //    Concurrency proposal is marked "very incomplete" in wasmtime 43 and
@@ -24,11 +24,11 @@
 //
 // 2. Host imports mirror the current runtime guest->host surface
 //    (HostCallV1 / HostTellV1 / HostCallRawV1 / HostDiscoverV1 from
-//    core/framework/src/guest/dynclib_abi.rs) plus the three context getters
+//    crates/actr-framework/src/guest/dynclib_abi.rs) plus the three context getters
 //    currently threaded through `InvocationContextV1`.
 //
 // 3. Guest exports mirror the framework `Workload` trait
-//    (core/framework/src/workload.rs) one-for-one: one `dispatch` RPC entry
+//    (crates/actr-framework/src/workload.rs) one-for-one: one `dispatch` RPC entry
 //    plus the sixteen observation hooks. The observation hooks are
 //    infallible except for the four lifecycle hooks, which return
 //    `result<_, actr-error>` to match the trait.

@@ -1,6 +1,6 @@
 # Option U Phase 6：γ-unified 详细设计
 
-> **历史设计快照 / 已被当前实现取代**：本文是 2026-04-24 Phase 6 γ-unified 的实施前设计，不是当前开发计划。当前 canonical 摘要见 [Option U 总览](./option-u-wit-compile-web.zh.md)；当前 framework web 入口见 `core/framework/src/guest/mod.rs`、`core/framework/src/web/context.rs`，echo `server-guest` / `client-guest` 已是一份化示例。
+> **历史设计快照 / 已被当前实现取代**：本文是 2026-04-24 Phase 6 γ-unified 的实施前设计，不是当前开发计划。当前 canonical 摘要见 [Option U 总览](./option-u-wit-compile-web.zh.md)；当前 framework web 入口见 `crates/actr-framework/src/guest/mod.rs`、`crates/actr-framework/src/web/context.rs`，echo `server-guest` / `client-guest` 已是一份化示例。
 
 **状态**：历史设计（Phase 6 已完成；Phase 7 跳过；Phase 8 已删除 CM/jco 浏览器路径）
 **上下文**：[Option U 总览](./option-u-wit-compile-web.zh.md) / [TD-003 并发 dispatch context bug](./tech-debt.zh.md#td-003)
@@ -43,9 +43,9 @@ actr_framework::entry!(EchoService);
 
 构建：
 
-- **Native**：`cargo build --target wasm32-wasip2` + `wasm-component-ld`  
+- **Native**：`cargo build --target wasm32-wasip2` + `wasm-component-ld`
   `entry!` 展开成 wit-bindgen 生成的 exports + Workload struct
-- **Web**：`cargo build --target wasm32-unknown-unknown` + `wasm-pack`  
+- **Web**：`cargo build --target wasm32-unknown-unknown` + `wasm-pack`
   `entry!` 展开成 `actr_web_abi::host::set_workload(...)` + 一个适配器
 
 用户**完全不需要知道** WIT、Component Model、JSPI、wasm-bindgen、request_id 在底层如何流转。
@@ -56,7 +56,7 @@ actr_framework::entry!(EchoService);
 
 ### 3.1 `Context` trait（共享，两个 target 通用）
 
-位置：`core/framework/src/context.rs`（现有，最小扩展）
+位置：`crates/actr-framework/src/context.rs`（现有，最小扩展）
 
 ```rust
 #[async_trait(?Send)]  // ← ?Send 加进去（web 要）；native 仍支持 Send auto trait
@@ -98,7 +98,7 @@ pub trait Context: Clone + 'static {
 
 ### 3.2 `Workload` trait（统一后的形态）
 
-位置：`core/framework/src/workload.rs`（现有，扩展以适配 web）
+位置：`crates/actr-framework/src/workload.rs`（现有，扩展以适配 web）
 
 ```rust
 #[async_trait(?Send)]
@@ -117,7 +117,7 @@ pub trait Workload: 'static {
 
 ### 3.3 web 侧 `actr_framework::web::WebContext`
 
-位置：**新增** `core/framework/src/web/context.rs`（`#[cfg(target_arch = "wasm32")]` + feature gate）
+位置：**新增** `crates/actr-framework/src/web/context.rs`（`#[cfg(target_arch = "wasm32")]` + feature gate）
 
 ```rust
 #[derive(Clone)]
@@ -136,8 +136,8 @@ impl Context for WebContext {
     fn caller_id(&self) -> Option<&ActrId> { self.inner.caller_id.as_ref() }
     fn request_id(&self) -> &str { &self.inner.request_id }
 
-    async fn call_raw(&self, target: &Dest, route_key: &str, body: &[u8]) 
-        -> ActorResult<Vec<u8>> 
+    async fn call_raw(&self, target: &Dest, route_key: &str, body: &[u8])
+        -> ActorResult<Vec<u8>>
     {
         // 内部调用 actr_web_abi::guest::__host_call_raw(
         //     self.inner.request_id.clone(),  ← 从 Context 本身取
@@ -160,20 +160,20 @@ impl Context for WebContext {
 
 ### 3.4 `actr-web-abi::guest::*` 新签名
 
-位置：`bindings/web/crates/actr-web-abi/src/guest.rs`（由 `wit-compile-web` 重生成）
+位置：`packages/actr-web/crates/actr-web-abi/src/guest.rs`（由 `wit-compile-web` 重生成）
 
 所有 host import wrapper 接受 `request_id: &str` 作为第一参数：
 
 ```rust
 // 旧（当前）
-pub async fn call_raw(target: &ActrId, route: &str, body: Vec<u8>) 
+pub async fn call_raw(target: &ActrId, route: &str, body: Vec<u8>)
     -> Result<Vec<u8>, ActrError> { ... }
 
 // 新
 pub async fn call_raw_with_request_id(
     request_id: &str,
-    target: &ActrId, 
-    route: &str, 
+    target: &ActrId,
+    route: &str,
     body: Vec<u8>,
 ) -> Result<Vec<u8>, ActrError> {
     // 内部把 request_id 透传给 __host_call_raw
@@ -197,8 +197,8 @@ extern "C" {
     #[wasm_bindgen(js_name = actrHostCallRaw, catch)]
     fn __host_call_raw(
         request_id: JsValue,   // ← 新增
-        target: JsValue, 
-        route: JsValue, 
+        target: JsValue,
+        route: JsValue,
         body: JsValue,
     ) -> Result<js_sys::Promise, JsValue>;
     // ...
@@ -207,7 +207,7 @@ extern "C" {
 
 ### 3.5 `actr-web-abi::host::*` 新签名
 
-位置：`bindings/web/crates/actr-web-abi/src/host.rs`（由 `wit-compile-web` 重生成）
+位置：`packages/actr-web/crates/actr-web-abi/src/host.rs`（由 `wit-compile-web` 重生成）
 
 原 `Workload` trait 的 17 方法签名**删除**（不直接使用它）。改为内部适配器：
 
@@ -236,11 +236,11 @@ pub fn register_workload<W: Workload + Clone>(w: W) {
 
 ### 3.6 sw-host `guest_bridge.rs` HashMap 协议
 
-位置：`bindings/web/crates/sw-host/src/guest_bridge.rs`
+位置：`packages/actr-web/crates/sw-host/src/guest_bridge.rs`
 
 ```rust
 thread_local! {
-    static DISPATCH_CTXS: RefCell<HashMap<String, Rc<RuntimeContext>>> 
+    static DISPATCH_CTXS: RefCell<HashMap<String, Rc<RuntimeContext>>>
         = const { RefCell::new(HashMap::new()) };
 }
 
@@ -250,7 +250,7 @@ fn ctx_insert(request_id: String, ctx: Rc<RuntimeContext>) {
 }
 
 fn ctx_get(request_id: &str) -> Result<Rc<RuntimeContext>, JsValue> {
-    DISPATCH_CTXS.with(|c| 
+    DISPATCH_CTXS.with(|c|
         c.borrow().get(request_id).cloned()
          .ok_or_else(|| JsValue::from_str(&format!("no ctx for request_id={}", request_id)))
     )
@@ -266,9 +266,9 @@ fn ctx_remove(request_id: &str) {
 async move {
     let request_id = ctx.request_id().to_string();
     ctx_insert(request_id.clone(), ctx.clone());
-    
+
     let result = dispatch_fn.call1(...).await;
-    
+
     ctx_remove(&request_id);   // 无论成功失败都清
     result
 }
@@ -279,8 +279,8 @@ async move {
 #[wasm_bindgen]
 pub async fn host_call_raw_async(
     request_id: String,   // ← 新增第一参数
-    target: JsValue, 
-    route_key: String, 
+    target: JsValue,
+    route_key: String,
     payload: js_sys::Uint8Array,
 ) -> Result<js_sys::Uint8Array, JsValue> {
     let ctx = ctx_get(&request_id)?;   // ← 按 request_id 查
@@ -298,10 +298,10 @@ pub async fn host_call_raw_async(
 
 **Agent P6-F**：
 
-- [F1] `core/framework/Cargo.toml` 加 `[features] web = [...]` 并处理依赖
-- [F2] `core/framework/src/context.rs` 去掉 `Send + Sync` bound 或用 cfg_attr
-- [F3] `core/framework/src/workload.rs` 同上（考虑保留 native 的 Send auto trait）
-- [F4] 新增 `core/framework/src/web/` 模块（含 `context.rs` 实现 `WebContext`）
+- [F1] `crates/actr-framework/Cargo.toml` 加 `[features] web = [...]` 并处理依赖
+- [F2] `crates/actr-framework/src/context.rs` 去掉 `Send + Sync` bound 或用 cfg_attr
+- [F3] `crates/actr-framework/src/workload.rs` 同上（考虑保留 native 的 Send auto trait）
+- [F4] 新增 `crates/actr-framework/src/web/` 模块（含 `context.rs` 实现 `WebContext`）
 - [F5] `cargo check --target wasm32-unknown-unknown --features web` 通过
 
 **前置依赖**：无
@@ -316,7 +316,7 @@ pub async fn host_call_raw_async(
 - [S2] `ctx_insert` / `ctx_get` / `ctx_remove` 函数
 - [S3] 旧 `register_component_workload` handler 改用 insert/remove 包装 dispatch（当前实现已重命名为 `register_guest_workload`）
 - [S4] 所有 8 个 `host_*_async` 加 `request_id: String` 第一参数 + 内部改用 `ctx_get`
-- [S5] cli/assets sync（TD-002 流程）
+- [S5] crates/actr-cli/assets sync（TD-002 流程）
 - [S6] `cargo check -p actr-sw-host --target wasm32-unknown-unknown` 通过
 
 **前置依赖**：无（API 合约在 §3.4/3.6 锁定）
@@ -327,7 +327,7 @@ pub async fn host_call_raw_async(
 
 **Agent P6-C**：
 
-- [C1] `tools/wit-compile-web/src/lib.rs`：模板加 request_id 参数
+- [C1] `tools/actr/wit-compile-web/src/lib.rs`：模板加 request_id 参数
 - [C2] 生成的 `guest.rs` 函数名从 `call_raw` 改为 `call_raw_with_request_id`（对齐 §3.4）
 - [C3] 生成的 `host.rs`：删除对外暴露的 `Workload` trait（改为 pub(crate) + `register_workload` 公开函数）
 - [C4] `cargo run -p actr-wit-compile-web` 重生成 `actr-web-abi/src/{types,guest,host}.rs`
@@ -356,8 +356,8 @@ pub async fn host_call_raw_async(
 
 **Agent P6b**：
 
-- [b1] `core/framework/src/entry.rs`：`entry!` 宏按 `target_arch` cfg 展开两套
-- [b2] `tools/protoc-gen/rust` 输出更新：Handler trait 方法签名改为 `fn xxx<C: Context>(&self, ctx: &C, req) -> ActorResult<Resp>`
+- [b1] `crates/actr-framework/src/entry.rs`：`entry!` 宏按 `target_arch` cfg 展开两套
+- [b2] `tools/actr/protoc-gen/rust` 输出更新：Handler trait 方法签名改为 `fn xxx<C: Context>(&self, ctx: &C, req) -> ActorResult<Resp>`
 - [b3] 如果 `protoc-gen/rust` 已经这样（现有 native 样子就是），只需要 web 路径也消费同一套 trait
 - [b4] 验收：一份 echo handler 源码，两 target 都编过 + 跑过
 

@@ -30,17 +30,17 @@ confidentiality and Actor impersonation.
 
 The only existing enforcement that an Actor credential binds to the relay source
 runs **on the signaling server**, not at either Actor endpoint. In
-`actrix/crates/signaling/src/server.rs`, `handle_actr_relay`
+`crates/loran-signaling/src/server.rs`, `handle_actr_relay`
 (`:1291-1405`) clones `relay.source` at `:1299`, validates the credential via
 `AIdCredentialValidator::check` at `:1361-1367`, and performs the binding check
 `claims.actor_id == relay.source` at `:1384-1397`, rejecting a mismatch. The
 credential is then forwarded to the target at `:1431,1451`.
 
-The receiving Actor trusts this. In `core/hyper/src/wire/webrtc/coordinator.rs`,
+The receiving Actor trusts this. In `crates/actr-hyper/src/wire/webrtc/coordinator.rs`,
 the relay/source dispatch at `:4346-4494` decides local-versus-remote handling by
 comparing `relay.source == local_id` and otherwise consumes `relay.source`
 directly as the peer identity, with no local credential re-verification. The web
-runtime does the same at `bindings/web/crates/sw-host/src/runtime.rs:1392,1924,
+runtime does the same at `packages/actr-web/crates/sw-host/src/runtime.rs:1392,1924,
 1959,2126-2128`. The trust model therefore reduces to "the signaling server did
 not substitute peer identity, SDP, or DTLS fingerprint" — exactly the assumption
 this RFC removes.
@@ -50,15 +50,15 @@ Two concrete gaps follow:
 1. **WebRTC has no Actor-level identity binding.** webrtc-rs performs DTLS
    internally; the Actr layer never reads or binds the DTLS fingerprint. The
    closest existing code is SDP/ICE-ufrag extraction at
-   `core/hyper/src/wire/webrtc/coordinator.rs:271-360` and the two-stage
+   `crates/actr-hyper/src/wire/webrtc/coordinator.rs:271-360` and the two-stage
    establishment prose at `:161-225`. DTLS encrypts between DTLS endpoints but
    proves nothing about which Actors those endpoints are.
 
 2. **The direct WebSocket path exposes replayable credential material in
-   plaintext headers** (`core/hyper/src/wire/websocket/connection.rs:171-197`
+   plaintext headers** (`crates/actr-hyper/src/wire/websocket/connection.rs:171-197`
    sets `X-Actr-Source-ID` and conditionally `X-Actr-Credential`), as called out
    by #349. The inbound gate verifies the credential signature
-   (`core/hyper/src/wire/websocket/gate.rs:319-374`) but only authenticates the
+   (`crates/actr-hyper/src/wire/websocket/gate.rs:319-374`) but only authenticates the
    credential itself, not "this credential belongs to *this* session."
 
 Scenarios the current design cannot prevent:
@@ -72,8 +72,8 @@ Scenarios the current design cannot prevent:
 
 The wire format and existing contracts do not prevent this change: signaling
 already carries `ActrRelay { source; credential; target }`
-(`core/protocol/proto/signaling.proto:94-98`), and the `WireHandle` abstraction
-(`core/hyper/src/transport/wire_handle.rs:31-72`) already unifies WebRTC and
+(`crates/actr-protocol/proto/signaling.proto:94-98`), and the `WireHandle` abstraction
+(`crates/actr-hyper/src/transport/wire_handle.rs:31-72`) already unifies WebRTC and
 WebSocket under one trait, so a `SecureActorChannel` wrapper composes without
 touching transport internals.
 
@@ -81,8 +81,8 @@ touching transport internals.
 
 ### 1. Channel state machine
 
-`SecureActorChannel` wraps a `WireHandle` (`core/hyper/src/transport/wire_handle.rs:38-75`)
-and exposes the same `DataLane` surface (`core/hyper/src/transport/lane.rs:274-345`)
+`SecureActorChannel` wraps a `WireHandle` (`crates/actr-hyper/src/transport/wire_handle.rs:38-75`)
+and exposes the same `DataLane` surface (`crates/actr-hyper/src/transport/lane.rs:274-345`)
 to upper layers. Its state machine is:
 
 ```
@@ -91,12 +91,12 @@ New -> Handshaking -> Verified -> Usable -> (Rekeying -> Verified)* -> Closed | 
 
 Application `send`/`recv` gates on `Usable`. Today the "usable" transition is pure
 transport readiness: DataChannel `on_open` emits `DataChannelOpened`
-(`core/hyper/src/wire/webrtc/connection.rs:817-831`), and a WebSocket enters Ready
+(`crates/actr-hyper/src/wire/webrtc/connection.rs:817-831`), and a WebSocket enters Ready
 directly via `from_server_stream`
-(`core/hyper/src/wire/websocket/connection.rs:141-156`). This RFC requires that
-`WireStatus::Ready` (`core/hyper/src/transport/wire_handle.rs:77-88`) does not
+(`crates/actr-hyper/src/wire/websocket/connection.rs:141-156`). This RFC requires that
+`WireStatus::Ready` (`crates/actr-hyper/src/transport/wire_handle.rs:77-88`) does not
 surface to upper layers until `Verified` holds. Concretely, the pool-level ready
-set (`core/hyper/src/transport/wire_pool.rs:238-268,311-370,374-491`) gains a
+set (`crates/actr-hyper/src/transport/wire_pool.rs:238-268,311-370,374-491`) gains a
 secure-channel precondition: a wire becomes a candidate for `Ready` only after
 its `SecureActorChannel` reports `Verified`.
 
@@ -110,7 +110,7 @@ Every handshake builds a canonical, ordered, length-prefixed byte buffer over
 these fields and feeds its hash into key derivation:
 
 - protocol version (uint32);
-- source `ActrId` (`core/protocol/proto/actr.proto:11,27-32`: realm + serial + type);
+- source `ActrId` (`crates/actr-protocol/proto/actr.proto:11,27-32`: realm + serial + type);
 - target `ActrId`;
 - session or exchange identifier (a fresh `u64` minted per handshake by the
   initiator, carried in signaling alongside the existing `ActrRelay`);
@@ -126,8 +126,8 @@ transcript hash (BLAKE3) is what signatures and the KDF consume.
 ### 3. Handshake protocol — recommended: a SIGMA-derived pattern
 
 Actr already issues per-Actor Ed25519 credentials through a trusted issuer (AIS,
-`actrix/crates/signaler/`), and `IdentityClaims`/`AIdCredential` already carry
-`realm_id`, `actor_id`, and `expires_at` (`core/protocol/proto/actr.proto:64-90`).
+`crates/loran-signaling/`), and `IdentityClaims`/`AIdCredential` already carry
+`realm_id`, `actor_id`, and `expires_at` (`crates/actr-protocol/proto/actr.proto:64-90`).
 A SIGMA-style mutually-authenticated Diffie-Hellman exchange composes cleanly:
 
 - DH ephemerals provide forward secrecy.
@@ -150,17 +150,17 @@ adopt Noise (e.g. `Noise_XX` or `Noise_XKpsk0`) instead — see Alternatives.
 
 No new cryptographic primitive is introduced. The design reuses:
 
-- `AIdCredentialValidator` (`actrix/crates/platform/src/aid/credential/validator.rs:17-117`)
+- `AIdCredentialValidator` (`crates/loran-platform/src/aid/credential/validator.rs:17-117`)
   and the pure-function `AIdCredentialVerifier`
-  (`actrix/crates/platform/src/aid/credential/verifier.rs:13-78`) for Ed25519
+  (`crates/loran-platform/src/aid/credential/verifier.rs:13-78`) for Ed25519
   signature verification and claims decoding;
-- `AisKeyCache` (`core/hyper/src/key_cache.rs:1-99`), already wired into the
-  WebSocket gate (`core/hyper/src/wire/websocket/gate.rs:319-374`), to resolve
+- `AisKeyCache` (`crates/actr-hyper/src/key_cache.rs:1-99`), already wired into the
+  WebSocket gate (`crates/actr-hyper/src/wire/websocket/gate.rs:319-374`), to resolve
   AIS signing keys on the WebRTC side too.
 
 The peer-signed transcript is verified with the peer's `AIdCredential`, and
 `claims.actor_id` must equal the asserted peer `ActorId`. This moves the binding
-check that today lives only at `actrix/crates/signaling/src/server.rs:1384-1397`
+check that today lives only at `crates/loran-signaling/src/server.rs:1384-1397`
 to **both endpoints locally**. The signaling server may continue its check as
 defense-in-depth, but receivers no longer depend on it.
 
@@ -185,7 +185,7 @@ that §1 enforces.
   unauthenticated transport fails closed because `Usable` is never reached. `ws://`
   is permitted only as an untrusted ciphertext carrier **after** a secure session
   is established; the plaintext `X-Actr-Source-ID`/`X-Actr-Credential` headers at
-  `core/hyper/src/wire/websocket/connection.rs:171-197` are removed.
+  `crates/actr-hyper/src/wire/websocket/connection.rs:171-197` are removed.
 
 ### 7. Reconnection, renegotiation, rekey, and ICE restart
 
@@ -193,7 +193,7 @@ that §1 enforces.
   rebinds from `Handshaking`. RFC-0400's recovery supervisor drives the wire
   reconnection; this RFC requires the secure channel to re-handshake before
   `Usable` resumes.
-- **ICE restart** (`core/hyper/src/wire/webrtc/coordinator.rs:70-99,699-790`)
+- **ICE restart** (`crates/actr-hyper/src/wire/webrtc/coordinator.rs:70-99,699-790`)
   preserves the Actor identity binding as long as the DTLS fingerprint is
   unchanged. If DTLS renegotiates a new fingerprint, the `PeerBinding` must be
   re-signed and re-verified before `Usable` is re-entered.
@@ -213,13 +213,13 @@ signaling alongside `ActrRelay`. The receiver verifies it locally using
 still relays the message but cannot forge it (it holds no Actor signing key).
 This requires exposing the local DTLS fingerprint to the Actr layer — currently
 not surfaced; the `PeerConnection` wrapper at
-`core/hyper/src/wire/webrtc/adapter.rs:334-596` must grow an accessor.
+`crates/actr-hyper/src/wire/webrtc/adapter.rs:334-596` must grow an accessor.
 
 **WebSocket.** WebSocket is treated as an untrusted byte transport. After TCP/TLS
 connect, the SIGMA DH handshake runs over the stream; only after `Verified` may
 application frames flow. The plaintext `X-Actr-Source-ID`/`X-Actr-Credential`
-headers (`core/hyper/src/wire/websocket/connection.rs:171-197`) and the inbound
-header parse path (`core/hyper/src/wire/websocket/server.rs:8-237`) are removed.
+headers (`crates/actr-hyper/src/wire/websocket/connection.rs:171-197`) and the inbound
+header parse path (`crates/actr-hyper/src/wire/websocket/server.rs:8-237`) are removed.
 WSS remains the recommended production default for outer metadata and handshake
 protection, but Actor message security must not depend on WSS being present or on
 where TLS terminates — this is the reconciliation with #349.
@@ -248,9 +248,9 @@ fails closed:
 - Added handshake latency and complexity on every Actor channel; the WebRTC path
   gains a signed-binding round trip even though DTLS already encrypts.
 - The WebRTC path requires adapter changes to expose the DTLS fingerprint to the
-  Actr layer (`core/hyper/src/wire/webrtc/adapter.rs:334-596`).
+  Actr layer (`crates/actr-hyper/src/wire/webrtc/adapter.rs:334-596`).
 - The signaling wire format changes (new `PeerBinding` message in
-  `core/protocol/proto/signaling.proto`); this uses the 0.x breaking-change
+  `crates/actr-protocol/proto/signaling.proto`); this uses the 0.x breaking-change
   window.
 
 ## Alternatives
@@ -284,7 +284,7 @@ close.
 ## Compatibility and phasing
 
 - **Wire format:** adds a `PeerBinding` message to
-  `core/protocol/proto/signaling.proto` and a secure-channel handshake
+  `crates/actr-protocol/proto/signaling.proto` and a secure-channel handshake
   sub-protocol. This is a breaking change to the signaling relay path; it uses
   the 0.x breaking-change window (a `feat!:` PR per the Conventional Commits
   policy in `CLAUDE.md`). The WebSocket direct path removes the
@@ -301,9 +301,9 @@ Implementation phases, each a separate PR gated on the prior:
    passthrough (no new crypto) — wires the seam and the `Verified` precondition
    in `WirePool`'s ready set.
 3. WebRTC: `PeerBinding` signing + local verification + DTLS-fingerprint export
-   from `core/hyper/src/wire/webrtc/adapter.rs`; receiver-side check in
-   `core/hyper/src/wire/webrtc/coordinator.rs` and
-   `bindings/web/crates/sw-host/src/runtime.rs`.
+   from `crates/actr-hyper/src/wire/webrtc/adapter.rs`; receiver-side check in
+   `crates/actr-hyper/src/wire/webrtc/coordinator.rs` and
+   `packages/actr-web/crates/sw-host/src/runtime.rs`.
 4. WebSocket: SIGMA handshake over the byte stream; remove plaintext bearer
    headers (closes #349).
 5. Reconnection, rekey, and ICE-restart rebinding per §7.

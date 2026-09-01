@@ -14,7 +14,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ACTR_ROOT="$(cd "$PROJECT_ROOT/../.." && pwd)"
 
 CLIENT_GUEST_DIR="$SCRIPT_DIR/client-guest"
-PY_WORKLOAD_DIR="$ACTR_ROOT/examples/python/echo-workload"
+PY_WORKLOAD_DIR="$ACTR_ROOT/examples/actr/python/echo-workload"
 RELEASE_DIR="$SCRIPT_DIR/release"
 LOG_DIR="$SCRIPT_DIR/logs/python-workload"
 RUN_DIR="$LOG_DIR/run"

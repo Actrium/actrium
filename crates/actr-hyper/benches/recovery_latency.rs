@@ -17,13 +17,13 @@
 //! * **M3** (pure `translate()` throughput) calls `View`/`Input`/`translate`,
 //!   which are `pub(crate)` — invisible to a `benches/` binary, which only
 //!   links against the crate's public API. It lives as an in-tree, ignored
-//!   unit test: `core/hyper/src/lifecycle/recovery_policy/translate_bench.rs`.
+//!   unit test: `crates/actr-hyper/src/lifecycle/recovery_policy/translate_bench.rs`.
 //!   Run it with:
 //!   `cargo test --release -p actr-hyper --lib translate_bench:: -- --ignored --nocapture`
 //! * **M4** (failure-backoff behavior under paused time) needs
 //!   `#[tokio::test(start_paused = true)]`, which this `harness = false`
 //!   binary's hand-rolled runtime cannot provide. It lives at
-//!   `core/hyper/tests/recovery_backoff.rs`. Run it with:
+//!   `crates/actr-hyper/tests/recovery_backoff.rs`. Run it with:
 //!   `cargo test --release -p actr-hyper --test recovery_backoff -- --ignored --nocapture`
 //!
 //! ## Honesty note on M1 (read before citing this number)

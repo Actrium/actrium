@@ -19,8 +19,8 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Actrium/actr.git",
-    "directory": "bindings/web/packages/actr-dom"
+    "url": "git+https://github.com/Actrium/actrium.git",
+    "directory": "packages/actr-web/packages/actr-dom"
   },
   "devDependencies": {
     "typescript": "^5.3.0"

@@ -184,7 +184,7 @@ jobs:
             echo "Reusing existing validation tag ${TAG} at ${validation_sha}"
             push_tag=false
           else
-            scripts/release-train.sh --version "$VERSION" --prepare-only --pre-release
+            scripts/actr/release-train.sh --version "$VERSION" --prepare-only --pre-release
             validation_sha=$(git rev-parse HEAD)
             git tag "$TAG" "$validation_sha"
             push_tag=true
@@ -392,7 +392,7 @@ jobs:
           BASE_VERSION: ${{ needs.context.outputs.base_version }}
         run: |
           set -euo pipefail
-          bash bindings/web/scripts/sync-cli-assets.sh --build
+          bash packages/actr-web/scripts/sync-cli-assets.sh --build
           mkdir -p release/validation/crates
           packages=(
             actr-protocol
@@ -414,7 +414,7 @@ jobs:
           )
           package_workspace_dir() {
             case "$1" in
-              actr-web-abi) printf '%s\n' bindings/web ;;
+              actr-web-abi) printf '%s\n' packages/actr-web ;;
               *) printf '%s\n' . ;;
             esac
           }
@@ -518,7 +518,7 @@ jobs:
             use_zig: false
     defaults:
       run:
-        working-directory: bindings/typescript
+        working-directory: packages/actr-typescript
     steps:
       - name: Checkout validation source
         uses: actions/checkout@v5
@@ -563,7 +563,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: bindings/typescript/artifacts/${{ matrix.artifact }}
+          path: packages/actr-typescript/artifacts/${{ matrix.artifact }}
           if-no-files-found: error
 
   build-npm-package-assets:
@@ -597,7 +597,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: actr.*.node
-          path: bindings/typescript/artifacts
+          path: packages/actr-typescript/artifacts
           merge-multiple: true
 
       - name: Package web and TypeScript npm artifacts
@@ -607,7 +607,7 @@ jobs:
           mkdir -p "$dist"
 
           (
-            cd bindings/web
+            cd packages/actr-web
             PUPPETEER_SKIP_DOWNLOAD=true \
             PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
             pnpm install --frozen-lockfile
@@ -618,14 +618,14 @@ jobs:
           )
 
           (
-            cd bindings/typescript/actr-workload
+            cd packages/actr-typescript/actr-workload
             npm ci
             npm run build
             npm pack --pack-destination "$dist"
           )
 
           (
-            cd bindings/typescript
+            cd packages/actr-typescript
             npm install
             npm run compile:ts
             npx napi create-npm-dirs
@@ -699,14 +699,14 @@ jobs:
       release_version: ${{ needs.context.outputs.pre_release_version }}
 
   actrix-assets:
-    name: Build actrix validation assets
+    name: Build Loran server validation assets
     needs:
       - context
       - prepare-validation-source
       - create-validation-release
     permissions:
       contents: write
-    uses: ./.github/workflows/_actrix-release.yml
+    uses: ./.github/workflows/_loran-release.yml
     with:
       tag: ${{ needs.context.outputs.release_tag }}
       source_ref: ${{ needs.context.outputs.release_tag }}
@@ -773,7 +773,7 @@ jobs:
         run: brew install opus
 
       - name: Build and package Swift XCFramework
-        working-directory: source/bindings/swift
+        working-directory: source/packages/actr-swift
         env:
           ACTR_BUILD_PROFILE: release
           ACTR_BINDINGS_PATH: dist/ActrBindings
@@ -787,8 +787,8 @@ jobs:
       - name: Prepare Swift validation recovery asset
         run: |
           set -euo pipefail
-          asset=source/bindings/swift/dist/ActrFFI.xcframework.zip
-          release_info=source/bindings/swift/dist/release.txt
+          asset=source/packages/actr-swift/dist/ActrFFI.xcframework.zip
+          release_info=source/packages/actr-swift/dist/release.txt
           checksum=$(sed -n 's/^SHA256 checksum:[[:space:]]*//p' "$release_info")
           [[ "$checksum" =~ ^[0-9a-f]{64}$ ]] || {
             echo "::error::Invalid Swift package checksum: ${checksum}"
@@ -798,7 +798,7 @@ jobs:
           # Preserve an immutable, content-addressed recovery copy before the
           # package-sync tag is pushed. A later run can recover the exact bytes
           # even if rebuilding the XCFramework is not bit-for-bit identical.
-          recovery_asset="source/bindings/swift/dist/ActrFFI.xcframework.${checksum}.zip"
+          recovery_asset="source/packages/actr-swift/dist/ActrFFI.xcframework.${checksum}.zip"
           cp "$asset" "$recovery_asset"
 
       - name: Stage Swift validation assets
@@ -806,9 +806,9 @@ jobs:
         with:
           name: swift-validation-assets
           path: |
-            source/bindings/swift/dist/ActrFFI.xcframework.zip
-            source/bindings/swift/dist/ActrFFI.xcframework.*.zip
-            source/bindings/swift/dist/release.txt
+            source/packages/actr-swift/dist/ActrFFI.xcframework.zip
+            source/packages/actr-swift/dist/ActrFFI.xcframework.*.zip
+            source/packages/actr-swift/dist/release.txt
           if-no-files-found: error
 
       - name: Upload Swift package-sync inputs
@@ -816,11 +816,11 @@ jobs:
         with:
           name: swift-package-sync-inputs
           path: |
-            source/bindings/swift/Sources/
-            source/bindings/swift/dist/ActrBindings/
-            source/bindings/swift/dist/ActrFFI.xcframework/
-            source/bindings/swift/dist/ActrFFI.xcframework.zip
-            source/bindings/swift/dist/release.txt
+            source/packages/actr-swift/Sources/
+            source/packages/actr-swift/dist/ActrBindings/
+            source/packages/actr-swift/dist/ActrFFI.xcframework/
+            source/packages/actr-swift/dist/ActrFFI.xcframework.zip
+            source/packages/actr-swift/dist/release.txt
           if-no-files-found: error
 
   swift-package:
@@ -944,7 +944,7 @@ jobs:
         run: cargo install --locked --force uniffi --version 0.31.1 --features cli --bin uniffi-bindgen
 
       - name: Build Kotlin Android package
-        working-directory: source/bindings/kotlin
+        working-directory: source/packages/actr-kotlin
         env:
           ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
           ANDROID_NDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}/ndk/25.2.9519653
@@ -1114,7 +1114,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: swift-package-sync-inputs
-          path: source/bindings/swift
+          path: source/packages/actr-swift
 
       - name: Checkout Swift package-sync repository
         if: steps.probe.outputs.publish == 'true'
@@ -1214,10 +1214,10 @@ jobs:
             echo "Reusing immutable Swift package-sync tag ${sync_tag}"
           else
             mkdir -p swift-sync/Sources
-            rsync -a --delete source/bindings/swift/Sources/ swift-sync/Sources/
-            rsync -a --delete source/bindings/swift/dist/ActrBindings/ swift-sync/ActrBindings/
+            rsync -a --delete source/packages/actr-swift/Sources/ swift-sync/Sources/
+            rsync -a --delete source/packages/actr-swift/dist/ActrBindings/ swift-sync/ActrBindings/
             rsync -a --delete \
-              source/bindings/swift/dist/ActrFFI.xcframework/ \
+              source/packages/actr-swift/dist/ActrFFI.xcframework/ \
               swift-sync/ActrFFI.xcframework/
 
             # This executes the sync repository's Package.swift without exposing
@@ -1233,7 +1233,7 @@ jobs:
             checksum=$(python3 - <<'PY'
           from pathlib import Path
 
-          text = Path("source/bindings/swift/dist/release.txt").read_text()
+          text = Path("source/packages/actr-swift/dist/release.txt").read_text()
           for line in text.splitlines():
               if line.startswith("SHA256 checksum:"):
                   print(line.split(":", 1)[1].strip())

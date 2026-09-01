@@ -177,7 +177,7 @@
 1. [SERVICES.md](./SERVICES.zh.md) - 故障排查章节
 2. [deploy/README.md](../deploy/README.md) - 部署问题
 3. [CONFIGURATION.md](./CONFIGURATION.zh.md) - 配置验证
-4. [GitHub Issues](https://github.com/Actrium/actrix/issues)
+4. [GitHub Issues](https://github.com/Actrium/actrium/issues)
 
 ---
 
@@ -243,8 +243,8 @@
 
 ## 📞 获取帮助
 
-- **GitHub Issues**: https://github.com/Actrium/actrix/issues
-- **讨论区**: https://github.com/Actrium/actrix/discussions
+- **GitHub Issues**: https://github.com/Actrium/actrium/issues
+- **讨论区**: https://github.com/Actrium/actrium/discussions
 - **项目主页**: https://actor-rtc.github.io
 
 ---

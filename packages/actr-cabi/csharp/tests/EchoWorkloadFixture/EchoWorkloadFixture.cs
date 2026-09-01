@@ -1,6 +1,6 @@
 // ActrSharp.Native.EchoWorkload — TEST-ONLY CI fixture.
 //
-// The native actr_cabi.dll (built from e2e/winui-echo-app/workload) ships under
+// The native actr_cabi.dll (built from tests/e2e/actr/winui-echo-app/workload) ships under
 // runtimes/win-{x64,arm64}/native/ and is auto-copied by NuGet at restore time.
 // This assembly exists only so the fixture package has a managed target; it
 // exposes the workload identity and the test-only native host-bridge probe the

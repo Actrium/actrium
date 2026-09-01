@@ -22,7 +22,7 @@ fn framework_codegen_typescript_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("actr-cli should live under the workspace root")
-        .join("tools/protoc-gen/typescript")
+        .join("tools/actr/protoc-gen/typescript")
 }
 
 fn prepare_typescript_codegen_tools() -> &'static Path {
@@ -31,11 +31,11 @@ fn prepare_typescript_codegen_tools() -> &'static Path {
         let dir = framework_codegen_typescript_dir();
         assert_success(
             &run_npm(&["install"], &dir),
-            "npm install (tools/protoc-gen/typescript)",
+            "npm install (tools/actr/protoc-gen/typescript)",
         );
         assert_success(
             &run_npm(&["run", "bundle"], &dir),
-            "npm run bundle (tools/protoc-gen/typescript)",
+            "npm run bundle (tools/actr/protoc-gen/typescript)",
         );
         dir
     })

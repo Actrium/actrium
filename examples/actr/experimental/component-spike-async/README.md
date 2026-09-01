@@ -1,12 +1,12 @@
 # component-spike-async (Phase 0.5)
 
 Standalone validation of the **async** end-to-end path for WASM Component Model
-+ WIT + wit-bindgen + wasmtime, building on Phase 0 (`experiments/component-spike/`).
++ WIT + wit-bindgen + wasmtime, building on Phase 0 (`examples/actr/experimental/component-spike/`).
 
 Phase 0 proved the synchronous path. This spike answers: **can wasmtime's
 `Component::instantiate_async` + bindgen async export/import path replace
 actr's handwritten cooperative-suspend (asyncify) machinery in
-`core/hyper/src/wasm/host.rs`?**
+`crates/actr-hyper/src/wasm/host.rs`?**
 
 Each sub-crate declares its own `[workspace]` so the repo-root `Cargo.lock` is
 untouched.
@@ -14,7 +14,7 @@ untouched.
 ## Layout
 
 ```
-experiments/component-spike-async/
+examples/actr/experimental/component-spike-async/
   wit/actr-spike-async.wit   WIT with design-note header on async semantics
   guest/                     Rust workload built to a Component (wasm32-wasip2)
                              with bindgen `async: true`
@@ -58,6 +58,6 @@ The host runs 8 tests; see `REPORT.md` for results and interpretation.
 
 - `REPORT.md` — full findings, versions, WIT/bindgen syntax gotchas, and
   recommendations for Phase 1.
-- `experiments/component-spike/REPORT.md` — Phase 0 baseline.
-- `core/hyper/src/wasm/host.rs` — the handwritten cooperative-suspend driver
+- `examples/actr/experimental/component-spike/REPORT.md` — Phase 0 baseline.
+- `crates/actr-hyper/src/wasm/host.rs` — the handwritten cooperative-suspend driver
   this spike aims to replace.

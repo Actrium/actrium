@@ -22,7 +22,7 @@
 #
 # WASI_ADAPTER must name Wasmtime's wasi_snapshot_preview1.reactor.wasm.
 
-WIT_FILE      := ../../../core/framework/wit-v2/actr-workload.wit
+WIT_FILE      := ../../../../crates/actr-framework/wit-v2/actr-workload.wit
 WORLD         := actr-workload-guest-v2
 GEN_DIR       := gen
 BUILD_DIR     := build

@@ -140,7 +140,7 @@ if ! command -v wasm-pack >/dev/null 2>&1; then
 fi
 
 echo "Building current protoc-gen-actrframework..."
-(cd "$ACTR_ROOT" && cargo build --manifest-path tools/protoc-gen/rust/Cargo.toml --bin protoc-gen-actrframework 2>&1 | tail -5)
+(cd "$ACTR_ROOT" && cargo build --manifest-path tools/actr/protoc-gen/rust/Cargo.toml --bin protoc-gen-actrframework 2>&1 | tail -5)
 export PATH="$ACTR_ROOT/target/debug:$PATH"
 
 # ---- Step 1: build WBG guests via wasm-pack (same crates, --features web) ----

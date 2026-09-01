@@ -14,7 +14,7 @@ settings:
     SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
 packages:
   actr-swift:
-    path: ../../bindings/swift
+    path: ../../../../packages/actr-swift
   swift-protobuf:
     url: https://github.com/apple/swift-protobuf.git
     from: 1.32.0

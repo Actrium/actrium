@@ -185,7 +185,7 @@ cd /mnt/c/Users/username/actr
 ### 1. Navigate to Example Directory
 
 ```bash
-cd examples/rust/package-echo
+cd examples/actr/rust/package-echo
 ```
 
 ### 2. Run the Test
@@ -393,10 +393,10 @@ Instead of the full test script, you can run components individually:
 ```bash
 # Start actrix manually
 cd ../../../actrix
-cargo run -- --config examples/rust/package-echo/actrix-config.toml
+cargo run -- --config examples/actr/rust/package-echo/actrix-config.toml
 
 # Run server with actr run (Note: start.sh will first generate/overwrite server-actr.toml)
-cd examples/rust/package-echo
+cd examples/actr/rust/package-echo
 cargo run -p actr-cli -- run \
     --config server-actr.toml
 
@@ -411,7 +411,7 @@ Before running the server manually, make sure `server-actr.toml` points to a rea
 Use the dedicated lifecycle script when you want to validate the detached runtime management flow against the package-backed server config:
 
 ```bash
-cd examples/rust/package-echo
+cd examples/actr/rust/package-echo
 bash manual-runtime-lifecycle.sh
 ```
 

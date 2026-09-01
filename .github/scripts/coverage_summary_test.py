@@ -33,7 +33,7 @@ class CoverageSummaryTest(unittest.TestCase):
                 encoding="utf-8",
             )
             web_rust_lcov.write_text(
-                "TN:\nSF:bindings/web/crates/common/src/lib.rs\nLF:15\nLH:6\nend_of_record\n",
+                "TN:\nSF:packages/actr-web/crates/common/src/lib.rs\nLF:15\nLH:6\nend_of_record\n",
                 encoding="utf-8",
             )
             ts_lcov.write_text(

@@ -56,7 +56,7 @@ generate_service_file() {
     cat > "$output_file" <<EOF
 [Unit]
 Description=Actrix Auxiliary Services
-Documentation=https://github.com/Actrium/actrix
+Documentation=https://github.com/Actrium/actrium
 After=network.target
 
 [Service]

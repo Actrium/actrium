@@ -113,7 +113,7 @@ SHA256 checksum: ${CHECKSUM}
 
 Publishing is managed by the monorepo release train. The external
 actr-swift-package-sync manifest receives the release tag and checksum;
-bindings/swift/Package.swift remains local-only.
+packages/actr-swift/Package.swift remains local-only.
 EOF
 
 echo ""
@@ -122,5 +122,5 @@ echo "🔑 Checksum: ${CHECKSUM}"
 echo ""
 echo "Next steps:"
 echo "  1) Publish through the monorepo release train"
-echo "  2) Keep bindings/swift/Package.swift local-only"
+echo "  2) Keep packages/actr-swift/Package.swift local-only"
 echo ""

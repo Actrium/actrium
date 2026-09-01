@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! ABI crate generated from `core/framework/wit/actr-workload.wit` via
-//! `tools/wit-compile-web`. Do not hand-edit `src/{types,guest,host}.rs`
+//! ABI crate generated from `crates/actr-framework/wit/actr-workload.wit` via
+//! `tools/actr/wit-compile-web`. Do not hand-edit `src/{types,guest,host}.rs`
 //! — regenerate with `cargo run -p actr-wit-compile-web` instead.
 //!
 //! This is the browser-path analogue of the host-side wit-bindgen

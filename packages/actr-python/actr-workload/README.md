@@ -8,7 +8,7 @@ Components. It provides:
 - A lightweight `Workload` `Protocol` for user code.
 - A small CLI/API wrapper around `componentize-py`.
 - Default WIT resolution against the repository source of truth at
-  `core/framework/wit-v2/actr-workload.wit`.
+  `crates/actr-framework/wit-v2/actr-workload.wit`.
 
 The build extra pins the currently supported componentizer:
 
@@ -22,14 +22,14 @@ componentize-py --version  # componentize-py 0.25.0
 The canonical workload WIT source is:
 
 ```text
-core/framework/wit-v2/actr-workload.wit
+crates/actr-framework/wit-v2/actr-workload.wit
 ```
 
 `actr-workload` resolves WIT in this order:
 
 1. An explicit `--wit PATH` argument or API `wit=` argument.
 2. The `ACTR_WORKLOAD_WIT` environment variable.
-3. The nearest checked-out repo WIT at `core/framework/wit-v2/actr-workload.wit`.
+3. The nearest checked-out repo WIT at `crates/actr-framework/wit-v2/actr-workload.wit`.
 4. A packaged resource copied from that repo WIT when building a wheel or sdist.
 
 Package-specific WIT copies, such as the TypeScript workload package

@@ -3,7 +3,7 @@ using ActrSharp;
 
 namespace WinUiEchoApp;
 
-// Mirrors e2e/swift-echo-app/EchoApp/ActrService.swift's linked-runtime flow,
+// Mirrors tests/e2e/actr/swift-echo-app/EchoApp/ActrService.swift's linked-runtime flow,
 // adapted to the actr-cabi C ABI typestate chain.
 //
 // Key difference from the Swift app: Swift implements the local EchoService
@@ -11,7 +11,7 @@ namespace WinUiEchoApp;
 // remote EchoService). The actr-cabi line cannot implement a workload in C#,
 // so the C# host drives only the node typestate chain and calls the LOCAL
 // linked Rust workload ("cabi.EchoApp"), which forwards to the remote
-// EchoService. See e2e/winui-echo-app/workload/src/lib.rs.
+// EchoService. See tests/e2e/actr/winui-echo-app/workload/src/lib.rs.
 internal sealed class ActrService
 {
     private const string WorkloadName = "cabi.EchoApp";

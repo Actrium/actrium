@@ -1,5 +1,5 @@
 //! Standalone `mock-actrix` binary — starts a mock actrix server on a given
-//! port and blocks until Ctrl+C. Used by `bindings/web/examples/echo`'s
+//! port and blocks until Ctrl+C. Used by `packages/actr-web/examples/echo`'s
 //! `start-mock.sh` to run integration e2e tests without a real actrix.
 
 use actr_mock_actrix::MockActrixServer;

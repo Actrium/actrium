@@ -16,33 +16,33 @@ Component Model and jco material are historical context for the old browser brid
 Install the web workspace dependencies:
 
 ```bash
-cd bindings/web
+cd packages/actr-web
 pnpm install
 ```
 
 Run the browser echo example against the in-repo mock actrix service:
 
 ```bash
-cd bindings/web/examples/echo
+cd packages/actr-web/examples/echo
 bash start-mock.sh
 ```
 
 Run the browser-hosted data-stream peer example:
 
 ```bash
-cd bindings/web/examples/data-stream-peer-concurrent
+cd packages/actr-web/examples/data-stream-peer-concurrent
 bash start.sh
 ```
 
 Rebuild and sync the web runtime assets embedded by `actr-cli`:
 
 ```bash
-cd bindings/web
+cd packages/actr-web
 bash crates/sw-host/build.sh
 bash scripts/sync-cli-assets.sh --build
 ```
 
-`crates/sw-host/build.sh` builds the Service Worker host wasm-bindgen output. `scripts/sync-cli-assets.sh --build` rebuilds and copies the canonical web assets into `cli/assets/web-runtime/` so `actr run --web` serves the current runtime.
+`crates/sw-host/build.sh` builds the Service Worker host wasm-bindgen output. `scripts/sync-cli-assets.sh --build` rebuilds and copies the canonical web assets into `crates/actr-cli/assets/web-runtime/` so `actr run --web` serves the current runtime.
 
 ## Current Runtime Shape
 
@@ -81,7 +81,7 @@ The web npm packages are published through the `Publish Web Packages` GitHub
 Actions workflow. The local equivalent is:
 
 ```bash
-cd bindings/web
+cd packages/actr-web
 pnpm install --frozen-lockfile
 bash scripts/publish.sh --dry-run --expected-version 0.1.0
 ```
@@ -108,7 +108,7 @@ Historical deep dives are useful for understanding how the current path was reac
 
 ## Development Notes
 
-- Use `pnpm install` in `bindings/web` for workspace package dependencies.
+- Use `pnpm install` in `packages/actr-web` for workspace package dependencies.
 - Use `bash crates/sw-host/build.sh` when editing `crates/sw-host`.
 - Use `bash scripts/sync-cli-assets.sh --build` when the CLI-embedded web runtime assets must be refreshed.
 - Use `bash examples/echo/start-mock.sh` for the primary echo smoke path.

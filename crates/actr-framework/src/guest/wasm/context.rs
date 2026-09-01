@@ -29,7 +29,7 @@ use super::generated::actr::workload::types as wit_types;
 
 /// Translate a WIT `actr-error` variant back into the framework's
 /// [`ActrError`] — exact inverse of the host-side `actr_error_to_wit` in
-/// `core/hyper/src/wasm/host.rs`.
+/// `crates/actr-hyper/src/wasm/host.rs`.
 pub(crate) fn wit_actr_error_to_proto(e: wit_types::ActrError) -> ActrError {
     match e {
         wit_types::ActrError::Unavailable(msg) => ActrError::Unavailable(msg),

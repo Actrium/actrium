@@ -22,7 +22,7 @@ This scenario validates the local package runtime flow end-to-end:
 
 1. `ACTRIX_BIN`
 2. `actrix` from `PATH`
-3. Install the in-tree `actrix/crates/actrixd` binary when `ACTRIX_BIN` is not already set
+3. Install the in-tree `crates/loran-server` binary when `ACTRIX_BIN` is not already set
 
 The auto-install target is the default cargo user bin directory:
 
@@ -32,8 +32,8 @@ The auto-install target is the default cargo user bin directory:
 ## Run
 
 ```bash
-bash e2e/package-runtime-echo/run.sh
-bash e2e/package-runtime-echo/run.sh "Hello"
+bash tests/e2e/actr/package-runtime-echo/run.sh
+bash tests/e2e/actr/package-runtime-echo/run.sh "Hello"
 ```
 
 Useful environment variables:

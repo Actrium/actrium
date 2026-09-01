@@ -34,7 +34,7 @@ services/<form>/
 ## 显式不实现的形态
 
 - linked-typescript / linked-python / linked-swift / linked-kotlin server form —— 依赖尚未落地的 FFI 入口工厂（`ActrNode.fromConfigWithWorkload` / `from_toml_with_workload` / `fromConfig(workload:)`），该路线已被取代，故此处不收录
-- TypeScript / Python source-defined service workload —— 项目设计已排除（参见 `cli/fixtures/typescript/echo/index.service.ts.hbs`：声明 source-defined workload 已移除）
+- TypeScript / Python source-defined service workload —— 项目设计已排除（参见 `crates/actr-cli/fixtures/typescript/echo/index.service.ts.hbs`：声明 source-defined workload 已移除）
 - Web binding 作为 server —— wasm-pack 当前只做 client
 
 ## 客户端语言（与 server form 解耦）

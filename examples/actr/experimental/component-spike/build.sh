@@ -3,7 +3,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$HERE/../.." && pwd)"
+REPO_ROOT="$(git -C "$HERE" rev-parse --show-toplevel)"
 GUEST_TARGET_DIR="$REPO_ROOT/target/experiments-component-spike-guest"
 cd "$HERE"
 

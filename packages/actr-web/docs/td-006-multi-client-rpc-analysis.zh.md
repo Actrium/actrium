@@ -1,8 +1,8 @@
 # TD-006 深度分析：同源 SW 下 2+ client 场景 RPC round-trip 挂起
 
-**状态**：已修复（2026-04-25，commit `301c58d6`）  
-**上下文**：[tech-debt.zh.md §TD-006](./tech-debt.zh.md#td-006)；[Option U Phase 6 γ-unified](./option-u-phase6-gamma-unified.zh.md)  
-**前置已修**：[TD-003](./tech-debt.zh.md#td-003)（dispatch ctx 单例）、[TD-004](./tech-debt.zh.md#td-004)（credential namespace 共享）  
+**状态**：已修复（2026-04-25，commit `301c58d6`）
+**上下文**：[tech-debt.zh.md §TD-006](./tech-debt.zh.md#td-006)；[Option U Phase 6 γ-unified](./option-u-phase6-gamma-unified.zh.md)
+**前置已修**：[TD-003](./tech-debt.zh.md#td-003)（dispatch ctx 单例）、[TD-004](./tech-debt.zh.md#td-004)（credential namespace 共享）
 **优先级**：已关闭；以下主体保留 2026-04-24 的修复前分析，结案结果见本页 TL;DR / §5 / §6
 
 ---
@@ -49,7 +49,7 @@ TD-006 已经收敛并修复。最后落地的是一组组合修复，而不是�
 
 ### 1.2 6-2 测试流程代码
 
-`bindings/web/examples/echo/test-auto.js:855-903` 的结构是：
+`packages/actr-web/examples/echo/test-auto.js:855-903` 的结构是：
 
 ```text
 browser.createBrowserContext()          // 全新 incognito
@@ -122,7 +122,7 @@ TD-004 diagnostic agent 留下过一句非常重要的次要发现：
 **结论**：已排除。
 
 - 旧 bug 是 `guest_bridge` 只有单槽 `GUEST_CTX`；现在已改成 `DISPATCH_CTXS: HashMap<String, Rc<RuntimeContext>>`，按 `request_id` 查上下文。
-- 代码位置：`bindings/web/crates/sw-host/src/guest_bridge.rs:107-150`。
+- 代码位置：`packages/actr-web/crates/sw-host/src/guest_bridge.rs:107-150`。
 - 伴随症状 `install_ctx called while another context is active` 已不再出现。
 - 更关键的是：`BasicFunction` 1-3 `Rapid Consecutive Sends` 仍可通过，说明同一 client 内的并发/快连发已不再把 ctx 互相踩掉。
 
@@ -131,7 +131,7 @@ TD-004 diagnostic agent 留下过一句非常重要的次要发现：
 **结论**：已排除。
 
 - `SwRuntime::new` 现在按 `client_id` 分区 credential namespace。
-- 代码位置：`bindings/web/crates/sw-host/src/runtime.rs:558-560`。
+- 代码位置：`packages/actr-web/crates/sw-host/src/runtime.rs:558-560`。
 - 实测证据：mock-actrix 日志能看到两个 client 独立 serial（4 和 5），且 `WS actor rebound` WARN 不再 fire。
 - 所以 TD-004 的根因链已经断开，不再是 TD-006 的解释。
 
@@ -140,9 +140,9 @@ TD-004 diagnostic agent 留下过一句非常重要的次要发现：
 **结论**：已排除。
 
 - `CLIENTS` 是 `HashMap<client_id, Rc<ClientContext>>`，不是单槽。
-- 代码位置：`bindings/web/crates/sw-host/src/runtime.rs:2487-2492`。
+- 代码位置：`packages/actr-web/crates/sw-host/src/runtime.rs:2487-2492`。
 - `ClientContext` 自带独立的 `runtime` / `system` / `dispatcher` / `peer_gate` / `transport_manager` / `stream_handlers`。
-- 代码位置：`bindings/web/crates/sw-host/src/runtime.rs:2354-2363`，初始化在 `2828-2868`。
+- 代码位置：`packages/actr-web/crates/sw-host/src/runtime.rs:2354-2363`，初始化在 `2828-2868`。
 - 这部分代码结构上已经是 multi-client aware。
 
 ### 2.4 DOM `MessagePort` 错配
@@ -150,9 +150,9 @@ TD-004 diagnostic agent 留下过一句非常重要的次要发现：
 **结论**：已排除。
 
 - `actor.sw.js` 在 SW 全局维护的是 `clientPorts: Map<clientId, port>`。
-- 代码位置：`bindings/web/packages/web-sdk/src/actor.sw.js:105-106`。
+- 代码位置：`packages/actr-web/packages/web-sdk/src/actor.sw.js:105-106`。
 - `DOM_PORT_INIT` 时按 `clientId` 入表；之后 `control` / `webrtc_event` / `fast_path_data` / `register_datachannel_port` 都是通过闭包捕获的那个 `clientId` 回到 Rust。
-- 代码位置：`bindings/web/packages/web-sdk/src/actor.sw.js:521-586`。
+- 代码位置：`packages/actr-web/packages/web-sdk/src/actor.sw.js:521-586`。
 - 也就是说“两个 tab 把 DOM port 混了”这类错配，从代码结构上已经讲不通。
 
 ---
@@ -168,13 +168,13 @@ TD-004 diagnostic agent 留下过一句非常重要的次要发现：
 **为什么仍可疑**：
 
 - `WORKLOAD` 是 SW 全局 thread-local 单槽。
-- 代码位置：`bindings/web/crates/sw-host/src/runtime.rs:2492`。
+- 代码位置：`packages/actr-web/crates/sw-host/src/runtime.rs:2492`。
 - 注册与读取都走同一个全局 workload。
-- 代码位置：`bindings/web/crates/sw-host/src/runtime.rs:2513-2516`、`2633-2635`、`3028-3030`。
+- 代码位置：`packages/actr-web/crates/sw-host/src/runtime.rs:2513-2516`、`2633-2635`、`3028-3030`。
 - `WasmWorkload` 只是包了一层 `Rc<dyn Fn(...) -> Future>`；`clone()` 复制的是共享 handler，不是独立实例。
-- 代码位置：`bindings/web/crates/sw-host/src/workload.rs:32-38`、`61-80`。
+- 代码位置：`packages/actr-web/crates/sw-host/src/workload.rs:32-38`、`61-80`。
 - WBG 路径里 `dispatchFn` 也是在 SW 启动时注册一次，全局复用。
-- 代码位置：`bindings/web/packages/web-sdk/src/actor.sw.js:406-435`。
+- 代码位置：`packages/actr-web/packages/web-sdk/src/actor.sw.js:406-435`。
 
 **为什么又不是最高嫌疑**：
 
@@ -198,12 +198,12 @@ TD-004 diagnostic agent 留下过一句非常重要的次要发现：
 **为什么仍可疑**：
 
 - `InboundPacketDispatcher` 本身很薄，只做 `from + message -> enqueue(mailbox)`。
-- 代码位置：`bindings/web/crates/sw-host/src/inbound/dispatcher.rs:19-27`、`58-111`。
+- 代码位置：`packages/actr-web/crates/sw-host/src/inbound/dispatcher.rs:19-27`、`58-111`。
 - 真正的关键路径是：
   - `handle_fast_path` 把新的 inbound RPC 判定为“不是 response”后，转入 dispatcher。
   - scheduler 再从 `record.from` 里恢复 `stream_id`，然后 `parse_peer_and_channel` 得到 `peer_id`。
   - 同时再从 envelope metadata 取 `sender_actr_id` 作为 `caller_id`。
-- 代码位置：`bindings/web/crates/sw-host/src/runtime.rs:2037` 附近、`2644-2668`。
+- 代码位置：`packages/actr-web/crates/sw-host/src/runtime.rs:2037` 附近、`2644-2668`。
 
 **如果这里有 bug，会怎么表现**：
 
@@ -234,11 +234,11 @@ TD-004 diagnostic agent 留下过一句非常重要的次要发现：
 **为什么可疑**：
 
 - SW 侧把 peer 身份压缩成单个 `peer_id = target.to_string_repr()`。
-- 代码位置：`bindings/web/crates/sw-host/src/runtime.rs:1398-1409`。
+- 代码位置：`packages/actr-web/crates/sw-host/src/runtime.rs:1398-1409`。
 - 发送到 DOM 的 `webrtc_command` 也只有 `peerId`，没有 `clientId`。
-- 代码位置：`bindings/web/crates/sw-host/src/runtime.rs:1341-1355`；消息 schema 在 `bindings/web/packages/actr-dom/src/sw-bridge.ts:35-48`。
+- 代码位置：`packages/actr-web/crates/sw-host/src/runtime.rs:1341-1355`；消息 schema 在 `packages/actr-web/packages/actr-dom/src/sw-bridge.ts:35-48`。
 - DOM 侧 `WebRtcCoordinator` 用 `peers: Map<string, PeerConnectionInfo>` 纯按 `peerId` 建索引；重复 `create_peer` 只会告警 `Peer already exists` 并直接返回。
-- 代码位置：`bindings/web/packages/actr-dom/src/webrtc-coordinator.ts:28`、`74-78`、`151-158`。
+- 代码位置：`packages/actr-web/packages/actr-dom/src/webrtc-coordinator.ts:28`、`74-78`、`151-158`。
 
 **为什么它解释力强**：
 
@@ -248,9 +248,9 @@ TD-004 diagnostic agent 留下过一句非常重要的次要发现：
 **反证**：
 
 - 每个 page 都会新建自己的 `ServiceWorkerBridge` 与 `WebRtcCoordinator`。
-- 代码位置：`bindings/web/packages/actr-dom/src/index.ts:116-132`；示例页 `cli/assets/web-runtime/actr-host.html:645-651`。
+- 代码位置：`packages/actr-web/packages/actr-dom/src/index.ts:116-132`；示例页 `crates/actr-cli/assets/web-runtime/actr-host.html:645-651`。
 - SW 侧 `handle_dom_webrtc_event` 也是按 `client_id` 回到对应 `SwRuntime`。
-- 代码位置：`bindings/web/crates/sw-host/src/runtime.rs:3182-3192`。
+- 代码位置：`packages/actr-web/crates/sw-host/src/runtime.rs:3182-3192`。
 - 所以 C 不是“显然存在的架构单例 bug”，而是“边界协议只带 `peerId` 是否足够”的怀疑。
 
 **验证方法**：
@@ -268,18 +268,18 @@ TD-004 diagnostic agent 留下过一句非常重要的次要发现：
 **为什么还没完全出局**：
 
 - `RuntimeContext` 的 `caller_id` 仍是后续业务逻辑依赖的重要字段。
-- 代码位置：`bindings/web/crates/sw-host/src/context.rs:21-41`、`45-61`。
+- 代码位置：`packages/actr-web/crates/sw-host/src/context.rs:21-41`、`45-61`。
 - server 端 inbound 请求的 `caller_id` 是在 scheduler 阶段从 envelope metadata 动态解码出来，再灌进新的 `RuntimeContext`。
-- 代码位置：`bindings/web/crates/sw-host/src/runtime.rs:2645-2649`、`2702-2710`。
+- 代码位置：`packages/actr-web/crates/sw-host/src/runtime.rs:2645-2649`、`2702-2710`。
 - 同时还会把 `caller_id -> Dest::Peer(peer_id)` 注册进 `peer_gate`。
-- 代码位置：`bindings/web/crates/sw-host/src/runtime.rs:2664-2668`。
+- 代码位置：`packages/actr-web/crates/sw-host/src/runtime.rs:2664-2668`。
 
 **为什么它不是更高嫌疑**：
 
 - 现在 `host_get_caller_id()` 已经不再依赖全局单槽，而是按 `request_id` 查上下文表。
-- 代码位置：`bindings/web/crates/sw-host/src/guest_bridge.rs:107-150`，getter 在 `482` 附近。
+- 代码位置：`packages/actr-web/crates/sw-host/src/guest_bridge.rs:107-150`，getter 在 `482` 附近。
 - `call_raw()` 发出的 `sender_actr_id` 也来自 `self_id`，不是某个共享全局。
-- 代码位置：`bindings/web/crates/sw-host/src/context.rs:93-131`。
+- 代码位置：`packages/actr-web/crates/sw-host/src/context.rs:93-131`。
 
 **因此 D 更像什么**：
 
@@ -298,21 +298,21 @@ TD-004 diagnostic agent 留下过一句非常重要的次要发现：
 **为什么可疑**：
 
 - 每个 `SwRuntime` 只有一条 `SignalingClient` websocket。
-- 代码位置：`bindings/web/crates/sw-host/src/runtime.rs:98-108`、`487-499`、`579-583`。
+- 代码位置：`packages/actr-web/crates/sw-host/src/runtime.rs:98-108`、`487-499`、`579-583`。
 - server runtime 必须在同一条 ws 上同时处理来自多个 client 的 `RoleNegotiation` / `SessionDescription` / `IceCandidate`。
 - 相关状态虽然名义上是 per-peer map，但全部共存于同一个 runtime：`known_peers`、`open_channels`、`role_assignments`、`peer_connection_states` 等。
-- 代码位置：`bindings/web/crates/sw-host/src/runtime.rs:510-521`、`1608-1737`、`1754-2011`。
+- 代码位置：`packages/actr-web/crates/sw-host/src/runtime.rs:510-521`、`1608-1737`、`1754-2011`。
 
 **这里有一个额外的测试基架红旗**：
 
-- `testing/mock-actrix/src/signaling.rs:557-611` 对 `RoleNegotiation` 的处理不是“发给 sender + target”，而是：
+- `crates/actr-mock-actrix/src/signaling.rs:557-611` 对 `RoleNegotiation` 的处理不是“发给 sender + target”，而是：
   - `envelope_for_from` 发给 sender。
   - `envelope_for_to` 发给所有其他连接。
-- 代码位置：`testing/mock-actrix/src/signaling.rs:601-609`。
+- 代码位置：`crates/actr-mock-actrix/src/signaling.rs:601-609`。
 - 在拓扑 `server + client1 + client2` 下，这意味着 client2 可能收到本应只属于 `client1 <-> server` 那一对的 `RoleAssignment`，然后误执行 `create_peer(client1)`。
 - sw-host 收到这类误投递时，确实会把它当真：
   - `handle_actr_relay` 在 `RoleAssignment` 分支里按 `remote_peer_id` 建立 peer 并可能 `create_offer`。
-  - 代码位置：`bindings/web/crates/sw-host/src/runtime.rs:1709-1737`。
+  - 代码位置：`packages/actr-web/crates/sw-host/src/runtime.rs:1709-1737`。
 
 **但要保持一个边界**：
 
@@ -333,7 +333,7 @@ TD-004 diagnostic agent 留下过一句非常重要的次要发现：
 
 - 字面上的“整个浏览器只一个 DOM `WebRtcCoordinator`”并不成立。
 - `initActrDom()` / host page 都是“每个页面新建一个 coordinator”。
-- 代码位置：`bindings/web/packages/actr-dom/src/index.ts:116-132`；`cli/assets/web-runtime/actr-host.html:645-651`。
+- 代码位置：`packages/actr-web/packages/actr-dom/src/index.ts:116-132`；`crates/actr-cli/assets/web-runtime/actr-host.html:645-651`。
 
 **为什么仍值得保留为 F**：
 
@@ -363,13 +363,13 @@ TD-004 diagnostic agent 留下过一句非常重要的次要发现：
 **先抓现成 console**：
 
 - `ServiceWorkerBridge` 已经会打印 `"[SW Bridge] -> SW"` / `"[SW Bridge] <- SW"`。
-- 代码位置：`bindings/web/packages/actr-dom/src/sw-bridge.ts:193-205`、`241-248`。
+- 代码位置：`packages/actr-web/packages/actr-dom/src/sw-bridge.ts:193-205`、`241-248`。
 - `WebRtcCoordinator` 已经会打印：
   - `Command ... for peer ...`
   - `Peer connection created: ...`
   - `Connection state changed: ...`
   - `DataChannel ... opened/closed`
-- 代码位置：`bindings/web/packages/actr-dom/src/webrtc-coordinator.ts:101-158`、`445-503`。
+- 代码位置：`packages/actr-web/packages/actr-dom/src/webrtc-coordinator.ts:101-158`、`445-503`。
 
 **如果还不够，直接在 puppeteer 里 patch `RTCPeerConnection`**：
 
@@ -418,32 +418,32 @@ await page.evaluateOnNewDocument(() => {
 
 **推荐打点位置**：
 
-1. `bindings/web/crates/sw-host/src/runtime.rs:3001-3060`  
-   `handle_dom_control`  
+1. `packages/actr-web/crates/sw-host/src/runtime.rs:3001-3060`
+   `handle_dom_control`
    打：`client_id` / `route_key` / `request_id` / `actor_id`
 
-2. `bindings/web/crates/sw-host/src/runtime.rs:3136-3154` 与 `1398-1409`  
-   `discover_target_with_retry` / `ensure_peer_with_retry` / `ensure_peer`  
+2. `packages/actr-web/crates/sw-host/src/runtime.rs:3136-3154` 与 `1398-1409`
+   `discover_target_with_retry` / `ensure_peer_with_retry` / `ensure_peer`
    打：`client_id` / `target_id` / `peer_id` / `known_peers`
 
-3. `bindings/web/crates/sw-host/src/runtime.rs:1341-1355`  
-   `send_webrtc_command`  
+3. `packages/actr-web/crates/sw-host/src/runtime.rs:1341-1355`
+   `send_webrtc_command`
    打：`client_id` / `actor_id` / `action` / `peer_id`
 
-4. `bindings/web/crates/sw-host/src/runtime.rs:3182-3256`  
-   `handle_dom_webrtc_event` / `register_datachannel_port`  
+4. `packages/actr-web/crates/sw-host/src/runtime.rs:3182-3256`
+   `handle_dom_webrtc_event` / `register_datachannel_port`
    打：`client_id` / `event_type` / `peer_id` / `channel_id`
 
-5. `bindings/web/crates/sw-host/src/runtime.rs:2037` 附近  
-   `handle_fast_path`  
+5. `packages/actr-web/crates/sw-host/src/runtime.rs:2037` 附近
+   `handle_fast_path`
    打：`client_id` / `stream_id` / `request_id` / `is_response`
 
-6. `bindings/web/crates/sw-host/src/inbound/dispatcher.rs:58-111` 与 `runtime.rs:2644-2715`  
-   dispatcher + scheduler  
+6. `packages/actr-web/crates/sw-host/src/inbound/dispatcher.rs:58-111` 与 `runtime.rs:2644-2715`
+   dispatcher + scheduler
    打：`stream_id` / `peer_id` / `sender_actr_id` / `caller_id` / `route_key`
 
-7. `bindings/web/crates/sw-host/src/runtime.rs:1520-1536`  
-   `handle_rpc_response`  
+7. `packages/actr-web/crates/sw-host/src/runtime.rs:1520-1536`
+   `handle_rpc_response`
    打：`client_id` / `request_id` / `PendingRpcTarget`
 
 **推荐统一日志模板**：
@@ -471,28 +471,28 @@ await page.evaluateOnNewDocument(() => {
 
 这次最终落地的是组合修复：
 
-- `testing/mock-actrix/src/signaling.rs`
+- `crates/actr-mock-actrix/src/signaling.rs`
   - `RoleNegotiation` 改成只投递给 `from/to` 两端，不再把 target 侧 `RoleAssignment` 广播给所有非 sender 连接。
   - 普通 relay 在 target 未绑定时改为 `warn + drop`，不再走“发给所有其他连接”的旧兼容分支。
   - `RouteCandidatesRequest` 改成只收集有活跃 WS 绑定的 actor，并优先最新 live registration。
-- `bindings/web/crates/sw-host/src/runtime.rs`
+- `packages/actr-web/crates/sw-host/src/runtime.rs`
   - stale peer / `datachannel_not_open` / `peer not found` 会真正触发 transport cleanup、peer reset、discovered target 失效与 pending RPC reject。
   - `disconnected` / `failed` / `closed` 现在都会同步关掉 transport，避免旧 handle 与旧 peer 状态残留。
-- `bindings/web/crates/sw-host/src/transport/peer_transport.rs`
+- `packages/actr-web/crates/sw-host/src/transport/peer_transport.rs`
   - `get_or_create_transport()` 改成真正的 vacant-only 创建。
   - `inject_connection()` 改用 `reconnect()`，避免 DOM 侧新 port 注入后继续命中旧 ready handle。
 - DOM / SW 侧
-  - `bindings/web/packages/actr-dom/src/sw-bridge.ts`
-  - `bindings/web/packages/actr-dom/src/webrtc-coordinator.ts`
-  - `bindings/web/packages/web-sdk/src/actor.sw.js`
-  - `bindings/web/packages/web-sdk/src/actor.sw.js`
-  - `cli/assets/web-runtime/actor.sw.js`
-  - `cli/assets/web-runtime/actor.sw.js`
-  - `cli/assets/web-runtime/actr-host.html`
+  - `packages/actr-web/packages/actr-dom/src/sw-bridge.ts`
+  - `packages/actr-web/packages/actr-dom/src/webrtc-coordinator.ts`
+  - `packages/actr-web/packages/web-sdk/src/actor.sw.js`
+  - `packages/actr-web/packages/web-sdk/src/actor.sw.js`
+  - `crates/actr-cli/assets/web-runtime/actor.sw.js`
+  - `crates/actr-cli/assets/web-runtime/actor.sw.js`
+  - `crates/actr-cli/assets/web-runtime/actr-host.html`
   - 这些地方补了 `CLIENT_UNREGISTER`、同 browser window remap 时清理旧 client、串行处理同一 `MessagePort`、lane-0 `bindRpcPort` 重绑、stale peer fast-fail 与 pending frame cleanup。
 - echo 示例与 harness
-  - `bindings/web/examples/echo/test-auto.js` 改成 `runBeforeUnload: true` 关闭页面，确保 unload 路径真的触发 unregister。
-  - `bindings/web/examples/echo/server/src/main.ts` 与 `server-guest/src/lib.rs` 增加了更直接的观测日志，便于确认 server 确实收包与回包。
+  - `packages/actr-web/examples/echo/test-auto.js` 改成 `runBeforeUnload: true` 关闭页面，确保 unload 路径真的触发 unregister。
+  - `packages/actr-web/examples/echo/server/src/main.ts` 与 `server-guest/src/lib.rs` 增加了更直接的观测日志，便于确认 server 确实收包与回包。
 
 ---
 
@@ -500,10 +500,10 @@ await page.evaluateOnNewDocument(() => {
 
 结案验证：
 
-- `SUITES='BasicFunction MultiTab' bash bindings/web/examples/echo/start-mock.sh`
+- `SUITES='BasicFunction MultiTab' bash packages/actr-web/examples/echo/start-mock.sh`
   - 结果：`12/12` 全过。
   - 关键项：`1-0 Basic Echo Connectivity`、`6-4 Refresh One Client`、`6-5 Multiple Server Instances` 全部通过。
-- `SUITES=BasicFunction bash bindings/web/examples/echo/start-mock.sh`
+- `SUITES=BasicFunction bash packages/actr-web/examples/echo/start-mock.sh`
   - 结果：`6/6` 全过。
 
 结论：
@@ -526,7 +526,7 @@ await page.evaluateOnNewDocument(() => {
 - `61dbbfa7`：TD-004 根因文档（credential namespace）
 - `eb034d94`：按 `client_id` 分区 credential namespace
 - `b658d4f0`：mock-actrix 对 WS rebind 发 WARN
-- `1ac5afd4`：同步 `cli/assets/web-runtime/` 产物
+- `1ac5afd4`：同步 `crates/actr-cli/assets/web-runtime/` 产物
 - `cb45a98d`：记录 TD-004 部分生效、TD-005/TD-006 继续追
 - `eda786ed`：Phase 6 收尾与 TD-006 初始登记
 - `6593fc6a`：TD-006 首版长分析文档
@@ -559,29 +559,29 @@ mock-actrix: WS bound to HTTP-registered actor actor_id=5@.../echo-client-app
 
 | 文件 | 位置 | 说明 |
 |------|------|------|
-| `bindings/web/crates/sw-host/src/runtime.rs` | `487-521` | `SwRuntime` 字段；看 per-peer / per-runtime state |
-| `bindings/web/crates/sw-host/src/runtime.rs` | `1398-1409` | `ensure_peer()`：`peer_id = target.to_string_repr()` |
-| `bindings/web/crates/sw-host/src/runtime.rs` | `1608-1737` | `handle_actr_relay()`：session/ICE/role-assignment |
-| `bindings/web/crates/sw-host/src/runtime.rs` | `1754-2011` | `handle_webrtc_event()`：DOM -> SW |
-| `bindings/web/crates/sw-host/src/runtime.rs` | `2487-2516` | `CLIENTS` / `WORKLOAD` thread-local |
-| `bindings/web/crates/sw-host/src/runtime.rs` | `2633-2715` | scheduler 构造 `caller_id` / `peer_id` / `RuntimeContext` |
-| `bindings/web/crates/sw-host/src/runtime.rs` | `3001-3158` | DOM 控制请求 -> handler / remote call |
-| `bindings/web/crates/sw-host/src/runtime.rs` | `3182-3256` | `handle_dom_webrtc_event()` / `register_datachannel_port()` |
-| `bindings/web/crates/sw-host/src/inbound/dispatcher.rs` | `58-111` | inbound RPC 进入 mailbox |
-| `bindings/web/crates/sw-host/src/context.rs` | `21-131` | `RuntimeContext` 与 `call_raw()` 的 `sender_actr_id` |
-| `bindings/web/packages/actr-dom/src/sw-bridge.ts` | `35-48`、`75-89`、`219-223` | WebRTC command/event schema 只带 `peerId` |
-| `bindings/web/packages/actr-dom/src/webrtc-coordinator.ts` | `28`、`74-78`、`151-158`、`445-503` | DOM peer map、create_peer、DataChannel open/close |
-| `bindings/web/packages/web-sdk/src/actor.sw.js` | `105-106`、`521-586` | `clientPorts` + per-`clientId` 路由 |
-| `bindings/web/examples/echo/test-auto.js` | `855-903` | 6-2 测试实现 |
-| `testing/mock-actrix/src/signaling.rs` | `557-611` | `RoleNegotiation` 回包当前会对所有非 sender 连接扇出 |
-| `testing/mock-actrix/src/signaling.rs` | `614-631` | 普通 relay 则是按 target 精确转发 |
+| `packages/actr-web/crates/sw-host/src/runtime.rs` | `487-521` | `SwRuntime` 字段；看 per-peer / per-runtime state |
+| `packages/actr-web/crates/sw-host/src/runtime.rs` | `1398-1409` | `ensure_peer()`：`peer_id = target.to_string_repr()` |
+| `packages/actr-web/crates/sw-host/src/runtime.rs` | `1608-1737` | `handle_actr_relay()`：session/ICE/role-assignment |
+| `packages/actr-web/crates/sw-host/src/runtime.rs` | `1754-2011` | `handle_webrtc_event()`：DOM -> SW |
+| `packages/actr-web/crates/sw-host/src/runtime.rs` | `2487-2516` | `CLIENTS` / `WORKLOAD` thread-local |
+| `packages/actr-web/crates/sw-host/src/runtime.rs` | `2633-2715` | scheduler 构造 `caller_id` / `peer_id` / `RuntimeContext` |
+| `packages/actr-web/crates/sw-host/src/runtime.rs` | `3001-3158` | DOM 控制请求 -> handler / remote call |
+| `packages/actr-web/crates/sw-host/src/runtime.rs` | `3182-3256` | `handle_dom_webrtc_event()` / `register_datachannel_port()` |
+| `packages/actr-web/crates/sw-host/src/inbound/dispatcher.rs` | `58-111` | inbound RPC 进入 mailbox |
+| `packages/actr-web/crates/sw-host/src/context.rs` | `21-131` | `RuntimeContext` 与 `call_raw()` 的 `sender_actr_id` |
+| `packages/actr-web/packages/actr-dom/src/sw-bridge.ts` | `35-48`、`75-89`、`219-223` | WebRTC command/event schema 只带 `peerId` |
+| `packages/actr-web/packages/actr-dom/src/webrtc-coordinator.ts` | `28`、`74-78`、`151-158`、`445-503` | DOM peer map、create_peer、DataChannel open/close |
+| `packages/actr-web/packages/web-sdk/src/actor.sw.js` | `105-106`、`521-586` | `clientPorts` + per-`clientId` 路由 |
+| `packages/actr-web/examples/echo/test-auto.js` | `855-903` | 6-2 测试实现 |
+| `crates/actr-mock-actrix/src/signaling.rs` | `557-611` | `RoleNegotiation` 回包当前会对所有非 sender 连接扇出 |
+| `crates/actr-mock-actrix/src/signaling.rs` | `614-631` | 普通 relay 则是按 target 精确转发 |
 
 ### 7.4 复现环境
 
 最常用的是：
 
 ```bash
-cd bindings/web/examples/echo
+cd packages/actr-web/examples/echo
 NODE_PATH=/home/l/.local/n/lib/node_modules \
   SUITES="MultiTab" \
   CAPTURE_SW_CONSOLE=1 \
@@ -591,12 +591,12 @@ NODE_PATH=/home/l/.local/n/lib/node_modules \
 补充说明：
 
 - 如果要对照矩阵，用 `SUITES="BasicFunction MultiTab"`。
-- 如果改过 `sw-host` Rust 或 `cli/assets/web-runtime/`，记得先处理 TD-002 提到的构建同步问题，否则观察到的不是最新 runtime。
+- 如果改过 `sw-host` Rust 或 `crates/actr-cli/assets/web-runtime/`，记得先处理 TD-002 提到的构建同步问题，否则观察到的不是最新 runtime。
 
 ### 7.5 历史教训
 
 - `page.on('console')` 只能天然抓 page console，抓不到 SW console；不过当前 `actor.sw.js` 已经会把 SW log 转发回页面，所以新增 Rust `log::info!` 是能被现有测试看到的。
-- 改 `sw-host` 代码后如果忘了同步 `cli/assets/web-runtime/` 并重建 `actr`，很容易拿旧 wasm 做新诊断。
+- 改 `sw-host` 代码后如果忘了同步 `crates/actr-cli/assets/web-runtime/` 并重建 `actr`，很容易拿旧 wasm 做新诊断。
 - **不要过早把 mock 多 client 失败等同于生产 runtime 根因**：`mock-actrix` 的 `RoleNegotiation` 扇出语义本身就可能放大或制造 multi-client 异常。
 
 ---

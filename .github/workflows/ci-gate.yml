@@ -93,7 +93,7 @@ jobs:
       - name: Resolve e2e workspace with the committed lockfile
         run: |
           cargo metadata \
-            --manifest-path e2e/Cargo.toml \
+            --manifest-path tests/e2e/actr/Cargo.toml \
             --format-version 1 \
             --locked \
             > "$RUNNER_TEMP/e2e-metadata.json"
@@ -115,7 +115,7 @@ jobs:
               )
           PY
       - name: Compile the Rust E2E workspace
-        run: cargo check --manifest-path e2e/Cargo.toml --workspace --locked
+        run: cargo check --manifest-path tests/e2e/actr/Cargo.toml --workspace --locked
 
   e2e_package_runtime:
     name: E2E Package Runtime
@@ -145,9 +145,9 @@ jobs:
         run: cargo install wasm-pack --version 0.15.0 --locked
       - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
-        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+        run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
       - name: Run package runtime echo e2e (PR gate, MODE=path1)
-        run: bash e2e/package-runtime-echo/run.sh
+        run: bash tests/e2e/actr/package-runtime-echo/run.sh
 
   audit:
     name: Dependency Audit
@@ -180,7 +180,7 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
-      # Fail the build if core/hyper/build.rs can't compile the wasm fixture
+      # Fail the build if crates/actr-hyper/build.rs can't compile the wasm fixture
       # (missing wasm32-wasip2 / wasm-component-ld) rather than silently
       # compiling the fixture tests out.
       ACTR_REQUIRE_WASM_FIXTURE: "1"
@@ -208,7 +208,7 @@ jobs:
         # The V2 WIT is shipped in the actr-hyper tarball so host bindgen works
         # without the sibling framework crate. Fail fast if the copy drifts.
         run: |
-          cmp core/framework/wit-v2/actr-workload.wit core/hyper/wit-v2/actr-workload.wit
+          cmp crates/actr-framework/wit-v2/actr-workload.wit crates/actr-hyper/wit-v2/actr-workload.wit
       - name: Cache cargo-installed tools
         id: cargo-tools
         uses: actions/cache@v4
@@ -233,17 +233,17 @@ jobs:
           fi
       - name: Cache CLI web runtime assets
         # Same source-hash key as the Test (Rust) shards: the sw-host wasm is
-        # a release wasm-pack compile (~2 min) derived only from bindings/web.
+        # a release wasm-pack compile (~2 min) derived only from packages/actr-web.
         uses: actions/cache@v4
         with:
-          path: cli/assets/web-runtime
-          key: cli-web-runtime-v1-${{ hashFiles('bindings/web/packages/**', 'bindings/web/crates/**', 'bindings/web/scripts/**') }}
+          path: crates/actr-cli/assets/web-runtime
+          key: cli-web-runtime-v1-${{ hashFiles('packages/actr-web/packages/**', 'packages/actr-web/crates/**', 'packages/actr-web/scripts/**') }}
       - name: Generate CLI web runtime assets
         run: |
-          if [ -f cli/assets/web-runtime/actr_sw_host_bg.wasm ]; then
-            bash bindings/web/scripts/sync-cli-assets.sh --skip-sw-host
+          if [ -f crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm ]; then
+            bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
           else
-            bash bindings/web/scripts/sync-cli-assets.sh --build
+            bash packages/actr-web/scripts/sync-cli-assets.sh --build
           fi
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -278,7 +278,7 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
-      # Fail the build if core/hyper/build.rs can't compile the wasm fixture
+      # Fail the build if crates/actr-hyper/build.rs can't compile the wasm fixture
       # (missing wasm32-wasip2 / wasm-component-ld) rather than silently
       # compiling the fixture tests out.
       ACTR_REQUIRE_WASM_FIXTURE: "1"
@@ -314,7 +314,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          # wasm32-wasip2 is required by core/hyper/build.rs to compile the
+          # wasm32-wasip2 is required by crates/actr-hyper/build.rs to compile the
           # wasm_actor_fixture Component under --all-features (wasm-engine).
           targets: wasm32-wasip2,wasm32-unknown-unknown
       - name: Install protoc
@@ -326,7 +326,7 @@ jobs:
         # The V2 WIT is shipped in the actr-hyper tarball so host bindgen works
         # without the sibling framework crate. Fail fast if the copy drifts.
         run: |
-          cmp core/framework/wit-v2/actr-workload.wit core/hyper/wit-v2/actr-workload.wit
+          cmp crates/actr-framework/wit-v2/actr-workload.wit crates/actr-hyper/wit-v2/actr-workload.wit
       - uses: Swatinem/rust-cache@v2
         with:
           cache-targets: false
@@ -370,18 +370,18 @@ jobs:
           wasm-tools --version
       - name: Cache CLI web runtime assets
         # The sw-host wasm build is a full wasm-pack release compile (~2 min)
-        # whose output depends only on bindings/web sources. Restore it by
+        # whose output depends only on packages/actr-web sources. Restore it by
         # source hash; on a hit only the cheap non-wasm asset sync runs.
         uses: actions/cache@v4
         with:
-          path: cli/assets/web-runtime
-          key: cli-web-runtime-v1-${{ hashFiles('bindings/web/packages/**', 'bindings/web/crates/**', 'bindings/web/scripts/**') }}
+          path: crates/actr-cli/assets/web-runtime
+          key: cli-web-runtime-v1-${{ hashFiles('packages/actr-web/packages/**', 'packages/actr-web/crates/**', 'packages/actr-web/scripts/**') }}
       - name: Generate CLI web runtime assets
         run: |
-          if [ -f cli/assets/web-runtime/actr_sw_host_bg.wasm ]; then
-            bash bindings/web/scripts/sync-cli-assets.sh --skip-sw-host
+          if [ -f crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm ]; then
+            bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
           else
-            bash bindings/web/scripts/sync-cli-assets.sh --build
+            bash packages/actr-web/scripts/sync-cli-assets.sh --build
           fi
       - name: Free disk space
         # `cargo nextest run --workspace --all-features` builds every test
@@ -479,14 +479,14 @@ jobs:
       - name: Cache CLI web runtime assets
         uses: actions/cache@v4
         with:
-          path: cli/assets/web-runtime
-          key: cli-web-runtime-v1-${{ hashFiles('bindings/web/packages/**', 'bindings/web/crates/**', 'bindings/web/scripts/**') }}
+          path: crates/actr-cli/assets/web-runtime
+          key: cli-web-runtime-v1-${{ hashFiles('packages/actr-web/packages/**', 'packages/actr-web/crates/**', 'packages/actr-web/scripts/**') }}
       - name: Generate CLI web runtime assets
         run: |
-          if [ -f cli/assets/web-runtime/actr_sw_host_bg.wasm ]; then
-            bash bindings/web/scripts/sync-cli-assets.sh --skip-sw-host
+          if [ -f crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm ]; then
+            bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
           else
-            bash bindings/web/scripts/sync-cli-assets.sh --build
+            bash packages/actr-web/scripts/sync-cli-assets.sh --build
           fi
       - name: Build at MSRV (locked)
         run: cargo build --workspace --all-targets --all-features --locked
@@ -506,30 +506,30 @@ jobs:
           node-version: "24"
           cache: "npm"
           cache-dependency-path: |
-            bindings/typescript/package.json
-            tools/protoc-gen/typescript/package-lock.json
+            packages/actr-typescript/package.json
+            tools/actr/protoc-gen/typescript/package-lock.json
       - name: Install dependencies
-        working-directory: bindings/typescript
+        working-directory: packages/actr-typescript
         run: npm install
       - name: Check formatting
-        working-directory: bindings/typescript
+        working-directory: packages/actr-typescript
         run: npm run format
       - name: Run lint
-        working-directory: bindings/typescript
+        working-directory: packages/actr-typescript
         run: npm run lint
       - name: Build
-        working-directory: bindings/typescript
+        working-directory: packages/actr-typescript
         run: npm run build
       - name: Run unit tests
-        working-directory: bindings/typescript
+        working-directory: packages/actr-typescript
         run: npm test
       - name: Test TypeScript protoc plugin
-        working-directory: tools/protoc-gen/typescript
+        working-directory: tools/actr/protoc-gen/typescript
         run: |
           npm ci
           npm test
       - name: Cargo check
-        working-directory: bindings/typescript
+        working-directory: packages/actr-typescript
         run: cargo check --locked --manifest-path Cargo.toml
 
   typescript_workload:
@@ -547,21 +547,21 @@ jobs:
           node-version: "24"
           cache: "npm"
           cache-dependency-path: |
-            bindings/typescript/actr-workload/package-lock.json
-            examples/typescript/echo-workload/package-lock.json
+            packages/actr-typescript/actr-workload/package-lock.json
+            examples/actr/typescript/echo-workload/package-lock.json
       - name: Verify TypeScript workload WIT drift
         run: |
-          cmp core/framework/wit-v2/actr-workload.wit bindings/typescript/actr-workload/src/wit-v2/actr-workload.wit
+          cmp crates/actr-framework/wit-v2/actr-workload.wit packages/actr-typescript/actr-workload/src/wit-v2/actr-workload.wit
       - name: Build TypeScript workload package
-        working-directory: bindings/typescript/actr-workload
+        working-directory: packages/actr-typescript/actr-workload
         run: |
           npm ci
           npm run build
           npm test
-          node dist/cli.js bindings /tmp/actr-workload-ts-bindings --wit ../../../core/framework/wit-v2/actr-workload.wit
+          node dist/cli.js bindings /tmp/actr-workload-ts-bindings --wit ../../../crates/actr-framework/wit-v2/actr-workload.wit
           npm pack --dry-run
       - name: Build TypeScript EchoService sources
-        working-directory: examples/typescript/echo-workload
+        working-directory: examples/actr/typescript/echo-workload
         run: |
           npm ci
           npm run build
@@ -579,7 +579,7 @@ jobs:
       contents: read
     defaults:
       run:
-        working-directory: tools/protoc-gen/python
+        working-directory: tools/actr/protoc-gen/python
     steps:
       - uses: actions/checkout@v5
       - name: Set up Python
@@ -587,7 +587,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
-          cache-dependency-path: tools/protoc-gen/python/pyproject.toml
+          cache-dependency-path: tools/actr/protoc-gen/python/pyproject.toml
       - name: Install package
         run: pip install -e .
       - name: Run unit tests
@@ -678,12 +678,12 @@ jobs:
         with:
           python-version: "3.13"
           cache: "pip"
-          cache-dependency-path: bindings/python/actr-workload/pyproject.toml
+          cache-dependency-path: packages/actr-python/actr-workload/pyproject.toml
       - name: Verify actr-hyper WIT drift
         # The V2 WIT is shipped in the actr-hyper tarball so host bindgen works
         # without the sibling framework crate. Fail fast if the copy drifts.
         run: |
-          cmp core/framework/wit-v2/actr-workload.wit core/hyper/wit-v2/actr-workload.wit
+          cmp crates/actr-framework/wit-v2/actr-workload.wit crates/actr-hyper/wit-v2/actr-workload.wit
       - name: Cache cargo-installed tools
         id: cargo-tools
         uses: actions/cache@v4
@@ -704,17 +704,17 @@ jobs:
           fi
       - name: Verify TypeScript workload WIT drift
         run: |
-          cmp core/framework/wit-v2/actr-workload.wit bindings/typescript/actr-workload/src/wit-v2/actr-workload.wit
+          cmp crates/actr-framework/wit-v2/actr-workload.wit packages/actr-typescript/actr-workload/src/wit-v2/actr-workload.wit
       - name: Build actr-workload package
         run: |
           python -m pip install -U build
-          python -m build bindings/python/actr-workload
+          python -m build packages/actr-python/actr-workload
       - name: Install actr-workload build extra
-        run: python -m pip install -e 'bindings/python/actr-workload[build]'
+        run: python -m pip install -e 'packages/actr-python/actr-workload[build]'
       - name: Verify componentize-py pin
         run: componentize-py --version | grep 'componentize-py 0.25.0'
       - name: Test Python workload authoring bridge
-        run: python -m unittest discover -s bindings/python/actr-workload/tests -v
+        run: python -m unittest discover -s packages/actr-python/actr-workload/tests -v
       - name: Generate workload bindings
         run: |
           rm -rf /tmp/actr-workload-bindings
@@ -722,15 +722,15 @@ jobs:
           test -f /tmp/actr-workload-bindings/actr_workload_bindings/exports/workload.py
           test -f /tmp/actr-workload-bindings/actr_workload_bindings/imports/host.py
       - name: Compile Python sources
-        run: python -m compileall bindings/python/actr-workload/src examples/python/echo-workload/workload.py
+        run: python -m compileall packages/actr-python/actr-workload/src examples/actr/python/echo-workload/workload.py
       - name: Build Python echo workload
-        working-directory: examples/python/echo-workload
+        working-directory: examples/actr/python/echo-workload
         run: ./build.sh package
       - name: Build generated Python scaffold
         # The first build preserves the hand-written workload. Move it aside so
         # `actr gen` stamps the real CLI scaffold, then componentize that output
         # against the V2 bindings as a regression guard.
-        working-directory: examples/python/echo-workload
+        working-directory: examples/actr/python/echo-workload
         run: |
           mv workload.py workload.py.handwritten
           ./build.sh
@@ -778,14 +778,14 @@ jobs:
         run: >-
           git diff --no-index --exit-code --
           crates/actr-cabi/actr-cabi.h
-          bindings/cabi/swift/Sources/ActrCabi/include/actr-cabi.h
+          packages/actr-cabi/swift/Sources/ActrCabi/include/actr-cabi.h
       - name: Type-check actr-cabi Swift wrapper
         run: >-
           swiftc -typecheck -swift-version 6
-          -I bindings/cabi/swift/Sources/ActrCabi/include
-          bindings/cabi/swift/Sources/ActrCabi/ActrCabi.swift
+          -I packages/actr-cabi/swift/Sources/ActrCabi/include
+          packages/actr-cabi/swift/Sources/ActrCabi/ActrCabi.swift
       - name: Build local Swift XCFramework
-        working-directory: bindings/swift
+        working-directory: packages/actr-swift
         env:
           ACTR_BUILD_PROFILE: debug
           ACTR_XCFRAMEWORK_TARGETS: macos
@@ -795,7 +795,7 @@ jobs:
           ACTR_BINARY_PATH=dist/ActrFFI.xcframework \
           ./build-xcframework.sh
       - name: Build Swift bindings package
-        working-directory: bindings/swift
+        working-directory: packages/actr-swift
         run: |
           ACTR_BINDINGS_PATH=dist/ActrBindings \
           ACTR_BINARY_PATH=dist/ActrFFI.xcframework \
@@ -803,7 +803,7 @@ jobs:
       - name: Pre-build mock-actrix
         run: cargo build -p actr-mock-actrix --bin mock-actrix
       - name: Test Swift bindings package
-        working-directory: bindings/swift
+        working-directory: packages/actr-swift
         env:
           ACTR_SWIFT_E2E: "1"
         run: |
@@ -829,7 +829,7 @@ jobs:
           ACTR_BINARY_PATH=dist/ActrFFI.xcframework \
           swift test
       - name: Build Swift codegen package
-        working-directory: tools/protoc-gen/swift
+        working-directory: tools/actr/protoc-gen/swift
         run: swift build
 
   kotlin:
@@ -863,20 +863,20 @@ jobs:
             cargo install wasm-pack --version 0.15.0 --locked --force
           fi
       - name: Check formatting
-        working-directory: bindings/web
+        working-directory: packages/actr-web
         run: cargo fmt --all -- --check
       - name: Check web workspace
-        working-directory: bindings/web
+        working-directory: packages/actr-web
         run: cargo check --workspace --target wasm32-unknown-unknown --locked
       - name: WIT codegen drift gate (Option U)
         run: cargo run -p actr-wit-compile-web -- --check
       - name: Build sw-host runtime assets
-        working-directory: bindings/web/crates/sw-host
+        working-directory: packages/actr-web/crates/sw-host
         env:
           ACTR_SKIP_CLI_ASSET_SYNC: "1"
         run: bash build.sh
-      - name: cli/assets sync drift gate
-        run: bash bindings/web/scripts/sync-cli-assets.sh --check --skip-sw-host
+      - name: crates/actr-cli/assets sync drift gate
+        run: bash packages/actr-web/scripts/sync-cli-assets.sh --check --skip-sw-host
 
   c_go_workloads:
     name: C and Go Workloads
@@ -951,19 +951,19 @@ jobs:
 
       - name: Build and validate C V2 workload
         run: >-
-          make -C examples/c/echo-workload verify
+          make -C examples/actr/c/echo-workload verify
           WIT_BINDGEN="$WIT_BINDGEN"
           WASM_TOOLS="$WASM_TOOLS"
           WASI_SDK="$WASI_SDK"
           WASI_ADAPTER="$WASI_ADAPTER"
 
       - name: Build and validate Go V2 workload
-        run: bash examples/go/echo-workload/build.sh
+        run: bash examples/actr/go/echo-workload/build.sh
 
       - name: Execute C and Go workloads through the actr host
         env:
-          ACTR_C_ECHO_COMPONENT: ${{ github.workspace }}/examples/c/echo-workload/dist/echo-c-0.1.0-wasm32-wasip2.wasm
-          ACTR_GO_ECHO_COMPONENT: ${{ github.workspace }}/examples/go/echo-workload/dist/echo-go-0.1.0-wasm32-wasip2.wasm
+          ACTR_C_ECHO_COMPONENT: ${{ github.workspace }}/examples/actr/c/echo-workload/dist/echo-c-0.1.0-wasm32-wasip2.wasm
+          ACTR_GO_ECHO_COMPONENT: ${{ github.workspace }}/examples/actr/go/echo-workload/dist/echo-go-0.1.0-wasm32-wasip2.wasm
           ACTR_WASM_FAST_COMPILE: "1"
         run: >-
           cargo test -p actr-hyper

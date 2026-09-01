@@ -2,7 +2,7 @@
 //!
 //! `export_workload!(MyWorkload, "cabi.Echo")` submits a `WorkloadEntry` whose
 //! `link_fn` captures the concrete workload type and calls the public
-//! `Node::link(node, workload)` (`core/hyper/src/lib.rs:1034`). The internal
+//! `Node::link(node, workload)` (`crates/actr-hyper/src/lib.rs:1034`). The internal
 //! `LinkedWorkloadHandle` is `pub(crate)`, so actr-cabi cannot use
 //! `link_handle`; the macro closes over the concrete type in the workload
 //! crate, where the type is known.

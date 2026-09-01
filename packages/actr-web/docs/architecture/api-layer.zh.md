@@ -306,5 +306,5 @@ SW 侧
 ---
 
 **实现时间**：2025-11-11
-**代码位置**：`bindings/web/crates/sw-host/src/`、`bindings/web/packages/web-sdk/src/actor.sw.js`
+**代码位置**：`packages/actr-web/crates/sw-host/src/`、`packages/actr-web/packages/web-sdk/src/actor.sw.js`
 **编译状态**：✅ 通过

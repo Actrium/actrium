@@ -190,7 +190,7 @@ impl SwLifecycleManager {
     /// Handle the `DOM_PING` message.
     ///
     /// `DOM_PING` is fire-and-forget keepalive from the DOM side
-    /// (`bindings/web/crates/dom-bridge/src/lifecycle.rs::send_ping`): the
+    /// (`packages/actr-web/crates/dom-bridge/src/lifecycle.rs::send_ping`): the
     /// browser garbage-collects an idle Service Worker, so the DOM merely
     /// has to *send* a message to keep this worker resident. The DOM does
     /// not await a `SW_PONG`; logging here is sufficient.

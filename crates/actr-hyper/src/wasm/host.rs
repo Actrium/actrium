@@ -8,7 +8,7 @@
 //!
 //! The guest component must implement the `actr:workload@0.6.0`
 //! `actr-workload-guest-v2` world defined in
-//! `core/framework/wit-v2/actr-workload.wit`. That contract carries one
+//! `crates/actr-framework/wit-v2/actr-workload.wit`. That contract carries one
 //! `dispatch(envelope, ctx)` export for inbound RPC plus seventeen observation
 //! hooks (lifecycle + signaling + transport + credential + mailbox),
 //! exactly mirroring [`actr_framework::Workload`]. Transport host imports and

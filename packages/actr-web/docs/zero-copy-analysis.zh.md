@@ -1,6 +1,6 @@
 # 零拷贝通信分析报告
 
-> **历史快照 / 非当前实现指南**（2026-01-08）：本文记录的是零拷贝优化前的 baseline 分析。当前实现已经有 `bindings/web/crates/common/src/zero_copy.rs`，并且 `sw-host` / `dom-bridge` 的 lane/postmessage 路径已接入 `receive_zero_copy`、`extract_payload_zero_copy`、`send_zero_copy`、`send_with_transfer` 等 helper。本文后续的“当前实现”“立即建议”均应按当时 baseline 理解，不代表当前仓库状态。
+> **历史快照 / 非当前实现指南**（2026-01-08）：本文记录的是零拷贝优化前的 baseline 分析。当前实现已经有 `packages/actr-web/crates/common/src/zero_copy.rs`，并且 `sw-host` / `dom-bridge` 的 lane/postmessage 路径已接入 `receive_zero_copy`、`extract_payload_zero_copy`、`send_zero_copy`、`send_with_transfer` 等 helper。本文后续的“当前实现”“立即建议”均应按当时 baseline 理解，不代表当前仓库状态。
 
 ## 执行概要
 

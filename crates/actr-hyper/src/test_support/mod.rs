@@ -1,6 +1,6 @@
 //! Shared integration-test helpers enabled by the `test-utils` feature.
 //!
-//! These modules are used by `core/hyper/tests/*` and live under the library
+//! These modules are used by `crates/actr-hyper/tests/*` and live under the library
 //! so their public APIs are treated as externally reachable rather than dead
 //! code inside each individual integration test crate.
 

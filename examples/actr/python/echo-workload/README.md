@@ -31,7 +31,7 @@ actr gen -l python --input protos --output generated
 The script:
 
 1. Creates `.venv/`.
-2. Installs `../../../bindings/python/actr-workload[build]`, which pins
+2. Installs `../../../../packages/actr-python/actr-workload[build]`, which pins
    `componentize-py==0.25.0`.
 3. Runs `actr-workload bindings bindings --world-module actr_workload_bindings`.
 4. Runs `actr-workload componentize workload --bindings-dir bindings`,

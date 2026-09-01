@@ -6,14 +6,14 @@
 # Rust client driver.
 #
 # Usage:
-#   bash e2e/polyglot-echo/run.sh                            # defaults: --server cdylib-rust --client rust --scenario echo
-#   bash e2e/polyglot-echo/run.sh --server cdylib-rust       # default Rust cdylib package server
-#   bash e2e/polyglot-echo/run.sh --server linked-rust       # in-process Rust linked workload
-#   bash e2e/polyglot-echo/run.sh --server wasm-rust         # Rust Wasm Component (hyper wasm-engine)
-#   bash e2e/polyglot-echo/run.sh --client rust              # Rust driver, echo scenario
-#   bash e2e/polyglot-echo/run.sh --client rust --scenario server-stream
-#   bash e2e/polyglot-echo/run.sh --client rust --scenario bidi
-#   bash e2e/polyglot-echo/run.sh --client rust hello        # custom message
+#   bash tests/e2e/actr/polyglot-echo/run.sh                            # defaults: --server cdylib-rust --client rust --scenario echo
+#   bash tests/e2e/actr/polyglot-echo/run.sh --server cdylib-rust       # default Rust cdylib package server
+#   bash tests/e2e/actr/polyglot-echo/run.sh --server linked-rust       # in-process Rust linked workload
+#   bash tests/e2e/actr/polyglot-echo/run.sh --server wasm-rust         # Rust Wasm Component (hyper wasm-engine)
+#   bash tests/e2e/actr/polyglot-echo/run.sh --client rust              # Rust driver, echo scenario
+#   bash tests/e2e/actr/polyglot-echo/run.sh --client rust --scenario server-stream
+#   bash tests/e2e/actr/polyglot-echo/run.sh --client rust --scenario bidi
+#   bash tests/e2e/actr/polyglot-echo/run.sh --client rust hello        # custom message
 #
 # Honoured environment variables:
 #   HTTP_PORT    Override mock-actrix port (default 18181).
@@ -25,7 +25,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 export REPO_ROOT SCRIPT_DIR
 
 source "$SCRIPT_DIR/lib/common.sh"
@@ -100,7 +100,7 @@ case "$SCENARIO" in
 esac
 
 # Streaming scenarios are independent of the chosen --server form: they always
-# spin up an additional linked stream-server (e2e/polyglot-echo/server/) and
+# spin up an additional linked stream-server (tests/e2e/actr/polyglot-echo/server/) and
 # the client driver picks STREAM_SERVICE_TYPE for those scenarios.  The
 # --server form only affects which echo workload is reachable under
 # SERVICE_TYPE.
@@ -251,26 +251,26 @@ run_ts_driver() {
     require_cmd node
     require_cmd npm
 
-    local bindings_dir="$REPO_ROOT/bindings/typescript"
+    local bindings_dir="$REPO_ROOT/packages/actr-typescript"
     local dist_entry="$bindings_dir/dist/index.js"
     local build_log="$LOG_DIR/driver-ts-build.log"
 
-    section "🔨 Building bindings/typescript"
+    section "🔨 Building packages/actr-typescript"
     if [ ! -f "$dist_entry" ]; then
         (
             cd "$bindings_dir"
             npm install --no-audit --no-fund
             npm run build:debug
             npm run compile:ts
-        ) >"$build_log" 2>&1 || { cat "$build_log" >&2; fail "bindings/typescript build failed"; }
-        [ -f "$dist_entry" ] || fail "bindings/typescript dist missing after build"
+        ) >"$build_log" 2>&1 || { cat "$build_log" >&2; fail "packages/actr-typescript build failed"; }
+        [ -f "$dist_entry" ] || fail "packages/actr-typescript dist missing after build"
         # `napi build` regenerates index.js/index.d.ts and strips the
         # hand-maintained ActrError shim. The driver only consumes dist/, so
         # restore the checked-in root bindings to keep this build side-effect
         # out of the working tree.
-        git -C "$REPO_ROOT" checkout -- bindings/typescript/index.js bindings/typescript/index.d.ts 2>/dev/null || true
+        git -C "$REPO_ROOT" checkout -- packages/actr-typescript/index.js packages/actr-typescript/index.d.ts 2>/dev/null || true
     fi
-    success "bindings/typescript built"
+    success "packages/actr-typescript built"
 
     section "🚀 Running TypeScript client driver"
     local driver_log="$LOG_DIR/driver-ts.log"

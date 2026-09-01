@@ -10,8 +10,8 @@ fail() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/release-actr-cli.sh build --target <target> --version <version> --output <dir> --state-file <file> [--dry-run]
-  scripts/release-actr-cli.sh publish --tag <tag> --assets <dir> --state-file <file> [--replace] [--create-release] [--dry-run]
+  scripts/actr/release-actr-cli.sh build --target <target> --version <version> --output <dir> --state-file <file> [--dry-run]
+  scripts/actr/release-actr-cli.sh publish --tag <tag> --assets <dir> --state-file <file> [--replace] [--create-release] [--dry-run]
 EOF
 }
 
@@ -180,10 +180,10 @@ command_build() {
   fi
 
   local repo_root cargo_args filename binary_path
-  repo_root=${ACTR_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
+  repo_root=${ACTR_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
   if [[ "${ACTR_PREBUILT_ASSETS:-}" != "1" ]]; then
     log_info "Syncing CLI web runtime assets for $TARGET"
-    (cd "$repo_root" && bash bindings/web/scripts/sync-cli-assets.sh --build)
+    (cd "$repo_root" && bash packages/actr-web/scripts/sync-cli-assets.sh --build)
   else
     log_info "Skipping asset sync (ACTR_PREBUILT_ASSETS=1)"
   fi

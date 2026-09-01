@@ -3,7 +3,7 @@
 > [!CAUTION]
 > 这是一个保留用于历史 Fast Path 调试的 legacy 示例，不是当前受支持的安全 Web workload 流程。它的自定义 Service Worker 会直接获取并执行松散的 wasm-bindgen JavaScript 和 `_bg.wasm`，不会验证 `.actr` 签名或内容 hash。`start.sh` 默认拒绝启动。当前流程请使用 [`../echo/start-mock.sh`](../echo/start-mock.sh)，直到本示例完成 signed `.actr` 迁移。
 
-这个示例把 [examples/rust/data-stream-peer-concurrent](../../../../examples/rust/data-stream-peer-concurrent/README.md) 的核心流程搬到了浏览器端：
+这个示例把 [examples/actr/rust/data-stream-peer-concurrent](../../../../examples/actr/rust/data-stream-peer-concurrent/README.md) 的核心流程搬到了浏览器端：
 
 - 浏览器发起 `StartStream`
 - 发起方在本地 WASM handler 中发现远端对等节点
@@ -39,7 +39,7 @@ data-stream-peer-concurrent/
 不要在生产环境、共享环境或处理不可信输入时运行。只有在隔离的本地环境中确认接受未验证代码执行风险后，才能显式启用：
 
 ```bash
-cd bindings/web/examples/data-stream-peer-concurrent
+cd packages/actr-web/examples/data-stream-peer-concurrent
 ACTR_ALLOW_UNVERIFIED_LEGACY_WBG=1 ./start.sh
 ```
 
@@ -60,7 +60,7 @@ ACTR_ALLOW_UNVERIFIED_LEGACY_WBG=1 ./start.sh
 下面的分步命令同样会执行未经 package 验证的松散 JS/WASM，只能用于隔离的历史调试：
 
 ```bash
-cd bindings/web/examples/data-stream-peer-concurrent
+cd packages/actr-web/examples/data-stream-peer-concurrent
 pnpm install
 pnpm install --dir client
 pnpm install --dir server

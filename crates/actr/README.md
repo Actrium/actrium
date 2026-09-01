@@ -79,7 +79,7 @@ The repository includes a complete set of design and development documents. A pr
   ```bash
   # Ubuntu/Debian
   sudo apt install protobuf-compiler
-  
+
   # macOS
   brew install protobuf
   ```
@@ -123,7 +123,7 @@ foundation crates, protoc tools, supported SDK crates, `actr-cli`, and Actrix
 server crates with one shared stable version.
 
 - Workflow file: `.github/workflows/release-train.yml`
-- Local/CI entrypoint: `scripts/release-train.sh`
+- Local/CI entrypoint: `scripts/actr/release-train.sh`
 - Required secrets:
   - `CARGO_REGISTRY_TOKEN` — crates.io publishing
   - `PYPI_API_TOKEN` — PyPI publishing (optional; omit to skip Python)
@@ -146,9 +146,9 @@ The release train publishes all components in a single run:
   2. Final Git tag created (`vX.Y.Z`)
   3. Swift package-sync dispatched (`Actrium/actr-swift-package-sync`)
   4. Kotlin package-sync dispatched (`Actrium/actr-kotlin-package-sync`)
-  5. TypeScript npm package published (`@actrium/actr` from `bindings/typescript/`)
+  5. TypeScript npm package published (`@actrium/actr` from `packages/actr-typescript/`)
   6. Web npm packages published (`@actrium/actr-dom`, `@actrium/actr-web`,
-     `@actrium/actr-web-react`) via `bindings/web/scripts/publish.sh`
+     `@actrium/actr-web-react`) via `packages/actr-web/scripts/publish.sh`
 
 Pre-release support is available via the `pre_release` workflow input,
 which accepts semver `X.Y.Z-<id>` and publishes npm packages with
@@ -178,7 +178,7 @@ Prepare the version commit on the maintenance release PR branch with, for
 example:
 
 ```bash
-scripts/release-train.sh --branch release-0.4 --version 0.4.18 --prepare-only
+scripts/actr/release-train.sh --branch release-0.4 --version 0.4.18 --prepare-only
 ```
 
 Pushing the branch and opening or updating its PR remain manual steps.

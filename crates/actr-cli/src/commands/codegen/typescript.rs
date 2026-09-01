@@ -17,8 +17,7 @@ const NPX: &str = "npx";
 const PROTOC_GEN_ES: &str = "protoc-gen-es";
 const EXPECTED_PROTOC_GEN_ES_VERSION: &str = "2.11.0";
 const PLUGIN_NAME: &str = "protoc-gen-actrframework-typescript";
-const GITHUB_RELEASE_URL_TEMPLATE: &str =
-    "https://github.com/Actrium/actr/releases/download/v{}/protoc-gen-actrframework-typescript.zip";
+const GITHUB_RELEASE_URL_TEMPLATE: &str = "https://github.com/Actrium/actrium/releases/download/v{}/protoc-gen-actrframework-typescript.zip";
 const IMPLEMENTED_MARKER: &str =
     "// ActrService is Implemented: This file contains a complete implementation.";
 const UNIMPLEMENTED_MARKER: &str =

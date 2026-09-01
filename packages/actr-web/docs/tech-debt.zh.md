@@ -1,4 +1,4 @@
-# bindings/web 技术债登记
+# packages/actr-web 技术债登记
 
 收录浏览器侧曾经登记过的技术债。当前截至 2026-04-25，TD-001 到 TD-006 都已关闭；本文主要作为历史索引和事故复盘入口，不应把旧“暂缓理由 / 修复选项”理解为仍待处理的当前债务。
 
@@ -24,11 +24,11 @@
 
 | 文件 | 行号 | 方法 |
 |------|------|------|
-| `bindings/web/crates/sw-host/src/transport/wire_builder.rs` | 45 | `WebWireBuilder::set_dom_channel` |
-| `bindings/web/crates/sw-host/src/transport/sw_transport.rs` | 66 | `SwTransport::set_dom_channel` |
-| `bindings/web/crates/sw-host/src/inbound/dispatcher.rs` | 47 | `InboundPacketDispatcher::set_dom_lane` |
-| `bindings/web/crates/dom-bridge/src/transport/dom_transport.rs` | 100 | `DomTransport::set_sw_channel` |
-| `bindings/web/crates/dom-bridge/src/webrtc/coordinator.rs` | 45 | `WebRtcCoordinator::set_sw_channel` |
+| `packages/actr-web/crates/sw-host/src/transport/wire_builder.rs` | 45 | `WebWireBuilder::set_dom_channel` |
+| `packages/actr-web/crates/sw-host/src/transport/sw_transport.rs` | 66 | `SwTransport::set_dom_channel` |
+| `packages/actr-web/crates/sw-host/src/inbound/dispatcher.rs` | 47 | `InboundPacketDispatcher::set_dom_lane` |
+| `packages/actr-web/crates/dom-bridge/src/transport/dom_transport.rs` | 100 | `DomTransport::set_sw_channel` |
+| `packages/actr-web/crates/dom-bridge/src/webrtc/coordinator.rs` | 45 | `WebRtcCoordinator::set_sw_channel` |
 
 每个 setter 都把一个 `DataLane` 塞进对应结构体的 `Arc<Mutex<Option<DataLane>>>` 字段；部分 setter 还会启动一个 `start_sw_receiver` / `start_dom_receiver` 接收循环。**Setter 从未被调用，意味着这些接收循环和发送代码路径在生产运行时全是死代码**。
 
@@ -36,7 +36,7 @@
 
 ```
 $ grep -rn "set_dom_channel\|set_dom_lane\|set_sw_channel" \
-    bindings/web/crates/sw-host/src/ bindings/web/crates/dom-bridge/src/
+    packages/actr-web/crates/sw-host/src/ packages/actr-web/crates/dom-bridge/src/
 ```
 
 仅命中上面 5 个定义位置，**无外部调用者**。
@@ -71,22 +71,22 @@ $ grep -rn "set_dom_channel\|set_dom_lane\|set_sw_channel" \
 
 ### 相关文件（可能一并处理）
 
-- `bindings/web/packages/web-sdk/src/actor.sw.js` — 真实的 SW 入口
-- `cli/assets/web-runtime/actor.sw.js` — 548ad7d9 同步的副本（一改两处）
-- `bindings/web/docs/architecture/message-flow-complete.zh.md` — 官方文档描述的消息流
+- `packages/actr-web/packages/web-sdk/src/actor.sw.js` — 真实的 SW 入口
+- `crates/actr-cli/assets/web-runtime/actor.sw.js` — 548ad7d9 同步的副本（一改两处）
+- `packages/actr-web/docs/architecture/message-flow-complete.zh.md` — 官方文档描述的消息流
 
 ### 不修复就应该知道的事
 
 - 这五个 setter 里 `log::info!` 永远不会打印 —— 看到 `[SW][SwTransport]`、`[WebWireBuilder]` 之类的静默，别误以为它们已被触达
-- public API 公开面（T5.5 Batch 5 bindings/web 扫描时）要注意是否把它们降级 —— 以免把未使用的 pub 暴露成外部承诺
+- public API 公开面（T5.5 Batch 5 packages/actr-web 扫描时）要注意是否把它们降级 —— 以免把未使用的 pub 暴露成外部承诺
 
 ---
 
-## TD-002（**已解决**）：sw-host wasm 产物到 `cli/assets/web-runtime/` 无自动同步
+## TD-002（**已解决**）：sw-host wasm 产物到 `crates/actr-cli/assets/web-runtime/` 无自动同步
 
-**状态**：已修复（2026-04-25）  
-**修复方式**：方案 B —— 新增 `bindings/web/scripts/sync-cli-assets.sh`，并在 `bindings/web/crates/sw-host/build.sh` 末尾自动调用。脚本支持 `--build`（顺带跑 wasm-pack）与 `--check`（CI drift gate）。  
-**覆盖文件**：`actr_sw_host_bg.wasm` / `actr_sw_host.js` / `actor.sw.js`（Phase 8 后单一 SW 入口；`actr-host.html` 在 cli/assets 是唯一源，不参与 sync）。  
+**状态**：已修复（2026-04-25）
+**修复方式**：方案 B —— 新增 `packages/actr-web/scripts/sync-cli-assets.sh`，并在 `packages/actr-web/crates/sw-host/build.sh` 末尾自动调用。脚本支持 `--build`（顺带跑 wasm-pack）与 `--check`（CI drift gate）。
+**覆盖文件**：`actr_sw_host_bg.wasm` / `actr_sw_host.js` / `actor.sw.js`（Phase 8 后单一 SW 入口；`actr-host.html` 在 crates/actr-cli/assets 是唯一源，不参与 sync）。
 **遗留动作**：完成 sync 后仍需手动 `cargo build -p actr-cli --bin actr` 让 `include_bytes!` 重新嵌入；脚本结尾会打印这条提示。
 
 **发现时间**：2026-04-24
@@ -94,32 +94,32 @@ $ grep -rn "set_dom_channel\|set_dom_lane\|set_sw_channel" \
 
 ### 现象
 
-`bindings/web/crates/sw-host/build.sh` 产出：
+`packages/actr-web/crates/sw-host/build.sh` 产出：
 ```
-bindings/web/dist/sw/actr_sw_host_bg.wasm
-bindings/web/dist/sw/actr_sw_host.js
+packages/actr-web/dist/sw/actr_sw_host_bg.wasm
+packages/actr-web/dist/sw/actr_sw_host.js
 ```
 
-`cli/assets/web-runtime/` 需要同名两个文件，通过 `cli/src/web_assets.rs:14` 的 `include_bytes!("../assets/web-runtime/actr_sw_host_bg.wasm")` 嵌入 actr binary。但仓内**没有自动同步脚本或 build rule**把 dist/sw 拷贝到 cli/assets。
+`crates/actr-cli/assets/web-runtime/` 需要同名两个文件，通过 `crates/actr-cli/src/web_assets.rs:14` 的 `include_bytes!("../assets/web-runtime/actr_sw_host_bg.wasm")` 嵌入 actr binary。但仓内**没有自动同步脚本或 build rule**把 dist/sw 拷贝到 crates/actr-cli/assets。
 
 ### 证据
 
 ```
-$ grep -rn "cli/assets/web-runtime\|include_bytes.*actr_sw_host" cli/ bindings/web/
-cli/src/web_assets.rs:14:pub const RUNTIME_WASM: &[u8] = include_bytes!(".../actr_sw_host_bg.wasm");
-cli/src/commands/run.rs:728:    .route("/packages/actr_sw_host_bg.wasm", get(serve_runtime_wasm))
-bindings/web/crates/sw-host/build.sh:24:  --out-dir ../../dist/sw \
+$ grep -rn "crates/actr-cli/assets/web-runtime\|include_bytes.*actr_sw_host" cli/ packages/actr-web/
+crates/actr-cli/src/web_assets.rs:14:pub const RUNTIME_WASM: &[u8] = include_bytes!(".../actr_sw_host_bg.wasm");
+crates/actr-cli/src/commands/run.rs:728:    .route("/packages/actr_sw_host_bg.wasm", get(serve_runtime_wasm))
+packages/actr-web/crates/sw-host/build.sh:24:  --out-dir ../../dist/sw \
 ```
 
-`bindings/web/crates/sw-host/build.sh` 只写 `dist/sw/`，不碰 `cli/assets/`。
+`packages/actr-web/crates/sw-host/build.sh` 只写 `dist/sw/`，不碰 `crates/actr-cli/assets/`。
 
 ### 后果
 
-改动 sw-host 的 Rust 代码后，`bash bindings/web/crates/sw-host/build.sh` + `cargo build -p actr-cli --bin actr` **两步都做了仍会失败** ——
-仅当 cli/assets 里的 wasm 是旧内容时，`include_bytes!` 也是旧的，无论 actr 怎么重编都一样。
+改动 sw-host 的 Rust 代码后，`bash packages/actr-web/crates/sw-host/build.sh` + `cargo build -p actr-cli --bin actr` **两步都做了仍会失败** ——
+仅当 crates/actr-cli/assets 里的 wasm 是旧内容时，`include_bytes!` 也是旧的，无论 actr 怎么重编都一样。
 
 commit 548ad7d9 的 commit message 第一条明确提到过这点：
-> "CLI-embedded assets were stale. `cli/assets/web-runtime/actor.sw.js` still used the legacy `loadWithGuestBridge` dynclib path while `web-sdk/src` already switched to `loadWithComponentBridge`... Re-sync the SDK source and the freshly-built `sw-host` wasm-bindgen output into cli/assets."
+> "CLI-embedded assets were stale. `crates/actr-cli/assets/web-runtime/actor.sw.js` still used the legacy `loadWithGuestBridge` dynclib path while `web-sdk/src` already switched to `loadWithComponentBridge`... Re-sync the SDK source and the freshly-built `sw-host` wasm-bindgen output into crates/actr-cli/assets."
 
 也就是说：548ad7d9 把 "再同步一次" 作为一次性修复做了，但没把这个同步动作固化到任何构建脚本里，所以下次又会踩。
 
@@ -129,22 +129,22 @@ commit 548ad7d9 的 commit message 第一条明确提到过这点：
 
 ### 历史修复选项
 
-- **A. 在 `sw-host/build.sh` 末尾直接 `cp` 到 `cli/assets/web-runtime/`**：最直接；坏处是绑定 sw-host 的 build.sh 知道 cli 的目录结构，跨 crate 耦合
-- **B. 新增 `bindings/web/scripts/sync-cli-assets.sh`**：把"同步"单独成一步；让上层 build-wasm.sh 或 CI 显式调用
-- **C. `build.rs` in cli/actr-cli**：让 cargo 在编译 cli 时自动从 `../bindings/web/dist/sw/` 拉最新；但这样 cli 会变成弱依赖 web/dist 存在
-- **D. 软链**：`cli/assets/web-runtime/actr_sw_host_bg.wasm` 不入库，改成指向 `bindings/web/dist/sw/`；但 `include_bytes!` 需要存在的文件，clone 新仓库时会断
+- **A. 在 `sw-host/build.sh` 末尾直接 `cp` 到 `crates/actr-cli/assets/web-runtime/`**：最直接；坏处是绑定 sw-host 的 build.sh 知道 cli 的目录结构，跨 crate 耦合
+- **B. 新增 `packages/actr-web/scripts/sync-cli-assets.sh`**：把"同步"单独成一步；让上层 build-wasm.sh 或 CI 显式调用
+- **C. `build.rs` in cli/actr-cli**：让 cargo 在编译 cli 时自动从 `../packages/actr-web/dist/sw/` 拉最新；但这样 cli 会变成弱依赖 web/dist 存在
+- **D. 软链**：`crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm` 不入库，改成指向 `packages/actr-web/dist/sw/`；但 `include_bytes!` 需要存在的文件，clone 新仓库时会断
 
 推荐 **B**：显式、职责清晰、失败可见。
 
 ### 修复后的工作流
 
-- 改 sw-host Rust 代码：`bash bindings/web/crates/sw-host/build.sh`（结尾自动 sync）→ `cargo build -p actr-cli --bin actr`
-- 改 `bindings/web/packages/web-sdk/src/actor*.sw.js`：`bash bindings/web/scripts/sync-cli-assets.sh` → `cargo build -p actr-cli --bin actr`
-- CI drift gate：`bash bindings/web/scripts/sync-cli-assets.sh --check`（在 PR 检查中阻断未同步的提交）
+- 改 sw-host Rust 代码：`bash packages/actr-web/crates/sw-host/build.sh`（结尾自动 sync）→ `cargo build -p actr-cli --bin actr`
+- 改 `packages/actr-web/packages/web-sdk/src/actor*.sw.js`：`bash packages/actr-web/scripts/sync-cli-assets.sh` → `cargo build -p actr-cli --bin actr`
+- CI drift gate：`bash packages/actr-web/scripts/sync-cli-assets.sh --check`（在 PR 检查中阻断未同步的提交）
 
 ### 历史教训
 
-- 浏览器 e2e 出现"SW 侧 Rust 新加的日志没打印"时，先怀疑 cli/assets 没同步，再怀疑代码逻辑
+- 浏览器 e2e 出现"SW 侧 Rust 新加的日志没打印"时，先怀疑 crates/actr-cli/assets 没同步，再怀疑代码逻辑
 - 用 `--check` 模式作为单一真相源：本地或 CI 都能用同一脚本判断是否漂移
 
 ---
@@ -172,7 +172,7 @@ commit 548ad7d9 的 commit message 第一条明确提到过这点：
 
 ### 根因
 
-`bindings/web/crates/sw-host/src/guest_bridge.rs:90`：
+`packages/actr-web/crates/sw-host/src/guest_bridge.rs:90`：
 
 ```rust
 thread_local! {
@@ -301,11 +301,11 @@ echo client 的 dispatch 实现恰好是 `discover(...).await → call_raw(...).
 
 **SW 侧 IndexedDB credential namespace 按 actr-type 而非 per-client**：
 
-- `bindings/web/crates/sw-host/src/runtime.rs:1001-1006` 的 `cred_kv_namespace` 只按 `client_actr_type` 命名
+- `packages/actr-web/crates/sw-host/src/runtime.rs:1001-1006` 的 `cred_kv_namespace` 只按 `client_actr_type` 命名
 - `runtime.rs:646-657` 的 `obtain_credential_from_ais` 里 `try_restore_credential_static` 命中即 return，跳过重新 AIS 注册
 - 第 2 个 client 页加载时，从 IndexedDB 恢复到第 1 个 client 的 `actor_id/credential`
 - 两个 ws 会话在 mock-actrix 注册成**同一 actor_id**
-- `testing/mock-actrix/src/signaling.rs:78-107` 的 `handle_connection` 用 `entry.client_id = new` 无条件覆盖
+- `crates/actr-mock-actrix/src/signaling.rs:78-107` 的 `handle_connection` 用 `entry.client_id = new` 无条件覆盖
 - 后连的 ws 抢走 registry binding，第 1 个 client 失去所有回程 relay
 
 ### 时间线证据（mock-actrix.log）
@@ -370,11 +370,11 @@ client1 warmup 在 **client2 还没出现前就已经失败**（30s 无 `📥`�
 ## TD-005（**已解决 / 误报**）：WebWorkloadAdapter + protoc-gen 看似有 `Reflect.get called on non-object`
 
 **状态**：误报 / 已解决（2026-04-24）
-**实际原因**：主 worktree 的 `target/debug/actr` binary 是 14:12 的旧版本；Phase 6b 和 TD-004 α' cherry-pick 之后**忘记重新 `cargo build -p actr-cli`**。那个 stale binary 用的是几代之前的 `cli/assets/web-runtime/actor-wbg.sw.js`（Phase 8 前旧名），与最新的 `actr-web-abi` / WebWorkloadAdapter 不匹配，于是 dispatchFn 报 `Reflect.get called on non-object`。
+**实际原因**：主 worktree 的 `target/debug/actr` binary 是 14:12 的旧版本；Phase 6b 和 TD-004 α' cherry-pick 之后**忘记重新 `cargo build -p actr-cli`**。那个 stale binary 用的是几代之前的 `crates/actr-cli/assets/web-runtime/actor-wbg.sw.js`（Phase 8 前旧名），与最新的 `actr-web-abi` / WebWorkloadAdapter 不匹配，于是 dispatchFn 报 `Reflect.get called on non-object`。
 
 **验证**：重新 `cargo build -p actr-cli` 后，Phase 6c 的 3 commits 直接 cherry-pick 到 main，BasicFunction 6/6 PASS。Phase 6c 代码本身无 bug，`WebWorkloadAdapter` / `EchoServiceDispatcher` 交互正常。
 
-**教训**：这条再次暴露 **[TD-002](#td-002)** 的影响面——改完 sw-host Rust **或**改完任何会影响 `cli/assets/web-runtime/` 内容的代码后，必须重 build `actr-cli` binary，否则 `include_bytes!` 嵌入的还是老版本。建议：
+**教训**：这条再次暴露 **[TD-002](#td-002)** 的影响面——改完 sw-host Rust **或**改完任何会影响 `crates/actr-cli/assets/web-runtime/` 内容的代码后，必须重 build `actr-cli` binary，否则 `include_bytes!` 嵌入的还是老版本。建议：
 - a) Phase 5 里把"rebuild actr binary"加入 CI 的必跑步骤
 - b) 或者实装 [TD-002](#td-002) §修复选项的 B（`sync-cli-assets.sh`）
 

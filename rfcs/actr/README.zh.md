@@ -26,7 +26,7 @@ rfcs/
 实现前先写 RFC，如果改动满足以下任一条件：
 
 - 改变 protocol、wire format、并发语义或回复语义；
-- 需要跨 crate 或跨层协同，例如 `core/hyper`、`framework`、codegen、FFI
+- 需要跨 crate 或跨层协同，例如 `crates/actr-hyper`、`framework`、codegen、FFI
   或 WIT；
 - 新增发布后难以撤回的 public API 或 option；
 - 需要在有实质取舍的多个方案之间做持久决策。

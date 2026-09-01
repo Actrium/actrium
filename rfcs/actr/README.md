@@ -27,7 +27,7 @@ Append a language code before `.md` for a non-English RFC, for example
 Write an RFC before implementation when the change:
 
 - changes protocol, wire format, concurrency, or reply semantics;
-- coordinates behavior across crates or layers such as `core/hyper`,
+- coordinates behavior across crates or layers such as `crates/actr-hyper`,
   `framework`, code generation, FFI, or WIT;
 - adds a public API or option that will be difficult to withdraw after release;
 - needs a durable decision among meaningful alternatives.

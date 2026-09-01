@@ -1,11 +1,11 @@
 //! Component Model dispatch regression tests (Phase 1 Commit 6).
 //!
 //! Ports the runnable subset of the Phase 0.5 async spike
-//! (`experiments/component-spike-async/host/src/main.rs`) into the real
+//! (`examples/actr/experimental/component-spike-async/host/src/main.rs`) into the real
 //! actr host surface. Each test drives `WasmHost::compile` →
 //! `instantiate` → `call_on_start` → `handle` against the rebuilt
 //! `wasm_actor_fixture` Component, mirroring the shape of
-//! `core/hyper/src/wasm/host_v2.rs::WasmWorkloadV2::handle`.
+//! `crates/actr-hyper/src/wasm/host_v2.rs::WasmWorkloadV2::handle`.
 //!
 //! Skipped from the spike:
 //! - **Test 3** (concurrent dispatches on the same instance) — superseded by

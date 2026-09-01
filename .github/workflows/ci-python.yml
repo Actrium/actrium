@@ -24,7 +24,7 @@ jobs:
         with:
           python-version: "3.13"
           cache: "pip"
-          cache-dependency-path: bindings/python/actr-workload/pyproject.toml
+          cache-dependency-path: packages/actr-python/actr-workload/pyproject.toml
 
 
       - name: Install wasm-tools
@@ -35,15 +35,15 @@ jobs:
 
       - name: Verify TypeScript workload WIT drift
         run: |
-          cmp core/framework/wit-v2/actr-workload.wit bindings/typescript/actr-workload/src/wit-v2/actr-workload.wit
+          cmp crates/actr-framework/wit-v2/actr-workload.wit packages/actr-typescript/actr-workload/src/wit-v2/actr-workload.wit
 
       - name: Build actr-workload package
         run: |
           python -m pip install -U build
-          python -m build bindings/python/actr-workload
+          python -m build packages/actr-python/actr-workload
 
       - name: Install actr-workload build extra
-        run: python -m pip install -e 'bindings/python/actr-workload[build]'
+        run: python -m pip install -e 'packages/actr-python/actr-workload[build]'
 
       - name: Verify componentize-py pin
         run: componentize-py --version | grep 'componentize-py 0.25.0'
@@ -56,8 +56,8 @@ jobs:
           test -f /tmp/actr-workload-bindings/actr_workload_bindings/imports/host.py
 
       - name: Compile Python sources
-        run: python -m compileall bindings/python/actr-workload/src examples/python/echo-workload/workload.py
+        run: python -m compileall packages/actr-python/actr-workload/src examples/actr/python/echo-workload/workload.py
 
       - name: Build Python echo workload
-        working-directory: examples/python/echo-workload
+        working-directory: examples/actr/python/echo-workload
         run: ./build.sh package

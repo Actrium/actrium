@@ -137,7 +137,7 @@ mod tests {
     /// "Fires no earlier than" against the real browser clock: after a `setTimeout`
     /// wait — which the HTML spec guarantees fires no earlier than its delay — the
     /// monotonic elapsed time is at least the requested duration. The Web analog of
-    /// the native real-wait deadline test in `core/platform-native/src/clock.rs`.
+    /// the native real-wait deadline test in `crates/actr-platform-native/src/clock.rs`.
     #[wasm_bindgen_test(async)]
     async fn elapsed_across_a_real_wait_is_at_least_the_requested_duration() {
         let clock = WebMonotonicClock;

@@ -1,26 +1,26 @@
-name: CI (actrix deploy)
+name: CI (Loran deploy)
 
-# actrix/deploy is a self-contained bootstrap CLI kept in its own sub-workspace
+# loran/deploy is a self-contained bootstrap CLI kept in its own sub-workspace
 # (excluded from the actr root workspace, no actr/actrix dependencies), so it
 # gets its own job that only runs when deploy changes.
 on:
   push:
     branches: [main]
     paths:
-      - "actrix/deploy/**"
-      - ".github/workflows/ci-actrix-deploy.yml"
+      - "loran/deploy/**"
+      - ".github/workflows/ci-loran-deploy.yml"
   pull_request:
     branches: [main]
     paths:
-      - "actrix/deploy/**"
-      - ".github/workflows/ci-actrix-deploy.yml"
+      - "loran/deploy/**"
+      - ".github/workflows/ci-loran-deploy.yml"
 
 permissions:
   contents: read
 
 defaults:
   run:
-    working-directory: actrix/deploy
+    working-directory: loran/deploy
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

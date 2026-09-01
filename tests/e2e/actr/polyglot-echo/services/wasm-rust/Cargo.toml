@@ -1,5 +1,5 @@
 # Empty [workspace] declares this crate as its own workspace root, so the
-# enclosing e2e/Cargo.toml workspace doesn't try to ingest it (it has wasm-
+# enclosing tests/e2e/actr/Cargo.toml workspace doesn't try to ingest it (it has wasm-
 # only deps that don't fit the workspace's native build matrix).
 [workspace]
 

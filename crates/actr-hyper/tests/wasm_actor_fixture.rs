@@ -1,6 +1,6 @@
 //! Compiled `wasm_actor_fixture` Component Model bytes.
 //!
-//! The `.wasm` is built by `core/hyper/build.rs` when the `wasm-engine`
+//! The `.wasm` is built by `crates/actr-hyper/build.rs` when the `wasm-engine`
 //! feature is enabled and the wasm32-wasip2 Component Model toolchain
 //! (`wasm-component-ld` >= 0.5.22, `wasm32-wasip2` rustup target) is
 //! available. `build.rs` sets the `ACTR_WASM_FIXTURE` env var to the built
