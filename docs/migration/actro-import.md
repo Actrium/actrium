@@ -9,8 +9,8 @@ its Git identities privacy-sanitized before the merge.
 - Commits retained: 2,270.
 - Commits pruned because their changes were completely absent from the retained
   tip: 2,117.
-- Sanitized source tip: `755dea23`.
-- Actrium import merge: `40d6b1a7`.
+- Sanitized source tip: `507c1dfb`.
+- Actrium import merge: `f9cc7736`.
 
 The retained commits keep author names. Known GitHub contributors use their
 `ID+USERNAME@users.noreply.github.com` identities; the source `root` identity
@@ -46,6 +46,10 @@ product or protocol requirement.
 
 ## Issue migration
 
-Issue transfer happens only after the integrated code has been pushed. Record
-the source-to-destination issue mapping here after transfer so references can
-be repaired without relying on issue-number equality.
+The integrated code was pushed before issue transfer. GitHub preserved the
+issue author, creation time, body, state, and `enhancement` label; the source
+URL now resolves to the destination issue.
+
+| Source | Destination | Title |
+| --- | --- | --- |
+| `Actrium/actro#1` | `Actrium/actrium#179` | Add built-in proxy configuration support across Actro |
