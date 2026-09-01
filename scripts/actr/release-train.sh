@@ -1035,6 +1035,7 @@ skip_python = sys.argv[3] == "true"
 
 package_files = [
     repo / "Cargo.toml",
+    repo / "crates/actr/Cargo.toml",
     repo / "packages/actr-web/Cargo.toml",
     repo / "crates/actr-protocol/Cargo.toml",
     repo / "crates/actr-service-compat/Cargo.toml",
