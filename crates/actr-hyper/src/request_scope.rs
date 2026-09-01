@@ -77,10 +77,18 @@ impl RequestScope {
     }
 
     /// Start a root scope whose absolute deadline is `now + timeout_ms`.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn root(timeout_ms: i64) -> Arc<Self> {
-        let request_id = uuid::Uuid::new_v4().to_string();
         let deadline =
             tokio::time::Instant::now() + Duration::from_millis(timeout_ms.max(1) as u64);
+        Self::root_at(deadline)
+    }
+
+    /// Start a root scope with a deadline that was created by the outbound API
+    /// entry point.  Keeping the instant here avoids a second clock read for
+    /// the same logical operation.
+    pub(crate) fn root_at(deadline: tokio::time::Instant) -> Arc<Self> {
+        let request_id = uuid::Uuid::new_v4().to_string();
         Self::new(
             request_id.clone(),
             request_id,
@@ -91,12 +99,18 @@ impl RequestScope {
 
     /// Derive the next hop: fresh request id, child token, and the earlier
     /// of the parent deadline and this hop's own timeout budget.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn child(&self, timeout_ms: i64) -> Arc<Self> {
         let own = tokio::time::Instant::now() + Duration::from_millis(timeout_ms.max(1) as u64);
+        self.child_at(own)
+    }
+
+    /// Derive a child scope from an already-created operation deadline.
+    pub(crate) fn child_at(&self, deadline: tokio::time::Instant) -> Arc<Self> {
         Self::new(
             uuid::Uuid::new_v4().to_string(),
             self.root_request_id.clone(),
-            own.min(self.deadline),
+            deadline.min(self.deadline),
             self.token.child_token(),
         )
     }

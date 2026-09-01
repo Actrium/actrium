@@ -78,6 +78,15 @@ struct SessionStateInner {
     fact_sink: Option<SupervisorFactSink>,
 }
 
+/// Opaque inner-state write lock held by
+/// [`SessionState::hold_inner_write_for_test`]. Wrapping the guard keeps the
+/// private inner state out of any callable signature.
+#[cfg(any(test, feature = "test-utils"))]
+#[cfg_attr(not(test), allow(dead_code))] // test-utils builds compile this without unit tests
+pub(crate) struct SessionStateBlockGuard<'a> {
+    _guard: tokio::sync::RwLockWriteGuard<'a, SessionStateInner>,
+}
+
 impl SessionState {
     /// Create a new `SessionState` in the `Active` phase with generation 1.
     pub fn new(snapshot: SessionSnapshot) -> Self {
@@ -95,6 +104,18 @@ impl SessionState {
     /// (hard rebind) reports `SessionActivated` to the connection supervisor.
     pub(crate) async fn set_fact_sink(&self, sink: SupervisorFactSink) {
         self.inner.write().await.fact_sink = Some(sink);
+    }
+
+    /// Test-only: hold the inner state write lock so readiness checks
+    /// (`is_current_generation`, `phase`) block until the guard drops.
+    /// Stage-composition regression tests use this to stall readiness
+    /// deterministically.
+    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg_attr(not(test), allow(dead_code))] // test-utils builds compile this without unit tests
+    pub(crate) async fn hold_inner_write_for_test(&self) -> SessionStateBlockGuard<'_> {
+        SessionStateBlockGuard {
+            _guard: self.inner.write().await,
+        }
     }
 
     // ---- readers -----------------------------------------------------------
