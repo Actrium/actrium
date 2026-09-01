@@ -1,0 +1,13 @@
+[package]
+name = "canvas-present-guest"
+version.workspace = true
+edition.workspace = true
+description = "Demo native keel guest that software-renders an animated RGBA8 framebuffer and hands each frame to host:canvas.present (stage ② framebuffer path)."
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+keel-native-guest = { path = "../keel-native-guest" }

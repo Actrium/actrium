@@ -1,0 +1,41 @@
+[package]
+name = "keel-native-guest"
+version.workspace = true
+edition.workspace = true
+description = "Ergonomic Rust SDK for writing keel native (non-JS) WASM guests — wraps the linear-memory host:* ABI so guests write store::put(k, v).await."
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["rlib"]
+
+# The op-batch oracle CLI needs the op-batch encoder, so it is skipped under
+# --no-default-features (the pure-JSON build has no wire_encode module).
+[[example]]
+name = "op_batch_oracle"
+required-features = ["binary-protocol"]
+
+[features]
+default = ["binary-protocol"]
+# PROMOTED, DEFAULT ON (issue #45): the guest-side encoders for the binary
+# op-batch (contracts/op-batch-wire.json) and canvas (contracts/canvas-wire.json)
+# wire protocols. Compiled into the shipped guest by default and negotiated at
+# RUNTIME, never a flag-day:
+#   - op-batch emits binary only after the host pushes `keel_wire_caps(bit0)`
+#     (host `binaryOpBatch` option, default ON); an old host that never calls it
+#     leaves the guest on JSON.
+#   - canvas emits binary only after the async `host:canvas.getInfo` handshake
+#     answers `binaryDraw:true` for the encoder's `wireVersion`; a host that does
+#     not advertise it (every host that lacks the downstream glue) stays on JSON.
+# Build a pure-JSON guest (no encoders, no `keel_wire_caps` export) with
+# `--no-default-features`.
+binary-protocol = []
+
+# talc: the guest's global allocator. no_std, no default features (pure
+# core/alloc). On wasm the guest wires `talc::wasm::WasmDynamicTalc`, a
+# memory.grow-backed growable heap that REUSES freed memory (real free list),
+# so the heap grows to fit the working set then plateaus — replacing the old
+# only-grows bump allocator.
+[dependencies]
+talc = { version = "5.0.4", default-features = false }
+unicode-normalization = { version = "0.1.24", default-features = false }

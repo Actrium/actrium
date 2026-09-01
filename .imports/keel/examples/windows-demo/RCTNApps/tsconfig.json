@@ -1,0 +1,32 @@
+{
+  "extends": "@tsconfig/react-native/tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "types": ["react", "react-native", "node"],
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    // ES2022, not ES2021: the linked keel sources use Object.hasOwn
+    // (src/host/wire/store-net-envelope.ts), which is an ES2022 lib member.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // These mappings exist because the linked keel sources live OUTSIDE this
+    // directory (../../../src), so their own node_modules walk-up never reaches
+    // the demo's install. react-native must point at the package itself: it has
+    // shipped its own types since 0.71 and @types/react-native is deprecated --
+    // the old mapping named a file that is not installed, which is why every
+    // `import ... from 'react-native'` in the linked sources failed to resolve.
+    "paths": {
+      "react": ["../node_modules/@types/react/index.d.ts"],
+      "react-native": ["../node_modules/react-native"],
+      "react/jsx-runtime": ["../node_modules/@types/react/jsx-runtime.d.ts"],
+      "keel": ["../node_modules/keel/src/host/index.ts"],
+      "keel/*": ["../node_modules/keel/src/host/*"]
+    }
+  },
+  "include": ["index.tsx", "src"],
+  "exclude": ["node_modules"]
+}

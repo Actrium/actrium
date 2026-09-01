@@ -1,0 +1,139 @@
+{
+  "$comment": "SINGLE SOURCE OF TRUTH for the KBS1 binary-value ENVELOPE — the wire that carries first-class byte-stream fields across the guest<->host capability seam (platform requirement R2: a contract-level 'this field is a byte stream' so host:store/host:net can take and return a Uint8Array/ptr+len instead of a JSON number-array). Full rationale, the current-flow audit, the QuickJS $b64 sidecar, the SDK wrappers and the phased plan live in store-net-bytes.DESIGN.md; THIS file locks only the on-the-wire ENVELOPE (magic, framing, sentinel, caps). It is a THIRD sibling to op-batch-wire.json (UI-tree diffs, magic 'KEEL') and canvas-wire.json (per-frame draw list, magic 'KCNV'); it shares their 'schema single-source + golden-lock + generated Rust constants' discipline (build.rs generate_store_net_contract + store-net-bytes.golden.json + store-net-bytes.CONFORMANCE.md) but is DELIBERATELY a different SHAPE: op-batch/canvas are opcode streams with a 16-byte header + intern table; KBS1 is a generic two-plane frame — a JSON CONTROL PLANE plus a length-prefixed BINARY DATA PLANE (multipart-like) — and is contract-agnostic (the codec walks the JSON for sentinels; it needs no per-call descriptor). CRITICAL magic discipline: 'KBS1' (4B 42 53 31) differs from 'KEEL' (4B 45 45 4C) at byte 1 and from 'KCNV' (4B 43 4E 56) at byte 1 too, so the host's first-byte/magic fork (all three start 0x4B 'K') routes a frame to exactly one decoder by comparing the FULL u32 — a frame meant for one fails the others' magic compare fail-closed before any field is read. Every codec MUST generate its constants FROM or validate them AGAINST this file, never hand-copy from a peer. All integers are UNSIGNED and LITTLE-ENDIAN.",
+  "version": 1,
+  "endianness": "little",
+
+  "magic": {
+    "$comment": "First 4 bytes of every KBS1 frame, read as a u32 LE. The bytes 4B 42 53 31 are ASCII 'K' 'B' 'S' '1' = 'Keel Binary Segments, version 1'. The u32 value 0x3153424b read little-endian yields exactly those bytes in order. DISTINCT from op-batch 0x4c45454b ('KEEL') and canvas 0x564e434b ('KCNV'): all three share byte 0 (0x4B 'K') but differ at byte 1 (0x42 'B' vs 0x45 'E' vs 0x43 'C'), so a u32 magic compare — which the host fork MUST use, never just byte 0 — disambiguates all three immediately. A decoder MUST read a u32 LE and reject fail-closed (reason 'bad-magic') if it is not exactly this value. THE VERSION RIDES THE 4TH MAGIC BYTE ('1' = 0x31): a v2 wire is 'KBS2' (0x3253424b), a different u32, so a v1 decoder rejects it on the SAME magic compare — there is NO separate version field on the wire (mirrors the canvas 'distinct magic' discipline; unlike op-batch/canvas which additionally carry a u16 protocolVersion, KBS1 folds version into the magic to keep the two-plane frame minimal).",
+    "u32le": 827540043,
+    "hex": "0x3153424b",
+    "asciiBytes": "4B 42 53 31",
+    "versionByte": "the 4th ASCII byte ('1' = 0x31) IS the wire version; bump it (to '2' = 'KBS2') on any breaking framing change so an old decoder rejects a new frame on the magic compare."
+  },
+
+  "protocolVersion": {
+    "$comment": "Documentation/codegen mirror of the version that rides the 4th magic byte ('1'). There is NO separate protocolVersion field ON THE WIRE (see magic.versionByte) — this block exists so build.rs can emit a PROTOCOL_VERSION constant alongside MAGIC (parity with the op-batch/canvas generators) and so a reader has one named place for 'which RBS version is this'. A v2 wire changes BOTH the 4th magic byte AND this value together.",
+    "value": 1
+  },
+
+  "framing": {
+    "$comment": "The complete on-the-wire byte layout. SYMMETRIC: the exact same framing is used in BOTH directions — guest->host request args AND host->guest return value. There is no header struct and no intern table (unlike op-batch/canvas): a frame is just magic, then a length-prefixed JSON control plane, then a length-prefixed list of raw binary segments. All lengths are u32 LE. Total framing overhead is 12 bytes + 4 bytes per segment (magic 4 + jsonLen 4 + segCount 4 + segLen 4*segCount).",
+    "byteLayout": [
+      {
+        "offset": 0,
+        "size": 4,
+        "name": "magic",
+        "type": "u32",
+        "value": 827540043,
+        "note": "0x3153424b = bytes 4B 42 53 31 = 'KBS1'. Reject on mismatch (reason 'bad-magic'). The 4th byte carries the version; there is no separate version field."
+      },
+      {
+        "offset": 4,
+        "size": 4,
+        "name": "jsonLen",
+        "type": "u32",
+        "note": "UTF-8 byte length of the JSON control plane that follows. MUST be validated against the remaining buffer BEFORE the JSON is read (reason 'truncated') and against limits.maxJsonBytes (reason 'json-too-big') — never trusted, never wrapped."
+      },
+      {
+        "offset": 8,
+        "size": "jsonLen",
+        "name": "json",
+        "type": "utf8",
+        "note": "the UTF-8 JSON control plane. Holds every non-binary field verbatim; each byte-stream field is REPLACED by the {\"$b\":N} sentinel (see sentinel). No terminator; length is exactly jsonLen. MUST parse as JSON after length validation, else fail-closed (reason 'bad-json')."
+      },
+      {
+        "offset": "8 + jsonLen",
+        "size": 4,
+        "name": "segCount",
+        "type": "u32",
+        "note": "number of binary segments that follow. MUST be validated against limits.maxSegments (reason 'too-many-segments') BEFORE any segment is read. Every {\"$b\":N} sentinel in the JSON MUST reference an N in [0, segCount) (reason 'bad-segment-ref')."
+      },
+      {
+        "offset": "12 + jsonLen",
+        "size": "variable",
+        "name": "segments",
+        "type": "segment[]",
+        "repeat": "segCount",
+        "note": "segCount segments, tightly packed, in EMISSION ORDER (segment index = position, 0-based). Each is a (segLen u32, segLen raw bytes) pair. Segment index N is what a {\"$b\":N} sentinel resolves to.",
+        "record": [
+          {
+            "name": "segLen",
+            "type": "u32",
+            "note": "byte length of this segment's raw payload. Validated against the remaining buffer (reason 'truncated') and limits.maxSegmentBytes (reason 'segment-too-big') BEFORE the bytes are read."
+          },
+          {
+            "name": "bytes",
+            "type": "raw",
+            "length": "segLen",
+            "note": "the raw byte stream, verbatim, no encoding and no terminator. Arbitrary bytes including 0x00 and 0xFF ride untouched — the control-plane JSON never holds the bytes, only the sentinel. On decode this becomes the field's Uint8Array; on encode a Uint8Array is hoisted here."
+          }
+        ]
+      }
+    ],
+    "strictTrailing": "A decoder reads exactly segCount segments after the JSON and MUST then have fully consumed the buffer — ZERO bytes may remain (reason 'truncated' on either underrun OR trailing bytes). A frame is exactly its magic + control plane + declared segments; the encoder writes nothing after the final segment.",
+    "atomicity": "FAIL-CLOSED / whole-frame: on ANY violation the codec aborts the ENTIRE frame and lets nothing partial cross the seam. A decoder revives all sentinels into an in-memory value and hands it on only if the whole frame is valid — never a half-decoded value; an encoder throws before/without emitting a truncated buffer."
+  },
+
+  "sentinel": {
+    "$comment": "How a byte-stream field appears in the JSON control plane and how the codec moves bytes between the two planes. The wire is SELF-DESCRIBING: the codec needs no per-call descriptor — it walks the parsed JSON for sentinels on decode and walks the value for Uint8Array on encode.",
+    "key": "$b",
+    "shape": "{\"$b\": N}  |  {\"$b\": [N0, N1, ...]}",
+    "rule": "A byte-stream field's value in the JSON control plane is an object whose reserved key '$b' maps to EITHER (a) a single 0-based unsigned integer N \u2014 the index of the one segment carrying that field's bytes \u2014 OR (b) a NON-EMPTY ARRAY of such integers [N0, N1, \u2026], meaning the field's bytes are the CONCATENATION of those segments in exactly that order. DECODE: the codec walks the parsed JSON and replaces every sentinel with its field's bytes (a Uint8Array / owned byte slice) \u2014 segment N for form (a), the ordered join for form (b). ENCODE: the codec walks the value, hoists every byte-stream value to NEW segments (appended in walk order) and replaces it with the sentinel naming those indices. Every index MUST be in [0, segCount) (reason 'bad-segment-ref'); each segment MUST be referenced at most once ACROSS THE WHOLE FRAME, including within a single array (reason 'bad-segment-ref'); an empty array, a non-integer element, or any other shape under the '$b' key is a malformed sentinel (reason 'bad-sentinel').",
+    "reservedKey": "'$b' is a RESERVED key: inside a KBS1 frame's control plane, an object of the exact shape {\"$b\": <non-negative integer>} — or {\"$b\": [<non-negative integer>, …]} — is ALWAYS interpreted as a segment reference, never as literal application data. See backCompat for why this reservation cannot collide with existing JSON-only calls.",
+    "quickjsNote": "The WASM boundary uses this index sentinel ({\"$b\":N}) with real length-prefixed segments. The QuickJS shell is a JSON-string bridge that cannot carry raw segment bytes, so on THAT transport a sibling inline sentinel {\"$b64\":\"<base64>\"} is used instead (see store-net-bytes.DESIGN.md §B.5). Both deliver a Uint8Array to the SAME handler; '$b64' is likewise a reserved key on the QuickJS path. KBS1 (this file) locks ONLY the WASM index form.",
+    "multiSegmentValues": "Form (b) is what lets ONE LOGICAL VALUE exceed limits.maxSegmentBytes. That cap bounds a single SEGMENT \u2014 one decoder allocation \u2014 and before form (b) existed it was therefore ALSO the ceiling on one stored value, which ordinary documents reach: a 1076x722 two-layer raster serialises to 3,956,173 bytes, and the largest two-layer document that fit under 1 MiB was 236x158. Splitting a value across segments keeps every INDIVIDUAL allocation bounded by maxSegmentBytes while lifting the ceiling on the value \u2014 and, the part a consumer cannot do for itself, keeps the value ATOMIC: it is one field of one frame, so the existing whole-frame fail-closed rule already covers it. Chunking in the application instead turns one value into meta + chunk/<n> keys whose compare-and-swap is PER KEY, so there is no way to version the SET, and a partial write leaves a torn value that only the application can detect.",
+    "multiSegmentCeiling": "NO new cap is introduced for a multi-segment value, deliberately: the concatenated allocation is already bounded by limits.maxSegments * limits.maxSegmentBytes (16 MiB), while limits.maxEnvelopeBytes is validated against the WHOLE buffer before any decoding. This lets all 16 bounded segments carry one logical value while preserving a hard 16.25 MiB frame ceiling. Note the peak decoder residency this implies: the frame plus the joined value, i.e. less than 33 MiB, because the segment bytes are COPIED into the joined value rather than aliased.",
+    "multiSegmentEncoderRule": "An encoder MUST emit form (a) for any value that fits in ONE segment, and MUST NOT emit a single-element array. A hard conformance requirement, not a style preference: it makes every frame expressible before this extension byte-for-byte IDENTICAL to before \u2014 so the pre-existing golden vectors still lock \u2014 and it means a value a peer could already carry is never re-encoded into a shape that peer may not understand. A decoder MUST still ACCEPT a single-element array, since rejecting it would be stricter than the grammar.",
+    "oldDecoderBehaviour": "This is an ADDITIVE grammar extension, so the magic stays 'KBS1': the FRAMING (magic, jsonLen, json, segCount, segments) is unchanged, and magic.versionByte is bumped only for a breaking FRAMING change. A decoder predating form (b) that meets a form-(b) frame rejects it FAIL-CLOSED with reason 'bad-sentinel' \u2014 it requires '$b' to map to a non-negative integer, and an array is not one \u2014 so it can never MISREAD such a frame as data. Combined with multiSegmentEncoderRule this means no call that worked before can regress: form (b) is only ever emitted for a value that exceeded maxSegmentBytes, which an old peer refused outright anyway."
+  },
+
+  "backCompat": {
+    "$comment": "The load-bearing conformance invariant that lets KBS1 coexist with today's raw-JSON capability wire without touching a single existing call.",
+    "invariant": "A call OR return that carries NO binary segments MUST NOT use the KBS1 envelope. It stays byte-for-byte IDENTICAL to today's raw-JSON path: a plain UTF-8 JSON body beginning with '{' (0x7B) or '[' (0x5B). Only a call whose contract declares a binary field, AND only when that specific call/return actually carries at least one byte-stream value, is wrapped in a KBS1 frame.",
+    "hostFork": "The host's guest->host fork keys on the payload's leading bytes: 0x4B 'K' + full-u32 magic 'KBS1' -> the envelope codec; 0x4B 'K' + 'KCNV' -> canvas; 0x4B 'K' + 'KEEL' -> op-batch; anything else (a plain JSON body starts with '{' 0x7B or '[' 0x5B, which matches no magic) -> the existing JSON.parse path, unchanged. The fork MUST compare the full u32 magic, never a single byte, because all three binary magics share byte 0.",
+    "returnFork": "Symmetric on the return: a host result with no byte-stream value is JSON.stringify'd exactly as today (byte-for-byte identical reply); only a result carrying a Uint8Array is emitted as a KBS1 frame. A guest decoding a return treats a body whose first u32 is not the KBS1 magic as a plain-JSON reply.",
+    "collisionClaim": "Because pure-JSON calls are NEVER sentinel-walked (they never enter the envelope codec), a literal {\"$b\":N} in an existing call's data is inert — it can only be MISread as a sentinel INSIDE a KBS1 frame, i.e. only within a binary-declared call, where '$b' is a reserved key by contract. So the reservation introduces zero risk to any existing capability.",
+    "conformanceRequirement": "A conformant implementation MUST NOT emit a KBS1 frame for a segment-free call/return, and a golden/back-compat test MUST assert that an existing text capability's on-wire bytes are unchanged from a pre-change golden (the KBS1 fork is never taken for a non-binary call)."
+  },
+
+  "limits": {
+    "$comment": "FAIL-CLOSED caps, single-sourced here and GENERATED into the Rust codec by build.rs (generate_store_net_contract) so the guest and host cannot drift; a conformance test locks them, exactly as op-batch/canvas caps are locked. 'Fail-closed' means: on ANY breach the codec aborts the WHOLE frame and lets nothing partial cross the seam — the encoder throws before/without emitting a truncated buffer; the decoder throws and discards the whole frame (with a typed reason) rather than reviving a partial value. Every u32 length on the wire (jsonLen, segCount, each segLen) MUST be validated against BOTH the remaining buffer AND its cap BEFORE it is used to index/allocate. These caps are enforced in BOTH directions (request encode/decode and return encode/decode).",
+    "maxSegments": {
+      "value": 16,
+      "reason": "Bounds the segment table, and therefore BOTH the number of byte-stream fields in one call/return AND the number of chunks one multi-segment value may be split into. At maxSegmentBytes each, 16 segments cap one logical value at 16 MiB while keeping every individual decoder allocation at 1 MiB.",
+      "reject": "segCount > this is fail-closed (reason 'too-many-segments'), checked BEFORE any segment is read. An encoder that would hoist a 17th segment throws and emits nothing."
+    },
+    "maxSegmentBytes": {
+      "value": 1048576,
+      "reason": "1 MiB ceiling on ONE SEGMENT \u2014 i.e. on one decoder allocation, NOT on one stored value. A value larger than this is split across segments and carried by the array sentinel form (see sentinel.multiSegmentValues), so this cap bounds allocation granularity while maxEnvelopeBytes bounds the value itself.",
+      "reject": "any segLen > this is fail-closed (reason 'segment-too-big'), checked BEFORE the segment bytes are read/allocated; the encoder throws before emitting an oversized segment."
+    },
+    "maxEnvelopeBytes": {
+      "value": 17039360,
+      "reason": "16.25 MiB hard ceiling on the ENTIRE encoded frame (magic + jsonLen + json + segCount + every segLen + every segment). This admits a full 16 MiB logical value split across all 16 bounded segments plus ordinary control-plane framing, while the independent 256 KiB JSON cap and framing overhead still keep the total allocation strictly bounded. A frame combining every per-part maximum can still exceed this aggregate cap by its framing bytes and is rejected.",
+      "reject": "a frame whose total byte length exceeds this is fail-closed (reason 'envelope-too-big'), checked on the whole buffer before decoding; the encoder throws if the growing output would exceed it and emits nothing."
+    },
+    "maxJsonBytes": {
+      "value": 262144,
+      "reason": "256 KiB cap on the JSON CONTROL PLANE alone (there is no such explicit cap on today's raw-JSON path; KBS1 adds one). Bounds the parse/allocation of the control plane independently of the binary data plane.",
+      "reject": "jsonLen > this is fail-closed (reason 'json-too-big'), checked BEFORE the JSON is read; the encoder throws before emitting an oversized control plane."
+    }
+  },
+
+  "reasons": {
+    "$comment": "The fail-closed 'reason' vocabulary. On ANY violation the codec drops the WHOLE frame (never a partial value) and reports one of these stable string tokens. A host-side failure surfaces as an error result (ok=0 with the reason); a guest-side failure is a None/Err. Tokens are words (not numbers) so both codecs and any log agree on the same vocabulary.",
+    "bad-magic": "the leading u32 != 0x3153424b ('KBS1') — wrong protocol, a cross-fed KEEL/KCNV buffer, or corrupt; check FIRST.",
+    "truncated": "a declared length (jsonLen, segCount, or a segLen) overruns the remaining buffer, OR trailing bytes remain after exactly segCount segments (strict full consumption).",
+    "json-too-big": "jsonLen > limits.maxJsonBytes.",
+    "bad-json": "the control-plane bytes are not well-formed JSON after length validation.",
+    "too-many-segments": "segCount > limits.maxSegments.",
+    "segment-too-big": "a segLen > limits.maxSegmentBytes.",
+    "envelope-too-big": "the whole frame's byte length > limits.maxEnvelopeBytes.",
+    "bad-segment-ref": "a {\"$b\":N} sentinel references N outside [0, segCount), or a non-integer/negative N.",
+    "bad-sentinel": "an object uses the reserved key '$b' with a malformed shape (e.g. extra keys alongside '$b', or a non-integer value) inside a KBS1 frame."
+  },
+
+  "golden": {
+    "$comment": "store-net-bytes.golden.json (a later phase) will hold byte-exact vectors, each pairing a source (control-plane value + its byte-stream fields) with its exact on-the-wire KBS1 encoding as a lowercase hex string, mirroring op-batch-wire.golden.json / canvas-wire.golden.json. Planned vectors: an empty-segment BACK-COMPAT case (a segment-free call MUST NOT be a KBS1 frame — asserted as raw JSON, NOT hex here), an empty-value segment (segLen 0), a value containing 0x00 and 0xFF, an at-maxSegmentBytes value, a multi-segment frame, and an at-maxSegments frame. The Rust encoder is the oracle; a decoder reconstructs the source value structure-exact from the hex. The conformance chain and run instructions live in store-net-bytes.CONFORMANCE.md. NOTE: no runtime codec exists yet — phase 0 locks THIS schema + the generated constants only."
+  }
+}

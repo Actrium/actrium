@@ -1,0 +1,1365 @@
+/**
+ * Keel SDK
+ *
+ * Virtual components and Hooks for Guest development
+ * Zero runtime dependencies - all implementations injected by reconciler at runtime
+ */
+
+import type { ReviewedUnknown } from '../shared';
+import { REF_RESULT_EVENT, RENDER_ERROR_EVENT } from '../shared/events';
+import { KBD_EVENT, KBD_SUBSCRIBE, KBD_UNSUBSCRIBE, type KeelKeyEvent } from '../shared/keyboard';
+import type {
+  ImageSource,
+  LayoutEvent,
+  RemoteRef,
+  RemoteRefCallback,
+  ScrollEvent,
+  StyleProp,
+} from './types';
+
+// ============ Runtime-injected React types ============
+// These types mirror React's types but are defined locally to avoid React dependency
+
+/** React node type - matches React.ReactNode */
+export type ReactNode =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | ReactNode[]
+  // A structural element member ({type, props}) — a real @types/react
+  // ReactElement is assignable to it, but React 19's ReactElement type does not
+  // expose $$typeof, so requiring $$typeof (as before) broke typed JSX children.
+  // Reason: keel mirrors React's ReactNode without a React dependency.
+  | { type: unknown; props: unknown };
+
+/** Component type - matches React.ComponentType */
+export type ComponentType<P = object> =
+  | ((props: P) => ReactNode)
+  | { new (props: P): { render(): ReactNode } };
+
+// ============ Runtime React hooks accessor ============
+
+interface ReactHooks {
+  useEffect: (effect: () => undefined | (() => void), deps?: ReviewedUnknown[]) => void;
+  useRef: <T>(initial: T) => { current: T };
+  useState: <T>(initial: T | (() => T)) => [T, (value: T | ((prev: T) => T)) => void];
+  useMemo: <T>(factory: () => T, deps: ReviewedUnknown[]) => T;
+  useCallback: <T extends (...args: ReviewedUnknown[]) => ReviewedUnknown>(
+    callback: T,
+    deps: ReviewedUnknown[]
+  ) => T;
+}
+
+/**
+ * Get React hooks from runtime-injected global.
+ *
+ * In keel sandbox, React is provided by the Guest runtime bundle via `globalThis.React`.
+ */
+function getReactHooks(): ReactHooks {
+  const g = globalThis as { React?: ReactHooks };
+  if (g.React && typeof g.React.useEffect === 'function') {
+    return g.React as ReactHooks;
+  }
+
+  // Fallback: hooks not available (will fail at runtime if used)
+  const throwUnavailable = (hook: string) => () => {
+    throw new Error(`[keel/guest] ${hook} not available. Ensure running in keel sandbox.`);
+  };
+  return {
+    useEffect: throwUnavailable('useEffect'),
+    useRef: throwUnavailable('useRef'),
+    useState: throwUnavailable('useState'),
+    useMemo: throwUnavailable('useMemo'),
+    useCallback: throwUnavailable('useCallback'),
+  } as ReactHooks;
+}
+
+// ============ Component Definitions ============
+// In sandbox: string identifiers (virtual components)
+
+// Component names list - single source of truth
+const COMPONENT_NAMES = [
+  // Core
+  'View',
+  'Text',
+  'Image',
+  'ImageBackground',
+  // Scrolling
+  'ScrollView',
+  'FlatList',
+  'SectionList',
+  'VirtualizedList',
+  'RefreshControl',
+  // Input
+  'TextInput',
+  'Button',
+  'Switch',
+  'Pressable',
+  // Touchables
+  'TouchableOpacity',
+  'TouchableHighlight',
+  'TouchableWithoutFeedback',
+  // Feedback
+  'ActivityIndicator',
+  'Modal',
+  'StatusBar',
+  // Layout
+  'SafeAreaView',
+  'KeyboardAvoidingView',
+] as const;
+
+type ComponentName = (typeof COMPONENT_NAMES)[number];
+
+/**
+ * Get components (virtual components in sandbox)
+ */
+function getComponents(): Record<ComponentName, string> {
+  const result = {} as Record<ComponentName, string>;
+  for (const name of COMPONENT_NAMES) {
+    result[name] = name;
+  }
+  return result;
+}
+
+// ============ Host-injected platform info ============
+
+/**
+ * Platform information a host can optionally inject for the guest.
+ *
+ * Convention: the host exposes this on `globalThis.__keel_platform`, either as a
+ * plain object or as a zero-argument function returning one (the same injection
+ * style as `__keel_getConfig`). The SDK re-reads the channel on every access, so
+ * a host may update the values over time (e.g. on window resize).
+ *
+ * Every field is optional: a host only injects what it truthfully knows. When a
+ * field is absent, the corresponding SDK API reports `isInjected === false` and
+ * falls back to a neutral, documented default instead of pretending to be a real
+ * platform.
+ */
+export interface KeelPlatformInfo {
+  /** Host OS identifier (e.g. 'ios', 'android', 'web'). */
+  os?: string;
+  /** OS or platform version. */
+  version?: string | number;
+  /** Logical window metrics. */
+  window?: { width: number; height: number; scale?: number; fontScale?: number };
+  /** Physical screen metrics, when the host distinguishes them from `window`. */
+  screen?: { width: number; height: number; scale?: number; fontScale?: number };
+  /** Device pixel ratio; `window.scale` is used when absent. */
+  pixelRatio?: number;
+  /** Font scale; `window.fontScale` is used when absent. */
+  fontScale?: number;
+  /** Current color scheme. Absent means the host does not know. */
+  colorScheme?: 'light' | 'dark';
+  /** Layout direction. Absent means the host does not know. */
+  isRTL?: boolean;
+  /** App lifecycle state (e.g. 'active', 'background'). Absent means unknown. */
+  appState?: string;
+}
+
+/** Read host-injected platform info; `null` when the host provided none. */
+function readPlatformInfo(): KeelPlatformInfo | null {
+  const g = globalThis as { __keel_platform?: KeelPlatformInfo | (() => KeelPlatformInfo) };
+  const raw = g.__keel_platform;
+  if (typeof raw === 'function') {
+    const value = raw();
+    return value && typeof value === 'object' ? value : null;
+  }
+  return raw && typeof raw === 'object' ? raw : null;
+}
+
+/** Device pixel ratio from injected info; 1 when the host injected none. */
+function readPixelRatio(): number {
+  const info = readPlatformInfo();
+  return info?.pixelRatio ?? info?.window?.scale ?? 1;
+}
+
+/**
+ * Window/screen metrics from injected info.
+ *
+ * Without injection this returns the neutral 0×0 fallback; callers that need to
+ * tell "the host reported a 0×0 window" apart from "the host injected nothing"
+ * must check `Dimensions.isInjected`.
+ */
+function readDimensions(dimension: 'window' | 'screen'): {
+  width: number;
+  height: number;
+  scale: number;
+  fontScale: number;
+} {
+  const info = readPlatformInfo();
+  const metrics = dimension === 'screen' ? (info?.screen ?? info?.window) : info?.window;
+  if (!metrics) {
+    return { width: 0, height: 0, scale: 1, fontScale: 1 };
+  }
+  return {
+    width: metrics.width,
+    height: metrics.height,
+    scale: metrics.scale ?? info?.pixelRatio ?? 1,
+    fontScale: metrics.fontScale ?? info?.fontScale ?? 1,
+  };
+}
+
+function unavailableError(api: string): Error {
+  return new Error(
+    `[keel] ${api} is not available: the host has not provided this capability. ` +
+      'Register it as a host:* module.'
+  );
+}
+
+/**
+ * Throw for a synchronous capability no host has provided.
+ *
+ * Deliberately synchronous and loud — a silent no-op would let guest code
+ * believe the action happened.
+ */
+function unavailable(api: string): never {
+  throw unavailableError(api);
+}
+
+/**
+ * Reject for a Promise-returning capability no host has provided.
+ *
+ * Still fails loud (an unhandled rejection surfaces), but as a rejection rather
+ * than a synchronous throw — so idiomatic `.catch()` / `await` error handling
+ * actually catches it. A synchronous throw here would fire before the caller's
+ * `.catch()` is attached, defeating correct async handling.
+ */
+function unavailableAsync<T = never>(api: string): Promise<T> {
+  return Promise.reject(unavailableError(api));
+}
+
+/**
+ * Guest-facing platform APIs, tiered by how honest they can be in a sandbox:
+ *
+ * - Pure JS (StyleSheet, Easing): real local implementations, no host involved.
+ * - Platform info (Platform, Dimensions, PixelRatio, Appearance, I18nManager,
+ *   AppState.currentState): read-only values from the optional host-injected
+ *   `globalThis.__keel_platform` channel (see {@link KeelPlatformInfo}); each
+ *   exposes `isInjected` and falls back to a neutral, documented default when
+ *   the host injects nothing.
+ * - Host capabilities (Alert, Linking, Share, Vibration, Keyboard.dismiss) and
+ *   change-event subscriptions (Dimensions/Appearance/AppState/Keyboard/Linking
+ *   listeners): no host implements them yet, so they throw via `unavailable`
+ *   instead of silently pretending to succeed.
+ */
+function getAPIs() {
+  const apis = {
+    // ---- Pure JS (real implementations) ----
+    StyleSheet: {
+      create: <T extends object>(styles: T): T => styles,
+      flatten: (s: ReviewedUnknown): ReviewedUnknown => s,
+    },
+    Easing: {
+      linear: (t: number) => t,
+      ease: (t: number) => t,
+      quad: (t: number) => t * t,
+      cubic: (t: number) => t * t * t,
+      bezier: () => (t: number) => t,
+      in: (e: (t: number) => number) => e,
+      out: (e: (t: number) => number) => e,
+      inOut: (e: (t: number) => number) => e,
+    },
+
+    // ---- Platform info (host-injected, read-only) ----
+    Platform: {
+      /** True when the host injected an OS identifier. */
+      get isInjected(): boolean {
+        return typeof readPlatformInfo()?.os === 'string';
+      },
+      /** Host OS, or the literal 'unknown' when the host injected none. */
+      get OS(): string {
+        return readPlatformInfo()?.os ?? 'unknown';
+      },
+      /** Host OS version, or `undefined` when the host injected none. */
+      get Version(): string | number | undefined {
+        return readPlatformInfo()?.version;
+      },
+      select: <T>(spec: Record<string, T> & { default?: T }): T | undefined => {
+        const os = readPlatformInfo()?.os;
+        return os !== undefined && os in spec ? spec[os] : spec.default;
+      },
+    },
+    Dimensions: {
+      /** True when the host injected window metrics. */
+      get isInjected(): boolean {
+        return readPlatformInfo()?.window !== undefined;
+      },
+      /**
+       * Window/screen metrics. Returns the neutral 0×0 fallback when the host
+       * injected nothing — check `isInjected` to distinguish the two cases.
+       */
+      get: (dimension: 'window' | 'screen' = 'window') => readDimensions(dimension),
+      /** Throws: no host pushes dimension-change events yet. */
+      addEventListener: (): { remove(): void } => unavailable('Dimensions.addEventListener'),
+    },
+    PixelRatio: {
+      /** True when the host injected a pixel ratio (directly or via window.scale). */
+      get isInjected(): boolean {
+        const info = readPlatformInfo();
+        return info?.pixelRatio !== undefined || info?.window?.scale !== undefined;
+      },
+      /** Device pixel ratio, or 1 when the host injected none (see `isInjected`). */
+      get: (): number => readPixelRatio(),
+      /** Font scale, or 1 when the host injected none. */
+      getFontScale: (): number => {
+        const info = readPlatformInfo();
+        return info?.fontScale ?? info?.window?.fontScale ?? 1;
+      },
+      getPixelSizeForLayoutSize: (size: number): number => Math.round(size * readPixelRatio()),
+      roundToNearestPixel: (size: number): number => {
+        const ratio = readPixelRatio();
+        return Math.round(size * ratio) / ratio;
+      },
+    },
+    Appearance: {
+      /** True when the host injected a color scheme. */
+      get isInjected(): boolean {
+        return readPlatformInfo()?.colorScheme !== undefined;
+      },
+      /** Host color scheme, or `null` (= unknown) when the host injected none. */
+      getColorScheme: (): 'light' | 'dark' | null => readPlatformInfo()?.colorScheme ?? null,
+      /** Throws: no host pushes appearance-change events yet. */
+      addChangeListener: (): { remove(): void } => unavailable('Appearance.addChangeListener'),
+    },
+    I18nManager: {
+      /** True when the host injected a layout direction. */
+      get isInjected(): boolean {
+        return readPlatformInfo()?.isRTL !== undefined;
+      },
+      /** Layout direction, or `false` when the host injected none (see `isInjected`). */
+      get isRTL(): boolean {
+        return readPlatformInfo()?.isRTL ?? false;
+      },
+      /** Throws: the sandbox cannot change the host layout direction. */
+      allowRTL: (): void => unavailable('I18nManager.allowRTL'),
+      /** Throws: the sandbox cannot change the host layout direction. */
+      forceRTL: (): void => unavailable('I18nManager.forceRTL'),
+    },
+    AppState: {
+      /** True when the host injected a lifecycle state. */
+      get isInjected(): boolean {
+        return readPlatformInfo()?.appState !== undefined;
+      },
+      /** Lifecycle state, or the literal 'unknown' when the host injected none. */
+      get currentState(): string {
+        return readPlatformInfo()?.appState ?? 'unknown';
+      },
+      /** Throws: no host pushes app-state events yet. */
+      addEventListener: (): { remove(): void } => unavailable('AppState.addEventListener'),
+    },
+
+    // ---- Host capabilities (Guest→Host requests; throw until a host provides them) ----
+    Keyboard: {
+      dismiss: (): void => unavailable('Keyboard.dismiss'),
+      addListener: (): { remove(): void } => unavailable('Keyboard.addListener'),
+    },
+    Alert: {
+      alert: (): void => unavailable('Alert.alert'),
+      prompt: (): void => unavailable('Alert.prompt'),
+    },
+    Linking: {
+      openURL: (_url: string): Promise<void> => unavailableAsync('Linking.openURL'),
+      canOpenURL: (_url: string): Promise<boolean> => unavailableAsync('Linking.canOpenURL'),
+      getInitialURL: (): Promise<string | null> => unavailableAsync('Linking.getInitialURL'),
+      addEventListener: (): { remove(): void } => unavailable('Linking.addEventListener'),
+    },
+    Share: {
+      share: (_content?: {
+        message?: string;
+        url?: string;
+        title?: string;
+      }): Promise<{ action: string }> => unavailableAsync('Share.share'),
+    },
+    Vibration: {
+      vibrate: (): void => unavailable('Vibration.vibrate'),
+      cancel: (): void => unavailable('Vibration.cancel'),
+    },
+  };
+  return apis;
+}
+
+/**
+ * RN-compatible hooks backed by the same host-injected platform info as the
+ * Platform/Dimensions/Appearance APIs.
+ *
+ * There is no change-event channel yet, so values refresh only when the guest
+ * re-renders. Fallbacks match the underlying APIs: `null` color scheme and 0×0
+ * dimensions mean "host injected nothing" (see `Dimensions.isInjected`).
+ */
+function getRNHooks() {
+  return {
+    useColorScheme: (): 'light' | 'dark' | null => readPlatformInfo()?.colorScheme ?? null,
+    useWindowDimensions: () => readDimensions('window'),
+  };
+}
+
+const _components = getComponents();
+const _apis = getAPIs();
+const _rnHooks = getRNHooks();
+
+// ============ Component typing ============
+
+/**
+ * A guest UI component: a virtual tag whose DECLARED type carries its props so
+ * guest JSX (`<View style=… />`) type-checks. At runtime every component is just
+ * its tag string, which the reconciler passes straight through to the host (see
+ * `element-transform`); only the declared type is refined from `string`.
+ *
+ * The declared return type is `null` deliberately: a virtual component's tag
+ * string is never invoked, so the return is fiction — it only has to satisfy
+ * React's JSX component contract (be assignable to `React.ReactNode`), and `null`
+ * is the simplest such member nameable without a React type dependency. (keel's
+ * own `ReactNode` is intentionally NOT used here: it is permissive on the INPUT
+ * side so a real `@types/react` element assigns to `children`, which makes it a
+ * superset of `React.ReactNode` and thus invalid as a component RETURN.)
+ */
+export type GuestComponent<P> = (props: P) => null;
+
+// "Cast the declaration, keep the runtime" — the same pattern `KeelErrorBoundary`
+// uses below. The `as unknown as` double-cast is intentional and observed by
+// nothing at runtime (the value stays the tag string).
+function asComponent<P>(tag: string): GuestComponent<P> {
+  return tag as unknown as GuestComponent<P>;
+}
+
+/**
+ * Same cast, for a component whose props are generic in an ELEMENT type.
+ *
+ * `GuestComponent<P>` takes its props type as a fixed argument, so
+ * `asComponent<FlatListProps>` pins `T` to the interface's default and the JSX
+ * call site has no way to supply one. Handing the whole component type in
+ * instead keeps the type parameter on the DECLARATION, so TypeScript infers it
+ * per call site — `<FlatList data={['a']} …/>` gives `item: string` with no
+ * annotation, and `<FlatList<string> …/>` also works. Only the list components
+ * need this; every other component's props have nothing to be generic over.
+ */
+function asGenericComponent<C>(tag: string): C {
+  return tag as unknown as C;
+}
+
+/**
+ * `FlatList` as a declaration generic in its element type. Written as a named
+ * type rather than inline so the three list components read the same way.
+ */
+export type FlatListComponent = <T>(props: FlatListProps<T>) => null;
+
+/**
+ * `SectionList` generic in both its item and its section type. `SectionT`
+ * defaults to `object` (not the interface's `unknown`): `unknown` would be
+ * inferred as the empty intersection at a call site that only passes `data`,
+ * which is the same dead end the non-generic declaration had.
+ */
+export type SectionListComponent = <ItemT, SectionT = object>(
+  props: SectionListProps<ItemT, SectionT>
+) => null;
+
+/** `VirtualizedList` as a declaration generic in its element type. */
+export type VirtualizedListComponent = <ItemT>(props: VirtualizedListProps<ItemT>) => null;
+
+/**
+ * Declare a host-registered component name with typed props from the guest side.
+ * A host may register extra component names via `ComponentRegistry.register`;
+ * this gives the guest a typed handle for one so the guest/host prop contract
+ * survives past a bare `as unknown as` cast. The runtime value is the tag string.
+ *
+ * @example
+ * ```tsx
+ * const Chart = declareHostComponent<{ points: number[] }>('Chart');
+ * <Chart points={[1, 2, 3]} />;
+ * ```
+ */
+export function declareHostComponent<P>(name: string): GuestComponent<P> {
+  return asComponent<P>(name);
+}
+
+// ============ Component Exports ============
+//
+// Core
+export const View = asComponent<ViewProps>(_components.View);
+export const Text = asComponent<TextProps>(_components.Text);
+export const Image = asComponent<ImageProps>(_components.Image);
+export const ImageBackground = asComponent<ImageBackgroundProps>(_components.ImageBackground);
+// Scrolling
+export const ScrollView = asComponent<ScrollViewProps>(_components.ScrollView);
+export const FlatList = asGenericComponent<FlatListComponent>(_components.FlatList);
+export const SectionList = asGenericComponent<SectionListComponent>(_components.SectionList);
+export const VirtualizedList = asGenericComponent<VirtualizedListComponent>(
+  _components.VirtualizedList
+);
+export const RefreshControl = asComponent<RefreshControlProps>(_components.RefreshControl);
+// Input
+export const TextInput = asComponent<TextInputProps>(_components.TextInput);
+export const Button = asComponent<ButtonProps>(_components.Button);
+export const Switch = asComponent<SwitchProps>(_components.Switch);
+export const Pressable = asComponent<PressableProps>(_components.Pressable);
+// Touchables
+export const TouchableOpacity = asComponent<TouchableOpacityProps>(_components.TouchableOpacity);
+export const TouchableHighlight = asComponent<TouchableHighlightProps>(
+  _components.TouchableHighlight
+);
+export const TouchableWithoutFeedback = asComponent<TouchableWithoutFeedbackProps>(
+  _components.TouchableWithoutFeedback
+);
+// Feedback
+export const ActivityIndicator = asComponent<ActivityIndicatorProps>(_components.ActivityIndicator);
+export const Modal = asComponent<ModalProps>(_components.Modal);
+export const StatusBar = asComponent<StatusBarProps>(_components.StatusBar);
+// Layout
+export const SafeAreaView = asComponent<SafeAreaViewProps>(_components.SafeAreaView);
+export const KeyboardAvoidingView = asComponent<KeyboardAvoidingViewProps>(
+  _components.KeyboardAvoidingView
+);
+
+// ============ API Exports ============
+// Pure JS
+export const StyleSheet = _apis.StyleSheet;
+export const Easing = _apis.Easing;
+// Platform Info
+export const Platform = _apis.Platform;
+export const Dimensions = _apis.Dimensions;
+export const PixelRatio = _apis.PixelRatio;
+export const Appearance = _apis.Appearance;
+export const I18nManager = _apis.I18nManager;
+// Event Subscription
+export const AppState = _apis.AppState;
+export const Keyboard = _apis.Keyboard;
+// Host Capability
+export const Alert = _apis.Alert;
+export const Linking = _apis.Linking;
+export const Share = _apis.Share;
+export const Vibration = _apis.Vibration;
+// Animated is intentionally NOT exported: there is no animation runtime in the
+// sandbox, and an empty placeholder would crash guests at first property access.
+
+// ============ RN Hook Exports ============
+export const useColorScheme = _rnHooks.useColorScheme;
+export const useWindowDimensions = _rnHooks.useWindowDimensions;
+
+// ============ Component Props Type Definitions ============
+
+/**
+ * Common Props
+ */
+export interface BaseProps {
+  style?: StyleProp;
+  testID?: string;
+  key?: string | number;
+  /**
+   * Callback from {@link useRemoteRef} — the guest's handle on the host component
+   * instance behind this node.
+   *
+   * Declared on EVERY component rather than per component, because that is what
+   * the runtime does: the reconciler's `getPublicInstance` hands back
+   * `{ nodeId }` for every node it creates, unconditionally
+   * (`src/guest/runtime/reconciler/host-config.ts`), so a remote ref is
+   * meaningful on any of them — not only on the components that happen to expose
+   * imperative methods today. The host preset already declared `ref` on its side
+   * of this seam; before #80 the guest side did not, which made `useRemoteRef`'s
+   * own documented example fail to type-check.
+   *
+   * Not a React ref: `ref` is stripped from the props that reach the host
+   * (`createInstance` / `commitUpdate` delete it), and React routes it through
+   * the reconciler instead.
+   */
+  ref?: RemoteRefCallback;
+}
+
+/**
+ * View Component Props
+ */
+export interface ViewProps extends BaseProps {
+  children?: ReactNode;
+  onLayout?: (event: LayoutEvent) => void;
+  pointerEvents?: 'auto' | 'none' | 'box-none' | 'box-only';
+  accessible?: boolean;
+  accessibilityLabel?: string;
+}
+
+/**
+ * Text Component Props
+ */
+export interface TextProps extends BaseProps {
+  children?: ReactNode;
+  numberOfLines?: number;
+  ellipsizeMode?: 'head' | 'middle' | 'tail' | 'clip';
+  selectable?: boolean;
+  onPress?: () => void;
+  onLongPress?: () => void;
+}
+
+/**
+ * Image Component Props
+ */
+export interface ImageProps extends BaseProps {
+  source: ImageSource | ImageSource[];
+  resizeMode?: 'cover' | 'contain' | 'stretch' | 'repeat' | 'center';
+  onLoad?: () => void;
+  onLoadStart?: () => void;
+  onLoadEnd?: () => void;
+  onError?: (error: { nativeEvent: { error: string } }) => void;
+  fadeDuration?: number;
+  blurRadius?: number;
+}
+
+/**
+ * ScrollView Component Props
+ */
+export interface ScrollViewProps extends ViewProps {
+  horizontal?: boolean;
+  showsVerticalScrollIndicator?: boolean;
+  showsHorizontalScrollIndicator?: boolean;
+  pagingEnabled?: boolean;
+  bounces?: boolean;
+  scrollEnabled?: boolean;
+  onScroll?: (event: ScrollEvent) => void;
+  onScrollBeginDrag?: (event: ScrollEvent) => void;
+  onScrollEndDrag?: (event: ScrollEvent) => void;
+  onMomentumScrollBegin?: (event: ScrollEvent) => void;
+  onMomentumScrollEnd?: (event: ScrollEvent) => void;
+  scrollEventThrottle?: number;
+  contentContainerStyle?: StyleProp;
+  keyboardShouldPersistTaps?: 'always' | 'never' | 'handled';
+  keyboardDismissMode?: 'none' | 'on-drag' | 'interactive';
+}
+
+/**
+ * TouchableOpacity Component Props
+ */
+export interface TouchableOpacityProps extends BaseProps {
+  children?: ReactNode;
+  onPress?: () => void;
+  onPressIn?: () => void;
+  onPressOut?: () => void;
+  onLongPress?: () => void;
+  activeOpacity?: number;
+  disabled?: boolean;
+  delayPressIn?: number;
+  delayPressOut?: number;
+  delayLongPress?: number;
+}
+
+/**
+ * FlatList Component Props
+ */
+export interface FlatListProps<T = unknown> extends ScrollViewProps {
+  data: T[];
+  renderItem: (info: { item: T; index: number }) => ReactNode;
+  keyExtractor?: (item: T, index: number) => string;
+  ItemSeparatorComponent?: ComponentType;
+  ListHeaderComponent?: ReactNode;
+  ListFooterComponent?: ReactNode;
+  ListEmptyComponent?: ReactNode;
+  numColumns?: number;
+  initialNumToRender?: number;
+  onEndReached?: () => void;
+  onEndReachedThreshold?: number;
+  refreshing?: boolean;
+  onRefresh?: () => void;
+  getItemLayout?: (
+    data: T[] | null,
+    index: number
+  ) => {
+    length: number;
+    offset: number;
+    index: number;
+  };
+}
+
+/**
+ * TextInput Component Props
+ */
+export interface TextInputProps extends BaseProps {
+  value?: string;
+  defaultValue?: string;
+  placeholder?: string;
+  placeholderTextColor?: string;
+  onChangeText?: (text: string) => void;
+  onChange?: (event: { nativeEvent: { text: string } }) => void;
+  onFocus?: () => void;
+  onBlur?: () => void;
+  onSubmitEditing?: () => void;
+  multiline?: boolean;
+  numberOfLines?: number;
+  maxLength?: number;
+  editable?: boolean;
+  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
+  autoCorrect?: boolean;
+  autoFocus?: boolean;
+  secureTextEntry?: boolean;
+  keyboardType?: 'default' | 'email-address' | 'numeric' | 'phone-pad' | 'decimal-pad' | 'url';
+  returnKeyType?: 'done' | 'go' | 'next' | 'search' | 'send';
+  selectTextOnFocus?: boolean;
+}
+
+/**
+ * Button Component Props
+ */
+export interface ButtonProps {
+  title: string;
+  onPress: () => void;
+  color?: string;
+  disabled?: boolean;
+  testID?: string;
+  accessibilityLabel?: string;
+}
+
+/**
+ * Switch Component Props
+ */
+export interface SwitchProps extends BaseProps {
+  value?: boolean;
+  onValueChange?: (value: boolean) => void;
+  disabled?: boolean;
+  trackColor?: { false?: string; true?: string };
+  thumbColor?: string;
+  ios_backgroundColor?: string;
+}
+
+/**
+ * ActivityIndicator Component Props
+ */
+export interface ActivityIndicatorProps extends BaseProps {
+  animating?: boolean;
+  color?: string;
+  size?: 'small' | 'large' | number;
+  hidesWhenStopped?: boolean;
+}
+
+/**
+ * ImageBackground Component Props — an Image that renders children over itself.
+ */
+export interface ImageBackgroundProps extends ImageProps {
+  children?: ReactNode;
+  imageStyle?: StyleProp;
+}
+
+/**
+ * Pressable Component Props.
+ */
+export interface PressableProps extends BaseProps {
+  children?: ReactNode;
+  onPress?: () => void;
+  onPressIn?: () => void;
+  onPressOut?: () => void;
+  onLongPress?: () => void;
+  disabled?: boolean;
+  hitSlop?: number | { top?: number; bottom?: number; left?: number; right?: number };
+}
+
+/**
+ * TouchableHighlight Component Props.
+ */
+export interface TouchableHighlightProps extends TouchableOpacityProps {
+  underlayColor?: string;
+}
+
+/**
+ * TouchableWithoutFeedback Component Props.
+ */
+export interface TouchableWithoutFeedbackProps extends BaseProps {
+  children?: ReactNode;
+  onPress?: () => void;
+  onPressIn?: () => void;
+  onPressOut?: () => void;
+  onLongPress?: () => void;
+  disabled?: boolean;
+}
+
+/**
+ * RefreshControl Component Props.
+ */
+export interface RefreshControlProps extends BaseProps {
+  refreshing: boolean;
+  onRefresh?: () => void;
+  colors?: string[];
+  tintColor?: string;
+  title?: string;
+  progressViewOffset?: number;
+}
+
+/**
+ * Modal Component Props.
+ */
+export interface ModalProps extends BaseProps {
+  children?: ReactNode;
+  visible?: boolean;
+  transparent?: boolean;
+  animationType?: 'none' | 'slide' | 'fade';
+  onRequestClose?: () => void;
+  onShow?: () => void;
+  presentationStyle?: 'fullScreen' | 'pageSheet' | 'formSheet' | 'overFullScreen';
+}
+
+/**
+ * StatusBar Component Props.
+ */
+export interface StatusBarProps {
+  hidden?: boolean;
+  barStyle?: 'default' | 'light-content' | 'dark-content';
+  backgroundColor?: string;
+  translucent?: boolean;
+  animated?: boolean;
+}
+
+/**
+ * SafeAreaView Component Props — a View that insets its content for safe areas.
+ */
+export type SafeAreaViewProps = ViewProps;
+
+/**
+ * KeyboardAvoidingView Component Props.
+ */
+export interface KeyboardAvoidingViewProps extends ViewProps {
+  behavior?: 'height' | 'position' | 'padding';
+  keyboardVerticalOffset?: number;
+  enabled?: boolean;
+}
+
+/**
+ * SectionList Component Props (minimal typed surface).
+ */
+export interface SectionListProps<ItemT = unknown, SectionT = unknown> extends ScrollViewProps {
+  sections: ReadonlyArray<{ data: ReadonlyArray<ItemT> } & SectionT>;
+  renderItem?: (info: { item: ItemT; index: number }) => ReactNode;
+  renderSectionHeader?: (info: { section: { data: ReadonlyArray<ItemT> } & SectionT }) => ReactNode;
+  keyExtractor?: (item: ItemT, index: number) => string;
+}
+
+/**
+ * VirtualizedList Component Props (minimal typed surface).
+ */
+export interface VirtualizedListProps<ItemT = unknown> extends ScrollViewProps {
+  data: ReadonlyArray<ItemT>;
+  getItem: (data: ReadonlyArray<ItemT>, index: number) => ItemT;
+  getItemCount: (data: ReadonlyArray<ItemT>) => number;
+  renderItem: (info: { item: ItemT; index: number }) => ReactNode;
+  keyExtractor?: (item: ItemT, index: number) => string;
+}
+
+// ============ Event Types (re-exported from types.ts) ============
+// LayoutEvent, ScrollEvent, ImageSource are now imported from '../types'
+
+// ============ Hooks ============
+
+/**
+ * Subscribe to host events
+ *
+ * Automatically cleans up subscription when component unmounts.
+ *
+ * @param eventName Event name
+ * @param callback Callback function
+ *
+ * @example
+ * ```tsx
+ * useHostEvent('REFRESH', () => {
+ *   console.log('Host requested refresh');
+ *   fetchData();
+ * });
+ * // Automatically unsubscribes when component unmounts
+ * ```
+ */
+export function useHostEvent<T = unknown>(eventName: string, callback: (payload: T) => void): void {
+  const { useEffect, useRef } = getReactHooks();
+
+  // Use ref to avoid re-subscribing when callback changes
+  const callbackRef = useRef(callback);
+
+  // Keep ref up to date with latest callback
+  useEffect(() => {
+    callbackRef.current = callback;
+    return undefined;
+  });
+
+  useEffect(() => {
+    const g = globalThis as Record<string, unknown>;
+    if ('__keel_onHostEvent' in globalThis) {
+      // Create stable callback wrapper that always calls the latest callback
+      const stableCallback = (payload: T) => callbackRef.current(payload);
+
+      // Subscribe and get unsubscribe function
+      const unsubscribe = (
+        g.__keel_onHostEvent as (name: string, cb: (payload: T) => void) => () => void
+      )(eventName, stableCallback);
+
+      // React automatically calls this cleanup function when component unmounts
+      return unsubscribe;
+    }
+    return undefined;
+  }, [eventName]); // Only re-subscribe when eventName changes
+}
+
+/**
+ * Get initial configuration from host
+ *
+ * @returns Configuration object
+ *
+ * @example
+ * ```tsx
+ * const config = useConfig<{ theme: 'light' | 'dark' }>();
+ * console.log(config.theme);
+ * ```
+ */
+export function useConfig<T = Record<string, unknown>>(): T {
+  // Actual implementation injected by reconciler at runtime
+  const g = globalThis as Record<string, unknown>;
+  if ('__keel_getConfig' in globalThis) {
+    return (g.__keel_getConfig as () => T)();
+  }
+  return {} as T;
+}
+
+/**
+ * Get function to send messages to host
+ *
+ * @returns send function
+ *
+ * @example
+ * ```tsx
+ * const sendToHost = useSendToHost();
+ * sendToHost('ANALYTICS', { action: 'click', target: 'button' });
+ * ```
+ */
+export function useSendToHost(): (eventName: string, payload?: ReviewedUnknown) => void {
+  // Actual implementation injected by reconciler at runtime
+  const g = globalThis as Record<string, unknown>;
+  if ('__keel_emitEvent' in globalThis) {
+    return g.__keel_emitEvent as (eventName: string, payload?: ReviewedUnknown) => void;
+  }
+  return () => {
+    console.warn('[keel] sendToHost is not available outside sandbox');
+  };
+}
+
+// ============ Keyboard (web host) ============
+
+/** Spec for {@link useKeyboard}. */
+export interface UseKeyboardSpec {
+  /**
+   * Keys to listen for, matched against `KeyboardEvent.key` (e.g. 'Enter', 'a', 'ArrowUp',
+   * ' ' for Space). `null` or omitted means every key.
+   */
+  keys?: string[] | null;
+  /**
+   * Ask the host to call `preventDefault` synchronously on the subscribed keys as they are
+   * captured. Use this for keys the browser would otherwise act on (Space scrolls, arrows
+   * scroll, Tab moves focus, '/' opens quick-find). The host must decide without awaiting
+   * the guest, which is why the intent is declared up front rather than per event.
+   */
+  preventDefault?: boolean;
+  /** Called on key press (keydown). */
+  onKeyDown?: (event: KeelKeyEvent) => void;
+  /** Called on key release (keyup). */
+  onKeyUp?: (event: KeelKeyEvent) => void;
+}
+
+/** Monotonic source of per-hook subscription ids (unique within a guest realm). */
+let _kbdSubscriptionSeq = 0;
+
+/**
+ * Subscribe to physical keyboard events forwarded by a web host (`keel/host/web`
+ * `attachKeyboard`). A no-op on hosts that don't bridge the keyboard (native, or web hosts
+ * that never attached it), so it is always safe to call.
+ *
+ * Events arrive asynchronously over the host-event channel, but the host has already decided
+ * synchronously — based on this subscription's `keys` + `preventDefault` — whether to call
+ * `preventDefault`. That split is deliberate: the browser cannot wait for the sandbox.
+ *
+ * @example
+ * ```tsx
+ * useKeyboard({
+ *   keys: ['ArrowLeft', 'ArrowRight', ' '],
+ *   preventDefault: true,
+ *   onKeyDown: (e) => move(e.key),
+ * });
+ * ```
+ */
+export function useKeyboard(spec: UseKeyboardSpec): void {
+  const { useEffect, useRef } = getReactHooks();
+
+  // Stable subscription id for this hook instance (assigned once, on first render).
+  const idRef = useRef<string | null>(null);
+  if (idRef.current === null) {
+    _kbdSubscriptionSeq += 1;
+    idRef.current = `kbd-${_kbdSubscriptionSeq}`;
+  }
+
+  // Track the latest spec so callbacks can change without re-subscribing.
+  const specRef = useRef(spec);
+  useEffect(() => {
+    specRef.current = spec;
+    return undefined;
+  });
+
+  // Re-subscribe only when the key set or preventDefault intent changes.
+  const specKeys = spec.keys ?? null;
+  const keysKey = specKeys === null ? '*' : [...specKeys].sort().join('\u0000');
+  const preventDefault = spec.preventDefault ?? false;
+
+  useEffect(() => {
+    const g = globalThis as Record<string, unknown>;
+    if (!('__keel_emitEvent' in g) || !('__keel_onHostEvent' in g)) {
+      return undefined;
+    }
+    const id = idRef.current as string;
+    // Reason: runtime-injected bridge; payload is any serializable guest->host value
+    const emit = g.__keel_emitEvent as (name: string, payload?: unknown) => void;
+    const onHostEvent = g.__keel_onHostEvent as (
+      name: string,
+      cb: (payload: KeelKeyEvent) => void
+    ) => () => void;
+
+    const keys = specRef.current.keys ?? null;
+
+    // Declare the subscription so the host can preventDefault exactly these keys.
+    emit(KBD_SUBSCRIBE, { id, keys, preventDefault });
+
+    // The host broadcasts every subscribed key on one channel, so filter locally to the
+    // keys this hook cares about before dispatching.
+    const unsubscribe = onHostEvent(KBD_EVENT, (event) => {
+      if (keys !== null && !keys.includes(event.key)) {
+        return;
+      }
+      const current = specRef.current;
+      if (event.type === 'keydown') {
+        current.onKeyDown?.(event);
+      } else {
+        current.onKeyUp?.(event);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      emit(KBD_UNSUBSCRIBE, { id });
+    };
+  }, [keysKey, preventDefault]);
+}
+
+// ============ Remote Ref ============
+
+/** Pending call entry for tracking async method invocations */
+interface PendingCall {
+  resolve: (value: ReviewedUnknown) => void;
+  reject: (error: Error) => void;
+  timeoutId: ReturnType<typeof setTimeout>;
+}
+
+/** REF_METHOD_RESULT message from Host */
+interface RefMethodResult {
+  refId: number;
+  callId: string;
+  result?: ReviewedUnknown;
+  error?: { message: string; name?: string; stack?: string };
+}
+
+/** Default timeout for remote method calls (ms) */
+const DEFAULT_REMOTE_REF_TIMEOUT = 4000;
+
+/**
+ * Create a remote reference to a Host component instance
+ *
+ * Since Guest code runs in a sandbox and cannot directly access Host component instances,
+ * this hook provides a message-based mechanism to invoke component methods asynchronously.
+ *
+ * @returns Tuple of [refCallback, remoteRef]
+ *   - refCallback: Pass to component's ref prop
+ *   - remoteRef: RemoteRef instance (null until mounted)
+ *
+ * @example
+ * ```tsx
+ * import { useRemoteRef, TextInput, TextInputRef } from 'keel/guest';
+ *
+ * function MyComponent() {
+ *   const [inputRef, remoteInput] = useRemoteRef<TextInputRef>();
+ *
+ *   const handleFocus = async () => {
+ *     await remoteInput?.invoke('focus');
+ *     // or using typed call proxy:
+ *     // await remoteInput?.call.focus();
+ *   };
+ *
+ *   return (
+ *     <TouchableOpacity onPress={handleFocus}>
+ *       <TextInput ref={inputRef} placeholder="Tap button to focus" />
+ *     </TouchableOpacity>
+ *   );
+ * }
+ * ```
+ *
+ * The `ref={inputRef}` line compiles as written: `ref` is declared on
+ * {@link BaseProps}, so every guest component accepts one (#80). The
+ * `check:guest-types` gate compiles this exact shape.
+ */
+export function useRemoteRef<T = unknown>(options?: {
+  timeout?: number;
+}): [RemoteRefCallback, RemoteRef<T> | null] {
+  const { useEffect, useRef, useState, useMemo, useCallback } = getReactHooks();
+
+  // Use provided timeout or default
+  const timeout = options?.timeout ?? DEFAULT_REMOTE_REF_TIMEOUT;
+
+  // Track the nodeId assigned by reconciler
+  const [nodeId, setNodeId] = useState<number | null>(null);
+
+  // Counter for generating unique call IDs
+  const callIdCounterRef = useRef(0);
+
+  // Map of pending calls waiting for results
+  const pendingCallsRef = useRef<Map<string, PendingCall>>(new Map());
+
+  // Ref callback to pass to the component
+  const refCallback = useCallback(
+    ((instance: { nodeId: number } | null) => {
+      if (instance && typeof instance.nodeId === 'number') {
+        setNodeId(instance.nodeId);
+      } else {
+        setNodeId(null);
+      }
+    }) as unknown as (...args: unknown[]) => unknown,
+    []
+  ) as unknown as RemoteRefCallback;
+
+  // Listen for REF_METHOD_RESULT events from Host
+  useEffect(() => {
+    const g = globalThis as Record<string, unknown>;
+    if (!('__keel_onHostEvent' in g)) {
+      return undefined;
+    }
+
+    const handleResult = (message: RefMethodResult) => {
+      // Only handle results for our nodeId
+      if (message.refId !== nodeId) {
+        return;
+      }
+
+      const pending = pendingCallsRef.current.get(message.callId);
+      if (!pending) {
+        return;
+      }
+
+      // Clear timeout and remove from pending
+      clearTimeout(pending.timeoutId);
+      pendingCallsRef.current.delete(message.callId);
+
+      // Resolve or reject the promise
+      if (message.error) {
+        const error = new Error(message.error.message);
+        if (message.error.name) error.name = message.error.name;
+        if (message.error.stack) error.stack = message.error.stack;
+        pending.reject(error);
+      } else {
+        pending.resolve(message.result);
+      }
+    };
+
+    // Subscribe to REF_RESULT_EVENT messages from the host
+    const unsubscribe = (
+      g.__keel_onHostEvent as (name: string, cb: (payload: RefMethodResult) => void) => () => void
+    )(REF_RESULT_EVENT, handleResult);
+
+    return unsubscribe;
+  }, [nodeId]);
+
+  // Cleanup pending calls when nodeId changes or on unmount
+  useEffect(() => {
+    return () => {
+      // Reject all pending calls - node may have changed or unmounted
+      for (const [, pending] of pendingCallsRef.current) {
+        clearTimeout(pending.timeoutId);
+        pending.reject(new Error('Node changed or component unmounted'));
+      }
+      pendingCallsRef.current.clear();
+    };
+  }, [nodeId]);
+
+  // Create RemoteRef instance
+  const remoteRef = useMemo<RemoteRef<T> | null>(() => {
+    if (nodeId === null) {
+      return null;
+    }
+
+    const invoke = <R = unknown>(method: string, ...args: unknown[]): Promise<R> => {
+      return new Promise((resolve, reject) => {
+        // Generate unique call ID
+        const callId = `${nodeId}-${++callIdCounterRef.current}`;
+
+        // Set timeout for the call
+        const timeoutId = setTimeout(() => {
+          pendingCallsRef.current.delete(callId);
+          reject(new Error(`Remote method call '${method}' timed out after ${timeout}ms`));
+        }, timeout);
+
+        // Store pending call
+        pendingCallsRef.current.set(callId, {
+          resolve: resolve as PendingCall['resolve'],
+          reject,
+          timeoutId,
+        });
+
+        // Send REF_CALL operation to Host
+        const g = globalThis as Record<string, unknown>;
+        if ('__keel_sendOperation' in g) {
+          const sendOp = g.__keel_sendOperation as (op: ReviewedUnknown) => void;
+          sendOp({
+            op: 'REF_CALL',
+            refId: nodeId,
+            method,
+            args,
+            callId,
+          });
+        } else {
+          // No operation channel available
+          clearTimeout(timeoutId);
+          pendingCallsRef.current.delete(callId);
+          reject(new Error('[keel/guest] __keel_sendOperation not available'));
+        }
+      });
+    };
+
+    // Create typed call proxy
+    const call = new Proxy(
+      {},
+      {
+        get(_, prop: string) {
+          return (...args: unknown[]) => invoke(prop, ...args);
+        },
+      }
+    ) as RemoteRef<T>['call'];
+
+    return {
+      nodeId,
+      invoke,
+      call,
+    };
+  }, [nodeId, timeout]);
+
+  return [refCallback, remoteRef];
+}
+
+// ============ Error Boundary ============
+
+/**
+ * Error info passed to error handlers
+ */
+export interface ErrorInfo {
+  componentStack: string;
+}
+
+/**
+ * Props for KeelErrorBoundary
+ */
+export interface KeelErrorBoundaryProps {
+  children: ReactNode;
+  fallback?: ReactNode | ((error: Error, errorInfo: ErrorInfo) => ReactNode);
+  onError?: (error: Error, errorInfo: ErrorInfo) => void;
+}
+
+/**
+ * State for KeelErrorBoundary
+ */
+interface KeelErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+  errorInfo: ErrorInfo | null;
+}
+
+/**
+ * Error Boundary component for catching render errors in Guest code
+ *
+ * @example
+ * ```tsx
+ * import { KeelErrorBoundary, View, Text } from 'keel/guest';
+ *
+ * function App() {
+ *   return (
+ *     <KeelErrorBoundary
+ *       fallback={<Text>Something went wrong</Text>}
+ *       onError={(error, info) => {
+ *         // Report error to host
+ *         sendToHost('RENDER_ERROR', { message: error.message, stack: info.componentStack });
+ *       }}
+ *     >
+ *       <MyComponent />
+ *     </KeelErrorBoundary>
+ *   );
+ * }
+ * ```
+ */
+// Note: We use React.Component here because ErrorBoundary must be a class component
+// Check that globalThis.React.Component is a valid constructor (not just an object from shims)
+const React =
+  globalThis.React && typeof (globalThis.React as { Component?: unknown }).Component === 'function'
+    ? globalThis.React
+    : { Component: class {} };
+
+type ReactType = typeof React;
+// Reason: ReactNode fallback type when React.Component unavailable
+type ReactNodeType = ReactType extends { Component: { prototype: { render(): infer R } } }
+  ? R
+  : unknown;
+
+export class KeelErrorBoundary extends (React.Component as unknown as new (
+  props: KeelErrorBoundaryProps
+) => {
+  props: KeelErrorBoundaryProps;
+  state: KeelErrorBoundaryState;
+  setState: (state: Partial<KeelErrorBoundaryState>) => void;
+  render(): ReactNodeType;
+}) {
+  constructor(props: KeelErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null };
+  }
+
+  static getDerivedStateFromError(error: Error): Partial<KeelErrorBoundaryState> {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: { componentStack: string }): void {
+    const info: ErrorInfo = { componentStack: errorInfo.componentStack };
+    this.setState({ errorInfo: info });
+
+    // Call onError callback if provided
+    if (this.props.onError) {
+      this.props.onError(error, info);
+    }
+
+    // Also send to host if sendToHost is available
+    const g = globalThis as Record<string, unknown>;
+    if ('__keel_emitEvent' in g) {
+      // Reason: Error payload can be any serializable type
+      const sendToHost = g.__keel_emitEvent as (name: string, payload: unknown) => void;
+      sendToHost(RENDER_ERROR_EVENT, {
+        message: error.message,
+        stack: error.stack,
+        componentStack: info.componentStack,
+      });
+    }
+  }
+
+  override render(): ReactNode {
+    if (this.state.hasError) {
+      const { fallback } = this.props;
+      const { error, errorInfo } = this.state;
+
+      if (typeof fallback === 'function' && error && errorInfo) {
+        return fallback(error, errorInfo);
+      }
+
+      if (fallback && typeof fallback !== 'function') {
+        return fallback;
+      }
+
+      // Default fallback - simple error message
+      return null;
+    }
+
+    return this.props.children;
+  }
+}
+
+// ============ Type Exports ============
+
+export type { ImageSource, LayoutEvent, ScrollEvent, StyleObject, StyleProp } from './types';

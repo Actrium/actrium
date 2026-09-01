@@ -1,0 +1,13 @@
+[package]
+name = "kv-guest"
+version.workspace = true
+edition.workspace = true
+description = "Demo native keel guest: calls host:store.putText through the keel-native-guest SDK."
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+keel-native-guest = { path = "../keel-native-guest" }
