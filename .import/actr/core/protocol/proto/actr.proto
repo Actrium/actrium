@@ -1,0 +1,495 @@
+syntax = "proto2";
+
+package actr;
+
+import "google/protobuf/timestamp.proto";
+
+// ===========================================================================
+// Basic Components
+//   Realm (Security Realm)
+//   ActrType (manufacturer + name + version)
+//   ActrId (Realm + serial number + type)
+//   ServiceSpec (fingerprint + proto bundle + tags)
+//   ActrNode (ActrId + ServiceSpec)
+// ===========================================================================
+message Realm {
+  required uint32 realm_id = 1;
+}
+
+message ActrType {
+  required string manufacturer = 1;
+  required string name = 2;
+  // Version string (e.g., "1.0.0", "v2", "stable"). Not required to follow
+  // semantic versioning, but must be present.
+  required string version = 3;
+}
+
+message ActrId {
+  required Realm realm = 1;
+  required uint64 serial_number = 2;
+  required ActrType type = 3;
+}
+
+message ServiceSpec {
+  required string name = 1;
+  optional string description = 2;
+  required string fingerprint = 3; // Deterministic hash combining all proto semantic fingerprints
+  repeated Protobuf protobufs = 4;
+  optional int64 published_at = 5; // Publication timestamp (Unix epoch seconds)
+  repeated string tags = 6; // Tags like "latest", "stable"
+
+  message Protobuf {
+    required string package = 1; // Package name (e.g., "user.v1", "acme.payment.v2")
+    required string content = 2; // Merged and normalized content for this package
+    required string fingerprint = 3; // Semantic fingerprint of merged package content
+  }
+}
+
+message ActrNode {
+  required ActrId actr_id = 1;
+  optional ServiceSpec service_spec = 2;
+}
+
+// Geographic location for load balancing
+message ServiceLocation {
+  optional string region = 1;      // Region identifier (e.g., "us-west", "cn-beijing")
+  optional double latitude = 2;    // Latitude in decimal degrees (-90 to +90)
+  optional double longitude = 3;   // Longitude in decimal degrees (-180 to +180)
+}
+
+// ============================================================================
+// AId Credential
+// ============================================================================
+
+// Actor identity claims, encoded as plaintext protobuf and signed by AIS with Ed25519.
+message IdentityClaims {
+  required uint32 realm_id   = 1;
+  required string actor_id   = 2;
+  required uint64 expires_at = 3;
+}
+
+// Time-limited HMAC TURN credential in the format compatible with `coturn --use-auth-secret`.
+message TurnCredential {
+  required string username   = 1; // "<expires_at>:<actor_id>"
+  required string password   = 2; // base64(HMAC-SHA1(turn_secret, username))
+  required uint64 expires_at = 3;
+}
+
+// Credential structure for ActrId authentication
+message AIdCredential {
+  required uint32 key_id    = 1;
+  required bytes  claims    = 2; // `proto_encode(IdentityClaims)` in plaintext
+  required bytes  signature = 3; // Ed25519 signature, 64 bytes
+}
+
+// ============================================================================
+// Access Control (type-to-type permissions)
+// =========================================================================
+
+// A single ACL rule: who (from_type @ source_realm) -> permission
+message AclRule {
+  enum Permission { DENY = 0; ALLOW = 1; }
+
+  required Permission permission = 1;
+  required ActrType   from_type  = 2;
+
+  // Source realm selector. "self" in config is resolved to realm_id by actor
+  // before registration; "*" in config maps to any_realm = true.
+  oneof source_realm {
+    bool   any_realm = 3; // wildcard: matches any realm
+    uint32 realm_id  = 4; // specific realm
+  }
+}
+
+// Access Control List.
+// Evaluation: any matching DENY overrides all ALLOWs.
+// Default policy: deny if no rule matches.
+message Acl {
+  repeated AclRule rules = 1;
+}
+
+// =========================================================================
+// Actr States
+//   LifecycleState: ActrNode Lifecycle State
+//   ServiceAvailabilityState: ActrNode Availability State
+//   ServiceDependencyState: ActrNode Service Dependency State
+// =========================================================================
+
+enum LifecycleState {
+  HALTED = 0;
+  INITIALIZING = 1;
+  CONSTRUCTING = 2;
+  RUNNING = 3;
+  DESTRUCTING = 4;
+  CRASHING = 5;
+}
+
+enum ServiceAvailabilityState {
+  FULL = 0;
+  DEGRADED = 1;
+  OVERLOADED = 2;
+  UNAVAILABLE = 3;
+}
+
+enum ServiceDependencyState {
+  HEALTHY = 0;
+  WARNING = 1;
+  BROKEN = 2;
+}
+
+// ============================================================================
+// Common Error (copied from actr/common.proto)
+// ============================================================================
+
+message ErrorResponse {
+  required uint32 code = 1;
+  required string message = 2;
+}
+
+// =========================================================================
+// Register
+// =========================================================================
+enum RegisterAuthMode {
+  REGISTER_AUTH_MODE_UNSPECIFIED = 0;
+  // Package-backed registration authenticated by MFR package lookup,
+  // manifest signature verification, or package renewal credentials.
+  REGISTER_AUTH_MODE_PACKAGE = 1;
+  // Source-linked workload registration authenticated by realm authorization.
+  REGISTER_AUTH_MODE_LINKED = 2;
+}
+
+// Allocate a new ActrId and register node metadata and API info.
+message RegisterRequest {
+  required ActrType actr_type = 1;
+  required Realm realm = 2;
+
+  // API / contract metadata
+  optional ServiceSpec service_spec = 3;
+  optional Acl acl = 4;
+  // Compact service reference: "ServiceName:fingerprint".
+  // Present when strict proto fingerprint matching is required.
+  optional string service = 5;
+  // WebSocket direct-connect address (e.g., "ws://192.168.1.10:9100").
+  // Set when the registering node has a WebSocket server listening for inbound
+  // direct connections. The signaling server stores this and returns it to
+  // clients via RouteCandidatesResponse so they can connect without a relay.
+  optional string ws_address = 6;
+
+  // Raw manifest bytes (original `actr.toml` from the `.actr` package) for MFR signature verification.
+  optional bytes manifest_raw = 10;
+  // Ed25519 signature over the manifest contents produced by the MFR, 64 bytes.
+  optional bytes mfr_signature = 11;
+  // Target platform (e.g. "wasm32-wasip1", "x86_64-unknown-linux-gnu").
+  // Extracted from manifest binary.target for AIS lookup path verification.
+  optional string target = 13;
+  // Explicit authentication source. Omitted/UNSPECIFIED is treated as PACKAGE
+  // for backward compatibility with older package clients.
+  optional RegisterAuthMode auth_mode = 14;
+  // Removed in breaking cleanup: legacy PSK renewal token.
+  reserved 12;
+  reserved "psk_token";
+
+  // Ed25519 signature over the ACTR-MANUFACTURER-REGISTER-V1 payload.
+  // A package launcher produces this fresh proof with the MFR key that signed
+  // manifest_raw, binding the running package to its manufacturer.
+  // Required only for unpublished Package Path 2 registrations.
+  optional bytes manufacturer_auth_signature = 15;
+  // Unix seconds included in the manufacturer signature payload.
+  // AIS accepts only a short time window to prevent long-lived replay.
+  optional uint64 manufacturer_auth_signed_at = 16;
+  // Random nonce included in the manufacturer signature payload.
+  // AIS atomically consumes it to prevent replay inside the time window.
+  optional bytes manufacturer_auth_nonce = 17;
+}
+
+message RegisterResponse {
+  message RegisterOk {
+    // Allocated identity and credentials
+    required ActrId        actr_id                          = 1;
+    required AIdCredential credential                       = 2;
+    required TurnCredential turn_credential                 = 3;
+    optional google.protobuf.Timestamp credential_expires_at = 4;
+    // Operational advice: heartbeat interval for subsequent Signaling Server connection
+    required uint32        signaling_heartbeat_interval_secs = 5;
+    required bytes         signing_pubkey                   = 6; // AIS Ed25519 verifying key, 32 bytes
+    required uint32        signing_key_id                   = 7;
+    // Bearer token bound to actr_id and used by POST /ais/renew.
+    optional bytes         renewal_token                    = 12;
+    // Renewal token expiration timestamp.
+    optional google.protobuf.Timestamp renewal_token_expires_at = 13;
+
+    // Removed in breaking cleanup: legacy PSK fields.
+    reserved 10, 11;
+    reserved "psk", "psk_expires_at";
+  }
+  oneof result {
+    RegisterOk success = 1;
+    ErrorResponse error = 2;
+  }
+}
+
+// Renew credentials for an existing actor identity.
+message RenewCredentialRequest {
+  required ActrId actr_id = 1;
+  required bytes renewal_token = 2;
+  // Client-generated UUID (16 raw bytes) identifying this logical write.
+  // Retries MUST reuse both this value and the exact request body. A new
+  // credential-renewal operation MUST generate a new value.
+  required bytes attempt_id = 3;
+}
+
+message RenewCredentialResponse {
+  oneof result {
+    RegisterResponse.RegisterOk success = 1;
+    ErrorResponse error = 2;
+  }
+}
+
+// Re-issue credentials for an existing actor when its renewal token can no
+// longer be used. The nested registration request re-authenticates the workload
+// (manufacturer proof for packages, realm authorization for linked workloads),
+// while actr_id identifies the stable runtime identity that must be preserved.
+message ReissueCredentialRequest {
+  required ActrId actr_id = 1;
+  required RegisterRequest registration = 2;
+  // Proof that the caller owns exactly this actr_id: the raw renewal token
+  // most recently issued to that actor (possibly expired). AIS matches its
+  // hash against the issuer-recorded token bindings for actr_id and rejects
+  // the reissue when no binding matches, so a workload cannot mint
+  // credentials for another same-realm/type actor or an arbitrary serial.
+  optional bytes renewal_proof = 3;
+  // Client-generated UUID (16 raw bytes) identifying this logical write.
+  // Retries MUST reuse both this value and the exact request body, including
+  // the manufacturer proof nested in registration.
+  required bytes attempt_id = 4;
+}
+
+// ============================================================================
+// Unregister
+// ============================================================================
+
+message UnregisterRequest {
+  required ActrId actr_id = 1;
+  optional string reason = 2;
+}
+
+message UnregisterResponse {
+  message UnregisterOk {}
+  oneof result {
+    UnregisterOk success = 1;
+    ErrorResponse error = 2;
+  }
+}
+
+// =========================================================================
+// Heartbeat
+// =========================================================================
+// Periodic liveness and load indicators.
+// NOTE: Currently measures Node-to-Signaling latency only.
+// For P2P latency-based routing, consider adding:
+//   - optional uint64 signaling_rtt_ms = 4;  // Node-to-Signaling RTT
+//   - LatencyReport message for P2P measurements
+//     See RouteCandidatesRequest.LOWEST_LATENCY for design discussion.
+message Ping {
+  required ServiceAvailabilityState availability = 1;
+  required float power_reserve = 2;
+  required float mailbox_backlog = 3;
+
+  // Sticky session support: list of client IDs that must route to this instance.
+  // Used by LoadBalancer's CLIENT_AFFINITY factor for session persistence.
+  // Actor instances report their currently connected sticky clients.
+  repeated string sticky_client_ids = 4;
+}
+
+message Pong {
+  required uint64 seq = 1;
+  optional uint32 suggest_interval_secs = 2; // advisory
+  optional CredentialWarning credential_warning = 3; // Credential warning, for example when a key is in its tolerance period.
+}
+
+// =========================================================================
+// Load-balancing: find best route candidates
+// =========================================================================
+// Request route candidates for a target actor type with optional selection policy.
+message RouteCandidatesRequest {
+  message NodeSelectionCriteria {
+    // Ranking factors for candidate ordering, applied in specified order.
+    // Same ActrType implies protocol compatibility; EXACT_MATCH_FIRST further
+    // prefers candidates whose proto fingerprint matches the requester's exactly.
+    enum NodeRankingFactor {
+      MAXIMUM_POWER_RESERVE = 0;
+      MINIMUM_MAILBOX_BACKLOG = 1;
+      EXACT_MATCH_FIRST = 2; // exact fingerprint match ranked above compatible
+      NEAREST = 3;
+      CLIENT_AFFINITY = 4;
+    }
+
+    required uint32 candidate_count = 1;
+    repeated NodeRankingFactor ranking_factors = 2;
+    optional ServiceDependencyState minimal_dependency_requirement = 3;
+    optional ServiceAvailabilityState minimal_health_requirement = 4;
+  }
+  required ActrType target_type = 1;
+  optional NodeSelectionCriteria criteria = 2;
+  optional ServiceLocation client_location = 3;  // Client's geographic location for NEAREST ranking
+  // Client's service fingerprint; used by EXACT_MATCH_FIRST ranking factor to
+  // prioritise candidates whose fingerprint matches exactly.
+  required string client_fingerprint = 4;
+}
+
+// WebSocket address entry for a route candidate
+message WsAddressEntry {
+  required ActrId candidate_id = 1;
+  optional string ws_address = 2;
+}
+
+message RouteCandidatesResponse {
+  message RouteCandidatesOk {
+    repeated ActrId candidates = 1;
+    // WebSocket direct-connect addresses for each candidate (if registered)
+    repeated WsAddressEntry ws_address_map = 2;
+  }
+  oneof result {
+    RouteCandidatesOk success = 1;
+    ErrorResponse error = 2;
+  }
+}
+
+// =========================================================================
+// Discovery request/response
+// =========================================================================
+// List (ActrType x fingerprint) combinations present on the network.
+message DiscoveryRequest {
+  optional string manufacturer = 1;
+  optional uint32 limit = 2 [default = 64];
+}
+
+message DiscoveryResponse {
+  message TypeEntry {
+    required ActrType actr_type = 1;
+    required string name = 2;
+    optional string description = 3;
+    required string service_fingerprint = 4;
+    optional int64 published_at = 5;
+    repeated string tags = 6;
+  }
+
+  message DiscoveryOk {
+    repeated TypeEntry entries = 1;
+  }
+
+  oneof result {
+    DiscoveryOk success = 1;
+    ErrorResponse error = 2;
+  }
+}
+
+// =========================================================================
+// Get service spec request/response
+// =========================================================================
+message GetServiceSpecRequest {
+  required string name = 1;
+}
+
+message GetServiceSpecResponse {
+  oneof result {
+    ServiceSpec success = 1;
+    ErrorResponse error = 2;
+  }
+}
+
+// =========================================================================
+// Actr-up subscription (push-based presence by actor instance)
+// =========================================================================
+
+// Subscribe to "actor of target_type comes online" events.
+message SubscribeActrUpRequest {
+  required ActrType target_type = 1;
+}
+
+message SubscribeActrUpResponse {
+  message SubscribeOk {}
+  oneof result {
+    SubscribeOk success = 1;
+    ErrorResponse error = 2;
+  }
+}
+
+// Cancel a previous subscription.
+message UnsubscribeActrUpRequest {
+  required ActrType target_type = 1;
+}
+
+message UnsubscribeActrUpResponse {
+  message UnsubscribeOk {}
+  oneof result {
+    UnsubscribeOk success = 1;
+    ErrorResponse error = 2;
+  }
+}
+
+// Event: a matching actor instance changed presence.
+message ActrUpEvent {
+  required ActrId actor_id = 1;
+}
+
+// =========================================================================
+// WebRTC Role Negotiation
+// =========================================================================
+
+// Initiate role arbitration between two Actr peers (who will create the Offer)
+message RoleNegotiation {
+  required ActrId from = 1;
+  required ActrId to = 2;
+  required uint32 realm_id = 3;
+}
+
+// Signaling server assigns the offerer role to one side
+message RoleAssignment {
+  required bool is_offerer = 1;
+  optional bool remote_fixed = 2 [default = false];  // Whether remote peer has fixed network config
+}
+
+// =========================================================================
+// ICE Restart Notification (Plan A: Answerer -> Offerer)
+// =========================================================================
+
+// Answerer notifies Offerer that its network has recovered,
+// so the Offerer should immediately retry ICE restart instead of
+// waiting for its backoff timer to expire.
+message IceRestartRequest {
+  optional string reason = 1; // e.g. "network_recovered", "network_type_changed"
+  // Stable across retransmissions of one recovery request. Optional so a
+  // rolling deployment can still accept requests from older runtimes.
+  optional string request_id = 2;
+  // Monotonically increasing retransmission attempt for request_id.
+  optional uint32 attempt = 3 [default = 1];
+}
+
+// Confirms whether the receiver can apply a correlated IceRestartRequest to
+// its current PeerConnection. ACCEPTED confirms ownership only; the Answerer
+// still waits for an ICE restart offer and retransmits if no offer is observed.
+message IceRestartRequestAck {
+  enum Outcome {
+    ACCEPTED = 0;
+    NO_ACTIVE_SESSION = 1;
+    WRONG_ROLE = 2;
+  }
+
+  required string request_id = 1;
+  optional uint32 attempt = 2 [default = 1];
+  optional Outcome outcome = 3 [default = ACCEPTED];
+}
+
+// =========================================================================
+// Credential Warning
+// =========================================================================
+
+// Credential warning used to notify clients about abnormal credential state.
+message CredentialWarning {
+  enum WarningType {
+    KEY_IN_TOLERANCE_PERIOD = 0; // The key is in its tolerance period: expired but still usable.
+  }
+  required WarningType type = 1;
+  required string message = 2;
+}

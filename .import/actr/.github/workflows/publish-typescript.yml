@@ -1,0 +1,37 @@
+name: Publish TypeScript Package (Deprecated)
+
+# ⚠️ DEPRECATED: TypeScript publishing is now handled by the staged release
+# train workflow (.github/workflows/release-train.yml).
+# This workflow is kept for reference only. Use the release train instead.
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: Version already committed in package.json and Cargo.toml
+        required: true
+        type: string
+      dry_run:
+        description: Validate and package without publishing to npm
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  deprecation-notice:
+    name: Deprecation notice
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print deprecation notice
+        run: |
+          echo "⚠️  This workflow is DEPRECATED."
+          echo "TypeScript publishing is now handled by the staged release train workflow."
+          echo "Use .github/workflows/release-train.yml with --stage publish-typescript instead."
+          echo ""
+          echo "The release train publishes TypeScript packages in the correct order:"
+          echo "  1. build-typescript-native (parallel native builds)"
+          echo "  2. publish-typescript-workload (@actrium/actr-workload)"
+          echo "  3. publish-typescript (@actrium/actr + platform packages)"
+          echo ""
+          echo "To trigger a full release, push a release commit to main or use workflow_dispatch."
+          exit 1

@@ -1,0 +1,234 @@
+name: Release Train (Basic Verify)
+
+on:
+  push:
+    branches:
+      - "*"
+    paths:
+      - ".github/workflows/release-prepare.yml"
+      - ".github/workflows/release-asset-validation.yml"
+      - ".github/workflows/release-train.yml"
+      - ".github/workflows/release-train-verify.yml"
+      - ".github/workflows/_actr-cli-release.yml"
+      - ".github/workflows/_actrix-release.yml"
+      - ".github/workflows/_protoc-plugins-release.yml"
+      - ".github/workflows/release-actr-cli.yml"
+      - ".github/workflows/release-actrix.yml"
+      - ".github/workflows/release-protoc-plugins.yml"
+      - ".github/workflows/publish-actrsharp.yml"
+      - ".github/workflows/release-actrsharp.yml"
+      - "scripts/release-actr-cli.sh"
+      - "scripts/release-train.sh"
+      - "scripts/detect-pre-release-label.sh"
+      - "scripts/tests/release-asset-validation.sh"
+      - "scripts/tests/release-train-*.sh"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "tools/protoc-gen/**"
+      - "bindings/web/Cargo.toml"
+      - "bindings/web/Cargo.lock"
+      - "bindings/web/pnpm-lock.yaml"
+      - "bindings/web/packages/**/package.json"
+      - "bindings/web/scripts/publish.sh"
+      - "bindings/web/scripts/sync-cli-assets.sh"
+      - "bindings/typescript/Cargo.toml"
+      - "bindings/typescript/Cargo.lock"
+      - "bindings/typescript/package.json"
+      - "bindings/swift/scripts/package-binary.sh"
+      - "bindings/kotlin/actr-kotlin/build.gradle.kts"
+      - "bindings/cabi/csharp/ActrSharp/**"
+  pull_request:
+    branches:
+      - main
+      - "release-*"
+    paths:
+      - ".github/workflows/release-prepare.yml"
+      - ".github/workflows/release-asset-validation.yml"
+      - ".github/workflows/release-train.yml"
+      - ".github/workflows/release-train-verify.yml"
+      - ".github/workflows/_actr-cli-release.yml"
+      - ".github/workflows/_actrix-release.yml"
+      - ".github/workflows/_protoc-plugins-release.yml"
+      - ".github/workflows/release-actr-cli.yml"
+      - ".github/workflows/release-actrix.yml"
+      - ".github/workflows/release-protoc-plugins.yml"
+      - ".github/workflows/publish-actrsharp.yml"
+      - ".github/workflows/release-actrsharp.yml"
+      - "scripts/release-actr-cli.sh"
+      - "scripts/release-train.sh"
+      - "scripts/detect-pre-release-label.sh"
+      - "scripts/tests/release-asset-validation.sh"
+      - "scripts/tests/release-train-*.sh"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "tools/protoc-gen/**"
+      - "bindings/web/Cargo.toml"
+      - "bindings/web/Cargo.lock"
+      - "bindings/web/pnpm-lock.yaml"
+      - "bindings/web/packages/**/package.json"
+      - "bindings/web/scripts/publish.sh"
+      - "bindings/web/scripts/sync-cli-assets.sh"
+      - "bindings/typescript/Cargo.toml"
+      - "bindings/typescript/Cargo.lock"
+      - "bindings/typescript/package.json"
+      - "bindings/swift/scripts/package-binary.sh"
+      - "bindings/kotlin/actr-kotlin/build.gradle.kts"
+      - "bindings/cabi/csharp/ActrSharp/**"
+
+concurrency:
+  group: release-train-basic-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  resolve-actrsharp:
+    name: Resolve ActrSharp dry-run context
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.context.outputs.version }}
+      release_sha: ${{ steps.context.outputs.release_sha }}
+    steps:
+      - name: Checkout current ref
+        uses: actions/checkout@v5
+
+      - name: Resolve version and SHA
+        id: context
+        run: |
+          version=$(python3 -c "import tomllib;from pathlib import Path;d=tomllib.loads(Path('Cargo.toml').read_text());print(d['workspace']['package']['version'])")
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  verify-actrsharp:
+    name: Verify ActrSharp release dry-run
+    needs: resolve-actrsharp
+    permissions:
+      contents: read
+    uses: ./.github/workflows/publish-actrsharp.yml
+    with:
+      version: ${{ needs.resolve-actrsharp.outputs.version }}
+      source_ref: ${{ needs.resolve-actrsharp.outputs.release_sha }}
+      release_sha: ${{ needs.resolve-actrsharp.outputs.release_sha }}
+      publish: false
+
+  verify:
+    name: Verify basic release train dry-run
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+      CARGO_REGISTRY_TOKEN: dummy-token-for-dry-run
+      PYPI_API_TOKEN: dummy-token-for-dry-run
+      PACKAGE_SYNC_GITHUB_TOKEN: dummy-token-for-dry-run
+    steps:
+      - name: Checkout current ref
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION }}
+
+      - name: Run release train script unit checks
+        run: |
+          bash scripts/tests/release-asset-validation.sh
+          bash scripts/tests/release-train-package-sync.sh
+          bash scripts/tests/release-train-modes.sh
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          scope: "@actrium"
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.15.9 --activate
+
+      - name: Install web dependencies
+        run: |
+          cd bindings/web
+          pnpm install --frozen-lockfile
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+          PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
+
+      - name: Validate web package metadata
+        run: |
+          cd bindings/web
+          node <<'EOF'
+          const fs = require("node:fs");
+
+          const packages = [
+            ["packages/actr-dom/package.json", "@actrium/actr-dom"],
+            ["packages/web-sdk/package.json", "@actrium/actr-web"],
+            ["packages/web-react/package.json", "@actrium/actr-web-react"],
+          ];
+
+          for (const [path, expectedName] of packages) {
+            const pkg = JSON.parse(fs.readFileSync(path, "utf8"));
+            if (pkg.name !== expectedName) throw new Error(path + ": expected " + expectedName + ", got " + pkg.name);
+            if (!pkg.version || !pkg.version.match(/^\d+\.\d+\.\d+/)) throw new Error(path + ": invalid version " + pkg.version);
+            if (pkg.publishConfig?.access !== "public") throw new Error(path + ": publishConfig.access must be public");
+            if (pkg.repository?.url !== "git+https://github.com/Actrium/actr.git") throw new Error(path + ": bad repository.url");
+            console.log("  OK " + pkg.name + "@" + pkg.version);
+          }
+          console.log("  All web package metadata valid");
+          EOF
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+
+      - name: Resolve release train version
+        id: version
+        run: |
+          version=$(python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          with Path("Cargo.toml").open("rb") as fh:
+              data = tomllib.load(fh)
+
+          print(data["workspace"]["package"]["version"])
+          PY
+          )
+          echo "value=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Run dry-run validation
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          target_branch="${BASE_REF:-$REF_NAME}"
+          if [[ "$target_branch" != "main" && ! "$target_branch" =~ ^release-[0-9]+\.[0-9]+$ ]]; then
+            target_branch=main
+          fi
+          scripts/release-train.sh \
+            --branch "$target_branch" \
+            --version "${{ steps.version.outputs.value }}" \
+            --dry-run
+
+      - name: Upload dry-run reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: basic-release-train-verify-${{ steps.version.outputs.value }}
+          path: release/reports/release-train-v${{ steps.version.outputs.value }}.*
+          if-no-files-found: error

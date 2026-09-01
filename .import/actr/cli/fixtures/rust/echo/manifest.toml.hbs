@@ -1,0 +1,31 @@
+edition = 1
+exports = []
+
+[package]
+name = "{{PROJECT_NAME_PASCAL}}ClientApp"
+manufacturer = "{{MANUFACTURER}}"
+version = "1.0.0"
+description = "Package-backed Rust echo client app"
+authors = []
+license = "Apache-2.0"
+tags = ["dev", "app"]
+
+[dependencies]
+EchoService = { actr_type = "{{MANUFACTURER}}:EchoService:1.0.0" }
+
+[binary]
+path = "dist/app.wasm"
+target = "wasm32-wasip2"
+
+[build]
+tool = "cargo"
+manifest_path = "Cargo.toml"
+artifact = "lib"
+profile = "release"
+target = "wasm32-wasip2"
+post_build = [
+  'mkdir -p "$(dirname "$ACTR_BUILD_BINARY_PATH")" && cp "$ACTR_BUILD_CARGO_TARGET_DIR/$ACTR_BUILD_TARGET/$ACTR_BUILD_PROFILE/{{PROJECT_NAME_SNAKE}}_guest.wasm" "$ACTR_BUILD_BINARY_PATH"',
+]
+
+[scripts]
+dev = "cargo run"

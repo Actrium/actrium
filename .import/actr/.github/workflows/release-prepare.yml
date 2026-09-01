@@ -1,0 +1,203 @@
+name: Release Prepare
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "release/**"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Explicit release version. Use to finalize a pre-release line (e.g. 0.8.0 after 0.8.0-rc.2) or to cut a specific pre-release (e.g. 0.8.0-rc.1). Empty = auto-detect.
+        required: false
+        type: string
+
+concurrency:
+  group: release-prepare
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare:
+    name: Prepare release PR
+    if: ${{ !contains(github.event.head_commit.message, 'chore(release):') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout triggering commit
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION }}
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          scope: "@actrium"
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.15.9 --activate
+
+      - name: Detect pre-release label
+        id: label
+        if: ${{ inputs.version == '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Find PRs merged to main since the last release tag that carry a
+          # release:<channel> label; the highest-maturity label wins. The
+          # script decides whether it starts a line, escalates the channel,
+          # or is ignored (workspace already on an equal/higher channel).
+          LAST_TAG=$(git describe --tags --match "v[0-9]*" --match "release-train-v[0-9]*" --abbrev=0 2>/dev/null || echo "")
+          COMMITS_FILE=$(mktemp)
+          PRS_FILE=$(mktemp --suffix=.json)
+          search_args=()
+          if [ -n "$LAST_TAG" ]; then
+            git rev-list --first-parent "${LAST_TAG}..HEAD" >"$COMMITS_FILE"
+            # Bound the query by merge time: `gh pr list` orders by creation
+            # date, so a plain --limit window can silently exclude a
+            # long-lived PR merged right after the tag (its creation date
+            # falls outside the window). The rev-list intersection remains
+            # the source of truth for membership.
+            search_args+=(--search "merged:>=$(git log -1 --format=%cs "${LAST_TAG}")")
+          else
+            git rev-list --first-parent HEAD >"$COMMITS_FILE"
+          fi
+          gh pr list --state merged --base main --limit 300 "${search_args[@]}" \
+            --json number,labels,mergeCommit >"$PRS_FILE"
+
+          if [ "$(jq 'length' "$PRS_FILE")" -ge 300 ]; then
+            echo "::warning::Merged-PR query hit the 300-row limit; label detection may be incomplete"
+          fi
+
+          TYPE=$(scripts/detect-pre-release-label.sh "$PRS_FILE" "$COMMITS_FILE")
+          if [ -n "$TYPE" ]; then
+            echo "Pre-release label release:${TYPE} found on PRs merged since ${LAST_TAG:-initial commit}"
+          else
+            echo "No pre-release label on PRs merged since ${LAST_TAG:-initial commit}"
+          fi
+          echo "type=${TYPE}" >> "$GITHUB_OUTPUT"
+
+      - name: Run release prepare
+        id: prepare
+        env:
+          # Env indirection, not ${{ }} interpolation: the dispatch input is
+          # attacker-controllable text and would execute before
+          # validate_version ever rejects it (GitHub script-injection guidance).
+          INPUT_VERSION: ${{ inputs.version }}
+          PRE_RELEASE_LABEL: ${{ steps.label.outputs.type }}
+        run: |
+          set -euo pipefail
+          args=(--prepare-only)
+          if [ -n "$INPUT_VERSION" ]; then
+            args+=(--version "$INPUT_VERSION")
+          elif [ -n "$PRE_RELEASE_LABEL" ]; then
+            args+=(--pre-release-type "$PRE_RELEASE_LABEL")
+          fi
+          PREPARE_HEAD=$(git rev-parse HEAD)
+          echo "base_sha=$PREPARE_HEAD" >> "$GITHUB_OUTPUT"
+          scripts/release-train.sh "${args[@]}"
+          NEW_HEAD=$(git rev-parse HEAD)
+          if [ "$PREPARE_HEAD" = "$NEW_HEAD" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          ver=$(python3 -c "import tomllib;from pathlib import Path;d=tomllib.loads(Path('Cargo.toml').read_text());print(d['workspace']['package']['version'])")
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Verify main is unchanged
+        id: freshness
+        if: steps.prepare.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          CURRENT_MAIN=$(git rev-parse origin/main)
+          if [ "$CURRENT_MAIN" != "${{ steps.prepare.outputs.base_sha }}" ]; then
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping stale release prepare run; main advanced to ${CURRENT_MAIN}."
+            exit 0
+          fi
+          echo "stale=false" >> "$GITHUB_OUTPUT"
+
+      - name: Push release branch
+        if: steps.prepare.outputs.skip != 'true' && steps.freshness.outputs.stale != 'true'
+        run: |
+          set -euo pipefail
+          BRANCH="release-prepare/v${{ steps.prepare.outputs.version }}"
+          git checkout -b "$BRANCH"
+          git push origin "$BRANCH" --force
+
+      - name: Create or update Release PR
+        if: steps.prepare.outputs.skip != 'true' && steps.freshness.outputs.stale != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VER="${{ steps.prepare.outputs.version }}"
+          BRANCH="release-prepare/v${VER}"
+          TITLE="chore(release): basic train v${VER}"
+
+          LAST_TAG=$(git describe --tags --match "v[0-9]*" --match "release-train-v[0-9]*" --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            CHANGELOG="Initial release v${VER}"
+          else
+            CHANGELOG=$(git log "${LAST_TAG}..HEAD" --pretty=format:"- %s" --reverse)
+          fi
+
+          BODY="## Release v${VER}"$'\n'$'\n'"### Changes since ${LAST_TAG:-initial commit}"$'\n'$'\n'"${CHANGELOG}"$'\n'$'\n'"---"$'\n'"> Auto-created by release prepare workflow. Merge to publish."
+
+          EXISTING=$(gh pr list --head "$BRANCH" --json number -q '.[0].number' 2>/dev/null || echo "")
+          if [ -n "$EXISTING" ]; then
+            echo "Updating existing PR #${EXISTING}"
+            gh pr edit "$EXISTING" --title "$TITLE" --body "$BODY"
+            CURRENT_PR="$EXISTING"
+          else
+            echo "Creating new PR"
+            PR_URL=$(gh pr create --base main --head "$BRANCH" --title "$TITLE" --body "$BODY")
+            CURRENT_PR="${PR_URL##*/}"
+          fi
+
+          SUPERSEDED=$(gh pr list --state open --base main --limit 100 \
+            --json number,headRefName \
+            --jq ".[] | select(.headRefName != \"${BRANCH}\" and (.headRefName | startswith(\"release-prepare/\"))) | .number")
+          while IFS= read -r pr; do
+            [ -n "$pr" ] || continue
+            gh pr comment "$pr" --body "Superseded by release PR #${CURRENT_PR}."
+            gh pr close "$pr"
+          done <<< "$SUPERSEDED"
+
+      - name: Upload release reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-prepare-report-${{ steps.prepare.outputs.version || 'skip' }}
+          path: release/reports/release-train-v*.*
+          if-no-files-found: ignore

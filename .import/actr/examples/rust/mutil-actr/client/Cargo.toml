@@ -1,0 +1,24 @@
+[package]
+name = "mutil_client"
+version = "0.2.1"
+edition = "2021"
+
+[[bin]]
+name = "mutil_client"
+path = "src/main.rs"
+
+[dependencies]
+actr = { workspace = true }
+actr-runtime = { workspace = true }
+actr-hyper = { workspace = true }
+actr-framework = { workspace = true }
+actr-protocol = { workspace = true }
+actr-config = { workspace = true }
+
+tokio = { version = "1", features = ["full"] }
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+prost = "0.14"
+bytes = "1.5"
+async-trait = "0.1"

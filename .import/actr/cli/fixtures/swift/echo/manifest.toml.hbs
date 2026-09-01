@@ -1,0 +1,18 @@
+edition = 1
+exports = []
+
+[package]
+name = "echo-client-app"
+manufacturer = "{{MANUFACTURER}}"
+version = "1.0.0"
+description = "Echo client app"
+authors = ["Actr-Team"]
+license = "Apache-2.0"
+tags = ["dev", "client"]
+
+[dependencies]
+{{#if IS_BOTH}}
+EchoService = { actr_type = "{{MANUFACTURER}}:EchoService:1.0.0" }
+{{else}}
+EchoService = { actr_type = "{{MANUFACTURER}}:EchoService:1.0.0" }
+{{/if}}

@@ -1,0 +1,71 @@
+name: Release actrix binaries
+
+# Manually rebuild and replace actrix server binaries for an existing release.
+# For automatic release-train integration, see release-train.yml which calls
+# _actrix-release.yml directly in parallel with the CLI release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to (re)build and upload binaries for
+        required: true
+        type: string
+      publish:
+        description: Upload built binaries to the GitHub Release
+        required: true
+        default: true
+        type: boolean
+      replace_assets:
+        description: Replace existing release assets when publishing
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: release-actrix-${{ inputs.tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  validate-release:
+    name: Ensure release exists
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - name: Resolve tag
+        id: resolve
+        run: |
+          TAG="${{ inputs.tag }}"
+          if [[ -z "$TAG" ]]; then
+            echo "::error::No tag provided"
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+      - name: Validate tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]] || {
+            echo "::error::Expected a release tag in vX.Y.Z or vX.Y.Z-<pre> form, got $TAG"
+            exit 1
+          }
+          # gh api uses GH_TOKEN; unauthenticated git ls-remote fails on the
+          # now-private repository ("could not read Username").
+          gh api "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" >/dev/null
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+
+  publish-actrix:
+    needs: validate-release
+    uses: ./.github/workflows/_actrix-release.yml
+    with:
+      tag: ${{ needs.validate-release.outputs.tag }}
+      source_ref: ${{ needs.validate-release.outputs.tag }}
+      publish: ${{ inputs.publish }}
+      replace_assets: ${{ inputs.replace_assets }}
+    secrets: inherit

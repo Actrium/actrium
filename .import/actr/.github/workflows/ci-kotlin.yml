@@ -1,0 +1,143 @@
+name: CI (Kotlin)
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  script-check:
+    name: Kotlin Android Script Check
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Validate Android build script
+        run: scripts/tests/kotlin-android-build-script.sh
+
+  test:
+    name: Kotlin Binding Test
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - uses: actions/checkout@v5
+      # JDK resolves from the runner image's tool-cache in seconds; do NOT
+      # re-add `cache: gradle` — on self-hosted runners it downloads/uploads a
+      # ~464 MB Gradle cache from the GitHub cache service every run and
+      # saturated the pod's egress (~20 min in, ~3 min out). The Gradle
+      # distribution and KtLint dependencies are pre-seeded in the image
+      # instead.
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+      # The SDK (platforms;android-34 + build-tools;34.0.0) is preinstalled in
+      # the runner image at $ANDROID_SDK_ROOT with the matching cmdline-tools
+      # version, so this only verifies presence — no download.
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-34 build-tools;34.0.0"
+      - name: Kotlin lint (ktlint)
+        working-directory: bindings/kotlin
+        run: ./gradlew ktlintCheck --no-daemon
+      - name: Run unit tests
+        working-directory: bindings/kotlin
+        run: ./gradlew :actr-kotlin:test --no-daemon
+      - name: Build Kotlin binding
+        working-directory: bindings/kotlin
+        run: ./gradlew :actr-kotlin:build --no-daemon
+      - name: Validate Maven publication coordinates
+        working-directory: bindings/kotlin
+        run: |
+          ./gradlew :actr-kotlin:generatePomFileForMavenPublication \
+            --no-daemon \
+            -PactrGroup=io.actrium \
+            -PactrVersion=9.8.7-rc.1 \
+            -PactrSourceRepository=Actrium/actr \
+            -PactrSourceTag=validation-v9.8.7-rc.1 \
+            -PactrSourceSha=0123456789abcdef
+          python3 - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree
+
+          pom = Path("actr-kotlin/build/publications/maven/pom-default.xml")
+          root = ElementTree.parse(pom).getroot()
+          actual = (
+              root.findtext("{*}groupId"),
+              root.findtext("{*}artifactId"),
+              root.findtext("{*}version"),
+          )
+          expected = ("io.actrium", "actr", "9.8.7-rc.1")
+          if actual != expected:
+              raise SystemExit(f"Maven coordinates mismatch: expected {expected}, got {actual}")
+          properties = root.find("{*}properties")
+          if properties is None:
+              raise SystemExit("Maven provenance properties are missing")
+          actual_provenance = {
+              child.tag.rsplit("}", 1)[-1]: child.text
+              for child in properties
+          }
+          expected_provenance = {
+              "actr.source.repository": "Actrium/actr",
+              "actr.source.tag": "validation-v9.8.7-rc.1",
+              "actr.source.sha": "0123456789abcdef",
+          }
+          if actual_provenance != expected_provenance:
+              raise SystemExit(
+                  f"Maven provenance mismatch: expected {expected_provenance}, "
+                  f"got {actual_provenance}"
+              )
+          PY
+
+  gen-test:
+    name: Kotlin Codegen Test
+    runs-on: ubuntu-latest-m
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+          cache: gradle
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION }}
+      - name: Cache wasm-pack binary
+        id: wasm-pack-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/wasm-pack
+          key: wasm-pack-binary-v0.13.1
+      - name: Install wasm-pack
+        if: steps.wasm-pack-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL https://github.com/rustwasm/wasm-pack/releases/download/v0.13.1/wasm-pack-v0.13.1-x86_64-unknown-linux-musl.tar.gz | tar xz -C /tmp
+          mv /tmp/wasm-pack-v0.13.1-x86_64-unknown-linux-musl/wasm-pack ~/.cargo/bin/
+          chmod +x ~/.cargo/bin/wasm-pack
+      - uses: Swatinem/rust-cache@v2
+      - name: Generate CLI web runtime assets
+        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+      - name: Cache Gradle build outputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            bindings/kotlin/demo/build
+            bindings/kotlin/build
+            tools/protoc-gen/kotlin/build
+          key: gradle-build-${{ runner.os }}-${{ hashFiles('bindings/kotlin/**/*.kt', 'tools/protoc-gen/kotlin/**/*.kt', 'bindings/kotlin/**/build.gradle.kts', 'tools/protoc-gen/kotlin/**/build.gradle.kts') }}
+      - name: Compile Kotlin demo and build protoc plugin (parallel)
+        run: |
+          (cd bindings/kotlin && ./gradlew :demo:compileDebugKotlin --no-daemon) &
+          (cd tools/protoc-gen/kotlin && ./gradlew protocPluginJar --no-daemon) &
+          wait
+      - name: Run Kotlin codegen integration tests
+        run: cargo test -p actr-cli --test kotlin_echo --verbose

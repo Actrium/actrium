@@ -1,0 +1,1131 @@
+//! Runtime Context Implementation
+//!
+//! Implements the Context trait defined in actr-framework.
+
+use crate::inbound::{DataChunkRegistry, MediaFrameRegistry};
+use crate::lifecycle::session_state::{SessionPhase, SessionState};
+use crate::outbound::Gate;
+use crate::wire::webrtc::SignalingClient;
+#[cfg(feature = "opentelemetry")]
+use crate::wire::webrtc::trace::inject_span_context_to_rpc;
+use actr_config::lock::LockFile;
+use actr_framework::{
+    Bytes, Context, DataChunk, Dest, MaybeSendBoxFuture, MaybeSendSync, MediaSample,
+};
+use actr_protocol::{
+    AIdCredential, ActorResult, ActrError, ActrId, ActrType, ConnectionNotReadyInfo, Direction,
+    PayloadType, RouteCandidatesRequest, RpcEnvelope, RpcRequest, route_candidates_request,
+};
+use async_trait::async_trait;
+use futures_util::future::BoxFuture;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::RwLock;
+
+/// RuntimeContext - Runtime's implementation of Context trait
+///
+/// # Design Features
+///
+/// - **Zero vtable**: internally uses Gate enum dispatch (not dyn)
+/// - **Smart routing**: automatically selects Host or Peer based on Dest
+/// - **Full implementation**: contains complete call/tell logic (encode, send, decode)
+/// - **Type safety**: generic methods provide compile-time type checking
+///
+/// # Performance
+///
+/// - Gate is an enum, uses static dispatch
+/// - Compiler can fully inline the entire call chain
+/// - Zero virtual function call overhead
+#[derive(Clone)]
+pub struct RuntimeContext {
+    self_id: ActrId,
+    caller_id: Option<ActrId>,
+    request_id: String,
+    inproc_gate: Gate,          // Shell/Local calls - immediately available
+    outproc_gate: Option<Gate>, // Remote Actor calls - lazily initialized
+    data_chunk_registry: Arc<DataChunkRegistry>, // DataChunk callback registry
+    media_frame_registry: Arc<MediaFrameRegistry>, // MediaTrack callback registry
+    signaling_client: Arc<dyn SignalingClient>,
+    credential: AIdCredential,
+    actr_lock: Option<Arc<LockFile>>, // packaged manifest.lock.toml for fingerprint lookups
+    /// `alias -> ActrType` map built once from the runtime's dependency source.
+    /// Package workloads use their authenticated lock; linked workloads use
+    /// their dynamic manifest. Every context shares this map by `Arc`.
+    alias_map: Arc<HashMap<String, ActrType>>,
+    /// Strict service fingerprints keyed by complete dependency ActrType.
+    dependency_fingerprints: Arc<HashMap<ActrType, String>>,
+    /// Shared map of discovered direct-connect WebSocket URLs, keyed by ActrId.
+    /// Populated by `discover_route_candidate` from the signaling `ws_address_map`,
+    /// then read by `DefaultWireBuilder` when establishing outbound connections.
+    discovered_ws_addresses: Arc<RwLock<HashMap<ActrId, String>>>,
+    /// Session state handle — when set, outbound sends dynamically read the
+    /// current credential from the snapshot (soft renew propagates automatically).
+    /// `None` during transition; will become required.
+    pub(crate) session_state: Option<SessionState>,
+    /// Generation captured at context creation time. After a hard rebind,
+    /// outbound sends from old-generation contexts return `ConnectionNotReady`.
+    pub(crate) context_generation: u64,
+
+    /// Reply-delivery handle for `ReplyMode::Explicit` methods (RFC-0323).
+    ///
+    /// `None` for RETURN routes (the vast majority) and for contexts that do
+    /// not host EXPLICIT dispatch. Set per-request by `admit_incoming` when
+    /// `reply_mode_for_route` returns `Explicit`. The generated EXPLICIT
+    /// dispatch arm reads this via [`Context::reply_deliver`]; if `None` it
+    /// fails the dispatch with `Internal` (reject-don't-degrade).
+    reply_deliver: Option<Arc<dyn actr_framework::Deliver>>,
+
+    /// Whether the caller is waiting for a RESPONSE (`call`) or not (`tell`).
+    /// Set per-request from the inbound envelope direction. Used by the
+    /// EXPLICIT dispatch arm to build the `Reply<T>` with the right
+    /// `emit_response` flag.
+    expects_response: bool,
+
+    /// Caller deadline for an EXPLICIT reply (RFC-0323): arrival time plus
+    /// `envelope.timeout_ms`. `None` for a TELL or a route with no timeout.
+    /// Set per-request by `admit_incoming` alongside `reply_deliver`; read
+    /// by the generated EXPLICIT dispatch arm via [`Context::reply_deadline`].
+    reply_deadline: Option<actr_framework::ReplyDeadline>,
+
+    /// Set only by a generated EXPLICIT dispatch arm before it hands a reply
+    /// handle to user code. The host uses this to distinguish a deferred reply
+    /// from a valid zero-byte dispatch return.
+    reply_claimed: Option<Arc<AtomicBool>>,
+
+    /// Per-request cancellation scope (#390). `None` on shell contexts (a
+    /// `call_raw` from them starts a root scope) and on scopes inbound from
+    /// peers; set from a claimed handoff marker for locally dispatched
+    /// guest work, whose nested calls then derive child scopes.
+    pub(crate) scope: Option<Arc<crate::request_scope::RequestScope>>,
+}
+
+impl RuntimeContext {
+    /// Create a new `RuntimeContext`.
+    ///
+    /// # Parameters
+    ///
+    /// - `self_id`: ID of the current actor
+    /// - `caller_id`: optional caller actor ID
+    /// - `request_id`: unique ID for the current request
+    /// - `inproc_gate`: in-process gate, immediately available
+    /// - `outproc_gate`: cross-process gate, possibly `None` until WebRTC initialization completes
+    /// - `data_chunk_registry`: callback registry for `DataChunk`
+    /// - `media_frame_registry`: callback registry for `MediaTrack`
+    /// - `signaling_client`: signaling client used for route discovery
+    /// - `credential`: credentials used when calling signaling interfaces
+    /// - `actr_lock`: shared packaged `manifest.lock.toml` used for fingerprint lookup (wrapped in `Arc` so context clones stay cheap)
+    /// - `discovered_ws_addresses`: shared map written by `discover_route_candidate` and read by `DefaultWireBuilder`
+    #[cfg(any(test, feature = "test-utils"))]
+    #[allow(clippy::too_many_arguments)] // Internal API - all parameters are required
+    pub(crate) fn new(
+        self_id: ActrId,
+        caller_id: Option<ActrId>,
+        request_id: String,
+        inproc_gate: Gate,
+        outproc_gate: Option<Gate>,
+        data_chunk_registry: Arc<DataChunkRegistry>,
+        media_frame_registry: Arc<MediaFrameRegistry>,
+        signaling_client: Arc<dyn SignalingClient>,
+        credential: AIdCredential,
+        actr_lock: Option<Arc<LockFile>>,
+        discovered_ws_addresses: Arc<RwLock<HashMap<ActrId, String>>>,
+        session_state: Option<SessionState>,
+        context_generation: u64,
+    ) -> Self {
+        let alias_map = Arc::new(
+            actr_lock
+                .as_deref()
+                .map(build_alias_map)
+                .unwrap_or_default(),
+        );
+        let dependency_fingerprints = Arc::new(
+            actr_lock
+                .as_deref()
+                .map(build_dependency_fingerprints)
+                .unwrap_or_default(),
+        );
+        Self::new_with_alias_map(
+            self_id,
+            caller_id,
+            request_id,
+            inproc_gate,
+            outproc_gate,
+            data_chunk_registry,
+            media_frame_registry,
+            signaling_client,
+            credential,
+            actr_lock,
+            alias_map,
+            dependency_fingerprints,
+            discovered_ws_addresses,
+            session_state,
+            context_generation,
+        )
+    }
+
+    /// Create a context with the dependency map already materialized by the
+    /// owning node.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_alias_map(
+        self_id: ActrId,
+        caller_id: Option<ActrId>,
+        request_id: String,
+        inproc_gate: Gate,
+        outproc_gate: Option<Gate>,
+        data_chunk_registry: Arc<DataChunkRegistry>,
+        media_frame_registry: Arc<MediaFrameRegistry>,
+        signaling_client: Arc<dyn SignalingClient>,
+        credential: AIdCredential,
+        actr_lock: Option<Arc<LockFile>>,
+        alias_map: Arc<HashMap<String, ActrType>>,
+        dependency_fingerprints: Arc<HashMap<ActrType, String>>,
+        discovered_ws_addresses: Arc<RwLock<HashMap<ActrId, String>>>,
+        session_state: Option<SessionState>,
+        context_generation: u64,
+    ) -> Self {
+        Self {
+            self_id,
+            caller_id,
+            request_id,
+            inproc_gate,
+            outproc_gate,
+            data_chunk_registry,
+            media_frame_registry,
+            signaling_client,
+            credential,
+            actr_lock,
+            alias_map,
+            dependency_fingerprints,
+            discovered_ws_addresses,
+            session_state,
+            context_generation,
+            reply_deliver: None,
+            expects_response: true,
+            reply_deadline: None,
+            reply_claimed: None,
+            scope: None,
+        }
+    }
+
+    /// Attach a claimed request scope (#390). Called by workload intake
+    /// before dispatch so nested guest calls inherit root cancellation and
+    /// the absolute deadline.
+    pub(crate) fn with_scope(mut self, scope: Arc<crate::request_scope::RequestScope>) -> Self {
+        self.scope = Some(scope);
+        self
+    }
+
+    /// Set the reply-delivery handle, `expects_response` flag, and caller
+    /// deadline for an `ReplyMode::Explicit` route (RFC-0323). Called by
+    /// `admit_incoming` before the dispatch continuation runs so the
+    /// generated EXPLICIT arm can read them off the context.
+    pub(crate) fn set_explicit_reply(
+        &mut self,
+        deliver: Arc<dyn actr_framework::Deliver>,
+        expects_response: bool,
+        reply_deadline: Option<actr_framework::ReplyDeadline>,
+        reply_claimed: Arc<AtomicBool>,
+    ) {
+        self.reply_deliver = Some(deliver);
+        self.expects_response = expects_response;
+        self.reply_deadline = reply_deadline;
+        self.reply_claimed = Some(reply_claimed);
+    }
+
+    /// Mark this inbound invocation as intentionally deferred. This is used
+    /// by foreign generated EXPLICIT dispatchers before user code receives a
+    /// movable reply handle.
+    pub fn claim_reply(&self) -> bool {
+        let Some(claimed) = &self.reply_claimed else {
+            return false;
+        };
+        claimed.store(true, Ordering::Release);
+        true
+    }
+
+    #[cfg(feature = "wasm-engine")]
+    pub(crate) fn reply_claimed_marker(&self) -> Option<Arc<AtomicBool>> {
+        self.reply_claimed.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn data_chunk_registry_for_test(&self) -> Arc<DataChunkRegistry> {
+        self.data_chunk_registry.clone()
+    }
+
+    /// Read-only test handle to the `alias -> ActrType` map.
+    #[cfg(test)]
+    pub(crate) fn alias_map(&self) -> &HashMap<String, ActrType> {
+        &self.alias_map
+    }
+
+    #[cfg(test)]
+    pub(crate) fn alias_map_for_test(&self) -> Arc<HashMap<String, ActrType>> {
+        self.alias_map.clone()
+    }
+
+    /// Select the appropriate gate based on `Dest`.
+    ///
+    /// - `Dest::Host` -> `inproc_gate`
+    /// - `Dest::Workload` -> `inproc_gate`
+    /// - `Dest::Peer(_)` -> `outproc_gate`, which must already be initialized
+    #[inline]
+    fn select_gate(&self, dest: &Dest) -> ActorResult<&Gate> {
+        match dest {
+            Dest::Host | Dest::Workload => Ok(&self.inproc_gate),
+            Dest::Peer(_) => self.outproc_gate.as_ref().ok_or_else(|| {
+                ActrError::Internal(
+                    "PeerGate not initialized yet (WebRTC setup in progress)".to_string(),
+                )
+            }),
+        }
+    }
+
+    /// Extract the target `ActrId` from `Dest`.
+    ///
+    /// - `Dest::Host` -> `self_id` for reverse Workload-to-App calls
+    /// - `Dest::Workload` -> `self_id` for local workload calls
+    /// - `Dest::Peer(id)` -> remote actor ID
+    #[inline]
+    fn extract_target_id<'a>(&'a self, dest: &'a Dest) -> &'a ActrId {
+        match dest {
+            Dest::Host | Dest::Workload => &self.self_id,
+            Dest::Peer(id) => id,
+        }
+    }
+
+    async fn ensure_session_ready(&self) -> ActorResult<()> {
+        let Some(session_state) = &self.session_state else {
+            return Ok(());
+        };
+
+        if !session_state
+            .is_current_generation(self.context_generation)
+            .await
+        {
+            return Err(ActrError::ConnectionNotReady(
+                ConnectionNotReadyInfo::without_retry_hint(),
+            ));
+        }
+
+        if session_state.phase().await != SessionPhase::Active {
+            return Err(ActrError::ConnectionNotReady(
+                ConnectionNotReadyInfo::without_retry_hint(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Execute a non-generic RPC request call (useful for language bindings).
+    #[cfg_attr(
+        feature = "opentelemetry",
+        tracing::instrument(
+            skip_all,
+            name = "RuntimeContext.call_raw",
+            fields(
+                actr_id = %self.self_id,
+                route_key = %route_key,
+            )
+        )
+    )]
+    pub async fn call_raw(
+        &self,
+        target: &Dest,
+        route_key: String,
+        payload_type: PayloadType,
+        payload: Bytes,
+        timeout_ms: i64,
+    ) -> ActorResult<Bytes> {
+        // Sender-side argument validation: a call must carry a positive
+        // deadline and an RPC payload type. Receivers stay permissive.
+        crate::transport::validate_rpc_timeout_ms(timeout_ms)?;
+        crate::outbound::ensure_rpc_payload_type(payload_type)?;
+
+        // Per-hop cancellation scope (#390). A context without a scope is a
+        // root call (shell or an inbound remote request); a guest context
+        // inherits its root's token and the earlier absolute deadline. An
+        // already-cancelled or expired inherited scope fails fast instead of
+        // admitting more work.
+        let scope = match &self.scope {
+            Some(parent) => parent.child(timeout_ms),
+            None => crate::request_scope::RequestScope::root(timeout_ms),
+        };
+        if !scope.is_active() {
+            return Err(ActrError::TimedOut);
+        }
+        let guard = scope.guard();
+
+        self.ensure_session_ready().await?;
+
+        #[cfg(feature = "opentelemetry")]
+        use crate::wire::webrtc::trace::inject_span_context_to_rpc;
+
+        #[cfg_attr(not(feature = "opentelemetry"), allow(unused_mut))]
+        let mut envelope = RpcEnvelope {
+            route_key,
+            payload: Some(payload),
+            error: None,
+            direction: Some(Direction::Request as i32),
+            traceparent: None,
+            tracestate: None,
+            request_id: uuid::Uuid::new_v4().to_string(),
+            metadata: vec![],
+            // Every stage receives the remaining absolute budget; no hop
+            // starts a fresh full timeout (#390).
+            timeout_ms: scope.remaining_ms().unwrap_or(1),
+        };
+        #[cfg(feature = "opentelemetry")]
+        inject_span_context_to_rpc(&tracing::Span::current(), &mut envelope);
+
+        // In-process hops carry the handoff marker so workload intake can
+        // claim the scope (or observe an abandoned root and drop before
+        // admission). Only `Dest::Workload` has a request intake that claims
+        // the marker (the Shell→Guest loop only completes RESPONSEs), and
+        // peer transports never see the marker.
+        let _handoff = if matches!(target, Dest::Workload) {
+            self.inproc_gate.inproc_scope_registry().map(|registry| {
+                crate::request_scope::attach_scope_marker(&mut envelope, registry, &scope)
+            })
+        } else {
+            None
+        };
+
+        let gate = self.select_gate(target)?;
+        let target_id = self.extract_target_id(target);
+        let send = gate.send_request_with_type(target_id, payload_type, envelope);
+        // Cooperative cancellation: cancelling the root drops this future
+        // from above, and a scope cancelled while we wait unwinds here with
+        // `TimedOut` instead of running out the caller's full budget.
+        let result = tokio::select! {
+            biased;
+            _ = scope.token().cancelled() => Err(ActrError::TimedOut),
+            response = send => response,
+        };
+        match result {
+            Ok(bytes) => {
+                guard.disarm();
+                Ok(bytes)
+            }
+            Err(error @ ActrError::TimedOut) => {
+                guard.cancel_with(crate::request_scope::CancelReason::DeadlineExpired);
+                Err(error)
+            }
+            // Any other exit (send failure, transport error, future drop)
+            // cancels the scope via the guard's Drop as `CallerDropped`.
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Execute a non-generic RPC message call (fire-and-forget, useful for language bindings).
+    #[cfg_attr(
+        feature = "opentelemetry",
+        tracing::instrument(
+            skip_all,
+            name = "RuntimeContext.tell_raw",
+            fields(
+                actr_id = %self.self_id,
+                route_key = %route_key,
+            )
+        )
+    )]
+    pub async fn tell_raw(
+        &self,
+        target: &Dest,
+        route_key: String,
+        payload_type: PayloadType,
+        payload: Bytes,
+    ) -> ActorResult<()> {
+        crate::outbound::ensure_rpc_payload_type(payload_type)?;
+
+        self.ensure_session_ready().await?;
+
+        #[cfg(feature = "opentelemetry")]
+        use crate::wire::webrtc::trace::inject_span_context_to_rpc;
+
+        #[cfg_attr(not(feature = "opentelemetry"), allow(unused_mut))]
+        let mut envelope = RpcEnvelope {
+            route_key,
+            payload: Some(payload),
+            error: None,
+            direction: Some(Direction::Tell as i32),
+            traceparent: None,
+            tracestate: None,
+            request_id: uuid::Uuid::new_v4().to_string(),
+            metadata: vec![],
+            // Documented filler for TELL: receivers MUST NOT read timeout_ms
+            // as a fire-and-forget marker — Direction::Tell is the label.
+            timeout_ms: 0,
+        };
+        #[cfg(feature = "opentelemetry")]
+        inject_span_context_to_rpc(&tracing::Span::current(), &mut envelope);
+
+        let gate = self.select_gate(target)?;
+        let target_id = self.extract_target_id(target);
+        gate.send_message_with_type(target_id, payload_type, envelope)
+            .await
+    }
+
+    /// Send DataChunk with an explicit payload type (lane selection).
+    ///
+    /// Convenience wrapper for language bindings that prefer positional `payload_type`
+    /// before `chunk`. Equivalent to calling `Context::send_data_chunk` directly.
+    pub async fn send_data_chunk_with_type(
+        &self,
+        target: &Dest,
+        payload_type: actr_protocol::PayloadType,
+        chunk: DataChunk,
+    ) -> ActorResult<()> {
+        self.ensure_session_ready().await?;
+
+        use actr_protocol::prost::Message as ProstMessage;
+
+        let payload = chunk.encode_to_vec();
+        let stream_id = chunk.stream_id.as_str();
+
+        let gate = self.select_gate(target)?;
+        let target_id = self.extract_target_id(target);
+
+        gate.send_data_chunk(
+            target_id,
+            payload_type,
+            stream_id,
+            bytes::Bytes::from(payload),
+        )
+        .await
+    }
+
+    /// Get dependency fingerprint from the packaged manifest.lock.toml
+    fn get_dependency_fingerprint(&self, target_type: &ActrType) -> Option<String> {
+        self.dependency_fingerprints.get(target_type).cloned()
+    }
+
+    /// Internal: Send discovery request to signaling server
+    async fn send_discovery_request(
+        &self,
+        target_type: &ActrType,
+        candidate_count: u32,
+        client_fingerprint: String,
+    ) -> ActorResult<InternalDiscoveryResult> {
+        let criteria = route_candidates_request::NodeSelectionCriteria {
+            candidate_count,
+            ranking_factors: (!client_fingerprint.is_empty())
+                .then_some(
+                    route_candidates_request::node_selection_criteria::NodeRankingFactor::ExactMatchFirst
+                        as i32,
+                )
+                .into_iter()
+                .collect(),
+            minimal_dependency_requirement: None,
+            minimal_health_requirement: None,
+        };
+
+        let request = RouteCandidatesRequest {
+            target_type: target_type.clone(),
+            criteria: Some(criteria),
+            client_location: None,
+            client_fingerprint,
+        };
+
+        let (source_id, credential) = if let Some(session_state) = &self.session_state {
+            (
+                session_state.actor_id().await,
+                session_state.credential().await,
+            )
+        } else {
+            (self.self_id.clone(), self.credential.clone())
+        };
+
+        let response = self
+            .signaling_client
+            .send_route_candidates_request(source_id, credential, request)
+            .await
+            .map_err(|e| ActrError::Unavailable(format!("Route candidates request failed: {e}")))?;
+
+        match response.result {
+            Some(actr_protocol::route_candidates_response::Result::Success(success)) => {
+                Ok(InternalDiscoveryResult {
+                    candidates: success.candidates,
+                    ws_address_map: success.ws_address_map,
+                })
+            }
+            Some(actr_protocol::route_candidates_response::Result::Error(err)) => {
+                Err(ActrError::Unavailable(format!(
+                    "Route candidates error {}: {}",
+                    err.code, err.message
+                )))
+            }
+            None => Err(ActrError::Unavailable(
+                "Invalid route candidates response: missing result".to_string(),
+            )),
+        }
+    }
+}
+
+/// Internal discovery result structure
+struct InternalDiscoveryResult {
+    candidates: Vec<ActrId>,
+    /// Direct-connect WebSocket URLs returned alongside candidates.
+    ws_address_map: Vec<actr_protocol::WsAddressEntry>,
+}
+
+/// Build the `alias -> ActrType` map from a packaged `manifest.lock.toml`.
+///
+/// Each `[[dependency]]` entry contributes its explicit v2 `alias`; `name` is
+/// metadata and is never used as an identity fallback.
+pub(crate) fn build_alias_map(lock: &LockFile) -> HashMap<String, ActrType> {
+    if lock.format_version() != actr_config::lock::LOCK_FILE_VERSION {
+        return HashMap::new();
+    }
+
+    let mut map = HashMap::with_capacity(lock.dependencies.len());
+    for dep in &lock.dependencies {
+        let alias = dep.alias.trim();
+        if alias.is_empty() {
+            continue;
+        }
+        match ActrType::from_string_repr(&dep.actr_type) {
+            Ok(actr_type) => {
+                map.insert(alias.to_string(), actr_type);
+            }
+            Err(_) => {
+                tracing::warn!(
+                    alias,
+                    actr_type = %dep.actr_type,
+                    "skipping lock dependency with unparseable actr_type during alias map build"
+                );
+            }
+        }
+    }
+    map
+}
+
+pub(crate) fn build_dependency_fingerprints(lock: &LockFile) -> HashMap<ActrType, String> {
+    if lock.format_version() != actr_config::lock::LOCK_FILE_VERSION {
+        return HashMap::new();
+    }
+    lock.dependencies
+        .iter()
+        .filter_map(|dependency| {
+            ActrType::from_string_repr(&dependency.actr_type)
+                .ok()
+                .map(|actr_type| (actr_type, dependency.fingerprint.clone()))
+        })
+        .collect()
+}
+
+/// Template used to materialize `RuntimeContext` instances for lifecycle
+/// bootstrap / observation paths (on_start / on_stop, signaling hooks, WebRTC
+/// hooks, ActrRef::app_context, ...).
+///
+/// Unlike the per-request dispatch path, which constructs `RuntimeContext`
+/// directly from `Inner`, this builder is a **detachable snapshot** of the
+/// handles needed to build a context. It is cloned into long-lived hook
+/// closures and into `ActrRefShared` so those paths don't need to retain a
+/// reference back to `Inner`.
+///
+/// # Fields
+///
+/// Mirrors `RuntimeContext`'s non-per-request state. `outproc_gate` is
+/// `Option` because hook builders can be captured *before* WebRTC
+/// initialization finishes; such snapshots will simply emit contexts with
+/// `outproc_gate = None`, matching the pre-existing semantics.
+#[derive(Clone)]
+pub(crate) struct BootstrapContextBuilder {
+    inproc_gate: Gate,
+    outproc_gate: Option<Gate>,
+    data_chunk_registry: Arc<DataChunkRegistry>,
+    media_frame_registry: Arc<MediaFrameRegistry>,
+    signaling_client: Arc<dyn SignalingClient>,
+    actr_lock: Option<Arc<LockFile>>,
+    alias_map: Arc<HashMap<String, ActrType>>,
+    dependency_fingerprints: Arc<HashMap<ActrType, String>>,
+    /// Shared map populated by discover_route_candidate; forwarded into each
+    /// RuntimeContext so discovery results are visible to DefaultWireBuilder.
+    discovered_ws_addresses: Arc<RwLock<HashMap<ActrId, String>>>,
+    /// Session state handle — when set, built contexts will read credentials
+    /// dynamically from the snapshot.
+    session_state: Option<SessionState>,
+    /// Generation number for stale-context detection after hard rebind.
+    generation: u64,
+}
+
+impl BootstrapContextBuilder {
+    /// Assemble a new builder from the runtime handles. All parameters are
+    /// snapshotted by clone; later mutations on the origin (e.g. the node's
+    /// own `actr_lock`) are intentionally not observed — callers that need
+    /// a fresh snapshot must re-build.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        inproc_gate: Gate,
+        outproc_gate: Option<Gate>,
+        data_chunk_registry: Arc<DataChunkRegistry>,
+        media_frame_registry: Arc<MediaFrameRegistry>,
+        signaling_client: Arc<dyn SignalingClient>,
+        actr_lock: Option<Arc<LockFile>>,
+        alias_map: Arc<HashMap<String, ActrType>>,
+        dependency_fingerprints: Arc<HashMap<ActrType, String>>,
+        discovered_ws_addresses: Arc<RwLock<HashMap<ActrId, String>>>,
+        session_state: Option<SessionState>,
+        generation: u64,
+    ) -> Self {
+        Self {
+            inproc_gate,
+            outproc_gate,
+            data_chunk_registry,
+            media_frame_registry,
+            signaling_client,
+            actr_lock,
+            alias_map,
+            dependency_fingerprints,
+            discovered_ws_addresses,
+            session_state,
+            generation,
+        }
+    }
+
+    /// Set or replace the session state handle after builder construction.
+    pub(crate) fn set_session_state(&mut self, ss: Option<SessionState>) {
+        self.session_state = ss;
+    }
+
+    /// Update the generation (called after hard rebind).
+    pub(crate) fn set_generation(&mut self, generation: u64) {
+        self.generation = generation;
+    }
+
+    /// Force-close registered stream callbacks during node teardown.
+    ///
+    /// The builder is owned by `ActrRefShared`, so it remains available even
+    /// when background tasks holding `Inner` cannot be joined synchronously.
+    pub(crate) fn clear_data_chunk_callbacks(&self) {
+        self.data_chunk_registry.clear();
+    }
+
+    /// Materialize a bootstrap `RuntimeContext` for lifecycle hooks.
+    ///
+    /// The produced context has no caller (`caller_id = None`) and a freshly
+    /// generated `request_id`; it is intended for on_start / on_stop /
+    /// transport-event observation where no inbound envelope drives the
+    /// request identity.
+    pub(crate) fn build_bootstrap(
+        &self,
+        self_id: &ActrId,
+        credential: &AIdCredential,
+    ) -> RuntimeContext {
+        let generation = self
+            .session_state
+            .as_ref()
+            .and_then(SessionState::generation_sync)
+            .unwrap_or(self.generation);
+
+        RuntimeContext::new_with_alias_map(
+            self_id.clone(),
+            None,
+            uuid::Uuid::new_v4().to_string(),
+            self.inproc_gate.clone(),
+            self.outproc_gate.clone(),
+            self.data_chunk_registry.clone(),
+            self.media_frame_registry.clone(),
+            self.signaling_client.clone(),
+            credential.clone(),
+            self.actr_lock.clone(),
+            self.alias_map.clone(),
+            self.dependency_fingerprints.clone(),
+            self.discovered_ws_addresses.clone(),
+            self.session_state.clone(),
+            generation,
+        )
+    }
+}
+
+#[async_trait]
+impl Context for RuntimeContext {
+    // ========== Data Access Methods ==========
+
+    fn self_id(&self) -> &ActrId {
+        &self.self_id
+    }
+
+    fn caller_id(&self) -> Option<&ActrId> {
+        self.caller_id.as_ref()
+    }
+
+    fn request_id(&self) -> &str {
+        &self.request_id
+    }
+
+    fn claim_reply(&self) -> bool {
+        RuntimeContext::claim_reply(self)
+    }
+
+    fn expects_response(&self) -> bool {
+        self.expects_response
+    }
+
+    fn reply_deliver(&self) -> Option<Arc<dyn actr_framework::Deliver>> {
+        self.reply_deliver.clone()
+    }
+
+    fn reply_deadline(&self) -> Option<actr_framework::ReplyDeadline> {
+        self.reply_deadline
+    }
+
+    // ========== Communication Methods ==========
+    #[cfg_attr(
+        feature = "opentelemetry",
+        tracing::instrument(
+            skip_all,
+            name = "RuntimeContext.call",
+            fields(actr_id = %self.self_id)
+        )
+    )]
+    async fn call<R: RpcRequest>(
+        &self,
+        target: &Dest,
+        request: R,
+        timeout_ms: i64,
+    ) -> ActorResult<R::Response> {
+        use actr_protocol::prost::Message as ProstMessage;
+
+        let payload: Bytes = request.encode_to_vec().into();
+        let response_bytes = RuntimeContext::call_raw(
+            self,
+            target,
+            R::route_key().to_string(),
+            R::payload_type(),
+            payload,
+            timeout_ms,
+        )
+        .await?;
+
+        R::Response::decode(&*response_bytes).map_err(|e| {
+            ActrError::DecodeFailure(format!(
+                "Failed to decode {}: {}",
+                std::any::type_name::<R::Response>(),
+                e
+            ))
+        })
+    }
+
+    #[cfg_attr(
+        feature = "opentelemetry",
+        tracing::instrument(
+            skip_all,
+            name = "RuntimeContext.tell",
+            fields(actr_id = %self.self_id)
+        )
+    )]
+    async fn tell<R: RpcRequest>(&self, target: &Dest, message: R) -> ActorResult<()> {
+        crate::outbound::ensure_rpc_payload_type(R::payload_type())?;
+
+        self.ensure_session_ready().await?;
+
+        // 1. Encode the message.
+        let payload: Bytes = message.encode_to_vec().into();
+
+        // 2. Get the route key.
+        let route_key = R::route_key().to_string();
+
+        // 3. Build the RpcEnvelope for fire-and-forget delivery.
+        #[cfg_attr(not(feature = "opentelemetry"), allow(unused_mut))]
+        let mut envelope = RpcEnvelope {
+            route_key,
+            payload: Some(payload),
+            error: None,
+            direction: Some(Direction::Tell as i32),
+            traceparent: None,
+            tracestate: None,
+            request_id: uuid::Uuid::new_v4().to_string(),
+            metadata: vec![],
+            // Documented filler for TELL: the Direction::Tell label — not a
+            // zero timeout — is what marks this envelope fire-and-forget.
+            timeout_ms: 0,
+        };
+        // Inject tracing context from current span
+        #[cfg(feature = "opentelemetry")]
+        inject_span_context_to_rpc(&tracing::Span::current(), &mut envelope);
+
+        // 4. Select a gate from Dest and extract the target ActrId.
+        let gate = self.select_gate(target)?;
+        let target_id = self.extract_target_id(target);
+
+        // 5. Dispatch through the Gate enum while preserving payload type.
+        gate.send_message_with_type(target_id, R::payload_type(), envelope)
+            .await
+    }
+
+    // ========== Fast Path: DataChunk Methods ==========
+
+    async fn register_stream<F>(&self, stream_id: String, callback: F) -> ActorResult<()>
+    where
+        F: Fn(DataChunk, ActrId) -> MaybeSendBoxFuture<'static, ActorResult<()>>
+            + MaybeSendSync
+            + 'static,
+    {
+        tracing::debug!(
+            "📊 Registering DataChunk callback for stream_id: {}",
+            stream_id
+        );
+        self.data_chunk_registry
+            .register(stream_id, Arc::new(callback));
+        Ok(())
+    }
+
+    async fn unregister_stream(&self, stream_id: &str) -> ActorResult<()> {
+        tracing::debug!(
+            "🚫 Unregistering DataChunk callback for stream_id: {}",
+            stream_id
+        );
+        self.data_chunk_registry.unregister(stream_id);
+        Ok(())
+    }
+
+    async fn send_data_chunk(
+        &self,
+        target: &Dest,
+        chunk: DataChunk,
+        payload_type: actr_protocol::PayloadType,
+    ) -> ActorResult<()> {
+        self.ensure_session_ready().await?;
+
+        use actr_protocol::prost::Message as ProstMessage;
+
+        // 1. Serialize DataChunk to bytes
+        let payload = chunk.encode_to_vec();
+        let stream_id = chunk.stream_id.as_str();
+
+        tracing::debug!(
+            "📤 Sending DataChunk: stream_id={}, sequence={}, size={} bytes",
+            stream_id,
+            chunk.sequence,
+            payload.len()
+        );
+
+        // 2. Select gate based on Dest
+        let gate = self.select_gate(target)?;
+        let target_id = self.extract_target_id(target);
+
+        // 3. Send via Gate with the caller-specified PayloadType
+        gate.send_data_chunk(
+            target_id,
+            payload_type,
+            stream_id,
+            bytes::Bytes::from(payload),
+        )
+        .await
+    }
+
+    #[cfg_attr(
+        feature = "opentelemetry",
+        tracing::instrument(
+            skip_all,
+            name = "RuntimeContext.discover_route_candidate",
+            fields(
+                actr_id = %self.self_id,
+                target_type = %target_type,
+            )
+        )
+    )]
+    async fn discover_route_candidate(&self, target_type: &ActrType) -> ActorResult<ActrId> {
+        self.ensure_session_ready().await?;
+
+        if !self.signaling_client.is_connected() {
+            return Err(ActrError::Unavailable(
+                "Signaling client is not connected.".to_string(),
+            ));
+        }
+
+        let service_name = format!("{}:{}", target_type.manufacturer, target_type.name);
+
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // Step 1: Get fingerprint from manifest.lock.toml (when available)
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        let client_fingerprint = match self.get_dependency_fingerprint(target_type) {
+            Some(fingerprint) => fingerprint,
+            None => {
+                if self.actr_lock.is_none() {
+                    tracing::debug!(
+                        "manifest.lock.toml not loaded; sending discovery without fingerprint for '{}'",
+                        service_name
+                    );
+                    String::new()
+                } else {
+                    tracing::error!(
+                        severity = 10,
+                        error_category = "dependency_missing",
+                        "❌ DEPENDENCY NOT FOUND: Service '{}' is not declared in manifest.lock.toml.\n\
+                         Please run 'actr deps install' to generate the lock file with all dependencies.",
+                        service_name
+                    );
+                    return Err(ActrError::DependencyNotFound {
+                        service_name: service_name.clone(),
+                        message: format!(
+                            "Dependency '{}' not found in manifest.lock.toml. Run 'actr deps install' to resolve dependencies.",
+                            service_name
+                        ),
+                    });
+                }
+            }
+        };
+
+        if !client_fingerprint.is_empty() {
+            tracing::debug!(
+                "📋 Found dependency fingerprint for '{}': {}",
+                service_name,
+                &client_fingerprint[..20.min(client_fingerprint.len())]
+            );
+        }
+
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // Step 2: Send discovery request to signaling server
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        let result = self
+            .send_discovery_request(target_type, 1, client_fingerprint)
+            .await?;
+
+        tracing::info!(
+            "Discovery result [{}]: {} candidates, {} ws_address entries",
+            service_name,
+            result.candidates.len(),
+            result.ws_address_map.len(),
+        );
+
+        // Populate the shared discovered_ws_addresses map so DefaultWireBuilder
+        // can use direct WebSocket connections instead of WebRTC for peers that
+        // advertise a ws:// address through the signaling server.
+        if !result.ws_address_map.is_empty() {
+            let mut map = self.discovered_ws_addresses.write().await;
+            for entry in result.ws_address_map {
+                if let Some(url) = entry.ws_address {
+                    tracing::debug!(
+                        actor_id = ?entry.candidate_id,
+                        ws_url = %url,
+                        "discovered direct WebSocket address",
+                    );
+                    map.insert(entry.candidate_id, url);
+                }
+            }
+        }
+
+        result.candidates.into_iter().next().ok_or_else(|| {
+            ActrError::NotFound(format!(
+                "No route candidates for type {}/{}",
+                target_type.manufacturer, target_type.name
+            ))
+        })
+    }
+
+    async fn resolve_dependency(&self, alias: &str) -> ActorResult<ActrType> {
+        if let Some(actr_type) = self.alias_map.get(alias) {
+            return Ok(actr_type.clone());
+        }
+        Err(ActrError::DependencyNotFound {
+            service_name: alias.to_string(),
+            message: format!(
+                "dependency alias `{alias}` is not declared in the workload dependency metadata"
+            ),
+        })
+    }
+
+    async fn call_raw(
+        &self,
+        target: &ActrId,
+        route_key: &str,
+        payload: Bytes,
+        timeout_ms: i64,
+    ) -> ActorResult<Bytes> {
+        RuntimeContext::call_raw(
+            self,
+            &Dest::Peer(target.clone()),
+            route_key.to_string(),
+            PayloadType::RpcReliable,
+            payload,
+            timeout_ms,
+        )
+        .await
+    }
+
+    async fn call_raw_with_payload_type(
+        &self,
+        target: &ActrId,
+        route_key: &str,
+        payload_type: PayloadType,
+        payload: Bytes,
+        timeout_ms: i64,
+    ) -> ActorResult<Bytes> {
+        RuntimeContext::call_raw(
+            self,
+            &Dest::Peer(target.clone()),
+            route_key.to_string(),
+            payload_type,
+            payload,
+            timeout_ms,
+        )
+        .await
+    }
+
+    // ========== Fast Path: MediaTrack Methods ==========
+
+    async fn register_media_track<F>(&self, track_id: String, callback: F) -> ActorResult<()>
+    where
+        F: Fn(MediaSample, ActrId) -> BoxFuture<'static, ActorResult<()>> + Send + Sync + 'static,
+    {
+        tracing::debug!(
+            "📹 Registering MediaTrack callback for track_id: {}",
+            track_id
+        );
+        self.media_frame_registry
+            .register(track_id, Arc::new(callback));
+        Ok(())
+    }
+
+    async fn unregister_media_track(&self, track_id: &str) -> ActorResult<()> {
+        tracing::debug!(
+            "📹 Unregistering MediaTrack callback for track_id: {}",
+            track_id
+        );
+        self.media_frame_registry.unregister(track_id);
+        Ok(())
+    }
+
+    async fn send_media_sample(
+        &self,
+        target: &Dest,
+        track_id: &str,
+        sample: MediaSample,
+    ) -> ActorResult<()> {
+        // 1. Select appropriate gate based on Dest
+        let gate = self.select_gate(target)?;
+
+        // 2. Extract target ActrId
+        let target_id = self.extract_target_id(target);
+
+        // 3. Send via Gate (delegates to WebRTC Track)
+        gate.send_media_sample(target_id, track_id, sample).await
+    }
+
+    async fn add_media_track(
+        &self,
+        target: &Dest,
+        track_id: &str,
+        codec: &str,
+        media_type: &str,
+    ) -> ActorResult<()> {
+        let gate = self.select_gate(target)?;
+        let target_id = self.extract_target_id(target);
+        gate.add_media_track(target_id, track_id, codec, media_type)
+            .await
+    }
+
+    async fn remove_media_track(&self, target: &Dest, track_id: &str) -> ActorResult<()> {
+        let gate = self.select_gate(target)?;
+        let target_id = self.extract_target_id(target);
+        gate.remove_media_track(target_id, track_id).await
+    }
+}
+
+#[cfg(test)]
+#[path = "context_tests.rs"]
+mod tests;

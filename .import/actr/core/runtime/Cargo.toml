@@ -1,0 +1,27 @@
+[package]
+name = "actr-runtime"
+version = "0.10.0-alpha.4"
+edition.workspace = true
+rust-version.workspace = true
+description = "Thin business dispatch layer for Actor-RTC — wasm32-compatible"
+repository = "https://github.com/Actrium/actr"
+license.workspace = true
+keywords = ["actor", "dispatch", "runtime", "wasm"]
+categories = ["asynchronous", "concurrency"]
+
+[dependencies]
+actr-framework.workspace = true
+actr-protocol.workspace = true
+async-trait.workspace = true
+bytes = "1.10"
+futures-util.workspace = true
+tracing.workspace = true
+
+[features]
+default = []
+# placeholder — upper layer crates reference this feature; remove after splitting is complete
+opentelemetry = []
+test-utils = []
+
+[lints]
+workspace = true

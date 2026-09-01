@@ -1,0 +1,12 @@
+//! {{PROJECT_NAME}} — local guest bridge for the Rust echo app.
+//!
+//! The bridge proto defines no local RPC routes, so the unified workload
+//! registers the `()` handler and forwards remote calls through
+//! `generated::actr_dispatch`.
+
+pub mod generated;
+
+use actr_framework::entry;
+use generated::actr_dispatch::ActrWorkload;
+
+entry!(ActrWorkload<()>, ActrWorkload::new(()));

@@ -1,0 +1,31 @@
+import fs from 'fs';
+import path from 'path';
+import { defineConfig } from 'vite';
+import wasm from 'vite-plugin-wasm';
+import topLevelAwait from 'vite-plugin-top-level-await';
+
+export default defineConfig({
+  plugins: [wasm(), topLevelAwait()],
+  resolve: {
+    alias: {
+      '@actrium/actr-web': path.resolve(__dirname, '../../../packages/web-sdk/src'),
+      '@actrium/actr-dom': path.resolve(__dirname, '../../../packages/actr-dom/src'),
+    },
+  },
+  server: {
+    port: 5173,
+    strictPort: true,
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+    },
+    host: true,
+    https: {
+      key: fs.readFileSync(path.resolve(__dirname, '.certs/localhost+1-key.pem')),
+      cert: fs.readFileSync(path.resolve(__dirname, '.certs/localhost+1.pem')),
+    },
+  },
+  optimizeDeps: {
+    exclude: ['@actrium/actr-web'],
+  },
+});

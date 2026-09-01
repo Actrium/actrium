@@ -1,0 +1,62 @@
+name: CI (Swift)
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-build:
+    name: Swift Lint And Build
+    runs-on: macos-arm64-larger
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION }}
+      - name: Cache uniffi-bindgen binary
+        id: cache-uniffi
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/uniffi-bindgen*
+          key: uniffi-bindgen-0.31.1-${{ runner.os }}-${{ runner.arch }}
+      - name: Install UniFFI bindgen
+        if: steps.cache-uniffi.outputs.cache-hit != 'true'
+        run: cargo install --locked --force uniffi --version 0.31.1 --features cli --bin uniffi-bindgen
+      - name: Install Swift tools and libraries
+        run: brew install swiftlint opus
+      - name: Run SwiftLint
+        run: swiftlint lint --strict
+      - name: Build local Swift XCFramework
+        working-directory: bindings/swift
+        env:
+          ACTR_BUILD_PROFILE: debug
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+        run: |
+          ACTR_BINDINGS_PATH=dist/ActrBindings \
+          ACTR_BINARY_PATH=dist/ActrFFI.xcframework \
+          ./build-xcframework.sh
+      - name: Build Swift bindings package
+        working-directory: bindings/swift
+        run: |
+          ACTR_BINDINGS_PATH=dist/ActrBindings \
+          ACTR_BINARY_PATH=dist/ActrFFI.xcframework \
+          swift build
+      - name: Test Swift bindings package
+        working-directory: bindings/swift
+        run: |
+          ACTR_BINDINGS_PATH=dist/ActrBindings \
+          ACTR_BINARY_PATH=dist/ActrFFI.xcframework \
+          swift test
+      - name: Build Swift codegen package
+        working-directory: tools/protoc-gen/swift
+        run: swift build

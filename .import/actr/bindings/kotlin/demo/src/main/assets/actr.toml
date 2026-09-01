@@ -1,0 +1,49 @@
+# actr.toml — linked runtime configuration
+#
+# EchoApp uses linked mode through ActrNode.linked() and does not use
+# `actr build`. This file is read directly as runtime configuration, so
+# package, binary, and build sections are intentionally omitted.
+#
+# Package identity and dependencies are declared in manifest.toml.
+
+[signaling]
+url = "ws://127.0.0.1:9080/signaling/ws"
+
+[ais_endpoint]
+url = "http://127.0.0.1:9080/ais"
+
+[deployment]
+realm_id = 33554434
+realm_secret = "rs_m5bEk-i1R9mCOpj3ej1_eN80f6ukR7OS"
+
+[discovery]
+visible = true
+
+[observability]
+filter_level = "debug"
+tracing_enabled = false
+
+[webrtc]
+force_relay = true
+stun_urls = ["stun:127.0.0.1:3478"]
+turn_urls = ["turn:127.0.0.1:3478"]
+
+[hyper]
+data_dir = "/data/data/io.actrium.demo/files/hyper"
+
+[hyper.trust]
+kind = "dev_only"
+
+[acl]
+
+[[acl.rules]]
+permission = "allow"
+type = "acme:EchoApp:0.1.0"
+
+[[acl.rules]]
+permission = "allow"
+type = "actrium:EchoService:1.0.0"
+
+[[acl.rules]]
+permission = "allow"
+type = "actrium:DuplexStreamService:1.0.0"

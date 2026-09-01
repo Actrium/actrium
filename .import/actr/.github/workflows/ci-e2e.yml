@@ -1,0 +1,675 @@
+name: CI (E2E)
+
+on:
+  schedule:
+    # GitHub Actions cron uses UTC. 18:00 UTC = 02:00 UTC+8 next day.
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-runtime-echo-e2e:
+    name: Package Runtime Echo E2E
+    runs-on: ubuntu-latest-m
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install Linux e2e dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*
+          sudo apt-get update
+          sudo apt-get install -y jq sqlite3 lsof perl
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ vars.PROTOC_VERSION }}
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+      - uses: Swatinem/rust-cache@v2
+      - name: Generate CLI web runtime assets
+        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+      - name: Run package runtime echo e2e
+        run: bash e2e/package-runtime-echo/run.sh
+
+  # The standalone Rust echo e2e (`cargo test --test e2e_rust_echo`) was
+  # superseded by `package-runtime-echo` once the Rust service template moved
+  # to the cdylib + `actr run` packaging model. The dedicated job has been
+  # removed; equivalent coverage now lives in the `package-runtime-echo-e2e`
+  # job above.
+
+  polyglot-echo-e2e:
+    name: Polyglot Echo E2E
+    # Server-form matrix against an in-tree EchoService: three server forms
+    # (cdylib-rust / linked-rust / wasm-rust) driven by the Rust client, plus
+    # the Rust server-stream + bidi DataStream scenarios. Runs entirely against
+    # the in-tree mock-actrix. One job runs the whole matrix sequentially so the
+    # slow setup (mock-actrix + actr CLI + service build) is amortised across
+    # every scenario.
+    runs-on: ubuntu-latest-m
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2,wasm32-unknown-unknown
+      - name: Install Linux e2e dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq lsof
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ vars.PROTOC_VERSION }}
+      - name: Install wasm Component Model toolchain
+        run: |
+          cargo install wasm-component-ld --version 0.5.26 --locked
+          cargo install wasm-tools --version 1.253.0 --locked
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Distinct from package-runtime-echo's cache: the polyglot scenario
+          # uses its own CARGO_TARGET_DIR tree under target/e2e-cache/polyglot-echo/.
+          #
+          # Only the two cross-scenario shared target trees (actr-cli, mock-actrix)
+          # are cached. The per-scenario trees (service-build, driver-rust,
+          # linked-rust, wasm-rust, stream-server) are cheap to rebuild and are
+          # deleted by the "Clean ..." steps below as soon as no later scenario
+          # needs them; caching all seven trees is what exhausted the runner's
+          # ~14 GB disk during the post-run cache save (#314).
+          key: polyglot-echo-e2e
+          # Defense in depth: only persist the cache from the nightly schedule (or
+          # a manual run on main), so any other run can never be failed by the
+          # disk-heavy cache-save step.
+          save-if: ${{ github.event_name == 'schedule' || github.ref == 'refs/heads/main' }}
+          workspaces: |
+            . -> target/e2e-cache/polyglot-echo/actr-cli
+            . -> target/e2e-cache/polyglot-echo/mock-actrix
+      - name: Generate CLI web runtime assets
+        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      # ── server forms (Rust client, echo scenario) ──────────────────────────
+      - name: Run polyglot-echo (--server cdylib-rust --client rust)
+        run: bash e2e/polyglot-echo/run.sh --server cdylib-rust --client rust polyglot-ci-cdylib
+      - name: Run polyglot-echo (--server linked-rust --client rust)
+        run: bash e2e/polyglot-echo/run.sh --server linked-rust --client rust polyglot-ci-linked
+      # linked-rust is used only by the scenario above; reclaim its target dir
+      # immediately to cap peak disk usage (#314).
+      - name: Clean linked-rust target dir
+        run: |
+          rm -rf target/e2e-cache/polyglot-echo/linked-rust
+          df -h /
+      - name: Run polyglot-echo (--server wasm-rust --client rust)
+        # The wasm-rust first call occasionally hits a transient startup timeout.
+        # Retry once, but surface attempt 1's exit code so a real regression is
+        # distinguishable from the known-transient flake in the logs.
+        run: |
+          set +e
+          bash e2e/polyglot-echo/run.sh --server wasm-rust --client rust polyglot-ci-wasm
+          attempt1=$?
+          if [ "$attempt1" -ne 0 ]; then
+            echo "::warning::wasm-rust echo attempt 1 failed with exit code $attempt1; retrying once with fresh processes"
+            set -e
+            bash e2e/polyglot-echo/run.sh --server wasm-rust --client rust polyglot-ci-wasm
+          fi
+      # wasm-rust is used only by the scenario above; reclaim its target dir.
+      - name: Clean wasm-rust target dir
+        run: |
+          rm -rf target/e2e-cache/polyglot-echo/wasm-rust
+          df -h /
+      # ── streaming scenarios (Rust client, dedicated linked stream server) ───
+      - name: Run polyglot-echo (--client rust --scenario server-stream)
+        run: bash e2e/polyglot-echo/run.sh --client rust --scenario server-stream polyglot-ci-stream
+      - name: Run polyglot-echo (--client rust --scenario bidi)
+        run: bash e2e/polyglot-echo/run.sh --client rust --scenario bidi polyglot-ci-bidi
+      # bidi is the last streaming scenario and the last Rust-client scenario, so
+      # both stream-server and driver-rust are done after it; reclaim both.
+      - name: Clean stream-server and driver-rust target dirs
+        run: |
+          rm -rf target/e2e-cache/polyglot-echo/stream-server target/e2e-cache/polyglot-echo/driver-rust
+          df -h /
+      # ── cross-language client (TypeScript driver, echo scenario) ────────────
+      - name: Run polyglot-echo (--server cdylib-rust --client ts)
+        run: bash e2e/polyglot-echo/run.sh --server cdylib-rust --client ts polyglot-ci-ts
+      # Disk-usage observability: runs regardless of scenario outcome so future
+      # disk-pressure issues are immediately locatable in the logs (#314). The
+      # per-scenario trees should already have been reclaimed by the steps above.
+      - name: Disk usage
+        if: always()
+        run: |
+          df -h
+          echo "── remaining target/e2e-cache/polyglot-echo trees ──"
+          du -sh target/e2e-cache/polyglot-echo/* 2>/dev/null || true
+      # #251: a failed scenario preserves its per-run diagnostics under
+      # .tmp/run-*/ (logs, rendered runtime configs, scaffolded service +
+      # manifest lock). Successful runs delete their run dirs, so this only
+      # uploads content when a scenario actually failed. The signed .actr
+      # packages in dist/ (multi-MB binaries) and the per-run signing keys
+      # are excluded. `failure()` (not `always()`) so green runs upload
+      # nothing; it still fires when the failing step exits early because
+      # the remaining steps of the job are skipped, not the job's tail.
+      - name: Upload polyglot-echo diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: polyglot-echo-e2e-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            e2e/polyglot-echo/.tmp/**
+            !e2e/polyglot-echo/.tmp/*/dist/**
+            !e2e/polyglot-echo/.tmp/*/dev-key.json
+            !e2e/polyglot-echo/.tmp/*/service-keychain.json
+          retention-days: 7
+          if-no-files-found: warn
+
+  typescript-e2e:
+    name: TypeScript E2E
+    # Blocked until jco can componentize the V2 async host imports. The required
+    # TypeScript source build remains covered by ci-typescript/ci-gate; re-enable
+    # this runtime E2E under #431 when the guarded componentization smoke test is
+    # green (upstream ComponentizeJS#335, local tracking #427).
+    if: ${{ false }}
+    runs-on: ubuntu-latest-m
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2,wasm32-unknown-unknown
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install Linux e2e dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*
+          sudo apt-get update
+          sudo apt-get install -y jq lsof perl
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ vars.PROTOC_VERSION }}
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+      - uses: Swatinem/rust-cache@v2
+      - name: Generate CLI web runtime assets
+        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+      - name: Pre-build actr and mock-actrix
+        run: |
+          cargo build --locked --release -p actr-cli --bin actr --features wasm-engine
+          cargo build --locked --release -p actr-mock-actrix --bin mock-actrix
+      - name: Run TypeScript stream e2e
+        run: bash e2e/typescript-stream/run.sh
+
+  web-browser-e2e:
+    name: Web Browser E2E
+    # e2e/web-browser/run.sh packages the same currently-unbuildable V2
+    # TypeScript workload as typescript-e2e. Re-enable under #431 after #427.
+    if: ${{ false }}
+    runs-on: ubuntu-latest-m
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2,wasm32-unknown-unknown
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install Linux e2e dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*
+          sudo apt-get update
+          sudo apt-get install -y lsof
+          google-chrome --version || google-chrome-stable --version || true
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ vars.PROTOC_VERSION }}
+      - name: Install wasm Component Model toolchain
+        run: |
+          cargo install wasm-component-ld --version 0.5.26 --locked
+          cargo install wasm-tools --version 1.253.0 --locked
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+      - uses: Swatinem/rust-cache@v2
+      - name: Install web binding root deps (puppeteer)
+        working-directory: bindings/web
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+          PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.15.9 --activate
+          pnpm install --frozen-lockfile
+      - name: Generate CLI web runtime assets
+        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+      - name: Pre-build actr CLI and mock-actrix
+        run: |
+          cargo build --locked --release -p actr-cli --bin actr --features wasm-engine
+          cargo build --locked --release -p actr-mock-actrix --bin mock-actrix
+      - name: Run web browser e2e
+        env:
+          ACTR_CMD: ${{ github.workspace }}/target/release/actr
+          ACTR_E2E_ACTR_BIN: ${{ github.workspace }}/target/release/actr
+          PUPPETEER_EXECUTABLE_PATH: /usr/bin/google-chrome
+          SUITES: BasicFunction
+        run: bash e2e/web-browser/run.sh
+
+  swift-echo-app-e2e:
+    name: Swift EchoApp E2E
+    runs-on: macos-arm64-larger
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Cache SPM packages
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ runner.os }}-${{ hashFiles('e2e/swift-echo-app/project.yml') }}
+          restore-keys: |
+            spm-${{ runner.os }}-
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown,aarch64-apple-ios,aarch64-apple-ios-sim
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Install macOS e2e dependencies
+        run: |
+          brew install xcodegen jq sqlite libssh2 pkg-config
+          brew link libssh2
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ vars.PROTOC_VERSION }}
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+      - uses: Swatinem/rust-cache@v2
+      - name: Generate CLI web runtime assets
+        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+      - name: Cache uniffi-bindgen binary
+        id: cache-uniffi
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/uniffi-bindgen*
+          key: uniffi-bindgen-0.31.1-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install UniFFI bindgen
+        if: steps.cache-uniffi.outputs.cache-hit != 'true'
+        run: cargo install --locked --force uniffi --version 0.31.1 --features cli --bin uniffi-bindgen
+
+      - name: Build local Swift XCFramework (iOS + macOS)
+        working-directory: bindings/swift
+        env:
+          ACTR_BUILD_PROFILE: debug
+          ACTR_XCFRAMEWORK_TARGETS: all
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+        run: |
+          ACTR_BINDINGS_PATH=dist/ActrBindings \
+          ACTR_BINARY_PATH=dist/ActrFFI.xcframework \
+          ./build-xcframework.sh
+          echo "ACTR_BINARY_PATH=dist/ActrFFI.xcframework" >> "$GITHUB_ENV"
+          echo "ACTR_BINDINGS_PATH=dist/ActrBindings" >> "$GITHUB_ENV"
+
+      - name: Run Swift EchoApp e2e
+        env:
+          CAPTURE_DIAGNOSTICS_ON_SUCCESS: "1"
+          CAPTURE_CRASH_BACKTRACE: "1"
+        run: bash e2e/swift-echo-app/run.sh
+
+      - name: Upload sanitized diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-echo-app-e2e-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: e2e/swift-echo-app/.tmp/sanitized-logs/
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Upload Swift EchoApp debug symbols
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-echo-app-e2e-symbols-${{ github.run_id }}-${{ github.run_attempt }}
+          path: e2e/swift-echo-app/.tmp/symbols/
+          retention-days: 7
+          if-no-files-found: warn
+
+  swift-datastream-app-e2e:
+    name: Swift DataStreamApp E2E
+    runs-on: macos-arm64-larger
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Cache SPM packages
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ runner.os }}-${{ hashFiles('e2e/swift-datastream-app/project.yml') }}
+          restore-keys: |
+            spm-${{ runner.os }}-
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown,aarch64-apple-ios,aarch64-apple-ios-sim
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Install macOS e2e dependencies
+        run: |
+          brew install xcodegen jq sqlite libssh2 pkg-config
+          brew link libssh2
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ vars.PROTOC_VERSION }}
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+      - uses: Swatinem/rust-cache@v2
+      - name: Generate CLI web runtime assets
+        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+      - name: Cache uniffi-bindgen binary
+        id: cache-uniffi
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/uniffi-bindgen*
+          key: uniffi-bindgen-0.31.1-${{ runner.os }}-${{ runner.arch }}
+      - name: Install UniFFI bindgen
+        if: steps.cache-uniffi.outputs.cache-hit != 'true'
+        run: cargo install --locked --force uniffi --version 0.31.1 --features cli --bin uniffi-bindgen
+      - name: Build local Swift XCFramework (iOS + macOS)
+        working-directory: bindings/swift
+        env:
+          ACTR_BUILD_PROFILE: debug
+          ACTR_XCFRAMEWORK_TARGETS: all
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+        run: |
+          ACTR_BINDINGS_PATH=dist/ActrBindings \
+          ACTR_BINARY_PATH=dist/ActrFFI.xcframework \
+          ./build-xcframework.sh
+          echo "ACTR_BINARY_PATH=dist/ActrFFI.xcframework" >> "$GITHUB_ENV"
+          echo "ACTR_BINDINGS_PATH=dist/ActrBindings" >> "$GITHUB_ENV"
+      - name: Run Swift DataStreamApp e2e
+        env:
+          CAPTURE_DIAGNOSTICS_ON_SUCCESS: "1"
+        run: bash e2e/swift-datastream-app/run.sh
+      - name: Upload sanitized diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-datastream-app-e2e-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: e2e/swift-datastream-app/.tmp/sanitized-logs/
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Upload Swift DataStreamApp debug symbols
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-datastream-app-e2e-symbols-${{ github.run_id }}-${{ github.run_attempt }}
+          path: e2e/swift-datastream-app/.tmp/symbols/
+          retention-days: 7
+          if-no-files-found: warn
+
+  swift-ts-workload-e2e:
+    name: Swift TS Workload E2E
+    # This scenario packages the same currently-unbuildable V2 TypeScript WASM
+    # workload as typescript-e2e. Keep it disabled at the job boundary so the
+    # scheduled workflow does not consume a macOS runner before failing.
+    # Re-enable under #431 after #427.
+    if: ${{ false }}
+    runs-on: macos-arm64-larger
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Cache SPM packages
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ runner.os }}-${{ hashFiles('e2e/swift-ts-workload/manifest.toml') }}
+          restore-keys: |
+            spm-${{ runner.os }}-
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2,wasm32-unknown-unknown,aarch64-apple-ios,aarch64-apple-ios-sim
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install macOS e2e dependencies
+        run: |
+          brew install xcodegen jq sqlite libssh2 pkg-config
+          brew link libssh2
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ vars.PROTOC_VERSION }}
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+      - name: Install wasm Component Model toolchain
+        run: |
+          cargo install wasm-component-ld --version 0.5.26 --locked
+          cargo install wasm-tools --version 1.253.0 --locked
+      - uses: Swatinem/rust-cache@v2
+      - name: Generate CLI web runtime assets
+        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+      - name: Cache uniffi-bindgen binary
+        id: cache-uniffi
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/uniffi-bindgen*
+          key: uniffi-bindgen-0.31.1-${{ runner.os }}-${{ runner.arch }}
+      - name: Install UniFFI bindgen
+        if: steps.cache-uniffi.outputs.cache-hit != 'true'
+        run: cargo install --locked --force uniffi --version 0.31.1 --features cli --bin uniffi-bindgen
+      - name: Build local Swift XCFramework (iOS + macOS)
+        working-directory: bindings/swift
+        env:
+          ACTR_BUILD_PROFILE: debug
+          ACTR_XCFRAMEWORK_TARGETS: all
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+        run: |
+          ACTR_BINDINGS_PATH=dist/ActrBindings \
+          ACTR_BINARY_PATH=dist/ActrFFI.xcframework \
+          ./build-xcframework.sh
+          echo "ACTR_BINARY_PATH=dist/ActrFFI.xcframework" >> "$GITHUB_ENV"
+          echo "ACTR_BINDINGS_PATH=dist/ActrBindings" >> "$GITHUB_ENV"
+      - name: Run Swift TS Workload e2e
+        env:
+          CAPTURE_DIAGNOSTICS_ON_SUCCESS: "1"
+        run: bash e2e/swift-ts-workload/run.sh
+      - name: Upload sanitized diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-ts-workload-e2e-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: e2e/swift-ts-workload/.tmp/sanitized-logs/
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Upload Swift TS Workload debug symbols
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-ts-workload-e2e-symbols-${{ github.run_id }}-${{ github.run_attempt }}
+          path: e2e/swift-ts-workload/.tmp/symbols/
+          retention-days: 7
+          if-no-files-found: warn
+
+  python-web-e2e:
+    name: Python Web E2E
+    runs-on: ubuntu-latest-m
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2,wasm32-unknown-unknown
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ vars.PROTOC_VERSION }}
+      - name: Install wasm Component Model toolchain
+        run: |
+          cargo install wasm-component-ld --version 0.5.26 --locked
+          cargo install wasm-tools --version 1.253.0 --locked
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux test deps
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*
+          sudo apt-get update
+          sudo apt-get install -y lsof netcat-openbsd
+          google-chrome --version || google-chrome-stable --version || true
+      - name: Install web binding root deps (puppeteer)
+        working-directory: bindings/web
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+          PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.15.9 --activate
+          pnpm install --frozen-lockfile
+      - name: Generate CLI web runtime assets
+        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+      - name: Pre-build actr CLI (release)
+        run: cargo build --locked --release -p actr-cli --bin actr --features wasm-engine
+      - name: Run generated Python echo browser e2e
+        working-directory: bindings/web/examples/echo
+        env:
+          ACTR_CMD: ${{ github.workspace }}/target/release/actr
+          PUPPETEER_EXECUTABLE_PATH: /usr/bin/google-chrome
+          PYTHON_SERVER_READY_ATTEMPTS: "1200"
+          PYTHON_ECHO_MESSAGE: hello-from-actr-web
+        run: bash start-python-mock.sh
+
+  kotlin-echo-app-e2e:
+    name: Kotlin EchoApp E2E
+    # Kotlin/Android mirror of swift-echo-app. Builds the native .so fresh (the
+    # .so files are gitignored), publishes the AAR to mavenLocal, bootstraps a
+    # local actrix + Rust EchoService, scaffolds a Kotlin client (linked mode),
+    # and verifies via `./gradlew connectedDebugAndroidTest` on an x86_64 emulator.
+    runs-on: ubuntu-latest-m
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Enable KVM (emulator hardware acceleration)
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0777", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown,aarch64-linux-android,x86_64-linux-android
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Setup Android SDK + NDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-34 build-tools;34.0.0 ndk;25.2.9519653'
+      - name: Install Linux e2e dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq sqlite3 lsof perl
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ vars.PROTOC_VERSION }}
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+      - name: Install uniffi-bindgen
+        run: cargo install uniffi --version 0.31.1 --locked --features cli --bin uniffi-bindgen
+      - uses: Swatinem/rust-cache@v2
+      - name: Generate CLI web runtime assets
+        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+      - name: Build Android native lib (x86_64) + publish AAR to mavenLocal
+        env:
+          ACTR_ANDROID_TARGETS: x86_64-linux-android
+          ACTR_COPY_DEMO_JNILIBS: "false"
+        run: |
+          bash bindings/kotlin/build-android.sh
+          cd bindings/kotlin && ./gradlew :actr-kotlin:publishToMavenLocal --no-daemon
+      - name: Run Kotlin EchoApp e2e (emulator)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: default
+          profile: pixel_6_pro
+          sdcard-path-or-size: 512M
+          disk-size: 1536M
+          ram-size: 4096M
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: bash e2e/kotlin-echo-app/run.sh
+      - name: Upload sanitized diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kotlin-echo-app-e2e-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: e2e/kotlin-echo-app/.tmp/sanitized-logs/
+          retention-days: 7
+          if-no-files-found: warn

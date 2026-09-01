@@ -1,0 +1,367 @@
+name: Publish ActrSharp
+
+# Builds the managed-only ActrSharp NuGet package, publishes it to the Actrium
+# GitHub Packages feed, and uploads its snupkg to the matching GitHub Release.
+# The native actr_cabi library remains owned by workload packages.
+#
+# This workflow is reusable-only. The staged release train handles new releases,
+# while release-actrsharp.yml can recover an existing tag. Callers control token
+# permissions and whether remote writes are enabled through the publish input.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: ActrSharp version; must match Cargo.toml and ActrSharp.csproj.
+        required: true
+        type: string
+      source_ref:
+        description: Exact Git ref or SHA to build.
+        required: true
+        type: string
+      release_sha:
+        description: Expected commit for source_ref and the vX.Y.Z tag.
+        required: true
+        type: string
+      publish:
+        description: Publish to GitHub Packages and the matching GitHub Release.
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: publish-actrsharp-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Validate and publish ActrSharp
+    runs-on: windows-latest
+    steps:
+      - name: Initialize release state
+        shell: pwsh
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          if ($env:VERSION_INPUT -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
+            throw "ActrSharp version '$env:VERSION_INPUT' is not valid SemVer."
+          }
+          $tagRef = "refs/tags/v$env:VERSION_INPUT"
+          $tagRefspec = "{0}:{0}" -f $tagRef
+          "ACTR_VERSION=$env:VERSION_INPUT" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "ACTR_TAG_REFSPEC=$tagRefspec" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "ACTR_RELEASE_MODE=workflow_failed" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "ActrSharp version: $env:VERSION_INPUT"
+          Write-Host "ActrSharp tag refspec: $tagRefspec"
+
+      - name: Checkout release source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Verify source SHA and package versions
+        shell: pwsh
+        env:
+          EXPECTED_RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          $sourceSha = git rev-parse "HEAD^{commit}"
+          if ($LASTEXITCODE -ne 0) { throw "Unable to resolve the checked-out source SHA." }
+          if ($sourceSha -ne $env:EXPECTED_RELEASE_SHA) {
+            throw "Source mismatch: checked out $sourceSha, expected $env:EXPECTED_RELEASE_SHA."
+          }
+
+          $cargo = (Get-Content Cargo.toml | Select-String '^version = "(.+)"' |
+                    Select-Object -First 1).Matches.Groups[1].Value
+          $csproj = (Get-Content bindings/cabi/csharp/ActrSharp/ActrSharp.csproj |
+                     Select-String '<Version>(.+)</Version>' |
+                     Select-Object -First 1).Matches.Groups[1].Value
+          Write-Host "publish=$env:ACTR_VERSION cargo=$cargo csproj=$csproj sha=$sourceSha"
+          if ($cargo -ne $env:ACTR_VERSION) {
+            throw "Version mismatch: Cargo workspace=$cargo != publish version=$env:ACTR_VERSION"
+          }
+          if ($csproj -ne $env:ACTR_VERSION) {
+            throw "Version mismatch: ActrSharp.csproj=$csproj != publish version=$env:ACTR_VERSION"
+          }
+
+      - name: Verify release and tag alignment
+        if: inputs.publish
+        shell: pwsh
+        env:
+          EXPECTED_RELEASE_SHA: ${{ inputs.release_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $tag = "v$env:ACTR_VERSION"
+          $release = $null
+          for ($i = 0; $i -lt 30; $i++) {
+            $releaseJson = gh release view $tag --repo Actrium/actr `
+              --json tagName,name,url 2>$null
+            if ($LASTEXITCODE -eq 0) {
+              $release = $releaseJson | ConvertFrom-Json
+              break
+            }
+            $global:LASTEXITCODE = 0
+            Start-Sleep -Seconds 10
+          }
+          if (-not $release) {
+            throw "GitHub Release $tag is not visible after polling."
+          }
+          Write-Host ($release | ConvertTo-Json -Compress)
+          git fetch origin $env:ACTR_TAG_REFSPEC
+          if ($LASTEXITCODE -ne 0) { throw "Unable to fetch v$env:ACTR_VERSION." }
+          $tagSha = git rev-parse "v$env:ACTR_VERSION^{commit}"
+          if ($LASTEXITCODE -ne 0) { throw "Unable to resolve v$env:ACTR_VERSION." }
+          if ($tagSha -ne $env:EXPECTED_RELEASE_SHA) {
+            throw "Tag mismatch: v$env:ACTR_VERSION points to $tagSha, expected $env:EXPECTED_RELEASE_SHA."
+          }
+          Write-Host "Release v$env:ACTR_VERSION is aligned with $tagSha."
+
+      - name: Restore, build, and pack ActrSharp
+        shell: pwsh
+        run: |
+          $artifacts = "$PWD/artifacts"
+          New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
+          dotnet restore bindings/cabi/csharp/ActrSharp/ActrSharp.csproj
+          if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed." }
+          dotnet build bindings/cabi/csharp/ActrSharp/ActrSharp.csproj `
+            --no-restore --configuration Release -p:Version=$env:ACTR_VERSION
+          if ($LASTEXITCODE -ne 0) { throw "dotnet build failed." }
+          dotnet pack bindings/cabi/csharp/ActrSharp/ActrSharp.csproj `
+            --no-build --configuration Release `
+            -p:Version=$env:ACTR_VERSION -p:PackageOutputPath=$artifacts
+          if ($LASTEXITCODE -ne 0) { throw "dotnet pack failed." }
+          Get-ChildItem $artifacts | ForEach-Object { Write-Host "  $($_.Name)" }
+
+      - name: Verify nupkg metadata
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $nupkg = "artifacts/ActrSharp.$env:ACTR_VERSION.nupkg"
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($nupkg)
+          try {
+            $nuspecEntry = $zip.Entries | Where-Object { $_.FullName -like "*.nuspec" } | Select-Object -First 1
+            if (-not $nuspecEntry) { throw "ActrSharp nupkg has no nuspec." }
+            $reader = New-Object System.IO.StreamReader($nuspecEntry.Open())
+            try { $nuspec = $reader.ReadToEnd() } finally { $reader.Dispose() }
+            [xml]$nuspecXml = $nuspec
+            if ($nuspec -notmatch ('<version>' + [regex]::Escape($env:ACTR_VERSION) + '</version>')) {
+              throw "nupkg version does not match $env:ACTR_VERSION"
+            }
+            $repository = $nuspecXml.SelectSingleNode(
+              "/*[local-name()='package']/*[local-name()='metadata']/*[local-name()='repository']"
+            )
+            if (-not $repository -or $repository.GetAttribute("url") -ne "https://github.com/Actrium/actr") {
+              throw "nupkg RepositoryUrl must point at https://github.com/Actrium/actr"
+            }
+            $license = $nuspecXml.SelectSingleNode(
+              "/*[local-name()='package']/*[local-name()='metadata']/*[local-name()='license']"
+            )
+            if (-not $license -or $license.GetAttribute("type") -ne "expression" -or $license.InnerText -ne "Apache-2.0") {
+              throw "nupkg license expression must be Apache-2.0"
+            }
+            if ($nuspec -notmatch ('<releaseNotes>https://github.com/Actrium/actr/releases/tag/v' + [regex]::Escape($env:ACTR_VERSION) + '</releaseNotes>')) {
+              throw "nupkg release notes must point to v$env:ACTR_VERSION"
+            }
+            $native = $zip.Entries | Where-Object {
+              $_.FullName -like "runtimes/*" -or $_.FullName -like "*/native/*"
+            }
+            if ($native) {
+              throw "ActrSharp nupkg must not contain native assets: $($native.FullName)"
+            }
+          } finally {
+            $zip.Dispose()
+          }
+          Write-Host "nupkg metadata verified (version, repository, license, managed-only)."
+
+      - name: Mark dry-run validation complete
+        if: ${{ !inputs.publish }}
+        shell: pwsh
+        run: |
+          "ACTR_RELEASE_MODE=dry_run_validated" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Check existing package version
+        if: inputs.publish
+        id: package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $response = gh api "/orgs/Actrium/packages/nuget/ActrSharp/versions" `
+            --paginate --jq '.[].name' 2>&1
+          if ($LASTEXITCODE -eq 0) {
+            $exists = @($response) -contains $env:ACTR_VERSION
+          } elseif (($response -join "`n") -match 'HTTP 404') {
+            $exists = $false
+          } else {
+            throw "Unable to query existing ActrSharp versions: $($response -join ' ')"
+          }
+          $global:LASTEXITCODE = 0
+          "exists=$($exists.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "ActrSharp $env:ACTR_VERSION already published: $exists"
+
+      - name: Check existing symbol package asset
+        if: inputs.publish
+        id: symbols
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $tag = "v$env:ACTR_VERSION"
+          $assetName = "ActrSharp.$env:ACTR_VERSION.snupkg"
+          $localAsset = "artifacts/$assetName"
+          $release = $null
+          for ($i = 0; $i -lt 30; $i++) {
+            $releaseJson = gh release view $tag --repo Actrium/actr --json assets 2>$null
+            if ($LASTEXITCODE -eq 0) {
+              $release = $releaseJson | ConvertFrom-Json
+              break
+            }
+            $global:LASTEXITCODE = 0
+            Start-Sleep -Seconds 10
+          }
+          if (-not $release) { throw "Unable to read GitHub Release $tag assets after polling." }
+          $existing = @($release.assets | Where-Object { $_.name -eq $assetName })
+          if ($existing.Count -eq 0) {
+            "exists=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            exit 0
+          }
+
+          $downloadDir = Join-Path $env:RUNNER_TEMP "actrsharp-existing-symbols"
+          New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
+          gh release download $tag --repo Actrium/actr --pattern $assetName --dir $downloadDir
+          if ($LASTEXITCODE -ne 0) { throw "Unable to download existing $assetName." }
+          $localHash = (Get-FileHash $localAsset -Algorithm SHA256).Hash
+          $remoteHash = (Get-FileHash (Join-Path $downloadDir $assetName) -Algorithm SHA256).Hash
+          if ($localHash -ne $remoteHash) {
+            throw "Existing $assetName differs from the package built from ${{ inputs.release_sha }}."
+          }
+          "exists=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Existing $assetName matches the newly built package."
+
+      # GitHub Packages does not expose NuGet's SymbolPackagePublish endpoint,
+      # so only nupkg is pushed here; snupkg is handled as a release asset.
+      - name: Push ActrSharp to GitHub Packages
+        if: inputs.publish && steps.package.outputs.exists != 'true'
+        id: push
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          dotnet nuget push "artifacts/ActrSharp.$env:ACTR_VERSION.nupkg" `
+            --source "https://nuget.pkg.github.com/Actrium/index.json" `
+            --api-key $env:GITHUB_TOKEN --no-symbols --skip-duplicate
+          if ($LASTEXITCODE -ne 0) { throw "Failed to publish ActrSharp $env:ACTR_VERSION." }
+          "created=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Upload symbol package asset
+        if: inputs.publish && steps.symbols.outputs.exists != 'true'
+        id: upload-symbols
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v$env:ACTR_VERSION"
+          $assetName = "ActrSharp.$env:ACTR_VERSION.snupkg"
+          $localAsset = "artifacts/$assetName"
+          gh release upload $tag $localAsset --repo Actrium/actr
+          if ($LASTEXITCODE -ne 0) { throw "Failed to upload $assetName to $tag." }
+          "created=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Uploaded $assetName to GitHub Release $tag."
+
+      - name: Verify published package
+        if: inputs.publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $seen = $false
+          # GitHub Packages infers the package->repository link asynchronously
+          # from the nuspec RepositoryUrl (validated pre-publish at the
+          # "Verify nupkg metadata" step). Link inference latency is GitHub-side
+          # and unrelated to publish success, so it is NOT a hard requirement
+          # here. Only poll version visibility; the repository link is left to
+          # GitHub's async inference (verifiable post-release via the package
+          # API if needed). v0.8.4 failed release-train.yml solely because the
+          # link had not been inferred within the old 5-minute poll budget even
+          # though ActrSharp 0.8.4 was published and visible.
+          for ($i = 0; $i -lt 30; $i++) {
+            if (-not $seen) {
+              $response = gh api "/orgs/Actrium/packages/nuget/ActrSharp/versions" `
+                --paginate --jq '.[].name' 2>$null
+              if ($LASTEXITCODE -eq 0 -and @($response) -contains $env:ACTR_VERSION) {
+                $seen = $true
+              }
+            }
+            if ($seen) { break }
+            Start-Sleep -Seconds 10
+          }
+          if (-not $seen) {
+            throw "ActrSharp $env:ACTR_VERSION is not visible in GitHub Packages after polling."
+          }
+
+          # Package visibility (internal/public) and the package->repository
+          # link are both org-admin / GitHub-side concerns, not release-train
+          # hard requirements:
+          # - visibility does not change between releases once an admin sets it;
+          #   enforcing/patching it here only added a transient-API-error failure
+          #   surface (alinejun review on the prior one-shot fetch: lost retry
+          #   buffer, no null guard, ConvertFrom-Json ran before $LASTEXITCODE
+          #   guard). Dropped entirely.
+          # - repository link is inferred async by GitHub Packages from the
+          #   nuspec RepositoryUrl (validated pre-publish at "Verify nupkg
+          #   metadata"). v0.8.4 failed release-train.yml solely on this link
+          #   poll (see #562 history).
+          # The only hard requirement here is version visibility ($seen above).
+
+      - name: Mark publishing complete
+        if: inputs.publish
+        shell: pwsh
+        env:
+          PACKAGE_CREATED: ${{ steps.push.outputs.created }}
+          SYMBOLS_CREATED: ${{ steps.upload-symbols.outputs.created }}
+        run: |
+          if ($env:PACKAGE_CREATED -eq "true" -or $env:SYMBOLS_CREATED -eq "true") {
+            $mode = "published"
+          } else {
+            $mode = "already_published"
+          }
+          "ACTR_RELEASE_MODE=$mode" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Write release-train state
+        if: always()
+        shell: pwsh
+        env:
+          JOB_STATUS: ${{ job.status }}
+          RELEASE_SHA_INPUT: ${{ inputs.release_sha }}
+          VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          $status = if ($env:JOB_STATUS -eq "success") { "success" } else { "failure" }
+          $mode = if ($status -eq "success") { $env:ACTR_RELEASE_MODE } else { "workflow_failed" }
+          $reportDir = "release/reports"
+          New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
+          $fields = @(
+            "ActrSharp", "sdk", "nuget", $env:VERSION_INPUT,
+            $status, $mode,
+            "https://github.com/orgs/Actrium/packages/nuget/package/ActrSharp",
+            $env:RELEASE_SHA_INPUT
+          )
+          ($fields -join "`t") | Out-File `
+            -FilePath "$reportDir/release-train-v$env:VERSION_INPUT.publish-actrsharp.state.tsv" `
+            -Encoding utf8
+
+      - name: Upload release-train state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: publish-actrsharp-artifacts
+          path: release/reports/release-train-v${{ inputs.version }}.publish-actrsharp.state.tsv
+          if-no-files-found: error

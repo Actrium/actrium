@@ -1,0 +1,375 @@
+//! Actor isolated storage implementation
+//!
+//! Each Actor has an independent SQLite database file, located at the fixed
+//! hashed layout under the secure storage root (`{root}/actors/v1/<hash>/`).
+//! All read/write operations are confined to this namespace; an Actor cannot access another Actor's data.
+
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use tracing::{debug, error, info};
+
+use actr_platform_traits::{KvOp, KvStore, PlatformError, StorageNamespace};
+use async_trait::async_trait;
+
+use super::root::SecureStorageRoot;
+use crate::error::{HyperError, HyperResult};
+
+/// Actor isolated storage handle
+///
+/// Each Actor has an independent SQLite database file, with the path determined
+/// by Hyper's namespace resolver.
+/// All read/write operations are confined to this namespace; an Actor cannot access another Actor's data.
+///
+/// The rusqlite connection is not Send; wrapped in `Arc<Mutex<Connection>>` for cross-thread sharing.
+/// All blocking I/O is offloaded to the blocking thread pool via `tokio::task::spawn_blocking`.
+#[derive(Clone)]
+pub struct ActorStore {
+    /// Shared SQLite connection (rusqlite is not Send, protected by Mutex)
+    conn: Arc<Mutex<rusqlite::Connection>>,
+    /// Database file path (for logging/debugging only)
+    namespace: PathBuf,
+}
+
+impl ActorStore {
+    /// Open or create an actor's SQLite database under a [`SecureStorageRoot`].
+    ///
+    /// The only public entry: the namespace directory is created with per-level
+    /// symlink checks by [`SecureStorageRoot::prepare_database_path`], and SQLite
+    /// opens the file with `SQLITE_OPEN_NOFOLLOW`.
+    pub async fn open_under(
+        root: &SecureStorageRoot,
+        namespace: &StorageNamespace,
+    ) -> HyperResult<Self> {
+        let db_path = root.prepare_database_path(namespace).await?;
+        Self::open_unchecked(&db_path).await
+    }
+
+    /// Open a database at an already-prepared path with `SQLITE_OPEN_NOFOLLOW`.
+    ///
+    /// Crate-private: only [`ActorStore::open_under`] (post-validation) and a
+    /// narrow set of unit tests may open an arbitrary path. Not a security
+    /// boundary — the caller must have created and symlink-checked the parent.
+    pub(crate) async fn open_unchecked(db_path: &Path) -> HyperResult<Self> {
+        let db_path = db_path.to_path_buf();
+        let namespace = db_path.clone();
+
+        // rusqlite is a sync API, execute in blocking thread pool via spawn_blocking
+        let conn = tokio::task::spawn_blocking(move || -> HyperResult<rusqlite::Connection> {
+            // NOFOLLOW guards the final component; ancestors were checked during
+            // prepare_database_path. A one-shot OpenOptions + O_NOFOLLOW cannot
+            // substitute: SQLite re-opens the file by path.
+            let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+                | rusqlite::OpenFlags::SQLITE_OPEN_CREATE
+                | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW;
+            let conn = rusqlite::Connection::open_with_flags(&db_path, flags).map_err(|e| {
+                error!(
+                    path = %db_path.display(),
+                    error = %e,
+                    "failed to open SQLite database"
+                );
+                HyperError::Storage(format!(
+                    "failed to open database `{}`: {e}",
+                    db_path.display()
+                ))
+            })?;
+
+            // enable WAL mode for improved concurrent read performance
+            conn.execute_batch("PRAGMA journal_mode=WAL;")
+                .map_err(|e| HyperError::Storage(format!("failed to set WAL mode: {e}")))?;
+
+            // create table (idempotent)
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS kv_store (
+                    key        TEXT PRIMARY KEY NOT NULL,
+                    value      BLOB NOT NULL,
+                    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+                );",
+            )
+            .map_err(|e| {
+                HyperError::Storage(format!("failed to initialize kv_store table: {e}"))
+            })?;
+
+            Ok(conn)
+        })
+        .await
+        .map_err(|e| HyperError::Storage(format!("spawn_blocking task failed: {e}")))??;
+
+        info!(
+            path = %namespace.display(),
+            "ActorStore ready"
+        );
+
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+            namespace,
+        })
+    }
+
+    /// Generic KV storage: write or update a key-value pair
+    pub async fn kv_set(&self, key: &str, value: &[u8]) -> HyperResult<()> {
+        let conn = Arc::clone(&self.conn);
+        let key = key.to_string();
+        let value = value.to_vec();
+        let ns = self.namespace.clone();
+
+        tokio::task::spawn_blocking(move || -> HyperResult<()> {
+            let conn = conn.lock().map_err(|e| {
+                HyperError::Storage(format!("failed to acquire database lock: {e}"))
+            })?;
+
+            conn.execute(
+                "INSERT INTO kv_store (key, value, updated_at)
+                 VALUES (?1, ?2, unixepoch())
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                rusqlite::params![key, value],
+            )
+            .map_err(|e| {
+                error!(
+                    namespace = %ns.display(),
+                    key = %key,
+                    error = %e,
+                    "kv_set write failed"
+                );
+                HyperError::Storage(format!("kv_set write `{key}` failed: {e}"))
+            })?;
+
+            debug!(namespace = %ns.display(), key = %key, "kv_set write succeeded");
+            Ok(())
+        })
+        .await
+        .map_err(|e| HyperError::Storage(format!("spawn_blocking task failed: {e}")))??;
+
+        Ok(())
+    }
+
+    /// Generic KV storage: read a key's value, returns None if the key does not exist
+    pub async fn kv_get(&self, key: &str) -> HyperResult<Option<Vec<u8>>> {
+        let conn = Arc::clone(&self.conn);
+        let key = key.to_string();
+        let ns = self.namespace.clone();
+
+        tokio::task::spawn_blocking(move || -> HyperResult<Option<Vec<u8>>> {
+            let conn = conn.lock().map_err(|e| {
+                HyperError::Storage(format!("failed to acquire database lock: {e}"))
+            })?;
+
+            let result = conn.query_row(
+                "SELECT value FROM kv_store WHERE key = ?1",
+                rusqlite::params![key],
+                |row| row.get::<_, Vec<u8>>(0),
+            );
+
+            match result {
+                Ok(value) => {
+                    debug!(namespace = %ns.display(), key = %key, "kv_get hit");
+                    Ok(Some(value))
+                }
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    debug!(namespace = %ns.display(), key = %key, "kv_get miss");
+                    Ok(None)
+                }
+                Err(e) => {
+                    error!(
+                        namespace = %ns.display(),
+                        key = %key,
+                        error = %e,
+                        "kv_get read failed"
+                    );
+                    Err(HyperError::Storage(format!(
+                        "kv_get read `{key}` failed: {e}"
+                    )))
+                }
+            }
+        })
+        .await
+        .map_err(|e| HyperError::Storage(format!("spawn_blocking task failed: {e}")))?
+    }
+
+    /// Generic KV storage: delete a key, returns whether a record was actually deleted
+    pub async fn kv_delete(&self, key: &str) -> HyperResult<bool> {
+        let conn = Arc::clone(&self.conn);
+        let key = key.to_string();
+        let ns = self.namespace.clone();
+
+        tokio::task::spawn_blocking(move || -> HyperResult<bool> {
+            let conn = conn.lock().map_err(|e| {
+                HyperError::Storage(format!("failed to acquire database lock: {e}"))
+            })?;
+
+            let affected = conn
+                .execute(
+                    "DELETE FROM kv_store WHERE key = ?1",
+                    rusqlite::params![key],
+                )
+                .map_err(|e| {
+                    error!(
+                        namespace = %ns.display(),
+                        key = %key,
+                        error = %e,
+                        "kv_delete failed"
+                    );
+                    HyperError::Storage(format!("kv_delete `{key}` failed: {e}"))
+                })?;
+
+            let deleted = affected > 0;
+            debug!(namespace = %ns.display(), key = %key, deleted, "kv_delete executed");
+            Ok(deleted)
+        })
+        .await
+        .map_err(|e| HyperError::Storage(format!("spawn_blocking task failed: {e}")))?
+    }
+
+    /// List all keys, optionally filtered by prefix
+    pub async fn kv_list_keys(&self, prefix: Option<&str>) -> HyperResult<Vec<String>> {
+        let conn = Arc::clone(&self.conn);
+        let prefix = prefix.map(|s| s.to_string());
+        let ns = self.namespace.clone();
+
+        tokio::task::spawn_blocking(move || -> HyperResult<Vec<String>> {
+            let conn = conn.lock().map_err(|e| {
+                HyperError::Storage(format!("failed to acquire database lock: {e}"))
+            })?;
+
+            let keys = if let Some(ref pfx) = prefix {
+                // use LIKE pattern matching for prefix, escape wildcards
+                let pattern = format!("{}%", pfx.replace('%', "\\%").replace('_', "\\_"));
+                let mut stmt = conn
+                    .prepare("SELECT key FROM kv_store WHERE key LIKE ?1 ESCAPE '\\' ORDER BY key")
+                    .map_err(|e| HyperError::Storage(format!("failed to prepare SQL: {e}")))?;
+                let rows = stmt
+                    .query_map(rusqlite::params![pattern], |row| row.get::<_, String>(0))
+                    .map_err(|e| HyperError::Storage(format!("failed to query key list: {e}")))?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| HyperError::Storage(format!("failed to read key row: {e}")))?
+            } else {
+                let mut stmt = conn
+                    .prepare("SELECT key FROM kv_store ORDER BY key")
+                    .map_err(|e| HyperError::Storage(format!("failed to prepare SQL: {e}")))?;
+                let rows = stmt
+                    .query_map([], |row| row.get::<_, String>(0))
+                    .map_err(|e| HyperError::Storage(format!("failed to query key list: {e}")))?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| HyperError::Storage(format!("failed to read key row: {e}")))?
+            };
+
+            debug!(
+                namespace = %ns.display(),
+                count = keys.len(),
+                prefix = ?prefix,
+                "kv_list_keys query completed"
+            );
+            Ok(keys)
+        })
+        .await
+        .map_err(|e| HyperError::Storage(format!("spawn_blocking task failed: {e}")))?
+    }
+
+    /// Batch operations (atomic transaction)
+    ///
+    /// All operations execute in a single transaction; if any step fails, all are rolled back.
+    pub async fn kv_batch(&self, ops: Vec<KvOp>) -> HyperResult<()> {
+        let conn = Arc::clone(&self.conn);
+        let ns = self.namespace.clone();
+
+        tokio::task::spawn_blocking(move || -> HyperResult<()> {
+            let mut conn = conn.lock().map_err(|e| {
+                HyperError::Storage(format!("failed to acquire database lock: {e}"))
+            })?;
+
+            let tx = conn.transaction().map_err(|e| {
+                HyperError::Storage(format!("failed to begin transaction: {e}"))
+            })?;
+
+            for op in &ops {
+                match op {
+                    KvOp::Set { key, value } => {
+                        tx.execute(
+                            "INSERT INTO kv_store (key, value, updated_at)
+                             VALUES (?1, ?2, unixepoch())
+                             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                            rusqlite::params![key, value],
+                        )
+                        .map_err(|e| {
+                            error!(
+                                namespace = %ns.display(),
+                                key = %key,
+                                error = %e,
+                                "kv_batch set operation failed"
+                            );
+                            HyperError::Storage(format!("kv_batch set `{key}` failed: {e}"))
+                        })?;
+                        debug!(namespace = %ns.display(), key = %key, "kv_batch set");
+                    }
+                    KvOp::Delete { key } => {
+                        tx.execute(
+                            "DELETE FROM kv_store WHERE key = ?1",
+                            rusqlite::params![key],
+                        )
+                        .map_err(|e| {
+                            error!(
+                                namespace = %ns.display(),
+                                key = %key,
+                                error = %e,
+                                "kv_batch delete operation failed"
+                            );
+                            HyperError::Storage(format!("kv_batch delete `{key}` failed: {e}"))
+                        })?;
+                        debug!(namespace = %ns.display(), key = %key, "kv_batch delete");
+                    }
+                }
+            }
+
+            tx.commit().map_err(|e| {
+                error!(namespace = %ns.display(), error = %e, "kv_batch transaction commit failed");
+                HyperError::Storage(format!("kv_batch transaction commit failed: {e}"))
+            })?;
+
+            debug!(
+                namespace = %ns.display(),
+                ops_count = ops.len(),
+                "kv_batch transaction committed"
+            );
+            Ok(())
+        })
+        .await
+        .map_err(|e| HyperError::Storage(format!("spawn_blocking task failed: {e}")))?
+    }
+}
+
+#[async_trait]
+impl KvStore for ActorStore {
+    async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, PlatformError> {
+        self.kv_get(key)
+            .await
+            .map_err(|e| PlatformError::Storage(e.to_string()))
+    }
+
+    async fn set(&self, key: &str, value: &[u8]) -> Result<(), PlatformError> {
+        self.kv_set(key, value)
+            .await
+            .map_err(|e| PlatformError::Storage(e.to_string()))
+    }
+
+    async fn delete(&self, key: &str) -> Result<bool, PlatformError> {
+        self.kv_delete(key)
+            .await
+            .map_err(|e| PlatformError::Storage(e.to_string()))
+    }
+
+    async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, PlatformError> {
+        self.kv_list_keys(prefix)
+            .await
+            .map_err(|e| PlatformError::Storage(e.to_string()))
+    }
+
+    async fn batch(&self, ops: Vec<KvOp>) -> Result<(), PlatformError> {
+        self.kv_batch(ops)
+            .await
+            .map_err(|e| PlatformError::Storage(e.to_string()))
+    }
+}
+
+#[cfg(test)]
+#[path = "db_tests.rs"]
+mod tests;

@@ -1,0 +1,129 @@
+//! {{PROJECT_NAME}} — package-backed Rust echo app.
+
+mod generated;
+
+use anyhow::{Context, Result, anyhow};
+use base64::Engine;
+use generated::echo::EchoRequest;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::Arc;
+use tracing::info;
+
+use actr_config::{ConfigParser, PackageInfo};
+use actr_hyper::{Hyper, HyperConfig, Node, StaticTrust, WorkloadPackage, init_observability};
+
+const PACKAGE_PATH: &str = "dist/app.actr";
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let manifest = ConfigParser::from_manifest_file("manifest.toml")
+        .context("failed to parse manifest.toml")?;
+    ensure_package_built(Path::new(PACKAGE_PATH))?;
+
+    let runtime = ConfigParser::from_runtime_file("actr.toml", package_info(&manifest.package))
+        .context("failed to parse actr.toml")?;
+
+    let _observability = init_observability(&runtime.observability)?;
+
+    let package_path = runtime
+        .package_path
+        .clone()
+        .ok_or_else(|| anyhow!("actr.toml is missing [package].path"))?;
+    let package_dir = package_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    // For the scaffold we use a simple StaticTrust anchor loaded from
+    // `public-key.json` next to the .actr package. Swap in RegistryTrust or a
+    // ChainTrust composition if your deployment fetches keys from AIS.
+    let pubkey = load_public_key(&package_dir)?;
+    let trust = Arc::new(StaticTrust::new(pubkey).context("invalid public key")?);
+
+    let hyper_data_dir = actr_config::user_config::resolve_hyper_data_dir()?;
+    let hyper = Hyper::new(HyperConfig::new(&hyper_data_dir, trust))
+        .await
+        .context("failed to initialize Hyper")?;
+
+    let package = WorkloadPackage::from_path(&package_path)
+        .with_context(|| format!("failed to read {}", package_path.display()))?;
+
+    let ais_endpoint = runtime.ais_endpoint.clone();
+    let actr_ref = Node::from_hyper(hyper, runtime.clone())
+        .attach(&package)
+        .await
+        .context("failed to attach local guest package")?
+        .register(&ais_endpoint)
+        .await
+        .context("failed to register with AIS")?
+        .start()
+        .await
+        .context("failed to start app node")?;
+    info!("Calling {{MANUFACTURER}}:EchoService:1.0.0");
+
+    let response = actr_ref
+        .call(
+            EchoRequest {
+                message: "hello".to_string(),
+            },
+            30_000,
+        )
+        .await
+        .context("Echo RPC failed")?;
+
+    println!("Echo reply: {}", response.reply);
+
+    actr_ref.shutdown();
+    actr_ref.wait_for_shutdown().await;
+    Ok(())
+}
+
+fn package_info(package: &PackageInfo) -> PackageInfo {
+    package.clone()
+}
+
+fn ensure_package_built(package_path: &Path) -> Result<()> {
+    let public_key_path = package_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("public-key.json");
+
+    if package_path.exists() && public_key_path.exists() {
+        return Ok(());
+    }
+
+    let status = Command::new("actr")
+        .args(["build", "-o", PACKAGE_PATH])
+        .status()
+        .context("failed to run `actr build` for the local guest package")?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "`actr build -o {}` failed with status {}",
+            PACKAGE_PATH,
+            status
+        ))
+    }
+}
+
+fn load_public_key(package_dir: &Path) -> Result<Vec<u8>> {
+    let key_path = package_dir.join("public-key.json");
+    let key_content = std::fs::read_to_string(&key_path)
+        .with_context(|| format!("failed to read {}", key_path.display()))?;
+    let key_json: serde_json::Value =
+        serde_json::from_str(&key_content).context("invalid public-key.json")?;
+    let public_key = key_json["public_key"]
+        .as_str()
+        .ok_or_else(|| anyhow!("public-key.json is missing `public_key`"))?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(public_key)
+        .context("invalid base64 public key")?;
+
+    if bytes.len() != 32 {
+        return Err(anyhow!("public-key.json must contain a 32-byte key"));
+    }
+
+    Ok(bytes)
+}

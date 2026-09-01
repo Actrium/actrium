@@ -1,0 +1,106 @@
+[workspace]
+members = [
+    "crates/actr-web-abi",
+    "crates/common",
+    "crates/sw-host",
+    "crates/dom-bridge",
+    "crates/mailbox-web",
+    "crates/platform-web",
+]
+exclude = ["examples/*"]
+resolver = "2"
+
+[workspace.package]
+version = "0.10.0-alpha.4"
+edition = "2024"
+license = "Apache-2.0"
+authors = ["87705880+kookyleo@users.noreply.github.com"]
+repository = "https://github.com/Actrium/actr"
+
+[workspace.lints.clippy]
+collapsible_if = "allow"
+collapsible_else_if = "allow"
+
+[workspace.dependencies]
+# WASM-related
+wasm-bindgen = "0.2.126"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = "0.3"
+serde-wasm-bindgen = "0.6"
+
+# Async runtime (minimal tokio)
+tokio = { version = "1", default-features = false, features = [
+    "sync",
+    "macros",
+    "time",
+] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# IndexedDB
+indexed_db_futures = "0.5"
+rexie = "0.6"
+gloo-timers = { version = "0.3", features = ["futures"] }
+
+# Utilities
+console_error_panic_hook = "0.1"
+wasm-logger = "0.2"
+log = "0.4"
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Async helpers
+futures = "0.3"
+async-trait = "0.1"
+
+# Concurrency helpers
+dashmap = "5.5"
+parking_lot = "0.12"
+
+# UUID (with js feature for WASM)
+uuid = { version = "1.18", features = ["v4", "serde", "js"] }
+getrandom = { version = "0.2", features = ["js"] }
+chrono = { version = "0.4", features = ["serde", "wasmbind"] }
+
+# Tracing + OpenTelemetry
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = [
+    "fmt",
+    "std",
+] }
+tracing-web = "0.1"
+opentelemetry = { version = "0.32.0", default-features = false, features = [
+    "trace",
+] }
+tracing-opentelemetry = "0.33.0"
+
+# Protobuf (for code generation)
+prost = "0.14"
+prost-types = "0.14"
+prost-build = "0.14"
+bytes = "1.10"
+
+# Code generation tools
+quote = "1.0"
+proc-macro2 = "1.0"
+syn = { version = "2.0", features = ["full"] }
+handlebars = "5.1"
+heck = "0.5"
+
+# Actr Dependencies
+actr-protocol = { path = "../../core/protocol" }
+actr-framework = { path = "../../core/framework" }
+actr-platform-traits = { path = "../../core/platform-traits" }
+actr-runtime-mailbox = { path = "../../core/runtime-mailbox", default-features = false }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.release.package."*"]
+opt-level = "z"

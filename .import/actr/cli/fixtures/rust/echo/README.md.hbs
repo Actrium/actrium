@@ -1,0 +1,20 @@
+# {{PROJECT_NAME}}
+
+Rust echo app that installs the remote EchoService proto, generates a local bridge guest, and calls the service.
+
+## Quick start
+
+```bash
+actr deps install
+actr gen -l rust
+cargo run
+```
+
+## Files
+
+- `protos/local/local.proto` defines the local bridge service used for route forwarding.
+- `src/generated/` is created by `actr gen -l rust`.
+- `src/lib.rs` wraps the generated local bridge workload as the package guest.
+- `src/main.rs` builds `dist/app.actr` on demand, starts the local guest, and prints the echo reply.
+- `manifest.toml` declares the EchoService dependency and guest package build config.
+- `actr.toml` configures runtime startup for the local guest package.

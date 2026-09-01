@@ -1,0 +1,49 @@
+{
+  "name": "@actrium/actr-web",
+  "version": "0.10.0-alpha.4",
+  "description": "High-level browser SDK for Actrium",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./actor.sw.js": "./dist/actor.sw.js"
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "tsc && cp src/actor.sw.js dist/actor.sw.js",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist/",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@actrium/actr-dom": "workspace:*",
+    "protobufjs": "^7.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  },
+  "keywords": [
+    "actor",
+    "wasm",
+    "webrtc",
+    "typescript",
+    "sdk"
+  ],
+  "author": "87705880+kookyleo@users.noreply.github.com",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Actrium/actr.git",
+    "directory": "bindings/web/packages/web-sdk"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

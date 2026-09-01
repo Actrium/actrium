@@ -1,0 +1,46 @@
+[package]
+name = "actr-runtime-mailbox"
+version = "0.10.0-alpha.4"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Persistent mailbox layer for the Actor-RTC framework, backed by SQLite."
+repository = "https://github.com/Actrium/actr"
+keywords = ["actor", "mailbox", "storage", "persistence", "sqlite"]
+categories = ["database", "data-structures", "asynchronous"]
+
+[features]
+default = ["sqlite"]
+sqlite = ["dep:rusqlite"]
+
+[lints]
+workspace = true
+
+[dependencies]
+# Foundation Layer
+actr-protocol.workspace = true
+
+# Database Support
+rusqlite = { workspace = true, optional = true }
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Async Support
+tokio = { version = "1", default-features = false, features = ["sync"] }
+async-trait.workspace = true
+
+# Utilities
+uuid.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+
+# Logging
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile = "3.23"
+tokio = { workspace = true }
+tokio-test = "0.4"

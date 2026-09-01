@@ -1,0 +1,13 @@
+//! {{PROJECT_NAME}} — package-backed Actor-RTC EchoService host
+//!
+//! Build a verified `.actr` package first, then host it via `Hyper.attach(...)`.
+
+use tracing::error;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    error!(
+        "Source-defined Rust service workloads were removed. Build a verified .actr package and host it with Hyper.attach(...)."
+    );
+    Ok(())
+}

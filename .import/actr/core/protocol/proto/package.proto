@@ -1,0 +1,106 @@
+// Copyright 2025 actr Project Authors
+//
+// Licensed under the Apache License, Version 2.0
+// Package-level message envelopes
+
+syntax = "proto2";
+
+package actr;
+
+import "actr.proto";
+
+// Metadata key-value pair
+message MetadataEntry {
+    required string key = 1;
+    required string value = 2;
+}
+
+// Direction of an RpcEnvelope on the wire.
+//
+// Receivers route explicitly on this field instead of inferring
+// request-vs-response from pending-state or tell-ness from timeout_ms.
+// Routing policy: REQUEST and TELL are dispatched to a handler; RESPONSE
+// wakes the matching pending request. Absence, DIRECTION_UNSPECIFIED,
+// and unknown future values are invalid on the current wire protocol;
+// receivers should warn and drop instead of guessing from local pending state.
+//
+// Senders MUST set this on every envelope they construct.
+//
+// Receivers trust this label without cross-checking pending state, so a
+// mislabeled envelope is routed by its label: a request stamped Response is
+// dropped if its request_id isn't pending, and a response stamped Request is
+// enqueued as a new call. The orphan-drop log includes route_key to make
+// such mislabels diagnosable.
+enum Direction {
+    DIRECTION_UNSPECIFIED = 0;  // Invalid default / missing direction sentinel; receivers warn + drop
+    DIRECTION_REQUEST = 1;      // A new RPC call addressed to a handler; a response is expected
+    DIRECTION_RESPONSE = 2;     // A reply (success payload or ErrorResponse) to a prior request
+    DIRECTION_TELL = 3;         // Fire-and-forget request; receiver MUST NOT reply
+}
+
+// RpcEnvelope wraps State Path RPC messages
+message RpcEnvelope {
+    // Route key: "package.Service.Method"
+    required string route_key = 1;
+
+    // Payload for successful RPC (request or response)
+    // Optional: when error is present, payload should be empty
+    optional bytes payload = 2;
+
+    // System-level error (envelope layer)
+    // Examples: UnknownRoute, DeserializationError, Panic, InvalidStateTransition
+    // Business errors should be in the response message payload
+    optional ErrorResponse error = 3;
+
+    // Envelope direction: Request, Response, or Tell. See `Direction` above.
+    optional Direction direction = 4;
+
+    // W3C trace context header values (for distributed tracing)
+    optional string traceparent = 100;  // W3C trace context header value
+    optional string tracestate = 101;  // W3C trace state header value
+
+    required string request_id = 102;
+    repeated MetadataEntry metadata = 103;
+
+    // Caller deadline in milliseconds.
+    //
+    // Contract: timeout_ms MUST be > 0 iff direction == DIRECTION_REQUEST.
+    // Senders set 0 as documented filler for TELL and RESPONSE envelopes.
+    // Receivers MUST ignore timeout_ms for TELL/RESPONSE and MUST NOT infer
+    // tell-ness (fire-and-forget) from timeout_ms == 0 — the explicit
+    // DIRECTION_TELL label is the only fire-and-forget marker.
+    required int64 timeout_ms = 104;
+}
+
+// DataChunk - A single chunk of an application data stream (Fast Path)
+//
+// For streaming application data (non-media):
+// - File transfer chunks
+// - Game state updates
+// - Custom protocol streams
+message DataChunk {
+    required string stream_id = 1;
+    required uint64 sequence = 2;
+    required bytes payload = 3;
+    repeated MetadataEntry metadata = 4;
+    // Producer-defined data time for the chunk's content (sampling instant,
+    // simulation tick, authoring time — the producing application chooses
+    // the clock and the meaning). Purely an application annotation: the
+    // runtime never reads it, ordering is carried by `sequence` alone, it
+    // is not a freshness or timeout input, and receivers must not compare
+    // it against their local clocks.
+    //
+    // Deliberately the only application-semantic annotation promoted to a
+    // dedicated field: time is the overwhelmingly common stream annotation,
+    // and a typed slot keeps every SDK on one name and one type instead of
+    // per-app string conventions. Not a precedent — any other application
+    // annotation belongs in `metadata`.
+    optional int64 timestamp_ms = 5;
+}
+
+// NOTE: MediaFrame is NOT needed as a protobuf message.
+// Media streaming uses WebRTC native MediaStreamTrack API:
+// - Each track is a separate RTP channel with its own ID
+// - RTP headers already contain sequence numbers, timestamps, SSRC
+// - No protobuf serialization overhead
+// - MediaFrameRegistry maps track_id to native frame callbacks

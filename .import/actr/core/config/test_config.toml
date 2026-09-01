@@ -1,0 +1,34 @@
+edition = 1
+
+exports = ["examples/test.proto"]
+
+[package]
+name = "test-service"
+manufacturer = "acme"
+description = "Test configuration"
+
+[dependencies]
+user-service = {}
+payment-service = { actr_type = "acme+payment-service", fingerprint = "service_semantic:abc123..." }
+
+[scripts]
+run = "cargo run"
+test = "cargo test"
+
+[system.signaling]
+url = "ws://localhost:8081"
+
+[system.ais_endpoint]
+url = "http://localhost:8081/ais"
+
+[system.deployment]
+realm_id = 1001
+
+[system.discovery]
+visible = true
+
+[system.observability]
+filter_level = "info"
+tracing_enabled = false
+tracing_endpoint = "http://localhost:4317"
+tracing_service_name = "test-service"

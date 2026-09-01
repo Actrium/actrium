@@ -1,0 +1,54 @@
+// ACTR: mutable scaffold
+// User-owned business scaffold. Keep Generated/ immutable and customize this file.
+
+import Actr
+import Foundation
+
+{{#if HAS_SERVICES}}
+public final class {{SERVICE_NAME}}LifecycleAdapter<Handler: ActrDispatchHandler>: Workload, @unchecked Sendable {
+    private let handler: Handler
+
+    public init(handler: Handler) {
+        self.handler = handler
+    }
+{{else}}
+public final class {{SERVICE_NAME}}LifecycleAdapter: Workload, @unchecked Sendable {
+    public init() {}
+{{/if}}
+
+    public func onStart(ctx: Context) async throws {
+        // TODO: Optionally customize startup logic
+    }
+
+    public func onReady(ctx: Context) async throws {
+        // TODO: Optionally customize ready logic
+    }
+
+    public func onStop(ctx: Context) async throws {
+        // TODO: Optionally customize shutdown logic
+    }
+
+    public func onError(ctx: Context, event: ErrorEvent) async throws {
+        // TODO: Optionally customize error handling
+    }
+
+    public func dispatch(ctx: Context, envelope: RpcEnvelope) async throws -> Data {
+{{#if HAS_SERVICES}}
+        return try await actrDispatch(
+            ctx: ctx,
+            handler: handler,
+            routeKey: envelope.routeKey,
+            payload: envelope.payload,
+            timeoutMs: envelope.timeoutMs
+        )
+{{else}}
+        return try await actrDispatch(
+            ctx: ctx,
+            handler: EmptyActrDispatchHandler(),
+            routeKey: envelope.routeKey,
+            payload: envelope.payload,
+            timeoutMs: envelope.timeoutMs
+        )
+{{/if}}
+    }
+}

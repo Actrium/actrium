@@ -1,0 +1,42 @@
+# Build artifacts
+**/target/
+
+# Logs
+**/logs/
+*.log
+
+# IDE and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Generated protobuf outputs
+**/*_pb.rs
+*.pb.go
+
+# Generated code directories
+**/generated/
+!typescript/echo-workload/src/generated/
+!typescript/echo-workload/src/generated/**
+
+# Actrix integration files
+# actrix-*.toml
+ACTRIX*.md
+
+# Misc runtime files
+.status
+.demo_logs/
+database/
+**/.hyper/
+rust/wasm-echo/dev-key.json
+
+# actr.toml files (use Actr.example.toml as template)
+**/actr.toml
+
+# Actrix config file (use actrix-config.example.toml as template)
+actrix-config.toml
+**/.actr/

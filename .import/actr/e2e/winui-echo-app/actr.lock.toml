@@ -1,0 +1,3 @@
+# Placeholder lock file for local EchoApp.
+# This project uses local linked workloads (actr-cabi) and hand-rolled
+# protobuf encoding; no remote package lock is required.

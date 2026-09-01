@@ -1,0 +1,44 @@
+# Standalone crate: napi-rs builds this independently, outside the main
+# Rust workspace. The empty [workspace] table keeps Cargo from auto-joining
+# any workspace it finds above this path.
+[workspace]
+
+[package]
+name = "actr-ts"
+version = "0.10.0-alpha.4"
+edition = "2024"
+rust-version = "1.95"
+license = "Apache-2.0"
+repository = "https://github.com/Actrium/actr.git"
+authors = ["Actor-RTC Contributors"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# napi-rs
+napi = { version = "3.8.2", features = ["async", "tokio_rt"] }
+napi-derive = "3.5.1"
+
+# actr dependencies
+actr-protocol = { path = "../../core/protocol" }
+actr-framework = { path = "../../core/framework" }
+actr-config = { path = "../../core/config" }
+actr-hyper = { path = "../../core/hyper" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+bytes = "1"
+async-trait = "0.1"
+
+# Utilities
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+# lto = true
+strip = true

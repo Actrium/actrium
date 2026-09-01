@@ -1,0 +1,94 @@
+//! Service management module
+//!
+//! Manages the lifecycle of various auxiliary services
+//! # Service Management Abstraction
+//!
+//! Provides a generic service management abstraction for fine-grained control over different service types (STUN, TURN, Signaling, KS, etc.)
+//!
+//! ## Core Concepts
+//!
+//! - `HttpRouterService`: Core trait for HTTP route services, provides axum router
+//! - `IceService`: Core trait for ICE services, standalone UDP server
+//! - `ServiceInfo`: Basic service information
+//! - `ServiceManager`: Service manager, responsible for managing the lifecycle of multiple services
+
+pub mod container;
+pub mod grpc;
+pub mod http;
+pub mod ice;
+pub mod manager;
+pub mod trace;
+
+use anyhow::Result;
+use async_trait::async_trait;
+use axum::Router;
+use platform::{ServiceInfo, ServiceState};
+use std::fmt::Debug;
+use url::Url;
+
+// Re-export service implementations
+pub use http::{AisService, MfrService, SignalingService};
+pub use ice::{StunService, TurnService};
+
+// Re-export core components
+pub use container::ServiceContainer;
+pub use manager::ServiceManager;
+
+/// Core trait for HTTP route services - provides axum router
+#[async_trait]
+pub trait HttpRouterService: Send + Sync + Debug {
+    /// Get service information
+    fn info(&self) -> &ServiceInfo;
+
+    /// Get mutable service information
+    fn info_mut(&mut self) -> &mut ServiceInfo;
+
+    /// Build axum router
+    async fn build_router(&mut self) -> Result<Router>;
+
+    /// Service start callback (called after router is built and started)
+    async fn on_start(&mut self, base_url: Url) -> Result<()> {
+        self.info_mut().set_running(base_url);
+        Ok(())
+    }
+
+    /// Service stop callback
+    async fn on_stop(&mut self) -> Result<()> {
+        platform::recording::info!("HTTP router service '{}' stopped", self.info().name);
+        self.info_mut().status = ServiceState::Unknown;
+        Ok(())
+    }
+
+    /// Get route prefix (e.g. "/admin", "/authority", etc.)
+    fn route_prefix(&self) -> &str;
+}
+
+/// Core trait for ICE services - standalone UDP server
+#[async_trait]
+pub trait IceService: Send + Sync + Debug {
+    /// Get service information
+    fn info(&self) -> &ServiceInfo;
+
+    /// Get mutable service information
+    fn info_mut(&mut self) -> &mut ServiceInfo;
+
+    /// Start ICE service
+    async fn start(
+        &mut self,
+        shutdown_rx: tokio::sync::broadcast::Receiver<()>,
+        oneshot_tx: tokio::sync::oneshot::Sender<ServiceInfo>,
+    ) -> Result<()>;
+
+    /// Stop ICE service
+    async fn stop(&mut self) -> Result<()> {
+        platform::recording::info!("ICE service '{}' stopped", self.info().name);
+        self.info_mut().status = ServiceState::Unknown;
+        Ok(())
+    }
+
+    /// Get service health status
+    #[allow(dead_code)]
+    async fn health_check(&self) -> Result<bool> {
+        Ok(self.info().is_running())
+    }
+}

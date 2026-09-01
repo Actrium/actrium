@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import unittest
+
+import ci_targets
+
+
+class CiTargetsTest(unittest.TestCase):
+    def test_e2e_rust_sources_and_manifests_trigger_compile_check(self) -> None:
+        paths = (
+            "e2e/Cargo.toml",
+            "e2e/Cargo.lock",
+            "e2e/polyglot-echo/clients/rust/Cargo.toml",
+            "e2e/polyglot-echo/clients/rust/src/main.rs",
+        )
+
+        for path in paths:
+            with self.subTest(path=path):
+                targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+                self.assertTrue(targets["e2e_rust"])
+                self.assertIn(f"e2e_rust:{path}", reasons)
+
+    def test_package_runtime_shell_changes_gate_the_scenario(self) -> None:
+        targets, reasons = ci_targets.detect_targets(
+            ["e2e/package-runtime-echo/run.sh"],
+            full_run=False,
+        )
+
+        self.assertTrue(targets["e2e_package_runtime"])
+        self.assertFalse(targets["e2e_rust"])
+        self.assertIn("e2e_package_runtime:e2e/package-runtime-echo/run.sh", reasons)
+
+    def test_package_runtime_rust_sources_keep_the_compile_check(self) -> None:
+        targets, reasons = ci_targets.detect_targets(
+            ["e2e/package-runtime-echo/Cargo.toml"],
+            full_run=False,
+        )
+
+        self.assertTrue(targets["e2e_package_runtime"])
+        self.assertTrue(targets["e2e_rust"])
+        self.assertIn("e2e_rust:e2e/package-runtime-echo/Cargo.toml", reasons)
+
+    def test_c_and_go_echo_workloads_trigger_component_builds(self) -> None:
+        paths = (
+            "examples/c/echo-workload/src/main.c",
+            "examples/go/echo-workload/build.sh",
+        )
+
+        for path in paths:
+            with self.subTest(path=path):
+                targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+                self.assertTrue(targets["c_go_workloads"])
+                self.assertIn(f"c_go_workload:{path}", reasons)
+
+    def test_v2_wit_change_rebuilds_c_and_go_components(self) -> None:
+        path = "core/framework/wit-v2/actr-workload.wit"
+        targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+        self.assertTrue(targets["c_go_workloads"])
+        self.assertTrue(targets["rust_core"])
+        self.assertTrue(targets["e2e_rust"])
+        self.assertIn(f"core_dependency:{path}", reasons)
+
+    def test_native_workload_smoke_change_rebuilds_components(self) -> None:
+        path = "core/hyper/tests/native_workload_smoke.rs"
+        targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+        self.assertTrue(targets["c_go_workloads"])
+        self.assertTrue(targets["rust_core"])
+        self.assertIn(f"core_dependency:{path}", reasons)
+
+    def test_actrix_change_triggers_rust_checks(self) -> None:
+        path = "actrix/crates/turn/src/authenticator.rs"
+        targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+        self.assertTrue(targets["rust_core"])
+        self.assertFalse(targets["csharp_binding"])
+        self.assertIn(f"actrix_workspace:{path}", reasons)
+
+    def test_csharp_runtime_dependencies_trigger_csharp_checks(self) -> None:
+        paths = (
+            "core/config/src/lib.rs",
+            "core/framework/src/lib.rs",
+            "core/hyper/src/lib.rs",
+            "core/pack/src/lib.rs",
+            "core/platform-traits/src/lib.rs",
+            "core/protocol/src/lib.rs",
+            "core/runtime/src/lib.rs",
+            "core/runtime-mailbox/src/lib.rs",
+            "core/service-compat/src/lib.rs",
+        )
+
+        for path in paths:
+            with self.subTest(path=path):
+                targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+                self.assertTrue(targets["rust_core"])
+                self.assertTrue(targets["csharp_binding"])
+                self.assertIn(f"core_dependency:{path}", reasons)
+
+    def test_unrelated_core_change_does_not_trigger_csharp_checks(self) -> None:
+        for path in ("core/hlc/src/lib.rs", "core/platform-native/src/lib.rs"):
+            with self.subTest(path=path):
+                targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+                self.assertTrue(targets["rust_core"])
+                self.assertFalse(targets["csharp_binding"])
+                self.assertIn(f"core_dependency:{path}", reasons)
+
+    def test_actr_cabi_change_triggers_native_and_binding_checks(self) -> None:
+        path = "crates/actr-cabi/src/lib.rs"
+        targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+        self.assertTrue(targets["rust_core"])
+        self.assertTrue(targets["swift_binding"])
+        self.assertTrue(targets["csharp_binding"])
+        self.assertIn(f"actr_cabi:{path}", reasons)
+
+    def test_cabi_swift_change_triggers_swift_checks(self) -> None:
+        path = "bindings/cabi/swift/Sources/ActrCabi/ActrCabi.swift"
+        targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+        self.assertTrue(targets["swift_binding"])
+        self.assertIn(f"swift:{path}", reasons)
+
+    def test_winui_e2e_change_triggers_rust_and_csharp_checks(self) -> None:
+        for path in (
+            "e2e/winui-echo-app/WinUiEchoApp/ActrService.cs",
+            "e2e/winui-echo-app/workload/src/lib.rs",
+            "e2e/winui-echo-app/workload/Cargo.toml",
+        ):
+            with self.subTest(path=path):
+                targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+                self.assertTrue(targets["rust_core"])
+                self.assertTrue(targets["csharp_binding"])
+                self.assertIn(f"winui_e2e:{path}", reasons)
+
+    def test_typescript_echo_workload_triggers_workload_checks(self) -> None:
+        targets, reasons = ci_targets.detect_targets(
+            ["examples/typescript/echo-workload/src/actr_service.ts"],
+            full_run=False,
+        )
+
+        self.assertTrue(targets["ts_workload"])
+        self.assertFalse(targets["web_binding"])
+        self.assertIn(
+            "typescript_workload:examples/typescript/echo-workload/src/actr_service.ts",
+            reasons,
+        )
+
+    def test_generated_typescript_browser_e2e_source_triggers_light_checks(self) -> None:
+        targets, reasons = ci_targets.detect_targets(
+            ["cli/tests/e2e_typescript_generated_echo_web.rs"],
+            full_run=False,
+        )
+
+        self.assertTrue(targets["rust_core"])
+        self.assertTrue(targets["ts_workload"])
+        self.assertTrue(targets["web_binding"])
+        self.assertIn(
+            "generated_typescript_web_e2e_source:cli/tests/e2e_typescript_generated_echo_web.rs",
+            reasons,
+        )
+
+    def test_kotlin_codegen_paths_trigger_rust_and_kotlin_checks(self) -> None:
+        paths = (
+            "cli/src/commands/codegen/kotlin.rs",
+            "cli/tests/kotlin_echo.rs",
+            "cli/fixtures/kotlin/echo/MainActivity.kt",
+        )
+
+        for path in paths:
+            with self.subTest(path=path):
+                targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+                self.assertTrue(targets["rust_core"])
+                self.assertTrue(targets["kotlin_binding"])
+                self.assertIn(f"kotlin_codegen:{path}", reasons)
+
+    def test_v2_workload_wit_triggers_sdk_checks(self) -> None:
+        path = "core/framework/wit-v2/actr-workload.wit"
+        targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+        self.assertTrue(targets["rust_core"])
+        self.assertTrue(targets["python_workload"])
+        self.assertTrue(targets["ts_workload"])
+        self.assertIn(f"core_dependency:{path}", reasons)
+
+    def test_retained_web_wit_does_not_trigger_workload_sdk_checks(self) -> None:
+        path = "core/framework/wit/actr-workload.wit"
+        targets, _ = ci_targets.detect_targets([path], full_run=False)
+
+        self.assertTrue(targets["rust_core"])
+        self.assertFalse(targets["python_workload"])
+        self.assertFalse(targets["ts_workload"])
+
+
+if __name__ == "__main__":
+    unittest.main()
