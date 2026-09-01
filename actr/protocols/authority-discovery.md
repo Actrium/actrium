@@ -1,5 +1,7 @@
 # Actr Authority Discovery
 
+Language: **English** | [简体中文](authority-discovery.zh.md)
+
 Status: initial draft; not yet registered with IANA.
 
 This document defines how an Actr client discovers the public services for an
@@ -15,7 +17,8 @@ location of the signaling, identity, discovery, or ICE services.
 Authority discovery maps that stable authority to service endpoints. It does
 not define the `actr:` URI target syntax, Actor resolution, signaling protocol,
 authentication protocol, or ICE configuration response. Those are separate
-Actr protocol concerns.
+Actr protocol concerns. The URI syntax is defined by the
+[Actr URI specification](uri.md).
 
 The keywords **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are
 to be interpreted as described by BCP 14 when they appear in uppercase.
@@ -228,7 +231,7 @@ specification and does not require a separate IANA registration.
 
 This initial draft deliberately leaves the following work open:
 
-- complete and reference the Actr URI specification;
+- stabilize the Actr URI specification and its authority mapping;
 - define the individual service protocols and their allowed URI schemes;
 - decide whether service ordering, priority, or failover metadata is needed;
 - add interoperability fixtures and negative test cases;
