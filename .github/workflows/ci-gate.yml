@@ -21,6 +21,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  identity:
+    name: Commit Identity Privacy
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Test identity policy
+        run: python .github/scripts/check_commit_identities_test.py
+      - name: Check newly introduced commits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: >-
+          python .github/scripts/check_commit_identities.py
+          --base-sha "$BASE_SHA"
+          --head-sha "$HEAD_SHA"
+
   determine:
     name: Determine Affected Targets
     runs-on: [self-hosted, Linux, X64]
@@ -1037,6 +1057,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     if: always()
     needs:
+      - identity
       - determine
       - e2e_rust
       - e2e_package_runtime
@@ -1056,6 +1077,7 @@ jobs:
       - cjk
     env:
       MODE: ${{ needs.determine.outputs.mode }}
+      IDENTITY_RESULT: ${{ needs.identity.result }}
       CHANGED_FILES_JSON: ${{ needs.determine.outputs.changed_files_json }}
       REASONS_JSON: ${{ needs.determine.outputs.reasons_json }}
       RUST_RESULT: ${{ needs.rust.result }}
@@ -1083,6 +1105,7 @@ jobs:
           import sys
 
           results = {
+              "identity": os.environ["IDENTITY_RESULT"],
               "audit": os.environ["AUDIT_RESULT"],
               "rust": os.environ["RUST_RESULT"],
               "typescript": os.environ["TYPESCRIPT_RESULT"],
