@@ -75,9 +75,24 @@ def commit_range(repo: Path, base_sha: str, head_sha: str) -> list[str]:
     try:
         base_sha = run_git(repo, "rev-parse", f"{base_sha}^{{commit}}").strip()
     except subprocess.CalledProcessError as error:
-        raise RuntimeError(
-            "base commit is unavailable; CI must checkout with fetch-depth: 0"
-        ) from error
+        # A force-push can make the event's `before` commit unreachable from
+        # every advertised ref even with fetch-depth: 0. GitHub still permits
+        # fetching that exact object id, so recover it before calculating the
+        # introduced range instead of silently checking only HEAD.
+        try:
+            run_git(
+                repo,
+                "fetch",
+                "--no-tags",
+                "--no-recurse-submodules",
+                "origin",
+                base_sha,
+            )
+            base_sha = run_git(repo, "rev-parse", f"{base_sha}^{{commit}}").strip()
+        except subprocess.CalledProcessError as fetch_error:
+            raise RuntimeError(
+                "base commit is unavailable after an explicit object-id fetch"
+            ) from fetch_error
 
     if base_sha == head_sha:
         return []

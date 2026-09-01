@@ -104,6 +104,71 @@ class CommitIdentityTest(unittest.TestCase):
                 [],
             )
 
+    def test_unadvertised_force_push_base_is_fetched_by_object_id(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            remote = root / "remote.git"
+            writer = root / "writer"
+            checker = root / "checker"
+            subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+            subprocess.run(
+                ["git", "-C", str(remote), "config", "uploadpack.allowAnySHA1InWant", "true"],
+                check=True,
+            )
+            subprocess.run(["git", "init", "-q", str(writer)], check=True)
+            subprocess.run(
+                ["git", "-C", str(writer), "remote", "add", "origin", str(remote)],
+                check=True,
+            )
+            old_sha = self._commit(
+                writer,
+                "101+developer@users.noreply.github.com",
+                "old history",
+            )
+            subprocess.run(
+                ["git", "-C", str(writer), "push", "-q", "origin", "HEAD:main"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(writer), "checkout", "-q", "--orphan", "replacement"],
+                check=True,
+            )
+            new_sha = self._commit(
+                writer,
+                "101+developer@users.noreply.github.com",
+                "replacement history",
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(writer),
+                    "push",
+                    "-q",
+                    "--force",
+                    "origin",
+                    "HEAD:main",
+                ],
+                check=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "clone",
+                    "-q",
+                    "--no-local",
+                    "--branch",
+                    "main",
+                    str(remote),
+                    str(checker),
+                ],
+                check=True,
+            )
+
+            with self.assertRaises(subprocess.CalledProcessError):
+                identity_check.run_git(checker, "rev-parse", f"{old_sha}^{{commit}}")
+            self.assertEqual(identity_check.commit_range(checker, old_sha, new_sha), [new_sha])
+
     @staticmethod
     def _commit(repo: Path, email: str, message: str) -> str:
         env = os.environ.copy()
