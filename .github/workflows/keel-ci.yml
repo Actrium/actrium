@@ -125,6 +125,7 @@ jobs:
       # canvas encoding fork in canvas::draw), so the JSON-only build needs its
       # own pass to stay green.
       - name: Test SDK crate (host target)
+        working-directory: ${{ github.workspace }}
         run: |
           cargo test -p keel-native-guest
           cargo test -p keel-native-guest --no-default-features

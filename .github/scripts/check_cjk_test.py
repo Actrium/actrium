@@ -155,6 +155,25 @@ def test_markdown_language_switcher_link_is_allowed() -> None:
         assert "README.md" not in files, "language switcher link to .zh.md must be allowed"
 
 
+def test_markdown_line_pragma_with_reason_exempts_next_line() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        repo = _make_repo(Path(td))
+        content = (
+            "# Wire fixture\n\n"
+            "<!-- cjk-allow: the literal text is UTF-8 fixture data -->\n"
+            f"- `{CJK_LINE}`\n"
+        )
+        (repo / "contract.md").write_text(content, encoding="utf-8")
+        subprocess.run(["git", "add", "contract.md"], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "x"],
+            cwd=repo, check=True,
+        )
+        data = _run_checker(repo)
+        files = {f["file"] for f in data["findings"]}
+        assert "contract.md" not in files, "Markdown line pragma must exempt fixture data"
+
+
 def main() -> int:
     tests = [
         test_bare_line_pragma_without_reason_is_flagged,
@@ -164,6 +183,7 @@ def main() -> int:
         test_zh_md_suffix_is_allowed,
         test_allowed_dirs_are_skipped,
         test_markdown_language_switcher_link_is_allowed,
+        test_markdown_line_pragma_with_reason_exempts_next_line,
     ]
     failures = 0
     for t in tests:
