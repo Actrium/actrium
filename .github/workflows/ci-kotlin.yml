@@ -94,6 +94,8 @@ jobs:
   gen-test:
     name: Kotlin Codegen Test
     runs-on: ubuntu-latest-m
+    env:
+      ACTR_GRADLE_REPOSITORIES: canonical
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
@@ -136,8 +138,16 @@ jobs:
           key: gradle-build-${{ runner.os }}-${{ hashFiles('packages/actr-kotlin/**/*.kt', 'tools/actr/protoc-gen/kotlin/**/*.kt', 'packages/actr-kotlin/**/build.gradle.kts', 'tools/actr/protoc-gen/kotlin/**/build.gradle.kts') }}
       - name: Compile Kotlin demo and build protoc plugin (parallel)
         run: |
-          (cd packages/actr-kotlin && ./gradlew :demo:compileDebugKotlin --no-daemon) &
-          (cd tools/actr/protoc-gen/kotlin && ./gradlew protocPluginJar --no-daemon) &
-          wait
+          # Wait on each PID explicitly: bare `wait` with no args always
+          # returns 0 even if a background job failed, which would silently
+          # mask compile failures. Keep failures in an `||` list so `bash -e`
+          # still reaps both jobs before the step exits.
+          (cd packages/actr-kotlin && ./gradlew :demo:compileDebugKotlin --no-daemon) & pid1=$!
+          (cd tools/actr/protoc-gen/kotlin && ./gradlew protocPluginJar --no-daemon) & pid2=$!
+          rc1=0
+          rc2=0
+          wait "$pid1" || rc1=$?
+          wait "$pid2" || rc2=$?
+          exit $((rc1 | rc2))
       - name: Run Kotlin codegen integration tests
         run: cargo test -p actr-cli --test kotlin_echo --verbose
