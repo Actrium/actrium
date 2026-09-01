@@ -1817,6 +1817,7 @@ publish_package_sync_repo() {
 
 stage_release_version_files() {
   git add Cargo.toml Cargo.lock \
+    crates/actr/Cargo.toml \
     packages/actr-web/Cargo.toml \
     crates/actr-protocol/Cargo.toml \
     crates/actr-service-compat/Cargo.toml \

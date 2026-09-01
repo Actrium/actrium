@@ -1474,6 +1474,16 @@ test_release_prepare_stages_workload_lockfile() {
   fi
 }
 
+test_release_prepare_stages_actr_facade_manifest() {
+  local stage_function
+  stage_function=$(declare -f stage_release_version_files)
+
+  if ! grep -Fq 'crates/actr/Cargo.toml' <<<"$stage_function"; then
+    printf 'release prepare must stage the Actr facade manifest\n' >&2
+    exit 1
+  fi
+}
+
 test_release_prepare_refreshes_and_stages_e2e_lockfile() {
   local update_function stage_function
   update_function=$(declare -f update_versions)
@@ -2568,6 +2578,7 @@ test_release_train_workflow_downloads_only_typescript_native_artifacts
 test_release_prepare_workflow_skips_release_commits
 test_report_stage_merges_state_files
 test_release_prepare_stages_workload_lockfile
+test_release_prepare_stages_actr_facade_manifest
 test_notify_wechat_includes_nuget_packages
 test_release_prepare_refreshes_and_stages_e2e_lockfile
 test_update_versions_syncs_optional_dependencies
