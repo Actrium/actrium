@@ -72,8 +72,8 @@ fn swift_echo_init_creates_expected_files() {
         "actr.toml should exist"
     );
     assert!(
-        project_dir.join("manifest.lock.toml").exists(),
-        "manifest.lock.toml should exist (for xcodegen)"
+        !project_dir.join("manifest.lock.toml").exists(),
+        "manifest.lock.toml should be created by `actr deps install`, not `actr init`"
     );
     assert!(
         project_dir.join("README.md").exists(),
