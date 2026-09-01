@@ -21,7 +21,8 @@ fn python_generated_echo_workload_receives_actr_web_request() {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
+        .ancestors()
+        .find(|candidate| candidate.join("packages/actr-web").is_dir())
         .expect("actr-cli should live under the workspace root");
     let script = root.join("packages/actr-web/examples/echo/start-python-mock.sh");
     let out = Command::new("bash")

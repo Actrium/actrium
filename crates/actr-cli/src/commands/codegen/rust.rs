@@ -925,10 +925,10 @@ impl {handler_trait} for {impl_name} {{
         }
 
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-        if let Some(parent_workspace) = manifest_dir.parent()
-            && parent_workspace.join("Cargo.toml").exists()
-            && parent_workspace.join("tools/actr/protoc-gen/rust").exists()
-        {
+        if let Some(parent_workspace) = manifest_dir.ancestors().find(|candidate| {
+            candidate.join("Cargo.toml").exists()
+                && candidate.join("tools/actr/protoc-gen/rust").exists()
+        }) {
             return Ok(Some(parent_workspace.to_path_buf()));
         }
 

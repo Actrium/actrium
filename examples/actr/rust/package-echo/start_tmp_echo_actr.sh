@@ -80,7 +80,7 @@ append_workspace_patch() {
     cat >> "$cargo_toml" <<EOF
 
 [patch.crates-io]
-actr = { path = "$ACTR_REPO_DIR" }
+actr = { path = "$ACTR_REPO_DIR/crates/actr" }
 actr-protocol = { path = "$ACTR_REPO_DIR/crates/actr-protocol" }
 actr-framework = { path = "$ACTR_REPO_DIR/crates/actr-framework" }
 actr-hyper = { path = "$ACTR_REPO_DIR/crates/actr-hyper" }

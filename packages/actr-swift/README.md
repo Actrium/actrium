@@ -41,12 +41,12 @@ through the low-level `ActrBindings` module.
 The Swift build scripts build `libactr` from the monorepo workspace root.
 
 ```text
-actr/
+actrium/
 ├── Cargo.toml                # Rust workspace root
-├── bindings/
-│   ├── ffi/                  # libactr crate
-│   └── swift/                # Swift package sources and build scripts
-└── core/                     # Rust crates required by libactr
+├── crates/
+│   └── actr-ffi/             # libactr crate
+└── packages/
+    └── actr-swift/           # Swift package sources and build scripts
 ```
 
 The package-sync repository owns its own workflow definitions.
@@ -131,7 +131,7 @@ and publishing releases.
 
 ## Project Structure
 
-- `../ffi/`: Rust FFI crate used to build the XCFramework and generate UniFFI bindings
+- `../../crates/actr-ffi/`: Rust FFI crate used to build the XCFramework and generate UniFFI bindings
 - `ActrBindings/`: UniFFI-generated Swift bindings (Swift + headers/modulemap)
 - `build-xcframework.sh`: Build script
 - `scripts/package-binary.sh`: Zip + checksum helper for Release assets
@@ -140,7 +140,7 @@ and publishing releases.
 
 ## Configuration
 
-UniFFI configuration lives in `../ffi/uniffi.toml`.
+UniFFI configuration lives in `../../crates/actr-ffi/uniffi.toml`.
 
 ## Documentation
 

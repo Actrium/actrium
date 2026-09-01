@@ -7,13 +7,13 @@
 //! of an Actro-operated sync service.
 
 use actro_core::browser_data::{
-    self, BrowserStorageSyncExecutionPlan, BrowserStorageSyncExecutionResultBatch,
-    BrowserStorageSyncOperation, BrowserStorageSyncOperationResult, BROWSER_STORAGE_SCHEMA_VERSION,
-    BROWSER_STORAGE_SYNC_CONTRACT_VERSION,
+    self, BROWSER_STORAGE_SCHEMA_VERSION, BROWSER_STORAGE_SYNC_CONTRACT_VERSION,
+    BrowserStorageSyncExecutionPlan, BrowserStorageSyncExecutionResultBatch,
+    BrowserStorageSyncOperation, BrowserStorageSyncOperationResult,
 };
 use rusqlite::types::{Value as SqlValue, ValueRef};
-use rusqlite::{params_from_iter, Connection, Transaction};
-use serde_json::{json, Value};
+use rusqlite::{Connection, Transaction, params_from_iter};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -765,29 +765,29 @@ fn validate_push_request_context(
         return Err(BrowserSyncServerError::Forbidden("device mismatch"));
     }
 
-    if let Some(request_type) = value.get("requestType").and_then(Value::as_str) {
-        if request_type.trim() != "push" {
-            return Err(BrowserSyncServerError::InvalidPayload("request type"));
-        }
+    if let Some(request_type) = value.get("requestType").and_then(Value::as_str)
+        && request_type.trim() != "push"
+    {
+        return Err(BrowserSyncServerError::InvalidPayload("request type"));
     }
 
     let push_batch = value
         .get("pushBatch")
         .ok_or(BrowserSyncServerError::InvalidPayload("push batch"))?;
     validate_storage_schema_version(push_batch, "push batch storage schema version")?;
-    if let Some(batch_scope) = push_batch.get("scope").and_then(Value::as_str) {
-        if normalize_service_id(batch_scope, "push batch scope")? != context_account {
-            return Err(BrowserSyncServerError::Forbidden(
-                "push batch scope mismatch",
-            ));
-        }
+    if let Some(batch_scope) = push_batch.get("scope").and_then(Value::as_str)
+        && normalize_service_id(batch_scope, "push batch scope")? != context_account
+    {
+        return Err(BrowserSyncServerError::Forbidden(
+            "push batch scope mismatch",
+        ));
     }
-    if let Some(batch_device_id) = push_batch.get("deviceId").and_then(Value::as_str) {
-        if normalize_service_id(batch_device_id, "push batch device id")? != context_device {
-            return Err(BrowserSyncServerError::Forbidden(
-                "push batch device mismatch",
-            ));
-        }
+    if let Some(batch_device_id) = push_batch.get("deviceId").and_then(Value::as_str)
+        && normalize_service_id(batch_device_id, "push batch device id")? != context_device
+    {
+        return Err(BrowserSyncServerError::Forbidden(
+            "push batch device mismatch",
+        ));
     }
 
     let records = push_batch
@@ -914,10 +914,10 @@ fn sync_http_pull_request_parts(
 ) -> Result<(i64, String)> {
     let value: Value = serde_json::from_str(body)?;
     validate_storage_schema_version(&value, "pull storage schema version")?;
-    if let Some(request_type) = value.get("requestType").and_then(Value::as_str) {
-        if request_type.trim() != "pull" {
-            return Err(BrowserSyncServerError::InvalidPayload("pull request type"));
-        }
+    if let Some(request_type) = value.get("requestType").and_then(Value::as_str)
+        && request_type.trim() != "pull"
+    {
+        return Err(BrowserSyncServerError::InvalidPayload("pull request type"));
     }
 
     let scope = value
@@ -1390,9 +1390,11 @@ mod tests {
             "",
         ));
         assert_eq!(contract_response.status_code, 200);
-        assert!(contract_response
-            .body
-            .contains(browser_data::BROWSER_STORAGE_SYNC_TRANSPORT_CYCLE_PATH));
+        assert!(
+            contract_response
+                .body
+                .contains(browser_data::BROWSER_STORAGE_SYNC_TRANSPORT_CYCLE_PATH)
+        );
 
         let device_a_push = push_request(
             "profile-a",
@@ -1571,9 +1573,11 @@ mod tests {
             .to_string(),
         ));
         assert_eq!(unsupported_pull.status_code, 426);
-        assert!(unsupported_pull
-            .body
-            .contains(browser_data::BROWSER_STORAGE_SYNC_UNSUPPORTED_SCHEMA_ERROR_CODE));
+        assert!(
+            unsupported_pull
+                .body
+                .contains(browser_data::BROWSER_STORAGE_SYNC_UNSUPPORTED_SCHEMA_ERROR_CODE)
+        );
     }
 
     #[test]
@@ -1592,10 +1596,12 @@ mod tests {
             110,
             vec![history_record("device-a", "https://example.com/a", 110)],
         );
-        assert!(service
-            .merge_push_request_json(&context, &valid_push)
-            .unwrap()
-            .contains(r#""acceptedCount":1"#));
+        assert!(
+            service
+                .merge_push_request_json(&context, &valid_push)
+                .unwrap()
+                .contains(r#""acceptedCount":1"#)
+        );
 
         let bad_token = BrowserSyncRequestContext {
             account_id: "profile-a".to_string(),

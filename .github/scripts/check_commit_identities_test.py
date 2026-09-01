@@ -49,6 +49,7 @@ class CommitIdentityTest(unittest.TestCase):
             author_email="developer@users.noreply.github.com",
             committer_name="Developer",
             committer_email="developer@users.noreply.github.com",
+            parent_count=1,
             message="Co-authored-by: Peer <123+peer@users.noreply.github.com>",
         )
         exposed = identity_check.CommitIdentity(
@@ -57,10 +58,31 @@ class CommitIdentityTest(unittest.TestCase):
             author_email=allowed.author_email,
             committer_name=allowed.committer_name,
             committer_email=allowed.committer_email,
+            parent_count=allowed.parent_count,
             message="Signed-off-by: Developer <dev@example.com>",
         )
         self.assertEqual(identity_check.validate_identity(allowed), [])
         self.assertEqual(len(identity_check.validate_identity(exposed)), 1)
+
+    def test_github_service_identity_is_limited_to_merge_commits(self) -> None:
+        base = dict(
+            sha="c" * 40,
+            author_name="Developer",
+            author_email="developer@users.noreply.github.com",
+            committer_name="GitHub",
+            committer_email="noreply@github.com",
+            message="Merge pull request #1",
+        )
+        merge = identity_check.CommitIdentity(parent_count=2, **base)
+        ordinary = identity_check.CommitIdentity(parent_count=1, **base)
+        wrong_name = identity_check.CommitIdentity(
+            parent_count=2,
+            **{**base, "committer_name": "Developer"},
+        )
+
+        self.assertEqual(identity_check.validate_identity(merge), [])
+        self.assertEqual(len(identity_check.validate_identity(ordinary)), 1)
+        self.assertEqual(len(identity_check.validate_identity(wrong_name)), 1)
 
     def test_only_commits_after_base_are_checked(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

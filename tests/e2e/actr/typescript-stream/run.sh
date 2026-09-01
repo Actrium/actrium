@@ -429,7 +429,7 @@ tokio = { version = "1", features = ["sync"] }
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(actr_has_generated)'] }
 
 [patch.crates-io]
-actr = { path = "$REPO_ROOT" }
+actr = { path = "$REPO_ROOT/crates/actr" }
 actr-config = { path = "$REPO_ROOT/crates/actr-config" }
 actr-framework = { path = "$REPO_ROOT/crates/actr-framework" }
 actr-hyper = { path = "$REPO_ROOT/crates/actr-hyper" }
@@ -786,7 +786,7 @@ tokio = { version = "1", features = ["full"], optional = true }
 tracing = { version = "0.1", optional = true }
 
 [patch.crates-io]
-actr = { path = "$REPO_ROOT" }
+actr = { path = "$REPO_ROOT/crates/actr" }
 actr-config = { path = "$REPO_ROOT/crates/actr-config" }
 actr-framework = { path = "$REPO_ROOT/crates/actr-framework" }
 actr-hyper = { path = "$REPO_ROOT/crates/actr-hyper" }

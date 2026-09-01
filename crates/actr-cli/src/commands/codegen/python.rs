@@ -684,7 +684,10 @@ fn find_python_plugin() -> Result<Option<PathBuf>> {
 
 fn create_workspace_python_plugin_shim() -> Result<Option<PathBuf>> {
     let cli_manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let Some(workspace_root) = cli_manifest_dir.parent() else {
+    let Some(workspace_root) = cli_manifest_dir
+        .ancestors()
+        .find(|candidate| candidate.join("tools/actr/protoc-gen/python").is_dir())
+    else {
         return Ok(None);
     };
     let package_dir = workspace_root.join("tools/actr/protoc-gen/python");

@@ -596,7 +596,7 @@ fn serde_err(e: serde_wasm_bindgen::Error) -> JsValue {
     //
     // Every declaration takes `request_id: JsValue` as the first
     // parameter so the SW-host side can route the call back to the
-        // correct per-dispatch `RuntimeContext` (see Phase 6 gamma-unified
+    // correct per-dispatch `RuntimeContext` (see Phase 6 gamma-unified
     // design §3.4 / §3.6). This fixes the TD-003 concurrency hazard
     // where a single thread-local context was shared across dispatches.
     out.push_str("#[wasm_bindgen]\n");

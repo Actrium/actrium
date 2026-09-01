@@ -962,8 +962,9 @@ mod tests {
         }
     }
 
-    /// Minimal JSON string escaper (the color/text corpus stays within the
-    /// characters this handles; multibyte UTF-8 passes through verbatim).
+    /// Minimal JSON string escaper. Non-ASCII scalar values use JSON Unicode
+    /// escapes so the generated protocol fixture remains ASCII-only while the
+    /// parsed strings and encoded UTF-8 bytes remain unchanged.
     fn jstr(s: &str) -> String {
         let mut out = String::from("\"");
         for c in s.chars() {
@@ -973,6 +974,12 @@ mod tests {
                 '\n' => out.push_str("\\n"),
                 '\r' => out.push_str("\\r"),
                 '\t' => out.push_str("\\t"),
+                c if !c.is_ascii() => {
+                    let mut units = [0_u16; 2];
+                    for unit in c.encode_utf16(&mut units) {
+                        write!(out, "\\u{unit:04x}").expect("write JSON Unicode escape");
+                    }
+                }
                 _ => out.push(c),
             }
         }

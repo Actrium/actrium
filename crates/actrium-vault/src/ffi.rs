@@ -180,7 +180,7 @@ fn category_info(category: VaultItemCategory) -> VaultCategoryInfo {
 
 #[cfg(test)]
 mod tests {
-    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
 
     use super::*;
     use crate::crypto::{KEY_BYTE_LEN, SALT_BYTE_LEN};
