@@ -1,0 +1,60 @@
+diff --git a/node_modules/@react-native-community/geolocation/android/build.gradle b/node_modules/@react-native-community/geolocation/android/build.gradle
+index aab4a31..fa7fe30 100644
+--- a/node_modules/@react-native-community/geolocation/android/build.gradle
++++ b/node_modules/@react-native-community/geolocation/android/build.gradle
+@@ -5,7 +5,7 @@ buildscript {
+   }
+ 
+   dependencies {
+-    classpath 'com.android.tools.build:gradle:3.5.3'
++    classpath 'com.android.tools.build:gradle:8.8.2'
+   }
+ }
+ 
+@@ -33,11 +33,11 @@ android {
+     namespace = "com.reactnativecommunity.geolocation"
+   }
+ 
+-  compileSdkVersion getExtOrIntegerDefault('compileSdkVersion')
++  compileSdk = getExtOrIntegerDefault('compileSdkVersion')
+ 
+   defaultConfig {
+-    minSdkVersion getExtOrIntegerDefault('minSdkVersion')
+-    targetSdkVersion getExtOrIntegerDefault('targetSdkVersion')
++    minSdk = getExtOrIntegerDefault('minSdkVersion')
++    targetSdk = getExtOrIntegerDefault('targetSdkVersion')
+     buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", isNewArchitectureEnabled().toString()
+   }
+   buildTypes {
+@@ -84,8 +84,8 @@ repositories {
+ 
+   if (defaultDir.exists()) {
+     maven {
+-      url defaultDir.toString()
+-      name androidSourcesName
++      url = uri(defaultDir.toString())
++      name = androidSourcesName
+     }
+ 
+     logger.info(":${project.name}:reactNativeAndroidRoot ${defaultDir.canonicalPath}")
+@@ -109,16 +109,16 @@ repositories {
+ 
+       if (androidPrebuiltBinaryDir.exists()) {
+         maven {
+-          url androidPrebuiltBinaryDir.toString()
+-          name androidSourcesName
++          url = uri(androidPrebuiltBinaryDir.toString())
++          name = androidSourcesName
+         }
+ 
+         logger.info(":${project.name}:reactNativeAndroidRoot ${androidPrebuiltBinaryDir.canonicalPath}")
+         found = true
+       } else if (androidSourcesDir.exists()) {
+         maven {
+-          url androidSourcesDir.toString()
+-          name androidSourcesName
++          url = uri(androidSourcesDir.toString())
++          name = androidSourcesName
+         }
+ 
+         logger.info(":${project.name}:reactNativeAndroidRoot ${androidSourcesDir.canonicalPath}")

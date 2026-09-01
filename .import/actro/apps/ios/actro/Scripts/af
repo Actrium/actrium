@@ -1,0 +1,146 @@
+#!/bin/bash
+
+# ==============================================================================
+# Actro Helper 脚本 (af)
+# 快捷入口，整合常用构建与开发命令
+# ==============================================================================
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# 颜色输出
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+usage() {
+    echo ""
+    echo -e "${BLUE}Actro Helper (af)${NC}"
+    echo ""
+    echo "用法: af <command> [options]"
+    echo ""
+    echo "命令:"
+    echo "  install    安装依赖 (React Native + CocoaPods)"
+    echo "  bundle     打包 React Native Bundle"
+    echo "  build      本地测试构建 (生成 IPA)"
+    echo "  check      检查项目配置"
+    echo "  upload     构建并上传 TestFlight"
+    echo "  clean      清理构建产物和缓存"
+    echo "  help       显示此帮助信息"
+    echo ""
+    echo "示例:"
+    echo "  af install           # 安装所有依赖"
+    echo "  af bundle            # 打包 RN Bundle"
+    echo "  af build             # 本地测试构建 (Release)"
+    echo "  af build pkg         # 本地测试构建 (Debug)"
+    echo "  af check             # 检查配置"
+    echo "  af upload            # 上传到 TestFlight"
+    echo "  af clean             # 清理构建产物"
+    echo ""
+}
+
+cmd_install() {
+    echo -e "${BLUE}📦 安装依赖...${NC}"
+    "$SCRIPT_DIR/reinstall-dependencies.sh"
+}
+
+cmd_bundle() {
+    echo -e "${BLUE}📦 打包 React Native Bundle...${NC}"
+    "$SCRIPT_DIR/ensure-actro-runtime.sh"
+    cd "$PROJECT_ROOT/ActroRuntime"
+
+    if [ ! -d "node_modules" ]; then
+        echo -e "${YELLOW}⚠️  node_modules 不存在，先安装依赖...${NC}"
+        if command -v yarn &> /dev/null; then
+            yarn install
+        elif command -v bun &> /dev/null; then
+            bun install
+        elif command -v npm &> /dev/null; then
+            npm install
+        else
+            echo -e "${RED}❌ 未找到 yarn、bun 或 npm${NC}"
+            exit 1
+        fi
+    fi
+
+    node node_modules/react-native/scripts/bundle.js \
+        --platform ios \
+        --dev false \
+        --entry-file index.ts \
+        --bundle-output "$PROJECT_ROOT/Actro/actr.jsbundle" \
+        --assets-dest "$PROJECT_ROOT/Actro"
+
+    cd "$PROJECT_ROOT"
+    echo -e "${GREEN}✅ React Native Bundle 打包完成${NC}"
+}
+
+cmd_build() {
+    local build_type="${1:-pkg-prd}"
+    echo -e "${BLUE}🏗️  本地测试构建...${NC}"
+    "$SCRIPT_DIR/test-build.sh" "$build_type"
+}
+
+cmd_check() {
+    echo -e "${BLUE}🔍 检查项目配置...${NC}"
+    "$SCRIPT_DIR/check-config.sh"
+}
+
+cmd_upload() {
+    echo -e "${BLUE}☁️  构建并上传 TestFlight...${NC}"
+    "$SCRIPT_DIR/upload-testflight.sh"
+}
+
+cmd_clean() {
+    echo -e "${BLUE}🧹 清理构建产物和缓存...${NC}"
+    cd "$PROJECT_ROOT"
+
+    rm -rf build
+    if [ -d "ActroRuntime/node_modules" ]; then
+        rm -rf ActroRuntime/node_modules
+    fi
+    rm -rf Pods
+
+    if command -v watchman &> /dev/null; then
+        echo "🧹 清理 Watchman 缓存..."
+        watchman watch-del-all
+    fi
+
+    echo -e "${GREEN}✅ 清理完成${NC}"
+}
+
+# 主入口
+COMMAND="${1:-help}"
+shift 2>/dev/null || true
+
+case "$COMMAND" in
+    install|i)
+        cmd_install "$@"
+        ;;
+    bundle|b)
+        cmd_bundle "$@"
+        ;;
+    build|bd)
+        cmd_build "$@"
+        ;;
+    check|c)
+        cmd_check "$@"
+        ;;
+    upload|u)
+        cmd_upload "$@"
+        ;;
+    clean|cl)
+        cmd_clean "$@"
+        ;;
+    help|h|--help|-h)
+        usage
+        ;;
+    *)
+        echo -e "${RED}❌ 未知命令: $COMMAND${NC}"
+        usage
+        exit 1
+        ;;
+esac

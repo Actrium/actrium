@@ -1,0 +1,6 @@
+
+task printPath {
+    doLast {
+        println "PATH: " + System.getenv("PATH")
+    }
+}

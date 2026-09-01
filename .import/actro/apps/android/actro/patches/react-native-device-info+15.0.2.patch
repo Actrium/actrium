@@ -1,0 +1,42 @@
+diff --git a/node_modules/react-native-device-info/android/build.gradle b/node_modules/react-native-device-info/android/build.gradle
+index e352534..12d9763 100644
+--- a/node_modules/react-native-device-info/android/build.gradle
++++ b/node_modules/react-native-device-info/android/build.gradle
+@@ -7,7 +7,7 @@ buildscript {
+             mavenCentral()
+             google()
+         }
+-        def buildGradleVersion = ext.has('buildGradlePluginVersion') ? ext.get('buildGradlePluginVersion') : '4.2.0'
++        def buildGradleVersion = ext.has('buildGradlePluginVersion') ? ext.get('buildGradlePluginVersion') : '8.8.2'
+ 
+         dependencies {
+             classpath "com.android.tools.build:gradle:$buildGradleVersion"
+@@ -22,7 +22,7 @@ def safeExtGet(prop, fallback) {
+ }
+ 
+ android {
+-    compileSdkVersion safeExtGet('compileSdkVersion', 34)
++    compileSdk = safeExtGet('compileSdkVersion', 34)
+     
+     def agpVersion = com.android.Version.ANDROID_GRADLE_PLUGIN_VERSION
+     // Check AGP version for backward compatibility reasons
+@@ -31,8 +31,8 @@ android {
+     }
+ 
+     defaultConfig {
+-        minSdkVersion safeExtGet('minSdkVersion', 16)
+-        targetSdkVersion safeExtGet('targetSdkVersion', 28)
++        minSdk = safeExtGet('minSdkVersion', 16)
++        targetSdk = safeExtGet('targetSdkVersion', 28)
+ 
+         versionCode 2
+         versionName "1.1"
+@@ -50,7 +50,7 @@ repositories {
+     google()
+     maven {
+         // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm
+-        url "$rootDir/../node_modules/react-native/android"
++        url = uri("$rootDir/../node_modules/react-native/android")
+     }
+ }
+ 

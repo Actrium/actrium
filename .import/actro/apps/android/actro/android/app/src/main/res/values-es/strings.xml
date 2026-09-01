@@ -1,0 +1,14 @@
+<resources>
+    <string name="tab_active">Actividad</string>
+    <string name="tab_bookmark">Marcadores</string>
+    <string name="tab_set">Preferencias</string>
+    <string name="search">Buscar...</string>
+    <string name="goback">Volver</string>
+    <string name="blank_tab">Nueva pestaña</string>
+    <string name="menu_bookmark">Marcador</string>
+    <string name="menu_close_tab">Cerrar pestaña</string>
+    <string name="menu_close_other_tabs">Cerrar otras pestañas</string>
+    <string name="menu_cancel_bookmark">Quitar marcador</string>
+    <string name="active_empty_text">Las apps aparecen aquí\nPulsa \"+\" arriba</string>
+    <string name="server_closed">Servidor cerrado</string>
+</resources>

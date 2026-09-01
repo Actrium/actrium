@@ -1,0 +1,15 @@
+/* 日本語 (ja) */
+
+/* 位置の権限 */
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "当アプリは位置情報を利用し、高精度なナビゲーションと観光ガイドサービスを提供します。";
+"NSLocationWhenInUseUsageDescription" = "当アプリは位置情報を利用し、高精度なナビゲーションと観光ガイドサービスを提供します。";
+
+/* マイクの権限 */
+"NSMicrophoneUsageDescription" = "マイク使用を許可すると音声で質問可能により便利なAIサービスを即時利用できます。";
+
+/* カメラの権限 */
+"NSCameraUsageDescription" = "カメラ権限を有効にすると、写真や動画を撮影してより豊富なAIインタラクション体験を得られます。";
+
+/* 写真ライブラリ権限 */
+"NSPhotoLibraryUsageDescription" = "アップロードする画像を選択するために写真ライブラリへのアクセスを許可してください。";
+"NSPhotoLibraryAddUsageDescription" = "アプリが写真を写真ライブラリに保存できるように許可してください。";

@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Actro</AssemblyName>
+    <RootNamespace>Actro.Windows</RootNamespace>
+    <!-- Single-source version: apps/windows/VERSION is the only place the
+         Windows client version is stated. Version drives the SDK defaults
+         for AssemblyVersion, FileVersion and InformationalVersion, and
+         scripts/package-windows.ps1 reads the same file for artifact and
+         installer version stamping. -->
+    <ActroWindowsVersionFile>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '..', 'VERSION'))</ActroWindowsVersionFile>
+    <Version>$([System.IO.File]::ReadAllText('$(ActroWindowsVersionFile)').Trim())</Version>
+    <!-- No app icon asset exists in the repo yet (macOS/iOS icon sets carry
+         only Contents.json); the executable keeps the default icon until an
+         icon source is authored. Wire it up here via ApplicationIcon and in
+         packaging/actro-installer.iss via SetupIconFile at that point. -->
+    <!-- Per-monitor DPI: theme metrics are stored at a 96-DPI base and
+         resolved through BrowserTheme.Metrics.Scale; fonts are specified in
+         points. SystemAware (the default) would blur on mixed-DPI setups. -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.*" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.*" />
+    <!-- DPAPI protection for the browser sync credential file; not part of
+         the .NET 8 shared framework. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Flatten into the output root: DllImport("actro_core") probes the
+         application base directory, not a native\ subdirectory, so keeping
+         the folder layout would leave the library unloadable at runtime.
+         The test project already flattens the same way because its glob
+         lives outside that project's directory. -->
+    <Content Include="native\*.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

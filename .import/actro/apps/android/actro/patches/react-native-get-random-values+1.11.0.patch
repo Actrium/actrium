@@ -1,0 +1,47 @@
+diff --git a/node_modules/react-native-get-random-values/android/build.gradle b/node_modules/react-native-get-random-values/android/build.gradle
+index 077d5be..498a273 100644
+--- a/node_modules/react-native-get-random-values/android/build.gradle
++++ b/node_modules/react-native-get-random-values/android/build.gradle
+@@ -7,7 +7,7 @@ buildscript {
+             mavenCentral()
+             google()
+         }
+-        def buildGradleVersion = ext.has('buildGradlePluginVersion') ? ext.get('buildGradlePluginVersion') : '4.2.2'
++        def buildGradleVersion = ext.has('buildGradlePluginVersion') ? ext.get('buildGradlePluginVersion') : '8.8.2'
+ 
+         dependencies {
+             classpath "com.android.tools.build:gradle:$buildGradleVersion"
+@@ -24,19 +24,19 @@ def safeExtGet(prop, fallback) {
+ android {
+     def agpVersion = com.android.Version.ANDROID_GRADLE_PLUGIN_VERSION.tokenize('.')[0].toInteger()
+     if (agpVersion >= 7) {
+-      namespace 'org.linusu'
++      namespace = 'org.linusu'
+     }
+-    compileSdkVersion safeExtGet('compileSdkVersion', 30)
++    compileSdk = safeExtGet('compileSdkVersion', 30)
+     buildToolsVersion safeExtGet('buildToolsVersion', '30.0.3')
+ 
+     defaultConfig {
+-        minSdkVersion safeExtGet('minSdkVersion', 16)
+-        targetSdkVersion safeExtGet('targetSdkVersion', 30)
++        minSdk = safeExtGet('minSdkVersion', 16)
++        targetSdk = safeExtGet('targetSdkVersion', 30)
+         versionCode 1
+         versionName "1.0"
+     }
+     lintOptions {
+-        abortOnError false
++        abortOnError = false
+     }
+ }
+ 
+@@ -45,7 +45,7 @@ repositories {
+     google()
+     maven {
+         // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm
+-        url "$rootDir/../node_modules/react-native/android"
++        url = uri("$rootDir/../node_modules/react-native/android")
+     }
+ }
+ 

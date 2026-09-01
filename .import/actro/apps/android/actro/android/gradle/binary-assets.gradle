@@ -1,0 +1,69 @@
+def assetHelper = rootProject.file("../../../../scripts/PrepareAndroidBinaryAssets.java")
+def assetLock = rootProject.file("binary-assets.lock.properties")
+def assetCache = new File(gradle.gradleUserHomeDir, "caches/actro-binary-assets")
+def isWindows = System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("windows")
+def javaExecutable = new File(
+        System.getProperty("java.home"),
+        "bin/${isWindows ? 'java.exe' : 'java'}"
+)
+
+def registerPreparationTask = { targetProject, taskName, component, outputPath ->
+    def generatedRoot = targetProject.layout.buildDirectory.dir(outputPath)
+    def prepareTask = targetProject.tasks.register(taskName, Exec) {
+        group = "build setup"
+        description = "Downloads, verifies, and extracts ${component} Android assets"
+
+        inputs.file(assetHelper)
+        inputs.file(assetLock)
+        inputs.property("component", component)
+        outputs.dir(generatedRoot)
+
+        doFirst {
+            def command = [
+                    javaExecutable.absolutePath,
+                    assetHelper.absolutePath,
+                    "--lock", assetLock.absolutePath,
+                    "--component", component,
+                    "--output", generatedRoot.get().asFile.absolutePath,
+                    "--cache", assetCache.absolutePath,
+            ]
+            if (gradle.startParameter.offline) {
+                command.add("--offline")
+            }
+            setCommandLine(command)
+        }
+    }
+    return [task: prepareTask, generatedRoot: generatedRoot]
+}
+
+def appProject = rootProject.project(":app")
+appProject.plugins.withId("com.android.application") {
+    def registration = registerPreparationTask(
+            appProject,
+            "prepareAsrModels",
+            "asr",
+            "generated/actro-binary-assets/asr"
+    )
+    appProject.android.sourceSets.main.assets.srcDir(
+            registration.generatedRoot.map { it.dir("assets") }
+    )
+    appProject.tasks.matching { it.name == "preBuild" }.configureEach {
+        dependsOn(registration.task)
+    }
+}
+
+def actrProject = rootProject.project(":actr-kotlin")
+actrProject.plugins.withId("com.android.library") {
+    def registration = registerPreparationTask(
+            actrProject,
+            "prepareActrNativeLibraries",
+            "actr",
+            "generated/actro-binary-assets/actr"
+    )
+    actrProject.android.sourceSets.main.jniLibs.srcDir(
+            registration.generatedRoot.map { it.dir("jniLibs") }
+    )
+    actrProject.tasks.matching { it.name == "preBuild" }.configureEach {
+        dependsOn(registration.task)
+    }
+}

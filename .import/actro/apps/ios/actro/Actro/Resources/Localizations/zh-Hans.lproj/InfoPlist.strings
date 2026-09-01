@@ -1,0 +1,14 @@
+/* 简体中文 (zh-Hans) */
+
+/* 位置权限 */
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "我们会使用你的位置来提供更精准的导航与导览服务";
+"NSLocationWhenInUseUsageDescription" = "我们会使用你的位置来提供更精准的导航与导览服务";
+
+/* 麦克风权限 */
+"NSMicrophoneUsageDescription" = "开启麦克风后，你可以用语音提问，获取更便捷的Ai服务";
+
+/* 相机权限 */
+"NSCameraUsageDescription" = "开启相机权限，可以拍摄照片和视频，获得更丰富的AI交互体验";
+/* 相册权限 */
+"NSPhotoLibraryUsageDescription" = "允许访问相册以选择要上传的图片。";
+"NSPhotoLibraryAddUsageDescription" = "允许将照片保存到相册，以便上传或保存生成的内容。";

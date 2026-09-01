@@ -1,0 +1,15 @@
+<resources>
+    <string name="tab_active">Activité</string>
+    <string name="tab_bookmark">Favoris</string>
+    <string name="tab_set">Préférences</string>
+    <string name="search">Rechercher...</string>
+    <string name="goback">Retour</string>
+    <string name="blank_tab">Nouvel onglet</string>
+    <string name="menu_bookmark">Signet</string>
+    <string name="menu_close_tab">Fermer l\'onglet</string>
+    <string name="menu_close_other_tabs">Fermer les autres onglets</string>
+    <string name="menu_cancel_bookmark">Supprimer le signet</string>
+    <string name="active_empty_text">Apps s\'affichent ici\nCliquez sur \"+\" en haut</string>
+    <string name="server_closed">Serveur fermé</string>
+</resources>
+

@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#000000"
+        android:orientation="vertical">
+
+        <FrameLayout
+            android:id="@+id/flTitle"
+            android:layout_width="match_parent"
+            android:layout_height="64dp">
+
+            <LinearLayout
+                android:id="@+id/llTitleTab"
+                android:layout_width="match_parent"
+                android:layout_height="64dp"
+                android:background="#D1D1D6"
+                android:orientation="horizontal"
+                android:paddingStart="4dp"
+                android:paddingTop="12dp"
+                android:paddingEnd="8dp">
+
+                <ImageView
+                    android:id="@+id/ivHome"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_gravity="center_vertical"
+                    android:padding="10dp"
+                    android:src="@drawable/ic_menu_left" />
+
+                <FrameLayout
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:clipChildren="false">
+
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/rvApp"
+                        android:layout_width="wrap_content"
+                        android:layout_height="match_parent"
+                        android:clipChildren="false"
+                        android:clipToPadding="false"
+                        android:paddingEnd="44dp" />
+
+                    <View
+                        android:layout_width="88dp"
+                        android:layout_height="match_parent"
+                        android:layout_gravity="end"
+                        android:background="@drawable/tablet_add_bg" />
+
+                    <ImageView
+                        android:id="@+id/ivAdd"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:layout_gravity="center_vertical"
+                        android:padding="10dp"
+                        android:src="@drawable/ic_add"
+                        app:tint="#000" />
+                </FrameLayout>
+
+                <ImageView
+                    android:id="@+id/ivAppMenu"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_gravity="center_vertical"
+                    android:layout_marginStart="16dp"
+                    android:padding="10dp"
+                    android:src="@drawable/ic_app_menu"
+                    app:tint="#000000" />
+            </LinearLayout>
+
+            <RelativeLayout
+                android:id="@+id/rlTitleGrid"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="16dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/tvBack"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_centerVertical="true"
+                    android:drawableLeft="@drawable/ic_back"
+                    android:drawableTint="#FFF"
+                    android:gravity="center_vertical"
+                    android:text="@string/goback"
+                    android:textColor="#FFF"
+                    android:textSize="18sp" />
+
+                <RadioGroup
+                    android:id="@+id/rgNavigation"
+                    android:layout_width="200dp"
+                    android:layout_height="56dp"
+                    android:layout_centerInParent="true"
+                    android:background="@drawable/bottom_nav_bg_dark"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="4dp">
+
+                    <RadioButton
+                        android:id="@+id/navActivity"
+                        android:layout_width="0dp"
+                        android:layout_height="52dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bottom_nav_indicator_dark"
+                        android:button="@null"
+                        android:checked="true"
+                        android:drawableTop="@drawable/nav_activity_selector"
+                        android:drawablePadding="4dp"
+                        android:drawableTint="@color/nav_text_selector"
+                        android:gravity="center"
+                        android:padding="8dp"
+                        android:text="@string/tab_active"
+                        android:textColor="@color/nav_text_selector"
+                        android:textSize="10sp" />
+
+                    <!-- 标签页 -->
+                    <RadioButton
+                        android:id="@+id/navTag"
+                        android:layout_width="0dp"
+                        android:layout_height="52dp"
+                        android:layout_weight="1"
+                        android:button="@null"
+                        android:drawableTop="@drawable/nav_tag_selector"
+                        android:drawablePadding="4dp"
+                        android:drawableTint="@color/nav_text_selector"
+                        android:gravity="center"
+                        android:padding="8dp"
+                        android:text="@string/tab_bookmark"
+                        android:textColor="@color/nav_text_selector"
+                        android:textSize="10sp" />
+
+
+                </RadioGroup>
+
+                <ImageView
+                    android:id="@+id/ivSet"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_alignParentEnd="true"
+                    android:layout_centerVertical="true"
+                    android:padding="12dp"
+                    android:src="@drawable/set" />
+            </RelativeLayout>
+
+        </FrameLayout>
+
+        <FrameLayout
+            android:id="@+id/flContent"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <FrameLayout
+                android:id="@+id/flTabContent"
+                android:layout_gravity="center_horizontal"
+                android:layout_width="match_parent"
+                android:background="#F2F2F6"
+                android:layout_height="match_parent" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvGridContent"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:visibility="gone" />
+
+            <ImageView
+                android:id="@+id/ivTransition"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
+
+            <FrameLayout
+                android:id="@+id/flSet"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_gravity="center"
+                android:visibility="gone" />
+
+            <FrameLayout
+                android:id="@+id/flBookmark"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
+
+            <androidx.constraintlayout.widget.ConstraintLayout
+                android:id="@+id/llSearch"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_gravity="bottom|center_horizontal"
+                android:layout_marginBottom="16dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="24dp"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_gravity="bottom|center_horizontal"
+                    android:background="@drawable/tablet_search_bg"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="11dp"
+                    app:layout_constraintBottom_toBottomOf="parent"
+                    app:layout_constraintEnd_toEndOf="parent"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintTop_toTopOf="parent"
+                    app:layout_constraintWidth_max="500dp">
+
+                    <ImageView
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:src="@drawable/ic_search"
+                        app:tint="#999" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingStart="12dp"
+                        android:text="@string/search"
+                        android:textColor="#999"
+                        android:textSize="17sp" />
+                </LinearLayout>
+            </androidx.constraintlayout.widget.ConstraintLayout>
+        </FrameLayout>
+    </LinearLayout>
+
+    <FrameLayout
+        android:id="@+id/flSearch"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="center"
+        android:background="#000"
+        android:visibility="gone" />
+</FrameLayout>
