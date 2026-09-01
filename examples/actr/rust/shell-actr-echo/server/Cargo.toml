@@ -6,7 +6,7 @@ edition = "2024"
 rust-version = "1.95"
 
 [dependencies]
-actr = { path = "../../../..", features = ["opentelemetry"] }
+actr = { path = "../../../../../crates/actr", features = ["opentelemetry"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 tracing = "0.1"
@@ -15,4 +15,4 @@ bytes = "1"
 async-trait = "0.1"
 
 [dev-dependencies]
-actr-framework = { path = "../../../../core/framework", features = ["test-utils"] }
+actr-framework = { path = "../../../../../crates/actr-framework", features = ["test-utils"] }

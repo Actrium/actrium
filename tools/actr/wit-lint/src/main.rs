@@ -6,8 +6,8 @@ use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let cwd = std::env::current_dir().expect("current_dir");
-    let wit_path = cwd.join("core/framework/wit-v2/actr-workload.wit");
-    let abi_path = cwd.join("core/framework/src/guest/dynclib_abi.rs");
+    let wit_path = cwd.join("crates/actr-framework/wit-v2/actr-workload.wit");
+    let abi_path = cwd.join("crates/actr-framework/src/guest/dynclib_abi.rs");
 
     match wit_lint::run_default_lint(&wit_path, &abi_path) {
         Ok(report) => {

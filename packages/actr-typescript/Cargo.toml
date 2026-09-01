@@ -21,10 +21,10 @@ napi = { version = "3.8.2", features = ["async", "tokio_rt"] }
 napi-derive = "3.5.1"
 
 # actr dependencies
-actr-protocol = { path = "../../core/protocol" }
-actr-framework = { path = "../../core/framework" }
-actr-config = { path = "../../core/config" }
-actr-hyper = { path = "../../core/hyper" }
+actr-protocol = { path = "../../crates/actr-protocol" }
+actr-framework = { path = "../../crates/actr-framework" }
+actr-config = { path = "../../crates/actr-config" }
+actr-hyper = { path = "../../crates/actr-hyper" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

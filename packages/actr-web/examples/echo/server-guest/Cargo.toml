@@ -22,8 +22,8 @@ name = "echo_guest"
 crate-type = ["cdylib"]
 
 [dependencies]
-actr-framework = { path = "../../../../../core/framework" }
-actr-protocol = { path = "../../../../../core/protocol" }
+actr-framework = { path = "../../../../../crates/actr-framework" }
+actr-protocol = { path = "../../../../../crates/actr-protocol" }
 anyhow = "1.0"
 async-trait = "0.1"
 bytes = "1.0"

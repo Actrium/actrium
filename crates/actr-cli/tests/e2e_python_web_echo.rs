@@ -23,16 +23,16 @@ fn python_generated_echo_workload_receives_actr_web_request() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("actr-cli should live under the workspace root");
-    let script = root.join("bindings/web/examples/echo/start-python-mock.sh");
+    let script = root.join("packages/actr-web/examples/echo/start-python-mock.sh");
     let out = Command::new("bash")
         .arg(&script)
         .env("SUITES", "PythonWorkload")
         .env("PYTHON_ECHO_MESSAGE", "hello-from-actr-web")
-        .current_dir(root.join("bindings/web/examples/echo"))
+        .current_dir(root.join("packages/actr-web/examples/echo"))
         .output()
         .expect("failed to run Python web echo e2e script");
 
-    assert_success(&out, "bindings/web/examples/echo/start-python-mock.sh");
+    assert_success(&out, "packages/actr-web/examples/echo/start-python-mock.sh");
 
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(

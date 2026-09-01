@@ -194,12 +194,12 @@ replace_path_with_version() {
 
     sed -i.tmp \
         -e "s|actr = { path = \"..\", version = \"[^\"]*\", features = \\[\"config\"\\] }|actr = { version = \"$actr_version\", features = [\"config\"] }|g" \
-        -e "s|actr-runtime-mailbox = { path = \"../core/runtime-mailbox\", version = \"[^\"]*\" }|actr-runtime-mailbox = \"$actr_version\"|g" \
-        -e "s|actr-config = { path = \"../core/config\", version = \"[^\"]*\" }|actr-config = \"$actr_version\"|g" \
-        -e "s|actr-protocol = { path = \"../core/protocol\", version = \"[^\"]*\" }|actr-protocol = \"$actr_version\"|g" \
-        -e "s|actr-service-compat = { path = \"../core/service-compat\", version = \"[^\"]*\" }|actr-service-compat = \"$actr_version\"|g" \
-        -e "s|actr-framework-protoc-codegen = { path = \"../tools/protoc-gen/rust\", version = \"[^\"]*\" }|actr-framework-protoc-codegen = \"$actr_version\"|g" \
-        -e "s|actr-web-protoc-codegen = { path = \"../tools/protoc-gen/web\", version = \"[^\"]*\" }|actr-web-protoc-codegen = \"$actr_version\"|g" \
+        -e "s|actr-runtime-mailbox = { path = \"../actr-runtime-mailbox\", version = \"[^\"]*\" }|actr-runtime-mailbox = \"$actr_version\"|g" \
+        -e "s|actr-config = { path = \"../actr-config\", version = \"[^\"]*\" }|actr-config = \"$actr_version\"|g" \
+        -e "s|actr-protocol = { path = \"../actr-protocol\", version = \"[^\"]*\" }|actr-protocol = \"$actr_version\"|g" \
+        -e "s|actr-service-compat = { path = \"../actr-service-compat\", version = \"[^\"]*\" }|actr-service-compat = \"$actr_version\"|g" \
+        -e "s|actr-framework-protoc-codegen = { path = \"../../tools/actr/protoc-gen/rust\", version = \"[^\"]*\" }|actr-framework-protoc-codegen = \"$actr_version\"|g" \
+        -e "s|actr-web-protoc-codegen = { path = \"../../tools/actr/protoc-gen/web\", version = \"[^\"]*\" }|actr-web-protoc-codegen = \"$actr_version\"|g" \
         Cargo.toml
     rm -f Cargo.toml.tmp
 

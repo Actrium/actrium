@@ -10,6 +10,7 @@ node_modules/
 dist/
 build/
 .turbo/
+**/*.rs.bk
 
 # Local configuration and secrets
 .env
@@ -19,5 +20,55 @@ build/
 
 # Logs and test artifacts
 *.log
+logs/
 coverage/
 test-results/
+lcov.info
+coverage-html/
+coverage.lcov
+
+# Editor swap files
+*.swp
+*.swo
+*~
+
+# Generated protocol and runtime data
+*.pb.go
+**/*_pb.rs
+*.db
+*.db-shm
+*.db-wal
+
+# Loran runtime configuration, including the imported Actrix compatibility
+# names. Checked-in examples remain explicitly allowed.
+loran-*.toml
+actrix-*.toml
+!**/actrix-config.example.toml
+loran-*.db*
+actrix-*.db*
+
+# Generated Actor package locks
+**/manifest.lock.toml
+!examples/actr/typescript/generated-echo-workload/manifest.lock.toml
+!packages/actr-web/examples/echo/client-guest/manifest.lock.toml
+!examples/actr/rust/package-echo/client-guest/manifest.lock.toml
+
+# Generated workload and CLI artifacts
+examples/actr/rust/wasm-echo/guest/built/
+examples/actr/rust/dynclib-echo/guest/target/
+crates/actr-hyper/tests/wasm_actor_fixture/built/
+crates/actr-cli/assets/web-runtime/actr_sw_host.js
+crates/actr-cli/assets/web-runtime/actr_sw_host_bg.wasm
+examples/actr/rust/echo-actr/dist/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+
+# Release and standalone-workspace artifacts
+release/reports/
+packages/actr-web/crates/framework-web-entry-smoke/Cargo.lock
+packages/actr-typescript/package-lock.json

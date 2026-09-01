@@ -19,8 +19,8 @@ crate-type = ["cdylib"]
 # The framework under test. The user-facing `web` feature below is the
 # one `entry!` consults at macro-expansion time — it propagates here via
 # `actr-framework/web`.
-actr-framework = { path = "../../../../core/framework" }
-actr-protocol = { path = "../../../../core/protocol" }
+actr-framework = { path = "../../../../crates/actr-framework" }
+actr-protocol = { path = "../../../../crates/actr-protocol" }
 async-trait = "0.1"
 bytes = "1.0"
 # `#[wasm_bindgen(start)]` expands to code that references the

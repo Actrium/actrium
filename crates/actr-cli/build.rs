@@ -32,9 +32,9 @@ fn main() {
 
     println!("cargo:rustc-env=ACTR_GIT_HASH={}", git_hash);
     println!("cargo:rustc-env=ACTR_GIT_DATE={}", git_date);
-    // Re-run build script if git head changes (monorepo: .git is in parent)
-    println!("cargo:rerun-if-changed=../.git/HEAD");
-    println!("cargo:rerun-if-changed=../.git/refs");
+    // Re-run build script if the monorepo Git head changes.
+    println!("cargo:rerun-if-changed=../../.git/HEAD");
+    println!("cargo:rerun-if-changed=../../.git/refs");
     // Re-run if web runtime assets change
     println!("cargo:rerun-if-changed=assets/web-runtime");
 
@@ -44,10 +44,11 @@ fn main() {
 fn copy_generated_web_assets() {
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let asset_dir = manifest_dir.join("assets/web-runtime");
-    let generated_dir = manifest_dir
+    let workspace_root = manifest_dir
         .parent()
-        .expect("cli crate should live under the workspace root")
-        .join("bindings/web/dist/sw");
+        .and_then(Path::parent)
+        .expect("actr-cli should live under the monorepo crates directory");
+    let generated_dir = workspace_root.join("packages/actr-web/dist/sw");
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("web-runtime");
 
     fs::create_dir_all(&out_dir).unwrap();
@@ -79,7 +80,7 @@ fn resolve_generated_asset_source(asset_dir: &Path, generated_dir: &Path, name: 
 fn fail_missing_web_asset(path: &Path) -> ! {
     panic!(
         "missing generated web runtime asset: {}\n\
-         run `bash bindings/web/scripts/sync-cli-assets.sh --build` from the workspace root \
+         run `bash packages/actr-web/scripts/sync-cli-assets.sh --build` from the workspace root \
          before building actr-cli",
         path.display()
     );

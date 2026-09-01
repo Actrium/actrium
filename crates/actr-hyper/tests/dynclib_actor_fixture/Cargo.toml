@@ -14,8 +14,8 @@ cdylib = ["actr-framework/cdylib"]
 web = []
 
 [dependencies]
-actr-framework = { path = "../../../../core/framework" }
-actr-protocol = { path = "../../../../core/protocol" }
+actr-framework = { path = "../../../actr-framework" }
+actr-protocol = { path = "../../../actr-protocol" }
 async-trait = "0.1"
 bytes = "1.10"
 prost = "0.14"

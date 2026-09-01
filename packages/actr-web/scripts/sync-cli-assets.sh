@@ -1,28 +1,28 @@
 #!/bin/bash
-# Sync canonical web runtime artefacts into cli/assets/web-runtime/.
+# Sync canonical web runtime artefacts into crates/actr-cli/assets/web-runtime/.
 #
-# `cli/src/web_assets.rs` embeds these files via `include_bytes!` /
+# `crates/actr-cli/src/web_assets.rs` embeds these files via `include_bytes!` /
 # `include_str!`. Without this script, edits to the source-of-truth files
 # silently drift from what the `actr` binary serves, leading to the kind of
 # stale-asset confusion that produced the TD-005 false alarm and forced
 # repeated manual copies during TD-006.
 #
 # Sources (canonical):
-#   bindings/web/dist/sw/actr_sw_host_bg.wasm   ← from sw-host/build.sh
-#   bindings/web/dist/sw/actr_sw_host.js        ← from sw-host/build.sh
-#   bindings/web/packages/web-sdk/src/actor.sw.js
+#   packages/actr-web/dist/sw/actr_sw_host_bg.wasm   ← from sw-host/build.sh
+#   packages/actr-web/dist/sw/actr_sw_host.js        ← from sw-host/build.sh
+#   packages/actr-web/packages/web-sdk/src/actor.sw.js
 #
 # Destination:
-#   cli/assets/web-runtime/<same names>
+#   crates/actr-cli/assets/web-runtime/<same names>
 #
-# Note: cli/assets/web-runtime/actr-host.html has no upstream source — it
+# Note: crates/actr-cli/assets/web-runtime/actr-host.html has no upstream source — it
 # is edited in place — so this script does NOT touch it.
 #
 # Usage:
-#   bash bindings/web/scripts/sync-cli-assets.sh           # sync only
-#   bash bindings/web/scripts/sync-cli-assets.sh --build   # build sw-host wasm first
-#   bash bindings/web/scripts/sync-cli-assets.sh --check   # verify in-sync, exit 1 on drift (CI use)
-#   bash bindings/web/scripts/sync-cli-assets.sh --check --skip-sw-host
+#   bash packages/actr-web/scripts/sync-cli-assets.sh           # sync only
+#   bash packages/actr-web/scripts/sync-cli-assets.sh --build   # build sw-host wasm first
+#   bash packages/actr-web/scripts/sync-cli-assets.sh --check   # verify in-sync, exit 1 on drift (CI use)
+#   bash packages/actr-web/scripts/sync-cli-assets.sh --check --skip-sw-host
 #       # verify stable source assets only; useful when sw-host wasm is rebuilt
 #       # on a different host/toolchain and is not byte-for-byte comparable
 
@@ -31,9 +31,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
-DIST_SW="$REPO_ROOT/bindings/web/dist/sw"
-WEB_SDK_SRC="$REPO_ROOT/bindings/web/packages/web-sdk/src"
-CLI_ASSETS="$REPO_ROOT/cli/assets/web-runtime"
+DIST_SW="$REPO_ROOT/packages/actr-web/dist/sw"
+WEB_SDK_SRC="$REPO_ROOT/packages/actr-web/packages/web-sdk/src"
+CLI_ASSETS="$REPO_ROOT/crates/actr-cli/assets/web-runtime"
 
 # (source, destination-name) pairs.
 PAIRS=(
@@ -62,7 +62,7 @@ done
 
 if [ "$mode" = "build-then-sync" ]; then
   echo "→ rebuilding sw-host wasm via build.sh..."
-  ( cd "$REPO_ROOT/bindings/web/crates/sw-host" && ACTR_SKIP_CLI_ASSET_SYNC=1 bash build.sh )
+  ( cd "$REPO_ROOT/packages/actr-web/crates/sw-host" && ACTR_SKIP_CLI_ASSET_SYNC=1 bash build.sh )
 fi
 
 mkdir -p "$CLI_ASSETS"
@@ -85,7 +85,7 @@ for pair in "${PAIRS[@]}"; do
       continue
     fi
     if [[ "$name" == actr_sw_host* ]]; then
-      echo "  hint: run with --build, or first execute bindings/web/crates/sw-host/build.sh" >&2
+      echo "  hint: run with --build, or first execute packages/actr-web/crates/sw-host/build.sh" >&2
     fi
     exit 1
   fi
@@ -107,12 +107,12 @@ done
 
 if [ "$mode" = "check" ]; then
   if [ "$drift" -eq 0 ]; then
-    echo "✓ cli/assets/web-runtime is in sync with bindings/web sources"
+    echo "✓ crates/actr-cli/assets/web-runtime is in sync with packages/actr-web sources"
     exit 0
   else
     echo
-    echo "cli/assets/web-runtime has drifted from bindings/web sources." >&2
-    echo "Run: bash bindings/web/scripts/sync-cli-assets.sh" >&2
+    echo "crates/actr-cli/assets/web-runtime has drifted from packages/actr-web sources." >&2
+    echo "Run: bash packages/actr-web/scripts/sync-cli-assets.sh" >&2
     exit 1
   fi
 fi

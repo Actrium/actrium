@@ -8,10 +8,10 @@ license = "Apache-2.0"
 [workspace]
 
 [dependencies]
-actr-framework = { path = "../../../core/framework" }
-actr-protocol = { path = "../../../core/protocol" }
-actr-runtime = { path = "../../../core/runtime" }
-actr-config = { path = "../../../core/config" }
+actr-framework = { path = "../../../../crates/actr-framework" }
+actr-protocol = { path = "../../../../crates/actr-protocol" }
+actr-runtime = { path = "../../../../crates/actr-runtime" }
+actr-config = { path = "../../../../crates/actr-config" }
 tokio = { version = "1.41", features = ["full"] }
 tracing = "0.1"
 async-trait = "0.1"

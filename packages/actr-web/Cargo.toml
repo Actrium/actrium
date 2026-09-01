@@ -91,10 +91,10 @@ handlebars = "5.1"
 heck = "0.5"
 
 # Actr Dependencies
-actr-protocol = { path = "../../core/protocol" }
-actr-framework = { path = "../../core/framework" }
-actr-platform-traits = { path = "../../core/platform-traits" }
-actr-runtime-mailbox = { path = "../../core/runtime-mailbox", default-features = false }
+actr-protocol = { path = "../../crates/actr-protocol" }
+actr-framework = { path = "../../crates/actr-framework" }
+actr-platform-traits = { path = "../../crates/actr-platform-traits" }
+actr-runtime-mailbox = { path = "../../crates/actr-runtime-mailbox", default-features = false }
 
 [profile.release]
 opt-level = "z"

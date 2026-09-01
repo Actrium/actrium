@@ -1027,7 +1027,7 @@ async fn serve_host_html(
 ///
 /// Phase 8 collapsed this to a single body — the previous Component Model
 /// path and its `ACTR_WEB_GUEST_MODE` selector were deleted along with
-/// `actor.sw.js` (CM variant). See `bindings/web/docs/option-u-wit-compile-web.zh.md`
+/// `actor.sw.js` (CM variant). See `packages/actr-web/docs/option-u-wit-compile-web.zh.md`
 /// §11.
 async fn serve_actor_sw_js(
     axum::extract::State(_state): axum::extract::State<Arc<WebServerState>>,

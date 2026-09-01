@@ -157,15 +157,18 @@ pub fn align_rust_project_with_workspace(project_dir: &Path) -> Result<()> {
     let mut patch = String::from("\n[patch.crates-io]\n");
     let crates = [
         ("actr", workspace.clone()),
-        ("actr-protocol", workspace.join("core/protocol")),
-        ("actr-framework", workspace.join("core/framework")),
-        ("actr-hyper", workspace.join("core/hyper")),
-        ("actr-runtime", workspace.join("core/runtime")),
-        ("actr-config", workspace.join("core/config")),
-        ("actr-service-compat", workspace.join("core/service-compat")),
+        ("actr-protocol", workspace.join("crates/actr-protocol")),
+        ("actr-framework", workspace.join("crates/actr-framework")),
+        ("actr-hyper", workspace.join("crates/actr-hyper")),
+        ("actr-runtime", workspace.join("crates/actr-runtime")),
+        ("actr-config", workspace.join("crates/actr-config")),
+        (
+            "actr-service-compat",
+            workspace.join("crates/actr-service-compat"),
+        ),
         (
             "actr-runtime-mailbox",
-            workspace.join("core/runtime-mailbox"),
+            workspace.join("crates/actr-runtime-mailbox"),
         ),
     ];
 

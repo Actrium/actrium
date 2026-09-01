@@ -135,12 +135,12 @@ dashmap.workspace = true
 dotenvy = "0.15"
 num_cpus = "1.17"
 actr-mock-actrix = { workspace = true, optional = true }
-actrix-signaling-service = { package = "actrix-signaling", path = "../../actrix/crates/signaling", optional = true }
-actrix-stun-service = { package = "actrix-stun", path = "../../actrix/crates/stun", optional = true }
-actrix-turn = { path = "../../actrix/crates/turn", optional = true }
+actrix-signaling-service = { package = "actrix-signaling", path = "../loran-signaling", optional = true }
+actrix-stun-service = { package = "actrix-stun", path = "../loran-stun", optional = true }
+actrix-turn = { path = "../loran-turn", optional = true }
 axum = { workspace = true, optional = true }
 hmac = { workspace = true, optional = true }
-platform = { package = "actrix-platform", path = "../../actrix/crates/platform", optional = true }
+platform = { package = "actrix-platform", path = "../loran-platform", optional = true }
 rustls = { workspace = true, optional = true }
 sha1 = { version = "0.10", optional = true }
 turn_crate = { workspace = true, optional = true }
