@@ -1615,6 +1615,98 @@ fn explicit_envelope(request_id: &str) -> RpcEnvelope {
     }
 }
 
+fn component_package_manifest_for_test() -> actr_pack::PackageManifest {
+    actr_pack::PackageManifest {
+        manufacturer: "test".to_string(),
+        name: "ComponentEcho".to_string(),
+        version: "0.1.0".to_string(),
+        binary: actr_pack::BinaryEntry {
+            path: "bin/actor.wasm".to_string(),
+            target: "wasm32-wasip2".to_string(),
+            hash: String::new(),
+            size: None,
+            kind: Some(actr_pack::BinaryKind::Component),
+        },
+        signature_algorithm: "ed25519".to_string(),
+        signing_key_id: None,
+        resources: vec![],
+        proto_files: vec![],
+        lock_file: None,
+        metadata: actr_pack::ManifestMetadata::default(),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn component_explicit_boundary_non_empty_return_falls_back_to_return() {
+    struct RawComponentReturnHandle;
+    #[async_trait::async_trait]
+    impl LinkedWorkloadHandle for RawComponentReturnHandle {
+        async fn dispatch(
+            &self,
+            _envelope: RpcEnvelope,
+            _ctx: Arc<crate::context::RuntimeContext>,
+        ) -> ActorResult<FrameworkBytes> {
+            Ok(FrameworkBytes::from_static(b"raw-component-return"))
+        }
+    }
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let config = dedup_test_config(&dir);
+    let actor_id = ActrId {
+        realm: config.realm,
+        serial_number: 1,
+        r#type: config.package.actr_type.clone(),
+    };
+    let workload =
+        Workload::Linked(Arc::new(RawComponentReturnHandle) as Arc<dyn LinkedWorkloadHandle>);
+    let mut inner = Inner::build(
+        config,
+        workload,
+        Some(component_package_manifest_for_test()),
+        None,
+        None,
+        100,
+        Duration::from_secs(60),
+        crate::config::DispatchConcurrency::default(),
+        None,
+        false,
+    )
+    .await
+    .expect("Inner::build must succeed");
+    inner.actor_id = Some(actor_id);
+    inner.credential_state = Some(CredentialState::new(AIdCredential::default(), None, None));
+    // Simulate the packaged Component path: the host cannot query a Rust
+    // dispatcher and therefore selects the Component explicit reply boundary.
+    inner.linked_handle = None;
+    let inner = Arc::new(inner);
+
+    let reply_sink = crate::lifecycle::reply_deliver::ReplySink::Mailbox {
+        caller: Err("test-caller".to_string()),
+        msg_id: uuid::Uuid::new_v4(),
+        span: tracing::Span::none(),
+    };
+    let outcome = inner
+        .handle_incoming(
+            explicit_envelope("component-return-fallback"),
+            None,
+            Some(reply_sink),
+            None,
+        )
+        .await;
+
+    match outcome {
+        IncomingOutcome::Replied(Ok(bytes)) => {
+            assert_eq!(bytes, FrameworkBytes::from_static(b"raw-component-return"));
+        }
+        other => panic!("non-empty Component return must not become Deferred: {other:?}"),
+    }
+    assert_eq!(
+        inner.outstanding_replies.len(),
+        0,
+        "RETURN fallback must release the EXPLICIT outstanding slot"
+    );
+}
+
 /// RFC-0323 §4/§5: an EXPLICIT dispatch completes `Deferred` (ack-at-return),
 /// the `outstanding_replies` gauge rises to 1, and firing the captured
 /// `Deliver` releases it back to 0.

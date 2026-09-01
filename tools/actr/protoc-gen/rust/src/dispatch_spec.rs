@@ -47,7 +47,12 @@ impl DispatchSpec {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read dispatch spec at {}", path.display()))?;
         let spec: DispatchSpec = serde_json::from_str(&content)
-            .with_context(|| format!("failed to parse dispatch spec at {}", path.display()))?;
+            .with_context(|| {
+                format!(
+                    "failed to parse dispatch spec at {}; rerun `actr gen` to refresh generated metadata",
+                    path.display()
+                )
+            })?;
         if spec.schema_version != "v1" {
             bail!(
                 "unsupported dispatch spec schema_version `{}`; expected `v1`",

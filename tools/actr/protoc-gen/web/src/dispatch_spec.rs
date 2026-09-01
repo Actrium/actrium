@@ -52,7 +52,11 @@ impl DispatchSpec {
             .map_err(|e| format!("Failed to read dispatch spec {}: {e}", path.display()))?;
 
         let spec: DispatchSpec = serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse dispatch spec JSON: {e}"))?;
+            .map_err(|e| {
+                format!(
+                    "Failed to parse dispatch spec JSON: {e}; rerun `actr gen` to refresh generated metadata"
+                )
+            })?;
 
         if spec.schema_version != DISPATCH_SPEC_SCHEMA_VERSION {
             return Err(format!(

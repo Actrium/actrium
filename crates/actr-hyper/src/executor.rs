@@ -501,7 +501,26 @@ pub(crate) fn spawn_runner_with_mode(
 /// send its reply, then receive the next. Exits when the channel closes (all
 /// handles dropped) or on an explicit `Shutdown`.
 async fn run_loop(mut workload: Workload, mut rx: mpsc::Receiver<ActorCmd>) {
-    while let Some(cmd) = rx.recv().await {
+    let mut deferred_reply_sweep = serial_deferred_reply_sweep_interval(&workload);
+    loop {
+        let cmd = tokio::select! {
+            maybe_cmd = rx.recv() => {
+                let Some(cmd) = maybe_cmd else {
+                    break;
+                };
+                cmd
+            }
+            Some(sweep_at) = serial_deferred_reply_sweep_tick(&mut deferred_reply_sweep) => {
+                let expired = serial_sweep_expired_deferred_replies(&mut workload, sweep_at);
+                if expired != 0 {
+                    tracing::warn!(
+                        expired,
+                        "timed out Component Model deferred replies from idle serial runner"
+                    );
+                }
+                continue;
+            }
+        };
         if cmd.reply_is_closed() {
             continue;
         }
@@ -611,6 +630,45 @@ async fn run_loop(mut workload: Workload, mut rx: mpsc::Receiver<ActorCmd>) {
             }
         }
     }
+}
+
+fn serial_deferred_reply_sweep_interval(
+    workload: &Workload,
+) -> Option<crate::timer::AuditedInterval> {
+    #[cfg(feature = "wasm-engine")]
+    {
+        if matches!(workload, Workload::Wasm(_)) {
+            let mut ticker = crate::timer::interval(
+                crate::timer::ids::INFLIGHT_TTL_SWEEP,
+                std::time::Duration::from_secs(5),
+            );
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            return Some(ticker);
+        }
+    }
+    let _ = workload;
+    None
+}
+
+async fn serial_deferred_reply_sweep_tick(
+    ticker: &mut Option<crate::timer::AuditedInterval>,
+) -> Option<tokio::time::Instant> {
+    match ticker {
+        Some(ticker) => Some(ticker.tick().await),
+        None => std::future::pending().await,
+    }
+}
+
+fn serial_sweep_expired_deferred_replies(
+    workload: &mut Workload,
+    now: tokio::time::Instant,
+) -> usize {
+    #[cfg(feature = "wasm-engine")]
+    if let Workload::Wasm(workload) = workload {
+        return workload.sweep_expired_deferred_replies(now);
+    }
+    let _ = (workload, now);
+    0
 }
 
 /// Interleaved command loop for a `Linked` workload (B2 native concurrency).
