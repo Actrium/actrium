@@ -5,11 +5,8 @@ repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
 primary_lower="$(printf '%s%s' 'as' 'kc')"
-primary_title="$(printf '%s%s' 'As' 'kc')"
-primary_upper="$(printf '%s%s' 'AS' 'KC')"
 peer_lower="$(printf '%s%s' 'as' 'ks')"
-peer_title="$(printf '%s%s' 'As' 'ks')"
-peer_upper="$(printf '%s%s' 'AS' 'KS')"
+token_pattern="(^|[^A-Za-z0-9_])(${primary_lower}|${peer_lower})([^A-Za-z0-9_]|$)"
 
 failures="$(mktemp)"
 trap 'rm -f "$failures"' EXIT
@@ -22,17 +19,30 @@ while IFS= read -r -d '' path; do
   fi
 done < <(git ls-files -co --exclude-standard -z)
 
-git grep -nI \
+git grep -niI -w \
   -e "$primary_lower" \
-  -e "$primary_title" \
-  -e "$primary_upper" \
+  -e "$peer_lower" \
   -- . >>"$failures" 2>/dev/null || true
 
-git grep -nI -w \
-  -e "$peer_lower" \
-  -e "$peer_title" \
-  -e "$peer_upper" \
-  -- . >>"$failures" 2>/dev/null || true
+if [[ "$(git rev-parse --is-shallow-repository)" == "true" ]]; then
+  printf 'full history is required for the retired protocol audit\n' >>"$failures"
+else
+  if git rev-list --objects --all \
+    | cut -d' ' -f2- \
+    | LC_ALL=C grep -aEi "$token_pattern" >/dev/null; then
+    printf 'retired identifier found in a retained history path\n' >>"$failures"
+  fi
+
+  if git log --all --format=%B \
+    | LC_ALL=C grep -aEi "$token_pattern" >/dev/null; then
+    printf 'retired identifier found in a retained commit message\n' >>"$failures"
+  fi
+
+  if git cat-file --batch-all-objects --batch \
+    | LC_ALL=C grep -aEi "$token_pattern" >/dev/null; then
+    printf 'retired identifier found in the Git object database\n' >>"$failures"
+  fi
+fi
 
 if [[ -s "$failures" ]]; then
   echo "Retired package protocol identifiers are not allowed:" >&2
