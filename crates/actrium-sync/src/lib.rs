@@ -765,29 +765,29 @@ fn validate_push_request_context(
         return Err(BrowserSyncServerError::Forbidden("device mismatch"));
     }
 
-    if let Some(request_type) = value.get("requestType").and_then(Value::as_str) {
-        if request_type.trim() != "push" {
-            return Err(BrowserSyncServerError::InvalidPayload("request type"));
-        }
+    if let Some(request_type) = value.get("requestType").and_then(Value::as_str)
+        && request_type.trim() != "push"
+    {
+        return Err(BrowserSyncServerError::InvalidPayload("request type"));
     }
 
     let push_batch = value
         .get("pushBatch")
         .ok_or(BrowserSyncServerError::InvalidPayload("push batch"))?;
     validate_storage_schema_version(push_batch, "push batch storage schema version")?;
-    if let Some(batch_scope) = push_batch.get("scope").and_then(Value::as_str) {
-        if normalize_service_id(batch_scope, "push batch scope")? != context_account {
-            return Err(BrowserSyncServerError::Forbidden(
-                "push batch scope mismatch",
-            ));
-        }
+    if let Some(batch_scope) = push_batch.get("scope").and_then(Value::as_str)
+        && normalize_service_id(batch_scope, "push batch scope")? != context_account
+    {
+        return Err(BrowserSyncServerError::Forbidden(
+            "push batch scope mismatch",
+        ));
     }
-    if let Some(batch_device_id) = push_batch.get("deviceId").and_then(Value::as_str) {
-        if normalize_service_id(batch_device_id, "push batch device id")? != context_device {
-            return Err(BrowserSyncServerError::Forbidden(
-                "push batch device mismatch",
-            ));
-        }
+    if let Some(batch_device_id) = push_batch.get("deviceId").and_then(Value::as_str)
+        && normalize_service_id(batch_device_id, "push batch device id")? != context_device
+    {
+        return Err(BrowserSyncServerError::Forbidden(
+            "push batch device mismatch",
+        ));
     }
 
     let records = push_batch
@@ -914,10 +914,10 @@ fn sync_http_pull_request_parts(
 ) -> Result<(i64, String)> {
     let value: Value = serde_json::from_str(body)?;
     validate_storage_schema_version(&value, "pull storage schema version")?;
-    if let Some(request_type) = value.get("requestType").and_then(Value::as_str) {
-        if request_type.trim() != "pull" {
-            return Err(BrowserSyncServerError::InvalidPayload("pull request type"));
-        }
+    if let Some(request_type) = value.get("requestType").and_then(Value::as_str)
+        && request_type.trim() != "pull"
+    {
+        return Err(BrowserSyncServerError::InvalidPayload("pull request type"));
     }
 
     let scope = value
