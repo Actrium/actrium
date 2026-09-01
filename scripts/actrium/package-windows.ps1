@@ -74,7 +74,7 @@ function Write-Note([string]$Message) { Write-Host "[note] $Message" }
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 
 # --- Version: single source of truth is windows/VERSION. ---------------
-$versionFile = Join-Path $repoRoot 'apps\windows\VERSION'
+$versionFile = Join-Path $repoRoot 'windows\VERSION'
 if (-not (Test-Path -LiteralPath $versionFile)) {
     throw "version file not found: $versionFile"
 }
@@ -103,7 +103,7 @@ Write-Ok "using dotnet at $DotnetExe"
 # --- Publish (self-contained, single output folder). -------------------------
 $distRoot = Join-Path $repoRoot 'dist\windows'
 $publishDir = Join-Path $distRoot "publish\Actro-$version-$Runtime"
-$project = Join-Path $repoRoot 'apps\windows\actro\Actro.Windows.csproj'
+$project = Join-Path $repoRoot 'windows\Actro.Windows.csproj'
 
 if (Test-Path -LiteralPath $publishDir) {
     Write-Step "removing stale publish folder $publishDir"
@@ -187,7 +187,7 @@ if ($SkipWebView2Bootstrapper) {
     $withBootstrapper = $true
 }
 
-$issScript = Join-Path $repoRoot 'apps\windows\actro\packaging\actro-installer.iss'
+$issScript = Join-Path $repoRoot 'windows\packaging\actro-installer.iss'
 $setupBaseName = "Actro-$version-$Runtime-setup"
 $isccArgs = @(
     "/DAppVersion=$version",

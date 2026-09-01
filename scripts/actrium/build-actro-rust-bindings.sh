@@ -2,11 +2,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 usage() {
     cat <<'USAGE'
-Usage: scripts/build-actro-rust-bindings.sh [runtime|apple|android|windows|all]
+Usage: scripts/actrium/build-actro-rust-bindings.sh [runtime|apple|android|windows|all]
 
 Builds generated native bindings and local binary artifacts for Actro Rust
 client crates.

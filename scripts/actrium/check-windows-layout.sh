@@ -1919,6 +1919,18 @@ check_pattern_in_each_file \
   windows/Actro.Windows.csproj
 
 check_pattern_in_each_file \
+  'Compile Remove="tests\\\*\*\\\*\.cs"' \
+  "Windows application excludes nested test sources from its default compile glob" \
+  "Windows application does not exclude nested test sources from its default compile glob" \
+  windows/Actro.Windows.csproj
+
+if rg -Fq '..\actro\' windows/tests/Actro.Windows.Tests.csproj; then
+  print_failure "Windows tests still reference the pre-migration actro subdirectory"
+else
+  print_ok "Windows tests reference the migrated windows source and native directories"
+fi
+
+check_pattern_in_each_file \
   'warning MSB3277' \
   "Windows verifier gates unexpected dotnet warnings" \
   "Windows verifier does not gate unexpected dotnet warnings" \
@@ -1958,7 +1970,7 @@ check_pattern_in_each_file \
 
 missing_packaging_pipeline_symbols=()
 for packaging_symbol in \
-  'apps.windows.VERSION' \
+  'windows\\VERSION' \
   '[-][-]self-contained' \
   'actro_core\.dll' \
   'Compress-Archive' \
