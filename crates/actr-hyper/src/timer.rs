@@ -279,9 +279,45 @@ timer_inventory! {
     },
     PEER_REQUEST_DEADLINE => {
         id: "outbound.peer.request", owner: "peer_gate", category: FailureDeadline,
-        duration: "caller or payload send budget", arm: "peer request/send starts",
-        success: "send and response path completes", interrupt: "caller cancellation or completion",
-        expiry: "close stale transport and return timeout", reset: "new request only", external: false
+        duration: "caller absolute RPC deadline", arm: "peer request preflight starts",
+        success: "preflight, send, and response path completes", interrupt: "caller cancellation or completion",
+        expiry: "close an implicated transport only after send starts and return timeout", reset: "new request only", external: false
+    },
+    HOST_REQUEST_DEADLINE => {
+        id: "outbound.host.request", owner: "host_transport", category: FailureDeadline,
+        duration: "caller absolute RPC deadline", arm: "host request lane lookup starts",
+        success: "lane admission, send, and response path completes", interrupt: "caller cancellation or completion",
+        expiry: "remove pending correlation and return timeout", reset: "new request only", external: false
+    },
+    OUTBOUND_TELL_DEADLINE => {
+        id: "outbound.tell", owner: "outbound_gate", category: FailureDeadline,
+        duration: "default Tell send budget", arm: "Tell readiness/preflight starts",
+        success: "Tell submission completes", interrupt: "caller cancellation or completion",
+        expiry: "return timeout without starting a new budget", reset: "new Tell only", external: false
+    },
+    OUTBOUND_DATA_CHUNK_DEADLINE => {
+        id: "outbound.data_chunk", owner: "outbound_gate", category: FailureDeadline,
+        duration: "default DataStream chunk send budget", arm: "DataStream readiness/preflight starts",
+        success: "chunk submission completes", interrupt: "caller cancellation or completion",
+        expiry: "return timeout without starting a new budget", reset: "new chunk only", external: false
+    },
+    RUNTIME_CALL_PREFLIGHT => {
+        id: "context.call.preflight", owner: "runtime_context", category: FailureDeadline,
+        duration: "caller absolute RPC deadline", arm: "native call session validation starts",
+        success: "session is current and active", interrupt: "caller cancellation",
+        expiry: "return timeout before gate dispatch", reset: "inherits call entry deadline; never reset", external: false
+    },
+    RUNTIME_TELL_PREFLIGHT => {
+        id: "context.tell.preflight", owner: "runtime_context", category: FailureDeadline,
+        duration: "default Tell send budget", arm: "Tell readiness/session validation starts",
+        success: "session is current and active", interrupt: "caller cancellation",
+        expiry: "return timeout before gate dispatch", reset: "inherits Tell entry budget; never reset", external: false
+    },
+    RUNTIME_DATA_CHUNK_PREFLIGHT => {
+        id: "context.data_chunk.preflight", owner: "runtime_context", category: FailureDeadline,
+        duration: "default DataStream chunk send budget", arm: "DataStream readiness/session validation starts",
+        success: "session is current and active", interrupt: "caller cancellation",
+        expiry: "return timeout before gate dispatch", reset: "inherits chunk entry budget; never reset", external: false
     },
     PEER_PENDING_RECOVERY_GRACE => {
         id: "outbound.peer.pending_recovery_grace", owner: "peer_gate", category: BusinessHysteresis,
@@ -289,12 +325,6 @@ timer_inventory! {
         success: "the same peer becomes sendable again", interrupt: "peer recovery or gate shutdown",
         expiry: "release pending RPC response waits without closing the destination transport",
         reset: "each distinct sendability falling edge", external: false
-    },
-    CORRELATION_RESPONSE => {
-        id: "transport.correlation.response", owner: "correlation", category: FailureDeadline,
-        duration: "caller response timeout", arm: "pending RPC awaits response",
-        success: "oneshot response", interrupt: "response channel close",
-        expiry: "remove pending correlation and return timeout", reset: "new RPC only", external: false
     },
     PEER_TRANSPORT_CREATE => {
         id: "transport.peer.create", owner: "peer_transport", category: FailureDeadline,

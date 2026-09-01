@@ -128,6 +128,66 @@ async fn send_request_timeout_removes_pending_entry() {
     );
 }
 
+#[tokio::test(start_paused = true)]
+async fn send_request_uses_one_deadline_across_channel_admission_and_response() {
+    let t = Arc::new(HostTransport::new());
+
+    // Saturate the reliable lane so the request must first wait for channel
+    // admission. The production capacity is intentionally exercised here:
+    // this regression is about the real bounded queue, not a test-only lane.
+    for sequence in 0..1024 {
+        t.send_message(
+            PayloadType::RpcReliable,
+            None,
+            envelope(&format!("queued-{sequence}")),
+        )
+        .await
+        .expect("filling the reliable lane should succeed");
+    }
+
+    let request_transport = Arc::clone(&t);
+    let request = tokio::spawn(async move {
+        let mut env = envelope("request-after-backpressure");
+        env.timeout_ms = 100;
+        request_transport
+            .send_request(PayloadType::RpcReliable, None, env)
+            .await
+    });
+
+    tokio::task::yield_now().await;
+    assert_eq!(
+        t.pending_len(),
+        1,
+        "request should be waiting for admission"
+    );
+
+    // Spend 60 ms of the caller budget waiting for capacity, then admit the
+    // request. Only 40 ms must remain for the response wait.
+    tokio::time::advance(Duration::from_millis(60)).await;
+    t.reliable_rx
+        .lock()
+        .await
+        .recv()
+        .await
+        .expect("the saturated lane should contain an envelope");
+    tokio::task::yield_now().await;
+    assert!(!request.is_finished(), "no response has been completed yet");
+
+    tokio::time::advance(Duration::from_millis(40)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        request.is_finished(),
+        "channel admission must consume the original caller deadline"
+    );
+
+    let err = request
+        .await
+        .expect("request task should not panic")
+        .expect_err("request should time out at the original deadline");
+    assert!(matches!(err, ActrError::TimedOut), "got {err:?}");
+    assert_eq!(t.pending_len(), 0, "timeout must remove correlation state");
+}
+
 #[tokio::test]
 async fn send_request_lane_failure_removes_pending_entry() {
     let t = HostTransport::new();

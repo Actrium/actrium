@@ -11,7 +11,6 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use actr_framework::Bytes;
 use actr_protocol::{ActorResult, ActrError, ActrId, ErrorResponse, RpcEnvelope};
@@ -180,27 +179,8 @@ impl<M> PendingRpc<M> {
         &self.request_id
     }
 
-    /// Wait for the response with a deadline. Timeout expiry yields
-    /// `Err(ActrError::TimedOut)`; a dropped sender (entry overwritten or
-    /// swept without a result) yields `Err(Unavailable("Response channel
-    /// closed"))`. The entry is removed on every path (by the completer or
-    /// by this guard's Drop).
-    pub(crate) async fn wait(mut self, timeout: Duration) -> ActorResult<Bytes> {
-        let rx = self
-            .rx
-            .take()
-            .expect("PendingRpc receiver is consumed exactly once");
-        match crate::timer::timeout(crate::timer::ids::CORRELATION_RESPONSE, timeout, rx).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(ActrError::Unavailable("Response channel closed".into())),
-            Err(_) => Err(ActrError::TimedOut),
-        }
-    }
-
-    /// Wait for the response without an internal deadline - for callers
-    /// that own a combined send+wait budget (e.g. `PeerGate` wraps this in
-    /// its own `tokio::time::timeout` so it can close the transport on
-    /// expiry).
+    /// Wait for the response without resetting the caller's deadline. The
+    /// owner wraps setup, send, and this receive in one absolute budget.
     pub(crate) async fn recv(mut self) -> ActorResult<Bytes> {
         let rx = self
             .rx
@@ -291,17 +271,21 @@ mod tests {
             CompleteOutcome::Completed
         );
         assert_eq!(correlation.len(), 0);
-        let result = pending.wait(Duration::from_secs(1)).await;
+        let result = pending.recv().await;
         assert_eq!(result.unwrap(), Bytes::from_static(b"resp"));
         assert_eq!(correlation.len(), 0);
     }
 
     #[tokio::test]
-    async fn wait_timeout_returns_timed_out_and_empties_map() {
+    async fn cancelled_recv_empties_map() {
         let correlation: RpcCorrelation<()> = RpcCorrelation::new();
         let pending = correlation.register("req-1", ());
-        let err = pending.wait(Duration::from_millis(10)).await.unwrap_err();
-        assert!(matches!(err, ActrError::TimedOut), "got {err:?}");
+        let waiting = tokio::spawn(pending.recv());
+        tokio::task::yield_now().await;
+        assert_eq!(correlation.len(), 1);
+
+        waiting.abort();
+        assert!(waiting.await.unwrap_err().is_cancelled());
         assert_eq!(correlation.len(), 0);
     }
 
@@ -385,7 +369,7 @@ mod tests {
             panic!("peer must not be computed on the completed path")
         });
         assert_eq!(outcome, CompleteOutcome::Completed);
-        let result = pending.wait(Duration::from_secs(1)).await;
+        let result = pending.recv().await;
         assert_eq!(result.unwrap(), Bytes::from_static(b"resp"));
     }
 

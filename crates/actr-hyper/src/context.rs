@@ -318,6 +318,23 @@ impl RuntimeContext {
         Ok(())
     }
 
+    /// Run the session preflight under the operation's already-created
+    /// absolute deadline.  Readiness is an outbound stage, not a separate
+    /// timeout budget; `definition` names the entry path so a Tell or
+    /// DataChunk readiness timeout is not traced as a caller RPC deadline.
+    async fn ensure_session_ready_until(
+        &self,
+        definition: crate::timer::TimerDefinition,
+        deadline: crate::transport::RpcDeadline,
+    ) -> ActorResult<()> {
+        match crate::timer::timeout_at(definition, deadline.instant(), self.ensure_session_ready())
+            .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(ActrError::TimedOut),
+        }
+    }
+
     /// Execute a non-generic RPC request call (useful for language bindings).
     #[cfg_attr(
         feature = "opentelemetry",
@@ -338,9 +355,9 @@ impl RuntimeContext {
         payload: Bytes,
         timeout_ms: i64,
     ) -> ActorResult<Bytes> {
-        // Sender-side argument validation: a call must carry a positive
-        // deadline and an RPC payload type. Receivers stay permissive.
-        crate::transport::validate_rpc_timeout_ms(timeout_ms)?;
+        // Sender-side argument validation and the single absolute deadline
+        // for this operation. Receivers stay permissive.
+        let deadline = crate::transport::RpcDeadline::from_timeout_ms(timeout_ms)?;
         crate::outbound::ensure_rpc_payload_type(payload_type)?;
 
         // Per-hop cancellation scope (#390). A context without a scope is a
@@ -349,15 +366,17 @@ impl RuntimeContext {
         // already-cancelled or expired inherited scope fails fast instead of
         // admitting more work.
         let scope = match &self.scope {
-            Some(parent) => parent.child(timeout_ms),
-            None => crate::request_scope::RequestScope::root(timeout_ms),
+            Some(parent) => parent.child_at(deadline.instant()),
+            None => crate::request_scope::RequestScope::root_at(deadline.instant()),
         };
         if !scope.is_active() {
             return Err(ActrError::TimedOut);
         }
         let guard = scope.guard();
 
-        self.ensure_session_ready().await?;
+        self.ensure_session_ready_until(crate::timer::ids::RUNTIME_CALL_PREFLIGHT, deadline)
+            .await?;
+        deadline.ensure_remaining()?;
 
         #[cfg(feature = "opentelemetry")]
         use crate::wire::webrtc::trace::inject_span_context_to_rpc;
@@ -394,7 +413,7 @@ impl RuntimeContext {
 
         let gate = self.select_gate(target)?;
         let target_id = self.extract_target_id(target);
-        let send = gate.send_request_with_type(target_id, payload_type, envelope);
+        let send = gate.send_request_with_type(target_id, payload_type, envelope, deadline);
         // Cooperative cancellation: cancelling the root drops this future
         // from above, and a scope cancelled while we wait unwinds here with
         // `TimedOut` instead of running out the caller's full budget.
@@ -439,7 +458,11 @@ impl RuntimeContext {
     ) -> ActorResult<()> {
         crate::outbound::ensure_rpc_payload_type(payload_type)?;
 
-        self.ensure_session_ready().await?;
+        let deadline =
+            crate::transport::RpcDeadline::from_duration(crate::transport::TELL_SEND_TIMEOUT);
+        self.ensure_session_ready_until(crate::timer::ids::RUNTIME_TELL_PREFLIGHT, deadline)
+            .await?;
+        deadline.ensure_remaining()?;
 
         #[cfg(feature = "opentelemetry")]
         use crate::wire::webrtc::trace::inject_span_context_to_rpc;
@@ -463,7 +486,7 @@ impl RuntimeContext {
 
         let gate = self.select_gate(target)?;
         let target_id = self.extract_target_id(target);
-        gate.send_message_with_type(target_id, payload_type, envelope)
+        gate.send_message_with_type(target_id, payload_type, envelope, deadline)
             .await
     }
 
@@ -477,7 +500,11 @@ impl RuntimeContext {
         payload_type: actr_protocol::PayloadType,
         chunk: DataChunk,
     ) -> ActorResult<()> {
-        self.ensure_session_ready().await?;
+        let deadline =
+            crate::transport::RpcDeadline::from_duration(crate::transport::DATA_CHUNK_SEND_TIMEOUT);
+        self.ensure_session_ready_until(crate::timer::ids::RUNTIME_DATA_CHUNK_PREFLIGHT, deadline)
+            .await?;
+        deadline.ensure_remaining()?;
 
         use actr_protocol::prost::Message as ProstMessage;
 
@@ -492,6 +519,7 @@ impl RuntimeContext {
             payload_type,
             stream_id,
             bytes::Bytes::from(payload),
+            deadline,
         )
         .await
     }
@@ -820,7 +848,11 @@ impl Context for RuntimeContext {
     async fn tell<R: RpcRequest>(&self, target: &Dest, message: R) -> ActorResult<()> {
         crate::outbound::ensure_rpc_payload_type(R::payload_type())?;
 
-        self.ensure_session_ready().await?;
+        let deadline =
+            crate::transport::RpcDeadline::from_duration(crate::transport::TELL_SEND_TIMEOUT);
+        self.ensure_session_ready_until(crate::timer::ids::RUNTIME_TELL_PREFLIGHT, deadline)
+            .await?;
+        deadline.ensure_remaining()?;
 
         // 1. Encode the message.
         let payload: Bytes = message.encode_to_vec().into();
@@ -852,7 +884,7 @@ impl Context for RuntimeContext {
         let target_id = self.extract_target_id(target);
 
         // 5. Dispatch through the Gate enum while preserving payload type.
-        gate.send_message_with_type(target_id, R::payload_type(), envelope)
+        gate.send_message_with_type(target_id, R::payload_type(), envelope, deadline)
             .await
     }
 
@@ -888,7 +920,11 @@ impl Context for RuntimeContext {
         chunk: DataChunk,
         payload_type: actr_protocol::PayloadType,
     ) -> ActorResult<()> {
-        self.ensure_session_ready().await?;
+        let deadline =
+            crate::transport::RpcDeadline::from_duration(crate::transport::DATA_CHUNK_SEND_TIMEOUT);
+        self.ensure_session_ready_until(crate::timer::ids::RUNTIME_DATA_CHUNK_PREFLIGHT, deadline)
+            .await?;
+        deadline.ensure_remaining()?;
 
         use actr_protocol::prost::Message as ProstMessage;
 
@@ -913,6 +949,7 @@ impl Context for RuntimeContext {
             payload_type,
             stream_id,
             bytes::Bytes::from(payload),
+            deadline,
         )
         .await
     }
