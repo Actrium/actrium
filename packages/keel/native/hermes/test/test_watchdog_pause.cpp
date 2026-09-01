@@ -139,7 +139,7 @@ int main() {
   // the target bumps it on connect/disconnect.
   auto gate = std::make_shared<keel::devtools::CdpTeardownGate>();
   auto clientsAttached = std::make_shared<std::atomic<int>>(0);
-  std::atomic<int> noClientResumes{0};  // proves the #77 branch actually ran
+  std::atomic<int> noClientResumes{0};  // proves the #160 branch actually ran
 
   // Mirrors HermesSandboxContext's ctor callback. Fires on the runtime thread.
   // `reconcile` is a test-only knob for the has-client watchdog reconciliation:
@@ -160,7 +160,7 @@ int main() {
           case ET::ExplicitPause:
           case ET::Exception:
             if (!hasClient) {
-              // #77: nobody to drive resume — auto-resume so the runtime never
+              // #160: nobody to drive resume — auto-resume so the runtime never
               // hangs. This is the behavior exercised by the no-client pass.
               if (dbg.isWaitingForCommand()) {
                 dbg.resumeFromPaused(hdbg::AsyncDebugCommand::Continue);
@@ -184,7 +184,7 @@ int main() {
         }
       });
 
-  // #77 regression, run FIRST while clientsAttached == 0 (no client). Registering
+  // #160 regression, run FIRST while clientsAttached == 0 (no client). Registering
   // the callback above took Hermes out of inert mode, so this `debugger;` pauses;
   // with no client to resume it the runtime would hang forever. The no-client
   // branch must auto-resume it, so the eval must COMPLETE and set __nc.
@@ -220,7 +220,7 @@ int main() {
     std::cout << "    [no client] completed=" << completed
               << " resumes=" << noClientResumes.load() << " __nc=" << nc << "\n";
     check(completed && noClientResumes.load() >= 1 && nc == 5,
-          "#77: debugger; with no client auto-resumes instead of hanging");
+          "#160: debugger; with no client auto-resumes instead of hanging");
   }
 
   hdbg::EnqueueRuntimeTaskFunc enqueue = [&pump, rtPtr](hdbg::RuntimeTask t) {

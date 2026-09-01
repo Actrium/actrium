@@ -925,7 +925,7 @@ export class Engine implements IEngine {
     // the single timer/clock owner, which is what makes pause()/resume() clock-freeze and
     // the setImmediate synchronous drain work uniformly. On the WASM provider these callbacks
     // are functions, which can't cross the JSON bridge by reference; the provider's inject()
-    // shim now registers them by id so they survive (issue #10). We deliberately do NOT skip
+    // shim now registers them by id so they survive (issue #137). We deliberately do NOT skip
     // injection in favor of a provider's native timers — that would create a second,
     // unfreezable clock and break pause/resume on that provider.
     injectWithLog('setTimeout', this.timerManager.createSetTimeoutPolyfill());

@@ -7,7 +7,7 @@
  * Note: Guest runtime internals (reconciler/bridge) are in src/guest/runtime/
  */
 
-// Sandbox-safe utilities (issue #68). Guest sandboxes provide only core
+// Sandbox-safe utilities (issue #158). Guest sandboxes provide only core
 // ECMAScript intrinsics — web platform globals like `TextEncoder` and
 // `performance` are NOT guaranteed (they type-check under a DOM lib but throw in
 // the sandbox) — so guest code that needs them must go through these call-time-
@@ -28,7 +28,7 @@ export {
   encodeBase64,
   nowMs,
 } from '../guest/runtime/reconciler/sandbox-compat';
-// Web keyboard bridge (issue #19, L3)
+// Web keyboard bridge (issue #139, L3)
 export type { KeelKeyEvent } from '../shared/keyboard';
 // Component prop types and event types
 export type {

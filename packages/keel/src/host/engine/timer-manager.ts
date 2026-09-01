@@ -270,7 +270,7 @@ export class TimerManager {
     // it, so pause() clears an already-fired timer, resume() arms a fresh one --
     // and then the gate releases the held tick, which re-arms straight from here
     // and orphans the one resume created. Both fire, each re-arms, and the
-    // interval doubles on every pause/resume (issue #107).
+    // interval doubles on every pause/resume (issue #174).
     //
     // On the release path this is a no-op clear of the timer that just fired.
     // The sentinels are not native ids and must never be passed to clearTimeout.

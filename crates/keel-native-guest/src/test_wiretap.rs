@@ -8,7 +8,7 @@
 //!
 //! Lives here rather than inside one test file because two suites need it:
 //! `store_net_wrappers_tests` (KBS1 envelopes) and `module_verdict_tests`
-//! (issue #85 — the body-level `ok` a wrapper must fold into its `Result`).
+//! (issue #165 — the body-level `ok` a wrapper must fold into its `Result`).
 
 use crate::test_shims::CALLS;
 use core::future::Future;

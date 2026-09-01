@@ -608,7 +608,7 @@ pub mod store {
         // one segment for a value within the per-segment cap (byte-identical to
         // before), several plus an array sentinel for a larger one. Passing one
         // slice straight to `encode_envelope` is what used to make the per-segment
-        // cap the ceiling on a stored value (issue #84).
+        // cap the ceiling on a stored value (issue #164).
         let mut segments: Vec<&[u8]> = Vec::new();
         let sentinel = crate::store_net_encode::hoist_bytes(value, &mut segments)
             .map_err(crate::codec_error)?;
@@ -877,7 +877,7 @@ pub mod net {
             Some(bytes) => {
                 // Same as `store::put_bytes`: hoist through the codec so a body
                 // larger than one segment is split and named by an array sentinel
-                // instead of failing closed at the per-segment cap (issue #84).
+                // instead of failing closed at the per-segment cap (issue #164).
                 let mut segments: Vec<&[u8]> = Vec::new();
                 let sentinel = crate::store_net_encode::hoist_bytes(bytes, &mut segments)
                     .map_err(crate::codec_error)?;
@@ -1639,7 +1639,7 @@ pub mod canvas {
     /// over-dimension, size/stride mismatch, a canvas in another mode, no 2D
     /// context, no memory reader, over byte budget — comes back as `Err(body)`
     /// with the host's `{"ok":false,"reason":"…"}` intact, so `let _ = present(…)`
-    /// can no longer hide a window that silently stopped updating (issue #85; see
+    /// can no longer hide a window that silently stopped updating (issue #165; see
     /// [`crate::module_result`] for why the reply carries two status levels).
     pub async fn present(canvas_id: &str, surface: &Surface) -> Result<Vec<u8>, Vec<u8>> {
         let mut body = String::from("{\"canvasId\":");
@@ -2252,7 +2252,7 @@ pub mod gpu {
 /// driven by the canvas `pointer` / `wheel` / `key` event streams delivered
 /// through [`crate::events`]. This is what works today; converging the two lines
 /// on one component model (props + an event return path) is a tracked follow-up,
-/// not a permanent design choice — see issue #63 and
+/// not a permanent design choice — see issue #153 and
 /// `docs/native-guest-deferred.zh.md`.
 pub mod ui {
     use alloc::string::String;
@@ -2625,7 +2625,7 @@ pub(crate) fn json_flag_true(bytes: &[u8], field: &str) -> bool {
 /// ran and answered — not that it agreed to do the work. A module whose seam
 /// declares an `"ok":boolean` response carries its OWN verdict in the body, and a
 /// refusal (`{"ok":false,"reason":"…"}`) arrives over a perfectly successful
-/// call. Mapping only the transport level (issue #85) let every refusal a host
+/// call. Mapping only the transport level (issue #165) let every refusal a host
 /// can express reach the guest as `Ok`, which made a dropped frame and a drawn
 /// frame indistinguishable from the return value alone — the guest saw `Ok` while
 /// the window silently stopped updating.
@@ -2899,7 +2899,7 @@ mod test_wiretap;
 mod store_net_wrappers_tests;
 
 /// Tests that a host module's OWN verdict (`{"ok":false,…}` in the body of a
-/// successful call) reaches the guest as `Err`, never `Ok` (issue #85).
+/// successful call) reaches the guest as `Err`, never `Ok` (issue #165).
 #[cfg(test)]
 #[path = "module_verdict_tests.rs"]
 mod module_verdict_tests;

@@ -1,5 +1,5 @@
 /**
- * Engine timer-callback-driven render on the wasm-quickjs provider (issue #10).
+ * Engine timer-callback-driven render on the wasm-quickjs provider (issue #137).
  *
  * Before the fix, host functions that take a CALLBACK argument (setTimeout / setInterval /
  * setImmediate / queueMicrotask) lost the callback on the WASM provider: the engine injects
@@ -30,7 +30,7 @@ const describeIfWASM = typeof WebAssembly !== 'undefined' ? describe : describe.
 // biome-ignore lint/suspicious/noExplicitAny: test mock components
 const mock = ((p: any) => p) as any;
 
-describeIfWASM('Engine timer-callback render on wasm-quickjs (issue #10)', () => {
+describeIfWASM('Engine timer-callback render on wasm-quickjs (issue #137)', () => {
   it('a setImmediate callback fires through the bridge and its batch reaches the Receiver', async () => {
     const engine = new Engine({ sandbox: 'wasm-quickjs' });
     engine.register({ View: mock, Text: mock });
@@ -39,7 +39,7 @@ describeIfWASM('Engine timer-callback render on wasm-quickjs (issue #10)', () =>
     engine.createReceiver();
 
     await engine.loadBundle(`
-      // Initial render (direct data batch — already worked after #8).
+      // Initial render (direct data batch — already worked after #136).
       globalThis.__keel_sendBatch({
         version: 1, batchId: 1,
         operations: [
@@ -48,7 +48,7 @@ describeIfWASM('Engine timer-callback render on wasm-quickjs (issue #10)', () =>
         ]
       });
       // Deferred update scheduled via the engine's setImmediate polyfill. The callback
-      // argument crosses the WASM bridge by id (#10) and is invoked when the engine drains
+      // argument crosses the WASM bridge by id (#137) and is invoked when the engine drains
       // immediates — producing a SECOND batch the host must receive.
       setImmediate(function(){
         globalThis.__keel_sendBatch({

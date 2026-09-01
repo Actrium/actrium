@@ -1,11 +1,11 @@
 /**
- * Bare-sandbox regression guard for the sandbox-safe helpers (issue #68).
+ * Bare-sandbox regression guard for the sandbox-safe helpers (issue #158).
  *
  * `sandbox-compat.ts`'s header claims two things that only a bare environment can
  * check: that every helper works with no `TextEncoder` / `TextDecoder` /
  * `performance` / `btoa` / `atob`, and that the checks happen per CALL so nothing
  * is captured at module-eval time. The file also says "tests can simulate a bare
- * sandbox by deleting them" — this is the test that finally does, which the #68
+ * sandbox by deleting them" — this is the test that finally does, which the #158
  * follow-up asked for.
  *
  * It runs in a SUBPROCESS, not here. `bun test` shares one process across test
@@ -63,7 +63,7 @@ async function runProbe(): Promise<ProbeResult> {
   return JSON.parse(stdout.trim()) as ProbeResult;
 }
 
-describe('sandbox-compat in a bare sandbox (#68)', () => {
+describe('sandbox-compat in a bare sandbox (#158)', () => {
   it('every helper works with the platform globals absent from the start', async () => {
     const r = await runProbe();
 

@@ -39,11 +39,11 @@ can decode it. Requirements, all mandated by the platform requirement R1
   re-gate every guest for an additive, opt-in encoding — exactly the flag-day the
   platform said to avoid.
 - **Promotion = runtime handshake, not a compile flag.** The guest encoder is
-  shipped by default (issue #45); whether a given frame goes out binary or JSON
+  shipped by default (issue #147); whether a given frame goes out binary or JSON
   is decided at runtime by the `host:canvas.getInfo` handshake. "Going live" for
   a host is implementing that handshake + `decodeCanvasBatch`, not a guest
   rebuild — no wire change, no version bump.
-- **Guest-shipped, host-consumer downstream (issue #45).** The Rust canvas
+- **Guest-shipped, host-consumer downstream (issue #147).** The Rust canvas
   encoder is now compiled into the shipped guest by default (`binary-protocol`
   feature, default-on) and the TS decoder is exported from `keel/wire`. What is
   NOT in keel: the `host:canvas` module that answers `getInfo` and decodes

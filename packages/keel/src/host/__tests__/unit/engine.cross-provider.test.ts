@@ -1,7 +1,7 @@
 /**
  * Engine cross-provider contract suite.
  *
- * The recurring bug class (#3 / #5 / #8) was "works on vm, broken on the WASM provider"
+ * The recurring bug class (#134 / #135 / #136) was "works on vm, broken on the WASM provider"
  * slipping through because the Engine-level suite only ever drove sandbox:'vm'. This
  * runs the same core host<->guest contracts against BOTH in-process providers
  * (node-vm + wasm-quickjs), end-to-end through a real Engine, with host-side assertions:

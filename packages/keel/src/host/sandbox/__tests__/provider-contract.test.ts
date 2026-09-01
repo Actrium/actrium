@@ -2,7 +2,7 @@
  * Cross-provider sandbox contract suite.
  *
  * The same core Engine<->sandbox contracts run against EVERY available provider, so a
- * provider-specific regression (the #3 / #5 / #8 class: "works on vm, broken on WASM")
+ * provider-specific regression (the #134 / #135 / #136 class: "works on vm, broken on WASM")
  * turns the matching cell red instead of slipping through. Today this parametrizes vm
  * and wasm-quickjs (both run in Node/bun); native JSI providers (jsc/quickjs/hermes)
  * are covered by the on-device e2e suites.

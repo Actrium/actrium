@@ -1,5 +1,5 @@
 /**
- * keel/host/web — opt-in, first-class web host adapter (issue #19).
+ * keel/host/web — opt-in, first-class web host adapter (issue #139).
  *
  * Provides the generic web mechanism for embedding keel on the web, kept separate from the
  * RN-first core so web deps stay opt-in:
@@ -28,7 +28,7 @@
  * ```
  */
 
-// Web keyboard bridge protocol (issue #19, L3) — re-exported for host integrators.
+// Web keyboard bridge protocol (issue #139, L3) — re-exported for host integrators.
 export {
   KBD_EVENT,
   KBD_SUBSCRIBE,
@@ -86,7 +86,7 @@ export {
   WorkerDispatch,
   type WorkerDispatchDeps,
 } from './worker/worker-dispatch';
-// Off-main-thread engine (issue #19, L1)
+// Off-main-thread engine (issue #139, L1)
 export {
   createWorkerEngine,
   type DbgPausedEvent,

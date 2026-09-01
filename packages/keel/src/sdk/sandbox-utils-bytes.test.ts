@@ -1,5 +1,5 @@
 /**
- * The byte<->text half of `keel/guest`'s sandbox-safe utilities (issue #68):
+ * The byte<->text half of `keel/guest`'s sandbox-safe utilities (issue #158):
  * `createUtf8Decoder`, `encodeBase64` and `decodeBase64`.
  *
  * The decode direction's whole risk is MALFORMED input. Well-formed UTF-8 is easy
@@ -85,7 +85,7 @@ const TRICKY: Array<[string, number[]]> = [
   ['empty', []],
 ];
 
-describe('createUtf8Decoder (#68)', () => {
+describe('createUtf8Decoder (#158)', () => {
   it('uses the platform TextDecoder when the sandbox has one', () => {
     const decode = createUtf8Decoder();
     expect(decode(new Uint8Array([0xe4, 0xb8, 0xad]))).toBe(CJK_ZHONG);
@@ -188,7 +188,7 @@ describe('createUtf8Decoder (#68)', () => {
   });
 });
 
-describe('base64 (#68)', () => {
+describe('base64 (#158)', () => {
   const SAMPLES: number[][] = [
     [],
     [0x00],

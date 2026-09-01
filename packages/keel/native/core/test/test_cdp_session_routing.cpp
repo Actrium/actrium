@@ -80,7 +80,7 @@ struct RecordingTarget : public IEngineDebugTarget {
 TestSuite createCDPSessionRoutingTests() {
   TestSuite suite{"CDPSessionRouting", {}};
 
-  // ---- issue #42: nested params.sessionId must not hijack routing ----------
+  // ---- issue #144: nested params.sessionId must not hijack routing ----------
 
   suite.cases.push_back({"nested params.sessionId does not select a session", []() {
     auto transport = std::make_shared<MockTransport>();
@@ -144,7 +144,7 @@ TestSuite createCDPSessionRoutingTests() {
     server.stop();
   }});
 
-  // ---- issue #42: cross-connection session ownership -----------------------
+  // ---- issue #144: cross-connection session ownership -----------------------
 
   suite.cases.push_back({"a sessionId from another connection is rejected", []() {
     auto transport = std::make_shared<MockTransport>();
@@ -193,7 +193,7 @@ TestSuite createCDPSessionRoutingTests() {
     server.stop();
   }});
 
-  // ---- issue #43: single-tenant fallback for path-less transports ----------
+  // ---- issue #145: single-tenant fallback for path-less transports ----------
 
   suite.cases.push_back({"tenantId 0 falls back to the sole debug target", []() {
     auto transport = std::make_shared<MockTransport>();

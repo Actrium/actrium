@@ -373,7 +373,7 @@ int main() {
     JS_FreeRuntime(mrt);
   }
 
-  // --- Async pause on a single-line loop (issue #39). ------------------------
+  // --- Async pause on a single-line loop (issue #141). ------------------------
   // On `while (...) { ... }` written on one source line the (token,line,depth)
   // dedup key never changes, so onStep's per-line dedup would swallow every
   // callback after the first. A pending requestPause() must defeat the dedup,
@@ -429,7 +429,7 @@ int main() {
     const bool pauseLanded =
         e2.first == 2 && e2.second == PauseReason::Pause;
     check(pauseLanded,
-          "async pause lands on the spinning single-line loop (issue #39)");
+          "async pause lands on the spinning single-line loop (issue #141)");
 
     if (pauseLanded) {
       // Break the loop from the captive paused thread, then run to completion.

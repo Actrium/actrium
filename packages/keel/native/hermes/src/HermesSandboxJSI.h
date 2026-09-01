@@ -133,7 +133,7 @@ private:
   // here to keep the Hermes debugger headers off this header.
   std::uint32_t watchdogPauseCallbackId_ = 0;
   bool watchdogSuspended_ = false;
-  // Teardown gate shared with the CDPAgentTarget (issue #40, B1). Every CDP
+  // Teardown gate shared with the CDPAgentTarget (issue #142, B1). Every CDP
   // entry that reaches the runtime / AsyncDebuggerAPI at ENQUEUE time opens a
   // section on it; dispose() closes the gate and waits for open sections to
   // drain before destroying the CDPDebugAPI + runtime, so no CDP thread can
@@ -142,7 +142,7 @@ private:
   // Count of attached DevTools clients, shared with the CDPAgentTarget which
   // bumps it on connect/disconnect. The watchdog pause callback reads it: with
   // zero clients a debugger;/breakpoint pause must auto-resume, or the runtime
-  // (and the host JS thread it shares) hangs forever (#77). Written on the
+  // (and the host JS thread it shares) hangs forever (#160). Written on the
   // relay thread, read on the runtime thread → atomic. Dev-only.
   std::shared_ptr<std::atomic<int>> cdpClientsAttached_;
   // Weak handle to the target built by createCdpDebugTarget, so dispose() can

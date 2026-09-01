@@ -10,11 +10,11 @@
  * up, and so tests can simulate a bare sandbox by deleting them.
  *
  * These helpers are GUEST-FACING: `keel/guest` re-exports them (`src/sdk/index.ts`,
- * issue #68) because a sandboxed guest has no `TextEncoder` of its own to fall
+ * issue #158) because a sandboxed guest has no `TextEncoder` of its own to fall
  * back on. They are therefore public surface, not internal plumbing — do not
  * retire one because its last in-tree caller went away.
  *
- * Measured inside a keel guest running on QuickJS-WASM (issue #68), reporting
+ * Measured inside a keel guest running on QuickJS-WASM (issue #158), reporting
  * `typeof globalThis[name]` from inside the sandbox: `TextEncoder`,
  * `TextDecoder`, `performance`, `btoa`, `atob`, `Buffer` and `crypto` are all
  * ABSENT, while `Uint8Array`, `console` and `setTimeout` are present. That

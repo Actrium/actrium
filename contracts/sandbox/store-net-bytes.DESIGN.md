@@ -283,7 +283,7 @@ Reuse the existing bounds-check posture (`assertInBounds`,
 | `MAX_ENVELOPE_BYTES` | 16.25 MiB | admits all 16 bounded segments as one value, plus bounded control-plane headroom |
 | `MAX_JSON_BYTES` | 256 KiB | the control plane (new explicit cap; there is none today) |
 
-**Phase 2 — one logical value across several segments (issue #84).** In phase 1
+**Phase 2 — one logical value across several segments (issue #164).** In phase 1
 one byte-stream field was one segment, so `MAX_SEGMENT_BYTES` was also the ceiling
 on a stored value. Ordinary documents reach it: a 1076×722 two-layer raster
 serialises to 3,956,173 bytes (the largest two-layer document that fit under 1 MiB

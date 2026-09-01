@@ -1,6 +1,6 @@
 /**
  * Message protocol between the main-thread {@link BlurPool} and each
- * `blur-pool-worker` (approach B, #57). Deliberately tiny — three main→worker
+ * `blur-pool-worker` (approach B, #151). Deliberately tiny — three main→worker
  * kinds and three worker→main kinds — and structured-clone-safe, with the
  * pixel buffers moved as **transferable** `ArrayBuffer`s (zero-copy) rather than
  * cloned. Each worker owns a private wasm linear memory; there is no shared

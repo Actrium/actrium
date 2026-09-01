@@ -129,7 +129,7 @@ export interface QuickJSNativeWASMProviderOptions {
 // Timer/microtask host functions whose FIRST argument is a guest callback. The isolated
 // WASM realm can't pass a function reference over the JSON bridge, so the guest shim
 // registers the callback in __keel.callbacks (the same registry the reconciler uses for
-// function props) and sends a {__keel_cb:id} marker instead (issue #10). Release lifetimes
+// function props) and sends a {__keel_cb:id} marker instead (issue #137). Release lifetimes
 // differ, so the timer family gets per-shape shims.
 const ONE_SHOT_CALLBACK_FNS = new Set(['setTimeout', 'setImmediate', 'queueMicrotask']);
 const REPEATING_CALLBACK_FNS = new Set(['setInterval']);
@@ -678,10 +678,10 @@ const GUEST_ERROR_CODEC = `
   })();`;
 
 /**
- * Build the guest-side shim for a by-name host function (issue #8 + #10).
+ * Build the guest-side shim for a by-name host function (issue #136 + #137).
  *
  * The shim posts the call to the host over __sendToHost and reads back the synchronous
- * return value (the host writes it to __keel_fn_ret). For #10, any FUNCTION argument is
+ * return value (the host writes it to __keel_fn_ret). For #137, any FUNCTION argument is
  * replaced with a {__keel_cb:id} marker after registering it in __keel.callbacks; the host
  * reconstructs a proxy that invokes the guest callback by id (see onHostFnCall).
  *
@@ -826,7 +826,7 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
         // __sendToHost (see installHostModules).
         let onHostModuleEvent: ((event: string, data: string) => void) | null = null;
 
-        // By-name host->guest function bridge (issue #8). The isolated WASM realm
+        // By-name host->guest function bridge (issue #136). The isolated WASM realm
         // can't receive a host function reference, so each function injected by name
         // (render: __keel_sendBatch; events: __keel_emitEvent; config: __keel_getConfig;
         // etc.) is registered here and reached via __sendToHost -> onHostFnCall.
@@ -846,13 +846,13 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
             console.log(`[QuickJSWASM] Host callback: ${event}`, data);
           }
 
-          // host:* request/response bridge (issue #5)
+          // host:* request/response bridge (issue #135)
           if (event.indexOf('__keel_host_') === 0) {
             onHostModuleEvent?.(event, data);
             return;
           }
 
-          // by-name host function bridge (issue #8)
+          // by-name host function bridge (issue #136)
           if (event.indexOf('__keel_fn:') === 0) {
             onHostFnCall?.(event.slice(10), data);
             return;
@@ -888,7 +888,7 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
         module._qjs_install_console();
 
         // NOTE: the native C timer functions (qjs_install_timer_functions) are intentionally
-        // NOT installed here (issue #10, approach A). The host Engine injects its own
+        // NOT installed here (issue #137, approach A). The host Engine injects its own
         // TimerManager-backed setTimeout/setInterval/setImmediate polyfills, and those now
         // work on WASM because callback arguments cross the bridge by id (approach B, see
         // buildHostFnShim + onHostFnCall). Keeping the engine's TimerManager as the single
@@ -975,7 +975,7 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
         // exception branch calls __keel.__errenc for rich error payloads.
         evalVoid(GUEST_ERROR_CODEC);
 
-        // ---- host:* module bridge (issue #5) ----
+        // ---- host:* module bridge (issue #135) ----
         // The WASM realm can't hold host function references, so host:* capabilities
         // are bridged as a JSON request/response over __sendToHost: the guest stub posts
         // an invoke, the host runs the (boundary-enforced) dispatch table entry, and the
@@ -994,11 +994,11 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
           }
         };
 
-        // Synchronously invoke a by-name injected host function (issue #8). The guest
+        // Synchronously invoke a by-name injected host function (issue #136). The guest
         // shim is blocked inside __sendToHost while this runs, so writing the result
         // back to a guest global lets the shim return it synchronously. One-way hooks
         // (render/event) simply ignore the written value.
-        // Invoke a guest callback by id (issue #10). A function can't cross the JSON
+        // Invoke a guest callback by id (issue #137). A function can't cross the JSON
         // bridge, so the guest registered it in __keel.callbacks and passed an id; here the
         // host fires it later (e.g. when a TimerManager timer elapses) by evaluating
         // invokeCallback in the guest realm and draining the resulting microtasks.
@@ -1310,7 +1310,7 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
           },
 
           inject: (name: string, value: unknown): void => {
-            // Bridge a by-name host function into the isolated guest realm (issue #8).
+            // Bridge a by-name host function into the isolated guest realm (issue #136).
             // The guest shim posts its arguments to the host synchronously via
             // __sendToHost (routed to onHostFnCall in hostCallback), then reads back the
             // value the host wrote. This wires the render channel (__keel_sendBatch ->

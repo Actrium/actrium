@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { BlurPool } from '../blur-pool';
 import { NativeGuestHost } from '../native-guest-host';
 
-// Approach-B correctness gate (#57): an N-worker tiled box blur must be
+// Approach-B correctness gate (#151): an N-worker tiled box blur must be
 // BYTE-FOR-BYTE identical to a single-instance whole-image blur of the same
 // image with the same kernel. Equality holds because each worker's strip carries
 // a `radius`-row halo, so interior output rows see the exact same window (real

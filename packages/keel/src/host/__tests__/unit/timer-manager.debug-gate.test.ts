@@ -8,12 +8,12 @@
  * in that window used to arm a second native timer whose id was then overwritten
  * by the held tick's own re-arm. Neither could cancel the other, so the interval
  * ran as two chains at once -- and every further pause/resume added another
- * (issue #107).
+ * (issue #174).
  *
  * Assertions are on live native handles owned by an injected virtual scheduler,
  * not on callback spacing. Grid catch-up can legally deliver two ticks 1 ms
- * apart with a single chain (issue #121); a min-gap check cannot tell that
- * apart from the #107 double-arm.
+ * apart with a single chain (issue #176); a min-gap check cannot tell that
+ * apart from the #174 double-arm.
  */
 
 import { describe, expect, it } from 'bun:test';

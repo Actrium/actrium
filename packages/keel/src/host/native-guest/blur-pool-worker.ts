@@ -1,5 +1,5 @@
 /**
- * blur-pool-worker.ts — runs INSIDE a Web Worker (approach B, #57).
+ * blur-pool-worker.ts — runs INSIDE a Web Worker (approach B, #151).
  *
  * Hosts ONE independent {@link NativeGuestHost} + blur-demo-guest instance (its
  * own private wasm linear memory — no shared memory) and blurs pixel tiles the

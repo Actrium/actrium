@@ -5,7 +5,7 @@
  * engine-test.html. Exposes the Engine constructor on window so the Playwright spec can
  * drive a real Engine on the real WASM provider (sandbox:'wasm-quickjs') — the only setup
  * that exercises the full react-reconciler scheduler + timers through the host bridge
- * (issue #10), which the bun unit suite (mock react) and the bare-harness Playwright tests
+ * (issue #137), which the bun unit suite (mock react) and the bare-harness Playwright tests
  * (hand-rolled React shim + native timers) cannot.
  */
 

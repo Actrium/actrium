@@ -1,5 +1,5 @@
 /**
- * WebEngineView (issue #19, L2)
+ * WebEngineView (issue #139, L2)
  *
  * The DOM-mount sibling of the React Native `EngineView`. It reuses the platform-agnostic
  * `useEngineView` hook (load bundle → subscribe to engine updates → `receiver.render()`),

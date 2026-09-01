@@ -497,7 +497,7 @@ describe('canvas guests — capability handshake (WIP binary wire)', () => {
     expect(draws[0].encoding).toBe('json');
   });
 
-  it('the promoted DEFAULT guest probes and emits BINARY when the host advertises (issue #45)', async () => {
+  it('the promoted DEFAULT guest probes and emits BINARY when the host advertises (issue #147)', async () => {
     // canvas-guest.wasm is the shipped demo guest. Post-promotion it carries the
     // binary encoder BY DEFAULT, so its draw path probes getInfo and — against an
     // advertising host — emits a KCNV frame, exactly like canvas-binary-guest.

@@ -98,7 +98,7 @@ const HEAP_CHURN = readFileSync(join(import.meta.dir, 'fixtures/heap-churn-guest
 // Adversarial guest that imports an undeclared function (must be rejected).
 const BAD_IMPORT = readFileSync(join(import.meta.dir, 'fixtures/bad-import.wasm'));
 // SIMD128 guest: a box-blur demo built with wasm v128 opcodes; proves enabling
-// SIMD adds no host import (opcodes, not imports) so the seal is unchanged (#57).
+// SIMD adds no host import (opcodes, not imports) so the seal is unchanged (#151).
 const BLUR_GUEST = readFileSync(join(import.meta.dir, 'fixtures/blur-demo-guest.wasm'));
 // Adversarial guest whose keel_on_event traps.
 const EVENT_TRAP = readFileSync(join(import.meta.dir, 'fixtures/event-trap.wasm'));
@@ -469,7 +469,7 @@ describe('NativeGuestHost — host->guest events (keel_on_event)', () => {
   });
 
   it('pushes a byte-carrying payload as a KBS1 frame, leaving JSON events byte-identical', async () => {
-    // The host->guest PUSH path for raw bytes (issue #82). A native guest cannot
+    // The host->guest PUSH path for raw bytes (issue #163). A native guest cannot
     // subscribe to a host module (that needs a function reference), and it cannot
     // pull data that arrives because an external peer spoke — so the event
     // channel must be able to carry bytes, not just text.
@@ -536,7 +536,7 @@ describe('NativeGuestHost — host->guest events (keel_on_event)', () => {
     expect((host.exports.count as () => number)()).toBe(0);
   });
 
-  it('delivers a byte payload larger than one segment by splitting it (#84)', async () => {
+  it('delivers a byte payload larger than one segment by splitting it (#164)', async () => {
     // The same codec backs the event channel, so lifting the per-FIELD ceiling
     // lifts it here too. This does NOT widen the host->guest worst case: the
     // aggregate `maxEnvelopeBytes` is unchanged, and a frame that size was always

@@ -72,7 +72,7 @@ keel 现状 = **QuickJS-WASM 跑 JS guest**（沙箱是一个 WASM 模块，里�
 
 模块自己的态度写在**响应体**里。凡是契约（`contracts/sandbox/graphics-seams.json`）声明了 `"ok":boolean` 的方法 —— `canvas.present`、`canvas.draw`、`gpu.submit`、`gpu.configure`、`gpu.createResource`、`asset.blit` —— 一次被拒绝的调用长这样：传输级 `ok=1`（调用完全成功），响应体 `{"ok":false,"reason":"size-mismatch"}`（模块拒绝了）。两件事都是真的，而且不冲突。
 
-拿 `present` 举例把过程走一遍：guest 要贴一帧 8600 设备像素宽的画面，宿主的上限是 8192，于是宿主原地丢掉这一帧，回一句 `{"ok":false,"reason":"invalid-input"}`。传输层一切正常，所以只看第一级的话，guest 收到的是"成功"。它会接着画下一帧、再下一帧，而窗口从此不再更新 —— 两边都不报错，什么日志也没有。这就是 issue #85 的现场。
+拿 `present` 举例把过程走一遍：guest 要贴一帧 8600 设备像素宽的画面，宿主的上限是 8192，于是宿主原地丢掉这一帧，回一句 `{"ok":false,"reason":"invalid-input"}`。传输层一切正常，所以只看第一级的话，guest 收到的是"成功"。它会接着画下一帧、再下一帧，而窗口从此不再更新 —— 两边都不报错，什么日志也没有。这就是 issue #165 的现场。
 
 所以 SDK 的规矩是：**凡是契约声明了体内 `ok` 的方法，包装函数把两级折成一个 `Result`，`Ok` 就代表这件事真的发生了。** 被拒绝时原样返回宿主的响应体，`reason` 还在里面，从 `Err` 里读。两级仍然分得清 —— 传输失败的 body 里根本没有 `ok` 字段可读。
 
@@ -101,11 +101,11 @@ keel 现状 = **QuickJS-WASM 跑 JS guest**（沙箱是一个 WASM 模块，里�
 
 渲染路径（Phase C 首版已通）：原生 guest **发渲染批次** → `keel_send_batch` → host 解码成 `OperationBatch` → 真 `receiver` 物化成 sealed 组件树，**与 JS guest 复用同一 receiver**。批次 wire 首版用 JSON（与 host:* wire 一致），后续换二进制 op 协议——ABI 通道形状不变。
 
-**节点词汇边界（canvas-first，当前）**：原生 guest 能发的**全部**节点就三种——`ui::view`（容器）、`ui::text`（字符串）、`ui::canvas`（视口），而且 `View`/`Text` **不带 props / 样式 / id / 事件回调**。JS guest 的 21 名组件白名单（`src/sdk/sdk.ts`）从原生线**够不着**：原生 guest 挂不了任何可交互 RN 组件，连给 `View`/`Text` 定位、描边都做不到。真正的界面（工具栏、表单、下拉、文本框）要**自绘进一个 `Canvas`**——guest 自己做布局、命中测试、焦点，靠 canvas 的 `pointer` / `wheel` / `key` 事件流（经 `events::on` 投递）驱动。**这是当前能用的形态；把两条线收敛到一套组件模型（props + 事件回传通道）是已记录的 follow-up、不是永久设计**——见 issue #63 与 [native-guest-deferred.zh.md](native-guest-deferred.zh.md)。这条边界现在只有读 `lib.rs` 才发现，此处显式写明，避免作者对着它写完才知道。
+**节点词汇边界（canvas-first，当前）**：原生 guest 能发的**全部**节点就三种——`ui::view`（容器）、`ui::text`（字符串）、`ui::canvas`（视口），而且 `View`/`Text` **不带 props / 样式 / id / 事件回调**。JS guest 的 21 名组件白名单（`src/sdk/sdk.ts`）从原生线**够不着**：原生 guest 挂不了任何可交互 RN 组件，连给 `View`/`Text` 定位、描边都做不到。真正的界面（工具栏、表单、下拉、文本框）要**自绘进一个 `Canvas`**——guest 自己做布局、命中测试、焦点，靠 canvas 的 `pointer` / `wheel` / `key` 事件流（经 `events::on` 投递）驱动。**这是当前能用的形态；把两条线收敛到一套组件模型（props + 事件回传通道）是已记录的 follow-up、不是永久设计**——见 issue #153 与 [native-guest-deferred.zh.md](native-guest-deferred.zh.md)。这条边界现在只有读 `lib.rs` 才发现，此处显式写明，避免作者对着它写完才知道。
 
 **事件（host→guest，已落地）**：guest 导出 `keel_on_event(name_ptr,name_len, payload_ptr,payload_len)`；host 调 `NativeGuestHost.emitEvent(name, payload)`（编码 payload → `keel_alloc` 写入 → 调 `keel_on_event`，guest 无此导出则 no-op；**全程 try/catch，guest 的坏 alloc/trap 不使 host 抛错**）。
 
-**事件 payload 的编码分叉（issue #82）**：payload 走**与 host 调用返回值同一套分叉**——不含字节时是 UTF-8 JSON（与改动前逐字节一致），含 `Uint8Array` 时编成 **KBS1 信封**（`contracts/sandbox/store-net-bytes.json`），字节以原始段（segment）随行、不做 base64 / 数字数组膨胀。ABI 没变（`keel_on_event` 本来就是 `(ptr,len)` 字节区间），guest handler 拿到的也一直是原始 `&[u8]`：想要字节的 handler 自己 peek magic、`store_net_encode::decode_envelope` 零拷贝解框，不想要的照旧当 JSON 解。**这是原生 guest 唯一的 host→guest 推送通道**：宿主模块的 `subscription` 从原生线**结构性够不着**（订阅要递一个 handler 函数，而这条 ABI 只搬字节），所以外部对端主动送来的数据（转发的 socket、串口、子进程 stdout——guest 无从知道何时该拉）只能走事件。契约层的 `createCapabilitiesManifest` 会把这类导出列进 `jsOnlyCapabilities`，`subscription()` 也可用 `binary: { event: [...] }` 声明事件里的字节字段（派发处有 fail-closed 兜底：声明为字节的字段必须是真 `Uint8Array`，数字数组一律拒）。编码失败（段超 1 MiB 上限、循环引用）**不静默丢**：`console.warn` 报出事件名与原因（同 render 通道的告警上限，防洪）。SDK `events::on(name, |payload| …)` 注册同步 handler + `off(id)` 注销（`dispatch` 先快照 handler，允许 handler 内自删/新增而不 UAF）。这让原生 guest 从「只能画一帧」变**可收输入/生命周期 = 可交互**。**注**：handler 是同步的，暂不应在其中 `.await` host 调用——被 drop 的 future 不仅收不到结果，其结果槽还会在 guest 侧 `RESULTS` 累积（已加 64 上限兜底，避免无界泄漏）；异步 handler 是 follow-up。**canvas 的帧缓冲 present 是消费者层，地基不碰。**
+**事件 payload 的编码分叉（issue #163）**：payload 走**与 host 调用返回值同一套分叉**——不含字节时是 UTF-8 JSON（与改动前逐字节一致），含 `Uint8Array` 时编成 **KBS1 信封**（`contracts/sandbox/store-net-bytes.json`），字节以原始段（segment）随行、不做 base64 / 数字数组膨胀。ABI 没变（`keel_on_event` 本来就是 `(ptr,len)` 字节区间），guest handler 拿到的也一直是原始 `&[u8]`：想要字节的 handler 自己 peek magic、`store_net_encode::decode_envelope` 零拷贝解框，不想要的照旧当 JSON 解。**这是原生 guest 唯一的 host→guest 推送通道**：宿主模块的 `subscription` 从原生线**结构性够不着**（订阅要递一个 handler 函数，而这条 ABI 只搬字节），所以外部对端主动送来的数据（转发的 socket、串口、子进程 stdout——guest 无从知道何时该拉）只能走事件。契约层的 `createCapabilitiesManifest` 会把这类导出列进 `jsOnlyCapabilities`，`subscription()` 也可用 `binary: { event: [...] }` 声明事件里的字节字段（派发处有 fail-closed 兜底：声明为字节的字段必须是真 `Uint8Array`，数字数组一律拒）。编码失败（段超 1 MiB 上限、循环引用）**不静默丢**：`console.warn` 报出事件名与原因（同 render 通道的告警上限，防洪）。SDK `events::on(name, |payload| …)` 注册同步 handler + `off(id)` 注销（`dispatch` 先快照 handler，允许 handler 内自删/新增而不 UAF）。这让原生 guest 从「只能画一帧」变**可收输入/生命周期 = 可交互**。**注**：handler 是同步的，暂不应在其中 `.await` host 调用——被 drop 的 future 不仅收不到结果，其结果槽还会在 guest 侧 `RESULTS` 累积（已加 64 上限兜底，避免无界泄漏）；异步 handler 是 follow-up。**canvas 的帧缓冲 present 是消费者层，地基不碰。**
 
 ## 7. 测试
 
@@ -191,7 +191,7 @@ guest 现在**可以**（不强制）导出 `keel_abi_version`，向宿主声明
 
 ## 10. wasm SIMD128 —— native guest 的向量化构建路径
 
-像素级重计算（图像滤镜、合成）只在 **native guest 线**（Rust→wasm）才谈得上向量化——`runtime:"keel"` 的 JS/QuickJS 线是解释执行、无处上 SIMD（详见 issue #57 / #58）。本节给出这条线上 wasm SIMD128 的**构建路径**与一处基线示例。
+像素级重计算（图像滤镜、合成）只在 **native guest 线**（Rust→wasm）才谈得上向量化——`runtime:"keel"` 的 JS/QuickJS 线是解释执行、无处上 SIMD（详见 issue #151 / #152）。本节给出这条线上 wasm SIMD128 的**构建路径**与一处基线示例。
 
 ### 10.1 构建路径：按函数 `#[target_feature]`，无需全局 flag
 

@@ -1,9 +1,9 @@
 /**
- * Engine-in-browser useEffect e2e on real WASM (issue #10 — the full-scheduler slice).
+ * Engine-in-browser useEffect e2e on real WASM (issue #137 — the full-scheduler slice).
  *
  * This is the one test that exercises the PRODUCTION path end-to-end: a real Engine on the
  * real wasm-quickjs provider, loading a real React component that uses useEffect + setTimeout
- * via the real react-reconciler scheduler. Before the #10 fix, callback arguments (the
+ * via the real react-reconciler scheduler. Before the #137 fix, callback arguments (the
  * scheduler's setImmediate/setTimeout, and the effect's own setTimeout) were dropped over the
  * JSON bridge, so the reconciler could not complete a render and no batch reached the host.
  *
@@ -39,7 +39,7 @@ const GUEST_USE_EFFECT = `
   render(h(App), globalThis.__keel_sendBatch);
 `;
 
-test.describe('Engine useEffect render on real WASM (issue #10)', () => {
+test.describe('Engine useEffect render on real WASM (issue #137)', () => {
   test('initial render and a useEffect+setTimeout-driven update both reach the host Receiver', async ({
     page,
   }) => {
@@ -128,7 +128,7 @@ const GUEST_ON_PRESS = `
   render(h(App), globalThis.__keel_sendBatch);
 `;
 
-test.describe('Engine onPress-driven setState on real WASM (issue #17)', () => {
+test.describe('Engine onPress-driven setState on real WASM (issue #138)', () => {
   test('a host-invoked onPress callback triggers setState and the update reaches the Receiver', async ({
     page,
   }) => {

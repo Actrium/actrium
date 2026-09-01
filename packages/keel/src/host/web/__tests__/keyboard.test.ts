@@ -1,5 +1,5 @@
 /**
- * Web keyboard bridge — host capture tests (issue #19, L3).
+ * Web keyboard bridge — host capture tests (issue #139, L3).
  *
  * Pure logic: a fake DOM target + fake KeyboardEvent + a mock engine. Asserts the synchronous
  * preventDefault decision (the correctness-critical part) and the structured forwarding, plus

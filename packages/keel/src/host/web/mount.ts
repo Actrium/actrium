@@ -1,6 +1,6 @@
 /**
  * Imperative mount helper for integrators without a React app of their own — mounts a
- * WebEngineView into a plain DOM node via react-dom (issue #19, L2).
+ * WebEngineView into a plain DOM node via react-dom (issue #139, L2).
  *
  * react-dom is an OPTIONAL peer dependency: integrators that already render React just use
  * the `<WebEngineView/>` component directly and never touch this. The import below uses a

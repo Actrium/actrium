@@ -1,5 +1,5 @@
 /**
- * WorkerEngine integration tests (issue #19, L1).
+ * WorkerEngine integration tests (issue #139, L1).
  *
  * Spins up a real Web Worker (bun supports `new Worker(url, { type: 'module' })`) running the
  * QuickJS-WASM engine off-thread, and drives it through the main-thread WorkerEngine proxy.

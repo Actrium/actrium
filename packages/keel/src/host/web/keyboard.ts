@@ -1,5 +1,5 @@
 /**
- * Web keyboard bridge — host capture (issue #19, L3).
+ * Web keyboard bridge — host capture (issue #139, L3).
  *
  * Captures physical keyboard events on a DOM target and forwards them to the guest, mirroring
  * the guest's `useKeyboard` hook. The hard part it solves: a guest that wants to consume a key

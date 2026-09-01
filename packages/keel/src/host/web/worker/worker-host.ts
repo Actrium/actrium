@@ -1,5 +1,5 @@
 /**
- * Worker host harness (issue #19, L1) — runs INSIDE a Web Worker.
+ * Worker host harness (issue #139, L1) — runs INSIDE a Web Worker.
  *
  * It owns a real core {@link Engine} with the QuickJS-WASM sandbox, so the entire guest CPU
  * cost (module eval, callbacks, event handlers) runs off the main/UI thread. The synchronous

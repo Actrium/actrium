@@ -179,7 +179,7 @@
        Without this check a missing CMake step is not reported as a missing step:
        the include search silently falls through to the vendor header and the
        build dies with four C4576 errors pointing INTO third-party code, which
-       is how it was first reported (issue #100). -->
+       is how it was first reported (issue #168). -->
   <Target Name="EnsureKeelSandboxNative" BeforeTargets="ClCompile">
     <Error Condition="'$(KeelSandboxEngine)'!='hermes' And !Exists('$(MSBuildThisFileDirectory)..\KeelSandboxNative\build\quickjs.h')"
            Text="Patched quickjs.h not found at windows\KeelSandboxNative\build\quickjs.h. Run the CMake sandbox step first (dev.cmd does this as step [3]): cmake -S windows\KeelSandboxNative -B windows\KeelSandboxNative\build -A x64 -DKEEL_SANDBOX_ENGINE=quickjs &amp;&amp; cmake --build windows\KeelSandboxNative\build --config $(Configuration)" />

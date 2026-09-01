@@ -87,7 +87,7 @@ describeIfWASM('QuickJSNativeWASMProvider', () => {
   });
 
   describe('Timers (engine-owned, not provider-native)', () => {
-    // Issue #10 (approach A): the WASM provider no longer installs the native C timers.
+    // Issue #137 (approach A): the WASM provider no longer installs the native C timers.
     // The host Engine injects its own TimerManager-backed setTimeout/setInterval/
     // setImmediate polyfills (whose callback arguments now cross the bridge by id —
     // approach B), keeping a single, freezable clock. So the BARE provider realm — used

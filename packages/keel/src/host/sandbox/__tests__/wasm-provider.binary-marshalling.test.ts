@@ -541,7 +541,7 @@ describeIfWASM('QuickJSNativeWASMProvider first-class binary marshalling', () =>
       expect(rr.isU8).toBe(true);
       expect(rr.bytes).toEqual([9, 0, 128]);
 
-      // Host -> guest callback args (issue #10 marker path).
+      // Host -> guest callback args (issue #137 marker path).
       let cbProxy: ((v: unknown) => void) | null = null;
       context.inject('__grabCb', (cb: (v: unknown) => void) => {
         cbProxy = cb;

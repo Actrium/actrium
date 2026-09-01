@@ -13,6 +13,7 @@ The consolidation is expected to proceed in small, reversible stages:
 
 This directory holds import maps, compatibility notes, and cutover checklists.
 The Actr/Loran source tree has completed steps 2 and 3. Keel's privacy-scrubbed
-history has completed step 2 and its relocated build is completing step 3.
+history and relocated build have completed steps 2 and 3. See the
+[Actr import plan](actr-import.md) and [Keel import record](keel-import.md).
 Actro has not yet been imported; the Actrix-to-Loran semantic rename remains
 part of step 5.

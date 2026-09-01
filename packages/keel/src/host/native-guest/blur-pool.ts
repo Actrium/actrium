@@ -1,5 +1,5 @@
 /**
- * blur-pool.ts — approach B (#57): a Web Worker pool that box-blurs a large
+ * blur-pool.ts — approach B (#151): a Web Worker pool that box-blurs a large
  * RGBA8 framebuffer in parallel across N INDEPENDENT native-wasm guest
  * instances, one per worker, with pixel tiles moved as **transferable**
  * ArrayBuffers (zero-copy across the postMessage boundary).

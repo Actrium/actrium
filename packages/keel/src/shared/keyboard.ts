@@ -1,5 +1,5 @@
 /**
- * Web keyboard bridge protocol (issue #19, L3) — shared by the guest hook (`keel/guest`
+ * Web keyboard bridge protocol (issue #139, L3) — shared by the guest hook (`keel/guest`
  * useKeyboard) and the web host capture (`keel/host/web` attachKeyboard).
  *
  * Direction:

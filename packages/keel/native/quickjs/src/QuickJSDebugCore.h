@@ -164,7 +164,7 @@ private:
   // Written under mutex_; additionally read lock-free (relaxed) on the onStep
   // hot path so a pending pause can defeat the per-line dedup — a single-line
   // loop never changes the dedup key, and without this probe an async
-  // Debugger.pause would starve forever (issue #39).
+  // Debugger.pause would starve forever (issue #141).
   std::atomic<bool> pauseRequested_{false};
   bool paused_ = false;                                // guarded by mutex_
   bool resumeRequested_ = false;                       // guarded by mutex_

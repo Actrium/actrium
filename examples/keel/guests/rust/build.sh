@@ -18,14 +18,14 @@ cd "$(dirname "$0")"
 TARGET=wasm32-unknown-unknown
 FIXTURES=../../../../packages/keel/src/host/native-guest/__tests__/fixtures
 # Single source of truth for both the debug (DWARF) and release fixture builds
-# below. Since the binary-protocol feature is now DEFAULT ON (issue #45), every
+# below. Since the binary-protocol feature is now DEFAULT ON (issue #147), every
 # guest here is binary-capable (op-batch encoder + keel_wire_caps export, canvas
 # encoder + getInfo probe) yet still emits JSON at runtime unless the host
 # negotiates binary — so canvas-binary-guest / ui-binary-guest build in the SAME
 # invocation now (no feature-isolation split needed). ui-guest-json (built
 # separately with --no-default-features) is the back-compat, pre-promotion
 # JSON-only guest used to test the "guest without keel_wire_caps" host path.
-# blur-demo-guest is the SIMD/worker-pool compute demo (issue #57).
+# blur-demo-guest is the SIMD/worker-pool compute demo (issue #151).
 GUESTS="kv-guest ui-guest seq-guest event-guest heap-churn-guest canvas-guest canvas-present-guest canvas-gpu-guest canvas-escape-guest asset-guest canvas-binary-guest ui-binary-guest blur-demo-guest host-api-v01-guest"
 
 # Optional debug build: DWARF-carrying guests for source-level debugging inside
