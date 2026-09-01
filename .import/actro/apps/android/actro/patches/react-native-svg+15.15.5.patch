@@ -1,0 +1,57 @@
+diff --git a/node_modules/react-native-svg/android/build.gradle b/node_modules/react-native-svg/android/build.gradle
+index 4fe912c..e54e716 100644
+--- a/node_modules/react-native-svg/android/build.gradle
++++ b/node_modules/react-native-svg/android/build.gradle
+@@ -9,7 +9,7 @@ buildscript {
+         }
+ 
+         dependencies {
+-            classpath("com.android.tools.build:gradle:7.4.2")
++            classpath("com.android.tools.build:gradle:8.8.2")
+             classpath "com.diffplug.spotless:spotless-plugin-gradle:6.17.0"
+         }
+     }
+@@ -85,8 +85,8 @@ def getFrescoVersion() {
+ def FRESCO_VERSION = getFrescoVersion()
+ 
+ android {
+-    compileSdkVersion safeExtGet('compileSdkVersion', 28)
+-    namespace "com.horcrux.svg"
++    compileSdk = safeExtGet('compileSdkVersion', 28)
++    namespace = "com.horcrux.svg"
+     def agpVersion = com.android.Version.ANDROID_GRADLE_PLUGIN_VERSION
+     if (agpVersion.tokenize('.')[0].toInteger() >= 8) {
+         buildFeatures {
+@@ -99,19 +99,19 @@ android {
+         ndkPath rootProject.ext.ndkPath
+     }
+     if (rootProject.hasProperty("ndkVersion")) {
+-        ndkVersion rootProject.ext.ndkVersion
++        ndkVersion = rootProject.ext.ndkVersion
+     }
+ 
+     defaultConfig {
+-        minSdkVersion safeExtGet('minSdkVersion', 16)
++        minSdk = safeExtGet('minSdkVersion', 16)
+         //noinspection OldTargetApi
+-        targetSdkVersion safeExtGet('targetSdkVersion', 28)
++        targetSdk = safeExtGet('targetSdkVersion', 28)
+         buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", isNewArchitectureEnabled().toString()
+ 
+         consumerProguardFiles 'proguard-rules.pro'
+     }
+     lintOptions {
+-        abortOnError false
++        abortOnError = false
+     }
+ 
+     sourceSets.main {
+@@ -131,7 +131,7 @@ repositories {
+     google()
+     maven {
+         // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm
+-        url "$rootDir/../node_modules/react-native/android"
++        url = uri("$rootDir/../node_modules/react-native/android")
+     }
+ }
+ 

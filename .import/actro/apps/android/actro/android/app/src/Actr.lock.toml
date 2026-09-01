@@ -1,0 +1,13 @@
+[metadata]
+version = 1
+generated_at = "2026-03-26T07:38:28.893413+00:00"
+
+[[dependency]]
+name = "bot"
+actr_type = "actro+app_server"
+fingerprint = "service_semantic:822480b5040acc05c12836b4218cfb00021d435802f566a4e89197feaba9eea4"
+cached_at = "2026-03-26T07:38:28.893411+00:00"
+
+[[dependency.files]]
+path = "bot/actro.proto"
+fingerprint = ""

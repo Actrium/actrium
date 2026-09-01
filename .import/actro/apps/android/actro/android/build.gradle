@@ -1,0 +1,54 @@
+buildscript {
+    ext {
+        buildToolsVersion = "35.0.0"
+        minSdkVersion = 26
+        compileSdkVersion = 35
+        targetSdkVersion = 35
+        ndkVersion = "27.1.12297006"
+        kotlinVersion = "2.0.21"
+        REACT_NATIVE_NODE_MODULES_DIR = "${rootProject.projectDir}/../node_modules/react-native"
+
+        // Read node path from local.properties
+        def localProps = new Properties()
+        def localPropsFile = rootProject.file('local.properties')
+        if (localPropsFile.exists()) {
+            localProps.load(new FileInputStream(localPropsFile))
+        }
+        nodeExecutableAndArgs = localProps.getProperty('reactNative.nodeExecutableAndArgs', 'node')
+    }
+    repositories {
+        google()
+        mavenCentral()
+        maven {
+            url = uri("https://maven.pkg.github.com/Actrium/actr-kotlin-package-sync")
+            credentials {
+                username = System.getenv("GITHUB_ACTRIUM_USER") ?: System.getenv("GITHUB_ACTOR") ?: "actrium"
+                password = System.getenv("GITHUB_ACTRIUM_TOKEN") ?: System.getenv("GITHUB_TOKEN") ?: ""
+            }
+        }
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.8.2")
+        classpath("com.facebook.react:react-native-gradle-plugin")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+        classpath("com.google.protobuf:protobuf-gradle-plugin:0.9.4")
+        classpath("com.google.devtools.ksp:symbol-processing-gradle-plugin:2.0.21-1.0.28")
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        maven {
+            url = uri("https://maven.pkg.github.com/Actrium/actr-kotlin-package-sync")
+            credentials {
+                username = System.getenv("GITHUB_ACTRIUM_USER") ?: System.getenv("GITHUB_ACTOR") ?: "actrium"
+                password = System.getenv("GITHUB_ACTRIUM_TOKEN") ?: System.getenv("GITHUB_TOKEN") ?: ""
+            }
+        }
+    }
+}
+
+apply plugin: "com.facebook.react.rootproject"
+apply from: file("gradle/binary-assets.gradle")

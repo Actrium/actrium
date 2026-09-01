@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package actro;
+
+import "remote/ask-service/ask.proto";
+
+// Client text message
+message TextMessage {
+  string text = 1;
+  string session_id = 2;
+  string message_id = 3;
+  ask.Location location = 4;
+  repeated string attachment_ids = 5;  // Optional: Attachment IDs
+  string stream_id = 6;
+  string text_response_stream_id = 7; // Text response stream ID (if applicable)
+  string voice_response_stream_id = 8; // Voice response stream ID (if applicable)
+}
+
+message TextMessageResponse {
+  string question_id = 1; // ID for the answer stream
+  string session_id = 2; // Session ID for tracking
+  string text = 3; // Text answer (if applicable)
+  int32 status_code = 4;
+  string error_message = 5;
+}
+
+message StartVoiceMessage {
+  string session_id = 1;
+  string message_id = 2;
+  string stream_id = 3;
+  ask.Location location = 4;
+  repeated string attachment_ids = 5;  // Optional: Attachment IDs
+  string text_response_stream_id = 7; // Text response stream ID (if applicable)
+  string voice_response_stream_id = 8; // Voice response stream ID (if applicable)
+}
+
+message StartVoiceMessageResponse {
+  string question_id = 1; // ID for the answer stream
+  string session_id = 2; // Session ID for tracking
+  string text = 3; // Text answer (if applicable)
+  int32 status_code = 4;
+  string error_message = 5;
+}
+
+message VoiceChunkMessage {
+  string session_id = 1;
+  string message_id = 2;
+  string chunk_id = 3;
+  bytes chunk_data = 4;
+  string stream_id = 5;
+  map<string, string> metadata = 6;
+}
+
+message VoiceChunkMessageResponse {
+  string stream_id = 1;
+  int32 status = 2;
+  string message = 3;
+}
+
+service AskLocalService {
+  // Handles text input from Shell
+  rpc SendText(TextMessage) returns (TextMessageResponse);
+
+  rpc StartSendVoice(StartVoiceMessage) returns (StartVoiceMessageResponse);
+
+  // Handles voice input from Shell
+  rpc SendVoiceChunk(VoiceChunkMessage) returns (VoiceChunkMessageResponse);
+}

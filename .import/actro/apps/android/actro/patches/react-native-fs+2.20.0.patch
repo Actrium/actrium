@@ -1,0 +1,39 @@
+diff --git a/node_modules/react-native-fs/android/build.gradle b/node_modules/react-native-fs/android/build.gradle
+index ddef857..7ed1c44 100644
+--- a/node_modules/react-native-fs/android/build.gradle
++++ b/node_modules/react-native-fs/android/build.gradle
+@@ -5,27 +5,29 @@ def safeExtGet(prop, fallback) {
+ buildscript {
+     repositories {
+         mavenCentral()
++        google()
+     }
+ 
+     dependencies {
+-        classpath 'com.android.tools.build:gradle:1.5.0'
++        classpath 'com.android.tools.build:gradle:8.8.2'
+     }
+ }
+ 
+ apply plugin: 'com.android.library'
+ 
+ android {
+-    compileSdkVersion safeExtGet('compileSdkVersion', 26)
++    namespace = "com.rnfs"
++    compileSdk = safeExtGet('compileSdkVersion', 26)
+     buildToolsVersion safeExtGet('buildToolsVersion', '26.0.3')
+ 
+     defaultConfig {
+-        minSdkVersion safeExtGet('minSdkVersion', 19)
+-        targetSdkVersion safeExtGet('targetSdkVersion', 26)
++        minSdk = safeExtGet('minSdkVersion', 19)
++        targetSdk = safeExtGet('targetSdkVersion', 26)
+         versionCode 1
+         versionName "1.0"
+     }
+     lintOptions {
+-        abortOnError false
++        abortOnError = false
+     }
+ }
+ 

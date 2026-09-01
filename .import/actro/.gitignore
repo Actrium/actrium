@@ -1,0 +1,58 @@
+.DS_Store
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# JavaScript
+node_modules/
+.turbo/
+.next/
+coverage/
+
+# Rust
+target/
+vcpkg_installed/
+crates/actro-core/generated/
+crates/actro-core/xcframework-staging/
+crates/actro-core/ActroCore.xcframework/**/libactro_core.a
+crates/actro-vault/generated/
+crates/actro-vault/xcframework-staging/
+crates/actro-vault/ActroVault.xcframework/**/libactro_vault.a
+# Apple
+DerivedData/
+.build/
+*.xcuserdata/
+
+# Build outputs
+build/
+dist/
+out/
+*.profraw
+*.profdata
+apps/windows/actro/bin/
+apps/windows/actro/native/*.dll
+apps/windows/actro/obj/
+apps/windows/actro.tests/bin/
+apps/windows/actro.tests/obj/
+packages/actro-native-kotlin/build/
+packages/actro-native-kotlin/src/main/jniLibs/**/*.so
+packages/actr-kotlin/src/main/jniLibs/
+apps/android/actro/android/app/src/main/assets/model/asr/
+
+# Local scratch / memory files
+internal/
+.gemini-clipboard/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Windows native staging artifacts
+apps/windows/actro/native/*.dylib
+apps/windows/actro/native/*.dll

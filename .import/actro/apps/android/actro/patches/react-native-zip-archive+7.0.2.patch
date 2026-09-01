@@ -1,0 +1,39 @@
+diff --git a/node_modules/react-native-zip-archive/android/build.gradle b/node_modules/react-native-zip-archive/android/build.gradle
+index b199afa..04a1c3b 100644
+--- a/node_modules/react-native-zip-archive/android/build.gradle
++++ b/node_modules/react-native-zip-archive/android/build.gradle
+@@ -5,14 +5,15 @@ buildscript {
+     }
+ 
+     dependencies {
+-        classpath 'com.android.tools.build:gradle:3.2.1'
++        classpath 'com.android.tools.build:gradle:8.8.2'
+     }
+ }
+ 
+ apply plugin: 'com.android.library'
+ 
+ android {
+-    compileSdkVersion rootProject.ext.compileSdkVersion
++    namespace = "com.rnziparchive"
++    compileSdk = rootProject.ext.compileSdkVersion
+     buildToolsVersion rootProject.ext.buildToolsVersion
+ 
+     compileOptions {
+@@ -21,13 +22,13 @@ android {
+     }
+ 
+     defaultConfig {
+-        minSdkVersion rootProject.ext.minSdkVersion
+-        targetSdkVersion rootProject.ext.targetSdkVersion
++        minSdk = rootProject.ext.minSdkVersion
++        targetSdk = rootProject.ext.targetSdkVersion
+         versionCode 1
+         versionName "1.0"
+     }
+     lintOptions {
+-        abortOnError false
++        abortOnError = false
+     }
+ }
+ 

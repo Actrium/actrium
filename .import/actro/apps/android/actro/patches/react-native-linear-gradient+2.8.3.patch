@@ -1,0 +1,46 @@
+diff --git a/node_modules/react-native-linear-gradient/android/build.gradle b/node_modules/react-native-linear-gradient/android/build.gradle
+index e3aacde..fb5ebac 100644
+--- a/node_modules/react-native-linear-gradient/android/build.gradle
++++ b/node_modules/react-native-linear-gradient/android/build.gradle
+@@ -12,7 +12,7 @@ buildscript {
+             mavenCentral()
+         }
+         dependencies {
+-            classpath 'com.android.tools.build:gradle:7.2.1'
++            classpath 'com.android.tools.build:gradle:8.8.2'
+         }
+     }
+ }
+@@ -20,13 +20,14 @@ buildscript {
+ apply plugin: 'com.android.library'
+ 
+ android {
+-    compileSdkVersion safeExtGet('compileSdkVersion', 31).toInteger()
++    namespace = "com.BV.LinearGradient"
++    compileSdk = safeExtGet('compileSdkVersion', 31).toInteger()
+     defaultConfig {
+-        minSdkVersion safeExtGet('minSdkVersion', 21)
+-        targetSdkVersion safeExtGet('targetSdkVersion', 31)
++        minSdk = safeExtGet('minSdkVersion', 21)
++        targetSdk = safeExtGet('targetSdkVersion', 31)
+     }
+     lintOptions {
+-        abortOnError false
++        abortOnError = false
+     }
+ }
+ 
+@@ -35,11 +36,11 @@ repositories {
+     mavenCentral()
+     maven {
+         // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm
+-        url "$rootDir/../node_modules/react-native/android"
++        url = uri("$rootDir/../node_modules/react-native/android")
+     }
+     maven {
+         // Android JSC is installed from npm
+-        url "$rootDir/../node_modules/jsc-android/dist"
++        url = uri("$rootDir/../node_modules/jsc-android/dist")
+     }
+     google()
+ }

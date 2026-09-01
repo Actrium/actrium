@@ -1,0 +1,66 @@
+diff --git a/node_modules/@react-native-camera-roll/camera-roll/android/build.gradle b/node_modules/@react-native-camera-roll/camera-roll/android/build.gradle
+index 2e6e38d..6fedd30 100644
+--- a/node_modules/@react-native-camera-roll/camera-roll/android/build.gradle
++++ b/node_modules/@react-native-camera-roll/camera-roll/android/build.gradle
+@@ -11,13 +11,13 @@ buildscript {
+     }
+ 
+     dependencies {
+-      classpath("com.android.tools.build:gradle:4.2.2")
++      classpath("com.android.tools.build:gradle:8.8.2")
+     }
+   }
+ }
+ 
+ task downloadDependencies() {
+-  description 'Download all dependencies to the Gradle cache'
++  description = 'Download all dependencies to the Gradle cache'
+   doLast {
+     configurations.findAll().each { config ->
+       if (config.name.contains("minReactNative") && config.canBeResolved) {
+@@ -143,7 +143,7 @@ android {
+   if(shouldUseNameSpace){
+     namespace = "com.reactnativecommunity.cameraroll"
+   }
+-  compileSdkVersion getExtOrIntegerDefault('compileSdkVersion')
++  compileSdk = getExtOrIntegerDefault('compileSdkVersion')
+ 
+     // Used to override the NDK path/version on internal CI or by allowing
+     // users to customize the NDK path/version from their root project (e.g. for M1 support)
+@@ -151,7 +151,7 @@ android {
+         ndkPath rootProject.ext.ndkPath
+     }
+     if (rootProject.hasProperty("ndkVersion")) {
+-        ndkVersion rootProject.ext.ndkVersion
++        ndkVersion = rootProject.ext.ndkVersion
+     }
+ 
+   compileOptions {
+@@ -160,8 +160,8 @@ android {
+   }
+ 
+   defaultConfig {
+-    minSdkVersion getExtOrIntegerDefault('minSdkVersion')
+-    targetSdkVersion getExtOrIntegerDefault('targetSdkVersion')
++    minSdk = getExtOrIntegerDefault('minSdkVersion')
++    targetSdk = getExtOrIntegerDefault('targetSdkVersion')
+   }
+ 
+       sourceSets.main {
+@@ -173,14 +173,14 @@ android {
+     }
+ 
+   lintOptions{
+-    abortOnError false
++    abortOnError = false
+   }
+ }
+ 
+ repositories {
+   maven {
+     // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm
+-    url "$rootDir/../node_modules/react-native/android"
++    url = uri("$rootDir/../node_modules/react-native/android")
+   }
+   google()
+   mavenLocal()
