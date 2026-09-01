@@ -1,5 +1,5 @@
 import { NativeEventEmitter, NativeModules } from 'react-native';
-import { RUNTIME_NATIVE_EVENTS } from '../../actr-host/coreContract';
+import { RUNTIME_NATIVE_EVENTS } from '../../runtime-host/coreContract';
 
 const { ExtensionEventEmitter } = NativeModules;
 const eventEmitter = new NativeEventEmitter(ExtensionEventEmitter);

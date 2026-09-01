@@ -1217,1162 +1217,1204 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+// For large crates we prevent `MethodTooLargeException` (see #2340)
+// N.B. the name of the extension is very misleading, since it is
+// rather `InterfaceTooLargeException`, caused by too many methods
+// in the interface for large crates.
+//
+// By splitting the otherwise huge interface into two parts
+// * UniffiLib
+// * IntegrityCheckingUniffiLib (this)
+// we allow for ~2x as many methods in the UniffiLib interface.
+//
+// The `ffi_uniffi_contract_version` method and all checksum methods are put
+// into `IntegrityCheckingUniffiLib` and these methods are called only once,
+// when the library is loaded.
+internal interface IntegrityCheckingUniffiLib : Library {
+    // Integrity check functions only
+    fun uniffi_actro_core_checksum_func_active_tab_from_row(
+): Short
+fun uniffi_actro_core_checksum_func_active_tab_rows_from_tabs(
+): Short
+fun uniffi_actro_core_checksum_func_active_tab_to_row(
+): Short
+fun uniffi_actro_core_checksum_func_actr_bridge_contract(
+): Short
+fun uniffi_actro_core_checksum_func_app_source_type_downloaded(
+): Short
+fun uniffi_actro_core_checksum_func_app_source_type_info(
+): Short
+fun uniffi_actro_core_checksum_func_app_source_type_local_dev(
+): Short
+fun uniffi_actro_core_checksum_func_asr_bridge_contract(
+): Short
+fun uniffi_actro_core_checksum_func_asr_model_language_dir(
+): Short
+fun uniffi_actro_core_checksum_func_asr_model_plan(
+): Short
+fun uniffi_actro_core_checksum_func_auth_access_control_path(
+): Short
+fun uniffi_actro_core_checksum_func_auth_access_control_status(
+): Short
+fun uniffi_actro_core_checksum_func_auth_access_control_url_from_app_url(
+): Short
+fun uniffi_actro_core_checksum_func_auth_account_base_url(
+): Short
+fun uniffi_actro_core_checksum_func_auth_api_response_success(
+): Short
+fun uniffi_actro_core_checksum_func_auth_client_app_path(
+): Short
+fun uniffi_actro_core_checksum_func_auth_environment_beta(
+): Short
+fun uniffi_actro_core_checksum_func_auth_environment_dev(
+): Short
+fun uniffi_actro_core_checksum_func_auth_environment_from_app_url(
+): Short
+fun uniffi_actro_core_checksum_func_auth_environment_from_url(
+): Short
+fun uniffi_actro_core_checksum_func_auth_environment_prod(
+): Short
+fun uniffi_actro_core_checksum_func_auth_environment_storage_suffix(
+): Short
+fun uniffi_actro_core_checksum_func_auth_is_authorized_code(
+): Short
+fun uniffi_actro_core_checksum_func_auth_is_client_app_not_found_code(
+): Short
+fun uniffi_actro_core_checksum_func_auth_is_client_app_not_found_message(
+): Short
+fun uniffi_actro_core_checksum_func_auth_resource_upload_token_path(
+): Short
+fun uniffi_actro_core_checksum_func_auth_resource_uploader_base_url(
+): Short
+fun uniffi_actro_core_checksum_func_browser_bookmark_snapshot_normalize_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_data_contract(
+): Short
+fun uniffi_actro_core_checksum_func_browser_history_snapshot_normalize_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_search_engine_default_id(
+): Short
+fun uniffi_actro_core_checksum_func_browser_search_engine_info(
+): Short
+fun uniffi_actro_core_checksum_func_browser_search_engine_normalize_id(
+): Short
+fun uniffi_actro_core_checksum_func_browser_search_engines(
+): Short
+fun uniffi_actro_core_checksum_func_browser_search_url(
+): Short
+fun uniffi_actro_core_checksum_func_browser_session_home_snapshot_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_session_snapshot_normalize_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_address_canonicalization_policy_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_bookmark_folder_tree_integrity_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_bookmark_folder_tree_integrity_policy_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_bookmark_ownership_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_bookmark_ownership_policy_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_bookmark_restore_placement_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_bookmark_restore_placement_policy_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_canonicalize_addresses_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_data_model_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_database_name(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_history_visit_aggregation_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_history_visit_aggregation_policy_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_repository_sql(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_retention_pruning_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_retention_pruning_policy_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_schema(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_schema_migration_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_schema_statements(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_schema_version(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_session_active_tab_consistency_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_session_active_tab_consistency_policy_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_session_tab_id_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_session_tab_ordering_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_session_tab_ordering_policy_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_ack_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_batch_from_dirty_rows_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_client_ack_batch_after_remote_apply_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_client_cycle_apply_result_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_client_cycle_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cleanup_result_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_compaction_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_compaction_result_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_compatibility_preflight_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_compatibility_status_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_attempt_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_client_apply_result_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_client_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_loop_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_schedule_state_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_status_policy_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_data_model_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_default_manifest_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_high_watermark_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_high_watermark_policy_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_capabilities_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_capability_preflight_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_cleanup_round_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_compaction_round_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_compatibility_preflight_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_cycle_round_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_membership_round_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_recovery_retention_round_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_recovery_snapshot_round_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_log_object_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_attempt_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_loop_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_result_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_schedule_state_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_status_policy_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_observability_event_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_adapter_contract_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_adapter_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_connection_contract_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_connection_status_policy_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_diagnostics_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_error_classification_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_error_policy_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_pull_apply_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_pull_continuation_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_pull_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_push_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_push_result_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_recovery_snapshot_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_recovery_snapshot_result_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_schema_migration_playbook_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_schema_rollout_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_snapshot_object_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_store_capability_preflight_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_store_contract_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_conflict_policy_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cycle_request_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cycle_response_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_cycle_transport_result_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_merge_policy_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_pull_request_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_push_request_from_dirty_rows_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_push_request_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_remote_apply_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_remote_apply_result_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_schedule_state_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_scheduler_status_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_server_merge_plan_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_server_merge_result_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_sql(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_status_policy_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_sync_transport_contract_json(
+): Short
+fun uniffi_actro_core_checksum_func_browser_storage_table_names(
+): Short
+fun uniffi_actro_core_checksum_func_core_app_repository_sql(
+): Short
+fun uniffi_actro_core_checksum_func_core_app_search_params(
+): Short
+fun uniffi_actro_core_checksum_func_core_bookmark_from_row(
+): Short
+fun uniffi_actro_core_checksum_func_core_bookmark_insert_params(
+): Short
+fun uniffi_actro_core_checksum_func_core_bookmark_repository_sql(
+): Short
+fun uniffi_actro_core_checksum_func_core_bookmark_search_params(
+): Short
+fun uniffi_actro_core_checksum_func_core_bookmark_update_params(
+): Short
+fun uniffi_actro_core_checksum_func_core_history_insert_visit_params(
+): Short
+fun uniffi_actro_core_checksum_func_core_history_item_from_row(
+): Short
+fun uniffi_actro_core_checksum_func_core_history_repository_sql(
+): Short
+fun uniffi_actro_core_checksum_func_core_history_search_title_param(
+): Short
+fun uniffi_actro_core_checksum_func_core_installed_app_from_row(
+): Short
+fun uniffi_actro_core_checksum_func_core_installed_app_insert_params(
+): Short
+fun uniffi_actro_core_checksum_func_core_installed_app_update_params(
+): Short
+fun uniffi_actro_core_checksum_func_core_schema_statements(
+): Short
+fun uniffi_actro_core_checksum_func_core_schema_table_names(
+): Short
+fun uniffi_actro_core_checksum_func_core_schema_version(
+): Short
+fun uniffi_actro_core_checksum_func_core_tag_from_row(
+): Short
+fun uniffi_actro_core_checksum_func_core_tag_insert_params(
+): Short
+fun uniffi_actro_core_checksum_func_core_tag_repository_sql(
+): Short
+fun uniffi_actro_core_checksum_func_core_tag_update_params(
+): Short
+fun uniffi_actro_core_checksum_func_create_actr_integrity_plan(
+): Short
+fun uniffi_actro_core_checksum_func_default_runtime_app_status(
+): Short
+fun uniffi_actro_core_checksum_func_default_system_tags(
+): Short
+fun uniffi_actro_core_checksum_func_default_tag_colors(
+): Short
+fun uniffi_actro_core_checksum_func_default_tags(
+): Short
+fun uniffi_actro_core_checksum_func_email_bridge_contract(
+): Short
+fun uniffi_actro_core_checksum_func_empty_browser_storage_sync_batch_json(
+): Short
+fun uniffi_actro_core_checksum_func_evaluate_contract(
+): Short
+fun uniffi_actro_core_checksum_func_extract_app_id_from_url(
+): Short
+fun uniffi_actro_core_checksum_func_is_asset_path(
+): Short
+fun uniffi_actro_core_checksum_func_normalize_browser_storage_sync_ack_batch_json(
+): Short
+fun uniffi_actro_core_checksum_func_normalize_browser_storage_sync_batch_json(
+): Short
+fun uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cloud_device_json(
+): Short
+fun uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cloud_log_object_json(
+): Short
+fun uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cloud_manifest_json(
+): Short
+fun uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cloud_snapshot_object_json(
+): Short
+fun uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cursors_json(
+): Short
+fun uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cycle_response_json(
+): Short
+fun uniffi_actro_core_checksum_func_normalize_browser_sync_provider_settings_json(
+): Short
+fun uniffi_actro_core_checksum_func_normalize_integrity_algorithm(
+): Short
+fun uniffi_actro_core_checksum_func_normalize_integrity_path(
+): Short
+fun uniffi_actro_core_checksum_func_normalize_path(
+): Short
+fun uniffi_actro_core_checksum_func_normalize_runtime_app_status(
+): Short
+fun uniffi_actro_core_checksum_func_normalize_sha256_hex(
+): Short
+fun uniffi_actro_core_checksum_func_parse_actr_actor_type(
+): Short
+fun uniffi_actro_core_checksum_func_parse_actr_package_manifest(
+): Short
+fun uniffi_actro_core_checksum_func_parse_app_source_type(
+): Short
+fun uniffi_actro_core_checksum_func_parse_system_app_type(
+): Short
+fun uniffi_actro_core_checksum_func_parse_vosk_partial_text(
+): Short
+fun uniffi_actro_core_checksum_func_parse_vosk_result_text(
+): Short
+fun uniffi_actro_core_checksum_func_post_process_zh_asr_segments(
+): Short
+fun uniffi_actro_core_checksum_func_relative_path_from(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_app_status_alive(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_app_status_dead(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_auth_context_app_id_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_auth_context_app_url_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_auth_context_client_id_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_auth_context_tab_id_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_bridge_app_url_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_bridge_container_height_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_bridge_container_width_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_bridge_icon_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_bridge_is_bookmarked_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_bridge_marked_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_bridge_status_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_bridge_tab_id_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_bridge_title_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_bridge_unread_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_bridge_visible_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_container_size_change_event(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_container_size_change_event_name(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_extension_panel_visible_change_event_name(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_extension_panel_visible_event(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_login_result_code_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_login_result_error_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_login_result_event_name(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_login_result_id_token_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_login_result_message_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_login_result_type_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_login_type_apple(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_login_type_google(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_login_type_wechat(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_root_props_current_tab_id_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_root_props_from_active_tabs(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_root_props_from_runtime_tabs(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_root_props_is_left_panel_visible_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_root_props_is_right_panel_visible_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_root_props_single_tab_mode_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_root_props_tab_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_root_props_tabs_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_search_input_changed_event_name(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_system_root_props(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_tab_bookmark_changed_event_name(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_tab_bookmark_event(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_tab_bookmark_status_from_fields(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_tab_entered_fullscreen_event_name(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_tab_exited_fullscreen_event_name(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_tab_from_active_tab(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_tab_fullscreen_event(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_tab_props_background_color_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_tab_props_html_content_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_tab_props_id_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_tab_props_reload_key_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_tab_props_right_panel_default_visible_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_tab_props_unified_script_key(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_tab_unread_from_fields(
+): Short
+fun uniffi_actro_core_checksum_func_runtime_tab_update_from_fields(
+): Short
+fun uniffi_actro_core_checksum_func_stable_content_fingerprint(
+): Short
+fun uniffi_actro_core_checksum_func_supported_contract_name(
+): Short
+fun uniffi_actro_core_checksum_func_supported_contract_version(
+): Short
+fun uniffi_actro_core_checksum_func_system_app_info(
+): Short
+fun uniffi_actro_core_checksum_func_system_app_type_bookmarks(
+): Short
+fun uniffi_actro_core_checksum_func_system_app_type_global_search(
+): Short
+fun uniffi_actro_core_checksum_func_system_app_type_settings(
+): Short
+fun uniffi_actro_core_checksum_func_tts_bridge_contract(
+): Short
+fun uniffi_actro_core_checksum_func_user_info_bridge_contract(
+): Short
+fun uniffi_actro_core_checksum_func_validate_actr_package_manifest(
+): Short
+fun ffi_actro_core_uniffi_contract_version(
+): Int
+
+}
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
-
 internal interface UniffiLib : Library {
     companion object {
         internal val INSTANCE: UniffiLib by lazy {
-            loadIndirect<UniffiLib>(componentName = "actro_core")
-            .also { lib: UniffiLib ->
-                uniffiCheckContractApiVersion(lib)
-                uniffiCheckApiChecksums(lib)
+            val componentName = "actro_core"
+            // For large crates we prevent `MethodTooLargeException` (see #2340)
+            // N.B. the name of the extension is very misleading, since it is
+            // rather `InterfaceTooLargeException`, caused by too many methods
+            // in the interface for large crates.
+            //
+            // By splitting the otherwise huge interface into two parts
+            // * UniffiLib (this)
+            // * IntegrityCheckingUniffiLib
+            // And all checksum methods are put into `IntegrityCheckingUniffiLib`
+            // we allow for ~2x as many methods in the UniffiLib interface.
+            //
+            // Thus we first load the library with `loadIndirect` as `IntegrityCheckingUniffiLib`
+            // so that we can (optionally!) call `uniffiCheckApiChecksums`...
+            loadIndirect<IntegrityCheckingUniffiLib>(componentName)
+                .also { lib: IntegrityCheckingUniffiLib ->
+                    uniffiCheckContractApiVersion(lib)
+                    uniffiCheckApiChecksums(lib)
                 }
+            // ... and then we load the library as `UniffiLib`
+            // N.B. we cannot use `loadIndirect` once and then try to cast it to `UniffiLib`
+            // => results in `java.lang.ClassCastException: com.sun.proxy.$Proxy cannot be cast to ...`
+            // error. So we must call `loadIndirect` twice. For crates large enough
+            // to trigger this issue, the performance impact is negligible, running on
+            // a macOS M1 machine the `loadIndirect` call takes ~50ms.
+            val lib = loadIndirect<UniffiLib>(componentName)
+            // No need to check the contract version and checksums, since
+            // we already did that with `IntegrityCheckingUniffiLib` above.
+            // Loading of library with integrity check done.
+            lib
         }
 
     }
 
+    // FFI functions
     fun uniffi_actro_core_fn_func_active_tab_from_row(`row`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_active_tab_rows_from_tabs(`tabs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_active_tab_to_row(`tab`: RustBuffer.ByValue,`sortOrder`: Int,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_actr_bridge_contract(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_app_source_type_downloaded(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_app_source_type_info(`raw`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_app_source_type_local_dev(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_asr_bridge_contract(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_asr_model_language_dir(`language`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_asr_model_plan(`language`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_auth_access_control_path(`appId`: RustBuffer.ByValue,`userId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_auth_access_control_status(`success`: Byte,`hasCode`: Byte,`code`: Int,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_auth_access_control_url_from_app_url(`appUrl`: RustBuffer.ByValue,`appId`: RustBuffer.ByValue,`userId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_auth_account_base_url(`environment`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_auth_api_response_success(`code`: Int,uniffi_out_err: UniffiRustCallStatus,
-    ): Byte
-    fun uniffi_actro_core_fn_func_auth_client_app_path(`appId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_auth_environment_beta(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_auth_environment_dev(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_auth_environment_from_app_url(`url`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_auth_environment_from_url(`url`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_auth_environment_prod(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_auth_environment_storage_suffix(`environment`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_auth_is_authorized_code(`code`: Int,uniffi_out_err: UniffiRustCallStatus,
-    ): Byte
-    fun uniffi_actro_core_fn_func_auth_is_client_app_not_found_code(`code`: Int,uniffi_out_err: UniffiRustCallStatus,
-    ): Byte
-    fun uniffi_actro_core_fn_func_auth_is_client_app_not_found_message(`message`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): Byte
-    fun uniffi_actro_core_fn_func_auth_resource_upload_token_path(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_auth_resource_uploader_base_url(`environment`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_bookmark_snapshot_normalize_json(`snapshotJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_data_contract(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_history_snapshot_normalize_json(`snapshotJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_search_engine_default_id(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_search_engine_info(`engineId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_search_engine_normalize_id(`engineId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_search_engines(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_search_url(`query`: RustBuffer.ByValue,`engineId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_session_home_snapshot_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_session_snapshot_normalize_json(`snapshotJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_address_canonicalization_policy_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_bookmark_folder_tree_integrity_plan_json(`foldersJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_bookmark_folder_tree_integrity_policy_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_bookmark_ownership_plan_json(`bookmarksJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_bookmark_ownership_policy_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_bookmark_restore_placement_plan_json(`bookmarksJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_bookmark_restore_placement_policy_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_canonicalize_addresses_json(`addressesJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_data_model_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_database_name(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_history_visit_aggregation_plan_json(`visitsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_history_visit_aggregation_policy_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_repository_sql(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_retention_pruning_plan_json(`recordsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_retention_pruning_policy_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_schema(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_schema_migration_plan_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_schema_statements(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_schema_version(uniffi_out_err: UniffiRustCallStatus,
-    ): Int
-    fun uniffi_actro_core_fn_func_browser_storage_session_active_tab_consistency_plan_json(`sessionsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_session_active_tab_consistency_policy_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_session_tab_id_plan_json(`tabsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_session_tab_ordering_plan_json(`tabsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_session_tab_ordering_policy_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_ack_plan_json(`ackJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_batch_from_dirty_rows_json(`scope`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,`rowsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_client_ack_batch_after_remote_apply_json(`responseJson`: RustBuffer.ByValue,`remoteApplyResultJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_client_cycle_apply_result_json(`responseJson`: RustBuffer.ByValue,`remoteApplyResultJson`: RustBuffer.ByValue,`ackApplied`: Byte,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_client_cycle_plan_json(`responseJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_cleanup_result_plan_json(`highWatermarkPlanJson`: RustBuffer.ByValue,`deleteResultsJson`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_compaction_plan_json(`manifestJson`: RustBuffer.ByValue,`manifestRevision`: RustBuffer.ByValue,`snapshotsJson`: RustBuffer.ByValue,`logsJson`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_compaction_result_plan_json(`compactionPlanJson`: RustBuffer.ByValue,`writeResultsJson`: RustBuffer.ByValue,`deleteResultsJson`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_compatibility_preflight_json(`documentsJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_compatibility_status_json(`documentKind`: RustBuffer.ByValue,`documentJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_attempt_plan_json(`cycleRoundJson`: RustBuffer.ByValue,`retryAttempt`: Int,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_client_apply_result_json(`cycleRoundJson`: RustBuffer.ByValue,`stepResultsJson`: RustBuffer.ByValue,`remoteApplyResultJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_client_plan_json(`cycleRoundJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_loop_plan_json(`cycleRoundsJson`: RustBuffer.ByValue,`retryAttempt`: Int,`observedAtUnixSeconds`: Long,`maxAttempts`: Int,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_schedule_state_json(`statusPolicyJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_status_policy_json(`cycleRoundJson`: RustBuffer.ByValue,`retryAttempt`: Int,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_data_model_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_default_manifest_json(`scope`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_high_watermark_plan_json(`manifestJson`: RustBuffer.ByValue,`snapshotsJson`: RustBuffer.ByValue,`logsJson`: RustBuffer.ByValue,`cursorsJson`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_high_watermark_policy_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_capabilities_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_capability_preflight_json(`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_cleanup_round_json(`rootDir`: RustBuffer.ByValue,`cursorsJson`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_compaction_round_json(`rootDir`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_compatibility_preflight_json(`rootDir`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_cycle_round_json(`rootDir`: RustBuffer.ByValue,`pushRequestJson`: RustBuffer.ByValue,`cursorsJson`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,`maxLogObjectsPerCollection`: Int,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_membership_round_json(`rootDir`: RustBuffer.ByValue,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_recovery_retention_round_json(`rootDir`: RustBuffer.ByValue,`retainSnapshots`: Int,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_recovery_snapshot_round_json(`rootDir`: RustBuffer.ByValue,`schemaMigrationPlaybookJson`: RustBuffer.ByValue,`compatibilityPreflightJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_log_object_json(`collection`: RustBuffer.ByValue,`sequence`: Long,`batchJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_attempt_plan_json(`membershipRoundJson`: RustBuffer.ByValue,`retryAttempt`: Int,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_loop_plan_json(`membershipRoundsJson`: RustBuffer.ByValue,`retryAttempt`: Int,`observedAtUnixSeconds`: Long,`maxAttempts`: Int,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_plan_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_result_plan_json(`membershipPlanJson`: RustBuffer.ByValue,`writeResultsJson`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_schedule_state_json(`statusPolicyJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_status_policy_json(`membershipRoundJson`: RustBuffer.ByValue,`retryAttempt`: Int,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_observability_event_json(`providerDiagnosticsJson`: RustBuffer.ByValue,`attemptPlanJson`: RustBuffer.ByValue,`loopPlanJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_adapter_contract_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_adapter_plan_json(`adapterSnapshotJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_connection_contract_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_connection_status_policy_json(`providerSnapshotJson`: RustBuffer.ByValue,`retryAttempt`: Int,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_diagnostics_json(`capabilityPreflightJson`: RustBuffer.ByValue,`compatibilityPreflightJson`: RustBuffer.ByValue,`providerErrorClassificationJson`: RustBuffer.ByValue,`cycleStatusPolicyJson`: RustBuffer.ByValue,`scheduleStateJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_error_classification_json(`providerErrorsJson`: RustBuffer.ByValue,`retryAttempt`: Int,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_error_policy_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_pull_apply_plan_json(`manifestJson`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`cursorsJson`: RustBuffer.ByValue,`snapshotsJson`: RustBuffer.ByValue,`logsJson`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_pull_continuation_plan_json(`pullPlanJson`: RustBuffer.ByValue,`readResultsJson`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_pull_plan_json(`manifestJson`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`cursorsJson`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,`maxLogObjectsPerCollection`: Int,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_push_plan_json(`manifestJson`: RustBuffer.ByValue,`manifestRevision`: RustBuffer.ByValue,`deviceJson`: RustBuffer.ByValue,`deviceRevision`: RustBuffer.ByValue,`pushRequestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_push_result_plan_json(`pushPlanJson`: RustBuffer.ByValue,`writeResultsJson`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_recovery_snapshot_plan_json(`schemaMigrationPlaybookJson`: RustBuffer.ByValue,`compatibilityPreflightJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_recovery_snapshot_result_plan_json(`recoverySnapshotPlanJson`: RustBuffer.ByValue,`writeResultsJson`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_schema_migration_playbook_json(`schemaRolloutPlanJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_schema_rollout_plan_json(`compatibilityPreflightJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_snapshot_object_json(`collection`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,`batchJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_store_capability_preflight_json(`capabilitiesJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_store_contract_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_conflict_policy_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cycle_request_plan_json(`baseUrl`: RustBuffer.ByValue,`accessToken`: RustBuffer.ByValue,`pushRequestJson`: RustBuffer.ByValue,`cursorsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cycle_response_json(`remoteBatchJson`: RustBuffer.ByValue,`ackJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_cycle_transport_result_json(`statusCode`: Int,`responseJson`: RustBuffer.ByValue,`errorMessage`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_merge_policy_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_pull_request_json(`scope`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,`cursorsJson`: RustBuffer.ByValue,`maxRecordsPerCollection`: Int,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_push_request_from_dirty_rows_json(`scope`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,`rowsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_push_request_json(`batchJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_remote_apply_plan_json(`batchJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_remote_apply_result_json(`planJson`: RustBuffer.ByValue,`resultJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_schedule_state_json(`statusPolicyJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_scheduler_status_json(`schedulerSnapshotJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_server_merge_plan_json(`pushRequestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_server_merge_result_json(`planJson`: RustBuffer.ByValue,`resultJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_sql(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_status_policy_json(`classification`: RustBuffer.ByValue,`shouldRetry`: Byte,`clientAction`: RustBuffer.ByValue,`retryAttempt`: Int,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_sync_transport_contract_json(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_browser_storage_table_names(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_core_app_repository_sql(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_core_app_search_params(`query`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_core_bookmark_from_row(`row`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_core_bookmark_insert_params(`bookmark`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_core_bookmark_repository_sql(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_core_bookmark_search_params(`query`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_core_bookmark_update_params(`bookmark`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_core_history_insert_visit_params(`id`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`appUrl`: RustBuffer.ByValue,`appId`: RustBuffer.ByValue,`visitTimeSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_core_history_item_from_row(`row`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_core_history_repository_sql(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_core_history_search_title_param(`query`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_core_installed_app_from_row(`row`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_core_installed_app_insert_params(`app`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_core_installed_app_update_params(`app`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_core_schema_statements(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_core_schema_table_names(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_core_schema_version(uniffi_out_err: UniffiRustCallStatus,
-    ): Int
-    fun uniffi_actro_core_fn_func_core_tag_from_row(`row`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_core_tag_insert_params(`id`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`color`: RustBuffer.ByValue,`isSystem`: Byte,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_core_tag_repository_sql(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_core_tag_update_params(`name`: RustBuffer.ByValue,`color`: RustBuffer.ByValue,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_create_actr_integrity_plan(`manifestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_default_runtime_app_status(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_default_system_tags(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_default_tag_colors(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_default_tags(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_email_bridge_contract(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_empty_browser_storage_sync_batch_json(`scope`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_evaluate_contract(`name`: RustBuffer.ByValue,`version`: Int,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_extract_app_id_from_url(`url`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_is_asset_path(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): Byte
-    fun uniffi_actro_core_fn_func_normalize_browser_storage_sync_ack_batch_json(`ackJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_normalize_browser_storage_sync_batch_json(`batchJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_normalize_browser_storage_sync_cloud_device_json(`deviceJson`: RustBuffer.ByValue,`fallbackScope`: RustBuffer.ByValue,`fallbackDeviceId`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_normalize_browser_storage_sync_cloud_log_object_json(`logJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_normalize_browser_storage_sync_cloud_manifest_json(`manifestJson`: RustBuffer.ByValue,`fallbackScope`: RustBuffer.ByValue,`fallbackDeviceId`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_normalize_browser_storage_sync_cloud_snapshot_object_json(`snapshotJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_normalize_browser_storage_sync_cursors_json(`cursorsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_normalize_browser_storage_sync_cycle_response_json(`responseJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_normalize_browser_sync_provider_settings_json(`settingsJson`: RustBuffer.ByValue,`isRootAbsolute`: Byte,`observedAtUnixSeconds`: Long,`freshDeviceId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_normalize_integrity_algorithm(`raw`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_normalize_integrity_path(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_normalize_path(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_normalize_runtime_app_status(`value`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_normalize_sha256_hex(`hash`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_parse_actr_actor_type(`raw`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_parse_app_source_type(`raw`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_parse_actr_manifest(`json`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_parse_system_app_type(`raw`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_parse_vosk_partial_text(`json`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_parse_vosk_result_text(`json`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_post_process_zh_asr_segments(`text`: RustBuffer.ByValue,`segments`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_relative_path_from(`absolutePath`: RustBuffer.ByValue,`baseDir`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_app_status_alive(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_app_status_dead(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_auth_context_app_id_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_auth_context_app_url_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_auth_context_client_id_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_auth_context_tab_id_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_bridge_app_url_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_bridge_container_height_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_bridge_container_width_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_bridge_icon_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_bridge_is_bookmarked_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_bridge_marked_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_bridge_status_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_bridge_tab_id_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_bridge_title_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_bridge_unread_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_bridge_visible_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_container_size_change_event(`containerWidth`: Int,`containerHeight`: Int,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_container_size_change_event_name(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_extension_panel_visible_change_event_name(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_extension_panel_visible_event(`tabId`: RustBuffer.ByValue,`visible`: Byte,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_login_result_code_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_login_result_error_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_login_result_event_name(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_login_result_id_token_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_login_result_message_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_login_result_type_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_login_type_apple(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_login_type_google(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_login_type_wechat(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_root_props_current_tab_id_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_root_props_from_active_tabs(`tab`: RustBuffer.ByValue,`tabs`: RustBuffer.ByValue,`containerHeight`: Int,`containerWidth`: Int,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_root_props_from_runtime_tabs(`tab`: RustBuffer.ByValue,`tabs`: RustBuffer.ByValue,`isLeftPanelVisible`: Byte,`isRightPanelVisible`: Byte,`containerHeight`: Int,`containerWidth`: Int,`appUrl`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_root_props_is_left_panel_visible_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_root_props_is_right_panel_visible_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_root_props_single_tab_mode_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_root_props_tab_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_root_props_tabs_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_search_input_changed_event_name(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_system_root_props(`systemAppType`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_tab_bookmark_changed_event_name(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_tab_bookmark_event(`tabId`: RustBuffer.ByValue,`isBookmarked`: Byte,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_tab_bookmark_status_from_fields(`tabId`: RustBuffer.ByValue,`marked`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_tab_entered_fullscreen_event_name(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_tab_exited_fullscreen_event_name(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_tab_from_active_tab(`tab`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_tab_fullscreen_event(`tabId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_tab_props_background_color_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_tab_props_html_content_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_tab_props_id_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_tab_props_reload_key_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_tab_props_right_panel_default_visible_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_tab_props_unified_script_key(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_tab_unread_from_fields(`tabId`: RustBuffer.ByValue,`unread`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_runtime_tab_update_from_fields(`tabId`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`icon`: RustBuffer.ByValue,`appUrl`: RustBuffer.ByValue,`status`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_stable_content_fingerprint(`input`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_supported_contract_name(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_supported_contract_version(uniffi_out_err: UniffiRustCallStatus,
-    ): Int
-    fun uniffi_actro_core_fn_func_system_app_info(`raw`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_system_app_type_bookmarks(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_system_app_type_global_search(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_system_app_type_settings(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_tts_bridge_contract(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_user_info_bridge_contract(uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_actro_core_fn_func_validate_actr_manifest(`json`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): Unit
-    fun ffi_actro_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun ffi_actro_core_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun ffi_actro_core_rustbuffer_free(`buf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): Unit
-    fun ffi_actro_core_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun ffi_actro_core_rust_future_poll_u8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_cancel_u8(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_free_u8(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Byte
-    fun ffi_actro_core_rust_future_poll_i8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_cancel_i8(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_free_i8(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_complete_i8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Byte
-    fun ffi_actro_core_rust_future_poll_u16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_cancel_u16(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_free_u16(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Short
-    fun ffi_actro_core_rust_future_poll_i16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_cancel_i16(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_free_i16(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_complete_i16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Short
-    fun ffi_actro_core_rust_future_poll_u32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_cancel_u32(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_free_u32(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_complete_u32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Int
-    fun ffi_actro_core_rust_future_poll_i32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_cancel_i32(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_free_i32(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_complete_i32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Int
-    fun ffi_actro_core_rust_future_poll_u64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_cancel_u64(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_free_u64(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_complete_u64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Long
-    fun ffi_actro_core_rust_future_poll_i64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_cancel_i64(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_free_i64(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_complete_i64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Long
-    fun ffi_actro_core_rust_future_poll_f32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_cancel_f32(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_free_f32(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_complete_f32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Float
-    fun ffi_actro_core_rust_future_poll_f64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_cancel_f64(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_free_f64(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_complete_f64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Double
-    fun ffi_actro_core_rust_future_poll_pointer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_cancel_pointer(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_free_pointer(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_complete_pointer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Pointer
-    fun ffi_actro_core_rust_future_poll_rust_buffer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_cancel_rust_buffer(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_free_rust_buffer(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_complete_rust_buffer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun ffi_actro_core_rust_future_poll_void(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_cancel_void(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_free_void(`handle`: Long,
-    ): Unit
-    fun ffi_actro_core_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Unit
-    fun uniffi_actro_core_checksum_func_active_tab_from_row(
-    ): Short
-    fun uniffi_actro_core_checksum_func_active_tab_rows_from_tabs(
-    ): Short
-    fun uniffi_actro_core_checksum_func_active_tab_to_row(
-    ): Short
-    fun uniffi_actro_core_checksum_func_actr_bridge_contract(
-    ): Short
-    fun uniffi_actro_core_checksum_func_app_source_type_downloaded(
-    ): Short
-    fun uniffi_actro_core_checksum_func_app_source_type_info(
-    ): Short
-    fun uniffi_actro_core_checksum_func_app_source_type_local_dev(
-    ): Short
-    fun uniffi_actro_core_checksum_func_asr_bridge_contract(
-    ): Short
-    fun uniffi_actro_core_checksum_func_asr_model_language_dir(
-    ): Short
-    fun uniffi_actro_core_checksum_func_asr_model_plan(
-    ): Short
-    fun uniffi_actro_core_checksum_func_auth_access_control_path(
-    ): Short
-    fun uniffi_actro_core_checksum_func_auth_access_control_status(
-    ): Short
-    fun uniffi_actro_core_checksum_func_auth_access_control_url_from_app_url(
-    ): Short
-    fun uniffi_actro_core_checksum_func_auth_account_base_url(
-    ): Short
-    fun uniffi_actro_core_checksum_func_auth_api_response_success(
-    ): Short
-    fun uniffi_actro_core_checksum_func_auth_client_app_path(
-    ): Short
-    fun uniffi_actro_core_checksum_func_auth_environment_beta(
-    ): Short
-    fun uniffi_actro_core_checksum_func_auth_environment_dev(
-    ): Short
-    fun uniffi_actro_core_checksum_func_auth_environment_from_app_url(
-    ): Short
-    fun uniffi_actro_core_checksum_func_auth_environment_from_url(
-    ): Short
-    fun uniffi_actro_core_checksum_func_auth_environment_prod(
-    ): Short
-    fun uniffi_actro_core_checksum_func_auth_environment_storage_suffix(
-    ): Short
-    fun uniffi_actro_core_checksum_func_auth_is_authorized_code(
-    ): Short
-    fun uniffi_actro_core_checksum_func_auth_is_client_app_not_found_code(
-    ): Short
-    fun uniffi_actro_core_checksum_func_auth_is_client_app_not_found_message(
-    ): Short
-    fun uniffi_actro_core_checksum_func_auth_resource_upload_token_path(
-    ): Short
-    fun uniffi_actro_core_checksum_func_auth_resource_uploader_base_url(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_bookmark_snapshot_normalize_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_data_contract(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_history_snapshot_normalize_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_search_engine_default_id(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_search_engine_info(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_search_engine_normalize_id(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_search_engines(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_search_url(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_session_home_snapshot_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_session_snapshot_normalize_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_address_canonicalization_policy_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_bookmark_folder_tree_integrity_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_bookmark_folder_tree_integrity_policy_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_bookmark_ownership_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_bookmark_ownership_policy_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_bookmark_restore_placement_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_bookmark_restore_placement_policy_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_canonicalize_addresses_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_data_model_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_database_name(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_history_visit_aggregation_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_history_visit_aggregation_policy_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_repository_sql(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_retention_pruning_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_retention_pruning_policy_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_schema(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_schema_migration_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_schema_statements(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_schema_version(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_session_active_tab_consistency_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_session_active_tab_consistency_policy_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_session_tab_id_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_session_tab_ordering_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_session_tab_ordering_policy_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_ack_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_batch_from_dirty_rows_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_client_ack_batch_after_remote_apply_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_client_cycle_apply_result_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_client_cycle_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cleanup_result_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_compaction_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_compaction_result_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_compatibility_preflight_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_compatibility_status_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_attempt_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_client_apply_result_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_client_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_loop_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_schedule_state_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_status_policy_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_data_model_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_default_manifest_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_high_watermark_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_high_watermark_policy_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_capabilities_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_capability_preflight_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_cleanup_round_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_compaction_round_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_compatibility_preflight_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_cycle_round_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_membership_round_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_recovery_retention_round_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_recovery_snapshot_round_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_log_object_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_attempt_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_loop_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_result_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_schedule_state_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_status_policy_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_observability_event_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_adapter_contract_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_adapter_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_connection_contract_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_connection_status_policy_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_diagnostics_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_error_classification_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_error_policy_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_pull_apply_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_pull_continuation_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_pull_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_push_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_push_result_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_recovery_snapshot_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_recovery_snapshot_result_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_schema_migration_playbook_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_schema_rollout_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_snapshot_object_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_store_capability_preflight_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_store_contract_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_conflict_policy_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cycle_request_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cycle_response_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_cycle_transport_result_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_merge_policy_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_pull_request_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_push_request_from_dirty_rows_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_push_request_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_remote_apply_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_remote_apply_result_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_schedule_state_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_scheduler_status_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_server_merge_plan_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_server_merge_result_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_sql(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_status_policy_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_sync_transport_contract_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_browser_storage_table_names(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_app_repository_sql(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_app_search_params(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_bookmark_from_row(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_bookmark_insert_params(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_bookmark_repository_sql(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_bookmark_search_params(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_bookmark_update_params(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_history_insert_visit_params(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_history_item_from_row(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_history_repository_sql(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_history_search_title_param(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_installed_app_from_row(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_installed_app_insert_params(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_installed_app_update_params(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_schema_statements(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_schema_table_names(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_schema_version(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_tag_from_row(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_tag_insert_params(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_tag_repository_sql(
-    ): Short
-    fun uniffi_actro_core_checksum_func_core_tag_update_params(
-    ): Short
-    fun uniffi_actro_core_checksum_func_create_actr_integrity_plan(
-    ): Short
-    fun uniffi_actro_core_checksum_func_default_runtime_app_status(
-    ): Short
-    fun uniffi_actro_core_checksum_func_default_system_tags(
-    ): Short
-    fun uniffi_actro_core_checksum_func_default_tag_colors(
-    ): Short
-    fun uniffi_actro_core_checksum_func_default_tags(
-    ): Short
-    fun uniffi_actro_core_checksum_func_email_bridge_contract(
-    ): Short
-    fun uniffi_actro_core_checksum_func_empty_browser_storage_sync_batch_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_evaluate_contract(
-    ): Short
-    fun uniffi_actro_core_checksum_func_extract_app_id_from_url(
-    ): Short
-    fun uniffi_actro_core_checksum_func_is_asset_path(
-    ): Short
-    fun uniffi_actro_core_checksum_func_normalize_browser_storage_sync_ack_batch_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_normalize_browser_storage_sync_batch_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cloud_device_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cloud_log_object_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cloud_manifest_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cloud_snapshot_object_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cursors_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cycle_response_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_normalize_browser_sync_provider_settings_json(
-    ): Short
-    fun uniffi_actro_core_checksum_func_normalize_integrity_algorithm(
-    ): Short
-    fun uniffi_actro_core_checksum_func_normalize_integrity_path(
-    ): Short
-    fun uniffi_actro_core_checksum_func_normalize_path(
-    ): Short
-    fun uniffi_actro_core_checksum_func_normalize_runtime_app_status(
-    ): Short
-    fun uniffi_actro_core_checksum_func_normalize_sha256_hex(
-    ): Short
-    fun uniffi_actro_core_checksum_func_parse_actr_actor_type(
-    ): Short
-    fun uniffi_actro_core_checksum_func_parse_app_source_type(
-    ): Short
-    fun uniffi_actro_core_checksum_func_parse_actr_manifest(
-    ): Short
-    fun uniffi_actro_core_checksum_func_parse_system_app_type(
-    ): Short
-    fun uniffi_actro_core_checksum_func_parse_vosk_partial_text(
-    ): Short
-    fun uniffi_actro_core_checksum_func_parse_vosk_result_text(
-    ): Short
-    fun uniffi_actro_core_checksum_func_post_process_zh_asr_segments(
-    ): Short
-    fun uniffi_actro_core_checksum_func_relative_path_from(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_app_status_alive(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_app_status_dead(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_auth_context_app_id_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_auth_context_app_url_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_auth_context_client_id_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_auth_context_tab_id_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_bridge_app_url_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_bridge_container_height_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_bridge_container_width_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_bridge_icon_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_bridge_is_bookmarked_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_bridge_marked_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_bridge_status_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_bridge_tab_id_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_bridge_title_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_bridge_unread_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_bridge_visible_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_container_size_change_event(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_container_size_change_event_name(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_extension_panel_visible_change_event_name(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_extension_panel_visible_event(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_login_result_code_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_login_result_error_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_login_result_event_name(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_login_result_id_token_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_login_result_message_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_login_result_type_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_login_type_apple(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_login_type_google(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_login_type_wechat(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_root_props_current_tab_id_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_root_props_from_active_tabs(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_root_props_from_runtime_tabs(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_root_props_is_left_panel_visible_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_root_props_is_right_panel_visible_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_root_props_single_tab_mode_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_root_props_tab_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_root_props_tabs_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_search_input_changed_event_name(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_system_root_props(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_tab_bookmark_changed_event_name(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_tab_bookmark_event(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_tab_bookmark_status_from_fields(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_tab_entered_fullscreen_event_name(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_tab_exited_fullscreen_event_name(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_tab_from_active_tab(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_tab_fullscreen_event(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_tab_props_background_color_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_tab_props_html_content_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_tab_props_id_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_tab_props_reload_key_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_tab_props_right_panel_default_visible_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_tab_props_unified_script_key(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_tab_unread_from_fields(
-    ): Short
-    fun uniffi_actro_core_checksum_func_runtime_tab_update_from_fields(
-    ): Short
-    fun uniffi_actro_core_checksum_func_stable_content_fingerprint(
-    ): Short
-    fun uniffi_actro_core_checksum_func_supported_contract_name(
-    ): Short
-    fun uniffi_actro_core_checksum_func_supported_contract_version(
-    ): Short
-    fun uniffi_actro_core_checksum_func_system_app_info(
-    ): Short
-    fun uniffi_actro_core_checksum_func_system_app_type_bookmarks(
-    ): Short
-    fun uniffi_actro_core_checksum_func_system_app_type_global_search(
-    ): Short
-    fun uniffi_actro_core_checksum_func_system_app_type_settings(
-    ): Short
-    fun uniffi_actro_core_checksum_func_tts_bridge_contract(
-    ): Short
-    fun uniffi_actro_core_checksum_func_user_info_bridge_contract(
-    ): Short
-    fun uniffi_actro_core_checksum_func_validate_actr_manifest(
-    ): Short
-    fun ffi_actro_core_uniffi_contract_version(
-    ): Int
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_active_tab_rows_from_tabs(`tabs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_active_tab_to_row(`tab`: RustBuffer.ByValue,`sortOrder`: Int,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_actr_bridge_contract(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_app_source_type_downloaded(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_app_source_type_info(`raw`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_app_source_type_local_dev(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_asr_bridge_contract(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_asr_model_language_dir(`language`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_asr_model_plan(`language`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_auth_access_control_path(`appId`: RustBuffer.ByValue,`userId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_auth_access_control_status(`success`: Byte,`hasCode`: Byte,`code`: Int,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_auth_access_control_url_from_app_url(`appUrl`: RustBuffer.ByValue,`appId`: RustBuffer.ByValue,`userId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_auth_account_base_url(`environment`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_auth_api_response_success(`code`: Int,uniffi_out_err: UniffiRustCallStatus,
+): Byte
+fun uniffi_actro_core_fn_func_auth_client_app_path(`appId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_auth_environment_beta(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_auth_environment_dev(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_auth_environment_from_app_url(`url`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_auth_environment_from_url(`url`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_auth_environment_prod(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_auth_environment_storage_suffix(`environment`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_auth_is_authorized_code(`code`: Int,uniffi_out_err: UniffiRustCallStatus,
+): Byte
+fun uniffi_actro_core_fn_func_auth_is_client_app_not_found_code(`code`: Int,uniffi_out_err: UniffiRustCallStatus,
+): Byte
+fun uniffi_actro_core_fn_func_auth_is_client_app_not_found_message(`message`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Byte
+fun uniffi_actro_core_fn_func_auth_resource_upload_token_path(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_auth_resource_uploader_base_url(`environment`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_bookmark_snapshot_normalize_json(`snapshotJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_data_contract(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_history_snapshot_normalize_json(`snapshotJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_search_engine_default_id(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_search_engine_info(`engineId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_search_engine_normalize_id(`engineId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_search_engines(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_search_url(`query`: RustBuffer.ByValue,`engineId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_session_home_snapshot_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_session_snapshot_normalize_json(`snapshotJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_address_canonicalization_policy_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_bookmark_folder_tree_integrity_plan_json(`foldersJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_bookmark_folder_tree_integrity_policy_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_bookmark_ownership_plan_json(`bookmarksJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_bookmark_ownership_policy_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_bookmark_restore_placement_plan_json(`bookmarksJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_bookmark_restore_placement_policy_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_canonicalize_addresses_json(`addressesJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_data_model_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_database_name(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_history_visit_aggregation_plan_json(`visitsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_history_visit_aggregation_policy_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_repository_sql(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_retention_pruning_plan_json(`recordsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_retention_pruning_policy_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_schema(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_schema_migration_plan_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_schema_statements(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_schema_version(uniffi_out_err: UniffiRustCallStatus,
+): Int
+fun uniffi_actro_core_fn_func_browser_storage_session_active_tab_consistency_plan_json(`sessionsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_session_active_tab_consistency_policy_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_session_tab_id_plan_json(`tabsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_session_tab_ordering_plan_json(`tabsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_session_tab_ordering_policy_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_ack_plan_json(`ackJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_batch_from_dirty_rows_json(`scope`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,`rowsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_client_ack_batch_after_remote_apply_json(`responseJson`: RustBuffer.ByValue,`remoteApplyResultJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_client_cycle_apply_result_json(`responseJson`: RustBuffer.ByValue,`remoteApplyResultJson`: RustBuffer.ByValue,`ackApplied`: Byte,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_client_cycle_plan_json(`responseJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_cleanup_result_plan_json(`highWatermarkPlanJson`: RustBuffer.ByValue,`deleteResultsJson`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_compaction_plan_json(`manifestJson`: RustBuffer.ByValue,`manifestRevision`: RustBuffer.ByValue,`snapshotsJson`: RustBuffer.ByValue,`logsJson`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_compaction_result_plan_json(`compactionPlanJson`: RustBuffer.ByValue,`writeResultsJson`: RustBuffer.ByValue,`deleteResultsJson`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_compatibility_preflight_json(`documentsJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_compatibility_status_json(`documentKind`: RustBuffer.ByValue,`documentJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_attempt_plan_json(`cycleRoundJson`: RustBuffer.ByValue,`retryAttempt`: Int,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_client_apply_result_json(`cycleRoundJson`: RustBuffer.ByValue,`stepResultsJson`: RustBuffer.ByValue,`remoteApplyResultJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_client_plan_json(`cycleRoundJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_loop_plan_json(`cycleRoundsJson`: RustBuffer.ByValue,`retryAttempt`: Int,`observedAtUnixSeconds`: Long,`maxAttempts`: Int,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_schedule_state_json(`statusPolicyJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_status_policy_json(`cycleRoundJson`: RustBuffer.ByValue,`retryAttempt`: Int,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_data_model_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_default_manifest_json(`scope`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_high_watermark_plan_json(`manifestJson`: RustBuffer.ByValue,`snapshotsJson`: RustBuffer.ByValue,`logsJson`: RustBuffer.ByValue,`cursorsJson`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_high_watermark_policy_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_capabilities_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_capability_preflight_json(`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_cleanup_round_json(`rootDir`: RustBuffer.ByValue,`cursorsJson`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_compaction_round_json(`rootDir`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_compatibility_preflight_json(`rootDir`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_cycle_round_json(`rootDir`: RustBuffer.ByValue,`pushRequestJson`: RustBuffer.ByValue,`cursorsJson`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,`maxLogObjectsPerCollection`: Int,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_membership_round_json(`rootDir`: RustBuffer.ByValue,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_recovery_retention_round_json(`rootDir`: RustBuffer.ByValue,`retainSnapshots`: Int,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_recovery_snapshot_round_json(`rootDir`: RustBuffer.ByValue,`schemaMigrationPlaybookJson`: RustBuffer.ByValue,`compatibilityPreflightJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_log_object_json(`collection`: RustBuffer.ByValue,`sequence`: Long,`batchJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_attempt_plan_json(`membershipRoundJson`: RustBuffer.ByValue,`retryAttempt`: Int,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_loop_plan_json(`membershipRoundsJson`: RustBuffer.ByValue,`retryAttempt`: Int,`observedAtUnixSeconds`: Long,`maxAttempts`: Int,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_plan_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_result_plan_json(`membershipPlanJson`: RustBuffer.ByValue,`writeResultsJson`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_schedule_state_json(`statusPolicyJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_status_policy_json(`membershipRoundJson`: RustBuffer.ByValue,`retryAttempt`: Int,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_observability_event_json(`providerDiagnosticsJson`: RustBuffer.ByValue,`attemptPlanJson`: RustBuffer.ByValue,`loopPlanJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_adapter_contract_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_adapter_plan_json(`adapterSnapshotJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_connection_contract_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_connection_status_policy_json(`providerSnapshotJson`: RustBuffer.ByValue,`retryAttempt`: Int,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_diagnostics_json(`capabilityPreflightJson`: RustBuffer.ByValue,`compatibilityPreflightJson`: RustBuffer.ByValue,`providerErrorClassificationJson`: RustBuffer.ByValue,`cycleStatusPolicyJson`: RustBuffer.ByValue,`scheduleStateJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_error_classification_json(`providerErrorsJson`: RustBuffer.ByValue,`retryAttempt`: Int,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_error_policy_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_pull_apply_plan_json(`manifestJson`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`cursorsJson`: RustBuffer.ByValue,`snapshotsJson`: RustBuffer.ByValue,`logsJson`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_pull_continuation_plan_json(`pullPlanJson`: RustBuffer.ByValue,`readResultsJson`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_pull_plan_json(`manifestJson`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`cursorsJson`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,`maxLogObjectsPerCollection`: Int,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_push_plan_json(`manifestJson`: RustBuffer.ByValue,`manifestRevision`: RustBuffer.ByValue,`deviceJson`: RustBuffer.ByValue,`deviceRevision`: RustBuffer.ByValue,`pushRequestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_push_result_plan_json(`pushPlanJson`: RustBuffer.ByValue,`writeResultsJson`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_recovery_snapshot_plan_json(`schemaMigrationPlaybookJson`: RustBuffer.ByValue,`compatibilityPreflightJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_recovery_snapshot_result_plan_json(`recoverySnapshotPlanJson`: RustBuffer.ByValue,`writeResultsJson`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_schema_migration_playbook_json(`schemaRolloutPlanJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_schema_rollout_plan_json(`compatibilityPreflightJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_snapshot_object_json(`collection`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,`batchJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_store_capability_preflight_json(`capabilitiesJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_store_contract_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_conflict_policy_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cycle_request_plan_json(`baseUrl`: RustBuffer.ByValue,`accessToken`: RustBuffer.ByValue,`pushRequestJson`: RustBuffer.ByValue,`cursorsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cycle_response_json(`remoteBatchJson`: RustBuffer.ByValue,`ackJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_cycle_transport_result_json(`statusCode`: Int,`responseJson`: RustBuffer.ByValue,`errorMessage`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_merge_policy_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_pull_request_json(`scope`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,`cursorsJson`: RustBuffer.ByValue,`maxRecordsPerCollection`: Int,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_push_request_from_dirty_rows_json(`scope`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,`rowsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_push_request_json(`batchJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_remote_apply_plan_json(`batchJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_remote_apply_result_json(`planJson`: RustBuffer.ByValue,`resultJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_schedule_state_json(`statusPolicyJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_scheduler_status_json(`schedulerSnapshotJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_server_merge_plan_json(`pushRequestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_server_merge_result_json(`planJson`: RustBuffer.ByValue,`resultJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_sql(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_status_policy_json(`classification`: RustBuffer.ByValue,`shouldRetry`: Byte,`clientAction`: RustBuffer.ByValue,`retryAttempt`: Int,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_sync_transport_contract_json(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_browser_storage_table_names(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_core_app_repository_sql(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_core_app_search_params(`query`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_core_bookmark_from_row(`row`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_core_bookmark_insert_params(`bookmark`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_core_bookmark_repository_sql(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_core_bookmark_search_params(`query`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_core_bookmark_update_params(`bookmark`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_core_history_insert_visit_params(`id`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`appUrl`: RustBuffer.ByValue,`appId`: RustBuffer.ByValue,`visitTimeSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_core_history_item_from_row(`row`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_core_history_repository_sql(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_core_history_search_title_param(`query`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_core_installed_app_from_row(`row`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_core_installed_app_insert_params(`app`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_core_installed_app_update_params(`app`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_core_schema_statements(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_core_schema_table_names(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_core_schema_version(uniffi_out_err: UniffiRustCallStatus,
+): Int
+fun uniffi_actro_core_fn_func_core_tag_from_row(`row`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_core_tag_insert_params(`id`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`color`: RustBuffer.ByValue,`isSystem`: Byte,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_core_tag_repository_sql(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_core_tag_update_params(`name`: RustBuffer.ByValue,`color`: RustBuffer.ByValue,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_create_actr_integrity_plan(`manifestToml`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_default_runtime_app_status(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_default_system_tags(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_default_tag_colors(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_default_tags(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_email_bridge_contract(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_empty_browser_storage_sync_batch_json(`scope`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_evaluate_contract(`name`: RustBuffer.ByValue,`version`: Int,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_extract_app_id_from_url(`url`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_is_asset_path(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Byte
+fun uniffi_actro_core_fn_func_normalize_browser_storage_sync_ack_batch_json(`ackJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_normalize_browser_storage_sync_batch_json(`batchJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_normalize_browser_storage_sync_cloud_device_json(`deviceJson`: RustBuffer.ByValue,`fallbackScope`: RustBuffer.ByValue,`fallbackDeviceId`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_normalize_browser_storage_sync_cloud_log_object_json(`logJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_normalize_browser_storage_sync_cloud_manifest_json(`manifestJson`: RustBuffer.ByValue,`fallbackScope`: RustBuffer.ByValue,`fallbackDeviceId`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_normalize_browser_storage_sync_cloud_snapshot_object_json(`snapshotJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_normalize_browser_storage_sync_cursors_json(`cursorsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_normalize_browser_storage_sync_cycle_response_json(`responseJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_normalize_browser_sync_provider_settings_json(`settingsJson`: RustBuffer.ByValue,`isRootAbsolute`: Byte,`observedAtUnixSeconds`: Long,`freshDeviceId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_normalize_integrity_algorithm(`raw`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_normalize_integrity_path(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_normalize_path(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_normalize_runtime_app_status(`value`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_normalize_sha256_hex(`hash`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_parse_actr_actor_type(`raw`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_parse_actr_package_manifest(`source`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_parse_app_source_type(`raw`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_parse_system_app_type(`raw`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_parse_vosk_partial_text(`json`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_parse_vosk_result_text(`json`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_post_process_zh_asr_segments(`text`: RustBuffer.ByValue,`segments`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_relative_path_from(`absolutePath`: RustBuffer.ByValue,`baseDir`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_app_status_alive(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_app_status_dead(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_auth_context_app_id_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_auth_context_app_url_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_auth_context_client_id_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_auth_context_tab_id_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_bridge_app_url_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_bridge_container_height_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_bridge_container_width_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_bridge_icon_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_bridge_is_bookmarked_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_bridge_marked_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_bridge_status_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_bridge_tab_id_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_bridge_title_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_bridge_unread_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_bridge_visible_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_container_size_change_event(`containerWidth`: Int,`containerHeight`: Int,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_container_size_change_event_name(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_extension_panel_visible_change_event_name(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_extension_panel_visible_event(`tabId`: RustBuffer.ByValue,`visible`: Byte,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_login_result_code_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_login_result_error_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_login_result_event_name(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_login_result_id_token_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_login_result_message_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_login_result_type_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_login_type_apple(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_login_type_google(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_login_type_wechat(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_root_props_current_tab_id_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_root_props_from_active_tabs(`tab`: RustBuffer.ByValue,`tabs`: RustBuffer.ByValue,`containerHeight`: Int,`containerWidth`: Int,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_root_props_from_runtime_tabs(`tab`: RustBuffer.ByValue,`tabs`: RustBuffer.ByValue,`isLeftPanelVisible`: Byte,`isRightPanelVisible`: Byte,`containerHeight`: Int,`containerWidth`: Int,`appUrl`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_root_props_is_left_panel_visible_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_root_props_is_right_panel_visible_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_root_props_single_tab_mode_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_root_props_tab_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_root_props_tabs_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_search_input_changed_event_name(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_system_root_props(`systemAppType`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_tab_bookmark_changed_event_name(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_tab_bookmark_event(`tabId`: RustBuffer.ByValue,`isBookmarked`: Byte,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_tab_bookmark_status_from_fields(`tabId`: RustBuffer.ByValue,`marked`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_tab_entered_fullscreen_event_name(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_tab_exited_fullscreen_event_name(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_tab_from_active_tab(`tab`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_tab_fullscreen_event(`tabId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_tab_props_background_color_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_tab_props_html_content_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_tab_props_id_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_tab_props_reload_key_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_tab_props_right_panel_default_visible_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_tab_props_unified_script_key(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_tab_unread_from_fields(`tabId`: RustBuffer.ByValue,`unread`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_runtime_tab_update_from_fields(`tabId`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`icon`: RustBuffer.ByValue,`appUrl`: RustBuffer.ByValue,`status`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_stable_content_fingerprint(`input`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_supported_contract_name(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_supported_contract_version(uniffi_out_err: UniffiRustCallStatus,
+): Int
+fun uniffi_actro_core_fn_func_system_app_info(`raw`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_system_app_type_bookmarks(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_system_app_type_global_search(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_system_app_type_settings(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_tts_bridge_contract(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_user_info_bridge_contract(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actro_core_fn_func_validate_actr_package_manifest(`source`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Unit
+fun ffi_actro_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun ffi_actro_core_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun ffi_actro_core_rustbuffer_free(`buf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Unit
+fun ffi_actro_core_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun ffi_actro_core_rust_future_poll_u8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+fun ffi_actro_core_rust_future_cancel_u8(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_free_u8(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Byte
+fun ffi_actro_core_rust_future_poll_i8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+fun ffi_actro_core_rust_future_cancel_i8(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_free_i8(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_complete_i8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Byte
+fun ffi_actro_core_rust_future_poll_u16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+fun ffi_actro_core_rust_future_cancel_u16(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_free_u16(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Short
+fun ffi_actro_core_rust_future_poll_i16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+fun ffi_actro_core_rust_future_cancel_i16(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_free_i16(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_complete_i16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Short
+fun ffi_actro_core_rust_future_poll_u32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+fun ffi_actro_core_rust_future_cancel_u32(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_free_u32(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_complete_u32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Int
+fun ffi_actro_core_rust_future_poll_i32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+fun ffi_actro_core_rust_future_cancel_i32(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_free_i32(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_complete_i32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Int
+fun ffi_actro_core_rust_future_poll_u64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+fun ffi_actro_core_rust_future_cancel_u64(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_free_u64(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_complete_u64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Long
+fun ffi_actro_core_rust_future_poll_i64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+fun ffi_actro_core_rust_future_cancel_i64(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_free_i64(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_complete_i64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Long
+fun ffi_actro_core_rust_future_poll_f32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+fun ffi_actro_core_rust_future_cancel_f32(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_free_f32(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_complete_f32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Float
+fun ffi_actro_core_rust_future_poll_f64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+fun ffi_actro_core_rust_future_cancel_f64(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_free_f64(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_complete_f64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Double
+fun ffi_actro_core_rust_future_poll_pointer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+fun ffi_actro_core_rust_future_cancel_pointer(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_free_pointer(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_complete_pointer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Pointer
+fun ffi_actro_core_rust_future_poll_rust_buffer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+fun ffi_actro_core_rust_future_cancel_rust_buffer(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_free_rust_buffer(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_complete_rust_buffer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun ffi_actro_core_rust_future_poll_void(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+fun ffi_actro_core_rust_future_cancel_void(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_free_void(`handle`: Long,
+): Unit
+fun ffi_actro_core_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Unit
 
 }
 
-private fun uniffiCheckContractApiVersion(lib: UniffiLib) {
+private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
     // Get the bindings contract version from our ComponentInterface
-    val bindings_contract_version = 26
+    val bindings_contract_version = 29
     // Get the scaffolding contract version by calling the into the dylib
     val scaffolding_contract_version = lib.ffi_actro_core_uniffi_contract_version()
     if (bindings_contract_version != scaffolding_contract_version) {
         throw RuntimeException("UniFFI contract version mismatch: try cleaning and rebuilding your project")
     }
 }
-
 @Suppress("UNUSED_PARAMETER")
-private fun uniffiCheckApiChecksums(lib: UniffiLib) {
+private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actro_core_checksum_func_active_tab_from_row() != 41850.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2841,7 +2883,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_actro_core_checksum_func_core_tag_update_params() != 29950.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actro_core_checksum_func_create_actr_integrity_plan() != 22264.toShort()) {
+    if (lib.uniffi_actro_core_checksum_func_create_actr_integrity_plan() != 36049.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actro_core_checksum_func_default_runtime_app_status() != 50313.toShort()) {
@@ -2916,10 +2958,10 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_actro_core_checksum_func_parse_actr_actor_type() != 4987.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actro_core_checksum_func_parse_app_source_type() != 29850.toShort()) {
+    if (lib.uniffi_actro_core_checksum_func_parse_actr_package_manifest() != 39514.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actro_core_checksum_func_parse_actr_manifest() != 59811.toShort()) {
+    if (lib.uniffi_actro_core_checksum_func_parse_app_source_type() != 29850.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actro_core_checksum_func_parse_system_app_type() != 40736.toShort()) {
@@ -3129,9 +3171,16 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_actro_core_checksum_func_user_info_bridge_contract() != 7990.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actro_core_checksum_func_validate_actr_manifest() != 14273.toShort()) {
+    if (lib.uniffi_actro_core_checksum_func_validate_actr_package_manifest() != 33172.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+}
+
+/**
+ * @suppress
+ */
+public fun uniffiEnsureInitialized() {
+    UniffiLib.INSTANCE
 }
 
 // Async support
@@ -3151,8 +3200,33 @@ interface Disposable {
     fun destroy()
     companion object {
         fun destroy(vararg args: Any?) {
-            args.filterIsInstance<Disposable>()
-                .forEach(Disposable::destroy)
+            for (arg in args) {
+                when (arg) {
+                    is Disposable -> arg.destroy()
+                    is ArrayList<*> -> {
+                        for (idx in arg.indices) {
+                            val element = arg[idx]
+                            if (element is Disposable) {
+                                element.destroy()
+                            }
+                        }
+                    }
+                    is Map<*, *> -> {
+                        for (element in arg.values) {
+                            if (element is Disposable) {
+                                element.destroy()
+                            }
+                        }
+                    }
+                    is Iterable<*> -> {
+                        for (element in arg) {
+                            if (element is Disposable) {
+                                element.destroy()
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -3841,6 +3915,82 @@ public object FfiConverterTypeActrBridgeContractInfo: FfiConverterRustBuffer<Act
 
 
 
+data class ActrPackageManifestInfo (
+    var `name`: kotlin.String,
+    var `version`: kotlin.String,
+    var `description`: kotlin.String?,
+    var `appId`: kotlin.String?,
+    var `icon`: kotlin.String?,
+    var `entry`: kotlin.String,
+    var `leftPanelDefaultVisible`: kotlin.Boolean,
+    var `rightPanelDefaultVisible`: kotlin.Boolean,
+    var `contractName`: kotlin.String?,
+    var `contractVersion`: kotlin.UInt?,
+    var `permissions`: List<kotlin.String>,
+    var `systemAppType`: kotlin.String?,
+    var `themeColor`: kotlin.String?
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeActrPackageManifestInfo: FfiConverterRustBuffer<ActrPackageManifestInfo> {
+    override fun read(buf: ByteBuffer): ActrPackageManifestInfo {
+        return ActrPackageManifestInfo(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalUInt.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ActrPackageManifestInfo) = (
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterString.allocationSize(value.`version`) +
+            FfiConverterOptionalString.allocationSize(value.`description`) +
+            FfiConverterOptionalString.allocationSize(value.`appId`) +
+            FfiConverterOptionalString.allocationSize(value.`icon`) +
+            FfiConverterString.allocationSize(value.`entry`) +
+            FfiConverterBoolean.allocationSize(value.`leftPanelDefaultVisible`) +
+            FfiConverterBoolean.allocationSize(value.`rightPanelDefaultVisible`) +
+            FfiConverterOptionalString.allocationSize(value.`contractName`) +
+            FfiConverterOptionalUInt.allocationSize(value.`contractVersion`) +
+            FfiConverterSequenceString.allocationSize(value.`permissions`) +
+            FfiConverterOptionalString.allocationSize(value.`systemAppType`) +
+            FfiConverterOptionalString.allocationSize(value.`themeColor`)
+    )
+
+    override fun write(value: ActrPackageManifestInfo, buf: ByteBuffer) {
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterString.write(value.`version`, buf)
+            FfiConverterOptionalString.write(value.`description`, buf)
+            FfiConverterOptionalString.write(value.`appId`, buf)
+            FfiConverterOptionalString.write(value.`icon`, buf)
+            FfiConverterString.write(value.`entry`, buf)
+            FfiConverterBoolean.write(value.`leftPanelDefaultVisible`, buf)
+            FfiConverterBoolean.write(value.`rightPanelDefaultVisible`, buf)
+            FfiConverterOptionalString.write(value.`contractName`, buf)
+            FfiConverterOptionalUInt.write(value.`contractVersion`, buf)
+            FfiConverterSequenceString.write(value.`permissions`, buf)
+            FfiConverterOptionalString.write(value.`systemAppType`, buf)
+            FfiConverterOptionalString.write(value.`themeColor`, buf)
+    }
+}
+
+
+
 data class AppSourceTypeInfo (
     var `kind`: kotlin.String,
     var `displayName`: kotlin.String
@@ -3868,146 +4018,6 @@ public object FfiConverterTypeAppSourceTypeInfo: FfiConverterRustBuffer<AppSourc
     override fun write(value: AppSourceTypeInfo, buf: ByteBuffer) {
             FfiConverterString.write(value.`kind`, buf)
             FfiConverterString.write(value.`displayName`, buf)
-    }
-}
-
-
-
-data class ActrIntegrityFilePlanInfo (
-    var `path`: kotlin.String,
-    var `expectedHash`: kotlin.String
-) {
-
-    companion object
-}
-
-/**
- * @suppress
- */
-public object FfiConverterTypeActrIntegrityFilePlanInfo: FfiConverterRustBuffer<ActrIntegrityFilePlanInfo> {
-    override fun read(buf: ByteBuffer): ActrIntegrityFilePlanInfo {
-        return ActrIntegrityFilePlanInfo(
-            FfiConverterString.read(buf),
-            FfiConverterString.read(buf),
-        )
-    }
-
-    override fun allocationSize(value: ActrIntegrityFilePlanInfo) = (
-            FfiConverterString.allocationSize(value.`path`) +
-            FfiConverterString.allocationSize(value.`expectedHash`)
-    )
-
-    override fun write(value: ActrIntegrityFilePlanInfo, buf: ByteBuffer) {
-            FfiConverterString.write(value.`path`, buf)
-            FfiConverterString.write(value.`expectedHash`, buf)
-    }
-}
-
-
-
-data class ActrIntegrityPlanInfo (
-    var `algorithm`: kotlin.String,
-    var `files`: List<ActrIntegrityFilePlanInfo>
-) {
-
-    companion object
-}
-
-/**
- * @suppress
- */
-public object FfiConverterTypeActrIntegrityPlanInfo: FfiConverterRustBuffer<ActrIntegrityPlanInfo> {
-    override fun read(buf: ByteBuffer): ActrIntegrityPlanInfo {
-        return ActrIntegrityPlanInfo(
-            FfiConverterString.read(buf),
-            FfiConverterSequenceTypeActrIntegrityFilePlanInfo.read(buf),
-        )
-    }
-
-    override fun allocationSize(value: ActrIntegrityPlanInfo) = (
-            FfiConverterString.allocationSize(value.`algorithm`) +
-            FfiConverterSequenceTypeActrIntegrityFilePlanInfo.allocationSize(value.`files`)
-    )
-
-    override fun write(value: ActrIntegrityPlanInfo, buf: ByteBuffer) {
-            FfiConverterString.write(value.`algorithm`, buf)
-            FfiConverterSequenceTypeActrIntegrityFilePlanInfo.write(value.`files`, buf)
-    }
-}
-
-
-
-data class ActrManifestInfo (
-    var `name`: kotlin.String,
-    var `version`: kotlin.String,
-    var `description`: kotlin.String?,
-    var `appId`: kotlin.String?,
-    var `icon`: kotlin.String?,
-    var `entry`: kotlin.String,
-    var `leftPanelDefaultVisible`: kotlin.Boolean,
-    var `rightPanelDefaultVisible`: kotlin.Boolean,
-    var `contractName`: kotlin.String?,
-    var `contractVersion`: kotlin.UInt?,
-    var `permissions`: List<kotlin.String>,
-    var `systemAppType`: kotlin.String?,
-    var `themeColor`: kotlin.String?
-) {
-
-    companion object
-}
-
-/**
- * @suppress
- */
-public object FfiConverterTypeActrManifestInfo: FfiConverterRustBuffer<ActrManifestInfo> {
-    override fun read(buf: ByteBuffer): ActrManifestInfo {
-        return ActrManifestInfo(
-            FfiConverterString.read(buf),
-            FfiConverterString.read(buf),
-            FfiConverterOptionalString.read(buf),
-            FfiConverterOptionalString.read(buf),
-            FfiConverterOptionalString.read(buf),
-            FfiConverterString.read(buf),
-            FfiConverterBoolean.read(buf),
-            FfiConverterBoolean.read(buf),
-            FfiConverterOptionalString.read(buf),
-            FfiConverterOptionalUInt.read(buf),
-            FfiConverterSequenceString.read(buf),
-            FfiConverterOptionalString.read(buf),
-            FfiConverterOptionalString.read(buf),
-        )
-    }
-
-    override fun allocationSize(value: ActrManifestInfo) = (
-            FfiConverterString.allocationSize(value.`name`) +
-            FfiConverterString.allocationSize(value.`version`) +
-            FfiConverterOptionalString.allocationSize(value.`description`) +
-            FfiConverterOptionalString.allocationSize(value.`appId`) +
-            FfiConverterOptionalString.allocationSize(value.`icon`) +
-            FfiConverterString.allocationSize(value.`entry`) +
-            FfiConverterBoolean.allocationSize(value.`leftPanelDefaultVisible`) +
-            FfiConverterBoolean.allocationSize(value.`rightPanelDefaultVisible`) +
-            FfiConverterOptionalString.allocationSize(value.`contractName`) +
-            FfiConverterOptionalUInt.allocationSize(value.`contractVersion`) +
-            FfiConverterSequenceString.allocationSize(value.`permissions`) +
-            FfiConverterOptionalString.allocationSize(value.`systemAppType`) +
-            FfiConverterOptionalString.allocationSize(value.`themeColor`)
-    )
-
-    override fun write(value: ActrManifestInfo, buf: ByteBuffer) {
-            FfiConverterString.write(value.`name`, buf)
-            FfiConverterString.write(value.`version`, buf)
-            FfiConverterOptionalString.write(value.`description`, buf)
-            FfiConverterOptionalString.write(value.`appId`, buf)
-            FfiConverterOptionalString.write(value.`icon`, buf)
-            FfiConverterString.write(value.`entry`, buf)
-            FfiConverterBoolean.write(value.`leftPanelDefaultVisible`, buf)
-            FfiConverterBoolean.write(value.`rightPanelDefaultVisible`, buf)
-            FfiConverterOptionalString.write(value.`contractName`, buf)
-            FfiConverterOptionalUInt.write(value.`contractVersion`, buf)
-            FfiConverterSequenceString.write(value.`permissions`, buf)
-            FfiConverterOptionalString.write(value.`systemAppType`, buf)
-            FfiConverterOptionalString.write(value.`themeColor`, buf)
     }
 }
 
@@ -5317,6 +5327,70 @@ public object FfiConverterTypeEmailBridgeContractInfo: FfiConverterRustBuffer<Em
 
 
 
+data class PackageIntegrityFilePlanInfo (
+    var `path`: kotlin.String,
+    var `expectedHash`: kotlin.String
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePackageIntegrityFilePlanInfo: FfiConverterRustBuffer<PackageIntegrityFilePlanInfo> {
+    override fun read(buf: ByteBuffer): PackageIntegrityFilePlanInfo {
+        return PackageIntegrityFilePlanInfo(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PackageIntegrityFilePlanInfo) = (
+            FfiConverterString.allocationSize(value.`path`) +
+            FfiConverterString.allocationSize(value.`expectedHash`)
+    )
+
+    override fun write(value: PackageIntegrityFilePlanInfo, buf: ByteBuffer) {
+            FfiConverterString.write(value.`path`, buf)
+            FfiConverterString.write(value.`expectedHash`, buf)
+    }
+}
+
+
+
+data class PackageIntegrityPlanInfo (
+    var `algorithm`: kotlin.String,
+    var `files`: List<PackageIntegrityFilePlanInfo>
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePackageIntegrityPlanInfo: FfiConverterRustBuffer<PackageIntegrityPlanInfo> {
+    override fun read(buf: ByteBuffer): PackageIntegrityPlanInfo {
+        return PackageIntegrityPlanInfo(
+            FfiConverterString.read(buf),
+            FfiConverterSequenceTypePackageIntegrityFilePlanInfo.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PackageIntegrityPlanInfo) = (
+            FfiConverterString.allocationSize(value.`algorithm`) +
+            FfiConverterSequenceTypePackageIntegrityFilePlanInfo.allocationSize(value.`files`)
+    )
+
+    override fun write(value: PackageIntegrityPlanInfo, buf: ByteBuffer) {
+            FfiConverterString.write(value.`algorithm`, buf)
+            FfiConverterSequenceTypePackageIntegrityFilePlanInfo.write(value.`files`, buf)
+    }
+}
+
+
+
 data class RuntimeContainerSizeChangeEventInfo (
     var `containerWidth`: kotlin.Int,
     var `containerHeight`: kotlin.Int
@@ -6196,38 +6270,6 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
 /**
  * @suppress
  */
-public object FfiConverterOptionalTypeActrIntegrityPlanInfo: FfiConverterRustBuffer<ActrIntegrityPlanInfo?> {
-    override fun read(buf: ByteBuffer): ActrIntegrityPlanInfo? {
-        if (buf.get().toInt() == 0) {
-            return null
-        }
-        return FfiConverterTypeActrIntegrityPlanInfo.read(buf)
-    }
-
-    override fun allocationSize(value: ActrIntegrityPlanInfo?): ULong {
-        if (value == null) {
-            return 1UL
-        } else {
-            return 1UL + FfiConverterTypeActrIntegrityPlanInfo.allocationSize(value)
-        }
-    }
-
-    override fun write(value: ActrIntegrityPlanInfo?, buf: ByteBuffer) {
-        if (value == null) {
-            buf.put(0)
-        } else {
-            buf.put(1)
-            FfiConverterTypeActrIntegrityPlanInfo.write(value, buf)
-        }
-    }
-}
-
-
-
-
-/**
- * @suppress
- */
 public object FfiConverterOptionalTypeCoreInstalledAppInfo: FfiConverterRustBuffer<CoreInstalledAppInfo?> {
     override fun read(buf: ByteBuffer): CoreInstalledAppInfo? {
         if (buf.get().toInt() == 0) {
@@ -6250,6 +6292,38 @@ public object FfiConverterOptionalTypeCoreInstalledAppInfo: FfiConverterRustBuff
         } else {
             buf.put(1)
             FfiConverterTypeCoreInstalledAppInfo.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypePackageIntegrityPlanInfo: FfiConverterRustBuffer<PackageIntegrityPlanInfo?> {
+    override fun read(buf: ByteBuffer): PackageIntegrityPlanInfo? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypePackageIntegrityPlanInfo.read(buf)
+    }
+
+    override fun allocationSize(value: PackageIntegrityPlanInfo?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypePackageIntegrityPlanInfo.allocationSize(value)
+        }
+    }
+
+    override fun write(value: PackageIntegrityPlanInfo?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypePackageIntegrityPlanInfo.write(value, buf)
         }
     }
 }
@@ -6440,34 +6514,6 @@ public object FfiConverterSequenceTypeActiveTabRowInfo: FfiConverterRustBuffer<L
 /**
  * @suppress
  */
-public object FfiConverterSequenceTypeActrIntegrityFilePlanInfo: FfiConverterRustBuffer<List<ActrIntegrityFilePlanInfo>> {
-    override fun read(buf: ByteBuffer): List<ActrIntegrityFilePlanInfo> {
-        val len = buf.getInt()
-        return List<ActrIntegrityFilePlanInfo>(len) {
-            FfiConverterTypeActrIntegrityFilePlanInfo.read(buf)
-        }
-    }
-
-    override fun allocationSize(value: List<ActrIntegrityFilePlanInfo>): ULong {
-        val sizeForLength = 4UL
-        val sizeForItems = value.map { FfiConverterTypeActrIntegrityFilePlanInfo.allocationSize(it) }.sum()
-        return sizeForLength + sizeForItems
-    }
-
-    override fun write(value: List<ActrIntegrityFilePlanInfo>, buf: ByteBuffer) {
-        buf.putInt(value.size)
-        value.iterator().forEach {
-            FfiConverterTypeActrIntegrityFilePlanInfo.write(it, buf)
-        }
-    }
-}
-
-
-
-
-/**
- * @suppress
- */
 public object FfiConverterSequenceTypeAsrSegmentInfo: FfiConverterRustBuffer<List<AsrSegmentInfo>> {
     override fun read(buf: ByteBuffer): List<AsrSegmentInfo> {
         val len = buf.getInt()
@@ -6570,6 +6616,34 @@ public object FfiConverterSequenceTypeDefaultTagInfo: FfiConverterRustBuffer<Lis
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeDefaultTagInfo.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypePackageIntegrityFilePlanInfo: FfiConverterRustBuffer<List<PackageIntegrityFilePlanInfo>> {
+    override fun read(buf: ByteBuffer): List<PackageIntegrityFilePlanInfo> {
+        val len = buf.getInt()
+        return List<PackageIntegrityFilePlanInfo>(len) {
+            FfiConverterTypePackageIntegrityFilePlanInfo.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<PackageIntegrityFilePlanInfo>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypePackageIntegrityFilePlanInfo.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<PackageIntegrityFilePlanInfo>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypePackageIntegrityFilePlanInfo.write(it, buf)
         }
     }
 }
@@ -8426,13 +8500,13 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
 
 
         /**
-         * Build the manifest integrity verification plan from a manifest JSON string.
+         * Build the payload integrity verification plan from a TOML manifest.
          */
-    @Throws(CoreException::class) fun `createActrIntegrityPlan`(`manifestJson`: kotlin.String): ActrIntegrityPlanInfo? {
-            return FfiConverterOptionalTypeActrIntegrityPlanInfo.lift(
+    @Throws(CoreException::class) fun `createActrIntegrityPlan`(`manifestToml`: kotlin.String): PackageIntegrityPlanInfo? {
+            return FfiConverterOptionalTypePackageIntegrityPlanInfo.lift(
     uniffiRustCallWithError(CoreException) { _status ->
     UniffiLib.INSTANCE.uniffi_actro_core_fn_func_create_actr_integrity_plan(
-        FfiConverterString.lower(`manifestJson`),_status)
+        FfiConverterString.lower(`manifestToml`),_status)
 }
     )
     }
@@ -8729,25 +8803,25 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
 
 
         /**
-         * Parse an app source type into the canonical wire string, if known.
-         */ fun `parseAppSourceType`(`raw`: kotlin.String): kotlin.String? {
-            return FfiConverterOptionalString.lift(
-    uniffiRustCall() { _status ->
-    UniffiLib.INSTANCE.uniffi_actro_core_fn_func_parse_app_source_type(
-        FfiConverterString.lower(`raw`),_status)
+         * Parse and validate an actr-package/1 TOML manifest.
+         */
+    @Throws(CoreException::class) fun `parseActrPackageManifest`(`source`: kotlin.String): ActrPackageManifestInfo {
+            return FfiConverterTypeActrPackageManifestInfo.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actro_core_fn_func_parse_actr_package_manifest(
+        FfiConverterString.lower(`source`),_status)
 }
     )
     }
 
 
         /**
-         * Parse and validate an ACTR manifest JSON string.
-         */
-    @Throws(CoreException::class) fun `parseActrManifest`(`json`: kotlin.String): ActrManifestInfo {
-            return FfiConverterTypeActrManifestInfo.lift(
-    uniffiRustCallWithError(CoreException) { _status ->
-    UniffiLib.INSTANCE.uniffi_actro_core_fn_func_parse_actr_manifest(
-        FfiConverterString.lower(`json`),_status)
+         * Parse an app source type into the canonical wire string, if known.
+         */ fun `parseAppSourceType`(`raw`: kotlin.String): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_actro_core_fn_func_parse_app_source_type(
+        FfiConverterString.lower(`raw`),_status)
 }
     )
     }
@@ -9461,13 +9535,13 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
 
 
         /**
-         * Validate an ACTR manifest JSON string without returning normalized fields.
+         * Validate an actr-package/1 TOML manifest without returning normalized fields.
          */
-    @Throws(CoreException::class) fun `validateActrManifest`(`json`: kotlin.String)
+    @Throws(CoreException::class) fun `validateActrPackageManifest`(`source`: kotlin.String)
         =
     uniffiRustCallWithError(CoreException) { _status ->
-    UniffiLib.INSTANCE.uniffi_actro_core_fn_func_validate_actr_manifest(
-        FfiConverterString.lower(`json`),_status)
+    UniffiLib.INSTANCE.uniffi_actro_core_fn_func_validate_actr_package_manifest(
+        FfiConverterString.lower(`source`),_status)
 }
 
 

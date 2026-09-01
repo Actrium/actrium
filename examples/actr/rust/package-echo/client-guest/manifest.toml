@@ -1,3 +1,5 @@
+edition = 1
+
 [package]
 name = "package-echo-client-guest"
 manufacturer = "acme"

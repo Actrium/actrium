@@ -6,13 +6,13 @@ import {
   TBookmarkItem,
 } from '../../repository/BookmarkRepository';
 import { openTab } from '../../native-bridge/tab/TabModule';
-import { useBookmarkStore } from '../../actr-host/store/useBookmarkStore';
+import { useBookmarkStore } from '../../runtime-host/store/useBookmarkStore';
 import {
   deleteBrowserBookmark,
   hasBrowserDataModule,
   loadBrowserBookmarks,
 } from '../../native-bridge/browser-data/BrowserDataModule';
-import type { BookmarkData } from '../../actr-host/types';
+import type { BookmarkData } from '../../runtime-host/types';
 
 type UseBookmarksPageOptions = {
   t: TFunction;

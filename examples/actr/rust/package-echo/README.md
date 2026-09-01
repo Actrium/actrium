@@ -247,25 +247,25 @@ Two backends are supported via the `--backend` flag:
 - Verifies signature with `actr pkg verify`
 - Builds client-guest cdylib package
 
-### Step 1-2: Start Actrix
-- Checks for actrix binary (builds if needed)
-- Starts actrix signaling server on port 8081
-- Waits for HTTP (8081/tcp) and ICE/TURN (3478/udp) to be ready
+### Step 1-2: Start Loran
+- Checks for the Loran server binary (builds it if needed)
+- Starts Loran on port 8081
+- Waits for HTTP (8081/tcp) and ICE/TURN (13478/udp) to be ready
 
 ### Step 2.5-2.7: Setup Infrastructure
-- Creates realms in actrix database
+- Creates realms in the Loran database
 - Registers MFR manufacturer identity with public key
-- Publishes package via `actr pkg publish` (challenge-response flow)
+- Publishes the package via `actr registry publish` (challenge-response flow)
 - Seeds client package metadata
 
 ### Step 3-4: Start Server
 - Builds package-echo-server binary
-- Regenerates `server-actr.toml` with the current package path
-- Runs `actr run -c server-actr.toml`
+- Generates `../logs/server-actr.toml` with the current package path
+- Runs `actr run -c ../logs/server-actr.toml`
 - Loads `.actr` package in production trust mode
 - Registers with AIS and obtains credential
 
-When using `start_tmp_echo_actr.sh`, the same flow runs against `tmp_server-actr.toml` instead, so the default `server-actr.toml` template is left untouched by the temporary-workload path.
+When using `start_tmp_echo_actr.sh`, the same flow runs against its isolated `tmp_server-actr.toml`.
 
 ### Step 5: Run Client
 - Builds package-echo-client binary
@@ -395,16 +395,16 @@ Instead of the full test script, you can run components individually:
 cd ../../../actrix
 cargo run -- --config examples/actr/rust/package-echo/actrix-config.toml
 
-# Run server with actr run (Note: start.sh will first generate/overwrite server-actr.toml)
+# Run the server with actr run after start.sh has generated ../logs/server-actr.toml
 cd examples/actr/rust/package-echo
 cargo run -p actr-cli -- run \
-    --config server-actr.toml
+    --config ../logs/server-actr.toml
 
 # Run client
 cargo run --bin package-echo-client
 ```
 
-Before running the server manually, make sure `server-actr.toml` points to a real `.actr` package. The committed file is only a template; `start.sh` rewrites it with the actual package path after building and signing `echo-actr`. The temporary workload flow uses `tmp_server-actr.toml` for the same purpose.
+Before running the server manually, make sure the runtime config points to a real `.actr` package. The committed `server-actr.toml` is only a template; `start.sh` leaves it untouched and writes the runnable config to `../logs/server-actr.toml` after building and signing `echo-actr`.
 
 ## Detached Runtime Lifecycle Check
 
@@ -433,7 +433,7 @@ package-echo/
 ├── start.sh               # End-to-end test script
 ├── actrix-config.toml     # Actrix server configuration
 ├── dev-key.json           # Development signing key
-├── server-actr.toml       # Default server runtime config template (overwritten by start.sh)
+├── server-actr.toml       # Default server runtime config template
 ├── tmp_server-actr.toml   # Temporary-workload runtime config template (overwritten by start_tmp_echo_actr.sh)
 ├── client/                # Echo client (native)
 │   ├── src/

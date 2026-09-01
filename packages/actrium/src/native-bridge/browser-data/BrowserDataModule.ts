@@ -1,5 +1,5 @@
 import { NativeModules } from 'react-native';
-import type { BookmarkData, HistoryItemData } from '../../actr-host/types';
+import type { BookmarkData, HistoryItemData } from '../../runtime-host/types';
 
 type BrowserDataNativeModule = {
   getRecentHistory?: (limit: number) => Promise<HistoryItemData[]>;

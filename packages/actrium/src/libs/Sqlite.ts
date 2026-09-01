@@ -1,5 +1,5 @@
 import SQLite, { SQLiteDatabase, ResultSet, Transaction } from 'react-native-sqlite-storage';
-import { RUNTIME_DATABASE_NAME } from '../actr-host/coreContract';
+import { RUNTIME_DATABASE_NAME } from '../runtime-host/coreContract';
 
 // Enable Promise Support
 SQLite.enablePromise(true);

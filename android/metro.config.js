@@ -10,7 +10,7 @@ const projectNodeModules = path.resolve(projectRoot, 'node_modules');
 const runtimeRoot = path.resolve(workspacePackagesRoot, 'actrium');
 const keelRoot = path.resolve(workspacePackagesRoot, 'keel');
 const appSdkRoot = path.resolve(workspacePackagesRoot, 'actrium-app-sdk');
-const runtimeShimsDir = path.resolve(runtimeRoot, 'src/actr-host/shims');
+const runtimeShimsDir = path.resolve(runtimeRoot, 'src/runtime-host/shims');
 
 const existingDirs = (paths) =>
   Array.from(new Set(paths)).filter((candidate) => fs.existsSync(candidate));

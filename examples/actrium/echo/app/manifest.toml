@@ -1,0 +1,38 @@
+format = "actr-package/1"
+
+[actor]
+manufacturer = "actrium"
+name = "echo-ui"
+version = "0.1.0"
+
+[workload]
+profile = "keel.guest/1"
+entry = "workload/guest.js"
+
+[workload.keel]
+runtime = "js"
+guest-api = "keel.guest/1"
+
+[host]
+profile = "actr.host/1"
+api = "^1.0.0"
+required-capabilities = ["actor.call", "ui.render"]
+optional-capabilities = []
+
+[extensions.actrium]
+title = "Echo"
+description = "Keel Guest demonstrating Actor RPC through Actrium"
+theme-color = "#101827"
+left-panel-default-visible = false
+right-panel-default-visible = false
+
+[signature]
+algorithm = "ed25519"
+key-id = "placeholder"
+
+[[files]]
+path = "workload/guest.js"
+role = "workload"
+media-type = "text/javascript"
+size = 0
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"

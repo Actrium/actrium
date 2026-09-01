@@ -23,7 +23,7 @@ cp media-relay/actr-a/Actr.example.toml media-relay/actr-a/actr.toml
 cp media-relay/actr-b/Actr.example.toml media-relay/actr-b/actr.toml
 ```
 
-`package-echo` is the exception for the packaged server host: it uses tracked runtime-config templates under `package-echo/`. `package-echo/start.sh` regenerates `server-actr.toml`, while `package-echo/start_tmp_echo_actr.sh` regenerates `tmp_server-actr.toml`, before running `actr run`.
+`package-echo` keeps tracked runtime-config templates under `package-echo/`. `package-echo/start.sh` writes its runnable config to `package-echo/logs/server-actr.toml`, while `package-echo/start_tmp_echo_actr.sh` uses its isolated `tmp_server-actr.toml`, before running `actr run`.
 
 ## Prerequisites
 
@@ -91,6 +91,6 @@ Both `--bin` and `-p` work identically in a workspace context.
   - Behavior: boots actrix (root config) → `actr-b` example → `actr-a` example; checks frame reception; exits automatically on success.
 - **Package Echo** – echo RPC against a host that loads a signed `.actr` package built locally.
   - Start: `bash package-echo/start.sh`
-  - Behavior: boots actrix (root config) → builds and signs the local `echo-actr` package → regenerates `server-actr.toml` → runs `actr run -c server-actr.toml` → launches the client example; asserts echo reply contains the packaged service response.
+  - Behavior: boots Loran (root config) → builds and signs the local `echo-actr` package → generates `logs/server-actr.toml` → runs the package with `actr run` → launches the client example; asserts the echo reply contains the packaged service response.
   - Temp scaffold variant: `bash package-echo/start_tmp_echo_actr.sh`
   - Temp behavior: creates a temporary `echo-actr-xx` Rust service project via `actr init`, runs `actr deps install` + `actr gen -l rust`, then reuses `package-echo/start.sh` with that generated workload and the isolated `tmp_server-actr.toml`.

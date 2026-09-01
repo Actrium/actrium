@@ -1,2 +1,7 @@
 [build]
 target-dir = "../../target/examples"
+
+# Override native-only global linker flags (for example, `-fuse-ld=mold`).
+# A non-empty target value is required for Cargo to select this source.
+[target.wasm32-wasip2]
+rustflags = ["-C", "debuginfo=0"]

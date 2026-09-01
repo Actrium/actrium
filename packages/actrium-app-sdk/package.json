@@ -14,7 +14,11 @@
       "default": "./src/index.guest.ts"
     },
     "./core": "./src/core/index.ts",
-    "./contracts": "./src/contracts/index.ts"
+    "./contracts": "./src/contracts/index.ts",
+    "./host-events": {
+      "react-native": "./src/host-events.ts",
+      "default": "./src/host-events.ts"
+    }
   },
   "sideEffects": [
     "./src/api/Toast.host.ts"
@@ -25,7 +29,6 @@
     "LICENSE"
   ],
   "scripts": {
-    "actr": "bun run cli/actr.ts",
     "generate:contracts": "bun run scripts/generate-contracts.ts",
     "typecheck": "tsc --noEmit",
     "typecheck:cli": "tsc --noEmit -p cli/tsconfig.json",

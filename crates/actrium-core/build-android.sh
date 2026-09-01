@@ -14,6 +14,7 @@ cd "$SCRIPT_DIR"
 echo "==> Generating UniFFI Kotlin bindings for actro-core..."
 mkdir -p "$KOTLIN_DIR"
 cargo run --bin uniffi-bindgen generate "$UDL_FILE" --language kotlin --out-dir "$KOTLIN_DIR"
+perl -pi -e 's/[ \t]+$//' "$GENERATED_KOTLIN"
 if [[ -f "$GENERATED_KOTLIN" ]]; then
     perl -i -pe 's/[ \t]+$//' "$GENERATED_KOTLIN"
 fi

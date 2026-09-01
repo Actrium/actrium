@@ -58,7 +58,7 @@ final class ActroReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDelegat
 
     override func bundleURL() -> URL? {
         #if DEBUG
-        // Forced to leave while developing Metro(Supporting heat loads);Debug The environment is not going back offline. actr.jsbundle(avoiding to expire) bundle Result"Whitescreen Unrendered")
+        // Forced to leave while developing Metro(Supporting heat loads);Debug The environment is not going back offline. runtime.jsbundle(avoiding to expire) bundle Result"Whitescreen Unrendered")
         // 🟢 Special attention is paid to: iPad The real thing is, when you debug it,RCTBundleURLProvider Yeah. IP:Port The Analysis of Unstable
         // Direct Construct URL It's to make sure iPad It's a very precise connection. Mac Metro (8082) The surest way to do it.
         let packagerHost = "localhost" // Or fill it in. Mac Local area network IP Address
@@ -124,10 +124,10 @@ final class ActroReactNativeHost {
     }
 
     func createRootView(initialProperties: [String: Any]) -> UIView {
-        nnotice("📱 [Native] Create RootView,module name: ActrApp")
+        nnotice("📱 [Native] Create RootView,module name: RuntimeApp")
 
         let rootView = factory.rootViewFactory.view(
-            withModuleName: "ActrApp",
+            withModuleName: "RuntimeApp",
             initialProperties: initialProperties,
             launchOptions: nil
         )
@@ -214,7 +214,7 @@ final class ActroReactNativeHost {
                 let contentView = rctRootView.contentView
                 if contentView.subviews.isEmpty {
                     nerror("❌ [Native] ContentView No subview!React Probably unrendered")
-                    nerror("👉 [Native] Debug: Confirm Metro Started (`cd Actro/ActroRuntime && bun run start`);Release: Ensure generated `actr.jsbundle`")
+                    nerror("👉 [Native] Debug: Confirm Metro Started (`cd Actro/ActroRuntime && bun run start`);Release: Ensure generated `runtime.jsbundle`")
                 } else {
                 }
             }
@@ -228,7 +228,7 @@ final class ActroReactNativeHost {
     func evaluateScript(_ code: String, tabId: UUID) {
         guard let bridge = self.bridge else { return }
         
-        // Send event to ActrApp to evaluate in the specific engine
+        // Send event to RuntimeApp to evaluate in the specific engine
         bridge.enqueueJSCall(
             "RCTDeviceEventEmitter",
             method: "emit",

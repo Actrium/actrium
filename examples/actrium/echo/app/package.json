@@ -1,0 +1,19 @@
+{
+  "name": "echo-at-actrium",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "mkdir -p workload dist && bun ../../../../packages/keel/src/cli/bin.ts build src/unified-app.tsx -o workload/guest.js --footer ../../../../packages/actrium-app-sdk/src/cli/keel-guest-footer.js --no-minify --dev",
+    "test": "bun test src/protobuf.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "askit": "file:../../../../packages/actrium-app-sdk",
+    "keel": "file:../../../../packages/keel",
+    "react": "19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.0.0",
+    "typescript": "5.9.3"
+  }
+}

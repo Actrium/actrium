@@ -5,7 +5,7 @@ import {
   RUNTIME_MESSAGE_TYPES,
   type RuntimeMessageProgress,
   type RuntimeMessageType,
-} from '../actr-host/coreContract';
+} from '../runtime-host/coreContract';
 
 export const Progress = RUNTIME_MESSAGE_PROGRESS;
 

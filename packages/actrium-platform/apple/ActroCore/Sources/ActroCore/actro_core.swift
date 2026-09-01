@@ -8,11 +8,11 @@ import Foundation
 // might be in a separate module, or it might be compiled inline into
 // this module. This is a bit of light hackery to work with both.
 #if canImport(actro_coreFFI)
-    import actro_coreFFI
+import actro_coreFFI
 #endif
 
-private extension RustBuffer {
-    /// Allocate a new buffer, copying the contents of a `UInt8` array.
+fileprivate extension RustBuffer {
+    // Allocate a new buffer, copying the contents of a `UInt8` array.
     init(bytes: [UInt8]) {
         let rbuf = bytes.withUnsafeBufferPointer { ptr in
             RustBuffer.from(ptr)
@@ -21,21 +21,21 @@ private extension RustBuffer {
     }
 
     static func empty() -> RustBuffer {
-        RustBuffer(capacity: 0, len: 0, data: nil)
+        RustBuffer(capacity: 0, len:0, data: nil)
     }
 
     static func from(_ ptr: UnsafeBufferPointer<UInt8>) -> RustBuffer {
         try! rustCall { ffi_actro_core_rustbuffer_from_bytes(ForeignBytes(bufferPointer: ptr), $0) }
     }
 
-    /// Frees the buffer in place.
-    /// The buffer must not be used after this is called.
+    // Frees the buffer in place.
+    // The buffer must not be used after this is called.
     func deallocate() {
         try! rustCall { ffi_actro_core_rustbuffer_free(self, $0) }
     }
 }
 
-private extension ForeignBytes {
+fileprivate extension ForeignBytes {
     init(bufferPointer: UnsafeBufferPointer<UInt8>) {
         self.init(len: Int32(bufferPointer.count), data: bufferPointer.baseAddress)
     }
@@ -48,7 +48,7 @@ private extension ForeignBytes {
 // Helper classes/extensions that don't change.
 // Someday, this will be in a library of its own.
 
-private extension Data {
+fileprivate extension Data {
     init(rustBuffer: RustBuffer) {
         self.init(
             bytesNoCopy: rustBuffer.data!,
@@ -72,15 +72,15 @@ private extension Data {
 //
 // Instead, the read() method and these helper functions input a tuple of data
 
-private func createReader(data: Data) -> (data: Data, offset: Data.Index) {
+fileprivate func createReader(data: Data) -> (data: Data, offset: Data.Index) {
     (data: data, offset: 0)
 }
 
-/// Reads an integer at the current offset, in big-endian order, and advances
-/// the offset on success. Throws if reading the integer would move the
-/// offset past the end of the buffer.
-private func readInt<T: FixedWidthInteger>(_ reader: inout (data: Data, offset: Data.Index)) throws -> T {
-    let range = reader.offset ..< reader.offset + MemoryLayout<T>.size
+// Reads an integer at the current offset, in big-endian order, and advances
+// the offset on success. Throws if reading the integer would move the
+// offset past the end of the buffer.
+fileprivate func readInt<T: FixedWidthInteger>(_ reader: inout (data: Data, offset: Data.Index)) throws -> T {
+    let range = reader.offset..<reader.offset + MemoryLayout<T>.size
     guard reader.data.count >= range.upperBound else {
         throw UniffiInternalError.bufferOverflow
     }
@@ -90,38 +90,38 @@ private func readInt<T: FixedWidthInteger>(_ reader: inout (data: Data, offset: 
         return value as! T
     }
     var value: T = 0
-    let _ = withUnsafeMutableBytes(of: &value) { reader.data.copyBytes(to: $0, from: range) }
+    let _ = withUnsafeMutableBytes(of: &value, { reader.data.copyBytes(to: $0, from: range)})
     reader.offset = range.upperBound
     return value.bigEndian
 }
 
-/// Reads an arbitrary number of bytes, to be used to read
-/// raw bytes, this is useful when lifting strings
-private func readBytes(_ reader: inout (data: Data, offset: Data.Index), count: Int) throws -> [UInt8] {
-    let range = reader.offset ..< (reader.offset + count)
+// Reads an arbitrary number of bytes, to be used to read
+// raw bytes, this is useful when lifting strings
+fileprivate func readBytes(_ reader: inout (data: Data, offset: Data.Index), count: Int) throws -> Array<UInt8> {
+    let range = reader.offset..<(reader.offset+count)
     guard reader.data.count >= range.upperBound else {
         throw UniffiInternalError.bufferOverflow
     }
     var value = [UInt8](repeating: 0, count: count)
-    value.withUnsafeMutableBufferPointer { buffer in
+    value.withUnsafeMutableBufferPointer({ buffer in
         reader.data.copyBytes(to: buffer, from: range)
-    }
+    })
     reader.offset = range.upperBound
     return value
 }
 
-/// Reads a float at the current offset.
-private func readFloat(_ reader: inout (data: Data, offset: Data.Index)) throws -> Float {
-    return try Float(bitPattern: readInt(&reader))
+// Reads a float at the current offset.
+fileprivate func readFloat(_ reader: inout (data: Data, offset: Data.Index)) throws -> Float {
+    return Float(bitPattern: try readInt(&reader))
 }
 
-/// Reads a float at the current offset.
-private func readDouble(_ reader: inout (data: Data, offset: Data.Index)) throws -> Double {
-    return try Double(bitPattern: readInt(&reader))
+// Reads a float at the current offset.
+fileprivate func readDouble(_ reader: inout (data: Data, offset: Data.Index)) throws -> Double {
+    return Double(bitPattern: try readInt(&reader))
 }
 
-/// Indicates if the offset has reached the end of the buffer.
-private func hasRemaining(_ reader: (data: Data, offset: Data.Index)) -> Bool {
+// Indicates if the offset has reached the end of the buffer.
+fileprivate func hasRemaining(_ reader: (data: Data, offset: Data.Index)) -> Bool {
     return reader.offset < reader.data.count
 }
 
@@ -129,34 +129,34 @@ private func hasRemaining(_ reader: (data: Data, offset: Data.Index)) -> Bool {
 // struct, but we use standalone functions instead in order to make external
 // types work.  See the above discussion on Readers for details.
 
-private func createWriter() -> [UInt8] {
+fileprivate func createWriter() -> [UInt8] {
     return []
 }
 
-private func writeBytes<S: Sequence>(_ writer: inout [UInt8], _ byteArr: S) where S.Element == UInt8 {
+fileprivate func writeBytes<S>(_ writer: inout [UInt8], _ byteArr: S) where S: Sequence, S.Element == UInt8 {
     writer.append(contentsOf: byteArr)
 }
 
-/// Writes an integer in big-endian order.
-///
-/// Warning: make sure what you are trying to write
-/// is in the correct type!
-private func writeInt<T: FixedWidthInteger>(_ writer: inout [UInt8], _ value: T) {
+// Writes an integer in big-endian order.
+//
+// Warning: make sure what you are trying to write
+// is in the correct type!
+fileprivate func writeInt<T: FixedWidthInteger>(_ writer: inout [UInt8], _ value: T) {
     var value = value.bigEndian
     withUnsafeBytes(of: &value) { writer.append(contentsOf: $0) }
 }
 
-private func writeFloat(_ writer: inout [UInt8], _ value: Float) {
+fileprivate func writeFloat(_ writer: inout [UInt8], _ value: Float) {
     writeInt(&writer, value.bitPattern)
 }
 
-private func writeDouble(_ writer: inout [UInt8], _ value: Double) {
+fileprivate func writeDouble(_ writer: inout [UInt8], _ value: Double) {
     writeInt(&writer, value.bitPattern)
 }
 
-/// Protocol for types that transfer other types across the FFI. This is
-/// analogous to the Rust trait of the same name.
-private protocol FfiConverter {
+// Protocol for types that transfer other types across the FFI. This is
+// analogous to the Rust trait of the same name.
+fileprivate protocol FfiConverter {
     associatedtype FfiType
     associatedtype SwiftType
 
@@ -166,33 +166,33 @@ private protocol FfiConverter {
     static func write(_ value: SwiftType, into buf: inout [UInt8])
 }
 
-/// Types conforming to `Primitive` pass themselves directly over the FFI.
-private protocol FfiConverterPrimitive: FfiConverter where FfiType == SwiftType {}
+// Types conforming to `Primitive` pass themselves directly over the FFI.
+fileprivate protocol FfiConverterPrimitive: FfiConverter where FfiType == SwiftType { }
 
 extension FfiConverterPrimitive {
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func lift(_ value: FfiType) throws -> SwiftType {
         return value
     }
 
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func lower(_ value: SwiftType) -> FfiType {
         return value
     }
 }
 
-/// Types conforming to `FfiConverterRustBuffer` lift and lower into a `RustBuffer`.
-/// Used for complex types where it's hard to write a custom lift/lower.
-private protocol FfiConverterRustBuffer: FfiConverter where FfiType == RustBuffer {}
+// Types conforming to `FfiConverterRustBuffer` lift and lower into a `RustBuffer`.
+// Used for complex types where it's hard to write a custom lift/lower.
+fileprivate protocol FfiConverterRustBuffer: FfiConverter where FfiType == RustBuffer {}
 
 extension FfiConverterRustBuffer {
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func lift(_ buf: RustBuffer) throws -> SwiftType {
         var reader = createReader(data: Data(rustBuffer: buf))
         let value = try read(from: &reader)
@@ -203,19 +203,18 @@ extension FfiConverterRustBuffer {
         return value
     }
 
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func lower(_ value: SwiftType) -> RustBuffer {
-        var writer = createWriter()
-        write(value, into: &writer)
-        return RustBuffer(bytes: writer)
+          var writer = createWriter()
+          write(value, into: &writer)
+          return RustBuffer(bytes: writer)
     }
 }
-
-/// An error type for FFI errors. These errors occur at the UniFFI level, not
-/// the library level.
-private enum UniffiInternalError: LocalizedError {
+// An error type for FFI errors. These errors occur at the UniFFI level, not
+// the library level.
+fileprivate enum UniffiInternalError: LocalizedError {
     case bufferOverflow
     case incompleteData
     case unexpectedOptionalTag
@@ -226,7 +225,7 @@ private enum UniffiInternalError: LocalizedError {
     case unexpectedStaleHandle
     case rustPanic(_ message: String)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .bufferOverflow: return "Reading the requested value would read past the end of the buffer"
         case .incompleteData: return "The buffer still has data after lifting its containing value"
@@ -241,24 +240,24 @@ private enum UniffiInternalError: LocalizedError {
     }
 }
 
-private extension NSLock {
+fileprivate extension NSLock {
     func withLock<T>(f: () throws -> T) rethrows -> T {
-        lock()
+        self.lock()
         defer { self.unlock() }
         return try f()
     }
 }
 
-private let CALL_SUCCESS: Int8 = 0
-private let CALL_ERROR: Int8 = 1
-private let CALL_UNEXPECTED_ERROR: Int8 = 2
-private let CALL_CANCELLED: Int8 = 3
+fileprivate let CALL_SUCCESS: Int8 = 0
+fileprivate let CALL_ERROR: Int8 = 1
+fileprivate let CALL_UNEXPECTED_ERROR: Int8 = 2
+fileprivate let CALL_CANCELLED: Int8 = 3
 
-private extension RustCallStatus {
+fileprivate extension RustCallStatus {
     init() {
         self.init(
             code: CALL_SUCCESS,
-            errorBuf: RustBuffer(
+            errorBuf: RustBuffer.init(
                 capacity: 0,
                 len: 0,
                 data: nil
@@ -274,8 +273,7 @@ private func rustCall<T>(_ callback: (UnsafeMutablePointer<RustCallStatus>) -> T
 
 private func rustCallWithError<T, E: Swift.Error>(
     _ errorHandler: @escaping (RustBuffer) throws -> E,
-    _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T
-) throws -> T {
+    _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T) throws -> T {
     try makeRustCall(callback, errorHandler: errorHandler)
 }
 
@@ -283,8 +281,8 @@ private func makeRustCall<T, E: Swift.Error>(
     _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T,
     errorHandler: ((RustBuffer) throws -> E)?
 ) throws -> T {
-    uniffiEnsureInitialized()
-    var callStatus = RustCallStatus()
+    uniffiEnsureActroCoreInitialized()
+    var callStatus = RustCallStatus.init()
     let returnedVal = callback(&callStatus)
     try uniffiCheckCallStatus(callStatus: callStatus, errorHandler: errorHandler)
     return returnedVal
@@ -295,44 +293,44 @@ private func uniffiCheckCallStatus<E: Swift.Error>(
     errorHandler: ((RustBuffer) throws -> E)?
 ) throws {
     switch callStatus.code {
-    case CALL_SUCCESS:
-        return
+        case CALL_SUCCESS:
+            return
 
-    case CALL_ERROR:
-        if let errorHandler = errorHandler {
-            throw try errorHandler(callStatus.errorBuf)
-        } else {
-            callStatus.errorBuf.deallocate()
-            throw UniffiInternalError.unexpectedRustCallError
-        }
+        case CALL_ERROR:
+            if let errorHandler = errorHandler {
+                throw try errorHandler(callStatus.errorBuf)
+            } else {
+                callStatus.errorBuf.deallocate()
+                throw UniffiInternalError.unexpectedRustCallError
+            }
 
-    case CALL_UNEXPECTED_ERROR:
-        // When the rust code sees a panic, it tries to construct a RustBuffer
-        // with the message.  But if that code panics, then it just sends back
-        // an empty buffer.
-        if callStatus.errorBuf.len > 0 {
-            throw try UniffiInternalError.rustPanic(FfiConverterString.lift(callStatus.errorBuf))
-        } else {
-            callStatus.errorBuf.deallocate()
-            throw UniffiInternalError.rustPanic("Rust panic")
-        }
+        case CALL_UNEXPECTED_ERROR:
+            // When the rust code sees a panic, it tries to construct a RustBuffer
+            // with the message.  But if that code panics, then it just sends back
+            // an empty buffer.
+            if callStatus.errorBuf.len > 0 {
+                throw UniffiInternalError.rustPanic(try FfiConverterString.lift(callStatus.errorBuf))
+            } else {
+                callStatus.errorBuf.deallocate()
+                throw UniffiInternalError.rustPanic("Rust panic")
+            }
 
-    case CALL_CANCELLED:
-        fatalError("Cancellation not supported yet")
+        case CALL_CANCELLED:
+            fatalError("Cancellation not supported yet")
 
-    default:
-        throw UniffiInternalError.unexpectedRustCallStatusCode
+        default:
+            throw UniffiInternalError.unexpectedRustCallStatusCode
     }
 }
 
 private func uniffiTraitInterfaceCall<T>(
     callStatus: UnsafeMutablePointer<RustCallStatus>,
     makeCall: () throws -> T,
-    writeReturn: (T) -> Void
+    writeReturn: (T) -> ()
 ) {
     do {
         try writeReturn(makeCall())
-    } catch {
+    } catch let error {
         callStatus.pointee.code = CALL_UNEXPECTED_ERROR
         callStatus.pointee.errorBuf = FfiConverterString.lower(String(describing: error))
     }
@@ -341,7 +339,7 @@ private func uniffiTraitInterfaceCall<T>(
 private func uniffiTraitInterfaceCallWithError<T, E>(
     callStatus: UnsafeMutablePointer<RustCallStatus>,
     makeCall: () throws -> T,
-    writeReturn: (T) -> Void,
+    writeReturn: (T) -> (),
     lowerError: (E) -> RustBuffer
 ) {
     do {
@@ -354,10 +352,10 @@ private func uniffiTraitInterfaceCallWithError<T, E>(
         callStatus.pointee.errorBuf = FfiConverterString.lower(String(describing: error))
     }
 }
-
-private class UniffiHandleMap<T> {
-    private var map: [UInt64: T] = [:]
+fileprivate final class UniffiHandleMap<T>: @unchecked Sendable {
+    // All mutation happens with this lock held, which is why we implement @unchecked Sendable.
     private let lock = NSLock()
+    private var map: [UInt64: T] = [:]
     private var currentHandle: UInt64 = 1
 
     func insert(obj: T) -> UInt64 {
@@ -369,7 +367,7 @@ private class UniffiHandleMap<T> {
         }
     }
 
-    func get(handle: UInt64) throws -> T {
+     func get(handle: UInt64) throws -> T {
         try lock.withLock {
             guard let obj = map[handle] else {
                 throw UniffiInternalError.unexpectedStaleHandle
@@ -389,108 +387,112 @@ private class UniffiHandleMap<T> {
     }
 
     var count: Int {
-        map.count
+        get {
+            map.count
+        }
     }
 }
+
 
 // Public interface members begin here.
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterUInt32: FfiConverterPrimitive {
+fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
     typealias FfiType = UInt32
     typealias SwiftType = UInt32
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt32 {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt32 {
         return try lift(readInt(&buf))
     }
 
-    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterInt32: FfiConverterPrimitive {
+fileprivate struct FfiConverterInt32: FfiConverterPrimitive {
     typealias FfiType = Int32
     typealias SwiftType = Int32
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int32 {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int32 {
         return try lift(readInt(&buf))
     }
 
-    static func write(_ value: Int32, into buf: inout [UInt8]) {
+    public static func write(_ value: Int32, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterInt64: FfiConverterPrimitive {
+fileprivate struct FfiConverterInt64: FfiConverterPrimitive {
     typealias FfiType = Int64
     typealias SwiftType = Int64
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int64 {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int64 {
         return try lift(readInt(&buf))
     }
 
-    static func write(_ value: Int64, into buf: inout [UInt8]) {
+    public static func write(_ value: Int64, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterDouble: FfiConverterPrimitive {
+fileprivate struct FfiConverterDouble: FfiConverterPrimitive {
     typealias FfiType = Double
     typealias SwiftType = Double
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Double {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Double {
         return try lift(readDouble(&buf))
     }
 
-    static func write(_ value: Double, into buf: inout [UInt8]) {
+    public static func write(_ value: Double, into buf: inout [UInt8]) {
         writeDouble(&buf, lower(value))
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterBool: FfiConverter {
+fileprivate struct FfiConverterBool : FfiConverter {
     typealias FfiType = Int8
     typealias SwiftType = Bool
 
-    static func lift(_ value: Int8) throws -> Bool {
+    public static func lift(_ value: Int8) throws -> Bool {
         return value != 0
     }
 
-    static func lower(_ value: Bool) -> Int8 {
+    public static func lower(_ value: Bool) -> Int8 {
         return value ? 1 : 0
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Bool {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Bool {
         return try lift(readInt(&buf))
     }
 
-    static func write(_ value: Bool, into buf: inout [UInt8]) {
+    public static func write(_ value: Bool, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterString: FfiConverter {
+fileprivate struct FfiConverterString: FfiConverter {
     typealias SwiftType = String
     typealias FfiType = RustBuffer
 
-    static func lift(_ value: RustBuffer) throws -> String {
+    public static func lift(_ value: RustBuffer) throws -> String {
         defer {
             value.deallocate()
         }
@@ -501,7 +503,7 @@ private struct FfiConverterString: FfiConverter {
         return String(bytes: bytes, encoding: String.Encoding.utf8)!
     }
 
-    static func lower(_ value: String) -> RustBuffer {
+    public static func lower(_ value: String) -> RustBuffer {
         return value.utf8CString.withUnsafeBufferPointer { ptr in
             // The swift string gives us int8_t, we want uint8_t.
             ptr.withMemoryRebound(to: UInt8.self) { ptr in
@@ -512,17 +514,18 @@ private struct FfiConverterString: FfiConverter {
         }
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> String {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> String {
         let len: Int32 = try readInt(&buf)
-        return try String(bytes: readBytes(&buf, count: Int(len)), encoding: String.Encoding.utf8)!
+        return String(bytes: try readBytes(&buf, count: Int(len)), encoding: String.Encoding.utf8)!
     }
 
-    static func write(_ value: String, into buf: inout [UInt8]) {
+    public static func write(_ value: String, into buf: inout [UInt8]) {
         let len = Int32(value.utf8.count)
         writeInt(&buf, len)
         writeBytes(&buf, value.utf8)
     }
 }
+
 
 public struct ActiveTabInfo {
     public var id: String
@@ -535,8 +538,8 @@ public struct ActiveTabInfo {
     public var panelVisible: Bool
     public var status: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(id: String, name: String, icon: String, screenshot: String, hasUnread: Bool, url: String, isMarked: Bool, panelVisible: Bool, status: String) {
         self.id = id
         self.name = name
@@ -550,8 +553,13 @@ public struct ActiveTabInfo {
     }
 }
 
+#if compiler(>=6)
+extension ActiveTabInfo: Sendable {}
+#endif
+
+
 extension ActiveTabInfo: Equatable, Hashable {
-    public static func == (lhs: ActiveTabInfo, rhs: ActiveTabInfo) -> Bool {
+    public static func ==(lhs: ActiveTabInfo, rhs: ActiveTabInfo) -> Bool {
         if lhs.id != rhs.id {
             return false
         }
@@ -595,8 +603,10 @@ extension ActiveTabInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeActiveTabInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ActiveTabInfo {
@@ -611,7 +621,7 @@ public struct FfiConverterTypeActiveTabInfo: FfiConverterRustBuffer {
                 isMarked: FfiConverterBool.read(from: &buf),
                 panelVisible: FfiConverterBool.read(from: &buf),
                 status: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: ActiveTabInfo, into buf: inout [UInt8]) {
@@ -627,19 +637,21 @@ public struct FfiConverterTypeActiveTabInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeActiveTabInfo_lift(_ buf: RustBuffer) throws -> ActiveTabInfo {
     return try FfiConverterTypeActiveTabInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeActiveTabInfo_lower(_ value: ActiveTabInfo) -> RustBuffer {
     return FfiConverterTypeActiveTabInfo.lower(value)
 }
+
 
 public struct ActiveTabRowInfo {
     public var id: String
@@ -652,8 +664,8 @@ public struct ActiveTabRowInfo {
     public var status: String
     public var sortOrder: Int32
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(id: String, name: String, icon: String, screenshot: String, hasUnread: Bool, url: String, isMarked: Bool, status: String, sortOrder: Int32) {
         self.id = id
         self.name = name
@@ -667,8 +679,13 @@ public struct ActiveTabRowInfo {
     }
 }
 
+#if compiler(>=6)
+extension ActiveTabRowInfo: Sendable {}
+#endif
+
+
 extension ActiveTabRowInfo: Equatable, Hashable {
-    public static func == (lhs: ActiveTabRowInfo, rhs: ActiveTabRowInfo) -> Bool {
+    public static func ==(lhs: ActiveTabRowInfo, rhs: ActiveTabRowInfo) -> Bool {
         if lhs.id != rhs.id {
             return false
         }
@@ -712,8 +729,10 @@ extension ActiveTabRowInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeActiveTabRowInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ActiveTabRowInfo {
@@ -728,7 +747,7 @@ public struct FfiConverterTypeActiveTabRowInfo: FfiConverterRustBuffer {
                 isMarked: FfiConverterBool.read(from: &buf),
                 status: FfiConverterString.read(from: &buf),
                 sortOrder: FfiConverterInt32.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: ActiveTabRowInfo, into buf: inout [UInt8]) {
@@ -744,27 +763,29 @@ public struct FfiConverterTypeActiveTabRowInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeActiveTabRowInfo_lift(_ buf: RustBuffer) throws -> ActiveTabRowInfo {
     return try FfiConverterTypeActiveTabRowInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeActiveTabRowInfo_lower(_ value: ActiveTabRowInfo) -> RustBuffer {
     return FfiConverterTypeActiveTabRowInfo.lower(value)
 }
+
 
 public struct ActrActorTypeInfo {
     public var manufacturer: String
     public var name: String
     public var version: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(manufacturer: String, name: String, version: String) {
         self.manufacturer = manufacturer
         self.name = name
@@ -772,8 +793,13 @@ public struct ActrActorTypeInfo {
     }
 }
 
+#if compiler(>=6)
+extension ActrActorTypeInfo: Sendable {}
+#endif
+
+
 extension ActrActorTypeInfo: Equatable, Hashable {
-    public static func == (lhs: ActrActorTypeInfo, rhs: ActrActorTypeInfo) -> Bool {
+    public static func ==(lhs: ActrActorTypeInfo, rhs: ActrActorTypeInfo) -> Bool {
         if lhs.manufacturer != rhs.manufacturer {
             return false
         }
@@ -793,8 +819,10 @@ extension ActrActorTypeInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeActrActorTypeInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ActrActorTypeInfo {
@@ -803,7 +831,7 @@ public struct FfiConverterTypeActrActorTypeInfo: FfiConverterRustBuffer {
                 manufacturer: FfiConverterString.read(from: &buf),
                 name: FfiConverterString.read(from: &buf),
                 version: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: ActrActorTypeInfo, into buf: inout [UInt8]) {
@@ -813,19 +841,21 @@ public struct FfiConverterTypeActrActorTypeInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeActrActorTypeInfo_lift(_ buf: RustBuffer) throws -> ActrActorTypeInfo {
     return try FfiConverterTypeActrActorTypeInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeActrActorTypeInfo_lower(_ value: ActrActorTypeInfo) -> RustBuffer {
     return FfiConverterTypeActrActorTypeInfo.lower(value)
 }
+
 
 public struct ActrBridgeContractInfo {
     public var moduleName: String
@@ -906,8 +936,8 @@ public struct ActrBridgeContractInfo {
     public var keySequence: String
     public var keyTimestampMs: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(moduleName: String, streamEventName: String, statusConnected: String, streamTypeText: String, streamTypeVoice: String, streamTypeAttachmentResult: String, streamStatusOk: Int32, streamStatusError: Int32, streamMetadataEosKey: String, streamMetadataAosKey: String, streamMetadataTerminalValue: String, attachmentResultTimeoutMs: UInt32, attachmentChunkSizeBytes: UInt32, attachmentChecksumAlgorithmMd5: String, attachmentStatusCodeOk: Int32, attachmentTypeUnknown: Int32, attachmentTypeImage: Int32, attachmentTypeDocument: Int32, attachmentTypeAudio: Int32, attachmentTypeVideo: Int32, attachmentTypeOther: Int32, attachmentUploadStatusUnknown: Int32, attachmentUploadStatusCompleted: Int32, attachmentUploadStatusFailed: Int32, askServicePromptRouteKey: String, askServiceAttachRouteKey: String, askServicePrepareAttachmentUploadRouteKey: String, askLocalServiceSendTextRouteKey: String, askLocalServiceStartSendVoiceRouteKey: String, askLocalServiceSendVoiceChunkRouteKey: String, iosAskServicePromptTimeoutMs: UInt32, iosAskServicePrepareAttachmentUploadTimeoutMs: UInt32, androidAskServicePromptTimeoutMs: UInt32, androidAskServiceAttachTimeoutMs: UInt32, androidAskLocalServiceRpcTimeoutMs: UInt32, errorInvalidInput: String, errorUnknown: String, errorPromptRequest: String, errorNotConnected: String, errorActr: String, errorGeneric: String, keyTabId: String, keyActorType: String, keyPath: String, keyStatus: String, keyMessageId: String, keySessionId: String, keyText: String, keyMessage: String, keyStreamId: String, keyStreamIdUpper: String, keyTextResponseStreamId: String, keyVoiceResponseStreamId: String, keyAttachmentIds: String, keyLocation: String, keyLatitude: String, keyLongitude: String, keyAddress: String, keyPlaceName: String, keyFileData: String, keyAttachmentId: String, keyChecksum: String, keyChecksumAlgorithm: String, keySizeBytes: String, keyResultStreamId: String, keyId: String, keyFilename: String, keyType: String, keyStatusCode: String, keyErrorMessage: String, keyQuestionId: String, keyChunkId: String, keyMetadata: String, keyMetadataKey: String, keyMetadataValue: String, keySequence: String, keyTimestampMs: String) {
         self.moduleName = moduleName
         self.streamEventName = streamEventName
@@ -989,8 +1019,13 @@ public struct ActrBridgeContractInfo {
     }
 }
 
+#if compiler(>=6)
+extension ActrBridgeContractInfo: Sendable {}
+#endif
+
+
 extension ActrBridgeContractInfo: Equatable, Hashable {
-    public static func == (lhs: ActrBridgeContractInfo, rhs: ActrBridgeContractInfo) -> Bool {
+    public static func ==(lhs: ActrBridgeContractInfo, rhs: ActrBridgeContractInfo) -> Bool {
         if lhs.moduleName != rhs.moduleName {
             return false
         }
@@ -1306,8 +1341,10 @@ extension ActrBridgeContractInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeActrBridgeContractInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ActrBridgeContractInfo {
@@ -1390,7 +1427,7 @@ public struct FfiConverterTypeActrBridgeContractInfo: FfiConverterRustBuffer {
                 keyMetadataValue: FfiConverterString.read(from: &buf),
                 keySequence: FfiConverterString.read(from: &buf),
                 keyTimestampMs: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: ActrBridgeContractInfo, into buf: inout [UInt8]) {
@@ -1474,204 +1511,23 @@ public struct FfiConverterTypeActrBridgeContractInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeActrBridgeContractInfo_lift(_ buf: RustBuffer) throws -> ActrBridgeContractInfo {
     return try FfiConverterTypeActrBridgeContractInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeActrBridgeContractInfo_lower(_ value: ActrBridgeContractInfo) -> RustBuffer {
     return FfiConverterTypeActrBridgeContractInfo.lower(value)
 }
 
-public struct AppSourceTypeInfo {
-    public var kind: String
-    public var displayName: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
-    public init(kind: String, displayName: String) {
-        self.kind = kind
-        self.displayName = displayName
-    }
-}
-
-extension AppSourceTypeInfo: Equatable, Hashable {
-    public static func == (lhs: AppSourceTypeInfo, rhs: AppSourceTypeInfo) -> Bool {
-        if lhs.kind != rhs.kind {
-            return false
-        }
-        if lhs.displayName != rhs.displayName {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(kind)
-        hasher.combine(displayName)
-    }
-}
-
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeAppSourceTypeInfo: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AppSourceTypeInfo {
-        return
-            try AppSourceTypeInfo(
-                kind: FfiConverterString.read(from: &buf),
-                displayName: FfiConverterString.read(from: &buf)
-            )
-    }
-
-    public static func write(_ value: AppSourceTypeInfo, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.kind, into: &buf)
-        FfiConverterString.write(value.displayName, into: &buf)
-    }
-}
-
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAppSourceTypeInfo_lift(_ buf: RustBuffer) throws -> AppSourceTypeInfo {
-    return try FfiConverterTypeAppSourceTypeInfo.lift(buf)
-}
-
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAppSourceTypeInfo_lower(_ value: AppSourceTypeInfo) -> RustBuffer {
-    return FfiConverterTypeAppSourceTypeInfo.lower(value)
-}
-
-public struct ActrIntegrityFilePlanInfo {
-    public var path: String
-    public var expectedHash: String
-
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
-    public init(path: String, expectedHash: String) {
-        self.path = path
-        self.expectedHash = expectedHash
-    }
-}
-
-extension ActrIntegrityFilePlanInfo: Equatable, Hashable {
-    public static func == (lhs: ActrIntegrityFilePlanInfo, rhs: ActrIntegrityFilePlanInfo) -> Bool {
-        if lhs.path != rhs.path {
-            return false
-        }
-        if lhs.expectedHash != rhs.expectedHash {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(path)
-        hasher.combine(expectedHash)
-    }
-}
-
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeActrIntegrityFilePlanInfo: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ActrIntegrityFilePlanInfo {
-        return
-            try ActrIntegrityFilePlanInfo(
-                path: FfiConverterString.read(from: &buf),
-                expectedHash: FfiConverterString.read(from: &buf)
-            )
-    }
-
-    public static func write(_ value: ActrIntegrityFilePlanInfo, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.path, into: &buf)
-        FfiConverterString.write(value.expectedHash, into: &buf)
-    }
-}
-
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-public func FfiConverterTypeActrIntegrityFilePlanInfo_lift(_ buf: RustBuffer) throws -> ActrIntegrityFilePlanInfo {
-    return try FfiConverterTypeActrIntegrityFilePlanInfo.lift(buf)
-}
-
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-public func FfiConverterTypeActrIntegrityFilePlanInfo_lower(_ value: ActrIntegrityFilePlanInfo) -> RustBuffer {
-    return FfiConverterTypeActrIntegrityFilePlanInfo.lower(value)
-}
-
-public struct ActrIntegrityPlanInfo {
-    public var algorithm: String
-    public var files: [ActrIntegrityFilePlanInfo]
-
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
-    public init(algorithm: String, files: [ActrIntegrityFilePlanInfo]) {
-        self.algorithm = algorithm
-        self.files = files
-    }
-}
-
-extension ActrIntegrityPlanInfo: Equatable, Hashable {
-    public static func == (lhs: ActrIntegrityPlanInfo, rhs: ActrIntegrityPlanInfo) -> Bool {
-        if lhs.algorithm != rhs.algorithm {
-            return false
-        }
-        if lhs.files != rhs.files {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(algorithm)
-        hasher.combine(files)
-    }
-}
-
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeActrIntegrityPlanInfo: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ActrIntegrityPlanInfo {
-        return
-            try ActrIntegrityPlanInfo(
-                algorithm: FfiConverterString.read(from: &buf),
-                files: FfiConverterSequenceTypeActrIntegrityFilePlanInfo.read(from: &buf)
-            )
-    }
-
-    public static func write(_ value: ActrIntegrityPlanInfo, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.algorithm, into: &buf)
-        FfiConverterSequenceTypeActrIntegrityFilePlanInfo.write(value.files, into: &buf)
-    }
-}
-
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-public func FfiConverterTypeActrIntegrityPlanInfo_lift(_ buf: RustBuffer) throws -> ActrIntegrityPlanInfo {
-    return try FfiConverterTypeActrIntegrityPlanInfo.lift(buf)
-}
-
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-public func FfiConverterTypeActrIntegrityPlanInfo_lower(_ value: ActrIntegrityPlanInfo) -> RustBuffer {
-    return FfiConverterTypeActrIntegrityPlanInfo.lower(value)
-}
-
-public struct ActrManifestInfo {
+public struct ActrPackageManifestInfo {
     public var name: String
     public var version: String
     public var description: String?
@@ -1686,8 +1542,8 @@ public struct ActrManifestInfo {
     public var systemAppType: String?
     public var themeColor: String?
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(name: String, version: String, description: String?, appId: String?, icon: String?, entry: String, leftPanelDefaultVisible: Bool, rightPanelDefaultVisible: Bool, contractName: String?, contractVersion: UInt32?, permissions: [String], systemAppType: String?, themeColor: String?) {
         self.name = name
         self.version = version
@@ -1705,8 +1561,13 @@ public struct ActrManifestInfo {
     }
 }
 
-extension ActrManifestInfo: Equatable, Hashable {
-    public static func == (lhs: ActrManifestInfo, rhs: ActrManifestInfo) -> Bool {
+#if compiler(>=6)
+extension ActrPackageManifestInfo: Sendable {}
+#endif
+
+
+extension ActrPackageManifestInfo: Equatable, Hashable {
+    public static func ==(lhs: ActrPackageManifestInfo, rhs: ActrPackageManifestInfo) -> Bool {
         if lhs.name != rhs.name {
             return false
         }
@@ -1766,13 +1627,15 @@ extension ActrManifestInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeActrManifestInfo: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ActrManifestInfo {
+public struct FfiConverterTypeActrPackageManifestInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ActrPackageManifestInfo {
         return
-            try ActrManifestInfo(
+            try ActrPackageManifestInfo(
                 name: FfiConverterString.read(from: &buf),
                 version: FfiConverterString.read(from: &buf),
                 description: FfiConverterOptionString.read(from: &buf),
@@ -1786,10 +1649,10 @@ public struct FfiConverterTypeActrManifestInfo: FfiConverterRustBuffer {
                 permissions: FfiConverterSequenceString.read(from: &buf),
                 systemAppType: FfiConverterOptionString.read(from: &buf),
                 themeColor: FfiConverterOptionString.read(from: &buf)
-            )
+        )
     }
 
-    public static func write(_ value: ActrManifestInfo, into buf: inout [UInt8]) {
+    public static func write(_ value: ActrPackageManifestInfo, into buf: inout [UInt8]) {
         FfiConverterString.write(value.name, into: &buf)
         FfiConverterString.write(value.version, into: &buf)
         FfiConverterOptionString.write(value.description, into: &buf)
@@ -1806,19 +1669,91 @@ public struct FfiConverterTypeActrManifestInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-public func FfiConverterTypeActrManifestInfo_lift(_ buf: RustBuffer) throws -> ActrManifestInfo {
-    return try FfiConverterTypeActrManifestInfo.lift(buf)
+public func FfiConverterTypeActrPackageManifestInfo_lift(_ buf: RustBuffer) throws -> ActrPackageManifestInfo {
+    return try FfiConverterTypeActrPackageManifestInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-public func FfiConverterTypeActrManifestInfo_lower(_ value: ActrManifestInfo) -> RustBuffer {
-    return FfiConverterTypeActrManifestInfo.lower(value)
+public func FfiConverterTypeActrPackageManifestInfo_lower(_ value: ActrPackageManifestInfo) -> RustBuffer {
+    return FfiConverterTypeActrPackageManifestInfo.lower(value)
 }
+
+
+public struct AppSourceTypeInfo {
+    public var kind: String
+    public var displayName: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(kind: String, displayName: String) {
+        self.kind = kind
+        self.displayName = displayName
+    }
+}
+
+#if compiler(>=6)
+extension AppSourceTypeInfo: Sendable {}
+#endif
+
+
+extension AppSourceTypeInfo: Equatable, Hashable {
+    public static func ==(lhs: AppSourceTypeInfo, rhs: AppSourceTypeInfo) -> Bool {
+        if lhs.kind != rhs.kind {
+            return false
+        }
+        if lhs.displayName != rhs.displayName {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(kind)
+        hasher.combine(displayName)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAppSourceTypeInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AppSourceTypeInfo {
+        return
+            try AppSourceTypeInfo(
+                kind: FfiConverterString.read(from: &buf),
+                displayName: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: AppSourceTypeInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.kind, into: &buf)
+        FfiConverterString.write(value.displayName, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAppSourceTypeInfo_lift(_ buf: RustBuffer) throws -> AppSourceTypeInfo {
+    return try FfiConverterTypeAppSourceTypeInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAppSourceTypeInfo_lower(_ value: AppSourceTypeInfo) -> RustBuffer {
+    return FfiConverterTypeAppSourceTypeInfo.lower(value)
+}
+
 
 public struct AsrBridgeContractInfo {
     public var moduleName: String
@@ -1830,8 +1765,8 @@ public struct AsrBridgeContractInfo {
     public var keyText: String
     public var keyIsFinal: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(moduleName: String, resultEventName: String, errorEventName: String, errorInit: String, errorFeed: String, errorStop: String, keyText: String, keyIsFinal: String) {
         self.moduleName = moduleName
         self.resultEventName = resultEventName
@@ -1844,8 +1779,13 @@ public struct AsrBridgeContractInfo {
     }
 }
 
+#if compiler(>=6)
+extension AsrBridgeContractInfo: Sendable {}
+#endif
+
+
 extension AsrBridgeContractInfo: Equatable, Hashable {
-    public static func == (lhs: AsrBridgeContractInfo, rhs: AsrBridgeContractInfo) -> Bool {
+    public static func ==(lhs: AsrBridgeContractInfo, rhs: AsrBridgeContractInfo) -> Bool {
         if lhs.moduleName != rhs.moduleName {
             return false
         }
@@ -1885,8 +1825,10 @@ extension AsrBridgeContractInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeAsrBridgeContractInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AsrBridgeContractInfo {
@@ -1900,7 +1842,7 @@ public struct FfiConverterTypeAsrBridgeContractInfo: FfiConverterRustBuffer {
                 errorStop: FfiConverterString.read(from: &buf),
                 keyText: FfiConverterString.read(from: &buf),
                 keyIsFinal: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: AsrBridgeContractInfo, into buf: inout [UInt8]) {
@@ -1915,19 +1857,21 @@ public struct FfiConverterTypeAsrBridgeContractInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeAsrBridgeContractInfo_lift(_ buf: RustBuffer) throws -> AsrBridgeContractInfo {
     return try FfiConverterTypeAsrBridgeContractInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeAsrBridgeContractInfo_lower(_ value: AsrBridgeContractInfo) -> RustBuffer {
     return FfiConverterTypeAsrBridgeContractInfo.lower(value)
 }
+
 
 public struct AsrModelPlanInfo {
     public var languageDir: String
@@ -1935,8 +1879,8 @@ public struct AsrModelPlanInfo {
     public var storageRelativePath: String
     public var readyMarker: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(languageDir: String, assetPath: String, storageRelativePath: String, readyMarker: String) {
         self.languageDir = languageDir
         self.assetPath = assetPath
@@ -1945,8 +1889,13 @@ public struct AsrModelPlanInfo {
     }
 }
 
+#if compiler(>=6)
+extension AsrModelPlanInfo: Sendable {}
+#endif
+
+
 extension AsrModelPlanInfo: Equatable, Hashable {
-    public static func == (lhs: AsrModelPlanInfo, rhs: AsrModelPlanInfo) -> Bool {
+    public static func ==(lhs: AsrModelPlanInfo, rhs: AsrModelPlanInfo) -> Bool {
         if lhs.languageDir != rhs.languageDir {
             return false
         }
@@ -1970,8 +1919,10 @@ extension AsrModelPlanInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeAsrModelPlanInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AsrModelPlanInfo {
@@ -1981,7 +1932,7 @@ public struct FfiConverterTypeAsrModelPlanInfo: FfiConverterRustBuffer {
                 assetPath: FfiConverterString.read(from: &buf),
                 storageRelativePath: FfiConverterString.read(from: &buf),
                 readyMarker: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: AsrModelPlanInfo, into buf: inout [UInt8]) {
@@ -1992,34 +1943,41 @@ public struct FfiConverterTypeAsrModelPlanInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeAsrModelPlanInfo_lift(_ buf: RustBuffer) throws -> AsrModelPlanInfo {
     return try FfiConverterTypeAsrModelPlanInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeAsrModelPlanInfo_lower(_ value: AsrModelPlanInfo) -> RustBuffer {
     return FfiConverterTypeAsrModelPlanInfo.lower(value)
 }
 
+
 public struct AsrSegmentInfo {
     public var word: String
     public var nature: String?
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(word: String, nature: String?) {
         self.word = word
         self.nature = nature
     }
 }
 
+#if compiler(>=6)
+extension AsrSegmentInfo: Sendable {}
+#endif
+
+
 extension AsrSegmentInfo: Equatable, Hashable {
-    public static func == (lhs: AsrSegmentInfo, rhs: AsrSegmentInfo) -> Bool {
+    public static func ==(lhs: AsrSegmentInfo, rhs: AsrSegmentInfo) -> Bool {
         if lhs.word != rhs.word {
             return false
         }
@@ -2035,8 +1993,10 @@ extension AsrSegmentInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeAsrSegmentInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AsrSegmentInfo {
@@ -2044,7 +2004,7 @@ public struct FfiConverterTypeAsrSegmentInfo: FfiConverterRustBuffer {
             try AsrSegmentInfo(
                 word: FfiConverterString.read(from: &buf),
                 nature: FfiConverterOptionString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: AsrSegmentInfo, into buf: inout [UInt8]) {
@@ -2053,19 +2013,21 @@ public struct FfiConverterTypeAsrSegmentInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeAsrSegmentInfo_lift(_ buf: RustBuffer) throws -> AsrSegmentInfo {
     return try FfiConverterTypeAsrSegmentInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeAsrSegmentInfo_lower(_ value: AsrSegmentInfo) -> RustBuffer {
     return FfiConverterTypeAsrSegmentInfo.lower(value)
 }
+
 
 public struct BrowserDataContractInfo {
     public var schemaVersion: UInt32
@@ -2077,8 +2039,8 @@ public struct BrowserDataContractInfo {
     public var historyAddress: String
     public var bookmarksAddress: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(schemaVersion: UInt32, maxHistoryItems: UInt32, maxBookmarkItems: UInt32, maxSessionTabs: UInt32, maxTitleLength: UInt32, homeAddress: String, historyAddress: String, bookmarksAddress: String) {
         self.schemaVersion = schemaVersion
         self.maxHistoryItems = maxHistoryItems
@@ -2091,8 +2053,13 @@ public struct BrowserDataContractInfo {
     }
 }
 
+#if compiler(>=6)
+extension BrowserDataContractInfo: Sendable {}
+#endif
+
+
 extension BrowserDataContractInfo: Equatable, Hashable {
-    public static func == (lhs: BrowserDataContractInfo, rhs: BrowserDataContractInfo) -> Bool {
+    public static func ==(lhs: BrowserDataContractInfo, rhs: BrowserDataContractInfo) -> Bool {
         if lhs.schemaVersion != rhs.schemaVersion {
             return false
         }
@@ -2132,8 +2099,10 @@ extension BrowserDataContractInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeBrowserDataContractInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BrowserDataContractInfo {
@@ -2147,7 +2116,7 @@ public struct FfiConverterTypeBrowserDataContractInfo: FfiConverterRustBuffer {
                 homeAddress: FfiConverterString.read(from: &buf),
                 historyAddress: FfiConverterString.read(from: &buf),
                 bookmarksAddress: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: BrowserDataContractInfo, into buf: inout [UInt8]) {
@@ -2162,27 +2131,29 @@ public struct FfiConverterTypeBrowserDataContractInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeBrowserDataContractInfo_lift(_ buf: RustBuffer) throws -> BrowserDataContractInfo {
     return try FfiConverterTypeBrowserDataContractInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeBrowserDataContractInfo_lower(_ value: BrowserDataContractInfo) -> RustBuffer {
     return FfiConverterTypeBrowserDataContractInfo.lower(value)
 }
+
 
 public struct BrowserSearchEngineInfo {
     public var id: String
     public var displayName: String
     public var searchUrlPrefix: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(id: String, displayName: String, searchUrlPrefix: String) {
         self.id = id
         self.displayName = displayName
@@ -2190,8 +2161,13 @@ public struct BrowserSearchEngineInfo {
     }
 }
 
+#if compiler(>=6)
+extension BrowserSearchEngineInfo: Sendable {}
+#endif
+
+
 extension BrowserSearchEngineInfo: Equatable, Hashable {
-    public static func == (lhs: BrowserSearchEngineInfo, rhs: BrowserSearchEngineInfo) -> Bool {
+    public static func ==(lhs: BrowserSearchEngineInfo, rhs: BrowserSearchEngineInfo) -> Bool {
         if lhs.id != rhs.id {
             return false
         }
@@ -2211,8 +2187,10 @@ extension BrowserSearchEngineInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeBrowserSearchEngineInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BrowserSearchEngineInfo {
@@ -2221,7 +2199,7 @@ public struct FfiConverterTypeBrowserSearchEngineInfo: FfiConverterRustBuffer {
                 id: FfiConverterString.read(from: &buf),
                 displayName: FfiConverterString.read(from: &buf),
                 searchUrlPrefix: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: BrowserSearchEngineInfo, into buf: inout [UInt8]) {
@@ -2231,19 +2209,21 @@ public struct FfiConverterTypeBrowserSearchEngineInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeBrowserSearchEngineInfo_lift(_ buf: RustBuffer) throws -> BrowserSearchEngineInfo {
     return try FfiConverterTypeBrowserSearchEngineInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeBrowserSearchEngineInfo_lower(_ value: BrowserSearchEngineInfo) -> RustBuffer {
     return FfiConverterTypeBrowserSearchEngineInfo.lower(value)
 }
+
 
 public struct BrowserStorageRepositorySqlInfo {
     public var upsertHistoryPage: String
@@ -2262,8 +2242,8 @@ public struct BrowserStorageRepositorySqlInfo {
     public var insertSessionTab: String
     public var selectSessionTabs: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(upsertHistoryPage: String, insertHistoryVisit: String, selectHistoryRecent: String, deleteHistoryByAddress: String, deleteAllHistory: String, upsertBookmark: String, selectBookmarksRecent: String, deleteBookmarkByAddress: String, deleteBookmarkById: String, deleteAllBookmarks: String, upsertSession: String, selectSession: String, deleteSessionTabs: String, insertSessionTab: String, selectSessionTabs: String) {
         self.upsertHistoryPage = upsertHistoryPage
         self.insertHistoryVisit = insertHistoryVisit
@@ -2283,8 +2263,13 @@ public struct BrowserStorageRepositorySqlInfo {
     }
 }
 
+#if compiler(>=6)
+extension BrowserStorageRepositorySqlInfo: Sendable {}
+#endif
+
+
 extension BrowserStorageRepositorySqlInfo: Equatable, Hashable {
-    public static func == (lhs: BrowserStorageRepositorySqlInfo, rhs: BrowserStorageRepositorySqlInfo) -> Bool {
+    public static func ==(lhs: BrowserStorageRepositorySqlInfo, rhs: BrowserStorageRepositorySqlInfo) -> Bool {
         if lhs.upsertHistoryPage != rhs.upsertHistoryPage {
             return false
         }
@@ -2352,8 +2337,10 @@ extension BrowserStorageRepositorySqlInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeBrowserStorageRepositorySqlInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BrowserStorageRepositorySqlInfo {
@@ -2374,7 +2361,7 @@ public struct FfiConverterTypeBrowserStorageRepositorySqlInfo: FfiConverterRustB
                 deleteSessionTabs: FfiConverterString.read(from: &buf),
                 insertSessionTab: FfiConverterString.read(from: &buf),
                 selectSessionTabs: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: BrowserStorageRepositorySqlInfo, into buf: inout [UInt8]) {
@@ -2396,19 +2383,21 @@ public struct FfiConverterTypeBrowserStorageRepositorySqlInfo: FfiConverterRustB
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeBrowserStorageRepositorySqlInfo_lift(_ buf: RustBuffer) throws -> BrowserStorageRepositorySqlInfo {
     return try FfiConverterTypeBrowserStorageRepositorySqlInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeBrowserStorageRepositorySqlInfo_lower(_ value: BrowserStorageRepositorySqlInfo) -> RustBuffer {
     return FfiConverterTypeBrowserStorageRepositorySqlInfo.lower(value)
 }
+
 
 public struct BrowserStorageSchemaInfo {
     public var schemaVersion: UInt32
@@ -2416,8 +2405,8 @@ public struct BrowserStorageSchemaInfo {
     public var tableNames: [String]
     public var statements: [String]
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(schemaVersion: UInt32, databaseName: String, tableNames: [String], statements: [String]) {
         self.schemaVersion = schemaVersion
         self.databaseName = databaseName
@@ -2426,8 +2415,13 @@ public struct BrowserStorageSchemaInfo {
     }
 }
 
+#if compiler(>=6)
+extension BrowserStorageSchemaInfo: Sendable {}
+#endif
+
+
 extension BrowserStorageSchemaInfo: Equatable, Hashable {
-    public static func == (lhs: BrowserStorageSchemaInfo, rhs: BrowserStorageSchemaInfo) -> Bool {
+    public static func ==(lhs: BrowserStorageSchemaInfo, rhs: BrowserStorageSchemaInfo) -> Bool {
         if lhs.schemaVersion != rhs.schemaVersion {
             return false
         }
@@ -2451,8 +2445,10 @@ extension BrowserStorageSchemaInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeBrowserStorageSchemaInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BrowserStorageSchemaInfo {
@@ -2462,7 +2458,7 @@ public struct FfiConverterTypeBrowserStorageSchemaInfo: FfiConverterRustBuffer {
                 databaseName: FfiConverterString.read(from: &buf),
                 tableNames: FfiConverterSequenceString.read(from: &buf),
                 statements: FfiConverterSequenceString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: BrowserStorageSchemaInfo, into buf: inout [UInt8]) {
@@ -2473,19 +2469,21 @@ public struct FfiConverterTypeBrowserStorageSchemaInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeBrowserStorageSchemaInfo_lift(_ buf: RustBuffer) throws -> BrowserStorageSchemaInfo {
     return try FfiConverterTypeBrowserStorageSchemaInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeBrowserStorageSchemaInfo_lower(_ value: BrowserStorageSchemaInfo) -> RustBuffer {
     return FfiConverterTypeBrowserStorageSchemaInfo.lower(value)
 }
+
 
 public struct BrowserStorageSyncSqlInfo {
     public var selectDirtyHistoryPages: String
@@ -2509,8 +2507,8 @@ public struct BrowserStorageSyncSqlInfo {
     public var upsertSyncCursor: String
     public var selectSyncCursorsForScope: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(selectDirtyHistoryPages: String, selectDirtyHistoryVisits: String, selectDirtyBookmarkFolders: String, selectDirtyBookmarks: String, selectDirtySessions: String, selectDirtySessionTabs: String, applyRemoteHistoryPage: String, applyRemoteHistoryVisit: String, applyRemoteBookmarkFolder: String, applyRemoteBookmark: String, applyRemoteSession: String, applyRemoteSessionTab: String, markHistoryPageSynced: String, markHistoryVisitSynced: String, markBookmarkFolderSynced: String, markBookmarkSynced: String, markSessionSynced: String, markSessionTabSynced: String, upsertSyncCursor: String, selectSyncCursorsForScope: String) {
         self.selectDirtyHistoryPages = selectDirtyHistoryPages
         self.selectDirtyHistoryVisits = selectDirtyHistoryVisits
@@ -2535,8 +2533,13 @@ public struct BrowserStorageSyncSqlInfo {
     }
 }
 
+#if compiler(>=6)
+extension BrowserStorageSyncSqlInfo: Sendable {}
+#endif
+
+
 extension BrowserStorageSyncSqlInfo: Equatable, Hashable {
-    public static func == (lhs: BrowserStorageSyncSqlInfo, rhs: BrowserStorageSyncSqlInfo) -> Bool {
+    public static func ==(lhs: BrowserStorageSyncSqlInfo, rhs: BrowserStorageSyncSqlInfo) -> Bool {
         if lhs.selectDirtyHistoryPages != rhs.selectDirtyHistoryPages {
             return false
         }
@@ -2624,8 +2627,10 @@ extension BrowserStorageSyncSqlInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeBrowserStorageSyncSqlInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BrowserStorageSyncSqlInfo {
@@ -2651,7 +2656,7 @@ public struct FfiConverterTypeBrowserStorageSyncSqlInfo: FfiConverterRustBuffer 
                 markSessionTabSynced: FfiConverterString.read(from: &buf),
                 upsertSyncCursor: FfiConverterString.read(from: &buf),
                 selectSyncCursorsForScope: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: BrowserStorageSyncSqlInfo, into buf: inout [UInt8]) {
@@ -2678,34 +2683,41 @@ public struct FfiConverterTypeBrowserStorageSyncSqlInfo: FfiConverterRustBuffer 
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeBrowserStorageSyncSqlInfo_lift(_ buf: RustBuffer) throws -> BrowserStorageSyncSqlInfo {
     return try FfiConverterTypeBrowserStorageSyncSqlInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeBrowserStorageSyncSqlInfo_lower(_ value: BrowserStorageSyncSqlInfo) -> RustBuffer {
     return FfiConverterTypeBrowserStorageSyncSqlInfo.lower(value)
 }
 
+
 public struct ContractGateInfo {
     public var status: ContractGateStatus
     public var blockedReason: String?
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(status: ContractGateStatus, blockedReason: String?) {
         self.status = status
         self.blockedReason = blockedReason
     }
 }
 
+#if compiler(>=6)
+extension ContractGateInfo: Sendable {}
+#endif
+
+
 extension ContractGateInfo: Equatable, Hashable {
-    public static func == (lhs: ContractGateInfo, rhs: ContractGateInfo) -> Bool {
+    public static func ==(lhs: ContractGateInfo, rhs: ContractGateInfo) -> Bool {
         if lhs.status != rhs.status {
             return false
         }
@@ -2721,8 +2733,10 @@ extension ContractGateInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeContractGateInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ContractGateInfo {
@@ -2730,7 +2744,7 @@ public struct FfiConverterTypeContractGateInfo: FfiConverterRustBuffer {
             try ContractGateInfo(
                 status: FfiConverterTypeContractGateStatus.read(from: &buf),
                 blockedReason: FfiConverterOptionString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: ContractGateInfo, into buf: inout [UInt8]) {
@@ -2739,19 +2753,21 @@ public struct FfiConverterTypeContractGateInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeContractGateInfo_lift(_ buf: RustBuffer) throws -> ContractGateInfo {
     return try FfiConverterTypeContractGateInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeContractGateInfo_lower(_ value: ContractGateInfo) -> RustBuffer {
     return FfiConverterTypeContractGateInfo.lower(value)
 }
+
 
 public struct CoreAppRepositorySqlInfo {
     public var insertOrReplaceApp: String
@@ -2770,8 +2786,8 @@ public struct CoreAppRepositorySqlInfo {
     public var deleteAll: String
     public var vacuum: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(insertOrReplaceApp: String, updateApp: String, deleteById: String, deleteByBundleId: String, selectAll: String, selectBySourceType: String, selectPinned: String, selectByBundleId: String, selectById: String, countByBundleId: String, updateLastUsedByBundleId: String, togglePinnedById: String, searchByNameDescriptionOrBundleId: String, deleteAll: String, vacuum: String) {
         self.insertOrReplaceApp = insertOrReplaceApp
         self.updateApp = updateApp
@@ -2791,8 +2807,13 @@ public struct CoreAppRepositorySqlInfo {
     }
 }
 
+#if compiler(>=6)
+extension CoreAppRepositorySqlInfo: Sendable {}
+#endif
+
+
 extension CoreAppRepositorySqlInfo: Equatable, Hashable {
-    public static func == (lhs: CoreAppRepositorySqlInfo, rhs: CoreAppRepositorySqlInfo) -> Bool {
+    public static func ==(lhs: CoreAppRepositorySqlInfo, rhs: CoreAppRepositorySqlInfo) -> Bool {
         if lhs.insertOrReplaceApp != rhs.insertOrReplaceApp {
             return false
         }
@@ -2860,8 +2881,10 @@ extension CoreAppRepositorySqlInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeCoreAppRepositorySqlInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CoreAppRepositorySqlInfo {
@@ -2882,7 +2905,7 @@ public struct FfiConverterTypeCoreAppRepositorySqlInfo: FfiConverterRustBuffer {
                 searchByNameDescriptionOrBundleId: FfiConverterString.read(from: &buf),
                 deleteAll: FfiConverterString.read(from: &buf),
                 vacuum: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: CoreAppRepositorySqlInfo, into buf: inout [UInt8]) {
@@ -2904,19 +2927,21 @@ public struct FfiConverterTypeCoreAppRepositorySqlInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreAppRepositorySqlInfo_lift(_ buf: RustBuffer) throws -> CoreAppRepositorySqlInfo {
     return try FfiConverterTypeCoreAppRepositorySqlInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreAppRepositorySqlInfo_lower(_ value: CoreAppRepositorySqlInfo) -> RustBuffer {
     return FfiConverterTypeCoreAppRepositorySqlInfo.lower(value)
 }
+
 
 public struct CoreBookmarkInfo {
     public var id: String
@@ -2929,8 +2954,8 @@ public struct CoreBookmarkInfo {
     public var notes: String?
     public var favicon: String?
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(id: String, title: String, appUrl: String?, appId: String?, createdAtSeconds: Int64, lastUsedAtSeconds: Int64?, manufacturer: String?, notes: String?, favicon: String?) {
         self.id = id
         self.title = title
@@ -2944,8 +2969,13 @@ public struct CoreBookmarkInfo {
     }
 }
 
+#if compiler(>=6)
+extension CoreBookmarkInfo: Sendable {}
+#endif
+
+
 extension CoreBookmarkInfo: Equatable, Hashable {
-    public static func == (lhs: CoreBookmarkInfo, rhs: CoreBookmarkInfo) -> Bool {
+    public static func ==(lhs: CoreBookmarkInfo, rhs: CoreBookmarkInfo) -> Bool {
         if lhs.id != rhs.id {
             return false
         }
@@ -2989,8 +3019,10 @@ extension CoreBookmarkInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeCoreBookmarkInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CoreBookmarkInfo {
@@ -3005,7 +3037,7 @@ public struct FfiConverterTypeCoreBookmarkInfo: FfiConverterRustBuffer {
                 manufacturer: FfiConverterOptionString.read(from: &buf),
                 notes: FfiConverterOptionString.read(from: &buf),
                 favicon: FfiConverterOptionString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: CoreBookmarkInfo, into buf: inout [UInt8]) {
@@ -3021,19 +3053,21 @@ public struct FfiConverterTypeCoreBookmarkInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreBookmarkInfo_lift(_ buf: RustBuffer) throws -> CoreBookmarkInfo {
     return try FfiConverterTypeCoreBookmarkInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreBookmarkInfo_lower(_ value: CoreBookmarkInfo) -> RustBuffer {
     return FfiConverterTypeCoreBookmarkInfo.lower(value)
 }
+
 
 public struct CoreBookmarkRepositorySqlInfo {
     public var insertBookmark: String
@@ -3051,8 +3085,8 @@ public struct CoreBookmarkRepositorySqlInfo {
     public var deleteAll: String
     public var vacuum: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(insertBookmark: String, updateBookmark: String, deleteById: String, selectAll: String, selectByTag: String, searchByTitleOrNotes: String, countByAppUrl: String, selectByAppUrl: String, updateLastUsed: String, deleteNullAppUrl: String, deleteDuplicatesByAppUrl: String, deleteBookmarkTags: String, deleteAll: String, vacuum: String) {
         self.insertBookmark = insertBookmark
         self.updateBookmark = updateBookmark
@@ -3071,8 +3105,13 @@ public struct CoreBookmarkRepositorySqlInfo {
     }
 }
 
+#if compiler(>=6)
+extension CoreBookmarkRepositorySqlInfo: Sendable {}
+#endif
+
+
 extension CoreBookmarkRepositorySqlInfo: Equatable, Hashable {
-    public static func == (lhs: CoreBookmarkRepositorySqlInfo, rhs: CoreBookmarkRepositorySqlInfo) -> Bool {
+    public static func ==(lhs: CoreBookmarkRepositorySqlInfo, rhs: CoreBookmarkRepositorySqlInfo) -> Bool {
         if lhs.insertBookmark != rhs.insertBookmark {
             return false
         }
@@ -3136,8 +3175,10 @@ extension CoreBookmarkRepositorySqlInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeCoreBookmarkRepositorySqlInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CoreBookmarkRepositorySqlInfo {
@@ -3157,7 +3198,7 @@ public struct FfiConverterTypeCoreBookmarkRepositorySqlInfo: FfiConverterRustBuf
                 deleteBookmarkTags: FfiConverterString.read(from: &buf),
                 deleteAll: FfiConverterString.read(from: &buf),
                 vacuum: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: CoreBookmarkRepositorySqlInfo, into buf: inout [UInt8]) {
@@ -3178,19 +3219,21 @@ public struct FfiConverterTypeCoreBookmarkRepositorySqlInfo: FfiConverterRustBuf
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreBookmarkRepositorySqlInfo_lift(_ buf: RustBuffer) throws -> CoreBookmarkRepositorySqlInfo {
     return try FfiConverterTypeCoreBookmarkRepositorySqlInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreBookmarkRepositorySqlInfo_lower(_ value: CoreBookmarkRepositorySqlInfo) -> RustBuffer {
     return FfiConverterTypeCoreBookmarkRepositorySqlInfo.lower(value)
 }
+
 
 public struct CoreBookmarkRowInfo {
     public var id: String
@@ -3203,8 +3246,8 @@ public struct CoreBookmarkRowInfo {
     public var notes: String?
     public var favicon: String?
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(id: String, title: String, appUrl: String?, appId: String?, createdAtSeconds: Int64, lastUsedAtSeconds: Int64?, manufacturer: String?, notes: String?, favicon: String?) {
         self.id = id
         self.title = title
@@ -3218,8 +3261,13 @@ public struct CoreBookmarkRowInfo {
     }
 }
 
+#if compiler(>=6)
+extension CoreBookmarkRowInfo: Sendable {}
+#endif
+
+
 extension CoreBookmarkRowInfo: Equatable, Hashable {
-    public static func == (lhs: CoreBookmarkRowInfo, rhs: CoreBookmarkRowInfo) -> Bool {
+    public static func ==(lhs: CoreBookmarkRowInfo, rhs: CoreBookmarkRowInfo) -> Bool {
         if lhs.id != rhs.id {
             return false
         }
@@ -3263,8 +3311,10 @@ extension CoreBookmarkRowInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeCoreBookmarkRowInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CoreBookmarkRowInfo {
@@ -3279,7 +3329,7 @@ public struct FfiConverterTypeCoreBookmarkRowInfo: FfiConverterRustBuffer {
                 manufacturer: FfiConverterOptionString.read(from: &buf),
                 notes: FfiConverterOptionString.read(from: &buf),
                 favicon: FfiConverterOptionString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: CoreBookmarkRowInfo, into buf: inout [UInt8]) {
@@ -3295,19 +3345,21 @@ public struct FfiConverterTypeCoreBookmarkRowInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreBookmarkRowInfo_lift(_ buf: RustBuffer) throws -> CoreBookmarkRowInfo {
     return try FfiConverterTypeCoreBookmarkRowInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreBookmarkRowInfo_lower(_ value: CoreBookmarkRowInfo) -> RustBuffer {
     return FfiConverterTypeCoreBookmarkRowInfo.lower(value)
 }
+
 
 public struct CoreHistoryItemInfo {
     public var id: String
@@ -3316,8 +3368,8 @@ public struct CoreHistoryItemInfo {
     public var appId: String?
     public var visitTimeSeconds: Int64
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(id: String, title: String, appUrl: String?, appId: String?, visitTimeSeconds: Int64) {
         self.id = id
         self.title = title
@@ -3327,8 +3379,13 @@ public struct CoreHistoryItemInfo {
     }
 }
 
+#if compiler(>=6)
+extension CoreHistoryItemInfo: Sendable {}
+#endif
+
+
 extension CoreHistoryItemInfo: Equatable, Hashable {
-    public static func == (lhs: CoreHistoryItemInfo, rhs: CoreHistoryItemInfo) -> Bool {
+    public static func ==(lhs: CoreHistoryItemInfo, rhs: CoreHistoryItemInfo) -> Bool {
         if lhs.id != rhs.id {
             return false
         }
@@ -3356,8 +3413,10 @@ extension CoreHistoryItemInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeCoreHistoryItemInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CoreHistoryItemInfo {
@@ -3368,7 +3427,7 @@ public struct FfiConverterTypeCoreHistoryItemInfo: FfiConverterRustBuffer {
                 appUrl: FfiConverterOptionString.read(from: &buf),
                 appId: FfiConverterOptionString.read(from: &buf),
                 visitTimeSeconds: FfiConverterInt64.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: CoreHistoryItemInfo, into buf: inout [UInt8]) {
@@ -3380,19 +3439,21 @@ public struct FfiConverterTypeCoreHistoryItemInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreHistoryItemInfo_lift(_ buf: RustBuffer) throws -> CoreHistoryItemInfo {
     return try FfiConverterTypeCoreHistoryItemInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreHistoryItemInfo_lower(_ value: CoreHistoryItemInfo) -> RustBuffer {
     return FfiConverterTypeCoreHistoryItemInfo.lower(value)
 }
+
 
 public struct CoreHistoryItemRowInfo {
     public var id: String
@@ -3401,8 +3462,8 @@ public struct CoreHistoryItemRowInfo {
     public var appId: String?
     public var visitTimeSeconds: Int64
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(id: String, title: String, appUrl: String?, appId: String?, visitTimeSeconds: Int64) {
         self.id = id
         self.title = title
@@ -3412,8 +3473,13 @@ public struct CoreHistoryItemRowInfo {
     }
 }
 
+#if compiler(>=6)
+extension CoreHistoryItemRowInfo: Sendable {}
+#endif
+
+
 extension CoreHistoryItemRowInfo: Equatable, Hashable {
-    public static func == (lhs: CoreHistoryItemRowInfo, rhs: CoreHistoryItemRowInfo) -> Bool {
+    public static func ==(lhs: CoreHistoryItemRowInfo, rhs: CoreHistoryItemRowInfo) -> Bool {
         if lhs.id != rhs.id {
             return false
         }
@@ -3441,8 +3507,10 @@ extension CoreHistoryItemRowInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeCoreHistoryItemRowInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CoreHistoryItemRowInfo {
@@ -3453,7 +3521,7 @@ public struct FfiConverterTypeCoreHistoryItemRowInfo: FfiConverterRustBuffer {
                 appUrl: FfiConverterOptionString.read(from: &buf),
                 appId: FfiConverterOptionString.read(from: &buf),
                 visitTimeSeconds: FfiConverterInt64.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: CoreHistoryItemRowInfo, into buf: inout [UInt8]) {
@@ -3465,19 +3533,21 @@ public struct FfiConverterTypeCoreHistoryItemRowInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreHistoryItemRowInfo_lift(_ buf: RustBuffer) throws -> CoreHistoryItemRowInfo {
     return try FfiConverterTypeCoreHistoryItemRowInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreHistoryItemRowInfo_lower(_ value: CoreHistoryItemRowInfo) -> RustBuffer {
     return FfiConverterTypeCoreHistoryItemRowInfo.lower(value)
 }
+
 
 public struct CoreHistoryRepositorySqlInfo {
     public var insertVisit: String
@@ -3487,8 +3557,8 @@ public struct CoreHistoryRepositorySqlInfo {
     public var deleteById: String
     public var deleteAll: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(insertVisit: String, selectRecent: String, selectAll: String, searchByTitle: String, deleteById: String, deleteAll: String) {
         self.insertVisit = insertVisit
         self.selectRecent = selectRecent
@@ -3499,8 +3569,13 @@ public struct CoreHistoryRepositorySqlInfo {
     }
 }
 
+#if compiler(>=6)
+extension CoreHistoryRepositorySqlInfo: Sendable {}
+#endif
+
+
 extension CoreHistoryRepositorySqlInfo: Equatable, Hashable {
-    public static func == (lhs: CoreHistoryRepositorySqlInfo, rhs: CoreHistoryRepositorySqlInfo) -> Bool {
+    public static func ==(lhs: CoreHistoryRepositorySqlInfo, rhs: CoreHistoryRepositorySqlInfo) -> Bool {
         if lhs.insertVisit != rhs.insertVisit {
             return false
         }
@@ -3532,8 +3607,10 @@ extension CoreHistoryRepositorySqlInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeCoreHistoryRepositorySqlInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CoreHistoryRepositorySqlInfo {
@@ -3545,7 +3622,7 @@ public struct FfiConverterTypeCoreHistoryRepositorySqlInfo: FfiConverterRustBuff
                 searchByTitle: FfiConverterString.read(from: &buf),
                 deleteById: FfiConverterString.read(from: &buf),
                 deleteAll: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: CoreHistoryRepositorySqlInfo, into buf: inout [UInt8]) {
@@ -3558,19 +3635,21 @@ public struct FfiConverterTypeCoreHistoryRepositorySqlInfo: FfiConverterRustBuff
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreHistoryRepositorySqlInfo_lift(_ buf: RustBuffer) throws -> CoreHistoryRepositorySqlInfo {
     return try FfiConverterTypeCoreHistoryRepositorySqlInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreHistoryRepositorySqlInfo_lower(_ value: CoreHistoryRepositorySqlInfo) -> RustBuffer {
     return FfiConverterTypeCoreHistoryRepositorySqlInfo.lower(value)
 }
+
 
 public struct CoreInstalledAppInfo {
     public var id: String
@@ -3585,8 +3664,8 @@ public struct CoreInstalledAppInfo {
     public var lastUsedAtSeconds: Int64?
     public var isPinned: Bool
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(id: String, name: String, bundleId: String, version: String?, description: String?, sourceType: String, sourcePath: String, icon: String?, installedAtSeconds: Int64, lastUsedAtSeconds: Int64?, isPinned: Bool) {
         self.id = id
         self.name = name
@@ -3602,8 +3681,13 @@ public struct CoreInstalledAppInfo {
     }
 }
 
+#if compiler(>=6)
+extension CoreInstalledAppInfo: Sendable {}
+#endif
+
+
 extension CoreInstalledAppInfo: Equatable, Hashable {
-    public static func == (lhs: CoreInstalledAppInfo, rhs: CoreInstalledAppInfo) -> Bool {
+    public static func ==(lhs: CoreInstalledAppInfo, rhs: CoreInstalledAppInfo) -> Bool {
         if lhs.id != rhs.id {
             return false
         }
@@ -3655,8 +3739,10 @@ extension CoreInstalledAppInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeCoreInstalledAppInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CoreInstalledAppInfo {
@@ -3673,7 +3759,7 @@ public struct FfiConverterTypeCoreInstalledAppInfo: FfiConverterRustBuffer {
                 installedAtSeconds: FfiConverterInt64.read(from: &buf),
                 lastUsedAtSeconds: FfiConverterOptionInt64.read(from: &buf),
                 isPinned: FfiConverterBool.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: CoreInstalledAppInfo, into buf: inout [UInt8]) {
@@ -3691,19 +3777,21 @@ public struct FfiConverterTypeCoreInstalledAppInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreInstalledAppInfo_lift(_ buf: RustBuffer) throws -> CoreInstalledAppInfo {
     return try FfiConverterTypeCoreInstalledAppInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreInstalledAppInfo_lower(_ value: CoreInstalledAppInfo) -> RustBuffer {
     return FfiConverterTypeCoreInstalledAppInfo.lower(value)
 }
+
 
 public struct CoreInstalledAppRowInfo {
     public var id: String?
@@ -3718,8 +3806,8 @@ public struct CoreInstalledAppRowInfo {
     public var lastUsedAtSeconds: Int64?
     public var isPinnedValue: Int64
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(id: String?, name: String?, bundleId: String?, version: String?, description: String?, sourceType: String?, sourcePath: String?, icon: String?, installedAtSeconds: Int64?, lastUsedAtSeconds: Int64?, isPinnedValue: Int64) {
         self.id = id
         self.name = name
@@ -3735,8 +3823,13 @@ public struct CoreInstalledAppRowInfo {
     }
 }
 
+#if compiler(>=6)
+extension CoreInstalledAppRowInfo: Sendable {}
+#endif
+
+
 extension CoreInstalledAppRowInfo: Equatable, Hashable {
-    public static func == (lhs: CoreInstalledAppRowInfo, rhs: CoreInstalledAppRowInfo) -> Bool {
+    public static func ==(lhs: CoreInstalledAppRowInfo, rhs: CoreInstalledAppRowInfo) -> Bool {
         if lhs.id != rhs.id {
             return false
         }
@@ -3788,8 +3881,10 @@ extension CoreInstalledAppRowInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeCoreInstalledAppRowInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CoreInstalledAppRowInfo {
@@ -3806,7 +3901,7 @@ public struct FfiConverterTypeCoreInstalledAppRowInfo: FfiConverterRustBuffer {
                 installedAtSeconds: FfiConverterOptionInt64.read(from: &buf),
                 lastUsedAtSeconds: FfiConverterOptionInt64.read(from: &buf),
                 isPinnedValue: FfiConverterInt64.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: CoreInstalledAppRowInfo, into buf: inout [UInt8]) {
@@ -3824,19 +3919,21 @@ public struct FfiConverterTypeCoreInstalledAppRowInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreInstalledAppRowInfo_lift(_ buf: RustBuffer) throws -> CoreInstalledAppRowInfo {
     return try FfiConverterTypeCoreInstalledAppRowInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreInstalledAppRowInfo_lower(_ value: CoreInstalledAppRowInfo) -> RustBuffer {
     return FfiConverterTypeCoreInstalledAppRowInfo.lower(value)
 }
+
 
 public struct CoreSqlValueInfo {
     public var kind: String
@@ -3844,8 +3941,8 @@ public struct CoreSqlValueInfo {
     public var integer: Int64?
     public var real: Double?
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(kind: String, text: String?, integer: Int64?, real: Double?) {
         self.kind = kind
         self.text = text
@@ -3854,8 +3951,13 @@ public struct CoreSqlValueInfo {
     }
 }
 
+#if compiler(>=6)
+extension CoreSqlValueInfo: Sendable {}
+#endif
+
+
 extension CoreSqlValueInfo: Equatable, Hashable {
-    public static func == (lhs: CoreSqlValueInfo, rhs: CoreSqlValueInfo) -> Bool {
+    public static func ==(lhs: CoreSqlValueInfo, rhs: CoreSqlValueInfo) -> Bool {
         if lhs.kind != rhs.kind {
             return false
         }
@@ -3879,8 +3981,10 @@ extension CoreSqlValueInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeCoreSqlValueInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CoreSqlValueInfo {
@@ -3890,7 +3994,7 @@ public struct FfiConverterTypeCoreSqlValueInfo: FfiConverterRustBuffer {
                 text: FfiConverterOptionString.read(from: &buf),
                 integer: FfiConverterOptionInt64.read(from: &buf),
                 real: FfiConverterOptionDouble.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: CoreSqlValueInfo, into buf: inout [UInt8]) {
@@ -3901,19 +4005,21 @@ public struct FfiConverterTypeCoreSqlValueInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreSqlValueInfo_lift(_ buf: RustBuffer) throws -> CoreSqlValueInfo {
     return try FfiConverterTypeCoreSqlValueInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreSqlValueInfo_lower(_ value: CoreSqlValueInfo) -> RustBuffer {
     return FfiConverterTypeCoreSqlValueInfo.lower(value)
 }
+
 
 public struct CoreTagInfo {
     public var id: String
@@ -3921,8 +4027,8 @@ public struct CoreTagInfo {
     public var color: String?
     public var isSystem: Bool
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(id: String, name: String, color: String?, isSystem: Bool) {
         self.id = id
         self.name = name
@@ -3931,8 +4037,13 @@ public struct CoreTagInfo {
     }
 }
 
+#if compiler(>=6)
+extension CoreTagInfo: Sendable {}
+#endif
+
+
 extension CoreTagInfo: Equatable, Hashable {
-    public static func == (lhs: CoreTagInfo, rhs: CoreTagInfo) -> Bool {
+    public static func ==(lhs: CoreTagInfo, rhs: CoreTagInfo) -> Bool {
         if lhs.id != rhs.id {
             return false
         }
@@ -3956,8 +4067,10 @@ extension CoreTagInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeCoreTagInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CoreTagInfo {
@@ -3967,7 +4080,7 @@ public struct FfiConverterTypeCoreTagInfo: FfiConverterRustBuffer {
                 name: FfiConverterString.read(from: &buf),
                 color: FfiConverterOptionString.read(from: &buf),
                 isSystem: FfiConverterBool.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: CoreTagInfo, into buf: inout [UInt8]) {
@@ -3978,19 +4091,21 @@ public struct FfiConverterTypeCoreTagInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreTagInfo_lift(_ buf: RustBuffer) throws -> CoreTagInfo {
     return try FfiConverterTypeCoreTagInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreTagInfo_lower(_ value: CoreTagInfo) -> RustBuffer {
     return FfiConverterTypeCoreTagInfo.lower(value)
 }
+
 
 public struct CoreTagRepositorySqlInfo {
     public var countAll: String
@@ -4005,8 +4120,8 @@ public struct CoreTagRepositorySqlInfo {
     public var insertOrIgnoreBookmarkTag: String
     public var deleteBookmarkTag: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(countAll: String, selectAll: String, selectUser: String, insertTag: String, updateTag: String, deleteUserTagById: String, selectByBookmarkId: String, deleteBookmarkTagsByBookmarkId: String, insertBookmarkTag: String, insertOrIgnoreBookmarkTag: String, deleteBookmarkTag: String) {
         self.countAll = countAll
         self.selectAll = selectAll
@@ -4022,8 +4137,13 @@ public struct CoreTagRepositorySqlInfo {
     }
 }
 
+#if compiler(>=6)
+extension CoreTagRepositorySqlInfo: Sendable {}
+#endif
+
+
 extension CoreTagRepositorySqlInfo: Equatable, Hashable {
-    public static func == (lhs: CoreTagRepositorySqlInfo, rhs: CoreTagRepositorySqlInfo) -> Bool {
+    public static func ==(lhs: CoreTagRepositorySqlInfo, rhs: CoreTagRepositorySqlInfo) -> Bool {
         if lhs.countAll != rhs.countAll {
             return false
         }
@@ -4075,8 +4195,10 @@ extension CoreTagRepositorySqlInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeCoreTagRepositorySqlInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CoreTagRepositorySqlInfo {
@@ -4093,7 +4215,7 @@ public struct FfiConverterTypeCoreTagRepositorySqlInfo: FfiConverterRustBuffer {
                 insertBookmarkTag: FfiConverterString.read(from: &buf),
                 insertOrIgnoreBookmarkTag: FfiConverterString.read(from: &buf),
                 deleteBookmarkTag: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: CoreTagRepositorySqlInfo, into buf: inout [UInt8]) {
@@ -4111,19 +4233,21 @@ public struct FfiConverterTypeCoreTagRepositorySqlInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreTagRepositorySqlInfo_lift(_ buf: RustBuffer) throws -> CoreTagRepositorySqlInfo {
     return try FfiConverterTypeCoreTagRepositorySqlInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreTagRepositorySqlInfo_lower(_ value: CoreTagRepositorySqlInfo) -> RustBuffer {
     return FfiConverterTypeCoreTagRepositorySqlInfo.lower(value)
 }
+
 
 public struct CoreTagRowInfo {
     public var id: String
@@ -4131,8 +4255,8 @@ public struct CoreTagRowInfo {
     public var color: String?
     public var isSystemValue: Int64
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(id: String, name: String, color: String?, isSystemValue: Int64) {
         self.id = id
         self.name = name
@@ -4141,8 +4265,13 @@ public struct CoreTagRowInfo {
     }
 }
 
+#if compiler(>=6)
+extension CoreTagRowInfo: Sendable {}
+#endif
+
+
 extension CoreTagRowInfo: Equatable, Hashable {
-    public static func == (lhs: CoreTagRowInfo, rhs: CoreTagRowInfo) -> Bool {
+    public static func ==(lhs: CoreTagRowInfo, rhs: CoreTagRowInfo) -> Bool {
         if lhs.id != rhs.id {
             return false
         }
@@ -4166,8 +4295,10 @@ extension CoreTagRowInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeCoreTagRowInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CoreTagRowInfo {
@@ -4177,7 +4308,7 @@ public struct FfiConverterTypeCoreTagRowInfo: FfiConverterRustBuffer {
                 name: FfiConverterString.read(from: &buf),
                 color: FfiConverterOptionString.read(from: &buf),
                 isSystemValue: FfiConverterInt64.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: CoreTagRowInfo, into buf: inout [UInt8]) {
@@ -4188,27 +4319,29 @@ public struct FfiConverterTypeCoreTagRowInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreTagRowInfo_lift(_ buf: RustBuffer) throws -> CoreTagRowInfo {
     return try FfiConverterTypeCoreTagRowInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeCoreTagRowInfo_lower(_ value: CoreTagRowInfo) -> RustBuffer {
     return FfiConverterTypeCoreTagRowInfo.lower(value)
 }
+
 
 public struct DefaultTagInfo {
     public var name: String
     public var color: String
     public var isSystem: Bool
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(name: String, color: String, isSystem: Bool) {
         self.name = name
         self.color = color
@@ -4216,8 +4349,13 @@ public struct DefaultTagInfo {
     }
 }
 
+#if compiler(>=6)
+extension DefaultTagInfo: Sendable {}
+#endif
+
+
 extension DefaultTagInfo: Equatable, Hashable {
-    public static func == (lhs: DefaultTagInfo, rhs: DefaultTagInfo) -> Bool {
+    public static func ==(lhs: DefaultTagInfo, rhs: DefaultTagInfo) -> Bool {
         if lhs.name != rhs.name {
             return false
         }
@@ -4237,8 +4375,10 @@ extension DefaultTagInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeDefaultTagInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DefaultTagInfo {
@@ -4247,7 +4387,7 @@ public struct FfiConverterTypeDefaultTagInfo: FfiConverterRustBuffer {
                 name: FfiConverterString.read(from: &buf),
                 color: FfiConverterString.read(from: &buf),
                 isSystem: FfiConverterBool.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: DefaultTagInfo, into buf: inout [UInt8]) {
@@ -4257,19 +4397,21 @@ public struct FfiConverterTypeDefaultTagInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeDefaultTagInfo_lift(_ buf: RustBuffer) throws -> DefaultTagInfo {
     return try FfiConverterTypeDefaultTagInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeDefaultTagInfo_lower(_ value: DefaultTagInfo) -> RustBuffer {
     return FfiConverterTypeDefaultTagInfo.lower(value)
 }
+
 
 public struct EmailBridgeContractInfo {
     public var moduleName: String
@@ -4278,8 +4420,8 @@ public struct EmailBridgeContractInfo {
     public var errorInvalidRecipients: String
     public var errorOpenFailed: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(moduleName: String, methodComposeEmail: String, uriSchemeMailto: String, errorInvalidRecipients: String, errorOpenFailed: String) {
         self.moduleName = moduleName
         self.methodComposeEmail = methodComposeEmail
@@ -4289,8 +4431,13 @@ public struct EmailBridgeContractInfo {
     }
 }
 
+#if compiler(>=6)
+extension EmailBridgeContractInfo: Sendable {}
+#endif
+
+
 extension EmailBridgeContractInfo: Equatable, Hashable {
-    public static func == (lhs: EmailBridgeContractInfo, rhs: EmailBridgeContractInfo) -> Bool {
+    public static func ==(lhs: EmailBridgeContractInfo, rhs: EmailBridgeContractInfo) -> Bool {
         if lhs.moduleName != rhs.moduleName {
             return false
         }
@@ -4318,8 +4465,10 @@ extension EmailBridgeContractInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeEmailBridgeContractInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EmailBridgeContractInfo {
@@ -4330,7 +4479,7 @@ public struct FfiConverterTypeEmailBridgeContractInfo: FfiConverterRustBuffer {
                 uriSchemeMailto: FfiConverterString.read(from: &buf),
                 errorInvalidRecipients: FfiConverterString.read(from: &buf),
                 errorOpenFailed: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: EmailBridgeContractInfo, into buf: inout [UInt8]) {
@@ -4342,34 +4491,181 @@ public struct FfiConverterTypeEmailBridgeContractInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeEmailBridgeContractInfo_lift(_ buf: RustBuffer) throws -> EmailBridgeContractInfo {
     return try FfiConverterTypeEmailBridgeContractInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeEmailBridgeContractInfo_lower(_ value: EmailBridgeContractInfo) -> RustBuffer {
     return FfiConverterTypeEmailBridgeContractInfo.lower(value)
 }
 
+
+public struct PackageIntegrityFilePlanInfo {
+    public var path: String
+    public var expectedHash: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(path: String, expectedHash: String) {
+        self.path = path
+        self.expectedHash = expectedHash
+    }
+}
+
+#if compiler(>=6)
+extension PackageIntegrityFilePlanInfo: Sendable {}
+#endif
+
+
+extension PackageIntegrityFilePlanInfo: Equatable, Hashable {
+    public static func ==(lhs: PackageIntegrityFilePlanInfo, rhs: PackageIntegrityFilePlanInfo) -> Bool {
+        if lhs.path != rhs.path {
+            return false
+        }
+        if lhs.expectedHash != rhs.expectedHash {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(path)
+        hasher.combine(expectedHash)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePackageIntegrityFilePlanInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PackageIntegrityFilePlanInfo {
+        return
+            try PackageIntegrityFilePlanInfo(
+                path: FfiConverterString.read(from: &buf),
+                expectedHash: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PackageIntegrityFilePlanInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.path, into: &buf)
+        FfiConverterString.write(value.expectedHash, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackageIntegrityFilePlanInfo_lift(_ buf: RustBuffer) throws -> PackageIntegrityFilePlanInfo {
+    return try FfiConverterTypePackageIntegrityFilePlanInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackageIntegrityFilePlanInfo_lower(_ value: PackageIntegrityFilePlanInfo) -> RustBuffer {
+    return FfiConverterTypePackageIntegrityFilePlanInfo.lower(value)
+}
+
+
+public struct PackageIntegrityPlanInfo {
+    public var algorithm: String
+    public var files: [PackageIntegrityFilePlanInfo]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(algorithm: String, files: [PackageIntegrityFilePlanInfo]) {
+        self.algorithm = algorithm
+        self.files = files
+    }
+}
+
+#if compiler(>=6)
+extension PackageIntegrityPlanInfo: Sendable {}
+#endif
+
+
+extension PackageIntegrityPlanInfo: Equatable, Hashable {
+    public static func ==(lhs: PackageIntegrityPlanInfo, rhs: PackageIntegrityPlanInfo) -> Bool {
+        if lhs.algorithm != rhs.algorithm {
+            return false
+        }
+        if lhs.files != rhs.files {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(algorithm)
+        hasher.combine(files)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePackageIntegrityPlanInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PackageIntegrityPlanInfo {
+        return
+            try PackageIntegrityPlanInfo(
+                algorithm: FfiConverterString.read(from: &buf),
+                files: FfiConverterSequenceTypePackageIntegrityFilePlanInfo.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PackageIntegrityPlanInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.algorithm, into: &buf)
+        FfiConverterSequenceTypePackageIntegrityFilePlanInfo.write(value.files, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackageIntegrityPlanInfo_lift(_ buf: RustBuffer) throws -> PackageIntegrityPlanInfo {
+    return try FfiConverterTypePackageIntegrityPlanInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePackageIntegrityPlanInfo_lower(_ value: PackageIntegrityPlanInfo) -> RustBuffer {
+    return FfiConverterTypePackageIntegrityPlanInfo.lower(value)
+}
+
+
 public struct RuntimeContainerSizeChangeEventInfo {
     public var containerWidth: Int32
     public var containerHeight: Int32
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(containerWidth: Int32, containerHeight: Int32) {
         self.containerWidth = containerWidth
         self.containerHeight = containerHeight
     }
 }
 
+#if compiler(>=6)
+extension RuntimeContainerSizeChangeEventInfo: Sendable {}
+#endif
+
+
 extension RuntimeContainerSizeChangeEventInfo: Equatable, Hashable {
-    public static func == (lhs: RuntimeContainerSizeChangeEventInfo, rhs: RuntimeContainerSizeChangeEventInfo) -> Bool {
+    public static func ==(lhs: RuntimeContainerSizeChangeEventInfo, rhs: RuntimeContainerSizeChangeEventInfo) -> Bool {
         if lhs.containerWidth != rhs.containerWidth {
             return false
         }
@@ -4385,8 +4681,10 @@ extension RuntimeContainerSizeChangeEventInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeRuntimeContainerSizeChangeEventInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeContainerSizeChangeEventInfo {
@@ -4394,7 +4692,7 @@ public struct FfiConverterTypeRuntimeContainerSizeChangeEventInfo: FfiConverterR
             try RuntimeContainerSizeChangeEventInfo(
                 containerWidth: FfiConverterInt32.read(from: &buf),
                 containerHeight: FfiConverterInt32.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: RuntimeContainerSizeChangeEventInfo, into buf: inout [UInt8]) {
@@ -4403,34 +4701,41 @@ public struct FfiConverterTypeRuntimeContainerSizeChangeEventInfo: FfiConverterR
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeContainerSizeChangeEventInfo_lift(_ buf: RustBuffer) throws -> RuntimeContainerSizeChangeEventInfo {
     return try FfiConverterTypeRuntimeContainerSizeChangeEventInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeContainerSizeChangeEventInfo_lower(_ value: RuntimeContainerSizeChangeEventInfo) -> RustBuffer {
     return FfiConverterTypeRuntimeContainerSizeChangeEventInfo.lower(value)
 }
 
+
 public struct RuntimeExtensionPanelVisibleEventInfo {
     public var tabId: String
     public var visible: Bool
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(tabId: String, visible: Bool) {
         self.tabId = tabId
         self.visible = visible
     }
 }
 
+#if compiler(>=6)
+extension RuntimeExtensionPanelVisibleEventInfo: Sendable {}
+#endif
+
+
 extension RuntimeExtensionPanelVisibleEventInfo: Equatable, Hashable {
-    public static func == (lhs: RuntimeExtensionPanelVisibleEventInfo, rhs: RuntimeExtensionPanelVisibleEventInfo) -> Bool {
+    public static func ==(lhs: RuntimeExtensionPanelVisibleEventInfo, rhs: RuntimeExtensionPanelVisibleEventInfo) -> Bool {
         if lhs.tabId != rhs.tabId {
             return false
         }
@@ -4446,8 +4751,10 @@ extension RuntimeExtensionPanelVisibleEventInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeRuntimeExtensionPanelVisibleEventInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeExtensionPanelVisibleEventInfo {
@@ -4455,7 +4762,7 @@ public struct FfiConverterTypeRuntimeExtensionPanelVisibleEventInfo: FfiConverte
             try RuntimeExtensionPanelVisibleEventInfo(
                 tabId: FfiConverterString.read(from: &buf),
                 visible: FfiConverterBool.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: RuntimeExtensionPanelVisibleEventInfo, into buf: inout [UInt8]) {
@@ -4464,19 +4771,21 @@ public struct FfiConverterTypeRuntimeExtensionPanelVisibleEventInfo: FfiConverte
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeExtensionPanelVisibleEventInfo_lift(_ buf: RustBuffer) throws -> RuntimeExtensionPanelVisibleEventInfo {
     return try FfiConverterTypeRuntimeExtensionPanelVisibleEventInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeExtensionPanelVisibleEventInfo_lower(_ value: RuntimeExtensionPanelVisibleEventInfo) -> RustBuffer {
     return FfiConverterTypeRuntimeExtensionPanelVisibleEventInfo.lower(value)
 }
+
 
 public struct RuntimeRootPropsInfo {
     public var tab: RuntimeTabInfo
@@ -4489,8 +4798,8 @@ public struct RuntimeRootPropsInfo {
     public var containerWidth: Int32
     public var appUrl: String?
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(tab: RuntimeTabInfo, isLeftPanelVisible: Bool, tabs: [RuntimeTabInfo], singleTabMode: Bool, isRightPanelVisible: Bool, currentTabId: String, containerHeight: Int32, containerWidth: Int32, appUrl: String?) {
         self.tab = tab
         self.isLeftPanelVisible = isLeftPanelVisible
@@ -4504,8 +4813,13 @@ public struct RuntimeRootPropsInfo {
     }
 }
 
+#if compiler(>=6)
+extension RuntimeRootPropsInfo: Sendable {}
+#endif
+
+
 extension RuntimeRootPropsInfo: Equatable, Hashable {
-    public static func == (lhs: RuntimeRootPropsInfo, rhs: RuntimeRootPropsInfo) -> Bool {
+    public static func ==(lhs: RuntimeRootPropsInfo, rhs: RuntimeRootPropsInfo) -> Bool {
         if lhs.tab != rhs.tab {
             return false
         }
@@ -4549,8 +4863,10 @@ extension RuntimeRootPropsInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeRuntimeRootPropsInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeRootPropsInfo {
@@ -4565,7 +4881,7 @@ public struct FfiConverterTypeRuntimeRootPropsInfo: FfiConverterRustBuffer {
                 containerHeight: FfiConverterInt32.read(from: &buf),
                 containerWidth: FfiConverterInt32.read(from: &buf),
                 appUrl: FfiConverterOptionString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: RuntimeRootPropsInfo, into buf: inout [UInt8]) {
@@ -4581,34 +4897,41 @@ public struct FfiConverterTypeRuntimeRootPropsInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeRootPropsInfo_lift(_ buf: RustBuffer) throws -> RuntimeRootPropsInfo {
     return try FfiConverterTypeRuntimeRootPropsInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeRootPropsInfo_lower(_ value: RuntimeRootPropsInfo) -> RustBuffer {
     return FfiConverterTypeRuntimeRootPropsInfo.lower(value)
 }
 
+
 public struct RuntimeSystemRootPropsInfo {
     public var tab: RuntimeSystemTabInfo
     public var singleTabMode: Bool
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(tab: RuntimeSystemTabInfo, singleTabMode: Bool) {
         self.tab = tab
         self.singleTabMode = singleTabMode
     }
 }
 
+#if compiler(>=6)
+extension RuntimeSystemRootPropsInfo: Sendable {}
+#endif
+
+
 extension RuntimeSystemRootPropsInfo: Equatable, Hashable {
-    public static func == (lhs: RuntimeSystemRootPropsInfo, rhs: RuntimeSystemRootPropsInfo) -> Bool {
+    public static func ==(lhs: RuntimeSystemRootPropsInfo, rhs: RuntimeSystemRootPropsInfo) -> Bool {
         if lhs.tab != rhs.tab {
             return false
         }
@@ -4624,8 +4947,10 @@ extension RuntimeSystemRootPropsInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeRuntimeSystemRootPropsInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeSystemRootPropsInfo {
@@ -4633,7 +4958,7 @@ public struct FfiConverterTypeRuntimeSystemRootPropsInfo: FfiConverterRustBuffer
             try RuntimeSystemRootPropsInfo(
                 tab: FfiConverterTypeRuntimeSystemTabInfo.read(from: &buf),
                 singleTabMode: FfiConverterBool.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: RuntimeSystemRootPropsInfo, into buf: inout [UInt8]) {
@@ -4642,32 +4967,39 @@ public struct FfiConverterTypeRuntimeSystemRootPropsInfo: FfiConverterRustBuffer
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeSystemRootPropsInfo_lift(_ buf: RustBuffer) throws -> RuntimeSystemRootPropsInfo {
     return try FfiConverterTypeRuntimeSystemRootPropsInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeSystemRootPropsInfo_lower(_ value: RuntimeSystemRootPropsInfo) -> RustBuffer {
     return FfiConverterTypeRuntimeSystemRootPropsInfo.lower(value)
 }
 
+
 public struct RuntimeSystemTabInfo {
     public var systemAppType: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(systemAppType: String) {
         self.systemAppType = systemAppType
     }
 }
 
+#if compiler(>=6)
+extension RuntimeSystemTabInfo: Sendable {}
+#endif
+
+
 extension RuntimeSystemTabInfo: Equatable, Hashable {
-    public static func == (lhs: RuntimeSystemTabInfo, rhs: RuntimeSystemTabInfo) -> Bool {
+    public static func ==(lhs: RuntimeSystemTabInfo, rhs: RuntimeSystemTabInfo) -> Bool {
         if lhs.systemAppType != rhs.systemAppType {
             return false
         }
@@ -4679,15 +5011,17 @@ extension RuntimeSystemTabInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeRuntimeSystemTabInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeSystemTabInfo {
         return
             try RuntimeSystemTabInfo(
                 systemAppType: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: RuntimeSystemTabInfo, into buf: inout [UInt8]) {
@@ -4695,34 +5029,41 @@ public struct FfiConverterTypeRuntimeSystemTabInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeSystemTabInfo_lift(_ buf: RustBuffer) throws -> RuntimeSystemTabInfo {
     return try FfiConverterTypeRuntimeSystemTabInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeSystemTabInfo_lower(_ value: RuntimeSystemTabInfo) -> RustBuffer {
     return FfiConverterTypeRuntimeSystemTabInfo.lower(value)
 }
 
+
 public struct RuntimeTabBookmarkEventInfo {
     public var tabId: String
     public var isBookmarked: Bool
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(tabId: String, isBookmarked: Bool) {
         self.tabId = tabId
         self.isBookmarked = isBookmarked
     }
 }
 
+#if compiler(>=6)
+extension RuntimeTabBookmarkEventInfo: Sendable {}
+#endif
+
+
 extension RuntimeTabBookmarkEventInfo: Equatable, Hashable {
-    public static func == (lhs: RuntimeTabBookmarkEventInfo, rhs: RuntimeTabBookmarkEventInfo) -> Bool {
+    public static func ==(lhs: RuntimeTabBookmarkEventInfo, rhs: RuntimeTabBookmarkEventInfo) -> Bool {
         if lhs.tabId != rhs.tabId {
             return false
         }
@@ -4738,8 +5079,10 @@ extension RuntimeTabBookmarkEventInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeRuntimeTabBookmarkEventInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeTabBookmarkEventInfo {
@@ -4747,7 +5090,7 @@ public struct FfiConverterTypeRuntimeTabBookmarkEventInfo: FfiConverterRustBuffe
             try RuntimeTabBookmarkEventInfo(
                 tabId: FfiConverterString.read(from: &buf),
                 isBookmarked: FfiConverterBool.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: RuntimeTabBookmarkEventInfo, into buf: inout [UInt8]) {
@@ -4756,34 +5099,41 @@ public struct FfiConverterTypeRuntimeTabBookmarkEventInfo: FfiConverterRustBuffe
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeTabBookmarkEventInfo_lift(_ buf: RustBuffer) throws -> RuntimeTabBookmarkEventInfo {
     return try FfiConverterTypeRuntimeTabBookmarkEventInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeTabBookmarkEventInfo_lower(_ value: RuntimeTabBookmarkEventInfo) -> RustBuffer {
     return FfiConverterTypeRuntimeTabBookmarkEventInfo.lower(value)
 }
 
+
 public struct RuntimeTabBookmarkStatusInfo {
     public var tabId: String
     public var marked: Bool
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(tabId: String, marked: Bool) {
         self.tabId = tabId
         self.marked = marked
     }
 }
 
+#if compiler(>=6)
+extension RuntimeTabBookmarkStatusInfo: Sendable {}
+#endif
+
+
 extension RuntimeTabBookmarkStatusInfo: Equatable, Hashable {
-    public static func == (lhs: RuntimeTabBookmarkStatusInfo, rhs: RuntimeTabBookmarkStatusInfo) -> Bool {
+    public static func ==(lhs: RuntimeTabBookmarkStatusInfo, rhs: RuntimeTabBookmarkStatusInfo) -> Bool {
         if lhs.tabId != rhs.tabId {
             return false
         }
@@ -4799,8 +5149,10 @@ extension RuntimeTabBookmarkStatusInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeRuntimeTabBookmarkStatusInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeTabBookmarkStatusInfo {
@@ -4808,7 +5160,7 @@ public struct FfiConverterTypeRuntimeTabBookmarkStatusInfo: FfiConverterRustBuff
             try RuntimeTabBookmarkStatusInfo(
                 tabId: FfiConverterString.read(from: &buf),
                 marked: FfiConverterBool.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: RuntimeTabBookmarkStatusInfo, into buf: inout [UInt8]) {
@@ -4817,32 +5169,39 @@ public struct FfiConverterTypeRuntimeTabBookmarkStatusInfo: FfiConverterRustBuff
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeTabBookmarkStatusInfo_lift(_ buf: RustBuffer) throws -> RuntimeTabBookmarkStatusInfo {
     return try FfiConverterTypeRuntimeTabBookmarkStatusInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeTabBookmarkStatusInfo_lower(_ value: RuntimeTabBookmarkStatusInfo) -> RustBuffer {
     return FfiConverterTypeRuntimeTabBookmarkStatusInfo.lower(value)
 }
 
+
 public struct RuntimeTabFullscreenEventInfo {
     public var tabId: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(tabId: String) {
         self.tabId = tabId
     }
 }
 
+#if compiler(>=6)
+extension RuntimeTabFullscreenEventInfo: Sendable {}
+#endif
+
+
 extension RuntimeTabFullscreenEventInfo: Equatable, Hashable {
-    public static func == (lhs: RuntimeTabFullscreenEventInfo, rhs: RuntimeTabFullscreenEventInfo) -> Bool {
+    public static func ==(lhs: RuntimeTabFullscreenEventInfo, rhs: RuntimeTabFullscreenEventInfo) -> Bool {
         if lhs.tabId != rhs.tabId {
             return false
         }
@@ -4854,15 +5213,17 @@ extension RuntimeTabFullscreenEventInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeRuntimeTabFullscreenEventInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeTabFullscreenEventInfo {
         return
             try RuntimeTabFullscreenEventInfo(
                 tabId: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: RuntimeTabFullscreenEventInfo, into buf: inout [UInt8]) {
@@ -4870,19 +5231,21 @@ public struct FfiConverterTypeRuntimeTabFullscreenEventInfo: FfiConverterRustBuf
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeTabFullscreenEventInfo_lift(_ buf: RustBuffer) throws -> RuntimeTabFullscreenEventInfo {
     return try FfiConverterTypeRuntimeTabFullscreenEventInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeTabFullscreenEventInfo_lower(_ value: RuntimeTabFullscreenEventInfo) -> RustBuffer {
     return FfiConverterTypeRuntimeTabFullscreenEventInfo.lower(value)
 }
+
 
 public struct RuntimeTabInfo {
     public var unifiedScript: String
@@ -4893,8 +5256,8 @@ public struct RuntimeTabInfo {
     public var htmlContent: String
     public var title: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(unifiedScript: String, rightPanelDefaultVisible: Bool, id: String, backgroundColor: String, reloadKey: Int32, htmlContent: String, title: String) {
         self.unifiedScript = unifiedScript
         self.rightPanelDefaultVisible = rightPanelDefaultVisible
@@ -4906,8 +5269,13 @@ public struct RuntimeTabInfo {
     }
 }
 
+#if compiler(>=6)
+extension RuntimeTabInfo: Sendable {}
+#endif
+
+
 extension RuntimeTabInfo: Equatable, Hashable {
-    public static func == (lhs: RuntimeTabInfo, rhs: RuntimeTabInfo) -> Bool {
+    public static func ==(lhs: RuntimeTabInfo, rhs: RuntimeTabInfo) -> Bool {
         if lhs.unifiedScript != rhs.unifiedScript {
             return false
         }
@@ -4943,8 +5311,10 @@ extension RuntimeTabInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeRuntimeTabInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeTabInfo {
@@ -4957,7 +5327,7 @@ public struct FfiConverterTypeRuntimeTabInfo: FfiConverterRustBuffer {
                 reloadKey: FfiConverterInt32.read(from: &buf),
                 htmlContent: FfiConverterString.read(from: &buf),
                 title: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: RuntimeTabInfo, into buf: inout [UInt8]) {
@@ -4971,34 +5341,41 @@ public struct FfiConverterTypeRuntimeTabInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeTabInfo_lift(_ buf: RustBuffer) throws -> RuntimeTabInfo {
     return try FfiConverterTypeRuntimeTabInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeTabInfo_lower(_ value: RuntimeTabInfo) -> RustBuffer {
     return FfiConverterTypeRuntimeTabInfo.lower(value)
 }
 
+
 public struct RuntimeTabUnreadInfo {
     public var tabId: String
     public var unread: Bool
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(tabId: String, unread: Bool) {
         self.tabId = tabId
         self.unread = unread
     }
 }
 
+#if compiler(>=6)
+extension RuntimeTabUnreadInfo: Sendable {}
+#endif
+
+
 extension RuntimeTabUnreadInfo: Equatable, Hashable {
-    public static func == (lhs: RuntimeTabUnreadInfo, rhs: RuntimeTabUnreadInfo) -> Bool {
+    public static func ==(lhs: RuntimeTabUnreadInfo, rhs: RuntimeTabUnreadInfo) -> Bool {
         if lhs.tabId != rhs.tabId {
             return false
         }
@@ -5014,8 +5391,10 @@ extension RuntimeTabUnreadInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeRuntimeTabUnreadInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeTabUnreadInfo {
@@ -5023,7 +5402,7 @@ public struct FfiConverterTypeRuntimeTabUnreadInfo: FfiConverterRustBuffer {
             try RuntimeTabUnreadInfo(
                 tabId: FfiConverterString.read(from: &buf),
                 unread: FfiConverterBool.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: RuntimeTabUnreadInfo, into buf: inout [UInt8]) {
@@ -5032,19 +5411,21 @@ public struct FfiConverterTypeRuntimeTabUnreadInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeTabUnreadInfo_lift(_ buf: RustBuffer) throws -> RuntimeTabUnreadInfo {
     return try FfiConverterTypeRuntimeTabUnreadInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeTabUnreadInfo_lower(_ value: RuntimeTabUnreadInfo) -> RustBuffer {
     return FfiConverterTypeRuntimeTabUnreadInfo.lower(value)
 }
+
 
 public struct RuntimeTabUpdateInfo {
     public var tabId: String
@@ -5053,8 +5434,8 @@ public struct RuntimeTabUpdateInfo {
     public var appUrl: String?
     public var status: String?
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(tabId: String, title: String?, icon: String?, appUrl: String?, status: String?) {
         self.tabId = tabId
         self.title = title
@@ -5064,8 +5445,13 @@ public struct RuntimeTabUpdateInfo {
     }
 }
 
+#if compiler(>=6)
+extension RuntimeTabUpdateInfo: Sendable {}
+#endif
+
+
 extension RuntimeTabUpdateInfo: Equatable, Hashable {
-    public static func == (lhs: RuntimeTabUpdateInfo, rhs: RuntimeTabUpdateInfo) -> Bool {
+    public static func ==(lhs: RuntimeTabUpdateInfo, rhs: RuntimeTabUpdateInfo) -> Bool {
         if lhs.tabId != rhs.tabId {
             return false
         }
@@ -5093,8 +5479,10 @@ extension RuntimeTabUpdateInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeRuntimeTabUpdateInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeTabUpdateInfo {
@@ -5105,7 +5493,7 @@ public struct FfiConverterTypeRuntimeTabUpdateInfo: FfiConverterRustBuffer {
                 icon: FfiConverterOptionString.read(from: &buf),
                 appUrl: FfiConverterOptionString.read(from: &buf),
                 status: FfiConverterOptionString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: RuntimeTabUpdateInfo, into buf: inout [UInt8]) {
@@ -5117,27 +5505,29 @@ public struct FfiConverterTypeRuntimeTabUpdateInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeTabUpdateInfo_lift(_ buf: RustBuffer) throws -> RuntimeTabUpdateInfo {
     return try FfiConverterTypeRuntimeTabUpdateInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRuntimeTabUpdateInfo_lower(_ value: RuntimeTabUpdateInfo) -> RustBuffer {
     return FfiConverterTypeRuntimeTabUpdateInfo.lower(value)
 }
+
 
 public struct SystemAppInfo {
     public var kind: String
     public var title: String
     public var aboutUrl: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(kind: String, title: String, aboutUrl: String) {
         self.kind = kind
         self.title = title
@@ -5145,8 +5535,13 @@ public struct SystemAppInfo {
     }
 }
 
+#if compiler(>=6)
+extension SystemAppInfo: Sendable {}
+#endif
+
+
 extension SystemAppInfo: Equatable, Hashable {
-    public static func == (lhs: SystemAppInfo, rhs: SystemAppInfo) -> Bool {
+    public static func ==(lhs: SystemAppInfo, rhs: SystemAppInfo) -> Bool {
         if lhs.kind != rhs.kind {
             return false
         }
@@ -5166,8 +5561,10 @@ extension SystemAppInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeSystemAppInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SystemAppInfo {
@@ -5176,7 +5573,7 @@ public struct FfiConverterTypeSystemAppInfo: FfiConverterRustBuffer {
                 kind: FfiConverterString.read(from: &buf),
                 title: FfiConverterString.read(from: &buf),
                 aboutUrl: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: SystemAppInfo, into buf: inout [UInt8]) {
@@ -5186,19 +5583,21 @@ public struct FfiConverterTypeSystemAppInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeSystemAppInfo_lift(_ buf: RustBuffer) throws -> SystemAppInfo {
     return try FfiConverterTypeSystemAppInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeSystemAppInfo_lower(_ value: SystemAppInfo) -> RustBuffer {
     return FfiConverterTypeSystemAppInfo.lower(value)
 }
+
 
 public struct TtsBridgeContractInfo {
     public var moduleName: String
@@ -5215,8 +5614,8 @@ public struct TtsBridgeContractInfo {
     public var keyCancelled: String
     public var keyMessage: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(moduleName: String, eventStart: String, eventPause: String, eventResume: String, eventFinish: String, eventError: String, keyRate: String, keyPitchMultiplier: String, keyVolume: String, keyLanguage: String, keyVoiceIdentifier: String, keyCancelled: String, keyMessage: String) {
         self.moduleName = moduleName
         self.eventStart = eventStart
@@ -5234,8 +5633,13 @@ public struct TtsBridgeContractInfo {
     }
 }
 
+#if compiler(>=6)
+extension TtsBridgeContractInfo: Sendable {}
+#endif
+
+
 extension TtsBridgeContractInfo: Equatable, Hashable {
-    public static func == (lhs: TtsBridgeContractInfo, rhs: TtsBridgeContractInfo) -> Bool {
+    public static func ==(lhs: TtsBridgeContractInfo, rhs: TtsBridgeContractInfo) -> Bool {
         if lhs.moduleName != rhs.moduleName {
             return false
         }
@@ -5295,8 +5699,10 @@ extension TtsBridgeContractInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeTtsBridgeContractInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TtsBridgeContractInfo {
@@ -5315,7 +5721,7 @@ public struct FfiConverterTypeTtsBridgeContractInfo: FfiConverterRustBuffer {
                 keyVoiceIdentifier: FfiConverterString.read(from: &buf),
                 keyCancelled: FfiConverterString.read(from: &buf),
                 keyMessage: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: TtsBridgeContractInfo, into buf: inout [UInt8]) {
@@ -5335,19 +5741,21 @@ public struct FfiConverterTypeTtsBridgeContractInfo: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeTtsBridgeContractInfo_lift(_ buf: RustBuffer) throws -> TtsBridgeContractInfo {
     return try FfiConverterTypeTtsBridgeContractInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeTtsBridgeContractInfo_lower(_ value: TtsBridgeContractInfo) -> RustBuffer {
     return FfiConverterTypeTtsBridgeContractInfo.lower(value)
 }
+
 
 public struct UserInfoBridgeContractInfo {
     public var moduleName: String
@@ -5366,8 +5774,8 @@ public struct UserInfoBridgeContractInfo {
     public var keyRequestContext: String
     public var keyIsLoggedIn: String
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(moduleName: String, methodGetCurrentUserInfo: String, methodLoginWithType: String, eventUserInfoChanged: String, eventLoginStatusChanged: String, eventUserLogout: String, keyId: String, keyLoginApiUrl: String, keyUserInfo: String, keyUserIdentity: String, keySessionToken: String, keyCreatedAt: String, keyUpdatedAt: String, keyRequestContext: String, keyIsLoggedIn: String) {
         self.moduleName = moduleName
         self.methodGetCurrentUserInfo = methodGetCurrentUserInfo
@@ -5387,8 +5795,13 @@ public struct UserInfoBridgeContractInfo {
     }
 }
 
+#if compiler(>=6)
+extension UserInfoBridgeContractInfo: Sendable {}
+#endif
+
+
 extension UserInfoBridgeContractInfo: Equatable, Hashable {
-    public static func == (lhs: UserInfoBridgeContractInfo, rhs: UserInfoBridgeContractInfo) -> Bool {
+    public static func ==(lhs: UserInfoBridgeContractInfo, rhs: UserInfoBridgeContractInfo) -> Bool {
         if lhs.moduleName != rhs.moduleName {
             return false
         }
@@ -5456,8 +5869,10 @@ extension UserInfoBridgeContractInfo: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeUserInfoBridgeContractInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UserInfoBridgeContractInfo {
@@ -5478,7 +5893,7 @@ public struct FfiConverterTypeUserInfoBridgeContractInfo: FfiConverterRustBuffer
                 keyUpdatedAt: FfiConverterString.read(from: &buf),
                 keyRequestContext: FfiConverterString.read(from: &buf),
                 keyIsLoggedIn: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: UserInfoBridgeContractInfo, into buf: inout [UInt8]) {
@@ -5500,15 +5915,16 @@ public struct FfiConverterTypeUserInfoBridgeContractInfo: FfiConverterRustBuffer
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeUserInfoBridgeContractInfo_lift(_ buf: RustBuffer) throws -> UserInfoBridgeContractInfo {
     return try FfiConverterTypeUserInfoBridgeContractInfo.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeUserInfoBridgeContractInfo_lower(_ value: UserInfoBridgeContractInfo) -> RustBuffer {
     return FfiConverterTypeUserInfoBridgeContractInfo.lower(value)
@@ -5518,13 +5934,19 @@ public func FfiConverterTypeUserInfoBridgeContractInfo_lower(_ value: UserInfoBr
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
 public enum ContractGateStatus {
+
     case ok
     case compat
     case blocked
 }
 
+
+#if compiler(>=6)
+extension ContractGateStatus: Sendable {}
+#endif
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeContractGateStatus: FfiConverterRustBuffer {
     typealias SwiftType = ContractGateStatus
@@ -5532,6 +5954,7 @@ public struct FfiConverterTypeContractGateStatus: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ContractGateStatus {
         let variant: Int32 = try readInt(&buf)
         switch variant {
+
         case 1: return .ok
 
         case 2: return .compat
@@ -5544,35 +5967,51 @@ public struct FfiConverterTypeContractGateStatus: FfiConverterRustBuffer {
 
     public static func write(_ value: ContractGateStatus, into buf: inout [UInt8]) {
         switch value {
+
+
         case .ok:
             writeInt(&buf, Int32(1))
+
 
         case .compat:
             writeInt(&buf, Int32(2))
 
+
         case .blocked:
             writeInt(&buf, Int32(3))
+
         }
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeContractGateStatus_lift(_ buf: RustBuffer) throws -> ContractGateStatus {
     return try FfiConverterTypeContractGateStatus.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeContractGateStatus_lower(_ value: ContractGateStatus) -> RustBuffer {
     return FfiConverterTypeContractGateStatus.lower(value)
 }
 
+
 extension ContractGateStatus: Equatable, Hashable {}
 
-public enum CoreError {
+
+
+
+
+
+
+public enum CoreError: Swift.Error {
+
+
+
     case InvalidJson(message: String)
 
     case MissingField(message: String)
@@ -5586,10 +6025,12 @@ public enum CoreError {
     case UnknownAppSourceType(message: String)
 
     case InvalidActrActorType(message: String)
+
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeCoreError: FfiConverterRustBuffer {
     typealias SwiftType = CoreError
@@ -5597,33 +6038,38 @@ public struct FfiConverterTypeCoreError: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CoreError {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-        case 1: return try .InvalidJson(
-                message: FfiConverterString.read(from: &buf)
-            )
 
-        case 2: return try .MissingField(
-                message: FfiConverterString.read(from: &buf)
-            )
 
-        case 3: return try .UnsupportedContract(
-                message: FfiConverterString.read(from: &buf)
-            )
 
-        case 4: return try .ContractTooNew(
-                message: FfiConverterString.read(from: &buf)
-            )
 
-        case 5: return try .UnknownSystemAppType(
-                message: FfiConverterString.read(from: &buf)
-            )
+        case 1: return .InvalidJson(
+            message: try FfiConverterString.read(from: &buf)
+        )
 
-        case 6: return try .UnknownAppSourceType(
-                message: FfiConverterString.read(from: &buf)
-            )
+        case 2: return .MissingField(
+            message: try FfiConverterString.read(from: &buf)
+        )
 
-        case 7: return try .InvalidActrActorType(
-                message: FfiConverterString.read(from: &buf)
-            )
+        case 3: return .UnsupportedContract(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+        case 4: return .ContractTooNew(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+        case 5: return .UnknownSystemAppType(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+        case 6: return .UnknownAppSourceType(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+        case 7: return .InvalidActrActorType(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
 
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -5631,25 +6077,50 @@ public struct FfiConverterTypeCoreError: FfiConverterRustBuffer {
 
     public static func write(_ value: CoreError, into buf: inout [UInt8]) {
         switch value {
-        case .InvalidJson(_ /* message is ignored*/ ):
+
+
+
+
+        case .InvalidJson(_ /* message is ignored*/):
             writeInt(&buf, Int32(1))
-        case .MissingField(_ /* message is ignored*/ ):
+        case .MissingField(_ /* message is ignored*/):
             writeInt(&buf, Int32(2))
-        case .UnsupportedContract(_ /* message is ignored*/ ):
+        case .UnsupportedContract(_ /* message is ignored*/):
             writeInt(&buf, Int32(3))
-        case .ContractTooNew(_ /* message is ignored*/ ):
+        case .ContractTooNew(_ /* message is ignored*/):
             writeInt(&buf, Int32(4))
-        case .UnknownSystemAppType(_ /* message is ignored*/ ):
+        case .UnknownSystemAppType(_ /* message is ignored*/):
             writeInt(&buf, Int32(5))
-        case .UnknownAppSourceType(_ /* message is ignored*/ ):
+        case .UnknownAppSourceType(_ /* message is ignored*/):
             writeInt(&buf, Int32(6))
-        case .InvalidActrActorType(_ /* message is ignored*/ ):
+        case .InvalidActrActorType(_ /* message is ignored*/):
             writeInt(&buf, Int32(7))
+
+
         }
     }
 }
 
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCoreError_lift(_ buf: RustBuffer) throws -> CoreError {
+    return try FfiConverterTypeCoreError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCoreError_lower(_ value: CoreError) -> RustBuffer {
+    return FfiConverterTypeCoreError.lower(value)
+}
+
+
 extension CoreError: Equatable, Hashable {}
+
+
+
 
 extension CoreError: Foundation.LocalizedError {
     public var errorDescription: String? {
@@ -5657,13 +6128,16 @@ extension CoreError: Foundation.LocalizedError {
     }
 }
 
+
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
+fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
     typealias SwiftType = UInt32?
 
-    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         guard let value = value else {
             writeInt(&buf, Int8(0))
             return
@@ -5672,7 +6146,7 @@ private struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
         FfiConverterUInt32.write(value, into: &buf)
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterUInt32.read(from: &buf)
@@ -5682,12 +6156,12 @@ private struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterOptionInt64: FfiConverterRustBuffer {
+fileprivate struct FfiConverterOptionInt64: FfiConverterRustBuffer {
     typealias SwiftType = Int64?
 
-    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         guard let value = value else {
             writeInt(&buf, Int8(0))
             return
@@ -5696,7 +6170,7 @@ private struct FfiConverterOptionInt64: FfiConverterRustBuffer {
         FfiConverterInt64.write(value, into: &buf)
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterInt64.read(from: &buf)
@@ -5706,12 +6180,12 @@ private struct FfiConverterOptionInt64: FfiConverterRustBuffer {
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterOptionDouble: FfiConverterRustBuffer {
+fileprivate struct FfiConverterOptionDouble: FfiConverterRustBuffer {
     typealias SwiftType = Double?
 
-    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         guard let value = value else {
             writeInt(&buf, Int8(0))
             return
@@ -5720,7 +6194,7 @@ private struct FfiConverterOptionDouble: FfiConverterRustBuffer {
         FfiConverterDouble.write(value, into: &buf)
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterDouble.read(from: &buf)
@@ -5730,12 +6204,12 @@ private struct FfiConverterOptionDouble: FfiConverterRustBuffer {
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterOptionBool: FfiConverterRustBuffer {
+fileprivate struct FfiConverterOptionBool: FfiConverterRustBuffer {
     typealias SwiftType = Bool?
 
-    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         guard let value = value else {
             writeInt(&buf, Int8(0))
             return
@@ -5744,7 +6218,7 @@ private struct FfiConverterOptionBool: FfiConverterRustBuffer {
         FfiConverterBool.write(value, into: &buf)
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterBool.read(from: &buf)
@@ -5754,12 +6228,12 @@ private struct FfiConverterOptionBool: FfiConverterRustBuffer {
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterOptionString: FfiConverterRustBuffer {
+fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
     typealias SwiftType = String?
 
-    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         guard let value = value else {
             writeInt(&buf, Int8(0))
             return
@@ -5768,7 +6242,7 @@ private struct FfiConverterOptionString: FfiConverterRustBuffer {
         FfiConverterString.write(value, into: &buf)
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterString.read(from: &buf)
@@ -5778,36 +6252,12 @@ private struct FfiConverterOptionString: FfiConverterRustBuffer {
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterOptionTypeActrIntegrityPlanInfo: FfiConverterRustBuffer {
-    typealias SwiftType = ActrIntegrityPlanInfo?
-
-    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
-        guard let value = value else {
-            writeInt(&buf, Int8(0))
-            return
-        }
-        writeInt(&buf, Int8(1))
-        FfiConverterTypeActrIntegrityPlanInfo.write(value, into: &buf)
-    }
-
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
-        switch try readInt(&buf) as Int8 {
-        case 0: return nil
-        case 1: return try FfiConverterTypeActrIntegrityPlanInfo.read(from: &buf)
-        default: throw UniffiInternalError.unexpectedOptionalTag
-        }
-    }
-}
-
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-private struct FfiConverterOptionTypeCoreInstalledAppInfo: FfiConverterRustBuffer {
+fileprivate struct FfiConverterOptionTypeCoreInstalledAppInfo: FfiConverterRustBuffer {
     typealias SwiftType = CoreInstalledAppInfo?
 
-    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         guard let value = value else {
             writeInt(&buf, Int8(0))
             return
@@ -5816,7 +6266,7 @@ private struct FfiConverterOptionTypeCoreInstalledAppInfo: FfiConverterRustBuffe
         FfiConverterTypeCoreInstalledAppInfo.write(value, into: &buf)
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeCoreInstalledAppInfo.read(from: &buf)
@@ -5826,12 +6276,36 @@ private struct FfiConverterOptionTypeCoreInstalledAppInfo: FfiConverterRustBuffe
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterOptionTypeRuntimeTabBookmarkStatusInfo: FfiConverterRustBuffer {
+fileprivate struct FfiConverterOptionTypePackageIntegrityPlanInfo: FfiConverterRustBuffer {
+    typealias SwiftType = PackageIntegrityPlanInfo?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypePackageIntegrityPlanInfo.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypePackageIntegrityPlanInfo.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeRuntimeTabBookmarkStatusInfo: FfiConverterRustBuffer {
     typealias SwiftType = RuntimeTabBookmarkStatusInfo?
 
-    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         guard let value = value else {
             writeInt(&buf, Int8(0))
             return
@@ -5840,7 +6314,7 @@ private struct FfiConverterOptionTypeRuntimeTabBookmarkStatusInfo: FfiConverterR
         FfiConverterTypeRuntimeTabBookmarkStatusInfo.write(value, into: &buf)
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeRuntimeTabBookmarkStatusInfo.read(from: &buf)
@@ -5850,12 +6324,12 @@ private struct FfiConverterOptionTypeRuntimeTabBookmarkStatusInfo: FfiConverterR
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterOptionTypeRuntimeTabUnreadInfo: FfiConverterRustBuffer {
+fileprivate struct FfiConverterOptionTypeRuntimeTabUnreadInfo: FfiConverterRustBuffer {
     typealias SwiftType = RuntimeTabUnreadInfo?
 
-    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         guard let value = value else {
             writeInt(&buf, Int8(0))
             return
@@ -5864,7 +6338,7 @@ private struct FfiConverterOptionTypeRuntimeTabUnreadInfo: FfiConverterRustBuffe
         FfiConverterTypeRuntimeTabUnreadInfo.write(value, into: &buf)
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeRuntimeTabUnreadInfo.read(from: &buf)
@@ -5874,12 +6348,12 @@ private struct FfiConverterOptionTypeRuntimeTabUnreadInfo: FfiConverterRustBuffe
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterOptionTypeRuntimeTabUpdateInfo: FfiConverterRustBuffer {
+fileprivate struct FfiConverterOptionTypeRuntimeTabUpdateInfo: FfiConverterRustBuffer {
     typealias SwiftType = RuntimeTabUpdateInfo?
 
-    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         guard let value = value else {
             writeInt(&buf, Int8(0))
             return
@@ -5888,7 +6362,7 @@ private struct FfiConverterOptionTypeRuntimeTabUpdateInfo: FfiConverterRustBuffe
         FfiConverterTypeRuntimeTabUpdateInfo.write(value, into: &buf)
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeRuntimeTabUpdateInfo.read(from: &buf)
@@ -5898,12 +6372,12 @@ private struct FfiConverterOptionTypeRuntimeTabUpdateInfo: FfiConverterRustBuffe
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterSequenceString: FfiConverterRustBuffer {
+fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
     typealias SwiftType = [String]
 
-    static func write(_ value: [String], into buf: inout [UInt8]) {
+    public static func write(_ value: [String], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         for item in value {
@@ -5911,24 +6385,24 @@ private struct FfiConverterSequenceString: FfiConverterRustBuffer {
         }
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String] {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String] {
         let len: Int32 = try readInt(&buf)
         var seq = [String]()
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
-            try seq.append(FfiConverterString.read(from: &buf))
+            seq.append(try FfiConverterString.read(from: &buf))
         }
         return seq
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterSequenceTypeActiveTabInfo: FfiConverterRustBuffer {
+fileprivate struct FfiConverterSequenceTypeActiveTabInfo: FfiConverterRustBuffer {
     typealias SwiftType = [ActiveTabInfo]
 
-    static func write(_ value: [ActiveTabInfo], into buf: inout [UInt8]) {
+    public static func write(_ value: [ActiveTabInfo], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         for item in value {
@@ -5936,24 +6410,24 @@ private struct FfiConverterSequenceTypeActiveTabInfo: FfiConverterRustBuffer {
         }
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ActiveTabInfo] {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ActiveTabInfo] {
         let len: Int32 = try readInt(&buf)
         var seq = [ActiveTabInfo]()
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
-            try seq.append(FfiConverterTypeActiveTabInfo.read(from: &buf))
+            seq.append(try FfiConverterTypeActiveTabInfo.read(from: &buf))
         }
         return seq
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterSequenceTypeActiveTabRowInfo: FfiConverterRustBuffer {
+fileprivate struct FfiConverterSequenceTypeActiveTabRowInfo: FfiConverterRustBuffer {
     typealias SwiftType = [ActiveTabRowInfo]
 
-    static func write(_ value: [ActiveTabRowInfo], into buf: inout [UInt8]) {
+    public static func write(_ value: [ActiveTabRowInfo], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         for item in value {
@@ -5961,49 +6435,24 @@ private struct FfiConverterSequenceTypeActiveTabRowInfo: FfiConverterRustBuffer 
         }
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ActiveTabRowInfo] {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ActiveTabRowInfo] {
         let len: Int32 = try readInt(&buf)
         var seq = [ActiveTabRowInfo]()
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
-            try seq.append(FfiConverterTypeActiveTabRowInfo.read(from: &buf))
+            seq.append(try FfiConverterTypeActiveTabRowInfo.read(from: &buf))
         }
         return seq
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterSequenceTypeActrIntegrityFilePlanInfo: FfiConverterRustBuffer {
-    typealias SwiftType = [ActrIntegrityFilePlanInfo]
-
-    static func write(_ value: [ActrIntegrityFilePlanInfo], into buf: inout [UInt8]) {
-        let len = Int32(value.count)
-        writeInt(&buf, len)
-        for item in value {
-            FfiConverterTypeActrIntegrityFilePlanInfo.write(item, into: &buf)
-        }
-    }
-
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ActrIntegrityFilePlanInfo] {
-        let len: Int32 = try readInt(&buf)
-        var seq = [ActrIntegrityFilePlanInfo]()
-        seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
-            try seq.append(FfiConverterTypeActrIntegrityFilePlanInfo.read(from: &buf))
-        }
-        return seq
-    }
-}
-
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-private struct FfiConverterSequenceTypeAsrSegmentInfo: FfiConverterRustBuffer {
+fileprivate struct FfiConverterSequenceTypeAsrSegmentInfo: FfiConverterRustBuffer {
     typealias SwiftType = [AsrSegmentInfo]
 
-    static func write(_ value: [AsrSegmentInfo], into buf: inout [UInt8]) {
+    public static func write(_ value: [AsrSegmentInfo], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         for item in value {
@@ -6011,24 +6460,24 @@ private struct FfiConverterSequenceTypeAsrSegmentInfo: FfiConverterRustBuffer {
         }
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [AsrSegmentInfo] {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [AsrSegmentInfo] {
         let len: Int32 = try readInt(&buf)
         var seq = [AsrSegmentInfo]()
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
-            try seq.append(FfiConverterTypeAsrSegmentInfo.read(from: &buf))
+            seq.append(try FfiConverterTypeAsrSegmentInfo.read(from: &buf))
         }
         return seq
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterSequenceTypeBrowserSearchEngineInfo: FfiConverterRustBuffer {
+fileprivate struct FfiConverterSequenceTypeBrowserSearchEngineInfo: FfiConverterRustBuffer {
     typealias SwiftType = [BrowserSearchEngineInfo]
 
-    static func write(_ value: [BrowserSearchEngineInfo], into buf: inout [UInt8]) {
+    public static func write(_ value: [BrowserSearchEngineInfo], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         for item in value {
@@ -6036,24 +6485,24 @@ private struct FfiConverterSequenceTypeBrowserSearchEngineInfo: FfiConverterRust
         }
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [BrowserSearchEngineInfo] {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [BrowserSearchEngineInfo] {
         let len: Int32 = try readInt(&buf)
         var seq = [BrowserSearchEngineInfo]()
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
-            try seq.append(FfiConverterTypeBrowserSearchEngineInfo.read(from: &buf))
+            seq.append(try FfiConverterTypeBrowserSearchEngineInfo.read(from: &buf))
         }
         return seq
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterSequenceTypeCoreSqlValueInfo: FfiConverterRustBuffer {
+fileprivate struct FfiConverterSequenceTypeCoreSqlValueInfo: FfiConverterRustBuffer {
     typealias SwiftType = [CoreSqlValueInfo]
 
-    static func write(_ value: [CoreSqlValueInfo], into buf: inout [UInt8]) {
+    public static func write(_ value: [CoreSqlValueInfo], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         for item in value {
@@ -6061,24 +6510,24 @@ private struct FfiConverterSequenceTypeCoreSqlValueInfo: FfiConverterRustBuffer 
         }
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [CoreSqlValueInfo] {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [CoreSqlValueInfo] {
         let len: Int32 = try readInt(&buf)
         var seq = [CoreSqlValueInfo]()
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
-            try seq.append(FfiConverterTypeCoreSqlValueInfo.read(from: &buf))
+            seq.append(try FfiConverterTypeCoreSqlValueInfo.read(from: &buf))
         }
         return seq
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterSequenceTypeDefaultTagInfo: FfiConverterRustBuffer {
+fileprivate struct FfiConverterSequenceTypeDefaultTagInfo: FfiConverterRustBuffer {
     typealias SwiftType = [DefaultTagInfo]
 
-    static func write(_ value: [DefaultTagInfo], into buf: inout [UInt8]) {
+    public static func write(_ value: [DefaultTagInfo], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         for item in value {
@@ -6086,24 +6535,49 @@ private struct FfiConverterSequenceTypeDefaultTagInfo: FfiConverterRustBuffer {
         }
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [DefaultTagInfo] {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [DefaultTagInfo] {
         let len: Int32 = try readInt(&buf)
         var seq = [DefaultTagInfo]()
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
-            try seq.append(FfiConverterTypeDefaultTagInfo.read(from: &buf))
+            seq.append(try FfiConverterTypeDefaultTagInfo.read(from: &buf))
         }
         return seq
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer {
+fileprivate struct FfiConverterSequenceTypePackageIntegrityFilePlanInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [PackageIntegrityFilePlanInfo]
+
+    public static func write(_ value: [PackageIntegrityFilePlanInfo], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypePackageIntegrityFilePlanInfo.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [PackageIntegrityFilePlanInfo] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [PackageIntegrityFilePlanInfo]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypePackageIntegrityFilePlanInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer {
     typealias SwiftType = [RuntimeTabInfo]
 
-    static func write(_ value: [RuntimeTabInfo], into buf: inout [UInt8]) {
+    public static func write(_ value: [RuntimeTabInfo], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         for item in value {
@@ -6111,2590 +6585,2438 @@ private struct FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer {
         }
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RuntimeTabInfo] {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RuntimeTabInfo] {
         let len: Int32 = try readInt(&buf)
         var seq = [RuntimeTabInfo]()
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
-            try seq.append(FfiConverterTypeRuntimeTabInfo.read(from: &buf))
+            seq.append(try FfiConverterTypeRuntimeTabInfo.read(from: &buf))
         }
         return seq
     }
 }
-
 /**
  * Convert a persisted active-tab row into the platform active-tab model.
  */
-public func activeTabFromRow(row: ActiveTabRowInfo) -> ActiveTabInfo {
-    return try! FfiConverterTypeActiveTabInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_active_tab_from_row(
-            FfiConverterTypeActiveTabRowInfo.lower(row), $0
-        )
-    })
+public func activeTabFromRow(row: ActiveTabRowInfo) -> ActiveTabInfo  {
+    return try!  FfiConverterTypeActiveTabInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_active_tab_from_row(
+        FfiConverterTypeActiveTabRowInfo_lower(row),$0
+    )
+})
 }
-
 /**
  * Convert active-tab models into persisted rows with stable sort order.
  */
-public func activeTabRowsFromTabs(tabs: [ActiveTabInfo]) -> [ActiveTabRowInfo] {
-    return try! FfiConverterSequenceTypeActiveTabRowInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_active_tab_rows_from_tabs(
-            FfiConverterSequenceTypeActiveTabInfo.lower(tabs), $0
-        )
-    })
+public func activeTabRowsFromTabs(tabs: [ActiveTabInfo]) -> [ActiveTabRowInfo]  {
+    return try!  FfiConverterSequenceTypeActiveTabRowInfo.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_active_tab_rows_from_tabs(
+        FfiConverterSequenceTypeActiveTabInfo.lower(tabs),$0
+    )
+})
 }
-
 /**
  * Convert a platform active-tab model into a persisted active-tab row.
  */
-public func activeTabToRow(tab: ActiveTabInfo, sortOrder: Int32) -> ActiveTabRowInfo {
-    return try! FfiConverterTypeActiveTabRowInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_active_tab_to_row(
-            FfiConverterTypeActiveTabInfo.lower(tab),
-            FfiConverterInt32.lower(sortOrder), $0
-        )
-    })
+public func activeTabToRow(tab: ActiveTabInfo, sortOrder: Int32) -> ActiveTabRowInfo  {
+    return try!  FfiConverterTypeActiveTabRowInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_active_tab_to_row(
+        FfiConverterTypeActiveTabInfo_lower(tab),
+        FfiConverterInt32.lower(sortOrder),$0
+    )
+})
 }
-
 /**
  * Return the canonical ActrBridge native module/event/payload contract.
  */
-public func actrBridgeContract() -> ActrBridgeContractInfo {
-    return try! FfiConverterTypeActrBridgeContractInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_actr_bridge_contract($0)
-    })
+public func actrBridgeContract() -> ActrBridgeContractInfo  {
+    return try!  FfiConverterTypeActrBridgeContractInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_actr_bridge_contract($0
+    )
+})
 }
-
 /**
  * Return the canonical downloaded app source type.
  */
-public func appSourceTypeDownloaded() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_app_source_type_downloaded($0)
-    })
+public func appSourceTypeDownloaded() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_app_source_type_downloaded($0
+    )
+})
 }
-
 /**
  * Return display metadata for an app source type.
  */
-public func appSourceTypeInfo(raw: String) throws -> AppSourceTypeInfo {
-    return try FfiConverterTypeAppSourceTypeInfo.lift(rustCallWithError(FfiConverterTypeCoreError.lift) {
-        uniffi_actro_core_fn_func_app_source_type_info(
-            FfiConverterString.lower(raw), $0
-        )
-    })
+public func appSourceTypeInfo(raw: String)throws  -> AppSourceTypeInfo  {
+    return try  FfiConverterTypeAppSourceTypeInfo_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actro_core_fn_func_app_source_type_info(
+        FfiConverterString.lower(raw),$0
+    )
+})
 }
-
 /**
  * Return the canonical local development app source type.
  */
-public func appSourceTypeLocalDev() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_app_source_type_local_dev($0)
-    })
+public func appSourceTypeLocalDev() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_app_source_type_local_dev($0
+    )
+})
 }
-
 /**
  * Return the canonical Android ASR native module/event/payload contract.
  */
-public func asrBridgeContract() -> AsrBridgeContractInfo {
-    return try! FfiConverterTypeAsrBridgeContractInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_asr_bridge_contract($0)
-    })
+public func asrBridgeContract() -> AsrBridgeContractInfo  {
+    return try!  FfiConverterTypeAsrBridgeContractInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_asr_bridge_contract($0
+    )
+})
 }
-
 /**
  * Map a BCP-47-ish ASR language code to an available bundled model dir.
  */
-public func asrModelLanguageDir(language: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_asr_model_language_dir(
-            FfiConverterString.lower(language), $0
-        )
-    })
+public func asrModelLanguageDir(language: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_asr_model_language_dir(
+        FfiConverterString.lower(language),$0
+    )
+})
 }
-
 /**
  * Build the platform ASR model loading path plan for a language.
  */
-public func asrModelPlan(language: String) -> AsrModelPlanInfo {
-    return try! FfiConverterTypeAsrModelPlanInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_asr_model_plan(
-            FfiConverterString.lower(language), $0
-        )
-    })
+public func asrModelPlan(language: String) -> AsrModelPlanInfo  {
+    return try!  FfiConverterTypeAsrModelPlanInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_asr_model_plan(
+        FfiConverterString.lower(language),$0
+    )
+})
 }
-
-public func authAccessControlPath(appId: String, userId: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_auth_access_control_path(
-            FfiConverterString.lower(appId),
-            FfiConverterString.lower(userId), $0
-        )
-    })
+public func authAccessControlPath(appId: String, userId: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_auth_access_control_path(
+        FfiConverterString.lower(appId),
+        FfiConverterString.lower(userId),$0
+    )
+})
 }
-
-public func authAccessControlStatus(success: Bool, hasCode: Bool, code: Int32) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_auth_access_control_status(
-            FfiConverterBool.lower(success),
-            FfiConverterBool.lower(hasCode),
-            FfiConverterInt32.lower(code), $0
-        )
-    })
+public func authAccessControlStatus(success: Bool, hasCode: Bool, code: Int32) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_auth_access_control_status(
+        FfiConverterBool.lower(success),
+        FfiConverterBool.lower(hasCode),
+        FfiConverterInt32.lower(code),$0
+    )
+})
 }
-
-public func authAccessControlUrlFromAppUrl(appUrl: String, appId: String, userId: String) -> String? {
-    return try! FfiConverterOptionString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_auth_access_control_url_from_app_url(
-            FfiConverterString.lower(appUrl),
-            FfiConverterString.lower(appId),
-            FfiConverterString.lower(userId), $0
-        )
-    })
+public func authAccessControlUrlFromAppUrl(appUrl: String, appId: String, userId: String) -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_auth_access_control_url_from_app_url(
+        FfiConverterString.lower(appUrl),
+        FfiConverterString.lower(appId),
+        FfiConverterString.lower(userId),$0
+    )
+})
 }
-
-public func authAccountBaseUrl(environment: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_auth_account_base_url(
-            FfiConverterString.lower(environment), $0
-        )
-    })
+public func authAccountBaseUrl(environment: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_auth_account_base_url(
+        FfiConverterString.lower(environment),$0
+    )
+})
 }
-
-public func authApiResponseSuccess(code: Int32) -> Bool {
-    return try! FfiConverterBool.lift(try! rustCall {
-        uniffi_actro_core_fn_func_auth_api_response_success(
-            FfiConverterInt32.lower(code), $0
-        )
-    })
+public func authApiResponseSuccess(code: Int32) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_auth_api_response_success(
+        FfiConverterInt32.lower(code),$0
+    )
+})
 }
-
-public func authClientAppPath(appId: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_auth_client_app_path(
-            FfiConverterString.lower(appId), $0
-        )
-    })
+public func authClientAppPath(appId: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_auth_client_app_path(
+        FfiConverterString.lower(appId),$0
+    )
+})
 }
-
-public func authEnvironmentBeta() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_auth_environment_beta($0)
-    })
+public func authEnvironmentBeta() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_auth_environment_beta($0
+    )
+})
 }
-
-public func authEnvironmentDev() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_auth_environment_dev($0)
-    })
+public func authEnvironmentDev() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_auth_environment_dev($0
+    )
+})
 }
-
-public func authEnvironmentFromAppUrl(url: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_auth_environment_from_app_url(
-            FfiConverterString.lower(url), $0
-        )
-    })
+public func authEnvironmentFromAppUrl(url: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_auth_environment_from_app_url(
+        FfiConverterString.lower(url),$0
+    )
+})
 }
-
-public func authEnvironmentFromUrl(url: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_auth_environment_from_url(
-            FfiConverterString.lower(url), $0
-        )
-    })
+public func authEnvironmentFromUrl(url: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_auth_environment_from_url(
+        FfiConverterString.lower(url),$0
+    )
+})
 }
-
-public func authEnvironmentProd() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_auth_environment_prod($0)
-    })
+public func authEnvironmentProd() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_auth_environment_prod($0
+    )
+})
 }
-
-public func authEnvironmentStorageSuffix(environment: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_auth_environment_storage_suffix(
-            FfiConverterString.lower(environment), $0
-        )
-    })
+public func authEnvironmentStorageSuffix(environment: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_auth_environment_storage_suffix(
+        FfiConverterString.lower(environment),$0
+    )
+})
 }
-
-public func authIsAuthorizedCode(code: Int32) -> Bool {
-    return try! FfiConverterBool.lift(try! rustCall {
-        uniffi_actro_core_fn_func_auth_is_authorized_code(
-            FfiConverterInt32.lower(code), $0
-        )
-    })
+public func authIsAuthorizedCode(code: Int32) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_auth_is_authorized_code(
+        FfiConverterInt32.lower(code),$0
+    )
+})
 }
-
-public func authIsClientAppNotFoundCode(code: Int32) -> Bool {
-    return try! FfiConverterBool.lift(try! rustCall {
-        uniffi_actro_core_fn_func_auth_is_client_app_not_found_code(
-            FfiConverterInt32.lower(code), $0
-        )
-    })
+public func authIsClientAppNotFoundCode(code: Int32) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_auth_is_client_app_not_found_code(
+        FfiConverterInt32.lower(code),$0
+    )
+})
 }
-
-public func authIsClientAppNotFoundMessage(message: String) -> Bool {
-    return try! FfiConverterBool.lift(try! rustCall {
-        uniffi_actro_core_fn_func_auth_is_client_app_not_found_message(
-            FfiConverterString.lower(message), $0
-        )
-    })
+public func authIsClientAppNotFoundMessage(message: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_auth_is_client_app_not_found_message(
+        FfiConverterString.lower(message),$0
+    )
+})
 }
-
-public func authResourceUploadTokenPath() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_auth_resource_upload_token_path($0)
-    })
+public func authResourceUploadTokenPath() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_auth_resource_upload_token_path($0
+    )
+})
 }
-
-public func authResourceUploaderBaseUrl(environment: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_auth_resource_uploader_base_url(
-            FfiConverterString.lower(environment), $0
-        )
-    })
+public func authResourceUploaderBaseUrl(environment: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_auth_resource_uploader_base_url(
+        FfiConverterString.lower(environment),$0
+    )
+})
 }
-
 /**
  * Normalize a browser bookmark snapshot JSON document.
  */
-public func browserBookmarkSnapshotNormalizeJson(snapshotJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_bookmark_snapshot_normalize_json(
-            FfiConverterString.lower(snapshotJson), $0
-        )
-    })
+public func browserBookmarkSnapshotNormalizeJson(snapshotJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_bookmark_snapshot_normalize_json(
+        FfiConverterString.lower(snapshotJson),$0
+    )
+})
 }
-
 /**
  * Return the shared browser data snapshot contract.
  */
-public func browserDataContract() -> BrowserDataContractInfo {
-    return try! FfiConverterTypeBrowserDataContractInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_data_contract($0)
-    })
+public func browserDataContract() -> BrowserDataContractInfo  {
+    return try!  FfiConverterTypeBrowserDataContractInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_data_contract($0
+    )
+})
 }
-
 /**
  * Normalize a browser history snapshot JSON document.
  */
-public func browserHistorySnapshotNormalizeJson(snapshotJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_history_snapshot_normalize_json(
-            FfiConverterString.lower(snapshotJson), $0
-        )
-    })
+public func browserHistorySnapshotNormalizeJson(snapshotJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_history_snapshot_normalize_json(
+        FfiConverterString.lower(snapshotJson),$0
+    )
+})
 }
-
 /**
  * Return the canonical default browser search engine id.
  */
-public func browserSearchEngineDefaultId() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_search_engine_default_id($0)
-    })
+public func browserSearchEngineDefaultId() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_search_engine_default_id($0
+    )
+})
 }
-
 /**
  * Return metadata for a browser search engine, falling back to the default.
  */
-public func browserSearchEngineInfo(engineId: String?) -> BrowserSearchEngineInfo {
-    return try! FfiConverterTypeBrowserSearchEngineInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_search_engine_info(
-            FfiConverterOptionString.lower(engineId), $0
-        )
-    })
+public func browserSearchEngineInfo(engineId: String?) -> BrowserSearchEngineInfo  {
+    return try!  FfiConverterTypeBrowserSearchEngineInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_search_engine_info(
+        FfiConverterOptionString.lower(engineId),$0
+    )
+})
 }
-
 /**
  * Normalize a browser search engine id, falling back to the default.
  */
-public func browserSearchEngineNormalizeId(engineId: String?) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_search_engine_normalize_id(
-            FfiConverterOptionString.lower(engineId), $0
-        )
-    })
+public func browserSearchEngineNormalizeId(engineId: String?) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_search_engine_normalize_id(
+        FfiConverterOptionString.lower(engineId),$0
+    )
+})
 }
-
 /**
  * Return supported browser search engines.
  */
-public func browserSearchEngines() -> [BrowserSearchEngineInfo] {
-    return try! FfiConverterSequenceTypeBrowserSearchEngineInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_search_engines($0)
-    })
+public func browserSearchEngines() -> [BrowserSearchEngineInfo]  {
+    return try!  FfiConverterSequenceTypeBrowserSearchEngineInfo.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_search_engines($0
+    )
+})
 }
-
 /**
  * Build the browser search URL for a query and search engine.
  */
-public func browserSearchUrl(query: String, engineId: String?) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_search_url(
-            FfiConverterString.lower(query),
-            FfiConverterOptionString.lower(engineId), $0
-        )
-    })
+public func browserSearchUrl(query: String, engineId: String?) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_search_url(
+        FfiConverterString.lower(query),
+        FfiConverterOptionString.lower(engineId),$0
+    )
+})
 }
-
 /**
  * Return the default browser session snapshot JSON document.
  */
-public func browserSessionHomeSnapshotJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_session_home_snapshot_json($0)
-    })
+public func browserSessionHomeSnapshotJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_session_home_snapshot_json($0
+    )
+})
 }
-
 /**
  * Normalize a browser session snapshot JSON document.
  */
-public func browserSessionSnapshotNormalizeJson(snapshotJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_session_snapshot_normalize_json(
-            FfiConverterString.lower(snapshotJson), $0
-        )
-    })
+public func browserSessionSnapshotNormalizeJson(snapshotJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_session_snapshot_normalize_json(
+        FfiConverterString.lower(snapshotJson),$0
+    )
+})
 }
-
 /**
  * Return the shared browser storage address canonicalization policy contract.
  */
-public func browserStorageAddressCanonicalizationPolicyJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_address_canonicalization_policy_json($0)
-    })
+public func browserStorageAddressCanonicalizationPolicyJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_address_canonicalization_policy_json($0
+    )
+})
 }
-
 /**
  * Build a bookmark folder tree integrity plan in a single batch.
  */
-public func browserStorageBookmarkFolderTreeIntegrityPlanJson(foldersJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_bookmark_folder_tree_integrity_plan_json(
-            FfiConverterString.lower(foldersJson), $0
-        )
-    })
+public func browserStorageBookmarkFolderTreeIntegrityPlanJson(foldersJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_bookmark_folder_tree_integrity_plan_json(
+        FfiConverterString.lower(foldersJson),$0
+    )
+})
 }
-
 /**
  * Return the shared bookmark folder tree integrity policy contract.
  */
-public func browserStorageBookmarkFolderTreeIntegrityPolicyJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_bookmark_folder_tree_integrity_policy_json($0)
-    })
+public func browserStorageBookmarkFolderTreeIntegrityPolicyJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_bookmark_folder_tree_integrity_policy_json($0
+    )
+})
 }
-
 /**
  * Build a bookmark ownership/source resolution plan in a single batch.
  */
-public func browserStorageBookmarkOwnershipPlanJson(bookmarksJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_bookmark_ownership_plan_json(
-            FfiConverterString.lower(bookmarksJson), $0
-        )
-    })
+public func browserStorageBookmarkOwnershipPlanJson(bookmarksJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_bookmark_ownership_plan_json(
+        FfiConverterString.lower(bookmarksJson),$0
+    )
+})
 }
-
 /**
  * Return the shared bookmark ownership/source resolution policy contract.
  */
-public func browserStorageBookmarkOwnershipPolicyJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_bookmark_ownership_policy_json($0)
-    })
+public func browserStorageBookmarkOwnershipPolicyJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_bookmark_ownership_policy_json($0
+    )
+})
 }
-
 /**
  * Build a bookmark restore placement plan in a single batch.
  */
-public func browserStorageBookmarkRestorePlacementPlanJson(bookmarksJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_bookmark_restore_placement_plan_json(
-            FfiConverterString.lower(bookmarksJson), $0
-        )
-    })
+public func browserStorageBookmarkRestorePlacementPlanJson(bookmarksJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_bookmark_restore_placement_plan_json(
+        FfiConverterString.lower(bookmarksJson),$0
+    )
+})
 }
-
 /**
  * Return the shared bookmark restore placement policy contract.
  */
-public func browserStorageBookmarkRestorePlacementPolicyJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_bookmark_restore_placement_policy_json($0)
-    })
+public func browserStorageBookmarkRestorePlacementPolicyJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_bookmark_restore_placement_policy_json($0
+    )
+})
 }
-
 /**
  * Canonicalize persisted browser storage addresses in a single batch.
  */
-public func browserStorageCanonicalizeAddressesJson(addressesJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_canonicalize_addresses_json(
-            FfiConverterString.lower(addressesJson), $0
-        )
-    })
+public func browserStorageCanonicalizeAddressesJson(addressesJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_canonicalize_addresses_json(
+        FfiConverterString.lower(addressesJson),$0
+    )
+})
 }
-
 /**
  * Return the shared browser storage data model contract.
  */
-public func browserStorageDataModelJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_data_model_json($0)
-    })
+public func browserStorageDataModelJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_data_model_json($0
+    )
+})
 }
-
 /**
  * Return the shared browser storage database name.
  */
-public func browserStorageDatabaseName() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_database_name($0)
-    })
+public func browserStorageDatabaseName() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_database_name($0
+    )
+})
 }
-
 /**
  * Build history page aggregates from history visits in a single batch.
  */
-public func browserStorageHistoryVisitAggregationPlanJson(visitsJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_history_visit_aggregation_plan_json(
-            FfiConverterString.lower(visitsJson), $0
-        )
-    })
+public func browserStorageHistoryVisitAggregationPlanJson(visitsJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_history_visit_aggregation_plan_json(
+        FfiConverterString.lower(visitsJson),$0
+    )
+})
 }
-
 /**
  * Return the shared history visit aggregation policy contract.
  */
-public func browserStorageHistoryVisitAggregationPolicyJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_history_visit_aggregation_policy_json($0)
-    })
+public func browserStorageHistoryVisitAggregationPolicyJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_history_visit_aggregation_policy_json($0
+    )
+})
 }
-
 /**
  * Return shared browser storage repository SQL.
  */
-public func browserStorageRepositorySql() -> BrowserStorageRepositorySqlInfo {
-    return try! FfiConverterTypeBrowserStorageRepositorySqlInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_repository_sql($0)
-    })
+public func browserStorageRepositorySql() -> BrowserStorageRepositorySqlInfo  {
+    return try!  FfiConverterTypeBrowserStorageRepositorySqlInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_repository_sql($0
+    )
+})
 }
-
 /**
  * Build a history/session retention pruning plan in a single batch.
  */
-public func browserStorageRetentionPruningPlanJson(recordsJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_retention_pruning_plan_json(
-            FfiConverterString.lower(recordsJson), $0
-        )
-    })
+public func browserStorageRetentionPruningPlanJson(recordsJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_retention_pruning_plan_json(
+        FfiConverterString.lower(recordsJson),$0
+    )
+})
 }
-
 /**
  * Return the shared history/session retention pruning policy contract.
  */
-public func browserStorageRetentionPruningPolicyJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_retention_pruning_policy_json($0)
-    })
+public func browserStorageRetentionPruningPolicyJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_retention_pruning_policy_json($0
+    )
+})
 }
-
 /**
  * Return the shared browser storage schema contract.
  */
-public func browserStorageSchema() -> BrowserStorageSchemaInfo {
-    return try! FfiConverterTypeBrowserStorageSchemaInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_schema($0)
-    })
+public func browserStorageSchema() -> BrowserStorageSchemaInfo  {
+    return try!  FfiConverterTypeBrowserStorageSchemaInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_schema($0
+    )
+})
 }
-
 /**
  * Return the shared browser storage incremental schema migration plan JSON.
  */
-public func browserStorageSchemaMigrationPlanJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_schema_migration_plan_json($0)
-    })
+public func browserStorageSchemaMigrationPlanJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_schema_migration_plan_json($0
+    )
+})
 }
-
 /**
  * Return SQL statements for the shared browser storage schema.
  */
-public func browserStorageSchemaStatements() -> [String] {
-    return try! FfiConverterSequenceString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_schema_statements($0)
-    })
+public func browserStorageSchemaStatements() -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_schema_statements($0
+    )
+})
 }
-
 /**
  * Return the shared browser storage schema version.
  */
-public func browserStorageSchemaVersion() -> UInt32 {
-    return try! FfiConverterUInt32.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_schema_version($0)
-    })
+public func browserStorageSchemaVersion() -> UInt32  {
+    return try!  FfiConverterUInt32.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_schema_version($0
+    )
+})
 }
-
 /**
  * Build a session active-tab consistency plan in a single batch.
  */
-public func browserStorageSessionActiveTabConsistencyPlanJson(sessionsJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_session_active_tab_consistency_plan_json(
-            FfiConverterString.lower(sessionsJson), $0
-        )
-    })
+public func browserStorageSessionActiveTabConsistencyPlanJson(sessionsJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_session_active_tab_consistency_plan_json(
+        FfiConverterString.lower(sessionsJson),$0
+    )
+})
 }
-
 /**
  * Return the shared session active-tab consistency policy contract.
  */
-public func browserStorageSessionActiveTabConsistencyPolicyJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_session_active_tab_consistency_policy_json($0)
-    })
+public func browserStorageSessionActiveTabConsistencyPolicyJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_session_active_tab_consistency_policy_json($0
+    )
+})
 }
-
 /**
  * Build a session tab stable-id normalization plan in a single batch.
  */
-public func browserStorageSessionTabIdPlanJson(tabsJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_session_tab_id_plan_json(
-            FfiConverterString.lower(tabsJson), $0
-        )
-    })
+public func browserStorageSessionTabIdPlanJson(tabsJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_session_tab_id_plan_json(
+        FfiConverterString.lower(tabsJson),$0
+    )
+})
 }
-
 /**
  * Build a contiguous session tab ordering plan in a single batch.
  */
-public func browserStorageSessionTabOrderingPlanJson(tabsJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_session_tab_ordering_plan_json(
-            FfiConverterString.lower(tabsJson), $0
-        )
-    })
+public func browserStorageSessionTabOrderingPlanJson(tabsJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_session_tab_ordering_plan_json(
+        FfiConverterString.lower(tabsJson),$0
+    )
+})
 }
-
 /**
  * Return the shared session tab ordering policy contract.
  */
-public func browserStorageSessionTabOrderingPolicyJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_session_tab_ordering_policy_json($0)
-    })
+public func browserStorageSessionTabOrderingPolicyJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_session_tab_ordering_policy_json($0
+    )
+})
 }
-
 /**
  * Build a browser storage sync ack execution plan JSON payload.
  */
-public func browserStorageSyncAckPlanJson(ackJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_ack_plan_json(
-            FfiConverterString.lower(ackJson), $0
-        )
-    })
+public func browserStorageSyncAckPlanJson(ackJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_ack_plan_json(
+        FfiConverterString.lower(ackJson),$0
+    )
+})
 }
-
 /**
  * Build a browser storage sync batch JSON payload from dirty native SQL rows.
  */
-public func browserStorageSyncBatchFromDirtyRowsJson(scope: String, deviceId: String, generatedAtUnixSeconds: Int64, rowsJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_batch_from_dirty_rows_json(
-            FfiConverterString.lower(scope),
-            FfiConverterString.lower(deviceId),
-            FfiConverterInt64.lower(generatedAtUnixSeconds),
-            FfiConverterString.lower(rowsJson), $0
-        )
-    })
+public func browserStorageSyncBatchFromDirtyRowsJson(scope: String, deviceId: String, generatedAtUnixSeconds: Int64, rowsJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_batch_from_dirty_rows_json(
+        FfiConverterString.lower(scope),
+        FfiConverterString.lower(deviceId),
+        FfiConverterInt64.lower(generatedAtUnixSeconds),
+        FfiConverterString.lower(rowsJson),$0
+    )
+})
 }
-
 /**
  * Build the ack batch that is safe to apply after remote rows were applied locally.
  */
-public func browserStorageSyncClientAckBatchAfterRemoteApplyJson(responseJson: String, remoteApplyResultJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_client_ack_batch_after_remote_apply_json(
-            FfiConverterString.lower(responseJson),
-            FfiConverterString.lower(remoteApplyResultJson), $0
-        )
-    })
+public func browserStorageSyncClientAckBatchAfterRemoteApplyJson(responseJson: String, remoteApplyResultJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_client_ack_batch_after_remote_apply_json(
+        FfiConverterString.lower(responseJson),
+        FfiConverterString.lower(remoteApplyResultJson),$0
+    )
+})
 }
-
 /**
  * Adjudicate one applied sync cycle response into the platform-facing result envelope.
  */
-public func browserStorageSyncClientCycleApplyResultJson(responseJson: String, remoteApplyResultJson: String, ackApplied: Bool) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_client_cycle_apply_result_json(
-            FfiConverterString.lower(responseJson),
-            FfiConverterString.lower(remoteApplyResultJson),
-            FfiConverterBool.lower(ackApplied), $0
-        )
-    })
+public func browserStorageSyncClientCycleApplyResultJson(responseJson: String, remoteApplyResultJson: String, ackApplied: Bool) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_client_cycle_apply_result_json(
+        FfiConverterString.lower(responseJson),
+        FfiConverterString.lower(remoteApplyResultJson),
+        FfiConverterBool.lower(ackApplied),$0
+    )
+})
 }
-
 /**
  * Build the client-side apply/ack execution plan for a sync cycle response.
  */
-public func browserStorageSyncClientCyclePlanJson(responseJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_client_cycle_plan_json(
-            FfiConverterString.lower(responseJson), $0
-        )
-    })
+public func browserStorageSyncClientCyclePlanJson(responseJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_client_cycle_plan_json(
+        FfiConverterString.lower(responseJson),$0
+    )
+})
 }
-
 /**
  * Summarize high-watermark cleanup delete results and build retry/reread decisions.
  */
-public func browserStorageSyncCloudCleanupResultPlanJson(highWatermarkPlanJson: String, deleteResultsJson: String, generatedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_cleanup_result_plan_json(
-            FfiConverterString.lower(highWatermarkPlanJson),
-            FfiConverterString.lower(deleteResultsJson),
-            FfiConverterInt64.lower(generatedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudCleanupResultPlanJson(highWatermarkPlanJson: String, deleteResultsJson: String, generatedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_cleanup_result_plan_json(
+        FfiConverterString.lower(highWatermarkPlanJson),
+        FfiConverterString.lower(deleteResultsJson),
+        FfiConverterInt64.lower(generatedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Build a cloud-drive provider write/delete plan for snapshot/log compaction.
  */
-public func browserStorageSyncCloudCompactionPlanJson(manifestJson: String, manifestRevision: String, snapshotsJson: String, logsJson: String, deviceId: String, generatedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_compaction_plan_json(
-            FfiConverterString.lower(manifestJson),
-            FfiConverterString.lower(manifestRevision),
-            FfiConverterString.lower(snapshotsJson),
-            FfiConverterString.lower(logsJson),
-            FfiConverterString.lower(deviceId),
-            FfiConverterInt64.lower(generatedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudCompactionPlanJson(manifestJson: String, manifestRevision: String, snapshotsJson: String, logsJson: String, deviceId: String, generatedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_compaction_plan_json(
+        FfiConverterString.lower(manifestJson),
+        FfiConverterString.lower(manifestRevision),
+        FfiConverterString.lower(snapshotsJson),
+        FfiConverterString.lower(logsJson),
+        FfiConverterString.lower(deviceId),
+        FfiConverterInt64.lower(generatedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Summarize cloud-drive compaction write/delete results and build retry/cleanup decisions.
  */
-public func browserStorageSyncCloudCompactionResultPlanJson(compactionPlanJson: String, writeResultsJson: String, deleteResultsJson: String, generatedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_compaction_result_plan_json(
-            FfiConverterString.lower(compactionPlanJson),
-            FfiConverterString.lower(writeResultsJson),
-            FfiConverterString.lower(deleteResultsJson),
-            FfiConverterInt64.lower(generatedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudCompactionResultPlanJson(compactionPlanJson: String, writeResultsJson: String, deleteResultsJson: String, generatedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_compaction_result_plan_json(
+        FfiConverterString.lower(compactionPlanJson),
+        FfiConverterString.lower(writeResultsJson),
+        FfiConverterString.lower(deleteResultsJson),
+        FfiConverterInt64.lower(generatedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Classify a batch of provider-read cloud-drive browser sync documents before adapters continue.
  */
-public func browserStorageSyncCloudCompatibilityPreflightJson(documentsJson: String, observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_compatibility_preflight_json(
-            FfiConverterString.lower(documentsJson),
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudCompatibilityPreflightJson(documentsJson: String, observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_compatibility_preflight_json(
+        FfiConverterString.lower(documentsJson),
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Classify whether a cloud-drive browser sync document can be read/written by this client.
  */
-public func browserStorageSyncCloudCompatibilityStatusJson(documentKind: String, documentJson: String, observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_compatibility_status_json(
-            FfiConverterString.lower(documentKind),
-            FfiConverterString.lower(documentJson),
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudCompatibilityStatusJson(documentKind: String, documentJson: String, observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_compatibility_status_json(
+        FfiConverterString.lower(documentKind),
+        FfiConverterString.lower(documentJson),
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Compose cloud-drive cycle client/status/schedule state into one attempt plan.
  */
-public func browserStorageSyncCloudCycleAttemptPlanJson(cycleRoundJson: String, retryAttempt: UInt32, observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_attempt_plan_json(
-            FfiConverterString.lower(cycleRoundJson),
-            FfiConverterUInt32.lower(retryAttempt),
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudCycleAttemptPlanJson(cycleRoundJson: String, retryAttempt: UInt32, observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_attempt_plan_json(
+        FfiConverterString.lower(cycleRoundJson),
+        FfiConverterUInt32.lower(retryAttempt),
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Adjudicate the native execution of one cloud cycle client plan into the result envelope.
  */
-public func browserStorageSyncCloudCycleClientApplyResultJson(cycleRoundJson: String, stepResultsJson: String, remoteApplyResultJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_client_apply_result_json(
-            FfiConverterString.lower(cycleRoundJson),
-            FfiConverterString.lower(stepResultsJson),
-            FfiConverterString.lower(remoteApplyResultJson), $0
-        )
-    })
+public func browserStorageSyncCloudCycleClientApplyResultJson(cycleRoundJson: String, stepResultsJson: String, remoteApplyResultJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_client_apply_result_json(
+        FfiConverterString.lower(cycleRoundJson),
+        FfiConverterString.lower(stepResultsJson),
+        FfiConverterString.lower(remoteApplyResultJson),$0
+    )
+})
 }
-
 /**
  * Flatten a cloud-drive cycle round result into native-executable client steps.
  */
-public func browserStorageSyncCloudCycleClientPlanJson(cycleRoundJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_client_plan_json(
-            FfiConverterString.lower(cycleRoundJson), $0
-        )
-    })
+public func browserStorageSyncCloudCycleClientPlanJson(cycleRoundJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_client_plan_json(
+        FfiConverterString.lower(cycleRoundJson),$0
+    )
+})
 }
-
 /**
  * Plan a bounded cloud-drive cycle loop from already-produced cycle rounds.
  */
-public func browserStorageSyncCloudCycleLoopPlanJson(cycleRoundsJson: String, retryAttempt: UInt32, observedAtUnixSeconds: Int64, maxAttempts: UInt32) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_loop_plan_json(
-            FfiConverterString.lower(cycleRoundsJson),
-            FfiConverterUInt32.lower(retryAttempt),
-            FfiConverterInt64.lower(observedAtUnixSeconds),
-            FfiConverterUInt32.lower(maxAttempts), $0
-        )
-    })
+public func browserStorageSyncCloudCycleLoopPlanJson(cycleRoundsJson: String, retryAttempt: UInt32, observedAtUnixSeconds: Int64, maxAttempts: UInt32) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_loop_plan_json(
+        FfiConverterString.lower(cycleRoundsJson),
+        FfiConverterUInt32.lower(retryAttempt),
+        FfiConverterInt64.lower(observedAtUnixSeconds),
+        FfiConverterUInt32.lower(maxAttempts),$0
+    )
+})
 }
-
 /**
  * Build platform-consumable cloud-drive cycle schedule state from a cloud status policy.
  */
-public func browserStorageSyncCloudCycleScheduleStateJson(statusPolicyJson: String, observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_schedule_state_json(
-            FfiConverterString.lower(statusPolicyJson),
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudCycleScheduleStateJson(statusPolicyJson: String, observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_schedule_state_json(
+        FfiConverterString.lower(statusPolicyJson),
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Classify a cloud-drive cycle round for native schedulers and provider recovery UX.
  */
-public func browserStorageSyncCloudCycleStatusPolicyJson(cycleRoundJson: String, retryAttempt: UInt32) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_status_policy_json(
-            FfiConverterString.lower(cycleRoundJson),
-            FfiConverterUInt32.lower(retryAttempt), $0
-        )
-    })
+public func browserStorageSyncCloudCycleStatusPolicyJson(cycleRoundJson: String, retryAttempt: UInt32) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_status_policy_json(
+        FfiConverterString.lower(cycleRoundJson),
+        FfiConverterUInt32.lower(retryAttempt),$0
+    )
+})
 }
-
 /**
  * Return the Rust-owned cloud-drive browser sync data model contract.
  */
-public func browserStorageSyncCloudDataModelJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_data_model_json($0)
-    })
+public func browserStorageSyncCloudDataModelJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_data_model_json($0
+    )
+})
 }
-
 /**
  * Build a default cloud-drive browser sync manifest JSON payload.
  */
-public func browserStorageSyncCloudDefaultManifestJson(scope: String, deviceId: String, generatedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_default_manifest_json(
-            FfiConverterString.lower(scope),
-            FfiConverterString.lower(deviceId),
-            FfiConverterInt64.lower(generatedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudDefaultManifestJson(scope: String, deviceId: String, generatedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_default_manifest_json(
+        FfiConverterString.lower(scope),
+        FfiConverterString.lower(deviceId),
+        FfiConverterInt64.lower(generatedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Build a batched cloud high-watermark/retention status plan from manifest, snapshot, log, and local cursor state.
  */
-public func browserStorageSyncCloudHighWatermarkPlanJson(manifestJson: String, snapshotsJson: String, logsJson: String, cursorsJson: String, deviceId: String, generatedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_high_watermark_plan_json(
-            FfiConverterString.lower(manifestJson),
-            FfiConverterString.lower(snapshotsJson),
-            FfiConverterString.lower(logsJson),
-            FfiConverterString.lower(cursorsJson),
-            FfiConverterString.lower(deviceId),
-            FfiConverterInt64.lower(generatedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudHighWatermarkPlanJson(manifestJson: String, snapshotsJson: String, logsJson: String, cursorsJson: String, deviceId: String, generatedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_high_watermark_plan_json(
+        FfiConverterString.lower(manifestJson),
+        FfiConverterString.lower(snapshotsJson),
+        FfiConverterString.lower(logsJson),
+        FfiConverterString.lower(cursorsJson),
+        FfiConverterString.lower(deviceId),
+        FfiConverterInt64.lower(generatedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Describe the Rust-owned cloud high-watermark and retention status policy.
  */
-public func browserStorageSyncCloudHighWatermarkPolicyJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_high_watermark_policy_json($0)
-    })
+public func browserStorageSyncCloudHighWatermarkPolicyJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_high_watermark_policy_json($0
+    )
+})
 }
-
 /**
  * Return the Rust-owned local-folder cloud-store capabilities.
  */
-public func browserStorageSyncCloudLocalFolderCapabilitiesJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_capabilities_json($0)
-    })
+public func browserStorageSyncCloudLocalFolderCapabilitiesJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_capabilities_json($0
+    )
+})
 }
-
 /**
  * Preflight the Rust-owned local-folder cloud-store capabilities.
  */
-public func browserStorageSyncCloudLocalFolderCapabilityPreflightJson(observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_capability_preflight_json(
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudLocalFolderCapabilityPreflightJson(observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_capability_preflight_json(
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Run one cloud-drive high-watermark cleanup round against a Rust-owned local-folder provider store.
  */
-public func browserStorageSyncCloudLocalFolderCleanupRoundJson(rootDir: String, cursorsJson: String, deviceId: String, generatedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_cleanup_round_json(
-            FfiConverterString.lower(rootDir),
-            FfiConverterString.lower(cursorsJson),
-            FfiConverterString.lower(deviceId),
-            FfiConverterInt64.lower(generatedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudLocalFolderCleanupRoundJson(rootDir: String, cursorsJson: String, deviceId: String, generatedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_cleanup_round_json(
+        FfiConverterString.lower(rootDir),
+        FfiConverterString.lower(cursorsJson),
+        FfiConverterString.lower(deviceId),
+        FfiConverterInt64.lower(generatedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Run one cloud-drive compaction round against a Rust-owned local-folder provider store.
  */
-public func browserStorageSyncCloudLocalFolderCompactionRoundJson(rootDir: String, deviceId: String, generatedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_compaction_round_json(
-            FfiConverterString.lower(rootDir),
-            FfiConverterString.lower(deviceId),
-            FfiConverterInt64.lower(generatedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudLocalFolderCompactionRoundJson(rootDir: String, deviceId: String, generatedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_compaction_round_json(
+        FfiConverterString.lower(rootDir),
+        FfiConverterString.lower(deviceId),
+        FfiConverterInt64.lower(generatedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Preflight cloud-file compatibility by reading the Rust-owned local-folder store once.
  */
-public func browserStorageSyncCloudLocalFolderCompatibilityPreflightJson(rootDir: String, observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_compatibility_preflight_json(
-            FfiConverterString.lower(rootDir),
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudLocalFolderCompatibilityPreflightJson(rootDir: String, observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_compatibility_preflight_json(
+        FfiConverterString.lower(rootDir),
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Run one cloud-drive sync cycle against a Rust-owned local-folder provider store.
  */
-public func browserStorageSyncCloudLocalFolderCycleRoundJson(rootDir: String, pushRequestJson: String, cursorsJson: String, deviceId: String, generatedAtUnixSeconds: Int64, maxLogObjectsPerCollection: UInt32) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_cycle_round_json(
-            FfiConverterString.lower(rootDir),
-            FfiConverterString.lower(pushRequestJson),
-            FfiConverterString.lower(cursorsJson),
-            FfiConverterString.lower(deviceId),
-            FfiConverterInt64.lower(generatedAtUnixSeconds),
-            FfiConverterUInt32.lower(maxLogObjectsPerCollection), $0
-        )
-    })
+public func browserStorageSyncCloudLocalFolderCycleRoundJson(rootDir: String, pushRequestJson: String, cursorsJson: String, deviceId: String, generatedAtUnixSeconds: Int64, maxLogObjectsPerCollection: UInt32) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_cycle_round_json(
+        FfiConverterString.lower(rootDir),
+        FfiConverterString.lower(pushRequestJson),
+        FfiConverterString.lower(cursorsJson),
+        FfiConverterString.lower(deviceId),
+        FfiConverterInt64.lower(generatedAtUnixSeconds),
+        FfiConverterUInt32.lower(maxLogObjectsPerCollection),$0
+    )
+})
 }
-
 /**
  * Run one cloud-drive device membership round against a Rust-owned local-folder provider store.
  */
-public func browserStorageSyncCloudLocalFolderMembershipRoundJson(rootDir: String, requestJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_membership_round_json(
-            FfiConverterString.lower(rootDir),
-            FfiConverterString.lower(requestJson), $0
-        )
-    })
+public func browserStorageSyncCloudLocalFolderMembershipRoundJson(rootDir: String, requestJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_membership_round_json(
+        FfiConverterString.lower(rootDir),
+        FfiConverterString.lower(requestJson),$0
+    )
+})
 }
-
 /**
  * Run one cloud-drive recovery-snapshot retention round against a Rust-owned local-folder provider store.
  */
-public func browserStorageSyncCloudLocalFolderRecoveryRetentionRoundJson(rootDir: String, retainSnapshots: UInt32, generatedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_recovery_retention_round_json(
-            FfiConverterString.lower(rootDir),
-            FfiConverterUInt32.lower(retainSnapshots),
-            FfiConverterInt64.lower(generatedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudLocalFolderRecoveryRetentionRoundJson(rootDir: String, retainSnapshots: UInt32, generatedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_recovery_retention_round_json(
+        FfiConverterString.lower(rootDir),
+        FfiConverterUInt32.lower(retainSnapshots),
+        FfiConverterInt64.lower(generatedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Run one local-folder provider recovery snapshot round through Rust.
  */
-public func browserStorageSyncCloudLocalFolderRecoverySnapshotRoundJson(rootDir: String, schemaMigrationPlaybookJson: String, compatibilityPreflightJson: String, observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_recovery_snapshot_round_json(
-            FfiConverterString.lower(rootDir),
-            FfiConverterString.lower(schemaMigrationPlaybookJson),
-            FfiConverterString.lower(compatibilityPreflightJson),
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudLocalFolderRecoverySnapshotRoundJson(rootDir: String, schemaMigrationPlaybookJson: String, compatibilityPreflightJson: String, observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_recovery_snapshot_round_json(
+        FfiConverterString.lower(rootDir),
+        FfiConverterString.lower(schemaMigrationPlaybookJson),
+        FfiConverterString.lower(compatibilityPreflightJson),
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Build a cloud-drive browser sync log object JSON payload from a sync batch.
  */
-public func browserStorageSyncCloudLogObjectJson(collection: String, sequence: Int64, batchJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_log_object_json(
-            FfiConverterString.lower(collection),
-            FfiConverterInt64.lower(sequence),
-            FfiConverterString.lower(batchJson), $0
-        )
-    })
+public func browserStorageSyncCloudLogObjectJson(collection: String, sequence: Int64, batchJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_log_object_json(
+        FfiConverterString.lower(collection),
+        FfiConverterInt64.lower(sequence),
+        FfiConverterString.lower(batchJson),$0
+    )
+})
 }
-
 /**
  * Compose cloud-drive membership status/schedule state into one connect/revoke attempt plan.
  */
-public func browserStorageSyncCloudMembershipAttemptPlanJson(membershipRoundJson: String, retryAttempt: UInt32, observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_attempt_plan_json(
-            FfiConverterString.lower(membershipRoundJson),
-            FfiConverterUInt32.lower(retryAttempt),
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudMembershipAttemptPlanJson(membershipRoundJson: String, retryAttempt: UInt32, observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_attempt_plan_json(
+        FfiConverterString.lower(membershipRoundJson),
+        FfiConverterUInt32.lower(retryAttempt),
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Plan a bounded cloud-drive membership loop from already-produced connect/revoke rounds.
  */
-public func browserStorageSyncCloudMembershipLoopPlanJson(membershipRoundsJson: String, retryAttempt: UInt32, observedAtUnixSeconds: Int64, maxAttempts: UInt32) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_loop_plan_json(
-            FfiConverterString.lower(membershipRoundsJson),
-            FfiConverterUInt32.lower(retryAttempt),
-            FfiConverterInt64.lower(observedAtUnixSeconds),
-            FfiConverterUInt32.lower(maxAttempts), $0
-        )
-    })
+public func browserStorageSyncCloudMembershipLoopPlanJson(membershipRoundsJson: String, retryAttempt: UInt32, observedAtUnixSeconds: Int64, maxAttempts: UInt32) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_loop_plan_json(
+        FfiConverterString.lower(membershipRoundsJson),
+        FfiConverterUInt32.lower(retryAttempt),
+        FfiConverterInt64.lower(observedAtUnixSeconds),
+        FfiConverterUInt32.lower(maxAttempts),$0
+    )
+})
 }
-
 /**
  * Build an ordered cloud-drive provider write plan for device membership join/revoke.
  */
-public func browserStorageSyncCloudMembershipPlanJson(requestJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_plan_json(
-            FfiConverterString.lower(requestJson), $0
-        )
-    })
+public func browserStorageSyncCloudMembershipPlanJson(requestJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_plan_json(
+        FfiConverterString.lower(requestJson),$0
+    )
+})
 }
-
 /**
  * Classify provider write receipts for a cloud-drive device membership plan.
  */
-public func browserStorageSyncCloudMembershipResultPlanJson(membershipPlanJson: String, writeResultsJson: String, generatedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_result_plan_json(
-            FfiConverterString.lower(membershipPlanJson),
-            FfiConverterString.lower(writeResultsJson),
-            FfiConverterInt64.lower(generatedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudMembershipResultPlanJson(membershipPlanJson: String, writeResultsJson: String, generatedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_result_plan_json(
+        FfiConverterString.lower(membershipPlanJson),
+        FfiConverterString.lower(writeResultsJson),
+        FfiConverterInt64.lower(generatedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Build platform-consumable cloud-drive membership schedule state from a membership status policy.
  */
-public func browserStorageSyncCloudMembershipScheduleStateJson(statusPolicyJson: String, observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_schedule_state_json(
-            FfiConverterString.lower(statusPolicyJson),
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudMembershipScheduleStateJson(statusPolicyJson: String, observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_schedule_state_json(
+        FfiConverterString.lower(statusPolicyJson),
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Classify a cloud-drive membership round for connect/revoke UX and provider recovery.
  */
-public func browserStorageSyncCloudMembershipStatusPolicyJson(membershipRoundJson: String, retryAttempt: UInt32) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_status_policy_json(
-            FfiConverterString.lower(membershipRoundJson),
-            FfiConverterUInt32.lower(retryAttempt), $0
-        )
-    })
+public func browserStorageSyncCloudMembershipStatusPolicyJson(membershipRoundJson: String, retryAttempt: UInt32) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_membership_status_policy_json(
+        FfiConverterString.lower(membershipRoundJson),
+        FfiConverterUInt32.lower(retryAttempt),$0
+    )
+})
 }
-
 /**
  * Build a local/exportable cloud-drive sync observability event from diagnostics and cycle plans.
  */
-public func browserStorageSyncCloudObservabilityEventJson(providerDiagnosticsJson: String, attemptPlanJson: String, loopPlanJson: String, observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_observability_event_json(
-            FfiConverterString.lower(providerDiagnosticsJson),
-            FfiConverterString.lower(attemptPlanJson),
-            FfiConverterString.lower(loopPlanJson),
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudObservabilityEventJson(providerDiagnosticsJson: String, attemptPlanJson: String, loopPlanJson: String, observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_observability_event_json(
+        FfiConverterString.lower(providerDiagnosticsJson),
+        FfiConverterString.lower(attemptPlanJson),
+        FfiConverterString.lower(loopPlanJson),
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Return the Rust-owned provider adapter object-space contract.
  */
-public func browserStorageSyncCloudProviderAdapterContractJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_adapter_contract_json($0)
-    })
+public func browserStorageSyncCloudProviderAdapterContractJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_adapter_contract_json($0
+    )
+})
 }
-
 /**
  * Build the provider adapter object-space readiness plan.
  */
-public func browserStorageSyncCloudProviderAdapterPlanJson(adapterSnapshotJson: String, observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_adapter_plan_json(
-            FfiConverterString.lower(adapterSnapshotJson),
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudProviderAdapterPlanJson(adapterSnapshotJson: String, observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_adapter_plan_json(
+        FfiConverterString.lower(adapterSnapshotJson),
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Return the Rust-owned provider connection/session status contract.
  */
-public func browserStorageSyncCloudProviderConnectionContractJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_connection_contract_json($0)
-    })
+public func browserStorageSyncCloudProviderConnectionContractJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_connection_contract_json($0
+    )
+})
 }
-
 /**
  * Classify provider connection/session, store readiness, and membership readiness.
  */
-public func browserStorageSyncCloudProviderConnectionStatusPolicyJson(providerSnapshotJson: String, retryAttempt: UInt32, observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_connection_status_policy_json(
-            FfiConverterString.lower(providerSnapshotJson),
-            FfiConverterUInt32.lower(retryAttempt),
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudProviderConnectionStatusPolicyJson(providerSnapshotJson: String, retryAttempt: UInt32, observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_connection_status_policy_json(
+        FfiConverterString.lower(providerSnapshotJson),
+        FfiConverterUInt32.lower(retryAttempt),
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Summarize provider capability, cloud-file compatibility, provider errors, cycle status, and schedule state for sync UI diagnostics.
  */
-public func browserStorageSyncCloudProviderDiagnosticsJson(capabilityPreflightJson: String, compatibilityPreflightJson: String, providerErrorClassificationJson: String, cycleStatusPolicyJson: String, scheduleStateJson: String, observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_diagnostics_json(
-            FfiConverterString.lower(capabilityPreflightJson),
-            FfiConverterString.lower(compatibilityPreflightJson),
-            FfiConverterString.lower(providerErrorClassificationJson),
-            FfiConverterString.lower(cycleStatusPolicyJson),
-            FfiConverterString.lower(scheduleStateJson),
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudProviderDiagnosticsJson(capabilityPreflightJson: String, compatibilityPreflightJson: String, providerErrorClassificationJson: String, cycleStatusPolicyJson: String, scheduleStateJson: String, observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_diagnostics_json(
+        FfiConverterString.lower(capabilityPreflightJson),
+        FfiConverterString.lower(compatibilityPreflightJson),
+        FfiConverterString.lower(providerErrorClassificationJson),
+        FfiConverterString.lower(cycleStatusPolicyJson),
+        FfiConverterString.lower(scheduleStateJson),
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Classify provider SDK/native error batches for retry, reread, and recovery.
  */
-public func browserStorageSyncCloudProviderErrorClassificationJson(providerErrorsJson: String, retryAttempt: UInt32, observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_error_classification_json(
-            FfiConverterString.lower(providerErrorsJson),
-            FfiConverterUInt32.lower(retryAttempt),
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudProviderErrorClassificationJson(providerErrorsJson: String, retryAttempt: UInt32, observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_error_classification_json(
+        FfiConverterString.lower(providerErrorsJson),
+        FfiConverterUInt32.lower(retryAttempt),
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Return the Rust-owned provider error classification policy.
  */
-public func browserStorageSyncCloudProviderErrorPolicyJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_error_policy_json($0)
-    })
+public func browserStorageSyncCloudProviderErrorPolicyJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_error_policy_json($0
+    )
+})
 }
-
 /**
  * Build a remote-apply plan from cloud-drive browser sync pull read results.
  */
-public func browserStorageSyncCloudPullApplyPlanJson(manifestJson: String, deviceId: String, cursorsJson: String, snapshotsJson: String, logsJson: String, generatedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_pull_apply_plan_json(
-            FfiConverterString.lower(manifestJson),
-            FfiConverterString.lower(deviceId),
-            FfiConverterString.lower(cursorsJson),
-            FfiConverterString.lower(snapshotsJson),
-            FfiConverterString.lower(logsJson),
-            FfiConverterInt64.lower(generatedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudPullApplyPlanJson(manifestJson: String, deviceId: String, cursorsJson: String, snapshotsJson: String, logsJson: String, generatedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_pull_apply_plan_json(
+        FfiConverterString.lower(manifestJson),
+        FfiConverterString.lower(deviceId),
+        FfiConverterString.lower(cursorsJson),
+        FfiConverterString.lower(snapshotsJson),
+        FfiConverterString.lower(logsJson),
+        FfiConverterInt64.lower(generatedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Build follow-up provider list/read operations from cloud pull pagination cursors.
  */
-public func browserStorageSyncCloudPullContinuationPlanJson(pullPlanJson: String, readResultsJson: String, generatedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_pull_continuation_plan_json(
-            FfiConverterString.lower(pullPlanJson),
-            FfiConverterString.lower(readResultsJson),
-            FfiConverterInt64.lower(generatedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudPullContinuationPlanJson(pullPlanJson: String, readResultsJson: String, generatedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_pull_continuation_plan_json(
+        FfiConverterString.lower(pullPlanJson),
+        FfiConverterString.lower(readResultsJson),
+        FfiConverterInt64.lower(generatedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Build a cloud-drive provider read plan for a browser sync pull.
  */
-public func browserStorageSyncCloudPullPlanJson(manifestJson: String, deviceId: String, cursorsJson: String, generatedAtUnixSeconds: Int64, maxLogObjectsPerCollection: UInt32) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_pull_plan_json(
-            FfiConverterString.lower(manifestJson),
-            FfiConverterString.lower(deviceId),
-            FfiConverterString.lower(cursorsJson),
-            FfiConverterInt64.lower(generatedAtUnixSeconds),
-            FfiConverterUInt32.lower(maxLogObjectsPerCollection), $0
-        )
-    })
+public func browserStorageSyncCloudPullPlanJson(manifestJson: String, deviceId: String, cursorsJson: String, generatedAtUnixSeconds: Int64, maxLogObjectsPerCollection: UInt32) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_pull_plan_json(
+        FfiConverterString.lower(manifestJson),
+        FfiConverterString.lower(deviceId),
+        FfiConverterString.lower(cursorsJson),
+        FfiConverterInt64.lower(generatedAtUnixSeconds),
+        FfiConverterUInt32.lower(maxLogObjectsPerCollection),$0
+    )
+})
 }
-
 /**
  * Build an ordered cloud-drive provider write plan for a browser sync push.
  */
-public func browserStorageSyncCloudPushPlanJson(manifestJson: String, manifestRevision: String, deviceJson: String, deviceRevision: String, pushRequestJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_push_plan_json(
-            FfiConverterString.lower(manifestJson),
-            FfiConverterString.lower(manifestRevision),
-            FfiConverterString.lower(deviceJson),
-            FfiConverterString.lower(deviceRevision),
-            FfiConverterString.lower(pushRequestJson), $0
-        )
-    })
+public func browserStorageSyncCloudPushPlanJson(manifestJson: String, manifestRevision: String, deviceJson: String, deviceRevision: String, pushRequestJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_push_plan_json(
+        FfiConverterString.lower(manifestJson),
+        FfiConverterString.lower(manifestRevision),
+        FfiConverterString.lower(deviceJson),
+        FfiConverterString.lower(deviceRevision),
+        FfiConverterString.lower(pushRequestJson),$0
+    )
+})
 }
-
 /**
  * Summarize cloud-drive push write results and build the local ack/retry plan.
  */
-public func browserStorageSyncCloudPushResultPlanJson(pushPlanJson: String, writeResultsJson: String, generatedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_push_result_plan_json(
-            FfiConverterString.lower(pushPlanJson),
-            FfiConverterString.lower(writeResultsJson),
-            FfiConverterInt64.lower(generatedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudPushResultPlanJson(pushPlanJson: String, writeResultsJson: String, generatedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_push_result_plan_json(
+        FfiConverterString.lower(pushPlanJson),
+        FfiConverterString.lower(writeResultsJson),
+        FfiConverterInt64.lower(generatedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Plan provider recovery snapshots before explicit cloud-file migration or repair.
  */
-public func browserStorageSyncCloudRecoverySnapshotPlanJson(schemaMigrationPlaybookJson: String, compatibilityPreflightJson: String, observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_recovery_snapshot_plan_json(
-            FfiConverterString.lower(schemaMigrationPlaybookJson),
-            FfiConverterString.lower(compatibilityPreflightJson),
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudRecoverySnapshotPlanJson(schemaMigrationPlaybookJson: String, compatibilityPreflightJson: String, observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_recovery_snapshot_plan_json(
+        FfiConverterString.lower(schemaMigrationPlaybookJson),
+        FfiConverterString.lower(compatibilityPreflightJson),
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Classify provider recovery snapshot write receipts before migration or repair continues.
  */
-public func browserStorageSyncCloudRecoverySnapshotResultPlanJson(recoverySnapshotPlanJson: String, writeResultsJson: String, generatedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_recovery_snapshot_result_plan_json(
-            FfiConverterString.lower(recoverySnapshotPlanJson),
-            FfiConverterString.lower(writeResultsJson),
-            FfiConverterInt64.lower(generatedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudRecoverySnapshotResultPlanJson(recoverySnapshotPlanJson: String, writeResultsJson: String, generatedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_recovery_snapshot_result_plan_json(
+        FfiConverterString.lower(recoverySnapshotPlanJson),
+        FfiConverterString.lower(writeResultsJson),
+        FfiConverterInt64.lower(generatedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Plan the explicit cloud-file schema migration playbook from a Rust-owned rollout plan.
  */
-public func browserStorageSyncCloudSchemaMigrationPlaybookJson(schemaRolloutPlanJson: String, observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_schema_migration_playbook_json(
-            FfiConverterString.lower(schemaRolloutPlanJson),
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudSchemaMigrationPlaybookJson(schemaRolloutPlanJson: String, observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_schema_migration_playbook_json(
+        FfiConverterString.lower(schemaRolloutPlanJson),
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Plan client/cloud-file schema rollout from a Rust-owned compatibility preflight.
  */
-public func browserStorageSyncCloudSchemaRolloutPlanJson(compatibilityPreflightJson: String, observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_schema_rollout_plan_json(
-            FfiConverterString.lower(compatibilityPreflightJson),
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudSchemaRolloutPlanJson(compatibilityPreflightJson: String, observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_schema_rollout_plan_json(
+        FfiConverterString.lower(compatibilityPreflightJson),
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Build a cloud-drive browser sync snapshot object JSON payload from a sync batch.
  */
-public func browserStorageSyncCloudSnapshotObjectJson(collection: String, generatedAtUnixSeconds: Int64, batchJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_snapshot_object_json(
-            FfiConverterString.lower(collection),
-            FfiConverterInt64.lower(generatedAtUnixSeconds),
-            FfiConverterString.lower(batchJson), $0
-        )
-    })
+public func browserStorageSyncCloudSnapshotObjectJson(collection: String, generatedAtUnixSeconds: Int64, batchJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_snapshot_object_json(
+        FfiConverterString.lower(collection),
+        FfiConverterInt64.lower(generatedAtUnixSeconds),
+        FfiConverterString.lower(batchJson),$0
+    )
+})
 }
-
 /**
  * Preflight provider cloud-store capabilities before browser sync starts.
  */
-public func browserStorageSyncCloudStoreCapabilityPreflightJson(capabilitiesJson: String, observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_store_capability_preflight_json(
-            FfiConverterString.lower(capabilitiesJson),
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncCloudStoreCapabilityPreflightJson(capabilitiesJson: String, observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_store_capability_preflight_json(
+        FfiConverterString.lower(capabilitiesJson),
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Return the shared browser storage cloud provider object-store contract.
  */
-public func browserStorageSyncCloudStoreContractJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cloud_store_contract_json($0)
-    })
+public func browserStorageSyncCloudStoreContractJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cloud_store_contract_json($0
+    )
+})
 }
-
 /**
  * Return the shared browser storage sync conflict policy contract.
  */
-public func browserStorageSyncConflictPolicyJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_conflict_policy_json($0)
-    })
+public func browserStorageSyncConflictPolicyJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_conflict_policy_json($0
+    )
+})
 }
-
 /**
  * Build a platform-executable browser storage sync cycle HTTP request plan.
  */
-public func browserStorageSyncCycleRequestPlanJson(baseUrl: String, accessToken: String, pushRequestJson: String, cursorsJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cycle_request_plan_json(
-            FfiConverterString.lower(baseUrl),
-            FfiConverterString.lower(accessToken),
-            FfiConverterString.lower(pushRequestJson),
-            FfiConverterString.lower(cursorsJson), $0
-        )
-    })
+public func browserStorageSyncCycleRequestPlanJson(baseUrl: String, accessToken: String, pushRequestJson: String, cursorsJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cycle_request_plan_json(
+        FfiConverterString.lower(baseUrl),
+        FfiConverterString.lower(accessToken),
+        FfiConverterString.lower(pushRequestJson),
+        FfiConverterString.lower(cursorsJson),$0
+    )
+})
 }
-
 /**
  * Build a browser storage sync cycle response JSON payload.
  */
-public func browserStorageSyncCycleResponseJson(remoteBatchJson: String, ackJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cycle_response_json(
-            FfiConverterString.lower(remoteBatchJson),
-            FfiConverterString.lower(ackJson), $0
-        )
-    })
+public func browserStorageSyncCycleResponseJson(remoteBatchJson: String, ackJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cycle_response_json(
+        FfiConverterString.lower(remoteBatchJson),
+        FfiConverterString.lower(ackJson),$0
+    )
+})
 }
-
 /**
  * Classify an HTTP/RPC sync cycle transport result.
  */
-public func browserStorageSyncCycleTransportResultJson(statusCode: Int32, responseJson: String, errorMessage: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_cycle_transport_result_json(
-            FfiConverterInt32.lower(statusCode),
-            FfiConverterString.lower(responseJson),
-            FfiConverterString.lower(errorMessage), $0
-        )
-    })
+public func browserStorageSyncCycleTransportResultJson(statusCode: Int32, responseJson: String, errorMessage: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_cycle_transport_result_json(
+        FfiConverterInt32.lower(statusCode),
+        FfiConverterString.lower(responseJson),
+        FfiConverterString.lower(errorMessage),$0
+    )
+})
 }
-
 /**
  * Return the shared browser storage sync collection merge policy contract.
  */
-public func browserStorageSyncMergePolicyJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_merge_policy_json($0)
-    })
+public func browserStorageSyncMergePolicyJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_merge_policy_json($0
+    )
+})
 }
-
 /**
  * Build a browser storage sync pull request JSON payload.
  */
-public func browserStorageSyncPullRequestJson(scope: String, deviceId: String, generatedAtUnixSeconds: Int64, cursorsJson: String, maxRecordsPerCollection: UInt32) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_pull_request_json(
-            FfiConverterString.lower(scope),
-            FfiConverterString.lower(deviceId),
-            FfiConverterInt64.lower(generatedAtUnixSeconds),
-            FfiConverterString.lower(cursorsJson),
-            FfiConverterUInt32.lower(maxRecordsPerCollection), $0
-        )
-    })
+public func browserStorageSyncPullRequestJson(scope: String, deviceId: String, generatedAtUnixSeconds: Int64, cursorsJson: String, maxRecordsPerCollection: UInt32) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_pull_request_json(
+        FfiConverterString.lower(scope),
+        FfiConverterString.lower(deviceId),
+        FfiConverterInt64.lower(generatedAtUnixSeconds),
+        FfiConverterString.lower(cursorsJson),
+        FfiConverterUInt32.lower(maxRecordsPerCollection),$0
+    )
+})
 }
-
 /**
  * Build a browser storage sync push request JSON payload from dirty native SQL rows.
  */
-public func browserStorageSyncPushRequestFromDirtyRowsJson(scope: String, deviceId: String, generatedAtUnixSeconds: Int64, rowsJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_push_request_from_dirty_rows_json(
-            FfiConverterString.lower(scope),
-            FfiConverterString.lower(deviceId),
-            FfiConverterInt64.lower(generatedAtUnixSeconds),
-            FfiConverterString.lower(rowsJson), $0
-        )
-    })
+public func browserStorageSyncPushRequestFromDirtyRowsJson(scope: String, deviceId: String, generatedAtUnixSeconds: Int64, rowsJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_push_request_from_dirty_rows_json(
+        FfiConverterString.lower(scope),
+        FfiConverterString.lower(deviceId),
+        FfiConverterInt64.lower(generatedAtUnixSeconds),
+        FfiConverterString.lower(rowsJson),$0
+    )
+})
 }
-
 /**
  * Build a browser storage sync push request JSON payload.
  */
-public func browserStorageSyncPushRequestJson(batchJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_push_request_json(
-            FfiConverterString.lower(batchJson), $0
-        )
-    })
+public func browserStorageSyncPushRequestJson(batchJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_push_request_json(
+        FfiConverterString.lower(batchJson),$0
+    )
+})
 }
-
 /**
  * Build a browser storage remote apply execution plan JSON payload.
  */
-public func browserStorageSyncRemoteApplyPlanJson(batchJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_remote_apply_plan_json(
-            FfiConverterString.lower(batchJson), $0
-        )
-    })
+public func browserStorageSyncRemoteApplyPlanJson(batchJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_remote_apply_plan_json(
+        FfiConverterString.lower(batchJson),$0
+    )
+})
 }
-
 /**
  * Summarize native browser storage remote apply execution results.
  */
-public func browserStorageSyncRemoteApplyResultJson(planJson: String, resultJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_remote_apply_result_json(
-            FfiConverterString.lower(planJson),
-            FfiConverterString.lower(resultJson), $0
-        )
-    })
+public func browserStorageSyncRemoteApplyResultJson(planJson: String, resultJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_remote_apply_result_json(
+        FfiConverterString.lower(planJson),
+        FfiConverterString.lower(resultJson),$0
+    )
+})
 }
-
 /**
  * Build platform-consumable browser storage sync schedule state from a status policy.
  */
-public func browserStorageSyncScheduleStateJson(statusPolicyJson: String, observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_schedule_state_json(
-            FfiConverterString.lower(statusPolicyJson),
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func browserStorageSyncScheduleStateJson(statusPolicyJson: String, observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_schedule_state_json(
+        FfiConverterString.lower(statusPolicyJson),
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Build product-visible browser storage sync scheduler status from a platform snapshot.
  */
-public func browserStorageSyncSchedulerStatusJson(schedulerSnapshotJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_scheduler_status_json(
-            FfiConverterString.lower(schedulerSnapshotJson), $0
-        )
-    })
+public func browserStorageSyncSchedulerStatusJson(schedulerSnapshotJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_scheduler_status_json(
+        FfiConverterString.lower(schedulerSnapshotJson),$0
+    )
+})
 }
-
 /**
  * Build a browser storage server-side merge execution plan from a push request.
  */
-public func browserStorageSyncServerMergePlanJson(pushRequestJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_server_merge_plan_json(
-            FfiConverterString.lower(pushRequestJson), $0
-        )
-    })
+public func browserStorageSyncServerMergePlanJson(pushRequestJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_server_merge_plan_json(
+        FfiConverterString.lower(pushRequestJson),$0
+    )
+})
 }
-
 /**
  * Summarize browser storage server-side merge execution results and build an ack batch.
  */
-public func browserStorageSyncServerMergeResultJson(planJson: String, resultJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_server_merge_result_json(
-            FfiConverterString.lower(planJson),
-            FfiConverterString.lower(resultJson), $0
-        )
-    })
+public func browserStorageSyncServerMergeResultJson(planJson: String, resultJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_server_merge_result_json(
+        FfiConverterString.lower(planJson),
+        FfiConverterString.lower(resultJson),$0
+    )
+})
 }
-
 /**
  * Return shared browser storage sync SQL.
  */
-public func browserStorageSyncSql() -> BrowserStorageSyncSqlInfo {
-    return try! FfiConverterTypeBrowserStorageSyncSqlInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_sql($0)
-    })
+public func browserStorageSyncSql() -> BrowserStorageSyncSqlInfo  {
+    return try!  FfiConverterTypeBrowserStorageSyncSqlInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_sql($0
+    )
+})
 }
-
 /**
  * Build the product-level browser storage sync status/retry policy.
  */
-public func browserStorageSyncStatusPolicyJson(classification: String, shouldRetry: Bool, clientAction: String, retryAttempt: UInt32) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_status_policy_json(
-            FfiConverterString.lower(classification),
-            FfiConverterBool.lower(shouldRetry),
-            FfiConverterString.lower(clientAction),
-            FfiConverterUInt32.lower(retryAttempt), $0
-        )
-    })
+public func browserStorageSyncStatusPolicyJson(classification: String, shouldRetry: Bool, clientAction: String, retryAttempt: UInt32) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_status_policy_json(
+        FfiConverterString.lower(classification),
+        FfiConverterBool.lower(shouldRetry),
+        FfiConverterString.lower(clientAction),
+        FfiConverterUInt32.lower(retryAttempt),$0
+    )
+})
 }
-
 /**
  * Return the shared browser storage sync transport contract.
  */
-public func browserStorageSyncTransportContractJson() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_sync_transport_contract_json($0)
-    })
+public func browserStorageSyncTransportContractJson() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_sync_transport_contract_json($0
+    )
+})
 }
-
 /**
  * Return table names for the shared browser storage schema.
  */
-public func browserStorageTableNames() -> [String] {
-    return try! FfiConverterSequenceString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_browser_storage_table_names($0)
-    })
+public func browserStorageTableNames() -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_browser_storage_table_names($0
+    )
+})
 }
-
 /**
  * Return SQL used by native app repositories.
  */
-public func coreAppRepositorySql() -> CoreAppRepositorySqlInfo {
-    return try! FfiConverterTypeCoreAppRepositorySqlInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_core_app_repository_sql($0)
-    })
+public func coreAppRepositorySql() -> CoreAppRepositorySqlInfo  {
+    return try!  FfiConverterTypeCoreAppRepositorySqlInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_core_app_repository_sql($0
+    )
+})
 }
-
 /**
  * Return SQL LIKE parameters used by native app search.
  */
-public func coreAppSearchParams(query: String) -> [String] {
-    return try! FfiConverterSequenceString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_core_app_search_params(
-            FfiConverterString.lower(query), $0
-        )
-    })
+public func coreAppSearchParams(query: String) -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_core_app_search_params(
+        FfiConverterString.lower(query),$0
+    )
+})
 }
-
 /**
  * Convert a native bookmark SQL row into the shared bookmark shape.
  */
-public func coreBookmarkFromRow(row: CoreBookmarkRowInfo) -> CoreBookmarkInfo {
-    return try! FfiConverterTypeCoreBookmarkInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_core_bookmark_from_row(
-            FfiConverterTypeCoreBookmarkRowInfo.lower(row), $0
-        )
-    })
+public func coreBookmarkFromRow(row: CoreBookmarkRowInfo) -> CoreBookmarkInfo  {
+    return try!  FfiConverterTypeCoreBookmarkInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_core_bookmark_from_row(
+        FfiConverterTypeCoreBookmarkRowInfo_lower(row),$0
+    )
+})
 }
-
 /**
  * Return ordered bind values for native bookmark insert.
  */
-public func coreBookmarkInsertParams(bookmark: CoreBookmarkInfo) -> [CoreSqlValueInfo] {
-    return try! FfiConverterSequenceTypeCoreSqlValueInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_core_bookmark_insert_params(
-            FfiConverterTypeCoreBookmarkInfo.lower(bookmark), $0
-        )
-    })
+public func coreBookmarkInsertParams(bookmark: CoreBookmarkInfo) -> [CoreSqlValueInfo]  {
+    return try!  FfiConverterSequenceTypeCoreSqlValueInfo.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_core_bookmark_insert_params(
+        FfiConverterTypeCoreBookmarkInfo_lower(bookmark),$0
+    )
+})
 }
-
 /**
  * Return SQL used by native bookmark repositories.
  */
-public func coreBookmarkRepositorySql() -> CoreBookmarkRepositorySqlInfo {
-    return try! FfiConverterTypeCoreBookmarkRepositorySqlInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_core_bookmark_repository_sql($0)
-    })
+public func coreBookmarkRepositorySql() -> CoreBookmarkRepositorySqlInfo  {
+    return try!  FfiConverterTypeCoreBookmarkRepositorySqlInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_core_bookmark_repository_sql($0
+    )
+})
 }
-
 /**
  * Return SQL LIKE parameters used by native bookmark search.
  */
-public func coreBookmarkSearchParams(query: String) -> [String] {
-    return try! FfiConverterSequenceString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_core_bookmark_search_params(
-            FfiConverterString.lower(query), $0
-        )
-    })
+public func coreBookmarkSearchParams(query: String) -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_core_bookmark_search_params(
+        FfiConverterString.lower(query),$0
+    )
+})
 }
-
 /**
  * Return ordered bind values for native bookmark update.
  */
-public func coreBookmarkUpdateParams(bookmark: CoreBookmarkInfo) -> [CoreSqlValueInfo] {
-    return try! FfiConverterSequenceTypeCoreSqlValueInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_core_bookmark_update_params(
-            FfiConverterTypeCoreBookmarkInfo.lower(bookmark), $0
-        )
-    })
+public func coreBookmarkUpdateParams(bookmark: CoreBookmarkInfo) -> [CoreSqlValueInfo]  {
+    return try!  FfiConverterSequenceTypeCoreSqlValueInfo.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_core_bookmark_update_params(
+        FfiConverterTypeCoreBookmarkInfo_lower(bookmark),$0
+    )
+})
 }
-
 /**
  * Return ordered bind values for native history insert.
  */
-public func coreHistoryInsertVisitParams(id: String, title: String, appUrl: String?, appId: String?, visitTimeSeconds: Int64) -> [CoreSqlValueInfo] {
-    return try! FfiConverterSequenceTypeCoreSqlValueInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_core_history_insert_visit_params(
-            FfiConverterString.lower(id),
-            FfiConverterString.lower(title),
-            FfiConverterOptionString.lower(appUrl),
-            FfiConverterOptionString.lower(appId),
-            FfiConverterInt64.lower(visitTimeSeconds), $0
-        )
-    })
+public func coreHistoryInsertVisitParams(id: String, title: String, appUrl: String?, appId: String?, visitTimeSeconds: Int64) -> [CoreSqlValueInfo]  {
+    return try!  FfiConverterSequenceTypeCoreSqlValueInfo.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_core_history_insert_visit_params(
+        FfiConverterString.lower(id),
+        FfiConverterString.lower(title),
+        FfiConverterOptionString.lower(appUrl),
+        FfiConverterOptionString.lower(appId),
+        FfiConverterInt64.lower(visitTimeSeconds),$0
+    )
+})
 }
-
 /**
  * Convert a native history SQL row into the shared history item shape.
  */
-public func coreHistoryItemFromRow(row: CoreHistoryItemRowInfo) -> CoreHistoryItemInfo {
-    return try! FfiConverterTypeCoreHistoryItemInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_core_history_item_from_row(
-            FfiConverterTypeCoreHistoryItemRowInfo.lower(row), $0
-        )
-    })
+public func coreHistoryItemFromRow(row: CoreHistoryItemRowInfo) -> CoreHistoryItemInfo  {
+    return try!  FfiConverterTypeCoreHistoryItemInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_core_history_item_from_row(
+        FfiConverterTypeCoreHistoryItemRowInfo_lower(row),$0
+    )
+})
 }
-
 /**
  * Return SQL used by native history repositories.
  */
-public func coreHistoryRepositorySql() -> CoreHistoryRepositorySqlInfo {
-    return try! FfiConverterTypeCoreHistoryRepositorySqlInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_core_history_repository_sql($0)
-    })
+public func coreHistoryRepositorySql() -> CoreHistoryRepositorySqlInfo  {
+    return try!  FfiConverterTypeCoreHistoryRepositorySqlInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_core_history_repository_sql($0
+    )
+})
 }
-
 /**
  * Return the SQL LIKE parameter used by native history title search.
  */
-public func coreHistorySearchTitleParam(query: String) -> String? {
-    return try! FfiConverterOptionString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_core_history_search_title_param(
-            FfiConverterString.lower(query), $0
-        )
-    })
+public func coreHistorySearchTitleParam(query: String) -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_core_history_search_title_param(
+        FfiConverterString.lower(query),$0
+    )
+})
 }
-
 /**
  * Convert a native installed-app SQL row into the shared installed-app shape.
  */
-public func coreInstalledAppFromRow(row: CoreInstalledAppRowInfo) -> CoreInstalledAppInfo? {
-    return try! FfiConverterOptionTypeCoreInstalledAppInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_core_installed_app_from_row(
-            FfiConverterTypeCoreInstalledAppRowInfo.lower(row), $0
-        )
-    })
+public func coreInstalledAppFromRow(row: CoreInstalledAppRowInfo) -> CoreInstalledAppInfo?  {
+    return try!  FfiConverterOptionTypeCoreInstalledAppInfo.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_core_installed_app_from_row(
+        FfiConverterTypeCoreInstalledAppRowInfo_lower(row),$0
+    )
+})
 }
-
 /**
  * Return ordered bind values for native installed-app insert.
  */
-public func coreInstalledAppInsertParams(app: CoreInstalledAppInfo) throws -> [CoreSqlValueInfo] {
-    return try FfiConverterSequenceTypeCoreSqlValueInfo.lift(rustCallWithError(FfiConverterTypeCoreError.lift) {
-        uniffi_actro_core_fn_func_core_installed_app_insert_params(
-            FfiConverterTypeCoreInstalledAppInfo.lower(app), $0
-        )
-    })
+public func coreInstalledAppInsertParams(app: CoreInstalledAppInfo)throws  -> [CoreSqlValueInfo]  {
+    return try  FfiConverterSequenceTypeCoreSqlValueInfo.lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actro_core_fn_func_core_installed_app_insert_params(
+        FfiConverterTypeCoreInstalledAppInfo_lower(app),$0
+    )
+})
 }
-
 /**
  * Return ordered bind values for native installed-app update.
  */
-public func coreInstalledAppUpdateParams(app: CoreInstalledAppInfo) throws -> [CoreSqlValueInfo] {
-    return try FfiConverterSequenceTypeCoreSqlValueInfo.lift(rustCallWithError(FfiConverterTypeCoreError.lift) {
-        uniffi_actro_core_fn_func_core_installed_app_update_params(
-            FfiConverterTypeCoreInstalledAppInfo.lower(app), $0
-        )
-    })
+public func coreInstalledAppUpdateParams(app: CoreInstalledAppInfo)throws  -> [CoreSqlValueInfo]  {
+    return try  FfiConverterSequenceTypeCoreSqlValueInfo.lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actro_core_fn_func_core_installed_app_update_params(
+        FfiConverterTypeCoreInstalledAppInfo_lower(app),$0
+    )
+})
 }
-
 /**
  * Return all SQL statements needed to create or migrate the core schema.
  */
-public func coreSchemaStatements() -> [String] {
-    return try! FfiConverterSequenceString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_core_schema_statements($0)
-    })
+public func coreSchemaStatements() -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_core_schema_statements($0
+    )
+})
 }
-
 /**
  * Return canonical table names owned by the core schema.
  */
-public func coreSchemaTableNames() -> [String] {
-    return try! FfiConverterSequenceString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_core_schema_table_names($0)
-    })
+public func coreSchemaTableNames() -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_core_schema_table_names($0
+    )
+})
 }
-
 /**
  * Return the canonical Actro core SQLite schema version.
  */
-public func coreSchemaVersion() -> UInt32 {
-    return try! FfiConverterUInt32.lift(try! rustCall {
-        uniffi_actro_core_fn_func_core_schema_version($0)
-    })
+public func coreSchemaVersion() -> UInt32  {
+    return try!  FfiConverterUInt32.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_core_schema_version($0
+    )
+})
 }
-
 /**
  * Convert a native tag SQL row into the shared tag shape.
  */
-public func coreTagFromRow(row: CoreTagRowInfo) -> CoreTagInfo {
-    return try! FfiConverterTypeCoreTagInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_core_tag_from_row(
-            FfiConverterTypeCoreTagRowInfo.lower(row), $0
-        )
-    })
+public func coreTagFromRow(row: CoreTagRowInfo) -> CoreTagInfo  {
+    return try!  FfiConverterTypeCoreTagInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_core_tag_from_row(
+        FfiConverterTypeCoreTagRowInfo_lower(row),$0
+    )
+})
 }
-
 /**
  * Return ordered bind values for native tag insert.
  */
-public func coreTagInsertParams(id: String, name: String, color: String?, isSystem: Bool) -> [CoreSqlValueInfo] {
-    return try! FfiConverterSequenceTypeCoreSqlValueInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_core_tag_insert_params(
-            FfiConverterString.lower(id),
-            FfiConverterString.lower(name),
-            FfiConverterOptionString.lower(color),
-            FfiConverterBool.lower(isSystem), $0
-        )
-    })
+public func coreTagInsertParams(id: String, name: String, color: String?, isSystem: Bool) -> [CoreSqlValueInfo]  {
+    return try!  FfiConverterSequenceTypeCoreSqlValueInfo.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_core_tag_insert_params(
+        FfiConverterString.lower(id),
+        FfiConverterString.lower(name),
+        FfiConverterOptionString.lower(color),
+        FfiConverterBool.lower(isSystem),$0
+    )
+})
 }
-
 /**
  * Return SQL used by native tag repositories.
  */
-public func coreTagRepositorySql() -> CoreTagRepositorySqlInfo {
-    return try! FfiConverterTypeCoreTagRepositorySqlInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_core_tag_repository_sql($0)
-    })
+public func coreTagRepositorySql() -> CoreTagRepositorySqlInfo  {
+    return try!  FfiConverterTypeCoreTagRepositorySqlInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_core_tag_repository_sql($0
+    )
+})
 }
-
 /**
  * Return ordered bind values for native tag update.
  */
-public func coreTagUpdateParams(name: String, color: String?, id: String) -> [CoreSqlValueInfo] {
-    return try! FfiConverterSequenceTypeCoreSqlValueInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_core_tag_update_params(
-            FfiConverterString.lower(name),
-            FfiConverterOptionString.lower(color),
-            FfiConverterString.lower(id), $0
-        )
-    })
+public func coreTagUpdateParams(name: String, color: String?, id: String) -> [CoreSqlValueInfo]  {
+    return try!  FfiConverterSequenceTypeCoreSqlValueInfo.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_core_tag_update_params(
+        FfiConverterString.lower(name),
+        FfiConverterOptionString.lower(color),
+        FfiConverterString.lower(id),$0
+    )
+})
 }
-
 /**
- * Build the manifest integrity verification plan from a manifest JSON string.
+ * Build the payload integrity verification plan from a TOML manifest.
  */
-public func createActrIntegrityPlan(manifestJson: String) throws -> ActrIntegrityPlanInfo? {
-    return try FfiConverterOptionTypeActrIntegrityPlanInfo.lift(rustCallWithError(FfiConverterTypeCoreError.lift) {
-        uniffi_actro_core_fn_func_create_actr_integrity_plan(
-            FfiConverterString.lower(manifestJson), $0
-        )
-    })
+public func createActrIntegrityPlan(manifestToml: String)throws  -> PackageIntegrityPlanInfo?  {
+    return try  FfiConverterOptionTypePackageIntegrityPlanInfo.lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actro_core_fn_func_create_actr_integrity_plan(
+        FfiConverterString.lower(manifestToml),$0
+    )
+})
 }
-
 /**
  * Return the default runtime app status.
  */
-public func defaultRuntimeAppStatus() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_default_runtime_app_status($0)
-    })
+public func defaultRuntimeAppStatus() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_default_runtime_app_status($0
+    )
+})
 }
-
 /**
  * Return default system tags that should be protected by native clients.
  */
-public func defaultSystemTags() -> [DefaultTagInfo] {
-    return try! FfiConverterSequenceTypeDefaultTagInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_default_system_tags($0)
-    })
+public func defaultSystemTags() -> [DefaultTagInfo]  {
+    return try!  FfiConverterSequenceTypeDefaultTagInfo.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_default_system_tags($0
+    )
+})
 }
-
 /**
  * Return default colors used when creating user tags.
  */
-public func defaultTagColors() -> [String] {
-    return try! FfiConverterSequenceString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_default_tag_colors($0)
-    })
+public func defaultTagColors() -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_default_tag_colors($0
+    )
+})
 }
-
 /**
  * Return default tags that should be seeded after schema creation.
  */
-public func defaultTags() -> [DefaultTagInfo] {
-    return try! FfiConverterSequenceTypeDefaultTagInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_default_tags($0)
-    })
+public func defaultTags() -> [DefaultTagInfo]  {
+    return try!  FfiConverterSequenceTypeDefaultTagInfo.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_default_tags($0
+    )
+})
 }
-
 /**
  * Return the canonical Email native module/method/error contract.
  */
-public func emailBridgeContract() -> EmailBridgeContractInfo {
-    return try! FfiConverterTypeEmailBridgeContractInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_email_bridge_contract($0)
-    })
+public func emailBridgeContract() -> EmailBridgeContractInfo  {
+    return try!  FfiConverterTypeEmailBridgeContractInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_email_bridge_contract($0
+    )
+})
 }
-
 /**
  * Return an empty browser storage sync batch JSON payload.
  */
-public func emptyBrowserStorageSyncBatchJson(scope: String, deviceId: String, generatedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_empty_browser_storage_sync_batch_json(
-            FfiConverterString.lower(scope),
-            FfiConverterString.lower(deviceId),
-            FfiConverterInt64.lower(generatedAtUnixSeconds), $0
-        )
-    })
+public func emptyBrowserStorageSyncBatchJson(scope: String, deviceId: String, generatedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_empty_browser_storage_sync_batch_json(
+        FfiConverterString.lower(scope),
+        FfiConverterString.lower(deviceId),
+        FfiConverterInt64.lower(generatedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Evaluate a contract tuple using the current Actro host compatibility rules.
  */
-public func evaluateContract(name: String?, version: UInt32) -> ContractGateInfo {
-    return try! FfiConverterTypeContractGateInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_evaluate_contract(
-            FfiConverterOptionString.lower(name),
-            FfiConverterUInt32.lower(version), $0
-        )
-    })
+public func evaluateContract(name: String?, version: UInt32) -> ContractGateInfo  {
+    return try!  FfiConverterTypeContractGateInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_evaluate_contract(
+        FfiConverterOptionString.lower(name),
+        FfiConverterUInt32.lower(version),$0
+    )
+})
 }
-
 /**
  * Extract the app id from URLs containing `/with/{appId}`.
  */
-public func extractAppIdFromUrl(url: String) -> String? {
-    return try! FfiConverterOptionString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_extract_app_id_from_url(
-            FfiConverterString.lower(url), $0
-        )
-    })
+public func extractAppIdFromUrl(url: String) -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_extract_app_id_from_url(
+        FfiConverterString.lower(url),$0
+    )
+})
 }
-
 /**
  * Return whether the path points to a known ACTR asset extension.
  */
-public func isAssetPath(path: String) -> Bool {
-    return try! FfiConverterBool.lift(try! rustCall {
-        uniffi_actro_core_fn_func_is_asset_path(
-            FfiConverterString.lower(path), $0
-        )
-    })
+public func isAssetPath(path: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_is_asset_path(
+        FfiConverterString.lower(path),$0
+    )
+})
 }
-
 /**
  * Normalize a browser storage sync ack batch JSON payload.
  */
-public func normalizeBrowserStorageSyncAckBatchJson(ackJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_normalize_browser_storage_sync_ack_batch_json(
-            FfiConverterString.lower(ackJson), $0
-        )
-    })
+public func normalizeBrowserStorageSyncAckBatchJson(ackJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_normalize_browser_storage_sync_ack_batch_json(
+        FfiConverterString.lower(ackJson),$0
+    )
+})
 }
-
 /**
  * Normalize a browser storage sync batch JSON payload.
  */
-public func normalizeBrowserStorageSyncBatchJson(batchJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_normalize_browser_storage_sync_batch_json(
-            FfiConverterString.lower(batchJson), $0
-        )
-    })
+public func normalizeBrowserStorageSyncBatchJson(batchJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_normalize_browser_storage_sync_batch_json(
+        FfiConverterString.lower(batchJson),$0
+    )
+})
 }
-
 /**
  * Normalize a cloud-drive browser sync device JSON payload.
  */
-public func normalizeBrowserStorageSyncCloudDeviceJson(deviceJson: String, fallbackScope: String, fallbackDeviceId: String, observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_normalize_browser_storage_sync_cloud_device_json(
-            FfiConverterString.lower(deviceJson),
-            FfiConverterString.lower(fallbackScope),
-            FfiConverterString.lower(fallbackDeviceId),
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func normalizeBrowserStorageSyncCloudDeviceJson(deviceJson: String, fallbackScope: String, fallbackDeviceId: String, observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_normalize_browser_storage_sync_cloud_device_json(
+        FfiConverterString.lower(deviceJson),
+        FfiConverterString.lower(fallbackScope),
+        FfiConverterString.lower(fallbackDeviceId),
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Normalize a cloud-drive browser sync log object JSON payload.
  */
-public func normalizeBrowserStorageSyncCloudLogObjectJson(logJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_normalize_browser_storage_sync_cloud_log_object_json(
-            FfiConverterString.lower(logJson), $0
-        )
-    })
+public func normalizeBrowserStorageSyncCloudLogObjectJson(logJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_normalize_browser_storage_sync_cloud_log_object_json(
+        FfiConverterString.lower(logJson),$0
+    )
+})
 }
-
 /**
  * Normalize a cloud-drive browser sync manifest JSON payload.
  */
-public func normalizeBrowserStorageSyncCloudManifestJson(manifestJson: String, fallbackScope: String, fallbackDeviceId: String, observedAtUnixSeconds: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_normalize_browser_storage_sync_cloud_manifest_json(
-            FfiConverterString.lower(manifestJson),
-            FfiConverterString.lower(fallbackScope),
-            FfiConverterString.lower(fallbackDeviceId),
-            FfiConverterInt64.lower(observedAtUnixSeconds), $0
-        )
-    })
+public func normalizeBrowserStorageSyncCloudManifestJson(manifestJson: String, fallbackScope: String, fallbackDeviceId: String, observedAtUnixSeconds: Int64) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_normalize_browser_storage_sync_cloud_manifest_json(
+        FfiConverterString.lower(manifestJson),
+        FfiConverterString.lower(fallbackScope),
+        FfiConverterString.lower(fallbackDeviceId),
+        FfiConverterInt64.lower(observedAtUnixSeconds),$0
+    )
+})
 }
-
 /**
  * Normalize a cloud-drive browser sync snapshot object JSON payload.
  */
-public func normalizeBrowserStorageSyncCloudSnapshotObjectJson(snapshotJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_normalize_browser_storage_sync_cloud_snapshot_object_json(
-            FfiConverterString.lower(snapshotJson), $0
-        )
-    })
+public func normalizeBrowserStorageSyncCloudSnapshotObjectJson(snapshotJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_normalize_browser_storage_sync_cloud_snapshot_object_json(
+        FfiConverterString.lower(snapshotJson),$0
+    )
+})
 }
-
 /**
  * Normalize browser storage sync cursor JSON payloads.
  */
-public func normalizeBrowserStorageSyncCursorsJson(cursorsJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_normalize_browser_storage_sync_cursors_json(
-            FfiConverterString.lower(cursorsJson), $0
-        )
-    })
+public func normalizeBrowserStorageSyncCursorsJson(cursorsJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_normalize_browser_storage_sync_cursors_json(
+        FfiConverterString.lower(cursorsJson),$0
+    )
+})
 }
-
 /**
  * Normalize a browser storage sync cycle response JSON payload.
  */
-public func normalizeBrowserStorageSyncCycleResponseJson(responseJson: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_normalize_browser_storage_sync_cycle_response_json(
-            FfiConverterString.lower(responseJson), $0
-        )
-    })
+public func normalizeBrowserStorageSyncCycleResponseJson(responseJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_normalize_browser_storage_sync_cycle_response_json(
+        FfiConverterString.lower(responseJson),$0
+    )
+})
 }
-
 /**
  * Normalize a persisted browser sync provider-settings snapshot (schema,
  * provider-kind whitelist, absolute-root rule, configured determination).
  */
-public func normalizeBrowserSyncProviderSettingsJson(settingsJson: String, isRootAbsolute: Bool, observedAtUnixSeconds: Int64, freshDeviceId: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_normalize_browser_sync_provider_settings_json(
-            FfiConverterString.lower(settingsJson),
-            FfiConverterBool.lower(isRootAbsolute),
-            FfiConverterInt64.lower(observedAtUnixSeconds),
-            FfiConverterString.lower(freshDeviceId), $0
-        )
-    })
+public func normalizeBrowserSyncProviderSettingsJson(settingsJson: String, isRootAbsolute: Bool, observedAtUnixSeconds: Int64, freshDeviceId: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_normalize_browser_sync_provider_settings_json(
+        FfiConverterString.lower(settingsJson),
+        FfiConverterBool.lower(isRootAbsolute),
+        FfiConverterInt64.lower(observedAtUnixSeconds),
+        FfiConverterString.lower(freshDeviceId),$0
+    )
+})
 }
-
 /**
  * Normalize and validate a manifest integrity algorithm.
  */
-public func normalizeIntegrityAlgorithm(raw: String) -> String? {
-    return try! FfiConverterOptionString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_normalize_integrity_algorithm(
-            FfiConverterString.lower(raw), $0
-        )
-    })
+public func normalizeIntegrityAlgorithm(raw: String) -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_normalize_integrity_algorithm(
+        FfiConverterString.lower(raw),$0
+    )
+})
 }
-
 /**
  * Normalize and validate a manifest integrity file path.
  */
-public func normalizeIntegrityPath(path: String) -> String? {
-    return try! FfiConverterOptionString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_normalize_integrity_path(
-            FfiConverterString.lower(path), $0
-        )
-    })
+public func normalizeIntegrityPath(path: String) -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_normalize_integrity_path(
+        FfiConverterString.lower(path),$0
+    )
+})
 }
-
 /**
  * Collapse repeated slashes in a filesystem-like path.
  */
-public func normalizePath(path: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_normalize_path(
-            FfiConverterString.lower(path), $0
-        )
-    })
+public func normalizePath(path: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_normalize_path(
+        FfiConverterString.lower(path),$0
+    )
+})
 }
-
 /**
  * Return the canonical runtime app status string, if `value` is known.
  */
-public func normalizeRuntimeAppStatus(value: String) -> String? {
-    return try! FfiConverterOptionString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_normalize_runtime_app_status(
-            FfiConverterString.lower(value), $0
-        )
-    })
+public func normalizeRuntimeAppStatus(value: String) -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_normalize_runtime_app_status(
+        FfiConverterString.lower(value),$0
+    )
+})
 }
-
 /**
  * Normalize and validate a SHA-256 hex digest.
  */
-public func normalizeSha256Hex(hash: String) -> String? {
-    return try! FfiConverterOptionString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_normalize_sha256_hex(
-            FfiConverterString.lower(hash), $0
-        )
-    })
+public func normalizeSha256Hex(hash: String) -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_normalize_sha256_hex(
+        FfiConverterString.lower(hash),$0
+    )
+})
 }
-
 /**
  * Parse an Actr actor type wire value in `manufacturer+name` format.
  */
-public func parseActrActorType(raw: String) throws -> ActrActorTypeInfo {
-    return try FfiConverterTypeActrActorTypeInfo.lift(rustCallWithError(FfiConverterTypeCoreError.lift) {
-        uniffi_actro_core_fn_func_parse_actr_actor_type(
-            FfiConverterString.lower(raw), $0
-        )
-    })
+public func parseActrActorType(raw: String)throws  -> ActrActorTypeInfo  {
+    return try  FfiConverterTypeActrActorTypeInfo_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actro_core_fn_func_parse_actr_actor_type(
+        FfiConverterString.lower(raw),$0
+    )
+})
 }
-
+/**
+ * Parse and validate an actr-package/1 TOML manifest.
+ */
+public func parseActrPackageManifest(source: String)throws  -> ActrPackageManifestInfo  {
+    return try  FfiConverterTypeActrPackageManifestInfo_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actro_core_fn_func_parse_actr_package_manifest(
+        FfiConverterString.lower(source),$0
+    )
+})
+}
 /**
  * Parse an app source type into the canonical wire string, if known.
  */
-public func parseAppSourceType(raw: String) -> String? {
-    return try! FfiConverterOptionString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_parse_app_source_type(
-            FfiConverterString.lower(raw), $0
-        )
-    })
+public func parseAppSourceType(raw: String) -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_parse_app_source_type(
+        FfiConverterString.lower(raw),$0
+    )
+})
 }
-
-/**
- * Parse and validate an ACTR manifest JSON string.
- */
-public func parseActrManifest(json: String) throws -> ActrManifestInfo {
-    return try FfiConverterTypeActrManifestInfo.lift(rustCallWithError(FfiConverterTypeCoreError.lift) {
-        uniffi_actro_core_fn_func_parse_actr_manifest(
-            FfiConverterString.lower(json), $0
-        )
-    })
-}
-
 /**
  * Parse a system app type into the canonical wire string, if known.
  */
-public func parseSystemAppType(raw: String) -> String? {
-    return try! FfiConverterOptionString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_parse_system_app_type(
-            FfiConverterString.lower(raw), $0
-        )
-    })
+public func parseSystemAppType(raw: String) -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_parse_system_app_type(
+        FfiConverterString.lower(raw),$0
+    )
+})
 }
-
 /**
  * Parse Vosk getPartialResult JSON and return the `partial` field.
  */
-public func parseVoskPartialText(json: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_parse_vosk_partial_text(
-            FfiConverterString.lower(json), $0
-        )
-    })
+public func parseVoskPartialText(json: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_parse_vosk_partial_text(
+        FfiConverterString.lower(json),$0
+    )
+})
 }
-
 /**
  * Parse Vosk getResult/getFinalResult JSON and return the `text` field.
  */
-public func parseVoskResultText(json: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_parse_vosk_result_text(
-            FfiConverterString.lower(json), $0
-        )
-    })
+public func parseVoskResultText(json: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_parse_vosk_result_text(
+        FfiConverterString.lower(json),$0
+    )
+})
 }
-
 /**
  * Build final Chinese ASR text from platform-provided segmentation terms.
  */
-public func postProcessZhAsrSegments(text: String, segments: [AsrSegmentInfo]) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_post_process_zh_asr_segments(
-            FfiConverterString.lower(text),
-            FfiConverterSequenceTypeAsrSegmentInfo.lower(segments), $0
-        )
-    })
+public func postProcessZhAsrSegments(text: String, segments: [AsrSegmentInfo]) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_post_process_zh_asr_segments(
+        FfiConverterString.lower(text),
+        FfiConverterSequenceTypeAsrSegmentInfo.lower(segments),$0
+    )
+})
 }
-
 /**
  * Return a normalized relative path from `base_dir` to `absolute_path`.
  */
-public func relativePathFrom(absolutePath: String, baseDir: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_relative_path_from(
-            FfiConverterString.lower(absolutePath),
-            FfiConverterString.lower(baseDir), $0
-        )
-    })
+public func relativePathFrom(absolutePath: String, baseDir: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_relative_path_from(
+        FfiConverterString.lower(absolutePath),
+        FfiConverterString.lower(baseDir),$0
+    )
+})
 }
-
 /**
  * Return the canonical runtime app status for live apps.
  */
-public func runtimeAppStatusAlive() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_app_status_alive($0)
-    })
+public func runtimeAppStatusAlive() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_app_status_alive($0
+    )
+})
 }
-
 /**
  * Return the canonical runtime app status for stopped apps.
  */
-public func runtimeAppStatusDead() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_app_status_dead($0)
-    })
+public func runtimeAppStatusDead() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_app_status_dead($0
+    )
+})
 }
-
-public func runtimeAuthContextAppIdKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_auth_context_app_id_key($0)
-    })
+public func runtimeAuthContextAppIdKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_auth_context_app_id_key($0
+    )
+})
 }
-
-public func runtimeAuthContextAppUrlKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_auth_context_app_url_key($0)
-    })
+public func runtimeAuthContextAppUrlKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_auth_context_app_url_key($0
+    )
+})
 }
-
-public func runtimeAuthContextClientIdKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_auth_context_client_id_key($0)
-    })
+public func runtimeAuthContextClientIdKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_auth_context_client_id_key($0
+    )
+})
 }
-
-public func runtimeAuthContextTabIdKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_auth_context_tab_id_key($0)
-    })
+public func runtimeAuthContextTabIdKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_auth_context_tab_id_key($0
+    )
+})
 }
-
-public func runtimeBridgeAppUrlKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_bridge_app_url_key($0)
-    })
+public func runtimeBridgeAppUrlKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_bridge_app_url_key($0
+    )
+})
 }
-
-public func runtimeBridgeContainerHeightKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_bridge_container_height_key($0)
-    })
+public func runtimeBridgeContainerHeightKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_bridge_container_height_key($0
+    )
+})
 }
-
-public func runtimeBridgeContainerWidthKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_bridge_container_width_key($0)
-    })
+public func runtimeBridgeContainerWidthKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_bridge_container_width_key($0
+    )
+})
 }
-
-public func runtimeBridgeIconKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_bridge_icon_key($0)
-    })
+public func runtimeBridgeIconKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_bridge_icon_key($0
+    )
+})
 }
-
-public func runtimeBridgeIsBookmarkedKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_bridge_is_bookmarked_key($0)
-    })
+public func runtimeBridgeIsBookmarkedKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_bridge_is_bookmarked_key($0
+    )
+})
 }
-
-public func runtimeBridgeMarkedKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_bridge_marked_key($0)
-    })
+public func runtimeBridgeMarkedKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_bridge_marked_key($0
+    )
+})
 }
-
-public func runtimeBridgeStatusKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_bridge_status_key($0)
-    })
+public func runtimeBridgeStatusKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_bridge_status_key($0
+    )
+})
 }
-
 /**
  * Return canonical bridge payload keys shared by runtime tab events.
  */
-public func runtimeBridgeTabIdKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_bridge_tab_id_key($0)
-    })
+public func runtimeBridgeTabIdKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_bridge_tab_id_key($0
+    )
+})
 }
-
-public func runtimeBridgeTitleKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_bridge_title_key($0)
-    })
+public func runtimeBridgeTitleKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_bridge_title_key($0
+    )
+})
 }
-
-public func runtimeBridgeUnreadKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_bridge_unread_key($0)
-    })
+public func runtimeBridgeUnreadKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_bridge_unread_key($0
+    )
+})
 }
-
-public func runtimeBridgeVisibleKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_bridge_visible_key($0)
-    })
+public func runtimeBridgeVisibleKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_bridge_visible_key($0
+    )
+})
 }
-
 /**
  * Build the native-to-runtime container size event payload.
  */
-public func runtimeContainerSizeChangeEvent(containerWidth: Int32, containerHeight: Int32) -> RuntimeContainerSizeChangeEventInfo {
-    return try! FfiConverterTypeRuntimeContainerSizeChangeEventInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_container_size_change_event(
-            FfiConverterInt32.lower(containerWidth),
-            FfiConverterInt32.lower(containerHeight), $0
-        )
-    })
+public func runtimeContainerSizeChangeEvent(containerWidth: Int32, containerHeight: Int32) -> RuntimeContainerSizeChangeEventInfo  {
+    return try!  FfiConverterTypeRuntimeContainerSizeChangeEventInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_container_size_change_event(
+        FfiConverterInt32.lower(containerWidth),
+        FfiConverterInt32.lower(containerHeight),$0
+    )
+})
 }
-
-public func runtimeContainerSizeChangeEventName() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_container_size_change_event_name($0)
-    })
+public func runtimeContainerSizeChangeEventName() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_container_size_change_event_name($0
+    )
+})
 }
-
-public func runtimeExtensionPanelVisibleChangeEventName() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_extension_panel_visible_change_event_name($0)
-    })
+public func runtimeExtensionPanelVisibleChangeEventName() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_extension_panel_visible_change_event_name($0
+    )
+})
 }
-
 /**
  * Build the native-to-runtime extension panel visibility event payload.
  */
-public func runtimeExtensionPanelVisibleEvent(tabId: String, visible: Bool) -> RuntimeExtensionPanelVisibleEventInfo {
-    return try! FfiConverterTypeRuntimeExtensionPanelVisibleEventInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_extension_panel_visible_event(
-            FfiConverterString.lower(tabId),
-            FfiConverterBool.lower(visible), $0
-        )
-    })
+public func runtimeExtensionPanelVisibleEvent(tabId: String, visible: Bool) -> RuntimeExtensionPanelVisibleEventInfo  {
+    return try!  FfiConverterTypeRuntimeExtensionPanelVisibleEventInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_extension_panel_visible_event(
+        FfiConverterString.lower(tabId),
+        FfiConverterBool.lower(visible),$0
+    )
+})
 }
-
-public func runtimeLoginResultCodeKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_login_result_code_key($0)
-    })
+public func runtimeLoginResultCodeKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_login_result_code_key($0
+    )
+})
 }
-
-public func runtimeLoginResultErrorKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_login_result_error_key($0)
-    })
+public func runtimeLoginResultErrorKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_login_result_error_key($0
+    )
+})
 }
-
-public func runtimeLoginResultEventName() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_login_result_event_name($0)
-    })
+public func runtimeLoginResultEventName() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_login_result_event_name($0
+    )
+})
 }
-
-public func runtimeLoginResultIdTokenKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_login_result_id_token_key($0)
-    })
+public func runtimeLoginResultIdTokenKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_login_result_id_token_key($0
+    )
+})
 }
-
-public func runtimeLoginResultMessageKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_login_result_message_key($0)
-    })
+public func runtimeLoginResultMessageKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_login_result_message_key($0
+    )
+})
 }
-
-public func runtimeLoginResultTypeKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_login_result_type_key($0)
-    })
+public func runtimeLoginResultTypeKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_login_result_type_key($0
+    )
+})
 }
-
-public func runtimeLoginTypeApple() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_login_type_apple($0)
-    })
+public func runtimeLoginTypeApple() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_login_type_apple($0
+    )
+})
 }
-
-public func runtimeLoginTypeGoogle() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_login_type_google($0)
-    })
+public func runtimeLoginTypeGoogle() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_login_type_google($0
+    )
+})
 }
-
-public func runtimeLoginTypeWechat() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_login_type_wechat($0)
-    })
+public func runtimeLoginTypeWechat() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_login_type_wechat($0
+    )
+})
 }
-
-public func runtimeRootPropsCurrentTabIdKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_root_props_current_tab_id_key($0)
-    })
+public func runtimeRootPropsCurrentTabIdKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_root_props_current_tab_id_key($0
+    )
+})
 }
-
 /**
  * Build single-tab React Native runtime root props from active-tab models.
  */
-public func runtimeRootPropsFromActiveTabs(tab: ActiveTabInfo, tabs: [ActiveTabInfo], containerHeight: Int32, containerWidth: Int32) -> RuntimeRootPropsInfo {
-    return try! FfiConverterTypeRuntimeRootPropsInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_root_props_from_active_tabs(
-            FfiConverterTypeActiveTabInfo.lower(tab),
-            FfiConverterSequenceTypeActiveTabInfo.lower(tabs),
-            FfiConverterInt32.lower(containerHeight),
-            FfiConverterInt32.lower(containerWidth), $0
-        )
-    })
+public func runtimeRootPropsFromActiveTabs(tab: ActiveTabInfo, tabs: [ActiveTabInfo], containerHeight: Int32, containerWidth: Int32) -> RuntimeRootPropsInfo  {
+    return try!  FfiConverterTypeRuntimeRootPropsInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_root_props_from_active_tabs(
+        FfiConverterTypeActiveTabInfo_lower(tab),
+        FfiConverterSequenceTypeActiveTabInfo.lower(tabs),
+        FfiConverterInt32.lower(containerHeight),
+        FfiConverterInt32.lower(containerWidth),$0
+    )
+})
 }
-
 /**
  * Build single-tab React Native runtime root props from prebuilt runtime tabs.
  */
-public func runtimeRootPropsFromRuntimeTabs(tab: RuntimeTabInfo, tabs: [RuntimeTabInfo], isLeftPanelVisible: Bool, isRightPanelVisible: Bool, containerHeight: Int32, containerWidth: Int32, appUrl: String?) -> RuntimeRootPropsInfo {
-    return try! FfiConverterTypeRuntimeRootPropsInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_root_props_from_runtime_tabs(
-            FfiConverterTypeRuntimeTabInfo.lower(tab),
-            FfiConverterSequenceTypeRuntimeTabInfo.lower(tabs),
-            FfiConverterBool.lower(isLeftPanelVisible),
-            FfiConverterBool.lower(isRightPanelVisible),
-            FfiConverterInt32.lower(containerHeight),
-            FfiConverterInt32.lower(containerWidth),
-            FfiConverterOptionString.lower(appUrl), $0
-        )
-    })
+public func runtimeRootPropsFromRuntimeTabs(tab: RuntimeTabInfo, tabs: [RuntimeTabInfo], isLeftPanelVisible: Bool, isRightPanelVisible: Bool, containerHeight: Int32, containerWidth: Int32, appUrl: String?) -> RuntimeRootPropsInfo  {
+    return try!  FfiConverterTypeRuntimeRootPropsInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_root_props_from_runtime_tabs(
+        FfiConverterTypeRuntimeTabInfo_lower(tab),
+        FfiConverterSequenceTypeRuntimeTabInfo.lower(tabs),
+        FfiConverterBool.lower(isLeftPanelVisible),
+        FfiConverterBool.lower(isRightPanelVisible),
+        FfiConverterInt32.lower(containerHeight),
+        FfiConverterInt32.lower(containerWidth),
+        FfiConverterOptionString.lower(appUrl),$0
+    )
+})
 }
-
-public func runtimeRootPropsIsLeftPanelVisibleKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_root_props_is_left_panel_visible_key($0)
-    })
+public func runtimeRootPropsIsLeftPanelVisibleKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_root_props_is_left_panel_visible_key($0
+    )
+})
 }
-
-public func runtimeRootPropsIsRightPanelVisibleKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_root_props_is_right_panel_visible_key($0)
-    })
+public func runtimeRootPropsIsRightPanelVisibleKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_root_props_is_right_panel_visible_key($0
+    )
+})
 }
-
-public func runtimeRootPropsSingleTabModeKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_root_props_single_tab_mode_key($0)
-    })
+public func runtimeRootPropsSingleTabModeKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_root_props_single_tab_mode_key($0
+    )
+})
 }
-
-public func runtimeRootPropsTabKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_root_props_tab_key($0)
-    })
+public func runtimeRootPropsTabKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_root_props_tab_key($0
+    )
+})
 }
-
-public func runtimeRootPropsTabsKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_root_props_tabs_key($0)
-    })
+public func runtimeRootPropsTabsKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_root_props_tabs_key($0
+    )
+})
 }
-
-public func runtimeSearchInputChangedEventName() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_search_input_changed_event_name($0)
-    })
+public func runtimeSearchInputChangedEventName() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_search_input_changed_event_name($0
+    )
+})
 }
-
 /**
  * Build the current Android-compatible single system page root props.
  */
-public func runtimeSystemRootProps(systemAppType: String) throws -> RuntimeSystemRootPropsInfo {
-    return try FfiConverterTypeRuntimeSystemRootPropsInfo.lift(rustCallWithError(FfiConverterTypeCoreError.lift) {
-        uniffi_actro_core_fn_func_runtime_system_root_props(
-            FfiConverterString.lower(systemAppType), $0
-        )
-    })
+public func runtimeSystemRootProps(systemAppType: String)throws  -> RuntimeSystemRootPropsInfo  {
+    return try  FfiConverterTypeRuntimeSystemRootPropsInfo_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actro_core_fn_func_runtime_system_root_props(
+        FfiConverterString.lower(systemAppType),$0
+    )
+})
 }
-
-public func runtimeTabBookmarkChangedEventName() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_tab_bookmark_changed_event_name($0)
-    })
+public func runtimeTabBookmarkChangedEventName() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_tab_bookmark_changed_event_name($0
+    )
+})
 }
-
 /**
  * Build the native-to-runtime tab bookmark event payload.
  */
-public func runtimeTabBookmarkEvent(tabId: String, isBookmarked: Bool) -> RuntimeTabBookmarkEventInfo {
-    return try! FfiConverterTypeRuntimeTabBookmarkEventInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_tab_bookmark_event(
-            FfiConverterString.lower(tabId),
-            FfiConverterBool.lower(isBookmarked), $0
-        )
-    })
+public func runtimeTabBookmarkEvent(tabId: String, isBookmarked: Bool) -> RuntimeTabBookmarkEventInfo  {
+    return try!  FfiConverterTypeRuntimeTabBookmarkEventInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_tab_bookmark_event(
+        FfiConverterString.lower(tabId),
+        FfiConverterBool.lower(isBookmarked),$0
+    )
+})
 }
-
 /**
  * Build a normalized tab bookmark-status payload from native bridge fields.
  */
-public func runtimeTabBookmarkStatusFromFields(tabId: String?, marked: Bool?) -> RuntimeTabBookmarkStatusInfo? {
-    return try! FfiConverterOptionTypeRuntimeTabBookmarkStatusInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_tab_bookmark_status_from_fields(
-            FfiConverterOptionString.lower(tabId),
-            FfiConverterOptionBool.lower(marked), $0
-        )
-    })
+public func runtimeTabBookmarkStatusFromFields(tabId: String?, marked: Bool?) -> RuntimeTabBookmarkStatusInfo?  {
+    return try!  FfiConverterOptionTypeRuntimeTabBookmarkStatusInfo.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_tab_bookmark_status_from_fields(
+        FfiConverterOptionString.lower(tabId),
+        FfiConverterOptionBool.lower(marked),$0
+    )
+})
 }
-
-public func runtimeTabEnteredFullscreenEventName() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_tab_entered_fullscreen_event_name($0)
-    })
+public func runtimeTabEnteredFullscreenEventName() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_tab_entered_fullscreen_event_name($0
+    )
+})
 }
-
-public func runtimeTabExitedFullscreenEventName() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_tab_exited_fullscreen_event_name($0)
-    })
+public func runtimeTabExitedFullscreenEventName() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_tab_exited_fullscreen_event_name($0
+    )
+})
 }
-
 /**
  * Convert an active-tab model into the React Native runtime tab props shape.
  */
-public func runtimeTabFromActiveTab(tab: ActiveTabInfo) -> RuntimeTabInfo {
-    return try! FfiConverterTypeRuntimeTabInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_tab_from_active_tab(
-            FfiConverterTypeActiveTabInfo.lower(tab), $0
-        )
-    })
+public func runtimeTabFromActiveTab(tab: ActiveTabInfo) -> RuntimeTabInfo  {
+    return try!  FfiConverterTypeRuntimeTabInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_tab_from_active_tab(
+        FfiConverterTypeActiveTabInfo_lower(tab),$0
+    )
+})
 }
-
 /**
  * Build the native-to-runtime tab fullscreen event payload.
  */
-public func runtimeTabFullscreenEvent(tabId: String) -> RuntimeTabFullscreenEventInfo {
-    return try! FfiConverterTypeRuntimeTabFullscreenEventInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_tab_fullscreen_event(
-            FfiConverterString.lower(tabId), $0
-        )
-    })
+public func runtimeTabFullscreenEvent(tabId: String) -> RuntimeTabFullscreenEventInfo  {
+    return try!  FfiConverterTypeRuntimeTabFullscreenEventInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_tab_fullscreen_event(
+        FfiConverterString.lower(tabId),$0
+    )
+})
 }
-
-public func runtimeTabPropsBackgroundColorKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_tab_props_background_color_key($0)
-    })
+public func runtimeTabPropsBackgroundColorKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_tab_props_background_color_key($0
+    )
+})
 }
-
-public func runtimeTabPropsHtmlContentKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_tab_props_html_content_key($0)
-    })
+public func runtimeTabPropsHtmlContentKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_tab_props_html_content_key($0
+    )
+})
 }
-
-public func runtimeTabPropsIdKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_tab_props_id_key($0)
-    })
+public func runtimeTabPropsIdKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_tab_props_id_key($0
+    )
+})
 }
-
-public func runtimeTabPropsReloadKeyKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_tab_props_reload_key_key($0)
-    })
+public func runtimeTabPropsReloadKeyKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_tab_props_reload_key_key($0
+    )
+})
 }
-
-public func runtimeTabPropsRightPanelDefaultVisibleKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_tab_props_right_panel_default_visible_key($0)
-    })
+public func runtimeTabPropsRightPanelDefaultVisibleKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_tab_props_right_panel_default_visible_key($0
+    )
+})
 }
-
-public func runtimeTabPropsUnifiedScriptKey() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_tab_props_unified_script_key($0)
-    })
+public func runtimeTabPropsUnifiedScriptKey() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_tab_props_unified_script_key($0
+    )
+})
 }
-
 /**
  * Build a normalized tab unread payload from native bridge fields.
  */
-public func runtimeTabUnreadFromFields(tabId: String?, unread: Bool?) -> RuntimeTabUnreadInfo? {
-    return try! FfiConverterOptionTypeRuntimeTabUnreadInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_tab_unread_from_fields(
-            FfiConverterOptionString.lower(tabId),
-            FfiConverterOptionBool.lower(unread), $0
-        )
-    })
+public func runtimeTabUnreadFromFields(tabId: String?, unread: Bool?) -> RuntimeTabUnreadInfo?  {
+    return try!  FfiConverterOptionTypeRuntimeTabUnreadInfo.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_tab_unread_from_fields(
+        FfiConverterOptionString.lower(tabId),
+        FfiConverterOptionBool.lower(unread),$0
+    )
+})
 }
-
 /**
  * Build a normalized runtime tab update patch from native bridge fields.
  */
-public func runtimeTabUpdateFromFields(tabId: String?, title: String?, icon: String?, appUrl: String?, status: String?) -> RuntimeTabUpdateInfo? {
-    return try! FfiConverterOptionTypeRuntimeTabUpdateInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_runtime_tab_update_from_fields(
-            FfiConverterOptionString.lower(tabId),
-            FfiConverterOptionString.lower(title),
-            FfiConverterOptionString.lower(icon),
-            FfiConverterOptionString.lower(appUrl),
-            FfiConverterOptionString.lower(status), $0
-        )
-    })
+public func runtimeTabUpdateFromFields(tabId: String?, title: String?, icon: String?, appUrl: String?, status: String?) -> RuntimeTabUpdateInfo?  {
+    return try!  FfiConverterOptionTypeRuntimeTabUpdateInfo.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_runtime_tab_update_from_fields(
+        FfiConverterOptionString.lower(tabId),
+        FfiConverterOptionString.lower(title),
+        FfiConverterOptionString.lower(icon),
+        FfiConverterOptionString.lower(appUrl),
+        FfiConverterOptionString.lower(status),$0
+    )
+})
 }
-
 /**
  * Build the stable 16-character content fingerprint used by host shells.
  */
-public func stableContentFingerprint(input: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_stable_content_fingerprint(
-            FfiConverterString.lower(input), $0
-        )
-    })
+public func stableContentFingerprint(input: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_stable_content_fingerprint(
+        FfiConverterString.lower(input),$0
+    )
+})
 }
-
 /**
  * Return the host-supported contract name.
  */
-public func supportedContractName() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_supported_contract_name($0)
-    })
+public func supportedContractName() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_supported_contract_name($0
+    )
+})
 }
-
 /**
  * Return the host-supported contract version.
  */
-public func supportedContractVersion() -> UInt32 {
-    return try! FfiConverterUInt32.lift(try! rustCall {
-        uniffi_actro_core_fn_func_supported_contract_version($0)
-    })
+public func supportedContractVersion() -> UInt32  {
+    return try!  FfiConverterUInt32.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_supported_contract_version($0
+    )
+})
 }
-
 /**
  * Return title and about: URL metadata for a system app type.
  */
-public func systemAppInfo(raw: String) throws -> SystemAppInfo {
-    return try FfiConverterTypeSystemAppInfo.lift(rustCallWithError(FfiConverterTypeCoreError.lift) {
-        uniffi_actro_core_fn_func_system_app_info(
-            FfiConverterString.lower(raw), $0
-        )
-    })
+public func systemAppInfo(raw: String)throws  -> SystemAppInfo  {
+    return try  FfiConverterTypeSystemAppInfo_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actro_core_fn_func_system_app_info(
+        FfiConverterString.lower(raw),$0
+    )
+})
 }
-
 /**
  * Return the canonical bookmarks system app type.
  */
-public func systemAppTypeBookmarks() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_system_app_type_bookmarks($0)
-    })
+public func systemAppTypeBookmarks() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_system_app_type_bookmarks($0
+    )
+})
 }
-
 /**
  * Return the canonical global search system app type.
  */
-public func systemAppTypeGlobalSearch() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_system_app_type_global_search($0)
-    })
+public func systemAppTypeGlobalSearch() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_system_app_type_global_search($0
+    )
+})
 }
-
 /**
  * Return the canonical settings system app type.
  */
-public func systemAppTypeSettings() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_actro_core_fn_func_system_app_type_settings($0)
-    })
+public func systemAppTypeSettings() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_actro_core_fn_func_system_app_type_settings($0
+    )
+})
 }
-
 /**
  * Return the canonical TTS native module/event/options/payload contract.
  */
-public func ttsBridgeContract() -> TtsBridgeContractInfo {
-    return try! FfiConverterTypeTtsBridgeContractInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_tts_bridge_contract($0)
-    })
+public func ttsBridgeContract() -> TtsBridgeContractInfo  {
+    return try!  FfiConverterTypeTtsBridgeContractInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_tts_bridge_contract($0
+    )
+})
 }
-
 /**
  * Return the canonical UserInfo native module/method/event/payload contract.
  */
-public func userInfoBridgeContract() -> UserInfoBridgeContractInfo {
-    return try! FfiConverterTypeUserInfoBridgeContractInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_user_info_bridge_contract($0)
-    })
+public func userInfoBridgeContract() -> UserInfoBridgeContractInfo  {
+    return try!  FfiConverterTypeUserInfoBridgeContractInfo_lift(try! rustCall() {
+    uniffi_actro_core_fn_func_user_info_bridge_contract($0
+    )
+})
 }
-
 /**
- * Validate an ACTR manifest JSON string without returning normalized fields.
+ * Validate an actr-package/1 TOML manifest without returning normalized fields.
  */
-public func validateActrManifest(json: String) throws {
-    try rustCallWithError(FfiConverterTypeCoreError.lift) {
-        uniffi_actro_core_fn_func_validate_actr_manifest(
-            FfiConverterString.lower(json), $0
-        )
-    }
+public func validateActrPackageManifest(source: String)throws   {try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actro_core_fn_func_validate_actr_package_manifest(
+        FfiConverterString.lower(source),$0
+    )
+}
 }
 
 private enum InitializationResult {
@@ -8702,781 +9024,782 @@ private enum InitializationResult {
     case contractVersionMismatch
     case apiChecksumMismatch
 }
-
-/// Use a global variable to perform the versioning checks. Swift ensures that
-/// the code inside is only computed once.
-private var initializationResult: InitializationResult = {
+// Use a global variable to perform the versioning checks. Swift ensures that
+// the code inside is only computed once.
+private let initializationResult: InitializationResult = {
     // Get the bindings contract version from our ComponentInterface
-    let bindings_contract_version = 26
+    let bindings_contract_version = 29
     // Get the scaffolding contract version by calling the into the dylib
     let scaffolding_contract_version = ffi_actro_core_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if uniffi_actro_core_checksum_func_active_tab_from_row() != 41850 {
+    if (uniffi_actro_core_checksum_func_active_tab_from_row() != 41850) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_active_tab_rows_from_tabs() != 7255 {
+    if (uniffi_actro_core_checksum_func_active_tab_rows_from_tabs() != 7255) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_active_tab_to_row() != 12881 {
+    if (uniffi_actro_core_checksum_func_active_tab_to_row() != 12881) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_actr_bridge_contract() != 19924 {
+    if (uniffi_actro_core_checksum_func_actr_bridge_contract() != 19924) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_app_source_type_downloaded() != 13641 {
+    if (uniffi_actro_core_checksum_func_app_source_type_downloaded() != 13641) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_app_source_type_info() != 25194 {
+    if (uniffi_actro_core_checksum_func_app_source_type_info() != 25194) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_app_source_type_local_dev() != 31226 {
+    if (uniffi_actro_core_checksum_func_app_source_type_local_dev() != 31226) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_asr_bridge_contract() != 59326 {
+    if (uniffi_actro_core_checksum_func_asr_bridge_contract() != 59326) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_asr_model_language_dir() != 51628 {
+    if (uniffi_actro_core_checksum_func_asr_model_language_dir() != 51628) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_asr_model_plan() != 35877 {
+    if (uniffi_actro_core_checksum_func_asr_model_plan() != 35877) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_auth_access_control_path() != 44639 {
+    if (uniffi_actro_core_checksum_func_auth_access_control_path() != 44639) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_auth_access_control_status() != 30292 {
+    if (uniffi_actro_core_checksum_func_auth_access_control_status() != 30292) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_auth_access_control_url_from_app_url() != 19686 {
+    if (uniffi_actro_core_checksum_func_auth_access_control_url_from_app_url() != 19686) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_auth_account_base_url() != 52852 {
+    if (uniffi_actro_core_checksum_func_auth_account_base_url() != 52852) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_auth_api_response_success() != 40266 {
+    if (uniffi_actro_core_checksum_func_auth_api_response_success() != 40266) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_auth_client_app_path() != 44153 {
+    if (uniffi_actro_core_checksum_func_auth_client_app_path() != 44153) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_auth_environment_beta() != 13711 {
+    if (uniffi_actro_core_checksum_func_auth_environment_beta() != 13711) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_auth_environment_dev() != 18625 {
+    if (uniffi_actro_core_checksum_func_auth_environment_dev() != 18625) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_auth_environment_from_app_url() != 62771 {
+    if (uniffi_actro_core_checksum_func_auth_environment_from_app_url() != 62771) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_auth_environment_from_url() != 41351 {
+    if (uniffi_actro_core_checksum_func_auth_environment_from_url() != 41351) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_auth_environment_prod() != 56207 {
+    if (uniffi_actro_core_checksum_func_auth_environment_prod() != 56207) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_auth_environment_storage_suffix() != 33555 {
+    if (uniffi_actro_core_checksum_func_auth_environment_storage_suffix() != 33555) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_auth_is_authorized_code() != 58037 {
+    if (uniffi_actro_core_checksum_func_auth_is_authorized_code() != 58037) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_auth_is_client_app_not_found_code() != 63660 {
+    if (uniffi_actro_core_checksum_func_auth_is_client_app_not_found_code() != 63660) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_auth_is_client_app_not_found_message() != 50400 {
+    if (uniffi_actro_core_checksum_func_auth_is_client_app_not_found_message() != 50400) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_auth_resource_upload_token_path() != 32595 {
+    if (uniffi_actro_core_checksum_func_auth_resource_upload_token_path() != 32595) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_auth_resource_uploader_base_url() != 48458 {
+    if (uniffi_actro_core_checksum_func_auth_resource_uploader_base_url() != 48458) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_bookmark_snapshot_normalize_json() != 45412 {
+    if (uniffi_actro_core_checksum_func_browser_bookmark_snapshot_normalize_json() != 45412) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_data_contract() != 2698 {
+    if (uniffi_actro_core_checksum_func_browser_data_contract() != 2698) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_history_snapshot_normalize_json() != 19189 {
+    if (uniffi_actro_core_checksum_func_browser_history_snapshot_normalize_json() != 19189) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_search_engine_default_id() != 6764 {
+    if (uniffi_actro_core_checksum_func_browser_search_engine_default_id() != 6764) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_search_engine_info() != 9374 {
+    if (uniffi_actro_core_checksum_func_browser_search_engine_info() != 9374) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_search_engine_normalize_id() != 24148 {
+    if (uniffi_actro_core_checksum_func_browser_search_engine_normalize_id() != 24148) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_search_engines() != 3991 {
+    if (uniffi_actro_core_checksum_func_browser_search_engines() != 3991) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_search_url() != 51261 {
+    if (uniffi_actro_core_checksum_func_browser_search_url() != 51261) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_session_home_snapshot_json() != 23841 {
+    if (uniffi_actro_core_checksum_func_browser_session_home_snapshot_json() != 23841) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_session_snapshot_normalize_json() != 14972 {
+    if (uniffi_actro_core_checksum_func_browser_session_snapshot_normalize_json() != 14972) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_address_canonicalization_policy_json() != 22793 {
+    if (uniffi_actro_core_checksum_func_browser_storage_address_canonicalization_policy_json() != 22793) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_bookmark_folder_tree_integrity_plan_json() != 16029 {
+    if (uniffi_actro_core_checksum_func_browser_storage_bookmark_folder_tree_integrity_plan_json() != 16029) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_bookmark_folder_tree_integrity_policy_json() != 11346 {
+    if (uniffi_actro_core_checksum_func_browser_storage_bookmark_folder_tree_integrity_policy_json() != 11346) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_bookmark_ownership_plan_json() != 28171 {
+    if (uniffi_actro_core_checksum_func_browser_storage_bookmark_ownership_plan_json() != 28171) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_bookmark_ownership_policy_json() != 1378 {
+    if (uniffi_actro_core_checksum_func_browser_storage_bookmark_ownership_policy_json() != 1378) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_bookmark_restore_placement_plan_json() != 31728 {
+    if (uniffi_actro_core_checksum_func_browser_storage_bookmark_restore_placement_plan_json() != 31728) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_bookmark_restore_placement_policy_json() != 34703 {
+    if (uniffi_actro_core_checksum_func_browser_storage_bookmark_restore_placement_policy_json() != 34703) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_canonicalize_addresses_json() != 946 {
+    if (uniffi_actro_core_checksum_func_browser_storage_canonicalize_addresses_json() != 946) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_data_model_json() != 9837 {
+    if (uniffi_actro_core_checksum_func_browser_storage_data_model_json() != 9837) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_database_name() != 46383 {
+    if (uniffi_actro_core_checksum_func_browser_storage_database_name() != 46383) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_history_visit_aggregation_plan_json() != 9821 {
+    if (uniffi_actro_core_checksum_func_browser_storage_history_visit_aggregation_plan_json() != 9821) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_history_visit_aggregation_policy_json() != 4696 {
+    if (uniffi_actro_core_checksum_func_browser_storage_history_visit_aggregation_policy_json() != 4696) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_repository_sql() != 14631 {
+    if (uniffi_actro_core_checksum_func_browser_storage_repository_sql() != 14631) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_retention_pruning_plan_json() != 10683 {
+    if (uniffi_actro_core_checksum_func_browser_storage_retention_pruning_plan_json() != 10683) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_retention_pruning_policy_json() != 36635 {
+    if (uniffi_actro_core_checksum_func_browser_storage_retention_pruning_policy_json() != 36635) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_schema() != 2717 {
+    if (uniffi_actro_core_checksum_func_browser_storage_schema() != 2717) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_schema_migration_plan_json() != 13145 {
+    if (uniffi_actro_core_checksum_func_browser_storage_schema_migration_plan_json() != 13145) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_schema_statements() != 14241 {
+    if (uniffi_actro_core_checksum_func_browser_storage_schema_statements() != 14241) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_schema_version() != 9261 {
+    if (uniffi_actro_core_checksum_func_browser_storage_schema_version() != 9261) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_session_active_tab_consistency_plan_json() != 815 {
+    if (uniffi_actro_core_checksum_func_browser_storage_session_active_tab_consistency_plan_json() != 815) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_session_active_tab_consistency_policy_json() != 47645 {
+    if (uniffi_actro_core_checksum_func_browser_storage_session_active_tab_consistency_policy_json() != 47645) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_session_tab_id_plan_json() != 5925 {
+    if (uniffi_actro_core_checksum_func_browser_storage_session_tab_id_plan_json() != 5925) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_session_tab_ordering_plan_json() != 41941 {
+    if (uniffi_actro_core_checksum_func_browser_storage_session_tab_ordering_plan_json() != 41941) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_session_tab_ordering_policy_json() != 18886 {
+    if (uniffi_actro_core_checksum_func_browser_storage_session_tab_ordering_policy_json() != 18886) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_ack_plan_json() != 12375 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_ack_plan_json() != 12375) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_batch_from_dirty_rows_json() != 13852 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_batch_from_dirty_rows_json() != 13852) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_client_ack_batch_after_remote_apply_json() != 64001 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_client_ack_batch_after_remote_apply_json() != 64001) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_client_cycle_apply_result_json() != 27565 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_client_cycle_apply_result_json() != 27565) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_client_cycle_plan_json() != 35974 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_client_cycle_plan_json() != 35974) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cleanup_result_plan_json() != 44174 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cleanup_result_plan_json() != 44174) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_compaction_plan_json() != 42923 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_compaction_plan_json() != 42923) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_compaction_result_plan_json() != 39054 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_compaction_result_plan_json() != 39054) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_compatibility_preflight_json() != 54006 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_compatibility_preflight_json() != 54006) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_compatibility_status_json() != 30919 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_compatibility_status_json() != 30919) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_attempt_plan_json() != 35513 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_attempt_plan_json() != 35513) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_client_apply_result_json() != 21564 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_client_apply_result_json() != 21564) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_client_plan_json() != 39277 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_client_plan_json() != 39277) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_loop_plan_json() != 27779 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_loop_plan_json() != 27779) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_schedule_state_json() != 9196 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_schedule_state_json() != 9196) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_status_policy_json() != 32732 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_status_policy_json() != 32732) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_data_model_json() != 54530 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_data_model_json() != 54530) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_default_manifest_json() != 57330 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_default_manifest_json() != 57330) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_high_watermark_plan_json() != 40022 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_high_watermark_plan_json() != 40022) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_high_watermark_policy_json() != 64491 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_high_watermark_policy_json() != 64491) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_capabilities_json() != 37246 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_capabilities_json() != 37246) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_capability_preflight_json() != 47906 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_capability_preflight_json() != 47906) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_cleanup_round_json() != 43847 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_cleanup_round_json() != 43847) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_compaction_round_json() != 61891 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_compaction_round_json() != 61891) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_compatibility_preflight_json() != 24726 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_compatibility_preflight_json() != 24726) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_cycle_round_json() != 46141 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_cycle_round_json() != 46141) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_membership_round_json() != 56582 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_membership_round_json() != 56582) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_recovery_retention_round_json() != 4074 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_recovery_retention_round_json() != 4074) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_recovery_snapshot_round_json() != 64404 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_recovery_snapshot_round_json() != 64404) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_log_object_json() != 24019 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_log_object_json() != 24019) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_attempt_plan_json() != 50250 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_attempt_plan_json() != 50250) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_loop_plan_json() != 53251 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_loop_plan_json() != 53251) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_plan_json() != 43556 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_plan_json() != 43556) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_result_plan_json() != 42993 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_result_plan_json() != 42993) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_schedule_state_json() != 21895 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_schedule_state_json() != 21895) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_status_policy_json() != 9274 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_status_policy_json() != 9274) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_observability_event_json() != 56407 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_observability_event_json() != 56407) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_adapter_contract_json() != 14146 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_adapter_contract_json() != 14146) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_adapter_plan_json() != 4775 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_adapter_plan_json() != 4775) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_connection_contract_json() != 27522 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_connection_contract_json() != 27522) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_connection_status_policy_json() != 34696 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_connection_status_policy_json() != 34696) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_diagnostics_json() != 47809 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_diagnostics_json() != 47809) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_error_classification_json() != 3806 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_error_classification_json() != 3806) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_error_policy_json() != 9492 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_error_policy_json() != 9492) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_pull_apply_plan_json() != 56183 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_pull_apply_plan_json() != 56183) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_pull_continuation_plan_json() != 6897 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_pull_continuation_plan_json() != 6897) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_pull_plan_json() != 19176 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_pull_plan_json() != 19176) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_push_plan_json() != 18260 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_push_plan_json() != 18260) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_push_result_plan_json() != 23523 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_push_result_plan_json() != 23523) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_recovery_snapshot_plan_json() != 2465 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_recovery_snapshot_plan_json() != 2465) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_recovery_snapshot_result_plan_json() != 33170 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_recovery_snapshot_result_plan_json() != 33170) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_schema_migration_playbook_json() != 19964 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_schema_migration_playbook_json() != 19964) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_schema_rollout_plan_json() != 50330 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_schema_rollout_plan_json() != 50330) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_snapshot_object_json() != 52484 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_snapshot_object_json() != 52484) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_store_capability_preflight_json() != 54829 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_store_capability_preflight_json() != 54829) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_store_contract_json() != 58815 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cloud_store_contract_json() != 58815) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_conflict_policy_json() != 23145 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_conflict_policy_json() != 23145) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cycle_request_plan_json() != 36860 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cycle_request_plan_json() != 36860) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cycle_response_json() != 23666 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cycle_response_json() != 23666) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_cycle_transport_result_json() != 11163 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_cycle_transport_result_json() != 11163) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_merge_policy_json() != 56071 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_merge_policy_json() != 56071) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_pull_request_json() != 41409 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_pull_request_json() != 41409) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_push_request_from_dirty_rows_json() != 47975 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_push_request_from_dirty_rows_json() != 47975) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_push_request_json() != 14103 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_push_request_json() != 14103) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_remote_apply_plan_json() != 29266 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_remote_apply_plan_json() != 29266) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_remote_apply_result_json() != 43598 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_remote_apply_result_json() != 43598) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_schedule_state_json() != 11611 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_schedule_state_json() != 11611) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_scheduler_status_json() != 8481 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_scheduler_status_json() != 8481) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_server_merge_plan_json() != 59023 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_server_merge_plan_json() != 59023) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_server_merge_result_json() != 32013 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_server_merge_result_json() != 32013) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_sql() != 30853 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_sql() != 30853) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_status_policy_json() != 37270 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_status_policy_json() != 37270) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_sync_transport_contract_json() != 1171 {
+    if (uniffi_actro_core_checksum_func_browser_storage_sync_transport_contract_json() != 1171) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_browser_storage_table_names() != 49823 {
+    if (uniffi_actro_core_checksum_func_browser_storage_table_names() != 49823) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_app_repository_sql() != 46953 {
+    if (uniffi_actro_core_checksum_func_core_app_repository_sql() != 46953) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_app_search_params() != 22469 {
+    if (uniffi_actro_core_checksum_func_core_app_search_params() != 22469) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_bookmark_from_row() != 21902 {
+    if (uniffi_actro_core_checksum_func_core_bookmark_from_row() != 21902) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_bookmark_insert_params() != 30735 {
+    if (uniffi_actro_core_checksum_func_core_bookmark_insert_params() != 30735) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_bookmark_repository_sql() != 21342 {
+    if (uniffi_actro_core_checksum_func_core_bookmark_repository_sql() != 21342) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_bookmark_search_params() != 57291 {
+    if (uniffi_actro_core_checksum_func_core_bookmark_search_params() != 57291) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_bookmark_update_params() != 45421 {
+    if (uniffi_actro_core_checksum_func_core_bookmark_update_params() != 45421) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_history_insert_visit_params() != 20342 {
+    if (uniffi_actro_core_checksum_func_core_history_insert_visit_params() != 20342) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_history_item_from_row() != 56627 {
+    if (uniffi_actro_core_checksum_func_core_history_item_from_row() != 56627) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_history_repository_sql() != 13387 {
+    if (uniffi_actro_core_checksum_func_core_history_repository_sql() != 13387) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_history_search_title_param() != 45080 {
+    if (uniffi_actro_core_checksum_func_core_history_search_title_param() != 45080) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_installed_app_from_row() != 58881 {
+    if (uniffi_actro_core_checksum_func_core_installed_app_from_row() != 58881) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_installed_app_insert_params() != 36238 {
+    if (uniffi_actro_core_checksum_func_core_installed_app_insert_params() != 36238) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_installed_app_update_params() != 24747 {
+    if (uniffi_actro_core_checksum_func_core_installed_app_update_params() != 24747) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_schema_statements() != 48345 {
+    if (uniffi_actro_core_checksum_func_core_schema_statements() != 48345) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_schema_table_names() != 16087 {
+    if (uniffi_actro_core_checksum_func_core_schema_table_names() != 16087) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_schema_version() != 42948 {
+    if (uniffi_actro_core_checksum_func_core_schema_version() != 42948) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_tag_from_row() != 31577 {
+    if (uniffi_actro_core_checksum_func_core_tag_from_row() != 31577) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_tag_insert_params() != 41167 {
+    if (uniffi_actro_core_checksum_func_core_tag_insert_params() != 41167) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_tag_repository_sql() != 56888 {
+    if (uniffi_actro_core_checksum_func_core_tag_repository_sql() != 56888) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_core_tag_update_params() != 29950 {
+    if (uniffi_actro_core_checksum_func_core_tag_update_params() != 29950) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_create_actr_integrity_plan() != 22264 {
+    if (uniffi_actro_core_checksum_func_create_actr_integrity_plan() != 36049) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_default_runtime_app_status() != 50313 {
+    if (uniffi_actro_core_checksum_func_default_runtime_app_status() != 50313) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_default_system_tags() != 47540 {
+    if (uniffi_actro_core_checksum_func_default_system_tags() != 47540) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_default_tag_colors() != 58678 {
+    if (uniffi_actro_core_checksum_func_default_tag_colors() != 58678) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_default_tags() != 18836 {
+    if (uniffi_actro_core_checksum_func_default_tags() != 18836) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_email_bridge_contract() != 2786 {
+    if (uniffi_actro_core_checksum_func_email_bridge_contract() != 2786) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_empty_browser_storage_sync_batch_json() != 41109 {
+    if (uniffi_actro_core_checksum_func_empty_browser_storage_sync_batch_json() != 41109) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_evaluate_contract() != 57178 {
+    if (uniffi_actro_core_checksum_func_evaluate_contract() != 57178) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_extract_app_id_from_url() != 55910 {
+    if (uniffi_actro_core_checksum_func_extract_app_id_from_url() != 55910) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_is_asset_path() != 16653 {
+    if (uniffi_actro_core_checksum_func_is_asset_path() != 16653) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_normalize_browser_storage_sync_ack_batch_json() != 580 {
+    if (uniffi_actro_core_checksum_func_normalize_browser_storage_sync_ack_batch_json() != 580) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_normalize_browser_storage_sync_batch_json() != 53585 {
+    if (uniffi_actro_core_checksum_func_normalize_browser_storage_sync_batch_json() != 53585) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cloud_device_json() != 4969 {
+    if (uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cloud_device_json() != 4969) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cloud_log_object_json() != 15866 {
+    if (uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cloud_log_object_json() != 15866) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cloud_manifest_json() != 59150 {
+    if (uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cloud_manifest_json() != 59150) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cloud_snapshot_object_json() != 18935 {
+    if (uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cloud_snapshot_object_json() != 18935) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cursors_json() != 4950 {
+    if (uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cursors_json() != 4950) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cycle_response_json() != 11480 {
+    if (uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cycle_response_json() != 11480) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_normalize_browser_sync_provider_settings_json() != 48136 {
+    if (uniffi_actro_core_checksum_func_normalize_browser_sync_provider_settings_json() != 48136) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_normalize_integrity_algorithm() != 25333 {
+    if (uniffi_actro_core_checksum_func_normalize_integrity_algorithm() != 25333) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_normalize_integrity_path() != 14386 {
+    if (uniffi_actro_core_checksum_func_normalize_integrity_path() != 14386) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_normalize_path() != 61225 {
+    if (uniffi_actro_core_checksum_func_normalize_path() != 61225) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_normalize_runtime_app_status() != 55968 {
+    if (uniffi_actro_core_checksum_func_normalize_runtime_app_status() != 55968) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_normalize_sha256_hex() != 9870 {
+    if (uniffi_actro_core_checksum_func_normalize_sha256_hex() != 9870) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_parse_actr_actor_type() != 4987 {
+    if (uniffi_actro_core_checksum_func_parse_actr_actor_type() != 4987) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_parse_app_source_type() != 29850 {
+    if (uniffi_actro_core_checksum_func_parse_actr_package_manifest() != 39514) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_parse_actr_manifest() != 59811 {
+    if (uniffi_actro_core_checksum_func_parse_app_source_type() != 29850) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_parse_system_app_type() != 40736 {
+    if (uniffi_actro_core_checksum_func_parse_system_app_type() != 40736) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_parse_vosk_partial_text() != 29846 {
+    if (uniffi_actro_core_checksum_func_parse_vosk_partial_text() != 29846) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_parse_vosk_result_text() != 29488 {
+    if (uniffi_actro_core_checksum_func_parse_vosk_result_text() != 29488) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_post_process_zh_asr_segments() != 28771 {
+    if (uniffi_actro_core_checksum_func_post_process_zh_asr_segments() != 28771) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_relative_path_from() != 18089 {
+    if (uniffi_actro_core_checksum_func_relative_path_from() != 18089) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_app_status_alive() != 44623 {
+    if (uniffi_actro_core_checksum_func_runtime_app_status_alive() != 44623) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_app_status_dead() != 48585 {
+    if (uniffi_actro_core_checksum_func_runtime_app_status_dead() != 48585) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_auth_context_app_id_key() != 30725 {
+    if (uniffi_actro_core_checksum_func_runtime_auth_context_app_id_key() != 30725) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_auth_context_app_url_key() != 60856 {
+    if (uniffi_actro_core_checksum_func_runtime_auth_context_app_url_key() != 60856) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_auth_context_client_id_key() != 49507 {
+    if (uniffi_actro_core_checksum_func_runtime_auth_context_client_id_key() != 49507) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_auth_context_tab_id_key() != 34881 {
+    if (uniffi_actro_core_checksum_func_runtime_auth_context_tab_id_key() != 34881) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_bridge_app_url_key() != 22852 {
+    if (uniffi_actro_core_checksum_func_runtime_bridge_app_url_key() != 22852) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_bridge_container_height_key() != 48410 {
+    if (uniffi_actro_core_checksum_func_runtime_bridge_container_height_key() != 48410) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_bridge_container_width_key() != 22852 {
+    if (uniffi_actro_core_checksum_func_runtime_bridge_container_width_key() != 22852) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_bridge_icon_key() != 11026 {
+    if (uniffi_actro_core_checksum_func_runtime_bridge_icon_key() != 11026) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_bridge_is_bookmarked_key() != 55021 {
+    if (uniffi_actro_core_checksum_func_runtime_bridge_is_bookmarked_key() != 55021) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_bridge_marked_key() != 14417 {
+    if (uniffi_actro_core_checksum_func_runtime_bridge_marked_key() != 14417) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_bridge_status_key() != 28059 {
+    if (uniffi_actro_core_checksum_func_runtime_bridge_status_key() != 28059) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_bridge_tab_id_key() != 44368 {
+    if (uniffi_actro_core_checksum_func_runtime_bridge_tab_id_key() != 44368) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_bridge_title_key() != 51581 {
+    if (uniffi_actro_core_checksum_func_runtime_bridge_title_key() != 51581) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_bridge_unread_key() != 22200 {
+    if (uniffi_actro_core_checksum_func_runtime_bridge_unread_key() != 22200) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_bridge_visible_key() != 10342 {
+    if (uniffi_actro_core_checksum_func_runtime_bridge_visible_key() != 10342) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_container_size_change_event() != 61178 {
+    if (uniffi_actro_core_checksum_func_runtime_container_size_change_event() != 61178) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_container_size_change_event_name() != 26096 {
+    if (uniffi_actro_core_checksum_func_runtime_container_size_change_event_name() != 26096) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_extension_panel_visible_change_event_name() != 33257 {
+    if (uniffi_actro_core_checksum_func_runtime_extension_panel_visible_change_event_name() != 33257) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_extension_panel_visible_event() != 36108 {
+    if (uniffi_actro_core_checksum_func_runtime_extension_panel_visible_event() != 36108) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_login_result_code_key() != 63993 {
+    if (uniffi_actro_core_checksum_func_runtime_login_result_code_key() != 63993) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_login_result_error_key() != 41906 {
+    if (uniffi_actro_core_checksum_func_runtime_login_result_error_key() != 41906) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_login_result_event_name() != 20979 {
+    if (uniffi_actro_core_checksum_func_runtime_login_result_event_name() != 20979) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_login_result_id_token_key() != 7268 {
+    if (uniffi_actro_core_checksum_func_runtime_login_result_id_token_key() != 7268) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_login_result_message_key() != 17863 {
+    if (uniffi_actro_core_checksum_func_runtime_login_result_message_key() != 17863) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_login_result_type_key() != 57501 {
+    if (uniffi_actro_core_checksum_func_runtime_login_result_type_key() != 57501) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_login_type_apple() != 20564 {
+    if (uniffi_actro_core_checksum_func_runtime_login_type_apple() != 20564) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_login_type_google() != 31390 {
+    if (uniffi_actro_core_checksum_func_runtime_login_type_google() != 31390) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_login_type_wechat() != 2457 {
+    if (uniffi_actro_core_checksum_func_runtime_login_type_wechat() != 2457) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_root_props_current_tab_id_key() != 59431 {
+    if (uniffi_actro_core_checksum_func_runtime_root_props_current_tab_id_key() != 59431) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_root_props_from_active_tabs() != 54880 {
+    if (uniffi_actro_core_checksum_func_runtime_root_props_from_active_tabs() != 54880) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_root_props_from_runtime_tabs() != 39191 {
+    if (uniffi_actro_core_checksum_func_runtime_root_props_from_runtime_tabs() != 39191) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_root_props_is_left_panel_visible_key() != 12993 {
+    if (uniffi_actro_core_checksum_func_runtime_root_props_is_left_panel_visible_key() != 12993) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_root_props_is_right_panel_visible_key() != 16845 {
+    if (uniffi_actro_core_checksum_func_runtime_root_props_is_right_panel_visible_key() != 16845) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_root_props_single_tab_mode_key() != 24185 {
+    if (uniffi_actro_core_checksum_func_runtime_root_props_single_tab_mode_key() != 24185) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_root_props_tab_key() != 57438 {
+    if (uniffi_actro_core_checksum_func_runtime_root_props_tab_key() != 57438) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_root_props_tabs_key() != 9089 {
+    if (uniffi_actro_core_checksum_func_runtime_root_props_tabs_key() != 9089) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_search_input_changed_event_name() != 17030 {
+    if (uniffi_actro_core_checksum_func_runtime_search_input_changed_event_name() != 17030) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_system_root_props() != 19540 {
+    if (uniffi_actro_core_checksum_func_runtime_system_root_props() != 19540) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_tab_bookmark_changed_event_name() != 54121 {
+    if (uniffi_actro_core_checksum_func_runtime_tab_bookmark_changed_event_name() != 54121) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_tab_bookmark_event() != 38576 {
+    if (uniffi_actro_core_checksum_func_runtime_tab_bookmark_event() != 38576) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_tab_bookmark_status_from_fields() != 40187 {
+    if (uniffi_actro_core_checksum_func_runtime_tab_bookmark_status_from_fields() != 40187) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_tab_entered_fullscreen_event_name() != 40193 {
+    if (uniffi_actro_core_checksum_func_runtime_tab_entered_fullscreen_event_name() != 40193) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_tab_exited_fullscreen_event_name() != 942 {
+    if (uniffi_actro_core_checksum_func_runtime_tab_exited_fullscreen_event_name() != 942) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_tab_from_active_tab() != 37747 {
+    if (uniffi_actro_core_checksum_func_runtime_tab_from_active_tab() != 37747) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_tab_fullscreen_event() != 54739 {
+    if (uniffi_actro_core_checksum_func_runtime_tab_fullscreen_event() != 54739) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_tab_props_background_color_key() != 59779 {
+    if (uniffi_actro_core_checksum_func_runtime_tab_props_background_color_key() != 59779) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_tab_props_html_content_key() != 45749 {
+    if (uniffi_actro_core_checksum_func_runtime_tab_props_html_content_key() != 45749) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_tab_props_id_key() != 12717 {
+    if (uniffi_actro_core_checksum_func_runtime_tab_props_id_key() != 12717) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_tab_props_reload_key_key() != 21102 {
+    if (uniffi_actro_core_checksum_func_runtime_tab_props_reload_key_key() != 21102) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_tab_props_right_panel_default_visible_key() != 52350 {
+    if (uniffi_actro_core_checksum_func_runtime_tab_props_right_panel_default_visible_key() != 52350) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_tab_props_unified_script_key() != 2521 {
+    if (uniffi_actro_core_checksum_func_runtime_tab_props_unified_script_key() != 2521) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_tab_unread_from_fields() != 58278 {
+    if (uniffi_actro_core_checksum_func_runtime_tab_unread_from_fields() != 58278) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_runtime_tab_update_from_fields() != 24695 {
+    if (uniffi_actro_core_checksum_func_runtime_tab_update_from_fields() != 24695) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_stable_content_fingerprint() != 23754 {
+    if (uniffi_actro_core_checksum_func_stable_content_fingerprint() != 23754) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_supported_contract_name() != 26637 {
+    if (uniffi_actro_core_checksum_func_supported_contract_name() != 26637) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_supported_contract_version() != 30331 {
+    if (uniffi_actro_core_checksum_func_supported_contract_version() != 30331) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_system_app_info() != 42589 {
+    if (uniffi_actro_core_checksum_func_system_app_info() != 42589) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_system_app_type_bookmarks() != 47594 {
+    if (uniffi_actro_core_checksum_func_system_app_type_bookmarks() != 47594) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_system_app_type_global_search() != 51256 {
+    if (uniffi_actro_core_checksum_func_system_app_type_global_search() != 51256) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_system_app_type_settings() != 59459 {
+    if (uniffi_actro_core_checksum_func_system_app_type_settings() != 59459) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_tts_bridge_contract() != 54160 {
+    if (uniffi_actro_core_checksum_func_tts_bridge_contract() != 54160) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_user_info_bridge_contract() != 7990 {
+    if (uniffi_actro_core_checksum_func_user_info_bridge_contract() != 7990) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_actro_core_checksum_func_validate_actr_manifest() != 14273 {
+    if (uniffi_actro_core_checksum_func_validate_actr_package_manifest() != 33172) {
         return InitializationResult.apiChecksumMismatch
     }
 
     return InitializationResult.ok
 }()
 
-private func uniffiEnsureInitialized() {
+// Make the ensure init function public so that other modules which have external type references to
+// our types can call it.
+public func uniffiEnsureActroCoreInitialized() {
     switch initializationResult {
     case .ok:
         break

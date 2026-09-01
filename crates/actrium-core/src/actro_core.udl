@@ -1,11 +1,11 @@
 namespace actro_core {
-    /// Parse and validate an ACTR manifest JSON string.
+    /// Parse and validate an actr-package/1 TOML manifest.
     [Throws=CoreError]
-    ActrManifestInfo parse_actr_manifest(string json);
+    ActrPackageManifestInfo parse_actr_package_manifest(string source);
 
-    /// Validate an ACTR manifest JSON string without returning normalized fields.
+    /// Validate an actr-package/1 TOML manifest without returning normalized fields.
     [Throws=CoreError]
-    void validate_actr_manifest(string json);
+    void validate_actr_package_manifest(string source);
 
     /// Evaluate a contract tuple using the current Actro host compatibility rules.
     ContractGateInfo evaluate_contract(string? name, u32 version);
@@ -34,9 +34,9 @@ namespace actro_core {
     /// Build the stable 16-character content fingerprint used by host shells.
     string stable_content_fingerprint(string input);
 
-    /// Build the manifest integrity verification plan from a manifest JSON string.
+    /// Build the payload integrity verification plan from a TOML manifest.
     [Throws=CoreError]
-    ActrIntegrityPlanInfo? create_actr_integrity_plan(string manifest_json);
+    PackageIntegrityPlanInfo? create_actr_integrity_plan(string manifest_toml);
 
     /// Parse a system app type into the canonical wire string, if known.
     string? parse_system_app_type(string raw);
@@ -948,7 +948,7 @@ namespace actro_core {
     );
 };
 
-dictionary ActrManifestInfo {
+dictionary ActrPackageManifestInfo {
     string name;
     string version;
     string? description;
@@ -1355,14 +1355,14 @@ dictionary CoreInstalledAppInfo {
     boolean is_pinned;
 };
 
-dictionary ActrIntegrityFilePlanInfo {
+dictionary PackageIntegrityFilePlanInfo {
     string path;
     string expected_hash;
 };
 
-dictionary ActrIntegrityPlanInfo {
+dictionary PackageIntegrityPlanInfo {
     string algorithm;
-    sequence<ActrIntegrityFilePlanInfo> files;
+    sequence<PackageIntegrityFilePlanInfo> files;
 };
 
 dictionary ActiveTabInfo {

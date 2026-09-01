@@ -6,10 +6,10 @@
 
 ```
 ActroRuntime/src/
-├── TabRouter.tsx          # 顶级路由：分发至 ActrApp (插件) 或 SystemApp (内置功能)
-├── actr-host/             # 核心宿主逻辑
-│   ├── ActrApp.tsx        #   多 Tab 管理与全局监控推送
-│   ├── ActrTabView.tsx    #   插件沙箱 (Keel Engine) 的完整生命周期管理
+├── TabRouter.tsx          # 顶级路由：分发至 RuntimeApp (插件) 或 SystemApp (内置功能)
+├── runtime-host/             # 核心宿主逻辑
+│   ├── RuntimeApp.tsx        #   多 Tab 管理与全局监控推送
+│   ├── RuntimeTabView.tsx    #   插件沙箱 (Keel Engine) 的完整生命周期管理
 │   ├── components/        #   支持响应式的双端 UI 组件库
 │   └── store/             #   Zustand 状态机 (Message, App, Input 等领域)
 ├── native-bridge/         # 原生通信层：封装了 Actr WebRTC 的复杂信号逻辑
@@ -24,8 +24,8 @@ ActroRuntime/src/
 
 ### A. 双端响应式适配 (Layout Tokens)
 通过 `src/utils/layout.ts` 定义一套视觉 Token。系统监听 `window` 尺寸变化：
-- **Pad (>=768px)**: 启用 `ActrInputPadView`，采用固定宽度的侧边工具栏和三栏布局。
-- **Phone**: 启用 `ActrInputMobileView`，采用全宽输入框、大按钮手势操作区和底部 Overlay。
+- **Pad (>=768px)**: 启用 `AppInputPadView`，采用固定宽度的侧边工具栏和三栏布局。
+- **Phone**: 启用 `AppInputMobileView`，采用全宽输入框、大按钮手势操作区和底部 Overlay。
 
 ### B. 插件沙箱 (Host-Guest)
 - 每个插件运行在隔离的 `Engine` 实例中。
@@ -56,26 +56,26 @@ ActroRuntime/src/
 
 ### 顶部安全区（Header）
 - 顶部安全区不是全局单点处理，而是按子域分开：
-  - `actr-host`（插件会话域）：由 `actr-host/components/ChatHeader.tsx` 负责可配置的顶部 inset。
+  - `runtime-host`（插件会话域）：由 `runtime-host/components/ChatHeader.tsx` 负责可配置的顶部 inset。
   - `system-apps`（系统应用域）：各页面/组件自行控制顶部留白（当前多数为固定 `paddingTop`，例如 `SettingsMain.tsx` / `GlobalSearchApp.tsx` 的 `paddingTop: 60`）。
-- `ChatHeader` 的具体规则（仅适用于 `actr-host`）：
+- `ChatHeader` 的具体规则（仅适用于 `runtime-host`）：
   - 使用 `useSafeAreaInsets().top` 读取系统顶部 inset。
   - `includeSafeTopInset=true`（默认）时，Header 高度为 `CHAT_HEADER_HEIGHT + topInset`，并通过 `paddingTop` 吃掉刘海/状态栏区域。
-  - 当外层已处理顶部偏移时关闭内部 inset，避免重复叠加（如 `ActrTabView.tsx` 外层 `marginTop: topInsetRaw`，对应 `includeSafeTopInset={false}`）。
+  - 当外层已处理顶部偏移时关闭内部 inset，避免重复叠加（如 `RuntimeTabView.tsx` 外层 `marginTop: topInsetRaw`，对应 `includeSafeTopInset={false}`）。
 
 ### 底部安全区（Input/Dock）
-- 统一通过 `actr-host/components/SafeBottomView.tsx` 处理底部安全区，不在业务页面重复写平台分支。
+- 统一通过 `runtime-host/components/SafeBottomView.tsx` 处理底部安全区，不在业务页面重复写平台分支。
 - `SafeBottomView` 规则：
   - iOS：`extraBottom = 0`，不额外叠加 `insets.bottom`（由 `SafeAreaView` 自身处理底部安全区）。
   - Android：`extraBottom = max(insets.bottom, minBottom)`，保证手势导航条机型和普通机型都有足够底部留白。
   - 最终 `paddingBottom = 原有 paddingBottom + extraBottom`，不会覆盖调用方已有样式。
 - 典型用法：
-  - `ActrInputMobileView.tsx`：`<SafeBottomView minBottom={10} />`
+  - `AppInputMobileView.tsx`：`<SafeBottomView minBottom={10} />`
   - `LoadApp.tsx`（Phone 输入 Dock）：`<SafeBottomView minBottom={12} />`
 
 ### 实施原则
 - 新增底部输入栏、浮层 Dock、悬浮操作条时，优先复用 `SafeBottomView`，不要在页面内直接写 `Platform.OS` + `insets.bottom`。
-- `actr-host` 新增顶部 Header/导航条时，先判断外层是否已做 `top` 偏移，再决定 `includeSafeTopInset`，避免双重安全区。
+- `runtime-host` 新增顶部 Header/导航条时，先判断外层是否已做 `top` 偏移，再决定 `includeSafeTopInset`，避免双重安全区。
 - `system-apps` 新增页面时，不要默认复用 `ChatHeader` 语义；需在页面内明确选择“固定顶部留白”或“基于 `useSafeAreaInsets().top` 动态留白”，并保持同类系统页一致。
 
 

@@ -4,9 +4,9 @@ typealias ActiveTabInfo = uniffi.actro_core.ActiveTabInfo
 typealias ActiveTabRowInfo = uniffi.actro_core.ActiveTabRowInfo
 typealias ActrActorTypeInfo = uniffi.actro_core.ActrActorTypeInfo
 typealias ActrBridgeContractInfo = uniffi.actro_core.ActrBridgeContractInfo
-typealias ActrManifestInfo = uniffi.actro_core.ActrManifestInfo
-typealias ActrIntegrityFilePlanInfo = uniffi.actro_core.ActrIntegrityFilePlanInfo
-typealias ActrIntegrityPlanInfo = uniffi.actro_core.ActrIntegrityPlanInfo
+typealias ActrPackageManifestInfo = uniffi.actro_core.ActrPackageManifestInfo
+typealias PackageIntegrityFilePlanInfo = uniffi.actro_core.PackageIntegrityFilePlanInfo
+typealias PackageIntegrityPlanInfo = uniffi.actro_core.PackageIntegrityPlanInfo
 typealias AppSourceTypeInfo = uniffi.actro_core.AppSourceTypeInfo
 typealias AsrBridgeContractInfo = uniffi.actro_core.AsrBridgeContractInfo
 typealias AsrModelPlanInfo = uniffi.actro_core.AsrModelPlanInfo
@@ -1024,8 +1024,8 @@ object ActroCore {
     fun isAssetPath(path: String): Boolean = uniffi.actro_core.isAssetPath(path)
 
     @Throws(CoreException::class)
-    fun createActrIntegrityPlan(manifestJson: String): ActrIntegrityPlanInfo? =
-        uniffi.actro_core.createActrIntegrityPlan(manifestJson)
+    fun createPackageIntegrityPlan(manifestJson: String): PackageIntegrityPlanInfo? =
+        uniffi.actro_core.createPackageIntegrityPlan(manifestJson)
 
     fun normalizeIntegrityAlgorithm(raw: String): String? =
         uniffi.actro_core.normalizeIntegrityAlgorithm(raw)
@@ -1048,7 +1048,7 @@ object ActroCore {
     ): String = uniffi.actro_core.postProcessZhAsrSegments(text, segments)
 
     @Throws(CoreException::class)
-    fun parseActrManifest(json: String): ActrManifestInfo = uniffi.actro_core.parseActrManifest(json)
+    fun parseActrPackageManifest(json: String): ActrPackageManifestInfo = uniffi.actro_core.parseActrPackageManifest(json)
 
     fun parseAppSourceType(raw: String): String? = uniffi.actro_core.parseAppSourceType(raw)
 
@@ -1259,7 +1259,7 @@ object ActroCore {
         uniffi.actro_core.userInfoBridgeContract()
 
     @Throws(CoreException::class)
-    fun validateActrManifest(json: String) = uniffi.actro_core.validateActrManifest(json)
+    fun validateActrPackageManifest(json: String) = uniffi.actro_core.validateActrPackageManifest(json)
 }
 
 object ActroVault {

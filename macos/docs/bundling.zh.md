@@ -5,7 +5,7 @@ Actro 项目包含独立的 React Native bundle。现行 Helper 是单一 `Actro
 | Bundle | 入口文件 | 输出文件 | 用途 |
 |--------|----------|----------|------|
 | System Apps | `index-system.tsx` | `system.jsbundle` | 系统 Renderer（`system.*`） |
-| Actr Host | `index-actr.tsx` | `actr.jsbundle` | 普通应用 Renderer |
+| Actr Host | `index-runtime.tsx` | `runtime.jsbundle` | 普通应用 Renderer |
 
 ## 快速使用
 
@@ -40,23 +40,23 @@ Actro 项目包含独立的 React Native bundle。现行 Helper 是单一 `Actro
 
 **入口文件**：`packages/actrium/index-system.tsx`
 
-### Actr Host (`actr.jsbundle`)
+### Actr Host (`runtime.jsbundle`)
 
 **用途**：由 RCTViewService1-N 加载，渲染 `.actr` 插件应用。
 
 **包含的功能**：
-- `ActrApp` - 插件宿主环境
+- `RuntimeApp` - 插件宿主环境
 - `keel` / `askit` 引擎支持
 - Guest sandbox 运行时
 
-**入口文件**：`packages/actrium/index-actr.tsx`
+**入口文件**：`packages/actrium/index-runtime.tsx`
 
 ## 源码结构
 
 ```
 packages/actrium/
 ├── index-system.tsx      # System Apps 入口
-├── index-actr.tsx        # Actr Host 入口
+├── index-runtime.tsx        # Actr Host 入口
 ├── index.ts              # Legacy 统一入口（已废弃）
 └── src/
     ├── system-apps/      # 系统应用源码
@@ -64,8 +64,8 @@ packages/actrium/
     │   ├── HistoryApp.tsx
     │   ├── BookmarksApp.tsx
     │   └── DebugApp.tsx
-    ├── actr-host/        # Actr 宿主源码
-    │   ├── ActrApp.tsx
+    ├── runtime-host/        # Actr 宿主源码
+    │   ├── RuntimeApp.tsx
     │   └── BundleView.tsx
     ├── TabRouter.tsx     # 路由器（Legacy）
     └── logger.ts         # 日志工具

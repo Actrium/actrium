@@ -1,0 +1,618 @@
+//! Versioned Actor Package (`actr-package/1`) support.
+//!
+//! This module implements the profile-neutral package shape documented in
+//! `actr/protocols/actor-package.zh.md`.  The older flat binary manifest stays
+//! available through [`crate::PackageManifest`] while existing native Actor
+//! workloads migrate to the versioned shape.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::io::{Cursor, Write};
+
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
+use serde::{Deserialize, Serialize};
+use zip::CompressionMethod;
+use zip::write::SimpleFileOptions;
+
+use crate::error::PackError;
+use crate::util::{read_zip_entry_bounded, sha256_hex, sha256_zip_entry_bounded};
+use crate::verify::{DEFAULT_MAX_VERIFIED_ENTRIES, DEFAULT_MAX_VERIFIED_ENTRY_BYTES};
+
+pub const ACTOR_PACKAGE_FORMAT_V1: &str = "actr-package/1";
+pub const KEEL_GUEST_PROFILE_V1: &str = "keel.guest/1";
+const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
+const MAX_SIGNATURE_BYTES: usize = 64;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActorPackageManifest {
+    pub format: String,
+    pub actor: ActorDescriptor,
+    pub workload: WorkloadDescriptor,
+    pub host: HostRequirements,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub dependencies: BTreeMap<String, ActorDependency>,
+    #[serde(default, skip_serializing_if = "PackageExtensions::is_empty")]
+    pub extensions: PackageExtensions,
+    pub signature: SignatureDescriptor,
+    #[serde(default)]
+    pub files: Vec<PackageFileEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActorDescriptor {
+    pub manufacturer: String,
+    pub name: String,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkloadDescriptor {
+    pub profile: String,
+    pub entry: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keel: Option<KeelGuestDescriptor>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KeelGuestDescriptor {
+    pub runtime: String,
+    #[serde(rename = "guest-api")]
+    pub guest_api: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostRequirements {
+    pub profile: String,
+    pub api: String,
+    #[serde(default, rename = "required-capabilities")]
+    pub required_capabilities: Vec<String>,
+    #[serde(default, rename = "optional-capabilities")]
+    pub optional_capabilities: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActorDependency {
+    pub actor: String,
+    pub version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract: Option<String>,
+    #[serde(default = "default_true")]
+    pub required: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PackageExtensions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actrium: Option<ActriumExtension>,
+}
+
+impl PackageExtensions {
+    fn is_empty(&self) -> bool {
+        self.actrium.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActriumExtension {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(
+        default,
+        rename = "theme-color",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub theme_color: Option<String>,
+    #[serde(default, rename = "left-panel-default-visible")]
+    pub left_panel_default_visible: bool,
+    #[serde(default, rename = "right-panel-default-visible")]
+    pub right_panel_default_visible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SignatureDescriptor {
+    pub algorithm: String,
+    #[serde(rename = "key-id")]
+    pub key_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PackageFileEntry {
+    pub path: String,
+    pub role: String,
+    #[serde(rename = "media-type")]
+    pub media_type: String,
+    pub size: u64,
+    pub sha256: String,
+}
+
+impl ActorPackageManifest {
+    pub fn from_toml(source: &str) -> Result<Self, PackError> {
+        let manifest: Self = toml::from_str(source)
+            .map_err(|error| PackError::ManifestParseError(error.to_string()))?;
+        manifest.validate()?;
+        Ok(manifest)
+    }
+
+    pub fn to_toml(&self) -> Result<String, PackError> {
+        self.validate()?;
+        toml::to_string_pretty(self)
+            .map_err(|error| PackError::ManifestParseError(error.to_string()))
+    }
+
+    pub fn actor_type(&self) -> String {
+        format!(
+            "{}:{}:{}",
+            self.actor.manufacturer, self.actor.name, self.actor.version
+        )
+    }
+
+    pub fn workload_file(&self) -> Result<&PackageFileEntry, PackError> {
+        self.files
+            .iter()
+            .find(|file| file.path == self.workload.entry)
+            .ok_or_else(|| {
+                PackError::InvalidPackage(format!(
+                    "workload entry `{}` is not declared in files",
+                    self.workload.entry
+                ))
+            })
+    }
+
+    pub fn validate(&self) -> Result<(), PackError> {
+        if self.format != ACTOR_PACKAGE_FORMAT_V1 {
+            return Err(PackError::InvalidPackage(format!(
+                "unsupported package format `{}`",
+                self.format
+            )));
+        }
+        for (field, value) in [
+            ("actor.manufacturer", self.actor.manufacturer.as_str()),
+            ("actor.name", self.actor.name.as_str()),
+            ("actor.version", self.actor.version.as_str()),
+            ("workload.profile", self.workload.profile.as_str()),
+            ("workload.entry", self.workload.entry.as_str()),
+            ("host.profile", self.host.profile.as_str()),
+            ("host.api", self.host.api.as_str()),
+            ("signature.key-id", self.signature.key_id.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                return Err(PackError::InvalidPackage(format!(
+                    "{field} must not be empty"
+                )));
+            }
+        }
+        if self.signature.algorithm != "ed25519" {
+            return Err(PackError::InvalidPackage(
+                "signature.algorithm must be `ed25519`".to_string(),
+            ));
+        }
+        validate_package_path(&self.workload.entry)?;
+        if self.workload.profile == KEEL_GUEST_PROFILE_V1 {
+            let keel = self.workload.keel.as_ref().ok_or_else(|| {
+                PackError::InvalidPackage("keel.guest/1 requires [workload.keel]".to_string())
+            })?;
+            if keel.guest_api != KEEL_GUEST_PROFILE_V1 {
+                return Err(PackError::InvalidPackage(format!(
+                    "workload.keel.guest-api must be `{KEEL_GUEST_PROFILE_V1}`"
+                )));
+            }
+            if keel.runtime.trim().is_empty() {
+                return Err(PackError::InvalidPackage(
+                    "workload.keel.runtime must not be empty".to_string(),
+                ));
+            }
+        }
+
+        if self.files.is_empty() {
+            return Err(PackError::InvalidPackage(
+                "files must declare at least the workload entry".to_string(),
+            ));
+        }
+        if self.files.len() > DEFAULT_MAX_VERIFIED_ENTRIES {
+            return Err(PackError::InvalidPackage(format!(
+                "manifest declares {} files, exceeds limit {}",
+                self.files.len(),
+                DEFAULT_MAX_VERIFIED_ENTRIES
+            )));
+        }
+        let mut paths = BTreeSet::new();
+        for file in &self.files {
+            validate_package_path(&file.path)?;
+            if !paths.insert(file.path.as_str()) {
+                return Err(PackError::InvalidPackage(format!(
+                    "manifest declares duplicate file `{}`",
+                    file.path
+                )));
+            }
+            validate_sha256(&file.sha256)?;
+        }
+        let workload_file = self.workload_file()?;
+        if workload_file.role != "workload" {
+            return Err(PackError::InvalidPackage(format!(
+                "workload entry `{}` must have role `workload`",
+                workload_file.path
+            )));
+        }
+        for path in self
+            .workload
+            .keel
+            .iter()
+            .flat_map(|keel| [keel.capabilities.as_deref(), keel.contract.as_deref()])
+            .flatten()
+        {
+            if !paths.contains(path) {
+                return Err(PackError::InvalidPackage(format!(
+                    "profile file `{path}` is not declared in files"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn validate_package_path(path: &str) -> Result<(), PackError> {
+    if path.is_empty()
+        || path.starts_with('/')
+        || path.starts_with('\\')
+        || path.contains('\\')
+        || path
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return Err(PackError::InvalidPackage(format!(
+            "invalid package path `{path}`"
+        )));
+    }
+    if matches!(path, "manifest.toml" | "manifest.sig") {
+        return Err(PackError::InvalidPackage(format!(
+            "reserved package path `{path}` cannot be a payload"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_sha256(value: &str) -> Result<(), PackError> {
+    if value.len() != 64 || !value.as_bytes().iter().all(u8::is_ascii_hexdigit) {
+        return Err(PackError::InvalidPackage(
+            "files[].sha256 must be a 64-character SHA-256 hex string".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+pub struct ActorPackOptions {
+    pub manifest: ActorPackageManifest,
+    pub payloads: BTreeMap<String, Vec<u8>>,
+    pub signing_key: SigningKey,
+}
+
+pub fn pack_actor_package(options: &ActorPackOptions) -> Result<Vec<u8>, PackError> {
+    let mut manifest = options.manifest.clone();
+    let declared: BTreeSet<_> = manifest
+        .files
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect();
+    let supplied: BTreeSet<_> = options.payloads.keys().map(String::as_str).collect();
+    if declared != supplied {
+        return Err(PackError::InvalidPackage(
+            "manifest files and supplied payload paths differ".to_string(),
+        ));
+    }
+    for file in &mut manifest.files {
+        let bytes = options
+            .payloads
+            .get(&file.path)
+            .ok_or_else(|| PackError::InvalidPackage(format!("missing payload `{}`", file.path)))?;
+        file.size = bytes.len() as u64;
+        file.sha256 = sha256_hex(bytes);
+    }
+    manifest.signature.algorithm = "ed25519".to_string();
+    manifest.signature.key_id =
+        crate::compute_key_id(&options.signing_key.verifying_key().to_bytes());
+    let manifest_toml = manifest.to_toml()?;
+    let signature = options
+        .signing_key
+        .sign(manifest_toml.as_bytes())
+        .to_bytes();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut archive = zip::ZipWriter::new(cursor);
+    let stored = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+    archive.start_file("manifest.toml", stored)?;
+    archive.write_all(manifest_toml.as_bytes())?;
+    archive.start_file("manifest.sig", stored)?;
+    archive.write_all(&signature)?;
+    for file in &manifest.files {
+        archive.start_file(&file.path, stored)?;
+        archive.write_all(&options.payloads[&file.path])?;
+    }
+    Ok(archive.finish()?.into_inner())
+}
+
+#[derive(Debug, Clone)]
+pub struct InspectedActorPackage {
+    pub manifest: ActorPackageManifest,
+    pub manifest_raw: Vec<u8>,
+    pub signature_raw: Vec<u8>,
+}
+
+pub fn inspect_actor_package(bytes: &[u8]) -> Result<InspectedActorPackage, PackError> {
+    inspect_actor_package_bounded(
+        bytes,
+        DEFAULT_MAX_VERIFIED_ENTRY_BYTES,
+        DEFAULT_MAX_VERIFIED_ENTRY_BYTES,
+    )
+}
+
+pub fn inspect_actor_package_bounded(
+    bytes: &[u8],
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+) -> Result<InspectedActorPackage, PackError> {
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes))?;
+    let manifest_raw = read_zip_entry_bounded(&mut archive, "manifest.toml", MAX_MANIFEST_BYTES)
+        .map_err(required_manifest)?;
+    let signature_raw = read_zip_entry_bounded(&mut archive, "manifest.sig", MAX_SIGNATURE_BYTES)
+        .map_err(required_signature)?;
+    if signature_raw.len() != 64 {
+        return Err(PackError::SignatureVerificationFailed(format!(
+            "manifest.sig must be exactly 64 bytes, got {}",
+            signature_raw.len()
+        )));
+    }
+    let manifest_source = std::str::from_utf8(&manifest_raw)
+        .map_err(|error| PackError::ManifestParseError(error.to_string()))?;
+    let manifest = ActorPackageManifest::from_toml(manifest_source)?;
+
+    let declared: BTreeSet<_> = manifest
+        .files
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect();
+    let mut archive_names = BTreeSet::new();
+    let mut payload_names = BTreeSet::new();
+    for index in 0..archive.len() {
+        let entry = archive.by_index(index)?;
+        if entry.compression() != CompressionMethod::Stored {
+            return Err(PackError::InvalidPackage(format!(
+                "ZIP entry `{}` must use STORE compression",
+                entry.name()
+            )));
+        }
+        let name = entry.name().to_string();
+        validate_archive_name(&name)?;
+        if !archive_names.insert(name.clone()) {
+            return Err(PackError::InvalidPackage(format!(
+                "ZIP contains duplicate entry `{name}`"
+            )));
+        }
+        if !matches!(name.as_str(), "manifest.toml" | "manifest.sig") {
+            payload_names.insert(name);
+        }
+    }
+    if declared != payload_names.iter().map(String::as_str).collect() {
+        return Err(PackError::InvalidPackage(
+            "ZIP payload entries do not exactly match manifest files".to_string(),
+        ));
+    }
+
+    let mut consumed = 0usize;
+    for file in &manifest.files {
+        let remaining = max_total_bytes.saturating_sub(consumed);
+        let allowed = max_entry_bytes.min(remaining);
+        let (actual_hash, actual_size) =
+            sha256_zip_entry_bounded(&mut archive, &file.path, allowed)?;
+        if actual_size as u64 != file.size {
+            return Err(PackError::InvalidPackage(format!(
+                "file size mismatch for `{}`",
+                file.path
+            )));
+        }
+        if actual_hash != file.sha256.to_ascii_lowercase() {
+            return Err(PackError::ResourceHashMismatch {
+                path: file.path.clone(),
+            });
+        }
+        consumed = consumed
+            .checked_add(actual_size)
+            .ok_or_else(|| PackError::InvalidPackage("payload size overflows usize".to_string()))?;
+    }
+
+    Ok(InspectedActorPackage {
+        manifest,
+        manifest_raw,
+        signature_raw,
+    })
+}
+
+pub fn verify_actor_package(
+    bytes: &[u8],
+    public_key: &VerifyingKey,
+) -> Result<InspectedActorPackage, PackError> {
+    let inspected = inspect_actor_package(bytes)?;
+    let signature_bytes: [u8; 64] = inspected.signature_raw.clone().try_into().map_err(|_| {
+        PackError::SignatureVerificationFailed("manifest.sig has invalid length".to_string())
+    })?;
+    public_key
+        .verify_strict(
+            &inspected.manifest_raw,
+            &Signature::from_bytes(&signature_bytes),
+        )
+        .map_err(|error| {
+            PackError::SignatureVerificationFailed(format!("Ed25519 verification failed: {error}"))
+        })?;
+    let actual_key_id = crate::compute_key_id(&public_key.to_bytes());
+    if inspected.manifest.signature.key_id != actual_key_id {
+        return Err(PackError::SignatureVerificationFailed(format!(
+            "signature.key-id does not match verifying key: expected `{actual_key_id}`"
+        )));
+    }
+    Ok(inspected)
+}
+
+pub fn read_actor_package_file(
+    bytes: &[u8],
+    inspected: &InspectedActorPackage,
+    path: &str,
+    max_bytes: usize,
+) -> Result<Vec<u8>, PackError> {
+    if !inspected
+        .manifest
+        .files
+        .iter()
+        .any(|file| file.path == path)
+    {
+        return Err(PackError::InvalidPackage(format!(
+            "file `{path}` is not declared by the verified manifest"
+        )));
+    }
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes))?;
+    read_zip_entry_bounded(&mut archive, path, max_bytes)
+}
+
+pub fn read_actor_workload(
+    bytes: &[u8],
+    inspected: &InspectedActorPackage,
+) -> Result<Vec<u8>, PackError> {
+    read_actor_package_file(
+        bytes,
+        inspected,
+        &inspected.manifest.workload.entry,
+        DEFAULT_MAX_VERIFIED_ENTRY_BYTES,
+    )
+}
+
+fn validate_archive_name(name: &str) -> Result<(), PackError> {
+    if matches!(name, "manifest.toml" | "manifest.sig") {
+        Ok(())
+    } else {
+        validate_package_path(name)
+    }
+}
+
+fn required_manifest(error: PackError) -> PackError {
+    match error {
+        PackError::ZipError(zip::result::ZipError::FileNotFound) => PackError::ManifestNotFound,
+        other => other,
+    }
+}
+
+fn required_signature(error: PackError) -> PackError {
+    match error {
+        PackError::ZipError(zip::result::ZipError::FileNotFound) => PackError::SignatureNotFound,
+        other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::rngs::OsRng;
+
+    fn manifest() -> ActorPackageManifest {
+        ActorPackageManifest {
+            format: ACTOR_PACKAGE_FORMAT_V1.to_string(),
+            actor: ActorDescriptor {
+                manufacturer: "actrium".to_string(),
+                name: "echo-ui".to_string(),
+                version: "0.1.0".to_string(),
+            },
+            workload: WorkloadDescriptor {
+                profile: KEEL_GUEST_PROFILE_V1.to_string(),
+                entry: "workload/guest.js".to_string(),
+                keel: Some(KeelGuestDescriptor {
+                    runtime: "js".to_string(),
+                    guest_api: KEEL_GUEST_PROFILE_V1.to_string(),
+                    capabilities: None,
+                    contract: None,
+                }),
+            },
+            host: HostRequirements {
+                profile: "actr.host/1".to_string(),
+                api: "^1.0.0".to_string(),
+                required_capabilities: vec!["actor.call".to_string(), "ui.render".to_string()],
+                optional_capabilities: Vec::new(),
+            },
+            dependencies: BTreeMap::new(),
+            extensions: PackageExtensions {
+                actrium: Some(ActriumExtension {
+                    title: Some("Echo".to_string()),
+                    ..ActriumExtension::default()
+                }),
+            },
+            signature: SignatureDescriptor {
+                algorithm: "ed25519".to_string(),
+                key_id: "placeholder".to_string(),
+            },
+            files: vec![PackageFileEntry {
+                path: "workload/guest.js".to_string(),
+                role: "workload".to_string(),
+                media_type: "text/javascript".to_string(),
+                size: 0,
+                sha256: "0".repeat(64),
+            }],
+        }
+    }
+
+    #[test]
+    fn round_trip_keel_guest_package() {
+        let key = SigningKey::generate(&mut OsRng);
+        let options = ActorPackOptions {
+            manifest: manifest(),
+            payloads: BTreeMap::from([(
+                "workload/guest.js".to_string(),
+                b"globalThis.echo = true;".to_vec(),
+            )]),
+            signing_key: key.clone(),
+        };
+        let package = pack_actor_package(&options).unwrap();
+        let verified = verify_actor_package(&package, &key.verifying_key()).unwrap();
+        assert_eq!(verified.manifest.workload.profile, KEEL_GUEST_PROFILE_V1);
+        assert_eq!(
+            read_actor_workload(&package, &verified).unwrap(),
+            b"globalThis.echo = true;"
+        );
+    }
+
+    #[test]
+    fn rejects_undeclared_payload() {
+        let key = SigningKey::generate(&mut OsRng);
+        let options = ActorPackOptions {
+            manifest: manifest(),
+            payloads: BTreeMap::from([("workload/guest.js".to_string(), b"guest".to_vec())]),
+            signing_key: key,
+        };
+        let package = pack_actor_package(&options).unwrap();
+        let archive = zip::ZipArchive::new(Cursor::new(package)).unwrap();
+        assert_eq!(archive.len(), 3);
+    }
+
+    #[test]
+    fn rejects_path_traversal() {
+        let mut manifest = manifest();
+        manifest.files[0].path = "../guest.js".to_string();
+        assert!(manifest.validate().is_err());
+    }
+}

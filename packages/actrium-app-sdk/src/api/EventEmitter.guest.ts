@@ -2,7 +2,7 @@
  * EventEmitter - Guest Implementation
  *
  * In guest/sandbox environment, EventEmitter communicates with Host through the bridge.
- * Uses global.__sendEventToHost and global.__useHostEvent provided by Keel runtime.
+ * Uses the event hooks injected by the Keel runtime.
  *
  * Features:
  * - Automatic retry on network failures
@@ -21,11 +21,22 @@ interface QueuedMessage {
   timestamp: number;
 }
 
-// Declare globals injected by Keel runtime
-declare const global: {
+// Globals injected into every Keel sandbox.
+const runtimeGlobal = globalThis as typeof globalThis & {
+  __keel_emitEvent?: (eventName: string, payload?: unknown) => void;
+  __keel_onHostEvent?: (
+    eventName: string,
+    callback: (payload: unknown) => void
+  ) => () => void;
   __sendEventToHost?: (eventName: string, payload?: unknown) => void;
   __useHostEvent?: (eventName: string, callback: (payload: unknown) => void) => () => void;
 };
+
+const getSendToHost = () =>
+  runtimeGlobal.__keel_emitEvent ?? runtimeGlobal.__sendEventToHost;
+
+const getUseHostEvent = () =>
+  runtimeGlobal.__keel_onHostEvent ?? runtimeGlobal.__useHostEvent;
 
 class GuestEventEmitter extends EventEmitterBase implements EventEmitterAPI {
   private messageQueue: QueuedMessage[] = [];
@@ -52,9 +63,10 @@ class GuestEventEmitter extends EventEmitterBase implements EventEmitterAPI {
    */
   private ensureHostEventSubscribed(eventName: string): void {
     if (this.subscribedHostEvents.has(eventName)) return;
-    if (typeof global.__useHostEvent !== 'function') return;
+    const useHostEvent = getUseHostEvent();
+    if (!useHostEvent) return;
 
-    const unsubscribe = global.__useHostEvent(eventName, (payload: unknown) => {
+    const unsubscribe = useHostEvent(eventName, (payload: unknown) => {
       this.notifyLocalListeners(eventName, payload);
     });
 
@@ -82,13 +94,14 @@ class GuestEventEmitter extends EventEmitterBase implements EventEmitterAPI {
    * Send message to host with automatic retry
    */
   private sendToHostWithRetry(event: string, payload: unknown): void {
-    if (typeof global.__sendEventToHost !== 'function') {
+    const sendToHost = getSendToHost();
+    if (!sendToHost) {
       logger.warn('EventEmitter', '__sendEventToHost not available in this environment');
       return;
     }
 
     try {
-      global.__sendEventToHost(event, payload);
+      sendToHost(event, payload);
     } catch (error) {
       logger.error('EventEmitter', `Failed to send event "${event}" to host`, {
         event,
@@ -152,14 +165,15 @@ class GuestEventEmitter extends EventEmitterBase implements EventEmitterAPI {
         continue;
       }
 
-      if (typeof global.__sendEventToHost !== 'function') {
+      const sendToHost = getSendToHost();
+      if (!sendToHost) {
         msg.retries++;
         failed.push(msg);
         continue;
       }
 
       try {
-        global.__sendEventToHost(msg.event, msg.payload);
+        sendToHost(msg.event, msg.payload);
       } catch (error) {
         logger.error(
           'EventEmitter',

@@ -31,9 +31,9 @@ yarn-error.log*
 *.jsbundle.map
 
 # ActroRuntime actr example build artifacts
-ActroRuntime/actr-app-examples/**/dist/
-ActroRuntime/actr-app-examples/**/*.actr
-ActroRuntime/actr-app-examples/**/unified-app.js
+ActroRuntime/keel-guest-examples/**/dist/
+ActroRuntime/keel-guest-examples/**/*.actr
+ActroRuntime/keel-guest-examples/**/unified-app.js
 
 # Temporary files
 *.tmp

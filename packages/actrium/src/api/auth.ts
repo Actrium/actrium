@@ -9,7 +9,7 @@ import {
   authCheckSessionPath,
   authClientAppPath,
   type AuthEnvironment,
-} from '../actr-host/coreContract';
+} from '../runtime-host/coreContract';
 
 // Environments
 export const ENVS: Record<AuthEnvironment, string> = {

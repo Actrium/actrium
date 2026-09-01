@@ -269,13 +269,13 @@ RustBuffer uniffi_actro_core_fn_func_active_tab_to_row(RustBuffer tab, int32_t s
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_ACTR_BRIDGE_CONTRACT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_ACTR_BRIDGE_CONTRACT
 RustBuffer uniffi_actro_core_fn_func_actr_bridge_contract(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_APP_SOURCE_TYPE_DOWNLOADED
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_APP_SOURCE_TYPE_DOWNLOADED
 RustBuffer uniffi_actro_core_fn_func_app_source_type_downloaded(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_APP_SOURCE_TYPE_INFO
@@ -286,13 +286,13 @@ RustBuffer uniffi_actro_core_fn_func_app_source_type_info(RustBuffer raw, RustCa
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_APP_SOURCE_TYPE_LOCAL_DEV
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_APP_SOURCE_TYPE_LOCAL_DEV
 RustBuffer uniffi_actro_core_fn_func_app_source_type_local_dev(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_ASR_BRIDGE_CONTRACT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_ASR_BRIDGE_CONTRACT
 RustBuffer uniffi_actro_core_fn_func_asr_bridge_contract(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_ASR_MODEL_LANGUAGE_DIR
@@ -338,13 +338,13 @@ RustBuffer uniffi_actro_core_fn_func_auth_client_app_path(RustBuffer app_id, Rus
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_AUTH_ENVIRONMENT_BETA
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_AUTH_ENVIRONMENT_BETA
 RustBuffer uniffi_actro_core_fn_func_auth_environment_beta(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_AUTH_ENVIRONMENT_DEV
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_AUTH_ENVIRONMENT_DEV
 RustBuffer uniffi_actro_core_fn_func_auth_environment_dev(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_AUTH_ENVIRONMENT_FROM_APP_URL
@@ -360,7 +360,7 @@ RustBuffer uniffi_actro_core_fn_func_auth_environment_from_url(RustBuffer url, R
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_AUTH_ENVIRONMENT_PROD
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_AUTH_ENVIRONMENT_PROD
 RustBuffer uniffi_actro_core_fn_func_auth_environment_prod(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_AUTH_ENVIRONMENT_STORAGE_SUFFIX
@@ -386,7 +386,7 @@ int8_t uniffi_actro_core_fn_func_auth_is_client_app_not_found_message(RustBuffer
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_AUTH_RESOURCE_UPLOAD_TOKEN_PATH
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_AUTH_RESOURCE_UPLOAD_TOKEN_PATH
 RustBuffer uniffi_actro_core_fn_func_auth_resource_upload_token_path(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_AUTH_RESOURCE_UPLOADER_BASE_URL
@@ -402,7 +402,7 @@ RustBuffer uniffi_actro_core_fn_func_browser_bookmark_snapshot_normalize_json(Ru
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_DATA_CONTRACT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_DATA_CONTRACT
 RustBuffer uniffi_actro_core_fn_func_browser_data_contract(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_HISTORY_SNAPSHOT_NORMALIZE_JSON
@@ -413,7 +413,7 @@ RustBuffer uniffi_actro_core_fn_func_browser_history_snapshot_normalize_json(Rus
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_SEARCH_ENGINE_DEFAULT_ID
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_SEARCH_ENGINE_DEFAULT_ID
 RustBuffer uniffi_actro_core_fn_func_browser_search_engine_default_id(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_SEARCH_ENGINE_INFO
@@ -429,7 +429,7 @@ RustBuffer uniffi_actro_core_fn_func_browser_search_engine_normalize_id(RustBuff
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_SEARCH_ENGINES
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_SEARCH_ENGINES
 RustBuffer uniffi_actro_core_fn_func_browser_search_engines(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_SEARCH_URL
@@ -440,7 +440,7 @@ RustBuffer uniffi_actro_core_fn_func_browser_search_url(RustBuffer query, RustBu
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_SESSION_HOME_SNAPSHOT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_SESSION_HOME_SNAPSHOT_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_session_home_snapshot_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_SESSION_SNAPSHOT_NORMALIZE_JSON
@@ -451,7 +451,7 @@ RustBuffer uniffi_actro_core_fn_func_browser_session_snapshot_normalize_json(Rus
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_ADDRESS_CANONICALIZATION_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_ADDRESS_CANONICALIZATION_POLICY_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_storage_address_canonicalization_policy_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_BOOKMARK_FOLDER_TREE_INTEGRITY_PLAN_JSON
@@ -462,7 +462,7 @@ RustBuffer uniffi_actro_core_fn_func_browser_storage_bookmark_folder_tree_integr
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_BOOKMARK_FOLDER_TREE_INTEGRITY_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_BOOKMARK_FOLDER_TREE_INTEGRITY_POLICY_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_storage_bookmark_folder_tree_integrity_policy_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_BOOKMARK_OWNERSHIP_PLAN_JSON
@@ -473,7 +473,7 @@ RustBuffer uniffi_actro_core_fn_func_browser_storage_bookmark_ownership_plan_jso
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_BOOKMARK_OWNERSHIP_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_BOOKMARK_OWNERSHIP_POLICY_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_storage_bookmark_ownership_policy_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_BOOKMARK_RESTORE_PLACEMENT_PLAN_JSON
@@ -484,7 +484,7 @@ RustBuffer uniffi_actro_core_fn_func_browser_storage_bookmark_restore_placement_
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_BOOKMARK_RESTORE_PLACEMENT_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_BOOKMARK_RESTORE_PLACEMENT_POLICY_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_storage_bookmark_restore_placement_policy_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_CANONICALIZE_ADDRESSES_JSON
@@ -495,13 +495,13 @@ RustBuffer uniffi_actro_core_fn_func_browser_storage_canonicalize_addresses_json
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_DATA_MODEL_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_DATA_MODEL_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_storage_data_model_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_DATABASE_NAME
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_DATABASE_NAME
 RustBuffer uniffi_actro_core_fn_func_browser_storage_database_name(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_HISTORY_VISIT_AGGREGATION_PLAN_JSON
@@ -512,13 +512,13 @@ RustBuffer uniffi_actro_core_fn_func_browser_storage_history_visit_aggregation_p
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_HISTORY_VISIT_AGGREGATION_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_HISTORY_VISIT_AGGREGATION_POLICY_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_storage_history_visit_aggregation_policy_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_REPOSITORY_SQL
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_REPOSITORY_SQL
 RustBuffer uniffi_actro_core_fn_func_browser_storage_repository_sql(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_RETENTION_PRUNING_PLAN_JSON
@@ -529,31 +529,31 @@ RustBuffer uniffi_actro_core_fn_func_browser_storage_retention_pruning_plan_json
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_RETENTION_PRUNING_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_RETENTION_PRUNING_POLICY_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_storage_retention_pruning_policy_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SCHEMA
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SCHEMA
 RustBuffer uniffi_actro_core_fn_func_browser_storage_schema(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SCHEMA_MIGRATION_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SCHEMA_MIGRATION_PLAN_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_storage_schema_migration_plan_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SCHEMA_STATEMENTS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SCHEMA_STATEMENTS
 RustBuffer uniffi_actro_core_fn_func_browser_storage_schema_statements(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SCHEMA_VERSION
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SCHEMA_VERSION
 uint32_t uniffi_actro_core_fn_func_browser_storage_schema_version(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SESSION_ACTIVE_TAB_CONSISTENCY_PLAN_JSON
@@ -564,7 +564,7 @@ RustBuffer uniffi_actro_core_fn_func_browser_storage_session_active_tab_consiste
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SESSION_ACTIVE_TAB_CONSISTENCY_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SESSION_ACTIVE_TAB_CONSISTENCY_POLICY_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_storage_session_active_tab_consistency_policy_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SESSION_TAB_ID_PLAN_JSON
@@ -580,7 +580,7 @@ RustBuffer uniffi_actro_core_fn_func_browser_storage_session_tab_ordering_plan_j
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SESSION_TAB_ORDERING_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SESSION_TAB_ORDERING_POLICY_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_storage_session_tab_ordering_policy_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_ACK_PLAN_JSON
@@ -666,7 +666,7 @@ RustBuffer uniffi_actro_core_fn_func_browser_storage_sync_cloud_cycle_status_pol
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CLOUD_DATA_MODEL_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CLOUD_DATA_MODEL_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_storage_sync_cloud_data_model_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CLOUD_DEFAULT_MANIFEST_JSON
@@ -682,13 +682,13 @@ RustBuffer uniffi_actro_core_fn_func_browser_storage_sync_cloud_high_watermark_p
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CLOUD_HIGH_WATERMARK_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CLOUD_HIGH_WATERMARK_POLICY_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_storage_sync_cloud_high_watermark_policy_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_CAPABILITIES_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_CAPABILITIES_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_capabilities_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_CAPABILITY_PREFLIGHT_JSON
@@ -774,7 +774,7 @@ RustBuffer uniffi_actro_core_fn_func_browser_storage_sync_cloud_observability_ev
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_ADAPTER_CONTRACT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_ADAPTER_CONTRACT_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_adapter_contract_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_ADAPTER_PLAN_JSON
@@ -785,7 +785,7 @@ RustBuffer uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_adapter
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_CONNECTION_CONTRACT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_CONNECTION_CONTRACT_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_connection_contract_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_CONNECTION_STATUS_POLICY_JSON
@@ -806,7 +806,7 @@ RustBuffer uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_error_c
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_ERROR_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_ERROR_POLICY_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_storage_sync_cloud_provider_error_policy_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PULL_APPLY_PLAN_JSON
@@ -867,13 +867,13 @@ RustBuffer uniffi_actro_core_fn_func_browser_storage_sync_cloud_store_capability
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CLOUD_STORE_CONTRACT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CLOUD_STORE_CONTRACT_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_storage_sync_cloud_store_contract_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CONFLICT_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CONFLICT_POLICY_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_storage_sync_conflict_policy_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_CYCLE_REQUEST_PLAN_JSON
@@ -894,7 +894,7 @@ RustBuffer uniffi_actro_core_fn_func_browser_storage_sync_cycle_transport_result
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_MERGE_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_MERGE_POLICY_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_storage_sync_merge_policy_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_PULL_REQUEST_JSON
@@ -945,7 +945,7 @@ RustBuffer uniffi_actro_core_fn_func_browser_storage_sync_server_merge_result_js
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_SQL
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_SQL
 RustBuffer uniffi_actro_core_fn_func_browser_storage_sync_sql(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_STATUS_POLICY_JSON
@@ -956,19 +956,19 @@ RustBuffer uniffi_actro_core_fn_func_browser_storage_sync_status_policy_json(Rus
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_TRANSPORT_CONTRACT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_SYNC_TRANSPORT_CONTRACT_JSON
 RustBuffer uniffi_actro_core_fn_func_browser_storage_sync_transport_contract_json(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_TABLE_NAMES
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_BROWSER_STORAGE_TABLE_NAMES
 RustBuffer uniffi_actro_core_fn_func_browser_storage_table_names(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CORE_APP_REPOSITORY_SQL
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CORE_APP_REPOSITORY_SQL
 RustBuffer uniffi_actro_core_fn_func_core_app_repository_sql(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CORE_APP_SEARCH_PARAMS
@@ -989,7 +989,7 @@ RustBuffer uniffi_actro_core_fn_func_core_bookmark_insert_params(RustBuffer book
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CORE_BOOKMARK_REPOSITORY_SQL
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CORE_BOOKMARK_REPOSITORY_SQL
 RustBuffer uniffi_actro_core_fn_func_core_bookmark_repository_sql(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CORE_BOOKMARK_SEARCH_PARAMS
@@ -1015,7 +1015,7 @@ RustBuffer uniffi_actro_core_fn_func_core_history_item_from_row(RustBuffer row, 
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CORE_HISTORY_REPOSITORY_SQL
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CORE_HISTORY_REPOSITORY_SQL
 RustBuffer uniffi_actro_core_fn_func_core_history_repository_sql(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CORE_HISTORY_SEARCH_TITLE_PARAM
@@ -1041,19 +1041,19 @@ RustBuffer uniffi_actro_core_fn_func_core_installed_app_update_params(RustBuffer
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CORE_SCHEMA_STATEMENTS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CORE_SCHEMA_STATEMENTS
 RustBuffer uniffi_actro_core_fn_func_core_schema_statements(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CORE_SCHEMA_TABLE_NAMES
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CORE_SCHEMA_TABLE_NAMES
 RustBuffer uniffi_actro_core_fn_func_core_schema_table_names(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CORE_SCHEMA_VERSION
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CORE_SCHEMA_VERSION
 uint32_t uniffi_actro_core_fn_func_core_schema_version(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CORE_TAG_FROM_ROW
@@ -1069,7 +1069,7 @@ RustBuffer uniffi_actro_core_fn_func_core_tag_insert_params(RustBuffer id, RustB
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CORE_TAG_REPOSITORY_SQL
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CORE_TAG_REPOSITORY_SQL
 RustBuffer uniffi_actro_core_fn_func_core_tag_repository_sql(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CORE_TAG_UPDATE_PARAMS
@@ -1079,37 +1079,37 @@ RustBuffer uniffi_actro_core_fn_func_core_tag_update_params(RustBuffer name, Rus
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CREATE_ACTR_INTEGRITY_PLAN
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_CREATE_ACTR_INTEGRITY_PLAN
-RustBuffer uniffi_actro_core_fn_func_create_actr_integrity_plan(RustBuffer manifest_json, RustCallStatus *_Nonnull out_status
+RustBuffer uniffi_actro_core_fn_func_create_actr_integrity_plan(RustBuffer manifest_toml, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_DEFAULT_RUNTIME_APP_STATUS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_DEFAULT_RUNTIME_APP_STATUS
 RustBuffer uniffi_actro_core_fn_func_default_runtime_app_status(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_DEFAULT_SYSTEM_TAGS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_DEFAULT_SYSTEM_TAGS
 RustBuffer uniffi_actro_core_fn_func_default_system_tags(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_DEFAULT_TAG_COLORS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_DEFAULT_TAG_COLORS
 RustBuffer uniffi_actro_core_fn_func_default_tag_colors(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_DEFAULT_TAGS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_DEFAULT_TAGS
 RustBuffer uniffi_actro_core_fn_func_default_tags(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_EMAIL_BRIDGE_CONTRACT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_EMAIL_BRIDGE_CONTRACT
 RustBuffer uniffi_actro_core_fn_func_email_bridge_contract(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_EMPTY_BROWSER_STORAGE_SYNC_BATCH_JSON
@@ -1207,14 +1207,14 @@ RustBuffer uniffi_actro_core_fn_func_normalize_sha256_hex(RustBuffer hash, RustC
 RustBuffer uniffi_actro_core_fn_func_parse_actr_actor_type(RustBuffer raw, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_PARSE_ACTR_PACKAGE_MANIFEST
+#define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_PARSE_ACTR_PACKAGE_MANIFEST
+RustBuffer uniffi_actro_core_fn_func_parse_actr_package_manifest(RustBuffer source, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_PARSE_APP_SOURCE_TYPE
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_PARSE_APP_SOURCE_TYPE
 RustBuffer uniffi_actro_core_fn_func_parse_app_source_type(RustBuffer raw, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_PARSE_ACTR_MANIFEST
-#define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_PARSE_ACTR_MANIFEST
-RustBuffer uniffi_actro_core_fn_func_parse_actr_manifest(RustBuffer json, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_PARSE_SYSTEM_APP_TYPE
@@ -1245,103 +1245,103 @@ RustBuffer uniffi_actro_core_fn_func_relative_path_from(RustBuffer absolute_path
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_APP_STATUS_ALIVE
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_APP_STATUS_ALIVE
 RustBuffer uniffi_actro_core_fn_func_runtime_app_status_alive(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_APP_STATUS_DEAD
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_APP_STATUS_DEAD
 RustBuffer uniffi_actro_core_fn_func_runtime_app_status_dead(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_AUTH_CONTEXT_APP_ID_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_AUTH_CONTEXT_APP_ID_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_auth_context_app_id_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_AUTH_CONTEXT_APP_URL_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_AUTH_CONTEXT_APP_URL_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_auth_context_app_url_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_AUTH_CONTEXT_CLIENT_ID_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_AUTH_CONTEXT_CLIENT_ID_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_auth_context_client_id_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_AUTH_CONTEXT_TAB_ID_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_AUTH_CONTEXT_TAB_ID_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_auth_context_tab_id_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_APP_URL_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_APP_URL_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_bridge_app_url_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_CONTAINER_HEIGHT_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_CONTAINER_HEIGHT_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_bridge_container_height_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_CONTAINER_WIDTH_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_CONTAINER_WIDTH_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_bridge_container_width_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_ICON_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_ICON_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_bridge_icon_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_IS_BOOKMARKED_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_IS_BOOKMARKED_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_bridge_is_bookmarked_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_MARKED_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_MARKED_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_bridge_marked_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_STATUS_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_STATUS_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_bridge_status_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_TAB_ID_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_TAB_ID_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_bridge_tab_id_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_TITLE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_TITLE_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_bridge_title_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_UNREAD_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_UNREAD_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_bridge_unread_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_VISIBLE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_BRIDGE_VISIBLE_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_bridge_visible_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_CONTAINER_SIZE_CHANGE_EVENT
@@ -1352,13 +1352,13 @@ RustBuffer uniffi_actro_core_fn_func_runtime_container_size_change_event(int32_t
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_CONTAINER_SIZE_CHANGE_EVENT_NAME
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_CONTAINER_SIZE_CHANGE_EVENT_NAME
 RustBuffer uniffi_actro_core_fn_func_runtime_container_size_change_event_name(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_EXTENSION_PANEL_VISIBLE_CHANGE_EVENT_NAME
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_EXTENSION_PANEL_VISIBLE_CHANGE_EVENT_NAME
 RustBuffer uniffi_actro_core_fn_func_runtime_extension_panel_visible_change_event_name(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_EXTENSION_PANEL_VISIBLE_EVENT
@@ -1369,61 +1369,61 @@ RustBuffer uniffi_actro_core_fn_func_runtime_extension_panel_visible_event(RustB
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_LOGIN_RESULT_CODE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_LOGIN_RESULT_CODE_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_login_result_code_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_LOGIN_RESULT_ERROR_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_LOGIN_RESULT_ERROR_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_login_result_error_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_LOGIN_RESULT_EVENT_NAME
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_LOGIN_RESULT_EVENT_NAME
 RustBuffer uniffi_actro_core_fn_func_runtime_login_result_event_name(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_LOGIN_RESULT_ID_TOKEN_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_LOGIN_RESULT_ID_TOKEN_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_login_result_id_token_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_LOGIN_RESULT_MESSAGE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_LOGIN_RESULT_MESSAGE_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_login_result_message_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_LOGIN_RESULT_TYPE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_LOGIN_RESULT_TYPE_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_login_result_type_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_LOGIN_TYPE_APPLE
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_LOGIN_TYPE_APPLE
 RustBuffer uniffi_actro_core_fn_func_runtime_login_type_apple(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_LOGIN_TYPE_GOOGLE
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_LOGIN_TYPE_GOOGLE
 RustBuffer uniffi_actro_core_fn_func_runtime_login_type_google(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_LOGIN_TYPE_WECHAT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_LOGIN_TYPE_WECHAT
 RustBuffer uniffi_actro_core_fn_func_runtime_login_type_wechat(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_ROOT_PROPS_CURRENT_TAB_ID_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_ROOT_PROPS_CURRENT_TAB_ID_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_root_props_current_tab_id_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_ROOT_PROPS_FROM_ACTIVE_TABS
@@ -1439,37 +1439,37 @@ RustBuffer uniffi_actro_core_fn_func_runtime_root_props_from_runtime_tabs(RustBu
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_ROOT_PROPS_IS_LEFT_PANEL_VISIBLE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_ROOT_PROPS_IS_LEFT_PANEL_VISIBLE_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_root_props_is_left_panel_visible_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_ROOT_PROPS_IS_RIGHT_PANEL_VISIBLE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_ROOT_PROPS_IS_RIGHT_PANEL_VISIBLE_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_root_props_is_right_panel_visible_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_ROOT_PROPS_SINGLE_TAB_MODE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_ROOT_PROPS_SINGLE_TAB_MODE_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_root_props_single_tab_mode_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_ROOT_PROPS_TAB_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_ROOT_PROPS_TAB_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_root_props_tab_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_ROOT_PROPS_TABS_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_ROOT_PROPS_TABS_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_root_props_tabs_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_SEARCH_INPUT_CHANGED_EVENT_NAME
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_SEARCH_INPUT_CHANGED_EVENT_NAME
 RustBuffer uniffi_actro_core_fn_func_runtime_search_input_changed_event_name(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_SYSTEM_ROOT_PROPS
@@ -1480,7 +1480,7 @@ RustBuffer uniffi_actro_core_fn_func_runtime_system_root_props(RustBuffer system
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_BOOKMARK_CHANGED_EVENT_NAME
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_BOOKMARK_CHANGED_EVENT_NAME
 RustBuffer uniffi_actro_core_fn_func_runtime_tab_bookmark_changed_event_name(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_BOOKMARK_EVENT
@@ -1496,13 +1496,13 @@ RustBuffer uniffi_actro_core_fn_func_runtime_tab_bookmark_status_from_fields(Rus
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_ENTERED_FULLSCREEN_EVENT_NAME
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_ENTERED_FULLSCREEN_EVENT_NAME
 RustBuffer uniffi_actro_core_fn_func_runtime_tab_entered_fullscreen_event_name(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_EXITED_FULLSCREEN_EVENT_NAME
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_EXITED_FULLSCREEN_EVENT_NAME
 RustBuffer uniffi_actro_core_fn_func_runtime_tab_exited_fullscreen_event_name(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_FROM_ACTIVE_TAB
@@ -1518,37 +1518,37 @@ RustBuffer uniffi_actro_core_fn_func_runtime_tab_fullscreen_event(RustBuffer tab
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_PROPS_BACKGROUND_COLOR_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_PROPS_BACKGROUND_COLOR_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_tab_props_background_color_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_PROPS_HTML_CONTENT_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_PROPS_HTML_CONTENT_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_tab_props_html_content_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_PROPS_ID_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_PROPS_ID_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_tab_props_id_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_PROPS_RELOAD_KEY_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_PROPS_RELOAD_KEY_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_tab_props_reload_key_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_PROPS_RIGHT_PANEL_DEFAULT_VISIBLE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_PROPS_RIGHT_PANEL_DEFAULT_VISIBLE_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_tab_props_right_panel_default_visible_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_PROPS_UNIFIED_SCRIPT_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_PROPS_UNIFIED_SCRIPT_KEY
 RustBuffer uniffi_actro_core_fn_func_runtime_tab_props_unified_script_key(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_RUNTIME_TAB_UNREAD_FROM_FIELDS
@@ -1569,13 +1569,13 @@ RustBuffer uniffi_actro_core_fn_func_stable_content_fingerprint(RustBuffer input
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_SUPPORTED_CONTRACT_NAME
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_SUPPORTED_CONTRACT_NAME
 RustBuffer uniffi_actro_core_fn_func_supported_contract_name(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_SUPPORTED_CONTRACT_VERSION
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_SUPPORTED_CONTRACT_VERSION
 uint32_t uniffi_actro_core_fn_func_supported_contract_version(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_SYSTEM_APP_INFO
@@ -1586,36 +1586,36 @@ RustBuffer uniffi_actro_core_fn_func_system_app_info(RustBuffer raw, RustCallSta
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_SYSTEM_APP_TYPE_BOOKMARKS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_SYSTEM_APP_TYPE_BOOKMARKS
 RustBuffer uniffi_actro_core_fn_func_system_app_type_bookmarks(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_SYSTEM_APP_TYPE_GLOBAL_SEARCH
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_SYSTEM_APP_TYPE_GLOBAL_SEARCH
 RustBuffer uniffi_actro_core_fn_func_system_app_type_global_search(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_SYSTEM_APP_TYPE_SETTINGS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_SYSTEM_APP_TYPE_SETTINGS
 RustBuffer uniffi_actro_core_fn_func_system_app_type_settings(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_TTS_BRIDGE_CONTRACT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_TTS_BRIDGE_CONTRACT
 RustBuffer uniffi_actro_core_fn_func_tts_bridge_contract(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_USER_INFO_BRIDGE_CONTRACT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_USER_INFO_BRIDGE_CONTRACT
 RustBuffer uniffi_actro_core_fn_func_user_info_bridge_contract(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_VALIDATE_ACTR_MANIFEST
-#define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_VALIDATE_ACTR_MANIFEST
-void uniffi_actro_core_fn_func_validate_actr_manifest(RustBuffer json, RustCallStatus *_Nonnull out_status
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_VALIDATE_ACTR_PACKAGE_MANIFEST
+#define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_FN_FUNC_VALIDATE_ACTR_PACKAGE_MANIFEST
+void uniffi_actro_core_fn_func_validate_actr_package_manifest(RustBuffer source, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_FFI_ACTRO_CORE_RUSTBUFFER_ALLOC
@@ -1901,1525 +1901,1525 @@ void ffi_actro_core_rust_future_complete_void(uint64_t handle, RustCallStatus *_
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_ACTIVE_TAB_FROM_ROW
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_ACTIVE_TAB_FROM_ROW
 uint16_t uniffi_actro_core_checksum_func_active_tab_from_row(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_ACTIVE_TAB_ROWS_FROM_TABS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_ACTIVE_TAB_ROWS_FROM_TABS
 uint16_t uniffi_actro_core_checksum_func_active_tab_rows_from_tabs(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_ACTIVE_TAB_TO_ROW
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_ACTIVE_TAB_TO_ROW
 uint16_t uniffi_actro_core_checksum_func_active_tab_to_row(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_ACTR_BRIDGE_CONTRACT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_ACTR_BRIDGE_CONTRACT
 uint16_t uniffi_actro_core_checksum_func_actr_bridge_contract(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_APP_SOURCE_TYPE_DOWNLOADED
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_APP_SOURCE_TYPE_DOWNLOADED
 uint16_t uniffi_actro_core_checksum_func_app_source_type_downloaded(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_APP_SOURCE_TYPE_INFO
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_APP_SOURCE_TYPE_INFO
 uint16_t uniffi_actro_core_checksum_func_app_source_type_info(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_APP_SOURCE_TYPE_LOCAL_DEV
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_APP_SOURCE_TYPE_LOCAL_DEV
 uint16_t uniffi_actro_core_checksum_func_app_source_type_local_dev(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_ASR_BRIDGE_CONTRACT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_ASR_BRIDGE_CONTRACT
 uint16_t uniffi_actro_core_checksum_func_asr_bridge_contract(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_ASR_MODEL_LANGUAGE_DIR
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_ASR_MODEL_LANGUAGE_DIR
 uint16_t uniffi_actro_core_checksum_func_asr_model_language_dir(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_ASR_MODEL_PLAN
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_ASR_MODEL_PLAN
 uint16_t uniffi_actro_core_checksum_func_asr_model_plan(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_ACCESS_CONTROL_PATH
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_ACCESS_CONTROL_PATH
 uint16_t uniffi_actro_core_checksum_func_auth_access_control_path(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_ACCESS_CONTROL_STATUS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_ACCESS_CONTROL_STATUS
 uint16_t uniffi_actro_core_checksum_func_auth_access_control_status(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_ACCESS_CONTROL_URL_FROM_APP_URL
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_ACCESS_CONTROL_URL_FROM_APP_URL
 uint16_t uniffi_actro_core_checksum_func_auth_access_control_url_from_app_url(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_ACCOUNT_BASE_URL
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_ACCOUNT_BASE_URL
 uint16_t uniffi_actro_core_checksum_func_auth_account_base_url(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_API_RESPONSE_SUCCESS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_API_RESPONSE_SUCCESS
 uint16_t uniffi_actro_core_checksum_func_auth_api_response_success(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_CLIENT_APP_PATH
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_CLIENT_APP_PATH
 uint16_t uniffi_actro_core_checksum_func_auth_client_app_path(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_ENVIRONMENT_BETA
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_ENVIRONMENT_BETA
 uint16_t uniffi_actro_core_checksum_func_auth_environment_beta(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_ENVIRONMENT_DEV
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_ENVIRONMENT_DEV
 uint16_t uniffi_actro_core_checksum_func_auth_environment_dev(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_ENVIRONMENT_FROM_APP_URL
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_ENVIRONMENT_FROM_APP_URL
 uint16_t uniffi_actro_core_checksum_func_auth_environment_from_app_url(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_ENVIRONMENT_FROM_URL
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_ENVIRONMENT_FROM_URL
 uint16_t uniffi_actro_core_checksum_func_auth_environment_from_url(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_ENVIRONMENT_PROD
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_ENVIRONMENT_PROD
 uint16_t uniffi_actro_core_checksum_func_auth_environment_prod(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_ENVIRONMENT_STORAGE_SUFFIX
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_ENVIRONMENT_STORAGE_SUFFIX
 uint16_t uniffi_actro_core_checksum_func_auth_environment_storage_suffix(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_IS_AUTHORIZED_CODE
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_IS_AUTHORIZED_CODE
 uint16_t uniffi_actro_core_checksum_func_auth_is_authorized_code(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_IS_CLIENT_APP_NOT_FOUND_CODE
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_IS_CLIENT_APP_NOT_FOUND_CODE
 uint16_t uniffi_actro_core_checksum_func_auth_is_client_app_not_found_code(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_IS_CLIENT_APP_NOT_FOUND_MESSAGE
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_IS_CLIENT_APP_NOT_FOUND_MESSAGE
 uint16_t uniffi_actro_core_checksum_func_auth_is_client_app_not_found_message(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_RESOURCE_UPLOAD_TOKEN_PATH
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_RESOURCE_UPLOAD_TOKEN_PATH
 uint16_t uniffi_actro_core_checksum_func_auth_resource_upload_token_path(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_RESOURCE_UPLOADER_BASE_URL
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_AUTH_RESOURCE_UPLOADER_BASE_URL
 uint16_t uniffi_actro_core_checksum_func_auth_resource_uploader_base_url(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_BOOKMARK_SNAPSHOT_NORMALIZE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_BOOKMARK_SNAPSHOT_NORMALIZE_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_bookmark_snapshot_normalize_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_DATA_CONTRACT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_DATA_CONTRACT
 uint16_t uniffi_actro_core_checksum_func_browser_data_contract(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_HISTORY_SNAPSHOT_NORMALIZE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_HISTORY_SNAPSHOT_NORMALIZE_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_history_snapshot_normalize_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_SEARCH_ENGINE_DEFAULT_ID
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_SEARCH_ENGINE_DEFAULT_ID
 uint16_t uniffi_actro_core_checksum_func_browser_search_engine_default_id(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_SEARCH_ENGINE_INFO
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_SEARCH_ENGINE_INFO
 uint16_t uniffi_actro_core_checksum_func_browser_search_engine_info(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_SEARCH_ENGINE_NORMALIZE_ID
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_SEARCH_ENGINE_NORMALIZE_ID
 uint16_t uniffi_actro_core_checksum_func_browser_search_engine_normalize_id(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_SEARCH_ENGINES
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_SEARCH_ENGINES
 uint16_t uniffi_actro_core_checksum_func_browser_search_engines(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_SEARCH_URL
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_SEARCH_URL
 uint16_t uniffi_actro_core_checksum_func_browser_search_url(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_SESSION_HOME_SNAPSHOT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_SESSION_HOME_SNAPSHOT_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_session_home_snapshot_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_SESSION_SNAPSHOT_NORMALIZE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_SESSION_SNAPSHOT_NORMALIZE_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_session_snapshot_normalize_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_ADDRESS_CANONICALIZATION_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_ADDRESS_CANONICALIZATION_POLICY_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_address_canonicalization_policy_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_BOOKMARK_FOLDER_TREE_INTEGRITY_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_BOOKMARK_FOLDER_TREE_INTEGRITY_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_bookmark_folder_tree_integrity_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_BOOKMARK_FOLDER_TREE_INTEGRITY_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_BOOKMARK_FOLDER_TREE_INTEGRITY_POLICY_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_bookmark_folder_tree_integrity_policy_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_BOOKMARK_OWNERSHIP_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_BOOKMARK_OWNERSHIP_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_bookmark_ownership_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_BOOKMARK_OWNERSHIP_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_BOOKMARK_OWNERSHIP_POLICY_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_bookmark_ownership_policy_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_BOOKMARK_RESTORE_PLACEMENT_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_BOOKMARK_RESTORE_PLACEMENT_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_bookmark_restore_placement_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_BOOKMARK_RESTORE_PLACEMENT_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_BOOKMARK_RESTORE_PLACEMENT_POLICY_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_bookmark_restore_placement_policy_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_CANONICALIZE_ADDRESSES_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_CANONICALIZE_ADDRESSES_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_canonicalize_addresses_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_DATA_MODEL_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_DATA_MODEL_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_data_model_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_DATABASE_NAME
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_DATABASE_NAME
 uint16_t uniffi_actro_core_checksum_func_browser_storage_database_name(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_HISTORY_VISIT_AGGREGATION_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_HISTORY_VISIT_AGGREGATION_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_history_visit_aggregation_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_HISTORY_VISIT_AGGREGATION_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_HISTORY_VISIT_AGGREGATION_POLICY_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_history_visit_aggregation_policy_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_REPOSITORY_SQL
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_REPOSITORY_SQL
 uint16_t uniffi_actro_core_checksum_func_browser_storage_repository_sql(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_RETENTION_PRUNING_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_RETENTION_PRUNING_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_retention_pruning_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_RETENTION_PRUNING_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_RETENTION_PRUNING_POLICY_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_retention_pruning_policy_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SCHEMA
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SCHEMA
 uint16_t uniffi_actro_core_checksum_func_browser_storage_schema(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SCHEMA_MIGRATION_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SCHEMA_MIGRATION_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_schema_migration_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SCHEMA_STATEMENTS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SCHEMA_STATEMENTS
 uint16_t uniffi_actro_core_checksum_func_browser_storage_schema_statements(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SCHEMA_VERSION
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SCHEMA_VERSION
 uint16_t uniffi_actro_core_checksum_func_browser_storage_schema_version(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SESSION_ACTIVE_TAB_CONSISTENCY_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SESSION_ACTIVE_TAB_CONSISTENCY_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_session_active_tab_consistency_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SESSION_ACTIVE_TAB_CONSISTENCY_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SESSION_ACTIVE_TAB_CONSISTENCY_POLICY_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_session_active_tab_consistency_policy_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SESSION_TAB_ID_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SESSION_TAB_ID_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_session_tab_id_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SESSION_TAB_ORDERING_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SESSION_TAB_ORDERING_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_session_tab_ordering_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SESSION_TAB_ORDERING_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SESSION_TAB_ORDERING_POLICY_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_session_tab_ordering_policy_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_ACK_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_ACK_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_ack_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_BATCH_FROM_DIRTY_ROWS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_BATCH_FROM_DIRTY_ROWS_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_batch_from_dirty_rows_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLIENT_ACK_BATCH_AFTER_REMOTE_APPLY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLIENT_ACK_BATCH_AFTER_REMOTE_APPLY_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_client_ack_batch_after_remote_apply_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLIENT_CYCLE_APPLY_RESULT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLIENT_CYCLE_APPLY_RESULT_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_client_cycle_apply_result_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLIENT_CYCLE_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLIENT_CYCLE_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_client_cycle_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_CLEANUP_RESULT_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_CLEANUP_RESULT_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cleanup_result_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_COMPACTION_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_COMPACTION_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_compaction_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_COMPACTION_RESULT_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_COMPACTION_RESULT_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_compaction_result_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_COMPATIBILITY_PREFLIGHT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_COMPATIBILITY_PREFLIGHT_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_compatibility_preflight_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_COMPATIBILITY_STATUS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_COMPATIBILITY_STATUS_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_compatibility_status_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_CYCLE_ATTEMPT_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_CYCLE_ATTEMPT_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_attempt_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_CYCLE_CLIENT_APPLY_RESULT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_CYCLE_CLIENT_APPLY_RESULT_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_client_apply_result_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_CYCLE_CLIENT_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_CYCLE_CLIENT_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_client_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_CYCLE_LOOP_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_CYCLE_LOOP_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_loop_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_CYCLE_SCHEDULE_STATE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_CYCLE_SCHEDULE_STATE_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_schedule_state_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_CYCLE_STATUS_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_CYCLE_STATUS_POLICY_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_cycle_status_policy_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_DATA_MODEL_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_DATA_MODEL_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_data_model_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_DEFAULT_MANIFEST_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_DEFAULT_MANIFEST_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_default_manifest_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_HIGH_WATERMARK_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_HIGH_WATERMARK_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_high_watermark_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_HIGH_WATERMARK_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_HIGH_WATERMARK_POLICY_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_high_watermark_policy_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_CAPABILITIES_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_CAPABILITIES_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_capabilities_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_CAPABILITY_PREFLIGHT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_CAPABILITY_PREFLIGHT_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_capability_preflight_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_CLEANUP_ROUND_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_CLEANUP_ROUND_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_cleanup_round_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_COMPACTION_ROUND_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_COMPACTION_ROUND_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_compaction_round_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_COMPATIBILITY_PREFLIGHT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_COMPATIBILITY_PREFLIGHT_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_compatibility_preflight_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_CYCLE_ROUND_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_CYCLE_ROUND_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_cycle_round_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_MEMBERSHIP_ROUND_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_MEMBERSHIP_ROUND_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_membership_round_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_RECOVERY_RETENTION_ROUND_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_RECOVERY_RETENTION_ROUND_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_recovery_retention_round_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_RECOVERY_SNAPSHOT_ROUND_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOCAL_FOLDER_RECOVERY_SNAPSHOT_ROUND_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_recovery_snapshot_round_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOG_OBJECT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_LOG_OBJECT_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_log_object_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_MEMBERSHIP_ATTEMPT_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_MEMBERSHIP_ATTEMPT_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_attempt_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_MEMBERSHIP_LOOP_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_MEMBERSHIP_LOOP_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_loop_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_MEMBERSHIP_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_MEMBERSHIP_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_MEMBERSHIP_RESULT_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_MEMBERSHIP_RESULT_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_result_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_MEMBERSHIP_SCHEDULE_STATE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_MEMBERSHIP_SCHEDULE_STATE_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_schedule_state_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_MEMBERSHIP_STATUS_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_MEMBERSHIP_STATUS_POLICY_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_membership_status_policy_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_OBSERVABILITY_EVENT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_OBSERVABILITY_EVENT_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_observability_event_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_ADAPTER_CONTRACT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_ADAPTER_CONTRACT_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_adapter_contract_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_ADAPTER_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_ADAPTER_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_adapter_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_CONNECTION_CONTRACT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_CONNECTION_CONTRACT_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_connection_contract_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_CONNECTION_STATUS_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_CONNECTION_STATUS_POLICY_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_connection_status_policy_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_DIAGNOSTICS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_DIAGNOSTICS_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_diagnostics_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_ERROR_CLASSIFICATION_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_ERROR_CLASSIFICATION_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_error_classification_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_ERROR_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_ERROR_POLICY_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_provider_error_policy_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PULL_APPLY_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PULL_APPLY_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_pull_apply_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PULL_CONTINUATION_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PULL_CONTINUATION_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_pull_continuation_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PULL_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PULL_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_pull_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PUSH_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PUSH_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_push_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PUSH_RESULT_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_PUSH_RESULT_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_push_result_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_RECOVERY_SNAPSHOT_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_RECOVERY_SNAPSHOT_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_recovery_snapshot_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_RECOVERY_SNAPSHOT_RESULT_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_RECOVERY_SNAPSHOT_RESULT_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_recovery_snapshot_result_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_SCHEMA_MIGRATION_PLAYBOOK_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_SCHEMA_MIGRATION_PLAYBOOK_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_schema_migration_playbook_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_SCHEMA_ROLLOUT_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_SCHEMA_ROLLOUT_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_schema_rollout_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_SNAPSHOT_OBJECT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_SNAPSHOT_OBJECT_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_snapshot_object_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_STORE_CAPABILITY_PREFLIGHT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_STORE_CAPABILITY_PREFLIGHT_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_store_capability_preflight_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_STORE_CONTRACT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CLOUD_STORE_CONTRACT_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cloud_store_contract_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CONFLICT_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CONFLICT_POLICY_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_conflict_policy_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CYCLE_REQUEST_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CYCLE_REQUEST_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cycle_request_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CYCLE_RESPONSE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CYCLE_RESPONSE_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cycle_response_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CYCLE_TRANSPORT_RESULT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_CYCLE_TRANSPORT_RESULT_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_cycle_transport_result_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_MERGE_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_MERGE_POLICY_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_merge_policy_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_PULL_REQUEST_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_PULL_REQUEST_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_pull_request_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_PUSH_REQUEST_FROM_DIRTY_ROWS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_PUSH_REQUEST_FROM_DIRTY_ROWS_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_push_request_from_dirty_rows_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_PUSH_REQUEST_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_PUSH_REQUEST_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_push_request_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_REMOTE_APPLY_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_REMOTE_APPLY_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_remote_apply_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_REMOTE_APPLY_RESULT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_REMOTE_APPLY_RESULT_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_remote_apply_result_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_SCHEDULE_STATE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_SCHEDULE_STATE_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_schedule_state_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_SCHEDULER_STATUS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_SCHEDULER_STATUS_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_scheduler_status_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_SERVER_MERGE_PLAN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_SERVER_MERGE_PLAN_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_server_merge_plan_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_SERVER_MERGE_RESULT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_SERVER_MERGE_RESULT_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_server_merge_result_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_SQL
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_SQL
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_sql(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_STATUS_POLICY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_STATUS_POLICY_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_status_policy_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_TRANSPORT_CONTRACT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_SYNC_TRANSPORT_CONTRACT_JSON
 uint16_t uniffi_actro_core_checksum_func_browser_storage_sync_transport_contract_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_TABLE_NAMES
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_BROWSER_STORAGE_TABLE_NAMES
 uint16_t uniffi_actro_core_checksum_func_browser_storage_table_names(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_APP_REPOSITORY_SQL
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_APP_REPOSITORY_SQL
 uint16_t uniffi_actro_core_checksum_func_core_app_repository_sql(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_APP_SEARCH_PARAMS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_APP_SEARCH_PARAMS
 uint16_t uniffi_actro_core_checksum_func_core_app_search_params(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_BOOKMARK_FROM_ROW
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_BOOKMARK_FROM_ROW
 uint16_t uniffi_actro_core_checksum_func_core_bookmark_from_row(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_BOOKMARK_INSERT_PARAMS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_BOOKMARK_INSERT_PARAMS
 uint16_t uniffi_actro_core_checksum_func_core_bookmark_insert_params(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_BOOKMARK_REPOSITORY_SQL
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_BOOKMARK_REPOSITORY_SQL
 uint16_t uniffi_actro_core_checksum_func_core_bookmark_repository_sql(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_BOOKMARK_SEARCH_PARAMS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_BOOKMARK_SEARCH_PARAMS
 uint16_t uniffi_actro_core_checksum_func_core_bookmark_search_params(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_BOOKMARK_UPDATE_PARAMS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_BOOKMARK_UPDATE_PARAMS
 uint16_t uniffi_actro_core_checksum_func_core_bookmark_update_params(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_HISTORY_INSERT_VISIT_PARAMS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_HISTORY_INSERT_VISIT_PARAMS
 uint16_t uniffi_actro_core_checksum_func_core_history_insert_visit_params(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_HISTORY_ITEM_FROM_ROW
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_HISTORY_ITEM_FROM_ROW
 uint16_t uniffi_actro_core_checksum_func_core_history_item_from_row(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_HISTORY_REPOSITORY_SQL
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_HISTORY_REPOSITORY_SQL
 uint16_t uniffi_actro_core_checksum_func_core_history_repository_sql(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_HISTORY_SEARCH_TITLE_PARAM
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_HISTORY_SEARCH_TITLE_PARAM
 uint16_t uniffi_actro_core_checksum_func_core_history_search_title_param(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_INSTALLED_APP_FROM_ROW
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_INSTALLED_APP_FROM_ROW
 uint16_t uniffi_actro_core_checksum_func_core_installed_app_from_row(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_INSTALLED_APP_INSERT_PARAMS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_INSTALLED_APP_INSERT_PARAMS
 uint16_t uniffi_actro_core_checksum_func_core_installed_app_insert_params(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_INSTALLED_APP_UPDATE_PARAMS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_INSTALLED_APP_UPDATE_PARAMS
 uint16_t uniffi_actro_core_checksum_func_core_installed_app_update_params(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_SCHEMA_STATEMENTS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_SCHEMA_STATEMENTS
 uint16_t uniffi_actro_core_checksum_func_core_schema_statements(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_SCHEMA_TABLE_NAMES
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_SCHEMA_TABLE_NAMES
 uint16_t uniffi_actro_core_checksum_func_core_schema_table_names(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_SCHEMA_VERSION
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_SCHEMA_VERSION
 uint16_t uniffi_actro_core_checksum_func_core_schema_version(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_TAG_FROM_ROW
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_TAG_FROM_ROW
 uint16_t uniffi_actro_core_checksum_func_core_tag_from_row(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_TAG_INSERT_PARAMS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_TAG_INSERT_PARAMS
 uint16_t uniffi_actro_core_checksum_func_core_tag_insert_params(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_TAG_REPOSITORY_SQL
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_TAG_REPOSITORY_SQL
 uint16_t uniffi_actro_core_checksum_func_core_tag_repository_sql(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_TAG_UPDATE_PARAMS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CORE_TAG_UPDATE_PARAMS
 uint16_t uniffi_actro_core_checksum_func_core_tag_update_params(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CREATE_ACTR_INTEGRITY_PLAN
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_CREATE_ACTR_INTEGRITY_PLAN
 uint16_t uniffi_actro_core_checksum_func_create_actr_integrity_plan(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_DEFAULT_RUNTIME_APP_STATUS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_DEFAULT_RUNTIME_APP_STATUS
 uint16_t uniffi_actro_core_checksum_func_default_runtime_app_status(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_DEFAULT_SYSTEM_TAGS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_DEFAULT_SYSTEM_TAGS
 uint16_t uniffi_actro_core_checksum_func_default_system_tags(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_DEFAULT_TAG_COLORS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_DEFAULT_TAG_COLORS
 uint16_t uniffi_actro_core_checksum_func_default_tag_colors(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_DEFAULT_TAGS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_DEFAULT_TAGS
 uint16_t uniffi_actro_core_checksum_func_default_tags(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_EMAIL_BRIDGE_CONTRACT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_EMAIL_BRIDGE_CONTRACT
 uint16_t uniffi_actro_core_checksum_func_email_bridge_contract(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_EMPTY_BROWSER_STORAGE_SYNC_BATCH_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_EMPTY_BROWSER_STORAGE_SYNC_BATCH_JSON
 uint16_t uniffi_actro_core_checksum_func_empty_browser_storage_sync_batch_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_EVALUATE_CONTRACT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_EVALUATE_CONTRACT
 uint16_t uniffi_actro_core_checksum_func_evaluate_contract(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_EXTRACT_APP_ID_FROM_URL
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_EXTRACT_APP_ID_FROM_URL
 uint16_t uniffi_actro_core_checksum_func_extract_app_id_from_url(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_IS_ASSET_PATH
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_IS_ASSET_PATH
 uint16_t uniffi_actro_core_checksum_func_is_asset_path(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_BROWSER_STORAGE_SYNC_ACK_BATCH_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_BROWSER_STORAGE_SYNC_ACK_BATCH_JSON
 uint16_t uniffi_actro_core_checksum_func_normalize_browser_storage_sync_ack_batch_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_BROWSER_STORAGE_SYNC_BATCH_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_BROWSER_STORAGE_SYNC_BATCH_JSON
 uint16_t uniffi_actro_core_checksum_func_normalize_browser_storage_sync_batch_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_BROWSER_STORAGE_SYNC_CLOUD_DEVICE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_BROWSER_STORAGE_SYNC_CLOUD_DEVICE_JSON
 uint16_t uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cloud_device_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_BROWSER_STORAGE_SYNC_CLOUD_LOG_OBJECT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_BROWSER_STORAGE_SYNC_CLOUD_LOG_OBJECT_JSON
 uint16_t uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cloud_log_object_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_BROWSER_STORAGE_SYNC_CLOUD_MANIFEST_JSON
 uint16_t uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cloud_manifest_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_BROWSER_STORAGE_SYNC_CLOUD_SNAPSHOT_OBJECT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_BROWSER_STORAGE_SYNC_CLOUD_SNAPSHOT_OBJECT_JSON
 uint16_t uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cloud_snapshot_object_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_BROWSER_STORAGE_SYNC_CURSORS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_BROWSER_STORAGE_SYNC_CURSORS_JSON
 uint16_t uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cursors_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_BROWSER_STORAGE_SYNC_CYCLE_RESPONSE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_BROWSER_STORAGE_SYNC_CYCLE_RESPONSE_JSON
 uint16_t uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cycle_response_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_BROWSER_SYNC_PROVIDER_SETTINGS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_BROWSER_SYNC_PROVIDER_SETTINGS_JSON
 uint16_t uniffi_actro_core_checksum_func_normalize_browser_sync_provider_settings_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_INTEGRITY_ALGORITHM
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_INTEGRITY_ALGORITHM
 uint16_t uniffi_actro_core_checksum_func_normalize_integrity_algorithm(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_INTEGRITY_PATH
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_INTEGRITY_PATH
 uint16_t uniffi_actro_core_checksum_func_normalize_integrity_path(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_PATH
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_PATH
 uint16_t uniffi_actro_core_checksum_func_normalize_path(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_RUNTIME_APP_STATUS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_RUNTIME_APP_STATUS
 uint16_t uniffi_actro_core_checksum_func_normalize_runtime_app_status(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_SHA256_HEX
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_NORMALIZE_SHA256_HEX
 uint16_t uniffi_actro_core_checksum_func_normalize_sha256_hex(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_PARSE_ACTR_ACTOR_TYPE
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_PARSE_ACTR_ACTOR_TYPE
 uint16_t uniffi_actro_core_checksum_func_parse_actr_actor_type(void
-    
+
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_PARSE_ACTR_PACKAGE_MANIFEST
+#define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_PARSE_ACTR_PACKAGE_MANIFEST
+uint16_t uniffi_actro_core_checksum_func_parse_actr_package_manifest(void
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_PARSE_APP_SOURCE_TYPE
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_PARSE_APP_SOURCE_TYPE
 uint16_t uniffi_actro_core_checksum_func_parse_app_source_type(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_PARSE_ACTR_MANIFEST
-#define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_PARSE_ACTR_MANIFEST
-uint16_t uniffi_actro_core_checksum_func_parse_actr_manifest(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_PARSE_SYSTEM_APP_TYPE
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_PARSE_SYSTEM_APP_TYPE
 uint16_t uniffi_actro_core_checksum_func_parse_system_app_type(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_PARSE_VOSK_PARTIAL_TEXT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_PARSE_VOSK_PARTIAL_TEXT
 uint16_t uniffi_actro_core_checksum_func_parse_vosk_partial_text(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_PARSE_VOSK_RESULT_TEXT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_PARSE_VOSK_RESULT_TEXT
 uint16_t uniffi_actro_core_checksum_func_parse_vosk_result_text(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_POST_PROCESS_ZH_ASR_SEGMENTS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_POST_PROCESS_ZH_ASR_SEGMENTS
 uint16_t uniffi_actro_core_checksum_func_post_process_zh_asr_segments(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RELATIVE_PATH_FROM
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RELATIVE_PATH_FROM
 uint16_t uniffi_actro_core_checksum_func_relative_path_from(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_APP_STATUS_ALIVE
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_APP_STATUS_ALIVE
 uint16_t uniffi_actro_core_checksum_func_runtime_app_status_alive(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_APP_STATUS_DEAD
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_APP_STATUS_DEAD
 uint16_t uniffi_actro_core_checksum_func_runtime_app_status_dead(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_AUTH_CONTEXT_APP_ID_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_AUTH_CONTEXT_APP_ID_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_auth_context_app_id_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_AUTH_CONTEXT_APP_URL_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_AUTH_CONTEXT_APP_URL_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_auth_context_app_url_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_AUTH_CONTEXT_CLIENT_ID_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_AUTH_CONTEXT_CLIENT_ID_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_auth_context_client_id_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_AUTH_CONTEXT_TAB_ID_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_AUTH_CONTEXT_TAB_ID_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_auth_context_tab_id_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_APP_URL_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_APP_URL_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_bridge_app_url_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_CONTAINER_HEIGHT_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_CONTAINER_HEIGHT_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_bridge_container_height_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_CONTAINER_WIDTH_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_CONTAINER_WIDTH_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_bridge_container_width_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_ICON_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_ICON_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_bridge_icon_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_IS_BOOKMARKED_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_IS_BOOKMARKED_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_bridge_is_bookmarked_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_MARKED_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_MARKED_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_bridge_marked_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_STATUS_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_STATUS_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_bridge_status_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_TAB_ID_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_TAB_ID_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_bridge_tab_id_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_TITLE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_TITLE_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_bridge_title_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_UNREAD_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_UNREAD_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_bridge_unread_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_VISIBLE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_BRIDGE_VISIBLE_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_bridge_visible_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_CONTAINER_SIZE_CHANGE_EVENT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_CONTAINER_SIZE_CHANGE_EVENT
 uint16_t uniffi_actro_core_checksum_func_runtime_container_size_change_event(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_CONTAINER_SIZE_CHANGE_EVENT_NAME
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_CONTAINER_SIZE_CHANGE_EVENT_NAME
 uint16_t uniffi_actro_core_checksum_func_runtime_container_size_change_event_name(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_EXTENSION_PANEL_VISIBLE_CHANGE_EVENT_NAME
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_EXTENSION_PANEL_VISIBLE_CHANGE_EVENT_NAME
 uint16_t uniffi_actro_core_checksum_func_runtime_extension_panel_visible_change_event_name(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_EXTENSION_PANEL_VISIBLE_EVENT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_EXTENSION_PANEL_VISIBLE_EVENT
 uint16_t uniffi_actro_core_checksum_func_runtime_extension_panel_visible_event(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_LOGIN_RESULT_CODE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_LOGIN_RESULT_CODE_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_login_result_code_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_LOGIN_RESULT_ERROR_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_LOGIN_RESULT_ERROR_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_login_result_error_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_LOGIN_RESULT_EVENT_NAME
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_LOGIN_RESULT_EVENT_NAME
 uint16_t uniffi_actro_core_checksum_func_runtime_login_result_event_name(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_LOGIN_RESULT_ID_TOKEN_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_LOGIN_RESULT_ID_TOKEN_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_login_result_id_token_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_LOGIN_RESULT_MESSAGE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_LOGIN_RESULT_MESSAGE_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_login_result_message_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_LOGIN_RESULT_TYPE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_LOGIN_RESULT_TYPE_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_login_result_type_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_LOGIN_TYPE_APPLE
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_LOGIN_TYPE_APPLE
 uint16_t uniffi_actro_core_checksum_func_runtime_login_type_apple(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_LOGIN_TYPE_GOOGLE
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_LOGIN_TYPE_GOOGLE
 uint16_t uniffi_actro_core_checksum_func_runtime_login_type_google(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_LOGIN_TYPE_WECHAT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_LOGIN_TYPE_WECHAT
 uint16_t uniffi_actro_core_checksum_func_runtime_login_type_wechat(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_ROOT_PROPS_CURRENT_TAB_ID_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_ROOT_PROPS_CURRENT_TAB_ID_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_root_props_current_tab_id_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_ROOT_PROPS_FROM_ACTIVE_TABS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_ROOT_PROPS_FROM_ACTIVE_TABS
 uint16_t uniffi_actro_core_checksum_func_runtime_root_props_from_active_tabs(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_ROOT_PROPS_FROM_RUNTIME_TABS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_ROOT_PROPS_FROM_RUNTIME_TABS
 uint16_t uniffi_actro_core_checksum_func_runtime_root_props_from_runtime_tabs(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_ROOT_PROPS_IS_LEFT_PANEL_VISIBLE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_ROOT_PROPS_IS_LEFT_PANEL_VISIBLE_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_root_props_is_left_panel_visible_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_ROOT_PROPS_IS_RIGHT_PANEL_VISIBLE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_ROOT_PROPS_IS_RIGHT_PANEL_VISIBLE_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_root_props_is_right_panel_visible_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_ROOT_PROPS_SINGLE_TAB_MODE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_ROOT_PROPS_SINGLE_TAB_MODE_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_root_props_single_tab_mode_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_ROOT_PROPS_TAB_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_ROOT_PROPS_TAB_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_root_props_tab_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_ROOT_PROPS_TABS_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_ROOT_PROPS_TABS_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_root_props_tabs_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_SEARCH_INPUT_CHANGED_EVENT_NAME
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_SEARCH_INPUT_CHANGED_EVENT_NAME
 uint16_t uniffi_actro_core_checksum_func_runtime_search_input_changed_event_name(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_SYSTEM_ROOT_PROPS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_SYSTEM_ROOT_PROPS
 uint16_t uniffi_actro_core_checksum_func_runtime_system_root_props(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_BOOKMARK_CHANGED_EVENT_NAME
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_BOOKMARK_CHANGED_EVENT_NAME
 uint16_t uniffi_actro_core_checksum_func_runtime_tab_bookmark_changed_event_name(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_BOOKMARK_EVENT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_BOOKMARK_EVENT
 uint16_t uniffi_actro_core_checksum_func_runtime_tab_bookmark_event(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_BOOKMARK_STATUS_FROM_FIELDS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_BOOKMARK_STATUS_FROM_FIELDS
 uint16_t uniffi_actro_core_checksum_func_runtime_tab_bookmark_status_from_fields(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_ENTERED_FULLSCREEN_EVENT_NAME
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_ENTERED_FULLSCREEN_EVENT_NAME
 uint16_t uniffi_actro_core_checksum_func_runtime_tab_entered_fullscreen_event_name(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_EXITED_FULLSCREEN_EVENT_NAME
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_EXITED_FULLSCREEN_EVENT_NAME
 uint16_t uniffi_actro_core_checksum_func_runtime_tab_exited_fullscreen_event_name(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_FROM_ACTIVE_TAB
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_FROM_ACTIVE_TAB
 uint16_t uniffi_actro_core_checksum_func_runtime_tab_from_active_tab(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_FULLSCREEN_EVENT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_FULLSCREEN_EVENT
 uint16_t uniffi_actro_core_checksum_func_runtime_tab_fullscreen_event(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_PROPS_BACKGROUND_COLOR_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_PROPS_BACKGROUND_COLOR_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_tab_props_background_color_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_PROPS_HTML_CONTENT_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_PROPS_HTML_CONTENT_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_tab_props_html_content_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_PROPS_ID_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_PROPS_ID_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_tab_props_id_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_PROPS_RELOAD_KEY_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_PROPS_RELOAD_KEY_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_tab_props_reload_key_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_PROPS_RIGHT_PANEL_DEFAULT_VISIBLE_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_PROPS_RIGHT_PANEL_DEFAULT_VISIBLE_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_tab_props_right_panel_default_visible_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_PROPS_UNIFIED_SCRIPT_KEY
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_PROPS_UNIFIED_SCRIPT_KEY
 uint16_t uniffi_actro_core_checksum_func_runtime_tab_props_unified_script_key(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_UNREAD_FROM_FIELDS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_UNREAD_FROM_FIELDS
 uint16_t uniffi_actro_core_checksum_func_runtime_tab_unread_from_fields(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_UPDATE_FROM_FIELDS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_RUNTIME_TAB_UPDATE_FROM_FIELDS
 uint16_t uniffi_actro_core_checksum_func_runtime_tab_update_from_fields(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_STABLE_CONTENT_FINGERPRINT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_STABLE_CONTENT_FINGERPRINT
 uint16_t uniffi_actro_core_checksum_func_stable_content_fingerprint(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_SUPPORTED_CONTRACT_NAME
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_SUPPORTED_CONTRACT_NAME
 uint16_t uniffi_actro_core_checksum_func_supported_contract_name(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_SUPPORTED_CONTRACT_VERSION
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_SUPPORTED_CONTRACT_VERSION
 uint16_t uniffi_actro_core_checksum_func_supported_contract_version(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_SYSTEM_APP_INFO
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_SYSTEM_APP_INFO
 uint16_t uniffi_actro_core_checksum_func_system_app_info(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_SYSTEM_APP_TYPE_BOOKMARKS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_SYSTEM_APP_TYPE_BOOKMARKS
 uint16_t uniffi_actro_core_checksum_func_system_app_type_bookmarks(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_SYSTEM_APP_TYPE_GLOBAL_SEARCH
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_SYSTEM_APP_TYPE_GLOBAL_SEARCH
 uint16_t uniffi_actro_core_checksum_func_system_app_type_global_search(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_SYSTEM_APP_TYPE_SETTINGS
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_SYSTEM_APP_TYPE_SETTINGS
 uint16_t uniffi_actro_core_checksum_func_system_app_type_settings(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_TTS_BRIDGE_CONTRACT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_TTS_BRIDGE_CONTRACT
 uint16_t uniffi_actro_core_checksum_func_tts_bridge_contract(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_USER_INFO_BRIDGE_CONTRACT
 #define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_USER_INFO_BRIDGE_CONTRACT
 uint16_t uniffi_actro_core_checksum_func_user_info_bridge_contract(void
-    
+
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_VALIDATE_ACTR_MANIFEST
-#define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_VALIDATE_ACTR_MANIFEST
-uint16_t uniffi_actro_core_checksum_func_validate_actr_manifest(void
-    
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_VALIDATE_ACTR_PACKAGE_MANIFEST
+#define UNIFFI_FFIDEF_UNIFFI_ACTRO_CORE_CHECKSUM_FUNC_VALIDATE_ACTR_PACKAGE_MANIFEST
+uint16_t uniffi_actro_core_checksum_func_validate_actr_package_manifest(void
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_FFI_ACTRO_CORE_UNIFFI_CONTRACT_VERSION
 #define UNIFFI_FFIDEF_FFI_ACTRO_CORE_UNIFFI_CONTRACT_VERSION
 uint32_t ffi_actro_core_uniffi_contract_version(void
-    
+
 );
 #endif
 

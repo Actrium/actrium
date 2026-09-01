@@ -37,7 +37,7 @@ class GlassView: UIView {
         return nil  // Do not intercept any touching incidents
     }
 
-    /// Check if URL is a valid drop target (.actr file or directory with manifest.json)
+    /// Check if URL is a valid drop target (.actr file or directory with manifest.toml)
     private func isValidDropTarget(_ url: URL) -> Bool {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
@@ -45,8 +45,8 @@ class GlassView: UIView {
         }
 
         if isDirectory.boolValue {
-            // Directory - check for manifest.json
-            let manifestPath = url.appendingPathComponent("manifest.json").path
+            // Directory - check for manifest.toml
+            let manifestPath = url.appendingPathComponent("manifest.toml").path
             return FileManager.default.fileExists(atPath: manifestPath)
         } else {
             // File - check for .actr extension

@@ -945,9 +945,9 @@ fi
 
 if ! rg -q 'expectedSha256: guestHashCode' \
   packages/actrium/src/services/AppSessionService.ts; then
-  print_failure "RN .actr session loading does not pass the server hash into ActrLoader"
+  print_failure "RN .actr session loading does not pass the server hash into ActrPackageLoader"
 else
-  print_ok "RN .actr session loading verifies the downloaded archive in ActrLoader"
+  print_ok "RN .actr session loading verifies the downloaded archive in ActrPackageLoader"
 fi
 
 # Windows OS-level interop (dwmapi window chrome) is not Rust-core access:
@@ -2182,7 +2182,7 @@ windows_browser_data_requirements=(
   "android/android/app/src/main/java/io/actrium/actro/generated/ActroAndroidPersistenceContract.kt|object Runtime|Android generated persistence contract includes runtime database constants"
   "android/android/app/src/main/java/io/actrium/actro/generated/ActroAndroidPersistenceContract.kt|SELECT_TOKEN_BY_ENV|Android generated persistence contract includes auth token queries"
   "packages/actrium/src/libs/Sqlite.ts|RUNTIME_DATABASE_NAME|RN runtime SQLite database name comes from Rust-generated contract"
-  "packages/actrium/src/actr-host/generated/actroCoreContract.ts|RUNTIME_DATABASE_NAME = 'AppDatabase.db'|RN generated contract exports the runtime database name"
+  "packages/actrium/src/runtime-host/generated/actroCoreContract.ts|RUNTIME_DATABASE_NAME = 'AppDatabase.db'|RN generated contract exports the runtime database name"
   "packages/actrium/src/repository/AuthRepository.ts|saveBrowserSyncSession|RN auth token saves feed the native browser sync credential store"
   "packages/actrium/src/repository/AuthRepository.ts|clearBrowserSyncSession|RN auth token clears remove native browser sync credentials"
   "packages/actrium/src/native-bridge/browser-data/BrowserDataModule.ts|getBrowserSyncStatus|RN runtime exposes typed browser sync status"
@@ -2316,7 +2316,7 @@ else
 fi
 
 apple_manifest_reader_duplicates="$(
-  rg -n 'CryptoKit|SHA256|parseActrManifest|createActrIntegrityPlan|evaluateContract|CoreError|findManifestJSON|resolvedACTRIntegrityFileURL' \
+  rg -n 'CryptoKit|SHA256|parseActrPackageManifest|createPackageIntegrityPlan|evaluateContract|CoreError|findManifestJSON|resolvedPackageIntegrityFileURL' \
     ios/Actro/Models/ActrPackageManifestReader.swift \
     macos/Actro/Models/ActrPackageManifestReader.swift \
     2>/dev/null || true

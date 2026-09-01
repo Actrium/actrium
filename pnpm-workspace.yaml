@@ -1,4 +1,6 @@
 packages:
   - "android"
+  - "examples/actrium/echo/app"
   - "packages/actrium"
+  - "packages/actrium/keel-guest-examples/counterapp"
   - "packages/actrium-app-sdk"

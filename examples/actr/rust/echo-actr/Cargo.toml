@@ -25,11 +25,8 @@ bytes = { workspace = true }
 prost = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 
-[build-dependencies]
-prost-build = "0.14"
-
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-actr-hyper = { version = "0.4", features = ["wasm-engine", "test-utils"] }
+actr-hyper = { workspace = true, features = ["wasm-engine", "test-utils"] }
 actr-pack = { workspace = true }
 actr-platform-native = { workspace = true }
 base64 = "0.22"

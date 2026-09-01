@@ -1,8 +1,8 @@
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::actr::{
-    self, ActrManifest, ContractGateStatus as DomainContractGateStatus, ManifestError,
+use crate::actr_package::{
+    self, ActrPackageManifest, ContractGateStatus as DomainContractGateStatus, ManifestError,
 };
 use crate::auth;
 use crate::bridge;
@@ -14,7 +14,7 @@ use crate::runtime_persistence;
 use crate::speech;
 
 #[derive(Debug, Clone)]
-pub struct ActrManifestInfo {
+pub struct ActrPackageManifestInfo {
     pub name: String,
     pub version: String,
     pub description: Option<String>,
@@ -30,32 +30,32 @@ pub struct ActrManifestInfo {
     pub theme_color: Option<String>,
 }
 
-impl From<ActrManifest> for ActrManifestInfo {
-    fn from(manifest: ActrManifest) -> Self {
-        let app_id = manifest.app_id().map(ToOwned::to_owned);
-        let theme_color = manifest.effective_theme_color().map(ToOwned::to_owned);
-        let (contract_name, contract_version) = manifest
-            .contract
-            .as_ref()
-            .map(|contract| (Some(contract.name.clone()), Some(contract.version)))
-            .unwrap_or((None, None));
+impl From<ActrPackageManifest> for ActrPackageManifestInfo {
+    fn from(manifest: ActrPackageManifest) -> Self {
+        let extension = manifest.extensions.actrium.as_ref();
+        let is_keel_guest = manifest.workload.profile == actr_pack::KEEL_GUEST_PROFILE_V1;
 
         Self {
-            name: manifest.name,
-            version: manifest.version,
-            description: manifest.description,
-            app_id,
-            icon: manifest.icon,
-            entry: manifest.entry,
-            left_panel_default_visible: manifest.left_panel_default_visible,
-            right_panel_default_visible: manifest.right_panel_default_visible,
-            contract_name,
-            contract_version,
-            permissions: manifest.permissions,
-            system_app_type: manifest
-                .system_app_type
-                .map(|system_app_type| system_app_type.as_str().to_string()),
-            theme_color,
+            name: extension
+                .and_then(|value| value.title.clone())
+                .unwrap_or_else(|| manifest.actor.name.clone()),
+            version: manifest.actor.version.clone(),
+            description: extension.and_then(|value| value.description.clone()),
+            app_id: Some(format!(
+                "{}+{}",
+                manifest.actor.manufacturer, manifest.actor.name
+            )),
+            icon: extension.and_then(|value| value.icon.clone()),
+            entry: manifest.workload.entry,
+            left_panel_default_visible: extension
+                .is_some_and(|value| value.left_panel_default_visible),
+            right_panel_default_visible: extension
+                .is_some_and(|value| value.right_panel_default_visible),
+            contract_name: is_keel_guest.then(|| "keel.guest".to_string()),
+            contract_version: is_keel_guest.then_some(1),
+            permissions: manifest.host.required_capabilities,
+            system_app_type: None,
+            theme_color: extension.and_then(|value| value.theme_color.clone()),
         }
     }
 }
@@ -503,13 +503,13 @@ pub struct CoreInstalledAppInfo {
 }
 
 #[derive(Debug, Clone)]
-pub struct ActrIntegrityFilePlanInfo {
+pub struct PackageIntegrityFilePlanInfo {
     pub path: String,
     pub expected_hash: String,
 }
 
-impl From<actr::ManifestIntegrityFilePlan> for ActrIntegrityFilePlanInfo {
-    fn from(plan: actr::ManifestIntegrityFilePlan) -> Self {
+impl From<actr_package::ManifestIntegrityFilePlan> for PackageIntegrityFilePlanInfo {
+    fn from(plan: actr_package::ManifestIntegrityFilePlan) -> Self {
         Self {
             path: plan.path,
             expected_hash: plan.expected_hash,
@@ -518,19 +518,19 @@ impl From<actr::ManifestIntegrityFilePlan> for ActrIntegrityFilePlanInfo {
 }
 
 #[derive(Debug, Clone)]
-pub struct ActrIntegrityPlanInfo {
+pub struct PackageIntegrityPlanInfo {
     pub algorithm: String,
-    pub files: Vec<ActrIntegrityFilePlanInfo>,
+    pub files: Vec<PackageIntegrityFilePlanInfo>,
 }
 
-impl From<actr::ManifestIntegrityPlan> for ActrIntegrityPlanInfo {
-    fn from(plan: actr::ManifestIntegrityPlan) -> Self {
+impl From<actr_package::ManifestIntegrityPlan> for PackageIntegrityPlanInfo {
+    fn from(plan: actr_package::ManifestIntegrityPlan) -> Self {
         Self {
             algorithm: plan.algorithm,
             files: plan
                 .files
                 .into_iter()
-                .map(ActrIntegrityFilePlanInfo::from)
+                .map(PackageIntegrityFilePlanInfo::from)
                 .collect(),
         }
     }
@@ -643,7 +643,7 @@ pub struct RuntimeSystemRootPropsInfo {
 
 #[derive(Debug, Error)]
 pub enum CoreError {
-    #[error("manifest JSON is invalid: {0}")]
+    #[error("manifest is invalid: {0}")]
     InvalidJson(String),
     #[error("manifest is missing required field `{0}`")]
     MissingField(String),
@@ -666,8 +666,7 @@ pub enum CoreError {
 impl From<ManifestError> for CoreError {
     fn from(error: ManifestError) -> Self {
         match error {
-            ManifestError::InvalidJson(message) => Self::InvalidJson(message),
-            ManifestError::MissingField(field) => Self::MissingField(field.to_string()),
+            ManifestError::InvalidManifest(message) => Self::InvalidJson(message),
             ManifestError::UnsupportedContract { actual, expected } => {
                 Self::UnsupportedContract { actual, expected }
             }
@@ -680,34 +679,25 @@ impl From<ManifestError> for CoreError {
                 actual,
                 supported,
             },
-            ManifestError::UnsupportedIntegrityAlgorithm { actual, expected } => Self::InvalidJson(
-                format!("unsupported integrity algorithm `{actual}`, expected `{expected}`"),
-            ),
-            ManifestError::InvalidIntegrityPath(path) => {
-                Self::InvalidJson(format!("manifest integrity path `{path}` is invalid"))
-            }
-            ManifestError::InvalidIntegrityHash { path } => {
-                Self::InvalidJson(format!("manifest integrity hash for `{path}` is invalid"))
-            }
         }
     }
 }
 
-pub fn parse_actr_manifest(json: String) -> Result<ActrManifestInfo, CoreError> {
-    actr::parse_manifest_json(&json)
-        .map(ActrManifestInfo::from)
+pub fn parse_actr_package_manifest(source: String) -> Result<ActrPackageManifestInfo, CoreError> {
+    actr_package::parse_manifest_toml(&source)
+        .map(ActrPackageManifestInfo::from)
         .map_err(CoreError::from)
 }
 
-pub fn validate_actr_manifest(json: String) -> Result<(), CoreError> {
-    actr::parse_manifest_json(&json)
+pub fn validate_actr_package_manifest(source: String) -> Result<(), CoreError> {
+    actr_package::parse_manifest_toml(&source)
         .map(|_| ())
         .map_err(CoreError::from)
 }
 
 pub fn evaluate_contract(name: Option<String>, version: u32) -> ContractGateInfo {
     let contract = name.map(|name| Contract { name, version });
-    let gate = actr::evaluate_contract(contract.as_ref());
+    let gate = actr_package::evaluate_contract(contract.as_ref());
 
     ContractGateInfo {
         status: gate.status.into(),
@@ -716,31 +706,31 @@ pub fn evaluate_contract(name: Option<String>, version: u32) -> ContractGateInfo
 }
 
 pub fn extract_app_id_from_url(url: String) -> Option<String> {
-    actr::extract_app_id_from_url(&url)
+    actr_package::extract_app_id_from_url(&url)
 }
 
 pub fn normalize_path(path: String) -> String {
-    actr::normalize_path(&path)
+    actr_package::normalize_path(&path)
 }
 
 pub fn relative_path_from(absolute_path: String, base_dir: String) -> String {
-    actr::relative_path_from(&absolute_path, &base_dir)
+    actr_package::relative_path_from(&absolute_path, &base_dir)
 }
 
 pub fn is_asset_path(path: String) -> bool {
-    actr::is_asset_path(&path)
+    actr_package::is_asset_path(&path)
 }
 
 pub fn normalize_integrity_algorithm(raw: String) -> Option<String> {
-    actr::normalize_integrity_algorithm(&raw).map(ToOwned::to_owned)
+    actr_package::normalize_integrity_algorithm(&raw).map(ToOwned::to_owned)
 }
 
 pub fn normalize_integrity_path(path: String) -> Option<String> {
-    actr::normalize_integrity_path(&path)
+    actr_package::normalize_integrity_path(&path)
 }
 
 pub fn normalize_sha256_hex(hash: String) -> Option<String> {
-    actr::normalize_sha256_hex(&hash)
+    actr_package::normalize_sha256_hex(&hash)
 }
 
 pub fn stable_content_fingerprint(input: String) -> String {
@@ -753,11 +743,12 @@ pub fn stable_content_fingerprint(input: String) -> String {
 }
 
 pub fn create_actr_integrity_plan(
-    manifest_json: String,
-) -> Result<Option<ActrIntegrityPlanInfo>, CoreError> {
-    let manifest = actr::parse_manifest_json(&manifest_json).map_err(CoreError::from)?;
-    actr::build_integrity_plan(manifest.integrity.as_ref())
-        .map(|plan| plan.map(ActrIntegrityPlanInfo::from))
+    manifest_toml: String,
+) -> Result<Option<PackageIntegrityPlanInfo>, CoreError> {
+    let manifest = actr_package::parse_manifest_toml(&manifest_toml).map_err(CoreError::from)?;
+    actr_package::build_integrity_plan(&manifest)
+        .map(PackageIntegrityPlanInfo::from)
+        .map(Some)
         .map_err(CoreError::from)
 }
 
@@ -1833,11 +1824,11 @@ pub fn browser_storage_sync_server_merge_result_json(
 }
 
 pub fn supported_contract_name() -> String {
-    actr::SUPPORTED_CONTRACT_NAME.to_string()
+    actr_package::SUPPORTED_CONTRACT_NAME.to_string()
 }
 
 pub fn supported_contract_version() -> u32 {
-    actr::SUPPORTED_CONTRACT_VERSION
+    actr_package::SUPPORTED_CONTRACT_VERSION
 }
 
 pub fn core_schema_version() -> u32 {
@@ -2892,25 +2883,45 @@ mod tests {
 
     #[test]
     fn ffi_manifest_info_flattens_host_fields() {
-        let info = parse_actr_manifest(
-            r##"{
-                "name": "Demo",
-                "version": "1",
-                "id": "demo.app",
-                "entry": "main.js",
-                "backgroundColor": "#111111",
-                "contract": { "name": "ask", "version": 1 },
-                "systemAppType": "settings"
-            }"##
+        let info = parse_actr_package_manifest(
+            r##"
+                format = "actr-package/1"
+                [actor]
+                manufacturer = "demo"
+                name = "app"
+                version = "1.0.0"
+                [workload]
+                profile = "keel.guest/1"
+                entry = "workload/guest.js"
+                [workload.keel]
+                runtime = "js"
+                guest-api = "keel.guest/1"
+                [host]
+                profile = "actr.host/1"
+                api = "^1"
+                required-capabilities = ["ui.render"]
+                [extensions.actrium]
+                title = "Demo"
+                theme-color = "#111111"
+                [signature]
+                algorithm = "ed25519"
+                key-id = "mfr-test"
+                [[files]]
+                path = "workload/guest.js"
+                role = "workload"
+                media-type = "text/javascript"
+                size = 1
+                sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            "##
             .to_string(),
         )
         .unwrap();
 
-        assert_eq!(info.app_id.as_deref(), Some("demo.app"));
+        assert_eq!(info.app_id.as_deref(), Some("demo+app"));
         assert_eq!(info.theme_color.as_deref(), Some("#111111"));
-        assert_eq!(info.contract_name.as_deref(), Some("ask"));
+        assert_eq!(info.contract_name.as_deref(), Some("keel.guest"));
         assert_eq!(info.contract_version, Some(1));
-        assert_eq!(info.system_app_type.as_deref(), Some("settings"));
+        assert_eq!(info.system_app_type, None);
     }
 
     #[test]
@@ -3032,21 +3043,29 @@ mod tests {
         let schema = browser_storage_schema();
         assert_eq!(schema.schema_version, 6);
         assert_eq!(schema.database_name, "actro_browser.db");
-        assert!(schema
-            .table_names
-            .contains(&"browser_history_pages".to_string()));
-        assert!(schema
-            .table_names
-            .contains(&"browser_session_tabs".to_string()));
-        assert!(schema
-            .statements
-            .iter()
-            .any(|statement| statement.contains("browser_bookmarks")));
+        assert!(
+            schema
+                .table_names
+                .contains(&"browser_history_pages".to_string())
+        );
+        assert!(
+            schema
+                .table_names
+                .contains(&"browser_session_tabs".to_string())
+        );
+        assert!(
+            schema
+                .statements
+                .iter()
+                .any(|statement| statement.contains("browser_bookmarks"))
+        );
         assert_eq!(browser_storage_schema_version(), 6);
         assert_eq!(browser_storage_database_name(), "actro_browser.db");
-        assert!(browser_storage_schema_statements()
-            .iter()
-            .any(|statement| statement.contains("browser_storage_schema_version")));
+        assert!(
+            browser_storage_schema_statements()
+                .iter()
+                .any(|statement| statement.contains("browser_storage_schema_version"))
+        );
 
         let migration_plan = browser_storage_schema_migration_plan_json();
         assert!(migration_plan.contains("\"schemaVersion\":6"));
@@ -3054,9 +3073,10 @@ mod tests {
         assert!(migration_plan.contains("\"idempotentStatements\""));
 
         let sql = browser_storage_repository_sql();
-        assert!(sql
-            .upsert_history_page
-            .contains("INSERT INTO browser_history_pages"));
+        assert!(
+            sql.upsert_history_page
+                .contains("INSERT INTO browser_history_pages")
+        );
         assert!(sql.upsert_bookmark.contains("ON CONFLICT(address)"));
         assert_eq!(
             sql.select_session,
@@ -3068,16 +3088,22 @@ mod tests {
         );
 
         let sync_sql = browser_storage_sync_sql();
-        assert!(sync_sql
-            .select_dirty_history_pages
-            .contains("browser_history_pages"));
-        assert!(sync_sql
-            .apply_remote_history_page
-            .contains("ON CONFLICT(address)"));
+        assert!(
+            sync_sql
+                .select_dirty_history_pages
+                .contains("browser_history_pages")
+        );
+        assert!(
+            sync_sql
+                .apply_remote_history_page
+                .contains("ON CONFLICT(address)")
+        );
         assert!(sync_sql.upsert_sync_cursor.contains("browser_sync_cursors"));
-        assert!(sync_sql
-            .mark_session_tab_synced
-            .contains("sync_revision <= ?"));
+        assert!(
+            sync_sql
+                .mark_session_tab_synced
+                .contains("sync_revision <= ?")
+        );
 
         let data_model = browser_storage_data_model_json();
         assert!(data_model.contains(r#""storageSchemaVersion":6"#));
@@ -3118,8 +3144,10 @@ mod tests {
         assert!(folder_tree_plan.contains(r#""action":"rejectFolderMove""#));
 
         let bookmark_restore_policy = browser_storage_bookmark_restore_placement_policy_json();
-        assert!(bookmark_restore_policy
-            .contains(r#""policy":"browserStorageBookmarkRestorePlacement""#));
+        assert!(
+            bookmark_restore_policy
+                .contains(r#""policy":"browserStorageBookmarkRestorePlacement""#)
+        );
         assert!(bookmark_restore_policy.contains(r#""placementRules""#));
 
         let bookmark_restore_plan = browser_storage_bookmark_restore_placement_plan_json(
@@ -3131,7 +3159,9 @@ mod tests {
         );
 
         let bookmark_ownership_policy = browser_storage_bookmark_ownership_policy_json();
-        assert!(bookmark_ownership_policy.contains(r#""policy":"browserStorageBookmarkOwnership""#));
+        assert!(
+            bookmark_ownership_policy.contains(r#""policy":"browserStorageBookmarkOwnership""#)
+        );
         assert!(bookmark_ownership_policy.contains(r#""ownershipRules""#));
 
         let bookmark_ownership_plan = browser_storage_bookmark_ownership_plan_json(
@@ -3168,8 +3198,10 @@ mod tests {
             r#"[{"id":"","index":0,"address":"actro://home"},{"id":"tab-a","index":1,"address":"https://example.com/a"}]"#.to_string(),
         );
         assert!(session_tab_id_plan.contains(r#""policy":"browserStorageSessionTabId""#));
-        assert!(session_tab_id_plan
-            .contains(r#""tabIds":["fa3d824d-efbc-593f-b327-a463b5e0973c","tab-a"]"#));
+        assert!(
+            session_tab_id_plan
+                .contains(r#""tabIds":["fa3d824d-efbc-593f-b327-a463b5e0973c","tab-a"]"#)
+        );
 
         let active_tab_policy = browser_storage_session_active_tab_consistency_policy_json();
         assert!(
@@ -3320,8 +3352,10 @@ mod tests {
 
         let provider_connection_contract =
             browser_storage_sync_cloud_provider_connection_contract_json();
-        assert!(provider_connection_contract
-            .contains(r#""planType":"cloudProviderConnectionStatusPolicy""#));
+        assert!(
+            provider_connection_contract
+                .contains(r#""planType":"cloudProviderConnectionStatusPolicy""#)
+        );
         assert!(provider_connection_contract.contains("No Actro product server"));
 
         let provider_error_policy = browser_storage_sync_cloud_provider_error_policy_json();
@@ -3343,8 +3377,10 @@ mod tests {
                 0,
                 8,
             );
-        assert!(provider_error_classification
-            .contains(r#""classification":"cloudStateRereadRequired""#));
+        assert!(
+            provider_error_classification
+                .contains(r#""classification":"cloudStateRereadRequired""#)
+        );
         assert!(provider_error_classification.contains(r#""canonicalErrorKind":"conflict""#));
 
         let cloud_store_preflight = browser_storage_sync_cloud_store_capability_preflight_json(
@@ -3370,8 +3406,10 @@ mod tests {
             8,
         );
         let high_watermark_policy = browser_storage_sync_cloud_high_watermark_policy_json();
-        assert!(high_watermark_policy
-            .contains(r#""policyName":"browserStorageSyncCloudHighWatermark""#));
+        assert!(
+            high_watermark_policy
+                .contains(r#""policyName":"browserStorageSyncCloudHighWatermark""#)
+        );
         let high_watermark_plan = browser_storage_sync_cloud_high_watermark_plan_json(
             cloud_manifest.clone(),
             "[]".to_string(),
@@ -3410,8 +3448,10 @@ mod tests {
 
         let cloud_schema_migration_playbook =
             browser_storage_sync_cloud_schema_migration_playbook_json(cloud_schema_rollout, 8);
-        assert!(cloud_schema_migration_playbook
-            .contains(r#""planType":"cloudSchemaMigrationPlaybook""#));
+        assert!(
+            cloud_schema_migration_playbook
+                .contains(r#""planType":"cloudSchemaMigrationPlaybook""#)
+        );
         assert!(
             cloud_schema_migration_playbook.contains(r#""classification":"noMigrationRequired""#)
         );
@@ -3493,8 +3533,10 @@ mod tests {
             11,
         );
         assert!(provider_error_diagnostics.contains(r#""classification":"cloudConflict""#));
-        assert!(provider_error_diagnostics
-            .contains(r#""providerErrorClassification":"cloudStateRereadRequired""#));
+        assert!(
+            provider_error_diagnostics
+                .contains(r#""providerErrorClassification":"cloudStateRereadRequired""#)
+        );
         assert!(provider_error_diagnostics.contains(r#""pendingCloudReread":true"#));
 
         let cloud_cycle_attempt_plan = browser_storage_sync_cloud_cycle_attempt_plan_json(
@@ -3545,8 +3587,10 @@ mod tests {
             10_001,
         );
         assert!(cloud_observability_event.contains(r#""planType":"cloudObservabilityEvent""#));
-        assert!(cloud_observability_event
-            .contains(r#""eventName":"browserSyncCloudUserActionRequired""#));
+        assert!(
+            cloud_observability_event
+                .contains(r#""eventName":"browserSyncCloudUserActionRequired""#)
+        );
         assert!(cloud_observability_event.contains(r#""redactedExportAllowed":true"#));
 
         let local_folder_root = std::env::temp_dir().join(format!(
@@ -3621,12 +3665,16 @@ mod tests {
     fn ffi_schema_exports_version_tables_and_tag_seed() {
         assert_eq!(core_schema_version(), 1);
         assert!(core_schema_table_names().contains(&"tab_sessions".to_string()));
-        assert!(core_schema_statements()
-            .iter()
-            .any(|statement| statement.contains("CREATE TABLE IF NOT EXISTS history")));
-        assert!(default_tags()
-            .iter()
-            .any(|tag| tag.name == "App" && tag.is_system));
+        assert!(
+            core_schema_statements()
+                .iter()
+                .any(|statement| statement.contains("CREATE TABLE IF NOT EXISTS history"))
+        );
+        assert!(
+            default_tags()
+                .iter()
+                .any(|tag| tag.name == "App" && tag.is_system)
+        );
         assert_eq!(
             default_system_tags()
                 .into_iter()
@@ -3699,9 +3747,11 @@ mod tests {
         );
 
         let bookmark_sql = core_bookmark_repository_sql();
-        assert!(bookmark_sql
-            .insert_bookmark
-            .starts_with("INSERT INTO bookmarks"));
+        assert!(
+            bookmark_sql
+                .insert_bookmark
+                .starts_with("INSERT INTO bookmarks")
+        );
         assert_eq!(
             bookmark_sql.select_all,
             "SELECT * FROM bookmarks ORDER BY title ASC"
@@ -3730,13 +3780,17 @@ mod tests {
         assert_eq!(bookmark.last_used_at_seconds, Some(1_700_000_002));
 
         let app_sql = core_app_repository_sql();
-        assert!(app_sql
-            .insert_or_replace_app
-            .starts_with("INSERT OR REPLACE INTO apps"));
+        assert!(
+            app_sql
+                .insert_or_replace_app
+                .starts_with("INSERT OR REPLACE INTO apps")
+        );
         assert_eq!(app_sql.select_all, "SELECT * FROM apps ORDER BY name ASC");
-        assert!(app_sql
-            .search_by_name_description_or_bundle_id
-            .contains("LOWER(bundle_id)"));
+        assert!(
+            app_sql
+                .search_by_name_description_or_bundle_id
+                .contains("LOWER(bundle_id)")
+        );
         assert_eq!(app_sql.vacuum, "VACUUM");
         assert_eq!(
             core_app_search_params("Local".to_string()),
@@ -3764,20 +3818,22 @@ mod tests {
         assert_eq!(app.id, "app-1");
         assert_eq!(app.source_type, "localDev");
         assert!(app.is_pinned);
-        assert!(core_installed_app_from_row(CoreInstalledAppRowInfo {
-            id: Some("app-2".to_string()),
-            name: Some("Broken".to_string()),
-            bundle_id: Some("com.example.broken".to_string()),
-            version: None,
-            description: None,
-            source_type: Some("local-dev".to_string()),
-            source_path: Some("/tmp/broken.actr".to_string()),
-            icon: None,
-            installed_at_seconds: Some(1_700_000_004),
-            last_used_at_seconds: None,
-            is_pinned_value: 0,
-        })
-        .is_none());
+        assert!(
+            core_installed_app_from_row(CoreInstalledAppRowInfo {
+                id: Some("app-2".to_string()),
+                name: Some("Broken".to_string()),
+                bundle_id: Some("com.example.broken".to_string()),
+                version: None,
+                description: None,
+                source_type: Some("local-dev".to_string()),
+                source_path: Some("/tmp/broken.actr".to_string()),
+                icon: None,
+                installed_at_seconds: Some(1_700_000_004),
+                last_used_at_seconds: None,
+                is_pinned_value: 0,
+            })
+            .is_none()
+        );
     }
 
     #[test]
@@ -3907,18 +3963,18 @@ mod tests {
         assert_eq!(parse_vosk_result_text("not json".to_string()), "");
         assert_eq!(
             post_process_zh_asr_segments(
-            "\u{4eca}\u{5929} \u{5929}\u{6c14} \u{5f88}\u{597d}".to_string(),
+                "\u{4eca}\u{5929} \u{5929}\u{6c14} \u{5f88}\u{597d}".to_string(),
                 vec![
                     AsrSegmentInfo {
-                    word: "\u{4eca}\u{5929}".to_string(),
+                        word: "\u{4eca}\u{5929}".to_string(),
                         nature: Some("t".to_string()),
                     },
                     AsrSegmentInfo {
-                    word: "\u{5929}\u{6c14}".to_string(),
+                        word: "\u{5929}\u{6c14}".to_string(),
                         nature: Some("n".to_string()),
                     },
                     AsrSegmentInfo {
-                    word: "\u{5f88}\u{597d}".to_string(),
+                        word: "\u{5f88}\u{597d}".to_string(),
                         nature: Some("a".to_string()),
                     },
                 ],
@@ -4505,17 +4561,31 @@ mod tests {
     #[test]
     fn ffi_integrity_plan_normalizes_manifest_integrity() {
         let plan = create_actr_integrity_plan(
-            r##"{
-                "name": "Demo",
-                "version": "1",
-                "entry": "main.js",
-                "integrity": {
-                    "algorithm": "SHA-256",
-                    "files": {
-                        "/dist/main.js": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-                    }
-                }
-            }"##
+            r##"
+                format = "actr-package/1"
+                [actor]
+                manufacturer = "demo"
+                name = "app"
+                version = "1.0.0"
+                [workload]
+                profile = "keel.guest/1"
+                entry = "dist/main.js"
+                [workload.keel]
+                runtime = "js"
+                guest-api = "keel.guest/1"
+                [host]
+                profile = "actr.host/1"
+                api = "^1"
+                [signature]
+                algorithm = "ed25519"
+                key-id = "mfr-test"
+                [[files]]
+                path = "dist/main.js"
+                role = "workload"
+                media-type = "text/javascript"
+                size = 1
+                sha256 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            "##
             .to_string(),
         )
         .unwrap()
@@ -4533,17 +4603,31 @@ mod tests {
     #[test]
     fn ffi_integrity_plan_rejects_unsafe_paths() {
         let error = create_actr_integrity_plan(
-            r##"{
-                "name": "Demo",
-                "version": "1",
-                "entry": "main.js",
-                "integrity": {
-                    "algorithm": "sha256",
-                    "files": {
-                        "../secret": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                    }
-                }
-            }"##
+            r##"
+                format = "actr-package/1"
+                [actor]
+                manufacturer = "demo"
+                name = "app"
+                version = "1.0.0"
+                [workload]
+                profile = "keel.guest/1"
+                entry = "../secret"
+                [workload.keel]
+                runtime = "js"
+                guest-api = "keel.guest/1"
+                [host]
+                profile = "actr.host/1"
+                api = "^1"
+                [signature]
+                algorithm = "ed25519"
+                key-id = "mfr-test"
+                [[files]]
+                path = "../secret"
+                role = "workload"
+                media-type = "text/javascript"
+                size = 1
+                sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            "##
             .to_string(),
         )
         .unwrap_err();

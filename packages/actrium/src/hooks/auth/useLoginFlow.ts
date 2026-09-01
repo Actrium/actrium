@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useLogin, LoginStep } from './useLogin';
 import { useAuthorize, AuthorizeStep } from './useAuthorize';
-import { useTab } from '../../actr-host/contexts/TabContext';
+import { useTab } from '../../runtime-host/contexts/TabContext';
 
 export type LoginFlowMode =
   | 'login_only'           // Set page: Login only
