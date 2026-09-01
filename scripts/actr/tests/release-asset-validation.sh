@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 cd "$repo_root"
 
 python3 - <<'PY'
@@ -16,11 +16,11 @@ from pathlib import Path
 
 workflow_path = Path(".github/workflows/release-asset-validation.yml")
 protoc_path = Path(".github/workflows/_protoc-plugins-release.yml")
-swift_packaging_path = Path("bindings/swift/scripts/package-binary.sh")
+swift_packaging_path = Path("packages/actr-swift/scripts/package-binary.sh")
 verify_path = Path(".github/workflows/release-train-verify.yml")
 reusable_paths = (
     Path(".github/workflows/_actr-cli-release.yml"),
-    Path(".github/workflows/_actrix-release.yml"),
+    Path(".github/workflows/_loran-release.yml"),
     protoc_path,
 )
 workflow = workflow_path.read_text()
@@ -292,7 +292,7 @@ for name, document in reusable_workflows.items():
 
 for caller, reusable_name in (
     ("cli-assets", "_actr-cli-release.yml"),
-    ("actrix-assets", "_actrix-release.yml"),
+    ("actrix-assets", "_loran-release.yml"),
     ("protoc-plugin-assets", "_protoc-plugins-release.yml"),
 ):
     caller_job = job_block(caller)
@@ -335,7 +335,7 @@ for package_dir in (
     require(f"npm/{package_dir}" in npm, f"npm package {package_dir} must be packed")
 
 require("  python-package-assets:\n" not in workflow, "Python distributions must not have a duplicate standalone producer")
-require("python -m build tools/protoc-gen/python" not in workflow, "validation workflow must delegate Python builds to protoc workflow")
+require("python -m build tools/actr/protoc-gen/python" not in workflow, "validation workflow must delegate Python builds to protoc workflow")
 require(protoc.count("python -m build") == 1, "protoc workflow must have exactly one Python build")
 require("python -m twine check" in protoc, "Python distributions must pass twine validation")
 require("pattern: protoc-gen-*" in protoc, "protoc publisher must only download its own artifacts")
@@ -512,7 +512,7 @@ for validation_marker in (
 for forbidden in (
     "./gradlew",
     "package-binary.sh",
-    "source/bindings/kotlin",
+    "source/packages/actr-kotlin",
     "actions/setup-java",
 ):
     require(
@@ -678,7 +678,7 @@ require(
     kotlin_publish.count('"maven_sources_sha256"') == 2,
     "Kotlin immutable tag metadata must create and validate the sources JAR checksum",
 )
-kotlin_gradle = Path("bindings/kotlin/actr-kotlin/build.gradle.kts").read_text()
+kotlin_gradle = Path("packages/actr-kotlin/actr-kotlin/build.gradle.kts").read_text()
 for pom_property in (
     "actr.source.repository",
     "actr.source.tag",
@@ -710,10 +710,10 @@ require(
     "Kotlin Gradle publication must support credential-free local staging",
 )
 for filtered_path in (
-    '"bindings/swift/scripts/package-binary.sh"',
-    '"bindings/kotlin/actr-kotlin/build.gradle.kts"',
+    '"packages/actr-swift/scripts/package-binary.sh"',
+    '"packages/actr-kotlin/actr-kotlin/build.gradle.kts"',
     '".github/workflows/_actr-cli-release.yml"',
-    '".github/workflows/_actrix-release.yml"',
+    '".github/workflows/_loran-release.yml"',
 ):
     require(
         verify_workflow.count(filtered_path) == 2,

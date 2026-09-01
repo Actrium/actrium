@@ -78,7 +78,7 @@ jobs:
 
           $cargo = (Get-Content Cargo.toml | Select-String '^version = "(.+)"' |
                     Select-Object -First 1).Matches.Groups[1].Value
-          $csproj = (Get-Content bindings/cabi/csharp/ActrSharp/ActrSharp.csproj |
+          $csproj = (Get-Content packages/actr-cabi/csharp/ActrSharp/ActrSharp.csproj |
                      Select-String '<Version>(.+)</Version>' |
                      Select-Object -First 1).Matches.Groups[1].Value
           Write-Host "publish=$env:ACTR_VERSION cargo=$cargo csproj=$csproj sha=$sourceSha"
@@ -127,12 +127,12 @@ jobs:
         run: |
           $artifacts = "$PWD/artifacts"
           New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
-          dotnet restore bindings/cabi/csharp/ActrSharp/ActrSharp.csproj
+          dotnet restore packages/actr-cabi/csharp/ActrSharp/ActrSharp.csproj
           if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed." }
-          dotnet build bindings/cabi/csharp/ActrSharp/ActrSharp.csproj `
+          dotnet build packages/actr-cabi/csharp/ActrSharp/ActrSharp.csproj `
             --no-restore --configuration Release -p:Version=$env:ACTR_VERSION
           if ($LASTEXITCODE -ne 0) { throw "dotnet build failed." }
-          dotnet pack bindings/cabi/csharp/ActrSharp/ActrSharp.csproj `
+          dotnet pack packages/actr-cabi/csharp/ActrSharp/ActrSharp.csproj `
             --no-build --configuration Release `
             -p:Version=$env:ACTR_VERSION -p:PackageOutputPath=$artifacts
           if ($LASTEXITCODE -ne 0) { throw "dotnet pack failed." }
@@ -156,8 +156,8 @@ jobs:
             $repository = $nuspecXml.SelectSingleNode(
               "/*[local-name()='package']/*[local-name()='metadata']/*[local-name()='repository']"
             )
-            if (-not $repository -or $repository.GetAttribute("url") -ne "https://github.com/Actrium/actr") {
-              throw "nupkg RepositoryUrl must point at https://github.com/Actrium/actr"
+            if (-not $repository -or $repository.GetAttribute("url") -ne "https://github.com/Actrium/actrium") {
+              throw "nupkg RepositoryUrl must point at https://github.com/Actrium/actrium"
             }
             $license = $nuspecXml.SelectSingleNode(
               "/*[local-name()='package']/*[local-name()='metadata']/*[local-name()='license']"
@@ -165,7 +165,7 @@ jobs:
             if (-not $license -or $license.GetAttribute("type") -ne "expression" -or $license.InnerText -ne "Apache-2.0") {
               throw "nupkg license expression must be Apache-2.0"
             }
-            if ($nuspec -notmatch ('<releaseNotes>https://github.com/Actrium/actr/releases/tag/v' + [regex]::Escape($env:ACTR_VERSION) + '</releaseNotes>')) {
+            if ($nuspec -notmatch ('<releaseNotes>https://github.com/Actrium/actrium/releases/tag/v' + [regex]::Escape($env:ACTR_VERSION) + '</releaseNotes>')) {
               throw "nupkg release notes must point to v$env:ACTR_VERSION"
             }
             $native = $zip.Entries | Where-Object {

@@ -1,16 +1,16 @@
 # T18: 浏览器 e2e 中 jco async-lift dispatch 永挂
 
-**状态**：已绕开 + CM 代码已删除（2026-04-25）。浏览器主路径切到 Option U（WIT → wasm-bindgen 直产物），不再依赖 jco / JSPI；CM 桥接（`loadWithComponentBridge` / `transpile-component.sh` / 旧版 `actor.sw.js`）在 Option U Phase 8 一并删除。本节正文保留为修复前的诊断历史。  
-**当前生产路径**：`actr_framework::entry!` 宏 + `bindings/web/crates/actr-web-abi/`（由 `tools/wit-compile-web` 从 WIT 直接生成）+ `actor.sw.js`（Phase 8 后即原 wbg 版本，重命名后），整链已在 BasicFunction + MultiTab 12/12 e2e 中验证。  
-**影响**（修复前历史描述）：浏览器 Component Model 路径下的 e2e 跑不通。原生（native wasmtime）路径不受影响。  
-**关联 commits**：`548ad7d9`（Component Model bridge 完成）、`c6deaeb0`（core/hyper pub 面收缩）、`b6b90f33`（TD-001）、`10e830da` / `936cd555` / `829aec4c`（诊断设施落盘）；Option U 主线 `87b3401d` / `301c58d6`  
+**状态**：已绕开 + CM 代码已删除（2026-04-25）。浏览器主路径切到 Option U（WIT → wasm-bindgen 直产物），不再依赖 jco / JSPI；CM 桥接（`loadWithComponentBridge` / `transpile-component.sh` / 旧版 `actor.sw.js`）在 Option U Phase 8 一并删除。本节正文保留为修复前的诊断历史。
+**当前生产路径**：`actr_framework::entry!` 宏 + `packages/actr-web/crates/actr-web-abi/`（由 `tools/actr/wit-compile-web` 从 WIT 直接生成）+ `actor.sw.js`（Phase 8 后即原 wbg 版本，重命名后），整链已在 BasicFunction + MultiTab 12/12 e2e 中验证。
+**影响**（修复前历史描述）：浏览器 Component Model 路径下的 e2e 跑不通。原生（native wasmtime）路径不受影响。
+**关联 commits**：`548ad7d9`（Component Model bridge 完成）、`c6deaeb0`（crates/actr-hyper pub 面收缩）、`b6b90f33`（TD-001）、`10e830da` / `936cd555` / `829aec4c`（诊断设施落盘）；Option U 主线 `87b3401d` / `301c58d6`
 **关联文档**：[tech-debt.zh.md](./tech-debt.zh.md) TD-001 / TD-002、[option-u-wit-compile-web.zh.md](./option-u-wit-compile-web.zh.md)、[option-u-phase6-gamma-unified.zh.md](./option-u-phase6-gamma-unified.zh.md)
 
 ---
 
 ## 0. 这份文档在讲什么
 
-本仓 `actr` 的浏览器 e2e（`bindings/web/examples/echo/test-auto.js`）在 Chrome M146/M147 上**跑不通**：简单 Echo RPC 发出去后 30 秒 timeout，没有任何远端响应。经过 4 轮诊断 spike 把根因收窄到 **jco 生成的 `guest.js` 里 async-lift 任务调度层**——guest component 的 dispatch 被触发了，但在调用任何 host import 之前就挂住不动。
+本仓 `actr` 的浏览器 e2e（`packages/actr-web/examples/echo/test-auto.js`）在 Chrome M146/M147 上**跑不通**：简单 Echo RPC 发出去后 30 秒 timeout，没有任何远端响应。经过 4 轮诊断 spike 把根因收窄到 **jco 生成的 `guest.js` 里 async-lift 任务调度层**——guest component 的 dispatch 被触发了，但在调用任何 host import 之前就挂住不动。
 
 这不是 "WebRTC peer 建不起来"，也不是 "signaling 转发失败"——这些都是表象；真正的断点比这些都要浅一层。
 
@@ -176,7 +176,7 @@ Spike 4：+ CDP SW console capture → 发现 guest dispatch Promise 挂住
 **两个反复踩的元问题**（已作 feedback memory + tech-debt 登记）：
 
 - **盲区 1**：`puppeteer.page.on('console')` 只抓 page 的 console，**抓不到 Service Worker console**。Rust `log::info!` 经 wasm-logger 落到 SW console 完全隐形。已 commit env-var gated 的 CDP 抓取 (`CAPTURE_SW_CONSOLE=1`) 到 test-auto.js (`829aec4c`)；memory feedback `feedback_puppeteer_sw_console.md` 记录
-- **盲区 2**：sw-host 编出的 wasm 放在 `bindings/web/dist/sw/`，但 `cli/src/web_assets.rs` 通过 `include_bytes!` 从 **`cli/assets/web-runtime/`** 嵌入。两者没有自动同步，改 sw-host 后忘记手动 cp 等于用旧 wasm 测新逻辑。已在 tech-debt.zh.md 登记为 **TD-002**
+- **盲区 2**：sw-host 编出的 wasm 放在 `packages/actr-web/dist/sw/`，但 `crates/actr-cli/src/web_assets.rs` 通过 `include_bytes!` 从 **`crates/actr-cli/assets/web-runtime/`** 嵌入。两者没有自动同步，改 sw-host 后忘记手动 cp 等于用旧 wasm 测新逻辑。已在 tech-debt.zh.md 登记为 **TD-002**
 
 ---
 
@@ -266,7 +266,7 @@ crates/js-component-bindgen/src/intrinsics/p3/async_task.rs
 - **代价**：浏览器端 Rust guest 不再是 Component Model，而是 core wasm + wasm-bindgen。需要维护两份 guest 代码（或抽象一层）
 - **收益**：wasm-bindgen 成熟多年，Promise/async 用 JS 回调自然解决，无 JSPI 依赖
 - **判断点**：这是对 "原生 Component Model、浏览器 Component Model 同构" 承诺的战略让步。愿不愿意让步？
-- **规模**：大。要重做 bindings/web 的 guest 生成链路、重做 host side 的 wasm-bindgen import 桥
+- **规模**：大。要重做 packages/actr-web 的 guest 生成链路、重做 host side 的 wasm-bindgen import 桥
 
 ### S. 先冻结
 
@@ -294,7 +294,7 @@ crates/js-component-bindgen/src/intrinsics/p3/async_task.rs
 几乎所有 2026 CM 综述都默认 jco 是**唯一**的 JS host：
 
 > "Browsers currently support raw .wasm modules, not full WASM components directly, which means that to use component-style bundles in the browser, you often need a transpilation step."
-> 
+>
 > "Tools like the jco package on npm bridge the gap of component bundles not being directly supported in browsers..."
 
 **含义**：
@@ -313,14 +313,14 @@ crates/js-component-bindgen/src/intrinsics/p3/async_task.rs
 | `936cd555` | `sw-host/build.sh` + `dom-bridge/build.sh` 清 `RUSTFLAGS` 避免 mold 漏进 wasm32 |
 | `829aec4c` | `test-auto.js` 加 `CAPTURE_SW_CONSOLE=1` 订阅 SW target console |
 | `b6b90f33` | TD-001 登记（SW↔DOM DataLane 5 个 zero-call setter） |
-| （本次）| TD-002 登记（sw-host wasm 未自动同步到 cli/assets） + 本文档 |
+| （本次）| TD-002 登记（sw-host wasm 未自动同步到 crates/actr-cli/assets） + 本文档 |
 
 **未入库历史诊断材料（仅用于考古，不建议复活为当前路径）**：
 
 | 位置 | 内容 | 复活方式 |
 |------|------|---------|
 | jco fork v1.18.1 + #1361 patch | `crates/js-component-bindgen/src/intrinsics/p3/async_task.rs` L2072 / L2298 两处 `params[0] → params.at(-1)` | clone + checkout tag + patch + `cargo xtask build debug`（注意 clear `RUSTFLAGS`） |
-| HX-PROBE 诊断代码 | 8 处 `log::info!("[SW][HX-PROBE] HOSTIMPORT {fn} called …")` 加在 `bindings/web/crates/sw-host/src/guest_bridge.rs` host 导入函数入口 | grep git log / 本文档搜 `HX-PROBE` |
+| HX-PROBE 诊断代码 | 8 处 `log::info!("[SW][HX-PROBE] HOSTIMPORT {fn} called …")` 加在 `packages/actr-web/crates/sw-host/src/guest_bridge.rs` host 导入函数入口 | grep git log / 本文档搜 `HX-PROBE` |
 
 **memory**：
 - `feedback_puppeteer_sw_console.md`：诊断浏览器 SW Rust 行为必须用 CDP SW target console
@@ -340,5 +340,5 @@ crates/js-component-bindgen/src/intrinsics/p3/async_task.rs
 
 ## 10. 未展开的遗留问题
 
-- **favicon.ico 404**：`actr run --web` 的 static 路由没 serve `/favicon.ico`。多次 spike 里这条 404 总是混在失败日志里误导判断。修法小（给 `cli/src/commands/run.rs:728` 的路由表加一条 no-op 或空 favicon 响应），但非 T18 必修
+- **favicon.ico 404**：`actr run --web` 的 static 路由没 serve `/favicon.ico`。多次 spike 里这条 404 总是混在失败日志里误导判断。修法小（给 `crates/actr-cli/src/commands/run.rs:728` 的路由表加一条 no-op 或空 favicon 响应），但非 T18 必修
 - **rustup 软链异常**：`/home/l/.rustup` 是空目录，上轮 W2-F agent 临时 `sudo ln -s /mnt/sdb1/l_misc/.rustup /home/l/.rustup`。非本仓问题，不必在此解决

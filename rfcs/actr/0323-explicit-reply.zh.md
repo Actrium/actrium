@@ -16,7 +16,7 @@
 
 ## 动机（Motivation）
 
-#337 之后的接收循环（`core/hyper/src/lifecycle/node.rs`，inproc 与 mailbox 两条循环共享 `admit_incoming`）：
+#337 之后的接收循环（`crates/actr-hyper/src/lifecycle/node.rs`，inproc 与 mailbox 两条循环共享 `admit_incoming`）：
 
 ```
 admit_incoming(envelope) ──同步、按到达序──→ ACL / dedup / 键提取 / 调度器提交
@@ -38,7 +38,7 @@ gate-on 且声明了 conflict-key 时，多个 continuation 跨 distinct key 并
 
 ### 1. 回复模式（proto method option）
 
-在 `core/protocol/proto/actr/options.proto` 增加 method 级选项，extension tag 取 **50002**（`payload_type` 已占 50001，紧随其后分配）：
+在 `crates/actr-protocol/proto/actr/options.proto` 增加 method 级选项，extension tag 取 **50002**（`payload_type` 已占 50001，紧随其后分配）：
 
 ```proto
 enum ReplyMode {

@@ -1,5 +1,5 @@
 //! Hand-written business logic — the only thing that should change when
-//! the echo semantics change.  Mirror of cli/fixtures/rust/echo_service.rs.hbs
+//! the echo semantics change.  Mirror of crates/actr-cli/fixtures/rust/echo_service.rs.hbs
 //! verbatim.
 
 use crate::generated::echo::{EchoRequest, EchoResponse};

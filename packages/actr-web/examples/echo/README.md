@@ -76,7 +76,7 @@ Self-contained launcher using the in-repo `actr-mock-actrix` crate as
 signaling/AIS/MFR — no external `actrix` checkout or SQLite seeding required:
 
 ```bash
-cd bindings/web/examples/echo
+cd packages/actr-web/examples/echo
 ./start-mock.sh [PORT]
 ```
 

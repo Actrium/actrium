@@ -36,7 +36,7 @@ RPC: get_or_create_transport 复用死 transport → send 挂 15s
 - **I-6**：优雅关闭时 pending requests 同样被释放（PeerGate retire 任务已有 drain 逻辑，
   补上事件后自然生效，需测试确认）。
 
-### 改动点（预计 ≤ 3 处，均在 `core/hyper/src/wire/webrtc/v020/peer/`）
+### 改动点（预计 ≤ 3 处，均在 `crates/actr-hyper/src/wire/webrtc/v020/peer/`）
 
 1. **`RtcUnavailableReason` 增加变体** `Closed`（优雅关闭语义）。
    内部枚举（测试断言 `reason=NegotiationFailed` 所见），加变体无协议影响。
@@ -108,7 +108,7 @@ A.foreground() → maybe_start_deferred_recovery → start_soft_recovery
   保留 1b18ee87 的 resurrect 路径（begin_transport_attempt）。两条路径互斥，
   消除 resurrect/coalesce 冲突。
 
-### 改动点（均在 `core/hyper/src/wire/webrtc/v020/peer/reducer.rs`）
+### 改动点（均在 `crates/actr-hyper/src/wire/webrtc/v020/peer/reducer.rs`）
 
 1. **协商在飞判定**（新 helper）：
    ```rust

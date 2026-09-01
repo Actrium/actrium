@@ -107,17 +107,17 @@ native-hosted WASM 尤其重要：WASM guest 的沙箱能力不应被 manifest �
 
 | 环节 | 当前代码 | 问题 |
 |---|---|---|
-| Manifest 类型 | `core/pack/src/manifest.rs:5-8` | 三个身份字段都是无约束 `String` |
+| Manifest 类型 | `crates/actr-pack/src/manifest.rs:5-8` | 三个身份字段都是无约束 `String` |
 | TOML 解析 | `PackageManifest::from_toml()` | 只反序列化，无身份语义校验 |
-| 协议身份解析 | `core/protocol/src/actr_ext.rs:55-82` | `from_string_repr()` 对 manufacturer/name 使用 `Name`，package 路径未复用，存在两套合法性规则 |
-| 内置验签 | `core/pack/src/verify.rs:111-268` | 验签、哈希后原样返回身份 |
-| Registry key lookup | `core/hyper/src/verify/trust.rs:193-220` | 验签前使用原始 `manufacturer` 获取公钥 |
+| 协议身份解析 | `crates/actr-protocol/src/actr_ext.rs:55-82` | `from_string_repr()` 对 manufacturer/name 使用 `Name`，package 路径未复用，存在两套合法性规则 |
+| 内置验签 | `crates/actr-pack/src/verify.rs:111-268` | 验签、哈希后原样返回身份 |
+| Registry key lookup | `crates/actr-hyper/src/verify/trust.rs:193-220` | 验签前使用原始 `manufacturer` 获取公钥 |
 | 自定义 verifier | `TrustProvider::verify_package*()` | provider 可以直接返回未经身份校验的 `VerifiedPackage` |
 | Workload attach | `load_workload_package_inner()` | provider 返回后立即进入 binary 检测和 workload 加载 |
-| Namespace 解析 | `core/hyper/src/config.rs:735-820` | 字符串替换后直接 `PathBuf::from` |
-| ActorStore | `core/hyper/src/storage/db.rs:37-85` | `create_dir_all` 后 `Connection::open` |
-| ActorStore public API | `core/hyper/src/lib.rs:197,265` | 公开重导出的 `ActorStore::open(path)` 可绕过未来 root-aware 安全入口 |
-| Native platform | `core/platform-native/src/platform.rs:87-104` | 把 namespace 当绝对路径透传 |
+| Namespace 解析 | `crates/actr-hyper/src/config.rs:735-820` | 字符串替换后直接 `PathBuf::from` |
+| ActorStore | `crates/actr-hyper/src/storage/db.rs:37-85` | `create_dir_all` 后 `Connection::open` |
+| ActorStore public API | `crates/actr-hyper/src/lib.rs:197,265` | 公开重导出的 `ActorStore::open(path)` 可绕过未来 root-aware 安全入口 |
+| Native platform | `crates/actr-platform-native/src/platform.rs:87-104` | 把 namespace 当绝对路径透传 |
 
 只在 `resolve_storage_path_for()` 增加校验虽然可以保护当前落盘点，但不能建立
 “`VerifiedPackage` 的身份已经安全”的信任边界，也不能阻止自定义 provider 的危险返回值
@@ -232,7 +232,7 @@ Hyper 不再把 canonical filesystem path 传给自定义 provider，也不对 p
 唯一的 `ActrType::validate()`，让字符串解析、package verification、Registry lookup 和
 AIS registration 共用。
 
-在 `core/protocol/src/actr_ext.rs` 增加：
+在 `crates/actr-protocol/src/actr_ext.rs` 增加：
 
 ```rust
 pub const MAX_ACTR_VERSION_BYTES: usize = 64;
@@ -326,7 +326,7 @@ ActrType 可注册
 `to_string_repr()` 调用，必须由注册入口校验保护。可以为新调用方补充
 `try_to_string_repr()`，但不能用它替代入口校验。
 
-在 `core/pack/src/identity.rs` 新增：
+在 `crates/actr-pack/src/identity.rs` 新增：
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -390,7 +390,7 @@ fn update_field(hasher: &mut Sha256, tag: u8, bytes: &[u8]) {
 
 ### 4.2 内置 verifier：验签后校验
 
-在 `core/pack/src/verify.rs` 中，签名验证和 manifest 解析完成后、返回
+在 `crates/actr-pack/src/verify.rs` 中，签名验证和 manifest 解析完成后、返回
 `VerifiedPackage` 之前执行：
 
 ```rust
@@ -467,7 +467,7 @@ async fn verify_package_for_hyper(
 
 AIS 是独立服务端信任边界，不能只依赖 Hyper 已经校验。AIS register handler 在处理
 外部请求、生成 ActrId 或写 ACL 前也必须调用 `request.actr_type.validate()`；当前
-`actrix/crates/ais/src/handlers.rs` 中以 `to_string_repr()` 生成 ACL key 的代码只能位于
+`crates/loran-ais/src/handlers.rs` 中以 `to_string_repr()` 生成 ACL key 的代码只能位于
 该校验之后。这样即使请求绕过 Hyper 直接到达 AIS，也不会写入以后无法由
 `from_string_repr()` 解析的 key。
 
@@ -628,7 +628,7 @@ direct-filesystem 存储分支（非 `with_platform()`）时才初始化为 `Som
 
 ### 4.6 PlatformProvider：传递 opaque namespace
 
-在 `core/platform-traits` 定义强类型：
+在 `crates/actr-platform-traits` 定义强类型：
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -656,9 +656,9 @@ impl StorageNamespace {
 }
 ```
 
-`StorageNamespace` 与 `core/pack` 的 `StorageNamespaceId` 是两个刻意分开的类型：
-`StorageNamespaceId`（在 `core/pack`）是身份哈希的计算结果，只含 32 字节 digest；
-`StorageNamespace`（在 `core/platform-traits`）是传给 provider 的传输类型，额外携带 layout
+`StorageNamespace` 与 `crates/actr-pack` 的 `StorageNamespaceId` 是两个刻意分开的类型：
+`StorageNamespaceId`（在 `crates/actr-pack`）是身份哈希的计算结果，只含 32 字节 digest；
+`StorageNamespace`（在 `crates/actr-platform-traits`）是传给 provider 的传输类型，额外携带 layout
 version。二者分层不同——pack 负责「算出来」，platform-traits 负责「传出去」——Hyper 在
 `storage_namespace_for()` 中通过 `into_bytes()` 显式桥接。不要因字段相似就合并它们。
 
@@ -705,7 +705,7 @@ let store = platform.secret_store(&namespace).await?;
 新增 public `ActorStore::open_under(root: &SecureStorageRoot, namespace:
 &StorageNamespace)`。
 
-`ActorStore` 当前经 `core/hyper/src/lib.rs:197,265` 公开重导出，
+`ActorStore` 当前经 `crates/actr-hyper/src/lib.rs:197,265` 公开重导出，
 `ActorStore::open(path)` 也是 public；如果只新增 `open_under()` 而保留 raw open，外部
 调用方仍可绕过 root、hash、祖先检查和 NOFOLLOW。
 
@@ -991,7 +991,7 @@ Hyper 的保证从 provider 返回边界开始。内置 `RegistryTrust` 则通�
 
 ## 八、落地清单
 
-### core/protocol
+### crates/actr-protocol
 
 - [ ] 在 `ActrType` 上新增唯一的 `validate()`
 - [ ] manufacturer/name 复用 `Name::new()`，不复制规则
@@ -1001,17 +1001,17 @@ Hyper 的保证从 provider 返回边界开始。内置 `RegistryTrust` 则通�
 - [ ] 修正 `Name` 文档和错误文本：当前实现的 32 上限是 UTF-8 字节数，不是字符数
 - [ ] 增加 `ActrType` 合法/非法矩阵和 `to_string_repr()/from_string_repr()` round-trip 测试
 
-### core/pack
+### crates/actr-pack
 
 - [ ] 增加 `actr-protocol.workspace = true` 依赖并确认无 dependency cycle
-- [ ] 新增 `core/pack/src/identity.rs`
+- [ ] 新增 `crates/actr-pack/src/identity.rs`
 - [ ] `ValidatedActorIdentity::from_manifest()` 委托 `ActrType::validate()`
 - [ ] 实现 `StorageNamespaceId`、域分隔 hash、`into_bytes()` 和 `to_hex()`
-- [ ] 在 `core/pack/src/lib.rs` 导出所需类型
+- [ ] 在 `crates/actr-pack/src/lib.rs` 导出所需类型
 - [ ] 在 `verify()`、`verify_bounded()`、`verify_with_limits()` 公共实现路径接入校验
 - [ ] 增加 identity/hash 单元测试
 
-### core/hyper trust
+### crates/actr-hyper trust
 
 - [ ] 新增统一 `verify_package_for_hyper()`
 - [ ] `Hyper::verify_package()` 改走统一入口
@@ -1028,7 +1028,7 @@ Hyper 的保证从 provider 返回边界开始。内置 `RegistryTrust` 则通�
 - [ ] 增加绕过 Hyper 直接提交非法 register request 的拒绝测试
 - [ ] 用与 protocol/package 相同的合法/非法身份矩阵做一致性测试
 
-### core/hyper storage
+### crates/actr-hyper storage
 
 - [ ] 用 `storage_root` 替换 `storage_path_template`
 - [ ] 为旧 `storage_path_template` 保留只报错的 Serde tombstone
@@ -1094,17 +1094,17 @@ Hyper 的保证从 provider 返回边界开始。内置 `RegistryTrust` 则通�
 ## 十、参考
 
 - [Actrium/actr#350](https://github.com/Actrium/actr/issues/350)
-- `core/protocol/src/actr_ext.rs`
-- `core/protocol/src/name.rs`
-- `core/pack/src/manifest.rs`
-- `core/pack/src/verify.rs`
-- `core/hyper/src/verify/trust.rs`
-- `core/hyper/src/verify/cert_cache.rs`
-- `core/hyper/src/config.rs`
-- `core/hyper/src/lib.rs`
-- `core/hyper/src/storage/db.rs`
-- `core/platform-traits/src/platform.rs`
-- `core/platform-native/src/platform.rs`
-- `actrix/crates/ais/src/handlers.rs`
+- `crates/actr-protocol/src/actr_ext.rs`
+- `crates/actr-protocol/src/name.rs`
+- `crates/actr-pack/src/manifest.rs`
+- `crates/actr-pack/src/verify.rs`
+- `crates/actr-hyper/src/verify/trust.rs`
+- `crates/actr-hyper/src/verify/cert_cache.rs`
+- `crates/actr-hyper/src/config.rs`
+- `crates/actr-hyper/src/lib.rs`
+- `crates/actr-hyper/src/storage/db.rs`
+- `crates/actr-platform-traits/src/platform.rs`
+- `crates/actr-platform-native/src/platform.rs`
+- `crates/loran-ais/src/handlers.rs`
 - CWE-22: Improper Limitation of a Pathname to a Restricted Directory
 - CWE-73: External Control of File Name or Path

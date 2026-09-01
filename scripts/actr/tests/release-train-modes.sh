@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 cd "$repo_root"
 
 script_under_test=$(mktemp)
-sed '/^main "\$@"$/d' scripts/release-train.sh >"$script_under_test"
+sed '/^main "\$@"$/d' scripts/actr/release-train.sh >"$script_under_test"
 # shellcheck source=/dev/null
 source "$script_under_test"
 rm -f "$script_under_test"
@@ -373,7 +373,7 @@ test_asset_release_workflows_accept_pre_release_tags() {
   local workflow
   for workflow in \
     .github/workflows/_actr-cli-release.yml \
-    .github/workflows/_actrix-release.yml \
+    .github/workflows/_loran-release.yml \
     .github/workflows/_protoc-plugins-release.yml; do
     if ! grep -q '\^v(\[0-9\]+\\\.\[0-9\]+\\\.\[0-9\]+(-\[0-9A-Za-z-\]+(\\\.\[0-9A-Za-z-\]+)\*)?)\$' "$workflow"; then
       printf '%s must accept vX.Y.Z-<pre> release tags\n' "$workflow" >&2
@@ -387,7 +387,7 @@ test_asset_release_workflows_accept_pre_release_tags() {
 
   for workflow in \
     .github/workflows/release-actr-cli.yml \
-    .github/workflows/release-actrix.yml \
+    .github/workflows/release-loran.yml \
     .github/workflows/release-protoc-plugins.yml; do
     if ! grep -q '\^v\[0-9\]+\\\.\[0-9\]+\\\.\[0-9\]+(-\[0-9A-Za-z-\]+(\\\.\[0-9A-Za-z-\]+)\*)?\$' "$workflow"; then
       printf '%s must accept vX.Y.Z-<pre> release tags\n' "$workflow" >&2
@@ -451,7 +451,7 @@ test_release_prepare_workflow_detects_pre_release_labels() {
     exit 1
   fi
 
-  if ! grep -qF 'scripts/detect-pre-release-label.sh' .github/workflows/release-prepare.yml; then
+  if ! grep -qF 'scripts/actr/detect-pre-release-label.sh' .github/workflows/release-prepare.yml; then
     printf 'release prepare must delegate label detection to the script\n' >&2
     exit 1
   fi
@@ -499,7 +499,7 @@ test_verify_workflow_triggers_on_concrete_asset_workflows() {
   local workflow
   for workflow in \
     .github/workflows/release-actr-cli.yml \
-    .github/workflows/release-actrix.yml \
+    .github/workflows/release-loran.yml \
     .github/workflows/release-protoc-plugins.yml; do
     local count
     count=$(grep -Fc "$workflow" "$verify")
@@ -509,7 +509,7 @@ test_verify_workflow_triggers_on_concrete_asset_workflows() {
     fi
   done
 
-  if [ "$(grep -Fc 'scripts/detect-pre-release-label.sh' "$verify")" -lt 2 ]; then
+  if [ "$(grep -Fc 'scripts/actr/detect-pre-release-label.sh' "$verify")" -lt 2 ]; then
     printf 'the label detection script must trigger the verify workflow\n' >&2
     exit 1
   fi
@@ -554,20 +554,20 @@ test_detect_pre_release_label_prefers_highest_maturity() {
   commits=$(mktemp)
 
   write_detect_fixtures "$prs" "$commits"
-  assert_eq "rc" "$(scripts/detect-pre-release-label.sh "$prs" "$commits")" \
+  assert_eq "rc" "$(scripts/actr/detect-pre-release-label.sh "$prs" "$commits")" \
     "rc wins over beta and alpha"
 
   # Drop the rc PR; beta must win over alpha.
   jq '[.[] | select(.number != 103)]' "$prs" >"${prs}.tmp" && mv "${prs}.tmp" "$prs"
-  assert_eq "beta" "$(scripts/detect-pre-release-label.sh "$prs" "$commits")" \
+  assert_eq "beta" "$(scripts/actr/detect-pre-release-label.sh "$prs" "$commits")" \
     "beta wins over alpha"
 
   jq '[.[] | select(.number != 102)]' "$prs" >"${prs}.tmp" && mv "${prs}.tmp" "$prs"
-  assert_eq "alpha" "$(scripts/detect-pre-release-label.sh "$prs" "$commits")" \
+  assert_eq "alpha" "$(scripts/actr/detect-pre-release-label.sh "$prs" "$commits")" \
     "alpha detected when alone"
 
   jq '[.[] | select(.number != 101)]' "$prs" >"${prs}.tmp" && mv "${prs}.tmp" "$prs"
-  assert_eq "" "$(scripts/detect-pre-release-label.sh "$prs" "$commits")" \
+  assert_eq "" "$(scripts/actr/detect-pre-release-label.sh "$prs" "$commits")" \
     "no output without labeled PRs"
 
   rm -f "$prs" "$commits"
@@ -581,14 +581,14 @@ test_detect_pre_release_label_ignores_prs_outside_commit_range() {
   write_detect_fixtures "$prs" "$commits"
   # Only the unlabeled PR's merge commit is in range.
   printf '%s\n' dddddddddddddddddddddddddddddddddddddddd >"$commits"
-  assert_eq "" "$(scripts/detect-pre-release-label.sh "$prs" "$commits")" \
+  assert_eq "" "$(scripts/actr/detect-pre-release-label.sh "$prs" "$commits")" \
     "labeled PR merged before the last tag is ignored"
 
   # Multiple labels on one PR: the highest-maturity channel must win.
   jq '[.[] | select(.number == 101) | .labels += [{ "name": "release:rc" }]]' \
     "$prs" >"${prs}.tmp" && mv "${prs}.tmp" "$prs"
   printf '%s\n' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >"$commits"
-  assert_eq "rc" "$(scripts/detect-pre-release-label.sh "$prs" "$commits")" \
+  assert_eq "rc" "$(scripts/actr/detect-pre-release-label.sh "$prs" "$commits")" \
     "rc beats alpha on the same PR"
 
   rm -f "$prs" "$commits"
@@ -600,7 +600,7 @@ test_detect_pre_release_label_reads_json_from_stdin() {
   commits=$(mktemp)
 
   write_detect_fixtures "$prs" "$commits"
-  assert_eq "rc" "$(scripts/detect-pre-release-label.sh - "$commits" <"$prs")" \
+  assert_eq "rc" "$(scripts/actr/detect-pre-release-label.sh - "$commits" <"$prs")" \
     "JSON payload can arrive on stdin"
 
   rm -f "$prs" "$commits"
@@ -1122,7 +1122,7 @@ test_publish_python_package_uses_testpypi_for_pre_release() {
   local temp_dir call_log dist_file
   temp_dir=$(mktemp -d)
   call_log="$temp_dir/python.log"
-  dist_file="tools/protoc-gen/python/dist/framework_codegen_python-1.2.3-pre.1.tar.gz"
+  dist_file="tools/actr/protoc-gen/python/dist/framework_codegen_python-1.2.3-pre.1.tar.gz"
 
   cat >"$temp_dir/python" <<'EOF'
 #!/usr/bin/env bash
@@ -1236,7 +1236,7 @@ test_publish_typescript_workload_builds_before_publish() {
   local temp_dir original_path
   temp_dir=$(mktemp -d)
   original_path=$PATH
-  mkdir -p "$temp_dir/bin" "$temp_dir/bindings/typescript/actr-workload"
+  mkdir -p "$temp_dir/bin" "$temp_dir/packages/actr-typescript/actr-workload"
 
   cat >"$temp_dir/bin/npm" <<'EOF'
 #!/usr/bin/env bash
@@ -1251,7 +1251,7 @@ exit 0
 EOF
   chmod +x "$temp_dir/bin/npm"
 
-  cat >"$temp_dir/bindings/typescript/actr-workload/package.json" <<'EOF'
+  cat >"$temp_dir/packages/actr-typescript/actr-workload/package.json" <<'EOF'
 {
   "name": "@actrium/actr-workload",
   "version": "1.2.3",
@@ -1288,7 +1288,7 @@ test_publish_typescript_package_writes_native_and_main_state() {
   local temp_dir original_path
   temp_dir=$(mktemp -d)
   original_path=$PATH
-  mkdir -p "$temp_dir/bin" "$temp_dir/bindings/typescript"
+  mkdir -p "$temp_dir/bin" "$temp_dir/packages/actr-typescript"
 
   cat >"$temp_dir/bin/npm" <<'EOF'
 #!/usr/bin/env bash
@@ -1318,7 +1318,7 @@ exit 0
 EOF
   chmod +x "$temp_dir/bin/npx"
 
-  cat >"$temp_dir/bindings/typescript/package.json" <<'EOF'
+  cat >"$temp_dir/packages/actr-typescript/package.json" <<'EOF'
 {
   "name": "@actrium/actr",
   "version": "1.2.3",
@@ -1328,7 +1328,7 @@ EOF
   }
 }
 EOF
-  printf '[package]\nversion = "1.2.3"\n' >"$temp_dir/bindings/typescript/Cargo.toml"
+  printf '[package]\nversion = "1.2.3"\n' >"$temp_dir/packages/actr-typescript/Cargo.toml"
 
   export NPM_CALL_LOG="$temp_dir/npm-calls.log"
   export NPX_CALL_LOG="$temp_dir/npx-calls.log"
@@ -1377,7 +1377,7 @@ test_release_train_workflow_publish_typescript_uses_script_stage() {
   reset_release_train_state
 
   if ! grep -q 'args=(--stage publish-typescript --branch "${{ needs.context.outputs.target_branch }}" --version' .github/workflows/release-train.yml; then
-    printf 'publish-typescript workflow job must call scripts/release-train.sh --stage publish-typescript\n' >&2
+    printf 'publish-typescript workflow job must call scripts/actr/release-train.sh --stage publish-typescript\n' >&2
     exit 1
   fi
 
@@ -1468,7 +1468,7 @@ test_release_prepare_stages_workload_lockfile() {
   local stage_function
   stage_function=$(declare -f stage_release_version_files)
 
-  if ! grep -Fq 'e2e/winui-echo-app/workload/Cargo.lock' <<<"$stage_function"; then
+  if ! grep -Fq 'tests/e2e/actr/winui-echo-app/workload/Cargo.lock' <<<"$stage_function"; then
     printf 'release prepare must stage the generated WinUI workload lockfile\n' >&2
     exit 1
   fi
@@ -1479,11 +1479,11 @@ test_release_prepare_refreshes_and_stages_e2e_lockfile() {
   update_function=$(declare -f update_versions)
   stage_function=$(declare -f stage_release_version_files)
 
-  if ! grep -Fq 'cargo update --manifest-path e2e/Cargo.toml' <<<"$update_function"; then
+  if ! grep -Fq 'cargo update --manifest-path tests/e2e/actr/Cargo.toml' <<<"$update_function"; then
     printf 'release prepare must refresh the e2e workspace lockfile\n' >&2
     exit 1
   fi
-  if ! grep -Fq 'e2e/Cargo.lock' <<<"$stage_function"; then
+  if ! grep -Fq 'tests/e2e/actr/Cargo.lock' <<<"$stage_function"; then
     printf 'release prepare must stage the generated e2e workspace lockfile\n' >&2
     exit 1
   fi
@@ -1543,11 +1543,11 @@ test_update_versions_syncs_optional_dependencies() {
 
   local temp_dir
   temp_dir=$(mktemp -d)
-  mkdir -p "$temp_dir/bindings/typescript"
-  mkdir -p "$temp_dir/bindings/cabi/csharp/ActrSharp"
+  mkdir -p "$temp_dir/packages/actr-typescript"
+  mkdir -p "$temp_dir/packages/actr-cabi/csharp/ActrSharp"
 
   # Create a minimal package.json with optionalDependencies.
-  cat >"$temp_dir/bindings/typescript/package.json" <<'EOF'
+  cat >"$temp_dir/packages/actr-typescript/package.json" <<'EOF'
 {
   "name": "@actrium/actr",
   "version": "0.2.0",
@@ -1560,7 +1560,7 @@ test_update_versions_syncs_optional_dependencies() {
 EOF
 
   printf '<Project><PropertyGroup><Version>0.2.0</Version></PropertyGroup></Project>\n' \
-    >"$temp_dir/bindings/cabi/csharp/ActrSharp/ActrSharp.csproj"
+    >"$temp_dir/packages/actr-cabi/csharp/ActrSharp/ActrSharp.csproj"
 
   WORK_REPO_ROOT="$temp_dir"
   VERSION="0.3.0"
@@ -1569,78 +1569,78 @@ EOF
   # Stub out all Cargo.toml paths.
   for f in \
     Cargo.toml \
-    bindings/web/Cargo.toml \
-    core/protocol/Cargo.toml \
-    core/service-compat/Cargo.toml \
-    core/config/Cargo.toml \
-    core/framework/Cargo.toml \
-    core/runtime-mailbox/Cargo.toml \
-    core/runtime/Cargo.toml \
-    core/platform-traits/Cargo.toml \
-    core/pack/Cargo.toml \
-    core/hyper/Cargo.toml \
-    core/platform-native/Cargo.toml \
-    testing/mock-actrix/Cargo.toml \
-    tools/protoc-gen/rust/Cargo.toml \
-    tools/protoc-gen/web/Cargo.toml \
-    cli/Cargo.toml \
-    actrix/crates/contracts/Cargo.toml \
-    actrix/crates/signer/Cargo.toml \
-    actrix/crates/platform/Cargo.toml \
-    actrix/crates/control/Cargo.toml \
-    actrix/crates/mfr/Cargo.toml \
-    actrix/crates/signaling/Cargo.toml \
-    actrix/crates/stun/Cargo.toml \
-    actrix/crates/turn/Cargo.toml \
-    actrix/crates/ais/Cargo.toml \
-    actrix/crates/sdk/Cargo.toml \
-    actrix/crates/actrixd/Cargo.toml \
-    bindings/typescript/Cargo.toml \
-    bindings/web/crates/actr-web-abi/Cargo.toml \
-    bindings/web/crates/common/Cargo.toml \
-    bindings/web/crates/sw-host/Cargo.toml \
-    bindings/web/crates/dom-bridge/Cargo.toml \
-    bindings/web/crates/mailbox-web/Cargo.toml \
-    bindings/web/crates/platform-web/Cargo.toml \
-    bindings/web/crates/framework-web-entry-smoke/Cargo.toml; do
+    packages/actr-web/Cargo.toml \
+    crates/actr-protocol/Cargo.toml \
+    crates/actr-service-compat/Cargo.toml \
+    crates/actr-config/Cargo.toml \
+    crates/actr-framework/Cargo.toml \
+    crates/actr-runtime-mailbox/Cargo.toml \
+    crates/actr-runtime/Cargo.toml \
+    crates/actr-platform-traits/Cargo.toml \
+    crates/actr-pack/Cargo.toml \
+    crates/actr-hyper/Cargo.toml \
+    crates/actr-platform-native/Cargo.toml \
+    crates/actr-mock-actrix/Cargo.toml \
+    tools/actr/protoc-gen/rust/Cargo.toml \
+    tools/actr/protoc-gen/web/Cargo.toml \
+    crates/actr-cli/Cargo.toml \
+    crates/loran-proto/Cargo.toml \
+    crates/loran-signer/Cargo.toml \
+    crates/loran-platform/Cargo.toml \
+    crates/loran-control/Cargo.toml \
+    crates/loran-mfr/Cargo.toml \
+    crates/loran-signaling/Cargo.toml \
+    crates/loran-stun/Cargo.toml \
+    crates/loran-turn/Cargo.toml \
+    crates/loran-ais/Cargo.toml \
+    crates/loran-sdk/Cargo.toml \
+    crates/loran-server/Cargo.toml \
+    packages/actr-typescript/Cargo.toml \
+    packages/actr-web/crates/actr-web-abi/Cargo.toml \
+    packages/actr-web/crates/common/Cargo.toml \
+    packages/actr-web/crates/sw-host/Cargo.toml \
+    packages/actr-web/crates/dom-bridge/Cargo.toml \
+    packages/actr-web/crates/mailbox-web/Cargo.toml \
+    packages/actr-web/crates/platform-web/Cargo.toml \
+    packages/actr-web/crates/framework-web-entry-smoke/Cargo.toml; do
     mkdir -p "$(dirname "$temp_dir/$f")"
     printf '[package]\nversion = "0.2.0"\n' >"$temp_dir/$f"
   done
 
-  cat >"$temp_dir/actrix/crates/platform/Cargo.toml" <<'EOF'
+  cat >"$temp_dir/crates/loran-platform/Cargo.toml" <<'EOF'
 [package]
 version.workspace = true
 
 [dependencies]
-signer = { path = "../signer", package = "actrix-signer", version = "0.2.0" }
+signer = { path = "../loran-signer", package = "actrix-signer", version = "0.2.0" }
 EOF
 
   # Create web packages.
   for wp in actr-dom web-sdk web-react; do
-    mkdir -p "$temp_dir/bindings/web/packages/$wp"
-    printf '{"name":"@actrium/actr-dom","version":"0.2.0"}' >"$temp_dir/bindings/web/packages/$wp/package.json"
+    mkdir -p "$temp_dir/packages/actr-web/packages/$wp"
+    printf '{"name":"@actrium/actr-dom","version":"0.2.0"}' >"$temp_dir/packages/actr-web/packages/$wp/package.json"
   done
 
   # Create workload package.
-  mkdir -p "$temp_dir/bindings/typescript/actr-workload"
-  printf '{"name":"@actrium/actr-workload","version":"0.2.0"}' >"$temp_dir/bindings/typescript/actr-workload/package.json"
+  mkdir -p "$temp_dir/packages/actr-typescript/actr-workload"
+  printf '{"name":"@actrium/actr-workload","version":"0.2.0"}' >"$temp_dir/packages/actr-typescript/actr-workload/package.json"
 
   # Create protoc plugin version sources.
   mkdir -p \
-    "$temp_dir/tools/protoc-gen/swift/Sources/framework-codegen-swift" \
-    "$temp_dir/tools/protoc-gen/typescript/src" \
-    "$temp_dir/tools/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen"
+    "$temp_dir/tools/actr/protoc-gen/swift/Sources/framework-codegen-swift" \
+    "$temp_dir/tools/actr/protoc-gen/typescript/src" \
+    "$temp_dir/tools/actr/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen"
   printf 'struct Generator { static let version = "0.2.0" }\n' \
-    >"$temp_dir/tools/protoc-gen/swift/Sources/framework-codegen-swift/main.swift"
+    >"$temp_dir/tools/actr/protoc-gen/swift/Sources/framework-codegen-swift/main.swift"
   printf 'const VERSION = "0.2.0";\n' \
-    >"$temp_dir/tools/protoc-gen/typescript/src/main.ts"
+    >"$temp_dir/tools/actr/protoc-gen/typescript/src/main.ts"
   printf '{"name":"framework-codegen-typescript","version":"0.2.0"}\n' \
-    >"$temp_dir/tools/protoc-gen/typescript/package.json"
+    >"$temp_dir/tools/actr/protoc-gen/typescript/package.json"
   printf '{"name":"framework-codegen-typescript","version":"0.2.0","lockfileVersion":3,"packages":{"":{"version":"0.2.0"}}}\n' \
-    >"$temp_dir/tools/protoc-gen/typescript/package-lock.json"
+    >"$temp_dir/tools/actr/protoc-gen/typescript/package-lock.json"
   printf 'version = "0.2.0"\n' \
-    >"$temp_dir/tools/protoc-gen/kotlin/build.gradle.kts"
-  cat >"$temp_dir/tools/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen/Main.kt" <<'EOF'
+    >"$temp_dir/tools/actr/protoc-gen/kotlin/build.gradle.kts"
+  cat >"$temp_dir/tools/actr/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen/Main.kt" <<'EOF'
 println("protoc-gen-actrframework-kotlin 0.2.0")
 println("    0.2.0")
 EOF
@@ -1649,45 +1649,45 @@ EOF
 
   # Verify optionalDependencies were synced.
   local darwin_ver
-  darwin_ver=$(python3 -c "import json; d=json.load(open('$temp_dir/bindings/typescript/package.json')); print(d['optionalDependencies']['@actrium/actr-darwin-x64'])")
+  darwin_ver=$(python3 -c "import json; d=json.load(open('$temp_dir/packages/actr-typescript/package.json')); print(d['optionalDependencies']['@actrium/actr-darwin-x64'])")
   assert_eq "0.3.0" "$darwin_ver" "optionalDependencies sync"
 
   # Verify non-actrium deps are untouched.
   local other_ver
-  other_ver=$(python3 -c "import json; d=json.load(open('$temp_dir/bindings/typescript/package.json')); print(d['optionalDependencies']['@other/package'])")
+  other_ver=$(python3 -c "import json; d=json.load(open('$temp_dir/packages/actr-typescript/package.json')); print(d['optionalDependencies']['@other/package'])")
   assert_eq "1.0.0" "$other_ver" "non-actrium deps untouched"
 
   # Verify actr-workload version was updated.
   local workload_ver
-  workload_ver=$(python3 -c "import json; d=json.load(open('$temp_dir/bindings/typescript/actr-workload/package.json')); print(d['version'])")
+  workload_ver=$(python3 -c "import json; d=json.load(open('$temp_dir/packages/actr-typescript/actr-workload/package.json')); print(d['version'])")
   assert_eq "0.3.0" "$workload_ver" "actr-workload version"
 
   local actrsharp_ver
   actrsharp_ver=$(sed -n 's:.*<Version>\([^<]*\)</Version>.*:\1:p' \
-    "$temp_dir/bindings/cabi/csharp/ActrSharp/ActrSharp.csproj")
+    "$temp_dir/packages/actr-cabi/csharp/ActrSharp/ActrSharp.csproj")
   assert_eq "0.3.0" "$actrsharp_ver" "ActrSharp version"
 
   assert_eq \
     'struct Generator { static let version = "0.3.0" }' \
-    "$(cat "$temp_dir/tools/protoc-gen/swift/Sources/framework-codegen-swift/main.swift")" \
+    "$(cat "$temp_dir/tools/actr/protoc-gen/swift/Sources/framework-codegen-swift/main.swift")" \
     "Swift protoc plugin version"
   assert_eq \
     'const VERSION = "0.3.0";' \
-    "$(cat "$temp_dir/tools/protoc-gen/typescript/src/main.ts")" \
+    "$(cat "$temp_dir/tools/actr/protoc-gen/typescript/src/main.ts")" \
     "TypeScript protoc plugin source version"
   assert_eq \
     "0.3.0" \
-    "$(python3 -c "import json; print(json.load(open('$temp_dir/tools/protoc-gen/typescript/package-lock.json'))['packages']['']['version'])")" \
+    "$(python3 -c "import json; print(json.load(open('$temp_dir/tools/actr/protoc-gen/typescript/package-lock.json'))['packages']['']['version'])")" \
     "TypeScript protoc plugin lock version"
   assert_eq \
     'version = "0.3.0"' \
-    "$(cat "$temp_dir/tools/protoc-gen/kotlin/build.gradle.kts")" \
+    "$(cat "$temp_dir/tools/actr/protoc-gen/kotlin/build.gradle.kts")" \
     "Kotlin protoc plugin Gradle version"
   assert_eq \
-    'signer = { path = "../signer", package = "actrix-signer", version = "0.3.0" }' \
-    "$(tail -n 1 "$temp_dir/actrix/crates/platform/Cargo.toml")" \
+    'signer = { path = "../loran-signer", package = "actrix-signer", version = "0.3.0" }' \
+    "$(tail -n 1 "$temp_dir/crates/loran-platform/Cargo.toml")" \
     "Actrix path dependency version"
-  if grep -q '0\.2\.0' "$temp_dir/tools/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen/Main.kt"; then
+  if grep -q '0\.2\.0' "$temp_dir/tools/actr/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen/Main.kt"; then
     printf 'Kotlin protoc plugin output versions were not synchronized\n' >&2
     rm -rf "$temp_dir"
     exit 1
@@ -1701,13 +1701,13 @@ test_update_versions_rewrites_prerelease_embedded_versions() {
 
   local temp_dir main_kt
   temp_dir=$(mktemp -d)
-  main_kt="$temp_dir/tools/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen/Main.kt"
-  mkdir -p "$temp_dir/bindings/typescript" "$temp_dir/bindings/cabi/csharp/ActrSharp"
+  main_kt="$temp_dir/tools/actr/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen/Main.kt"
+  mkdir -p "$temp_dir/packages/actr-typescript" "$temp_dir/packages/actr-cabi/csharp/ActrSharp"
 
   printf '{"name":"@actrium/actr","version":"0.9.0"}' \
-    >"$temp_dir/bindings/typescript/package.json"
+    >"$temp_dir/packages/actr-typescript/package.json"
   printf '<Project><PropertyGroup><Version>0.9.0</Version></PropertyGroup></Project>\n' \
-    >"$temp_dir/bindings/cabi/csharp/ActrSharp/ActrSharp.csproj"
+    >"$temp_dir/packages/actr-cabi/csharp/ActrSharp/ActrSharp.csproj"
 
   WORK_REPO_ROOT="$temp_dir"
   SKIP_PYTHON=true
@@ -1715,69 +1715,69 @@ test_update_versions_rewrites_prerelease_embedded_versions() {
   # Stub out all Cargo.toml paths.
   for f in \
     Cargo.toml \
-    bindings/web/Cargo.toml \
-    core/protocol/Cargo.toml \
-    core/service-compat/Cargo.toml \
-    core/config/Cargo.toml \
-    core/framework/Cargo.toml \
-    core/runtime-mailbox/Cargo.toml \
-    core/runtime/Cargo.toml \
-    core/platform-traits/Cargo.toml \
-    core/pack/Cargo.toml \
-    core/hyper/Cargo.toml \
-    core/platform-native/Cargo.toml \
-    testing/mock-actrix/Cargo.toml \
-    tools/protoc-gen/rust/Cargo.toml \
-    tools/protoc-gen/web/Cargo.toml \
-    cli/Cargo.toml \
-    actrix/crates/contracts/Cargo.toml \
-    actrix/crates/signer/Cargo.toml \
-    actrix/crates/platform/Cargo.toml \
-    actrix/crates/control/Cargo.toml \
-    actrix/crates/mfr/Cargo.toml \
-    actrix/crates/signaling/Cargo.toml \
-    actrix/crates/stun/Cargo.toml \
-    actrix/crates/turn/Cargo.toml \
-    actrix/crates/ais/Cargo.toml \
-    actrix/crates/sdk/Cargo.toml \
-    actrix/crates/actrixd/Cargo.toml \
-    bindings/typescript/Cargo.toml \
-    bindings/web/crates/actr-web-abi/Cargo.toml \
-    bindings/web/crates/common/Cargo.toml \
-    bindings/web/crates/sw-host/Cargo.toml \
-    bindings/web/crates/dom-bridge/Cargo.toml \
-    bindings/web/crates/mailbox-web/Cargo.toml \
-    bindings/web/crates/platform-web/Cargo.toml \
-    bindings/web/crates/framework-web-entry-smoke/Cargo.toml; do
+    packages/actr-web/Cargo.toml \
+    crates/actr-protocol/Cargo.toml \
+    crates/actr-service-compat/Cargo.toml \
+    crates/actr-config/Cargo.toml \
+    crates/actr-framework/Cargo.toml \
+    crates/actr-runtime-mailbox/Cargo.toml \
+    crates/actr-runtime/Cargo.toml \
+    crates/actr-platform-traits/Cargo.toml \
+    crates/actr-pack/Cargo.toml \
+    crates/actr-hyper/Cargo.toml \
+    crates/actr-platform-native/Cargo.toml \
+    crates/actr-mock-actrix/Cargo.toml \
+    tools/actr/protoc-gen/rust/Cargo.toml \
+    tools/actr/protoc-gen/web/Cargo.toml \
+    crates/actr-cli/Cargo.toml \
+    crates/loran-proto/Cargo.toml \
+    crates/loran-signer/Cargo.toml \
+    crates/loran-platform/Cargo.toml \
+    crates/loran-control/Cargo.toml \
+    crates/loran-mfr/Cargo.toml \
+    crates/loran-signaling/Cargo.toml \
+    crates/loran-stun/Cargo.toml \
+    crates/loran-turn/Cargo.toml \
+    crates/loran-ais/Cargo.toml \
+    crates/loran-sdk/Cargo.toml \
+    crates/loran-server/Cargo.toml \
+    packages/actr-typescript/Cargo.toml \
+    packages/actr-web/crates/actr-web-abi/Cargo.toml \
+    packages/actr-web/crates/common/Cargo.toml \
+    packages/actr-web/crates/sw-host/Cargo.toml \
+    packages/actr-web/crates/dom-bridge/Cargo.toml \
+    packages/actr-web/crates/mailbox-web/Cargo.toml \
+    packages/actr-web/crates/platform-web/Cargo.toml \
+    packages/actr-web/crates/framework-web-entry-smoke/Cargo.toml; do
     mkdir -p "$(dirname "$temp_dir/$f")"
     printf '[package]\nversion = "0.9.0"\n' >"$temp_dir/$f"
   done
 
   # Create web packages.
   for wp in actr-dom web-sdk web-react; do
-    mkdir -p "$temp_dir/bindings/web/packages/$wp"
-    printf '{"name":"@actrium/actr-dom","version":"0.9.0"}' >"$temp_dir/bindings/web/packages/$wp/package.json"
+    mkdir -p "$temp_dir/packages/actr-web/packages/$wp"
+    printf '{"name":"@actrium/actr-dom","version":"0.9.0"}' >"$temp_dir/packages/actr-web/packages/$wp/package.json"
   done
 
   # Create workload package.
-  mkdir -p "$temp_dir/bindings/typescript/actr-workload"
-  printf '{"name":"@actrium/actr-workload","version":"0.9.0"}' >"$temp_dir/bindings/typescript/actr-workload/package.json"
+  mkdir -p "$temp_dir/packages/actr-typescript/actr-workload"
+  printf '{"name":"@actrium/actr-workload","version":"0.9.0"}' >"$temp_dir/packages/actr-typescript/actr-workload/package.json"
 
   # Create protoc plugin version sources.
   mkdir -p \
-    "$temp_dir/tools/protoc-gen/swift/Sources/framework-codegen-swift" \
-    "$temp_dir/tools/protoc-gen/typescript/src" \
-    "$temp_dir/tools/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen"
+    "$temp_dir/tools/actr/protoc-gen/swift/Sources/framework-codegen-swift" \
+    "$temp_dir/tools/actr/protoc-gen/typescript/src" \
+    "$temp_dir/tools/actr/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen"
   printf 'struct Generator { static let version = "0.9.0" }\n' \
-    >"$temp_dir/tools/protoc-gen/swift/Sources/framework-codegen-swift/main.swift"
+    >"$temp_dir/tools/actr/protoc-gen/swift/Sources/framework-codegen-swift/main.swift"
   printf 'const VERSION = "0.9.0";\n' \
-    >"$temp_dir/tools/protoc-gen/typescript/src/main.ts"
+    >"$temp_dir/tools/actr/protoc-gen/typescript/src/main.ts"
   printf '{"name":"framework-codegen-typescript","version":"0.9.0"}\n' \
-    >"$temp_dir/tools/protoc-gen/typescript/package.json"
+    >"$temp_dir/tools/actr/protoc-gen/typescript/package.json"
   printf '{"name":"framework-codegen-typescript","version":"0.9.0","lockfileVersion":3,"packages":{"":{"version":"0.9.0"}}}\n' \
-    >"$temp_dir/tools/protoc-gen/typescript/package-lock.json"
+    >"$temp_dir/tools/actr/protoc-gen/typescript/package-lock.json"
   printf 'version = "0.9.0"\n' \
-    >"$temp_dir/tools/protoc-gen/kotlin/build.gradle.kts"
+    >"$temp_dir/tools/actr/protoc-gen/kotlin/build.gradle.kts"
   cat >"$main_kt" <<'EOF'
 println("protoc-gen-actrframework-kotlin 0.9.0")
 println("    0.9.0")
@@ -1803,7 +1803,7 @@ println("    0.10.0-alpha.1")' \
     "Kotlin plugin version after idempotent prerelease re-run"
   assert_eq \
     'version = "0.10.0-alpha.1"' \
-    "$(cat "$temp_dir/tools/protoc-gen/kotlin/build.gradle.kts")" \
+    "$(cat "$temp_dir/tools/actr/protoc-gen/kotlin/build.gradle.kts")" \
     "Kotlin plugin Gradle version after idempotent prerelease re-run"
 
   # Pre-release -> pre-release bump must consume the previous suffix instead
@@ -1825,7 +1825,7 @@ test_publish_web_packages_skips_puppeteer_download() {
   local temp_dir pnpm_env_log
   temp_dir=$(mktemp -d)
   pnpm_env_log="$temp_dir/pnpm-env.log"
-  mkdir -p "$temp_dir/bin" "$temp_dir/bindings/web/scripts"
+  mkdir -p "$temp_dir/bin" "$temp_dir/packages/actr-web/scripts"
 
   # Fake pnpm that records its environment.
   cat >"$temp_dir/bin/pnpm" <<'EOF'
@@ -1838,19 +1838,19 @@ EOF
   chmod +x "$temp_dir/bin/pnpm"
 
   # Fake publish.sh so it succeeds.
-  cat >"$temp_dir/bindings/web/scripts/publish.sh" <<'EOF'
+  cat >"$temp_dir/packages/actr-web/scripts/publish.sh" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
-  chmod +x "$temp_dir/bindings/web/scripts/publish.sh"
+  chmod +x "$temp_dir/packages/actr-web/scripts/publish.sh"
 
   # Fake node for version read.
-  mkdir -p "$temp_dir/bindings/web/packages/actr-dom" \
-    "$temp_dir/bindings/web/packages/web-sdk" \
-    "$temp_dir/bindings/web/packages/web-react"
-  printf '{"name":"@actrium/actr-dom","version":"1.2.3","publishConfig":{"access":"public"}}\n' >"$temp_dir/bindings/web/packages/actr-dom/package.json"
-  printf '{"name":"@actrium/actr-web","version":"1.2.3","publishConfig":{"access":"public"}}\n' >"$temp_dir/bindings/web/packages/web-sdk/package.json"
-  printf '{"name":"@actrium/actr-web-react","version":"1.2.3","publishConfig":{"access":"public"}}\n' >"$temp_dir/bindings/web/packages/web-react/package.json"
+  mkdir -p "$temp_dir/packages/actr-web/packages/actr-dom" \
+    "$temp_dir/packages/actr-web/packages/web-sdk" \
+    "$temp_dir/packages/actr-web/packages/web-react"
+  printf '{"name":"@actrium/actr-dom","version":"1.2.3","publishConfig":{"access":"public"}}\n' >"$temp_dir/packages/actr-web/packages/actr-dom/package.json"
+  printf '{"name":"@actrium/actr-web","version":"1.2.3","publishConfig":{"access":"public"}}\n' >"$temp_dir/packages/actr-web/packages/web-sdk/package.json"
+  printf '{"name":"@actrium/actr-web-react","version":"1.2.3","publishConfig":{"access":"public"}}\n' >"$temp_dir/packages/actr-web/packages/web-react/package.json"
 
   local original_path=$PATH
   PATH="$temp_dir/bin:$PATH"
@@ -1888,18 +1888,18 @@ EOF
 test_cli_zigbuild_uses_zigbuild_arguments_without_build_subcommand() {
   reset_release_train_state
   # shellcheck source=/dev/null
-  source scripts/release-actr-cli.sh
+  source scripts/actr/release-actr-cli.sh
 
   local temp_dir original_path cargo_args_log
   temp_dir=$(mktemp -d)
   cargo_args_log="$temp_dir/cargo-args.log"
-  mkdir -p "$temp_dir/bin" "$temp_dir/bindings/web/scripts"
+  mkdir -p "$temp_dir/bin" "$temp_dir/packages/actr-web/scripts"
 
-  cat >"$temp_dir/bindings/web/scripts/sync-cli-assets.sh" <<'EOF'
+  cat >"$temp_dir/packages/actr-web/scripts/sync-cli-assets.sh" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
-  chmod +x "$temp_dir/bindings/web/scripts/sync-cli-assets.sh"
+  chmod +x "$temp_dir/packages/actr-web/scripts/sync-cli-assets.sh"
 
   cat >"$temp_dir/bin/cargo" <<'EOF'
 #!/usr/bin/env bash
@@ -1954,7 +1954,7 @@ EOF
 test_cli_release_state_rows_match_report_schema() {
   reset_release_train_state
   # shellcheck source=/dev/null
-  source scripts/release-actr-cli.sh
+  source scripts/actr/release-actr-cli.sh
 
   local temp_dir field_count version status mode
   temp_dir=$(mktemp -d)
@@ -1987,7 +1987,7 @@ test_cli_release_state_rows_match_report_schema() {
 test_cli_sha256_uses_sha256sum_without_shasum() {
   reset_release_train_state
   # shellcheck source=/dev/null
-  source scripts/release-actr-cli.sh
+  source scripts/actr/release-actr-cli.sh
 
   local temp_dir original_path expected_line actual_line
   temp_dir=$(mktemp -d)
@@ -2022,7 +2022,7 @@ EOF
 test_cli_release_upload_asset_deletes_existing_asset_before_retry() {
   reset_release_train_state
   # shellcheck source=/dev/null
-  source scripts/release-actr-cli.sh
+  source scripts/actr/release-actr-cli.sh
 
   local temp_dir asset_path curl_log upload_attempts
   temp_dir=$(mktemp -d)
@@ -2115,7 +2115,7 @@ test_cli_release_upload_asset_deletes_existing_asset_before_retry() {
 test_cli_validation_tag_requires_strict_semver() {
   reset_release_train_state
   # shellcheck source=/dev/null
-  source scripts/release-actr-cli.sh
+  source scripts/actr/release-actr-cli.sh
 
   local version
   version=$(version_from_release_tag validation-v1.2.3-rc.1)
@@ -2192,36 +2192,36 @@ test_release_prepare_workflow_closes_superseded_prs() {
 test_typescript_dry_run_uses_pack_without_registry_publish() {
   reset_release_train_state
 
-  if ! grep -q 'npm pack --dry-run --ignore-scripts' scripts/release-train.sh; then
+  if ! grep -q 'npm pack --dry-run --ignore-scripts' scripts/actr/release-train.sh; then
     printf 'TypeScript dry-run must validate the package with npm pack\n' >&2
     exit 1
   fi
 
-  if grep -q 'npm publish --access public --dry-run --ignore-scripts' scripts/release-train.sh; then
+  if grep -q 'npm publish --access public --dry-run --ignore-scripts' scripts/actr/release-train.sh; then
     printf 'TypeScript dry-run must not contact the registry through npm publish\n' >&2
     exit 1
   fi
 }
 
 test_cli_has_no_unused_git2_dependency() {
-  if grep -q '^git2[[:space:]]*=' cli/Cargo.toml; then
+  if grep -q '^git2[[:space:]]*=' crates/actr-cli/Cargo.toml; then
     printf 'actr-cli must not depend on unused git2\n' >&2
     exit 1
   fi
 
-  if grep -q 'git2::Error' cli/src/error.rs; then
+  if grep -q 'git2::Error' crates/actr-cli/src/error.rs; then
     printf 'actr-cli must not retain unused git2 conversion\n' >&2
     exit 1
   fi
 }
 
 test_release_train_delegates_cli_release_operations() {
-  if ! grep -q 'scripts/release-actr-cli.sh.*"${args\[@\]}"' scripts/release-train.sh; then
+  if ! grep -q 'scripts/actr/release-actr-cli.sh.*"${args\[@\]}"' scripts/actr/release-train.sh; then
     printf 'release train must delegate CLI release operations\n' >&2
     exit 1
   fi
 
-  if grep -q '^build_cli_binary_target()' scripts/release-train.sh; then
+  if grep -q '^build_cli_binary_target()' scripts/actr/release-train.sh; then
     printf 'release train must not retain the CLI build implementation\n' >&2
     exit 1
   fi
@@ -2246,7 +2246,7 @@ EOF
   actual=$(printf '%s\n' "${ACTRIX_CRATES[@]}")
   assert_eq "$expected" "$actual" "Actrix publish order"
 
-  if grep -Rq '^publish = false$' actrix/crates --include Cargo.toml; then
+  if grep -Rq '^publish = false$' crates/loran-* --include Cargo.toml; then
     printf 'Actrix crates must be publishable\n' >&2
     exit 1
   fi
@@ -2256,7 +2256,7 @@ EOF
       printf 'Actrix path dependency must declare a registry version: %s\n' "$dependency" >&2
       exit 1
     fi
-  done < <(grep -Rh 'path = "../' actrix/crates --include Cargo.toml)
+  done < <(grep -Rh 'path = "../loran-' crates/loran-* --include Cargo.toml)
 }
 
 test_publish_rust_stage_publishes_packages() {
@@ -2482,7 +2482,7 @@ test_release_train_publishes_release_assets_in_parallel() {
   local reusable
   for reusable in \
     .github/workflows/_actr-cli-release.yml \
-    .github/workflows/_actrix-release.yml \
+    .github/workflows/_loran-release.yml \
     .github/workflows/_protoc-plugins-release.yml; do
     if ! grep -B3 -A3 'path: tag-source' "$reusable" | grep -Fq 'if: inputs.publish'; then
       printf '%s must skip tag checkout when publish=false\n' "$reusable" >&2
@@ -2496,7 +2496,7 @@ test_release_train_publishes_release_assets_in_parallel() {
 }
 
 test_actrix_release_stages_binaries_with_bash() {
-  local workflow=.github/workflows/_actrix-release.yml
+  local workflow=.github/workflows/_loran-release.yml
   if ! sed -n '/name: Stage binary/,/name: Upload artifacts/p' "$workflow" | grep -q 'shell: bash'; then
     printf 'actrix release Stage binary step must use bash for Windows runner compatibility\n' >&2
     exit 1

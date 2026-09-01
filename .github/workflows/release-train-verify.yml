@@ -10,33 +10,33 @@ on:
       - ".github/workflows/release-train.yml"
       - ".github/workflows/release-train-verify.yml"
       - ".github/workflows/_actr-cli-release.yml"
-      - ".github/workflows/_actrix-release.yml"
+      - ".github/workflows/_loran-release.yml"
       - ".github/workflows/_protoc-plugins-release.yml"
       - ".github/workflows/release-actr-cli.yml"
-      - ".github/workflows/release-actrix.yml"
+      - ".github/workflows/release-loran.yml"
       - ".github/workflows/release-protoc-plugins.yml"
       - ".github/workflows/publish-actrsharp.yml"
       - ".github/workflows/release-actrsharp.yml"
-      - "scripts/release-actr-cli.sh"
-      - "scripts/release-train.sh"
-      - "scripts/detect-pre-release-label.sh"
-      - "scripts/tests/release-asset-validation.sh"
-      - "scripts/tests/release-train-*.sh"
+      - "scripts/actr/release-actr-cli.sh"
+      - "scripts/actr/release-train.sh"
+      - "scripts/actr/detect-pre-release-label.sh"
+      - "scripts/actr/tests/release-asset-validation.sh"
+      - "scripts/actr/tests/release-train-*.sh"
       - "Cargo.toml"
       - "Cargo.lock"
-      - "tools/protoc-gen/**"
-      - "bindings/web/Cargo.toml"
-      - "bindings/web/Cargo.lock"
-      - "bindings/web/pnpm-lock.yaml"
-      - "bindings/web/packages/**/package.json"
-      - "bindings/web/scripts/publish.sh"
-      - "bindings/web/scripts/sync-cli-assets.sh"
-      - "bindings/typescript/Cargo.toml"
-      - "bindings/typescript/Cargo.lock"
-      - "bindings/typescript/package.json"
-      - "bindings/swift/scripts/package-binary.sh"
-      - "bindings/kotlin/actr-kotlin/build.gradle.kts"
-      - "bindings/cabi/csharp/ActrSharp/**"
+      - "tools/actr/protoc-gen/**"
+      - "packages/actr-web/Cargo.toml"
+      - "packages/actr-web/Cargo.lock"
+      - "packages/actr-web/pnpm-lock.yaml"
+      - "packages/actr-web/packages/**/package.json"
+      - "packages/actr-web/scripts/publish.sh"
+      - "packages/actr-web/scripts/sync-cli-assets.sh"
+      - "packages/actr-typescript/Cargo.toml"
+      - "packages/actr-typescript/Cargo.lock"
+      - "packages/actr-typescript/package.json"
+      - "packages/actr-swift/scripts/package-binary.sh"
+      - "packages/actr-kotlin/actr-kotlin/build.gradle.kts"
+      - "packages/actr-cabi/csharp/ActrSharp/**"
   pull_request:
     branches:
       - main
@@ -47,33 +47,33 @@ on:
       - ".github/workflows/release-train.yml"
       - ".github/workflows/release-train-verify.yml"
       - ".github/workflows/_actr-cli-release.yml"
-      - ".github/workflows/_actrix-release.yml"
+      - ".github/workflows/_loran-release.yml"
       - ".github/workflows/_protoc-plugins-release.yml"
       - ".github/workflows/release-actr-cli.yml"
-      - ".github/workflows/release-actrix.yml"
+      - ".github/workflows/release-loran.yml"
       - ".github/workflows/release-protoc-plugins.yml"
       - ".github/workflows/publish-actrsharp.yml"
       - ".github/workflows/release-actrsharp.yml"
-      - "scripts/release-actr-cli.sh"
-      - "scripts/release-train.sh"
-      - "scripts/detect-pre-release-label.sh"
-      - "scripts/tests/release-asset-validation.sh"
-      - "scripts/tests/release-train-*.sh"
+      - "scripts/actr/release-actr-cli.sh"
+      - "scripts/actr/release-train.sh"
+      - "scripts/actr/detect-pre-release-label.sh"
+      - "scripts/actr/tests/release-asset-validation.sh"
+      - "scripts/actr/tests/release-train-*.sh"
       - "Cargo.toml"
       - "Cargo.lock"
-      - "tools/protoc-gen/**"
-      - "bindings/web/Cargo.toml"
-      - "bindings/web/Cargo.lock"
-      - "bindings/web/pnpm-lock.yaml"
-      - "bindings/web/packages/**/package.json"
-      - "bindings/web/scripts/publish.sh"
-      - "bindings/web/scripts/sync-cli-assets.sh"
-      - "bindings/typescript/Cargo.toml"
-      - "bindings/typescript/Cargo.lock"
-      - "bindings/typescript/package.json"
-      - "bindings/swift/scripts/package-binary.sh"
-      - "bindings/kotlin/actr-kotlin/build.gradle.kts"
-      - "bindings/cabi/csharp/ActrSharp/**"
+      - "tools/actr/protoc-gen/**"
+      - "packages/actr-web/Cargo.toml"
+      - "packages/actr-web/Cargo.lock"
+      - "packages/actr-web/pnpm-lock.yaml"
+      - "packages/actr-web/packages/**/package.json"
+      - "packages/actr-web/scripts/publish.sh"
+      - "packages/actr-web/scripts/sync-cli-assets.sh"
+      - "packages/actr-typescript/Cargo.toml"
+      - "packages/actr-typescript/Cargo.lock"
+      - "packages/actr-typescript/package.json"
+      - "packages/actr-swift/scripts/package-binary.sh"
+      - "packages/actr-kotlin/actr-kotlin/build.gradle.kts"
+      - "packages/actr-cabi/csharp/ActrSharp/**"
 
 concurrency:
   group: release-train-basic-verify-${{ github.ref }}
@@ -146,9 +146,9 @@ jobs:
 
       - name: Run release train script unit checks
         run: |
-          bash scripts/tests/release-asset-validation.sh
-          bash scripts/tests/release-train-package-sync.sh
-          bash scripts/tests/release-train-modes.sh
+          bash scripts/actr/tests/release-asset-validation.sh
+          bash scripts/actr/tests/release-train-package-sync.sh
+          bash scripts/actr/tests/release-train-modes.sh
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -164,7 +164,7 @@ jobs:
 
       - name: Install web dependencies
         run: |
-          cd bindings/web
+          cd packages/actr-web
           pnpm install --frozen-lockfile
         env:
           PUPPETEER_SKIP_DOWNLOAD: "true"
@@ -172,7 +172,7 @@ jobs:
 
       - name: Validate web package metadata
         run: |
-          cd bindings/web
+          cd packages/actr-web
           node <<'EOF'
           const fs = require("node:fs");
 
@@ -187,7 +187,7 @@ jobs:
             if (pkg.name !== expectedName) throw new Error(path + ": expected " + expectedName + ", got " + pkg.name);
             if (!pkg.version || !pkg.version.match(/^\d+\.\d+\.\d+/)) throw new Error(path + ": invalid version " + pkg.version);
             if (pkg.publishConfig?.access !== "public") throw new Error(path + ": publishConfig.access must be public");
-            if (pkg.repository?.url !== "git+https://github.com/Actrium/actr.git") throw new Error(path + ": bad repository.url");
+            if (pkg.repository?.url !== "git+https://github.com/Actrium/actrium.git") throw new Error(path + ": bad repository.url");
             console.log("  OK " + pkg.name + "@" + pkg.version);
           }
           console.log("  All web package metadata valid");
@@ -220,7 +220,7 @@ jobs:
           if [[ "$target_branch" != "main" && ! "$target_branch" =~ ^release-[0-9]+\.[0-9]+$ ]]; then
             target_branch=main
           fi
-          scripts/release-train.sh \
+          scripts/actr/release-train.sh \
             --branch "$target_branch" \
             --version "${{ steps.version.outputs.value }}" \
             --dry-run

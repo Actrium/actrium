@@ -1,6 +1,6 @@
 # 0001: Organize the monorepo around component roots and package entrances
 
-Status: proposed
+Status: accepted
 
 ## Context
 

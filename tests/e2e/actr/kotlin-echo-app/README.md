@@ -31,9 +31,9 @@ All actrix/server-lifecycle + Kotlin-app-scaffolding logic is factored into
 ## How it differs from the Swift suite
 
 - **Native libs are gitignored** — every run rebuilds the `.so` via
-  `bindings/kotlin/build-android.sh` and publishes the AAR to `mavenLocal()`.
+  `packages/actr-kotlin/build-android.sh` and publishes the AAR to `mavenLocal()`.
 - **Linked mode, package-backed demo test notwithstanding** — the fixture instrumentation test
-  (`cli/fixtures/kotlin/echo/EchoIntegrationTest.kt`) does not compile against the current DSL
+  (`crates/actr-cli/fixtures/kotlin/echo/EchoIntegrationTest.kt`) does not compile against the current DSL
   (`createActrNode` now requires a package path). This suite writes its own linked-mode test
   modeled on the demo app's `ClientActivity` (`ActrNode.linked` / `linkedWithMonitoring`).
 - The Android emulator reaches the host via `10.0.2.2`; the bundled `actr.toml` uses that,
@@ -49,9 +49,9 @@ Locally (Apple Silicon): build the native lib for the emulator arch, publish the
 arm64 emulator, then:
 
 ```bash
-ACTR_ANDROID_TARGETS=aarch64-linux-android bash bindings/kotlin/build-android.sh
-(cd bindings/kotlin && ./gradlew :actr-kotlin:publishToMavenLocal)
-bash e2e/kotlin-echo-app/run.sh
+ACTR_ANDROID_TARGETS=aarch64-linux-android bash packages/actr-kotlin/build-android.sh
+(cd packages/actr-kotlin && ./gradlew :actr-kotlin:publishToMavenLocal)
+bash tests/e2e/actr/kotlin-echo-app/run.sh
 ```
 
 A green run prints `actrix is healthy` → `EchoService readiness check complete` →

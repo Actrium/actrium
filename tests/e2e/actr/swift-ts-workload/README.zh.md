@@ -8,7 +8,7 @@
 
 - 客户端：`actrium:SwiftTsWorkloadApp:0.1.0`（iOS 模拟器，ActrNode.linked）
 - 服务端：`actrium:DuplexEchoService:1.0.0`（TS workload，wasm32-wasip2，`actr run` 托管）
-- 信令：本仓库内真实 actrix（`ensure_actrix_available` 按需从 `actrix/crates/actrixd` 安装）
+- 信令：本仓库内真实 actrix（`ensure_actrix_available` 按需从 `crates/loran-server` 安装）
 
 ## 验证
 
@@ -19,8 +19,8 @@
 ## 运行
 
 ```bash
-bash e2e/swift-ts-workload/run.sh
-KEEP_TMP=1 bash e2e/swift-ts-workload/run.sh
+bash tests/e2e/actr/swift-ts-workload/run.sh
+KEEP_TMP=1 bash tests/e2e/actr/swift-ts-workload/run.sh
 ```
 
 ## 关键不变量

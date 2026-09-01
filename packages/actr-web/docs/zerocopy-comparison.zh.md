@@ -1,6 +1,6 @@
 # 零拷贝方案对比示例
 
-> **概念对比 / 非可运行示例**：原 `examples/zerocopy-comparison/` 只有 README 型材料，已移入 docs。本文保留为策略对比，不代表仓库里存在可直接访问的 demo URL，也不代表 SharedArrayBuffer 路线已经实现。当前零拷贝 helper 以 `bindings/web/crates/common/src/zero_copy.rs` 为准，当前 Fast Path 消息名为 `fast_path_data`。
+> **概念对比 / 非可运行示例**：原 `examples/zerocopy-comparison/` 只有 README 型材料，已移入 docs。本文保留为策略对比，不代表仓库里存在可直接访问的 demo URL，也不代表 SharedArrayBuffer 路线已经实现。当前零拷贝 helper 以 `packages/actr-web/crates/common/src/zero_copy.rs` 为准，当前 Fast Path 消息名为 `fast_path_data`。
 
 对比几种零拷贝/近零拷贝策略的适用场景。
 
@@ -423,7 +423,7 @@ class FastPathAdapter {
 
 ## 相关文档
 
-- 当前 helper：`bindings/web/crates/common/src/zero_copy.rs`
-- 当前 Fast Path：`bindings/web/packages/actr-dom/src/fast-path-forwarder.ts`
-- 当前 SW handler：`bindings/web/packages/web-sdk/src/actor.sw.js`
+- 当前 helper：`packages/actr-web/crates/common/src/zero_copy.rs`
+- 当前 Fast Path：`packages/actr-web/packages/actr-dom/src/fast-path-forwarder.ts`
+- 当前 SW handler：`packages/actr-web/packages/web-sdk/src/actor.sw.js`
 - [SharedArrayBuffer MDN](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer)

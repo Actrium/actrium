@@ -16,11 +16,11 @@
 //!
 //! - **WASM Component Model** (`target_arch = "wasm32"`, no `web` feature):
 //!   wit-bindgen generates the `Guest` trait + `host` imports from
-//!   `core/framework/wit-v2/actr-workload.wit`; the [`entry!`] macro
+//!   `crates/actr-framework/wit-v2/actr-workload.wit`; the [`entry!`] macro
 //!   produces an adapter that bridges the user's [`Workload`] impl into
 //!   the generated `Guest`. Targets `wasm32-wasip2` and requires
 //!   `wasm-component-ld 0.5.22+` as the linker (see
-//!   `experiments/component-spike-async/REPORT.md`).
+//!   `examples/actr/experimental/component-spike-async/REPORT.md`).
 //! - **Web ABI / wasm-bindgen** (`target_arch = "wasm32"` + `feature = "web"`):
 //!   expands to a [`wasm_bindgen(start)`][wbgstart] bootstrap that wraps the
 //!   user [`Workload`] in `web::WebWorkloadAdapter` and hands it to
@@ -432,7 +432,7 @@ macro_rules! entry {
         // `actr-web-abi::host` are the public surface the Service Worker
         // dispatches into; they resolve through the registered adapter back
         // into the user's `Workload` impl. See
-        // `bindings/web/docs/option-u-phase6-gamma-unified.zh.md` §4.5.
+        // `packages/actr-web/docs/option-u-phase6-gamma-unified.zh.md` §4.5.
         #[cfg(all(target_arch = "wasm32", feature = "web"))]
         const _: () = {
             // `wasm_bindgen(start)` functions are invoked once per module

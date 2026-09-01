@@ -28,4 +28,4 @@ EchoService 实现编译为普通 Rust 可执行二进制（不是 cdylib）。�
 
 ## 限制
 
-- 只跑 echo 场景（不含 streaming）。需要 streaming 用 `e2e/polyglot-echo/server/` (linked stream-server)。
+- 只跑 echo 场景（不含 streaming）。需要 streaming 用 `tests/e2e/actr/polyglot-echo/server/` (linked stream-server)。

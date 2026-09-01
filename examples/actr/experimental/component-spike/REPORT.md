@@ -239,7 +239,7 @@ must tear down the offending actor instance and decide on restart policy
 
 ### Q13 - migration from `wasmtime::Module` to `wasmtime::component::Component`
 
-The main actr WASM host is in `core/hyper/src/wasm/host.rs` (~789 lines).
+The main actr WASM host is in `crates/actr-hyper/src/wasm/host.rs` (~789 lines).
 Current shape:
 
 - Hand-rolled `Linker::<HostData>::new()` with per-hook `func_wrap(...)`
@@ -247,7 +247,7 @@ Current shape:
 - Imports `wasi_snapshot_preview1` fragments by hand
   (`proc_exit`, `fd_close`, etc).
 - Uses `Module::new(&engine, wasm_bytes)` + `Instance` + `TypedFunc`.
-- Owns a bespoke ABI layer in `core/hyper/src/wasm/abi.rs` for marshalling
+- Owns a bespoke ABI layer in `crates/actr-hyper/src/wasm/abi.rs` for marshalling
   between host and guest (pointer/len into linear memory).
 
 Component migration replaces:
@@ -271,7 +271,7 @@ work that the current suspend/resume dance services.
 **Rough estimate:** `register_host_imports` (~150 lines) shrinks to a
 single WIT file + `bindgen!()` macro. `abi.rs` disappears. `host.rs`
 drops to maybe 250 lines. The guest-side guest bridge
-(`bindings/web/crates/runtime-sw/src/guest_bridge.rs`) needs to be
+(`packages/actr-web/crates/runtime-sw/src/guest_bridge.rs`) needs to be
 rewritten against wit-bindgen-generated exports, but the shape is
 1-to-1 with what the WIT contract declares.
 
@@ -375,14 +375,14 @@ Both paths are live today.
 
 1. Land the spike as a reference (this commit).
 2. Copy actr's real WorkloadContract into a canonical WIT file at
-   `core/framework/wit/actr-workload.wit` (all 16 hooks, real types).
+   `crates/actr-framework/wit/actr-workload.wit` (all 16 hooks, real types).
 3. Spike the **async host** variant of this same setup before
    committing to a full rewrite - verify the 16 async hooks actually
    run under wasmtime's `component-model-async` path and that the
    existing cooperative-suspend machinery can be deleted.
-4. Plan the `core/hyper/src/wasm/host.rs` rewrite around
+4. Plan the `crates/actr-hyper/src/wasm/host.rs` rewrite around
    `bindgen!()`-generated linker + `Component::instantiate_async`.
-   Delete `core/hyper/src/wasm/abi.rs` as part of that commit.
+   Delete `crates/actr-hyper/src/wasm/abi.rs` as part of that commit.
 5. Keep `cargo-component` off the dependency list unless a future
    requirement (e.g. multi-module linking) demands it. `wasm32-wasip2`
    + `wasm-tools` is enough.

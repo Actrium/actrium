@@ -3,11 +3,11 @@
 //! This module is the handwritten C ABI used by the DynClib workload variant
 //! (loaded via dlopen). The WASM variant does NOT consume these types — it
 //! goes through wit-bindgen-generated code against
-//! `core/framework/wit-v2/actr-workload.wit`.
+//! `crates/actr-framework/wit-v2/actr-workload.wit`.
 //!
 //! Do NOT add wasm-path code paths here. Do NOT reference this module from
 //! the wasm guest adapter. This module is kept structurally aligned with the V2
-//! WIT contract by `tools/wit-lint`.
+//! WIT contract by `tools/actr/wit-lint`.
 
 use crate::Dest;
 use actr_protocol::prost::Message as ProstMessage;

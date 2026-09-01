@@ -595,7 +595,7 @@ impl SwiftGenerator {
                 }
                 PROTOC_GEN_ACTR_FRAMEWORK_SWIFT => {
                     error_msg.push_str(
-                        "  - protoc-gen-actrframework-swift: build from source with `cd tools/protoc-gen/swift && swift build -c release --product protoc-gen-actrframework-swift --arch arm64`, then add the release binary to PATH\n",
+                        "  - protoc-gen-actrframework-swift: build from source with `cd tools/actr/protoc-gen/swift && swift build -c release --product protoc-gen-actrframework-swift --arch arm64`, then add the release binary to PATH\n",
                     );
                 }
                 _ => {}
@@ -610,8 +610,8 @@ impl SwiftGenerator {
         {
             let plugin_root = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .parent()
-                .map(|path| path.join("tools/protoc-gen/swift"))
-                .unwrap_or_else(|| PathBuf::from("tools/protoc-gen/swift"));
+                .map(|path| path.join("tools/actr/protoc-gen/swift"))
+                .unwrap_or_else(|| PathBuf::from("tools/actr/protoc-gen/swift"));
             let package_swift = plugin_root.join("Package.swift");
             if !package_swift.is_file() {
                 return Ok(None);
@@ -846,7 +846,7 @@ impl SwiftGenerator {
     /// Best-effort automatic installation hook for protoc-gen-actrframework-swift.
     fn try_install_actrframework_swift_plugin(&self) -> Result<()> {
         debug!(
-            "No remote package installer is configured for protoc-gen-actrframework-swift; use the workspace-local build or build tools/protoc-gen/swift manually"
+            "No remote package installer is configured for protoc-gen-actrframework-swift; use the workspace-local build or build tools/actr/protoc-gen/swift manually"
         );
         Ok(())
     }

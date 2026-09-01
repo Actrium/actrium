@@ -103,7 +103,7 @@ pub(crate) fn compile_to_descriptor_set(
 /// "nothing to generate from this file".
 pub fn file_to_proto_service(file: &FileDescriptorProto) -> Option<ProtoService> {
     // The crate currently assumes one service per proto file, matching the
-    // sibling `tools/protoc-gen/rust/` plugin. If a file declares more than
+    // sibling `tools/actr/protoc-gen/rust/` plugin. If a file declares more than
     // one service only the first is used; remaining services are logged.
     let service = file.service.first()?;
     if file.service.len() > 1 {

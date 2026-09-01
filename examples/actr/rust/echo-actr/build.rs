@@ -80,20 +80,20 @@ fn find_plugin(name: &str) -> Option<PathBuf> {
 fn bootstrap_local_workspace_plugin(name: &str) -> Option<PathBuf> {
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR")?);
     let candidate_roots = [
-        manifest_dir.join("../../.."), // Inside actr repo: examples/rust/echo-actr -> actr
+        manifest_dir.join("../../../.."), // Monorepo: examples/actr/rust/echo-actr -> repository root
         manifest_dir.join("../actr"),  // Standalone: next to actr repo
         manifest_dir.parent()?.to_path_buf(), // Other workspace configurations
     ];
 
     for root in candidate_roots {
-        if !root.join("tools/protoc-gen/rust/Cargo.toml").is_file() {
+        if !root.join("tools/actr/protoc-gen/rust/Cargo.toml").is_file() {
             continue;
         }
 
         let status = Command::new("cargo")
             .arg("build")
             .arg("--manifest-path")
-            .arg(root.join("tools/protoc-gen/rust/Cargo.toml"))
+            .arg(root.join("tools/actr/protoc-gen/rust/Cargo.toml"))
             .arg("--bin")
             .arg(name)
             .status()
@@ -117,7 +117,7 @@ fn install_plugin_from_git(name: &str) -> Result<(), String> {
     let status = Command::new("cargo")
         .arg("install")
         .arg("--git")
-        .arg("https://github.com/Actrium/actr.git")
+        .arg("https://github.com/Actrium/actrium.git")
         .arg("--rev")
         .arg(rev)
         .arg("--bin")

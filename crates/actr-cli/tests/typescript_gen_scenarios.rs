@@ -23,7 +23,7 @@ fn framework_codegen_typescript_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("actr-cli should live under the workspace root")
-        .join("tools/protoc-gen/typescript")
+        .join("tools/actr/protoc-gen/typescript")
 }
 
 fn prepare_typescript_codegen_tools() -> &'static Path {
@@ -34,7 +34,7 @@ fn prepare_typescript_codegen_tools() -> &'static Path {
         // Ensure we are in the right directory
         assert!(
             dir.exists(),
-            "tools/protoc-gen/typescript dir not found at {}",
+            "tools/actr/protoc-gen/typescript dir not found at {}",
             dir.display()
         );
 

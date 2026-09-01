@@ -1,7 +1,7 @@
 //! AIS HTTP client for Web (Service Worker / DOM)
 //!
 //! Uses `web_sys::fetch` to send protobuf-encoded `RegisterRequest` to the AIS `/register`
-//! endpoint. Mirrors the native `AisClient` (`core/hyper/src/ais_client.rs`) semantics.
+//! endpoint. Mirrors the native `AisClient` (`crates/actr-hyper/src/ais_client.rs`) semantics.
 
 use actr_protocol::prost::Message;
 use actr_protocol::{

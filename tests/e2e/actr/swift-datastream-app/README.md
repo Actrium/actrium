@@ -47,7 +47,7 @@ graph LR
 ## File Structure
 
 ```
-e2e/swift-datastream-app/
+tests/e2e/actr/swift-datastream-app/
 ├── run.sh                 # CI orchestration and dynamic empty-template scaffolding
 ├── actr.toml.tpl          # Runtime config template rendered into the temporary app
 ├── manifest.toml          # Source template for DataStreamApp package identity/dependency
@@ -87,13 +87,13 @@ The older 8-probe runner remains in source for manual/debug use, but it is not t
 
 ```bash
 # Local (macOS only)
-bash e2e/swift-datastream-app/run.sh
+bash tests/e2e/actr/swift-datastream-app/run.sh
 
 # Keep artifacts on failure
-KEEP_TMP=1 bash e2e/swift-datastream-app/run.sh
+KEEP_TMP=1 bash tests/e2e/actr/swift-datastream-app/run.sh
 
 # Capture diagnostics even on success
-CAPTURE_DIAGNOSTICS_ON_SUCCESS=1 bash e2e/swift-datastream-app/run.sh
+CAPTURE_DIAGNOSTICS_ON_SUCCESS=1 bash tests/e2e/actr/swift-datastream-app/run.sh
 ```
 
 ## Diagnostics

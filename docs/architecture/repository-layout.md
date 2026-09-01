@@ -1,12 +1,12 @@
 # Repository layout
 
-Status: proposed structural baseline.
+Status: current structural baseline.
 
 The monorepo is organized around visible components first. `crates/` and
 `packages/` then provide one consistent home for reusable implementation units,
 rather than making each component invent its own package topology.
 
-## Proposed tree
+## Current tree
 
     actr/
     └── README.md          Public Actr boundary and component-level guidance

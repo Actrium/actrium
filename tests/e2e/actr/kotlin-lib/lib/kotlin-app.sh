@@ -2,12 +2,12 @@
 #
 # kotlin-app.sh — shared helpers for the Kotlin Android e2e suites.
 #
-# The actrix/Rust lifecycle helpers are ported from e2e/swift-echo-app/run.sh and
-# e2e/swift-datastream-app/run.sh; the Kotlin-specific helpers (AAR substitution,
+# The actrix/Rust lifecycle helpers are ported from tests/e2e/actr/swift-echo-app/run.sh and
+# tests/e2e/actr/swift-datastream-app/run.sh; the Kotlin-specific helpers (AAR substitution,
 # linked-mode app config, gradle connectedAndroidTest) are new.
 #
 # This file is SOURCED (after package-runtime-echo/lib/common.sh) by each
-# e2e/kotlin-*/run.sh. It defines functions only; the run.sh owns globals and
+# tests/e2e/actr/kotlin-*/run.sh. It defines functions only; the run.sh owns globals and
 # the main phase ordering.
 #
 # Globals expected from the run.sh:
@@ -91,24 +91,24 @@ append_workspace_patch() {
 
 [patch.crates-io]
 actr = { path = "$repo_path" }
-actr-config = { path = "$repo_path/core/config" }
-actr-protocol = { path = "$repo_path/core/protocol" }
-actr-framework = { path = "$repo_path/core/framework" }
-actr-hyper = { path = "$repo_path/core/hyper" }
-actr-pack = { path = "$repo_path/core/pack" }
-actr-platform-native = { path = "$repo_path/core/platform-native" }
-actr-platform-traits = { path = "$repo_path/core/platform-traits" }
-actr-runtime = { path = "$repo_path/core/runtime" }
-actr-runtime-mailbox = { path = "$repo_path/core/runtime-mailbox" }
-actr-service-compat = { path = "$repo_path/core/service-compat" }
+actr-config = { path = "$repo_path/crates/actr-config" }
+actr-protocol = { path = "$repo_path/crates/actr-protocol" }
+actr-framework = { path = "$repo_path/crates/actr-framework" }
+actr-hyper = { path = "$repo_path/crates/actr-hyper" }
+actr-pack = { path = "$repo_path/crates/actr-pack" }
+actr-platform-native = { path = "$repo_path/crates/actr-platform-native" }
+actr-platform-traits = { path = "$repo_path/crates/actr-platform-traits" }
+actr-runtime = { path = "$repo_path/crates/actr-runtime" }
+actr-runtime-mailbox = { path = "$repo_path/crates/actr-runtime-mailbox" }
+actr-service-compat = { path = "$repo_path/crates/actr-service-compat" }
 EOF
 }
 
 pin_workspace_actr_dependencies() {
     local cargo_toml="$1"
 
-    ACTR_FRAMEWORK_PATH="$REPO_ROOT/core/framework" \
-    ACTR_PROTOCOL_PATH="$REPO_ROOT/core/protocol" \
+    ACTR_FRAMEWORK_PATH="$REPO_ROOT/crates/actr-framework" \
+    ACTR_PROTOCOL_PATH="$REPO_ROOT/crates/actr-protocol" \
         perl -i -pe '
             if (/^actr-framework = /) {
                 $_ = qq{actr-framework = { path = "$ENV{ACTR_FRAMEWORK_PATH}" }\n};
@@ -117,9 +117,9 @@ pin_workspace_actr_dependencies() {
             }
         ' "$cargo_toml"
 
-    grep -Fq "actr-framework = { path = \"$REPO_ROOT/core/framework\" }" "$cargo_toml" ||
+    grep -Fq "actr-framework = { path = \"$REPO_ROOT/crates/actr-framework\" }" "$cargo_toml" ||
         fail "Failed to pin actr-framework to the workspace"
-    grep -Fq "actr-protocol = { path = \"$REPO_ROOT/core/protocol\" }" "$cargo_toml" ||
+    grep -Fq "actr-protocol = { path = \"$REPO_ROOT/crates/actr-protocol\" }" "$cargo_toml" ||
         fail "Failed to pin actr-protocol to the workspace"
 }
 
@@ -402,7 +402,7 @@ substitute_local_aar() {
 
     # 1. Replace settings.gradle.kts with a mavenLocal()-only variant (no GH auth).
     render_template \
-        "$REPO_ROOT/e2e/kotlin-lib/settings.local.gradle.kts.tpl" \
+        "$REPO_ROOT/tests/e2e/actr/kotlin-lib/settings.local.gradle.kts.tpl" \
         "$app_dir/settings.gradle.kts" \
         "__PROJECT_NAME__=$(basename "$app_dir")"
 
@@ -428,7 +428,7 @@ build_and_publish_aar() {
     section "🏗️  Building Android native lib + publishing actr-kotlin AAR"
     local sdk_root
     sdk_root="$(resolve_android_sdk_root)" || fail "Android SDK not found (set ANDROID_SDK_ROOT)"
-    local kotlin_dir="$REPO_ROOT/bindings/kotlin"
+    local kotlin_dir="$REPO_ROOT/packages/actr-kotlin"
 
     (
         cd "$kotlin_dir"
@@ -456,7 +456,7 @@ render_linked_client_config() {
     # All client endpoints use the host LAN IP ($HOST_IP) — reachable from the
     # Android emulator (which can't use 127.0.0.1) and from host processes alike.
     render_template \
-        "$REPO_ROOT/e2e/kotlin-lib/actr.toml.tpl" \
+        "$REPO_ROOT/tests/e2e/actr/kotlin-lib/actr.toml.tpl" \
         "$assets_dir/actr.toml" \
         "__HOST__=${HOST_IP}" \
         "__HTTP_PORT__=$HTTP_PORT" \

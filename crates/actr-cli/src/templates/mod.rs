@@ -196,8 +196,8 @@ fn resolve_actr_swift_local_path() -> Option<String> {
     let candidates: [PathBuf; 4] = [
         root.to_path_buf(),
         root.join("actr-swift"),
-        root.join("bindings/swift"),
-        root.join("actr/bindings/swift"),
+        root.join("packages/actr-swift"),
+        root.join("actr/packages/actr-swift"),
     ];
 
     candidates

@@ -33,7 +33,7 @@ if let overrideBinaryPath {
             path: relativeBinaryPath
         )
     } else {
-        fatalError("ACTR_BINARY_PATH must point inside the bindings/swift package root.")
+        fatalError("ACTR_BINARY_PATH must point inside the packages/actr-swift package root.")
     }
 } else if FileManager.default.fileExists(atPath: distBinaryAbsolutePath) {
     actrBinaryTarget = .binaryTarget(

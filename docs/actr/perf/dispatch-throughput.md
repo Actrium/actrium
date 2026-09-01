@@ -4,8 +4,8 @@ A citable benchmark of what the v2 **same-instance distinct-key interleave**
 buys under an IO-bound load, relative to the serial baseline, plus a
 per-dispatch net-overhead number. Referenced by the M6 RFC (§4).
 
-- Benchmark: `core/hyper/benches/dispatch_throughput.rs` (`harness = false`).
-- Shared IO-gate helpers: `core/hyper/tests/common/concurrency.rs`
+- Benchmark: `crates/actr-hyper/benches/dispatch_throughput.rs` (`harness = false`).
+- Shared IO-gate helpers: `crates/actr-hyper/tests/common/concurrency.rs`
   (`io_gate_bridge` / `spawn_native_io_gate`).
 - Run: `CARGO_TARGET_WASM32_WASIP2_RUSTFLAGS="-Awarnings" ACTR_REQUIRE_WASM_FIXTURE=1 \`
   `cargo +1.95.0 bench -p actr-hyper --features wasm-engine,test-utils --bench dispatch_throughput`

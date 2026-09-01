@@ -38,7 +38,7 @@
   <ItemGroup>
     <!-- Native assets: NuGet copies runtimes/<RID>/native/actr_cabi.dll into
          the consumer's output directory at restore time (no manual copy). The
-         DLLs are built by CI from e2e/winui-echo-app/workload and dropped here
+         DLLs are built by CI from tests/e2e/actr/winui-echo-app/workload and dropped here
          before packing; runtimes/ is gitignored. -->
     <None Include="runtimes\**\*" Pack="true" PackagePath="runtimes" />
     <None Include="README.md" Pack="true" PackagePath="\" />

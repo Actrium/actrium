@@ -1,14 +1,14 @@
 included:
-  - bindings/swift
-  - tools/protoc-gen/swift
-  - examples/audio-capture/AudioCaptureApp
+  - packages/actr-swift
+  - tools/actr/protoc-gen/swift
+  - examples/actr/audio-capture/AudioCaptureApp
 
 excluded:
-  - bindings/swift/.build
-  - bindings/swift/ActrBindings
-  - bindings/swift/ActrFFI.xcframework
-  - tools/protoc-gen/swift/.build
-  - examples/audio-capture/AudioCaptureApp/.build
+  - packages/actr-swift/.build
+  - packages/actr-swift/ActrBindings
+  - packages/actr-swift/ActrFFI.xcframework
+  - tools/actr/protoc-gen/swift/.build
+  - examples/actr/audio-capture/AudioCaptureApp/.build
 
 disabled_rules:
   - closure_parameter_position

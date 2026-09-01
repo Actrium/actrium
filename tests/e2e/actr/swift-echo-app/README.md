@@ -81,7 +81,7 @@ sequenceDiagram
 ## File Structure
 
 ```
-e2e/swift-echo-app/
+tests/e2e/actr/swift-echo-app/
 ├── run.sh                # CI orchestration script
 ├── actr.toml.tpl         # Runtime config template (rendered → actr.toml)
 ├── actr.lock.toml         # Runtime lock placeholder bundled with EchoApp
@@ -112,16 +112,16 @@ EchoApp runs with `ACTR_ECHOAPP_AUTO_SEND=1` and `ACTR_ECHOAPP_TEST_INPUT=<messa
 
 ```bash
 # Local (macOS only)
-bash e2e/swift-echo-app/run.sh
+bash tests/e2e/actr/swift-echo-app/run.sh
 
 # Custom message
-bash e2e/swift-echo-app/run.sh "Hello"
+bash tests/e2e/actr/swift-echo-app/run.sh "Hello"
 
 # Keep artifacts on failure (diagnostics + sanitized logs)
-KEEP_TMP=1 bash e2e/swift-echo-app/run.sh
+KEEP_TMP=1 bash tests/e2e/actr/swift-echo-app/run.sh
 
 # Capture diagnostics even on success (uploads to CI artifact)
-CAPTURE_DIAGNOSTICS_ON_SUCCESS=1 bash e2e/swift-echo-app/run.sh
+CAPTURE_DIAGNOSTICS_ON_SUCCESS=1 bash tests/e2e/actr/swift-echo-app/run.sh
 ```
 
 ### Diagnostics

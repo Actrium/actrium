@@ -2,7 +2,7 @@
  * DispatchSpec v1 — JSON descriptor consumed by the Kotlin protoc plugin to
  * generate the unified `actr_dispatch.kt` dispatcher.
  *
- * Mirrors the shape defined in `cli/src/commands/codegen/dispatch_spec.rs`.
+ * Mirrors the shape defined in `crates/actr-cli/src/commands/codegen/dispatch_spec.rs`.
  * The hash is recomputed locally using the same JCS + SHA-256 algorithm to
  * detect stale specs.
  */

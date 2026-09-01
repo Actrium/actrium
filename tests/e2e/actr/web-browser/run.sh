@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 
 ACTR_RELEASE_BIN="$REPO_ROOT/target/release/actr"
 if [ -x "$ACTR_RELEASE_BIN" ]; then
@@ -13,7 +13,7 @@ fi
 export SUITES="${SUITES:-BasicFunction}"
 
 (
-  cd "$REPO_ROOT/bindings/web/examples/echo"
+  cd "$REPO_ROOT/packages/actr-web/examples/echo"
   bash start-mock.sh
 )
 

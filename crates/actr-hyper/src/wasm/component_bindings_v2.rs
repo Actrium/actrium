@@ -29,7 +29,7 @@
 wasmtime::component::bindgen!({
     world: "actr-workload-guest-v2",
     // `wit-v2/actr-workload.wit` is a checked-in byte-identical copy of
-    // `core/framework/wit-v2/actr-workload.wit`, kept in-crate so the
+    // `crates/actr-framework/wit-v2/actr-workload.wit`, kept in-crate so the
     // publish tarball is self-contained. Drift is guarded by CI (`cmp`).
     path: "wit-v2",
     imports: { default: trappable },

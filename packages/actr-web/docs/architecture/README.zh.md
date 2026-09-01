@@ -20,7 +20,7 @@
    - **推荐先看这个！**
 
 3. **[WASM-DOM 集成架构](./wasm-dom-integration.zh.md)** 🔥 **核心决策**
-   - 当前 Option U 流程：WIT → `tools/wit-compile-web` / `actr-web-abi` → wasm-bindgen/wasm-pack no-modules
+   - 当前 Option U 流程：WIT → `tools/actr/wit-compile-web` / `actr-web-abi` → wasm-bindgen/wasm-pack no-modules
    - 产物形态：单个签名 `.actr`，内含 wasm-bindgen binary 与 `resources/glue.js`
    - SW 入口：`packages/web-sdk/src/actor.sw.js`
    - **阅读此文了解为什么采用当前架构**
@@ -144,9 +144,9 @@ actr-web/
 
 | 领域 | 当前事实 |
 |------|----------|
-| 浏览器 guest 路径 | Option U 是唯一路径：WIT → `tools/wit-compile-web` / `actr-web-abi` → wasm-bindgen / wasm-pack no-modules → binary 与 glue 打入签名 `.actr` |
+| 浏览器 guest 路径 | Option U 是唯一路径：WIT → `tools/actr/wit-compile-web` / `actr-web-abi` → wasm-bindgen / wasm-pack no-modules → binary 与 glue 打入签名 `.actr` |
 | Service Worker 入口 | `packages/web-sdk/src/actor.sw.js` 加载 sw-host，验证 `.actr`，提取 package binary 与 `resources/glue.js`，并安装 `actrHost*` bridge |
-| CLI Web assets | `cli/src/web_assets.rs` 嵌入 sw-host WASM/JS、`actor.sw.js` 和 host HTML；`cli/src/commands/run.rs` 提供签名 `.actr`，不需要 `.wbg` companion route |
+| CLI Web assets | `crates/actr-cli/src/web_assets.rs` 嵌入 sw-host WASM/JS、`actor.sw.js` 和 host HTML；`crates/actr-cli/src/commands/run.rs` 提供签名 `.actr`，不需要 `.wbg` companion route |
 | DOM 固定层 | `packages/actr-dom` 提供 WebRTC coordinator、SW bridge 和 `FastPathForwarder` |
 | Fast Path | DOM 收到 WebRTC 数据后转发 `fast_path_data`；SW `handle_dom_fast_path` 分发到 runtime fast path 和 stream handlers |
 | 生命周期 | DOM 和 SW lifecycle baseline 已实现；仍有细粒度恢复和重注册缺口 |

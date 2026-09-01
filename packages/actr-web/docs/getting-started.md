@@ -12,7 +12,7 @@ This guide covers the current Actor-RTC Web browser path: Option U / wasm-bindge
 Install dependencies:
 
 ```bash
-cd bindings/web
+cd packages/actr-web
 pnpm install
 rustup target add wasm32-unknown-unknown
 cargo install wasm-pack
@@ -36,7 +36,7 @@ Package verification fails closed. Empty trust configuration, registry-only trus
 ## Run the Echo Example
 
 ```bash
-cd bindings/web
+cd packages/actr-web
 pnpm install
 cd examples/echo
 bash start-mock.sh
@@ -53,16 +53,16 @@ The script builds the browser guest, packages its wasm and glue into signed `.ac
 When `crates/sw-host` or `packages/web-sdk/src/actor.sw.js` changes, refresh the assets embedded by `actr-cli`:
 
 ```bash
-cd bindings/web
+cd packages/actr-web
 bash crates/sw-host/build.sh
 bash scripts/sync-cli-assets.sh --build
 ```
 
-The sync script copies canonical web runtime assets into `cli/assets/web-runtime/`. Rebuild `actr-cli` after syncing if you need the CLI binary to embed the new bytes.
+The sync script copies canonical web runtime assets into `crates/actr-cli/assets/web-runtime/`. Rebuild `actr-cli` after syncing if you need the CLI binary to embed the new bytes.
 
 ## React Integration
 
-`@actrium/actr-web-react` currently re-exports the hooks defined in `bindings/web/packages/web-react/src/index.ts`:
+`@actrium/actr-web-react` currently re-exports the hooks defined in `packages/actr-web/packages/web-react/src/index.ts`:
 
 - `useActorClient`
 - `useServiceCall`

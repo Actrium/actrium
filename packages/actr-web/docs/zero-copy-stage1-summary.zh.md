@@ -1,6 +1,6 @@
 # 零拷贝优化阶段 1 完成总结
 
-> **历史快照 / 非当前实现指南**：本文记录 2026-01-08 阶段 1 优化落地时的变更摘要。当前实现请以 `bindings/web/crates/common/src/zero_copy.rs` 以及 `bindings/web/crates/{sw-host,dom-bridge}/src/transport/` 下实际调用为准；本文中的测试数、文件清单和预期收益不作为当前覆盖率或性能事实。
+> **历史快照 / 非当前实现指南**：本文记录 2026-01-08 阶段 1 优化落地时的变更摘要。当前实现请以 `packages/actr-web/crates/common/src/zero_copy.rs` 以及 `packages/actr-web/crates/{sw-host,dom-bridge}/src/transport/` 下实际调用为准；本文中的测试数、文件清单和预期收益不作为当前覆盖率或性能事实。
 
 ## 实施日期
 2026-01-08

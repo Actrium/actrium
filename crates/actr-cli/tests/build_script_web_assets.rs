@@ -8,7 +8,7 @@ fn embedded_actor_service_worker_matches_web_sdk_source() {
     let root = workspace_root();
     let source = fs::read(root.join("packages/actr-web/packages/web-sdk/src/actor.sw.js"))
         .expect("read canonical actor.sw.js");
-    let embedded = fs::read(root.join("cli/assets/web-runtime/actor.sw.js"))
+    let embedded = fs::read(root.join("crates/actr-cli/assets/web-runtime/actor.sw.js"))
         .expect("read embedded actor.sw.js");
     assert_eq!(
         embedded, source,
@@ -56,7 +56,7 @@ fn missing_generated_web_assets_copy_from_canonical_sources_without_mutating_cli
         r#"#!/bin/sh
 set -eu
 printf 'called\n' > sync-called.txt
-printf 'mutated\n' > cli/assets/web-runtime/actor.sw.js
+printf 'mutated\n' > crates/actr-cli/assets/web-runtime/actor.sw.js
 "#,
     )
     .expect("write fake sync script");
@@ -101,7 +101,7 @@ printf 'mutated\n' > cli/assets/web-runtime/actor.sw.js
 fn compile_build_script(repo_root: &Path) -> PathBuf {
     let source = std::env::var_os("ACTR_BUILD_RS_SOURCE")
         .map(PathBuf::from)
-        .unwrap_or_else(|| workspace_root().join("cli/build.rs"));
+        .unwrap_or_else(|| workspace_root().join("crates/actr-cli/build.rs"));
     let output = repo_root.join("build-script");
 
     let status = Command::new("rustc")
@@ -111,7 +111,10 @@ fn compile_build_script(repo_root: &Path) -> PathBuf {
         .arg(&output)
         .status()
         .expect("compile build script");
-    assert!(status.success(), "rustc should compile cli/build.rs");
+    assert!(
+        status.success(),
+        "rustc should compile crates/actr-cli/build.rs"
+    );
 
     output
 }

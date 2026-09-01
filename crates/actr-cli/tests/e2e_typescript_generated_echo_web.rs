@@ -25,7 +25,7 @@ fn workspace_root() -> PathBuf {
 }
 
 fn typescript_echo_example_dir() -> PathBuf {
-    workspace_root().join("examples/typescript/echo-workload")
+    workspace_root().join("examples/actr/typescript/echo-workload")
 }
 
 fn web_echo_dir() -> PathBuf {
@@ -119,7 +119,7 @@ fn read_public_key(key_path: &Path) -> String {
 fn ensure_typescript_workload_package_built() {
     static ONCE: OnceLock<()> = OnceLock::new();
     ONCE.get_or_init(|| {
-        let dir = workspace_root().join("bindings/typescript/actr-workload");
+        let dir = workspace_root().join("packages/actr-typescript/actr-workload");
         assert_success(
             &run("npm", ["install"], &dir),
             "npm install (actr-workload)",

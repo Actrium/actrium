@@ -113,14 +113,14 @@ fn bootstrap_local_workspace_plugin(name: &str) -> Option<PathBuf> {
     ];
 
     for root in candidate_roots {
-        if !root.join("tools/protoc-gen/rust/Cargo.toml").is_file() {
+        if !root.join("tools/actr/protoc-gen/rust/Cargo.toml").is_file() {
             continue;
         }
 
         let status = Command::new("cargo")
             .arg("build")
             .arg("--manifest-path")
-            .arg(root.join("tools/protoc-gen/rust/Cargo.toml"))
+            .arg(root.join("tools/actr/protoc-gen/rust/Cargo.toml"))
             .arg("--bin")
             .arg(name)
             .status()

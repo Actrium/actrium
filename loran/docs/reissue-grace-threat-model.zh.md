@@ -7,7 +7,7 @@
 `/reissue` 的持有证明（possession proof）是节点最后一次拿到的 renewal token。为了让「长时间离线」的节点仍能找回自己的稳定身份，AIS 对这份证明放宽了时效：
 
 ```
-// actrix/crates/ais/src/renewal.rs
+// crates/loran-ais/src/renewal.rs
 pub const REISSUE_BINDING_GRACE_SECS: i64 = 30 * 86_400; // 30 天
 ```
 

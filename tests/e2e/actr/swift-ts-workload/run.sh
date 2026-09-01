@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 
 source "$SCRIPT_DIR/../package-runtime-echo/lib/common.sh"
 source "$SCRIPT_DIR/lib/readiness.sh"
@@ -14,7 +14,7 @@ REALM_ID=""
 ADMIN_PASSWORD="e2e-test-password"
 MANUFACTURER="${MANUFACTURER:-actrium}"
 ACTRIX_BIN="${ACTRIX_BIN:-}"
-ACTR_CLI_MANIFEST="$REPO_ROOT/cli/Cargo.toml"
+ACTR_CLI_MANIFEST="$REPO_ROOT/crates/actr-cli/Cargo.toml"
 ACTRIX_CONFIG_TEMPLATE="$SCRIPT_DIR/../package-runtime-echo/config/actrix.toml"
 E2E_TARGET_ROOT="$REPO_ROOT/target/e2e-cache/swift-ts-workload"
 ACTR_TARGET_DIR="$E2E_TARGET_ROOT/actr-cli"
@@ -595,7 +595,7 @@ EOF
     write_project_keychain_config "$TMP_SERVICE_DIR" "$SERVICE_KEYCHAIN"
 
     section "📦 Building local TypeScript workload binding"
-    (cd "$REPO_ROOT/bindings/typescript/actr-workload" && npm ci && npm run build)
+    (cd "$REPO_ROOT/packages/actr-typescript/actr-workload" && npm ci && npm run build)
 
     (
         cd "$TMP_SERVICE_DIR"
@@ -705,7 +705,7 @@ settings:
     SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
 packages:
   actr-swift:
-    path: $REPO_ROOT/bindings/swift
+    path: $REPO_ROOT/packages/actr-swift
   swift-protobuf:
     url: https://github.com/apple/swift-protobuf.git
     from: 1.32.0

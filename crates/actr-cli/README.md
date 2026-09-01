@@ -115,7 +115,7 @@ Do **not** ship transitional aliases.
    `core::Command`.
 4. Register the variant in `src/cli.rs::Commands` and `as_command()`.
 5. Re-export the type from `src/commands/mod.rs`.
-6. Add a smoke assertion in `cli/tests/cli_shape.rs`.
+6. Add a smoke assertion in `crates/actr-cli/tests/cli_shape.rs`.
 7. Document the command in this README if it changes the top-level shape.
 
 ---

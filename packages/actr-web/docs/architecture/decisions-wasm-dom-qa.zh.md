@@ -4,7 +4,7 @@
 **参与者**: 架构团队
 **类型**: 技术决策讨论
 
-> **历史讨论说明**：本文记录早期设计讨论。当前落地路径是 Option U / wasm-bindgen：WIT → `tools/wit-compile-web` / `actr-web-abi` → wasm-pack no-modules → `*_bg.wasm` 作为签名 `.actr` binary、JS glue 作为 `resources/glue.js` → `actor.sw.js` 验证并从包内加载。旧 `.wbg` bundle/sibling 描述已过时。本文中的延迟数字和 “下一步实现” 描述不作为当前事实；当前事实请以 [架构总览](./overview.zh.md) 和源码为准。
+> **历史讨论说明**：本文记录早期设计讨论。当前落地路径是 Option U / wasm-bindgen：WIT → `tools/actr/wit-compile-web` / `actr-web-abi` → wasm-pack no-modules → `*_bg.wasm` 作为签名 `.actr` binary、JS glue 作为 `resources/glue.js` → `actor.sw.js` 验证并从包内加载。旧 `.wbg` bundle/sibling 描述已过时。本文中的延迟数字和 “下一步实现” 描述不作为当前事实；当前事实请以 [架构总览](./overview.zh.md) 和源码为准。
 
 ---
 

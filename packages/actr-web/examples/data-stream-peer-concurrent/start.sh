@@ -36,7 +36,7 @@ command_exists() { command -v "$1" >/dev/null 2>&1; }
 
 if [ "${ACTR_ALLOW_UNVERIFIED_LEGACY_WBG:-}" != "1" ]; then
     log_error "Refusing to start legacy data-stream example: it executes unsigned loose JS/WASM."
-    log_info "Use bindings/web/examples/echo/start-mock.sh for the current signed .actr path."
+    log_info "Use packages/actr-web/examples/echo/start-mock.sh for the current signed .actr path."
     log_info "For isolated historical debugging only, explicitly set ACTR_ALLOW_UNVERIFIED_LEGACY_WBG=1."
     exit 2
 fi

@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # wit-compile-web: codegen that lowers the canonical actr WIT contract
-# (core/framework/wit/actr-workload.wit) into hand-maintained Rust sources
-# under bindings/web/crates/actr-web-abi/src/. Browsers cannot consume the
-# Component Model product directly (see bindings/web/docs/t18-...), so
+# (crates/actr-framework/wit/actr-workload.wit) into hand-maintained Rust sources
+# under packages/actr-web/crates/actr-web-abi/src/. Browsers cannot consume the
+# Component Model product directly (see packages/actr-web/docs/t18-...), so
 # Option U keeps WIT as the single source of truth and compiles it to a
 # core wasm + wasm-bindgen shape the browser can load natively.
 #
@@ -19,7 +19,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Codegen: actr-workload.wit -> bindings/web/crates/actr-web-abi/src/*.rs"
+description = "Codegen: actr-workload.wit -> packages/actr-web/crates/actr-web-abi/src/*.rs"
 publish = false
 
 [lints]

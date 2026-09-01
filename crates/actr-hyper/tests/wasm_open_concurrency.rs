@@ -30,7 +30,7 @@ use std::time::Duration;
 
 // The conflict-key concurrency harness (route consts, gate bridge, watchdog
 // helpers) is shared with the M6 isomorphism suite; see
-// `core/hyper/tests/common/concurrency.rs`.
+// `crates/actr-hyper/tests/common/concurrency.rs`.
 use actr_hyper::config::WasmRuntimeLimits;
 use actr_hyper::test_support::concurrency::{
     BOOM, ECHO, PROBE, await_dispatch, caller, gate_bridge, probe_spec, read_u32, spawn_dispatch,

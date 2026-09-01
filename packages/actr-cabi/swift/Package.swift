@@ -5,7 +5,7 @@ import PackageDescription
 // actr-cabi Swift binding — a parallel binding to actr-swift (UniFFI).
 // Consumers use `import ActrCabi` (vs `import Actr` for the UniFFI line).
 //
-// Binary distribution model mirrors bindings/swift/Package.swift:
+// Binary distribution model mirrors packages/actr-swift/Package.swift:
 // - ACTR_CABI_BINARY_PATH override → point at a locally built xcframework
 // - dist/ActrCabi.xcframework → CI-built
 // - ActrCabi.xcframework → checked-in fallback
@@ -30,7 +30,7 @@ func binaryPathRelativeToPackageRoot(_ path: String) -> String? {
 let cabiBinaryTarget: Target
 if let overrideBinaryPath {
     guard let relative = binaryPathRelativeToPackageRoot(overrideBinaryPath) else {
-        fatalError("ACTR_CABI_BINARY_PATH must point inside the bindings/cabi/swift package root.")
+        fatalError("ACTR_CABI_BINARY_PATH must point inside the packages/actr-cabi/swift package root.")
     }
     cabiBinaryTarget = .binaryTarget(name: "ActrCabiLib", path: relative)
 } else if FileManager.default.fileExists(atPath: distBinaryAbsolutePath) {

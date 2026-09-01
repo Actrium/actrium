@@ -40,8 +40,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Actrium/actr.git",
-    "directory": "bindings/typescript/actr-workload"
+    "url": "git+https://github.com/Actrium/actrium.git",
+    "directory": "packages/actr-typescript/actr-workload"
   },
   "keywords": [
     "actor",

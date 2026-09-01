@@ -38,7 +38,7 @@ pub fn rust_e2e_target_dir() -> PathBuf {
 }
 
 fn local_swift_package_dir() -> PathBuf {
-    workspace_root().join("bindings/swift")
+    workspace_root().join("packages/actr-swift")
 }
 
 fn local_swift_e2e_output_dir() -> PathBuf {

@@ -16,8 +16,8 @@ data = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())
 print(data["dependencies"]["actr-framework"]["rev"])
 PY
 )}"
-ACTR_REPO_DIR="${ECHO_ACTR_ACTR_REPO_DIR:-$ROOT_DIR/../../..}"
-ACTR_CLI_MANIFEST="${ECHO_ACTR_CLI_MANIFEST:-$ACTR_REPO_DIR/cli/Cargo.toml}"
+ACTR_REPO_DIR="${ECHO_ACTR_ACTR_REPO_DIR:-$ROOT_DIR/../../../..}"
+ACTR_CLI_MANIFEST="${ECHO_ACTR_CLI_MANIFEST:-$ACTR_REPO_DIR/crates/actr-cli/Cargo.toml}"
 
 TARGET="${1:-$(rustc -vV | awk '/host:/ {print $2}')}"
 
@@ -33,7 +33,7 @@ ensure_actr_cli() {
   fi
 
   cargo install \
-    --git https://github.com/Actrium/actr.git \
+    --git https://github.com/Actrium/actrium.git \
     --rev "$ACTR_GIT_REV" \
     --bin actr \
     actr-cli

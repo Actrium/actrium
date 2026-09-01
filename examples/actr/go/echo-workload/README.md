@@ -3,7 +3,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 This example implements the async
-[`actr-workload-guest-v2`](../../../core/framework/wit-v2/actr-workload.wit)
+[`actr-workload-guest-v2`](../../../../crates/actr-framework/wit-v2/actr-workload.wit)
 world (`actr:workload@0.6.0`) in Go. `dispatch` returns the inbound payload
 with an `echo: ` prefix, and every lifecycle or observation export accepts the
 explicit V2 invocation context.

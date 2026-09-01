@@ -1,7 +1,7 @@
 //! Canonical DispatchSpec v1 — JSON descriptor consumed by the Rust protoc
 //! plugin to generate the unified `actr_dispatch.rs` dispatcher.
 //!
-//! Mirrors the shape defined in `cli/src/commands/codegen/dispatch_spec.rs` so
+//! Mirrors the shape defined in `crates/actr-cli/src/commands/codegen/dispatch_spec.rs` so
 //! the plugin can deserialize the spec written by the CLI without depending on
 //! the CLI crate. The hash is recomputed locally using the same JCS + SHA-256
 //! algorithm to detect stale specs.
@@ -147,7 +147,7 @@ impl DispatchSpec {
     }
 
     /// Recompute the canonical JCS + SHA-256 hash of this spec *without* the
-    /// `spec_hash` field, matching `cli/src/commands/codegen/dispatch_spec.rs`.
+    /// `spec_hash` field, matching `crates/actr-cli/src/commands/codegen/dispatch_spec.rs`.
     fn recompute_hash(&self) -> String {
         let spec_without_hash = DispatchSpec {
             schema_version: self.schema_version.clone(),

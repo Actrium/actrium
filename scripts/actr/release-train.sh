@@ -132,7 +132,7 @@ PREVIOUS_TAG=""
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/release-train.sh [--version <X.Y.Z>] [--dry-run] [--prepare-only] [--skip-python] [--branch <branch>] [--stage <name>]
+  scripts/actr/release-train.sh [--version <X.Y.Z>] [--dry-run] [--prepare-only] [--skip-python] [--branch <branch>] [--stage <name>]
 
 Options:
   --version <X.Y.Z>  Stable semver used by the monorepo-managed release train (optional in CI).
@@ -1013,9 +1013,9 @@ stage_requires_python_release_tools() {
 }
 
 build_python_distribution() {
-  rm -rf tools/protoc-gen/python/dist tools/protoc-gen/python/build tools/protoc-gen/python/*.egg-info
+  rm -rf tools/actr/protoc-gen/python/dist tools/actr/protoc-gen/python/build tools/actr/protoc-gen/python/*.egg-info
   (
-    cd tools/protoc-gen/python
+    cd tools/actr/protoc-gen/python
     "$RELEASE_PYTHON_BIN" -m build >/dev/null
   )
 }
@@ -1035,40 +1035,40 @@ skip_python = sys.argv[3] == "true"
 
 package_files = [
     repo / "Cargo.toml",
-    repo / "bindings/web/Cargo.toml",
-    repo / "core/protocol/Cargo.toml",
-    repo / "core/service-compat/Cargo.toml",
-    repo / "core/config/Cargo.toml",
-    repo / "core/framework/Cargo.toml",
-    repo / "core/runtime-mailbox/Cargo.toml",
-    repo / "core/runtime/Cargo.toml",
-    repo / "core/platform-traits/Cargo.toml",
-    repo / "core/pack/Cargo.toml",
-    repo / "core/hyper/Cargo.toml",
-    repo / "core/platform-native/Cargo.toml",
-    repo / "testing/mock-actrix/Cargo.toml",
-    repo / "tools/protoc-gen/rust/Cargo.toml",
-    repo / "tools/protoc-gen/web/Cargo.toml",
-    repo / "cli/Cargo.toml",
-    repo / "actrix/crates/contracts/Cargo.toml",
-    repo / "actrix/crates/signer/Cargo.toml",
-    repo / "actrix/crates/platform/Cargo.toml",
-    repo / "actrix/crates/control/Cargo.toml",
-    repo / "actrix/crates/mfr/Cargo.toml",
-    repo / "actrix/crates/signaling/Cargo.toml",
-    repo / "actrix/crates/stun/Cargo.toml",
-    repo / "actrix/crates/turn/Cargo.toml",
-    repo / "actrix/crates/ais/Cargo.toml",
-    repo / "actrix/crates/sdk/Cargo.toml",
-    repo / "actrix/crates/actrixd/Cargo.toml",
-    repo / "bindings/typescript/Cargo.toml",
-    repo / "bindings/web/crates/actr-web-abi/Cargo.toml",
-    repo / "bindings/web/crates/common/Cargo.toml",
-    repo / "bindings/web/crates/sw-host/Cargo.toml",
-    repo / "bindings/web/crates/dom-bridge/Cargo.toml",
-    repo / "bindings/web/crates/mailbox-web/Cargo.toml",
-    repo / "bindings/web/crates/platform-web/Cargo.toml",
-    repo / "bindings/web/crates/framework-web-entry-smoke/Cargo.toml",
+    repo / "packages/actr-web/Cargo.toml",
+    repo / "crates/actr-protocol/Cargo.toml",
+    repo / "crates/actr-service-compat/Cargo.toml",
+    repo / "crates/actr-config/Cargo.toml",
+    repo / "crates/actr-framework/Cargo.toml",
+    repo / "crates/actr-runtime-mailbox/Cargo.toml",
+    repo / "crates/actr-runtime/Cargo.toml",
+    repo / "crates/actr-platform-traits/Cargo.toml",
+    repo / "crates/actr-pack/Cargo.toml",
+    repo / "crates/actr-hyper/Cargo.toml",
+    repo / "crates/actr-platform-native/Cargo.toml",
+    repo / "crates/actr-mock-actrix/Cargo.toml",
+    repo / "tools/actr/protoc-gen/rust/Cargo.toml",
+    repo / "tools/actr/protoc-gen/web/Cargo.toml",
+    repo / "crates/actr-cli/Cargo.toml",
+    repo / "crates/loran-proto/Cargo.toml",
+    repo / "crates/loran-signer/Cargo.toml",
+    repo / "crates/loran-platform/Cargo.toml",
+    repo / "crates/loran-control/Cargo.toml",
+    repo / "crates/loran-mfr/Cargo.toml",
+    repo / "crates/loran-signaling/Cargo.toml",
+    repo / "crates/loran-stun/Cargo.toml",
+    repo / "crates/loran-turn/Cargo.toml",
+    repo / "crates/loran-ais/Cargo.toml",
+    repo / "crates/loran-sdk/Cargo.toml",
+    repo / "crates/loran-server/Cargo.toml",
+    repo / "packages/actr-typescript/Cargo.toml",
+    repo / "packages/actr-web/crates/actr-web-abi/Cargo.toml",
+    repo / "packages/actr-web/crates/common/Cargo.toml",
+    repo / "packages/actr-web/crates/sw-host/Cargo.toml",
+    repo / "packages/actr-web/crates/dom-bridge/Cargo.toml",
+    repo / "packages/actr-web/crates/mailbox-web/Cargo.toml",
+    repo / "packages/actr-web/crates/platform-web/Cargo.toml",
+    repo / "packages/actr-web/crates/framework-web-entry-smoke/Cargo.toml",
 ]
 
 cli_dependency_names = {
@@ -1116,7 +1116,7 @@ def replace_first_version(lines: list[str]) -> list[str]:
 
 for path in package_files:
     lines = path.read_text().splitlines()
-    if path.name != "Cargo.toml" or path.parent == repo / "cli":
+    if path.name != "Cargo.toml" or path.parent == repo / "crates/actr-cli":
         lines = replace_first_version(lines)
     else:
         current_section = None
@@ -1143,14 +1143,14 @@ for path in package_files:
                 if name in workspace_dependency_names:
                     lines[index] = re.sub(r'version = "[^"]+"', f'version = "{version}"', line)
 
-    if path.parent == repo / "cli":
+    if path.parent == repo / "crates/actr-cli":
         for index, line in enumerate(lines):
             stripped = line.strip()
             name = stripped.split("=", 1)[0].strip()
             if name in cli_dependency_names and "version = " in line:
                 lines[index] = re.sub(r'version = "[^"]+"', f'version = "{version}"', line)
 
-    if repo / "actrix/crates" in path.parents:
+    if path.parent.parent == repo / "crates" and path.parent.name.startswith("loran-"):
         for index, line in enumerate(lines):
             if 'path = "../' in line and "version = " in line:
                 lines[index] = re.sub(r'version = "[^"]+"', f'version = "{version}"', line)
@@ -1164,7 +1164,7 @@ for path in package_files:
     path.write_text("\n".join(lines) + "\n")
 
 if not skip_python:
-    pyproject = repo / "tools/protoc-gen/python/pyproject.toml"
+    pyproject = repo / "tools/actr/protoc-gen/python/pyproject.toml"
     py_lines = pyproject.read_text().splitlines()
     current_section = None
     for index, line in enumerate(py_lines):
@@ -1182,11 +1182,11 @@ if not skip_python:
 
 # Bump web and typescript package versions to match the release train version.
 web_packages = [
-    repo / "bindings/web/packages/actr-dom/package.json",
-    repo / "bindings/web/packages/web-sdk/package.json",
-    repo / "bindings/web/packages/web-react/package.json",
-    repo / "bindings/typescript/package.json",
-    repo / "bindings/typescript/actr-workload/package.json",
+    repo / "packages/actr-web/packages/actr-dom/package.json",
+    repo / "packages/actr-web/packages/web-sdk/package.json",
+    repo / "packages/actr-web/packages/web-react/package.json",
+    repo / "packages/actr-typescript/package.json",
+    repo / "packages/actr-typescript/actr-workload/package.json",
 ]
 for wp in web_packages:
     pkg = json.loads(wp.read_text())
@@ -1197,7 +1197,7 @@ for wp in web_packages:
             pkg["optionalDependencies"][dep_name] = version
     wp.write_text(json.dumps(pkg, indent=2) + "\n")
 
-csharp_project = repo / "bindings/cabi/csharp/ActrSharp/ActrSharp.csproj"
+csharp_project = repo / "packages/actr-cabi/csharp/ActrSharp/ActrSharp.csproj"
 csharp_updated, csharp_count = re.subn(
     r'(<Version>)[^<]+(</Version>)',
     rf'\g<1>{version}\g<2>',
@@ -1210,14 +1210,14 @@ if csharp_count != 1:
     )
 csharp_project.write_text(csharp_updated)
 
-typescript_plugin_package = repo / "tools/protoc-gen/typescript/package.json"
+typescript_plugin_package = repo / "tools/actr/protoc-gen/typescript/package.json"
 typescript_plugin_package_data = json.loads(typescript_plugin_package.read_text())
 typescript_plugin_package_data["version"] = version
 typescript_plugin_package.write_text(
     json.dumps(typescript_plugin_package_data, indent=2) + "\n"
 )
 
-typescript_plugin_lock = repo / "tools/protoc-gen/typescript/package-lock.json"
+typescript_plugin_lock = repo / "tools/actr/protoc-gen/typescript/package-lock.json"
 typescript_plugin_lock_data = json.loads(typescript_plugin_lock.read_text())
 typescript_plugin_lock_data["version"] = version
 typescript_plugin_lock_data["packages"][""]["version"] = version
@@ -1227,31 +1227,31 @@ typescript_plugin_lock.write_text(
 
 embedded_versions = [
     (
-        repo / "tools/protoc-gen/swift/Sources/framework-codegen-swift/main.swift",
+        repo / "tools/actr/protoc-gen/swift/Sources/framework-codegen-swift/main.swift",
         r'(static let version = ")[^"]+(")',
         rf'\g<1>{version}\g<2>',
         1,
     ),
     (
-        repo / "tools/protoc-gen/typescript/src/main.ts",
+        repo / "tools/actr/protoc-gen/typescript/src/main.ts",
         r'(const VERSION = ")[^"]+(";)',
         rf'\g<1>{version}\g<2>',
         1,
     ),
     (
-        repo / "tools/protoc-gen/kotlin/build.gradle.kts",
+        repo / "tools/actr/protoc-gen/kotlin/build.gradle.kts",
         r'(?m)^(version = ")[^"]+(")$',
         rf'\g<1>{version}\g<2>',
         1,
     ),
     (
-        repo / "tools/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen/Main.kt",
+        repo / "tools/actr/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen/Main.kt",
         r'(protoc-gen-actrframework-kotlin )[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?',
         rf'\g<1>{version}',
         1,
     ),
     (
-        repo / "tools/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen/Main.kt",
+        repo / "tools/actr/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen/Main.kt",
         r'(println\("    )[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?("\))',
         rf'\g<1>{version}\g<2>',
         1,
@@ -1267,19 +1267,19 @@ for path, pattern, replacement, expected_count in embedded_versions:
     path.write_text(updated)
 PY
 
-  local e2e_manifest="$WORK_REPO_ROOT/e2e/Cargo.toml"
+  local e2e_manifest="$WORK_REPO_ROOT/tests/e2e/actr/Cargo.toml"
   if [[ -f "$e2e_manifest" ]]; then
     (
       cd "$WORK_REPO_ROOT"
-      cargo update --manifest-path e2e/Cargo.toml
+      cargo update --manifest-path tests/e2e/actr/Cargo.toml
     )
   fi
 
-  local workload_manifest="$WORK_REPO_ROOT/e2e/winui-echo-app/workload/Cargo.toml"
+  local workload_manifest="$WORK_REPO_ROOT/tests/e2e/actr/winui-echo-app/workload/Cargo.toml"
   if [[ -f "$workload_manifest" ]]; then
     (
       cd "$WORK_REPO_ROOT"
-      cargo update --manifest-path e2e/winui-echo-app/workload/Cargo.toml
+      cargo update --manifest-path tests/e2e/actr/winui-echo-app/workload/Cargo.toml
     )
   fi
 }
@@ -1296,7 +1296,7 @@ all_publishable_crates() {
 package_workspace_dir() {
   case "$1" in
     actr-web-abi)
-      printf '%s/bindings/web' "$WORK_REPO_ROOT"
+      printf '%s/packages/actr-web' "$WORK_REPO_ROOT"
       ;;
     *)
       printf '%s' "$WORK_REPO_ROOT"
@@ -1307,7 +1307,7 @@ package_workspace_dir() {
 run_validation_suite() {
   log_info "Running formatter and compile checks"
   log_info "Generating CLI web runtime assets"
-  bash bindings/web/scripts/sync-cli-assets.sh --build
+  bash packages/actr-web/scripts/sync-cli-assets.sh --build
 
   cargo fmt --all
   cargo check
@@ -1332,7 +1332,7 @@ run_validation_suite() {
 
 prepare_cli_publish_assets() {
   log_info "Generating CLI web runtime assets for actr-cli publish"
-  (cd "$WORK_REPO_ROOT" && bash bindings/web/scripts/sync-cli-assets.sh --build)
+  (cd "$WORK_REPO_ROOT" && bash packages/actr-web/scripts/sync-cli-assets.sh --build)
 }
 
 append_skipped_components() {
@@ -1474,7 +1474,7 @@ wait_for_package_sync_workflow() {
 }
 
 publish_web_packages() {
-  local web_root="$WORK_REPO_ROOT/bindings/web"
+  local web_root="$WORK_REPO_ROOT/packages/actr-web"
   local publish_script="$web_root/scripts/publish.sh"
   local web_version publish_args
 
@@ -1553,7 +1553,7 @@ EOF
 }
 
 publish_typescript_workload_package() {
-  local ts_workload_root="$WORK_REPO_ROOT/bindings/typescript/actr-workload"
+  local ts_workload_root="$WORK_REPO_ROOT/packages/actr-typescript/actr-workload"
   local ts_version
 
   if [[ ! -d "$ts_workload_root" ]]; then
@@ -1631,7 +1631,7 @@ publish_typescript_workload_package() {
 }
 
 publish_typescript_package() {
-  local ts_root="$WORK_REPO_ROOT/bindings/typescript"
+  local ts_root="$WORK_REPO_ROOT/packages/actr-typescript"
   local ts_version main_package cargo_version npm_tag
   local native_packages=(
     "@actrium/actr-darwin-x64|darwin-x64|actr.darwin-x64.node"
@@ -1816,57 +1816,57 @@ publish_package_sync_repo() {
 
 stage_release_version_files() {
   git add Cargo.toml Cargo.lock \
-    bindings/web/Cargo.toml \
-    core/protocol/Cargo.toml \
-    core/service-compat/Cargo.toml \
-    core/config/Cargo.toml \
-    core/framework/Cargo.toml \
-    core/runtime-mailbox/Cargo.toml \
-    core/runtime/Cargo.toml \
-    core/platform-traits/Cargo.toml \
-    core/pack/Cargo.toml \
-    core/hyper/Cargo.toml \
-    core/platform-native/Cargo.toml \
-    testing/mock-actrix/Cargo.toml \
-    tools/protoc-gen/rust/Cargo.toml \
-    tools/protoc-gen/web/Cargo.toml \
-    actrix/crates/contracts/Cargo.toml \
-    actrix/crates/signer/Cargo.toml \
-    actrix/crates/platform/Cargo.toml \
-    actrix/crates/control/Cargo.toml \
-    actrix/crates/mfr/Cargo.toml \
-    actrix/crates/signaling/Cargo.toml \
-    actrix/crates/stun/Cargo.toml \
-    actrix/crates/turn/Cargo.toml \
-    actrix/crates/ais/Cargo.toml \
-    actrix/crates/sdk/Cargo.toml \
-    actrix/crates/actrixd/Cargo.toml \
-    tools/protoc-gen/swift/Sources/framework-codegen-swift/main.swift \
-    tools/protoc-gen/typescript/src/main.ts \
-    tools/protoc-gen/typescript/package.json \
-    tools/protoc-gen/typescript/package-lock.json \
-    tools/protoc-gen/kotlin/build.gradle.kts \
-    tools/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen/Main.kt \
-    cli/Cargo.toml \
-    tools/protoc-gen/python/pyproject.toml \
-    bindings/web/packages/actr-dom/package.json \
-    bindings/web/packages/web-sdk/package.json \
-    bindings/web/packages/web-react/package.json \
-    bindings/typescript/Cargo.toml \
-    bindings/typescript/package.json \
-    bindings/typescript/actr-workload/package.json \
-    bindings/cabi/csharp/ActrSharp/ActrSharp.csproj \
-    bindings/web/crates/actr-web-abi/Cargo.toml \
-    bindings/web/crates/common/Cargo.toml \
-    bindings/web/crates/sw-host/Cargo.toml \
-    bindings/web/crates/dom-bridge/Cargo.toml \
-    bindings/web/crates/mailbox-web/Cargo.toml \
-    bindings/web/crates/platform-web/Cargo.toml \
-    bindings/web/crates/framework-web-entry-smoke/Cargo.toml \
-    bindings/web/Cargo.lock \
-    bindings/typescript/Cargo.lock \
-    e2e/Cargo.lock \
-    e2e/winui-echo-app/workload/Cargo.lock
+    packages/actr-web/Cargo.toml \
+    crates/actr-protocol/Cargo.toml \
+    crates/actr-service-compat/Cargo.toml \
+    crates/actr-config/Cargo.toml \
+    crates/actr-framework/Cargo.toml \
+    crates/actr-runtime-mailbox/Cargo.toml \
+    crates/actr-runtime/Cargo.toml \
+    crates/actr-platform-traits/Cargo.toml \
+    crates/actr-pack/Cargo.toml \
+    crates/actr-hyper/Cargo.toml \
+    crates/actr-platform-native/Cargo.toml \
+    crates/actr-mock-actrix/Cargo.toml \
+    tools/actr/protoc-gen/rust/Cargo.toml \
+    tools/actr/protoc-gen/web/Cargo.toml \
+    crates/loran-proto/Cargo.toml \
+    crates/loran-signer/Cargo.toml \
+    crates/loran-platform/Cargo.toml \
+    crates/loran-control/Cargo.toml \
+    crates/loran-mfr/Cargo.toml \
+    crates/loran-signaling/Cargo.toml \
+    crates/loran-stun/Cargo.toml \
+    crates/loran-turn/Cargo.toml \
+    crates/loran-ais/Cargo.toml \
+    crates/loran-sdk/Cargo.toml \
+    crates/loran-server/Cargo.toml \
+    tools/actr/protoc-gen/swift/Sources/framework-codegen-swift/main.swift \
+    tools/actr/protoc-gen/typescript/src/main.ts \
+    tools/actr/protoc-gen/typescript/package.json \
+    tools/actr/protoc-gen/typescript/package-lock.json \
+    tools/actr/protoc-gen/kotlin/build.gradle.kts \
+    tools/actr/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen/Main.kt \
+    crates/actr-cli/Cargo.toml \
+    tools/actr/protoc-gen/python/pyproject.toml \
+    packages/actr-web/packages/actr-dom/package.json \
+    packages/actr-web/packages/web-sdk/package.json \
+    packages/actr-web/packages/web-react/package.json \
+    packages/actr-typescript/Cargo.toml \
+    packages/actr-typescript/package.json \
+    packages/actr-typescript/actr-workload/package.json \
+    packages/actr-cabi/csharp/ActrSharp/ActrSharp.csproj \
+    packages/actr-web/crates/actr-web-abi/Cargo.toml \
+    packages/actr-web/crates/common/Cargo.toml \
+    packages/actr-web/crates/sw-host/Cargo.toml \
+    packages/actr-web/crates/dom-bridge/Cargo.toml \
+    packages/actr-web/crates/mailbox-web/Cargo.toml \
+    packages/actr-web/crates/platform-web/Cargo.toml \
+    packages/actr-web/crates/framework-web-entry-smoke/Cargo.toml \
+    packages/actr-web/Cargo.lock \
+    packages/actr-typescript/Cargo.lock \
+    tests/e2e/actr/Cargo.lock \
+    tests/e2e/actr/winui-echo-app/workload/Cargo.lock
 }
 
 commit_release_prepare() {
@@ -1898,7 +1898,7 @@ ensure_versions_prepared() {
 
   if [[ -n "$diff_files" ]]; then
     printf '%s\n' "$diff_files" >&2
-    fail "Release version files do not match ${VERSION}; run scripts/release-train.sh --branch ${RELEASE_BRANCH} --version ${VERSION} --prepare-only on a PR branch and merge it before publishing"
+    fail "Release version files do not match ${VERSION}; run scripts/actr/release-train.sh --branch ${RELEASE_BRANCH} --version ${VERSION} --prepare-only on a PR branch and merge it before publishing"
   fi
 }
 
@@ -1911,7 +1911,7 @@ ensure_publish_worktree_clean() {
       ":(exclude)release/reports/release-train-v${VERSION}.json" \
       ":(exclude)release/reports/release-train-v${VERSION}.*.state.tsv" \
       ":(exclude)release/reports/release-train-v${VERSION}.context.json" \
-      ":(exclude)cli/assets/web-runtime/"
+      ":(exclude)crates/actr-cli/assets/web-runtime/"
   )
   if [[ -n "$dirty_files" ]]; then
     printf '%s\n' "$dirty_files" >&2
@@ -1936,7 +1936,7 @@ npm_registry_url() {
 }
 
 registry_user_agent() {
-  printf 'actr-release-train/%s (https://github.com/Actrium/actr)' "${VERSION:-unknown}"
+  printf 'actr-release-train/%s (https://github.com/Actrium/actrium)' "${VERSION:-unknown}"
 }
 
 crate_version_visible() {
@@ -2070,7 +2070,7 @@ publish_python_package() {
   local upload_log
   upload_log=$(mktemp)
   (
-    cd tools/protoc-gen/python
+    cd tools/actr/protoc-gen/python
     if [[ "$PRE_RELEASE" == true ]]; then
       TWINE_USERNAME="__token__" \
       TWINE_PASSWORD="$twine_password" \
@@ -2190,7 +2190,7 @@ stage_build_cli_binaries() {
     local args=(build --target "$target" --version "$VERSION" --output "$staging" --state-file "$STATE_FILE")
     [[ "$DRY_RUN" == true ]] && args+=(--dry-run)
     RELEASE_SHA="$RELEASE_SHA" PACKAGE_SYNC_OWNER="$PACKAGE_SYNC_OWNER" \
-      scripts/release-actr-cli.sh "${args[@]}"
+      scripts/actr/release-actr-cli.sh "${args[@]}"
   done
 
   log_info "Stage build-cli-binaries complete"
@@ -2203,7 +2203,7 @@ stage_publish_cli_binaries() {
   local args=(publish --tag "$FINAL_TAG" --assets "$staging" --state-file "$STATE_FILE" --replace --create-release)
   [[ "$DRY_RUN" == true ]] && args+=(--dry-run)
   RELEASE_SHA="$RELEASE_SHA" PRE_RELEASE="$PRE_RELEASE" PACKAGE_SYNC_OWNER="$PACKAGE_SYNC_OWNER" \
-    scripts/release-actr-cli.sh "${args[@]}"
+    scripts/actr/release-actr-cli.sh "${args[@]}"
 
   log_info "Stage publish-cli-binaries complete"
 }
@@ -2250,7 +2250,7 @@ stage_build_typescript_native() {
   read_context
 
   # Build step: compile TypeScript and prepare NAPI artifacts directory.
-  local ts_root="$WORK_REPO_ROOT/bindings/typescript"
+  local ts_root="$WORK_REPO_ROOT/packages/actr-typescript"
   if [[ -d "$ts_root" ]]; then
     log_info "Compiling TypeScript"
     (cd "$ts_root" && npm install && npm run compile:ts)
@@ -2446,8 +2446,8 @@ run_release_train() {
   if [[ "$PREPARE_ONLY" == true ]]; then
     update_versions
     cargo update --workspace
-    cargo update --workspace --manifest-path bindings/web/Cargo.toml
-    cargo update --manifest-path bindings/typescript/Cargo.toml -p actr-protocol -p actr-framework -p actr-config -p actr-hyper
+    cargo update --workspace --manifest-path packages/actr-web/Cargo.toml
+    cargo update --manifest-path packages/actr-typescript/Cargo.toml -p actr-protocol -p actr-framework -p actr-config -p actr-hyper
     run_validation_suite
     commit_release_prepare
     return

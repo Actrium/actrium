@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 
 source "$SCRIPT_DIR/lib/common.sh"
 
@@ -15,7 +15,7 @@ MANUFACTURER="actrium"
 CLIENT_MANUFACTURER="$MANUFACTURER"
 CLIENT_GUEST_VERSION="0.1.0"
 ACTRIX_BIN="${ACTRIX_BIN:-}"
-ACTR_CLI_MANIFEST="$REPO_ROOT/cli/Cargo.toml"
+ACTR_CLI_MANIFEST="$REPO_ROOT/crates/actr-cli/Cargo.toml"
 E2E_TARGET_ROOT="$REPO_ROOT/target/e2e-cache/package-runtime-echo"
 ACTR_TARGET_DIR="$E2E_TARGET_ROOT/actr-cli"
 ACTRIX_TARGET_DIR="$E2E_TARGET_ROOT/actrix-bin"
@@ -151,7 +151,7 @@ build_local_actrix() {
     fi
     section "🔧 Building local actrix from source"
     CARGO_TARGET_DIR="$ACTRIX_TARGET_DIR" cargo build \
-        --manifest-path "$REPO_ROOT/actrix/crates/actrixd/Cargo.toml" \
+        --manifest-path "$REPO_ROOT/crates/loran-server/Cargo.toml" \
         --bin actrix >/dev/null
     ACTRIX_BIN="$ACTRIX_TARGET_DIR/debug/actrix"
     [ -x "$ACTRIX_BIN" ] || fail "actrix binary missing at $ACTRIX_BIN"
@@ -268,16 +268,16 @@ EOF
 
 [patch.crates-io]
 actr = { path = "$repo_path" }
-actr-config = { path = "$repo_path/core/config" }
-actr-protocol = { path = "$repo_path/core/protocol" }
-actr-framework = { path = "$repo_path/core/framework" }
-actr-hyper = { path = "$repo_path/core/hyper" }
-actr-pack = { path = "$repo_path/core/pack" }
-actr-platform-native = { path = "$repo_path/core/platform-native" }
-actr-platform-traits = { path = "$repo_path/core/platform-traits" }
-actr-runtime = { path = "$repo_path/core/runtime" }
-actr-runtime-mailbox = { path = "$repo_path/core/runtime-mailbox" }
-actr-service-compat = { path = "$repo_path/core/service-compat" }
+actr-config = { path = "$repo_path/crates/actr-config" }
+actr-protocol = { path = "$repo_path/crates/actr-protocol" }
+actr-framework = { path = "$repo_path/crates/actr-framework" }
+actr-hyper = { path = "$repo_path/crates/actr-hyper" }
+actr-pack = { path = "$repo_path/crates/actr-pack" }
+actr-platform-native = { path = "$repo_path/crates/actr-platform-native" }
+actr-platform-traits = { path = "$repo_path/crates/actr-platform-traits" }
+actr-runtime = { path = "$repo_path/crates/actr-runtime" }
+actr-runtime-mailbox = { path = "$repo_path/crates/actr-runtime-mailbox" }
+actr-service-compat = { path = "$repo_path/crates/actr-service-compat" }
 EOF
 }
 

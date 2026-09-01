@@ -1217,7 +1217,7 @@ CREATE TABLE nonce (
 
 ### 1. Rust 客户端
 
-**注意**: `Client` 和 `ClientConfig` (HTTP 客户端) 仅在测试模式下可用 (`#[cfg(test)]`)。  
+**注意**: `Client` 和 `ClientConfig` (HTTP 客户端) 仅在测试模式下可用 (`#[cfg(test)]`)。
 生产代码应使用 `GrpcClient` 和 `GrpcClientConfig` (gRPC 客户端)。
 
 **测试代码示例**:
@@ -1848,4 +1848,4 @@ sqlite3 /var/lib/actrix/ks.db \
 **文档版本**: v1.0
 **最后更新**: 2025-11-03
 **维护者**: Actrix Team
-**反馈**: https://github.com/Actrium/actrix/issues
+**反馈**: https://github.com/Actrium/actrium/issues

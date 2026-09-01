@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 description = "Actor-RTC framework core (stub for code generation testing)"
-repository = "https://github.com/Actrium/actr"
+repository = "https://github.com/Actrium/actrium"
 
 [lints]
 workspace = true
@@ -69,7 +69,7 @@ wasm-bindgen-futures = { version = "0.4", optional = true }
 js-sys = { version = "0.3", optional = true }
 serde-wasm-bindgen = { version = "0.6", optional = true }
 # `actr-web-abi` is the WIT-lowered browser ABI crate that lives in the
-# separately-gated `bindings/web` workspace. `WebContext` routes every
+# separately-gated `packages/actr-web` workspace. `WebContext` routes every
 # outbound call through its `guest::*_with_request_id` wrappers (Option U
 # γ-unified §3.3/§3.4). Kept optional + path+version so native builds never
 # pull it (or its wasm-bindgen tail) and so the cross-workspace path is

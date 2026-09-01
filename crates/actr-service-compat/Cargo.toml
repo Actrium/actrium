@@ -12,7 +12,7 @@ keywords = [
     "breaking-changes",
     "service",
 ]
-repository = "https://github.com/Actrium/actr"
+repository = "https://github.com/Actrium/actrium"
 readme = "README.md"
 
 [lints]

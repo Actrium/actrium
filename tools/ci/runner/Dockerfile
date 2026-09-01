@@ -12,7 +12,7 @@
 # Windows runners are intentionally NOT covered here; see README.md.
 #
 # Build context is the directory containing this Dockerfile:
-#   docker build -t actrium-runner:dev -f docker/runner/Dockerfile docker/runner/
+#   docker build -t actrium-runner:dev -f tools/ci/runner/Dockerfile tools/ci/runner/
 #
 # Under ARC (gha-runner-scale-set), the controller injects the JIT runner
 # config as the ACTIONS_RUNNER_INPUT_JITCONFIG env var into the `runner`
@@ -288,12 +288,12 @@ ARG JDK_VERSION=17.0.20+8
 # and re-downloads the whole toolchain at job time (~11 min, retry included).
 ARG CMDLINE_TOOLS=12266719
 # Gradle distribution + KtLint dependency versions, pinned to what
-# bindings/kotlin resolves at job time (gradle/wrapper/gradle-wrapper.properties
+# packages/actr-kotlin resolves at job time (gradle/wrapper/gradle-wrapper.properties
 # and build.gradle.kts). Pre-seeding both into the Gradle user home removes the
 # per-job distribution + KtLint dependency downloads.
 ARG GRADLE_VERSION=9.2.1
 ARG KTLINT_VERSION=1.5.0
-# The default must match bindings/kotlin/gradle/wrapper/gradle-wrapper.properties
+# The default must match packages/actr-kotlin/gradle/wrapper/gradle-wrapper.properties
 # so the staged distribution is reused by the wrapper.
 ARG GRADLE_DIST_PROXY=https://mirrors.cloud.tencent.com/gradle
 # SHA-256 of the Gradle archive named by the wrapper. Verify the image-build
@@ -301,7 +301,7 @@ ARG GRADLE_DIST_PROXY=https://mirrors.cloud.tencent.com/gradle
 # checksum check. Update this together with the wrapper property when the
 # Gradle version changes.
 ARG GRADLE_DIST_SHA256=72f44c9f8ebcb1af43838f45ee5c4aa9c5444898b3468ab3f4af7b6076c5bc3f
-# Version of the Gradle KtLint plugin used by bindings/kotlin/build.gradle.kts.
+# Version of the Gradle KtLint plugin used by packages/actr-kotlin/build.gradle.kts.
 ARG KTLINT_GRADLE_VERSION=12.1.2
 
 USER root
@@ -443,7 +443,7 @@ ENV RUNNER_MANUALLY_TRAP_SIG=1 \
 
 # GitHub-hosted runners keep node/java on PATH system-wide; jobs and Rust
 # tests that shell out to `npm`/`java` directly (without a setup-* step,
-# e.g. cli/tests/typescript_gen_scenarios.rs runs `npm install`) depend on
+# e.g. crates/actr-cli/tests/typescript_gen_scenarios.rs runs `npm install`) depend on
 # that. Put the toolcache bins on PATH so this image matches. setup-*
 # steps still hit the toolcache for version resolution as usual.
 ENV PATH="/opt/hostedtoolcache/node/${NODE_VERSION}/x64/bin:/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/${JDK_VERSION}/x64/bin:${PATH}"
@@ -488,5 +488,5 @@ RUN set -eux; \
 # ARC and `container:` workflow modes can drive it.
 LABEL org.opencontainers.image.title="actrium-runner" \
       org.opencontainers.image.description="Actrium self-hosted GitHub Actions runner (Linux)" \
-      org.opencontainers.image.source="https://github.com/Actrium/actr" \
+      org.opencontainers.image.source="https://github.com/Actrium/actrium" \
       org.opencontainers.image.licenses="Apache-2.0"

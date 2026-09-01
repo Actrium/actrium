@@ -19,12 +19,12 @@ permissions:
 
 jobs:
   publish-web:
-    name: Publish bindings/web
+    name: Publish packages/actr-web
     if: github.event_name == 'registry-publishing-disabled'
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: bindings/web
+        working-directory: packages/actr-web
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -118,10 +118,10 @@ jobs:
             if (packageJson.publishConfig?.access !== 'public') {
               throw new Error(`${path}: publishConfig.access must be public`);
             }
-            if (packageJson.repository?.url !== 'git+https://github.com/Actrium/actr.git') {
-              throw new Error(`${path}: repository.url must be git+https://github.com/Actrium/actr.git`);
+            if (packageJson.repository?.url !== 'git+https://github.com/Actrium/actrium.git') {
+              throw new Error(`${path}: repository.url must be git+https://github.com/Actrium/actrium.git`);
             }
-            if (!packageJson.repository?.directory?.startsWith('bindings/web/packages/')) {
+            if (!packageJson.repository?.directory?.startsWith('packages/actr-web/packages/')) {
               throw new Error(`${path}: repository.directory must point at the package directory`);
             }
           }

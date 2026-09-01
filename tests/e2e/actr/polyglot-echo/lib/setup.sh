@@ -72,7 +72,7 @@ build_actr_cli() {
     # single feature set across every form that shares this actr-cli target
     # dir, avoiding cargo feature-flip rebuilds when forms run back-to-back.
     CARGO_TARGET_DIR="$ACTR_CLI_TARGET_DIR" cargo build \
-        --manifest-path "$REPO_ROOT/cli/Cargo.toml" --bin actr \
+        --manifest-path "$REPO_ROOT/crates/actr-cli/Cargo.toml" --bin actr \
         --features wasm-engine >/dev/null
     ACTR_CLI_BIN="$ACTR_CLI_TARGET_DIR/debug/actr"
     [ -x "$ACTR_CLI_BIN" ] || fail "actr CLI binary missing at $ACTR_CLI_BIN"
@@ -298,7 +298,7 @@ setup_common_prelude() {
 
 # ── Server form: linked-rust (in-process Rust workload) ────────────────────
 #
-# Brings up an in-tree Rust binary at e2e/polyglot-echo/services/linked-rust/
+# Brings up an in-tree Rust binary at tests/e2e/actr/polyglot-echo/services/linked-rust/
 # that builds an actr Node, registers EchoService, and serves Echo RPCs.
 # Same wire protocol as the cdylib path; client driver does not care.
 setup_server_linked_rust() {
@@ -312,7 +312,7 @@ setup_server_linked_rust() {
 
 # ── Server form: wasm-rust (Rust Wasm Component) ──────────────────────────
 #
-# Builds a Rust Wasm Component at e2e/polyglot-echo/services/wasm-rust/ and
+# Builds a Rust Wasm Component at tests/e2e/actr/polyglot-echo/services/wasm-rust/ and
 # serves it via actr-hyper's wasm-engine feature.  Workload contract is the
 # same as cdylib (entry! macro), but the binary is a wasm32-wasip2 component
 # loaded by the Rust hyper host instead of dlopened.
@@ -391,7 +391,7 @@ start_linked_rust_server() {
 # via the same `actr build` pipeline as cdylib-rust (just with a different
 # manifest target/kind), then loads it through `actr run` whose hyper has
 # the wasm-engine feature enabled (build_actr_cli builds the CLI with
-# `--features wasm-engine`; it is not a default feature of cli/Cargo.toml).
+# `--features wasm-engine`; it is not a default feature of crates/actr-cli/Cargo.toml).
 #
 # Reuses server-runtime.toml.tpl (same one cdylib-rust uses) since the
 # only difference at runtime config level is the package path, which the
@@ -512,7 +512,7 @@ start_wasm_rust_server() {
 # ── Streaming server setup ────────────────────────────────────────────────────
 #
 # Builds and starts the in-tree streaming server binary
-# (e2e/polyglot-echo/server/).  The streaming server runs as a *linked
+# (tests/e2e/actr/polyglot-echo/server/).  The streaming server runs as a *linked
 # workload* (not a cdylib package) so that RuntimeContext's DataChunk APIs
 # are available.  It registers directly with mock-actrix under
 # polyglot:EchoStreamService:1.0.0 without going through `actr build` /

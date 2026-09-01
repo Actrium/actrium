@@ -5,7 +5,7 @@ set -euo pipefail
 # actr core) into an ActrCabi.xcframework for iOS / iOS-sim / macOS, packaged
 # with the actr-cabi.h header + modulemap.
 #
-# Simpler than bindings/swift/build-xcframework.sh: no UniFFI, no generated
+# Simpler than packages/actr-swift/build-xcframework.sh: no UniFFI, no generated
 # Actr.swift, no actrFFI.c stub — the Swift wrapper (ActrCabi.swift) is
 # hand-written and lives in the SPM package.
 #
@@ -22,7 +22,7 @@ WORKSPACE_ROOT="$(cd "${ROOT_DIR}/../../.." && pwd)"
 
 if [[ -z "${ACTR_CABI_WORKLOAD_CRATE:-}" ]]; then
   echo "error: ACTR_CABI_WORKLOAD_CRATE must point at a workload crate" >&2
-  echo "hint: ACTR_CABI_WORKLOAD_CRATE=../../e2e/swift-cabi-app/workload $0" >&2
+  echo "hint: ACTR_CABI_WORKLOAD_CRATE=$WORKSPACE_ROOT/path/to/staticlib-workload $0" >&2
   exit 1
 fi
 WORKLOAD_CRATE_DIR="$(cd "${ACTR_CABI_WORKLOAD_CRATE}" && pwd)"

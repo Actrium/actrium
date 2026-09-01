@@ -11,19 +11,19 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ACTOR_RTC_DIR="$(cd "$WORKSPACE_ROOT/../../.." && pwd)"
-ACTRIX_DIR="$ACTOR_RTC_DIR/actrix"
+ACTRIX_DIR="$ACTOR_RTC_DIR"
 # Try multiple config locations
 ACTRIX_CONFIG=""
-for candidate in "$SCRIPT_DIR/actrix-config.toml" "$WORKSPACE_ROOT/actrix-config.toml" "$ACTRIX_DIR/config.example.toml"; do
+for candidate in "$SCRIPT_DIR/actrix-config.toml" "$WORKSPACE_ROOT/actrix-config.toml" "$ACTRIX_DIR/loran/config/actrix.example.toml"; do
     if [ -f "$candidate" ]; then
         ACTRIX_CONFIG="$candidate"
         break
     fi
 done
 if [ -z "$ACTRIX_CONFIG" ]; then
-    if [ -f "$ACTRIX_DIR/config.example.toml" ]; then
+    if [ -f "$ACTRIX_DIR/loran/config/actrix.example.toml" ]; then
         ACTRIX_CONFIG="$WORKSPACE_ROOT/actrix-config.toml"
-        cp "$ACTRIX_DIR/config.example.toml" "$ACTRIX_CONFIG"
+        cp "$ACTRIX_DIR/loran/config/actrix.example.toml" "$ACTRIX_CONFIG"
     fi
 fi
 ACL_DEMO_DIR="$WORKSPACE_ROOT/acl"
@@ -68,7 +68,7 @@ fi
 # Build actrix
 echo "Building actrix from source..."
 cd "$ACTRIX_DIR"
-if ! cargo build 2>&1 | tee "$LOG_DIR/actrix-build.log" | tail -5; then
+if ! cargo build --manifest-path "$ACTRIX_DIR/crates/loran-server/Cargo.toml" 2>&1 | tee "$LOG_DIR/actrix-build.log" | tail -5; then
     echo -e "${RED}❌ Failed to build actrix${NC}"
     exit 1
 fi

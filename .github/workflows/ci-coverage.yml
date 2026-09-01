@@ -28,7 +28,7 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: Generate CLI web runtime assets
-        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+        run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
       - name: Run coverage
         run: |
           cargo llvm-cov clean --workspace
@@ -56,7 +56,7 @@ jobs:
       contents: read
     defaults:
       run:
-        working-directory: bindings/web
+        working-directory: packages/actr-web
     steps:
       - uses: actions/checkout@v5
       - name: Install cargo-llvm-cov
@@ -89,7 +89,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-web-rust-lcov
-          path: bindings/web/web-rust-lcov.info
+          path: packages/actr-web/web-rust-lcov.info
           retention-days: 7
       - name: Upload HTML
         uses: actions/upload-artifact@v4
@@ -105,7 +105,7 @@ jobs:
       contents: read
     defaults:
       run:
-        working-directory: bindings/web
+        working-directory: packages/actr-web
     steps:
       - uses: actions/checkout@v5
       - name: Install wasm-capable clang
@@ -147,13 +147,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-web-wasm-lcov
-          path: bindings/web/web-wasm-lcov.info
+          path: packages/actr-web/web-wasm-lcov.info
           retention-days: 7
       - name: Upload HTML
         uses: actions/upload-artifact@v4
         with:
           name: coverage-web-wasm-html
-          path: bindings/web/target/wasm-coverage-html/
+          path: packages/actr-web/target/wasm-coverage-html/
           retention-days: 7
 
   coverage-typescript:
@@ -163,7 +163,7 @@ jobs:
       contents: read
     defaults:
       run:
-        working-directory: bindings/typescript
+        working-directory: packages/actr-typescript
     steps:
       - uses: actions/checkout@v5
       - name: Setup Node.js
@@ -171,7 +171,7 @@ jobs:
         with:
           node-version: "24"
           cache: "npm"
-          cache-dependency-path: bindings/typescript/package.json
+          cache-dependency-path: packages/actr-typescript/package.json
       - name: Install dependencies
         run: npm install
       - name: Build native binding
@@ -182,13 +182,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-typescript-lcov
-          path: bindings/typescript/coverage/lcov.info
+          path: packages/actr-typescript/coverage/lcov.info
           retention-days: 7
       - name: Upload HTML
         uses: actions/upload-artifact@v4
         with:
           name: coverage-typescript-html
-          path: bindings/typescript/coverage/
+          path: packages/actr-typescript/coverage/
           retention-days: 7
 
   coverage-kotlin:
@@ -198,7 +198,7 @@ jobs:
       contents: read
     defaults:
       run:
-        working-directory: bindings/kotlin
+        working-directory: packages/actr-kotlin
     steps:
       - uses: actions/checkout@v5
       - name: Setup Java
@@ -213,13 +213,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-kotlin-xml
-          path: bindings/kotlin/actr-kotlin/build/reports/kover/report.xml
+          path: packages/actr-kotlin/actr-kotlin/build/reports/kover/report.xml
           retention-days: 7
       - name: Upload HTML
         uses: actions/upload-artifact@v4
         with:
           name: coverage-kotlin-html
-          path: bindings/kotlin/actr-kotlin/build/reports/kover/
+          path: packages/actr-kotlin/actr-kotlin/build/reports/kover/
           retention-days: 7
 
   coverage-summary:
@@ -370,7 +370,7 @@ jobs:
               <li><a href="typescript/">TypeScript</a></li>
               <li><a href="kotlin/">Kotlin</a></li>
             </ul>
-            <p>Web Rust (host unit) covers only the host-compatible bindings/web crates
+            <p>Web Rust (host unit) covers only the host-compatible packages/actr-web crates
             that can run under the native test harness. Web Rust (wasm) covers browser
             tests executed through wasm-bindgen-test. Puppeteer E2E remains functional
             validation unless a separate profiler export path is added.</p>

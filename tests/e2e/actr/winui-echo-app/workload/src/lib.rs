@@ -1,6 +1,6 @@
 //! WinUI EchoApp forwarding workload.
 //!
-//! Mirrors `e2e/swift-echo-app/EchoApp/ActrService.swift`'s
+//! Mirrors `tests/e2e/actr/swift-echo-app/EchoApp/ActrService.swift`'s
 //! `LocalEchoServiceHandlerImpl`: on each inbound call it discovers the remote
 //! `actrium:EchoService:1.0.0` and forwards the raw payload to
 //! `echo.EchoService.Echo`, returning the raw `EchoResponse` bytes.
@@ -11,7 +11,7 @@
 //! `cabi.EchoApp.Echo`), and this dispatcher forwards to the remote service.
 //!
 //! Registered as `"cabi.EchoApp"` via `export_workload!` and linked into
-//! `actr_cabi.dll` by `bindings/cabi/csharp/build-actr-cabi-dll.sh`.
+//! `actr_cabi.dll` by `packages/actr-cabi/csharp/build-actr-cabi-dll.sh`.
 //!
 //! The test-only `actr_fixture_host_bridge_*` exports at the end of this file
 //! are consumed by the ActrSharp fixture package's out-of-repo Windows CI

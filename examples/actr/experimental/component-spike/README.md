@@ -9,7 +9,7 @@ so `cargo build` at the repo root does not see it and the root `Cargo.lock` is n
 ## Layout
 
 ```
-experiments/component-spike/
+examples/actr/experimental/component-spike/
   wit/actr-spike.wit    minimal WIT contract (records, variants, nested records, result types)
   guest/                Rust workload compiled to a Component (wasm32-wasip2)
   host/                 Rust host using wasmtime::component + wit-bindgen to load + dispatch

@@ -4,7 +4,7 @@
 //! policy core's internal vocabulary, deliberately not part of the crate's
 //! public API. A `benches/*.rs` binary is a separate compilation unit that
 //! only links against `actr_hyper`'s public surface, so it cannot name any of
-//! these types — `core/hyper/benches/recovery_latency.rs` (M1/M2) documents
+//! these types — `crates/actr-hyper/benches/recovery_latency.rs` (M1/M2) documents
 //! this and points here.
 //!
 //! This lives as an in-tree, `#[ignore]`d unit test instead: a child module

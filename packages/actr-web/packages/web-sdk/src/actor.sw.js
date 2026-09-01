@@ -1,10 +1,10 @@
 /* Actor-RTC Service Worker entry — wasm-bindgen guest path.
  *
- * Loads a wasm-bindgen guest bundle (produced by `tools/wit-compile-web` →
+ * Loads a wasm-bindgen guest bundle (produced by `tools/actr/wit-compile-web` →
  * `actr-web-abi` + `wasm-pack --target no-modules`) and bridges it into the
  * sw-host runtime. This is the only browser dispatch path post Option U
  * Phase 8 (the previous Component Model + jco variant was deleted; see
- * `bindings/web/docs/option-u-wit-compile-web.zh.md` §11).
+ * `packages/actr-web/docs/option-u-wit-compile-web.zh.md` §11).
  *
  * Required `runtimeConfig` fields:
  *   package_url       - URL of the `.actr` workload package

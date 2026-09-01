@@ -1,7 +1,7 @@
 //! Smoke tests for the CLI command shape.
 //!
 //! These tests verify that the user-facing command surface matches the
-//! documented organization principles (see `cli/README.md`). They do NOT
+//! documented organization principles (see `crates/actr-cli/README.md`). They do NOT
 //! exercise behaviour — they only assert that command tree itself is intact,
 //! so renames / regressions show up fast.
 

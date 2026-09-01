@@ -4,7 +4,7 @@ set -euo pipefail
 # Build a Rust workload crate (cdylib, statically linking actr-cabi rlib +
 # actr core) into a per-target actr_cabi native lib (.dll/.dylib/.so) for
 # .NET consumers (WinUI/WPF/Console). Mirrors
-# bindings/cabi/swift/build-xcframework.sh but produces flat native libs
+# packages/actr-cabi/swift/build-xcframework.sh but produces flat native libs
 # instead of an xcframework — .NET P/Invoke loads them at runtime.
 #
 # Inputs:
@@ -21,7 +21,7 @@ WORKSPACE_ROOT="$(cd "${ROOT_DIR}/../../.." && pwd)"
 
 if [[ -z "${ACTR_CABI_WORKLOAD_CRATE:-}" ]]; then
   echo "error: ACTR_CABI_WORKLOAD_CRATE must point at a workload crate" >&2
-  echo "hint: ACTR_CABI_WORKLOAD_CRATE=../../e2e/cabi-app/workload $0" >&2
+  echo "hint: ACTR_CABI_WORKLOAD_CRATE=$WORKSPACE_ROOT/tests/e2e/actr/winui-echo-app/workload $0" >&2
   exit 1
 fi
 WORKLOAD_CRATE="$(cd "${ACTR_CABI_WORKLOAD_CRATE}" && pwd)"

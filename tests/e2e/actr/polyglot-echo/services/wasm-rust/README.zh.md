@@ -18,9 +18,9 @@ EchoService 实现编译为 **Rust wasm32-wasip2 Component Model** 二进制（`
 | 文件 | 角色 | 来源 |
 |---|---|---|
 | `src/echo_service.rs` | echo 业务逻辑（5 行） | 手写 |
-| `src/lib.rs` | `entry!` + `generated_stub` fallback | 手写（mirror of `cli/fixtures/rust/lib.rs.service.hbs`） |
+| `src/lib.rs` | `entry!` + `generated_stub` fallback | 手写（mirror of `crates/actr-cli/fixtures/rust/lib.rs.service.hbs`） |
 | `manifest.toml`, `Cargo.toml` | 包/项目元信息 | 手写 |
-| `protos/local/echo.proto` | 服务契约 | 手写（共享自 `e2e/polyglot-echo/proto/echo.proto`） |
+| `protos/local/echo.proto` | 服务契约 | 手写（共享自 `tests/e2e/actr/polyglot-echo/proto/echo.proto`） |
 | `src/generated/` | `actr gen -l rust` 输出（dispatcher + prost types） | 生成（gitignored） |
 
 跑 `regenerate.sh` 重生成 `src/generated/`。`src/lib.rs` 用 `#[cfg(actr_has_generated)]` 在缺失时降级 `generated_stub`，这样无需 gen 也能编译。

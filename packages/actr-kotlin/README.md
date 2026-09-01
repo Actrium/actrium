@@ -324,5 +324,5 @@ Licensed under the Apache License, Version 2.0.
 
 ## Related Projects
 
-- [ACTR Framework](https://github.com/Actrium/actr) - Core Rust implementation
-- [ACTR Examples](https://github.com/Actrium/actr/tree/main/examples) - Usage examples
+- [ACTR Framework](https://github.com/Actrium/actrium) - Core Rust implementation
+- [ACTR Examples](https://github.com/Actrium/actrium/tree/main/examples) - Usage examples

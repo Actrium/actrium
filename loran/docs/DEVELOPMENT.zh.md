@@ -13,7 +13,7 @@
 
 ```bash
 # 克隆仓库(包含子项目)
-git clone https://github.com/Actrium/actrix.git
+git clone https://github.com/Actrium/actrium.git
 cd actrix
 
 # 开发构建

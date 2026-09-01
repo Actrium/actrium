@@ -175,7 +175,7 @@ open class SimpleWorkload(
      * Shell (local application) side. Unlike the Rust version, there is no default forwarding
      * behavior - you must implement the logic.
      *
-     * See [shell-actr-echo/client](https://github.com/Actrium/actr/tree/main/examples) for a reference
+     * See [shell-actr-echo/client](https://github.com/Actrium/actrium/tree/main/examples) for a reference
      * implementation pattern.
      *
      * @param ctx Context for making RPC calls

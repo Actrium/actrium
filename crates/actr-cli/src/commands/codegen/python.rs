@@ -687,7 +687,7 @@ fn create_workspace_python_plugin_shim() -> Result<Option<PathBuf>> {
     let Some(workspace_root) = cli_manifest_dir.parent() else {
         return Ok(None);
     };
-    let package_dir = workspace_root.join("tools/protoc-gen/python");
+    let package_dir = workspace_root.join("tools/actr/protoc-gen/python");
     if !package_dir.join("framework_codegen_python").is_dir() {
         return Ok(None);
     }

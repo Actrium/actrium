@@ -29,9 +29,9 @@ driver means appending one ACL rule, not loosening to a wildcard.
 > **Python / Swift client drivers are intentionally absent.**
 > Their client-side entry points are unavailable or broken on the current
 > tree:
-> - **Python**: `bindings/python` ships only the `actr-workload`
+> - **Python**: `packages/actr-python` ships only the `actr-workload`
 >   build helper on `main`; the pyo3 `ActrNode` client class was removed.
-> - **Swift**: `bindings/swift` exposes `ActrNode.from(packageConfig:…)`
+> - **Swift**: `packages/actr-swift` exposes `ActrNode.from(packageConfig:…)`
 >   and `ActrNode.linked(config:type:workload:)`, but the
 >   `ActrNode.fromConfig(configPath:manifestPath:)` + `ActrRef.callRemote`
 >   client entry points the driver needs were removed / superseded.
@@ -44,12 +44,12 @@ driver means appending one ACL rule, not loosening to a wildcard.
 ## Run
 
 ```bash
-bash e2e/polyglot-echo/run.sh                              # cdylib-rust server, rust client, echo
-bash e2e/polyglot-echo/run.sh --server linked-rust        # in-process Rust linked workload server
-bash e2e/polyglot-echo/run.sh --server wasm-rust          # Rust Wasm Component server
-bash e2e/polyglot-echo/run.sh --client rust hi            # custom echo message
-bash e2e/polyglot-echo/run.sh --client rust --scenario server-stream
-bash e2e/polyglot-echo/run.sh --client rust --scenario bidi
+bash tests/e2e/actr/polyglot-echo/run.sh                              # cdylib-rust server, rust client, echo
+bash tests/e2e/actr/polyglot-echo/run.sh --server linked-rust        # in-process Rust linked workload server
+bash tests/e2e/actr/polyglot-echo/run.sh --server wasm-rust          # Rust Wasm Component server
+bash tests/e2e/actr/polyglot-echo/run.sh --client rust hi            # custom echo message
+bash tests/e2e/actr/polyglot-echo/run.sh --client rust --scenario server-stream
+bash tests/e2e/actr/polyglot-echo/run.sh --client rust --scenario bidi
 ```
 
 > `--server wasm-rust` builds a wasm32-wasip2 Component via
@@ -61,7 +61,7 @@ bash e2e/polyglot-echo/run.sh --client rust --scenario bidi
 ## Layout
 
 ```
-e2e/polyglot-echo/
+tests/e2e/actr/polyglot-echo/
 ├── proto/
 │   ├── echo.proto                shared unary service contract
 │   └── echo_stream.proto         server-stream + bidi contract
@@ -111,7 +111,7 @@ The directory is removed on success. Set `KEEP_TMP=1` to preserve it.
 
 ## Why a separate scenario
 
-`e2e/package-runtime-echo` already covers the end-to-end packaging /
+`tests/e2e/actr/package-runtime-echo` already covers the end-to-end packaging /
 trust / runtime path against a real `actrix`. This scenario focuses on
 the *server-form* axis: it deliberately runs against the in-tree
 `mock-actrix` so it can land in CI without a private repo dependency, and

@@ -9,7 +9,7 @@ This document covers common issues in the current Actor-RTC Web Option U / wasm-
 Install from the web workspace root:
 
 ```bash
-cd bindings/web
+cd packages/actr-web
 pnpm install
 ```
 
@@ -25,14 +25,14 @@ cargo install wasm-pack
 Then rebuild:
 
 ```bash
-cd bindings/web
+cd packages/actr-web
 bash crates/sw-host/build.sh
 ```
 
 If you need the CLI-embedded runtime assets, run:
 
 ```bash
-cd bindings/web
+cd packages/actr-web
 bash scripts/sync-cli-assets.sh --build
 ```
 
@@ -52,7 +52,7 @@ The manifest must hash the binary and list/hash `resources/glue.js` as a resourc
 The echo script lays this out automatically:
 
 ```bash
-cd bindings/web/examples/echo
+cd packages/actr-web/examples/echo
 bash start-mock.sh
 ```
 
@@ -61,11 +61,11 @@ bash start-mock.sh
 Refresh the CLI asset copy:
 
 ```bash
-cd bindings/web
+cd packages/actr-web
 bash scripts/sync-cli-assets.sh --build
 ```
 
-Then rebuild the CLI binary that embeds `cli/assets/web-runtime/`.
+Then rebuild the CLI binary that embeds `crates/actr-cli/assets/web-runtime/`.
 
 ## Runtime Failures
 
@@ -96,7 +96,7 @@ The browser verifier never skips package verification. Confirm the runtime confi
 For local example runs, prefer the mock actrix scripts:
 
 ```bash
-cd bindings/web/examples/echo
+cd packages/actr-web/examples/echo
 bash start-mock.sh
 ```
 

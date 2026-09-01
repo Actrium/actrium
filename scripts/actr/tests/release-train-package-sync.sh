@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 cd "$repo_root"
 
 # Load release-train helpers without executing the script entrypoint.
 script_under_test=$(mktemp)
-sed '/^main "\$@"$/d' scripts/release-train.sh >"$script_under_test"
+sed '/^main "\$@"$/d' scripts/actr/release-train.sh >"$script_under_test"
 source "$script_under_test"
 trap 'rm -f "$script_under_test"' EXIT
 

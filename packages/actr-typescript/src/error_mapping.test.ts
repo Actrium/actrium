@@ -19,7 +19,7 @@
  *
  * The wire shapes below are kept in lock-step with the Rust unit tests in
  * `src/error.rs` (`mod tests`) and the classification table in
- * `core/protocol/src/error.rs::Classify for ActrError`.
+ * `crates/actr-protocol/src/error.rs::Classify for ActrError`.
  */
 
 import { describe, it, expect } from 'vitest';

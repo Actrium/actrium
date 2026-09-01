@@ -7,7 +7,7 @@ This folder contains runnable ACTR TypeScript examples.
 From the repo root:
 
 ```bash
-cd bindings/typescript
+cd packages/actr-typescript
 npm install
 npm run build
 ```

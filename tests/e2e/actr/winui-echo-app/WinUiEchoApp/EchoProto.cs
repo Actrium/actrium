@@ -5,7 +5,7 @@ namespace WinUiEchoApp;
 
 // Manual protobuf codec for echo.EchoRequest / echo.EchoResponse.
 //
-// Schema (e2e/swift-echo-app/protos/remote/echo/echo.proto):
+// Schema (tests/e2e/actr/swift-echo-app/protos/remote/echo/echo.proto):
 //   message EchoRequest  { string message = 1; }
 //   message EchoResponse { string reply = 1; uint64 timestamp = 2; }
 //

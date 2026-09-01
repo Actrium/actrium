@@ -52,7 +52,7 @@ impl KotlinGenerator {
     /// Tries to build the workspace-local Kotlin protoc plugin first,
     /// then falls back to system PATH lookup.
     fn ensure_required_tools(&self) -> Result<PathBuf> {
-        // 1. Try building from workspace-local tools/protoc-gen/kotlin/
+        // 1. Try building from workspace-local tools/actr/protoc-gen/kotlin/
         if let Some(local_plugin) = self.try_build_workspace_kotlin_plugin()? {
             return Ok(local_plugin);
         }
@@ -87,23 +87,23 @@ impl KotlinGenerator {
             "Could not find protoc-gen-actrframework-kotlin plugin.\n\n\
              Installation options:\n\n\
              1. Build from workspace (automatic):\n\
-                The CLI will attempt to build from tools/protoc-gen/kotlin/ if it exists.\n\
+                The CLI will attempt to build from tools/actr/protoc-gen/kotlin/ if it exists.\n\
                 Requires: Java 17+, Gradle wrapper in that directory.\n\n\
              2. Build from source:\n\
-                cd tools/protoc-gen/kotlin && ./gradlew protocPluginJar\n\n\
+                cd tools/actr/protoc-gen/kotlin && ./gradlew protocPluginJar\n\n\
              3. Set environment variable:\n\
                 export ACTR_KOTLIN_PLUGIN_PATH=/path/to/protoc-gen-actrframework-kotlin\n\n\
-             For more information, visit: https://github.com/Actrium/actr/tree/main/tools/protoc-gen/kotlin",
+             For more information, visit: https://github.com/Actrium/actrium/tree/main/tools/actr/protoc-gen/kotlin",
         ))
     }
 
     /// Try to build the workspace-local Kotlin protoc plugin from
-    /// `tools/protoc-gen/kotlin/` and return its path on success.
+    /// `tools/actr/protoc-gen/kotlin/` and return its path on success.
     fn try_build_workspace_kotlin_plugin(&self) -> Result<Option<PathBuf>> {
         let plugin_root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
-            .map(|path| path.join("tools/protoc-gen/kotlin"))
-            .unwrap_or_else(|| PathBuf::from("tools/protoc-gen/kotlin"));
+            .map(|path| path.join("tools/actr/protoc-gen/kotlin"))
+            .unwrap_or_else(|| PathBuf::from("tools/actr/protoc-gen/kotlin"));
 
         let build_gradle = plugin_root.join("build.gradle.kts");
         if !build_gradle.is_file() {

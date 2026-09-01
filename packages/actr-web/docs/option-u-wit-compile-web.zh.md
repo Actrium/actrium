@@ -8,7 +8,7 @@
 | Phase | 状态 | 交付 |
 |-------|------|------|
 | **0 探查** | ✓ | `/tmp/wit-content-dump.md`；结论 GREEN LIGHT |
-| **1 types.rs 生成** | ✓ | `tools/wit-compile-web/` + `actr-web-abi/src/types.rs`（10 record + 3 variant） |
+| **1 types.rs 生成** | ✓ | `tools/actr/wit-compile-web/` + `actr-web-abi/src/types.rs`（10 record + 3 variant） |
 | **2 guest.rs 生成** | ✓ | `actr-web-abi/src/guest.rs`（8 host imports + async wrappers） |
 | **3 host.rs 生成** | ✓ | `actr-web-abi/src/host.rs`（`Workload` trait + 17 `#[wasm_bindgen]` exports） |
 | **4 Echo 接入 + e2e** | ✓ | `server/client-guest-wbg` + `actor.sw.js`（Phase 8 后 WBG 即唯一）+ `start-mock.sh`；**BasicFunction 6/6 PASS** |
@@ -16,12 +16,12 @@
 | **6a-I γ-unified 整合** | ✓ | 6 commits；BasicFunction 6/6 ✓；架构落地 |
 | **6b entry! 宏 + protoc 跨 target** | ✓ | 5 commits（WebWorkloadAdapter + 宏 + protoc-gen + smoke test crate；彼时的 ServiceHandler witness 无消费方，已于 #292 删除） |
 | **6c echo 一份化** | ✓ | 3 commits 合入 main（`87b3401d` / `a4ec581b` / `cff7f71a`），`*-guest-wbg` 已删，`*-guest` 单 crate 跨 target |
-| **TD-002 sync-cli-assets** | ✓ | `bindings/web/scripts/sync-cli-assets.sh` + sw-host build.sh 末尾自动触发 |
+| **TD-002 sync-cli-assets** | ✓ | `packages/actr-web/scripts/sync-cli-assets.sh` + sw-host build.sh 末尾自动触发 |
 | **TD-003 γ HashMap** | ✓ | `guest_bridge.rs::DISPATCH_CTXS: HashMap<RequestId, Ctx>` |
 | **TD-004 α'** | ✓ | cred namespace 按 client_id；mock-actrix rebind WARN |
 | **TD-006 multi-client RPC** | ✓ | mock-actrix relay 精确投递 + sw-host stale peer cleanup + DOM/SW client lifecycle 修复（commit `301c58d6`） |
 | **Phase 7 data-stream 迁移** | 待完成 | `data-stream-peer-concurrent` 仍由自定义 Service Worker 直接执行松散、未验证的 wasm-bindgen JS/WASM；已降级为默认拒绝启动的 legacy 示例，迁入 signed `.actr` canonical loader 后才能恢复为当前示例 |
-| **Phase 8 CM 路径删除** | ✓ | 删除 `bindings/web/packages/web-sdk/src/actor.sw.js`（CM 旧版）+ `cli/assets/web-runtime/actor.sw.js`（同步副本）+ `bindings/web/scripts/transpile-component.sh`；将 `actor-wbg.sw.js` → `actor.sw.js`、`start-mock-wbg.sh` → `start-mock.sh`；`register_component_workload` → `register_guest_workload`；移除 `cli` 内 `ACTR_WEB_GUEST_MODE` env 选择器；保留 `host_*_async` 等 host imports（WBG 路径仍用） |
+| **Phase 8 CM 路径删除** | ✓ | 删除 `packages/actr-web/packages/web-sdk/src/actor.sw.js`（CM 旧版）+ `crates/actr-cli/assets/web-runtime/actor.sw.js`（同步副本）+ `packages/actr-web/scripts/transpile-component.sh`；将 `actor-wbg.sw.js` → `actor.sw.js`、`start-mock-wbg.sh` → `start-mock.sh`；`register_component_workload` → `register_guest_workload`；移除 `cli` 内 `ACTR_WEB_GUEST_MODE` env 选择器；保留 `host_*_async` 等 host imports（WBG 路径仍用） |
 
 **最终 MultiTab 结果**：**`SUITES='BasicFunction MultiTab' bash start-mock.sh` 12/12 全过**。`1-0 Basic Echo Connectivity` / `6-2 Concurrent Multi-Client` / `6-3 Close One Client` / `6-4 Refresh One Client` / `6-5 Multiple Server Instances` 全部包含在内。
 
@@ -47,7 +47,7 @@ Option U 的核心主张：
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│ core/framework/wit/actr-workload.wit    （单一契约源）       │
+│ crates/actr-framework/wit/actr-workload.wit    （单一契约源）       │
 └─────────────────────────┬──────────────────────────────────┘
                           │
              ┌────────────┴──────────┐
@@ -56,7 +56,7 @@ Option U 的核心主张：
     ┌─────────────────┐    ┌──────────────────────────┐
     │ Native path     │    │ Web path                 │
     │                 │    │                          │
-    │ wit-bindgen     │    │ tools/wit-compile-web    │
+    │ wit-bindgen     │    │ tools/actr/wit-compile-web    │
     │ (async: true)   │    │   (new)                  │
     │                 │    │                          │
     │ ↓               │    │ ↓                        │
@@ -85,24 +85,24 @@ Option U 的核心主张：
 
 ## 2. 编译器职责
 
-输入：`core/framework/wit/actr-workload.wit`
+输入：`crates/actr-framework/wit/actr-workload.wit`
 
 输出（全部以 **committed Rust 源码** 形式）：
 
-1. **`bindings/web/crates/actr-web-abi/src/types.rs`**
+1. **`packages/actr-web/crates/actr-web-abi/src/types.rs`**
    类型定义：每个 WIT record / variant / enum / flags 对应一个 Rust `#[derive(Serialize, Deserialize, Debug, Clone)]` 的 struct / enum
 
-2. **`bindings/web/crates/actr-web-abi/src/guest.rs`**
+2. **`packages/actr-web/crates/actr-web-abi/src/guest.rs`**
    Guest 侧 import wrappers：每个 WIT import func 对应
    - 一个 `#[wasm_bindgen] extern "C"` 的 raw FFI 声明
    - 一个对用户友好的 async Rust 包装（`serde_wasm_bindgen::to_value` 入参 + `JsFuture::from` await + `from_value` 出参）
 
-3. **`bindings/web/crates/actr-web-abi/src/host.rs`**
+3. **`packages/actr-web/crates/actr-web-abi/src/host.rs`**
    Host 侧 export wrappers：每个 WIT export func 对应
    - 一个 `#[wasm_bindgen]` 导出的 entry point
    - 派发到用户实现的 trait 方法
 
-4. **CI drift check**：compiler 可以以 `--check` 模式跑，重新生成后 `diff` committed 版本，不匹配就退 1。已有 `tools/wit-lint` 是类似模式。
+4. **CI drift check**：compiler 可以以 `--check` 模式跑，重新生成后 `diff` committed 版本，不匹配就退 1。已有 `tools/actr/wit-lint` 是类似模式。
 
 ---
 
@@ -140,7 +140,7 @@ WIT 类型 ↔ JsValue 映射由 `serde-wasm-bindgen` crate 提供，我们只�
 
 ```wit
 interface host {
-    call-raw: func(target: actor-id, body: list<u8>) 
+    call-raw: func(target: actor-id, body: list<u8>)
         -> result<list<u8>, actor-error>;
     discover: func(realm: u32, actor-type: string) -> actor-id;
     log: func(level: u32, msg: string);
@@ -173,11 +173,11 @@ use wasm_bindgen_futures::JsFuture;
 #[wasm_bindgen(module = "/sw/actr-host.js")]
 extern "C" {
     #[wasm_bindgen(js_name = actrHostCallRaw, catch)]
-    fn __host_call_raw(target: JsValue, body: JsValue) 
+    fn __host_call_raw(target: JsValue, body: JsValue)
         -> Result<js_sys::Promise, JsValue>;
 
     #[wasm_bindgen(js_name = actrHostDiscover, catch)]
-    fn __host_discover(realm: u32, actor_type: &str) 
+    fn __host_discover(realm: u32, actor_type: &str)
         -> Result<js_sys::Promise, JsValue>;
 
     #[wasm_bindgen(js_name = actrHostLog)]
@@ -185,7 +185,7 @@ extern "C" {
 }
 
 pub async fn call_raw(
-    target: &super::types::ActorId, 
+    target: &super::types::ActorId,
     body: Vec<u8>,
 ) -> Result<Vec<u8>, super::types::ActorError> {
     let js_target = serde_wasm_bindgen::to_value(target)
@@ -240,8 +240,8 @@ async fn handle_echo(msg: &[u8]) -> Result<Vec<u8>, ActorError> {
 
 ## 6. Phase 0：探查步骤（最先跑）
 
-1. 在 worktree 里写一个小 Rust 程序（或直接用 `tools/wit-lint` 现成的 wit-parser 调用）
-2. 读 `core/framework/wit/actr-workload.wit`
+1. 在 worktree 里写一个小 Rust 程序（或直接用 `tools/actr/wit-lint` 现成的 wit-parser 调用）
+2. 读 `crates/actr-framework/wit/actr-workload.wit`
 3. dump 出：
    - 所有 record / variant / enum / flags 的名字和字段
    - 所有 import func 的签名（参数 / 返回 / async 与否）
@@ -273,14 +273,14 @@ async fn handle_echo(msg: &[u8]) -> Result<Vec<u8>, ActorError> {
 
 | 产物 | 影响 |
 |------|------|
-| `core/framework/wit/actr-workload.wit` | **不变**（依然是单一事实源） |
-| `core/framework/src/guest/` Rust guest 适配层 | native 侧保留，浏览器侧改用 `actr-web-abi` |
-| `bindings/web/crates/sw-host/` | 保留，但 `guest_bridge.rs` 里 jco bridge 相关代码可以大幅削减 |
-| `bindings/web/crates/dom-bridge/` | 不变 |
-| `bindings/web/scripts/transpile-component.sh` | 已随 Phase 8 删除；不属于当前路径 |
-| `cli/assets/web-runtime/actr_sw_host*` | 继续用（只是内容变简单） |
+| `crates/actr-framework/wit/actr-workload.wit` | **不变**（依然是单一事实源） |
+| `crates/actr-framework/src/guest/` Rust guest 适配层 | native 侧保留，浏览器侧改用 `actr-web-abi` |
+| `packages/actr-web/crates/sw-host/` | 保留，但 `guest_bridge.rs` 里 jco bridge 相关代码可以大幅削减 |
+| `packages/actr-web/crates/dom-bridge/` | 不变 |
+| `packages/actr-web/scripts/transpile-component.sh` | 已随 Phase 8 删除；不属于当前路径 |
+| `crates/actr-cli/assets/web-runtime/actr_sw_host*` | 继续用（只是内容变简单） |
 | TD-001（5 个 zero-call setter） | 可能刚好有理由**真正用上** Rust 侧 DataLane |
-| TD-002（cli/assets sync） | 仍然存在，但 jco 产物不再进这条路径 |
+| TD-002（crates/actr-cli/assets sync） | 仍然存在，但 jco 产物不再进这条路径 |
 | jco fork + #1361 patch | 仅作为 T18 历史 incident 留档，不属于当前浏览器路径 |
 
 ---
@@ -297,9 +297,9 @@ async fn handle_echo(msg: &[u8]) -> Result<Vec<u8>, ActorError> {
 
 ```bash
 # 在 worktree 里：
-cd tools/wit-lint
+cd tools/actr/wit-lint
 # 看它怎么调 wit-parser，复用
-cargo run --example dump-wit-content -- core/framework/wit/actr-workload.wit
+cargo run --example dump-wit-content -- crates/actr-framework/wit/actr-workload.wit
 # 输出应覆盖 §6 步骤 3 的所有 dump 项
 ```
 
@@ -315,8 +315,8 @@ Option U 核心路径已落地（Phase 0-4 完成，BasicFunction 6/6 PASS）。
 
 | # | 项目 | 状态 | 落点 |
 |---|------|------|------|
-| 5.1 | CI drift check：`cargo run -p actr-wit-compile-web -- --check` 与 `bash bindings/web/scripts/sync-cli-assets.sh --check` 双 gate | ✓ | `.github/workflows/ci-web.yml` |
-| 5.2 | `wit-lint` 与 `wit-compile-web` 并存关系：两者各自职责文档化（lint 仍用 `wit-parser=0.247.0`，与编译器钉同版本） | ✓ | `tools/wit-lint/README.md` 末段对比表（"Relationship to actr-wit-compile-web"） |
+| 5.1 | CI drift check：`cargo run -p actr-wit-compile-web -- --check` 与 `bash packages/actr-web/scripts/sync-cli-assets.sh --check` 双 gate | ✓ | `.github/workflows/ci-web.yml` |
+| 5.2 | `wit-lint` 与 `wit-compile-web` 并存关系：两者各自职责文档化（lint 仍用 `wit-parser=0.247.0`，与编译器钉同版本） | ✓ | `tools/actr/wit-lint/README.md` 末段对比表（"Relationship to actr-wit-compile-web"） |
 | 5.3 | T18 doc 标"已绕开（Option U）"作为实际采用路径 | ✓ | `t18-jco-async-lift-hang.zh.md` 头部 |
 | 5.4 | Option U doc 进度快照刷新 | ✓ | 本文档 §进度快照 |
 | 5.5 | CM 路径 deprecate 节奏决策 | ✓ | **决策**：Phase 7 跳过 + Phase 8 直接删（见进度快照 Phase 7/8 行）。删除已落地，全套 e2e（BasicFunction + MultiTab 12/12）通过 |
@@ -336,7 +336,7 @@ Option U 核心路径已落地（Phase 0-4 完成，BasicFunction 6/6 PASS）。
 | # | 项目 | 成本 | 产物 |
 |---|------|------|------|
 | 6.1 | 历史备选：旧 `register_component_workload` handler 外加 async mutex | 0.5 h | 后续未采用；当前实现走 request_id HashMap + `register_guest_workload` |
-| 6.2 | sync cli/assets（TD-002 流程）+ rebuild actr binary | 5 min | 同一 commit 或紧邻的 `chore(cli/assets): sync` |
+| 6.2 | sync crates/actr-cli/assets（TD-002 流程）+ rebuild actr binary | 5 min | 同一 commit 或紧邻的 `chore(crates/actr-cli/assets): sync` |
 | 6.3 | 跑 MultiTab 期待 6-1/6-2/6-3/6-4 PASS | 10 min | evidence log |
 | 6.4 | 6-5 "Multiple Server Instances" 独立议：改 `set_workload` 为 `HashMap<ActrType, Box<dyn Workload>>` **或**把 6-5 分类成"非 SW 架构支持的测试" | 0.5 h | commit 或 test-auto.js 分类调整 |
 | 6.5 | 6-6 "Shared SW Isolation" 独立调试 | 未知 | 可能另立 TD |
@@ -345,10 +345,10 @@ Option U 核心路径已落地（Phase 0-4 完成，BasicFunction 6/6 PASS）。
 
 | # | 项目 | 成本 | 产物 |
 |---|------|------|------|
-| 6.γ.1 | 给 WIT 所有 host import 加 `request-id` 参数 | 0.5 h | `core/framework/wit/actr-workload.wit` 改动 |
-| 6.γ.2 | `tools/wit-compile-web` 跟着改，重生成 `actr-web-abi` | 0.5 h | 两个 commit（compiler + 生成物） |
+| 6.γ.1 | 给 WIT 所有 host import 加 `request-id` 参数 | 0.5 h | `crates/actr-framework/wit/actr-workload.wit` 改动 |
+| 6.γ.2 | `tools/actr/wit-compile-web` 跟着改，重生成 `actr-web-abi` | 0.5 h | 两个 commit（compiler + 生成物） |
 | 6.γ.3 | `guest_bridge.rs` 改为 `HashMap<RequestId, Rc<RuntimeContext>>`，`host_*_async` 按传入 id 查表 | 1 h | sw-host commit |
-| 6.γ.4 | 同步 cli/assets + 跑 MultiTab | 15 min | |
+| 6.γ.4 | 同步 crates/actr-cli/assets + 跑 MultiTab | 15 min | |
 | 6.γ.5 | 评估对 native CM 路径的兼容性（wit-bindgen 改 WIT 后也要重生成 native 侧） | 0.5 h | 核实 native 跑的 tests 过 |
 
 ### 最终目标覆盖

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 
 source "$SCRIPT_DIR/../package-runtime-echo/lib/common.sh"
 source "$SCRIPT_DIR/lib/readiness.sh"
@@ -14,7 +14,7 @@ REALM_ID=""
 ADMIN_PASSWORD="e2e-test-password"
 MANUFACTURER="actrium"
 ACTRIX_BIN="${ACTRIX_BIN:-}"
-ACTR_CLI_MANIFEST="$REPO_ROOT/cli/Cargo.toml"
+ACTR_CLI_MANIFEST="$REPO_ROOT/crates/actr-cli/Cargo.toml"
 ACTRIX_CONFIG_TEMPLATE="$SCRIPT_DIR/../package-runtime-echo/config/actrix.toml"
 E2E_TARGET_ROOT="$REPO_ROOT/target/e2e-cache/swift-echo-app"
 ACTR_TARGET_DIR="$E2E_TARGET_ROOT/actr-cli"
@@ -475,7 +475,7 @@ build_local_actrix() {
 
     section "🔨 Building local actrix from source"
     CARGO_TARGET_DIR="$ACTR_TARGET_DIR" cargo build \
-        --manifest-path "$REPO_ROOT/actrix/crates/actrixd/Cargo.toml" \
+        --manifest-path "$REPO_ROOT/crates/loran-server/Cargo.toml" \
         --bin actrix >/dev/null
     ACTRIX_BIN="$ACTR_TARGET_DIR/debug/actrix"
     [ -x "$ACTRIX_BIN" ] || fail "actrix binary missing at $ACTRIX_BIN"
@@ -502,24 +502,24 @@ EOF
 
 [patch.crates-io]
 actr = { path = "$repo_path" }
-actr-config = { path = "$repo_path/core/config" }
-actr-protocol = { path = "$repo_path/core/protocol" }
-actr-framework = { path = "$repo_path/core/framework" }
-actr-hyper = { path = "$repo_path/core/hyper" }
-actr-pack = { path = "$repo_path/core/pack" }
-actr-platform-native = { path = "$repo_path/core/platform-native" }
-actr-platform-traits = { path = "$repo_path/core/platform-traits" }
-actr-runtime = { path = "$repo_path/core/runtime" }
-actr-runtime-mailbox = { path = "$repo_path/core/runtime-mailbox" }
-actr-service-compat = { path = "$repo_path/core/service-compat" }
+actr-config = { path = "$repo_path/crates/actr-config" }
+actr-protocol = { path = "$repo_path/crates/actr-protocol" }
+actr-framework = { path = "$repo_path/crates/actr-framework" }
+actr-hyper = { path = "$repo_path/crates/actr-hyper" }
+actr-pack = { path = "$repo_path/crates/actr-pack" }
+actr-platform-native = { path = "$repo_path/crates/actr-platform-native" }
+actr-platform-traits = { path = "$repo_path/crates/actr-platform-traits" }
+actr-runtime = { path = "$repo_path/crates/actr-runtime" }
+actr-runtime-mailbox = { path = "$repo_path/crates/actr-runtime-mailbox" }
+actr-service-compat = { path = "$repo_path/crates/actr-service-compat" }
 EOF
 }
 
 pin_workspace_actr_dependencies() {
     local cargo_toml="$1"
 
-    ACTR_FRAMEWORK_PATH="$REPO_ROOT/core/framework" \
-    ACTR_PROTOCOL_PATH="$REPO_ROOT/core/protocol" \
+    ACTR_FRAMEWORK_PATH="$REPO_ROOT/crates/actr-framework" \
+    ACTR_PROTOCOL_PATH="$REPO_ROOT/crates/actr-protocol" \
         perl -i -pe '
             if (/^actr-framework = /) {
                 $_ = qq{actr-framework = { path = "$ENV{ACTR_FRAMEWORK_PATH}" }\n};
@@ -528,9 +528,9 @@ pin_workspace_actr_dependencies() {
             }
         ' "$cargo_toml"
 
-    grep -Fq "actr-framework = { path = \"$REPO_ROOT/core/framework\" }" "$cargo_toml" ||
+    grep -Fq "actr-framework = { path = \"$REPO_ROOT/crates/actr-framework\" }" "$cargo_toml" ||
         fail "Failed to pin actr-framework to the workspace"
-    grep -Fq "actr-protocol = { path = \"$REPO_ROOT/core/protocol\" }" "$cargo_toml" ||
+    grep -Fq "actr-protocol = { path = \"$REPO_ROOT/crates/actr-protocol\" }" "$cargo_toml" ||
         fail "Failed to pin actr-protocol to the workspace"
 }
 
@@ -713,13 +713,13 @@ prepare_echo_app_workspace() {
     # leaving the checked-out fixture and any developer-local CLI config intact.
     rm -rf "$TMP_APP_DIR/EchoApp/Generated" "$TMP_APP_DIR/protos/remote"
 
-    ACTR_SWIFT_PATH="$REPO_ROOT/bindings/swift" \
+    ACTR_SWIFT_PATH="$REPO_ROOT/packages/actr-swift" \
         perl -i -pe '
             if (/^\s*path: \.\.\/\.\.\/bindings\/swift\s*$/) {
                 $_ = qq{    path: $ENV{ACTR_SWIFT_PATH}\n};
             }
         ' "$TMP_APP_DIR/project.yml"
-    grep -Fq "path: $REPO_ROOT/bindings/swift" "$TMP_APP_DIR/project.yml" ||
+    grep -Fq "path: $REPO_ROOT/packages/actr-swift" "$TMP_APP_DIR/project.yml" ||
         fail "Failed to point EchoApp at the workspace Swift binding"
 
     write_project_keychain_config "$TMP_APP_DIR" "$PROVISIONED_KEYCHAIN"

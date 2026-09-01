@@ -38,7 +38,7 @@ jobs:
           targets: ${{ inputs.full_matrix && 'x86_64-pc-windows-msvc aarch64-pc-windows-msvc' || 'x86_64-pc-windows-msvc' }}
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: e2e/winui-echo-app/workload
+          workspaces: tests/e2e/actr/winui-echo-app/workload
           cache-on-failure: true
 
       - name: Install protoc
@@ -54,7 +54,7 @@ jobs:
       - name: Build EchoWorkload cdylib
         shell: pwsh
         run: |
-          $workload = "e2e/winui-echo-app/workload/Cargo.toml"
+          $workload = "tests/e2e/actr/winui-echo-app/workload/Cargo.toml"
           $cargoProfile = if ($env:ACTR_CSHARP_FULL_MATRIX -eq "true") { "release" } else { "ci" }
           $profileArgs = if ($cargoProfile -eq "release") { @("--release") } else { @("--profile", "ci") }
 
@@ -63,10 +63,10 @@ jobs:
           & cargo @x64Args
           if ($LASTEXITCODE -ne 0) { throw "win-x64 cargo build failed (exit $LASTEXITCODE)" }
 
-          $fixtureRun = "bindings/cabi/csharp/tests/EchoWorkloadFixture/runtimes"
+          $fixtureRun = "packages/actr-cabi/csharp/tests/EchoWorkloadFixture/runtimes"
           New-Item -ItemType Directory -Force -Path "$fixtureRun/win-x64/native" | Out-Null
           Copy-Item `
-            "e2e/winui-echo-app/workload/target/x86_64-pc-windows-msvc/$cargoProfile/winui_echo_app_workload.dll" `
+            "tests/e2e/actr/winui-echo-app/workload/target/x86_64-pc-windows-msvc/$cargoProfile/winui_echo_app_workload.dll" `
             "$fixtureRun/win-x64/native/actr_cabi.dll"
 
           if ($env:ACTR_CSHARP_FULL_MATRIX -eq "true") {
@@ -76,7 +76,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "win-arm64 cargo build failed (exit $LASTEXITCODE)" }
             New-Item -ItemType Directory -Force -Path "$fixtureRun/win-arm64/native" | Out-Null
             Copy-Item `
-              "e2e/winui-echo-app/workload/target/aarch64-pc-windows-msvc/$cargoProfile/winui_echo_app_workload.dll" `
+              "tests/e2e/actr/winui-echo-app/workload/target/aarch64-pc-windows-msvc/$cargoProfile/winui_echo_app_workload.dll" `
               "$fixtureRun/win-arm64/native/actr_cabi.dll"
           }
           Write-Host "Built ActrSharp fixture profile=$cargoProfile full_matrix=$env:ACTR_CSHARP_FULL_MATRIX"
@@ -94,7 +94,7 @@ jobs:
         run: |
           $cargo = (Get-Content Cargo.toml | Select-String '^version = "(.+)"' |
                     Select-Object -First 1).Matches.Groups[1].Value
-          $csproj = (Get-Content bindings/cabi/csharp/ActrSharp/ActrSharp.csproj |
+          $csproj = (Get-Content packages/actr-cabi/csharp/ActrSharp/ActrSharp.csproj |
                      Select-String '<Version>(.+)</Version>' |
                      Select-Object -First 1).Matches.Groups[1].Value
           Write-Host "Cargo workspace=$cargo  ActrSharp.csproj=$csproj"
@@ -106,14 +106,14 @@ jobs:
       - name: dotnet format (verify no changes)
         shell: pwsh
         run: |
-          dotnet format bindings/cabi/csharp/ActrSharp/ActrSharp.csproj --verify-no-changes
-          dotnet format bindings/cabi/csharp/tests/ActrSharp.Tests/ActrSharp.Tests.csproj --verify-no-changes
+          dotnet format packages/actr-cabi/csharp/ActrSharp/ActrSharp.csproj --verify-no-changes
+          dotnet format packages/actr-cabi/csharp/tests/ActrSharp.Tests/ActrSharp.Tests.csproj --verify-no-changes
 
       - name: Restore + build ActrSharp
         shell: pwsh
         run: |
-          dotnet restore bindings/cabi/csharp/ActrSharp/ActrSharp.csproj
-          dotnet build bindings/cabi/csharp/ActrSharp/ActrSharp.csproj `
+          dotnet restore packages/actr-cabi/csharp/ActrSharp/ActrSharp.csproj
+          dotnet build packages/actr-cabi/csharp/ActrSharp/ActrSharp.csproj `
             --no-restore --configuration Release -p:Version=$env:ACTR_VERSION
 
       # Managed-layer unit tests. The test project references ActrSharp via
@@ -126,7 +126,7 @@ jobs:
         run: |
           # --runtime win-x64 guarantees RuntimeInformation.RuntimeIdentifier is
           # non-empty so the negative tests can assert ex.Rid is populated.
-          dotnet test bindings/cabi/csharp/tests/ActrSharp.Tests/ActrSharp.Tests.csproj `
+          dotnet test packages/actr-cabi/csharp/tests/ActrSharp.Tests/ActrSharp.Tests.csproj `
             --configuration Release --runtime win-x64 --logger "console;verbosity=normal"
 
       - name: Pack ActrSharp (nupkg + snupkg)
@@ -134,7 +134,7 @@ jobs:
         run: |
           $artifacts = "$PWD/artifacts"
           New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
-          dotnet pack bindings/cabi/csharp/ActrSharp/ActrSharp.csproj `
+          dotnet pack packages/actr-cabi/csharp/ActrSharp/ActrSharp.csproj `
             --no-build --configuration Release `
             -p:Version=$env:ACTR_VERSION -p:PackageOutputPath=$artifacts
           Get-ChildItem $artifacts | ForEach-Object { Write-Host "  $($_.Name)" }
@@ -176,7 +176,7 @@ jobs:
             '  </packageSourceMapping>',
             '</configuration>'
           )
-          ($cfg -join "`n") | Set-Content -Path bindings/cabi/csharp/nuget.config -Encoding utf8
+          ($cfg -join "`n") | Set-Content -Path packages/actr-cabi/csharp/nuget.config -Encoding utf8
           Write-Host "Local feed at $feed (nuget.config written)"
 
       # The fixture is packed AFTER ActrSharp is in the feed: it declares an
@@ -184,7 +184,7 @@ jobs:
       - name: Pack EchoWorkload fixture
         shell: pwsh
         run: |
-          dotnet pack bindings/cabi/csharp/tests/EchoWorkloadFixture/EchoWorkloadFixture.csproj `
+          dotnet pack packages/actr-cabi/csharp/tests/EchoWorkloadFixture/EchoWorkloadFixture.csproj `
             --configuration Release `
             -p:Version=$env:ACTR_VERSION -p:ActrSharpVersion=$env:ACTR_VERSION `
             -p:PackageOutputPath=$PWD/artifacts
@@ -243,12 +243,12 @@ jobs:
             $peOff = [System.BitConverter]::ToInt32($b, 0x3C)
             return ('0x{0:X4}' -f [System.BitConverter]::ToUInt16($b, $peOff + 4))
           }
-          $x64Dll = "bindings/cabi/csharp/tests/EchoWorkloadFixture/runtimes/win-x64/native/actr_cabi.dll"
+          $x64Dll = "packages/actr-cabi/csharp/tests/EchoWorkloadFixture/runtimes/win-x64/native/actr_cabi.dll"
           $m1 = Get-PeMachine $x64Dll
           Write-Host "win-x64 PE machine=$m1 (expect 0x8664)"
           if ($m1 -ne '0x8664') { throw "win-x64 actr_cabi.dll is not AMD64 (got $m1)" }
           if ($env:ACTR_CSHARP_FULL_MATRIX -eq "true") {
-            $armDll = "bindings/cabi/csharp/tests/EchoWorkloadFixture/runtimes/win-arm64/native/actr_cabi.dll"
+            $armDll = "packages/actr-cabi/csharp/tests/EchoWorkloadFixture/runtimes/win-arm64/native/actr_cabi.dll"
             $m2 = Get-PeMachine $armDll
             Write-Host "win-arm64 PE machine=$m2 (expect 0xAA64)"
             if ($m2 -ne '0xAA64') { throw "win-arm64 actr_cabi.dll is not ARM64 (got $m2)" }
@@ -311,7 +311,7 @@ jobs:
           ($cfg -join "`n") | Set-Content -Path nuget.config -Encoding utf8
 
           dotnet add package ActrSharp.Native.EchoWorkload --version $env:ACTR_VERSION
-          Copy-Item "$env:GITHUB_WORKSPACE/bindings/cabi/csharp/tests/EchoWorkloadFixture/consumer/Program.cs" `
+          Copy-Item "$env:GITHUB_WORKSPACE/packages/actr-cabi/csharp/tests/EchoWorkloadFixture/consumer/Program.cs" `
             -Destination Program.cs -Force
 
           dotnet restore --runtime win-x64
@@ -410,7 +410,7 @@ jobs:
           ($cfg -join "`n") | Set-Content -Path nuget.config -Encoding utf8
 
           dotnet add package ActrSharp.Native.EchoWorkload --version $version
-          Copy-Item "$env:GITHUB_WORKSPACE/bindings/cabi/csharp/tests/EchoWorkloadFixture/consumer/Program.cs" `
+          Copy-Item "$env:GITHUB_WORKSPACE/packages/actr-cabi/csharp/tests/EchoWorkloadFixture/consumer/Program.cs" `
             -Destination Program.cs -Force
 
           dotnet run --configuration Release

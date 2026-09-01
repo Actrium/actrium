@@ -1,3 +1,3 @@
-# Native DLLs are built by CI from e2e/winui-echo-app/workload and dropped
+# Native DLLs are built by CI from tests/e2e/actr/winui-echo-app/workload and dropped
 # into runtimes/win-{x64,arm64}/native/ before packing. Never commit them.
 runtimes/

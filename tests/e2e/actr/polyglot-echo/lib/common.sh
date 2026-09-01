@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Shared shell helpers for the polyglot-echo e2e scenario.
 #
-# This file is a slimmer cousin of `e2e/package-runtime-echo/lib/common.sh`:
+# This file is a slimmer cousin of `tests/e2e/actr/package-runtime-echo/lib/common.sh`:
 # the polyglot scenario runs against the in-tree `mock-actrix` binary, so the
 # `ensure_actrix_available` / admin-login / AIS warmup machinery is dropped.
 
@@ -149,13 +149,13 @@ EOF
 
 [patch.crates-io]
 actr = { path = "$repo_path" }
-actr-protocol = { path = "$repo_path/core/protocol" }
-actr-framework = { path = "$repo_path/core/framework" }
-actr-hyper = { path = "$repo_path/core/hyper" }
-actr-runtime = { path = "$repo_path/core/runtime" }
-actr-config = { path = "$repo_path/core/config" }
-actr-service-compat = { path = "$repo_path/core/service-compat" }
-actr-runtime-mailbox = { path = "$repo_path/core/runtime-mailbox" }
+actr-protocol = { path = "$repo_path/crates/actr-protocol" }
+actr-framework = { path = "$repo_path/crates/actr-framework" }
+actr-hyper = { path = "$repo_path/crates/actr-hyper" }
+actr-runtime = { path = "$repo_path/crates/actr-runtime" }
+actr-config = { path = "$repo_path/crates/actr-config" }
+actr-service-compat = { path = "$repo_path/crates/actr-service-compat" }
+actr-runtime-mailbox = { path = "$repo_path/crates/actr-runtime-mailbox" }
 EOF
 }
 

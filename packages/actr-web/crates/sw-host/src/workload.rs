@@ -1,11 +1,11 @@
 //! Runtime workload abstraction for the Web platform.
 //!
-//! Analogous to `core/hyper::workload::Workload`, but only supports the
+//! Analogous to `crates/actr-hyper::workload::Workload`, but only supports the
 //! WASM backend since the Web runtime runs entirely in a browser Service Worker.
 //!
 //! # Design
 //!
-//! In the native runtime (`core/hyper`), `Workload` is an enum with `None`,
+//! In the native runtime (`crates/actr-hyper`), `Workload` is an enum with `None`,
 //! `Native`, `Wasm`, and `DynClib` variants. The Web runtime only ever runs
 //! inside WASM, so there is a single `WasmWorkload` struct. The user
 //! constructs it from a `ServiceHandlerFn` and registers it with the SW
@@ -42,7 +42,7 @@ pub type ServiceHandlerFn = Rc<
 /// WASM workload for the Service Worker runtime.
 ///
 /// Wraps a [`ServiceHandlerFn`] that dispatches RPC requests to business logic.
-/// This is the Web equivalent of `core/hyper`'s `Workload::Wasm` variant.
+/// This is the Web equivalent of `crates/actr-hyper`'s `Workload::Wasm` variant.
 ///
 /// # Example
 ///

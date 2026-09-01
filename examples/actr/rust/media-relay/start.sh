@@ -18,20 +18,20 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ACTOR_RTC_DIR="$(cd "$WORKSPACE_ROOT/../../.." && pwd)"
-ACTR_DIR="$ACTOR_RTC_DIR/actr"
-ACTRIX_DIR="$ACTOR_RTC_DIR/actrix"
+ACTR_DIR="$ACTOR_RTC_DIR"
+ACTRIX_DIR="$ACTOR_RTC_DIR"
 # Try multiple config locations
 ACTRIX_CONFIG=""
-for candidate in "$SCRIPT_DIR/actrix-config.toml" "$WORKSPACE_ROOT/actrix-config.toml" "$ACTRIX_DIR/config.example.toml"; do
+for candidate in "$SCRIPT_DIR/actrix-config.toml" "$WORKSPACE_ROOT/actrix-config.toml" "$ACTRIX_DIR/loran/config/actrix.example.toml"; do
     if [ -f "$candidate" ]; then
         ACTRIX_CONFIG="$candidate"
         break
     fi
 done
 if [ -z "$ACTRIX_CONFIG" ]; then
-    if [ -f "$ACTRIX_DIR/config.example.toml" ]; then
+    if [ -f "$ACTRIX_DIR/loran/config/actrix.example.toml" ]; then
         ACTRIX_CONFIG="$WORKSPACE_ROOT/actrix-config.toml"
-        cp "$ACTRIX_DIR/config.example.toml" "$ACTRIX_CONFIG"
+        cp "$ACTRIX_DIR/loran/config/actrix.example.toml" "$ACTRIX_CONFIG"
     fi
 fi
 PROTO_DIR="$WORKSPACE_ROOT/media-relay/proto"
@@ -154,7 +154,7 @@ elif [ -f "$ACTRIX_DIR/target/release/actrix" ]; then
 elif [ -d "$ACTRIX_DIR" ]; then
     echo -e "${YELLOW}⚠️  actrix not found, building from source...${NC}"
     cd "$ACTRIX_DIR"
-    cargo build 2>&1 | tail -5
+    cargo build --manifest-path "$ACTRIX_DIR/crates/loran-server/Cargo.toml" 2>&1 | tail -5
     ACTRIX_CMD="$ACTRIX_DIR/target/debug/actrix"
     echo "✅ Built actrix: $ACTRIX_CMD"
     cd "$WORKSPACE_ROOT"

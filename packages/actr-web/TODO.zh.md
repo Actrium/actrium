@@ -36,7 +36,7 @@ Component Model / jco 是旧浏览器桥接路径的历史背景。当前用户�
 
 ### P1：文档和示例收敛
 
-- [ ] 让用户文档统一指向 `bindings/web/docs/README.md`、`getting-started.md`、`troubleshooting.md`、`error-handling.md`、`requirements.md`。
+- [ ] 让用户文档统一指向 `packages/actr-web/docs/README.md`、`getting-started.md`、`troubleshooting.md`、`error-handling.md`、`requirements.md`。
 - [ ] 将历史架构分析集中放在明确标注的 historical section。
 - [ ] 对 Echo 和 data-stream 示例补齐最小故障排查索引。
 - [ ] 对 React 使用说明只描述当前真实公开 hooks。
@@ -50,23 +50,23 @@ Component Model / jco 是旧浏览器桥接路径的历史背景。当前用户�
 ## 当前常用命令
 
 ```bash
-cd bindings/web
+cd packages/actr-web
 pnpm install
 ```
 
 ```bash
-cd bindings/web
+cd packages/actr-web
 bash crates/sw-host/build.sh
 bash scripts/sync-cli-assets.sh --build
 ```
 
 ```bash
-cd bindings/web/examples/echo
+cd packages/actr-web/examples/echo
 bash start-mock.sh
 ```
 
 ```bash
-cd bindings/web/examples/data-stream-peer-concurrent
+cd packages/actr-web/examples/data-stream-peer-concurrent
 bash start.sh
 ```
 

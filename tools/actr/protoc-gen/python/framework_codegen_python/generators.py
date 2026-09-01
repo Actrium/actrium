@@ -22,7 +22,7 @@ def validate_spec_hash(spec: dict, expected_hash: str) -> None:
     """Recompute the JCS+SHA-256 hash of *spec* (minus ``spec_hash``).
 
     Mirrors the canonicalisation in
-    ``cli/src/commands/codegen/dispatch_spec.rs``: sorted-keys
+    ``crates/actr-cli/src/commands/codegen/dispatch_spec.rs``: sorted-keys
     ``json.dumps`` with compact separators, then SHA-256 hex digest.
     """
     if not isinstance(spec, dict):

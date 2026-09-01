@@ -1,6 +1,6 @@
 //! polyglot-echo wasm-rust — package-backed Actor-RTC EchoService workload.
 //!
-//! Mirror of `cli/fixtures/rust/lib.rs.service.hbs` but pinned to the wasm
+//! Mirror of `crates/actr-cli/fixtures/rust/lib.rs.service.hbs` but pinned to the wasm
 //! Component Model build path (no `cdylib` feature on actr-framework — see
 //! Cargo.toml).  Run `regenerate.sh` to populate `src/generated/` from
 //! `protos/local/echo.proto`; without it the `generated_stub` fallback

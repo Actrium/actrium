@@ -31,7 +31,7 @@ jobs:
 
       - name: Checkout actr source
         env:
-          SOURCE_REPOSITORY: https://github.com/Actrium/actr
+          SOURCE_REPOSITORY: https://github.com/Actrium/actrium
         run: |
           rm -rf source-checkout
           git clone --depth 1 --branch "${{ inputs.source_tag }}" "${SOURCE_REPOSITORY}" source-checkout
@@ -67,17 +67,17 @@ jobs:
         run: sdkmanager "ndk;25.2.9519653"
 
       - name: Build native libraries
-        working-directory: source-checkout/bindings/kotlin
+        working-directory: source-checkout/packages/actr-kotlin
         env:
           ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
         run: ./build-android.sh
 
       - name: Package native binaries
-        working-directory: source-checkout/bindings/kotlin
+        working-directory: source-checkout/packages/actr-kotlin
         run: bash scripts/package-binary.sh v${{ inputs.version }}
 
       - name: Publish Maven artifact
-        working-directory: source-checkout/bindings/kotlin
+        working-directory: source-checkout/packages/actr-kotlin
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -100,7 +100,7 @@ jobs:
 
           payload = {
               "version": sys.argv[1],
-              "source_repository": "https://github.com/Actrium/actr",
+              "source_repository": "https://github.com/Actrium/actrium",
               "source_tag": sys.argv[2],
               "source_sha": sys.argv[3],
               "coordinate": f"io.actrium:actr:{sys.argv[1]}",
@@ -122,7 +122,7 @@ jobs:
         with:
           tag_name: v${{ inputs.version }}
           body_path: release-metadata.json
-          files: source-checkout/bindings/kotlin/dist/actr-kotlin-native.zip
+          files: source-checkout/packages/actr-kotlin/dist/actr-kotlin-native.zip
           generate_release_notes: true
           fail_on_unmatched_files: true
 
@@ -137,5 +137,5 @@ jobs:
             echo "- Version: \`${{ inputs.version }}\`"
             echo ""
             echo "### Native libraries"
-            cat source-checkout/bindings/kotlin/dist/release.txt
+            cat source-checkout/packages/actr-kotlin/dist/release.txt
           } >> "$GITHUB_STEP_SUMMARY"

@@ -1,6 +1,6 @@
 //! CLI surface: `Cli`/`Commands` enum + unified dispatch.
 //!
-//! Guiding principles (see `cli/README.md` for the long form):
+//! Guiding principles (see `crates/actr-cli/README.md` for the long form):
 //!
 //! - **High-frequency commands are flat**: `init`, `gen`, `build`, `run`,
 //!   `ps`, `logs`, `start/stop/restart/rm`, `check`, `doc`.

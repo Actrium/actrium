@@ -97,7 +97,7 @@ jobs:
             echo "::warning::Merged-PR query hit the 300-row limit; label detection may be incomplete"
           fi
 
-          TYPE=$(scripts/detect-pre-release-label.sh "$PRS_FILE" "$COMMITS_FILE")
+          TYPE=$(scripts/actr/detect-pre-release-label.sh "$PRS_FILE" "$COMMITS_FILE")
           if [ -n "$TYPE" ]; then
             echo "Pre-release label release:${TYPE} found on PRs merged since ${LAST_TAG:-initial commit}"
           else
@@ -123,7 +123,7 @@ jobs:
           fi
           PREPARE_HEAD=$(git rev-parse HEAD)
           echo "base_sha=$PREPARE_HEAD" >> "$GITHUB_OUTPUT"
-          scripts/release-train.sh "${args[@]}"
+          scripts/actr/release-train.sh "${args[@]}"
           NEW_HEAD=$(git rev-parse HEAD)
           if [ "$PREPARE_HEAD" = "$NEW_HEAD" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"

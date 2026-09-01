@@ -680,8 +680,8 @@ rust-version = "1.95"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-actr-sw-host = {{ git = "https://github.com/Actrium/actr", tag = "{actr_source_tag}" }}
-actr-web-common = {{ git = "https://github.com/Actrium/actr", tag = "{actr_source_tag}" }}
+actr-sw-host = {{ git = "https://github.com/Actrium/actrium", tag = "{actr_source_tag}" }}
+actr-web-common = {{ git = "https://github.com/Actrium/actrium", tag = "{actr_source_tag}" }}
 
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
@@ -1638,7 +1638,7 @@ mod tests {
         let cargo_toml = gen_wasm_cargo_toml("demo-wasm");
         let expected_tag = format!("tag = \"v{}\"", env!("CARGO_PKG_VERSION"));
 
-        assert!(cargo_toml.contains("git = \"https://github.com/Actrium/actr\""));
+        assert!(cargo_toml.contains("git = \"https://github.com/Actrium/actrium\""));
         assert!(cargo_toml.contains(&expected_tag));
         assert!(!cargo_toml.contains("github.com/actor-rtc/actr"));
         assert!(!cargo_toml.contains("branch = \"web\""));

@@ -14,33 +14,33 @@ Component Model / jco 只作为旧浏览器桥接路径的历史背景保留；�
 安装 web workspace 依赖：
 
 ```bash
-cd bindings/web
+cd packages/actr-web
 pnpm install
 ```
 
 运行基于仓库内 mock actrix 的 Echo 示例：
 
 ```bash
-cd bindings/web/examples/echo
+cd packages/actr-web/examples/echo
 bash start-mock.sh
 ```
 
 运行浏览器托管服务的 data-stream peer 示例：
 
 ```bash
-cd bindings/web/examples/data-stream-peer-concurrent
+cd packages/actr-web/examples/data-stream-peer-concurrent
 bash start.sh
 ```
 
 重建并同步 `actr-cli` 内嵌的 Web runtime assets：
 
 ```bash
-cd bindings/web
+cd packages/actr-web
 bash crates/sw-host/build.sh
 bash scripts/sync-cli-assets.sh --build
 ```
 
-`crates/sw-host/build.sh` 负责构建 Service Worker host 的 wasm-bindgen 产物。`scripts/sync-cli-assets.sh --build` 会重新构建并复制 canonical web assets 到 `cli/assets/web-runtime/`，让 `actr run --web` 使用当前运行时。
+`crates/sw-host/build.sh` 负责构建 Service Worker host 的 wasm-bindgen 产物。`scripts/sync-cli-assets.sh --build` 会重新构建并复制 canonical web assets 到 `crates/actr-cli/assets/web-runtime/`，让 `actr run --web` 使用当前运行时。
 
 ## 当前运行时结构
 
@@ -78,7 +78,7 @@ Shared Service Worker: actor.sw.js
 Web npm 包通过 GitHub Actions 的 `Publish Web Packages` 手动 workflow 发布。本地等价验证命令是：
 
 ```bash
-cd bindings/web
+cd packages/actr-web
 pnpm install --frozen-lockfile
 bash scripts/publish.sh --dry-run --expected-version 0.1.0
 ```
@@ -104,7 +104,7 @@ bash scripts/publish.sh --dry-run --expected-version 0.1.0
 
 ## 开发提示
 
-- 在 `bindings/web` 下使用 `pnpm install` 安装 workspace 依赖。
+- 在 `packages/actr-web` 下使用 `pnpm install` 安装 workspace 依赖。
 - 修改 `crates/sw-host` 后使用 `bash crates/sw-host/build.sh` 构建。
 - 需要刷新 CLI 内嵌 web runtime assets 时，使用 `bash scripts/sync-cli-assets.sh --build`。
 - 主 Echo smoke 路径使用 `bash examples/echo/start-mock.sh`。

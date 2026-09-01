@@ -36,19 +36,34 @@ FULL_TRIGGER_PATTERNS = (
     "rustfmt.toml",
     "clippy.toml",
     "deny.toml",
-    "scripts/release-train.sh",
+    "scripts/actr/release-train.sh",
 )
 
 CSHARP_CORE_DEPENDENCY_PREFIXES = (
-    "core/config/",
-    "core/framework/",
-    "core/hyper/",
-    "core/pack/",
-    "core/platform-traits/",
-    "core/protocol/",
-    "core/runtime/",
-    "core/runtime-mailbox/",
-    "core/service-compat/",
+    "crates/actr-config/",
+    "crates/actr-framework/",
+    "crates/actr-hyper/",
+    "crates/actr-pack/",
+    "crates/actr-platform-traits/",
+    "crates/actr-protocol/",
+    "crates/actr-runtime/",
+    "crates/actr-runtime-mailbox/",
+    "crates/actr-service-compat/",
+)
+
+ACTR_CORE_PREFIXES = (
+    "crates/actr/",
+    "crates/actr-config/",
+    "crates/actr-framework/",
+    "crates/actr-hlc/",
+    "crates/actr-hyper/",
+    "crates/actr-pack/",
+    "crates/actr-platform-native/",
+    "crates/actr-platform-traits/",
+    "crates/actr-protocol/",
+    "crates/actr-runtime/",
+    "crates/actr-runtime-mailbox/",
+    "crates/actr-service-compat/",
 )
 
 
@@ -87,7 +102,7 @@ def detect_targets(changed_files: list[str], full_run: bool) -> tuple[dict[str, 
             reasons.append(f"full_trigger:{path}")
             continue
 
-        if path == "cli/tests/e2e_typescript_generated_echo_web.rs":
+        if path == "crates/actr-cli/tests/e2e_typescript_generated_echo_web.rs":
             targets["rust_core"] = True
             targets["ts_workload"] = True
             targets["web_binding"] = True
@@ -97,7 +112,7 @@ def detect_targets(changed_files: list[str], full_run: bool) -> tuple[dict[str, 
         # Keep this before the generic e2e Rust-workspace rule below. The
         # WinUI workload is a standalone Cargo workspace and also exercises
         # the C# binding, so e2e_rust alone does not cover it.
-        if path.startswith("e2e/winui-echo-app/"):
+        if path.startswith("tests/e2e/actr/winui-echo-app/"):
             targets["rust_core"] = True
             targets["csharp_binding"] = True
             reasons.append(f"winui_e2e:{path}")
@@ -107,7 +122,7 @@ def detect_targets(changed_files: list[str], full_run: bool) -> tuple[dict[str, 
         # file in this directory feeds the scenario (shell, fixtures, python
         # heredocs), not just its Rust workspace files. Rust sources keep the
         # workspace compile check on top of the scenario run.
-        if path.startswith("e2e/package-runtime-echo/"):
+        if path.startswith("tests/e2e/actr/package-runtime-echo/"):
             targets["e2e_package_runtime"] = True
             reasons.append(f"e2e_package_runtime:{path}")
             if path.endswith((".rs", "Cargo.toml", "Cargo.lock")):
@@ -115,12 +130,12 @@ def detect_targets(changed_files: list[str], full_run: bool) -> tuple[dict[str, 
                 reasons.append(f"e2e_rust:{path}")
             continue
 
-        if path.startswith("e2e/") and path.endswith((".rs", "Cargo.toml", "Cargo.lock")):
+        if path.startswith("tests/e2e/actr/") and path.endswith((".rs", "Cargo.toml", "Cargo.lock")):
             targets["e2e_rust"] = True
             reasons.append(f"e2e_rust:{path}")
             continue
 
-        if path.startswith("core/"):
+        if path.startswith(ACTR_CORE_PREFIXES):
             targets["rust_core"] = True
             targets["e2e_rust"] = True
             targets["ts_binding"] = True
@@ -128,16 +143,16 @@ def detect_targets(changed_files: list[str], full_run: bool) -> tuple[dict[str, 
             targets["web_binding"] = True
             if path.startswith(CSHARP_CORE_DEPENDENCY_PREFIXES):
                 targets["csharp_binding"] = True
-            if path == "core/framework/wit-v2/actr-workload.wit":
+            if path == "crates/actr-framework/wit-v2/actr-workload.wit":
                 targets["c_go_workloads"] = True
                 targets["python_workload"] = True
                 targets["ts_workload"] = True
-            elif path == "core/hyper/tests/native_workload_smoke.rs":
+            elif path == "crates/actr-hyper/tests/native_workload_smoke.rs":
                 targets["c_go_workloads"] = True
             reasons.append(f"core_dependency:{path}")
             continue
 
-        if path.startswith("actrix/"):
+        if path.startswith("crates/loran-") or path.startswith("loran/"):
             targets["rust_core"] = True
             reasons.append(f"actrix_workspace:{path}")
             continue
@@ -149,100 +164,100 @@ def detect_targets(changed_files: list[str], full_run: bool) -> tuple[dict[str, 
             reasons.append(f"actr_cabi:{path}")
             continue
 
-        if path.startswith("cli/assets/web-runtime/"):
+        if path.startswith("crates/actr-cli/assets/web-runtime/"):
             targets["rust_core"] = True
             targets["web_binding"] = True
             reasons.append(f"web_runtime_asset:{path}")
             continue
 
         if path in (
-            "cli/src/commands/codegen/kotlin.rs",
-            "cli/tests/kotlin_echo.rs",
-        ) or path.startswith("cli/fixtures/kotlin/"):
+            "crates/actr-cli/src/commands/codegen/kotlin.rs",
+            "crates/actr-cli/tests/kotlin_echo.rs",
+        ) or path.startswith("crates/actr-cli/fixtures/kotlin/"):
             targets["rust_core"] = True
             targets["kotlin_binding"] = True
             reasons.append(f"kotlin_codegen:{path}")
             continue
 
-        if path.startswith(("src/", "cli/", "bindings/ffi/")):
+        if path.startswith(("crates/actr-cli/", "crates/actr-ffi/")):
             targets["rust_core"] = True
             reasons.append(f"rust_workspace:{path}")
             continue
 
-        if path.startswith("tools/protoc-gen/rust/"):
+        if path.startswith("tools/actr/protoc-gen/rust/"):
             targets["rust_core"] = True
             reasons.append(f"rust_codegen:{path}")
             continue
 
-        if path.startswith("tools/protoc-gen/web/"):
+        if path.startswith("tools/actr/protoc-gen/web/"):
             targets["rust_core"] = True
             targets["web_binding"] = True
             reasons.append(f"web_codegen:{path}")
             continue
 
-        if path.startswith("bindings/typescript/actr-workload/"):
+        if path.startswith("packages/actr-typescript/actr-workload/"):
             targets["ts_workload"] = True
             reasons.append(f"typescript_workload:{path}")
             continue
 
-        if path.startswith(("bindings/typescript/", "tools/protoc-gen/typescript/")):
+        if path.startswith(("packages/actr-typescript/", "tools/actr/protoc-gen/typescript/")):
             targets["ts_binding"] = True
             reasons.append(f"typescript:{path}")
             continue
 
-        if path.startswith("bindings/python/actr-workload/"):
+        if path.startswith("packages/actr-python/actr-workload/"):
             targets["python_workload"] = True
             reasons.append(f"python_workload:{path}")
             continue
 
-        if path.startswith("tools/protoc-gen/python/"):
+        if path.startswith("tools/actr/protoc-gen/python/"):
             targets["python_codegen"] = True
             reasons.append(f"python_codegen:{path}")
             continue
 
-        if path.startswith("examples/python/echo-workload/"):
+        if path.startswith("examples/actr/python/echo-workload/"):
             targets["python_workload"] = True
             reasons.append(f"python_workload:{path}")
             continue
 
-        if path.startswith("examples/typescript/echo-workload/"):
+        if path.startswith("examples/actr/typescript/echo-workload/"):
             targets["ts_workload"] = True
             reasons.append(f"typescript_workload:{path}")
             continue
 
         if path.startswith(
             (
-                "examples/c/echo-workload/",
-                "examples/go/echo-workload/",
+                "examples/actr/c/echo-workload/",
+                "examples/actr/go/echo-workload/",
             )
         ):
             targets["c_go_workloads"] = True
             reasons.append(f"c_go_workload:{path}")
             continue
 
-        if path.startswith("e2e/typescript-stream/"):
+        if path.startswith("tests/e2e/actr/typescript-stream/"):
             targets["ts_workload"] = True
             reasons.append(f"typescript_stream_e2e:{path}")
             continue
 
         if path.startswith(
-            ("bindings/swift/", "bindings/cabi/swift/", "tools/protoc-gen/swift/")
+            ("packages/actr-swift/", "packages/actr-cabi/swift/", "tools/actr/protoc-gen/swift/")
         ):
             targets["swift_binding"] = True
             reasons.append(f"swift:{path}")
             continue
 
-        if path.startswith(("bindings/kotlin/", "tools/protoc-gen/kotlin/")):
+        if path.startswith(("packages/actr-kotlin/", "tools/actr/protoc-gen/kotlin/")):
             targets["kotlin_binding"] = True
             reasons.append(f"kotlin:{path}")
             continue
 
-        if path.startswith("bindings/cabi/csharp/"):
+        if path.startswith("packages/actr-cabi/csharp/"):
             targets["csharp_binding"] = True
             reasons.append(f"csharp:{path}")
             continue
 
-        if path.startswith("bindings/web/"):
+        if path.startswith("packages/actr-web/"):
             targets["web_binding"] = True
             reasons.append(f"web_binding:{path}")
             continue

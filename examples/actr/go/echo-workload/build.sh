@@ -6,7 +6,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WIT_FILE="${HERE}/../../../core/framework/wit-v2/actr-workload.wit"
+WIT_FILE="${HERE}/../../../../crates/actr-framework/wit-v2/actr-workload.wit"
 WORLD="actr-workload-guest-v2"
 GEN_DIR="${HERE}/gen"
 BUILD_DIR="${HERE}/build"

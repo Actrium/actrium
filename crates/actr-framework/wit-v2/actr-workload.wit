@@ -28,7 +28,7 @@
 // component instance, cooperatively interleaving at each host-import `.await`.
 //
 // Design decisions (locked in during the Phase 0.75 run_concurrent spike,
-// see experiments/component-spike-runconcurrent/REPORT.md):
+// see examples/actr/experimental/component-spike-runconcurrent/REPORT.md):
 //
 // 1. Transport host imports and workload exports are real WIT `async func`s.
 //    This is the shape that unlocks wasmtime 46's Component Model Concurrency:

@@ -14,12 +14,12 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ACTR_ROOT="${HERE}/../../.."
+ACTR_ROOT="$(git -C "${HERE}" rev-parse --show-toplevel)"
 OUT_WASM="${HERE}/dist/echo-typescript-0.2.0-wasm32-wasip2.wasm"
 
 echo "[0/3] building local @actrium/actr-workload package ..."
 (
-    cd "${ACTR_ROOT}/bindings/typescript/actr-workload"
+    cd "${ACTR_ROOT}/packages/actr-typescript/actr-workload"
     npm install
     npm run build
 )

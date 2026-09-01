@@ -23,12 +23,12 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 # Determine paths and switch to workspace root
 # Use BASH_SOURCE[0] to reliably locate this script regardless of CWD
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# SCRIPT_DIR       = .../Actrium/actr/examples/rust/shell-actr-echo
+# SCRIPT_DIR       = .../Actrium/actrium/examples/actr/rust/shell-actr-echo
 # WORKSPACE_ROOT   = .../Actrium/actr/examples/rust  (the Cargo workspace)
 # ACTOR_RTC_DIR    = .../Actrium                     (repo root, parent of both actr/ and actrix/)
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ACTOR_RTC_DIR="$(cd "$WORKSPACE_ROOT/../../.." && pwd)"
-ACTRIX_DIR="$ACTOR_RTC_DIR/actrix"
+ACTRIX_DIR="$ACTOR_RTC_DIR"
 ACTRIX_CONFIG="$WORKSPACE_ROOT/actrix-config.toml"
 ECHO_SERVER_DIR="$SCRIPT_DIR/server"
 ECHO_CLIENT_DIR="$SCRIPT_DIR/client"
@@ -60,14 +60,14 @@ if [ ! -f "$ACTRIX_CONFIG" ]; then
     if [ -f "$WORKSPACE_ROOT/actrix-config.example.toml" ]; then
         echo "📋 Copying $WORKSPACE_ROOT/actrix-config.example.toml to $ACTRIX_CONFIG"
         cp "$WORKSPACE_ROOT/actrix-config.example.toml" "$ACTRIX_CONFIG"
-    elif [ -f "$ACTRIX_DIR/config.example.toml" ]; then
-        echo "📋 Copying $ACTRIX_DIR/config.example.toml to $ACTRIX_CONFIG"
-        cp "$ACTRIX_DIR/config.example.toml" "$ACTRIX_CONFIG"
+    elif [ -f "$ACTRIX_DIR/loran/config/actrix.example.toml" ]; then
+        echo "📋 Copying $ACTRIX_DIR/loran/config/actrix.example.toml to $ACTRIX_CONFIG"
+        cp "$ACTRIX_DIR/loran/config/actrix.example.toml" "$ACTRIX_CONFIG"
     else
         echo -e "${RED}❌ No actrix config found. Tried:${NC}"
         echo "   $WORKSPACE_ROOT/actrix-config.toml"
         echo "   $WORKSPACE_ROOT/actrix-config.example.toml"
-        echo "   $ACTRIX_DIR/config.example.toml"
+        echo "   $ACTRIX_DIR/loran/config/actrix.example.toml"
         exit 1
     fi
 fi
@@ -164,7 +164,7 @@ fi
 # Build actrix with opentelemetry feature
 echo "Building actrix from source (with opentelemetry feature)..."
 cd "$ACTRIX_DIR"
-cargo build --features opentelemetry 2>&1
+cargo build --manifest-path "$ACTRIX_DIR/crates/loran-server/Cargo.toml" --features opentelemetry 2>&1
 
 # Check if build was successful
 if [ ! -f "$ACTRIX_DIR/target/debug/actrix" ]; then
@@ -211,13 +211,13 @@ while [ $COUNTER -lt $MAX_WAIT ]; do
         cat "$LOG_DIR/actrix.log"
         exit 1
     fi
-    
+
     # Check if port 8081 is listening (actrix WebSocket server)
     if lsof -i:8081 > /dev/null 2>&1 || nc -z localhost 8081 2>/dev/null; then
         echo -e "${GREEN}✅ Actrix is running and listening on port 8081${NC}"
         break
     fi
-    
+
     sleep 1
     COUNTER=$((COUNTER + 1))
 done
@@ -319,13 +319,13 @@ while [ $COUNTER -lt $MAX_WAIT ]; do
         cat "$LOG_DIR/shell-actr-echo-server.log"
         exit 1
     fi
-    
+
     # Check if server has successfully connected to signaling server
     if grep -q "ActrNode started\|Echo Server ready\|ActrNode started" "$LOG_DIR/shell-actr-echo-server.log" 2>/dev/null; then
         echo -e "${GREEN}✅ Server is running and registered${NC}"
         break
     fi
-    
+
     sleep 1
     COUNTER=$((COUNTER + 1))
 done

@@ -14,7 +14,7 @@ const SYSTEMD_SERVICE_TEMPLATE: &str = r#"# actrix systemd service file template
 
 [Unit]
 Description=Actrix Auxiliary Servers
-Documentation=https://github.com/Actrium/actrix
+Documentation=https://github.com/Actrium/actrium
 After=network.target
 
 [Service]

@@ -64,7 +64,7 @@ fn load_package_public_key() -> Result<Vec<u8>> {
     let value: Value =
         serde_json::from_reader(std::fs::File::open(&key_path).with_context(|| {
             format!(
-                "Failed to read client guest public key at {}. Run `bash e2e/package-runtime-echo/run.sh` first.",
+                "Failed to read client guest public key at {}. Run `bash tests/e2e/actr/package-runtime-echo/run.sh` first.",
                 key_path.display(),
             )
         })?)
@@ -88,7 +88,7 @@ async fn main() -> Result<()> {
             "Failed to read client guest package at {:?}: {}",
             package_path, e
         );
-        error!("Run `bash e2e/package-runtime-echo/run.sh` to build the package first");
+        error!("Run `bash tests/e2e/actr/package-runtime-echo/run.sh` to build the package first");
     })?;
     info!("Loaded client guest package: {} bytes", package_bytes.len());
     let package = WorkloadPackage::new(package_bytes.clone());

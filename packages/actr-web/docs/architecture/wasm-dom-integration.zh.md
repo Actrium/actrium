@@ -4,7 +4,7 @@
 **状态**: 已决策，已按 Option U / wasm-bindgen 路径更新
 **决策者**: 架构团队
 
-> 当前源码事实：浏览器 guest 不再使用 Component Model / jco / 手工 `wasm-bindgen --web` 示例路径。当前路径是 WIT → `tools/wit-compile-web` 生成 `bindings/web/crates/actr-web-abi/src/{types,guest,host}.rs` → guest crate 通过 `wasm-pack --target no-modules` 产出 JS glue 和 `*_bg.wasm` → `*_bg.wasm` 作为 `.actr` 的签名 binary、JS glue 作为签名资源 `resources/glue.js` → `packages/web-sdk/src/actor.sw.js` 验证包并直接提取、加载二者。旧 `.wbg` sibling 布局已废弃。
+> 当前源码事实：浏览器 guest 不再使用 Component Model / jco / 手工 `wasm-bindgen --web` 示例路径。当前路径是 WIT → `tools/actr/wit-compile-web` 生成 `packages/actr-web/crates/actr-web-abi/src/{types,guest,host}.rs` → guest crate 通过 `wasm-pack --target no-modules` 产出 JS glue 和 `*_bg.wasm` → `*_bg.wasm` 作为 `.actr` 的签名 binary、JS glue 作为签名资源 `resources/glue.js` → `packages/web-sdk/src/actor.sw.js` 验证包并直接提取、加载二者。旧 `.wbg` sibling 布局已废弃。
 
 ---
 
@@ -489,7 +489,7 @@ TinyGo → WASM          rustc → WASM          Emscripten → WASM
     ↓                      ↓                       ↓
         WIT contract
                 ↓
-        tools/wit-compile-web / actr-web-abi
+        tools/actr/wit-compile-web / actr-web-abi
                 ↓
         signed .actr (binary + resources/glue.js)
                 ↓
@@ -500,7 +500,7 @@ TinyGo → WASM          rustc → WASM          Emscripten → WASM
 
 ```rust
 // 生成源头是 WIT，不是手写 wasm-bindgen trait。
-// `tools/wit-compile-web` 生成 actr-web-abi 的 guest/host glue，
+// `tools/actr/wit-compile-web` 生成 actr-web-abi 的 guest/host glue，
 // guest crate 再通过 `actr_framework::entry!` 或等价注册路径接入。
 ```
 

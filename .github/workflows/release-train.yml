@@ -8,18 +8,15 @@ on:
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
-      - "core/**/Cargo.toml"
-      - "cli/Cargo.toml"
-      - "actrix/crates/**/Cargo.toml"
-      - "testing/**/Cargo.toml"
-      - "tools/protoc-gen/**/Cargo.toml"
-      - "tools/protoc-gen/**/pyproject.toml"
-      - "bindings/web/Cargo.toml"
-      - "bindings/web/crates/**/Cargo.toml"
-      - "bindings/web/packages/**/package.json"
-      - "bindings/typescript/Cargo.toml"
-      - "bindings/typescript/package.json"
-      - "bindings/cabi/csharp/ActrSharp/ActrSharp.csproj"
+      - "crates/**/Cargo.toml"
+      - "tools/actr/protoc-gen/**/Cargo.toml"
+      - "tools/actr/protoc-gen/**/pyproject.toml"
+      - "packages/actr-web/Cargo.toml"
+      - "packages/actr-web/crates/**/Cargo.toml"
+      - "packages/actr-web/packages/**/package.json"
+      - "packages/actr-typescript/Cargo.toml"
+      - "packages/actr-typescript/package.json"
+      - "packages/actr-cabi/csharp/ActrSharp/ActrSharp.csproj"
       - ".github/workflows/publish-actrsharp.yml"
   workflow_dispatch:
     inputs:
@@ -229,7 +226,7 @@ jobs:
           if [[ "${{ needs.context.outputs.pre_release }}" == "true" ]]; then
             args+=(--pre-release)
           fi
-          scripts/release-train.sh "${args[@]}"
+          scripts/actr/release-train.sh "${args[@]}"
 
       - name: Upload create-tag artifacts
         if: always()
@@ -354,7 +351,7 @@ jobs:
           if [[ "${{ needs.context.outputs.pre_release }}" == "true" ]]; then
             args+=(--pre-release)
           fi
-          scripts/release-train.sh "${args[@]}"
+          scripts/actr/release-train.sh "${args[@]}"
 
       - name: Upload publish-rust artifacts
         if: always()
@@ -405,7 +402,7 @@ jobs:
           if [[ "${{ needs.context.outputs.pre_release }}" == "true" ]]; then
             args+=(--pre-release)
           fi
-          scripts/release-train.sh "${args[@]}"
+          scripts/actr/release-train.sh "${args[@]}"
 
       - name: Upload publish-python artifacts
         if: always()
@@ -449,7 +446,7 @@ jobs:
           if [[ "${{ needs.context.outputs.pre_release }}" == "true" ]]; then
             args+=(--pre-release)
           fi
-          scripts/release-train.sh "${args[@]}"
+          scripts/actr/release-train.sh "${args[@]}"
 
       - name: Upload publish-swift artifacts
         if: always()
@@ -493,7 +490,7 @@ jobs:
           if [[ "${{ needs.context.outputs.pre_release }}" == "true" ]]; then
             args+=(--pre-release)
           fi
-          scripts/release-train.sh "${args[@]}"
+          scripts/actr/release-train.sh "${args[@]}"
 
       - name: Upload publish-kotlin artifacts
         if: always()
@@ -549,7 +546,7 @@ jobs:
           if [[ "${{ needs.context.outputs.pre_release }}" == "true" ]]; then
             args+=(--pre-release)
           fi
-          scripts/release-train.sh "${args[@]}"
+          scripts/actr/release-train.sh "${args[@]}"
 
       - name: Upload publish-web artifacts
         if: always()
@@ -568,7 +565,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     defaults:
       run:
-        working-directory: bindings/typescript
+        working-directory: packages/actr-typescript
     strategy:
       fail-fast: false
       matrix:
@@ -619,7 +616,7 @@ jobs:
         with:
           node-version: "24"
           cache: "npm"
-          cache-dependency-path: bindings/typescript/package.json
+          cache-dependency-path: packages/actr-typescript/package.json
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -655,7 +652,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: bindings/typescript/artifacts/${{ matrix.artifact }}
+          path: packages/actr-typescript/artifacts/${{ matrix.artifact }}
           if-no-files-found: error
 
   # ── Publish TypeScript Workload ───────────────────────────────────────
@@ -697,7 +694,7 @@ jobs:
           if [[ "${{ needs.context.outputs.pre_release }}" == "true" ]]; then
             args+=(--pre-release)
           fi
-          scripts/release-train.sh "${args[@]}"
+          scripts/actr/release-train.sh "${args[@]}"
 
       - name: Upload publish-typescript-workload artifacts
         if: always()
@@ -729,7 +726,7 @@ jobs:
         with:
           node-version: "24"
           cache: "npm"
-          cache-dependency-path: bindings/typescript/package.json
+          cache-dependency-path: packages/actr-typescript/package.json
           registry-url: "https://registry.npmjs.org"
           scope: "@actrium"
 
@@ -749,7 +746,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: actr.*.node
-          path: bindings/typescript/artifacts
+          path: packages/actr-typescript/artifacts
           merge-multiple: true
 
       - name: Run publish-typescript stage
@@ -764,7 +761,7 @@ jobs:
           if [[ "${{ needs.context.outputs.pre_release }}" == "true" ]]; then
             args+=(--pre-release)
           fi
-          scripts/release-train.sh "${args[@]}"
+          scripts/actr/release-train.sh "${args[@]}"
 
       - name: Upload publish-typescript artifacts
         if: always()
@@ -806,13 +803,13 @@ jobs:
       replace_assets: true
     secrets: inherit
 
-  # ── Publish actrix Binaries ─────────────────────────────────────────────
+  # ── Publish Loran server binaries ───────────────────────────────────────
   publish-actrix:
-    name: Publish actrix binaries
+    name: Publish Loran server binaries
     needs:
       - context
       - create-release
-    uses: ./.github/workflows/_actrix-release.yml
+    uses: ./.github/workflows/_loran-release.yml
     with:
       tag: v${{ needs.context.outputs.version }}
       source_ref: ${{ fromJSON(needs.context.outputs.dry_run) && needs.context.outputs.release_sha || format('v{0}', needs.context.outputs.version) }}
@@ -882,7 +879,7 @@ jobs:
           if [[ "${{ needs.context.outputs.pre_release }}" == "true" ]]; then
             args+=(--pre-release)
           fi
-          scripts/release-train.sh "${args[@]}"
+          scripts/actr/release-train.sh "${args[@]}"
 
       - name: Upload consolidated release report
         if: always()
@@ -926,4 +923,4 @@ jobs:
           if [[ "${{ needs.context.outputs.pre_release }}" == "true" ]]; then
             args+=(--pre-release)
           fi
-          scripts/release-train.sh "${args[@]}"
+          scripts/actr/release-train.sh "${args[@]}"

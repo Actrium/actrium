@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Validate Android build script
-        run: scripts/tests/kotlin-android-build-script.sh
+        run: scripts/actr/tests/kotlin-android-build-script.sh
 
   test:
     name: Kotlin Binding Test
@@ -40,16 +40,16 @@ jobs:
         with:
           packages: "platforms;android-34 build-tools;34.0.0"
       - name: Kotlin lint (ktlint)
-        working-directory: bindings/kotlin
+        working-directory: packages/actr-kotlin
         run: ./gradlew ktlintCheck --no-daemon
       - name: Run unit tests
-        working-directory: bindings/kotlin
+        working-directory: packages/actr-kotlin
         run: ./gradlew :actr-kotlin:test --no-daemon
       - name: Build Kotlin binding
-        working-directory: bindings/kotlin
+        working-directory: packages/actr-kotlin
         run: ./gradlew :actr-kotlin:build --no-daemon
       - name: Validate Maven publication coordinates
-        working-directory: bindings/kotlin
+        working-directory: packages/actr-kotlin
         run: |
           ./gradlew :actr-kotlin:generatePomFileForMavenPublication \
             --no-daemon \
@@ -125,19 +125,19 @@ jobs:
           chmod +x ~/.cargo/bin/wasm-pack
       - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
-        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+        run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
       - name: Cache Gradle build outputs
         uses: actions/cache@v4
         with:
           path: |
-            bindings/kotlin/demo/build
-            bindings/kotlin/build
-            tools/protoc-gen/kotlin/build
-          key: gradle-build-${{ runner.os }}-${{ hashFiles('bindings/kotlin/**/*.kt', 'tools/protoc-gen/kotlin/**/*.kt', 'bindings/kotlin/**/build.gradle.kts', 'tools/protoc-gen/kotlin/**/build.gradle.kts') }}
+            packages/actr-kotlin/demo/build
+            packages/actr-kotlin/build
+            tools/actr/protoc-gen/kotlin/build
+          key: gradle-build-${{ runner.os }}-${{ hashFiles('packages/actr-kotlin/**/*.kt', 'tools/actr/protoc-gen/kotlin/**/*.kt', 'packages/actr-kotlin/**/build.gradle.kts', 'tools/actr/protoc-gen/kotlin/**/build.gradle.kts') }}
       - name: Compile Kotlin demo and build protoc plugin (parallel)
         run: |
-          (cd bindings/kotlin && ./gradlew :demo:compileDebugKotlin --no-daemon) &
-          (cd tools/protoc-gen/kotlin && ./gradlew protocPluginJar --no-daemon) &
+          (cd packages/actr-kotlin && ./gradlew :demo:compileDebugKotlin --no-daemon) &
+          (cd tools/actr/protoc-gen/kotlin && ./gradlew protocPluginJar --no-daemon) &
           wait
       - name: Run Kotlin codegen integration tests
         run: cargo test -p actr-cli --test kotlin_echo --verbose

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 
 source "$SCRIPT_DIR/../package-runtime-echo/lib/common.sh"
 source "$SCRIPT_DIR/lib/readiness.sh"
@@ -14,7 +14,7 @@ REALM_ID=""
 ADMIN_PASSWORD="e2e-test-password"
 MANUFACTURER="${MANUFACTURER:-actrium}"
 ACTRIX_BIN="${ACTRIX_BIN:-}"
-ACTR_CLI_MANIFEST="$REPO_ROOT/cli/Cargo.toml"
+ACTR_CLI_MANIFEST="$REPO_ROOT/crates/actr-cli/Cargo.toml"
 ACTRIX_CONFIG_TEMPLATE="$SCRIPT_DIR/../package-runtime-echo/config/actrix.toml"
 E2E_TARGET_ROOT="$REPO_ROOT/target/e2e-cache/swift-datastream-app"
 ACTR_TARGET_DIR="$E2E_TARGET_ROOT/actr-cli"
@@ -456,16 +456,16 @@ EOF
 
 [patch.crates-io]
 actr = { path = "$repo_path" }
-actr-config = { path = "$repo_path/core/config" }
-actr-protocol = { path = "$repo_path/core/protocol" }
-actr-framework = { path = "$repo_path/core/framework" }
-actr-hyper = { path = "$repo_path/core/hyper" }
-actr-pack = { path = "$repo_path/core/pack" }
-actr-platform-native = { path = "$repo_path/core/platform-native" }
-actr-platform-traits = { path = "$repo_path/core/platform-traits" }
-actr-runtime = { path = "$repo_path/core/runtime" }
-actr-runtime-mailbox = { path = "$repo_path/core/runtime-mailbox" }
-actr-service-compat = { path = "$repo_path/core/service-compat" }
+actr-config = { path = "$repo_path/crates/actr-config" }
+actr-protocol = { path = "$repo_path/crates/actr-protocol" }
+actr-framework = { path = "$repo_path/crates/actr-framework" }
+actr-hyper = { path = "$repo_path/crates/actr-hyper" }
+actr-pack = { path = "$repo_path/crates/actr-pack" }
+actr-platform-native = { path = "$repo_path/crates/actr-platform-native" }
+actr-platform-traits = { path = "$repo_path/crates/actr-platform-traits" }
+actr-runtime = { path = "$repo_path/crates/actr-runtime" }
+actr-runtime-mailbox = { path = "$repo_path/crates/actr-runtime-mailbox" }
+actr-service-compat = { path = "$repo_path/crates/actr-service-compat" }
 EOF
 }
 
@@ -621,8 +621,8 @@ default = ["cdylib"]
 cdylib = ["actr-framework/cdylib"]
 
 [dependencies]
-actr-framework = { path = "${REPO_ROOT}/core/framework" }
-actr-protocol = { path = "${REPO_ROOT}/core/protocol" }
+actr-framework = { path = "${REPO_ROOT}/crates/actr-framework" }
+actr-protocol = { path = "${REPO_ROOT}/crates/actr-protocol" }
 async-trait = "0.1"
 prost = "0.14"
 prost-types = "0.14"
@@ -1229,7 +1229,7 @@ settings:
     SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
 packages:
   actr-swift:
-    path: $REPO_ROOT/bindings/swift
+    path: $REPO_ROOT/packages/actr-swift
   swift-protobuf:
     url: https://github.com/apple/swift-protobuf.git
     from: 1.32.0

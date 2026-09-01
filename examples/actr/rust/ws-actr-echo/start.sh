@@ -29,8 +29,8 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 # Determine paths
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ACTOR_RTC_DIR="$(cd "$WORKSPACE_ROOT/../.." && pwd)"
-ACTRIX_DIR="$ACTOR_RTC_DIR/actrix"
+ACTOR_RTC_DIR="$(cd "$WORKSPACE_ROOT/../../.." && pwd)"
+ACTRIX_DIR="$ACTOR_RTC_DIR"
 WS_ECHO_DIR="$SCRIPT_DIR"
 SERVER_DIR="$WS_ECHO_DIR/server"
 CLIENT_DIR="$WS_ECHO_DIR/client"
@@ -166,7 +166,7 @@ if [ ! -d "$ACTRIX_DIR" ]; then
 fi
 
 cd "$ACTRIX_DIR"
-cargo build --features opentelemetry 2>&1
+cargo build --manifest-path "$ACTRIX_DIR/crates/loran-server/Cargo.toml" --features opentelemetry 2>&1
 
 if [ ! -f "$ACTRIX_DIR/target/debug/actrix" ]; then
     echo -e "${RED}❌ actrix build failed${NC}"

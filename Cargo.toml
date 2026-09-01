@@ -35,7 +35,7 @@ members = [
 # === Excluded from Cargo workspace ===
 # - examples: independent workspaces simulating external users
 # - bindings/{python,typescript,swift,kotlin}: non-Rust build systems
-# - tools/protoc-gen/{typescript,python,swift,kotlin}: non-Rust plugins
+# - tools/actr/protoc-gen/{typescript,python,swift,kotlin}: non-Rust plugins
 exclude = [
     "examples/actr/rust/*",
     "examples/actr/audio-capture/*",
