@@ -762,14 +762,9 @@ impl TypeScriptGenerator {
             return Ok(None);
         }
 
-        Ok(self.parse_plugin_version(&output.stdout))
-    }
-
-    fn parse_plugin_version(&self, stdout: &[u8]) -> Option<String> {
-        String::from_utf8_lossy(stdout)
-            .split_whitespace()
-            .find(|part| part.chars().next().is_some_and(|c| c.is_ascii_digit()))
-            .map(str::to_string)
+        Ok(super::parse_plugin_version(&String::from_utf8_lossy(
+            &output.stdout,
+        )))
     }
 
     fn ensure_required_plugin_version(
@@ -791,7 +786,8 @@ impl TypeScriptGenerator {
             )));
         }
 
-        let Some(version) = self.parse_plugin_version(&output.stdout) else {
+        let Some(version) = super::parse_plugin_version(&String::from_utf8_lossy(&output.stdout))
+        else {
             return Err(ActrCliError::command_error(format!(
                 "Failed to determine {PLUGIN_NAME} version"
             )));

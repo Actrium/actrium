@@ -217,3 +217,49 @@ fn pipeline_skips_format_when_flag_is_set() {
     assert_eq!(spy.scaffold_calls.load(Ordering::SeqCst), 1);
     assert_eq!(spy.validate_calls.load(Ordering::SeqCst), 1);
 }
+
+#[test]
+fn parses_bare_pre_release_plugin_version() {
+    // Regression for #644: the Swift plugin prints a bare pre-release token
+    // that the previous digits-and-dots-only parser rejected.
+    assert_eq!(
+        parse_plugin_version("0.10.0-alpha.3\n"),
+        Some("0.10.0-alpha.3".to_string())
+    );
+}
+
+#[test]
+fn parses_plugin_version_with_pre_release_and_build_metadata() {
+    assert_eq!(
+        parse_plugin_version("1.2.3-rc.1+build"),
+        Some("1.2.3-rc.1+build".to_string())
+    );
+}
+
+#[test]
+fn parses_plugin_version_prefixed_by_plugin_name() {
+    assert_eq!(
+        parse_plugin_version("protoc-gen-actrframework-swift 0.1.10\n"),
+        Some("0.1.10".to_string())
+    );
+}
+
+#[test]
+fn parses_plugin_version_from_multiline_output() {
+    assert_eq!(
+        parse_plugin_version("protoc-gen-x\nbanner text\n0.9.7\n"),
+        Some("0.9.7".to_string())
+    );
+}
+
+#[test]
+fn returns_none_when_plugin_output_has_no_version_token() {
+    assert_eq!(
+        parse_plugin_version("protoc-gen-actrframework-swift\n"),
+        None
+    );
+    assert_eq!(parse_plugin_version(""), None);
+    // A leading `v` does not count as a version; shipped plugins print bare
+    // versions.
+    assert_eq!(parse_plugin_version("v1.2.3"), None);
+}
