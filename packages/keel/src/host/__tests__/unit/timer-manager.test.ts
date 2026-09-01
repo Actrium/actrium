@@ -672,7 +672,7 @@ describe('TimerManager', () => {
         throw new Error(`tick-${callCount}`);
       }, 15);
 
-      await waitMs(80);
+      await waitUntil(() => callCount >= 2);
       clearI(id);
 
       // Should have fired multiple times despite errors
