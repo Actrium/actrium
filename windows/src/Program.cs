@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Windows.Forms;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal static class Program
 {
@@ -13,18 +13,18 @@ internal static class Program
         // Fail fast when the Rust core library cannot be loaded: every
         // durable contract (schema, SQL, normalization, sync policy) lives
         // there, so running without it would silently corrupt behavior.
-        var coreStatus = ActroCore.LoadStatus();
+        var coreStatus = ActriumCore.LoadStatus();
         if (!coreStatus.IsAvailable)
         {
             var reason = string.IsNullOrWhiteSpace(coreStatus.UnavailableReason)
-                ? "The Rust core library (actro_core.dll) could not be loaded."
+                ? "The Rust core library (actrium_core.dll) could not be loaded."
                 : coreStatus.UnavailableReason;
             Trace.TraceError("Rust core library unavailable at startup: {0}", reason);
             if (Environment.UserInteractive)
             {
                 MessageBox.Show(
                     reason,
-                    "Actro cannot start",
+                    "Actrium cannot start",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
             }
@@ -46,7 +46,7 @@ internal static class Program
         // Mirror --user-data-root into the single override choke point before
         // any durable store is constructed. WindowsAppPaths.GetLocalAppDataRoot
         // reads this variable, so both the argument and a directly exported
-        // ACTRO_USER_DATA_ROOT share one mechanism. Arg parsing happens before
+        // ACTRIUM_USER_DATA_ROOT share one mechanism. Arg parsing happens before
         // BrowserApplicationContext builds the stores, so the ordering is safe.
         if (!string.IsNullOrWhiteSpace(options.UserDataRoot))
         {

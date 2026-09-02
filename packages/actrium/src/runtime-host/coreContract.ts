@@ -1,1 +1,1 @@
-export * from './generated/actroCoreContract';
+export * from './generated/actriumCoreContract';

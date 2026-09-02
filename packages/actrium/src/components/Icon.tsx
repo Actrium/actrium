@@ -34,7 +34,7 @@ const IconSources: Record<string, any> = {
   next: require('../assets/icons/next.png'),
   logout: require('../assets/icons/logout.png'),
   search: require('../assets/icons/search.png'),
-  actro_gray: require('../assets/icons/actro_gray.png'),
+  actrium_gray: require('../assets/icons/actrium_gray.png'),
   user_item: require('../assets/icons/user_item.png'),
   user_select: require('../assets/icons/user_select.png'),
   history: require('../assets/icons/history.png'),

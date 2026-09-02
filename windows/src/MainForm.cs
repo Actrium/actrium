@@ -7,7 +7,7 @@ using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal sealed class MainForm : Form
 {
@@ -1132,7 +1132,7 @@ internal sealed class MainForm : Form
             && !string.Equals(args.Uri, "about:blank", StringComparison.OrdinalIgnoreCase))
         {
             // Generated documents keep their virtual address (e.g.
-            // actro://home); real navigations adopt the target URI.
+            // about:home); real navigations adopt the target URI.
             tab.Address = args.Uri;
             tab.IsShowingErrorPage = false;
         }
@@ -1598,7 +1598,7 @@ internal sealed class MainForm : Form
         tab.Address = NavigationPolicy.HomeAddress;
         tab.Title = BrowserHomeDocumentPolicy.Title;
         tab.IsShowingErrorPage = false;
-        NavigateGeneratedDocument(tab, BrowserHomeDocumentPolicy.BuildDocument(ActroCore.LoadStatus()));
+        NavigateGeneratedDocument(tab, BrowserHomeDocumentPolicy.BuildDocument(ActriumCore.LoadStatus()));
         SyncActiveTabUi();
         SyncSidebar();
     }
@@ -2806,7 +2806,7 @@ internal sealed class MainForm : Form
     private HostBridgeActions CreateHostBridgeActions()
     {
         return new HostBridgeActions(
-            ActroCore.LoadStatus,
+            ActriumCore.LoadStatus,
             OpenTabFromHostAsync,
             CloseTabFromHostAsync,
             SelectTabFromHostAsync,

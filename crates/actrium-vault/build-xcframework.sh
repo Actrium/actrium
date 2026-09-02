@@ -4,9 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-CRATE_NAME="actro_vault"
-FRAMEWORK_NAME="ActroVault"
-UDL_FILE="src/actro_vault.udl"
+CRATE_NAME="actrium_vault"
+FRAMEWORK_NAME="ActriumVault"
+UDL_FILE="src/actrium_vault.udl"
 GENERATED_DIR="generated"
 STAGING_DIR="xcframework-staging"
 TARGET_DIR="${CARGO_TARGET_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)/target}"
@@ -41,6 +41,10 @@ cargo run --bin uniffi-bindgen generate "$UDL_FILE" --language swift --out-dir "
 perl -pi -e 's/[ \t]+$//' \
     "${GENERATED_DIR}/${CRATE_NAME}.swift" \
     "${GENERATED_DIR}/${CRATE_NAME}FFI.h"
+perl -0777 -pi -e 's/\n+\z/\n/' \
+    "${GENERATED_DIR}/${CRATE_NAME}.swift" \
+    "${GENERATED_DIR}/${CRATE_NAME}FFI.h" \
+    "${GENERATED_DIR}/${CRATE_NAME}FFI.modulemap"
 mkdir -p "$(dirname "$APPLE_PACKAGE_SWIFT")"
 cp "${GENERATED_DIR}/${CRATE_NAME}.swift" "$APPLE_PACKAGE_SWIFT"
 

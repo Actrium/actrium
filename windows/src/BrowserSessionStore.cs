@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal sealed class BrowserSessionStore
 {
@@ -84,7 +84,7 @@ internal sealed class BrowserSessionStore
         // no persistable tabs. Unparseable core output is contract drift and
         // must fail loudly.
         var snapshotJson = JsonSerializer.Serialize(snapshot, JsonOptions);
-        var normalizedJson = ActroCore.NormalizeBrowserSessionSnapshotJson(snapshotJson);
+        var normalizedJson = ActriumCore.NormalizeBrowserSessionSnapshotJson(snapshotJson);
         try
         {
             return JsonSerializer.Deserialize<BrowserSessionSnapshot>(normalizedJson, JsonOptions);
@@ -192,7 +192,7 @@ internal sealed record BrowserSessionSnapshot(
         return new BrowserSessionSnapshot(
             1,
             0,
-            [new BrowserSessionTabSnapshot("Actro", NavigationPolicy.HomeAddress)]);
+            [new BrowserSessionTabSnapshot("Actrium", NavigationPolicy.HomeAddress)]);
     }
 }
 

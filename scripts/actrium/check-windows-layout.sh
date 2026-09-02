@@ -49,9 +49,9 @@ check_pattern_in_each_file() {
 required_files=(
   "windows/README.md"
   "windows/README.md"
-  "windows/Actro.Windows.csproj"
+  "windows/Actrium.Windows.csproj"
   "windows/native/README.md"
-  "windows/src/ActroCore.cs"
+  "windows/src/ActriumCore.cs"
   "windows/src/BrowserAddressInputPolicy.cs"
   "windows/src/BrowserApplicationContext.cs"
   "windows/src/BrowserBrowsingDataPolicy.cs"
@@ -114,13 +114,13 @@ required_files=(
   "windows/src/Program.cs"
   "windows/src/MainForm.cs"
   "windows/src/WindowsAppPaths.cs"
-  "windows/tests/Actro.Windows.Tests.csproj"
+  "windows/tests/Actrium.Windows.Tests.csproj"
   "windows/tests/Program.cs"
-  "crates/actrium-core/include/actro_core.h"
+  "crates/actrium-core/include/actrium_core.h"
   "scripts/actrium/verify-windows.sh"
-  "docs/migration/actro/windows-client.md"
+  "docs/migration/actrium/windows-client.md"
   "windows/VERSION"
-  "windows/packaging/actro-installer.iss"
+  "windows/packaging/actrium-installer.iss"
   "scripts/actrium/package-windows.sh"
   "scripts/actrium/package-windows.ps1"
 )
@@ -144,20 +144,20 @@ check_pattern_in_each_file \
   "Windows docs point at windows/" \
   "Windows docs do not point at windows/" \
   windows/README.md \
-  docs/migration/actro/windows-client.md
+  docs/migration/actrium/windows-client.md
 
 check_pattern_in_each_file \
   'WebView2' \
   "Windows app docs record WebView2 as the expected shell host" \
   "Windows app docs do not record WebView2 as the expected shell host" \
   windows/README.md \
-  docs/migration/actro/windows-client.md
+  docs/migration/actrium/windows-client.md
 
 check_pattern_in_each_file \
   'Microsoft\.Web\.WebView2' \
   "Windows project references WebView2" \
   "Windows project does not reference WebView2" \
-  windows/Actro.Windows.csproj
+  windows/Actrium.Windows.csproj
 
 check_pattern_in_each_file \
   'BrowserApplicationContext' \
@@ -261,7 +261,7 @@ check_pattern_in_each_file \
   'BrowserSidebarLayoutPolicy' \
   "Windows tests link and exercise the sidebar layout policy" \
   "Windows tests do not link and exercise the sidebar layout policy" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 check_pattern_in_each_file \
@@ -355,7 +355,7 @@ check_pattern_in_each_file \
   'BrowserTabOverviewPolicy' \
   "Windows tests link and exercise the tab overview policy" \
   "Windows tests do not link and exercise the tab overview policy" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 missing_tab_lifecycle_calls=()
@@ -503,14 +503,14 @@ check_pattern_in_each_file \
   'BrowserMenuModel' \
   "Windows tests link and exercise the compact menu model" \
   "Windows tests do not link and exercise the compact menu model" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 check_pattern_in_each_file \
   'BrowserEscapePolicy' \
   "Windows tests link and exercise the escape policy" \
   "Windows tests do not link and exercise the escape policy" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 missing_toolbar_events=()
@@ -593,14 +593,14 @@ check_pattern_in_each_file \
   'BrowserGlyphs' \
   "Windows tests link and exercise the glyph table" \
   "Windows tests do not link and exercise the glyph table" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 check_pattern_in_each_file \
   'BrowserToolbarLayoutPolicy' \
   "Windows tests link and exercise the toolbar layout policy" \
   "Windows tests do not link and exercise the toolbar layout policy" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 # Statuses live in the bottom-left overlay: transient ones auto-hide,
@@ -623,7 +623,7 @@ check_pattern_in_each_file \
   '<ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>' \
   "Windows project enables per-monitor DPI v2" \
   "Windows project does not enable per-monitor DPI v2" \
-  windows/Actro.Windows.csproj
+  windows/Actrium.Windows.csproj
 
 missing_theme_lifecycle_symbols=()
 for theme_symbol in WM_SETTINGCHANGE ImmersiveColorSet DwmSetWindowAttribute PreferredColorScheme ApplyTheme ApplyWebViewColorScheme DpiChanged OnFormClosedUnsubscribeTheme; do
@@ -714,14 +714,14 @@ check_pattern_in_each_file \
   'BrowserTheme' \
   "Windows tests link and exercise the theme policies" \
   "Windows tests do not link and exercise the theme policies" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 check_pattern_in_each_file \
   'BrowserDocumentStylePolicy' \
   "Windows tests link and exercise the shared document stylesheet" \
   "Windows tests do not link and exercise the shared document stylesheet" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 missing_string_table_symbols=()
@@ -761,7 +761,7 @@ check_pattern_in_each_file \
   'BrowserStrings' \
   "Windows tests link and exercise the string table" \
   "Windows tests do not link and exercise the string table" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 missing_webview_events=()
@@ -829,7 +829,7 @@ check_pattern_in_each_file \
 # The single app data path choke point honors an absolute-path override so
 # concurrent multi-instance runs keep fully independent state trees.
 check_pattern_in_each_file \
-  'ACTRO_USER_DATA_ROOT' \
+  'ACTRIUM_USER_DATA_ROOT' \
   "Windows app data root honors the user data root override" \
   "Windows app data root does not honor the user data root override" \
   windows/src/WindowsAppPaths.cs
@@ -849,7 +849,7 @@ check_pattern_in_each_file \
   "Windows browser sync coordinator routes through the provider connection planner" \
   "Windows browser sync coordinator does not route through the provider connection planner" \
   windows/src/BrowserStorageSyncCoordinator.cs \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 # The connection routing token is the Rust contract's, not the planner's: the
@@ -880,7 +880,7 @@ check_pattern_in_each_file \
   "Windows browser sync provider settings store is wired and exercised" \
   "Windows browser sync provider settings store is not wired and exercised" \
   windows/src/MainForm.cs \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 # Browser sync settings dialog: the product ConfigureSync surface fronts the
@@ -898,7 +898,7 @@ check_pattern_in_each_file \
   "Windows sync folder acceptance is gated by the pure preflight" \
   "Windows sync folder acceptance is not gated by the pure preflight" \
   windows/src/BrowserSyncSettingsDialog.cs \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 check_pattern_in_each_file \
@@ -906,7 +906,7 @@ check_pattern_in_each_file \
   "Windows sync connection status renders through the pure formatter" \
   "Windows sync connection status does not render through the pure formatter" \
   windows/src/BrowserSyncSettingsDialog.cs \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 check_pattern_in_each_file \
@@ -941,7 +941,7 @@ check_pattern_in_each_file \
   "Windows sync diagnostics render through the pure diagnostics formatter" \
   "Windows sync diagnostics do not render through the pure diagnostics formatter" \
   windows/src/BrowserSyncSettingsDialog.cs \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 check_pattern_in_each_file \
@@ -960,7 +960,7 @@ check_pattern_in_each_file \
   'BrowserProfilePolicy' \
   "Windows tests exercise browser profile policy" \
   "Windows tests do not exercise browser profile policy" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 check_pattern_in_each_file \
@@ -993,14 +993,14 @@ check_pattern_in_each_file \
   'BrowserClosedTabStack' \
   "Windows tests exercise closed-tab reopening" \
   "Windows tests do not exercise closed-tab reopening" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 check_pattern_in_each_file \
   'BrowserBrowsingDataPolicy' \
   "Windows tests exercise browsing-data policy" \
   "Windows tests do not exercise browsing-data policy" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 check_pattern_in_each_file \
@@ -1059,7 +1059,7 @@ check_pattern_in_each_file \
   'BrowserDownloadPolicy' \
   "Windows tests exercise browser download policy" \
   "Windows tests do not exercise browser download policy" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 check_pattern_in_each_file \
@@ -1106,7 +1106,7 @@ check_pattern_in_each_file \
   'BrowserExternalProtocolPolicy' \
   "Windows tests exercise external protocol policy" \
   "Windows tests do not exercise external protocol policy" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 check_pattern_in_each_file \
@@ -1147,7 +1147,7 @@ check_pattern_in_each_file \
   'BrowserPermissionPolicy' \
   "Windows tests exercise browser permission policy" \
   "Windows tests do not exercise browser permission policy" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 missing_find_bar_symbols=()
@@ -1182,7 +1182,7 @@ check_pattern_in_each_file \
   'BrowserFindPolicy' \
   "Windows tests exercise browser find policy" \
   "Windows tests do not exercise browser find policy" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 missing_zoom_policy_symbols=()
@@ -1203,7 +1203,7 @@ check_pattern_in_each_file \
   'BrowserZoomPolicy' \
   "Windows tests exercise browser zoom policy" \
   "Windows tests do not exercise browser zoom policy" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 missing_navigation_calls=()
@@ -1258,7 +1258,7 @@ check_pattern_in_each_file \
   'BrowserAddressInputPolicy' \
   "Windows tests exercise address input policy" \
   "Windows tests do not exercise address input policy" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 missing_search_engine_policy_symbols=()
@@ -1293,7 +1293,7 @@ check_pattern_in_each_file \
   'BrowserSearch' \
   "Windows tests exercise search engine policy and settings" \
   "Windows tests do not exercise search engine policy and settings" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 missing_startup_settings_store_symbols=()
@@ -1314,7 +1314,7 @@ check_pattern_in_each_file \
   'BrowserStartupSettings' \
   "Windows tests exercise startup settings" \
   "Windows tests do not exercise startup settings" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 missing_startup_settings_calls=()
@@ -1352,7 +1352,7 @@ check_pattern_in_each_file \
   windows/src/MainForm.cs
 
 missing_home_document_policy_symbols=()
-for home_document_symbol in BuildDocument Title ActroCoreStatus; do
+for home_document_symbol in BuildDocument Title ActriumCoreStatus; do
   if ! rg -q "$home_document_symbol" windows/src/BrowserHomeDocumentPolicy.cs; then
     missing_home_document_policy_symbols+=("$home_document_symbol")
   fi
@@ -1369,7 +1369,7 @@ check_pattern_in_each_file \
   'BrowserHomeDocumentPolicy' \
   "Windows tests exercise home document policy" \
   "Windows tests do not exercise home document policy" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 check_pattern_in_each_file \
@@ -1432,13 +1432,13 @@ check_pattern_in_each_file \
   "Windows generated list pages do not use the shared local list policy" \
   windows/src/BrowserBookmarksDocumentPolicy.cs \
   windows/src/BrowserHistoryDocumentPolicy.cs \
-  windows/tests/Actro.Windows.Tests.csproj
+  windows/tests/Actrium.Windows.Tests.csproj
 
 check_pattern_in_each_file \
   'BrowserBookmark' \
   "Windows tests exercise browser bookmark store and document policy" \
   "Windows tests do not exercise browser bookmark store and document policy" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 missing_bookmark_calls=()
@@ -1499,7 +1499,7 @@ check_pattern_in_each_file \
   'BrowserHistory' \
   "Windows tests exercise browser history store and document policy" \
   "Windows tests do not exercise browser history store and document policy" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 missing_history_calls=()
@@ -1548,7 +1548,7 @@ check_pattern_in_each_file \
   'BrowserContentBlocking' \
   "Windows tests exercise content blocking policy and store" \
   "Windows tests do not exercise content blocking policy and store" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 missing_content_blocking_calls=()
@@ -1583,7 +1583,7 @@ check_pattern_in_each_file \
   'BrowserProcessFailurePolicy' \
   "Windows tests exercise process failure policy" \
   "Windows tests do not exercise process failure policy" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 missing_process_failure_calls=()
@@ -1618,7 +1618,7 @@ check_pattern_in_each_file \
   'BrowserNavigationErrorPolicy' \
   "Windows tests exercise navigation error policy" \
   "Windows tests do not exercise navigation error policy" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 missing_navigation_error_calls=()
@@ -1659,7 +1659,7 @@ check_pattern_in_each_file \
   'BrowserPageActionPolicy' \
   "Windows tests exercise page action policy" \
   "Windows tests do not exercise page action policy" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 check_pattern_in_each_file \
@@ -1704,7 +1704,7 @@ check_pattern_in_each_file \
   'BrowserPdfPolicy' \
   "Windows tests exercise browser PDF policy" \
   "Windows tests do not exercise browser PDF policy" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 check_pattern_in_each_file \
@@ -1749,7 +1749,7 @@ check_pattern_in_each_file \
   'BrowserSessionStore' \
   "Windows tests exercise browser session persistence" \
   "Windows tests do not exercise browser session persistence" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 missing_session_store_symbols=()
@@ -1784,7 +1784,7 @@ check_pattern_in_each_file \
   'BrowserWindowStateStore' \
   "Windows tests exercise browser window state persistence" \
   "Windows tests do not exercise browser window state persistence" \
-  windows/tests/Actro.Windows.Tests.csproj \
+  windows/tests/Actrium.Windows.Tests.csproj \
   windows/tests/Program.cs
 
 missing_window_state_store_symbols=()
@@ -1819,7 +1819,7 @@ check_pattern_in_each_file \
   'HostBridgeProtocol' \
   "Windows tests link the host bridge protocol" \
   "Windows tests do not link the host bridge protocol" \
-  windows/tests/Actro.Windows.Tests.csproj
+  windows/tests/Actrium.Windows.Tests.csproj
 
 check_pattern_in_each_file \
   'HostBridgeDispatcher' \
@@ -1853,15 +1853,15 @@ check_pattern_in_each_file \
 
 missing_host_bridge_methods=()
 for host_method in \
-  'actro\.host\.getCoreStatus' \
-  'actro\.host\.openTab' \
-  'actro\.host\.closeTab' \
-  'actro\.host\.selectTab' \
-	  'actro\.host\.navigate' \
-	  'actro\.host\.getTabs' \
-	  'actro\.host\.getActiveTab' \
-	  'actro\.host\.removeBookmark' \
-	  'actro\.host\.removeHistoryEntry'
+  'actrium\.host\.getCoreStatus' \
+  'actrium\.host\.openTab' \
+  'actrium\.host\.closeTab' \
+  'actrium\.host\.selectTab' \
+	  'actrium\.host\.navigate' \
+	  'actrium\.host\.getTabs' \
+	  'actrium\.host\.getActiveTab' \
+	  'actrium\.host\.removeBookmark' \
+	  'actrium\.host\.removeHistoryEntry'
 do
   if ! rg -q "$host_method" windows/src/HostMessageBridge.cs windows/src/HostBridgeProtocol.cs; then
     missing_host_bridge_methods+=("$host_method")
@@ -1906,26 +1906,26 @@ check_pattern_in_each_file \
   windows/src/HostBridgeProtocol.cs
 
 check_pattern_in_each_file \
-  'actro_core_supported_contract_name' \
-  "Windows C# adapter and Rust C API header share ActroCore metadata symbols" \
-  "Windows C# adapter and Rust C API header do not share ActroCore metadata symbols" \
-  windows/src/ActroCore.cs \
-  crates/actrium-core/include/actro_core.h
+  'actrium_core_supported_contract_name' \
+  "Windows C# adapter and Rust C API header share ActriumCore metadata symbols" \
+  "Windows C# adapter and Rust C API header do not share ActriumCore metadata symbols" \
+  windows/src/ActriumCore.cs \
+  crates/actrium-core/include/actrium_core.h
 
 check_pattern_in_each_file \
   'native\\\*\.dll' \
-  "Windows project copies native ActroCore DLL artifacts" \
-  "Windows project does not copy native ActroCore DLL artifacts" \
-  windows/Actro.Windows.csproj
+  "Windows project copies native ActriumCore DLL artifacts" \
+  "Windows project does not copy native ActriumCore DLL artifacts" \
+  windows/Actrium.Windows.csproj
 
 check_pattern_in_each_file \
   'Compile Remove="tests\\\*\*\\\*\.cs"' \
   "Windows application excludes nested test sources from its default compile glob" \
   "Windows application does not exclude nested test sources from its default compile glob" \
-  windows/Actro.Windows.csproj
+  windows/Actrium.Windows.csproj
 
-if rg -Fq '..\actro\' windows/tests/Actro.Windows.Tests.csproj; then
-  print_failure "Windows tests still reference the pre-migration actro subdirectory"
+if rg -Fq '..\actrium\' windows/tests/Actrium.Windows.Tests.csproj; then
+  print_failure "Windows tests still reference the pre-migration actrium subdirectory"
 else
   print_ok "Windows tests reference the migrated windows source and native directories"
 fi
@@ -1947,7 +1947,7 @@ else
   print_ok "verify:windows is wired to scripts/actrium/verify-windows.sh"
 fi
 
-if [[ -f windows/Actro.Windows.csproj ]]; then
+if [[ -f windows/Actrium.Windows.csproj ]]; then
   print_ok "Windows project scaffold exists"
 else
   print_failure "Windows project scaffold is missing"
@@ -1968,19 +1968,19 @@ else
 fi
 
 check_pattern_in_each_file \
-  'ActroWindowsVersionFile' \
+  'ActriumWindowsVersionFile' \
   "Windows project single-sources its version from windows/VERSION" \
   "Windows project does not single-source its version from windows/VERSION" \
-  windows/Actro.Windows.csproj
+  windows/Actrium.Windows.csproj
 
 missing_packaging_pipeline_symbols=()
 for packaging_symbol in \
   'windows\\VERSION' \
   '[-][-]self-contained' \
-  'actro_core\.dll' \
+  'actrium_core\.dll' \
   'Compress-Archive' \
   'ISCC' \
-  'actro-installer\.iss' \
+  'actrium-installer\.iss' \
   'LinkId=2124703' \
   'code-signing certificate'
 do
@@ -1993,7 +1993,7 @@ if [[ "${#missing_packaging_pipeline_symbols[@]}" -ne 0 ]]; then
   print_failure "Windows packaging pipeline is missing expected behavior"
   printf '%s\n' "${missing_packaging_pipeline_symbols[@]}"
 else
-  print_ok "Windows packaging pipeline publishes, gates actro_core.dll, zips and compiles the installer"
+  print_ok "Windows packaging pipeline publishes, gates actrium_core.dll, zips and compiles the installer"
 fi
 
 check_pattern_in_each_file \
@@ -2013,7 +2013,7 @@ for installer_symbol in \
   '\{#AppVersion\}' \
   'unsigned'
 do
-  if ! rg -q "$installer_symbol" windows/packaging/actro-installer.iss; then
+  if ! rg -q "$installer_symbol" windows/packaging/actrium-installer.iss; then
     missing_installer_policy_symbols+=("$installer_symbol")
   fi
 done
@@ -2030,7 +2030,7 @@ check_pattern_in_each_file \
   "Windows app docs record the packaging entry point" \
   "Windows app docs do not record the packaging entry point" \
   windows/README.md \
-  docs/migration/actro/windows-client.md
+  docs/migration/actrium/windows-client.md
 
 if [[ "$failures" -ne 0 ]]; then
   echo

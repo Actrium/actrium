@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 // Versioned browser sync provider connection settings, sibling of the
 // endpoint credential snapshot. The record intentionally never contains a
@@ -219,7 +219,7 @@ internal sealed class BrowserSyncProviderSettingsStore
             ? "{}"
             : JsonSerializer.Serialize(snapshot, JsonOptions);
 
-        var normalizedJson = ActroCore.NormalizeBrowserSyncProviderSettingsJson(
+        var normalizedJson = ActriumCore.NormalizeBrowserSyncProviderSettingsJson(
             requestJson,
             isRootAbsolute,
             DateTimeOffset.UtcNow.ToUnixTimeSeconds(),

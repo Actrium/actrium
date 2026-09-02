@@ -2990,8 +2990,11 @@ mod tests {
         let bing = browser_search_engine_info(Some("bing".to_string()));
         assert_eq!(bing.display_name, "Bing");
         assert_eq!(
-            browser_search_url("actro browser".to_string(), Some("duckduckgo".to_string())),
-            "https://duckduckgo.com/?q=actro%20browser"
+            browser_search_url(
+                "actrium browser".to_string(),
+                Some("duckduckgo".to_string())
+            ),
+            "https://duckduckgo.com/?q=actrium%20browser"
         );
         assert_eq!(
             browser_search_url("a&b=c".to_string(), Some("google".to_string())),
@@ -3011,9 +3014,9 @@ mod tests {
         assert_eq!(contract.max_bookmark_items, 500);
         assert_eq!(contract.max_session_tabs, 50);
         assert_eq!(contract.max_title_length, 160);
-        assert_eq!(contract.home_address, "actro://home");
-        assert_eq!(contract.history_address, "actro://history");
-        assert_eq!(contract.bookmarks_address, "actro://bookmarks");
+        assert_eq!(contract.home_address, "about:home");
+        assert_eq!(contract.history_address, "about:history");
+        assert_eq!(contract.bookmarks_address, "about:bookmarks");
 
         let history = browser_history_snapshot_normalize_json(
             r#"{"version":99,"items":[{"title":"","address":"https://example.com/docs","visitedAtUnixSeconds":-1,"visitCount":0}]}"#.to_string(),
@@ -3024,25 +3027,25 @@ mod tests {
         assert!(history.contains(r#""visitCount":1"#));
 
         let session = browser_session_snapshot_normalize_json(
-            r#"{"version":99,"activeTabIndex":9,"tabs":[{"title":"","address":"ACTRO://BOOKMARKS"}]}"#.to_string(),
+            r#"{"version":99,"activeTabIndex":9,"tabs":[{"title":"","address":"ABOUT:BOOKMARKS"}]}"#.to_string(),
         );
         assert!(session.contains(r#""activeTabIndex":0"#));
         assert!(session.contains(r#""title":"New Tab"#));
-        assert!(session.contains(r#""address":"actro://bookmarks"#));
+        assert!(session.contains(r#""address":"about:bookmarks"#));
         assert_eq!(
             browser_session_snapshot_normalize_json(
                 r#"{"version":1,"activeTabIndex":0,"tabs":[]}"#.to_string()
             ),
             "null"
         );
-        assert!(browser_session_home_snapshot_json().contains(r#""address":"actro://home"#));
+        assert!(browser_session_home_snapshot_json().contains(r#""address":"about:home"#));
     }
 
     #[test]
     fn ffi_browser_storage_schema_contract_is_shared() {
         let schema = browser_storage_schema();
         assert_eq!(schema.schema_version, 6);
-        assert_eq!(schema.database_name, "actro_browser.db");
+        assert_eq!(schema.database_name, "actrium_browser.db");
         assert!(
             schema
                 .table_names
@@ -3060,7 +3063,7 @@ mod tests {
                 .any(|statement| statement.contains("browser_bookmarks"))
         );
         assert_eq!(browser_storage_schema_version(), 6);
-        assert_eq!(browser_storage_database_name(), "actro_browser.db");
+        assert_eq!(browser_storage_database_name(), "actrium_browser.db");
         assert!(
             browser_storage_schema_statements()
                 .iter()
@@ -3195,12 +3198,12 @@ mod tests {
         assert!(session_tab_ordering_plan.contains(r#""orderedTabIds":["tab-a","tab-b"]"#));
 
         let session_tab_id_plan = browser_storage_session_tab_id_plan_json(
-            r#"[{"id":"","index":0,"address":"actro://home"},{"id":"tab-a","index":1,"address":"https://example.com/a"}]"#.to_string(),
+            r#"[{"id":"","index":0,"address":"about:home"},{"id":"tab-a","index":1,"address":"https://example.com/a"}]"#.to_string(),
         );
         assert!(session_tab_id_plan.contains(r#""policy":"browserStorageSessionTabId""#));
         assert!(
             session_tab_id_plan
-                .contains(r#""tabIds":["fa3d824d-efbc-593f-b327-a463b5e0973c","tab-a"]"#)
+                .contains(r#""tabIds":["d1cf82a6-21b1-5f7b-a0fe-927c04728a08","tab-a"]"#)
         );
 
         let active_tab_policy = browser_storage_session_active_tab_consistency_policy_json();
@@ -3334,7 +3337,7 @@ mod tests {
         assert!(transport_contract.contains(r#""Authorization""#));
 
         let cloud_store_contract = browser_storage_sync_cloud_store_contract_json();
-        assert!(cloud_store_contract.contains(r#""rootPath":"Actro/BrowserSync""#));
+        assert!(cloud_store_contract.contains(r#""rootPath":"Actrium/BrowserSync""#));
         assert!(cloud_store_contract.contains(r#""operation":"write""#));
         assert!(cloud_store_contract.contains("expectedRevision"));
         assert!(cloud_store_contract.contains(r#""adapterKind":"opendal""#));
@@ -3344,7 +3347,7 @@ mod tests {
         assert!(provider_adapter_contract.contains("coarse rounds"));
 
         let provider_adapter_plan = browser_storage_sync_cloud_provider_adapter_plan_json(
-            r#"{"providerKind":"localFolder","rootPath":"Actro/BrowserSync","revisionKind":"contentHash","supportsPrefixList":true,"supportsPagedList":true,"supportsConditionalWrite":true,"supportsConditionalDelete":true,"supportsReadIfChanged":true,"supportsAtomicRename":false,"supportsAppFolder":true,"backgroundSync":"platformScheduled","conflictResolution":"optimisticRevision","maxObjectBytes":8388608,"maxPageSize":1000}"#.to_string(),
+            r#"{"providerKind":"localFolder","rootPath":"Actrium/BrowserSync","revisionKind":"contentHash","supportsPrefixList":true,"supportsPagedList":true,"supportsConditionalWrite":true,"supportsConditionalDelete":true,"supportsReadIfChanged":true,"supportsAtomicRename":false,"supportsAppFolder":true,"backgroundSync":"platformScheduled","conflictResolution":"optimisticRevision","maxObjectBytes":8388608,"maxPageSize":1000}"#.to_string(),
             8,
         );
         assert!(provider_adapter_plan.contains(r#""classification":"ready""#));
@@ -3356,7 +3359,7 @@ mod tests {
             provider_connection_contract
                 .contains(r#""planType":"cloudProviderConnectionStatusPolicy""#)
         );
-        assert!(provider_connection_contract.contains("No Actro product server"));
+        assert!(provider_connection_contract.contains("No Actrium product server"));
 
         let provider_error_policy = browser_storage_sync_cloud_provider_error_policy_json();
         assert!(provider_error_policy.contains(r#""planType":"cloudProviderErrorClassification""#));
@@ -3384,7 +3387,7 @@ mod tests {
         assert!(provider_error_classification.contains(r#""canonicalErrorKind":"conflict""#));
 
         let cloud_store_preflight = browser_storage_sync_cloud_store_capability_preflight_json(
-            r#"{"providerKind":"memory","rootPath":"Actro/BrowserSync","revisionKind":"monotonicCounter","supportsPrefixList":true,"supportsPagedList":true,"supportsConditionalWrite":true,"supportsConditionalDelete":true,"supportsReadIfChanged":true,"supportsAtomicRename":false,"supportsAppFolder":true,"backgroundSync":"testControlled","conflictResolution":"optimisticRevision","maxObjectBytes":8388608,"maxPageSize":1000}"#.to_string(),
+            r#"{"providerKind":"memory","rootPath":"Actrium/BrowserSync","revisionKind":"monotonicCounter","supportsPrefixList":true,"supportsPagedList":true,"supportsConditionalWrite":true,"supportsConditionalDelete":true,"supportsReadIfChanged":true,"supportsAtomicRename":false,"supportsAppFolder":true,"backgroundSync":"testControlled","conflictResolution":"optimisticRevision","maxObjectBytes":8388608,"maxPageSize":1000}"#.to_string(),
             8,
         );
         assert!(cloud_store_preflight.contains(r#""planType":"cloudStoreCapabilityPreflight""#));
@@ -3429,7 +3432,7 @@ mod tests {
         assert!(cleanup_result_plan.contains(r#""clientAction":"nothingToCleanup""#));
         let cloud_compatibility_preflight = browser_storage_sync_cloud_compatibility_preflight_json(
             format!(
-                r#"[{{"path":"Actro/BrowserSync/manifest.json","document":{cloud_manifest}}}]"#
+                r#"[{{"path":"Actrium/BrowserSync/manifest.json","document":{cloud_manifest}}}]"#
             ),
             8,
         );
@@ -3594,7 +3597,7 @@ mod tests {
         assert!(cloud_observability_event.contains(r#""redactedExportAllowed":true"#));
 
         let local_folder_root = std::env::temp_dir().join(format!(
-            "actro-core-ffi-local-folder-cycle-{}",
+            "actrium-core-ffi-local-folder-cycle-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&local_folder_root);
@@ -3706,13 +3709,16 @@ mod tests {
         let history_item = core_history_item_from_row(CoreHistoryItemRowInfo {
             id: "history-1".to_string(),
             title: "Example".to_string(),
-            app_url: Some("actro://example".to_string()),
+            app_url: Some("actr://example.com/example".to_string()),
             app_id: Some("example".to_string()),
             visit_time_seconds: 1_700_000_000,
         });
         assert_eq!(history_item.id, "history-1");
         assert_eq!(history_item.title, "Example");
-        assert_eq!(history_item.app_url.as_deref(), Some("actro://example"));
+        assert_eq!(
+            history_item.app_url.as_deref(),
+            Some("actr://example.com/example")
+        );
         assert_eq!(history_item.visit_time_seconds, 1_700_000_000);
 
         let tag_sql = core_tag_repository_sql();
@@ -3766,7 +3772,7 @@ mod tests {
         let bookmark = core_bookmark_from_row(CoreBookmarkRowInfo {
             id: "bookmark-1".to_string(),
             title: "Docs".to_string(),
-            app_url: Some("actro://docs".to_string()),
+            app_url: Some("actr://example.com/docs".to_string()),
             app_id: Some("docs".to_string()),
             created_at_seconds: 1_700_000_001,
             last_used_at_seconds: Some(1_700_000_002),
@@ -3776,7 +3782,7 @@ mod tests {
         });
         assert_eq!(bookmark.id, "bookmark-1");
         assert_eq!(bookmark.title, "Docs");
-        assert_eq!(bookmark.app_url.as_deref(), Some("actro://docs"));
+        assert_eq!(bookmark.app_url.as_deref(), Some("actr://example.com/docs"));
         assert_eq!(bookmark.last_used_at_seconds, Some(1_700_000_002));
 
         let app_sql = core_app_repository_sql();
@@ -3841,13 +3847,16 @@ mod tests {
         let history_params = core_history_insert_visit_params(
             "history-1".to_string(),
             "Example".to_string(),
-            Some("actro://example".to_string()),
+            Some("actr://example.com/example".to_string()),
             None,
             1_700_000_010,
         );
         assert_eq!(history_params.len(), 5);
         assert_eq!(history_params[0].text.as_deref(), Some("history-1"));
-        assert_eq!(history_params[2].text.as_deref(), Some("actro://example"));
+        assert_eq!(
+            history_params[2].text.as_deref(),
+            Some("actr://example.com/example")
+        );
         assert_eq!(history_params[3].kind, "null");
         assert_eq!(history_params[4].integer, Some(1_700_000_010));
 
@@ -3871,7 +3880,7 @@ mod tests {
         let bookmark = CoreBookmarkInfo {
             id: "bookmark-1".to_string(),
             title: "Docs".to_string(),
-            app_url: Some("actro://docs".to_string()),
+            app_url: Some("actr://example.com/docs".to_string()),
             app_id: Some("docs".to_string()),
             created_at_seconds: 1_700_000_011,
             last_used_at_seconds: Some(1_700_000_012),
@@ -4083,7 +4092,7 @@ mod tests {
             Some("tab-1".to_string()),
             Some("Updated".to_string()),
             None,
-            Some("actro://updated".to_string()),
+            Some("actr://example.com/updated".to_string()),
             Some("Dead".to_string()),
         )
         .unwrap();
@@ -4091,7 +4100,10 @@ mod tests {
         assert_eq!(update.tab_id, "tab-1");
         assert_eq!(update.title.as_deref(), Some("Updated"));
         assert_eq!(update.icon, None);
-        assert_eq!(update.app_url.as_deref(), Some("actro://updated"));
+        assert_eq!(
+            update.app_url.as_deref(),
+            Some("actr://example.com/updated")
+        );
         assert_eq!(update.status.as_deref(), Some("alive"));
 
         assert!(runtime_tab_update_from_fields(None, None, None, None, None).is_none());
@@ -4142,21 +4154,21 @@ mod tests {
         assert_eq!(auth_environment_beta(), "beta");
         assert_eq!(auth_environment_prod(), "prod");
         assert_eq!(
-            auth_environment_from_url("https://gate-actro.develenv.com".to_string()),
+            auth_environment_from_url("https://gate-actrium.develenv.com".to_string()),
             "dev"
         );
         assert_eq!(
-            auth_environment_from_app_url("https://gate-actro.develenv.com".to_string()),
+            auth_environment_from_app_url("https://gate-actrium.develenv.com".to_string()),
             "prod"
         );
         assert_eq!(
-            auth_environment_from_app_url("https://gate-actro.develenv.com/with/app".to_string()),
+            auth_environment_from_app_url("https://gate-actrium.develenv.com/with/app".to_string()),
             "dev"
         );
         assert_eq!(auth_environment_storage_suffix("beta".to_string()), ".beta");
         assert_eq!(
             auth_account_base_url("dev".to_string()),
-            "http://account-actro.develenv.com"
+            "http://account-actrium.develenv.com"
         );
         assert_eq!(
             auth_resource_uploader_base_url("beta".to_string()),
@@ -4173,12 +4185,12 @@ mod tests {
         assert_eq!(auth_resource_upload_token_path(), "/api/get-token");
         assert_eq!(
             auth_access_control_url_from_app_url(
-                "https://gate-actro.betaenv.com:9443/with/app-123".to_string(),
+                "https://gate-actrium.betaenv.com:9443/with/app-123".to_string(),
                 "app-123".to_string(),
                 "user.cn".to_string()
             )
             .as_deref(),
-            Some("https://gate-actro.betaenv.com/api/access_control/app-123/user.cn")
+            Some("https://gate-actrium.betaenv.com/api/access_control/app-123/user.cn")
         );
         assert_eq!(
             auth_access_control_url_from_app_url(
@@ -4315,15 +4327,15 @@ mod tests {
         );
         assert_eq!(
             contract.ask_local_service_send_text_route_key,
-            "actro.AskLocalService.SendText"
+            "actrium.AskLocalService.SendText"
         );
         assert_eq!(
             contract.ask_local_service_start_send_voice_route_key,
-            "actro.AskLocalService.StartSendVoice"
+            "actrium.AskLocalService.StartSendVoice"
         );
         assert_eq!(
             contract.ask_local_service_send_voice_chunk_route_key,
-            "actro.AskLocalService.SendVoiceChunk"
+            "actrium.AskLocalService.SendVoiceChunk"
         );
         assert_eq!(contract.ios_ask_service_prompt_timeout_ms, 20_000);
         assert_eq!(
@@ -4413,20 +4425,20 @@ mod tests {
 
     #[test]
     fn ffi_parse_actr_actor_type_returns_sdk_parts() {
-        let actor_type = parse_actr_actor_type(" actro + app_server ".to_string()).unwrap();
+        let actor_type = parse_actr_actor_type(" actrium + app_server ".to_string()).unwrap();
 
-        assert_eq!(actor_type.manufacturer, "actro");
+        assert_eq!(actor_type.manufacturer, "actrium");
         assert_eq!(actor_type.name, "app_server");
         assert_eq!(actor_type.version, "");
     }
 
     #[test]
     fn ffi_parse_actr_actor_type_rejects_invalid_wire_values() {
-        let error = parse_actr_actor_type("actro+server+extra".to_string()).unwrap_err();
+        let error = parse_actr_actor_type("actrium+server+extra".to_string()).unwrap_err();
 
         assert!(matches!(
             error,
-            CoreError::InvalidActrActorType(raw) if raw == "actro+server+extra"
+            CoreError::InvalidActrActorType(raw) if raw == "actrium+server+extra"
         ));
     }
 

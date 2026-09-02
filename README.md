@@ -4,8 +4,8 @@ Actrium is the private monorepo for the Actrium browser applications, the Actr
 foundation, the Keel sandbox UI framework, and Loran—the default shore-side
 service suite.
 
-Actr, its former Actrix service suite, Keel, and Actro have been migrated into
-this repository through reviewed, privacy-sanitized history imports. The Actro
+Actr, its former Actrix service suite, Keel, and Actrium have been migrated into
+this repository through reviewed, privacy-sanitized history imports. The Actrium
 applications now occupy the platform roots while their reusable code lives in
 `crates/` and `packages/`.
 
@@ -49,7 +49,7 @@ proposed source mapping and the reasoning behind it.
 ## Scope
 
 - Actr is the built-in foundation rather than a sibling product.
-- Actro evolves into the Actrium applications and their shared packages.
+- Actrium evolves into the Actrium applications and their shared packages.
 - Keel remains a distinct sandbox UI component, while shipping with Actrium.
 - Loran is the default and reference shore-side service suite; it includes the
   operational composition rather than becoming part of Actr itself.

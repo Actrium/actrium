@@ -1,12 +1,12 @@
-pub const PACKAGE_NAME: &str = "actro";
-pub const PACKAGE_DESCRIPTION: &str = "Actro browser client app";
-pub const PACKAGE_AUTHOR: &str = "Actro-Team";
+pub const PACKAGE_NAME: &str = "actrium";
+pub const PACKAGE_DESCRIPTION: &str = "Actrium browser client app";
+pub const PACKAGE_AUTHOR: &str = "Actrium-Team";
 pub const PACKAGE_LICENSE: &str = "Apache-2.0";
 pub const PACKAGE_TAG_DEV: &str = "dev";
 pub const PACKAGE_TAG_CLIENT: &str = "client";
 
-pub const CLIENT_ACTR_MANUFACTURER: &str = "actro";
-pub const CLIENT_ACTR_NAME: &str = "actro";
+pub const CLIENT_ACTR_MANUFACTURER: &str = "actrium";
+pub const CLIENT_ACTR_NAME: &str = "actrium";
 pub const DEPENDENCY_NAME: &str = "bid-service";
 
 pub const DEFAULT_SIGNALING_URL: &str = "wss://actrix1.develenv.com/signaling/ws";
@@ -24,7 +24,7 @@ pub const LOCK_DEPENDENCY_NAME: &str = "bot";
 pub const LOCK_DEPENDENCY_FINGERPRINT: &str =
     "service_semantic:090a8d3fb0c937ac019606c43cbe40e2223690e3d3ad87b2f16e42119c41820a";
 pub const LOCK_CACHED_AT: &str = "2026-02-06T06:40:17.912656+00:00";
-pub const LOCK_DEPENDENCY_FILE_PATH: &str = "bot/actro.proto";
+pub const LOCK_DEPENDENCY_FILE_PATH: &str = "bot/actrium.proto";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActrServiceEndpoint {
@@ -215,20 +215,20 @@ mod tests {
     fn normalizes_actr_service_urls_like_runtime_typescript() {
         assert_eq!(normalize_signaling_url(None), DEFAULT_SIGNALING_URL);
         assert_eq!(
-            normalize_signaling_url(Some(&endpoint("actrix1.actro.chat", Some("443")))),
-            "wss://actrix1.actro.chat:443/signaling/ws"
+            normalize_signaling_url(Some(&endpoint("actrix1.actrium.chat", Some("443")))),
+            "wss://actrix1.actrium.chat:443/signaling/ws"
         );
         assert_eq!(
             normalize_signaling_url(Some(&endpoint("ws://local.test", None))),
             "ws://local.test/signaling/ws"
         );
         assert_eq!(
-            normalize_stun_url(&endpoint("actrix1.actro.chat", Some("3478"))),
-            "stun:actrix1.actro.chat:3478"
+            normalize_stun_url(&endpoint("actrix1.actrium.chat", Some("3478"))),
+            "stun:actrix1.actrium.chat:3478"
         );
         assert_eq!(
-            normalize_turn_url(&endpoint("turn:actrix1.actro.chat", Some("3478"))),
-            "turn:actrix1.actro.chat:3478"
+            normalize_turn_url(&endpoint("turn:actrix1.actrium.chat", Some("3478"))),
+            "turn:actrix1.actrium.chat:3478"
         );
     }
 
@@ -238,18 +238,18 @@ mod tests {
             manufacturer: "acmeopenclaw".to_string(),
             name: "AskService".to_string(),
             realm_id: "1234567".to_string(),
-            signaling_services: vec![endpoint("actrix1.actro.chat", Some("443"))],
-            stun_services: vec![endpoint("actrix1.actro.chat", Some("3478"))],
-            turn_services: vec![endpoint("actrix1.actro.chat", Some("3478"))],
+            signaling_services: vec![endpoint("actrix1.actrium.chat", Some("443"))],
+            stun_services: vec![endpoint("actrix1.actrium.chat", Some("3478"))],
+            turn_services: vec![endpoint("actrix1.actrium.chat", Some("3478"))],
         });
 
-        assert!(toml.contains("name = \"actro\""));
-        assert!(toml.contains("tracing_service_name = \"actro\""));
+        assert!(toml.contains("name = \"actrium\""));
+        assert!(toml.contains("tracing_service_name = \"actrium\""));
         assert!(toml.contains("bid-service = { actr_type = \"acmeopenclaw+AskService\" }"));
-        assert!(toml.contains("url = \"wss://actrix1.actro.chat:443/signaling/ws\""));
+        assert!(toml.contains("url = \"wss://actrix1.actrium.chat:443/signaling/ws\""));
         assert!(toml.contains("realm_id = 1234567"));
-        assert!(toml.contains("stun_urls = [\"stun:actrix1.actro.chat:3478\"]"));
-        assert!(toml.contains("turn_urls = [\"turn:actrix1.actro.chat:3478\"]"));
+        assert!(toml.contains("stun_urls = [\"stun:actrix1.actrium.chat:3478\"]"));
+        assert!(toml.contains("turn_urls = [\"turn:actrix1.actrium.chat:3478\"]"));
         assert!(toml.ends_with('\n'));
     }
 
@@ -263,7 +263,7 @@ mod tests {
         assert!(toml.contains("version = 1"));
         assert!(toml.contains("name = \"bot\""));
         assert!(toml.contains("actr_type = \"acmeopenclaw+AskService\""));
-        assert!(toml.contains("path = \"bot/actro.proto\""));
+        assert!(toml.contains("path = \"bot/actrium.proto\""));
         assert!(toml.ends_with('\n'));
     }
 }

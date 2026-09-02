@@ -1,8 +1,8 @@
 //
 //  UnixSocketIPC.swift
-//  Actro
+//  Actrium
 //
-//  Unix Domain Socket IPC layer for Actro <-> Helper communication.
+//  Unix Domain Socket IPC layer for Actrium <-> Helper communication.
 //  Protocol: Length-prefixed Protobuf messages
 //
 //  Frame format:
@@ -21,7 +21,7 @@ enum IPCSocketPath {
     static func forTab(_ tabId: String) -> String {
         let processId = ProcessInfo.processInfo.processIdentifier
         return String(
-            format: "/tmp/actro-%d-%016llx.sock",
+            format: "/tmp/actrium-%d-%016llx.sock",
             processId,
             stableHash(tabId)
         )
@@ -42,7 +42,7 @@ enum IPCSocketPath {
     }
 }
 
-// MARK: - IPC Server (Actro side)
+// MARK: - IPC Server (Actrium side)
 
 /// Unix Socket server for receiving connections from Helper processes
 class IPCServer {
@@ -50,7 +50,7 @@ class IPCServer {
     private var clientSocket: Int32 = -1
     private let socketPath: String?
     private let connectedSocket: Int32?
-    private let queue = DispatchQueue(label: "io.actrium.actro.ipc.server")
+    private let queue = DispatchQueue(label: "io.actrium.app.ipc.server")
     private let sendLock = NSLock()
     private var isRunning = false
 
@@ -245,12 +245,12 @@ class IPCServer {
 
 // MARK: - IPC Client (Helper side)
 
-/// Unix Socket client for connecting to Actro
+/// Unix Socket client for connecting to Actrium
 class IPCClient {
     private var socket: Int32 = -1
     private let socketPath: String?
     private let connectedSocket: Int32?
-    private let queue = DispatchQueue(label: "io.actrium.actro.ipc.client")
+    private let queue = DispatchQueue(label: "io.actrium.app.ipc.client")
     private let sendLock = NSLock()
     private var isConnected = false
 

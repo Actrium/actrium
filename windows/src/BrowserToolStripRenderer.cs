@@ -2,7 +2,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 /// <summary>
 /// Theme-driven ToolStrip/menu renderer. The color table alone only covers

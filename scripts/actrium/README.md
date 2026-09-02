@@ -5,11 +5,11 @@ Repository automation lives here.
 Keep platform-specific scripts close to the app or package that owns them unless
 the script is used across multiple top-level areas.
 
-- `build-actro-rust-bindings.sh` rebuilds local native outputs for Actro Rust
+- `build-actrium-rust-bindings.sh` rebuilds local native outputs for Actrium Rust
   client crates. Use `apple`, `android`, or `all` to regenerate XCFrameworks,
   Swift binding sources, Kotlin bindings, Android JNI libraries, and
   Rust-generated compile-time contracts. Use `windows` separately on a Windows
-  Rust host to build and copy the ActroCore DLL used by the Windows shell. Heavy
+  Rust host to build and copy the ActriumCore DLL used by the Windows shell. Heavy
   binary slices are intentionally ignored and should be regenerated locally or in
   CI.
 - `PrepareAndroidBinaryAssets.java` is the JDK-only downloader used by Android
@@ -29,7 +29,7 @@ the script is used across multiple top-level areas.
   runtime links point at `packages/actrium`, the macOS compatibility layout
   points at monorepo package/runtime locations, reserved package boundaries
   have README files, `internal/` remains git-ignored, and temporary import
-  trees under `.import/actro/` are absent.
+  trees under `.import/actrium/` are absent.
 - `check-retired-protocol-names.sh` rejects identifiers from the superseded
   package split in the current tree and history reachable from `HEAD`. CI
   checks out the full history before invoking it, but unrelated branches and
@@ -47,9 +47,9 @@ the script is used across multiple top-level areas.
   generated file.
 - `check-rust-boundary-hygiene.sh` protects the native RN/UI boundary files that
   have already been moved behind local Swift/Kotlin adapters. It intentionally
-  does not ban `ActroCore` imports at real package-loading, database, model,
+  does not ban `ActriumCore` imports at real package-loading, database, model,
   ACTR, ASR, TTS, or Email native boundaries. It also keeps Windows P/Invoke
-  access centralized in `windows/src/ActroCore.cs`.
+  access centralized in `windows/src/ActriumCore.cs`.
 - `check-windows-layout.sh` verifies the current Windows project contract:
   `windows/` exists, WebView2 remains the expected shell host,
   the browser application context owns multi-window
@@ -75,7 +75,7 @@ the script is used across multiple top-level areas.
   host message bridge delegates to the local host bridge protocol,
   browser host methods are present, page-initiated unsafe navigations are
   intercepted, the Windows-local navigation policy, browser session store,
-  primary-window state store, and lightweight tests are present, the ActroCore C
+  primary-window state store, and lightweight tests are present, the ActriumCore C
   ABI adapter is present, and `verify:windows` is wired to the Windows verifier.
 
 ## Root Verification Shortcuts
@@ -83,7 +83,7 @@ the script is used across multiple top-level areas.
 The repository root `package.json` exposes the main migration checks:
 
 - `npm run verify:all` runs the full migration verification chain: migration
-  hygiene, Rust core/vault tests, Apple ActroCore Swift package tests, generated
+  hygiene, Rust core/vault tests, Apple ActriumCore Swift package tests, generated
   contract checks, Rust boundary hygiene, Windows layout checks, shared runtime
   typecheck, React Native bundles, and Android/iOS/macOS debug builds.
 - `npm run check:generated` verifies that Rust-generated lightweight contract
@@ -94,13 +94,13 @@ The repository root `package.json` exposes the main migration checks:
 - `npm run check:windows-layout` verifies the current Windows app layout and
   project metadata wiring.
 - `npm run check:bundles` builds the iOS, Android, and macOS React Native bundles.
-  macOS covers both Actro runtime entries: system apps and ACTR host.
+  macOS covers both Actrium runtime entries: system apps and ACTR host.
 - `npm run check:migration` runs repository migration hygiene checks.
 - `npm run check:repository-assets` validates the Android artifact lock, large
   file budgets, and vendored source checksums.
 - `npm run verify:rust` runs the core Rust contract/vault tests that back the
   shared native boundary.
-- `npm run verify:apple-core` runs the ActroCore Swift package tests, including
+- `npm run verify:apple-core` runs the ActriumCore Swift package tests, including
   Apple browser storage v1/v2/v3-to-v6 SQLite migration fixtures.
 - `npm run verify:runtime` runs the shared React Native runtime TypeScript
   check used by `verify:all`.

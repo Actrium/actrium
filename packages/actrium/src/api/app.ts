@@ -2,8 +2,8 @@ import { AppInfo } from './types';
 import { http } from './https';
 import { authClientAppPath } from '../runtime-host/coreContract';
 
-// export const CONSOLE_BASE = 'https://console-actro.betaenv.com';
-export const CONSOLE_BASE = 'https://console-v2.actro.chat';
+// export const CONSOLE_BASE = 'https://console-actrium.betaenv.com';
+export const CONSOLE_BASE = 'https://console-v2.actrium.chat';
 
 export const getAppInfo = async (appId: string) => {
   const res = await http.get<AppInfo>(

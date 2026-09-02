@@ -52,7 +52,7 @@ It has to be analyzed to a fixed `.actr` package digest.Program Release Descript
 - Keel Guest (a) Entry points;
 - Front–Service (a) Contracts;
 - Capacity and components to apply;
-- Keel/Actro/Actr ABI Compatibility scope;
+- Keel/Actrium/Actr ABI Compatibility scope;
 - (a) Resource quotas;
 - Workspace (a) Modes;
 - Publisher Can not open message
@@ -75,7 +75,7 @@ Service No, it's not.“Program Type”Nor is it a freely replaceable load-balan
 
 One. resident app Tab Corresponding short life cycle interactions Actor:
 
-- workload By Actro (b) Fixed;
+- workload By Actrium (b) Fixed;
 - Inline Keel Host, Actr client, capability broker and life-cycle management;
 - Load certified Keel Guest;
 - Only binds Service ♪ I'm limited ♪ capability;
@@ -84,7 +84,7 @@ One. resident app Tab Corresponding short life cycle interactions Actor:
 
 ### 2.5 Tab
 
-Actro Shell .Tab Saves local browsing status, e.g.:
+Actrium Shell .Tab Saves local browsing status, e.g.:
 
 - Local `tab_id`;
 - Current Normalization `actr://` URI;
@@ -143,7 +143,7 @@ The same. Service You can be multiple in time. Front Actor reconnect; this is no
 If Service It's always just one specific thing. Front Actor, and it immediately creates a contradiction:
 
 - Close Tab Back Service Whether it is necessary to delete;
-- Actro Restart New Front Actor How to connect;
+- Actrium Restart New Front Actor How to connect;
 - Front Whether the crash caused Workspace (a) Loss of ownership;
 - The following video shows the event:
 - The same example is why it is necessary to change identity after moving to new equipment.
@@ -157,7 +157,7 @@ So the simplest model is not“Two life-cycles tied to death.”and instead:
 Program Manifest Declaration:
 
 ```toml
-[actro.session]
+[actrium.session]
 attachment_policy = "exclusive"
 ```
 
@@ -212,7 +212,7 @@ It's missing. Realm authority.v1 It has to be expanded. ActorId Data models and 
 <serial_hex>@<realm_id>~dns:<realm-domain>/<publisher>:<program>:<version>
 ```
 
-Local Realm Use `local:<installation-id>` authorityFinally. wire/text Encoding by Actr ADR Freezing, but not returning.“Just one. realm_idFuck! Actro Private guess. Realm”Semantics.
+Local Realm Use `local:<installation-id>` authorityFinally. wire/text Encoding by Actr ADR Freezing, but not returning.“Just one. realm_idFuck! Actrium Private guess. Realm”Semantics.
 
 At the same time, the semantics of its life cycle must be derived from“Current registration address”Upgrade to“Durable logic of renewable rent Actor Identity”.
 
@@ -234,13 +234,13 @@ Target model no longer oriented URL Add a public layer“Logical Service Key”.
 ServiceInstanceId → current ActorId
 ```
 
-Actro Local databases can have pure storage. `record_id`But it's not a network identity, and it's not shared. URL Medium.
+Actrium Local databases can have pure storage. `record_id`But it's not a network identity, and it's not shared. URL Medium.
 
 ## 5. Status Attribution
 
 | Status | Author of authority | Annotations |
 |---|---|---|
-| Tab Arrange, move forward./Back | Actro Shell | It's synchronous. The loss should not disrupt the business. |
+| Tab Arrange, move forward./Back | Actrium Shell | It's synchronous. The loss should not disrupt the business. |
 | Guest UI Temporary state | Front Actor / Keel Guest | suspend But a snapshot. Once the crash is over, it's allowed to rebuild. |
 | Current binding Service ActorId | Tab Session | From Regularization URI |
 | Business status | Service Actor | Not on it. Front |
@@ -249,7 +249,7 @@ Actro Local databases can have pure storage. `record_id`But it's not a network i
 | Program Release metadata | Program Catalog | Here. coordinate + digest As Primary Key |
 | Actor Long-term private key | Secure Storage | Not normal SQLite |
 | Realm membership credential | Secure Storage | Short-term, renewable, revocable |
-| Permissions granted | Actro Permission Store | Tie publisher/program/major/digest/Workspace Scope |
+| Permissions granted | Actrium Permission Store | Tie publisher/program/major/digest/Workspace Scope |
 | ActorAssurance | Authenticator (%1)issuer ≠ subject) | For accuracy `ActorStateId` Nodal conclusion |
 | ApplicationAssurance | Applied assessor | Consemination conclusions of current no root map cut-off; presentation required Ready |
 
@@ -259,7 +259,7 @@ The three acts must be separated:
 
 ### 6.1 Create
 
-None `service` It's... URI Yes. Create Intent.Actro:
+None `service` It's... URI Yes. Create Intent.Actrium:
 
 1. Parsing and Validating Program Release;
 2. Selection Realm with Workspace;
@@ -305,12 +305,12 @@ If the program needs more backstages, Actor, Primary Service Discovery, creation
 
 ## 8. System Program
 
-Actro Shell address bar,Tab strip, access to bullet windows and security information belongs to ShellNot normal. Tab Content.
+Actrium Shell address bar,Tab strip, access to bullet windows and security information belongs to ShellNot normal. Tab Content.
 
 History, collection,Program Catalog, Service Inventory The visible pages should be either:
 
 1. As Shell Native management panel, not in normal applications Tab(a) The contract or other contract; or
-2. As Actro Own-owned, signed systems ProgramStill in compliance Front–Service Models.
+2. As Actrium Own-owned, signed systems ProgramStill in compliance Front–Service Models.
 
 Do not expose a third party hidden form for the system page Guest Permissions. System-level capabilities must be signed at different levels and visible Host policy Granted.
 

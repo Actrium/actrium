@@ -62,12 +62,12 @@ platform projects follow their native ecosystem's conventional layouts.
 - **actr/actrix → loran/** plus **crates/loran-***: `loran/` owns the deployable
   service suite; its daemon and reusable signaling, STUN/TURN, signer, control,
   discovery, and SDK units remain normal crates.
-- **actro/apps/{android,ios,macos,windows} → android/, ios/, macos/, windows/**:
+- **actrium/apps/{android,ios,macos,windows} → android/, ios/, macos/, windows/**:
   each keeps its ecosystem's expected project root rather than living under a
   generic `browser/` directory.
-- **actro/crates → crates/actrium-*** and **actro/packages →
-  packages/actrium-***. **actro/platform → packages/actrium-platform**.
-- **actro/schemas → contracts/actrium/** and **contracts/ipc/**.
+- **actrium/crates → crates/actrium-*** and **actrium/packages →
+  packages/actrium-***. **actrium/platform → packages/actrium-platform**.
+- **actrium/schemas → contracts/actrium/** and **contracts/ipc/**.
 - **keel/src + keel/native → packages/keel/**. The implementation remains one
   package during import; it should split only when independent publishing or
   dependency boundaries become real. There is intentionally no generic

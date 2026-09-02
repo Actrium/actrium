@@ -1,4 +1,4 @@
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal static class BrowserPermissionPolicy
 {

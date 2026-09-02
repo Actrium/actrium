@@ -1,6 +1,6 @@
 # System Apps
 
-Reserved package boundary for built-in Actro apps such as start page, history,
+Reserved package boundary for built-in Actrium apps such as start page, history,
 bookmarks, settings, and global search.
 
 Current implementation lives in `packages/actrium/`. Keep system app code

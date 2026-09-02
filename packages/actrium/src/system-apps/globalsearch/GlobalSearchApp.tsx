@@ -39,7 +39,7 @@ import { searchCopy as searchCopyZhHans } from './locales/zh-Hans/searchCopy';
 import { searchCopy as searchCopyZhHant } from './locales/zh-Hant/searchCopy';
 
 type SearchResultType = 'active' | 'bookmark' | 'setting';
-type SettingsPage = 'main' | 'accountDetail' | 'aboutActro';
+type SettingsPage = 'main' | 'accountDetail' | 'aboutActrium';
 type SettingsAboutPage = 'aboutApp' | 'userAgreement' | 'privacyPolicy' | 'icp';
 type SettingsAction = 'feedback' | 'logout';
 
@@ -163,7 +163,7 @@ export default function GlobalSearchApp() {
 
   const handleOpenAbout = useCallback(
     (aboutPage: SettingsAboutPage = 'aboutApp') => {
-      openSettingsWithDeepLink('aboutActro', aboutPage);
+      openSettingsWithDeepLink('aboutActrium', aboutPage);
     },
     [openSettingsWithDeepLink],
   );
@@ -176,7 +176,7 @@ export default function GlobalSearchApp() {
         name: t('actr.search.settings'),
         // Only the key words in the current interface language are retained to avoid Chinese-British hyphenation leading to a missed hit.
         searchKeywords: localizedSearchCopy.settingsKeywords,
-        icon: 'actro_gray',
+        icon: 'actrium_gray',
         action: handleOpenSettings,
       },
       {
@@ -192,15 +192,15 @@ export default function GlobalSearchApp() {
         type: 'setting',
         name: localizedSearchCopy.aboutName,
         searchKeywords: localizedSearchCopy.aboutKeywords,
-        icon: 'actro_gray',
-        action: () => openSettingsWithDeepLink('aboutActro'),
+        icon: 'actrium_gray',
+        action: () => openSettingsWithDeepLink('aboutActrium'),
       },
       {
         id: 'setting-about-app',
         type: 'setting',
         name: localizedSearchCopy.aboutAppName,
         searchKeywords: localizedSearchCopy.aboutAppKeywords,
-        icon: 'actro_gray',
+        icon: 'actrium_gray',
         action: () => handleOpenAbout('aboutApp'),
       },
       {
@@ -208,7 +208,7 @@ export default function GlobalSearchApp() {
         type: 'setting',
         name: t('actr.auth.userAgreement'),
         searchKeywords: [t('actr.auth.userAgreement')],
-        icon: 'actro_gray',
+        icon: 'actrium_gray',
         action: () => handleOpenAbout('userAgreement'),
       },
       {
@@ -216,7 +216,7 @@ export default function GlobalSearchApp() {
         type: 'setting',
         name: t('actr.auth.privacyPolicy'),
         searchKeywords: [t('actr.auth.privacyPolicy')],
-        icon: 'actro_gray',
+        icon: 'actrium_gray',
         action: () => handleOpenAbout('privacyPolicy'),
       },
       {
@@ -224,7 +224,7 @@ export default function GlobalSearchApp() {
         type: 'setting',
         name: localizedSearchCopy.icpName,
         searchKeywords: localizedSearchCopy.icpKeywords,
-        icon: 'actro_gray',
+        icon: 'actrium_gray',
         action: () => handleOpenAbout('icp'),
       },
     ];

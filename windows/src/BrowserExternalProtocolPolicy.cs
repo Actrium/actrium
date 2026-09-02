@@ -1,11 +1,11 @@
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal static class BrowserExternalProtocolPolicy
 {
     private static readonly HashSet<string> BlockedExternalSchemes = new(StringComparer.OrdinalIgnoreCase)
     {
         "about",
-        "actro",
+        "actrium",
         "blob",
         "data",
         "file",

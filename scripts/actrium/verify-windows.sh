@@ -9,8 +9,8 @@ if ! command -v rg >/dev/null 2>&1; then
   exit 127
 fi
 
-project="windows/Actro.Windows.csproj"
-test_project="windows/tests/Actro.Windows.Tests.csproj"
+project="windows/Actrium.Windows.csproj"
+test_project="windows/tests/Actrium.Windows.Tests.csproj"
 required_files=(
   "$project"
   "$test_project"
@@ -78,10 +78,10 @@ required_files=(
   "windows/src/NavigationPolicy.cs"
   "windows/src/WindowsAppPaths.cs"
   "windows/src/WindowsStartupOptions.cs"
-  "windows/src/ActroCore.cs"
+  "windows/src/ActriumCore.cs"
   "windows/tests/Program.cs"
   "windows/native/README.md"
-  "crates/actrium-core/include/actro_core.h"
+  "crates/actrium-core/include/actrium_core.h"
 )
 
 failures=0
@@ -633,7 +633,7 @@ fi
 # The durable state root honors an absolute-path override so concurrent
 # multi-instance runs keep independent state trees; the --user-data-root
 # argument feeds the same single choke point.
-if ! rg -q 'ACTRO_USER_DATA_ROOT' windows/src/WindowsAppPaths.cs \
+if ! rg -q 'ACTRIUM_USER_DATA_ROOT' windows/src/WindowsAppPaths.cs \
   || ! rg -q 'UserDataRootEnvironmentVariable' windows/src/Program.cs \
   || ! rg -q -- '--user-data-root' windows/src/WindowsStartupOptions.cs; then
   print_failure "Windows user data root override is not wired through the single app data path choke point"
@@ -893,7 +893,7 @@ if ! rg -q 'BrowserAddressInputPolicy.TryResolveAddressInput' windows/src/MainFo
   print_failure "Windows address bar does not resolve user input through the address input policy"
 fi
 
-for home_document_symbol in BuildDocument Title ActroCoreStatus; do
+for home_document_symbol in BuildDocument Title ActriumCoreStatus; do
   if ! rg -q "$home_document_symbol" windows/src/BrowserHomeDocumentPolicy.cs; then
     print_failure "Windows home document policy is missing symbol: $home_document_symbol"
   fi
@@ -1168,7 +1168,7 @@ if ! rg -q 'BrowserStorageDatabase' windows/src/BrowserSessionStore.cs; then
 fi
 
 for storage_symbol in LoadBrowserStorageSchema LoadBrowserStorageSyncSqlJson LoadBrowserStorageSyncCloudStoreContractJson LoadBrowserStorageSyncCloudLocalFolderCapabilitiesJson BuildBrowserStorageSyncCloudLocalFolderCapabilityPreflightJson BuildBrowserStorageSyncCloudPushPlanJson BuildBrowserStorageSyncCloudPushResultPlanJson BuildBrowserStorageSyncCloudPullPlanJson BuildBrowserStorageSyncCloudPullApplyPlanJson BuildBrowserStorageSyncCloudCompactionPlanJson BuildBrowserStorageSyncCloudLocalFolderCycleRoundJson NormalizeBrowserStorageSyncBatchJson BuildBrowserStorageSyncBatchFromDirtyRowsJson BuildBrowserStorageSyncPushRequestFromDirtyRowsJson NormalizeBrowserStorageSyncAckBatchJson NormalizeBrowserStorageSyncCursorsJson BuildBrowserStorageSyncPushRequestJson BuildBrowserStorageSyncPullRequestJson BuildBrowserStorageSyncCycleResponseJson BuildBrowserStorageSyncAckPlanJson BuildBrowserStorageSyncRemoteApplyPlanJson BuildBrowserStorageSyncRemoteApplyResultJson ApplyRemoteSyncPlan ApplySyncAckPlan ApplyCloudCycleClientPlan ExportDirtySyncBatch ExportDirtySyncPushRequest SelectDirtyStatements BrowserStorageSyncSqlContract SelectSyncCursorsForScope Microsoft.Data.Sqlite browser_history_pages browser_bookmarks browser_sessions; do
-  if ! rg -q "$storage_symbol" windows/src/BrowserStorageDatabase.cs windows/src/ActroCore.cs; then
+  if ! rg -q "$storage_symbol" windows/src/BrowserStorageDatabase.cs windows/src/ActriumCore.cs; then
     print_failure "Windows browser storage database is missing shared storage behavior: $storage_symbol"
   fi
 done
@@ -1218,9 +1218,9 @@ fi
 # Rust normalization contract: the store is a thin native wrapper and the
 # connection planner reads the normalized Configured flag instead of
 # re-deriving the predicate natively.
-if ! rg -q 'NormalizeBrowserSyncProviderSettingsJson' windows/src/ActroCore.cs \
-  || ! rg -q 'actro_core_normalize_browser_sync_provider_settings_json' windows/src/ActroCore.cs \
-  || ! rg -q 'ActroCore.NormalizeBrowserSyncProviderSettingsJson' windows/src/BrowserSyncProviderSettingsStore.cs \
+if ! rg -q 'NormalizeBrowserSyncProviderSettingsJson' windows/src/ActriumCore.cs \
+  || ! rg -q 'actrium_core_normalize_browser_sync_provider_settings_json' windows/src/ActriumCore.cs \
+  || ! rg -q 'ActriumCore.NormalizeBrowserSyncProviderSettingsJson' windows/src/BrowserSyncProviderSettingsStore.cs \
   || ! rg -q 'settings\?\.Configured' windows/src/BrowserSyncProviderConnectionPlanner.cs; then
   print_failure "Windows browser sync provider settings are not normalized through the Rust contract"
 else
@@ -1359,15 +1359,15 @@ else
 fi
 
 for host_method in \
-  'actro\.host\.getCoreStatus' \
-  'actro\.host\.openTab' \
-  'actro\.host\.closeTab' \
-  'actro\.host\.selectTab' \
-	  'actro\.host\.navigate' \
-	  'actro\.host\.getTabs' \
-	  'actro\.host\.getActiveTab' \
-	  'actro\.host\.removeBookmark' \
-	  'actro\.host\.removeHistoryEntry'
+  'actrium\.host\.getCoreStatus' \
+  'actrium\.host\.openTab' \
+  'actrium\.host\.closeTab' \
+  'actrium\.host\.selectTab' \
+	  'actrium\.host\.navigate' \
+	  'actrium\.host\.getTabs' \
+	  'actrium\.host\.getActiveTab' \
+	  'actrium\.host\.removeBookmark' \
+	  'actrium\.host\.removeHistoryEntry'
 do
   if ! rg -q "$host_method" windows/src/HostMessageBridge.cs windows/src/HostBridgeProtocol.cs; then
     print_failure "Windows host bridge does not expose method: $host_method"
@@ -1407,57 +1407,57 @@ else
   print_ok "Windows host bridge enforces a source allowlist"
 fi
 
-if ! rg -q 'DllImport\(LibraryName' windows/src/ActroCore.cs; then
-  print_failure "Windows ActroCore adapter does not use the centralized native library import"
+if ! rg -q 'DllImport\(LibraryName' windows/src/ActriumCore.cs; then
+  print_failure "Windows ActriumCore adapter does not use the centralized native library import"
 else
-  print_ok "Windows ActroCore adapter centralizes native library imports"
+  print_ok "Windows ActriumCore adapter centralizes native library imports"
 fi
 
 for symbol in \
-  actro_core_c_api_version \
-  actro_core_product_name \
-  actro_core_supported_contract_name \
-  actro_core_supported_contract_version \
-  actro_core_schema_version \
-  actro_core_runtime_schema_version \
-  actro_core_browser_storage_sync_sql_json \
-  actro_core_browser_storage_sync_batch_normalize_json \
-  actro_core_browser_storage_sync_ack_batch_normalize_json \
-  actro_core_browser_storage_sync_cursors_normalize_json \
-  actro_core_browser_storage_sync_batch_empty_json \
-  actro_core_browser_storage_sync_push_request_json \
-  actro_core_browser_storage_sync_pull_request_json \
-  actro_core_browser_storage_sync_cycle_response_json \
-  actro_core_browser_storage_sync_cloud_store_contract_json \
-  actro_core_browser_storage_sync_cloud_data_model_json \
-  actro_core_browser_storage_sync_cloud_default_manifest_json \
-  actro_core_browser_storage_sync_cloud_manifest_normalize_json \
-  actro_core_browser_storage_sync_cloud_device_normalize_json \
-  actro_core_browser_storage_sync_cloud_log_object_json \
-  actro_core_browser_storage_sync_cloud_log_object_normalize_json \
-  actro_core_browser_storage_sync_cloud_snapshot_object_json \
-  actro_core_browser_storage_sync_cloud_snapshot_object_normalize_json \
-  actro_core_browser_storage_sync_cloud_push_plan_json \
-  actro_core_browser_storage_sync_cloud_push_result_plan_json \
-  actro_core_browser_storage_sync_cloud_pull_plan_json \
-  actro_core_browser_storage_sync_cloud_pull_apply_plan_json \
-  actro_core_browser_storage_sync_cloud_compaction_plan_json \
-  actro_core_browser_storage_sync_cloud_compaction_result_plan_json \
-  actro_core_browser_storage_sync_cycle_request_plan_json \
-  actro_core_browser_storage_sync_cycle_transport_result_json \
-  actro_core_browser_storage_sync_status_policy_json \
-  actro_core_browser_storage_sync_schedule_state_json \
-  actro_core_browser_storage_sync_scheduler_status_json \
-  actro_core_browser_storage_sync_ack_plan_json \
-  actro_core_browser_storage_sync_remote_apply_plan_json \
-  actro_core_browser_storage_sync_remote_apply_result_json \
-  actro_core_normalize_browser_sync_provider_settings_json
+  actrium_core_c_api_version \
+  actrium_core_product_name \
+  actrium_core_supported_contract_name \
+  actrium_core_supported_contract_version \
+  actrium_core_schema_version \
+  actrium_core_runtime_schema_version \
+  actrium_core_browser_storage_sync_sql_json \
+  actrium_core_browser_storage_sync_batch_normalize_json \
+  actrium_core_browser_storage_sync_ack_batch_normalize_json \
+  actrium_core_browser_storage_sync_cursors_normalize_json \
+  actrium_core_browser_storage_sync_batch_empty_json \
+  actrium_core_browser_storage_sync_push_request_json \
+  actrium_core_browser_storage_sync_pull_request_json \
+  actrium_core_browser_storage_sync_cycle_response_json \
+  actrium_core_browser_storage_sync_cloud_store_contract_json \
+  actrium_core_browser_storage_sync_cloud_data_model_json \
+  actrium_core_browser_storage_sync_cloud_default_manifest_json \
+  actrium_core_browser_storage_sync_cloud_manifest_normalize_json \
+  actrium_core_browser_storage_sync_cloud_device_normalize_json \
+  actrium_core_browser_storage_sync_cloud_log_object_json \
+  actrium_core_browser_storage_sync_cloud_log_object_normalize_json \
+  actrium_core_browser_storage_sync_cloud_snapshot_object_json \
+  actrium_core_browser_storage_sync_cloud_snapshot_object_normalize_json \
+  actrium_core_browser_storage_sync_cloud_push_plan_json \
+  actrium_core_browser_storage_sync_cloud_push_result_plan_json \
+  actrium_core_browser_storage_sync_cloud_pull_plan_json \
+  actrium_core_browser_storage_sync_cloud_pull_apply_plan_json \
+  actrium_core_browser_storage_sync_cloud_compaction_plan_json \
+  actrium_core_browser_storage_sync_cloud_compaction_result_plan_json \
+  actrium_core_browser_storage_sync_cycle_request_plan_json \
+  actrium_core_browser_storage_sync_cycle_transport_result_json \
+  actrium_core_browser_storage_sync_status_policy_json \
+  actrium_core_browser_storage_sync_schedule_state_json \
+  actrium_core_browser_storage_sync_scheduler_status_json \
+  actrium_core_browser_storage_sync_ack_plan_json \
+  actrium_core_browser_storage_sync_remote_apply_plan_json \
+  actrium_core_browser_storage_sync_remote_apply_result_json \
+  actrium_core_normalize_browser_sync_provider_settings_json
 do
-  if ! rg -q "$symbol" crates/actrium-core/include/actro_core.h; then
+  if ! rg -q "$symbol" crates/actrium-core/include/actrium_core.h; then
     print_failure "Rust C ABI header is missing symbol: $symbol"
   fi
-  if ! rg -q "$symbol" windows/src/ActroCore.cs; then
-    print_failure "Windows ActroCore adapter is missing symbol: $symbol"
+  if ! rg -q "$symbol" windows/src/ActriumCore.cs; then
+    print_failure "Windows ActriumCore adapter is missing symbol: $symbol"
   fi
 done
 
@@ -1488,8 +1488,8 @@ if command -v "$dotnet_cmd" >/dev/null 2>&1; then
   export DOTNET_CLI_TELEMETRY_OPTOUT="${DOTNET_CLI_TELEMETRY_OPTOUT:-1}"
   export DOTNET_NOLOGO="${DOTNET_NOLOGO:-1}"
   dotnet_build_args=(--configuration Debug -p:NuGetAudit=false -p:UseSharedCompilation=false)
-  test_log="$(mktemp -t actro-windows-tests.XXXXXX)"
-  build_log="$(mktemp -t actro-windows-build.XXXXXX)"
+  test_log="$(mktemp -t actrium-windows-tests.XXXXXX)"
+  build_log="$(mktemp -t actrium-windows-build.XXXXXX)"
   trap 'rm -f "$test_log" "$build_log"' EXIT
 
   "$dotnet_cmd" run --project "$test_project" "${dotnet_build_args[@]}" 2>&1 | tee "$test_log"
@@ -1498,7 +1498,7 @@ if command -v "$dotnet_cmd" >/dev/null 2>&1; then
   "$dotnet_cmd" build "$project" "${dotnet_build_args[@]}" 2>&1 | tee "$build_log"
   check_dotnet_warnings "$build_log" "Windows app build" true
 elif [[ "$is_windows_host" == "true" ]]; then
-  echo "error: dotnet SDK is required to build Actro Windows on Windows hosts" >&2
+  echo "error: dotnet SDK is required to build Actrium Windows on Windows hosts" >&2
   exit 127
 else
   echo

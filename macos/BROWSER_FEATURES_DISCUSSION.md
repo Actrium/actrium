@@ -1,4 +1,4 @@
-# Actro Browser function discussion
+# Actrium Browser function discussion
 
 ## 1. Sidebar Favicon ✅ Achieved
 
@@ -26,7 +26,7 @@
 ### Code Position
 - `WebViewTabView.swift:WebViewHolder.takeSnapshot()`
 - `WebViewTabView.swift:WebViewMultiProcessTabView`
-- `WorkspaceMainView.swift:onChange(of: viewModel.actroMode)`
+- `WorkspaceMainView.swift:onChange(of: viewModel.actriumMode)`
 
 ---
 
@@ -78,7 +78,7 @@
 
 ### Code Position
 - `WebViewTabView.swift:WebViewHolder.print()`
-- `ActroApp.swift:printCurrentPage()`
+- `ActriumApp.swift:printCurrentPage()`
 
 ---
 
@@ -93,7 +93,7 @@
 
 ### Code Position
 - `WebViewTabView.swift:WebViewHolder.zoomIn/zoomOut/resetZoom()`
-- `ActroApp.swift:zoomIn/zoomOut/resetZoom()`
+- `ActriumApp.swift:zoomIn/zoomOut/resetZoom()`
 
 ---
 
@@ -104,7 +104,7 @@
 - Shortcut Keys: `Ctrl+Cmd+F`
 
 ### Code Position
-- `ActroApp.swift:toggleFullScreen()`
+- `ActriumApp.swift:toggleFullScreen()`
 
 ---
 
@@ -139,9 +139,9 @@
 
 ## 9. Multi-process model comparison
 
-### Current Actro Achieved
+### Current Actrium Achieved
 ```
-Actro App (Main Process)
+Actrium App (Main Process)
     └── WKWebView
             └── WebContent Process (By WebKit Management)
                     └── Share WKProcessPool
@@ -167,7 +167,7 @@ Safari Special features:
 - A more nuanced sandbox.
 
 ### Conclusions
-Actro What's used is **WKWebView Standard multi-process model**with Safari ♪ And the bottom of the floor ♪ WebKit) but:
+Actrium What's used is **WKWebView Standard multi-process model**with Safari ♪ And the bottom of the floor ♪ WebKit) but:
 - Safari There's a more stringent site quarantine strategy.
 - Safari There's an independent network./GPU Process
-- Actro The process management is entirely by WebKit Frame processing, yes"Standard Safari Same paragraph"The simplified version of the new version
+- Actrium The process management is entirely by WebKit Frame processing, yes"Standard Safari Same paragraph"The simplified version of the new version

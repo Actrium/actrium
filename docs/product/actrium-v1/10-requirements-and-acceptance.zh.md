@@ -53,7 +53,7 @@
 
 | ID | 需求 |
 |---|---|
-| FR-FRONT-001 | Front Host 必须随 Actro 发布且 Publisher 不可替换。 |
+| FR-FRONT-001 | Front Host 必须随 Actrium 发布且 Publisher 不可替换。 |
 | FR-FRONT-002 | v1 正式 Guest 只支持 Keel JS Guest。 |
 | FR-FRONT-003 | 必须固定 QuickJS 并启用硬 timeout 与 heap cap。 |
 | FR-FRONT-004 | Guest 模块、capability、组件和 RemoteRef 必须白名单。 |
@@ -89,7 +89,7 @@
 
 | ID | 需求 |
 |---|---|
-| FR-NET-001 | Actro 必须内置 signaling client 和本地 Realm，不写死唯一全球服务器。 |
+| FR-NET-001 | Actrium 必须内置 signaling client 和本地 Realm，不写死唯一全球服务器。 |
 | FR-NET-002 | Realm Profile 必须通过 HTTPS 和签名验证。 |
 | FR-NET-003 | 一个 Realm 必须可委派多个 signaling/TURN endpoint。 |
 | FR-NET-004 | v1 Front 与 Primary Service 必须处于同一 Realm。 |
@@ -104,7 +104,7 @@
 | FR-NET-013 | Local Realm ActorId 必须绑定 installation authority，禁止复制为跨设备 portable link。 |
 | FR-NET-014 | Service 不得仅凭 Front 自报的 ActorType、Host 版本或 digest 授予高风险权限；需要时必须验证独立 attestation。 |
 | FR-NET-015 | Realm bootstrap 必须固定 HTTPS 443，并以 Profile continuity key、序号、有效期和轮换链防回滚。 |
-| FR-NET-016 | Actro 必须提供 Realm 加入、重新认证、设备撤销、离开和 key 变化处置流程。 |
+| FR-NET-016 | Actrium 必须提供 Realm 加入、重新认证、设备撤销、离开和 key 变化处置流程。 |
 
 ### 1.7 Permission、安全与隐私
 
@@ -264,7 +264,7 @@
 
 **Given** 用户未安装 `notes.example/team-notes@1.4.2`<br>
 **When** 打开无 `service` URI并确认权限/Workspace<br>
-**Then** Actro 验证 package、只创建一个 Service、获得持久 ActorId、改写 URI、Attach 并显示 Guest。
+**Then** Actrium 验证 package、只创建一个 Service、获得持久 ActorId、改写 URI、Attach 并显示 Guest。
 
 ### AC-002：刷新不重复创建
 
@@ -308,10 +308,10 @@
 **When** 关闭 Tab<br>
 **Then** Front/session 销毁，Service/Workspace/ActorId 保留并可从 Inventory 重开。
 
-### AC-009：Actro 重启
+### AC-009：Actrium 重启
 
 **Given** 本地 Service 已创建<br>
-**When** 完全退出并重启 Actro<br>
+**When** 完全退出并重启 Actrium<br>
 **Then** Service 用同一 ActorId恢复；收藏和历史 URI 仍可连接。
 
 ### AC-010：独占会话
@@ -396,7 +396,7 @@
 
 **Given** Inventory 中的远端 Service 只授予 Attach、未授予 host management<br>
 **When** 用户点击启动、停止或清除<br>
-**Then** Actro 显示需要远端宿主授权，不伪造成功、不在本地创建替代 Service。
+**Then** Actrium 显示需要远端宿主授权，不伪造成功、不在本地创建替代 Service。
 
 ### AC-024：必要辅助 Actor 失陷
 
@@ -585,7 +585,7 @@
 | local-folder Workspace | 支持 | 支持 | security-scoped provider | SAF/provider |
 | 远端 Host 管理 | 有 management capability 时 | 有 management capability 时 | 有 management capability 时 | 有 management capability 时 |
 
-Linux/通用服务器宿主、云端自动调度、浏览器 Web 版和跨 Realm federation 不属于 Actro v1 客户端承诺；它们可以作为独立 Actr Host 后续定义。
+Linux/通用服务器宿主、云端自动调度、浏览器 Web 版和跨 Realm federation 不属于 Actrium v1 客户端承诺；它们可以作为独立 Actr Host 后续定义。
 
 ## 5. 产品指标
 

@@ -1,5 +1,5 @@
 /**
- * TabRouter - Top-level routing for Actro tabs
+ * TabRouter - Top-level routing for Actrium tabs
  *
  * Routes to:
  * - RuntimeApp: for .actr plugin tabs (via keel Engine)
@@ -117,7 +117,7 @@ const TabRouterInner: React.FC<TabRouterProps> = (props) => {
     // Avoid Visibility width/height Unnecessary trigger re-render
     const containerStyle = styles.container;
 
-    const prefix = 'https://gate-actro.betaenv.com/with/';
+    const prefix = 'https://gate-actrium.betaenv.com/with/';
     const appUrl =
       props.appUrl || (props.appId ? prefix + props.appId : undefined);
 

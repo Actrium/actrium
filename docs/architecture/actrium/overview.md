@@ -1,6 +1,6 @@
-# Actro Architecture Overview
+# Actrium Architecture Overview
 
-Actro is a multi-platform browser client for the Actrium ecosystem. The client
+Actrium is a multi-platform browser client for the Actrium ecosystem. The client
 repo owns product shells, native integrations, runtime host packages, and
 client-specific services. The core ACTR runtime remains in the `actr`
 repository and is consumed through released or local SDKs.
@@ -14,7 +14,7 @@ repository and is consumed through released or local SDKs.
 5. Cross-language contracts live in `schemas/`.
 
 Browser sync uses user-owned cloud storage as the product sync medium, not an
-Actro-operated sync service. See
+Actrium-operated sync service. See
 [`browser-sync-cloud-drive.md`](browser-sync-cloud-drive.md) for the cloud drive
 provider architecture.
 
@@ -32,13 +32,13 @@ provider architecture.
 - Windows has a WebView2 browser shell at `windows/`, with native
   tab/navigation chrome, explicit WebView2 profile storage, generated local
   history/bookmark pages, provider sync settings, page and browser full-screen
-  shell handling, and a `window.actroHost` browser bridge. The browser host
-  consumes shared non-UI behavior through the Actro Rust/native boundary while
+  shell handling, and a `window.actriumHost` browser bridge. The browser host
+  consumes shared non-UI behavior through the Actrium Rust/native boundary while
   browser-feature parity and packaging continue.
 
 ## Repository Boundary
 
-Actro should not vendor the ACTR runtime. It should depend on:
+Actrium should not vendor the ACTR runtime. It should depend on:
 
 - SwiftPM package `Actr` for Apple targets.
 - Maven package `io.actrium:actr` for Android.

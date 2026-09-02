@@ -1,4 +1,4 @@
-# Actro Multi-Procedure Architecture Design Document
+# Actrium Multi-Procedure Architecture Design Document
 
 ## I. OVERVIEW OF THE STRUCTURE
 
@@ -22,7 +22,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                           Actro.app (Main Process)                            │
+│                           Actrium.app (Main Process)                            │
 │                                                                         │
 │  ┌─────────────────────────────────────────────────────────────────┐   │
 │  │                        BrowserWindow                             │   │
@@ -46,7 +46,7 @@
           │ XPC (Broker)                                       │ XPC (Straight Company)
           ▼                                                    ▼
 ┌──────────────────────┐                         ┌──────────────────────────┐
-│   ActroBroker       │                         │    ActroTabRenderer     │
+│   ActriumBroker       │                         │    ActriumTabRenderer     │
 │   (XPC Service)      │                         │    (Helper App)          │
 │                      │                         │                          │
 │  - launchd Management       │  <── XPC Registration ───       │  NSXPCListener.anonymous()│
@@ -61,7 +61,7 @@
 
 Phase 1: Shake hands. (Pass. Broker)
 ┌─────────┐         ┌─────────────┐         ┌────────────────┐
-│  Actro │◀───────▶│ActroBroker │◀───────▶│ActroTabRenderer│
+│  Actrium │◀───────▶│ActriumBroker │◀───────▶│ActriumTabRenderer│
 │  (Main) │   XPC   │(XPC Service)│   XPC   │    (Helper)     │
 └─────────┘         └─────────────┘         └────────────────┘
     │                     │                        │
@@ -77,7 +77,7 @@ Phase 1: Shake hands. (Pass. Broker)
 
 Phase 2: Straight Company (Broker Leave.)
 ┌─────────┐                                  ┌────────────────┐
-│  Actro │◀════════════════════════════════▶│ActroTabRenderer│
+│  Actrium │◀════════════════════════════════▶│ActriumTabRenderer│
 │  (Main) │      Direct XPC Connection (via endpoint) │    (Helper)     │
 └─────────┘                                  └────────────────┘
 ```
@@ -89,13 +89,13 @@ Phase 2: Straight Company (Broker Leave.)
 ### 2.1 Time Scheduling
 
 ```
-Actro.app              ActroBroker                ActroTabRenderer
+Actrium.app              ActriumBroker                ActriumTabRenderer
     │                   (XPC Service)                      │
     │                        │                             │
     │  1. Connect on startup Broker   │                             │
     │     serviceName:       │                             │
     │     "io.actrium.     │                             │
-    │      actro.ActroBroker"                            │
+    │      actrium.ActriumBroker"                            │
     │───────────────────────>│                             │
     │                        │                             │
     │  2. registerMainApp()  │                             │
@@ -542,20 +542,20 @@ memoryPressureSource?.setEventHandler { [weak self] in
 ## VII. Catalogue structure
 
 ```
-Actro/
-├── Actro.app/                              # Main Application Bundle
+Actrium/
+├── Actrium.app/                              # Main Application Bundle
 │   └── Contents/
-│       ├── MacOS/Actro                     # Main Executable
+│       ├── MacOS/Actrium                     # Main Executable
 │       ├── Resources/
-│       │   └── ActroTabRenderer.app/       # Helper App (Embedded)
+│       │   └── ActriumTabRenderer.app/       # Helper App (Embedded)
 │       │       └── Contents/
-│       │           ├── MacOS/ActroTabRenderer
+│       │           ├── MacOS/ActriumTabRenderer
 │       │           └── Info.plist
 │       └── Info.plist
 │
-├── Actro/                                  # Lord App Source
+├── Actrium/                                  # Lord App Source
 │   ├── App/
-│   │   └── ActroApp.swift
+│   │   └── ActriumApp.swift
 │   ├── Browser/
 │   │   ├── BrowserWindow.swift
 │   │   └── BrowserViewModel.swift
@@ -572,7 +572,7 @@ Actro/
 │       ├── DevToolsPanel.swift              # UI
 │       └── ...
 │
-├── ActroTabRenderer/                       # Helper App Source
+├── ActriumTabRenderer/                       # Helper App Source
 │   ├── main.swift                           # Entry point
 │   ├── RendererAppDelegate.swift            # App Life cycle + XPC
 │   ├── TabRendererService.swift             # XPC Service realization
@@ -594,15 +594,15 @@ Actro/
 
 | Target | Type | Product | Annotations |
 |--------|------|---------|------|
-| **Actro** | Application | Actro.app | Main Application |
-| **ActroTabRenderer** | Application | ActroTabRenderer.app | Helper App |
-| **ActroShared** | Framework (Optional) | ActroShared.framework | Shared Code |
+| **Actrium** | Application | Actrium.app | Main Application |
+| **ActriumTabRenderer** | Application | ActriumTabRenderer.app | Helper App |
+| **ActriumShared** | Framework (Optional) | ActriumShared.framework | Shared Code |
 
-### 8.2 Build Phases (Actro Target)
+### 8.2 Build Phases (Actrium Target)
 
 ```
 1. Dependencies
-   └── ActroTabRenderer
+   └── ActriumTabRenderer
 
 2. Compile Sources
    └── (Lord App Source File)
@@ -613,10 +613,10 @@ Actro/
 4. Copy Files
    └── Destination: Resources
    └── Subpath: (Empty)
-   └── Files: ActroTabRenderer.app
+   └── Files: ActriumTabRenderer.app
 ```
 
-### 8.3 Info.plist (ActroTabRenderer)
+### 8.3 Info.plist (ActriumTabRenderer)
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -624,13 +624,13 @@ Actro/
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>io.actrium.actro.tabrenderer</string>
+    <string>io.actrium.app.tabrenderer</string>
 
     <key>CFBundleName</key>
-    <string>ActroTabRenderer</string>
+    <string>ActriumTabRenderer</string>
 
     <key>CFBundleExecutable</key>
-    <string>ActroTabRenderer</string>
+    <string>ActriumTabRenderer</string>
 
     <key>CFBundlePackageType</key>
     <string>APPL</string>
@@ -670,7 +670,7 @@ Actro/
 ### 9.2 Sandbox (Optional)
 
 ```xml
-<!-- ActroTabRenderer.entitlements -->
+<!-- ActriumTabRenderer.entitlements -->
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" ...>
 <plist version="1.0">
@@ -722,10 +722,10 @@ Actro/
 
 ```bash
 # Modalities1: Xcode Attach to Process
-Debug > Attach to Process > ActroTabRenderer
+Debug > Attach to Process > ActriumTabRenderer
 
 # Modalities2Command line start Helper (♪ Around the Lord ♪ App)
-/path/to/ActroTabRenderer.app/Contents/MacOS/ActroTabRenderer test-tab-id
+/path/to/ActriumTabRenderer.app/Contents/MacOS/ActriumTabRenderer test-tab-id
 ```
 
 ### 11.2 Log
@@ -733,24 +733,24 @@ Debug > Attach to Process > ActroTabRenderer
 ```swift
 // Helper End Use OSLog
 import os.log
-let logger = Logger(subsystem: "io.actrium.actro.tabrenderer", category: "Render")
+let logger = Logger(subsystem: "io.actrium.app.tabrenderer", category: "Render")
 logger.info("Frame rendered in \(duration)ms")
 
 // View Log
-log stream --predicate 'subsystem == "io.actrium.actro.tabrenderer"'
+log stream --predicate 'subsystem == "io.actrium.app.tabrenderer"'
 ```
 
 ### 11.3 Collapse Report
 
 - Helper The crash will create independence. crash report
-- Path:`~/Library/Logs/DiagnosticReports/ActroTabRenderer-*.ips`
+- Path:`~/Library/Logs/DiagnosticReports/ActriumTabRenderer-*.ips`
 
 ---
 
 ## XII. REMOTION PLANS
 
 ### Phase 1: Foundation
-- [ ] Create ActroTabRenderer target
+- [ ] Create ActriumTabRenderer target
 - [ ] Achieved NSXPCListener.anonymous() Start
 - [ ] Achieved endpoint stdout Transfer
 - [ ] Achieved TabProcessManager Connection Management

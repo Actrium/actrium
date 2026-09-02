@@ -158,7 +158,7 @@ actr://notes.example/team-notes@1.4.2/today?service=2af01%4042~dns%3Ateam.exampl
 
 ### 6.2 `realm`
 
-v1 正式 ActorId 本身必须携带 Realm authority，因此 Attach URI 不需要第二个定位参数。Actro 从 `service` 解出 Realm：
+v1 正式 ActorId 本身必须携带 Realm authority，因此 Attach URI 不需要第二个定位参数。Actrium 从 `service` 解出 Realm：
 
 ```text
 2af01@42~dns:team.example/notes.example:team-notes:1.4.2
@@ -171,7 +171,7 @@ v1 正式 ActorId 本身必须携带 Realm authority，因此 Attach URI 不需�
 
 Legacy Attach 解析成功后必须升级为含 authority 的 v1 ActorId，并从规范化 URI 移除 `realm`。不能让 `realm` 与 `service` 长期构成两个互相可能矛盾的定位源。
 
-Local Realm ActorId 使用 `local:<installation-id>` authority。它能在本机精确重连，但不能被其他设备解析；Actro 必须禁用“复制 portable link”，而不是伪造 DNS Realm。
+Local Realm ActorId 使用 `local:<installation-id>` authority。它能在本机精确重连，但不能被其他设备解析；Actrium 必须禁用“复制 portable link”，而不是伪造 DNS Realm。
 
 ### 6.3 Attach 的硬规则
 
@@ -215,11 +215,11 @@ Fragment 只用于 Guest 页面内状态，不参与：
 - 包版本；
 - Actor 身份验证。
 
-Actro 不允许在 fragment 中传 bearer invite。邀请和授权通过独立的 Realm/Service 流程完成。
+Actrium 不允许在 fragment 中传 bearer invite。邀请和授权通过独立的 Realm/Service 流程完成。
 
 ## 8. 规范化
 
-Actro 保存历史、收藏、复制链接前必须：
+Actrium 保存历史、收藏、复制链接前必须：
 
 1. scheme 小写；
 2. Publisher 和 Realm 转为小写 IDNA A-label；
@@ -272,7 +272,7 @@ replaceState(
 - Refresh 必须连接新 Service；
 - History 只记录最终实例地址。
 
-如果 Service 已创建但 URI 改写失败，Actro 必须从 `creation_intent_id` 恢复结果，不能再创建一次。
+如果 Service 已创建但 URI 改写失败，Actrium 必须从 `creation_intent_id` 恢复结果，不能再创建一次。
 
 ## 11. 开发 URI
 

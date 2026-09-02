@@ -1,7 +1,7 @@
 using System.Drawing;
 using System.Windows.Forms;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal sealed class BrowserFindBar : UserControl
 {

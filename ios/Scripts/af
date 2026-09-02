@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# Actro Helper Script (af)
+# Actrium Helper Script (af)
 # Shortcuts to integrate common build and development commands
 # ==============================================================================
 
@@ -19,7 +19,7 @@ NC='\033[0m'
 
 usage() {
     echo ""
-    echo -e "${BLUE}Actro Helper (af)${NC}"
+    echo -e "${BLUE}Actrium Helper (af)${NC}"
     echo ""
     echo "Usage: af <command> [options]"
     echo ""
@@ -50,8 +50,8 @@ cmd_install() {
 
 cmd_bundle() {
     echo -e "${BLUE}📦 Pack up. React Native Bundle...${NC}"
-    "$SCRIPT_DIR/ensure-actro-runtime.sh"
-    cd "$PROJECT_ROOT/ActroRuntime"
+    "$SCRIPT_DIR/ensure-actrium-runtime.sh"
+    cd "$PROJECT_ROOT/ActriumRuntime"
 
     if [ ! -d "node_modules" ]; then
         echo -e "${YELLOW}⚠️  node_modules No, no, no, no....${NC}"
@@ -71,8 +71,8 @@ cmd_bundle() {
         --platform ios \
         --dev false \
         --entry-file index.ts \
-        --bundle-output "$PROJECT_ROOT/Actro/runtime.jsbundle" \
-        --assets-dest "$PROJECT_ROOT/Actro"
+        --bundle-output "$PROJECT_ROOT/Actrium/runtime.jsbundle" \
+        --assets-dest "$PROJECT_ROOT/Actrium"
 
     cd "$PROJECT_ROOT"
     echo -e "${GREEN}✅ React Native Bundle Packing's done.${NC}"
@@ -99,8 +99,8 @@ cmd_clean() {
     cd "$PROJECT_ROOT"
 
     rm -rf build
-    if [ -d "ActroRuntime/node_modules" ]; then
-        rm -rf ActroRuntime/node_modules
+    if [ -d "ActriumRuntime/node_modules" ]; then
+        rm -rf ActriumRuntime/node_modules
     fi
     rm -rf Pods
 

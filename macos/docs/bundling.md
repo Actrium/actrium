@@ -1,6 +1,6 @@
 # React Native Bundle Build Guide
 
-Actro The project contains a stand-alone project React Native bundle. Current Helper It's a single. `ActroRenderer.app`Press fingerprint Segregation process, no more copying `RCTViewService*.xpc`. See also below. [Renderer-Process-Pool.md](Renderer-Process-Pool.md).
+Actrium The project contains a stand-alone project React Native bundle. Current Helper It's a single. `ActriumRenderer.app`Press fingerprint Segregation process, no more copying `RCTViewService*.xpc`. See also below. [Renderer-Process-Pool.md](Renderer-Process-Pool.md).
 
 | Bundle | Entry files | Output File | Purpose |
 |--------|----------|----------|------|
@@ -11,19 +11,19 @@ Actro The project contains a stand-alone project React Native bundle. Current He
 
 ```bash
 # Build All bundle(Release Mode)
-./scripts/bundle-actro-runtime.sh
+./scripts/bundle-actrium-runtime.sh
 
 # Build Only System Apps bundle
-./scripts/bundle-actro-runtime.sh --target system
+./scripts/bundle-actrium-runtime.sh --target system
 
 # Build Only Actr Host bundle
-./scripts/bundle-actro-runtime.sh --target actr
+./scripts/bundle-actrium-runtime.sh --target actr
 
 # Build Development bundle(includes source map)
-./scripts/bundle-actro-runtime.sh --dev
+./scripts/bundle-actrium-runtime.sh --dev
 
 # View Help
-./scripts/bundle-actro-runtime.sh --help
+./scripts/bundle-actrium-runtime.sh --help
 ```
 
 ## Bundle Annotations
@@ -77,12 +77,12 @@ packages/actrium/
 
 2. **Build bundle**:
    ```bash
-   ./scripts/bundle-actro-runtime.sh
+   ./scripts/bundle-actrium-runtime.sh
    ```
 
 3. **Build Xcode Item**:
    ```bash
-   xcodebuild -workspace Actro.xcworkspace -scheme Actro build
+   xcodebuild -workspace Actrium.xcworkspace -scheme Actrium build
    ```
 
 4. **Run Application**: From Xcode Run or open `.app` Documentation
@@ -96,6 +96,6 @@ packages/actrium/
 
 ## File Location
 
-- **Bundle Output**: `Actro/Resources/`
-- **Xcode Item**: `Actro.xcodeproj`
-- **Build Script**: `scripts/bundle-actro-runtime.sh`
+- **Bundle Output**: `Actrium/Resources/`
+- **Xcode Item**: `Actrium.xcodeproj`
+- **Build Script**: `scripts/bundle-actrium-runtime.sh`

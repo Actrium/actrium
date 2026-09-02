@@ -2,21 +2,21 @@ edition = 1
 exports = []
 
 [package]
-name = "actro"
-description = "Actro browser client app"
-authors = ["Actro-Team"]
+name = "actrium"
+description = "Actrium browser client app"
+authors = ["Actrium-Team"]
 license = "Apache-2.0"
 tags = ["dev", "client"]
 
 [package.actr_type]
-manufacturer = "actro"
-name = "actro"
+manufacturer = "actrium"
+name = "actrium"
 
 [dependencies]
 ask-service = { actr_type = "acmeopenclaw+AskService" }
 
 [system.signaling]
-url = "wss://actrix1.actro.chat:443/signaling/ws"
+url = "wss://actrix1.actrium.chat:443/signaling/ws"
 
 [system.deployment]
 realm_id = 349
@@ -28,12 +28,12 @@ visible = true
 filter_level = "debug"
 tracing_enabled = true
 tracing_endpoint = "http://127.0.0.1:4317"
-tracing_service_name = "actro"
+tracing_service_name = "actrium"
 
 [system.webrtc]
 force_relay = false
-stun_urls = ["stun:actrix1.actro.chat:3479"]
-turn_urls = ["turn:actrix1.actro.chat:3479"]
+stun_urls = ["stun:actrix1.actrium.chat:3479"]
+turn_urls = ["turn:actrix1.actrium.chat:3479"]
 
 [scripts]
 dev = "xcodegen generate"

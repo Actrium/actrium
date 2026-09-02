@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Actro</string>
+    <string name="app_name">Actrium</string>
     <string name="tab_bookmark">Bookmarks</string>
     <string name="tab_active">Activity</string>
     <string name="tab_set">Preferences</string>

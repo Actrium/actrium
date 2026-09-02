@@ -3,7 +3,7 @@
 ## C1. Camera/Microphone Permission
 
 **Files:**
-- `Actro/MultiProcess/WebViewTabView.swift` — WebViewHolder (WKUIDelegate)
+- `Actrium/MultiProcess/WebViewTabView.swift` — WebViewHolder (WKUIDelegate)
 
 **Implementation:**
 1. Implement `webView(_:requestMediaCapturePermissionFor:initiatedByFrame:type:decisionHandler:)`
@@ -14,7 +14,7 @@
 ## C2. Geolocation Permission
 
 **Files:**
-- `Actro/MultiProcess/WebViewTabView.swift` — WebViewHolder (WKUIDelegate)
+- `Actrium/MultiProcess/WebViewTabView.swift` — WebViewHolder (WKUIDelegate)
 
 **Implementation:**
 1. Implement `webView(_:requestDeviceOrientationAndMotionPermissionFor:initiatedByFrame:decisionHandler:)`
@@ -24,7 +24,7 @@
 ## C3. Permission Persistence
 
 **Files:**
-- `Actro/Settings/PermissionStore.swift` (new)
+- `Actrium/Settings/PermissionStore.swift` (new)
 
 **Implementation:**
 1. Dictionary `[String: [PermissionType: Bool]]` keyed by domain

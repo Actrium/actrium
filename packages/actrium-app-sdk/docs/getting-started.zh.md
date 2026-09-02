@@ -59,10 +59,10 @@ await engine.loadBundle('https://example.com/guest.js');
 
 ## 项目结构
 
-典型的 Actro 项目结构：
+典型的 Actrium 项目结构：
 
 ```
-my-actro-app/
+my-actrium-app/
 ├── host/                 # React Native Host App
 │   ├── src/
 │   │   ├── App.tsx

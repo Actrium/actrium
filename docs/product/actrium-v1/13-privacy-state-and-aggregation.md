@@ -1,12 +1,12 @@
-# 13. Actro Privacy tags and diagrams are assembled
+# 13. Actrium Privacy tags and diagrams are assembled
 
-> Security syntax [docs/security](../../security/README.zh.md) is the same as the first sentence. Actro How to get the model down to Tab, Front, Host and data. This chapter is changed in case of conflict without changing the current security model.
+> Security syntax [docs/security](../../security/README.zh.md) is the same as the first sentence. Actrium How to get the model down to Tab, Front, Host and data. This chapter is changed in case of conflict without changing the current security model.
 
 Mature:`Specified`.
 
 ## 1. What's the answer to this chapter?
 
-Actro Green on address bar / Yellow / Red, one for the one.**No root application**Yes.**Current Ready**Top `ApplicationAssurance`No, it's not. Program Name, no. Marketplace The review was not "a whole-scale world existed at the same time."
+Actrium Green on address bar / Yellow / Red, one for the one.**No root application**Yes.**Current Ready**Top `ApplicationAssurance`No, it's not. Program Name, no. Marketplace The review was not "a whole-scale world existed at the same time."
 
 ```text
 Tab ──Positioning──▶ Front Actor ──Found──▶ No root application CC(U(D))
@@ -57,7 +57,7 @@ Not Actor Target (screen, file,Workspace, HTTPS APIYes Host Forced remittance.TL
 Front The final conclusions of the nodal points are:
 
 ```text
-R_A(Front) = join(Actro Host Platform facts, Keel Guest The export facts)
+R_A(Front) = join(Actrium Host Platform facts, Keel Guest The export facts)
 ```
 
 Host I can do it. Guest The exit that can't be done is still this. Actor The exit. It's not just a comment. Guest.
@@ -100,7 +100,7 @@ Independent process, imposed before start-up OS sandboxNo original network / Any
 
 The platform remains the same:v1 WASM Green; third parties in-process Native Not green;desktop Capsule (a) The experimental level;iOS Third-party dynamics Native Do not do product capacity.
 
-### 5.4 Actro Native Front Host
+### 5.4 Actrium Native Front Host
 
 We can't put the platform on the ground. Host The verdict is unknown, or all. Tab Never green.Host The conclusions are drawn from official signatures, installation integrity, version strategy and equipment certification; the same is true of yellow or red when installation cannot be verified or the version cancelled. Front Process as a whole.
 
@@ -112,7 +112,7 @@ No, it's not. Actor. No authorization to send:`UNCONTROLLED`. The strategy requi
 
 ## 6. Declaration is input
 
-`.actr` Manifest It's... `[actro.privacy]` with Native Capsule profile Still pending validation of input, not conclusion.Host It has to be compared. importsIf you have a real capacity, you can't. Undeclared and possible exports are found: confirmed red, unrecognized yellow.
+`.actr` Manifest It's... `[actrium.privacy]` with Native Capsule profile Still pending validation of input, not conclusion.Host It has to be compared. importsIf you have a real capacity, you can't. Undeclared and possible exports are found: confirmed red, unrecognized yellow.
 
 ## 7. Who issued the conclusion?
 
@@ -122,7 +122,7 @@ Evidence   Material used to verify the claim
 Assurance  Conclusions given by the certifying officer in combination with state, evidence, rules and user strategies
 ```
 
-Actro Inside Privacy Agent The person must sign the certificate when the cross-process becomes the basis of security. `ActorAssurance`, be precise. `ActorId + ActorStateId`The relying party has used the test itself.
+Actrium Inside Privacy Agent The person must sign the certificate when the cross-process becomes the basis of security. `ActorAssurance`, be precise. `ActorId + ActorStateId`The relying party has used the test itself.
 
 Release `ApplicationAssurance` Before: Full discovery, check for each current state, each AA The result is only a consistent reading.
 
@@ -145,7 +145,7 @@ Icon (field names can be used) schema Repository version, not less semantic than
   "object": "actrium/actor-assurance/v1",
   "issuer": "verifier:…",
   "subject": { "actorId": "…", "actorStateId": "…" },
-  "qid": "actro.consumer.default",
+  "qid": "actrium.consumer.default",
   "ruleset": "…",
   "result": "CONTROLLED",
   "findings": [{ "effect": "Transfer(Actor(b))", "verdict": "CONTROLLED" }],
@@ -163,10 +163,10 @@ The handshake must still check the peer before sending the application data `gat
 The name may be retained and semantics are given to the object:
 
 ```text
-actro.privacy.v1.GetActorAssurance
-actro.privacy.v1.GetApplicationAssurance
-actro.privacy.v1.SubscribeChanges
-actro.privacy.v1.RequireReady
+actrium.privacy.v1.GetActorAssurance
+actrium.privacy.v1.GetApplicationAssurance
+actrium.privacy.v1.SubscribeChanges
+actrium.privacy.v1.RequireReady
 ```
 
 Attach The whole chart still needs to be completed. `Ready` It's... `ApplicationAssurance`. The application data is blocked directly by not scoring when the channel is not valid.
@@ -208,6 +208,6 @@ CHANNEL_INVALID
 
 ## 13. v1 Border
 
-Support:WASM (a) Export measures;Actro Host As a platform TCB(No self-signature); third party in-process Native Keep unknown or red; compliance Capsule Evidence-based; dynamically validated and transmitted data; intergenerational;Ready Show.
+Support:WASM (a) Export measures;Actrium Host As a platform TCB(No self-signature); third party in-process Native Keep unknown or red; compliance Capsule Evidence-based; dynamically validated and transmitted data; intergenerational;Ready Show.
 
 (a) Non-commitment: the business logic is not flawed;opaque HTTPS Non-disclosure; none OS sandbox I'm gonna put a third party in there. Native Greening; global privacy rating; green is absolutely safe.

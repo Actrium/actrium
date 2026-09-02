@@ -4,11 +4,11 @@
 
 ## 1. Summary of structure
 
-Actro Use ViewBridge (macOS Private framework) Enter the view of the process, which will React Native Content runs independently XPC Service Process.
+Actrium Use ViewBridge (macOS Private framework) Enter the view of the process, which will React Native Content runs independently XPC Service Process.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Actro Host App                          │
+│                        Actrium Host App                          │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
 │  │   SwiftUI View  │  │  MetroManager   │  │ XPCServicePool  │ │
 │  │   (TabPanel)    │  │  (Port: Dynamic)   │  │  (4 slots)      │ │
@@ -28,7 +28,7 @@ Actro Use ViewBridge (macOS Private framework) Enter the view of the process, wh
 │                    XPC Service Process                          │
 │              (RCTViewService0/1/2/3.xpc)                        │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │ ActroService   │  │ ServiceReact    │  │   RCTBridge     │ │
+│  │ ActriumService   │  │ ServiceReact    │  │   RCTBridge     │ │
 │  │ ViewController  │  │ NativeHost      │  │  (Share Examples)      │ │
 │  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘ │
 │           │                    │                    │           │
@@ -51,7 +51,7 @@ Actro Use ViewBridge (macOS Private framework) Enter the view of the process, wh
 
 ## 2. Key components
 
-### 2.1 Host End (Actro App)
+### 2.1 Host End (Actrium App)
 
 | Component | Documentation | Duties |
 |------|------|------|
@@ -66,11 +66,11 @@ Actro Use ViewBridge (macOS Private framework) Enter the view of the process, wh
 
 | Component | Documentation | Duties |
 |------|------|------|
-| `ActroServiceViewController` | ActroServiceViewController.swift | Dynamic Registered NSServiceViewController |
-| `ServiceReactNativeHost` | ActroServiceViewController.swift | Manage shared RCTBridge and per-Tab RCTRootView |
-| `TabViewControllerEntry` | ActroServiceViewController.swift | Single Tab It's... ViewController and RCTRootView |
-| `ResizableContainerView` | ActroServiceViewController.swift | Resizeable packagings, responding ViewBridge Zoom Sync |
-| `MetroConfig` | ActroServiceViewController.swift | Storage from Host Received Metro Configure |
+| `ActriumServiceViewController` | ActriumServiceViewController.swift | Dynamic Registered NSServiceViewController |
+| `ServiceReactNativeHost` | ActriumServiceViewController.swift | Manage shared RCTBridge and per-Tab RCTRootView |
+| `TabViewControllerEntry` | ActriumServiceViewController.swift | Single Tab It's... ViewController and RCTRootView |
+| `ResizableContainerView` | ActriumServiceViewController.swift | Resizeable packagings, responding ViewBridge Zoom Sync |
+| `MetroConfig` | ActriumServiceViewController.swift | Storage from Host Received Metro Configure |
 
 ## 3. Size Count (Key data)
 
@@ -97,12 +97,12 @@ viewportSize.height / cardHeight = scale
 
 ### 3.3 Render Mode
 
-| Mode | ViewBridge Render Size | Actro Transform | Final display of dimensions |
+| Mode | ViewBridge Render Size | Actrium Transform | Final display of dimensions |
 |------|---------------------|------------------|--------------|
 | Overview | cardSize (187x126) | scale=1 | 187x126 |
 | Focus | viewportSize (589x398) | scale=3.154 | 589x398 |
 
-**Key findings**: ViewBridge XPC I'm not gonna be able to make a difference in the process of independence. Host End Actro Transform Impact.Focus Patterns must make XPC Service Use viewportSize Render, otherwise the content will be blurred.
+**Key findings**: ViewBridge XPC I'm not gonna be able to make a difference in the process of independence. Host End Actrium Transform Impact.Focus Patterns must make XPC Service Use viewportSize Render, otherwise the content will be blurred.
 
 ## 4. Communications mechanisms
 
@@ -110,12 +110,12 @@ viewportSize.height / cardHeight = scale
 
 | Name of notice | Orientation | Purpose |
 |----------|------|------|
-| `com.actro.xpcServiceReady` | XPC → Host | XPC Service Ready, acceptable configuration |
-| `com.actro.tabConfig.<bundleId>` | Host → XPC | Send Tab ConfiguretabId, systemAppType Wait |
-| `com.actro.metro.config` | Host → XPC | Radio Metro Configurehost, port) |
-| `com.actro.containerSizeChanged` | Host → XPC | Notification of changes in packaging size |
-| `com.actro.openBookmark` | XPC → Host | User Click Bookmarks |
-| `com.actro.openHistoryItem` | XPC → Host | User Click History |
+| `io.actrium.app.xpcServiceReady` | XPC → Host | XPC Service Ready, acceptable configuration |
+| `io.actrium.app.tabConfig.<bundleId>` | Host → XPC | Send Tab ConfiguretabId, systemAppType Wait |
+| `io.actrium.app.metro.config` | Host → XPC | Radio Metro Configurehost, port) |
+| `io.actrium.app.containerSizeChanged` | Host → XPC | Notification of changes in packaging size |
+| `io.actrium.app.openBookmark` | XPC → Host | User Click Bookmarks |
+| `io.actrium.app.openHistoryItem` | XPC → Host | User Click History |
 
 ### 4.2 Tab Config Structure
 
@@ -150,7 +150,7 @@ sequenceDiagram
     participant VBHostView as ViewBridgeHostView<br/>(NSView)
     participant RemoteVC as NSRemoteView<br/>Controller
     participant DNC as Distributed<br/>NotificationCenter
-    participant ServiceVC as ActroService<br/>ViewController
+    participant ServiceVC as ActriumService<br/>ViewController
     participant Container as Resizable<br/>ContainerView
     participant RNHost as ServiceReact<br/>NativeHost
     participant RCTRoot as RCTRootView
@@ -237,7 +237,7 @@ sequenceDiagram
     Note over SwiftUI,RCTRoot: === Problem area: Focus Mode ===
 
     rect rgb(255, 200, 200)
-        Note over SwiftUI,VBHostView: Actro Transform Apply scaleEffect(3.154)
+        Note over SwiftUI,VBHostView: Actrium Transform Apply scaleEffect(3.154)
         SwiftUI->>SwiftUI: .scaleEffect(scale) Zoom in. TabPanel
         Note right of SwiftUI: ⚠️ scaleEffect Yeah. NSViewRepresentable<br/>Not effective, resulting in ViewBridge<br/>The contents display abnormality
     end
@@ -247,7 +247,7 @@ sequenceDiagram
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ 1. Actro App Start                                              │
+│ 1. Actrium App Start                                              │
 │    - CrashHandler.setup()                                       │
 │    - TabProcessManager Initialize                                    │
 │    - XPCNotificationBridge Initialize                                │
@@ -270,7 +270,7 @@ sequenceDiagram
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │ 4. XPC Service Start                                             │
-│    - registerActroServiceViewController() Dynamic Registration Category            │
+│    - registerActriumServiceViewController() Dynamic Registration Category            │
 │    - ServiceReactNativeHost.shared Initialize                        │
 │    - setupTabConfigListener() Set Notification Listen                       │
 │    - postXPCServiceReady() Announcements Host                            │
@@ -306,7 +306,7 @@ sequenceDiagram
 ### 6.1 Configure
 
 - **Pool Size**: 4 individual slot (RCTViewService0 - RCTViewService3)
-- **Bundle ID Format**: `io.actrium.actro.rctviewservice{N}`
+- **Bundle ID Format**: `io.actrium.app.rctviewservice{N}`
 
 ### 6.2 Distribution Policy
 
@@ -345,7 +345,7 @@ sequenceDiagram
 
 **Problem**: ViewBridge Private API Zero-syncs unstable.
 
-**Resolve**: Add DistributedNotificationCenter Alternative mechanisms (`com.actro.containerSizeChanged`)
+**Resolve**: Add DistributedNotificationCenter Alternative mechanisms (`io.actrium.app.containerSizeChanged`)
 
 ## 8. Outstanding issues:Focus Mode Rendering
 
@@ -366,17 +366,17 @@ React Native The content is in Focus Could not close temporary folder: %s
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Actro Transform                          │
+│                        Actrium Transform                          │
 │   - Overview Mode: scale = 1.0                                   │
 │   - Focus Mode: scale = viewportSize / cardSize ≈ 3.154         │
 │                                                                  │
-│   Question:Actro Transform It'll zoom in. TabPanel, but NSViewRepresentable │
+│   Question:Actrium Transform It'll zoom in. TabPanel, but NSViewRepresentable │
 │         (ViewBridge) I won't be. scaleEffect Correct Scale                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 **Key findings**: `scaleEffect` Yeah. `NSViewRepresentable` Not Effective (macOS The number of people who have been killed is not yet equal to the number of people who have been killed.
-It's not like that. SwiftUI The original view is passed like that. scaleEffect We'll offset it by a pre-diggling. Actro Transform Zoom in.
+It's not like that. SwiftUI The original view is passed like that. scaleEffect We'll offset it by a pre-diggling. Actrium Transform Zoom in.
 
 ### 8.4 Attempted scheme
 
@@ -384,7 +384,7 @@ It's not like that. SwiftUI The original view is passed like that. scaleEffect W
 
 ```swift
 // Ideas:Focus Mode viewportSize Rendering,scaleEffect Zoom in to cardSize,
-//       Actro Transform Zoom back in. viewportSize
+//       Actrium Transform Zoom back in. viewportSize
 ViewBridgeMultiProcessTabView(containerSize: viewportSize)
     .scaleEffect(cardWidth / viewportSize.width)  // ≈ 0.317
 ```
@@ -394,14 +394,14 @@ ViewBridgeMultiProcessTabView(containerSize: viewportSize)
 #### Programme B: Always cardSize Render ❌
 
 ```swift
-// Ideas:ViewBridge Always cardSize Rendering, by Actro Transform Zoom in.
+// Ideas:ViewBridge Always cardSize Rendering, by Actrium Transform Zoom in.
 ViewBridgeMultiProcessTabView(containerSize: cardSize)
 // Do Not Use scaleEffect
 ```
 
 **Result**:
 - Overview Mode: The content is correctly displayed ✓
-- Focus Mode:Actro Transform Fuzzy after magnifying/Do Not Show ❌
+- Focus Mode:Actrium Transform Fuzzy after magnifying/Do Not Show ❌
 
 **Observation**: You can see flashing images while you drag the window, which means that the content is actually being rendered.
 
@@ -447,7 +447,7 @@ ViewBridgeMultiProcessTabView(containerSize: renderSize)
 Web Content (Input)WKWebViewThe solution is to: **FocusedWebOverlay**:
 
 ```swift
-// Focus The blogger says:Web The content is in Actro Transform Independent rendering outside
+// Focus The blogger says:Web The content is in Actrium Transform Independent rendering outside
 if case .focus(let tabId) = mode, case .web(let url) = tab.contentType {
     FocusedWebOverlay(
         tab: tab,
@@ -459,7 +459,7 @@ if case .focus(let tabId) = mode, case .web(let url) = tab.contentType {
 ```
 
 Key points:
-1. Focus Under Mode Web Contents**No, I'm not. Actro Transform Internal**
+1. Focus Under Mode Web Contents**No, I'm not. Actrium Transform Internal**
 2. Use `WebViewHolderManager` Management sustainability WKWebView Examples
 3. Overview and Focus Share the same WKWebViewIt's just different.
 
@@ -467,7 +467,7 @@ Key points:
 
 #### Orientation 1: FocusedReactNativeOverlay
 
-Similar Web Content, create independent overlay Yes. Actro Transform Outside rendering:
+Similar Web Content, create independent overlay Yes. Actrium Transform Outside rendering:
 
 ```swift
 if case .focus(let tabId) = mode, case .reactNative = tab.contentType {
@@ -483,14 +483,14 @@ if case .focus(let tabId) = mode, case .reactNative = tab.contentType {
 - ViewBridge Connections are one-on-one, not two at once. ViewBridgeHostView
 - Yes, I do. Focus/Overview Rebuild when Switches ViewBridge Connect?
 
-#### Orientation 2: Investigations Actro Transform Yeah. NSRemoteView Impact
+#### Orientation 2: Investigations Actrium Transform Yeah. NSRemoteView Impact
 
-Maybe. Actro Transform(Adopted CALayer transform) ... ..and it's affecting. NSRemoteView the display.
+Maybe. Actrium Transform(Adopted CALayer transform) ... ..and it's affecting. NSRemoteView the display.
 
 **Debug Direction**:
 
 - Inspection NSRemoteView It's... layer Properties
-- Try Disable Actro Transform See if it's normal.
+- Try Disable Actrium Transform See if it's normal.
 - Research ViewBridge Private API & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & and & and
 
 ### 8.8 Key Log
@@ -513,10 +513,10 @@ ViewBridgeHostView: Remote view embedded, size=(186.74, 126.19)
 ## 9. List of documents
 
 ```
-Actro/
-├── Actro/
+Actrium/
+├── Actrium/
 │   ├── App/
-│   │   └── ActroApp.swift               # Application entrance,Metro Autostart
+│   │   └── ActriumApp.swift               # Application entrance,Metro Autostart
 │   ├── MultiProcess/
 │   │   ├── ViewBridgeHostView.swift     # ViewBridge Host End Achieved
 │   │   ├── XPCServicePool.swift         # XPC Service Pool management
@@ -526,8 +526,8 @@ Actro/
 │   │   └── MetroAddressResolver.swift   # Metro Address Parsing
 │   └── Views/
 │       └── WorkspaceMainView.swift      # TabPanel, Rendering dimension calculation
-├── ActroViewService/
-│   └── ActroServiceViewController.swift # XPC Service Achieved
+├── ActriumViewService/
+│   └── ActriumServiceViewController.swift # XPC Service Achieved
 ├── scripts/
 │   └── generate_xpc_pool.sh             # XPC Service Pool Generate Script
 └── packages/actrium/
@@ -545,10 +545,10 @@ Actro/
 
 ```bash
 # Host End Log
-log show --predicate 'process == "Actro"' --last 1m
+log show --predicate 'process == "Actrium"' --last 1m
 
 # XPC Service Log
-log show --predicate 'process contains "ActroViewService"' --last 1m
+log show --predicate 'process contains "ActriumViewService"' --last 1m
 
 # Metro Relevant
 log show --predicate 'eventMessage contains "Metro"' --last 1m
@@ -568,7 +568,7 @@ log show --predicate 'eventMessage contains "Metro"' --last 1m
 ---
 
 *Document Update Time: 2026-01-09*
-*Based on Actro Project ' s actual running log analysis*
+*Based on Actrium Project ' s actual running log analysis*
 *I'm not sure. 8 Section"Outstanding issues"It's on the record. Focus Debugging of mode rendering problems*
 
 ## 11. Emerging issues:Remote / Local View Error
@@ -582,12 +582,12 @@ log show --predicate 'eventMessage contains "Metro"' --last 1m
 ### 11.2 Ghen analysis
 
 1) **Tab Configure path missing“Connect dimensions”**
-   - Host → Service ..and only for the broadcast. `com.actro.tabConfig.<bundleId>`No one with whom. NSRemoteViewController/Connect to request this configuration.
+   - Host → Service ..and only for the broadcast. `io.actrium.app.tabConfig.<bundleId>`No one with whom. NSRemoteViewController/Connect to request this configuration.
    - Service Side `assignPendingEntry(tabId:)` It's... FIFO The strategy will be received. `tabId` ♪ Tie it to the“The oldest one. pending entry”——The earliest. `loadView` - The connection.
    - When Same Process Slot (inslot0It's in there. StartPage/Bookmarks/History When three connections are made, just“Connection creation order”and“Configure Send Order”Not in line, it'll be TabA It's... config ♪ Tie it to the TabB , there is a misdirection of content.
 
 2) **Service End uncleaned old entry, easily reuses the wrong connection**
-   - `registerActroServiceViewController` It's defined. dealloc blockBut no. `class_addMethod` Registered,`unregisterEntry` Never called.
+   - `registerActriumServiceViewController` It's defined. dealloc blockBut no. `class_addMethod` Registered,`unregisterEntry` Never called.
    - SwiftUI If it's rebuilt Host Side ViewBridge(e.g., changing pattern or size leading to replacement of view), old entry Still `tabRegistry`New pending entry I can't get it. `tabId` Tie, resulting in new connections not being rendered or old.
 
 3) **xpcServiceReady Only for the first one. tabConfig Re-issuance**(minor but aggravating chaos)

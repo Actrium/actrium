@@ -313,7 +313,7 @@ ORDER BY name ASC
 }
 
 pub mod android {
-    pub const DATABASE_NAME: &str = "actro_database";
+    pub const DATABASE_NAME: &str = "actrium_database";
     pub const DATABASE_VERSION: u32 = 1;
 
     pub mod active_list {
@@ -431,7 +431,7 @@ mod tests {
 
     #[test]
     fn android_active_room_contract_matches_existing_schema() {
-        assert_eq!(android::DATABASE_NAME, "actro_database");
+        assert_eq!(android::DATABASE_NAME, "actrium_database");
         assert_eq!(android::DATABASE_VERSION, 1);
         assert_eq!(android::active_list::TABLE_NAME, "active_list");
         assert_eq!(android::active_list::column::HAS_UNREAD, "hasUnread");

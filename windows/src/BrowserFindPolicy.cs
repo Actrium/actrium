@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal static class BrowserFindPolicy
 {

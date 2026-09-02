@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Packages the Actro Windows client into distributable artifacts.
+  Packages the Actrium Windows client into distributable artifacts.
 
 .DESCRIPTION
   Runs on a Windows host (PowerShell 5.1 or later) and produces, under
@@ -8,11 +8,11 @@
 
     1. A reproducible self-contained publish folder
        (dotnet publish -c Release -r win-x64 --self-contained true) with
-       actro_core.dll flattened at the application root.
-    2. A portable zip: Actro-<version>-win-x64.zip.
-    3. A per-user installer: Actro-<version>-win-x64-setup.exe, built with
+       actrium_core.dll flattened at the application root.
+    2. A portable zip: Actrium-<version>-win-x64.zip.
+    3. A per-user installer: Actrium-<version>-win-x64-setup.exe, built with
        Inno Setup 6 (ISCC.exe) from windows/packaging/
-       actro-installer.iss. When Inno Setup is not installed the script
+       actrium-installer.iss. When Inno Setup is not installed the script
        still succeeds and produces the portable zip only.
 
   Version single-sourcing: windows/VERSION is the only version
@@ -20,22 +20,22 @@
   version) and this script reads it for artifact names and the installer
   AppVersion, so the binary stamp and the installer stamp cannot drift.
 
-  Installer policy (see actro-installer.iss for the implementation):
-    - Installs per-user under %LOCALAPPDATA%\Programs\Actro; never requests
+  Installer policy (see actrium-installer.iss for the implementation):
+    - Installs per-user under %LOCALAPPDATA%\Programs\Actrium; never requests
       for administrator rights.
     - Creates a per-user Start Menu shortcut.
     - Detects the WebView2 Evergreen runtime via the EdgeUpdate Clients
       registry keys and runs the official Microsoft bootstrapper
       (downloaded by this script at package time) only when it is missing.
     - Uninstall removes the installed binaries and shortcuts but leaves
-      user profile data (%LOCALAPPDATA%\Actrium\Actro\Windows and the
+      user profile data (%LOCALAPPDATA%\Actrium\Actrium\Windows and the
       WebView2 browsing profile) in place, so a reinstall restores the
       user's session, bookmarks and history.
 
   KNOWN GAP - code signing: the produced executables, zip payload and
   installer are NOT signed because no code-signing certificate exists yet.
   SmartScreen will warn on first run/install. When a certificate becomes
-  available, sign Actro.exe and the setup exe with signtool (present in the
+  available, sign Actrium.exe and the setup exe with signtool (present in the
   Windows SDK) as a post-step here.
 
 .PARAMETER Configuration
@@ -102,8 +102,8 @@ Write-Ok "using dotnet at $DotnetExe"
 
 # --- Publish (self-contained, single output folder). -------------------------
 $distRoot = Join-Path $repoRoot 'dist\windows'
-$publishDir = Join-Path $distRoot "publish\Actro-$version-$Runtime"
-$project = Join-Path $repoRoot 'windows\Actro.Windows.csproj'
+$publishDir = Join-Path $distRoot "publish\Actrium-$version-$Runtime"
+$project = Join-Path $repoRoot 'windows\Actrium.Windows.csproj'
 
 if (Test-Path -LiteralPath $publishDir) {
     Write-Step "removing stale publish folder $publishDir"
@@ -118,26 +118,26 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Fail fast when the publish payload is incomplete: the app itself loads
-# actro_core.dll fail-fast from the application root, so a package without
+# actrium_core.dll fail-fast from the application root, so a package without
 # it would install a client that cannot start.
-foreach ($required in @('Actro.exe', 'actro_core.dll', 'WebView2Loader.dll')) {
+foreach ($required in @('Actrium.exe', 'actrium_core.dll', 'WebView2Loader.dll')) {
     $requiredPath = Join-Path $publishDir $required
     if (-not (Test-Path -LiteralPath $requiredPath)) {
         throw "publish output is missing $required at its root: $requiredPath"
     }
 }
-Write-Ok 'publish root carries Actro.exe, actro_core.dll and WebView2Loader.dll'
+Write-Ok 'publish root carries Actrium.exe, actrium_core.dll and WebView2Loader.dll'
 
 # The binary stamp must agree with windows/VERSION; a mismatch means the
 # csproj no longer reads the version file and the single source has drifted.
-$exeInfo = (Get-Item -LiteralPath (Join-Path $publishDir 'Actro.exe')).VersionInfo
+$exeInfo = (Get-Item -LiteralPath (Join-Path $publishDir 'Actrium.exe')).VersionInfo
 if (-not $exeInfo.ProductVersion.StartsWith($version)) {
-    throw "Actro.exe ProductVersion '$($exeInfo.ProductVersion)' does not match windows/VERSION '$version'"
+    throw "Actrium.exe ProductVersion '$($exeInfo.ProductVersion)' does not match windows/VERSION '$version'"
 }
-Write-Ok "Actro.exe stamped ProductVersion=$($exeInfo.ProductVersion) FileVersion=$($exeInfo.FileVersion)"
+Write-Ok "Actrium.exe stamped ProductVersion=$($exeInfo.ProductVersion) FileVersion=$($exeInfo.FileVersion)"
 
 # --- Portable zip. ------------------------------------------------------------
-$zipPath = Join-Path $distRoot "Actro-$version-$Runtime.zip"
+$zipPath = Join-Path $distRoot "Actrium-$version-$Runtime.zip"
 if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
 Write-Step "compressing portable zip $zipPath"
 Compress-Archive -Path (Join-Path $publishDir '*') -DestinationPath $zipPath
@@ -187,8 +187,8 @@ if ($SkipWebView2Bootstrapper) {
     $withBootstrapper = $true
 }
 
-$issScript = Join-Path $repoRoot 'windows\packaging\actro-installer.iss'
-$setupBaseName = "Actro-$version-$Runtime-setup"
+$issScript = Join-Path $repoRoot 'windows\packaging\actrium-installer.iss'
+$setupBaseName = "Actrium-$version-$Runtime-setup"
 $isccArgs = @(
     "/DAppVersion=$version",
     "/DPublishDir=$publishDir",

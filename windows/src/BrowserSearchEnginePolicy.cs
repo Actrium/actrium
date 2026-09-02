@@ -1,4 +1,4 @@
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 // The Rust core is the only source of the search engine catalog; an empty
 // catalog, default id, or normalized id is contract drift and must fail
@@ -9,7 +9,7 @@ internal static class BrowserSearchEnginePolicy
     {
         get
         {
-            var defaultId = ActroCore.LoadBrowserSearchEngineDefaultId();
+            var defaultId = ActriumCore.LoadBrowserSearchEngineDefaultId();
             return string.IsNullOrWhiteSpace(defaultId)
                 ? throw new InvalidOperationException(
                     "Default browser search engine id from the Rust core is empty.")
@@ -30,7 +30,7 @@ internal static class BrowserSearchEnginePolicy
     {
         get
         {
-            var engines = ActroCore.LoadBrowserSearchEngines();
+            var engines = ActriumCore.LoadBrowserSearchEngines();
             return engines.Count == 0
                 ? throw new InvalidOperationException(
                     "Browser search engine catalog from the Rust core is empty.")
@@ -40,7 +40,7 @@ internal static class BrowserSearchEnginePolicy
 
     public static string NormalizeEngineId(string? engineId)
     {
-        var normalized = ActroCore.NormalizeBrowserSearchEngineId(engineId);
+        var normalized = ActriumCore.NormalizeBrowserSearchEngineId(engineId);
         return string.IsNullOrWhiteSpace(normalized)
             ? throw new InvalidOperationException(
                 "Normalized browser search engine id from the Rust core is empty.")
@@ -56,7 +56,7 @@ internal static class BrowserSearchEnginePolicy
 
     public static string BuildSearchUrl(string query, string? engineId)
     {
-        return ActroCore.BuildBrowserSearchUrl(query, engineId);
+        return ActriumCore.BuildBrowserSearchUrl(query, engineId);
     }
 }
 

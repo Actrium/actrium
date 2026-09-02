@@ -1,4 +1,4 @@
-# Actro 多进程架构设计文档
+# Actrium 多进程架构设计文档
 
 ## 一、架构概述
 
@@ -22,7 +22,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                           Actro.app (主进程)                            │
+│                           Actrium.app (主进程)                            │
 │                                                                         │
 │  ┌─────────────────────────────────────────────────────────────────┐   │
 │  │                        BrowserWindow                             │   │
@@ -46,7 +46,7 @@
           │ XPC (Broker)                                       │ XPC (直连)
           ▼                                                    ▼
 ┌──────────────────────┐                         ┌──────────────────────────┐
-│   ActroBroker       │                         │    ActroTabRenderer     │
+│   ActriumBroker       │                         │    ActriumTabRenderer     │
 │   (XPC Service)      │                         │    (Helper App)          │
 │                      │                         │                          │
 │  - launchd 管理       │  <── XPC 注册 ───       │  NSXPCListener.anonymous()│
@@ -61,7 +61,7 @@
 
 Phase 1: 握手 (通过 Broker)
 ┌─────────┐         ┌─────────────┐         ┌────────────────┐
-│  Actro │◀───────▶│ActroBroker │◀───────▶│ActroTabRenderer│
+│  Actrium │◀───────▶│ActriumBroker │◀───────▶│ActriumTabRenderer│
 │  (Main) │   XPC   │(XPC Service)│   XPC   │    (Helper)     │
 └─────────┘         └─────────────┘         └────────────────┘
     │                     │                        │
@@ -77,7 +77,7 @@ Phase 1: 握手 (通过 Broker)
 
 Phase 2: 直连 (Broker 退场)
 ┌─────────┐                                  ┌────────────────┐
-│  Actro │◀════════════════════════════════▶│ActroTabRenderer│
+│  Actrium │◀════════════════════════════════▶│ActriumTabRenderer│
 │  (Main) │      直接 XPC 连接 (via endpoint) │    (Helper)     │
 └─────────┘                                  └────────────────┘
 ```
@@ -89,13 +89,13 @@ Phase 2: 直连 (Broker 退场)
 ### 2.1 时序图
 
 ```
-Actro.app              ActroBroker                ActroTabRenderer
+Actrium.app              ActriumBroker                ActriumTabRenderer
     │                   (XPC Service)                      │
     │                        │                             │
     │  1. 启动时连接 Broker   │                             │
     │     serviceName:       │                             │
     │     "io.actrium.     │                             │
-    │      actro.ActroBroker"                            │
+    │      actrium.ActriumBroker"                            │
     │───────────────────────>│                             │
     │                        │                             │
     │  2. registerMainApp()  │                             │
@@ -542,20 +542,20 @@ memoryPressureSource?.setEventHandler { [weak self] in
 ## 七、目录结构
 
 ```
-Actro/
-├── Actro.app/                              # 主应用 Bundle
+Actrium/
+├── Actrium.app/                              # 主应用 Bundle
 │   └── Contents/
-│       ├── MacOS/Actro                     # 主可执行文件
+│       ├── MacOS/Actrium                     # 主可执行文件
 │       ├── Resources/
-│       │   └── ActroTabRenderer.app/       # Helper App (嵌入)
+│       │   └── ActriumTabRenderer.app/       # Helper App (嵌入)
 │       │       └── Contents/
-│       │           ├── MacOS/ActroTabRenderer
+│       │           ├── MacOS/ActriumTabRenderer
 │       │           └── Info.plist
 │       └── Info.plist
 │
-├── Actro/                                  # 主 App 源码
+├── Actrium/                                  # 主 App 源码
 │   ├── App/
-│   │   └── ActroApp.swift
+│   │   └── ActriumApp.swift
 │   ├── Browser/
 │   │   ├── BrowserWindow.swift
 │   │   └── BrowserViewModel.swift
@@ -572,7 +572,7 @@ Actro/
 │       ├── DevToolsPanel.swift              # UI
 │       └── ...
 │
-├── ActroTabRenderer/                       # Helper App 源码
+├── ActriumTabRenderer/                       # Helper App 源码
 │   ├── main.swift                           # 入口点
 │   ├── RendererAppDelegate.swift            # App 生命周期 + XPC
 │   ├── TabRendererService.swift             # XPC 服务实现
@@ -594,15 +594,15 @@ Actro/
 
 | Target | Type | Product | 说明 |
 |--------|------|---------|------|
-| **Actro** | Application | Actro.app | 主应用 |
-| **ActroTabRenderer** | Application | ActroTabRenderer.app | Helper App |
-| **ActroShared** | Framework (可选) | ActroShared.framework | 共享代码 |
+| **Actrium** | Application | Actrium.app | 主应用 |
+| **ActriumTabRenderer** | Application | ActriumTabRenderer.app | Helper App |
+| **ActriumShared** | Framework (可选) | ActriumShared.framework | 共享代码 |
 
-### 8.2 Build Phases (Actro Target)
+### 8.2 Build Phases (Actrium Target)
 
 ```
 1. Dependencies
-   └── ActroTabRenderer
+   └── ActriumTabRenderer
 
 2. Compile Sources
    └── (主 App 源文件)
@@ -613,10 +613,10 @@ Actro/
 4. Copy Files
    └── Destination: Resources
    └── Subpath: (空)
-   └── Files: ActroTabRenderer.app
+   └── Files: ActriumTabRenderer.app
 ```
 
-### 8.3 Info.plist (ActroTabRenderer)
+### 8.3 Info.plist (ActriumTabRenderer)
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -624,13 +624,13 @@ Actro/
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>io.actrium.actro.tabrenderer</string>
+    <string>io.actrium.app.tabrenderer</string>
 
     <key>CFBundleName</key>
-    <string>ActroTabRenderer</string>
+    <string>ActriumTabRenderer</string>
 
     <key>CFBundleExecutable</key>
-    <string>ActroTabRenderer</string>
+    <string>ActriumTabRenderer</string>
 
     <key>CFBundlePackageType</key>
     <string>APPL</string>
@@ -670,7 +670,7 @@ Actro/
 ### 9.2 沙盒 (可选)
 
 ```xml
-<!-- ActroTabRenderer.entitlements -->
+<!-- ActriumTabRenderer.entitlements -->
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" ...>
 <plist version="1.0">
@@ -722,10 +722,10 @@ Actro/
 
 ```bash
 # 方式1：Xcode 附加到进程
-Debug > Attach to Process > ActroTabRenderer
+Debug > Attach to Process > ActriumTabRenderer
 
 # 方式2：命令行启动 Helper (绕过主 App)
-/path/to/ActroTabRenderer.app/Contents/MacOS/ActroTabRenderer test-tab-id
+/path/to/ActriumTabRenderer.app/Contents/MacOS/ActriumTabRenderer test-tab-id
 ```
 
 ### 11.2 日志
@@ -733,24 +733,24 @@ Debug > Attach to Process > ActroTabRenderer
 ```swift
 // Helper 端使用 OSLog
 import os.log
-let logger = Logger(subsystem: "io.actrium.actro.tabrenderer", category: "Render")
+let logger = Logger(subsystem: "io.actrium.app.tabrenderer", category: "Render")
 logger.info("Frame rendered in \(duration)ms")
 
 // 查看日志
-log stream --predicate 'subsystem == "io.actrium.actro.tabrenderer"'
+log stream --predicate 'subsystem == "io.actrium.app.tabrenderer"'
 ```
 
 ### 11.3 崩溃报告
 
 - Helper 崩溃会生成独立的 crash report
-- 路径：`~/Library/Logs/DiagnosticReports/ActroTabRenderer-*.ips`
+- 路径：`~/Library/Logs/DiagnosticReports/ActriumTabRenderer-*.ips`
 
 ---
 
 ## 十二、迁移计划
 
 ### Phase 1: 基础架构
-- [ ] 创建 ActroTabRenderer target
+- [ ] 创建 ActriumTabRenderer target
 - [ ] 实现 NSXPCListener.anonymous() 启动
 - [ ] 实现 endpoint stdout 传输
 - [ ] 实现 TabProcessManager 连接管理

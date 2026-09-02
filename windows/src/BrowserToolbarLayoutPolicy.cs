@@ -1,4 +1,4 @@
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 /// <summary>
 /// Pure geometry for the two-segment toolbar. Structure follows the macOS

@@ -156,7 +156,7 @@ export const LoginModal = ({
               <View style={[styles.modalBg, styles.darkBg]} />
               <View style={styles.modalContentWrapper}>
                 <View style={styles.header}>
-                  <AppText style={styles.title}>{t('actr.auth.login') + ' Actro'}</AppText>
+                  <AppText style={styles.title}>{t('actr.auth.login') + ' Actrium'}</AppText>
                   <HostIconButton
                     iconType='close'
                     size={44}

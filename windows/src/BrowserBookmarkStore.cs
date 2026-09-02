@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal sealed class BrowserBookmarkStore
 {
@@ -168,7 +168,7 @@ internal sealed class BrowserBookmarkStore
         // Unparseable or missing core output is contract drift and must fail
         // loudly.
         var snapshotJson = JsonSerializer.Serialize(snapshot, JsonOptions);
-        var normalizedJson = ActroCore.NormalizeBrowserBookmarkSnapshotJson(snapshotJson);
+        var normalizedJson = ActriumCore.NormalizeBrowserBookmarkSnapshotJson(snapshotJson);
         try
         {
             return JsonSerializer.Deserialize<BrowserBookmarkSnapshot>(normalizedJson, JsonOptions)

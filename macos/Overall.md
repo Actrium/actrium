@@ -37,7 +37,7 @@ Important paths:
 - `packages/keel/`: sandbox engine, reconciler, and Guest build tooling;
 - `packages/actrium-app-sdk/`: Host/Guest bridge APIs;
 - `crates/actrium-core/`: shared Rust/native policy and bindings;
-- `macos/Actro/Models/ActrPackageManifestReader.swift`: macOS package reader;
+- `macos/Actrium/Models/ActrPackageManifestReader.swift`: macOS package reader;
 - `packages/actrium/keel-guest-examples/counterapp/`: reusable Guest example;
 - `examples/actrium/echo/`: complete Loran + Actor + Actrium Echo demo.
 

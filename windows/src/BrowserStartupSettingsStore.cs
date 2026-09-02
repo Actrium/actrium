@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal sealed class BrowserStartupSettingsStore
 {

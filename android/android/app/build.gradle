@@ -95,9 +95,9 @@ android {
     buildToolsVersion = rootProject.ext.buildToolsVersion
     compileSdk = rootProject.ext.compileSdkVersion
 
-    namespace = "io.actrium.actro"
+    namespace = "io.actrium.app"
     defaultConfig {
-        applicationId = "io.actrium.actro"
+        applicationId = "io.actrium.app"
         minSdk = rootProject.ext.minSdkVersion
         targetSdk = rootProject.ext.targetSdkVersion
         versionCode = 1_28_00
@@ -116,12 +116,12 @@ android {
     signingConfigs {
         release {
             if (isCI) {
-                storeFile file(System.getenv("KEYSTORE_PATH") ?: '../Actro.jks')
+                storeFile file(System.getenv("KEYSTORE_PATH") ?: '../Actrium.jks')
                 storePassword System.getenv("KEYSTORE_PASSWORD") ?: ''
                 keyAlias System.getenv("KEY_ALIAS") ?: ''
                 keyPassword System.getenv("KEY_PASSWORD") ?: ''
             } else {
-                storeFile file(localProperties.getProperty('KEYSTORE_PATH') ?: '../Actro.jks')
+                storeFile file(localProperties.getProperty('KEYSTORE_PATH') ?: '../Actrium.jks')
                 storePassword localProperties.getProperty('KEYSTORE_PASSWORD') ?: ''
                 keyAlias localProperties.getProperty('KEY_ALIAS') ?: ''
                 keyPassword localProperties.getProperty('KEY_PASSWORD') ?: ''
@@ -170,7 +170,7 @@ dependencies {
         implementation jscFlavor
     }
     implementation(project(":actr-kotlin"))
-    implementation(project(":actro-native-kotlin"))
+    implementation(project(":actrium-native-kotlin"))
     implementation(project(":keel"))
     implementation(project(":react-native-safe-area-context"))
     implementation(project(":react-native-view-shot"))

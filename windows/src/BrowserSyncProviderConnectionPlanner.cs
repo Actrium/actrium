@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal enum BrowserSyncProviderRouting
 {
@@ -104,7 +104,7 @@ internal static class BrowserSyncProviderConnectionPlanner
         // contract drift and must fail loudly instead of degrading to a
         // hand-copied C# policy.
         var connectionPolicy = JsonNodeFromObjectJson(
-            ActroCore.BuildBrowserStorageSyncCloudProviderConnectionStatusPolicyJson(
+            ActriumCore.BuildBrowserStorageSyncCloudProviderConnectionStatusPolicyJson(
                 providerSnapshot.ToJsonString(JsonOptions),
                 retryAttempt,
                 observedAtUnixSeconds)) as JsonObject

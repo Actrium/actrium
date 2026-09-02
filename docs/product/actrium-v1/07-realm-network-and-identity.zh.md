@@ -103,7 +103,7 @@ Profile 至少包含：
 - 连哪个信令集群；
 - Realm 42 是否与本机另一个 Realm 42 冲突。
 
-Actro v1 因而要求目标 ActorId 自带 authority；示意格式为：
+Actrium v1 因而要求目标 ActorId 自带 authority；示意格式为：
 
 ```text
 2af01@42~dns:team.example/notes.example:team-notes:1.4.2
@@ -159,9 +159,9 @@ Actro v1 因而要求目标 ActorId 自带 authority；示意格式为：
 
 它不负责保存 Service 业务状态。
 
-## 5. Actro 是否内置信令
+## 5. Actrium 是否内置信令
 
-Actro 内置：
+Actrium 内置：
 
 - Actr signaling client；
 - Realm Profile resolver；
@@ -170,7 +170,7 @@ Actro 内置：
 - 本地 Realm 的 loopback/embedded signaling；
 - 诊断和状态 UI。
 
-Actro 不写死：
+Actrium 不写死：
 
 - 唯一全球信令服务器；
 - 唯一公益组织；
@@ -229,7 +229,7 @@ Credential claims 应包含：
 可选的受管客户端证明另行包含：
 
 - platform app attestation；
-- Actro 发行签名/版本；
+- Actrium 发行签名/版本；
 - device management claim；
 - attestation nonce 和有效期。
 
@@ -241,7 +241,7 @@ Service Actor 的长期私钥和 ActorId 在创建事务中一次生成/签发�
 
 以下操作必须保持 ActorId：
 
-- Actro/Service 进程重启；
+- Actrium/Service 进程重启；
 - credential 正常续期；
 - renewal token 丢失后的重新认证，只要能证明同一长期 key；
 - signaling reconnect；
@@ -292,7 +292,7 @@ Host 为 workload 出口闭包提供证据时，必须使用独立、可验证�
 3. principal/device 完成登录或邀请；
 4. Realm 签发 membership credential；
 5. 设备安全存储保存 key/refresh material；
-6. Actro 建立 Realm record。
+6. Actrium 建立 Realm record。
 
 ### 7.2 Actor 注册
 

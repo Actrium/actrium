@@ -1645,7 +1645,8 @@ fn effect_completed_with_peer_coverage_residuals_acknowledges_intent() {
             outcome: EffectOutcome::CompletedWithResiduals {
                 residuals: vec![EffectDiagnosis::TransportImpaired {
                     scopes: vec![
-                        "peer=actr://7:handoff:session=1:ice=0:owner=RtcConnectionManager".into(),
+                        "peer=actr://example.com/handoff:session=1:ice=0:owner=RtcConnectionManager"
+                            .into(),
                     ],
                 }],
             },

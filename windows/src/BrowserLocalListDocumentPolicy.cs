@@ -1,7 +1,7 @@
 using System.Net;
 using System.Text.Json;
 
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal static class BrowserLocalListDocumentPolicy
 {
@@ -166,7 +166,7 @@ internal static class BrowserLocalListDocumentPolicy
                 document.addEventListener("click", async (event) => {
                   const target = event.target instanceof Element ? event.target : null;
                   const button = target ? target.closest(`button[${removeAttribute}]`) : null;
-                  const hostAction = window.actroHost ? window.actroHost[removeHostMethod] : null;
+                  const hostAction = window.actriumHost ? window.actriumHost[removeHostMethod] : null;
                   if (!button || typeof hostAction !== "function") {
                     return;
                   }

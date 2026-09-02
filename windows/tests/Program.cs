@@ -3,7 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Data.Sqlite;
 
-using Actro.Windows;
+using Actrium.Windows;
 
 var tests = new (string Name, Func<Task> Run)[]
 {
@@ -24,13 +24,13 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertTrue(NavigationPolicy.TryNormalizeAddress("about:blank", out var aboutUrl));
         AssertEqual("about:blank", aboutUrl);
 
-        AssertTrue(NavigationPolicy.TryNormalizeAddress("file:///C:/Actro/index.html", out var fileUrl));
+        AssertTrue(NavigationPolicy.TryNormalizeAddress("file:///C:/Actrium/index.html", out var fileUrl));
         AssertTrue(fileUrl.StartsWith("file:///", StringComparison.Ordinal));
         return Task.CompletedTask;
     }),
     ("normalizes absolute local file paths", () =>
     {
-        var localPath = Path.Combine(Path.GetTempPath(), $"actro windows test {Guid.NewGuid():N}.html");
+        var localPath = Path.Combine(Path.GetTempPath(), $"actrium windows test {Guid.NewGuid():N}.html");
 
         AssertTrue(NavigationPolicy.TryNormalizeLocalFilePath(localPath, out var fileAddress));
         AssertTrue(fileAddress.StartsWith("file:", StringComparison.Ordinal));
@@ -54,7 +54,7 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertTrue(NavigationPolicy.IsAllowedNavigationAddress("https://example.com/path"));
         AssertTrue(NavigationPolicy.IsAllowedNavigationAddress("http://localhost:3000"));
         AssertTrue(NavigationPolicy.IsAllowedNavigationAddress("about:blank"));
-        AssertTrue(NavigationPolicy.IsAllowedNavigationAddress("file:///C:/Actro/index.html"));
+        AssertTrue(NavigationPolicy.IsAllowedNavigationAddress("file:///C:/Actrium/index.html"));
         AssertFalse(NavigationPolicy.IsAllowedNavigationAddress("javascript:alert(1)"));
         AssertFalse(NavigationPolicy.IsAllowedNavigationAddress("data:text/html,hello"));
         AssertFalse(NavigationPolicy.IsAllowedNavigationAddress("example.com"));
@@ -74,7 +74,7 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertFalse(NavigationPolicy.IsGeneratedDocumentUri("data:image/png;base64,AAAA"));
         AssertFalse(NavigationPolicy.IsGeneratedDocumentUri("data:text/plain,hello"));
         AssertFalse(NavigationPolicy.IsGeneratedDocumentUri("https://example.com"));
-        AssertFalse(NavigationPolicy.IsGeneratedDocumentUri("actro://home"));
+        AssertFalse(NavigationPolicy.IsGeneratedDocumentUri("about:home"));
         AssertFalse(NavigationPolicy.IsGeneratedDocumentUri(""));
         return Task.CompletedTask;
     }),
@@ -84,10 +84,10 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertTrue(BrowserExternalProtocolPolicy.IsExternalProtocolAddress("tel:+15551234567"));
         AssertTrue(BrowserExternalProtocolPolicy.IsExternalProtocolAddress("ftp://example.com/file.txt"));
         AssertFalse(BrowserExternalProtocolPolicy.IsExternalProtocolAddress("https://example.com"));
-        AssertFalse(BrowserExternalProtocolPolicy.IsExternalProtocolAddress("file:///C:/Actro/index.html"));
+        AssertFalse(BrowserExternalProtocolPolicy.IsExternalProtocolAddress("file:///C:/Actrium/index.html"));
         AssertFalse(BrowserExternalProtocolPolicy.IsExternalProtocolAddress("javascript:alert(1)"));
         AssertFalse(BrowserExternalProtocolPolicy.IsExternalProtocolAddress("data:text/html,hello"));
-        AssertFalse(BrowserExternalProtocolPolicy.IsExternalProtocolAddress("actro://home"));
+        AssertFalse(BrowserExternalProtocolPolicy.IsExternalProtocolAddress("about:home"));
         return Task.CompletedTask;
     }),
     ("builds external protocol prompt", () =>
@@ -108,17 +108,17 @@ var tests = new (string Name, Func<Task> Run)[]
     }),
     ("recognizes home address", () =>
     {
-        AssertTrue(NavigationPolicy.IsHomeAddress(" actro://HOME "));
-        AssertFalse(NavigationPolicy.IsHomeAddress("https://actro.local"));
+        AssertTrue(NavigationPolicy.IsHomeAddress(" about:HOME "));
+        AssertFalse(NavigationPolicy.IsHomeAddress("https://actrium.local"));
         return Task.CompletedTask;
     }),
     ("recognizes history address", () =>
     {
-        AssertTrue(NavigationPolicy.IsHistoryAddress(" actro://HISTORY "));
-        AssertTrue(NavigationPolicy.IsInternalAddress("actro://history"));
-        AssertTrue(NavigationPolicy.IsBookmarksAddress(" actro://BOOKMARKS "));
-        AssertTrue(NavigationPolicy.IsInternalAddress("actro://bookmarks"));
-        AssertFalse(NavigationPolicy.IsInternalAddress("https://actro.local/history"));
+        AssertTrue(NavigationPolicy.IsHistoryAddress(" about:HISTORY "));
+        AssertTrue(NavigationPolicy.IsInternalAddress("about:history"));
+        AssertTrue(NavigationPolicy.IsBookmarksAddress(" about:BOOKMARKS "));
+        AssertTrue(NavigationPolicy.IsInternalAddress("about:bookmarks"));
+        AssertFalse(NavigationPolicy.IsInternalAddress("https://actrium.local/history"));
         return Task.CompletedTask;
     }),
     ("resolves address bar urls without search", () =>
@@ -127,27 +127,27 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertEqual("https://example.com/docs", resolved);
         AssertFalse(isSearch);
 
-        AssertTrue(BrowserAddressInputPolicy.TryResolveAddressInput(" actro://HOME ", out var homeAddress, out var isHomeSearch));
+        AssertTrue(BrowserAddressInputPolicy.TryResolveAddressInput(" about:HOME ", out var homeAddress, out var isHomeSearch));
         AssertEqual(NavigationPolicy.HomeAddress, homeAddress);
         AssertFalse(isHomeSearch);
 
-        AssertTrue(BrowserAddressInputPolicy.TryResolveAddressInput(" actro://HISTORY ", out var historyAddress, out var isHistorySearch));
+        AssertTrue(BrowserAddressInputPolicy.TryResolveAddressInput(" about:HISTORY ", out var historyAddress, out var isHistorySearch));
         AssertEqual(NavigationPolicy.HistoryAddress, historyAddress);
         AssertFalse(isHistorySearch);
 
-        AssertTrue(BrowserAddressInputPolicy.TryResolveAddressInput(" actro://BOOKMARKS ", out var bookmarksAddress, out var isBookmarksSearch));
+        AssertTrue(BrowserAddressInputPolicy.TryResolveAddressInput(" about:BOOKMARKS ", out var bookmarksAddress, out var isBookmarksSearch));
         AssertEqual(NavigationPolicy.BookmarksAddress, bookmarksAddress);
         AssertFalse(isBookmarksSearch);
         return Task.CompletedTask;
     }),
     ("resolves address bar search queries", () =>
     {
-        AssertTrue(BrowserAddressInputPolicy.TryResolveAddressInput("actro browser client", out var resolved, out var isSearch));
-        AssertEqual($"{BrowserAddressInputPolicy.DefaultSearchUrlPrefix}actro%20browser%20client", resolved);
+        AssertTrue(BrowserAddressInputPolicy.TryResolveAddressInput("actrium browser client", out var resolved, out var isSearch));
+        AssertEqual($"{BrowserAddressInputPolicy.DefaultSearchUrlPrefix}actrium%20browser%20client", resolved);
         AssertTrue(isSearch);
 
-        AssertTrue(BrowserAddressInputPolicy.TryResolveAddressInput("actro browser client", "bing", out var bingResolved, out var isBingSearch));
-        AssertEqual("https://www.bing.com/search?q=actro%20browser%20client", bingResolved);
+        AssertTrue(BrowserAddressInputPolicy.TryResolveAddressInput("actrium browser client", "bing", out var bingResolved, out var isBingSearch));
+        AssertEqual("https://www.bing.com/search?q=actrium%20browser%20client", bingResolved);
         AssertTrue(isBingSearch);
         return Task.CompletedTask;
     }),
@@ -192,31 +192,31 @@ var tests = new (string Name, Func<Task> Run)[]
     ("builds available browser home document", () =>
     {
         var document = BrowserHomeDocumentPolicy.BuildDocument(
-            ActroCoreStatus.Available(
-                "Actro <Beta>",
+            ActriumCoreStatus.Available(
+                "Actrium <Beta>",
                 7,
                 "ask<script>",
                 2,
                 3,
                 4));
 
-        AssertTrue(document.Contains("<title>Actro &lt;Beta&gt;</title>", StringComparison.Ordinal));
-        AssertTrue(document.Contains("<h1>Actro &lt;Beta&gt;</h1>", StringComparison.Ordinal));
+        AssertTrue(document.Contains("<title>Actrium &lt;Beta&gt;</title>", StringComparison.Ordinal));
+        AssertTrue(document.Contains("<h1>Actrium &lt;Beta&gt;</h1>", StringComparison.Ordinal));
         AssertTrue(document.Contains("Rust core ready: C API v7, contract ask&lt;script&gt;@v2, schemas core/runtime 3/4.", StringComparison.Ordinal));
-        AssertTrue(document.Contains("window.actroHost.getCoreStatus", StringComparison.Ordinal));
-        AssertFalse(document.Contains("Actro <Beta>", StringComparison.Ordinal));
+        AssertTrue(document.Contains("window.actriumHost.getCoreStatus", StringComparison.Ordinal));
+        AssertFalse(document.Contains("Actrium <Beta>", StringComparison.Ordinal));
         AssertFalse(document.Contains("ask<script>", StringComparison.Ordinal));
         return Task.CompletedTask;
     }),
     ("builds fallback browser home document", () =>
     {
         var document = BrowserHomeDocumentPolicy.BuildDocument(
-            ActroCoreStatus.Unavailable("missing <actro_core.dll>"));
+            ActriumCoreStatus.Unavailable("missing <actrium_core.dll>"));
 
         AssertTrue(document.Contains("Rust core DLL is not loaded yet", StringComparison.Ordinal));
-        AssertTrue(document.Contains("missing &lt;actro_core.dll&gt;", StringComparison.Ordinal));
+        AssertTrue(document.Contains("missing &lt;actrium_core.dll&gt;", StringComparison.Ordinal));
         AssertTrue(document.Contains("data-core-status", StringComparison.Ordinal));
-        AssertFalse(document.Contains("missing <actro_core.dll>", StringComparison.Ordinal));
+        AssertFalse(document.Contains("missing <actrium_core.dll>", StringComparison.Ordinal));
         return Task.CompletedTask;
     }),
     ("formats browser process failures", () =>
@@ -265,7 +265,7 @@ var tests = new (string Name, Func<Task> Run)[]
             "http://localhost:5173/ads/dev.js",
             "Script"));
         AssertFalse(BrowserContentBlockingPolicy.ShouldBlock(
-            "file:///C:/Actro/ads/banner.js",
+            "file:///C:/Actrium/ads/banner.js",
             "Image"));
         return Task.CompletedTask;
     }),
@@ -304,8 +304,8 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertEqual(BrowserSearchEnginePolicy.DefaultEngineId, BrowserSearchEnginePolicy.NormalizeEngineId("missing"));
         AssertEqual("duckduckgo", BrowserSearchEnginePolicy.NormalizeEngineId(" DuckDuckGo "));
         AssertEqual(
-            "https://duckduckgo.com/?q=actro%20browser",
-            BrowserSearchEnginePolicy.BuildSearchUrl("actro browser", "duckduckgo"));
+            "https://duckduckgo.com/?q=actrium%20browser",
+            BrowserSearchEnginePolicy.BuildSearchUrl("actrium browser", "duckduckgo"));
         AssertTrue(BrowserSearchEnginePolicy.TryGetEngine("bing", out var engine));
         AssertEqual("Bing", engine.DisplayName);
         return Task.CompletedTask;
@@ -461,7 +461,7 @@ var tests = new (string Name, Func<Task> Run)[]
     }),
     ("formats PDF save status", () =>
     {
-        AssertEqual("Saved page.pdf", BrowserPdfPolicy.FormatSaveStatus(true, Path.Combine("C:", "Actro", "page.pdf")));
+        AssertEqual("Saved page.pdf", BrowserPdfPolicy.FormatSaveStatus(true, Path.Combine("C:", "Actrium", "page.pdf")));
         AssertEqual("Save as PDF failed", BrowserPdfPolicy.FormatSaveStatus(false, "page.pdf"));
         return Task.CompletedTask;
     }),
@@ -533,7 +533,7 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertTrue(BrowserPageActionPolicy.TryGetExternalAddress("example.com", out var normalizedWebAddress));
         AssertEqual("https://example.com/", normalizedWebAddress);
 
-        AssertTrue(BrowserPageActionPolicy.TryGetExternalAddress("file:///C:/Actro/index.html", out var fileAddress));
+        AssertTrue(BrowserPageActionPolicy.TryGetExternalAddress("file:///C:/Actrium/index.html", out var fileAddress));
         AssertTrue(fileAddress.StartsWith("file:///", StringComparison.Ordinal));
 
         AssertFalse(BrowserPageActionPolicy.TryGetExternalAddress(NavigationPolicy.HomeAddress, out _));
@@ -580,7 +580,7 @@ var tests = new (string Name, Func<Task> Run)[]
     {
         AssertEqual("https://example.com", BrowserPermissionPolicy.DescribeOrigin("https://example.com/path"));
         AssertEqual("https://example.com:8443", BrowserPermissionPolicy.DescribeOrigin("https://example.com:8443/path"));
-        AssertEqual("A local file", BrowserPermissionPolicy.DescribeOrigin("file:///C:/Actro/index.html"));
+        AssertEqual("A local file", BrowserPermissionPolicy.DescribeOrigin("file:///C:/Actrium/index.html"));
         AssertEqual("This page", BrowserPermissionPolicy.DescribeOrigin("not a uri"));
         return Task.CompletedTask;
     }),
@@ -617,14 +617,14 @@ var tests = new (string Name, Func<Task> Run)[]
         var options = WindowsStartupOptions.FromArgs([
             "--url",
             "https://example.com/one",
-            "C:\\Actro\\two.html",
+            "C:\\Actrium\\two.html",
             "--url",
             "https://example.com/three",
         ]);
 
         AssertEqual(3, options.InitialAddresses.Count);
         AssertEqual("https://example.com/one", options.InitialAddresses[0]);
-        AssertEqual("C:\\Actro\\two.html", options.InitialAddresses[1]);
+        AssertEqual("C:\\Actrium\\two.html", options.InitialAddresses[1]);
         AssertEqual("https://example.com/three", options.InitialAddresses[2]);
         return Task.CompletedTask;
     }),
@@ -659,8 +659,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("parses user data root startup option", () =>
     {
         var options = WindowsStartupOptions.FromArgs(
-            ["--user-data-root", "/srv/actro/instance-b", "https://example.com/"]);
-        AssertEqual("/srv/actro/instance-b", options.UserDataRoot);
+            ["--user-data-root", "/srv/actrium/instance-b", "https://example.com/"]);
+        AssertEqual("/srv/actrium/instance-b", options.UserDataRoot);
         // The root value is not swallowed as a positional address.
         AssertEqual("https://example.com/", options.InitialUrl);
         AssertEqual(1, options.InitialAddresses.Count);
@@ -673,7 +673,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("builds Windows app data root", () =>
     {
         var root = WindowsAppPaths.GetLocalAppDataRoot();
-        AssertTrue(root.EndsWith(Path.Combine("Actrium", "Actro", "Windows"), StringComparison.OrdinalIgnoreCase));
+        AssertTrue(root.EndsWith(Path.Combine("Actrium", "Actrium", "Windows"), StringComparison.OrdinalIgnoreCase));
         return Task.CompletedTask;
     }),
     ("honors the user data root environment override", () =>
@@ -683,7 +683,7 @@ var tests = new (string Name, Func<Task> Run)[]
         try
         {
             // An absolute override replaces the whole root verbatim (no
-            // Actrium/Actro/Windows suffix), so concurrent instances keep
+            // Actrium/Actrium/Windows suffix), so concurrent instances keep
             // fully independent state trees.
             var overrideRoot = CreateTempDirectoryPath();
             Environment.SetEnvironmentVariable(
@@ -699,12 +699,12 @@ var tests = new (string Name, Func<Task> Run)[]
             Environment.SetEnvironmentVariable(
                 WindowsAppPaths.UserDataRootEnvironmentVariable, "   ");
             AssertTrue(WindowsAppPaths.GetLocalAppDataRoot().EndsWith(
-                Path.Combine("Actrium", "Actro", "Windows"), StringComparison.OrdinalIgnoreCase));
+                Path.Combine("Actrium", "Actrium", "Windows"), StringComparison.OrdinalIgnoreCase));
 
             // A relative override would silently split state across instances:
             // it must fail loudly instead of resolving against the CWD.
             Environment.SetEnvironmentVariable(
-                WindowsAppPaths.UserDataRootEnvironmentVariable, "relative/actro-root");
+                WindowsAppPaths.UserDataRootEnvironmentVariable, "relative/actrium-root");
             var threw = false;
             try
             {
@@ -729,7 +729,7 @@ var tests = new (string Name, Func<Task> Run)[]
     {
         var userDataFolder = BrowserProfilePolicy.GetDefaultUserDataFolder();
         AssertTrue(userDataFolder.EndsWith(
-            Path.Combine("Actrium", "Actro", "Windows", BrowserProfilePolicy.UserDataFolderName),
+            Path.Combine("Actrium", "Actrium", "Windows", BrowserProfilePolicy.UserDataFolderName),
             StringComparison.OrdinalIgnoreCase));
         return Task.CompletedTask;
     }),
@@ -741,7 +741,7 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertTrue(userDataFolder.EndsWith(
             Path.Combine(
                 "Actrium",
-                "Actro",
+                "Actrium",
                 "Windows",
                 BrowserProfilePolicy.PrivateUserDataParentFolderName,
                 "aaaaaaaabbbbccccddddeeeeeeeeeeee"),
@@ -1156,7 +1156,7 @@ var tests = new (string Name, Func<Task> Run)[]
                         databasePath,
                         $"SELECT sync_revision FROM browser_history_pages WHERE address = 'https://example.com/history-v{legacyVersion}'"));
 
-                var remoteBatchJson = ActroCore.BuildBrowserStorageSyncBatchFromDirtyRowsJson(
+                var remoteBatchJson = ActriumCore.BuildBrowserStorageSyncBatchFromDirtyRowsJson(
                     "profile",
                     "device-win",
                     1250,
@@ -1177,7 +1177,7 @@ var tests = new (string Name, Func<Task> Run)[]
                         }
                     ]
                     """);
-                var cycleResponseJson = ActroCore.BuildBrowserStorageSyncCycleResponseJson(
+                var cycleResponseJson = ActriumCore.BuildBrowserStorageSyncCycleResponseJson(
                     remoteBatchJson,
                     """
                     {
@@ -1270,7 +1270,7 @@ var tests = new (string Name, Func<Task> Run)[]
                 1300,
                 1));
 
-            var remoteBatchJson = ActroCore.BuildBrowserStorageSyncBatchFromDirtyRowsJson(
+            var remoteBatchJson = ActriumCore.BuildBrowserStorageSyncBatchFromDirtyRowsJson(
                 "profile",
                 "device-win",
                 1310,
@@ -1291,7 +1291,7 @@ var tests = new (string Name, Func<Task> Run)[]
                     }
                 ]
                 """);
-            var cycleResponseJson = ActroCore.BuildBrowserStorageSyncCycleResponseJson(
+            var cycleResponseJson = ActriumCore.BuildBrowserStorageSyncCycleResponseJson(
                 remoteBatchJson,
                 """
                 {
@@ -1338,21 +1338,21 @@ var tests = new (string Name, Func<Task> Run)[]
     }),
     ("plans browser sync cloud provider adapter object space through Rust", () =>
     {
-        using (var contract = JsonDocument.Parse(ActroCore.LoadBrowserStorageSyncCloudProviderAdapterContractJson()))
+        using (var contract = JsonDocument.Parse(ActriumCore.LoadBrowserStorageSyncCloudProviderAdapterContractJson()))
         {
             AssertEqual(
                 "cloudProviderAdapterPlan",
                 contract.RootElement.GetProperty("planType").GetString());
             AssertEqual(
-                "Actro/BrowserSync",
+                "Actrium/BrowserSync",
                 contract.RootElement.GetProperty("objectSpace").GetProperty("rootPath").GetString());
             AssertTrue(contract.RootElement.GetProperty("operationBoundary").GetString()!.Contains(
                 "coarse rounds",
                 StringComparison.Ordinal));
         }
 
-        var localFolderCapabilities = ActroCore.LoadBrowserStorageSyncCloudLocalFolderCapabilitiesJson();
-        using (var ready = JsonDocument.Parse(ActroCore.BuildBrowserStorageSyncCloudProviderAdapterPlanJson(
+        var localFolderCapabilities = ActriumCore.LoadBrowserStorageSyncCloudLocalFolderCapabilitiesJson();
+        using (var ready = JsonDocument.Parse(ActriumCore.BuildBrowserStorageSyncCloudProviderAdapterPlanJson(
             localFolderCapabilities,
             1400)))
         {
@@ -1363,11 +1363,11 @@ var tests = new (string Name, Func<Task> Run)[]
             AssertTrue(ready.RootElement.GetProperty("shouldAllowSync").GetBoolean());
             AssertFalse(ready.RootElement.GetProperty("shouldBlockSync").GetBoolean());
             AssertEqual(
-                "Actro/BrowserSync/manifest.json",
+                "Actrium/BrowserSync/manifest.json",
                 ready.RootElement.GetProperty("objectLayout").GetProperty("manifestPath").GetString());
         }
 
-        using (var setup = JsonDocument.Parse(ActroCore.BuildBrowserStorageSyncCloudProviderAdapterPlanJson(
+        using (var setup = JsonDocument.Parse(ActriumCore.BuildBrowserStorageSyncCloudProviderAdapterPlanJson(
             """
             {
                 "providerKind": "localFolder",
@@ -1390,24 +1390,24 @@ var tests = new (string Name, Func<Task> Run)[]
         {
             AssertEqual("providerSetupRequired", setup.RootElement.GetProperty("classification").GetString());
             AssertTrue(setup.RootElement.GetProperty("shouldBlockSync").GetBoolean());
-            AssertEqual("configureActroBrowserSyncRoot", setup.RootElement.GetProperty("rootPathAction").GetString());
+            AssertEqual("configureActriumBrowserSyncRoot", setup.RootElement.GetProperty("rootPathAction").GetString());
         }
 
         return Task.CompletedTask;
     }),
     ("classifies browser sync cloud provider connection state through Rust", () =>
     {
-        using (var contract = JsonDocument.Parse(ActroCore.LoadBrowserStorageSyncCloudProviderConnectionContractJson()))
+        using (var contract = JsonDocument.Parse(ActriumCore.LoadBrowserStorageSyncCloudProviderConnectionContractJson()))
         {
             AssertEqual(
                 "cloudProviderConnectionStatusPolicy",
                 contract.RootElement.GetProperty("planType").GetString());
             AssertTrue(contract.RootElement.GetProperty("productConstraint").GetString()!.Contains(
-                "No Actro product server",
+                "No Actrium product server",
                 StringComparison.Ordinal));
         }
 
-        using (var ready = JsonDocument.Parse(ActroCore.BuildBrowserStorageSyncCloudProviderConnectionStatusPolicyJson(
+        using (var ready = JsonDocument.Parse(ActriumCore.BuildBrowserStorageSyncCloudProviderConnectionStatusPolicyJson(
             """
             {
                 "providerKind": "localFolder",
@@ -1428,7 +1428,7 @@ var tests = new (string Name, Func<Task> Run)[]
             AssertEqual("idle", ready.RootElement.GetProperty("schedulerAction").GetString());
         }
 
-        using (var missingMembership = JsonDocument.Parse(ActroCore.BuildBrowserStorageSyncCloudProviderConnectionStatusPolicyJson(
+        using (var missingMembership = JsonDocument.Parse(ActriumCore.BuildBrowserStorageSyncCloudProviderConnectionStatusPolicyJson(
             """
             {
                 "providerKind": "googleDrive",
@@ -1451,7 +1451,7 @@ var tests = new (string Name, Func<Task> Run)[]
             AssertEqual("writeCloudMembership", missingMembership.RootElement.GetProperty("providerAction").GetString());
         }
 
-        using (var retry = JsonDocument.Parse(ActroCore.BuildBrowserStorageSyncCloudProviderConnectionStatusPolicyJson(
+        using (var retry = JsonDocument.Parse(ActriumCore.BuildBrowserStorageSyncCloudProviderConnectionStatusPolicyJson(
             """
             {
                 "providerKind": "oneDrive",
@@ -1476,7 +1476,7 @@ var tests = new (string Name, Func<Task> Run)[]
     }),
     ("classifies browser sync cloud provider errors through Rust", () =>
     {
-        using (var policy = JsonDocument.Parse(ActroCore.LoadBrowserStorageSyncCloudProviderErrorPolicyJson()))
+        using (var policy = JsonDocument.Parse(ActriumCore.LoadBrowserStorageSyncCloudProviderErrorPolicyJson()))
         {
             AssertEqual(
                 "cloudProviderErrorClassification",
@@ -1486,7 +1486,7 @@ var tests = new (string Name, Func<Task> Run)[]
                 StringComparison.Ordinal));
         }
 
-        using (var reread = JsonDocument.Parse(ActroCore.BuildBrowserStorageSyncCloudProviderErrorClassificationJson(
+        using (var reread = JsonDocument.Parse(ActriumCore.BuildBrowserStorageSyncCloudProviderErrorClassificationJson(
             """
             {
                 "providerKind": "googleDrive",
@@ -1494,7 +1494,7 @@ var tests = new (string Name, Func<Task> Run)[]
                     {
                         "operationIndex": 1,
                         "operationType": "writeManifest",
-                        "path": "Actro/BrowserSync/manifest.json",
+                        "path": "Actrium/BrowserSync/manifest.json",
                         "providerStatusCode": 412,
                         "message": "etag mismatch"
                     }
@@ -1511,7 +1511,7 @@ var tests = new (string Name, Func<Task> Run)[]
                 "conflict",
                 reread.RootElement.GetProperty("errors")[0].GetProperty("canonicalErrorKind").GetString());
 
-            using var diagnostics = JsonDocument.Parse(ActroCore.BuildBrowserStorageSyncCloudProviderDiagnosticsJson(
+            using var diagnostics = JsonDocument.Parse(ActriumCore.BuildBrowserStorageSyncCloudProviderDiagnosticsJson(
                 string.Empty,
                 string.Empty,
                 reread.RootElement.GetRawText(),
@@ -1525,7 +1525,7 @@ var tests = new (string Name, Func<Task> Run)[]
             AssertTrue(diagnostics.RootElement.GetProperty("pendingCloudReread").GetBoolean());
         }
 
-        using (var retry = JsonDocument.Parse(ActroCore.BuildBrowserStorageSyncCloudProviderErrorClassificationJson(
+        using (var retry = JsonDocument.Parse(ActriumCore.BuildBrowserStorageSyncCloudProviderErrorClassificationJson(
             """
             {
                 "providerKind": "oneDrive",
@@ -1650,7 +1650,7 @@ var tests = new (string Name, Func<Task> Run)[]
                 AssertTrue(seedResult.RootElement.GetProperty("observabilityEvent").GetProperty("redactedExportAllowed").GetBoolean());
             }
 
-            AssertTrue(File.Exists(Path.Combine(cloudRoot, "Actro", "BrowserSync", "manifest.json")));
+            AssertTrue(File.Exists(Path.Combine(cloudRoot, "Actrium", "BrowserSync", "manifest.json")));
 
             var localDatabase = new BrowserStorageDatabase(localDatabasePath);
             var localClient = new BrowserStorageSyncClient(localDatabase);
@@ -1732,7 +1732,7 @@ var tests = new (string Name, Func<Task> Run)[]
                     localDatabasePath,
                     "SELECT COUNT(*) FROM browser_history_visits WHERE address = 'https://example.com/local-folder-remote'"));
 
-            var manifestPath = Path.Combine(cloudRoot, "Actro", "BrowserSync", "manifest.json");
+            var manifestPath = Path.Combine(cloudRoot, "Actrium", "BrowserSync", "manifest.json");
             var manifest = JsonNode.Parse(File.ReadAllText(manifestPath))!.AsObject();
             manifest["storageSchemaVersion"] = BrowserStorageDatabase.SchemaVersion + 1;
             File.WriteAllText(manifestPath, manifest.ToJsonString());
@@ -1813,7 +1813,7 @@ var tests = new (string Name, Func<Task> Run)[]
                 ["scope"] = "profile",
                 ["actorDeviceId"] = "device-win",
                 ["memberDeviceId"] = "device-win",
-                ["displayName"] = "Actro Windows",
+                ["displayName"] = "Actrium Windows",
                 ["platform"] = "Windows",
                 ["membershipAction"] = "connect",
                 ["generatedAtUnixSeconds"] = 1810,
@@ -1906,8 +1906,8 @@ var tests = new (string Name, Func<Task> Run)[]
                     joinResult.RootElement.GetProperty("membershipRound").GetProperty("membershipAction").GetString());
             }
 
-            AssertTrue(File.Exists(Path.Combine(cloudRoot, "Actro", "BrowserSync", "manifest.json")));
-            AssertTrue(File.Exists(Path.Combine(cloudRoot, "Actro", "BrowserSync", "devices", "device-win.json")));
+            AssertTrue(File.Exists(Path.Combine(cloudRoot, "Actrium", "BrowserSync", "manifest.json")));
+            AssertTrue(File.Exists(Path.Combine(cloudRoot, "Actrium", "BrowserSync", "devices", "device-win.json")));
 
             var revokeRequestJson = JsonSerializer.Serialize(new Dictionary<string, object>
             {
@@ -1986,7 +1986,7 @@ var tests = new (string Name, Func<Task> Run)[]
                 "revoked",
                 revokeResult.RootElement.GetProperty("membershipRound").GetProperty("memberStatus").GetString());
 
-            var manifestPath = Path.Combine(cloudRoot, "Actro", "BrowserSync", "manifest.json");
+            var manifestPath = Path.Combine(cloudRoot, "Actrium", "BrowserSync", "manifest.json");
             using var manifest = JsonDocument.Parse(File.ReadAllText(manifestPath));
             AssertTrue(manifest.RootElement.GetProperty("devices").EnumerateArray().Any(device =>
                 device.GetProperty("deviceId").GetString() == "device-win"
@@ -2000,7 +2000,7 @@ var tests = new (string Name, Func<Task> Run)[]
                 ["scope"] = "profile",
                 ["actorDeviceId"] = "device-win",
                 ["memberDeviceId"] = "device-win-2",
-                ["displayName"] = "Actro Windows 2",
+                ["displayName"] = "Actrium Windows 2",
                 ["platform"] = "Windows",
                 ["membershipAction"] = "connect",
                 ["generatedAtUnixSeconds"] = 1840,
@@ -2096,7 +2096,7 @@ var tests = new (string Name, Func<Task> Run)[]
                 "upgradeClient",
                 blockedJoinResult.RootElement.GetProperty("recoverySnapshotRound").GetProperty("clientAction").GetString());
             AssertFalse(blockedJoinResult.RootElement.GetProperty("recoverySnapshotRound").GetProperty("resultPlan").GetProperty("snapshotRequested").GetBoolean());
-            AssertFalse(File.Exists(Path.Combine(cloudRoot, "Actro", "BrowserSync", "devices", "device-win-2.json")));
+            AssertFalse(File.Exists(Path.Combine(cloudRoot, "Actrium", "BrowserSync", "devices", "device-win-2.json")));
         }
         finally
         {
@@ -2151,8 +2151,8 @@ var tests = new (string Name, Func<Task> Run)[]
         try
         {
             var database = new BrowserStorageDatabase(databasePath);
-            var cycleResponseJson = ActroCore.BuildBrowserStorageSyncCycleResponseJson(
-                ActroCore.LoadEmptyBrowserStorageSyncBatchJson("profile", "device-win", 1410),
+            var cycleResponseJson = ActriumCore.BuildBrowserStorageSyncCycleResponseJson(
+                ActriumCore.LoadEmptyBrowserStorageSyncBatchJson("profile", "device-win", 1410),
                 """
                 {
                     "version": 1,
@@ -2260,8 +2260,8 @@ var tests = new (string Name, Func<Task> Run)[]
             scheduler.CancelPendingSync();
 
             transport.StatusCode = 200;
-            transport.ResponseJson = ActroCore.BuildBrowserStorageSyncCycleResponseJson(
-                ActroCore.LoadEmptyBrowserStorageSyncBatchJson("profile", "device-win", 1440),
+            transport.ResponseJson = ActriumCore.BuildBrowserStorageSyncCycleResponseJson(
+                ActriumCore.LoadEmptyBrowserStorageSyncBatchJson("profile", "device-win", 1440),
                 """
                 {
                     "version": 1,
@@ -2549,7 +2549,7 @@ var tests = new (string Name, Func<Task> Run)[]
 
             AssertEqual(2210L, providerStore.Load().MembershipJoinedAtUnixSeconds);
             AssertTrue(File.Exists(Path.Combine(
-                cloudRoot, "Actro", "BrowserSync", "devices", $"{deviceId}.json")));
+                cloudRoot, "Actrium", "BrowserSync", "devices", $"{deviceId}.json")));
 
             // The coordinator keeps the last executed round's diagnostics
             // summary in memory (here the cycle that followed the join) for
@@ -2697,7 +2697,7 @@ var tests = new (string Name, Func<Task> Run)[]
             // A cloud membership round blocked by a newer store schema: the
             // round's own cloud scheduleState parks the scheduler on the
             // user, and the membership marker is not persisted.
-            var manifestPath = Path.Combine(cloudRoot, "Actro", "BrowserSync", "manifest.json");
+            var manifestPath = Path.Combine(cloudRoot, "Actrium", "BrowserSync", "manifest.json");
             var manifest = JsonNode.Parse(File.ReadAllText(manifestPath))!.AsObject();
             manifest["storageSchemaVersion"] = BrowserStorageDatabase.SchemaVersion + 1;
             File.WriteAllText(manifestPath, manifest.ToJsonString());
@@ -2837,12 +2837,12 @@ var tests = new (string Name, Func<Task> Run)[]
         try
         {
             var capabilityJson =
-                ActroCore.BuildBrowserStorageSyncCloudLocalFolderCapabilityPreflightJson(2500);
-            var adapterPlanJson = ActroCore.BuildBrowserStorageSyncCloudProviderAdapterPlanJson(
-                ActroCore.LoadBrowserStorageSyncCloudLocalFolderCapabilitiesJson(),
+                ActriumCore.BuildBrowserStorageSyncCloudLocalFolderCapabilityPreflightJson(2500);
+            var adapterPlanJson = ActriumCore.BuildBrowserStorageSyncCloudProviderAdapterPlanJson(
+                ActriumCore.LoadBrowserStorageSyncCloudLocalFolderCapabilitiesJson(),
                 2500);
             var compatibilityJson =
-                ActroCore.BuildBrowserStorageSyncCloudLocalFolderCompatibilityPreflightJson(
+                ActriumCore.BuildBrowserStorageSyncCloudLocalFolderCompatibilityPreflightJson(
                     cloudRoot,
                     2500);
 
@@ -2887,7 +2887,7 @@ var tests = new (string Name, Func<Task> Run)[]
 
             // A wrong object-space root blocks through the real Rust adapter
             // plan and surfaces the rootPathAction as the thing to fix.
-            var wrongRootAdapterPlanJson = ActroCore.BuildBrowserStorageSyncCloudProviderAdapterPlanJson(
+            var wrongRootAdapterPlanJson = ActriumCore.BuildBrowserStorageSyncCloudProviderAdapterPlanJson(
                 """
                 {
                     "providerKind": "localFolder",
@@ -2912,18 +2912,18 @@ var tests = new (string Name, Func<Task> Run)[]
             AssertEqual(
                 BrowserSyncFolderPreflight.AdapterBlockedReason,
                 adapterBlocked.BlockedReasonKey);
-            AssertEqual("configureActroBrowserSyncRoot", adapterBlocked.DetailText);
+            AssertEqual("configureActriumBrowserSyncRoot", adapterBlocked.DetailText);
 
             // A cloud store written by a newer schema blocks acceptance with
             // the compatibility policy's user action as the error detail.
-            var manifestDirectory = Path.Combine(cloudRoot, "Actro", "BrowserSync");
+            var manifestDirectory = Path.Combine(cloudRoot, "Actrium", "BrowserSync");
             Directory.CreateDirectory(manifestDirectory);
-            var manifest = JsonNode.Parse(ActroCore.BuildBrowserStorageSyncCloudDefaultManifestJson(
+            var manifest = JsonNode.Parse(ActriumCore.BuildBrowserStorageSyncCloudDefaultManifestJson(
                 "profile", "device-win-preflight", 2502))!.AsObject();
             manifest["storageSchemaVersion"] = BrowserStorageDatabase.SchemaVersion + 1;
             File.WriteAllText(Path.Combine(manifestDirectory, "manifest.json"), manifest.ToJsonString());
             var upgradeCompatibilityJson =
-                ActroCore.BuildBrowserStorageSyncCloudLocalFolderCompatibilityPreflightJson(
+                ActriumCore.BuildBrowserStorageSyncCloudLocalFolderCompatibilityPreflightJson(
                     cloudRoot,
                     2503);
             using (var upgradePlan = JsonDocument.Parse(upgradeCompatibilityJson))
@@ -2947,7 +2947,7 @@ var tests = new (string Name, Func<Task> Run)[]
                 true,
                 capabilityJson,
                 adapterPlanJson,
-                ActroCore.BuildBrowserStorageSyncCloudLocalFolderCompatibilityPreflightJson(
+                ActriumCore.BuildBrowserStorageSyncCloudLocalFolderCompatibilityPreflightJson(
                     string.Empty,
                     2504));
             AssertFalse(invalidCompatibility.Accept);
@@ -2986,7 +2986,7 @@ var tests = new (string Name, Func<Task> Run)[]
         // mapped display string, so contract growth fails here instead of
         // leaking raw tokens into the dialog by default.
         using (var contract = JsonDocument.Parse(
-            ActroCore.LoadBrowserStorageSyncCloudProviderConnectionContractJson()))
+            ActriumCore.LoadBrowserStorageSyncCloudProviderConnectionContractJson()))
         {
             foreach (var classification in contract.RootElement
                 .GetProperty("classifications").EnumerateArray())
@@ -3100,7 +3100,7 @@ var tests = new (string Name, Func<Task> Run)[]
             // Blocked cycle (cloud schema bumped past this client): the same
             // fixture as the local-folder client case; the formatter surfaces
             // the blocking classification and its user action readably.
-            var manifestPath = Path.Combine(cloudRoot, "Actro", "BrowserSync", "manifest.json");
+            var manifestPath = Path.Combine(cloudRoot, "Actrium", "BrowserSync", "manifest.json");
             var manifest = JsonNode.Parse(File.ReadAllText(manifestPath))!.AsObject();
             manifest["storageSchemaVersion"] = BrowserStorageDatabase.SchemaVersion + 1;
             File.WriteAllText(manifestPath, manifest.ToJsonString());
@@ -3139,7 +3139,7 @@ var tests = new (string Name, Func<Task> Run)[]
                 ["scope"] = "profile",
                 ["actorDeviceId"] = "device-win-2",
                 ["memberDeviceId"] = "device-win-2",
-                ["displayName"] = "Actro Windows 2",
+                ["displayName"] = "Actrium Windows 2",
                 ["platform"] = "Windows",
                 ["membershipAction"] = "connect",
                 ["generatedAtUnixSeconds"] = 3120,
@@ -3168,7 +3168,7 @@ var tests = new (string Name, Func<Task> Run)[]
             // the error section lists normalized error kinds with the object
             // paths the provider failed on, plus retry/reread intent.
             using var errorClassification = JsonDocument.Parse(
-                ActroCore.BuildBrowserStorageSyncCloudProviderErrorClassificationJson(
+                ActriumCore.BuildBrowserStorageSyncCloudProviderErrorClassificationJson(
                     """
                     {
                         "providerKind": "localFolder",
@@ -3176,7 +3176,7 @@ var tests = new (string Name, Func<Task> Run)[]
                             {
                                 "operationIndex": 0,
                                 "operationType": "writeManifest",
-                                "path": "Actro/BrowserSync/manifest.json",
+                                "path": "Actrium/BrowserSync/manifest.json",
                                 "providerStatusCode": 412,
                                 "message": "etag mismatch"
                             }
@@ -3186,7 +3186,7 @@ var tests = new (string Name, Func<Task> Run)[]
                     0,
                     3130));
             using var errorDiagnostics = JsonDocument.Parse(
-                ActroCore.BuildBrowserStorageSyncCloudProviderDiagnosticsJson(
+                ActriumCore.BuildBrowserStorageSyncCloudProviderDiagnosticsJson(
                     string.Empty,
                     string.Empty,
                     errorClassification.RootElement.GetRawText(),
@@ -3208,7 +3208,7 @@ var tests = new (string Name, Func<Task> Run)[]
             AssertTrue(errorText.Contains("  Failed operations: 1 of 1 (retryable ", StringComparison.Ordinal));
             AssertTrue(errorText.Contains("  Cloud reread planned: yes", StringComparison.Ordinal));
             AssertTrue(errorText.Contains(
-                "    - writeManifest Actro/BrowserSync/manifest.json",
+                "    - writeManifest Actrium/BrowserSync/manifest.json",
                 StringComparison.Ordinal));
             AssertTrue(errorText.Contains("      Kind: conflict", StringComparison.Ordinal));
             AssertTrue(errorText.Contains("      Message: etag mismatch", StringComparison.Ordinal));
@@ -3371,7 +3371,7 @@ var tests = new (string Name, Func<Task> Run)[]
             store.SaveSession("prod", " token-win-session ");
             snapshot = store.Load();
             AssertEqual("prod", snapshot?.Environment);
-            AssertEqual("https://account.actro.chat", snapshot?.BaseUrl);
+            AssertEqual("https://account.actrium.chat", snapshot?.BaseUrl);
             AssertEqual("token-win-session", snapshot?.AccessToken);
             AssertEqual("default", snapshot?.Scope);
             AssertTrue((snapshot?.SavedAtUnixSeconds ?? 0) > 0);
@@ -3467,8 +3467,8 @@ var tests = new (string Name, Func<Task> Run)[]
                 "profile"));
 
             var database = new BrowserStorageDatabase(databasePath);
-            var cycleResponseJson = ActroCore.BuildBrowserStorageSyncCycleResponseJson(
-                ActroCore.LoadEmptyBrowserStorageSyncBatchJson("profile", "device-win-stored", 1420),
+            var cycleResponseJson = ActriumCore.BuildBrowserStorageSyncCycleResponseJson(
+                ActriumCore.LoadEmptyBrowserStorageSyncBatchJson("profile", "device-win-stored", 1420),
                 """
                 {
                     "version": 1,
@@ -3503,11 +3503,11 @@ var tests = new (string Name, Func<Task> Run)[]
     }),
     ("loads auth endpoint contract from core", () =>
     {
-        AssertEqual("prod", ActroCore.LoadAuthEnvironmentProd());
-        AssertEqual("https://account.actro.chat", ActroCore.LoadAuthAccountBaseUrl("prod"));
-        AssertEqual("https://account-actro.betaenv.com", ActroCore.LoadAuthAccountBaseUrl("beta"));
-        AssertEqual("http://account-actro.develenv.com", ActroCore.LoadAuthAccountBaseUrl("dev"));
-        AssertEqual("https://account.actro.chat", ActroCore.LoadAuthAccountBaseUrl("unknown"));
+        AssertEqual("prod", ActriumCore.LoadAuthEnvironmentProd());
+        AssertEqual("https://account.actrium.chat", ActriumCore.LoadAuthAccountBaseUrl("prod"));
+        AssertEqual("https://account-actrium.betaenv.com", ActriumCore.LoadAuthAccountBaseUrl("beta"));
+        AssertEqual("http://account-actrium.develenv.com", ActriumCore.LoadAuthAccountBaseUrl("dev"));
+        AssertEqual("https://account.actrium.chat", ActriumCore.LoadAuthAccountBaseUrl("unknown"));
         return Task.CompletedTask;
     }),
     ("builds safe browser history document", () =>
@@ -3611,7 +3611,7 @@ var tests = new (string Name, Func<Task> Run)[]
 
         AssertOkResponse(response, "core");
         var result = response.RootElement.GetProperty("result");
-        AssertEqual("Actro", result.GetProperty("productName").GetString());
+        AssertEqual("Actrium", result.GetProperty("productName").GetString());
         AssertEqual((uint)1, result.GetProperty("cApiVersion").GetUInt32());
         AssertEqual("ask", result.GetProperty("supportedContractName").GetString());
     }),
@@ -3703,9 +3703,9 @@ var tests = new (string Name, Func<Task> Run)[]
             dispatcher,
             """
             {
-              "type": "actro.host.request",
+              "type": "actrium.host.request",
               "id": "bad-params",
-              "method": "actro.host.navigate",
+              "method": "actrium.host.navigate",
               "params": "not-an-object"
             }
             """);
@@ -3966,7 +3966,7 @@ var tests = new (string Name, Func<Task> Run)[]
     {
         var css = BrowserDocumentStylePolicy.RootCss;
         var homeDocument = BrowserHomeDocumentPolicy.BuildDocument(
-            ActroCoreStatus.Available("Actro", 1, "ask", 1, 2, 3));
+            ActriumCoreStatus.Available("Actrium", 1, "ask", 1, 2, 3));
         var errorDocument = BrowserNavigationErrorPolicy.BuildErrorDocument(
             "https://example.com/",
             "Timeout");
@@ -4000,8 +4000,8 @@ var tests = new (string Name, Func<Task> Run)[]
             AssertTrue(key.All(character => char.IsAsciiLetterOrDigit(character) || character == '.'));
         }
 
-        AssertEqual("Actro", BrowserStrings.Get("window.title.product"));
-        AssertEqual("Actro Private", BrowserStrings.Get("window.title.privateProduct"));
+        AssertEqual("Actrium", BrowserStrings.Get("window.title.product"));
+        AssertEqual("Actrium Private", BrowserStrings.Get("window.title.privateProduct"));
         AssertEqual("New Tab", BrowserStrings.Get("tab.defaultTitle"));
         AssertEqual("Browser Data Sync", BrowserStrings.Get("dialog.syncSettings.title"));
         // The endpoint-token dialog is demoted to the development-only
@@ -4046,8 +4046,8 @@ var tests = new (string Name, Func<Task> Run)[]
             BrowserStrings.Format("status.searchEngineChanged", "DuckDuckGo"));
         AssertEqual("Zoom 125%", BrowserStrings.Format("status.zoomLevel", "125%"));
         AssertEqual(
-            "Page - Actro",
-            BrowserStrings.Format("window.title.documentFormat", "Page", "Actro"));
+            "Page - Actrium",
+            BrowserStrings.Format("window.title.documentFormat", "Page", "Actrium"));
         return Task.CompletedTask;
     }),
     ("exposes every menu command in the compact menu model exactly once", () =>
@@ -4349,7 +4349,7 @@ static HostBridgeDispatcher CreateDispatcher(
     return new HostBridgeDispatcher(
         ownerTabId,
         new HostBridgeActions(
-            () => ActroCoreStatus.Available("Actro", 1, "ask", 1, 2, 3),
+            () => ActriumCoreStatus.Available("Actrium", 1, "ask", 1, 2, 3),
             openTabAsync ?? ((_, request) =>
             {
                 var tab = new HostTabPayload("new-tab", request.Title ?? "New Tab", request.Url ?? "", true, false, false, false);
@@ -4362,8 +4362,8 @@ static HostBridgeDispatcher CreateDispatcher(
                 var tab = new HostTabPayload("active", "Active", request.Url ?? request.Address ?? "", true, false, false, false);
                 return Task.FromResult(tab);
             },
-            () => new HostTabsPayload("active", [new HostTabPayload("active", "Active", "actro://home", true, false, false, false)]),
-            () => new HostTabPayload("active", "Active", "actro://home", true, false, false, false),
+            () => new HostTabsPayload("active", [new HostTabPayload("active", "Active", "about:home", true, false, false, false)]),
+            () => new HostTabPayload("active", "Active", "about:home", true, false, false, false),
             removeBookmarkAsync ?? (_ => Task.FromResult(false)),
             removeHistoryEntryAsync ?? (_ => Task.FromResult(false))));
 }
@@ -4492,12 +4492,12 @@ static void AssertCredentialLoadFails(BrowserStorageSyncCredentialStore store)
 
 static string CreateTempPath()
 {
-    return Path.Combine(Path.GetTempPath(), $"actro-windows-tests-{Guid.NewGuid():N}.json");
+    return Path.Combine(Path.GetTempPath(), $"actrium-windows-tests-{Guid.NewGuid():N}.json");
 }
 
 static string CreateTempDatabasePath()
 {
-    return Path.Combine(Path.GetTempPath(), $"actro-windows-tests-{Guid.NewGuid():N}.db");
+    return Path.Combine(Path.GetTempPath(), $"actrium-windows-tests-{Guid.NewGuid():N}.db");
 }
 
 static void DeleteBrowserStoreFiles(string legacyFilePath)
@@ -4520,7 +4520,7 @@ static void DeleteDatabaseFiles(string databasePath)
 
 static string CreateTempDirectoryPath()
 {
-    return Path.Combine(Path.GetTempPath(), $"actro-windows-tests-{Guid.NewGuid():N}");
+    return Path.Combine(Path.GetTempPath(), $"actrium-windows-tests-{Guid.NewGuid():N}");
 }
 
 static void CreateLegacyBrowserStorageDatabase(string databasePath, int schemaVersion)

@@ -13,7 +13,7 @@
 
 askit 提供：
 - 在 Host 和 Guest 中表现一致的统一 API
-- 为 Actro 平台优化的预构建 UI 组件
+- 为 Actrium 平台优化的预构建 UI 组件
 - 自动消息路由和桥接
 
 ```

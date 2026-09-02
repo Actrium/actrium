@@ -1,4 +1,4 @@
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 internal static class WindowsAppPaths
 {
@@ -8,7 +8,7 @@ internal static class WindowsAppPaths
     // which is otherwise impossible because every store routes through this
     // single choke point. Program.Main mirrors the --user-data-root argument
     // into this variable so both entry points share one source of truth.
-    public const string UserDataRootEnvironmentVariable = "ACTRO_USER_DATA_ROOT";
+    public const string UserDataRootEnvironmentVariable = "ACTRIUM_USER_DATA_ROOT";
 
     public static string GetLocalAppDataRoot()
     {
@@ -28,7 +28,7 @@ internal static class WindowsAppPaths
 
             // Returned as the full root: callers that need isolation (for
             // example BrowserProfilePolicy) Path.Combine their own subfolder
-            // on top, so the standard Actrium/Actro/Windows suffix is not
+            // on top, so the standard Actrium/Actrium/Windows suffix is not
             // appended here on purpose.
             return trimmed;
         }
@@ -36,7 +36,7 @@ internal static class WindowsAppPaths
         return Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Actrium",
-            "Actro",
+            "Actrium",
             "Windows");
     }
 }

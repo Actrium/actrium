@@ -1,10 +1,10 @@
 # 09. Security and privacy
 
-> Privacy and security [docs/security](../../security/README.zh.md) is the applicable rule. Actro Threats, privileges, sandboxes and secret management; colours and maps brought together [13](13-privacy-state-and-aggregation.md).
+> Privacy and security [docs/security](../../security/README.zh.md) is the applicable rule. Actrium Threats, privileges, sandboxes and secret management; colours and maps brought together [13](13-privacy-state-and-aggregation.md).
 
 ## 1. Security objectives
 
-Actro It is important to ensure that:
+Actrium It is important to ensure that:
 
 1. User knows which code runs from. Publisher; which unalterable version;
 2. Publisher Guest Could not close temporary folder: %s Front Host;
@@ -24,7 +24,7 @@ Actro It is important to ensure that:
 ```mermaid
 flowchart LR
     U["User/Admin"]
-    SH["Actro Shell + Native Host<br/>Lettered"]
+    SH["Actrium Shell + Native Host<br/>Lettered"]
     G["Keel Guest<br/>Untrusted."]
     SVH["Service Host Broker<br/>Lettered"]
     SW["Service WASM<br/>Limited"]
@@ -90,7 +90,7 @@ Lettered Host There are still possible gaps;“Lettered”It is stated that it i
 | Zip slip/zip bomb | Path denied, number of files/Total/Compression ratio limit, atomic decompression |
 | Guest require Any module | Build and install double white lists,runtime resolver fail-closed |
 | Guest Direct networking | No Default fetch/socket;`host:net` capability + allowlist |
-| Image Invisible networking/Bring your own header | ActroSafeImage Only asset id Or controlled. URL |
+| Image Invisible networking/Bring your own header | ActriumSafeImage Only asset id Or controlled. URL |
 | Guest Any Actor | Only exposure to fixed PrimaryService capability |
 | Guest Counterfeiting Users/Permissions | Host Attach Uncoverable session metadata |
 | Guest Infinite Cycle | QuickJS interrupt timeout,Closable runtime |
@@ -102,7 +102,7 @@ Lettered Host There are still possible gaps;“Lettered”It is stated that it i
 | URL Batch creation | Confirm,creation intent Quotas, sources and flows |
 | URL Discover Permissions | ActorId Not capability, URI None token |
 | Actor Counterfeit | Realm credential, Actor key proof, challenge |
-| Client disguised as official Actro Front | Service Default not trusting client to achieve; controlled scenes are tested separately platform/runtime attestation |
+| Client disguised as official Actrium Front | Service Default not trusting client to achieve; controlled scenes are tested separately platform/runtime attestation |
 | Malicious. Actor "Don't leak" self-report. | The person assessed cannot sign out for final `ActorAssurance`;a valid declaration by Host Close |
 | Service Concealing the support. Actor | No root map to find out; no green underage |
 | WASM Declarations differ from actual exports | Comparison manifest, imports; valid declaration and actual side; confirmation of non-declaration of export `UNCONTROLLED` |
@@ -219,7 +219,7 @@ Static scans are the issuance of diagnostics, not the complete security boundary
 
 ### 7.3 Component control
 
-Component props No, it's not.“Normal UI Data”It's automatic.Actro Must check:
+Component props No, it's not.“Normal UI Data”It's automatic.Actrium Must check:
 
 - URL and header;
 - Documentation/asset reference;
@@ -241,7 +241,7 @@ The security centre shows the actual level:
 | S1 Same-process sandbox | v1 Keel JS Guest | Independence QuickJS runtime + capability + quota |
 | S2 Worker/runtime isolation | Follow-up | Yeah. terminate worker + Independent memory movement |
 | S3 OS process isolation | Desktop Long-Term Objectives | helper process/AppContainer/XPC |
-| T1 Trusted Native | Actro First party/Enterprise | Native workloadTrust. |
+| T1 Trusted Native | Actrium First party/Enterprise | Native workloadTrust. |
 
 Don't put it in the car. S1 The case is written.“Process level segregation”.QuickJS Yes. C Engine,Host/Bridge/The component layer leaks may still be crossing the language sandbox.
 
@@ -373,7 +373,7 @@ Default does not contain:
 
 ## 15. Security update and undo
 
-- Actro Host Security update can require restart Front;
+- Actrium Host Security update can require restart Front;
 - package (a) Discontinuation of the hierarchy;
 - Realm key (a) The revocation immediately affects the new connection;
 - Created session At the latest. credential/lease Term expires;
@@ -383,7 +383,7 @@ Default does not contain:
 
 ## 16. Privacy commitments
 
-Actro The user data flow depends on:
+Actrium The user data flow depends on:
 
 - Workspace Provider;
 - Service (c) Host;
@@ -411,7 +411,7 @@ Installation pages and security centres must be available“Where will the data 
 
 ## 18. Application security
 
-Applying privacy is not Publisher Self-reported a Boolean field.Actro You have to press it. [13](13-privacy-state-and-aggregation.md) and [docs/security](../../security/README.zh.md) Processing:
+Applying privacy is not Publisher Self-reported a Boolean field.Actrium You have to press it. [13](13-privacy-state-and-aggregation.md) and [docs/security](../../security/README.zh.md) Processing:
 
 - No root in the chart, by valid Actor `Transfer` (a) Formation;Front (a) Positioning only;
 - WASM Adoption of the declaration + import / Effectiveness / (b) Export closed-convey measures;

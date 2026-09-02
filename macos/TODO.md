@@ -1,4 +1,4 @@
-# Actro Browser Feature Checklist
+# Actrium Browser Feature Checklist
 
 ## Status Overview
 

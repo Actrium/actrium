@@ -42,7 +42,7 @@ const DEFAULT_OPTIONS = {
  * A lightweight adapter for expo-speech-recognition.
  *
  * The speech-recognition library now exposes a standard React Native native
- * module. Actro Runtime therefore reads the bridge from NativeModules instead
+ * module. Actrium Runtime therefore reads the bridge from NativeModules instead
  * of relying on the earlier Expo Modules JavaScript wrapper.
  *
  * NativeModules and NativeEventEmitter provide the single integration path.

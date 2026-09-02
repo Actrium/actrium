@@ -1,0 +1,340 @@
+syntax = "proto3";
+
+package actrium.ipc;
+
+// ============================================
+// Actrium <-> Helper IPC Protocol
+// Transport: Unix Domain Socket
+// ============================================
+
+// Wrapper message for all IPC communication
+message IPCMessage {
+    uint32 id = 1;           // Message ID for request/response matching
+    oneof payload {
+        // Actrium -> Helper
+        LoadContentRequest load_content = 10;
+        UpdateViewportRequest update_viewport = 11;
+        InputEvent input_event = 12;
+        ExecuteJSRequest execute_js = 13;
+        GetMetricsRequest get_metrics = 14;
+        GetSurfaceIDRequest get_surface_id = 15;
+        TerminateRequest terminate = 16;
+        DestroyTabRequest destroy_tab = 17;
+        GetAccessibilityTreeRequest get_accessibility_tree = 18;
+        AccessibilityActionRequest accessibility_action = 19;
+
+        // Helper -> Actrium
+        ReadyResponse ready = 50;
+        SurfaceUpdated surface_updated = 51;
+        TitleChanged title_changed = 52;
+        NavigationRequest navigation_request = 53;
+        ConsoleLog console_log = 54;
+        CrashReport crash_report = 55;
+        MetricsResponse metrics_response = 56;
+        SurfaceIDResponse surface_id_response = 57;
+        LoadContentResponse load_content_response = 58;
+        ExecuteJSResponse execute_js_response = 59;
+        ViewportApplied viewport_applied = 60;
+        HostEvent host_event = 61;
+        AccessibilityTree accessibility_tree = 62;
+        AccessibilityActionResponse accessibility_action_response = 63;
+    }
+}
+
+// ============================================
+// Actrium -> Helper Messages
+// ============================================
+
+message LoadContentRequest {
+    string content_type = 1;  // "url", "html", "javascript"
+    string content = 2;       // URL or content string
+    string background_color = 3;
+
+    // Tab configuration for React Native
+    string tab_id = 10;
+    string title = 11;
+    bool left_panel_visible = 12;
+    bool right_panel_visible = 13;
+    int32 reload_key = 14;
+
+    // Contract info
+    string contract_name = 20;
+    int32 contract_version = 21;
+    repeated string permissions = 22;
+
+    // Canonical business configuration. This preserves the complete ViewBridge
+    // payload while the typed transport evolves independently.
+    string config_json = 30;
+}
+
+message UpdateViewportRequest {
+    double width = 1;
+    double height = 2;
+    string tab_id = 10;
+    uint32 request_id = 11;
+    bool is_overview_mode = 12;
+}
+
+message InputEvent {
+    EventType type = 1;
+    double x = 2;
+    double y = 3;
+    double scroll_delta_x = 4;
+    double scroll_delta_y = 5;
+    uint32 button = 6;        // 0=left, 1=right, 2=middle
+    uint32 modifiers = 7;     // shift=1, control=2, option=4, command=8
+    uint32 key_code = 8;
+    string characters = 9;
+    string tab_id = 20;
+
+    enum EventType {
+        MOUSE_MOVE = 0;
+        MOUSE_DOWN = 1;
+        MOUSE_UP = 2;
+        MOUSE_ENTERED = 3;
+        MOUSE_EXITED = 4;
+        SCROLL = 5;
+        KEY_DOWN = 6;
+        KEY_UP = 7;
+    }
+}
+
+message ExecuteJSRequest {
+    string code = 1;
+    string tab_id = 10;
+}
+
+message GetMetricsRequest {
+}
+
+message GetSurfaceIDRequest {
+    string tab_id = 1;
+}
+
+message TerminateRequest {
+    string reason = 1;
+}
+
+message DestroyTabRequest {
+    string tab_id = 1;
+}
+
+message AccessibilityNode {
+    uint64 node_id = 1;
+    uint64 parent_id = 2;
+    string role = 3;
+    string subrole = 4;
+    string label = 5;
+    string value = 6;
+    string help = 7;
+    string role_description = 8;
+    double x = 9;
+    double y = 10;
+    double width = 11;
+    double height = 12;
+    bool enabled = 13;
+    bool focused = 14;
+    bool selected = 15;
+    repeated string actions = 16;
+    repeated uint64 child_ids = 17;
+}
+
+message AccessibilityTree {
+    string tab_id = 1;
+    uint64 focused_id = 2;
+    uint64 generation = 3;
+    repeated AccessibilityNode nodes = 4;
+}
+
+message GetAccessibilityTreeRequest {
+    string tab_id = 1;
+}
+
+message AccessibilityActionRequest {
+    string tab_id = 1;
+    uint64 node_id = 2;
+    string action = 3;
+}
+
+message AccessibilityActionResponse {
+    uint32 request_id = 1;
+    string tab_id = 2;
+    bool success = 3;
+    string error_message = 4;
+}
+
+// ============================================
+// Helper -> Actrium Messages
+// ============================================
+
+message ReadyResponse {
+    uint32 surface_id = 1;
+    uint32 width = 2;
+    uint32 height = 3;
+    string renderer_id = 10;
+    int32 process_id = 11;
+}
+
+message SurfaceUpdated {
+    uint32 surface_id = 1;
+    string tab_id = 10;
+}
+
+message TitleChanged {
+    string title = 1;
+    string tab_id = 10;
+}
+
+message NavigationRequest {
+    string url = 1;
+    bool new_tab = 2;
+    string tab_id = 10;
+}
+
+message ConsoleLog {
+    string level = 1;    // "log", "info", "warn", "error"
+    string message = 2;
+    string source = 3;
+    string tab_id = 10;
+}
+
+// Generic, allow-listed business action forwarded from a sandboxed Renderer
+// to the Browser Broker. `user_info_json` must contain a JSON object.
+message HostEvent {
+    string name = 1;
+    string user_info_json = 2;
+    string tab_id = 10;
+}
+
+message CrashReport {
+    string reason = 1;
+    string tab_id = 10;
+}
+
+message MetricsResponse {
+    uint32 request_id = 1;
+    uint64 memory_usage = 2;
+    double cpu_usage = 3;
+    uint32 frame_count = 4;
+    double fps = 5;
+}
+
+message SurfaceIDResponse {
+    uint32 request_id = 1;
+    uint32 surface_id = 2;
+    string tab_id = 10;
+}
+
+message LoadContentResponse {
+    uint32 request_id = 1;
+    bool success = 2;
+    string error_message = 3;
+    string tab_id = 10;
+}
+
+message ExecuteJSResponse {
+    uint32 request_id = 1;
+    bool success = 2;
+    string result = 3;
+    string error_message = 4;
+    string tab_id = 10;
+}
+
+message ViewportApplied {
+    string tab_id = 1;
+    uint32 request_id = 2;
+    double width = 3;
+    double height = 4;
+}
+
+// ============================================
+// XPC ViewBridge IPC Protocol
+// Transport: DistributedNotificationCenter
+// Key: tab_id (UUID string) for 1:1:1 mapping
+// ============================================
+
+// Host -> Service: Tab configuration
+// Notification: io.actrium.app.tabConfig.<serviceBundleId>
+message XPCTabConfig {
+    // Core identifier (UUID string)
+    string tab_id = 1;
+
+    // Tab metadata
+    string title = 2;
+    string background_color = 3;
+
+    // Container dimensions
+    double container_width = 10;
+    double container_height = 11;
+
+    // System app type (mutually exclusive with scripts)
+    // Values: "startPage", "history", "bookmarks", "debug", "loading"
+    string system_app_type = 20;
+
+    // ACTR scripts (for regular RN apps)
+    string unified_script = 30;
+    string left_panel_script = 31;
+    string right_panel_script = 32;
+    string guest_script = 33;
+
+    // Panel visibility
+    bool left_panel_visible = 40;
+    bool right_panel_visible = 41;
+
+    // Reload trigger
+    int32 reload_key = 50;
+
+    // System app data
+    repeated BookmarkData bookmarks = 60;
+    repeated HistoryItemData recent_history = 61;
+    repeated HistoryGroupData history_groups = 62;
+}
+
+// Service -> Host: Service ready notification
+// Notification: io.actrium.app.xpcServiceReady
+message XPCServiceReady {
+    string service_bundle_id = 1;  // e.g., "io.actrium.app.rctviewservice0"
+}
+
+// Service -> Host: Tab render state
+// Notification: io.actrium.app.tabState.<tabId>
+message XPCTabState {
+    string tab_id = 1;
+    TabRenderState state = 2;
+    string error_message = 3;
+
+    enum TabRenderState {
+        LOADING = 0;
+        READY = 1;
+        ERROR = 2;
+    }
+}
+
+// Service -> Host: Tab navigation request
+// Notification: io.actrium.app.tabNavigation.<tabId>
+message XPCTabNavigation {
+    string tab_id = 1;
+    string url = 2;
+    bool open_in_new_tab = 3;
+}
+
+// Data types for system apps
+message BookmarkData {
+    string id = 1;
+    string title = 2;
+    string app_url = 3;
+    string favicon_url = 4;
+    int64 created_at = 5;
+}
+
+message HistoryItemData {
+    string id = 1;
+    string title = 2;
+    string app_url = 3;
+    int64 visited_at = 4;
+}
+
+message HistoryGroupData {
+    string date = 1;  // e.g., "2024-01-15"
+    repeated HistoryItemData items = 2;
+}

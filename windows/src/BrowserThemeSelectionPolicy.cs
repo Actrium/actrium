@@ -1,4 +1,4 @@
-namespace Actro.Windows;
+namespace Actrium.Windows;
 
 /// <summary>
 /// Maps the Windows personalization setting to a theme. Pure so the harness

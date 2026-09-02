@@ -4,8 +4,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$repo_root"
 
-ts_contract="packages/actrium/src/runtime-host/generated/actroCoreContract.ts"
-android_contract="android/android/app/src/main/java/io/actrium/actro/generated/ActroAndroidPersistenceContract.kt"
+ts_contract="packages/actrium/src/runtime-host/generated/actriumCoreContract.ts"
+android_contract="android/android/app/src/main/java/io/actrium/app/generated/ActriumAndroidPersistenceContract.kt"
 
 failures=0
 
@@ -32,7 +32,7 @@ for generated_file in "$ts_contract" "$android_contract"; do
 done
 
 direct_ts_imports="$(
-  rg -n "generated/actroCoreContract" packages/actrium/src \
+  rg -n "generated/actriumCoreContract" packages/actrium/src \
     --glob '!**/runtime-host/generated/**' \
     --glob '!**/runtime-host/coreContract.ts' || true
 )"
@@ -53,11 +53,11 @@ fi
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
-tmp_ts_contract="$tmp_dir/actroCoreContract.ts"
-tmp_android_contract="$tmp_dir/ActroAndroidPersistenceContract.kt"
+tmp_ts_contract="$tmp_dir/actriumCoreContract.ts"
+tmp_android_contract="$tmp_dir/ActriumAndroidPersistenceContract.kt"
 
-cargo run --quiet -p actro-core --bin generate-ts-contracts -- "$tmp_ts_contract"
-cargo run --quiet -p actro-core --bin generate-android-contracts -- "$tmp_android_contract"
+cargo run --quiet -p actrium-core --bin generate-ts-contracts -- "$tmp_ts_contract"
+cargo run --quiet -p actrium-core --bin generate-android-contracts -- "$tmp_android_contract"
 
 compare_generated_contract() {
   local expected_file=$1

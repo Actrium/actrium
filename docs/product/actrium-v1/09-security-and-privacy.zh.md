@@ -1,10 +1,10 @@
 # 09. 安全与隐私
 
-> 隐私与保障语义以 [docs/security](../../security/README.zh.md) 为准。本章写 Actro 威胁、权限、沙箱和秘密管理；颜色与图汇聚见 [13](13-privacy-state-and-aggregation.md)。
+> 隐私与保障语义以 [docs/security](../../security/README.zh.md) 为准。本章写 Actrium 威胁、权限、沙箱和秘密管理；颜色与图汇聚见 [13](13-privacy-state-and-aggregation.md)。
 
 ## 1. 安全目标
 
-Actro 必须保证：
+Actrium 必须保证：
 
 1. 用户知道运行的代码来自哪个 Publisher、哪个不可变版本；
 2. Publisher Guest 不能替换或扩展受信 Front Host；
@@ -24,7 +24,7 @@ Actro 必须保证：
 ```mermaid
 flowchart LR
     U["User/Admin"]
-    SH["Actro Shell + Native Host<br/>受信"]
+    SH["Actrium Shell + Native Host<br/>受信"]
     G["Keel Guest<br/>不受信"]
     SVH["Service Host Broker<br/>受信"]
     SW["Service WASM<br/>受限"]
@@ -90,7 +90,7 @@ flowchart LR
 | Zip slip/zip bomb | 路径拒绝、文件数/总量/压缩比限制、原子解压 |
 | Guest require 任意模块 | 构建与安装双重白名单、runtime resolver fail-closed |
 | Guest 直接联网 | 无默认 fetch/socket；`host:net` capability + allowlist |
-| Image 隐式联网/自带 header | ActroSafeImage 只用 asset id 或受控 URL |
+| Image 隐式联网/自带 header | ActriumSafeImage 只用 asset id 或受控 URL |
 | Guest 调任意 Actor | 只暴露固定 PrimaryService capability |
 | Guest 伪造用户/权限 | Host 附加不可覆盖的 session metadata |
 | Guest 无限循环 | QuickJS interrupt timeout、可销毁 runtime |
@@ -102,7 +102,7 @@ flowchart LR
 | URL 批量创建 | 确认、creation intent 幂等、来源限流和配额 |
 | URL 泄露权限 | ActorId 非 capability，URI 无 token |
 | Actor 冒充 | Realm credential、Actor key proof、challenge |
-| 客户端伪装成官方 Actro Front | Service 默认不信任客户端实现；受管场景另验 platform/runtime attestation |
+| 客户端伪装成官方 Actrium Front | Service 默认不信任客户端实现；受管场景另验 platform/runtime attestation |
 | 恶意 Actor 自报「不泄露」 | 被评估者不得自签最终 `ActorAssurance`；有效声明由 Host 闭合 |
 | Service 隐瞒辅助 Actor | 无根图须发现入边；漏评不得绿 |
 | WASM 声明与实际出口不同 | 比较 manifest、imports、有效声明和实际边；确认未声明出口则为 `UNCONTROLLED` |
@@ -219,7 +219,7 @@ Service:
 
 ### 7.3 组件控制
 
-组件 props 不是“普通 UI 数据”就自动安全。Actro 必须检查：
+组件 props 不是“普通 UI 数据”就自动安全。Actrium 必须检查：
 
 - URL 和 header；
 - 文件/asset reference；
@@ -241,7 +241,7 @@ Service:
 | S1 Same-process sandbox | v1 Keel JS Guest | 独立 QuickJS runtime + capability + quota |
 | S2 Worker/runtime isolation | 后续 | 可 terminate worker + 独立内存调度 |
 | S3 OS process isolation | 桌面长期目标 | helper process/AppContainer/XPC |
-| T1 Trusted Native | Actro 第一方/企业 | 原生 workload，高信任 |
+| T1 Trusted Native | Actrium 第一方/企业 | 原生 workload，高信任 |
 
 不得把 S1 文案写成“进程级隔离”。QuickJS 是 C 引擎，Host/Bridge/组件层漏洞仍可能跨越语言沙箱。
 
@@ -373,7 +373,7 @@ ActorType、Host 版本和 package digest 的客户端声明不构成 runtime at
 
 ## 15. 安全更新与撤销
 
-- Actro Host 安全更新可要求重启 Front；
+- Actrium Host 安全更新可要求重启 Front；
 - package 撤销按等级处理；
 - Realm key 撤销立即影响新连接；
 - 已建立 session 最迟在 credential/lease 到期终止；
@@ -383,7 +383,7 @@ ActorType、Host 版本和 package digest 的客户端声明不构成 runtime at
 
 ## 16. 隐私承诺
 
-Actro 不应默认建立中心化账户或同步服务。用户数据流向取决于：
+Actrium 不应默认建立中心化账户或同步服务。用户数据流向取决于：
 
 - Workspace Provider；
 - Service 宿主；
@@ -411,7 +411,7 @@ Actro 不应默认建立中心化账户或同步服务。用户数据流向取�
 
 ## 18. 应用保障
 
-应用隐私不是 Publisher 自报的一个布尔字段。Actro 必须按 [13](13-privacy-state-and-aggregation.md) 和 [docs/security](../../security/README.zh.md) 处理：
+应用隐私不是 Publisher 自报的一个布尔字段。Actrium 必须按 [13](13-privacy-state-and-aggregation.md) 和 [docs/security](../../security/README.zh.md) 处理：
 
 - 图无根，由有效 Actor `Transfer` 形成；Front 只定位；
 - WASM 通过声明 + import / 有效能力 / 出口闭包度量；

@@ -1,4 +1,4 @@
-# Actro 浏览器功能讨论
+# Actrium 浏览器功能讨论
 
 ## 1. Sidebar Favicon ✅ 已实现
 
@@ -26,7 +26,7 @@
 ### 代码位置
 - `WebViewTabView.swift:WebViewHolder.takeSnapshot()`
 - `WebViewTabView.swift:WebViewMultiProcessTabView`
-- `WorkspaceMainView.swift:onChange(of: viewModel.actroMode)`
+- `WorkspaceMainView.swift:onChange(of: viewModel.actriumMode)`
 
 ---
 
@@ -78,7 +78,7 @@
 
 ### 代码位置
 - `WebViewTabView.swift:WebViewHolder.print()`
-- `ActroApp.swift:printCurrentPage()`
+- `ActriumApp.swift:printCurrentPage()`
 
 ---
 
@@ -93,7 +93,7 @@
 
 ### 代码位置
 - `WebViewTabView.swift:WebViewHolder.zoomIn/zoomOut/resetZoom()`
-- `ActroApp.swift:zoomIn/zoomOut/resetZoom()`
+- `ActriumApp.swift:zoomIn/zoomOut/resetZoom()`
 
 ---
 
@@ -104,7 +104,7 @@
 - 快捷键: `Ctrl+Cmd+F`
 
 ### 代码位置
-- `ActroApp.swift:toggleFullScreen()`
+- `ActriumApp.swift:toggleFullScreen()`
 
 ---
 
@@ -139,9 +139,9 @@
 
 ## 9. 多进程模型对比
 
-### 当前 Actro 实现
+### 当前 Actrium 实现
 ```
-Actro App (主进程)
+Actrium App (主进程)
     └── WKWebView
             └── WebContent Process (由 WebKit 管理)
                     └── 共享 WKProcessPool
@@ -167,7 +167,7 @@ Safari 的特点：
 - 更细粒度的沙盒
 
 ### 结论
-Actro 使用的是 **WKWebView 标准多进程模型**，与 Safari 的底层实现一致（都基于 WebKit），但：
+Actrium 使用的是 **WKWebView 标准多进程模型**，与 Safari 的底层实现一致（都基于 WebKit），但：
 - Safari 有更严格的站点隔离策略
 - Safari 有独立的网络/GPU 进程
-- Actro 的进程管理完全由 WebKit 框架处理，是"标准 Safari 同款"的简化版
+- Actrium 的进程管理完全由 WebKit 框架处理，是"标准 Safari 同款"的简化版

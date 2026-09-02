@@ -1,11 +1,11 @@
-# Actro Renderer Process Pool
+# Actrium Renderer Process Pool
 
 ## 1. Objective
 
 Copy the current build script by `RCTViewService0...3.xpc` It's... ViewBridge Replace Architecture with
 Chrome Style Broker/Renderer Structure:
 
-- Only one in the installation package `ActroRenderer.app` Helper;
+- Only one in the installation package `ActriumRenderer.app` Helper;
 - Broker We can start the same one more than once. Helper (a) Executable documents;
 - Every one. Helper Examples of individual address space,Hermes VM, React Native Host and sandboxes;
 - Large binary and resources are not replicated with pool capacity;
@@ -20,7 +20,7 @@ The relocation must be carried out in such a way as to:
    Tab Stay independent. RN root, properties and rendering surfaces.
 3. Different normal fingerprint Different uses Renderer process, without sharing a variable state of operation.
 4. Tab Only destroy the item when closing Tab It's... root;Renderer Last one inside. Tab Enter the free state after closing.
-5. Renderer The crash cannot be stopped. Actro or other Renderer;affected Tab Reloadable.
+5. Renderer The crash cannot be stopped. Actrium or other Renderer;affected Tab Reloadable.
 6. Focus/Overview Switch Not Rebuild Renderer, still completed by real-time size and attributes update.
 7. StartPage, History, Bookmarks, ACTR Scripts and left- and right-panel properties remain in the same data structure.
 8. Mouse, keyboard, wheel, Zooming and Window resize We have to get the right way. Tab.
@@ -28,14 +28,14 @@ The relocation must be carried out in such a way as to:
 ## 3. Process Model
 
 ```text
-Actro.app
+Actrium.app
 └── RendererProcessPool(Broker)
-    ├── system.*  ──> ActroRenderer PID A
+    ├── system.*  ──> ActriumRenderer PID A
     │                 ├── Tab root 1 + CAContext 1
     │                 └── Tab root 2 + CAContext 2
-    ├── fingerprint X -> ActroRenderer PID B
+    ├── fingerprint X -> ActriumRenderer PID B
     │                 └── Tab root 3 + CAContext 3
-    └── fingerprint Y -> ActroRenderer PID C
+    └── fingerprint Y -> ActriumRenderer PID C
                       └── Tab root 4 + CAContext 4
 ```
 
@@ -63,14 +63,14 @@ As Helper . The standard input file describer inherits the past and then uses `P
 Helper:
 
 ```text
-ActroRenderer
+ActriumRenderer
   --renderer-id <UUID>
   --fingerprint <fingerprint>
   --ipc-stdin
   --host-pid <PID>
 ```
 
-Communication is already in use `ActroIPC` Length prefix Protobuf Frame. One. Renderer Connect to Reuse All
+Communication is already in use `ActriumIPC` Length prefix Protobuf Frame. One. Renderer Connect to Reuse All
 Tab Message, so all Tab Class message must be carried `tab_id`.socket Enable `SO_NOSIGPIPE`,
 Write Serialization and Process partial write / `EINTR`, turn off the end only to return the error, not to use
 `SIGPIPE` Kill the process.
@@ -132,17 +132,17 @@ idle -> launching -> ready -> busy
 - Helper The blogger says:Broker Clean up all the maps and notify the affected. Tab;hosts will try again up to three times automatically,
   Use original configuration in substitution Renderer Restore up.
 - critical memory pressure Only the next one is not recovered. Tab It's... warm Renderer, do not migrate active Tab.
-- Actro To Every Time Exit Helper Send terminate And end the subprocess.
+- Actrium To Every Time Exit Helper Send terminate And end the subprocess.
 
 ## 7. Pack up.
 
 Objective structure:
 
 ```text
-Actro.app
-├── Contents/MacOS/Actro
-├── Contents/Helpers/ActroRenderer.app
-│   ├── Contents/MacOS/ActroRenderer
+Actrium.app
+├── Contents/MacOS/Actrium
+├── Contents/Helpers/ActriumRenderer.app
+│   ├── Contents/MacOS/ActriumRenderer
 │   ├── Contents/Frameworks/hermes.framework
 │   └── Contents/Resources/system.jsbundle
 └── Contents/Resources/...
@@ -164,8 +164,8 @@ Other Organiser
 
 The completion of the migration requires that it be met simultaneously:
 
-1. Clean. Debug Build and Related ActroTests Pass.
-2. App Not at all. `RCTViewService*.xpc`Only one. `ActroRenderer.app`.
+1. Clean. Debug Build and Related ActriumTests Pass.
+2. App Not at all. `RCTViewService*.xpc`Only one. `ActriumRenderer.app`.
 3. Open system app & Normal fingerprint Different observations. Renderer PID.
 4. Same fingerprint Two. Tab Map to the same PIDDifferent. contextId.
 5. Focus/Overview, resize, mouse, keyboard, wheel, panel switching is available.
@@ -176,7 +176,7 @@ The completion of the migration requires that it be met simultaneously:
 ## 9. This validation results
 
 - New DerivedData Other Organiser Debug Build successful.
-- `ActroIPC` Transfer Test 5/5 Pass. Cover the roads. Tab, HostEvent And close the end without trigger
+- `ActriumIPC` Transfer Test 5/5 Pass. Cover the roads. Tab, HostEvent And close the end without trigger
   `SIGPIPE`.
 - URL Passed route and process pool strategy test; strategy includes hardware nuclear boundaries,`system.*` Normalize,
   Normal fingerprint Exact sharing and cross-identity prohibition.
@@ -187,7 +187,7 @@ The completion of the migration requires that it be met simultaneously:
   JIT And network client entitlement Entry into force.
 - Old Debug App About 347 MiB;new Debug App Yes 143,144 KiB(About 139.8 MiB) ) , reduction approximately
   60%. Installed as
-  0 individual `.xpc`, 1 individual `ActroRenderer.app`, 1 individual `system.jsbundle`.
+  0 individual `.xpc`, 1 individual `ActriumRenderer.app`, 1 individual `system.jsbundle`.
 - ACTR / Keel Guest The acceptance range for this round is only for host viewing structures, loading links and fingerprint (a) Separation of borders;
   Its internal behaviour is left for subsequent adjustments before it is fully adapted.
 - Thin Helper Current non-link to moving-end page WebView, DeviceInfo, Reanimated and
@@ -199,14 +199,14 @@ The completion of the migration requires that it be met simultaneously:
 ## 10. Signing and Platform Boundary
 
 This machine has developed certificates for this machine Helper Do a nested signature with the main program and run a validation.Xcode Autosignature still needs new
-Bundle ID `io.actrium.actro.renderer` Create provisioning profile; This is account side set.
+Bundle ID `io.actrium.app.renderer` Create provisioning profile; This is account side set.
 Not affecting the manual development of a signature or architecture itself.
 
 `CAContext`, `CALayerHost` With Current ViewBridge Same as the one. macOS Private framework capacity, not suitable
-Mac App Store.Actro Currently private ViewBridgeSo this migration does not add a new category of distribution channels, and the new ones are not available.
+Mac App Store.Actrium Currently private ViewBridgeSo this migration does not add a new category of distribution channels, and the new ones are not available.
 But it has to be supported. macOS Versions run detection and fail downgrade.
 
-Chrome Remote Cocoa Complete AX The agent does not have a mature open-source bank to quote.Actro With minimum realization:
+Chrome Remote Cocoa Complete AX The agent does not have a mature open-source bank to quote.Actrium With minimum realization:
 Renderer Export `AccessibilityTree`, `RendererSurfaceHostView` As AX Group Exposure
 The children, the movement. `accessibility_action` Back. Keyboard focus still goes in IPC. No remote
 Complete AX API Overwrite (autodefined parameters, scroll area details, real-time text selection range).
