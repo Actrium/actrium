@@ -9,7 +9,8 @@ Unified protocol, types, and URI parsing for Actor-RTC framework.
 ## Features
 
 - **Protocol Definitions**: Provides `.proto` files and generated Rust types covering identity, signaling, service discovery, and other framework-level concepts.
-- **Core Utilities**: Provides necessary extensions for core types, such as string parsing/formatting for `ActorId` and `actr://` URI handling.
+- **Core Utilities**: Provides necessary extensions for core types, such as string parsing/formatting for `ActorId` and authority-based `actr://` URI handling.
+- **Authority Bootstrap Types**: Defines the public authority descriptor, package-resolution response, and ICE-configuration response shared by Hosts and Loran components.
 - **Pure Data Layer**: This module is a pure data definition and utility layer without any high-level business logic, runtime implementation, or application framework trait definitions.
 
 ## Core Protocols
@@ -24,10 +25,9 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-actr-protocol = "0.1.3"
+actr-protocol = "0.10.0-alpha.4"
 ```
 
 ## License
 
 Licensed under the Apache-2.0 license.
-

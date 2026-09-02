@@ -53,6 +53,8 @@ axum-server = { version = "0.7.3", default-features = false, features = [
 
 # Local dependencies
 actrix-sdk = { path = "../loran-sdk", version = "0.10.0-alpha.4" }
+actr-protocol = { workspace = true }
+loran-packages = { path = "../loran-packages", version = "0.10.0-alpha.4" }
 platform = { path = "../loran-platform", package = "actrix-platform", version = "0.10.0-alpha.4" }
 signaling = { path = "../loran-signaling", package = "actrix-signaling", version = "0.10.0-alpha.4" }
 stun = { path = "../loran-stun", package = "actrix-stun", version = "0.10.0-alpha.4" }
@@ -104,11 +106,11 @@ nix = { version = "0.30", features = ["user"] }
 actrix-sdk = { path = "../loran-sdk", version = "0.10.0-alpha.4", features = ["testing"] }
 platform = { path = "../loran-platform", package = "actrix-platform", version = "0.10.0-alpha.4" }
 tempfile = { workspace = true }
+tower = { version = "0.5", features = ["util"] }
 reqwest = { workspace = true, features = ["json"] }
 urlencoding = "2.1"
 base64 = { workspace = true }
 libc = "0.2"
-actr-protocol = { workspace = true }
 actr-runtime = { workspace = true }
 actr-runtime-mailbox = { workspace = true }
 prost = { workspace = true }
