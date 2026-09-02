@@ -700,7 +700,7 @@ Workload Profile 时完成静态真实性验证，但必须把可执行状态报
 
 - Actor Package TOML schema 与严格字段类型；
 - `manifest.lock.toml` v1；
-- 完成 [Actr Package Resolution](package-resolution.zh.md) 的 wire format、repository 与更新协议；
+- 继续定义 [Actr Package Resolution](package-resolution.zh.md) 的发布、repository 与更新协议；
 - `actr.component/1` Workload Profile；
 - `actr.native/1` Workload Profile；
 - `actr.linked/1` Workload Profile；

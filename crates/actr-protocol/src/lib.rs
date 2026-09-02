@@ -31,6 +31,7 @@ pub use generated::webrtc::*;
 
 // Stateless, self-contained extensions and utilities
 pub mod actr_ext;
+pub mod authority;
 pub mod error;
 pub mod manufacturer_auth;
 pub mod message;
@@ -40,6 +41,7 @@ pub mod uri;
 
 // Re-export key utilities for convenience
 pub use actr_ext::*;
+pub use authority::*;
 pub use error::*;
 pub use manufacturer_auth::*;
 pub use message::RpcRequest;

@@ -4,9 +4,11 @@
 //! All configuration item definitions, documentation, and default values are managed here.
 
 pub mod ais;
+pub mod authority;
 pub mod bind;
 pub mod config_store;
 pub mod control;
+pub mod packages;
 pub mod registry;
 pub mod resolver;
 pub mod services;
@@ -16,8 +18,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub mod turn;
 
 pub use crate::config::ais::AisConfig;
+pub use crate::config::authority::AuthorityConfig;
 pub use crate::config::bind::BindConfig;
 pub use crate::config::control::{AdminUiConfig, ControlConfig, ControlHead};
+pub use crate::config::packages::{PackageTargetConfig, PackagesConfig};
 pub use crate::config::services::ServicesConfig;
 pub use crate::config::signaling::SignalingConfig;
 pub use crate::config::turn::TurnConfig;
@@ -85,6 +89,10 @@ pub struct ActrixConfig {
     ///
     /// Defines bind addresses and port configurations for various network services.
     pub bind: BindConfig,
+
+    /// Public Actr authority discovery and deploy-time target mappings.
+    #[serde(default)]
+    pub authority: AuthorityConfig,
 
     /// TURN service-specific configuration
     ///
@@ -404,6 +412,7 @@ impl Default for ActrixConfig {
             group: None,
             pid: Some("logs/actrix.pid".to_string()),
             bind: BindConfig::default(),
+            authority: AuthorityConfig::default(),
             turn: TurnConfig::default(),
             location_tag: "default-location".to_string(),
             control: ControlConfig::default(),

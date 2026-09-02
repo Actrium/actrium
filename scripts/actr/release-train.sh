@@ -43,6 +43,7 @@ readonly CLI_CRATES=(
 # Actrix crates in dependency order. Keep the server package last so every
 # registry dependency is visible before `actrix` is published.
 readonly ACTRIX_CRATES=(
+  "loran-packages"
   "actrix-proto"
   "actrix-signer"
   "actrix-platform"
@@ -1052,6 +1053,7 @@ package_files = [
     repo / "tools/actr/protoc-gen/web/Cargo.toml",
     repo / "crates/actr-cli/Cargo.toml",
     repo / "crates/loran-proto/Cargo.toml",
+    repo / "crates/loran-packages/Cargo.toml",
     repo / "crates/loran-signer/Cargo.toml",
     repo / "crates/loran-platform/Cargo.toml",
     repo / "crates/loran-control/Cargo.toml",
@@ -1833,6 +1835,7 @@ stage_release_version_files() {
     tools/actr/protoc-gen/rust/Cargo.toml \
     tools/actr/protoc-gen/web/Cargo.toml \
     crates/loran-proto/Cargo.toml \
+    crates/loran-packages/Cargo.toml \
     crates/loran-signer/Cargo.toml \
     crates/loran-platform/Cargo.toml \
     crates/loran-control/Cargo.toml \
