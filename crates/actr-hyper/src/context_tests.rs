@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use super::*;
 use crate::test_support::runtime_context_with_host_transport;
 use crate::transport::HostTransport;
@@ -133,6 +135,114 @@ async fn ensure_session_ready_rejects_stale_generation() {
 
     ss.set_active().await;
     assert!(c.ensure_session_ready().await.is_ok());
+}
+
+async fn ctx_with_active_session() -> (RuntimeContext, SessionState) {
+    let mut c = ctx();
+    let snap =
+        crate::lifecycle::session_state::SessionSnapshot::empty_with_id(ActrId::default(), 5);
+    let ss = SessionState::new(snap);
+    c.session_state = Some(ss.clone());
+    c.context_generation = 5;
+    c.ensure_session_ready()
+        .await
+        .expect("session should be ready");
+    (c, ss)
+}
+
+#[tokio::test(start_paused = true)]
+async fn call_readiness_consumes_caller_deadline_before_gate_dispatch() {
+    let (c, ss) = ctx_with_active_session().await;
+
+    // Hold the session-state inner write lock so readiness checks block.
+    // The caller deadline must bound this wait; a later stage must not get a
+    // fresh budget after a full readiness stall.
+    let readiness_guard = ss.hold_inner_write_for_test().await;
+    let request = tokio::spawn(async move {
+        c.call(&Dest::Host, TimeoutRequest { payload: vec![1] }, 100)
+            .await
+    });
+
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_millis(100)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        request.is_finished(),
+        "readiness wait must be bounded by the caller deadline"
+    );
+
+    let error = request
+        .await
+        .expect("request task should not panic")
+        .expect_err("blocked readiness should time out");
+    assert!(matches!(error, ActrError::TimedOut), "got {error:?}");
+
+    drop(readiness_guard);
+}
+
+#[tokio::test(start_paused = true)]
+async fn tell_readiness_consumes_send_budget_before_gate_dispatch() {
+    let (c, ss) = ctx_with_active_session().await;
+
+    let readiness_guard = ss.hold_inner_write_for_test().await;
+    let request = tokio::spawn(async move {
+        c.tell(&Dest::Host, TimeoutRequest { payload: vec![1] })
+            .await
+    });
+
+    // Exactly the fixed Tell budget: a regression that lets readiness run
+    // unbudgeted and re-arm a fresh gate budget would keep the future
+    // pending (or succeed) after this advance.
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(13)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        request.is_finished(),
+        "readiness wait must be bounded by the Tell send budget"
+    );
+
+    let error = request
+        .await
+        .expect("request task should not panic")
+        .expect_err("blocked readiness should time out");
+    assert!(matches!(error, ActrError::TimedOut), "got {error:?}");
+
+    drop(readiness_guard);
+}
+
+#[tokio::test(start_paused = true)]
+async fn data_chunk_readiness_consumes_send_budget_before_gate_dispatch() {
+    let (c, ss) = ctx_with_active_session().await;
+
+    let readiness_guard = ss.hold_inner_write_for_test().await;
+    let request = tokio::spawn(async move {
+        c.send_data_chunk(
+            &Dest::Host,
+            actr_protocol::DataChunk {
+                stream_id: "stage-budget".to_string(),
+                sequence: 1,
+                ..Default::default()
+            },
+            actr_protocol::PayloadType::StreamReliable,
+        )
+        .await
+    });
+
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(15)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        request.is_finished(),
+        "readiness wait must be bounded by the DataChunk send budget"
+    );
+
+    let error = request
+        .await
+        .expect("request task should not panic")
+        .expect_err("blocked readiness should time out");
+    assert!(matches!(error, ActrError::TimedOut), "got {error:?}");
+
+    drop(readiness_guard);
 }
 
 // ── BootstrapContextBuilder ─────────────────────────────────────────────

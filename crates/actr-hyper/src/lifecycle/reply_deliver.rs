@@ -160,15 +160,23 @@ impl ReplyDeliver {
     /// scoped InFlight sweep. That sweep must remove the old request entry so a
     /// same-ID retry can start; skipping a second `dedup.complete(request_id)`
     /// here prevents this old task from completing the retried entry.
-    pub(crate) fn deliver_timeout(&self) -> bool {
-        self.try_deliver(
+    pub(crate) fn try_deliver_timeout(&self) -> bool {
+        if self.try_deliver(
             ReplyOutcome {
                 request_id: self.shared.request_id.clone(),
                 result: Err(ActrError::TimedOut),
                 emit_response: self.shared.emit_response,
             },
             false,
-        )
+        ) {
+            return true;
+        }
+
+        // A serial Component sweep may have won the timeout race through the
+        // Deliver trait before the node-wide outstanding-reply sweep reaches
+        // this entry. Treat that already-owned timeout as a win here too, so
+        // the paired dedup sweep still evicts the InFlight marker.
+        self.state.load(Ordering::Acquire) == DELIVER_TIMED_OUT
     }
 
     /// Whether no delivery task owns this reply. A TTL sweep uses this to
@@ -320,5 +328,12 @@ impl Deliver for ReplyDeliver {
         // race where a late `reply.send(Ok)` would overwrite the pump's
         // `Done(Err)` and emit a second wire reply.
         self.try_deliver(outcome, true);
+    }
+
+    fn deliver_timeout(&self, outcome: ReplyOutcome) {
+        // Keep the dedup entry InFlight until the node's paired outstanding
+        // reply sweep evicts it. This lets the sweep wake duplicate waiters
+        // and permits a same-ID retry instead of caching TimedOut as Done.
+        self.try_deliver(outcome, false);
     }
 }

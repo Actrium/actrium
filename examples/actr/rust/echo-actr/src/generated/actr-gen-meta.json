@@ -1,0 +1,45 @@
+{
+  "schema_version": "v1",
+  "plugin_version": "0.10.0-alpha.4",
+  "language": "rust",
+  "dispatch_spec_hash": "19e4cfdfdc602a82d82b53ea27e885512677e6e1cbbebda2594527cb2cb25b45",
+  "generated_files": [
+    "echo_actor.rs",
+    "actr_dispatch.rs",
+    "actr_handler.rs",
+    "actr-gen-meta.json"
+  ],
+  "generated_local_routes": [
+    "echo.EchoService.Echo"
+  ],
+  "generated_remote_routes": [],
+  "local_services": [
+    {
+      "name": "EchoService",
+      "package": "echo",
+      "proto_file": "echo.proto",
+      "handler_interface": "EchoServiceHandler",
+      "methods": [
+        {
+          "name": "Echo",
+          "snake_name": "echo",
+          "route_key": "echo.EchoService.Echo",
+          "input_ref": {
+            "proto_type": "echo.EchoRequest",
+            "type_name": "EchoRequest",
+            "proto_package": "echo",
+            "proto_file": "echo.proto"
+          },
+          "output_ref": {
+            "proto_type": "echo.EchoResponse",
+            "type_name": "EchoResponse",
+            "proto_package": "echo",
+            "proto_file": "echo.proto"
+          },
+          "reply_mode": "return"
+        }
+      ]
+    }
+  ],
+  "remote_services": []
+}

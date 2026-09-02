@@ -6,7 +6,7 @@
 //! - Support PayloadType routing (default Reliable)
 
 use super::ensure_stream_payload_type;
-use crate::transport::HostTransport;
+use crate::transport::{HostTransport, NetworkError, RpcDeadline};
 use actr_framework::Bytes;
 use actr_protocol::{ActorResult, ActrError, ActrId, Direction, PayloadType, RpcEnvelope};
 use std::sync::Arc;
@@ -47,12 +47,26 @@ impl HostGate {
     /// - `payload_type`: PayloadType (Reliable, Signal, LatencyFirst, MediaTrack)
     /// - `identifier`: Optional identifier (LatencyFirst needs channel_id, MediaTrack needs track_id)
     /// - `envelope`: Message envelope
+    #[cfg(any(test, feature = "test-utils"))]
     pub async fn send_request_with_type(
         &self,
         _target: &ActrId,
         payload_type: PayloadType,
         identifier: Option<String>,
+        envelope: RpcEnvelope,
+    ) -> ActorResult<Bytes> {
+        let deadline = RpcDeadline::from_timeout_ms(envelope.timeout_ms)?;
+        self.send_request_with_type_until(_target, payload_type, identifier, envelope, deadline)
+            .await
+    }
+
+    pub(crate) async fn send_request_with_type_until(
+        &self,
+        _target: &ActrId,
+        payload_type: PayloadType,
+        identifier: Option<String>,
         mut envelope: RpcEnvelope,
+        deadline: RpcDeadline,
     ) -> ActorResult<Bytes> {
         tracing::debug!(
             "HostGate::send_request_with_type to {:?} (type={:?}, id={:?})",
@@ -63,7 +77,7 @@ impl HostGate {
 
         envelope.direction = Some(Direction::Request as i32);
         self.transport
-            .send_request(payload_type, identifier, envelope)
+            .send_request_until(payload_type, identifier, envelope, deadline)
             .await
     }
 
@@ -78,6 +92,7 @@ impl HostGate {
     /// # Direction
     /// One-way traffic is stamped `Direction::Tell` so the receiver runs the
     /// handler without sending a reply.
+    #[cfg(any(test, feature = "test-utils"))]
     pub async fn send_message_with_type(
         &self,
         _target: &ActrId,
@@ -97,6 +112,28 @@ impl HostGate {
             .send_message(payload_type, identifier, envelope)
             .await
             .map_err(|e| ActrError::Unavailable(e.to_string()))
+    }
+
+    pub(crate) async fn send_message_with_type_until(
+        &self,
+        _target: &ActrId,
+        payload_type: PayloadType,
+        identifier: Option<String>,
+        mut envelope: RpcEnvelope,
+        deadline: RpcDeadline,
+    ) -> ActorResult<()> {
+        tracing::debug!(
+            "HostGate::send_message_with_type_until to {:?} (type={:?}, id={:?})",
+            _target,
+            payload_type,
+            identifier
+        );
+
+        envelope.direction = Some(Direction::Tell as i32);
+        self.transport
+            .send_message_until(payload_type, identifier, envelope, deadline)
+            .await
+            .map_err(Self::map_one_way_error)
     }
 
     /// Send request and wait for response (defaults to Reliable)
@@ -169,6 +206,7 @@ impl HostGate {
     ///
     /// # Note
     /// For inproc, DataChunk is sent via LatencyFirst channel with stream_id as identifier
+    #[cfg(any(test, feature = "test-utils"))]
     pub async fn send_data_chunk(
         &self,
         _target: &ActrId,
@@ -209,6 +247,58 @@ impl HostGate {
             .send_message(payload_type, Some(stream_id.to_string()), envelope)
             .await
             .map_err(|e| ActrError::Unavailable(e.to_string()))
+    }
+
+    pub(crate) async fn send_data_chunk_until(
+        &self,
+        _target: &ActrId,
+        payload_type: PayloadType,
+        stream_id: &str,
+        data: Bytes,
+        deadline: RpcDeadline,
+    ) -> ActorResult<()> {
+        tracing::debug!(
+            "HostGate::send_data_chunk_until stream_id={}, size={} bytes",
+            stream_id,
+            data.len()
+        );
+
+        ensure_stream_payload_type(payload_type)?;
+        #[cfg_attr(not(feature = "opentelemetry"), allow(unused_mut))]
+        let mut envelope = RpcEnvelope {
+            route_key: "fast_path.data_chunk".to_string(),
+            payload: Some(data),
+            error: None,
+            direction: Some(Direction::Tell as i32),
+            traceparent: None,
+            tracestate: None,
+            request_id: uuid::Uuid::new_v4().to_string(),
+            metadata: vec![],
+            timeout_ms: 0,
+        };
+
+        #[cfg(feature = "opentelemetry")]
+        {
+            use crate::wire::webrtc::trace::inject_span_context_to_rpc;
+            inject_span_context_to_rpc(&tracing::Span::current(), &mut envelope);
+        }
+
+        self.transport
+            .send_message_until(
+                payload_type,
+                Some(stream_id.to_string()),
+                envelope,
+                deadline,
+            )
+            .await
+            .map_err(Self::map_one_way_error)
+    }
+
+    fn map_one_way_error(error: NetworkError) -> ActrError {
+        match error {
+            NetworkError::TimeoutError(_) => ActrError::TimedOut,
+            other => ActrError::Unavailable(other.to_string()),
+        }
     }
 }
 

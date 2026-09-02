@@ -19,7 +19,7 @@ use actr_framework::{Bytes, MediaSample};
 use actr_protocol::{ActorResult, ActrError, ActrId, PayloadType, RpcEnvelope};
 use std::sync::Arc;
 
-use crate::transport::PayloadTypeExt;
+use crate::transport::{PayloadTypeExt, RpcDeadline};
 
 fn ensure_stream_payload_type(payload_type: PayloadType) -> ActorResult<()> {
     if !payload_type.is_stream() {
@@ -94,14 +94,15 @@ impl Gate {
         target_id: &ActrId,
         payload_type: PayloadType,
         envelope: RpcEnvelope,
+        deadline: RpcDeadline,
     ) -> ActorResult<Bytes> {
         match self {
             Gate::Host(gate) => {
-                gate.send_request_with_type(target_id, payload_type, None, envelope)
+                gate.send_request_with_type_until(target_id, payload_type, None, envelope, deadline)
                     .await
             }
             Gate::Peer(gate) => {
-                gate.send_request_with_type(target_id, payload_type, envelope)
+                gate.send_request_with_type_until(target_id, payload_type, envelope, deadline)
                     .await
             }
         }
@@ -113,14 +114,15 @@ impl Gate {
         target: &ActrId,
         payload_type: PayloadType,
         envelope: RpcEnvelope,
+        deadline: RpcDeadline,
     ) -> ActorResult<()> {
         match self {
             Gate::Host(gate) => {
-                gate.send_message_with_type(target, payload_type, None, envelope)
+                gate.send_message_with_type_until(target, payload_type, None, envelope, deadline)
                     .await
             }
             Gate::Peer(gate) => {
-                gate.send_tell_with_type(target, payload_type, envelope)
+                gate.send_tell_with_type_until(target, payload_type, envelope, deadline)
                     .await
             }
         }
@@ -208,14 +210,15 @@ impl Gate {
         payload_type: actr_protocol::PayloadType,
         stream_id: &str,
         data: Bytes,
+        deadline: RpcDeadline,
     ) -> ActorResult<()> {
         match self {
             Gate::Host(gate) => {
-                gate.send_data_chunk(target, payload_type, stream_id, data)
+                gate.send_data_chunk_until(target, payload_type, stream_id, data, deadline)
                     .await
             }
             Gate::Peer(gate) => {
-                gate.send_data_chunk(target, payload_type, stream_id, data)
+                gate.send_data_chunk_until(target, payload_type, stream_id, data, deadline)
                     .await
             }
         }

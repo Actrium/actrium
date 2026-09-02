@@ -222,6 +222,19 @@ describe('@actrium/actr-workload', () => {
     expect(host.hostCalls.replyPayloads).toEqual([payload]);
   });
 
+  it('delivers deferred errors through the explicit host boundary', async () => {
+    const { host, runtime } = await loadRuntime();
+    const ctx = new runtime.ActrContext(testInvocationCtx(95n));
+    const error = { tag: 'internal', val: 'deferred failure' } as const;
+
+    await ctx.replyError(error);
+    await new runtime.Reply(ctx, () => new Uint8Array()).sendError(error);
+
+    expect(host.hostCalls.ctxTokens).toEqual([95n, 95n]);
+    expect(host.hostCalls.operations).toEqual(['replyError', 'replyError']);
+    expect(host.hostCalls.replyErrors).toEqual([error, error]);
+  });
+
   it('rejects host imports when no invocation context is active', async () => {
     const { host, runtime } = await loadRuntime();
 

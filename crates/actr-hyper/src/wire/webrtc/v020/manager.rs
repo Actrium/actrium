@@ -151,6 +151,14 @@ enum PeerSlot {
     Closing(ClosingPeer),
 }
 
+/// Opaque write lock on the manager peers map held by
+/// [`RtcConnectionManager::hold_peers_write_for_test`]. Wrapping the guard
+/// keeps the private slot types out of any callable signature.
+#[cfg(any(test, feature = "test-utils"))]
+pub(crate) struct PreflightBlockGuard<'a> {
+    _guard: tokio::sync::RwLockWriteGuard<'a, HashMap<ActrId, PeerSlot>>,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ControllerAdmission {
     /// An explicit local operation may reopen a peer that was closed earlier.
@@ -641,6 +649,16 @@ impl RtcConnectionManager {
             self.peers.read().await.get(peer),
             Some(PeerSlot::Closing(_))
         )
+    }
+
+    /// Test-only: hold the peers-map write lock so preflight reads such as
+    /// `is_closing` block until the guard drops. Deadline regression tests
+    /// use this to stall the preflight stage deterministically.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) async fn hold_peers_write_for_test(&self) -> PreflightBlockGuard<'_> {
+        PreflightBlockGuard {
+            _guard: self.peers.write().await,
+        }
     }
 
     /// Initiate a connection to `peer`: ensure the controller exists, then ask

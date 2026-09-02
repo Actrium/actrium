@@ -106,8 +106,9 @@ fn main() {
     let lock_snapshot = std::fs::read(&guest_lock).ok();
 
     // Pin the Component Model linker via the target-specific env (highest
-    // precedence) and strip any inherited RUSTFLAGS so they can't override it
-    // (see Cargo's build.rustflags precedence). Also drop the coverage
+    // precedence) and override inherited RUSTFLAGS with an explicitly empty
+    // encoded value so Cargo cannot fall back to build.rustflags from a user
+    // config (see Cargo's build.rustflags precedence). Also drop the coverage
     // instrumentation wrappers (RUSTC_WRAPPER / RUSTC_WORKSPACE_WRAPPER, set by
     // the Coverage CI job via cargo-llvm-cov): the wasm fixture is a test-time
     // build artifact, not a host coverage instrumentation target, and the
@@ -117,7 +118,7 @@ fn main() {
         .current_dir(&guest_dir)
         .env("CARGO_TARGET_WASM32_WASIP2_LINKER", &ld)
         .env_remove("RUSTFLAGS")
-        .env_remove("CARGO_ENCODED_RUSTFLAGS")
+        .env("CARGO_ENCODED_RUSTFLAGS", "")
         .env_remove("RUSTC_WRAPPER")
         .env_remove("RUSTC_WORKSPACE_WRAPPER")
         .env("CARGO_TARGET_DIR", &guest_target_dir)

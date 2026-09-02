@@ -1915,78 +1915,75 @@ impl Inner {
             }
             _ => None,
         };
-        let explicit_deliver: Option<crate::lifecycle::reply_deliver::ReplyDeliver> = if reply_mode
-            == actr_protocol::ReplyMode::Explicit
-        {
-            match reply_sink {
-                Some(sink) => {
-                    // RFC-0323: plumb the caller deadline (arrival +
-                    // `envelope.timeout_ms`) onto the context so the
-                    // generated EXPLICIT arm builds `Reply<T>` with a
-                    // real deadline instead of `None`. `timeout_ms == 0`
-                    // means "no timeout" → `None` (a TELL or an
-                    // unbounded call). The wall-clock read lives in the
-                    // exempt dedup module — this deadline is a
-                    // caller-side bound, not a tokio-await deadline.
-                    let reply_deadline =
-                        crate::lifecycle::dedup::caller_reply_deadline(envelope.timeout_ms);
-                    #[cfg(feature = "webrtc-v020")]
-                    let v020_route: V020ResponseRoute = self.v020_manager.clone();
-                    #[cfg(not(feature = "webrtc-v020"))]
-                    let v020_route: V020ResponseRoute = ();
-                    let attempt_id = self.outstanding_replies.allocate_attempt_id();
-                    let (deliver, _flag) = crate::lifecycle::reply_deliver::ReplyDeliver::new(
-                        self.websocket_gate.clone(),
-                        v020_route,
-                        self.dedup_state.clone(),
-                        self.outstanding_replies.clone(),
-                        attempt_id,
-                        envelope.request_id.clone(),
-                        envelope.route_key.clone(),
-                        envelope.traceparent.clone(),
-                        envelope.tracestate.clone(),
-                        sink,
-                        expects_response,
-                    );
-                    // WIT 0.6 components use one host reply boundary for
-                    // both RETURN and EXPLICIT routes, so they are
-                    // admitted as deferred here. Linked workloads begin
-                    // unclaimed so older FFI dispatchers can still use
-                    // the return-byte fallback; current Rust/Kotlin/Swift
-                    // EXPLICIT dispatchers claim before handing out a
-                    // movable Reply handle.
-                    let reply_claimed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
-                        self.package_uses_explicit_reply_boundary,
-                    ));
-                    // Register the exact deliver for this admission. The
-                    // TTL sweep uses its first-write-wins gate, and all
-                    // asynchronous completion uses the attempt ID so an
-                    // old same-ID reply cannot release or complete a retry.
-                    self.outstanding_replies
-                        .register_with_deliver(
-                            &envelope.request_id,
+        let mut explicit_attempt_id = None;
+        let explicit_deliver: Option<crate::lifecycle::reply_deliver::ReplyDeliver> =
+            if reply_mode == actr_protocol::ReplyMode::Explicit {
+                match reply_sink {
+                    Some(sink) => {
+                        // RFC-0323: plumb the caller deadline (arrival +
+                        // `envelope.timeout_ms`) onto the context so the
+                        // generated EXPLICIT arm builds `Reply<T>` with a
+                        // real deadline instead of `None`. `timeout_ms == 0`
+                        // means "no timeout" → `None` (a TELL or an
+                        // unbounded call). The wall-clock read lives in the
+                        // exempt dedup module — this deadline is a
+                        // caller-side bound, not a tokio-await deadline.
+                        let reply_deadline =
+                            crate::lifecycle::dedup::caller_reply_deadline(envelope.timeout_ms);
+                        #[cfg(feature = "webrtc-v020")]
+                        let v020_route: V020ResponseRoute = self.v020_manager.clone();
+                        #[cfg(not(feature = "webrtc-v020"))]
+                        let v020_route: V020ResponseRoute = ();
+                        let attempt_id = self.outstanding_replies.allocate_attempt_id();
+                        explicit_attempt_id = Some(attempt_id);
+                        let (deliver, _flag) = crate::lifecycle::reply_deliver::ReplyDeliver::new(
+                            self.websocket_gate.clone(),
+                            v020_route,
+                            self.dedup_state.clone(),
+                            self.outstanding_replies.clone(),
                             attempt_id,
-                            deliver.clone(),
+                            envelope.request_id.clone(),
+                            envelope.route_key.clone(),
+                            envelope.traceparent.clone(),
+                            envelope.tracestate.clone(),
+                            sink,
+                            expects_response,
+                        );
+                        // Start every admission unclaimed. Component dispatchers
+                        // return a reserved deferred marker only after selecting
+                        // an EXPLICIT route; ordinary zero-byte return payloads
+                        // must still use the normal return-byte fallback.
+                        let reply_claimed =
+                            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                        // Register the exact deliver for this admission. The
+                        // TTL sweep uses its first-write-wins gate, and all
+                        // asynchronous completion uses the attempt ID so an
+                        // old same-ID reply cannot release or complete a retry.
+                        self.outstanding_replies
+                            .register_with_deliver(
+                                &envelope.request_id,
+                                attempt_id,
+                                deliver.clone(),
+                                reply_deadline,
+                            )
+                            .await;
+                        // Pump-side clone: lets `wrap_outcome` route a
+                        // handler-Err through the same first-write-wins
+                        // `deliver` as a spawned `Reply::send` / `Drop`.
+                        let pump_deliver = deliver.clone();
+                        ctx.set_explicit_reply(
+                            std::sync::Arc::new(deliver),
+                            expects_response,
                             reply_deadline,
-                        )
-                        .await;
-                    // Pump-side clone: lets `wrap_outcome` route a
-                    // handler-Err through the same first-write-wins
-                    // `deliver` as a spawned `Reply::send` / `Drop`.
-                    let pump_deliver = deliver.clone();
-                    ctx.set_explicit_reply(
-                        std::sync::Arc::new(deliver),
-                        expects_response,
-                        reply_deadline,
-                        reply_claimed,
-                    );
-                    Some(pump_deliver)
+                            reply_claimed,
+                        );
+                        Some(pump_deliver)
+                    }
+                    None => None,
                 }
-                None => None,
-            }
-        } else {
-            None
-        };
+            } else {
+                None
+            };
 
         // 2. Dispatch
         let dispatch_ctx = crate::workload::InvocationContext {
@@ -2009,6 +2006,8 @@ impl Inner {
         // needs its own copies to avoid a use-after-move.
         let request_id_err = envelope.request_id.clone();
         let expects_response_err = expects_response;
+        let outstanding_replies_for_fallback = self.outstanding_replies.clone();
+        let allow_component_return_fallback = self.package_uses_explicit_reply_boundary;
         let finish = move |result: ActorResult<Bytes>| async move {
             match &result {
                 Ok(_) => tracing::debug!(
@@ -2044,6 +2043,16 @@ impl Inner {
         // both gate-on and gate-off branches.
         let wrap_outcome = move |result: ActorResult<Bytes>| async move {
             if let Some(deliver) = &explicit_deliver {
+                if allow_component_return_fallback
+                    && matches!(&result, Ok(bytes) if !bytes.is_empty())
+                {
+                    if let Some(attempt_id) = explicit_attempt_id {
+                        outstanding_replies_for_fallback
+                            .complete_attempt(attempt_id)
+                            .await;
+                    }
+                    return IncomingOutcome::Replied(finish(result).await);
+                }
                 // EXPLICIT. For Ok the Reply<T> owns the success reply
                 // (send/Drop fires `deliver`); the pump does NOT deliver.
                 // For Err the pump routes the error through `deliver` so a

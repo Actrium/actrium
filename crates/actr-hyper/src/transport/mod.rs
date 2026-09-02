@@ -57,6 +57,15 @@ pub(crate) use lane::{
 };
 pub(crate) use route_table::{PayloadTypeExt, RetryPolicy};
 
+/// Default send budgets for fire-and-forget RPC and DataStream operations.
+///
+/// These operations do not carry a caller-provided RPC timeout in their wire
+/// envelope.  The budget is still created once at the API boundary and then
+/// passed down as an absolute deadline, so readiness, lane acquisition, and
+/// the actual send share one bounded operation.
+pub(crate) const TELL_SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(13);
+pub(crate) const DATA_CHUNK_SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
 // ConnType leaks through the public `WireHandle::connection_type` method,
 // so it must stay pub even though the `wire_pool` module itself is private.
 #[cfg(feature = "test-utils")]
@@ -96,6 +105,45 @@ pub use backoff::ExponentialBackoff;
 
 // Connection session
 
+/// One caller-owned absolute deadline shared by every phase of an outbound
+/// operation.
+///
+/// The value is intentionally crate-private: the public API continues to
+/// expose the existing Call/Tell/DataStream methods, while each lower layer
+/// consumes the same monotonic deadline rather than starting another full
+/// relative timeout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RpcDeadline(tokio::time::Instant);
+
+impl RpcDeadline {
+    /// Start a deadline from a validated RPC wire timeout.
+    pub(crate) fn from_timeout_ms(timeout_ms: i64) -> actr_protocol::ActorResult<Self> {
+        let timeout = validate_rpc_timeout_ms(timeout_ms)?;
+        Ok(Self(tokio::time::Instant::now() + timeout))
+    }
+
+    /// Start a deadline for an operation whose wire envelope has no timeout
+    /// field (Tell and DataStream).
+    pub(crate) fn from_duration(timeout: std::time::Duration) -> Self {
+        Self(tokio::time::Instant::now() + timeout)
+    }
+
+    pub(crate) fn instant(self) -> tokio::time::Instant {
+        self.0
+    }
+
+    /// Guard admission points against a deadline that elapsed between two
+    /// asynchronous stages.  This prevents a lower layer from registering or
+    /// sending work during the one final poll of an already-expired timeout.
+    pub(crate) fn ensure_remaining(self) -> actr_protocol::ActorResult<()> {
+        if tokio::time::Instant::now() >= self.0 {
+            Err(actr_protocol::ActrError::TimedOut)
+        } else {
+            Ok(())
+        }
+    }
+}
+
 /// Validate a caller-supplied RPC timeout at a call entry point and convert
 /// it into a [`std::time::Duration`].
 ///
@@ -118,4 +166,30 @@ pub(crate) fn validate_rpc_timeout_ms(
         )));
     }
     Ok(std::time::Duration::from_millis(timeout_ms as u64))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RpcDeadline;
+    use std::time::Duration;
+
+    #[tokio::test(start_paused = true)]
+    async fn rpc_deadline_is_shared_across_stages() {
+        let deadline = RpcDeadline::from_duration(Duration::from_secs(1));
+        let instant = deadline.instant();
+
+        tokio::time::advance(Duration::from_millis(400)).await;
+        deadline
+            .ensure_remaining()
+            .expect("the shared deadline should still be active");
+        assert_eq!(deadline.instant(), instant);
+
+        // A later stage observes the same absolute instant rather than
+        // receiving another full one-second timeout.
+        tokio::time::advance(Duration::from_millis(600)).await;
+        assert!(matches!(
+            deadline.ensure_remaining(),
+            Err(actr_protocol::ActrError::TimedOut)
+        ));
+    }
 }

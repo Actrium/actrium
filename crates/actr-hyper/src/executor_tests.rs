@@ -20,6 +20,10 @@ use tokio::sync::{Mutex as AsyncMutex, Semaphore, mpsc};
 
 const WATCHDOG: Duration = Duration::from_secs(5);
 
+#[cfg(all(feature = "wasm-engine", actr_wasm_fixture_available))]
+#[path = "../tests/wasm_actor_fixture.rs"]
+mod wasm_actor_fixture;
+
 /// Shared observation + gating state for the test workload handle.
 struct Gate {
     inflight: AtomicUsize,
@@ -331,6 +335,93 @@ async fn abort_and_join_drops_a_stuck_runner() {
         .await
         .expect("watchdog: aborted runner retained its workload")
         .expect("workload drop signal");
+}
+
+#[cfg(all(feature = "wasm-engine", actr_wasm_fixture_available))]
+#[derive(Clone, Default)]
+struct SerialSweepDeliver(Arc<std::sync::Mutex<Vec<actr_framework::ReplyOutcome>>>);
+
+#[cfg(all(feature = "wasm-engine", actr_wasm_fixture_available))]
+impl actr_framework::Deliver for SerialSweepDeliver {
+    fn deliver(&self, outcome: actr_framework::ReplyOutcome) {
+        self.0
+            .lock()
+            .expect("serial sweep deliver mutex poisoned")
+            .push(outcome);
+    }
+}
+
+#[cfg(all(feature = "wasm-engine", actr_wasm_fixture_available))]
+#[tokio::test(start_paused = true)]
+async fn serial_wasm_idle_sweep_expires_deferred_reply() {
+    let host = crate::wasm::WasmHost::compile(wasm_actor_fixture::WASM_ACTOR_FIXTURE)
+        .expect("compile fixture component");
+    let workload = host.instantiate().await.expect("instantiate fixture");
+    let handle = spawn_runner_with_mode(Workload::Wasm(workload), RunnerMode::Serial, None);
+    let delivered = SerialSweepDeliver::default();
+    let captured = Arc::clone(&delivered.0);
+    let mut ctx = test_ctx();
+    ctx.set_explicit_reply(
+        Arc::new(delivered),
+        true,
+        None,
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    );
+
+    let result = handle
+        .dispatch_envelope(
+            RpcEnvelope {
+                route_key: "test/forget-explicit".to_string(),
+                request_id: "serial-idle-expiry".to_string(),
+                direction: Some(actr_protocol::Direction::Request as i32),
+                ..Default::default()
+            },
+            ctx,
+            InvocationContext {
+                request_id: "serial-idle-expiry".to_string(),
+                ..test_invocation()
+            },
+            &noop_host_abi(),
+        )
+        .await
+        .expect("dispatch returns the deferred marker");
+    assert!(result.is_empty());
+    assert!(captured.lock().expect("capture mutex poisoned").is_empty());
+
+    // Advance the clock one sweep period at a time. With
+    // `MissedTickBehavior::Delay` a single large `advance` fires only one
+    // tick and then parks the interval one period past the frozen instant,
+    // so the sweep would never observe a `sweep_at` past the TTL. Stepping
+    // 5s at a time (yielding so the serial runner drains each tick) mirrors
+    // the live sweep cadence until the deferred reply expires.
+    let sweep_step = Duration::from_secs(5);
+    let sweep_steps =
+        ((crate::lifecycle::dedup::INFLIGHT_TTL + sweep_step).as_secs() / sweep_step.as_secs()) + 2;
+    for _ in 0..sweep_steps {
+        tokio::time::advance(sweep_step).await;
+        for _ in 0..4 {
+            let has_outcome = { !captured.lock().expect("capture mutex poisoned").is_empty() };
+            if has_outcome {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        let has_outcome = { !captured.lock().expect("capture mutex poisoned").is_empty() };
+        if has_outcome {
+            break;
+        }
+    }
+
+    {
+        let outcomes = captured.lock().expect("capture mutex poisoned");
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].request_id, "serial-idle-expiry");
+        assert!(matches!(
+            &outcomes[0].result,
+            Err(actr_protocol::ActrError::TimedOut)
+        ));
+    }
+    handle.shutdown().await;
 }
 
 // ── Interleaved runner (B2 native concurrency) ───────────────────────────────
