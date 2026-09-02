@@ -1,0 +1,17 @@
+edition = 1
+exports = ["protos/local/concurrency.proto"]
+
+[package]
+name = "ConcurrencyProbeWorkload"
+manufacturer = "acme"
+version = "0.2.0"
+description = "Generated Python concurrency probe workload for the run_concurrent e2e suite"
+authors = ["Actr Dev Team"]
+license = "Apache-2.0"
+tags = ["dev", "python-guest", "component-model", "generated", "e2e"]
+
+[binary]
+path = "dist/concurrency-probe-python-0.2.0-wasm32-wasip2.wasm"
+target = "wasm32-wasip2"
+
+[dependencies]
