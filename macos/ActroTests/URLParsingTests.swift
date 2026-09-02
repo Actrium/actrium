@@ -28,6 +28,12 @@ struct URLParsingTests {
         #expect(url?.absoluteString == "actro://settings")
     }
 
+    @Test func parseURL_actrScheme_passesThrough() {
+        let url = vm.parseURL("actr://localhost:8081/echo")
+        #expect(url?.absoluteString == "actr://localhost:8081/echo")
+        #expect(vm.isLocalFilePath("actr://localhost:8081/echo") == false)
+    }
+
     @Test func actroArchiveURL_isNotMisclassifiedAsLocalPath() {
         #expect(vm.isLocalFilePath("actro:///tmp/example.actr") == false)
         #expect(vm.parseURL("actro:///tmp/example.actr")?.path == "/tmp/example.actr")

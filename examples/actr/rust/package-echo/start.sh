@@ -24,6 +24,11 @@ ACTRIX_ICE_PORT=${ACTRIX_ICE_PORT:-13478}
 ACTRIX_HTTP_URL="http://localhost:${ACTRIX_HTTP_PORT}"
 ACTRIX_WS_URL="ws://localhost:${ACTRIX_HTTP_PORT}"
 ACTRIX_ADMIN_PASSWORD=${ACTRIX_ADMIN_PASSWORD:-testpassword123}
+ACTRIX_AUTHORITY_ENABLED=${ACTRIX_AUTHORITY_ENABLED:-0}
+ACTRIX_AUTHORITY_URI=${ACTRIX_AUTHORITY_URI:-actr://localhost:${ACTRIX_HTTP_PORT}}
+ACTRIX_PACKAGE_TARGET=${ACTRIX_PACKAGE_TARGET:-}
+ACTRIX_PACKAGE_ARTIFACT=${ACTRIX_PACKAGE_ARTIFACT:-}
+ACTRIX_PACKAGE_PROFILE=${ACTRIX_PACKAGE_PROFILE:-}
 
 # Colors for output
 RED='\033[0;31m'
@@ -237,17 +242,48 @@ ensure_actrix_config "$WORKSPACE_ROOT"
 # Keep every disposable runtime config on this demo's ports.  The non-standard
 # TURN port deliberately avoids colliding with a machine-wide TURN service.
 python3 - "$ACTRIX_CONFIG" "$CLIENT_DIR/actr.toml" "$CLIENT_GUEST_DIR/actr.toml" \
-    "$ACTRIX_HTTP_PORT" "$ACTRIX_ICE_PORT" <<'PY'
+    "$ACTRIX_HTTP_PORT" "$ACTRIX_ICE_PORT" "$ACTRIX_AUTHORITY_ENABLED" \
+    "$ACTRIX_AUTHORITY_URI" "$ACTRIX_PACKAGE_TARGET" "$ACTRIX_PACKAGE_ARTIFACT" \
+    "$ACTRIX_PACKAGE_PROFILE" <<'PY'
+import json
 from pathlib import Path
 import sys
 
-config_path, client_path, guest_path, http_port, ice_port = sys.argv[1:]
+(
+    config_path,
+    client_path,
+    guest_path,
+    http_port,
+    ice_port,
+    authority_enabled,
+    authority_uri,
+    package_target,
+    package_artifact,
+    package_profile,
+) = sys.argv[1:]
 
 loran = Path(config_path)
 text = loran.read_text(encoding="utf-8")
 text = text.replace('port = 8081', f'port = {http_port}', 1)
 text = text.replace('advertised_port = 3478', f'advertised_port = {ice_port}', 1)
 text = text.replace('port = 3478', f'port = {ice_port}', 1)
+if authority_enabled == "1":
+    if not package_target or not package_artifact:
+        raise SystemExit(
+            "ACTRIX_PACKAGE_TARGET and ACTRIX_PACKAGE_ARTIFACT are required "
+            "when ACTRIX_AUTHORITY_ENABLED=1"
+        )
+    if not Path(package_artifact).is_absolute():
+        raise SystemExit("ACTRIX_PACKAGE_ARTIFACT must be an absolute path")
+    text += "\n[authority]\n"
+    text += "enabled = true\n"
+    text += f"uri = {json.dumps(authority_uri)}\n"
+    text += "\n[services.packages]\n"
+    text += "\n[[services.packages.targets]]\n"
+    text += f"target = {json.dumps(package_target)}\n"
+    text += f"artifact = {json.dumps(package_artifact)}\n"
+    if package_profile:
+        text += f"profile = {json.dumps(package_profile)}\n"
 loran.write_text(text, encoding="utf-8")
 
 for runtime_path in (client_path, guest_path):

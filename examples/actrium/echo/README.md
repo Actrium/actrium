@@ -26,7 +26,11 @@ From this directory:
 ```
 
 The runner builds all three signed `.actr` packages, starts Loran and the two Actor
-Hosts, verifies one real echo call, builds Actrium, and opens the Echo UI package.
+Hosts, verifies one real echo call, builds Actrium, and opens
+`actr://localhost:8081/echo`. Actrium discovers Loran through
+`/.well-known/actr`, resolves the opaque `echo` Target through the advertised
+Package service, verifies the downloaded artifact, and keeps the public
+`actr:` URL in the address bar.
 Use `--no-open` for a non-interactive build and end-to-end verification.
 
 The Guest package declares the `actor.call` Host capability in `app/manifest.toml`.

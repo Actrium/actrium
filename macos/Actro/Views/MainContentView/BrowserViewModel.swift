@@ -668,7 +668,8 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
     /// Navigation Current Tab To Assign URL Or apply ID
     /// Unified navigation portal - Process all types of input
     /// - If the input is about: URLNavigator to the corresponding system application
-    /// - If the input is actro:// URLLoad Actro Apply
+    /// - If the input is an actr:// URL, discover and load its Actor package
+    /// - If the input is an actro:// URL, load an installed or local Actro app
     /// - If the input is http/https URL, as Web Load
     /// - Load if input is a local file path ACTR Apply
     /// - Otherwise, as app id Process
@@ -718,6 +719,40 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
                 tabs[index].contractName = nil
                 objectWillChange.send()
                 persistBrowserPageSession()
+                return
+            }
+
+            if ActrPublicURLScheme.isSupported(url.scheme) {
+                let tabId = tabs[index].id
+                tabs[index].url = url
+                tabs[index].title = "Loading Actor"
+                tabs[index].systemTabType = nil
+                objectWillChange.send()
+                persistBrowserPageSession()
+
+                Task { [weak self] in
+                    do {
+                        let packageURL = try await ActrAuthorityClient.shared.resolveAndDownload(url)
+                        guard let self,
+                              let currentIndex = self.tabs.firstIndex(where: { $0.id == tabId }) else {
+                            return
+                        }
+                        self.loadActrPackageIntoCurrentTab(
+                            from: packageURL,
+                            tabIndex: currentIndex,
+                            displayURL: url
+                        )
+                    } catch {
+                        logger.error("[navigateCurrentTab] Actr resolution failed: \(error.localizedDescription)")
+                        guard let self,
+                              let currentIndex = self.tabs.firstIndex(where: { $0.id == tabId }) else {
+                            return
+                        }
+                        self.tabs[currentIndex].title = "Unable to Open Actor"
+                        self.objectWillChange.send()
+                        self.persistBrowserPageSession()
+                    }
+                }
                 return
             }
 
@@ -783,7 +818,11 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
 
     /// Load ACTR app into the current tab (in-place update, not creating new tab)
     /// Used by actro:// URL navigation to update current tab content
-    private func loadActrPackageIntoCurrentTab(from fileURL: URL, tabIndex: Int) {
+    private func loadActrPackageIntoCurrentTab(
+        from fileURL: URL,
+        tabIndex: Int,
+        displayURL: URL? = nil
+    ) {
         let resolvedURL = fileURL.standardizedFileURL
 
         var isDirectory: ObjCBool = false
@@ -846,7 +885,9 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
 
             // Construct actro:// URL for History and address bar
             let appURL: URL
-            if let appId = manifestInfo.appId,
+            if let displayURL {
+                appURL = displayURL
+            } else if let appId = manifestInfo.appId,
                let url = URL(string: "\(ActroAppURLScheme.primary)://\(appId)") {
                 appURL = url
             } else {
@@ -905,7 +946,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
     func isLocalFilePath(_ input: String) -> Bool {
         // actro://... may itself point at an .actr archive. It must be parsed as
         // an application URL instead of being treated as a literal filesystem path.
-        if ActroAppURLScheme.hasSupportedPrefix(input) {
+        if ActroAppURLScheme.hasSupportedPrefix(input) || ActrPublicURLScheme.hasSupportedPrefix(input) {
             return false
         }
         // Here. / The first is the absolute path.
@@ -928,12 +969,13 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
     }
 
     /// Parsing URL String
-    /// - If about:/http/https/actro, Directly decipher
+    /// - If about:/http/https/actr/actro, parse directly
     /// - If it looks like a domain name (includes) . and does not contain spaces) add https:// Prefix
     func parseURL(_ input: String) -> URL? {
         // It's complete. URL (http/https/about/actro)
         if input.hasPrefix("http://") || input.hasPrefix("https://") ||
            input.hasPrefix("about:") ||
+           ActrPublicURLScheme.hasSupportedPrefix(input) ||
            ActroAppURLScheme.hasSupportedPrefix(input) {
             return URL(string: input)
         }
@@ -1000,6 +1042,11 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
         if sourceURL.scheme == "http" || sourceURL.scheme == "https" {
             logger.notice("🔄 [reloadCurrentTab] Web Content, Call WebView reload")
             WebViewHolderManager.shared.existingHolder(for: id)?.reload()
+            return
+        }
+
+        if ActrPublicURLScheme.isSupported(sourceURL.scheme) {
+            navigateCurrentTab(to: sourceURL.absoluteString)
             return
         }
 

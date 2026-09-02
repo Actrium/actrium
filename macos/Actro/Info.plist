@@ -16,6 +16,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>actro</string>
+				<string>actr</string>
 			</array>
 		</dict>
 	</array>

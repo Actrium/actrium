@@ -9,10 +9,13 @@ APP_PACKAGE="$APP_DIR/dist/actrium-echo-ui-0.1.0.actr"
 PACKAGE_ECHO_DIR="$REPO_ROOT/examples/actr/rust/package-echo"
 DERIVED_DATA_DIR="${ACTRIUM_ECHO_DERIVED_DATA_DIR:-$REPO_ROOT/target/xcode-derived-data/actrium-echo}"
 STACK_LOG="$REPO_ROOT/examples/actr/rust/logs/actrium-echo-stack.log"
+ACTRIX_HTTP_PORT="${ACTRIX_HTTP_PORT:-8081}"
+PUBLIC_ACTR_URL="actr://localhost:${ACTRIX_HTTP_PORT}/echo"
 MESSAGE="Hello from Actrium"
 OPEN_APP=1
 SKIP_INSTALL=0
 STACK_PID=""
+PACKAGE_DOWNLOAD_DIR=""
 
 usage() {
     sed -n '/^# Usage:/,/^# The script/p' "$0" \
@@ -63,6 +66,9 @@ cleanup() {
         kill "$STACK_PID" 2>/dev/null || true
         wait "$STACK_PID" 2>/dev/null || true
     fi
+    if [ -n "$PACKAGE_DOWNLOAD_DIR" ]; then
+        rm -rf "$PACKAGE_DOWNLOAD_DIR"
+    fi
 }
 trap cleanup EXIT INT TERM
 
@@ -112,6 +118,12 @@ cargo run -p actr-cli -- pkg verify \
     --pubkey "$PACKAGE_ECHO_DIR/dev-key.json"
 
 mkdir -p "$(dirname "$STACK_LOG")"
+ACTRIX_HTTP_PORT="$ACTRIX_HTTP_PORT" \
+ACTRIX_AUTHORITY_ENABLED=1 \
+ACTRIX_AUTHORITY_URI="actr://localhost:${ACTRIX_HTTP_PORT}" \
+ACTRIX_PACKAGE_TARGET="echo" \
+ACTRIX_PACKAGE_ARTIFACT="$APP_PACKAGE" \
+ACTRIX_PACKAGE_PROFILE="keel.guest/1" \
 ECHO_KEEP_RUNNING=1 \
     "$PACKAGE_ECHO_DIR/start.sh" \
     --client-mode http \
@@ -139,6 +151,30 @@ until grep -q "Echo stack is ready" "$STACK_LOG" 2>/dev/null; do
 done
 
 curl --silent --fail http://127.0.0.1:8391/health | jq .
+DISCOVERY_JSON="$(curl --silent --fail "http://localhost:${ACTRIX_HTTP_PORT}/.well-known/actr")"
+echo "$DISCOVERY_JSON" | jq -e \
+    --arg authority "actr://localhost:${ACTRIX_HTTP_PORT}" \
+    '.version == 1 and .authority == $authority and any(.services[]; .rel == "packages" and .protocol == "actr-packages/1")' \
+    >/dev/null
+
+RESOLUTION_JSON="$(curl --silent --fail --get \
+    --data-urlencode 'target=echo' \
+    "http://localhost:${ACTRIX_HTTP_PORT}/actr/packages/resolve")"
+PACKAGE_HREF="$(echo "$RESOLUTION_JSON" | jq -er '.package.href')"
+PACKAGE_SHA256="$(echo "$RESOLUTION_JSON" | jq -er '.package.sha256')"
+PACKAGE_SIZE="$(echo "$RESOLUTION_JSON" | jq -er '.package.size')"
+PACKAGE_DOWNLOAD_DIR="$(mktemp -d -t actrium-echo)"
+DOWNLOADED_PACKAGE="$PACKAGE_DOWNLOAD_DIR/echo.actr"
+curl --silent --fail "$PACKAGE_HREF" --output "$DOWNLOADED_PACKAGE"
+DOWNLOADED_SHA256="$(shasum -a 256 "$DOWNLOADED_PACKAGE" | awk '{print $1}')"
+DOWNLOADED_SIZE="$(stat -f %z "$DOWNLOADED_PACKAGE")"
+if [ "$DOWNLOADED_SHA256" != "$PACKAGE_SHA256" ] || [ "$DOWNLOADED_SIZE" != "$PACKAGE_SIZE" ]; then
+    echo "Loran returned an invalid Echo package artifact." >&2
+    exit 1
+fi
+rm -rf "$PACKAGE_DOWNLOAD_DIR"
+PACKAGE_DOWNLOAD_DIR=""
+echo "Loran authority and .actr distribution verified for $PUBLIC_ACTR_URL."
 echo "The Actor path is verified. Building Actrium for macOS."
 
 cd "$REPO_ROOT/macos"
@@ -179,6 +215,6 @@ if [ "$OPEN_APP" = "0" ]; then
     exit 0
 fi
 
-open -n "$APP_PATH" --args --url "actro://$APP_PACKAGE"
+open -n "$APP_PATH" --args --url "$PUBLIC_ACTR_URL"
 echo "Echo at Actrium is running. Press Ctrl-C to stop the demo stack."
 wait "$STACK_PID"
