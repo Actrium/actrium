@@ -76,28 +76,26 @@ assert_eq!(id.serial_number, parsed_id.serial_number);
 
 #### b) URI 解析 (`uri.rs`)
 
-提供对 `actr://` 协议 URI 的解析和构建功能，支持 `actr://<realm>:<manufacturer>+<name>@<version>` 格式。
+提供 authority-based `actr://<authority>/<opaque-target>` URI 的解析、规范化和构建功能。
+公开 URI 不把 realm、manufacturer、version 或运行中 Actor identity 固定到 path 位置。
 
 ```rust
 use std::str::FromStr;
 use actr_protocol::uri::{ActrUri, ActrUriBuilder};
 
 // 从字符串解析
-let uri = "actr://101:acme+user-service@1.0.0".parse::<ActrUri>().unwrap();
-assert_eq!(uri.realm, 101);
-assert_eq!(uri.manufacturer, "acme");
-assert_eq!(uri.name, "user-service");
-assert_eq!(uri.version, "1.0.0");
-assert_eq!(uri.actor_type(), "acme+user-service");
+let uri = "actr://example.com/apps/echo".parse::<ActrUri>().unwrap();
+assert_eq!(uri.authority(), "example.com");
+assert_eq!(uri.target(), Some("apps/echo"));
+assert_eq!(uri.discovery_url(), "https://example.com/.well-known/actr");
 
 // 使用构建器创建
 let uri = ActrUriBuilder::new()
-    .realm(101)
-    .manufacturer("acme")
-    .name("user-service")
+    .authority("example.com")
+    .target("apps/echo")
     .build()
     .unwrap();
-assert_eq!(uri.to_string(), "actr://101:acme+user-service@1.0.0");
+assert_eq!(uri.to_string(), "actr://example.com/apps/echo");
 ```
 
 #### c) 错误处理 (`error.rs`)

@@ -326,6 +326,11 @@ impl ServiceManager {
         );
         app = app.merge(control_router);
 
+        // Public authority bootstrap is an instance-level concern. It stays
+        // separate from the individual signaling, identity, and package roles
+        // even when Loran serves them from the same process.
+        app = app.merge(crate::service::http::build_authority_router(&self.config)?);
+
         // Business services based on enable bitmask
         if self.config.is_signaling_enabled() {
             let mut svc = SignalingService::new(self.config.clone(), cancel.clone());
