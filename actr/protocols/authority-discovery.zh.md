@@ -86,7 +86,8 @@ response header，但不返回 response body。本文不定义其他 method 的�
     },
     {
       "rel": "ice-config",
-      "href": "https://rtc.example.com/actr/ice"
+      "href": "https://rtc.example.com/actr/ice",
+      "protocol": "actr-ice-config/1"
     },
     {
       "rel": "contracts",
@@ -94,7 +95,7 @@ response header，但不返回 response body。本文不定义其他 method 的�
     },
     {
       "rel": "packages",
-      "href": "https://packages.example.com/actr",
+      "href": "https://packages.example.com/actr/packages",
       "protocol": "actr-packages/1"
     }
   ]
@@ -136,7 +137,7 @@ request 时使用的 authority 一致。redirect 不改变此绑定关系。
 | `signaling` | 建立 Actor 连通性并交换 session negotiation 消息。 |
 | `identity` | 解析 identity、key 和 authentication metadata。 |
 | `discovery` | Actor 启动后，按依赖、contract 和 capability 发现可用的 Actor instance。 |
-| `ice-config` | 获取 ICE server configuration，并在授权后取得短期 TURN credential。 |
+| `ice-config` | 按 [Actr ICE Configuration](ice-configuration.zh.md) 获取 ICE server 配置，并在授权后取得短期 TURN credential。 |
 | `contracts` | 获取公开的 Actor contract 和 interface description。 |
 | `packages` | 将公开 URI Target 解析为入口 Actor Package 发布，并取得 `.actr` artifact。 |
 

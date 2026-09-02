@@ -90,11 +90,17 @@ Example:
     },
     {
       "rel": "ice-config",
-      "href": "https://rtc.example.com/actr/ice"
+      "href": "https://rtc.example.com/actr/ice",
+      "protocol": "actr-ice-config/1"
     },
     {
       "rel": "contracts",
       "href": "https://contracts.example.com/actr"
+    },
+    {
+      "rel": "packages",
+      "href": "https://packages.example.com/actr/packages",
+      "protocol": "actr-packages/1"
     }
   ]
 }
@@ -140,9 +146,9 @@ Version 1 defines these core relations:
 | `signaling` | Establish Actor connectivity and exchange session negotiation messages. |
 | `identity` | Resolve identities, keys, and authentication metadata. |
 | `discovery` | Resolve Actor targets and capabilities. |
-| `ice-config` | Obtain ICE server configuration and, after authorization, short-lived TURN credentials. |
+| `ice-config` | Obtain ICE server configuration and, after authorization, short-lived TURN credentials as defined by [Actr ICE Configuration](ice-configuration.md). |
 | `contracts` | Obtain public Actor contract and interface descriptions. |
-| `packages` | Locate optional distributable Actor or application packages. |
+| `packages` | Resolve a public URI Target to an entry Actor Package and retrieve its `.actr` artifact. |
 
 Extension relation values **MUST** be absolute URIs controlled by the extension
 author. This avoids collisions with short core relation names.
