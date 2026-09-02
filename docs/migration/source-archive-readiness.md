@@ -10,7 +10,7 @@ consolidated into `Actrium/actrium`.
 
 | Repository | `main` tip | Open issues | Open pull requests | State |
 | --- | --- | ---: | ---: | --- |
-| `Actrium/actr` | `19ff662a26da356b5d631a63bb04a18682dee384` | 0 | 14 | Private, active |
+| `Actrium/actr` | `7a6ba0453cb93a45e6198372fc3509b7f52368ed` | 0 | 14 | Private, active |
 | `Actrium/keel` | `296ed6748b8749a0b8de6f78d127ce2f9474805c` | 0 | 0 | Private, active |
 | `Actrium/actro` | `755dea237b079b98f364634e83b6e0fdc88fd734` | 0 | 0 | Private, active |
 
