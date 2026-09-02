@@ -47,6 +47,7 @@ impl HostGate {
     /// - `payload_type`: PayloadType (Reliable, Signal, LatencyFirst, MediaTrack)
     /// - `identifier`: Optional identifier (LatencyFirst needs channel_id, MediaTrack needs track_id)
     /// - `envelope`: Message envelope
+    #[cfg(any(test, feature = "test-utils"))]
     pub async fn send_request_with_type(
         &self,
         _target: &ActrId,
@@ -91,6 +92,7 @@ impl HostGate {
     /// # Direction
     /// One-way traffic is stamped `Direction::Tell` so the receiver runs the
     /// handler without sending a reply.
+    #[cfg(any(test, feature = "test-utils"))]
     pub async fn send_message_with_type(
         &self,
         _target: &ActrId,
@@ -204,6 +206,7 @@ impl HostGate {
     ///
     /// # Note
     /// For inproc, DataChunk is sent via LatencyFirst channel with stream_id as identifier
+    #[cfg(any(test, feature = "test-utils"))]
     pub async fn send_data_chunk(
         &self,
         _target: &ActrId,

@@ -315,6 +315,7 @@ impl HostTransport {
         feature = "opentelemetry",
         tracing::instrument(skip_all, name = "HostTransport.send_request")
     )]
+    #[cfg(any(test, feature = "test-utils"))]
     pub async fn send_request(
         &self,
         payload_type: PayloadType,
