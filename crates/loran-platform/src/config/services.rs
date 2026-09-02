@@ -1,6 +1,7 @@
 //! Service configuration collection
 
 use super::ais::AisConfig;
+use super::packages::PackagesConfig;
 use super::signaling::SignalingConfig;
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +29,10 @@ impl Default for MfrConfig {
 /// Collection of all service configurations
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ServicesConfig {
+    /// Optional Actor package target resolver and artifact distributor.
+    #[serde(default)]
+    pub packages: Option<PackagesConfig>,
+
     /// Signer service configuration
     #[serde(default)]
     pub signer: Option<signer::SignerServiceConfig>,

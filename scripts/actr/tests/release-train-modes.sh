@@ -1596,6 +1596,7 @@ EOF
     tools/actr/protoc-gen/web/Cargo.toml \
     crates/actr-cli/Cargo.toml \
     crates/loran-proto/Cargo.toml \
+    crates/loran-packages/Cargo.toml \
     crates/loran-signer/Cargo.toml \
     crates/loran-platform/Cargo.toml \
     crates/loran-control/Cargo.toml \
@@ -1748,6 +1749,7 @@ test_update_versions_rewrites_prerelease_embedded_versions() {
     tools/actr/protoc-gen/web/Cargo.toml \
     crates/actr-cli/Cargo.toml \
     crates/loran-proto/Cargo.toml \
+    crates/loran-packages/Cargo.toml \
     crates/loran-signer/Cargo.toml \
     crates/loran-platform/Cargo.toml \
     crates/loran-control/Cargo.toml \
@@ -2247,6 +2249,7 @@ test_release_train_delegates_cli_release_operations() {
 test_actrix_crates_publish_in_dependency_order() {
   local expected actual dependency
   expected=$(cat <<'EOF'
+loran-packages
 actrix-proto
 actrix-signer
 actrix-platform
