@@ -1,185 +1,152 @@
 # Actr Package Resolution
 
-状态：架构草案；HTTP wire format 尚未定义。
+语言：[English](package-resolution.md) | **简体中文**
 
-本文仅提供简体中文版。
+状态：`actr-packages/1` 初始草案。
 
-本文定义 `actr:` URI 的 Target、authority 的 Package service、不可变 Package 发布引用和
-`.actr` artifact 之间的职责边界。它先固定长期语义，具体 HTTP method、request/response
-schema、认证质询和错误编码由后续版本补全。
+本文定义 `actr:` URI 中的不透明 Target 如何解析为不可变的入口 `.actr` Package，并定义
+Actr Authority Discovery 所发布 Package service 的 HTTP wire format。
 
-## 1. 核心结论
+## 1. 角色与边界
 
-非空 `actr:` URI Target 标识一个由 authority 发布的**入口 Actor Package**，供 Host 安装
-并尝试启动。它不标识已经运行的 Actor instance、signaling endpoint 或当前会话。
-
-标准解析链为：
+非空 Target 标识由 authority 选择的**入口 Actor Package**。它不标识正在运行的 Actor
+instance、signaling endpoint 或 session。
 
 ```text
-actr:// authority + opaque Target
-              │
-              ▼
-/.well-known/actr
-              │  选择 rel=packages
-              ▼
-Package service
-              │  解析 Target
-              ▼
-不可变 Package 发布引用
-              │  取得 artifact
-              ▼
-根 .actr
-              │  验证并检查 Host/Profile
-              ▼
-安装并启动入口 Actor
+actr://authority/opaque-target
+        → GET /.well-known/actr
+        → 选择 rel=packages、protocol=actr-packages/1
+        → 解析完整 Target
+        → 下载不可变的 .actr artifact
+        → 验证并在兼容 Host 中启动
 ```
 
-Target **MUST NOT** 先通过运行时 `rel=discovery` 解析。`discovery` 用于 Actor 启动后按依赖、
-contract 和 capability 发现 Actor instance；它不是浏览器地址栏的 Package resolver。
+运行时 Actor discovery 发生在入口 Package 启动之后。即使同一套 Loran 部署同时实现二者，
+Package service 和 runtime discovery service 也是两个独立协议角色。
 
-## 2. Target
+## 2. 发现 Package service
 
-Target 是 `actr://<authority>/` 后经过 URI 规范化的不透明 path，例如：
+authority descriptor 使用 service link 发布 Package service：
 
-```text
-actr://example.com/echo
-actr://example.com/apps/echo
+```json
+{
+  "rel": "packages",
+  "href": "https://packages.example.com/actr/packages",
+  "protocol": "actr-packages/1"
+}
 ```
 
-通用客户端不得从 segment 位置猜测 manufacturer、Actor name、version、realm 或仓库目录。
-这些名称如何映射到发布物，由控制该 authority 的 Package service 决定。
+`href` 是 service endpoint，不是 Target 的 URL prefix。客户端必须使用下节定义的请求，不能
+把 Target path segment 直接追加到 `href`。
 
-Target 可以作为长期入口保持稳定；例如 `echo` 可以随发布策略指向当前稳定版本。但是一次
-解析的结果必须落到不可变的 Package 发布引用，不能在下载或验证过程中悄悄漂移。
+## 3. Target 解析请求
 
-以下内容不是 URI Target：
+`actr-packages/1` service 必须支持：
 
-- Actor instance identity 或 serial number；
-- signaling、STUN、TURN 或 WebRTC 地址；
-- 当前 session；
-- manifest 中依赖解析得到的运行中 Actor；
-- Package repository 内部文件路径。
-
-authority 可以选择不为某个服务器 Actor 发布公开 Target。该 Actor 的 `.actr` 仍可作为部署
-发布物或其他 Package 的锁定依赖存在；其运行实例由 runtime discovery 发现。
-
-## 3. Package service discovery
-
-客户端先取得：
-
-```text
-https://<authority>/.well-known/actr
+```http
+GET /actr/packages/resolve?target=apps%2Fecho HTTP/1.1
+Host: packages.example.com
+Accept: application/json
 ```
 
-再从 `services` 数组选择 `rel` 为 `packages` 的 endpoint。descriptor 中没有一个名为
-`packages` 的顶层字段；`packages` 是 service relation。
+`target` 必须且只能出现一次。它的值是去掉前导 `/` 的完整规范化 Target，并按 HTTP query
+value 编码。服务端将其视为不透明值，不得假设其中 segment 表示 manufacturer、version、
+realm、文件路径或 Actor identity。
 
-示意：
+解析操作安全且幂等，服务端应提供明确的 HTTP 缓存指令。公开 Target 可以匿名解析；私有
+Target 可以使用常规 HTTP 认证与授权，但秘密信息不能进入 `actr:` URI。
+
+## 4. 成功响应
+
+成功响应使用 `200 OK` 和 `application/json`，body 遵循
+[`package-resolution.schema.json`](../../contracts/actr/package-resolution.schema.json)：
 
 ```json
 {
   "version": 1,
-  "authority": "actr://example.com",
-  "services": [
-    {
-      "rel": "packages",
-      "href": "https://packages.example.com/actr",
-      "protocol": "actr-packages/1"
-    }
-  ]
-}
-```
-
-`href` 标识 Package service endpoint，不是 Target 的 URL prefix。客户端 **MUST NOT** 仅把
-`echo` 拼成 `https://packages.example.com/actr/echo`。它必须按照 `protocol` 指定的 Package
-Resolution 请求格式提交完整 Target。
-
-## 4. Package 发布引用
-
-Package service 成功解析 Target 后，应返回足以唯一选择并验证 artifact 的不可变引用。其
-逻辑信息至少包括：
-
-- Actor type；
-- 精确版本；
-- Package publisher；
-- Package digest 及算法；
-- artifact locator；
-- artifact media type 或 format。
-
-以下 JSON 仅展示逻辑形状，不是已经确定的 wire schema：
-
-```json
-{
-  "actor": "acme:echo",
-  "version": "1.2.0",
-  "publisher": "acme",
-  "digest": "sha256:0123456789abcdef...",
-  "artifact": {
-    "href": "https://cdn.example.com/actr/acme/echo/1.2.0/package.actr",
-    "mediaType": "application/octet-stream"
+  "target": "apps/echo",
+  "package": {
+    "href": "https://packages.example.com/actr/packages/artifact?target=apps%2Fecho&sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "media_type": "application/zip",
+    "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "size": 18432,
+    "profile": "keel.guest/1"
   }
 }
 ```
 
-媒体类型尚未登记；在正式定义前，实现可以使用通用二进制媒体类型。Package digest 用于
-选择、缓存和传输完整性，不能代替 `.actr` manifest signature 与 publisher trust 验证。
+- `version` 是响应格式版本，本草案固定为 `1`；
+- `target` 必须与请求中解码后的完整 Target 完全一致；
+- `href` 是本次解析选中不可变 artifact 的绝对地址；
+- `media_type` 为 `application/zip`，因为 `actr-package/1` 是 ZIP container；
+- `sha256` 覆盖 artifact 下载响应的全部字节；
+- `size` 是预期 artifact 字节数；
+- `profile` 是可选提示，可用于提前检查 Host 兼容性，但签名后的 Package manifest 才是
+  权威信息。
 
-## 5. Host 行为
+客户端必须忽略未知字段，并拒绝不支持的版本、Target 不匹配、畸形 URL、无效 digest 或
+无效 size。
 
-取得根 `.actr` 后，Host 必须按 Actor Package 规范验证容器、digest、manifest、签名、
-Workload Profile、Host API 和 capability policy。
+## 5. Artifact 下载
 
-Target 可被 authority 正常解析，不代表每个 Host 都能运行其 Package。例如：
+客户端对 `package.href` 发起 `GET`。成功响应使用 `200 OK` 和 `application/zip`。
 
-- Actrium 通常打开带 `keel.guest/1` Workload 和 `ui.render` capability 的入口 Package；
-- 基于 Wasmtime 的 Host 可以运行 `actr.component/1`；
-- Actrium 收到只支持 `actr.component/1` 的服务器 Package 时，应报告 unsupported-profile，
-  而不是把它当作可浏览页面；
-- 格式和签名有效但 capability policy 不允许时，Host 应明确拒绝启动。
+客户端必须限制下载大小，验证 `size` 和 `sha256`，然后才能把字节交给 Actor Package
+verifier。传输完整性不能代替 manifest signature、publisher trust、Workload Profile、
+Host API 和 capability policy 验证。
 
-authority 面向 Actrium 发布可导航入口时，应该让 Target 解析到 Actrium 能呈现的根 Package，
-而不是暴露一个只能远程连接的 Server Actor instance。
+Artifact URL 应采用内容寻址，因此可以使用长期 immutable cache。Loran 把选中的 digest
+写入下载 URL；如果当前配置的文件已不再匹配该 digest，下载请求会被拒绝。
 
-## 6. 与运行时 Actor discovery 的边界
+## 6. 错误
 
-应用启动后的 Actor 连接不再经过浏览器导航 Target。例如 Echo：
+- `400 Bad Request`：Target 缺失、重复或格式错误；
+- `401 Unauthorized` / `403 Forbidden`：需要认证或授权被拒绝；
+- `404 Not Found`：authority 未发布该 Target，或不可变 artifact 引用不存在；
+- `406 Not Acceptable`：没有客户端支持的响应表示；
+- `503 Service Unavailable`：已配置的 artifact storage 暂不可用。
+
+错误 body 不是成功的 Package Resolution document。
+
+## 7. Host 行为
+
+Target 成功解析不代表当前 Host 一定兼容。例如 Actrium 可以接受 `keel.guest/1`，而
+Wasmtime Host 接受 `actr.component/1`。不兼容的 Host 应报告 unsupported profile，不能把
+服务器 workload 当作可浏览页面。
+
+Echo 的预期顺序是：
 
 ```text
-用户打开 actr://example.com/echo
-  → Package service 解析 echo
-  → 取得并启动 echo-ui.actr
-  → Echo UI 根据 manifest dependency 与 contract 请求 echo service
-  → runtime discovery 找到可用的 Echo Server Actor instance
-  → signaling 建立连接
+打开 actr://example.com/echo
+  → 解析并启动 echo-ui.actr
+  → 读取它声明的 Echo dependency 与 contract
+  → runtime discovery 选择运行中的 Echo Server Actor
+  → signaling 建立 Actor 连接
 ```
 
-用户不需要打开 `actr://example.com/echo/server`。服务器实例的 identity、位置、授权和会话
-状态不会编码进公开的应用 URI。
+用户不需要访问 `actr://example.com/echo/server`。
 
-## 7. Loran 的职责
+## 8. Loran 组合方式
 
-Loran 作为完整的默认 authority 实现，可以同时提供：
+Loran 的 `loran-packages` 组件负责 Target resolution 和 artifact download。即使本机 Loran
+不提供 `/.well-known/actr`，该组件也能独立运行。默认 Loran daemon 可以同时挂载二者并通过
+`rel=packages` 发布，也可以把 Package service 指向另一 Loran 节点、对象存储 gateway 或
+CDN-backed implementation。
 
-- `/.well-known/actr` authority descriptor；
-- Package Target resolver；
-- Package metadata、索引和 release 管理；
-- `.actr` artifact 下载，或把 artifact 委派给对象存储/CDN；
-- 运行时 Actor discovery、signaling 和 ICE configuration 等独立服务。
+MFR 继续负责 publisher identity、key、signing authority 和 publication audit。即使二者可
+部署到同一进程，MFR 也不会因此成为 artifact store。
 
-这些能力可以部署在同一进程，但协议角色必须保持分离。Package Target resolution 不得因为
-Loran 的合并实现而被等同于运行时 Actor instance discovery。
+## 9. 安全考虑
 
-## 8. 后续工作
+- 生产解析与下载必须使用 HTTPS；开发实现只能对明确的 loopback authority 允许 HTTP；
+- resolver 不得把不可信 Target 直接变换为本地文件路径；Loran 只解析管理员配置的精确
+  Target mapping；
+- 客户端必须在跟随 artifact URL 前应用 redirect、response size、timeout 和 network address
+  policy；
+- 私有 Target 的 cache key 必须包含授权状态；
+- `actr:` URI 和公开解析响应都不携带 bearer secret。
 
-- 定义 `actr-packages/1` 的 HTTP method、Target 编码和响应 schema；
-- 定义 Package 发布引用的正式字段与 JSON Schema；
-- 定义版本选择、channel、缓存和 redirect 规则；
-- 定义私有 Target 的认证与授权质询；
-- 定义 not-found、unsupported-profile、digest-mismatch 等错误映射；
-- 决定是否申请专用 `.actr` media type；
-- 增加 Target 解析、artifact 替换攻击和缓存一致性测试向量。
-
-## 9. 相关文档
+## 10. 相关规范
 
 - [Actr URI Scheme](uri.zh.md)
 - [Actr Authority Discovery](authority-discovery.zh.md)

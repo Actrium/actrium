@@ -10,21 +10,25 @@ the IANA `actr` URI scheme registration.
 
 ## 1. Purpose and scope
 
-An `actr:` URI is a stable logical reference to an Actr authority or to a
-target organized by that authority. It is both:
+An `actr:` URI is a stable logical reference to an Actr authority or to an
+application entry published by that authority. It is both:
 
 - an identifier that applications can store, compare, and exchange; and
-- a bootstrap reference from which an Actr client can discover the services
-  needed to resolve and contact the target.
+- a bootstrap reference from which an Actr Host can resolve, verify, and start
+  an entry Actor Package.
 
 An `actr:` URI is not a direct signaling, WebSocket, WebRTC, STUN, or TURN
 transport address. The authority delegates those network locations through
 [Actr Authority Discovery](authority-discovery.md).
 
-This document does not yet standardize the internal structure or resolution
-semantics of the target reference. In particular, it does not assign fixed
-path positions to an Actr realm, manufacturer, Actor type, version, or serial
-number. Those semantics require a separate target-resolution specification.
+This document does not assign fixed path positions to an Actr realm,
+manufacturer, Actor type, version, or serial number. The target reference stays
+opaque and resolves to an entry Actor Package release through
+[Actr Package Resolution](package-resolution.md).
+
+An `actr:` URI does not address a running Actor instance. Instance discovery,
+routing, signaling, and session establishment after startup belong to the Actr
+runtime protocols.
 
 The keywords **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are
 to be interpreted as described by BCP 14 when they appear in uppercase.
@@ -91,17 +95,21 @@ The optional path after the authority is the target reference:
 ```text
 actr://example.com/echo
 actr://example.com/actors/echo
-actr://example.com/actors/echo/instances/1a2b3c
 ```
 
 These examples illustrate path shape only; the segment names have no meaning
 assigned by this draft.
 
 An empty target reference identifies the authority itself. A non-empty target
-reference is interpreted by the target-resolution protocol advertised by that
-authority. Generic Actr URI parsers **MUST** preserve its normalized segment
-sequence and **MUST NOT** infer realm, manufacturer, version, or Actor identity
-fields from fixed path positions.
+reference is interpreted by the authority's Package service and resolves to an
+entry Actor Package release. Generic Actr URI parsers **MUST** preserve its
+normalized segment sequence and **MUST NOT** infer realm, manufacturer,
+version, Actor identity, or repository paths from fixed path positions.
+
+A target reference **MUST NOT** resolve to a running Actor instance, signaling
+endpoint, or current session. An authority also **MUST NOT** require clients to
+append the target directly to the Package service URL; Actr Package Resolution
+defines the request format.
 
 Target segments are case-sensitive. Arbitrary octets and characters outside
 the permitted ASCII set must be represented with UTF-8 followed by
@@ -122,12 +130,15 @@ Given an `actr:` URI, a client performs these logical steps:
 3. Retrieve `https://<authority>/.well-known/actr` as defined by Actr Authority
    Discovery.
 4. Verify that the returned descriptor is bound to the original authority.
-5. Select the advertised discovery, identity, signaling, and ICE configuration
-   services needed for the operation.
-6. If the URI contains a target reference, submit that reference to the
-   authority's target-resolution service.
-7. Authenticate and authorize the caller through the selected services before
-   disclosing private target information or establishing a session.
+5. If the URI contains a target reference, select the descriptor's
+   `rel=packages` service.
+6. Submit the complete target according to Actr Package Resolution and obtain
+   an immutable Package release reference.
+7. Download the root `.actr` artifact and verify its identity, version, digest,
+   publisher signature, Workload Profile, and Host requirements.
+8. Install and start it only when the Host and local policy allow it.
+9. After startup, use manifest dependencies, contracts, and runtime discovery
+   to locate and connect to running Actor instances.
 
 The `actr:` URI therefore remains stable when an authority moves signaling or
 other infrastructure to a different network endpoint.
@@ -161,8 +172,8 @@ Conforming examples:
 | URI | Meaning at this layer |
 | --- | --- |
 | `actr://example.com` | The Actr authority `example.com`. |
-| `actr://example.com/echo` | Target reference `echo` under that authority. |
-| `actr://example.com/actors/echo` | An opaque, multi-segment target reference. |
+| `actr://example.com/echo` | The authority's Echo entry Actor Package Target. |
+| `actr://example.com/actors/echo` | An opaque, multi-segment Package Target. |
 | `actr://example.com:8443/echo` | Authority discovery uses HTTPS port 8443. |
 | `actr://[2001:db8::1]:8443/echo` | An authority expressed as an IPv6 literal. |
 
@@ -177,23 +188,21 @@ Non-conforming examples:
 | `actr://example.com/a/../b` | Dot segment. |
 | `actr://101:acme+echo@1.0.0` | Legacy syntax; not an RFC 3986 Actr authority. |
 
-## 7. Relationship to Actor identities
+## 7. Relationship to Actor Packages and instances
 
 An Actr runtime may use structured identities containing a realm, serial
 number, manufacturer, Actor type, and version. Those internal identities are
 not automatically public Actr URIs.
 
-A target-resolution service may resolve an opaque target reference to:
+A non-empty target resolves only to an entry Actor Package release. The Target
+may remain stable while release policy advances it, but each resolution result
+binds an exact immutable artifact digest and locator.
 
-- an exact Actor instance;
-- an Actor type or version range;
-- an application or service group; or
-- another authority-defined target.
-
-The future target-resolution specification must define those selectors and
-their mapping to structured Actor identities. Implementations must not expose
-an internal database key or storage-oriented string format as a public URI
-without an explicit stable mapping.
+The Host creates an Actor instance from the verified Package and deployment
+configuration. That Actor later discovers dependencies through its manifest,
+contracts, and runtime discovery. A browser user can therefore open
+`actr://example.com/echo` to start an Echo UI without navigating to a URI for a
+particular Echo Server instance.
 
 ## 8. Legacy URI migration
 

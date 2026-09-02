@@ -44,6 +44,12 @@ location_tag = "local,dev,default"
 # Generate a strong key: openssl rand -hex 32
 actrix_shared_key = "example-key-please-replace-with-secure-random-value-32chars+"
 
+# Public Actr authority discovery. Production mode requires TLS, and this URI
+# must match the advertised bind.http domain and port exactly.
+[authority]
+enabled = false
+# uri = "actr://localhost:8080"
+
 # Recording pipeline (logging + tracing)
 [recording]
 # Global sink — default for all channels. Per-channel sink overrides below.
@@ -192,6 +198,16 @@ key_ttl_seconds = 3600
 # How long to retain expired/used publish nonces, in seconds.
 # Default: 86400 (24 hours)
 # nonce_retain_secs = 86400
+
+# Actor package Target resolution and .actr downloads are an independent
+# service. They may run here even when this process does not serve the
+# authority discovery document.
+# [services.packages]
+#
+# [[services.packages.targets]]
+# target = "apps/echo"
+# artifact = "/srv/actr/packages/echo-ui-1.0.0.actr"
+# profile = "keel.guest/1"
 
 # Signaling Service Configuration (optional)
 # Service enablement is controlled by the bitmask (enable field)
