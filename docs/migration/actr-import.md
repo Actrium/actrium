@@ -107,7 +107,7 @@ documented breaking change instead of an unqualified text replacement.
 The source was checked again on 2026-09-02 before archive preparation. Its
 `main` branch had advanced from migration baseline
 `61c7c3df751f5c432e7b6b4c169cdbac2842b142` to
-`19ff662a26da356b5d631a63bb04a18682dee384`. Each of the eleven intervening
+`7a6ba0453cb93a45e6198372fc3509b7f52368ed`. Each of the twelve intervening
 commits was reviewed against the consolidated tree rather than replayed
 blindly:
 
@@ -124,6 +124,7 @@ blindly:
 | `91e0cbc9` | `81c73346` | Migrated |
 | `6e4bfd2f` | — | Not replayed on `main`; the consolidated release preparation remains isolated on its release branch |
 | `19ff662a` | `2b8b0fc5` | Migrated |
+| `7a6ba045` | `d20cae2c` | Migrated with the repository-root CI workflow mapping |
 
 The migrated commits preserve source author names and author timestamps while
 using verified GitHub noreply identities. A destination-only follow-up,
