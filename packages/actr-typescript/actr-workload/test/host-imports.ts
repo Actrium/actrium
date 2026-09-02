@@ -44,6 +44,7 @@ export const hostCalls = {
   registerStream: [] as string[],
   unregisterStream: [] as string[],
   replyPayloads: [] as Uint8Array[],
+  replyErrors: [] as unknown[],
   sendDataChunk: [] as SendDataChunkCall[],
 };
 
@@ -55,6 +56,7 @@ export function resetHostCalls(): void {
   hostCalls.registerStream.length = 0;
   hostCalls.unregisterStream.length = 0;
   hostCalls.replyPayloads.length = 0;
+  hostCalls.replyErrors.length = 0;
   hostCalls.sendDataChunk.length = 0;
 }
 
@@ -112,6 +114,14 @@ export async function reply(
 ): Promise<void> {
   record(ctxToken, 'reply');
   hostCalls.replyPayloads.push(payload);
+}
+
+export async function replyError(
+  ctxToken: bigint,
+  error: unknown,
+): Promise<void> {
+  record(ctxToken, 'replyError');
+  hostCalls.replyErrors.push(error);
 }
 
 export async function discover(

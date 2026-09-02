@@ -322,7 +322,6 @@ export function parseSystemAppType(raw: string): SystemAppType | null {{
     ? (raw as SystemAppType)
     : null;
 }}
-
 "#,
         supported_contract_name = quote_ts(SUPPORTED_CONTRACT_NAME),
         supported_contract_version = SUPPORTED_CONTRACT_VERSION,

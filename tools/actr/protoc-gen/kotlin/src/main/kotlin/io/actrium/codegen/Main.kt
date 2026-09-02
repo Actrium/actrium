@@ -202,8 +202,14 @@ private fun generateActrDispatch(
             cases.appendLine("        ByteArray(0)")
         } else {
             cases.appendLine("        val response = handler.${handlerMethod}(request, ctx)")
-            cases.appendLine("        ctx.replyRaw(response.toByteArray())")
-            cases.appendLine("        ByteArray(0)")
+            cases.appendLine("        val responseBytes = response.toByteArray()")
+            cases.appendLine("        try {")
+            cases.appendLine("            ctx.replyRaw(responseBytes)")
+            cases.appendLine("            ByteArray(0)")
+            cases.appendLine("        } catch (error: Exception) {")
+            cases.appendLine("            if (error is kotlinx.coroutines.CancellationException) throw error")
+            cases.appendLine("            responseBytes")
+            cases.appendLine("        }")
         }
         cases.appendLine("    }")
     }
@@ -215,8 +221,13 @@ private fun generateActrDispatch(
         cases.appendLine("        val actrType = ctx.resolveDependency(${kotlinStringLiteral(alias)})")
         cases.appendLine("        val target = ctx.discover(actrType)")
         cases.appendLine("        val response = ctx.callRaw(target, routeKey, $payloadType, payload, timeoutMs)")
-        cases.appendLine("        ctx.replyRaw(response)")
-        cases.appendLine("        ByteArray(0)")
+        cases.appendLine("        try {")
+        cases.appendLine("            ctx.replyRaw(response)")
+        cases.appendLine("            ByteArray(0)")
+        cases.appendLine("        } catch (error: Exception) {")
+        cases.appendLine("            if (error is kotlinx.coroutines.CancellationException) throw error")
+        cases.appendLine("            response")
+        cases.appendLine("        }")
         cases.appendLine("    }")
     }
 

@@ -68,6 +68,13 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use tracing::Instrument as _;
 
+/// Reserved guest return value for a successful EXPLICIT dispatch whose reply
+/// is still owned by a movable reply handle. Keep byte-for-byte identical to
+/// `crates/actr-framework/src/guest/wasm/adapter.rs`; protobuf wire payloads cannot
+/// start with NUL (field tags are positive), so this sentinel cannot collide
+/// with a valid encoded protobuf response.
+const DEFERRED_REPLY_SENTINEL: &[u8] = b"\0ACTR_DEFERRED_REPLY\0";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // HasData projection + host-import Accessor trait
 // ─────────────────────────────────────────────────────────────────────────────
@@ -90,7 +97,8 @@ impl HostImportsV2 for HostState {
         ctx_token: u64,
         payload: Vec<u8>,
     ) -> wasmtime::Result<Result<(), WitActrError>> {
-        if self.deliver_reply(ctx_token, Ok(Bytes::from(payload))) {
+        let delivered = self.deliver_reply(ctx_token, Ok(Bytes::from(payload)));
+        if delivered || !self.invocation_exists(ctx_token) {
             Ok(Ok(()))
         } else {
             Ok(Err(WitActrError::Internal(
@@ -104,7 +112,8 @@ impl HostImportsV2 for HostState {
         ctx_token: u64,
         error: WitActrError,
     ) -> wasmtime::Result<Result<(), WitActrError>> {
-        if self.deliver_reply(ctx_token, Err(wit_actr_error_to_proto(error))) {
+        let delivered = self.deliver_reply(ctx_token, Err(wit_actr_error_to_proto(error)));
+        if delivered || !self.invocation_exists(ctx_token) {
             Ok(Ok(()))
         } else {
             Ok(Err(WitActrError::Internal(
@@ -202,7 +211,16 @@ impl HostWithStore<HostState> for HostState {
         ctx_token: u64,
         payload: Vec<u8>,
     ) -> wasmtime::Result<Result<(), WitActrError>> {
-        let host_abi = accessor.with(|mut a| a.get().invocation_host_abi(ctx_token));
+        let (host_abi, invocation_exists) = accessor.with(|mut a| {
+            let state = a.get();
+            (
+                state.invocation_host_abi(ctx_token),
+                state.invocation_exists(ctx_token),
+            )
+        });
+        if host_abi.is_none() && !invocation_exists {
+            return Ok(Ok(()));
+        }
         let result = run_host_operation(host_abi, HostOperation::Reply(payload)).await?;
         if result.is_ok() {
             // Keep the token live until the guest dispatch export also
@@ -222,7 +240,16 @@ impl HostWithStore<HostState> for HostState {
         ctx_token: u64,
         error: WitActrError,
     ) -> wasmtime::Result<Result<(), WitActrError>> {
-        let host_abi = accessor.with(|mut a| a.get().invocation_host_abi(ctx_token));
+        let (host_abi, invocation_exists) = accessor.with(|mut a| {
+            let state = a.get();
+            (
+                state.invocation_host_abi(ctx_token),
+                state.invocation_exists(ctx_token),
+            )
+        });
+        if host_abi.is_none() && !invocation_exists {
+            return Ok(Ok(()));
+        }
         let result = run_host_operation(
             host_abi,
             HostOperation::ReplyError(wit_actr_error_to_proto(error)),
@@ -973,16 +1000,23 @@ impl WasmWorkloadV2 {
         };
 
         // Region closed: retire the token unless the guest returned the
-        // explicit-boundary marker (`bytes == []`). A generated EXPLICIT
-        // handler may move its Reply handle into a later task; the host
-        // import retires that token when the later reply is accepted.
+        // explicit-boundary marker. A generated EXPLICIT handler may move its
+        // Reply handle into a later task; the host import retires that token
+        // when the later reply is accepted.
         let dispatch_succeeded = matches!(&region, Ok(Ok(Ok(_))));
+        let returned_deferred = matches!(
+            &region,
+            Ok(Ok(Ok(bytes))) if bytes.as_slice() == DEFERRED_REPLY_SENTINEL
+        );
         let (reply_completed, reply_claimed, fallback_deliver) = if !self.poisoned {
             let state = self
                 .store
                 .as_mut()
                 .expect("serviceable wasm instance must have a Store")
                 .data_mut();
+            if returned_deferred {
+                state.claim_invocation_reply(token);
+            }
             let reply_completed = state.invocation_reply_completed(token);
             let reply_claimed = state.invocation_reply_claimed(token);
             let fallback_deliver = state.unclaimed_reply_deliver(token);
@@ -1021,7 +1055,7 @@ impl WasmWorkloadV2 {
                             });
                             true
                         });
-                    let bytes = if reply_completed || fallback_delivered {
+                    let bytes = if reply_completed || reply_claimed || fallback_delivered {
                         Vec::new()
                     } else {
                         bytes
@@ -1488,6 +1522,15 @@ impl WasmWorkloadV2 {
         }
     }
 
+    pub(crate) fn sweep_expired_deferred_replies(&mut self, now: tokio::time::Instant) -> usize {
+        let Some(store) = self.store.as_mut() else {
+            return 0;
+        };
+        store
+            .data_mut()
+            .sweep_expired_deferred_replies(crate::lifecycle::dedup::INFLIGHT_TTL, now)
+    }
+
     /// Trap recovery for the resident region: fail every still-pending reply in
     /// the region-external ledger (a trap is a whole-instance fault — siblings
     /// are collateral, not adjudicated individually), then poison + clear the
@@ -1932,8 +1975,6 @@ async fn resident_region(
                                 continue;
                             }
                         }
-                        // `ctx` (RuntimeContext) drives only the Linked path.
-                        let _ = ctx;
                         // #251 request-path diagnostics: the envelope crosses
                         // from the host into the guest right below. Info-level
                         // so the polyglot e2e's default RUST_LOG=info captures
@@ -2007,16 +2048,16 @@ async fn resident_region(
                         {
                             return RegionExit::GuestCallFailed { token, error };
                         }
+                        // #251: carried through the in-flight future so the
+                        // completion log correlates with the entry log.
+                        let dispatch_request_id = envelope.request_id.clone();
+                        let dispatch_route_key = envelope.route_key.clone();
                         let inv = invocation_ctx_to_wit(
                             &invocation,
                             token,
                             expects_response,
                             reply_enabled,
                         );
-                        // #251: carried through the in-flight future so the
-                        // completion log correlates with the entry log.
-                        let dispatch_request_id = envelope.request_id.clone();
-                        let dispatch_route_key = envelope.route_key.clone();
                         let call = wl.call_dispatch(accessor, wit_env, inv);
                         let fut = async move {
                             let outcome = tokio::select! {
@@ -2057,8 +2098,15 @@ async fn resident_region(
                         return RegionExit::GuestCallFailed { token, error };
                     }
                 };
+                let returned_deferred = matches!(
+                    &call_result,
+                    Ok(bytes) if bytes.as_slice() == DEFERRED_REPLY_SENTINEL
+                );
                 let (live, reply_completed, reply_claimed, fallback_deliver) = accessor.with(|mut a| {
                     let state = a.get();
+                    if returned_deferred {
+                        state.claim_invocation_reply(token);
+                    }
                     let reply_completed = state.invocation_reply_completed(token);
                     let reply_claimed = state.invocation_reply_claimed(token);
                     let fallback_deliver = state.unclaimed_reply_deliver(token);
@@ -2092,7 +2140,7 @@ async fn resident_region(
                     // so a caller-side timeout can be attributed to the guest
                     // vs the response send path.
                     let call_result = match (reply_completed, reply_claimed, call_result) {
-                        (true, _, Ok(_)) => Ok(Vec::new()),
+                        (true, _, Ok(_)) | (false, true, Ok(_)) => Ok(Vec::new()),
                         (false, false, Ok(bytes)) if fallback_deliver.is_some() => {
                             fallback_deliver.expect("checked above").deliver(
                                 actr_framework::ReplyOutcome {

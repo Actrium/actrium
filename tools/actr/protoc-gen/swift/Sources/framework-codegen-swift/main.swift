@@ -535,8 +535,15 @@ struct ActrFrameworkGenerator {
                   } catch {
                       throw ActrError.DecodeFailure(msg: "Failed to encode \(outputSwift) for route \\(routeKey): \\(error)")
                   }
-                  try await ctx.replyRaw(payload: encoded)
-                  return Data()
+                  do {
+                      try await ctx.replyRaw(payload: encoded)
+                      return Data()
+                  } catch {
+                      if Task.isCancelled {
+                          throw error
+                      }
+                      return encoded
+                  }
                 """
             }
         }
@@ -557,8 +564,15 @@ struct ActrFrameworkGenerator {
                       payload: payload,
                       timeoutMs: timeoutMs
                   )
-                  try await ctx.replyRaw(payload: response)
-                  return Data()
+                  do {
+                      try await ctx.replyRaw(payload: response)
+                      return Data()
+                  } catch {
+                      if Task.isCancelled {
+                          throw error
+                      }
+                      return response
+                  }
             """
         }
 

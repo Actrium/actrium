@@ -283,6 +283,10 @@ def generate_explicit_reply_helpers() -> str:
     """Generate helpers shared by EXPLICIT local dispatch branches."""
     return "\n".join(
         [
+            "# Must stay byte-for-byte identical to the Component host and Rust adapter sentinels.",
+            "# Valid protobuf wire payloads cannot start with NUL because field tags are positive.",
+            '_ACTR_DEFERRED_REPLY = b"\\x00ACTR_DEFERRED_REPLY\\x00"',
+            "",
             "def _actr_error_from_exception(error: Exception) -> Any:",
             "    _host, types = _bindings()",
             "    if _is_actr_error(error, types):",
@@ -387,7 +391,7 @@ def generate_actr_dispatch_function(
                     f"            await handler.{handler_method}(req, ctx, reply)",
                     "        except Exception as exc:",
                     "            await reply.send_error(_actr_error_from_exception(exc))",
-                    "        return b\"\"",
+                    '        return _ACTR_DEFERRED_REPLY if ctx.reply_enabled else b""',
                 ]
             )
         else:
@@ -396,7 +400,10 @@ def generate_actr_dispatch_function(
                     f"        resp = await handler.{handler_method}(req, ctx)",
                     "        response = resp.SerializeToString()",
                     "        if ctx.reply_enabled:",
-                    "            await ctx.reply_raw(response)",
+                    "            try:",
+                    "                await ctx.reply_raw(response)",
+                    "            except Exception:",
+                    "                return response",
                     "            return b\"\"",
                     "        return response",
                 ]
@@ -414,7 +421,10 @@ def generate_actr_dispatch_function(
                 "        target = await ctx.discover(actr_type)",
                 f"        response = await ctx.call_raw(target, route_key, payload, timeout_ms, {payload_type})",
                 "        if ctx.reply_enabled:",
-                "            await ctx.reply_raw(response)",
+                "            try:",
+                "                await ctx.reply_raw(response)",
+                "            except Exception:",
+                "                return response",
                 "            return b\"\"",
                 "        return response",
             ]

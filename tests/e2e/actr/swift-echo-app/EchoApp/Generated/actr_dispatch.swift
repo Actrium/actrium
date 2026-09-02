@@ -33,8 +33,15 @@ public func actrDispatch(
                 msg: "Failed to encode Echoapp_LocalEchoResponse for route \(routeKey): \(error)"
             )
         }
-        try await ctx.replyRaw(payload: encoded)
-        return Data()
+        do {
+            try await ctx.replyRaw(payload: encoded)
+            return Data()
+        } catch {
+            if Task.isCancelled {
+                throw error
+            }
+            return encoded
+        }
     case "echo.EchoService.Echo":
         let actrType = try await ctx.resolveDependency(alias: "echo")
         let target = try await ctx.discover(targetType: actrType)
@@ -45,8 +52,15 @@ public func actrDispatch(
             payload: payload,
             timeoutMs: timeoutMs
         )
-        try await ctx.replyRaw(payload: response)
-        return Data()
+        do {
+            try await ctx.replyRaw(payload: response)
+            return Data()
+        } catch {
+            if Task.isCancelled {
+                throw error
+            }
+            return response
+        }
     default:
         throw ActrError.UnknownRoute(msg: "Unknown route: \(routeKey)")
     }

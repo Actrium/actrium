@@ -118,7 +118,7 @@ class GeneratorTests(unittest.TestCase):
         self.assertIn("response = resp.SerializeToString()", content)
         self.assertIn("if ctx.reply_enabled:", content)
         self.assertIn("await ctx.reply_raw(response)", content)
-        self.assertIn('return b""', content)
+        self.assertIn("except Exception:", content)
         self.assertIn("raise UnknownRoute(route_key)", content)
 
         # Must NOT contain forbidden symbols.
@@ -169,13 +169,8 @@ class GeneratorTests(unittest.TestCase):
             'response = await ctx.call_raw(target, route_key, payload, timeout_ms, "rpcReliable")',
             content,
         )
-        self.assertIn(
-            "if ctx.reply_enabled:\n"
-            "            await ctx.reply_raw(response)\n"
-            "            return b\"\"\n"
-            "        return response",
-            content,
-        )
+        self.assertIn("if ctx.reply_enabled:", content)
+        self.assertIn("await ctx.reply_raw(response)", content)
 
     def test_remote_dispatch_preserves_rpc_signal_payload_type(self) -> None:
         remote_route = {
@@ -276,7 +271,22 @@ class GeneratorTests(unittest.TestCase):
         self.assertIn("from actr_workload import Reply", content)
         self.assertIn("reply = Reply(ctx,", content)
         self.assertIn("await handler.echo_service_echo(req, ctx, reply)", content)
-        self.assertIn('return b""', content)
+        self.assertIn("from actr_workload.context import _bindings", content)
+        self.assertIn("def _actr_error_from_exception(error: Exception) -> Any:", content)
+        self.assertIn("return types.ActrError_Internal(message)", content)
+        self.assertIn("reply = Reply(ctx,", content)
+        self.assertIn("reply_sent = False", content)
+        self.assertIn("reply.send = send_once  # type: ignore[method-assign]", content)
+        self.assertIn("reply.send_error = send_error_once  # type: ignore[method-assign]", content)
+        self.assertIn("try:\n            await handler.echo_service_echo(req, ctx, reply)", content)
+        self.assertIn(
+            "except Exception as exc:\n            await reply.send_error(_actr_error_from_exception(exc))",
+            content,
+        )
+        self.assertIn("_ACTR_DEFERRED_REPLY", content)
+        self.assertIn(
+            'return _ACTR_DEFERRED_REPLY if ctx.reply_enabled else b""', content
+        )
 
 
 if __name__ == "__main__":

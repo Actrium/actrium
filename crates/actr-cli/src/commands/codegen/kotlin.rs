@@ -190,14 +190,11 @@ impl KotlinGenerator {
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let version = stdout
-            .split_whitespace()
-            .find(|part| part.chars().next().is_some_and(|ch| ch.is_ascii_digit()))
-            .ok_or_else(|| {
-                ActrCliError::command_error(format!(
-                    "Could not determine {PROTOC_GEN_ACTR_FRAMEWORK_KOTLIN} version"
-                ))
-            })?;
+        let version = super::parse_plugin_version(&stdout).ok_or_else(|| {
+            ActrCliError::command_error(format!(
+                "Could not determine {PROTOC_GEN_ACTR_FRAMEWORK_KOTLIN} version"
+            ))
+        })?;
 
         if version == required_version {
             return Ok(());

@@ -25,6 +25,7 @@ class _Invocation:
     caller_id = "caller"
     request_id = "request"
     ctx_token = 7
+    reply_enabled = True
 
 
 def _minimal_workload_source() -> str:
@@ -109,6 +110,27 @@ class WorkloadAuthoringTests(unittest.TestCase):
         self.assertEqual(response, b"response")
         self.assertEqual(len(captured), 1)
         self.assertIsInstance(captured[0][-1], RpcSignal)
+
+    def test_reply_send_error_forwards_explicit_error(self) -> None:
+        from actr_workload import ActrContext, Reply
+
+        captured: list[tuple[object, ...]] = []
+        error = {"tag": "internal", "val": "deferred failure"}
+
+        async def reply_error(*args: object) -> None:
+            captured.append(args)
+
+        host = SimpleNamespace(reply_error=reply_error)
+
+        async def exercise() -> None:
+            ctx = ActrContext(_Invocation())
+            reply = Reply(ctx, lambda value: value)
+            await reply.send_error(error)
+
+        with patch("actr_workload.context._bindings", return_value=(host, None)):
+            asyncio.run(exercise())
+
+        self.assertEqual(captured, [(7, error)])
 
     def test_authoring_workload_wraps_invocation_context(self) -> None:
         from actr_workload import ActrContext, Workload

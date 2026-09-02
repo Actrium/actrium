@@ -17,7 +17,9 @@ pub const DISPATCH_SPEC_SCHEMA_VERSION: &str = "v1";
 pub const DISPATCH_SPEC_FILE: &str = "actr-dispatch-spec.v1.json";
 
 /// How the callee delivers an RPC response (RFC-0323), mirrored from the
-/// protobuf `actr.reply_mode` method option. `Return` is the default and
+/// protobuf `actr.reply_mode` method option. This is a closed wire domain:
+/// the protobuf enum has exactly `RETURN` and `EXPLICIT`, so new values
+/// require an explicit protocol/codegen update. `Return` is the default and
 /// keeps the pre-RFC-0323 behavior; `Explicit` hands the callee a movable
 /// reply handle so it may return before the reply is produced.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

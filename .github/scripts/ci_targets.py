@@ -215,7 +215,7 @@ def detect_targets(changed_files: list[str], full_run: bool) -> tuple[dict[str, 
             reasons.append(f"python_codegen:{path}")
             continue
 
-        if path.startswith("examples/actr/python/echo-workload/"):
+        if path.startswith("examples/actr/python/"):
             targets["python_workload"] = True
             reasons.append(f"python_workload:{path}")
             continue
