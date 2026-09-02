@@ -101,3 +101,31 @@ documented breaking change instead of an unqualified text replacement.
 - `git log --follow` crosses the relocation for representative files.
 - `cargo metadata --no-deps` resolves the relocated workspace.
 - Targeted checks run for the Actr workspace after metadata resolution.
+
+## Final incremental synchronization
+
+The source was checked again on 2026-09-02 before archive preparation. Its
+`main` branch had advanced from migration baseline
+`61c7c3df751f5c432e7b6b4c169cdbac2842b142` to
+`19ff662a26da356b5d631a63bb04a18682dee384`. Each of the eleven intervening
+commits was reviewed against the consolidated tree rather than replayed
+blindly:
+
+| Source commit | Consolidated commit | Disposition |
+| --- | --- | --- |
+| `76b52313` | `dedefa89` | Migrated with the Loran signaling path mapping |
+| `87f2a6ee` | `0bdd56c6` | Migrated with the C ABI package path mapping |
+| `b19f03ab` | `581f8989` | Migrated and reconciled with the unified Actor package layout |
+| `61bc611f` | — | Superseded by the consolidated repository's explicit Wasmtime `46.0.3` security and MSRV policy |
+| `812c12c4` | `e23a0797` | Migrated across the language package mappings |
+| `9dbd215f` | `ce6e1b78` | Migrated |
+| `0897d992` | `dfa7a26e` | Migrated |
+| `f9591801` | `f1401b86` | Migrated with consolidated package and tool paths |
+| `91e0cbc9` | `81c73346` | Migrated |
+| `6e4bfd2f` | — | Not replayed on `main`; the consolidated release preparation remains isolated on its release branch |
+| `19ff662a` | `2b8b0fc5` | Migrated |
+
+The migrated commits preserve source author names and author timestamps while
+using verified GitHub noreply identities. A destination-only follow-up,
+`79417247`, normalizes the generated TypeScript contract terminator so the
+checked-in output and generator agree.
