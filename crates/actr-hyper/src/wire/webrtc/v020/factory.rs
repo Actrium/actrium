@@ -19,6 +19,7 @@ use std::sync::Arc;
 #[cfg(feature = "test-utils")]
 use actr_protocol::ActrId;
 use actr_protocol::TurnCredential;
+use futures_util::FutureExt;
 use webrtc::error::Error as RtcError;
 use webrtc::peer_connection::{
     PeerConnection, PeerConnectionBuilder, RTCBundlePolicy, RTCConfiguration,
@@ -274,7 +275,10 @@ impl PeerConnectionFactory {
                 .with_reactor_pool_size(self.runtime_config.reactor_pool_size());
         }
 
-        let pc = builder.build().await?;
+        // The builder's async state includes the full ICE/DTLS/SCTP setup.
+        // Erase it at this boundary as well so callers that add request-level
+        // deadline state do not inline another large future into their stack.
+        let pc = builder.build().boxed().await?;
         Ok(Arc::new(pc))
     }
 }

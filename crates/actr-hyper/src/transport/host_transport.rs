@@ -53,7 +53,7 @@
 //! ```
 
 use super::correlation::{CompleteOutcome, RpcCorrelation};
-use super::{DataLane, MpscLane, NetworkError, NetworkResult};
+use super::{DataLane, MpscLane, NetworkError, NetworkResult, RpcDeadline};
 use actr_framework::Bytes;
 use actr_protocol::{ActrError, PayloadType, RpcEnvelope};
 use std::collections::HashMap;
@@ -315,33 +315,59 @@ impl HostTransport {
         feature = "opentelemetry",
         tracing::instrument(skip_all, name = "HostTransport.send_request")
     )]
+    #[cfg(any(test, feature = "test-utils"))]
     pub async fn send_request(
         &self,
         payload_type: PayloadType,
         identifier: Option<String>,
         envelope: RpcEnvelope,
     ) -> actr_protocol::ActorResult<Bytes> {
-        // Sender-side deadline validation (#254): a request must carry a
-        // positive timeout. Rejecting here also avoids the `as u64` sign
-        // wrap for negative values. Receivers stay permissive.
-        let timeout = super::validate_rpc_timeout_ms(envelope.timeout_ms)?;
-
-        // Register the pending entry first; the guard removes it on every
-        // exit path below (lane lookup failure, send failure, timeout), so
-        // unanswered requests cannot accumulate in the map.
-        let pending = self.correlation.register(envelope.request_id.clone(), ());
-
-        // Send
-        let lane = self
-            .get_lane(payload_type, identifier)
+        let deadline = RpcDeadline::from_timeout_ms(envelope.timeout_ms)?;
+        self.send_request_until(payload_type, identifier, envelope, deadline)
             .await
-            .map_err(ActrError::from)?;
-        lane.send_envelope(envelope)
-            .await
-            .map_err(ActrError::from)?;
+    }
 
-        // Wait for response
-        pending.wait(timeout).await
+    /// Send a request using a deadline that was created by the API entry
+    /// point.  Lane lookup, channel admission, the send, and response waiting
+    /// all consume this same absolute budget.
+    pub(crate) async fn send_request_until(
+        &self,
+        payload_type: PayloadType,
+        identifier: Option<String>,
+        envelope: RpcEnvelope,
+        deadline: RpcDeadline,
+    ) -> actr_protocol::ActorResult<Bytes> {
+        deadline.ensure_remaining()?;
+        let operation = async {
+            // Register the pending entry before any awaited setup.  The RAII
+            // guard removes it if lane lookup, channel admission, response
+            // waiting, or cancellation exits this operation.
+            let pending = self.correlation.register(envelope.request_id.clone(), ());
+
+            let lane = self
+                .get_lane(payload_type, identifier)
+                .await
+                .map_err(ActrError::from)?;
+            deadline.ensure_remaining()?;
+            lane.send_envelope(envelope)
+                .await
+                .map_err(ActrError::from)?;
+
+            // The outer timeout owns the combined send + response budget;
+            // do not start another relative timeout here.
+            pending.recv().await
+        };
+
+        match crate::timer::timeout_at(
+            crate::timer::ids::HOST_REQUEST_DEADLINE,
+            deadline.instant(),
+            operation,
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(ActrError::TimedOut),
+        }
     }
 
     /// Send one-way message
@@ -357,6 +383,39 @@ impl HostTransport {
     ) -> NetworkResult<()> {
         let lane = self.get_lane(payload_type, identifier).await?;
         lane.send_envelope(envelope).await
+    }
+
+    /// Send a one-way message under a caller-owned absolute deadline.
+    pub(crate) async fn send_message_until(
+        &self,
+        payload_type: PayloadType,
+        identifier: Option<String>,
+        envelope: RpcEnvelope,
+        deadline: RpcDeadline,
+    ) -> NetworkResult<()> {
+        deadline
+            .ensure_remaining()
+            .map_err(|error| NetworkError::TimeoutError(error.to_string()))?;
+        let operation = async {
+            let lane = self.get_lane(payload_type, identifier).await?;
+            deadline
+                .ensure_remaining()
+                .map_err(|error| NetworkError::TimeoutError(error.to_string()))?;
+            lane.send_envelope(envelope).await
+        };
+
+        match crate::timer::timeout_at(
+            crate::timer::ids::OUTBOUND_TELL_DEADLINE,
+            deadline.instant(),
+            operation,
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(NetworkError::TimeoutError(
+                "outbound tell timed out".to_string(),
+            )),
+        }
     }
 
     /// Receive one message (select first available from all channels)

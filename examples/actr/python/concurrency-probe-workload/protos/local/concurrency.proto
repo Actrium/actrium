@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package concurrency;
+
+message ProbeRequest {
+  uint32 caller_serial = 1;
+}
+
+message ProbeResponse {
+  uint32 max_seen = 1;
+}
+
+message BoomRequest {}
+
+message BoomResponse {}
+
+service ProbeService {
+  rpc InflightProbe(ProbeRequest) returns (ProbeResponse);
+  rpc BoomAfterAwait(BoomRequest) returns (BoomResponse);
+}

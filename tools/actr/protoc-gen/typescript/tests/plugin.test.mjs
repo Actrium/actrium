@@ -193,7 +193,19 @@ service LocalService {
     dispatcher,
     /await handler\.localServiceTranscode\(req, ctx, replyHandle\)/,
   );
-  assert.match(dispatcher, /return new Uint8Array\(\)/);
+  assert.match(dispatcher, /function actrErrorFromThrown\(error: unknown\): ActrError/);
+  assert.match(dispatcher, /let replySent = false/);
+  assert.match(dispatcher, /replyHandle\.send = async \(response: .*Response\) =>/);
+  assert.match(dispatcher, /replyHandle\.sendError = async \(error: ActrError\) =>/);
+  assert.match(
+    dispatcher,
+    /try {\s*await handler\.localServiceTranscode\(req, ctx, replyHandle\);\s*} catch \(error\) {\s*await replyHandle\.sendError\(actrErrorFromThrown\(error\)\);/s,
+  );
+  assert.match(dispatcher, /const ACTR_DEFERRED_REPLY_SENTINEL = new Uint8Array\(\[/);
+  assert.match(
+    dispatcher,
+    /return ctx\.replyEnabled \? ACTR_DEFERRED_REPLY_SENTINEL : new Uint8Array\(\)/,
+  );
   assert.doesNotMatch(dispatcher, /const resp = await handler\.localServiceTranscode/);
 });
 

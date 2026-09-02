@@ -146,7 +146,7 @@ impl Deliver for WasmReplyDeliver {
             }
         };
         if let Err(error) = result {
-            tracing::error!(?error, "Rust guest reply could not reach the host");
+            panic!("Rust guest reply could not reach the host: {error:?}");
         }
     }
 }

@@ -461,7 +461,7 @@ private final class ProbeLifecycleAdapter: Workload, @unchecked Sendable {
             handler: handler,
             routeKey: envelope.routeKey,
             payload: envelope.payload,
-            timeoutMs: 30_000
+            timeoutMs: envelope.timeoutMs
         )
     }
 }

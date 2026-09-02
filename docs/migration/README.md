@@ -15,6 +15,7 @@ This directory holds import maps, compatibility notes, and cutover checklists.
 The Actr/Loran source tree, Keel, and Actro have completed the history-import
 stage. Keel and Actro have also been relocated into the shared monorepo shape.
 See the [Actr import plan](actr-import.md), [Keel import record](keel-import.md),
-and [Actro import record](actro-import.md). The Actrix-to-Loran and
+the [Actro import record](actro-import.md), and the
+[source repository archive checklist](source-archive-readiness.md). The Actrix-to-Loran and
 Actro-to-Actrium product-facing renames remain compatibility-aware work under
 step 5.

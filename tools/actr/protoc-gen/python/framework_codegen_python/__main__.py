@@ -56,7 +56,9 @@ def main() -> int:
     try:
         validate_spec_hash(spec, spec_hash)
     except ValueError as exc:
-        response.error = str(exc)
+        response.error = (
+            f"{exc}; rerun `actr gen` to refresh generated metadata"
+        )
         sys.stdout.buffer.write(response.SerializeToString())
         return 0
 

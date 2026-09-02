@@ -297,6 +297,12 @@ public final class ActrCabiNode: @unchecked Sendable {
         if code != 0 { throw ActrCabiError.runtimeInit(code) }
     }
 
+    /// Build a node from a config file.
+    ///
+    /// The node carries the placeholder identity `local:Client:0.0.0` until
+    /// `withActorType(_:)` overrides it. Linked apps that rely on
+    /// ACL-filtered discovery must call `withActorType(_:)` between this
+    /// method and `linkWorkload(name:)`.
     public func fromConfig(path: String) async throws {
         try withLockedState { state in
             guard case .empty = state else {
@@ -321,6 +327,35 @@ public final class ActrCabiNode: @unchecked Sendable {
             resetState()
             throw error
         }
+    }
+
+    /// Set the identity the linked workload registers with.
+    ///
+    /// `actorType` must use the `manufacturer:name:version` representation.
+    /// Call after `fromConfig(path:)` and before `linkWorkload(name:)`;
+    /// without this call the node registers with the placeholder identity
+    /// `local:Client:0.0.0`, which actrix ACL filtering rejects. On failure
+    /// the node is reset and must be rebuilt with `fromConfig(path:)`.
+    public func withActorType(_ actorType: String) throws {
+        let initHandle = try withLockedState { state -> UnsafeMutableRawPointer in
+            guard case let .initialized(handle) = state else {
+                throw ActrCabiError.invalidState(expected: "initialized")
+            }
+            state = .initializing
+            return handle
+        }
+        defer { actr_release_handle(initHandle) }
+        let newHandle = actorType.withCString { typePtr in
+            actr_node_with_actor_type(initHandle, typePtr, actorType.utf8.count)
+        }
+        guard let newHandle else {
+            resetState()
+            throw ActrCabiError.generic(
+                code: -50,
+                message: "invalid actor type or init handle: \(actorType)"
+            )
+        }
+        setState(.initialized(newHandle))
     }
 
     public func linkWorkload(name: String) async throws {

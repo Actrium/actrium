@@ -1890,7 +1890,6 @@ dependencies = [
  "ed25519-dalek",
  "libloading",
  "prost",
- "serde",
  "serde_json",
  "tempfile",
  "tokio",

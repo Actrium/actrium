@@ -45,6 +45,12 @@ use super::context::{WasmContext, proto_actr_error_to_wit, wit_actr_error_to_pro
 use super::generated::actr::workload::host as wit_host;
 use super::generated::actr::workload::types as wit_types;
 
+/// Reserved return value used by Component Model dispatchers to tell the host
+/// that an EXPLICIT reply remains outstanding after dispatch returns.
+// Must stay byte-for-byte identical to the Component host's sentinel. A
+// protobuf wire payload cannot start with NUL because field tags are positive.
+const DEFERRED_REPLY_SENTINEL: &[u8] = b"\0ACTR_DEFERRED_REPLY\0";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Singleton workload cell
 // ─────────────────────────────────────────────────────────────────────────────
@@ -279,19 +285,6 @@ pub async fn run_dispatch<W: Workload>(
     let reply_mode =
         <W::Dispatcher as MessageDispatcher>::reply_mode_for_route(&envelope.route_key);
     match <W::Dispatcher as MessageDispatcher>::dispatch(workload, envelope, &ctx).await {
-        Ok(bytes) if reply_mode == ReplyMode::Return && ctx.reply_enabled() => {
-            guest_log(
-                ctx.ctx_token,
-                "info",
-                format!(
-                    "wasm guest response generated: request_id={request_id} route_key={route_key} response_len={}",
-                    bytes.len(),
-                ),
-            )
-            .await;
-            ctx.reply_raw(bytes).await.map_err(actr_error_to_wit)?;
-            Ok(Vec::new())
-        }
         Ok(bytes) => {
             guest_log(
                 ctx.ctx_token,
@@ -302,7 +295,20 @@ pub async fn run_dispatch<W: Workload>(
                 ),
             )
             .await;
-            Ok(bytes.to_vec())
+            if reply_mode == ReplyMode::Explicit && ctx.reply_enabled() {
+                Ok(DEFERRED_REPLY_SENTINEL.to_vec())
+            } else if reply_mode == ReplyMode::Return && ctx.reply_enabled() {
+                let fallback = bytes.clone();
+                match ctx.reply_raw(bytes).await {
+                    Ok(()) => Ok(Vec::new()),
+                    Err(error) => {
+                        tracing::error!(?error, "Rust guest return reply could not reach the host");
+                        Ok(fallback.to_vec())
+                    }
+                }
+            } else {
+                Ok(bytes.to_vec())
+            }
         }
         Err(e) => {
             guest_log(

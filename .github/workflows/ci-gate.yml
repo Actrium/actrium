@@ -748,7 +748,7 @@ jobs:
           test -f /tmp/actr-workload-bindings/actr_workload_bindings/exports/workload.py
           test -f /tmp/actr-workload-bindings/actr_workload_bindings/imports/host.py
       - name: Compile Python sources
-        run: python -m compileall packages/actr-python/actr-workload/src examples/actr/python/echo-workload/workload.py
+        run: python -m compileall packages/actr-python/actr-workload/src examples/actr/python/echo-workload/workload.py examples/actr/python/concurrency-probe-workload/workload.py
       - name: Build Python echo workload
         working-directory: examples/actr/python/echo-workload
         run: ./build.sh package
@@ -765,7 +765,7 @@ jobs:
     name: Swift
     needs: determine
     if: needs.determine.outputs.swift_binding == 'true'
-    runs-on: macos-arm64-larger
+    runs-on: macos-latest
     permissions:
       contents: read
     steps:
