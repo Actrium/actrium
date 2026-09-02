@@ -156,6 +156,7 @@ impl<M> RpcCorrelation<M> {
     }
 
     /// Number of in-flight entries.
+    #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn len(&self) -> usize {
         lock_ignore_poison(&self.inner).len()
     }

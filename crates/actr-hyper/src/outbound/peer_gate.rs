@@ -7,10 +7,14 @@
 
 use super::ensure_stream_payload_type;
 use crate::lifecycle::SendProjection;
-use crate::transport::correlation::{CompleteOutcome, PendingRequestsMap, RpcCorrelation};
+#[cfg(any(test, feature = "test-utils"))]
+use crate::transport::DATA_CHUNK_SEND_TIMEOUT;
+use crate::transport::correlation::PendingRequestsMap;
+#[cfg(any(test, feature = "test-utils"))]
+use crate::transport::correlation::{CompleteOutcome, RpcCorrelation};
 use crate::transport::{
-    DATA_CHUNK_SEND_TIMEOUT, Dest, DestTransportRef, NetworkResult, PayloadTypeExt, PeerTransport,
-    RpcDeadline, SentTransportSlot, WireIdentity,
+    Dest, DestTransportRef, NetworkResult, PayloadTypeExt, PeerTransport, RpcDeadline,
+    SentTransportSlot, WireIdentity,
 };
 use actr_framework::{Bytes, MediaSample};
 use actr_protocol::prost::Message as ProstMessage;
@@ -21,7 +25,9 @@ use actr_protocol::{
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Mutex, oneshot, watch};
+#[cfg(any(test, feature = "test-utils"))]
+use tokio::sync::oneshot;
+use tokio::sync::{Mutex, watch};
 
 /// Preserve in-flight reliable RPCs across a brief sendability dip, but do not
 /// let a remote-side recovery leave response waits parked until their much
@@ -865,6 +871,7 @@ impl PeerGate {
             )
         )
     )]
+    #[cfg(any(test, feature = "test-utils"))]
     pub async fn send_request_with_type(
         &self,
         target: &ActrId,
@@ -1228,6 +1235,7 @@ impl PeerGate {
     ///
     /// # Implementation Note
     /// Sends via PeerTransport using WebRTC DataChannel or WebSocket
+    #[cfg(any(test, feature = "test-utils"))]
     pub async fn send_data_chunk(
         &self,
         target: &ActrId,
@@ -1245,6 +1253,7 @@ impl PeerGate {
         .await
     }
 
+    #[cfg(any(test, feature = "test-utils"))]
     async fn send_data_chunk_with_timeout(
         &self,
         target: &ActrId,
