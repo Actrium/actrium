@@ -765,7 +765,7 @@ jobs:
     name: Swift
     needs: determine
     if: needs.determine.outputs.swift_binding == 'true'
-    runs-on: macos-arm64-larger
+    runs-on: macos-latest
     permissions:
       contents: read
     steps:
