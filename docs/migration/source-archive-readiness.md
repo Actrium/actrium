@@ -10,7 +10,7 @@ consolidated into `Actrium/actrium`.
 
 | Repository | `main` tip | Open issues | Open pull requests | State |
 | --- | --- | ---: | ---: | --- |
-| `Actrium/actr` | `7a6ba0453cb93a45e6198372fc3509b7f52368ed` | 1 | 14 | Private, active |
+| `Actrium/actr` | `7a6ba0453cb93a45e6198372fc3509b7f52368ed` | 1 | 16 | Private, active |
 | `Actrium/keel` | `296ed6748b8749a0b8de6f78d127ce2f9474805c` | 0 | 0 | Private, active |
 | `Actrium/actro` | `755dea237b079b98f364634e83b6e0fdc88fd734` | 0 | 0 | Private, active |
 
@@ -27,7 +27,7 @@ required immediately before archive execution.
   review and synchronize the new range before continuing.
 - Resolve Actr issue `#667` explicitly by transferring it, closing it with a
   destination link, or retaining it as an intentionally archived record.
-- Resolve Actr's fourteen open pull requests explicitly. A pull request cannot
+- Resolve Actr's sixteen open pull requests explicitly. A pull request cannot
   be transferred like an issue; merge it, close it with a destination link, or
   retain it as an intentionally archived record.
 - Add a concise source-repository notice pointing contributors to
