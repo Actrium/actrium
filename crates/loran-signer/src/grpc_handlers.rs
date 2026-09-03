@@ -129,7 +129,14 @@ impl Signer for SignerGrpcService {
             .await
             .map_err(|e| Status::unauthenticated(format!("Authentication failed: {e}")))?;
 
-        // Check whether the key is still valid within the tolerance period
+        // A key that has passed `expires_at` must not mint anything.
+        //
+        // Verifier caches drop verifying keys at
+        // `expires_at` with no tolerance, so a signature created now would be
+        // a born-invalid credential that fails every handshake with 401.
+        // The tolerance window below only keeps key
+        // material readable for `get_verifying_key` and cleanup; it never
+        // extends the signing window.
         let key_record = self
             .storage
             .get_key_record(key_id)
@@ -140,16 +147,18 @@ impl Signer for SignerGrpcService {
         if key_record.expires_at > 0 {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs();
 
-            if key_record.expires_at + self.tolerance_seconds < now {
-                crate::recording::warn!("Key {} has expired beyond tolerance period", key_id);
-                return Err(Status::not_found(format!("Key {key_id} has expired")));
-            }
-
-            if key_record.expires_at < now {
-                crate::recording::warn!("Key {} is in tolerance period, signing allowed", key_id);
+            if crate::key_expired_for_signing(key_record.expires_at, now) {
+                crate::recording::warn!(
+                    "Key {} has expired; refusing to sign (expired_at={})",
+                    key_id,
+                    key_record.expires_at
+                );
+                return Err(Status::failed_precondition(format!(
+                    "Key {key_id} has expired; rotate before signing"
+                )));
             }
         }
 
