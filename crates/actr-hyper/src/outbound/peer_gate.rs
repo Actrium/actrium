@@ -329,9 +329,15 @@ impl PeerGate {
     }
 
     /// Install the workload hook callback used to mirror synchronous
-    /// delivery-uncertainty failures to hook observers.
+    /// delivery-uncertainty failures to hook observers. Installing twice is a
+    /// caller bug: the first callback is retained and the ignored
+    /// re-installation is logged so the lost update stays observable.
     pub fn set_hook_callback(&self, callback: crate::wire::webrtc::HookCallback) {
-        let _ = self.hook_callback.set(callback);
+        if self.hook_callback.set(callback).is_err() {
+            tracing::warn!(
+                "workload hook callback already installed; first callback retained, ignoring re-installation"
+            );
+        }
     }
 
     /// Mirror a synchronous `DeliveryUncertain` to hook observers. The send
@@ -1090,7 +1096,10 @@ impl PeerGate {
         // re-attempt is safe even for one-shot sends: it recovers pre-send
         // races (a lane invalidated between readiness and submission) without
         // weakening the at-most-once contract. Ambiguous (`Unknown`) attempts
-        // still surface `DeliveryUncertain` with no replay.
+        // still surface `DeliveryUncertain` with no replay. Worst case this
+        // boundary submits a payload to a physical transport at most twice
+        // per call (initial attempt + one safe reattempt); outer retry
+        // policies multiply that bound by their own attempt counts.
         const MAX_SAFE_REATTEMPTS: u32 = 1;
         let mut reattempts = 0u32;
         loop {
