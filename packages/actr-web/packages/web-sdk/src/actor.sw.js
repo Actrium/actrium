@@ -400,6 +400,10 @@ function installActrHostGlobals() {
   console.log('[SW][WBG] actrHost* globals installed (γ-unified, request_id-threaded)');
 }
 
+// @host-error-map begin
+// Extraction markers for host-error-map.test.js: the service worker is a
+// standalone classic script, so its tests load this exact function body from
+// the shipped bytes rather than duplicating it.
 function mapHostErrorToActr(e) {
   // sw-host's `actr_error_to_js` attaches `actrErrorTag` + message.
   // actr-web-abi `ActrError` variant serde tags are kebab-case; we
@@ -430,6 +434,7 @@ function mapHostErrorToActr(e) {
   }
   return { [tag]: msg };
 }
+// @host-error-map end
 
 // ─────────────────────────────────────────────────────────────────────────
 // Main bootstrap: load sw-host, load WBG guest, bridge them.

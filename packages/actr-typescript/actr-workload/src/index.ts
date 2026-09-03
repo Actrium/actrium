@@ -10,7 +10,7 @@ import {
   sendDataChunk as hostSendDataChunk,
   tell as hostTell,
   unregisterStream as hostUnregisterStream,
-} from 'actr:workload/host@0.6.0';
+} from 'actr:workload/host@0.7.0';
 
 export type PayloadBytes = Uint8Array | ArrayBuffer | ArrayLike<number>;
 

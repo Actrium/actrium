@@ -400,6 +400,9 @@ function installActrHostGlobals() {
   console.log('[SW][WBG] actrHost* globals installed (γ-unified, request_id-threaded)');
 }
 
+// @host-error-map begin
+// Extraction markers for the web-sdk's host-error-map.test.js: this CLI
+// runtime copy must stay byte-identical to the web-sdk mapping function.
 function mapHostErrorToActr(e) {
   // sw-host's `actr_error_to_js` attaches `actrErrorTag` + message.
   // actr-web-abi `ActrError` variant serde tags are kebab-case; we
@@ -430,6 +433,7 @@ function mapHostErrorToActr(e) {
   }
   return { [tag]: msg };
 }
+// @host-error-map end
 
 // ─────────────────────────────────────────────────────────────────────────
 // Main bootstrap: load sw-host, load WBG guest, bridge them.
