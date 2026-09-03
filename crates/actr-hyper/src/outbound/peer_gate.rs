@@ -1337,14 +1337,30 @@ impl PeerGate {
         envelope: RpcEnvelope,
         send_timeout: Option<Duration>,
     ) -> ActorResult<()> {
-        // Keep the test-only compatibility entry point on the same one-shot,
-        // progress-aware path as production Tell. This prevents a caller
-        // timeout from flattening an interrupted write into retryable
-        // `TimedOut`.
-        let deadline =
-            RpcDeadline::from_duration(send_timeout.unwrap_or(crate::transport::TELL_SEND_TIMEOUT));
-        self.send_tell_with_type_until(target, payload_type, envelope, deadline)
-            .await
+        // Explicit caller deadlines use the one-shot, progress-aware Tell
+        // path so cancellation after local submission is terminal
+        // `DeliveryUncertain`, never a retryable `TimedOut`. The no-deadline
+        // compatibility entry point retains the historical per-payload retry
+        // policy used by the low-level RpcSignal tests and callers.
+        if let Some(send_timeout) = send_timeout {
+            let deadline = RpcDeadline::from_duration(send_timeout);
+            return self
+                .send_tell_with_type_until(target, payload_type, envelope, deadline)
+                .await;
+        }
+
+        let envelope = Self::stamp_envelope_direction(envelope, Direction::Tell);
+        let data = Self::serialize_envelope(&envelope);
+        let dest = Self::actr_id_to_dest(target);
+        let admission = self.preflight_send(target, &dest).await?;
+        self.send_with_retry_for_operation(
+            &dest,
+            payload_type,
+            &data,
+            admission,
+            &envelope.request_id,
+        )
+        .await
     }
 
     /// S6-10: v0.20 `send_media_sample` — the peer's outbound track writer
