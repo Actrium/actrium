@@ -24,57 +24,91 @@ impl SignerClientWrapper {
         }
     }
 
+    /// Run one KS RPC against the cached client, optionally rebuilding the
+    /// client once after a retryable transport failure.
+    ///
+    /// A cached gRPC channel can go stale when KS restarts or the connection
+    /// breaks; without a rebuild every later call keeps failing on the dead
+    /// channel. Every wrapper method — not just `sign` — goes through this
+    /// path so a broken channel can never permanently wedge key rotation.
+    ///
+    /// Non-idempotent operations must disable replay. In particular, KS may
+    /// persist a generated key before its response is lost; replaying that
+    /// request would create an orphaned key.
+    ///
+    /// If the rebuild itself fails the slot stays `None`, so the next call
+    /// retries lazy initialization instead of caching the failure forever.
+    async fn call_with_rebuild<T>(
+        &self,
+        op_name: &str,
+        retry_on_transport_error: bool,
+        mut op: impl for<'c> FnMut(
+            &'c mut GrpcClient,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<T, signer::SignerError>> + Send + 'c>,
+        >,
+    ) -> Result<T, signer::SignerError> {
+        let mut guard = self.inner.write().await;
+        if guard.is_none() {
+            *guard = Some(GrpcClient::new(&self.grpc_config).await?);
+        }
+
+        let result = op(guard
+            .as_mut()
+            .expect("grpc client must exist after lazy init"))
+        .await;
+
+        match result {
+            Ok(value) => Ok(value),
+            Err(error) if is_retryable_transport_error(&error) => {
+                if retry_on_transport_error {
+                    platform::recording::warn!(
+                        "Signer gRPC transport failed during {}; rebuilding the client and retrying once",
+                        op_name
+                    );
+                } else {
+                    platform::recording::warn!(
+                        "Signer gRPC transport failed during {}; clearing the cached client without replaying the request",
+                        op_name
+                    );
+                }
+                *guard = None;
+                if !retry_on_transport_error {
+                    return Err(error);
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+
+                *guard = Some(GrpcClient::new(&self.grpc_config).await?);
+                op(guard
+                    .as_mut()
+                    .expect("grpc client must exist after reconnect"))
+                .await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     /// Request a new Ed25519 signing key from KS; returns (key_id, verifying_key_bytes[32], expires_at, tolerance_secs).
     /// The private key is retained on the KS server.
     pub async fn generate_signing_key(
         &self,
     ) -> Result<(u32, [u8; 32], u64, u64), signer::SignerError> {
-        let mut guard = self.inner.write().await;
-        if guard.is_none() {
-            let client = GrpcClient::new(&self.grpc_config).await?;
-            *guard = Some(client);
-        }
-        guard
-            .as_mut()
-            .expect("grpc client must exist after lazy init")
-            .generate_signing_key()
-            .await
+        self.call_with_rebuild("generate_signing_key", false, |client| {
+            Box::pin(client.generate_signing_key())
+        })
+        .await
     }
 
     /// Sign a message with the Ed25519 key in KS; returns a 64-byte signature.
     /// The private key never leaves the KS service.
     pub async fn sign(&self, key_id: u32, message: &[u8]) -> Result<Vec<u8>, signer::SignerError> {
-        let mut guard = self.inner.write().await;
-        if guard.is_none() {
-            let client = GrpcClient::new(&self.grpc_config).await?;
-            *guard = Some(client);
-        }
-        let result = guard
-            .as_mut()
-            .expect("grpc client must exist after lazy init")
-            .sign(key_id, message)
-            .await;
-
-        match result {
-            Ok(signature) => Ok(signature),
-            Err(error) if is_retryable_transport_error(&error) => {
-                platform::recording::warn!(
-                    "Signer gRPC transport failed for key_id={}; rebuilding the client and retrying once",
-                    key_id
-                );
-                *guard = None;
-                tokio::time::sleep(Duration::from_millis(200)).await;
-
-                let client = GrpcClient::new(&self.grpc_config).await?;
-                *guard = Some(client);
-                guard
-                    .as_mut()
-                    .expect("grpc client must exist after reconnect")
-                    .sign(key_id, message)
-                    .await
-            }
-            Err(error) => Err(error),
-        }
+        // Each attempt owns its copy of the message so the retry closure
+        // stays FnMut and the boxed future borrows nothing from the closure.
+        self.call_with_rebuild("sign", true, move |client| {
+            let payload = message.to_vec();
+            Box::pin(async move { client.sign(key_id, &payload).await })
+        })
+        .await
     }
 
     /// Get the verifying public key for the specified key_id
@@ -84,30 +118,18 @@ impl SignerClientWrapper {
         &self,
         key_id: u32,
     ) -> Result<([u8; 32], u64, u64), signer::SignerError> {
-        let mut guard = self.inner.write().await;
-        if guard.is_none() {
-            let client = GrpcClient::new(&self.grpc_config).await?;
-            *guard = Some(client);
-        }
-        guard
-            .as_mut()
-            .expect("grpc client must exist after lazy init")
-            .get_verifying_key(key_id)
-            .await
+        self.call_with_rebuild("get_verifying_key", true, |client| {
+            Box::pin(client.get_verifying_key(key_id))
+        })
+        .await
     }
 
     /// Health check
     pub async fn health_check(&self) -> Result<String, signer::SignerError> {
-        let mut guard = self.inner.write().await;
-        if guard.is_none() {
-            let client = GrpcClient::new(&self.grpc_config).await?;
-            *guard = Some(client);
-        }
-        guard
-            .as_mut()
-            .expect("grpc client must exist after lazy init")
-            .health_check()
-            .await
+        self.call_with_rebuild("health_check", true, |client| {
+            Box::pin(client.health_check())
+        })
+        .await
     }
 }
 
