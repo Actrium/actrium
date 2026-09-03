@@ -25,6 +25,7 @@ use actr_protocol::{
 };
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 #[cfg(any(test, feature = "test-utils"))]
 use tokio::sync::oneshot;
@@ -51,6 +52,170 @@ enum SendAdmission {
 struct GateSendAttempt {
     result: ActorResult<Option<DestTransportRef>>,
     progress: DeliveryProgress,
+}
+
+/// Hard limits for readiness waiters.  These are deliberately conservative:
+/// waiting is bounded work, not an offline payload queue.  Each class retains
+/// a minimum share so a burst of one operation type cannot consume the entire
+/// global budget.
+const MAX_GLOBAL_WAITERS: usize = 256;
+const MAX_PEER_WAITERS: usize = 64;
+const MAX_GLOBAL_WAITER_BYTES: usize = 16 * 1024 * 1024;
+const MAX_PEER_WAITER_BYTES: usize = 4 * 1024 * 1024;
+const MIN_RPC_WAITERS: usize = 32;
+const MIN_STREAM_WAITERS: usize = 32;
+const MAX_RPC_WAITERS: usize = MAX_GLOBAL_WAITERS - MIN_STREAM_WAITERS;
+const MAX_STREAM_WAITERS: usize = MAX_GLOBAL_WAITERS - MIN_RPC_WAITERS;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WaiterClass {
+    Rpc,
+    Stream,
+}
+
+impl WaiterClass {
+    fn for_payload(payload_type: PayloadType) -> Option<Self> {
+        match payload_type {
+            PayloadType::RpcReliable => Some(Self::Rpc),
+            PayloadType::StreamReliable => Some(Self::Stream),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Default)]
+struct PeerWaiterUsage {
+    waiters: usize,
+    bytes: usize,
+}
+
+#[derive(Default)]
+struct WaiterUsage {
+    global_waiters: usize,
+    global_bytes: usize,
+    rpc_waiters: usize,
+    stream_waiters: usize,
+    peers: HashMap<ActrId, PeerWaiterUsage>,
+}
+
+/// Synchronous accounting for readiness waiters.  The lock is held only while
+/// checking/incrementing counters; it is never held across an `.await`.
+struct WaiterBudget {
+    usage: StdMutex<WaiterUsage>,
+}
+
+impl Default for WaiterBudget {
+    fn default() -> Self {
+        Self {
+            usage: StdMutex::new(WaiterUsage::default()),
+        }
+    }
+}
+
+impl WaiterBudget {
+    fn try_acquire(
+        self: &Arc<Self>,
+        peer: &ActrId,
+        class: WaiterClass,
+        payload_bytes: usize,
+    ) -> Option<WaiterGuard> {
+        let mut usage = self
+            .usage
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (peer_waiters, peer_bytes) = usage
+            .peers
+            .get(peer)
+            .map(|peer_usage| (peer_usage.waiters, peer_usage.bytes))
+            .unwrap_or_default();
+        let class_waiters = match class {
+            WaiterClass::Rpc => usage.rpc_waiters,
+            WaiterClass::Stream => usage.stream_waiters,
+        };
+        let class_limit = match class {
+            WaiterClass::Rpc => MAX_RPC_WAITERS,
+            WaiterClass::Stream => MAX_STREAM_WAITERS,
+        };
+        let fits = usage.global_waiters < MAX_GLOBAL_WAITERS
+            && class_waiters < class_limit
+            && peer_waiters < MAX_PEER_WAITERS
+            && usage
+                .global_bytes
+                .checked_add(payload_bytes)
+                .is_some_and(|bytes| bytes <= MAX_GLOBAL_WAITER_BYTES)
+            && peer_bytes
+                .checked_add(payload_bytes)
+                .is_some_and(|bytes| bytes <= MAX_PEER_WAITER_BYTES);
+        if !fits {
+            return None;
+        }
+
+        usage.global_waiters += 1;
+        usage.global_bytes += payload_bytes;
+        match class {
+            WaiterClass::Rpc => usage.rpc_waiters += 1,
+            WaiterClass::Stream => usage.stream_waiters += 1,
+        }
+        // `peer_usage` points into the map, so reacquire it after the counter
+        // updates (which may have reborrowed `usage`).
+        let peer_usage = usage.peers.entry(peer.clone()).or_default();
+        peer_usage.waiters += 1;
+        peer_usage.bytes += payload_bytes;
+
+        Some(WaiterGuard {
+            budget: Arc::clone(self),
+            peer: peer.clone(),
+            class,
+            payload_bytes,
+        })
+    }
+
+    #[cfg(test)]
+    fn snapshot(&self) -> (usize, usize, usize, usize) {
+        let usage = self
+            .usage
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        (
+            usage.global_waiters,
+            usage.global_bytes,
+            usage.rpc_waiters,
+            usage.stream_waiters,
+        )
+    }
+}
+
+struct WaiterGuard {
+    budget: Arc<WaiterBudget>,
+    peer: ActrId,
+    class: WaiterClass,
+    payload_bytes: usize,
+}
+
+impl Drop for WaiterGuard {
+    fn drop(&mut self) {
+        let mut usage = self
+            .budget
+            .usage
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        usage.global_waiters = usage.global_waiters.saturating_sub(1);
+        usage.global_bytes = usage.global_bytes.saturating_sub(self.payload_bytes);
+        match self.class {
+            WaiterClass::Rpc => usage.rpc_waiters = usage.rpc_waiters.saturating_sub(1),
+            WaiterClass::Stream => usage.stream_waiters = usage.stream_waiters.saturating_sub(1),
+        }
+        let remove_peer = if let Some(peer_usage) = usage.peers.get_mut(&self.peer) {
+            peer_usage.waiters = peer_usage.waiters.saturating_sub(1);
+            peer_usage.bytes = peer_usage.bytes.saturating_sub(self.payload_bytes);
+            peer_usage.waiters == 0
+        } else {
+            false
+        };
+        if remove_peer {
+            usage.peers.remove(&self.peer);
+        }
+    }
 }
 
 impl SendAdmission {
@@ -110,6 +275,10 @@ pub struct PeerGate {
     /// Live global send authority derived by the recovery supervisor.
     send_projection_rx: watch::Receiver<SendProjection>,
 
+    /// Bounded readiness wait accounting.  Waiting never owns an unbounded
+    /// payload queue; the guard is released as soon as the wait ends.
+    waiter_budget: Arc<WaiterBudget>,
+
     /// Optional workload hook so a synchronous `DeliveryUncertain` returned
     /// to a caller is also observable through the
     /// `DataChunkDeliveryUncertain` lifecycle hook (the two channels must not
@@ -147,6 +316,7 @@ impl PeerGate {
             v020_manager,
             send_projection_rx: send_projection_rx
                 .unwrap_or_else(Self::normal_send_projection_receiver),
+            waiter_budget: Arc::new(WaiterBudget::default()),
             hook_callback: std::sync::OnceLock::new(),
         }
     }
@@ -629,6 +799,7 @@ impl PeerGate {
         dest: &Dest,
         payload_type: PayloadType,
         deadline: RpcDeadline,
+        payload_bytes: usize,
     ) -> ActorResult<SendAdmission> {
         let waitable = matches!(
             payload_type,
@@ -638,10 +809,19 @@ impl PeerGate {
             return self.preflight_send(target, dest, payload_type).await;
         }
 
+        let waiter_class = WaiterClass::for_payload(payload_type)
+            .expect("waitable route payloads must have a waiter class");
         let mut projection = self.send_projection_rx.clone();
         #[cfg(feature = "webrtc-v020")]
         let mut snapshots = self.v020_manager.subscribe_peer_snapshot_events();
         let mut ready = self.transport_manager.watch_ready_for(dest).await;
+        // A destination that does not exist yet has no ready-set to watch, so
+        // its eventual materialization (including a WebSocket fallback
+        // committed by another path) must come through the manager's
+        // destination-lifecycle channel — otherwise the waiter below parks
+        // until the operation deadline.
+        let mut dest_state = self.transport_manager.watch_dest_state();
+        let mut waiter = None;
 
         loop {
             match self.preflight_send(target, dest, payload_type).await {
@@ -660,6 +840,17 @@ impl PeerGate {
                             .await
                     {
                         return Err(error);
+                    }
+                    if waiter.is_none() {
+                        waiter = Some(
+                            self.waiter_budget
+                                .try_acquire(target, waiter_class, payload_bytes)
+                                .ok_or_else(|| {
+                                    ActrError::Unavailable(
+                                        "outbound readiness waiter capacity exhausted".to_string(),
+                                    )
+                                })?,
+                        );
                     }
                     deadline.ensure_remaining()?;
 
@@ -703,6 +894,14 @@ impl PeerGate {
                         },
                         event = snapshot_changed => {
                             if event.is_err() {
+                                return Err(error);
+                            }
+                        },
+                        changed = dest_state.changed() => {
+                            // Destination materialization (or fallback
+                            // commit): the loop re-runs preflight and
+                            // re-acquires the ready-set watch above.
+                            if changed.is_err() {
                                 return Err(error);
                             }
                         },
@@ -1114,6 +1313,7 @@ impl PeerGate {
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Request);
         let dest = Self::actr_id_to_dest(target);
         let request_id = envelope.request_id.clone();
+        let payload_bytes = envelope.payload.as_ref().map_or(0, |payload| payload.len());
         let sent_transport = Arc::new(Mutex::new(None));
         let sent_transport_for_send = Arc::clone(&sent_transport);
         let mut send_started = false;
@@ -1123,7 +1323,7 @@ impl PeerGate {
             deadline.instant(),
             async {
                 let admission = self
-                    .wait_until_route_ready(target, &dest, payload_type, deadline)
+                    .wait_until_route_ready(target, &dest, payload_type, deadline, payload_bytes)
                     .await?;
                 // Admission floor: a late-clearing route must not commit a
                 // send whose remaining budget cannot cover a meaningful
@@ -1275,6 +1475,7 @@ impl PeerGate {
         } else {
             Some(envelope.request_id.clone())
         };
+        let payload_bytes = envelope.payload.as_ref().map_or(0, |payload| payload.len());
 
         // Same cancellation-classification contract as the data-chunk path:
         // a deadline that fires mid-write must surface terminal
@@ -1286,7 +1487,7 @@ impl PeerGate {
             async {
                 let data = Self::serialize_envelope(&envelope);
                 let admission = self
-                    .wait_until_route_ready(target, &dest, payload_type, deadline)
+                    .wait_until_route_ready(target, &dest, payload_type, deadline, payload_bytes)
                     .await?;
                 deadline.ensure_remaining()?;
                 self.send_once_with_admission(
@@ -1605,7 +1806,7 @@ impl PeerGate {
             deadline.instant(),
             async {
                 let admission = self
-                    .wait_until_route_ready(target, &dest, payload_type, deadline)
+                    .wait_until_route_ready(target, &dest, payload_type, deadline, data.len())
                     .await?;
                 deadline.ensure_remaining()?;
                 self.send_once_with_admission(
@@ -2300,7 +2501,7 @@ mod tests {
             let gate = Arc::clone(&gate);
             let deadline = RpcDeadline::from_duration(Duration::from_secs(1));
             tokio::spawn(async move {
-                gate.wait_until_route_ready(&target, &dest, PayloadType::RpcReliable, deadline)
+                gate.wait_until_route_ready(&target, &dest, PayloadType::RpcReliable, deadline, 0)
                     .await
             })
         };
@@ -2312,6 +2513,233 @@ mod tests {
             .expect("route waiter must not panic")
             .expect("normal projection should admit the route");
         assert_eq!(admission, SendAdmission::Normal);
+    }
+
+    #[test]
+    fn waiter_budget_enforces_peer_cap_and_releases_raii() {
+        let budget = Arc::new(WaiterBudget::default());
+        let peer = test_actor_id(7);
+        let mut guards = Vec::new();
+        for _ in 0..MAX_PEER_WAITERS {
+            guards.push(
+                budget
+                    .try_acquire(&peer, WaiterClass::Rpc, 1)
+                    .expect("peer waiter cap should admit its configured limit"),
+            );
+        }
+        assert!(budget.try_acquire(&peer, WaiterClass::Rpc, 1).is_none());
+        assert_eq!(budget.snapshot().0, MAX_PEER_WAITERS);
+
+        drop(guards);
+        assert_eq!(budget.snapshot(), (0, 0, 0, 0));
+        assert!(budget.try_acquire(&peer, WaiterClass::Rpc, 1).is_some());
+    }
+
+    #[test]
+    fn waiter_budget_enforces_global_cap() {
+        let budget = Arc::new(WaiterBudget::default());
+        let mut guards = Vec::with_capacity(MAX_GLOBAL_WAITERS);
+        // Mix classes so neither per-class cap fires before the global one:
+        // 224 Rpc (the class cap) + 32 Stream = 256 = the global cap.
+        for serial in 0..MAX_RPC_WAITERS {
+            let peer = test_actor_id(serial as u64);
+            guards.push(
+                budget
+                    .try_acquire(&peer, WaiterClass::Rpc, 1)
+                    .unwrap_or_else(|| panic!("global cap should admit rpc waiter {serial}")),
+            );
+        }
+        for serial in 0..MIN_STREAM_WAITERS {
+            let peer = test_actor_id((serial + 10_000) as u64);
+            guards.push(
+                budget
+                    .try_acquire(&peer, WaiterClass::Stream, 1)
+                    .unwrap_or_else(|| panic!("global cap should admit stream waiter {serial}")),
+            );
+        }
+        assert!(
+            budget
+                .try_acquire(&test_actor_id(9_999), WaiterClass::Stream, 1)
+                .is_none(),
+            "the 257th waiter must be rejected by the global cap"
+        );
+        drop(guards);
+        assert_eq!(budget.snapshot().0, 0);
+    }
+
+    #[test]
+    fn waiter_budget_reserves_per_class_capacity() {
+        let budget = Arc::new(WaiterBudget::default());
+        let mut rpc_guards = Vec::with_capacity(MAX_RPC_WAITERS);
+        // MAX_RPC_WAITERS = MAX_GLOBAL_WAITERS - MIN_STREAM_WAITERS: filling
+        // the Rpc class leaves exactly the reserved Stream slots.
+        for serial in 0..MAX_RPC_WAITERS {
+            rpc_guards.push(
+                budget
+                    .try_acquire(&test_actor_id(serial as u64), WaiterClass::Rpc, 1)
+                    .unwrap_or_else(|| panic!("rpc class cap should admit waiter {serial}")),
+            );
+        }
+        assert!(
+            budget
+                .try_acquire(&test_actor_id(9_999), WaiterClass::Rpc, 1)
+                .is_none(),
+            "an exhausted Rpc class must reject a further Rpc waiter"
+        );
+        let reserved_stream = budget
+            .try_acquire(&test_actor_id(8_888), WaiterClass::Stream, 1)
+            .expect("the reserved Stream capacity must remain available");
+        drop(rpc_guards);
+        drop(reserved_stream);
+        assert_eq!(budget.snapshot(), (0, 0, 0, 0));
+    }
+
+    #[test]
+    fn waiter_budget_enforces_byte_ceilings() {
+        let budget = Arc::new(WaiterBudget::default());
+        let peer = test_actor_id(7);
+
+        // A single payload larger than the per-peer ceiling is refused.
+        assert!(
+            budget
+                .try_acquire(&peer, WaiterClass::Stream, MAX_PEER_WAITER_BYTES + 1)
+                .is_none(),
+            "an over-ceiling payload must never be retained"
+        );
+
+        // Two payloads whose sum exceeds the per-peer ceiling are refused.
+        let first = budget
+            .try_acquire(&peer, WaiterClass::Stream, MAX_PEER_WAITER_BYTES - 1)
+            .expect("a payload just under the per-peer ceiling fits");
+        assert!(
+            budget.try_acquire(&peer, WaiterClass::Stream, 2).is_none(),
+            "the per-peer byte ceiling must reject the second retained payload"
+        );
+        drop(first);
+
+        // Distinct peers sharing the global byte ceiling.
+        let mut guards = Vec::new();
+        for serial in 0..(MAX_GLOBAL_WAITER_BYTES / MAX_PEER_WAITER_BYTES) {
+            let peer = test_actor_id(serial as u64);
+            guards.push(
+                budget
+                    .try_acquire(&peer, WaiterClass::Stream, MAX_PEER_WAITER_BYTES)
+                    .unwrap_or_else(|| panic!("global byte ceiling should admit peer {serial}")),
+            );
+        }
+        assert!(
+            budget
+                .try_acquire(&test_actor_id(9_999), WaiterClass::Stream, 1)
+                .is_none(),
+            "the global byte ceiling must reject further retained payloads"
+        );
+        drop(guards);
+        assert_eq!(budget.snapshot(), (0, 0, 0, 0));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn route_waiter_exhaustion_fails_fast_from_public_send_path() {
+        let (gate, _transport, projection_tx, _builds, sends) =
+            gate_with_projection(SendProjection::Blocked);
+        let gate = Arc::new(gate);
+        let target = test_actor_id(3);
+
+        let mut requests = Vec::new();
+        for _ in 0..MAX_PEER_WAITERS {
+            let gate = Arc::clone(&gate);
+            let target = target.clone();
+            requests.push(tokio::spawn(async move {
+                gate.send_tell_with_type_until(
+                    &target,
+                    PayloadType::RpcReliable,
+                    RpcEnvelope {
+                        request_id: "exhaustion".to_string(),
+                        ..RpcEnvelope::default()
+                    },
+                    RpcDeadline::from_duration(Duration::from_secs(5)),
+                )
+                .await
+            }));
+        }
+
+        // Wait until every waiter is registered before overflowing.
+        let register_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while gate.waiter_budget.snapshot().0 < MAX_PEER_WAITERS {
+            assert!(
+                tokio::time::Instant::now() < register_deadline,
+                "waiters never registered"
+            );
+            crate::timer::sleep(
+                crate::timer::ids::PEER_TEST_EVENT_DELAY,
+                Duration::from_millis(5),
+            )
+            .await;
+        }
+
+        let overflow = gate
+            .send_tell_with_type_until(
+                &target,
+                PayloadType::RpcReliable,
+                RpcEnvelope {
+                    request_id: "overflow".to_string(),
+                    ..RpcEnvelope::default()
+                },
+                RpcDeadline::from_duration(Duration::from_secs(5)),
+            )
+            .await;
+        match overflow {
+            Err(ActrError::Unavailable(message)) => assert!(
+                message.contains("outbound readiness waiter capacity exhausted"),
+                "unexpected exhaustion diagnostic: {message}"
+            ),
+            other => panic!("the overflowing waiter must fail fast, got {other:?}"),
+        }
+
+        // Release: clearing the projection admits every parked waiter and
+        // the RAII guards return the budget.
+        projection_tx.send_replace(SendProjection::Normal);
+        for request in requests {
+            request
+                .await
+                .expect("waiter task must not panic")
+                .expect("admitted waiter should submit its tell");
+        }
+        assert_eq!(sends.load(Ordering::SeqCst), MAX_PEER_WAITERS);
+        assert_eq!(
+            gate.waiter_budget.snapshot(),
+            (0, 0, 0, 0),
+            "all waiter budget must be released after completion"
+        );
+    }
+
+    #[tokio::test]
+    async fn route_waiter_wakes_on_destination_materialization_signal() {
+        let (gate, transport, _projection_tx, _builds, _sends) =
+            gate_with_projection(SendProjection::Normal);
+        let target = test_actor_id(4);
+        let dest = PeerGate::actr_id_to_dest(&target);
+        let _gate = gate;
+
+        // The parked-waiter scenario the lifecycle channel exists for: the
+        // destination does not exist yet, so `watch_ready_for` yields no
+        // ready-set and only the destination lifecycle signal can report its
+        // materialization (e.g. a WebSocket fallback committed elsewhere).
+        assert!(transport.watch_ready_for(&dest).await.is_none());
+        let mut dest_state = transport.watch_dest_state();
+
+        transport
+            .get_or_create_transport(&dest)
+            .await
+            .expect("destination transport should materialize");
+
+        dest_state
+            .changed()
+            .await
+            .expect("destination materialization must be observable");
+        assert!(
+            transport.watch_ready_for(&dest).await.is_some(),
+            "after the wake the waiter can acquire the ready-set it lacked"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
