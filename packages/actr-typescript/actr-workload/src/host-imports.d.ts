@@ -130,5 +130,6 @@ declare module 'actr:workload/host@0.6.0' {
       }
     | { tag: 'decode-failure'; val: string }
     | { tag: 'not-implemented'; val: string }
-    | { tag: 'internal'; val: string };
+    | { tag: 'internal'; val: string }
+    | { tag: 'delivery-uncertain'; val: { operationId: string; cause: string } };
 }

@@ -69,15 +69,23 @@ impl DataLane for DefaultProgressLane {
 }
 
 #[tokio::test]
-async fn default_send_with_progress_is_conservatively_unknown() {
-    // The default implementation can never prove that a failed `send` left no
-    // bytes inside a transport, so every error shape — closed-like,
-    // secure-not-ready, or generic — must classify as Unknown, never as a
-    // replayable NotAttempted.
-    for mode in [
-        DefaultProgressMode::ClosedLike,
-        DefaultProgressMode::SecureNotReady,
-        DefaultProgressMode::Generic,
+async fn default_send_with_progress_classifies_by_error_shape() {
+    // The trait default serves lanes that only implement `send`: typed
+    // closed/secure errors are proven pre-send (route self-healing keeps
+    // working), while any other error is conservatively Unknown because the
+    // default cannot prove no bytes entered a transport. Adapters with
+    // ambiguous write semantics override and report Unknown (see the
+    // WebSocket tests above and the v0.20 lane).
+    for (mode, expected) in [
+        (
+            DefaultProgressMode::ClosedLike,
+            DeliveryProgress::NotAttempted,
+        ),
+        (
+            DefaultProgressMode::SecureNotReady,
+            DeliveryProgress::NotAttempted,
+        ),
+        (DefaultProgressMode::Generic, DeliveryProgress::Unknown),
     ] {
         let lane = DefaultProgressLane { mode };
         let attempt = lane
@@ -88,9 +96,8 @@ async fn default_send_with_progress_is_conservatively_unknown() {
             "{mode:?} should surface the send error"
         );
         assert_eq!(
-            attempt.progress,
-            DeliveryProgress::Unknown,
-            "{mode:?} must be conservatively Unknown under the default contract"
+            attempt.progress, expected,
+            "{mode:?} must classify as {expected:?} under the default contract"
         );
     }
 

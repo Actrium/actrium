@@ -5,7 +5,9 @@
 
 use super::Dest; // Re-exported from actr-framework
 use super::error::{NetworkError, NetworkResult};
-use super::lane::{DeliveryProgress, DeliveryProgressCell, record_delivery_progress};
+use super::lane::{
+    DeliveryProgress, DeliveryProgressCell, mark_delivery_write_in_flight, record_delivery_progress,
+};
 use super::route_table::{DataLaneType, PayloadTypeExt};
 use super::wire_handle::{WebRtcTransportLifecycle, WireHandle, WireIdentity};
 use super::wire_pool::{ConnType, ReadySet, RetryConfig, WirePool};
@@ -279,7 +281,7 @@ impl DestTransport {
                             // Convert to Bytes (zero-copy)
                             let payload = bytes::Bytes::copy_from_slice(data);
                             if let Some(cell) = progress_sink {
-                                record_delivery_progress(cell, DeliveryProgress::Unknown);
+                                mark_delivery_write_in_flight(cell);
                             }
                             let attempt = lane.send_with_progress(payload.clone()).await;
                             let progress = attempt.progress;
@@ -315,10 +317,7 @@ impl DestTransport {
                                     match conn.get_lane(payload_type).await {
                                         Ok(new_lane) => {
                                             if let Some(cell) = progress_sink {
-                                                record_delivery_progress(
-                                                    cell,
-                                                    DeliveryProgress::Unknown,
-                                                );
+                                                mark_delivery_write_in_flight(cell);
                                             }
                                             let retry = new_lane.send_with_progress(payload).await;
                                             let retry_progress = retry.progress;

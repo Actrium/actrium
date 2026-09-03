@@ -494,8 +494,10 @@ impl PeerGate {
     /// that carried them. Unlike explicit close cleanup, this deliberately
     /// keeps the DestTransport: hard recovery replaces its generation in place
     /// and the generation-aware v0.20 lanes become usable after convergence.
-    /// A soft-recovery sendability dip does not retire a Session, so reliable
-    /// work already accepted by the lane remains eligible to complete.
+    /// A request that has not reached a concrete lane yet must remain eligible
+    /// for that replacement. Only a request already accepted by the invalidated
+    /// WebRTC generation is released, and that result is explicitly uncertain
+    /// rather than retryable.
     #[cfg(feature = "webrtc-v020")]
     fn spawn_pending_invalidated_generation_cleanup(
         manager: &Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
@@ -506,24 +508,60 @@ impl PeerGate {
         tokio::spawn(async move {
             loop {
                 match invalidated.recv().await {
-                    Ok((peer, _generation)) => {
+                    Ok((peer, generation)) => {
                         let Some(pending) = pending.upgrade() else {
                             break;
                         };
-                        pending.fail_where(
+                        let removed = pending.fail_submitted_where(
                             |target| target == &peer,
-                            Self::send_projection_not_ready_error,
+                            |identity| {
+                                matches!(
+                                    identity,
+                                    Some(WireIdentity::WebRtc { peer_id, session_id })
+                                        if peer_id == &peer && *session_id == generation
+                                )
+                            },
+                            |request_id, _| {
+                                Self::delivery_uncertain_error(
+                                    Some(request_id),
+                                    format!(
+                                        "WebRTC generation {generation} was invalidated before the response arrived"
+                                    ),
+                                )
+                            },
                         );
+                        if removed > 0 {
+                            tracing::debug!(
+                                peer = ?peer,
+                                generation,
+                                removed,
+                                "released submitted RPCs on WebRTC generation invalidation"
+                            );
+                        }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                         tracing::warn!(
                             skipped,
-                            "generation-invalidation cleanup lagged; releasing all pending RPCs"
+                            "generation-invalidation cleanup lagged; conservatively releasing submitted RPCs"
                         );
                         let Some(pending) = pending.upgrade() else {
                             break;
                         };
-                        pending.fail_where(|_| true, Self::send_projection_not_ready_error);
+                        // Events were missed, so any submitted RPC may ride an
+                        // already-invalidated generation. Releasing with a
+                        // retryable error would invite caller-side replay and
+                        // duplicate delivery; surface terminal uncertainty and
+                        // let each caller's idempotency policy decide.
+                        pending.fail_submitted_where(
+                            |_| true,
+                            |_| true,
+                            |request_id, _| {
+                                Self::delivery_uncertain_error(
+                                    Some(request_id),
+                                    "WebRTC generation invalidation events were missed by the cleanup subscriber",
+                                )
+                            },
+                        );
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
@@ -589,10 +627,29 @@ impl PeerGate {
                                     .is_some_and(|snapshot| snapshot.sendable)
                             {
                             } else if let Some(pending) = task_pending.upgrade() {
-                                pending.fail_where(
+                                let removed = pending.fail_submitted_where(
                                     |target| target == &task_peer,
-                                    Self::send_projection_not_ready_error,
+                                    |identity| {
+                                        matches!(
+                                            identity,
+                                            Some(WireIdentity::WebRtc { peer_id, .. })
+                                                if peer_id == &task_peer
+                                        )
+                                    },
+                                    |request_id, _| {
+                                        Self::delivery_uncertain_error(
+                                            Some(request_id),
+                                            "WebRTC peer remained non-sendable during the recovery grace period",
+                                        )
+                                    },
                                 );
+                                if removed > 0 {
+                                    tracing::debug!(
+                                        peer = ?task_peer,
+                                        removed,
+                                        "released submitted RPCs after prolonged WebRTC recovery"
+                                    );
+                                }
                             }
                             // Self-cleanup on every exit path: drop this task's
                             // registration unless a newer grace task for the
@@ -1313,7 +1370,11 @@ impl PeerGate {
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Request);
         let dest = Self::actr_id_to_dest(target);
         let request_id = envelope.request_id.clone();
-        let payload_bytes = envelope.payload.as_ref().map_or(0, |payload| payload.len());
+        // Serialize once up front so the waiter budget retains the full
+        // envelope (payload + metadata), not just the payload: metadata-heavy
+        // envelopes must not bypass the documented byte ceilings.
+        let data = Self::serialize_envelope(&envelope);
+        let payload_bytes = data.len();
         let sent_transport = Arc::new(Mutex::new(None));
         let sent_transport_for_send = Arc::clone(&sent_transport);
         let mut send_started = false;
@@ -1341,19 +1402,28 @@ impl PeerGate {
                 let pending = self
                     .pending_requests
                     .register(request_id.clone(), target.clone());
-                let data = Self::serialize_envelope(&envelope);
                 deadline.ensure_remaining()?;
                 send_started = true;
 
-                self.send_with_retry_record_identity_for_operation(
-                    &dest,
-                    payload_type,
-                    &data,
-                    admission,
-                    Some(&sent_transport_for_send),
-                    &request_id,
-                )
-                .await?;
+                let sent = self
+                    .send_with_retry_record_identity_for_operation(
+                        &dest,
+                        payload_type,
+                        &data,
+                        admission,
+                        Some(&sent_transport_for_send),
+                        &request_id,
+                    )
+                    .await?;
+                if !self
+                    .pending_requests
+                    .mark_submitted(&request_id, sent.wire_identity.clone())
+                {
+                    tracing::debug!(
+                        request_id = %request_id,
+                        "pending RPC was completed while the physical send was resolving"
+                    );
+                }
                 tracing::debug!("Sent request to {:?}", target);
 
                 // The outer timeout owns the combined send + response budget.
@@ -1475,7 +1545,10 @@ impl PeerGate {
         } else {
             Some(envelope.request_id.clone())
         };
-        let payload_bytes = envelope.payload.as_ref().map_or(0, |payload| payload.len());
+        // Serialize once up front so the waiter budget retains the full
+        // envelope (payload + metadata), not just the payload.
+        let data = Self::serialize_envelope(&envelope);
+        let payload_bytes = data.len();
 
         // Same cancellation-classification contract as the data-chunk path:
         // a deadline that fires mid-write must surface terminal
@@ -1485,7 +1558,6 @@ impl PeerGate {
             crate::timer::ids::OUTBOUND_TELL_DEADLINE,
             deadline.instant(),
             async {
-                let data = Self::serialize_envelope(&envelope);
                 let admission = self
                     .wait_until_route_ready(target, &dest, payload_type, deadline, payload_bytes)
                     .await?;
@@ -2080,6 +2152,61 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct ReadyWebRtcCallWire {
+        lane: Arc<SuccessfulLane>,
+        peer_id: ActrId,
+        session_id: u64,
+    }
+
+    #[async_trait]
+    impl WireHandle for ReadyWebRtcCallWire {
+        fn connection_type(&self) -> ConnType {
+            ConnType::WebRTC
+        }
+
+        fn priority(&self) -> u8 {
+            1
+        }
+
+        async fn connect(&self) -> NetworkResult<()> {
+            Ok(())
+        }
+
+        fn is_connected(&self) -> bool {
+            true
+        }
+
+        async fn close(&self) -> NetworkResult<()> {
+            Ok(())
+        }
+
+        async fn get_lane(&self, _payload_type: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
+            Ok(self.lane.clone())
+        }
+
+        fn identity(&self) -> Option<WireIdentity> {
+            Some(WireIdentity::WebRtc {
+                peer_id: self.peer_id.clone(),
+                session_id: self.session_id,
+            })
+        }
+    }
+
+    struct ReadyWebRtcCallWireBuilder {
+        wire: Arc<ReadyWebRtcCallWire>,
+    }
+
+    #[async_trait]
+    impl WireBuilder for ReadyWebRtcCallWireBuilder {
+        async fn create_connections(
+            &self,
+            _dest: &Dest,
+        ) -> NetworkResult<Vec<Arc<dyn WireHandle>>> {
+            Ok(vec![self.wire.clone()])
+        }
+    }
+
     #[async_trait]
     impl WireBuilder for CountingSuccessfulWireBuilder {
         async fn create_connections(
@@ -2515,6 +2642,139 @@ mod tests {
         assert_eq!(admission, SendAdmission::Normal);
     }
 
+    #[tokio::test]
+    async fn generation_invalidation_keeps_unsubmitted_rpc_and_fails_matching_submitted_rpc() {
+        let (gate, _transport, _projection_tx, _builds, _sends) =
+            gate_with_projection(SendProjection::Normal);
+        let peer = test_actor_id(2);
+        let manager = gate.v020_manager.clone();
+
+        let awaiting = gate
+            .pending_requests
+            .register("awaiting-generation-replacement", peer.clone());
+        let submitted = gate
+            .pending_requests
+            .register("submitted-old-generation", peer.clone());
+        assert!(gate.pending_requests.mark_submitted(
+            "submitted-old-generation",
+            Some(WireIdentity::WebRtc {
+                peer_id: peer.clone(),
+                session_id: 7,
+            }),
+        ));
+
+        manager.publish_peer_generation_invalidated_for_test(peer.clone(), 7);
+
+        let submitted_error = timeout(
+            crate::timer::ids::PEER_REQUEST_DEADLINE,
+            Duration::from_secs(1),
+            submitted.recv(),
+        )
+        .await
+        .expect("generation invalidation must wake submitted RPC")
+        .expect_err("submitted RPC must receive an error");
+        assert!(matches!(
+            submitted_error,
+            ActrError::DeliveryUncertain { operation_id, .. }
+                if operation_id == "submitted-old-generation"
+        ));
+
+        // The replacement event must not remove an operation that has not
+        // reached a concrete lane. Its send task can therefore continue on
+        // the replacement generation without producing an orphan response.
+        assert_eq!(gate.pending_requests.len(), 1);
+        drop(awaiting);
+        assert_eq!(gate.pending_requests.len(), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn submitted_call_without_response_is_delivery_uncertain() {
+        let peer = test_actor_id(2);
+        let sends = Arc::new(AtomicUsize::new(0));
+        let session_id = 17;
+        let transport = Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(ReadyWebRtcCallWireBuilder {
+                wire: Arc::new(ReadyWebRtcCallWire {
+                    lane: Arc::new(SuccessfulLane {
+                        sends: sends.clone(),
+                    }),
+                    peer_id: peer.clone(),
+                    session_id,
+                }),
+            }),
+        ));
+        let manager = PeerGate::empty_manager_for_test();
+        let pending_requests: PendingRequestsMap = Arc::new(RpcCorrelation::new());
+        let gate = Arc::new(PeerGate::with_v020_manager(
+            transport,
+            manager.clone(),
+            pending_requests,
+            None,
+        ));
+        let request_id = "submitted-call-without-response";
+
+        // The local wire accepts the Call, but no Response is ever injected.
+        // A generation replacement must resolve the waiting Call as uncertain
+        // instead of allowing a timeout/retry to replay the payload.
+        let request = {
+            let gate = Arc::clone(&gate);
+            let peer = peer.clone();
+            tokio::spawn(async move {
+                gate.send_request_with_type(
+                    &peer,
+                    PayloadType::RpcReliable,
+                    RpcEnvelope {
+                        request_id: request_id.to_string(),
+                        route_key: "test.echo".to_string(),
+                        timeout_ms: 5_000,
+                        ..Default::default()
+                    },
+                )
+                .await
+            })
+        };
+
+        let send_deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        while sends.load(Ordering::SeqCst) == 0 {
+            assert!(
+                tokio::time::Instant::now() < send_deadline,
+                "Call was never submitted to the local WebRTC wire"
+            );
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(sends.load(Ordering::SeqCst), 1);
+
+        // Publishing more than once closes the small scheduling window between
+        // the lane returning and `mark_submitted`; only the first matching event
+        // can complete the pending Call, and no retry is ever started.
+        for _ in 0..32 {
+            manager.publish_peer_generation_invalidated_for_test(peer.clone(), session_id);
+            tokio::task::yield_now().await;
+            if request.is_finished() {
+                break;
+            }
+        }
+
+        let error = crate::timer::timeout(
+            crate::timer::ids::PEER_REQUEST_DEADLINE,
+            Duration::from_secs(1),
+            request,
+        )
+        .await
+        .expect("submitted Call must resolve when its generation is replaced")
+        .expect("Call task must not panic")
+        .expect_err("a Call without a Response must return an error");
+        assert!(matches!(
+            &error,
+            ActrError::DeliveryUncertain { operation_id, .. }
+                if operation_id == request_id
+        ));
+        assert!(!error.is_retryable());
+        assert_eq!(sends.load(Ordering::SeqCst), 1);
+        assert_eq!(gate.pending_requests.len(), 0);
+    }
+
     #[test]
     fn waiter_budget_enforces_peer_cap_and_releases_raii() {
         let budget = Arc::new(WaiterBudget::default());
@@ -2739,6 +2999,66 @@ mod tests {
         assert!(
             transport.watch_ready_for(&dest).await.is_some(),
             "after the wake the waiter can acquire the ready-set it lacked"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tell_waiter_retains_full_envelope_bytes() {
+        let (gate, _transport, projection_tx, _builds, _sends) =
+            gate_with_projection(SendProjection::Blocked);
+        let gate = Arc::new(gate);
+        let target = test_actor_id(6);
+
+        let request = {
+            let gate = Arc::clone(&gate);
+            let target = target.clone();
+            tokio::spawn(async move {
+                gate.send_tell_with_type_until(
+                    &target,
+                    PayloadType::RpcReliable,
+                    RpcEnvelope {
+                        request_id: "meta-heavy-tell".to_string(),
+                        payload: Some(Bytes::from_static(b"abcd")),
+                        metadata: vec![actr_protocol::MetadataEntry {
+                            key: "trace.baggage".to_string(),
+                            value: "v".repeat(4096),
+                        }],
+                        ..Default::default()
+                    },
+                    RpcDeadline::from_duration(Duration::from_secs(5)),
+                )
+                .await
+            })
+        };
+
+        let registered = tokio::time::Instant::now() + Duration::from_secs(5);
+        while gate.waiter_budget.snapshot().0 < 1 {
+            assert!(
+                tokio::time::Instant::now() < registered,
+                "waiter never registered"
+            );
+            crate::timer::sleep(
+                crate::timer::ids::PEER_TEST_EVENT_DELAY,
+                Duration::from_millis(5),
+            )
+            .await;
+        }
+
+        let retained = gate.waiter_budget.snapshot().1;
+        assert!(
+            retained > 4096 + "abcd".len(),
+            "the waiter must retain the serialized envelope (payload + metadata), got {retained}"
+        );
+
+        projection_tx.send_replace(SendProjection::Normal);
+        request
+            .await
+            .expect("tell task must not panic")
+            .expect("tell should submit after the route becomes ready");
+        assert_eq!(
+            gate.waiter_budget.snapshot(),
+            (0, 0, 0, 0),
+            "retained envelope bytes must be released after admission"
         );
     }
 

@@ -123,7 +123,8 @@ export type ActrError =
     }
   | { tag: 'decode-failure'; val: string }
   | { tag: 'not-implemented'; val: string }
-  | { tag: 'internal'; val: string };
+  | { tag: 'internal'; val: string }
+  | { tag: 'delivery-uncertain'; val: { operationId: string; cause: string } };
 
 type WitActrId = Omit<ActrId, 'serialNumber'> & {
   serialNumber: bigint;

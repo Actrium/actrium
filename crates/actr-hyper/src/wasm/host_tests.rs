@@ -80,7 +80,7 @@ fn probe_world_accepts_current_v6_component() {
     let src = r#"
         (component
           (instance $v6)
-          (export "actr:workload/workload@0.6.0" (instance $v6))
+          (export "actr:workload/workload@0.7.0" (instance $v6))
         )
     "#;
     probe_wat(src).expect("current workload ABI should be accepted");

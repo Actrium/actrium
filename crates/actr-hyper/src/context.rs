@@ -968,7 +968,6 @@ impl Context for RuntimeContext {
     ) -> ActorResult<()> {
         let deadline =
             crate::transport::RpcDeadline::from_duration(crate::transport::DATA_CHUNK_SEND_TIMEOUT);
-        let operation_id = uuid::Uuid::new_v4().to_string();
         self.ensure_session_ready_until(crate::timer::ids::RUNTIME_DATA_CHUNK_PREFLIGHT, deadline)
             .await?;
         deadline.ensure_remaining()?;
@@ -997,7 +996,9 @@ impl Context for RuntimeContext {
             stream_id,
             bytes::Bytes::from(payload),
             deadline,
-            &operation_id,
+            // The caller-visible stream id is the operation identity, matching
+            // the `DataChunkDeliveryUncertain` hook report.
+            stream_id,
         )
         .await
     }

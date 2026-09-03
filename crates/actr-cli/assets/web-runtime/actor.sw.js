@@ -420,6 +420,14 @@ function mapHostErrorToActr(e) {
       },
     };
   }
+  if (tag === 'delivery-uncertain') {
+    return {
+      'delivery-uncertain': {
+        'operation-id': (e && e.actrOperationId) || '',
+        cause: msg,
+      },
+    };
+  }
   return { [tag]: msg };
 }
 

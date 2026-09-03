@@ -9,9 +9,9 @@
 //! is `#[cfg(target_arch = "wasm32")]`-gated, so hosts never see this code
 //! or the underlying `wit-bindgen` crate.
 //!
-//! # Async world (`actr:workload@0.6.0`)
+//! # Async world (`actr:workload@0.7.0`)
 //!
-//! The WIT world (`actr:workload@0.6.0`) declares transport host imports and
+//! The WIT world (`actr:workload@0.7.0`) declares transport host imports and
 //! workload exports as real `async func`s. wit-bindgen 0.58 auto-generates
 //! async Rust bindings from that — the `Guest` trait methods and transport
 //! imports are `async fn`, with NO `async: true` flag (the async-ness comes

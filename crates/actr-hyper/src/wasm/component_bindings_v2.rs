@@ -1,4 +1,4 @@
-//! Component Model bindings for the `actr:workload@0.6.0` async WIT world.
+//! Component Model bindings for the `actr:workload@0.7.0` async WIT world.
 //!
 //! These are the sole runtime bindings after retirement of the 0.1.0
 //! synchronous world. The 0.6.0 world declares transport host imports and

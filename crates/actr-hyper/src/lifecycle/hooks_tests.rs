@@ -551,8 +551,10 @@ async fn data_chunk_uncertain_hook_routes_to_on_error() {
 
     assert_eq!(event.category, ErrorCategory::DataChunkDeliveryUncertain);
     assert!(matches!(
-        event.source,
-        ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "mobile-upload"
+        &event.source,
+        ActrError::DeliveryUncertain { operation_id, cause }
+            if operation_id == "mobile-upload"
+                && cause == "data stream delivery uncertain after WebRTC disconnect"
     ));
     assert!(event.context.contains("stream_id=mobile-upload"));
     assert!(event.context.contains("session_id=99"));

@@ -242,7 +242,7 @@ async fn expect_large_request_eventually_ok_between(
             }
             Ok(Ok(Err(error))) => {
                 assert!(
-                    is_expected_bounded_transport_failure(&error.to_string()),
+                    is_expected_bounded_transport_failure(&error),
                     "{request_id} got unexpected retry error: {error}"
                 );
             }
@@ -265,8 +265,20 @@ async fn assert_pending_empty(harness: &TestHarness, serial: u64, label: &str) {
     );
 }
 
-fn is_expected_bounded_transport_failure(message: &str) -> bool {
-    let message = message.to_ascii_lowercase();
+fn is_expected_bounded_transport_failure(error: &ActrError) -> bool {
+    // DeliveryUncertain is a terminal result for the original operation, but
+    // it is an expected bounded outcome for these in-flight recovery tests.
+    // The retry helpers below always create a fresh request ID; they never
+    // replay the uncertain operation automatically.
+    if matches!(error, ActrError::DeliveryUncertain { .. }) {
+        return true;
+    }
+
+    // Keep the legacy text checks for transport errors whose public mapping is
+    // intentionally coarse (for example, a closed DataChannel becomes an
+    // Unavailable message). The new uncertain outcome is matched structurally
+    // above so it cannot be confused with a generic substring.
+    let message = error.to_string().to_ascii_lowercase();
     [
         "connection",
         "request timeout",
@@ -347,9 +359,9 @@ async fn expect_bounded_failure(
     handle: tokio::task::JoinHandle<actr_protocol::ActorResult<Bytes>>,
     label: &str,
     timeout: Duration,
-) -> String {
+) -> ActrError {
     match tokio::time::timeout(timeout, handle).await {
-        Ok(Ok(Err(error))) => error.to_string(),
+        Ok(Ok(Err(error))) => error,
         Ok(Ok(Ok(response))) => {
             panic!(
                 "{label} unexpectedly succeeded with {} bytes",
@@ -371,7 +383,7 @@ async fn expect_bounded_completion(
     match tokio::time::timeout(timeout, handle).await {
         Ok(Ok(Ok(response))) => assert_payload_integrity(label, &response, data, expected_hash),
         Ok(Ok(Err(error))) => assert!(
-            is_expected_bounded_transport_failure(&error.to_string()),
+            is_expected_bounded_transport_failure(&error),
             "{label} got unexpected bounded failure: {error}"
         ),
         Ok(Err(error)) => panic!("{label} task panicked: {error}"),
@@ -464,6 +476,10 @@ async fn inflight_short_offline_recovers_original_request(case: RoleCase) {
             .await
             .expect("short offline request hung")
             .expect("short offline request task panicked")
+            // This case deliberately verifies that a short outage preserves
+            // the original request. DeliveryUncertain would mean the route
+            // generation was invalidated, so it must remain a contract failure
+            // here rather than being converted into an implicit retry.
             .expect("short offline request should recover");
         assert_payload_integrity(&request_id, &response, &data, &hash);
         assert_pending_empty(&harness, direction.from_serial, &request_id).await;
@@ -504,7 +520,7 @@ async fn inflight_network_type_switch_recovers_or_retries_once(case: RoleCase) {
             .expect("network type switch request task panicked");
         match result {
             Ok(response) => assert_payload_integrity(&request_id, &response, &data, &hash),
-            Err(ActrError::TimedOut) => {
+            Err(ActrError::TimedOut | ActrError::DeliveryUncertain { .. }) => {
                 let retry_id = format!("{request_id}_retry");
                 expect_large_request_ok_between(
                     &harness,
@@ -547,7 +563,10 @@ async fn inflight_long_offline_fails_bounded_then_retries(case: RoleCase) {
         process_mobile_events(&harness, case, vec![offline_event(1)]).await;
         let error = expect_bounded_failure(request, &request_id, Duration::from_secs(5)).await;
         assert!(
-            error.contains("Request timeout") || error.contains("timed out"),
+            matches!(
+                &error,
+                ActrError::TimedOut | ActrError::DeliveryUncertain { .. }
+            ),
             "long offline should time out the in-flight request, got: {error}"
         );
         assert_pending_empty(&harness, direction.from_serial, &request_id).await;
@@ -789,7 +808,7 @@ async fn inflight_data_chunk_long_offline_is_bounded_or_delivery_uncertain(case:
             .expect("in-flight DataChunk task should not panic");
         if let Err(error) = send_result {
             assert!(
-                is_expected_bounded_transport_failure(&error.to_string()),
+                is_expected_bounded_transport_failure(&error),
                 "unexpected in-flight DataChunk failure: {error}"
             );
         } else {
@@ -876,10 +895,10 @@ async fn mobile_event_storm_during_call_and_data_chunk_does_not_hang() {
         storm_result.expect("mobile event storm task should not panic");
         match call_result.expect("call task must not panic") {
             Ok(response) => assert_payload_integrity(&call_id, &response, &data, &hash),
-            Err(error) => assert!(is_expected_bounded_transport_failure(&error.to_string())),
+            Err(error) => assert!(is_expected_bounded_transport_failure(&error)),
         }
         if let Err(error) = stream_result {
-            assert!(is_expected_bounded_transport_failure(&error.to_string()));
+            assert!(is_expected_bounded_transport_failure(&error));
         }
         assert_pending_empty(&harness, case.mobile_serial, &call_id).await;
 

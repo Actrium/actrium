@@ -4,7 +4,7 @@
 
 This example implements the async
 [`actr-workload-guest-v2`](../../../../crates/actr-framework/wit-v2/actr-workload.wit)
-world (`actr:workload@0.6.0`) in C. `dispatch` returns the inbound payload with
+world (`actr:workload@0.7.0`) in C. `dispatch` returns the inbound payload with
 an `echo: ` prefix; lifecycle and observation hooks complete immediately.
 
 Every export receives the V2 `invocation-ctx`. The implementation releases
@@ -48,7 +48,7 @@ dist/echo-c-0.1.0-wasm32-wasip2.wasm
 ```
 
 `make verify` validates the binary and checks that its inferred world exports
-`actr:workload/workload@0.6.0`, uses async functions and explicit invocation
+`actr:workload/workload@0.7.0`, uses async functions and explicit invocation
 context, and contains no V1 interface. Because this echo implementation does
 not call a host function, componentization trims the unused `host` import.
 CI additionally loads the component through actr's Wasmtime V2 host, executes
