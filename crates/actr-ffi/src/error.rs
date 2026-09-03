@@ -69,9 +69,11 @@ impl From<ConnectionNotReadyInfo> for ProtoConnectionNotReadyInfo {
 
 /// Error type for actr operations.
 ///
-/// The first ten variants mirror `actr_protocol::ActrError` exactly; the
-/// remaining binding-local variants capture pre-protocol failures that
-/// originate inside the FFI shell (config parsing, package loading, etc.).
+/// Protocol errors are mirrored one-for-one where the binding ABI exposes
+/// them. `DeliveryUncertain` is appended after the existing variants so adding
+/// this case does not renumber the established UniFFI error discriminants.
+/// The binding-local `Config` variant captures failures that originate inside
+/// the FFI shell before the protocol layer is reached.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum ActrError {
     // ── Transient ─────────────────────────────────────────────────────────
@@ -122,6 +124,15 @@ pub enum ActrError {
     /// or runtime config.
     #[error("config: {msg}")]
     Config { msg: String },
+
+    // ── Protocol additive variant ─────────────────────────────────────────
+    /// The operation may have entered the transport, so generic retry is
+    /// unsafe. Keep the operation ID and cause available to SDK callers.
+    ///
+    /// This variant is intentionally appended to preserve the discriminants
+    /// of the existing UniFFI ABI.
+    #[error("delivery uncertain for operation {operation_id}: {cause}")]
+    DeliveryUncertain { operation_id: String, cause: String },
 }
 
 pub type ActrResult<T> = Result<T, ActrError>;
@@ -189,7 +200,9 @@ impl ActrError {
 
             ActrError::DecodeFailure { .. } => ErrorKind::Corrupt,
 
-            ActrError::NotImplemented { .. } | ActrError::Internal { .. } => ErrorKind::Internal,
+            ActrError::NotImplemented { .. }
+            | ActrError::Internal { .. }
+            | ActrError::DeliveryUncertain { .. } => ErrorKind::Internal,
         }
     }
 
@@ -237,6 +250,13 @@ impl From<actr_protocol::ActrError> for ActrError {
                 ActrError::ConnectionNotReady { info: info.into() }
             }
             actr_protocol::ActrError::TimedOut => ActrError::TimedOut,
+            actr_protocol::ActrError::DeliveryUncertain {
+                operation_id,
+                cause,
+            } => ActrError::DeliveryUncertain {
+                operation_id,
+                cause,
+            },
             actr_protocol::ActrError::NotFound(msg) => ActrError::NotFound { msg },
             actr_protocol::ActrError::PermissionDenied(msg) => ActrError::PermissionDenied { msg },
             actr_protocol::ActrError::InvalidArgument(msg) => ActrError::InvalidArgument { msg },
@@ -269,6 +289,13 @@ impl From<ActrError> for actr_protocol::ActrError {
                 actr_protocol::ActrError::ConnectionNotReady(info.into())
             }
             ActrError::TimedOut => actr_protocol::ActrError::TimedOut,
+            ActrError::DeliveryUncertain {
+                operation_id,
+                cause,
+            } => actr_protocol::ActrError::DeliveryUncertain {
+                operation_id,
+                cause,
+            },
             ActrError::NotFound { msg } => actr_protocol::ActrError::NotFound(msg),
             ActrError::PermissionDenied { msg } => actr_protocol::ActrError::PermissionDenied(msg),
             ActrError::InvalidArgument { msg } => actr_protocol::ActrError::InvalidArgument(msg),
@@ -367,6 +394,10 @@ mod tests {
             actr_protocol::ActrError::DecodeFailure("df".into()),
             actr_protocol::ActrError::NotImplemented("ni".into()),
             actr_protocol::ActrError::Internal("int".into()),
+            actr_protocol::ActrError::DeliveryUncertain {
+                operation_id: "op-1".into(),
+                cause: "write returned after close".into(),
+            },
         ];
 
         for original in cases {
@@ -392,6 +423,14 @@ mod tests {
             ErrorKind::Transient,
         );
         assert_eq!(ActrError::TimedOut.kind(), ErrorKind::Transient);
+        assert_eq!(
+            ActrError::DeliveryUncertain {
+                operation_id: "op-1".into(),
+                cause: "closed after write".into(),
+            }
+            .kind(),
+            ErrorKind::Internal,
+        );
         assert_eq!(
             ActrError::NotFound { msg: "x".into() }.kind(),
             ErrorKind::Client,
@@ -422,6 +461,13 @@ mod tests {
             .is_retryable()
         );
         assert!(!ActrError::NotFound { msg: "x".into() }.is_retryable());
+        assert!(
+            !ActrError::DeliveryUncertain {
+                operation_id: "op-1".into(),
+                cause: "closed after write".into(),
+            }
+            .is_retryable()
+        );
         assert!(ActrError::DecodeFailure { msg: "x".into() }.requires_dlq());
         assert!(!ActrError::Internal { msg: "x".into() }.requires_dlq());
     }

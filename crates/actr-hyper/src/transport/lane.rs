@@ -587,17 +587,27 @@ pub trait DataLane: Send + Sync + std::fmt::Debug {
     }
 
     /// Send raw bytes and retain the delivery-progress fact for the recovery
-    /// layer.  The default is deliberately conservative: an erroring `send`
-    /// cannot prove that zero bytes entered the transport (a closed-like
-    /// error can surface after a sink partially flushed a frame), so every
-    /// failure is reported as `Unknown` and route-level recovery must not
-    /// replay the payload.  A concrete adapter MUST override this when it can
-    /// prove `NotAttempted` (for example, an absent WebSocket sink) or
-    /// `SubmittedLocally`.
+    /// layer.
+    ///
+    /// The default handles lanes that only implement `send`: a typed
+    /// closed/not-open or secure-not-ready error is raised before a concrete
+    /// write, so it is a proven `NotAttempted` and route-level self-healing
+    /// remains available. Other errors are conservatively `Unknown`.
+    /// Adapters whose writes can fail after bytes entered a transport MUST
+    /// override this method and report `Unknown`.
     async fn send_with_progress(&self, data: bytes::Bytes) -> SendAttemptResult {
         match self.send(data).await {
             Ok(()) => SendAttemptResult::submitted(),
-            Err(error) => SendAttemptResult::failed(error, DeliveryProgress::Unknown),
+            Err(error) => {
+                let progress = if error.is_closed_like()
+                    || matches!(error, NetworkError::SecureChannelNotReady(_))
+                {
+                    DeliveryProgress::NotAttempted
+                } else {
+                    DeliveryProgress::Unknown
+                };
+                SendAttemptResult::failed(error, progress)
+            }
         }
     }
 

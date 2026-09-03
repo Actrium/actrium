@@ -6171,9 +6171,9 @@ public object FfiConverterTypeWebRtcPeerStateBridge: FfiConverterRustBuffer<WebR
 /**
  * Error type for actr operations.
  *
- * The first ten variants mirror `actr_protocol::ActrError` exactly; the
- * remaining binding-local variants capture pre-protocol failures that
- * originate inside the FFI shell (config parsing, package loading, etc.).
+ * Protocol errors are mirrored one-for-one where the binding ABI exposes
+ * them. DeliveryUncertain is appended so the existing UniFFI error
+ * discriminants remain stable; Config is a binding-local pre-protocol error.
  */
 sealed class ActrException: kotlin.Exception() {
     
@@ -6279,6 +6279,17 @@ sealed class ActrException: kotlin.Exception() {
         override val message
             get() = "msg=${ `msg` }"
     }
+
+    /** The operation may have entered the transport; generic retry is unsafe. */
+    class DeliveryUncertain(
+
+        val `operationId`: kotlin.String,
+
+        val causeDetail: kotlin.String
+        ) : ActrException() {
+        override val message
+            get() = "operationId=${ `operationId` }, cause=${ causeDetail }"
+    }
     
 
     
@@ -6332,6 +6343,10 @@ public object FfiConverterTypeActrError : FfiConverterRustBuffer<ActrException> 
                 FfiConverterString.read(buf),
                 )
             12 -> ActrException.Config(
+                FfiConverterString.read(buf),
+                )
+            13 -> ActrException.DeliveryUncertain(
+                FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
@@ -6400,6 +6415,12 @@ public object FfiConverterTypeActrError : FfiConverterRustBuffer<ActrException> 
                 4UL
                 + FfiConverterString.allocationSize(value.`msg`)
             )
+            is ActrException.DeliveryUncertain -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`operationId`)
+                + FfiConverterString.allocationSize(value.causeDetail)
+            )
         }
     }
 
@@ -6463,6 +6484,12 @@ public object FfiConverterTypeActrError : FfiConverterRustBuffer<ActrException> 
             is ActrException.Config -> {
                 buf.putInt(12)
                 FfiConverterString.write(value.`msg`, buf)
+                Unit
+            }
+            is ActrException.DeliveryUncertain -> {
+                buf.putInt(13)
+                FfiConverterString.write(value.`operationId`, buf)
+                FfiConverterString.write(value.causeDetail, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
