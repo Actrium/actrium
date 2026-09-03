@@ -168,10 +168,12 @@ suspend fun NetworkEventHandle.forceReconnectCatching(
 // Exception Extensions
 // ============================================================================
 //
-// The underlying sealed `ActrException` mirrors `actr_protocol::ActrError`
-// 1:1 (10 variants) plus a small number of binding-local variants. Rather
-// than reasoning about each concrete subclass, consumers typically branch
-// on fault domain via `ErrorKind` — see `actrErrorKind(ex)` below.
+// The underlying sealed `ActrException` mirrors the protocol error surface
+// plus a small number of binding-local variants. Rather than reasoning about
+// each concrete subclass, consumers typically branch on fault domain via
+// `ErrorKind` — see `actrErrorKind(ex)` below. Framework-owned Call/Tell and
+// StreamReliable operations already wait/retry inside Rust; SDK helpers must
+// not replay those operations implicitly.
 
 /** Get a user-friendly error message for logs or UI. */
 val ActrException.userMessage: String
@@ -193,6 +195,8 @@ val ActrException.userMessage: String
             is ActrException.NotImplemented -> "Not implemented: $msg"
             is ActrException.Internal -> "Internal error: $msg"
             is ActrException.Config -> "Configuration error: $msg"
+            is ActrException.DeliveryUncertain ->
+                "Delivery uncertain for operation $operationId: $causeDetail. Do not retry automatically."
         }
 
 /** Check if the exception is a timeout. */
@@ -217,14 +221,23 @@ val ActrException.isConnectionError: Boolean
  * terminal failure.
  */
 val ActrException.isRecoverable: Boolean
-    get() = actrErrorIsRetryable(this)
+    get() = when (this) {
+        // Keep this terminal classification usable in JVM-only unit tests and
+        // before the native runtime has been loaded; the Rust classifier uses
+        // the same non-retryable rule at the FFI boundary.
+        is ActrException.DeliveryUncertain -> false
+        else -> actrErrorIsRetryable(this)
+    }
 
 /**
  * Fault-domain bucket for this exception — one of `Transient` / `Client` /
  * `Internal` / `Corrupt`.
  */
 val ActrException.kind: ErrorKind
-    get() = actrErrorKind(this)
+    get() = when (this) {
+        is ActrException.DeliveryUncertain -> ErrorKind.INTERNAL
+        else -> actrErrorKind(this)
+    }
 
 /**
  * `true` iff the underlying payload should be routed to a Dead Letter
@@ -248,10 +261,16 @@ data class RetryConfig(
 /**
  * Execute a suspending block with exponential backoff retry.
  *
+ * The default preserves the existing behavior: retry ActrException failures
+ * classified as recoverable. `DeliveryUncertain` is intentionally not
+ * recoverable, so an ambiguous send is never replayed by this helper. For
+ * framework-owned Call/Tell/DataStream operations, prefer the direct API or
+ * provide an explicit predicate when a second retry layer is intentional.
+ *
  * Example:
  * ```kotlin
- * val result = withRetry(maxAttempts = 5) {
- *     ref.discover("acme:EchoService")
+ * val result = withRetry(shouldRetry = { it is java.io.IOException }) {
+ *     fetchFromAnExternalService()
  * }
  * ```
  */
