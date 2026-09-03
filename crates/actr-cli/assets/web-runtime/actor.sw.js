@@ -401,8 +401,11 @@ function installActrHostGlobals() {
 }
 
 // @host-error-map begin
-// Extraction markers for the web-sdk's host-error-map.test.js: this CLI
-// runtime copy must stay byte-identical to the web-sdk mapping function.
+// Extraction markers for web-sdk/src/host-error-map.test.js: this script is a
+// standalone classic service worker, so its tests load this exact function
+// body from the shipped bytes. The CLI-embedded runtime copy under
+// crates/actr-cli/assets/web-runtime must stay byte-identical (checked by
+// sync-cli-assets.sh --check).
 function mapHostErrorToActr(e) {
   // sw-host's `actr_error_to_js` attaches `actrErrorTag` + message.
   // actr-web-abi `ActrError` variant serde tags are kebab-case; we

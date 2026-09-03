@@ -624,7 +624,7 @@ impl WasmHost {
 /// `@0.2.0`/`@0.3.0` async worlds, the pre-state-hook `@0.4.0`, or the
 /// pre-EXPLICIT-reply `@0.5.0`) — or no recognised world at all — is rejected
 /// with an actionable rebuild hint. Older packages must be rebuilt with the
-/// current SDK, which emits only the 0.6.0 async-world ABI.
+/// current SDK, which emits only the 0.7.0 async-world ABI.
 fn probe_world(component: &Component, engine: &Engine) -> WasmResult<()> {
     let mut saw_v6 = false;
     let mut saw_v5 = false;
@@ -660,7 +660,7 @@ fn probe_world(component: &Component, engine: &Engine) -> WasmResult<()> {
         return Err(WasmError::LoadFailed(
             "component exports multiple actr:workload/workload ABI versions; \
              a package must implement exactly one world (rebuild with the current \
-             SDK, which emits only @0.6.0)"
+             SDK, which emits only @0.7.0)"
                 .to_string(),
         ));
     }
