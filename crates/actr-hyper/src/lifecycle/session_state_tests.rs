@@ -89,6 +89,61 @@ async fn phase_transitions_cover_all_states() {
 }
 
 #[tokio::test]
+async fn readiness_subscription_tracks_phase_and_generation() {
+    let state = SessionState::new(SessionSnapshot::empty_with_id(test_actor_id(), 1));
+    let mut readiness = state.subscribe_readiness();
+
+    assert_eq!(
+        *readiness.borrow(),
+        SessionReadiness {
+            phase: SessionPhase::Active,
+            generation: 1,
+        }
+    );
+
+    state.enter_rebinding().await;
+    readiness
+        .changed()
+        .await
+        .expect("phase change should be published");
+    assert_eq!(
+        *readiness.borrow(),
+        SessionReadiness {
+            phase: SessionPhase::Rebinding,
+            generation: 1,
+        }
+    );
+
+    state
+        .commit_hard_rebind_unpublished(SessionSnapshot::empty_with_id(test_actor_id(), 2))
+        .await;
+    readiness
+        .changed()
+        .await
+        .expect("generation change should be published");
+    assert_eq!(
+        *readiness.borrow(),
+        SessionReadiness {
+            phase: SessionPhase::Rebinding,
+            generation: 2,
+        }
+    );
+
+    state.set_active().await;
+    readiness
+        .changed()
+        .await
+        .expect("active transition should be published");
+    assert_eq!(
+        *readiness.borrow(),
+        SessionReadiness {
+            phase: SessionPhase::Active,
+            generation: 2,
+        }
+    );
+}
+
+#[tokio::test]
 async fn sync_readers_return_some_when_unlocked() {
     let state = SessionState::new(SessionSnapshot::empty_with_id(test_actor_id(), 7));
     // No contending lock held → try_read succeeds.
