@@ -172,10 +172,12 @@ impl DestTransport {
     /// - If connection available, send immediately
     /// - If not, wait for connection status change (via watch channel)
     /// - WirePool already handles priority, only need to try DataLane Types in order
-    /// - Stale self-heal: when `get_lane()` returns a closed-like error, the
-    ///   current WebRTC wire may be stale. We conditionally mark it Failed
-    ///   (only if it still carries the same identity) so the outer loop can
-    ///   wait for a new connection or fallback instead of spinning forever.
+    /// - Stale self-heal: when lane acquisition or a concrete send fails before
+    ///   submission, the current wire may be stale. We conditionally mark it
+    ///   Failed (only if it still carries the same identity) so the outer loop
+    ///   can wait for a new connection or fallback instead of spinning
+    ///   forever. An ambiguous send is returned immediately and is never
+    ///   replayed here.
     #[cfg_attr(
         feature = "opentelemetry",
         tracing::instrument(skip_all, name = "DestTransport.send")
