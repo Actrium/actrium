@@ -550,7 +550,10 @@ async fn data_chunk_uncertain_hook_routes_to_on_error() {
         .expect("error recorder dropped");
 
     assert_eq!(event.category, ErrorCategory::DataChunkDeliveryUncertain);
-    assert!(matches!(event.source, ActrError::Unavailable(_)));
+    assert!(matches!(
+        event.source,
+        ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "mobile-upload"
+    ));
     assert!(event.context.contains("stream_id=mobile-upload"));
     assert!(event.context.contains("session_id=99"));
     assert!(event.context.contains("reason=data channel closed"));

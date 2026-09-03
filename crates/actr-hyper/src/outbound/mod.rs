@@ -14,6 +14,7 @@ mod peer_gate;
 pub(crate) use crate::transport::correlation::PendingRequestsMap;
 pub use host_gate::HostGate;
 pub use peer_gate::PeerGate;
+pub(crate) use peer_gate::data_chunk_operation_id;
 
 use actr_framework::{Bytes, MediaSample};
 use actr_protocol::{ActorResult, ActrError, ActrId, PayloadType, RpcEnvelope};
@@ -211,15 +212,30 @@ impl Gate {
         stream_id: &str,
         data: Bytes,
         deadline: RpcDeadline,
+        operation_id: &str,
     ) -> ActorResult<()> {
         match self {
             Gate::Host(gate) => {
-                gate.send_data_chunk_until(target, payload_type, stream_id, data, deadline)
-                    .await
+                gate.send_data_chunk_until(
+                    target,
+                    payload_type,
+                    stream_id,
+                    data,
+                    deadline,
+                    operation_id,
+                )
+                .await
             }
             Gate::Peer(gate) => {
-                gate.send_data_chunk_until(target, payload_type, stream_id, data, deadline)
-                    .await
+                gate.send_data_chunk_until(
+                    target,
+                    payload_type,
+                    stream_id,
+                    data,
+                    deadline,
+                    operation_id,
+                )
+                .await
             }
         }
     }

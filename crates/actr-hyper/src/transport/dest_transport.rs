@@ -5,6 +5,7 @@
 
 use super::Dest; // Re-exported from actr-framework
 use super::error::{NetworkError, NetworkResult};
+use super::lane::{DeliveryProgress, DeliveryProgressCell, record_delivery_progress};
 use super::route_table::{DataLaneType, PayloadTypeExt};
 use super::wire_handle::{WebRtcTransportLifecycle, WireHandle, WireIdentity};
 use super::wire_pool::{ConnType, ReadySet, RetryConfig, WirePool};
@@ -23,6 +24,29 @@ use tokio::sync::watch;
 pub(crate) struct DestTransport {
     /// Connection manager
     conn_mgr: Arc<WirePool>,
+}
+
+/// Result of one destination send, retaining the low-level delivery fact while
+/// the route identity remains available to timeout/recovery cleanup.
+pub(crate) struct DestSendAttempt {
+    pub(crate) result: NetworkResult<Option<WireIdentity>>,
+    pub(crate) progress: DeliveryProgress,
+}
+
+impl DestSendAttempt {
+    fn submitted(identity: Option<WireIdentity>) -> Self {
+        Self {
+            result: Ok(identity),
+            progress: DeliveryProgress::SubmittedLocally,
+        }
+    }
+
+    fn failed(error: NetworkError, progress: DeliveryProgress) -> Self {
+        Self {
+            result: Err(error),
+            progress,
+        }
+    }
 }
 
 /// Cleans up a partially-built destination pool if its async constructor is
@@ -156,11 +180,30 @@ impl DestTransport {
         feature = "opentelemetry",
         tracing::instrument(skip_all, name = "DestTransport.send")
     )]
+    #[allow(dead_code)] // Compatibility wrapper retained for transport tests.
     pub(crate) async fn send_with_identity(
         &self,
         payload_type: PayloadType,
         data: &[u8],
     ) -> NetworkResult<Option<WireIdentity>> {
+        self.send_with_progress(payload_type, data, None)
+            .await
+            .result
+    }
+
+    /// Send a message while retaining whether the concrete lane submission
+    /// was not attempted, accepted locally, or became ambiguous.
+    ///
+    /// `progress_sink`, when given, receives the progress fact as soon as it
+    /// exists — tentatively `Unknown` immediately before each lane write and
+    /// authoritatively when the lane resolves — so a caller whose deadline
+    /// cancels this future can still classify the send.
+    pub(crate) async fn send_with_progress(
+        &self,
+        payload_type: PayloadType,
+        data: &[u8],
+        progress_sink: Option<&DeliveryProgressCell>,
+    ) -> DestSendAttempt {
         tracing::debug!(
             "📤 Sending message: type={:?}, size={}",
             payload_type,
@@ -171,9 +214,10 @@ impl DestTransport {
         let lane_types = payload_type.data_lane_types();
 
         if lane_types.is_empty() {
-            return Err(NetworkError::NoRoute(format!(
-                "No route for: {payload_type:?}"
-            )));
+            return DestSendAttempt::failed(
+                NetworkError::NoRoute(format!("No route for: {payload_type:?}")),
+                DeliveryProgress::NotAttempted,
+            );
         }
         let candidate_conn_types = candidate_conn_types(lane_types);
 
@@ -218,14 +262,48 @@ impl DestTransport {
                             );
                             // Convert to Bytes (zero-copy)
                             let payload = bytes::Bytes::copy_from_slice(data);
-                            let result = lane.send(payload.clone()).await;
+                            if let Some(cell) = progress_sink {
+                                record_delivery_progress(cell, DeliveryProgress::Unknown);
+                            }
+                            let attempt = lane.send_with_progress(payload.clone()).await;
+                            let progress = attempt.progress;
+                            if let Some(cell) = progress_sink {
+                                record_delivery_progress(cell, progress);
+                            }
+
+                            // Secure readiness is a pre-send condition even
+                            // when a custom adapter misreports its progress
+                            // as `Unknown`. Recover the lane before applying
+                            // the terminal ambiguous-send rule below.
+                            if let Err(error) = attempt.result.as_ref() {
+                                if matches!(error, NetworkError::SecureChannelNotReady(_)) {
+                                    tracing::info!(
+                                        "🔐 secure channel not ready for {:?} ({}), waiting for readiness",
+                                        conn_type,
+                                        error,
+                                    );
+                                    conn.invalidate_lane(payload_type).await;
+                                    continue 'send;
+                                }
+                            }
+
+                            // Once a concrete adapter reports that bytes may
+                            // have entered the transport, the route loop must
+                            // not replay this payload.  Preserve the progress
+                            // fact for the operation owner instead.
+                            if progress == DeliveryProgress::Unknown {
+                                return match attempt.result {
+                                    Ok(()) => DestSendAttempt::submitted(wire_identity),
+                                    Err(error) => DestSendAttempt::failed(error, progress),
+                                };
+                            }
 
                             // If the lane went stale after selection, drop the
                             // cached lane and retry once before surfacing the
                             // error. Transport-agnostic: a closed-like error
                             // means the underlying wire (WebRTC *or* WebSocket)
                             // is no longer sendable and should be self-healed.
-                            if let Err(e) = &result {
+                            if let Err(e) = attempt.result.as_ref() {
                                 if e.is_closed_like() {
                                     tracing::warn!(
                                         "♻️ lane closed-like error for {:?} ({:?}), invalidating lane and retrying once: {}",
@@ -236,10 +314,47 @@ impl DestTransport {
                                     conn.invalidate_lane(payload_type).await;
                                     match conn.get_lane(payload_type).await {
                                         Ok(new_lane) => {
-                                            return new_lane
-                                                .send(payload)
-                                                .await
-                                                .map(|_| wire_identity);
+                                            if let Some(cell) = progress_sink {
+                                                record_delivery_progress(
+                                                    cell,
+                                                    DeliveryProgress::Unknown,
+                                                );
+                                            }
+                                            let retry = new_lane.send_with_progress(payload).await;
+                                            let retry_progress = retry.progress;
+                                            if let Some(cell) = progress_sink {
+                                                record_delivery_progress(cell, retry_progress);
+                                            }
+                                            return match retry.result {
+                                                Ok(()) => DestSendAttempt::submitted(wire_identity),
+                                                Err(NetworkError::SecureChannelNotReady(_)) => {
+                                                    // Secure epoch rotated again
+                                                    // mid-retry: wait for a
+                                                    // fresh lane; the wire is
+                                                    // still healthy.
+                                                    conn.invalidate_lane(payload_type).await;
+                                                    continue 'send;
+                                                }
+                                                Err(error)
+                                                    if retry_progress
+                                                        == DeliveryProgress::Unknown =>
+                                                {
+                                                    DestSendAttempt::failed(error, retry_progress)
+                                                }
+                                                Err(error) if error.is_closed_like() => {
+                                                    self.evict_closed_like_connection(
+                                                        &conn,
+                                                        conn_type,
+                                                        payload_type,
+                                                        "retry send",
+                                                    )
+                                                    .await;
+                                                    continue 'send;
+                                                }
+                                                Err(error) => {
+                                                    DestSendAttempt::failed(error, retry_progress)
+                                                }
+                                            };
                                         }
                                         Err(retry_err) => {
                                             if matches!(
@@ -262,7 +377,10 @@ impl DestTransport {
                                                 .await;
                                                 continue 'send;
                                             }
-                                            return Err(retry_err);
+                                            return DestSendAttempt::failed(
+                                                retry_err,
+                                                DeliveryProgress::NotAttempted,
+                                            );
                                         }
                                     }
                                 }
@@ -282,7 +400,10 @@ impl DestTransport {
                                 }
                             }
 
-                            return result.map(|_| wire_identity);
+                            return match attempt.result {
+                                Ok(()) => DestSendAttempt::submitted(wire_identity),
+                                Err(error) => DestSendAttempt::failed(error, progress),
+                            };
                         }
                         Err(e) => {
                             if matches!(e, NetworkError::SecureChannelNotReady(_)) {
@@ -320,9 +441,10 @@ impl DestTransport {
             tracing::info!("⏳ Waiting for connection status...");
 
             if self.conn_mgr.is_closed() {
-                return Err(NetworkError::ChannelClosed(
-                    "connection manager closed".into(),
-                ));
+                return DestSendAttempt::failed(
+                    NetworkError::ChannelClosed("connection manager closed".into()),
+                    DeliveryProgress::NotAttempted,
+                );
             }
 
             if !self
@@ -330,16 +452,20 @@ impl DestTransport {
                 .has_live_candidate(&candidate_conn_types)
                 .await
             {
-                return Err(NetworkError::NoRoute(format!(
-                    "all transport candidates exhausted for {payload_type:?}: {candidate_conn_types:?}"
-                )));
+                return DestSendAttempt::failed(
+                    NetworkError::NoRoute(format!(
+                        "all transport candidates exhausted for {payload_type:?}: {candidate_conn_types:?}"
+                    )),
+                    DeliveryProgress::NotAttempted,
+                );
             }
 
             // Event-driven wait!
             if conn_watcher.changed().await.is_err() {
-                return Err(NetworkError::ChannelClosed(
-                    "connection manager closed".into(),
-                ));
+                return DestSendAttempt::failed(
+                    NetworkError::ChannelClosed("connection manager closed".into()),
+                    DeliveryProgress::NotAttempted,
+                );
             }
 
             tracing::debug!("🔔 Connection status updated, retrying...");
