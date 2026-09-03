@@ -14,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 use webrtc::data_channel::DataChannel;
 use webrtc::error::Error as RtcError;
 
+use crate::transport::DeliveryProgress;
 use crate::wire::webrtc::v020::status::LaneKind;
 
 use super::lane_handle::LaneHandle;
@@ -77,6 +78,26 @@ pub(crate) enum RtcSendError {
     MessageTooLarge,
 }
 
+/// One RTC send result with the delivery fact observed by the controller.
+/// `DataChunkDeliveryUncertain` is the only current outcome that may have
+/// entered the channel; all other errors are proven pre-send failures.
+#[derive(Debug)]
+pub(crate) struct RtcSendAttempt {
+    pub(crate) result: Result<(), RtcSendError>,
+    pub(crate) progress: DeliveryProgress,
+}
+
+impl RtcSendAttempt {
+    pub(crate) fn from_result(result: Result<(), RtcSendError>) -> Self {
+        let progress = match &result {
+            Ok(()) => DeliveryProgress::SubmittedLocally,
+            Err(RtcSendError::DataChunkDeliveryUncertain) => DeliveryProgress::Unknown,
+            Err(_) => DeliveryProgress::NotAttempted,
+        };
+        Self { result, progress }
+    }
+}
+
 /// An internal/uncategorized send failure (kept out of the stable enum so the
 /// public surface stays small; logged with the peer/generation/lane).
 #[derive(Debug, thiserror::Error)]
@@ -102,5 +123,42 @@ mod tests {
             map_send_error(&RtcError::ErrDataChannelClosed),
             RtcSendError::DataChannelClosed
         );
+    }
+
+    #[test]
+    fn send_attempt_preserves_delivery_progress() {
+        assert_eq!(
+            RtcSendAttempt::from_result(Ok(())).progress,
+            DeliveryProgress::SubmittedLocally
+        );
+        assert_eq!(
+            RtcSendAttempt::from_result(Err(RtcSendError::ConnectionNotReady)).progress,
+            DeliveryProgress::NotAttempted
+        );
+        assert_eq!(
+            RtcSendAttempt::from_result(Err(RtcSendError::DataChunkDeliveryUncertain)).progress,
+            DeliveryProgress::Unknown
+        );
+    }
+
+    #[test]
+    fn every_non_uncertain_error_is_a_proven_pre_send_failure() {
+        // The invariant documented on `RtcSendAttempt`: `DataChunkDeliveryUncertain`
+        // is the only error that may have entered the channel. Every other
+        // variant — including buffer-full and message-too-large, which are
+        // detected before fragmentation hands bytes to the channel — must
+        // classify as a proven pre-send failure so route recovery may replay.
+        for error in [
+            RtcSendError::ConnectionNotReady,
+            RtcSendError::DataChannelClosed,
+            RtcSendError::DataChannelBufferFull,
+            RtcSendError::MessageTooLarge,
+        ] {
+            assert_eq!(
+                RtcSendAttempt::from_result(Err(error)).progress,
+                DeliveryProgress::NotAttempted,
+                "{error:?} must remain a proven pre-send failure"
+            );
+        }
     }
 }

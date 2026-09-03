@@ -13,8 +13,9 @@ use crate::transport::correlation::PendingRequestsMap;
 #[cfg(any(test, feature = "test-utils"))]
 use crate::transport::correlation::{CompleteOutcome, RpcCorrelation};
 use crate::transport::{
-    Dest, DestTransportRef, NetworkResult, PayloadTypeExt, PeerTransport, RpcDeadline,
-    SentTransportSlot, WireIdentity,
+    DeliveryProgress, DeliveryProgressCell, Dest, DestTransportRef, PayloadTypeExt,
+    PeerSendAttempt, PeerTransport, RpcDeadline, SentTransportSlot, WireIdentity,
+    new_delivery_progress_cell, observed_delivery_progress,
 };
 use actr_framework::{Bytes, MediaSample};
 use actr_protocol::prost::Message as ProstMessage;
@@ -44,6 +45,12 @@ const PENDING_RECOVERY_GRACE: Duration = Duration::from_secs(5);
 enum SendAdmission {
     ExistingOnly,
     Normal,
+}
+
+/// One peer-gate attempt with the route's delivery-progress fact preserved.
+struct GateSendAttempt {
+    result: ActorResult<Option<DestTransportRef>>,
+    progress: DeliveryProgress,
 }
 
 impl SendAdmission {
@@ -611,6 +618,10 @@ impl PeerGate {
     ///
     /// Retry is applied only when `NetworkError::kind()` is `Transient`.
     /// Non-transient errors are returned immediately without retry.
+    /// Retry-policy send without a caller-correlatable operation id. Only
+    /// in-crate tests drive opaque-byte sends; every production path threads a
+    /// stable operation identity (request id or stream id).
+    #[cfg(test)]
     async fn send_with_retry(
         &self,
         dest: &Dest,
@@ -619,17 +630,38 @@ impl PeerGate {
         admission: SendAdmission,
     ) -> ActorResult<()> {
         let policy = payload_type.retry_policy();
-        self.send_with_retry_policy(dest, payload_type, data, policy, admission)
+        self.send_with_retry_policy(dest, payload_type, data, policy, admission, None)
             .await
     }
 
-    async fn send_with_retry_record_identity(
+    async fn send_with_retry_for_operation(
+        &self,
+        dest: &Dest,
+        payload_type: PayloadType,
+        data: &[u8],
+        admission: SendAdmission,
+        operation_id: &str,
+    ) -> ActorResult<()> {
+        let policy = payload_type.retry_policy();
+        self.send_with_retry_policy(
+            dest,
+            payload_type,
+            data,
+            policy,
+            admission,
+            Some(operation_id),
+        )
+        .await
+    }
+
+    async fn send_with_retry_record_identity_for_operation(
         &self,
         dest: &Dest,
         payload_type: PayloadType,
         data: &[u8],
         admission: SendAdmission,
         record: Option<&SentTransportSlot>,
+        operation_id: &str,
     ) -> ActorResult<DestTransportRef> {
         let policy = payload_type.retry_policy();
         self.send_with_retry_policy_record_identity(
@@ -639,6 +671,7 @@ impl PeerGate {
             policy,
             admission,
             record,
+            Some(operation_id),
         )
         .await
     }
@@ -650,6 +683,7 @@ impl PeerGate {
         data: &[u8],
         policy: crate::transport::RetryPolicy,
         admission: SendAdmission,
+        operation_id: Option<&str>,
     ) -> ActorResult<()> {
         self.send_with_retry_policy_record_identity(
             dest,
@@ -658,6 +692,7 @@ impl PeerGate {
             policy,
             admission,
             None,
+            operation_id,
         )
         .await
         .map(|_| ())
@@ -670,21 +705,43 @@ impl PeerGate {
         data: &[u8],
         admission: SendAdmission,
         record: Option<&SentTransportSlot>,
-    ) -> NetworkResult<Option<DestTransportRef>> {
+        progress_sink: Option<&DeliveryProgressCell>,
+    ) -> GateSendAttempt {
         match admission {
-            SendAdmission::Normal => self
-                .transport_manager
-                .send_with_identity(dest, payload_type, data, record)
-                .await
-                .map(Some),
+            SendAdmission::Normal => {
+                let PeerSendAttempt { result, progress } = self
+                    .transport_manager
+                    .send_with_progress(dest, payload_type, data, record, progress_sink)
+                    .await;
+                GateSendAttempt {
+                    result: result.map(Some).map_err(ActrError::from),
+                    progress,
+                }
+            }
             SendAdmission::ExistingOnly => {
-                self.transport_manager
-                    .send_existing_with_identity(dest, payload_type, data, record)
-                    .await
+                let attempt = self
+                    .transport_manager
+                    .send_existing_with_progress(dest, payload_type, data, record, progress_sink)
+                    .await;
+                GateSendAttempt {
+                    result: attempt.result.map_err(ActrError::from),
+                    progress: attempt.progress,
+                }
             }
         }
     }
 
+    fn delivery_uncertain_error(
+        operation_id: Option<&str>,
+        error: impl std::fmt::Display,
+    ) -> ActrError {
+        ActrError::DeliveryUncertain {
+            operation_id: operation_id.unwrap_or("unknown").to_string(),
+            cause: error.to_string(),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)] // Keeps send context explicit at this internal boundary.
     async fn send_once_with_admission(
         &self,
         dest: &Dest,
@@ -692,18 +749,24 @@ impl PeerGate {
         data: &[u8],
         admission: SendAdmission,
         record: Option<&SentTransportSlot>,
+        operation_id: Option<&str>,
+        progress_sink: Option<&DeliveryProgressCell>,
     ) -> ActorResult<DestTransportRef> {
         let admission = self.tighten_with_current_projection(admission)?;
-        match self
-            .attempt_send(dest, payload_type, data, admission, record)
-            .await
-        {
+        let attempt = self
+            .attempt_send(dest, payload_type, data, admission, record, progress_sink)
+            .await;
+        match attempt.result {
             Ok(Some(identity)) => Ok(identity),
             Ok(None) => Err(Self::send_projection_not_ready_error()),
-            Err(error) => Err(error.into()),
+            Err(error) if attempt.progress == DeliveryProgress::Unknown => {
+                Err(Self::delivery_uncertain_error(operation_id, error))
+            }
+            Err(error) => Err(error),
         }
     }
 
+    #[allow(clippy::too_many_arguments)] // Keeps retry context explicit at this internal boundary.
     async fn send_with_retry_policy_record_identity(
         &self,
         dest: &Dest,
@@ -712,28 +775,32 @@ impl PeerGate {
         policy: crate::transport::RetryPolicy,
         mut admission: SendAdmission,
         record: Option<&SentTransportSlot>,
+        operation_id: Option<&str>,
     ) -> ActorResult<DestTransportRef> {
         let mut delay = policy.initial_delay;
-        let mut attempt = 0u32;
+        let mut attempt_count = 0u32;
 
         loop {
             admission = self.tighten_with_current_projection(admission)?;
-            match self
-                .attempt_send(dest, payload_type, data, admission, record)
-                .await
-            {
+            let send_attempt = self
+                .attempt_send(dest, payload_type, data, admission, record, None)
+                .await;
+            match send_attempt.result {
                 Ok(Some(identity)) => return Ok(identity),
                 // `ExistingOnly` with no committed destination is an
                 // admission result, not a transient transport failure. Fail
                 // immediately without entering the retry backoff.
                 Ok(None) => return Err(Self::send_projection_not_ready_error()),
+                Err(e) if send_attempt.progress == DeliveryProgress::Unknown => {
+                    return Err(Self::delivery_uncertain_error(operation_id, e));
+                }
                 Err(e) => {
-                    attempt += 1;
+                    attempt_count += 1;
                     let retryable = e.is_retryable();
-                    let remaining = policy.max_attempts.saturating_sub(attempt);
+                    let remaining = policy.max_attempts.saturating_sub(attempt_count);
                     if retryable && remaining > 0 {
                         tracing::warn!(
-                            attempt,
+                            attempt = attempt_count,
                             remaining,
                             error = %e,
                             "transient send failure, retrying after {:?}",
@@ -743,16 +810,16 @@ impl PeerGate {
                         // exponential backoff capped at max_delay
                         delay = (delay * 2).min(policy.max_delay);
                     } else {
-                        if attempt > 1 {
+                        if attempt_count > 1 {
                             tracing::warn!(
-                                attempt,
+                                attempt = attempt_count,
                                 error = %e,
                                 retryable,
                                 "send failed after {} attempt(s)",
-                                attempt,
+                                attempt_count,
                             );
                         }
-                        return Err(e.into());
+                        return Err(e);
                     }
                 }
             }
@@ -852,7 +919,7 @@ impl PeerGate {
         let mut policy = payload_type.retry_policy();
         policy.initial_delay = std::time::Duration::ZERO;
         policy.max_delay = std::time::Duration::ZERO;
-        self.send_with_retry_policy(&dest, payload_type, data, policy, admission)
+        self.send_with_retry_policy(&dest, payload_type, data, policy, admission, None)
             .await
     }
 
@@ -917,12 +984,13 @@ impl PeerGate {
                 deadline.ensure_remaining()?;
                 send_started = true;
 
-                self.send_with_retry_record_identity(
+                self.send_with_retry_record_identity_for_operation(
                     &dest,
                     payload_type,
                     &data,
                     admission,
                     Some(&sent_transport_for_send),
+                    &request_id,
                 )
                 .await?;
                 tracing::debug!("Sent request to {:?}", target);
@@ -987,11 +1055,12 @@ impl PeerGate {
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Response);
         let data = Self::serialize_envelope(&envelope);
         let dest = Self::actr_id_to_dest(target);
-        self.send_with_retry(
+        self.send_with_retry_for_operation(
             &dest,
             PayloadType::RpcReliable,
             &data,
             SendAdmission::ExistingOnly,
+            &envelope.request_id,
         )
         .await
     }
@@ -1036,6 +1105,7 @@ impl PeerGate {
         deadline.ensure_remaining()?;
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Tell);
         let dest = Self::actr_id_to_dest(target);
+        let operation_id = envelope.request_id.clone();
 
         match crate::timer::timeout_at(
             crate::timer::ids::OUTBOUND_TELL_DEADLINE,
@@ -1044,8 +1114,14 @@ impl PeerGate {
                 let data = Self::serialize_envelope(&envelope);
                 let admission = self.preflight_send(target, &dest).await?;
                 deadline.ensure_remaining()?;
-                self.send_with_retry(&dest, payload_type, &data, admission)
-                    .await
+                self.send_with_retry_for_operation(
+                    &dest,
+                    payload_type,
+                    &data,
+                    admission,
+                    &operation_id,
+                )
+                .await
             },
         )
         .await
@@ -1067,7 +1143,13 @@ impl PeerGate {
         let data = Self::serialize_envelope(&envelope);
         let dest = Self::actr_id_to_dest(target);
         let admission = self.preflight_send(target, &dest).await?;
-        let send = self.send_with_retry(&dest, payload_type, &data, admission);
+        let send = self.send_with_retry_for_operation(
+            &dest,
+            payload_type,
+            &data,
+            admission,
+            &envelope.request_id,
+        );
         if let Some(send_timeout) = send_timeout {
             match crate::timer::timeout(
                 crate::timer::ids::PEER_REQUEST_DEADLINE,
@@ -1263,8 +1345,20 @@ impl PeerGate {
         send_timeout: Duration,
     ) -> ActorResult<()> {
         let deadline = RpcDeadline::from_duration(send_timeout);
-        self.send_data_chunk_until(target, payload_type, stream_id, data, deadline)
-            .await
+        // The caller-visible `stream_id` is the operation identity: the
+        // `DataChunkDeliveryUncertain` lifecycle hook reports the same value,
+        // so a `DeliveryUncertain` error can be correlated with the caller's
+        // own idempotency record.
+        let operation_id = stream_id.to_string();
+        self.send_data_chunk_until(
+            target,
+            payload_type,
+            stream_id,
+            data,
+            deadline,
+            &operation_id,
+        )
+        .await
     }
 
     pub(crate) async fn send_data_chunk_until(
@@ -1274,6 +1368,7 @@ impl PeerGate {
         stream_id: &str,
         data: Bytes,
         deadline: RpcDeadline,
+        operation_id: &str,
     ) -> ActorResult<()> {
         tracing::debug!(
             "PeerGate::send_data_chunk to {:?}, stream_id={}, payload_type={:?}, size={} bytes",
@@ -1300,21 +1395,45 @@ impl PeerGate {
         // session. A chunk-send timeout therefore only fails this send; it
         // deliberately does not tear down the transport (a timeout is not
         // proof the transport is bad — the remote may simply be slow).
+        //
+        // The progress cell survives cancellation of the send future: the
+        // transport records the delivery fact the moment it exists, so the
+        // timeout arm below can tell "cancelled before any transport write"
+        // (retryable `TimedOut`) apart from "cancelled with bytes possibly in
+        // flight" (terminal `DeliveryUncertain` — the data-chunk path has no
+        // dedup, so an automatic replay could deliver the payload twice).
+        let progress_cell = new_delivery_progress_cell();
         match crate::timer::timeout_at(
             crate::timer::ids::OUTBOUND_DATA_CHUNK_DEADLINE,
             deadline.instant(),
             async {
                 let admission = self.preflight_send(target, &dest).await?;
                 deadline.ensure_remaining()?;
-                self.send_once_with_admission(&dest, payload_type, &data, admission, None)
-                    .await
+                self.send_once_with_admission(
+                    &dest,
+                    payload_type,
+                    &data,
+                    admission,
+                    None,
+                    Some(operation_id),
+                    Some(&progress_cell),
+                )
+                .await
             },
         )
         .await
         {
             Ok(Ok(_identity)) => Ok(()),
             Ok(Err(e)) => Err(e),
-            Err(_) => Err(ActrError::TimedOut),
+            Err(_) => match observed_delivery_progress(&progress_cell) {
+                None | Some(DeliveryProgress::NotAttempted) => Err(ActrError::TimedOut),
+                Some(DeliveryProgress::SubmittedLocally) | Some(DeliveryProgress::Unknown) => {
+                    Err(Self::delivery_uncertain_error(
+                        Some(operation_id),
+                        "data chunk send deadline elapsed after transport submission",
+                    ))
+                }
+            },
         }
     }
 }
@@ -1922,7 +2041,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn send_message_with_type_times_out_before_reliable_retry_backoff_completes() {
+    async fn send_message_with_type_reports_uncertain_before_reliable_retry_backoff() {
         let attempts = Arc::new(AtomicUsize::new(0));
         let transport = Arc::new(PeerTransport::new(
             test_actor_id(1),
@@ -1943,7 +2062,11 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(matches!(err, ActrError::TimedOut), "got {err:?}");
+        assert!(matches!(
+            &err,
+            ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "req-direction"
+        ));
+        assert!(!err.is_retryable());
         assert_eq!(attempts.load(Ordering::SeqCst), 1);
     }
 
@@ -2004,7 +2127,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn send_data_chunk_timeout_is_timed_out() {
+    async fn send_data_chunk_timeout_mid_write_is_delivery_uncertain() {
         let transport = Arc::new(PeerTransport::new(
             test_actor_id(1),
             Arc::new(PendingWireBuilder),
@@ -2023,6 +2146,86 @@ mod tests {
             .await
             .unwrap_err();
 
+        // The deadline cancelled the send while a lane write was in flight.
+        // Bytes may already have entered the transport and the data-chunk
+        // path has no dedup, so the failure must be terminal and correlate to
+        // the caller-visible stream id — never a retryable TimedOut that an
+        // auto-retry would turn into a duplicate delivery.
+        assert!(
+            matches!(
+                &err,
+                ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "stream-1"
+            ),
+            "got {err:?}"
+        );
+        assert!(!err.is_retryable());
+    }
+
+    #[derive(Debug)]
+    struct LanelessPendingWire;
+
+    #[async_trait]
+    impl WireHandle for LanelessPendingWire {
+        fn connection_type(&self) -> ConnType {
+            ConnType::WebSocket
+        }
+
+        fn priority(&self) -> u8 {
+            1
+        }
+
+        async fn connect(&self) -> NetworkResult<()> {
+            Ok(())
+        }
+
+        fn is_connected(&self) -> bool {
+            true
+        }
+
+        async fn close(&self) -> NetworkResult<()> {
+            Ok(())
+        }
+
+        async fn get_lane(&self, _payload_type: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
+            std::future::pending().await
+        }
+    }
+
+    struct LanelessPendingWireBuilder;
+
+    #[async_trait]
+    impl WireBuilder for LanelessPendingWireBuilder {
+        async fn create_connections(
+            &self,
+            _dest: &Dest,
+        ) -> NetworkResult<Vec<Arc<dyn WireHandle>>> {
+            Ok(vec![Arc::new(LanelessPendingWire)])
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn send_data_chunk_timeout_before_write_is_timed_out() {
+        let transport = Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(LanelessPendingWireBuilder),
+        ));
+        let gate = PeerGate::for_test(transport);
+        let target = test_actor_id(2);
+
+        let err = gate
+            .send_data_chunk_with_timeout(
+                &target,
+                PayloadType::StreamReliable,
+                "stream-1",
+                Bytes::from_static(b"chunk"),
+                Duration::from_millis(250),
+            )
+            .await
+            .unwrap_err();
+
+        // The deadline fired before any lane write was approached (lane
+        // acquisition never resolved), so nothing can have entered a
+        // transport: the caller may safely retry.
         assert!(matches!(err, ActrError::TimedOut), "got {err:?}");
     }
     /// #390: dropping the `send_request` future (Kotlin coroutine cancel =

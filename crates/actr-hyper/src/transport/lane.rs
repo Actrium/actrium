@@ -482,6 +482,91 @@ pub(crate) type WsSink =
 
 // ── DataLane trait ────────────────────────────────────────────────────────────
 
+/// How far an outbound payload progressed before a send returned an error.
+///
+/// This is deliberately crate-private.  The distinction is used by the
+/// recovery layer to avoid replaying bytes that may already have entered a
+/// transport; public callers continue to receive the existing error surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeliveryProgress {
+    /// No transport write was attempted for this payload.
+    NotAttempted,
+    /// The local transport accepted the payload (remote processing is not
+    /// implied).
+    SubmittedLocally,
+    /// The send may have entered the transport, but completion is unknown.
+    Unknown,
+}
+
+/// Result of one low-level lane submission, including progress that must not be
+/// inferred later from a coarse `NetworkError`.
+#[derive(Debug)]
+pub struct SendAttemptResult {
+    pub(crate) result: NetworkResult<()>,
+    pub(crate) progress: DeliveryProgress,
+}
+
+impl SendAttemptResult {
+    /// Construct an attempt with an explicit delivery classification.
+    ///
+    /// This constructor is exposed only through the `test-utils` transport
+    /// surface so deterministic integration lanes can model pre-send and
+    /// ambiguous failures without weakening the production default.
+    #[cfg(feature = "test-utils")]
+    pub fn for_test(result: NetworkResult<()>, progress: DeliveryProgress) -> Self {
+        Self { result, progress }
+    }
+
+    pub(crate) fn submitted() -> Self {
+        Self {
+            result: Ok(()),
+            progress: DeliveryProgress::SubmittedLocally,
+        }
+    }
+
+    pub(crate) fn failed(error: NetworkError, progress: DeliveryProgress) -> Self {
+        Self {
+            result: Err(error),
+            progress,
+        }
+    }
+
+    pub fn into_result(self) -> NetworkResult<()> {
+        self.result
+    }
+}
+
+/// Shared sink receiving the delivery progress of one in-flight operation.
+///
+/// The transport writes the fact *as soon as it exists*: tentatively
+/// `Unknown` immediately before a lane write (a cancellation landing inside
+/// the write cannot be classified any other way), then authoritatively once
+/// the lane resolves. A deadline wrapper that cancels the send future can
+/// therefore still distinguish "never reached a transport" (retryable) from
+/// "may have entered a transport" (uncertain).
+pub(crate) type DeliveryProgressCell = Arc<std::sync::Mutex<Option<DeliveryProgress>>>;
+
+/// Create an empty progress cell for one outbound operation.
+pub(crate) fn new_delivery_progress_cell() -> DeliveryProgressCell {
+    Arc::new(std::sync::Mutex::new(None))
+}
+
+/// Record the latest observed progress. Last write wins: a tentative
+/// `Unknown` immediately precedes each lane write and the authoritative lane
+/// result immediately follows it, so the cell always reflects the current
+/// point of cancellation.
+pub(crate) fn record_delivery_progress(cell: &DeliveryProgressCell, progress: DeliveryProgress) {
+    if let Ok(mut guard) = cell.lock() {
+        *guard = Some(progress);
+    }
+}
+
+/// Read the progress recorded so far (`None` = no lane write was ever
+/// approached, so a cancellation is provably pre-send).
+pub(crate) fn observed_delivery_progress(cell: &DeliveryProgressCell) -> Option<DeliveryProgress> {
+    cell.lock().ok().and_then(|guard| *guard)
+}
+
 /// DataLane - Data transport channel trait
 ///
 /// Each DataLane represents a specific transport path for data/message transmission.
@@ -499,6 +584,21 @@ pub trait DataLane: Send + Sync + std::fmt::Debug {
         Err(NetworkError::InvalidOperation(
             "send(bytes) not supported on this lane type".to_string(),
         ))
+    }
+
+    /// Send raw bytes and retain the delivery-progress fact for the recovery
+    /// layer.  The default is deliberately conservative: an erroring `send`
+    /// cannot prove that zero bytes entered the transport (a closed-like
+    /// error can surface after a sink partially flushed a frame), so every
+    /// failure is reported as `Unknown` and route-level recovery must not
+    /// replay the payload.  A concrete adapter MUST override this when it can
+    /// prove `NotAttempted` (for example, an absent WebSocket sink) or
+    /// `SubmittedLocally`.
+    async fn send_with_progress(&self, data: bytes::Bytes) -> SendAttemptResult {
+        match self.send(data).await {
+            Ok(()) => SendAttemptResult::submitted(),
+            Err(error) => SendAttemptResult::failed(error, DeliveryProgress::Unknown),
+        }
     }
 
     /// Receive raw bytes (blocking until available).
@@ -677,9 +777,35 @@ impl WebSocketDataLane {
     }
 }
 
+/// Map the result of a WebSocket sink write to delivery progress.
+///
+/// Once `SinkExt::send` has been invoked, a returned error cannot prove that
+/// zero bytes reached the peer: the sink may have flushed part of the frame
+/// before the underlying connection failed.  Keep that distinction at the
+/// adapter boundary so route-level recovery cannot replay the payload.
+fn map_websocket_send_result(
+    result: Result<(), tokio_tungstenite::tungstenite::Error>,
+) -> SendAttemptResult {
+    match result {
+        Ok(()) => SendAttemptResult::submitted(),
+        Err(error) => {
+            let error = if is_tungstenite_closed(&error) {
+                NetworkError::WebSocketClosed(error.to_string())
+            } else {
+                NetworkError::SendError(format!("WebSocket send failed: {error}"))
+            };
+            SendAttemptResult::failed(error, DeliveryProgress::Unknown)
+        }
+    }
+}
+
 #[async_trait]
 impl DataLane for WebSocketDataLane {
     async fn send(&self, data: bytes::Bytes) -> NetworkResult<()> {
+        self.send_with_progress(data).await.into_result()
+    }
+
+    async fn send_with_progress(&self, data: bytes::Bytes) -> SendAttemptResult {
         // 1. Encapsulate message (add PayloadType header)
         let mut buf = Vec::with_capacity(5 + data.len());
 
@@ -696,24 +822,20 @@ impl DataLane for WebSocketDataLane {
         // 2. Send to WebSocket
         let mut sink_opt = self.sink.lock().await;
         if let Some(s) = sink_opt.as_mut() {
-            s.send(WsMessage::Binary(buf.into())).await.map_err(|e| {
-                if is_tungstenite_closed(&e) {
-                    NetworkError::WebSocketClosed(e.to_string())
-                } else {
-                    NetworkError::SendError(format!("WebSocket send failed: {e}"))
-                }
-            })?;
-
-            tracing::trace!(
-                "WebSocket sent {} bytes (type={:?})",
-                data.len(),
-                self.payload_type
-            );
-            Ok(())
+            let attempt = map_websocket_send_result(s.send(WsMessage::Binary(buf.into())).await);
+            if attempt.result.is_ok() {
+                tracing::trace!(
+                    "WebSocket sent {} bytes (type={:?})",
+                    data.len(),
+                    self.payload_type
+                );
+            }
+            attempt
         } else {
-            Err(NetworkError::WebSocketClosed(
-                "WebSocket not connected".to_string(),
-            ))
+            SendAttemptResult::failed(
+                NetworkError::WebSocketClosed("WebSocket not connected".to_string()),
+                DeliveryProgress::NotAttempted,
+            )
         }
     }
 

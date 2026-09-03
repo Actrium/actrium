@@ -35,12 +35,15 @@ pub(crate) use secure_channel::{SecureCell, SecureChannelState, SecureDataLane};
 
 // DataLane core abstraction (trait kept pub for sw-host/peer_transport).
 #[cfg(feature = "test-utils")]
-pub use lane::DataLane;
-#[cfg(not(feature = "test-utils"))]
-pub(crate) use lane::DataLane;
-#[cfg(feature = "test-utils")]
 pub(crate) use lane::notify_webrtc_fragment_sent_for_test;
-pub(crate) use lane::{MpscLane, WebSocketDataLane, WsSink};
+#[cfg(feature = "test-utils")]
+pub use lane::{DataLane, DeliveryProgress, SendAttemptResult};
+#[cfg(not(feature = "test-utils"))]
+pub(crate) use lane::{DataLane, DeliveryProgress, SendAttemptResult};
+pub(crate) use lane::{
+    DeliveryProgressCell, MpscLane, WebSocketDataLane, WsSink, new_delivery_progress_cell,
+    observed_delivery_progress,
+};
 #[cfg(feature = "test-utils")]
 pub use lane::{
     WebRtcFragmentSendEvent, WebRtcFragmentSendHook, WebRtcFragmentSendHookGuard,
@@ -80,7 +83,7 @@ pub use host_transport::HostTransport;
 pub(crate) use host_transport::HostTransport;
 #[cfg(not(feature = "test-utils"))]
 pub(crate) use peer_transport::PeerTransport;
-pub(crate) use peer_transport::{DestTransportRef, SentTransportSlot};
+pub(crate) use peer_transport::{DestTransportRef, PeerSendAttempt, SentTransportSlot};
 #[cfg(feature = "test-utils")]
 pub use peer_transport::{PeerTransport, WireBuilder};
 
