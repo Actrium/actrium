@@ -88,6 +88,14 @@ pub enum ActrError {
     #[error("timed out")]
     TimedOut,
 
+    /// The framework cannot prove whether a send entered the transport.
+    ///
+    /// This is intentionally terminal for generic automatic retry.  The
+    /// operation identifier and cause are retained for diagnostics and for a
+    /// caller that has its own idempotency policy.
+    #[error("delivery uncertain for operation {operation_id}: {cause}")]
+    DeliveryUncertain { operation_id: String, cause: String },
+
     // ── Client ─────────────────────────────────────────────────────────────
     /// Target actor not found.
     ///
@@ -207,7 +215,9 @@ impl Classify for ActrError {
 
             ActrError::DecodeFailure(_) => ErrorKind::Corrupt,
 
-            ActrError::NotImplemented(_) | ActrError::Internal(_) => ErrorKind::Internal,
+            ActrError::NotImplemented(_)
+            | ActrError::Internal(_)
+            | ActrError::DeliveryUncertain { .. } => ErrorKind::Internal,
         }
     }
 }
@@ -284,6 +294,17 @@ mod tests {
         assert!(!ActrError::NotFound("x".into()).is_retryable());
         assert!(!ActrError::DecodeFailure("x".into()).is_retryable());
         assert!(!ActrError::Internal("x".into()).is_retryable());
+    }
+
+    #[test]
+    fn delivery_uncertain_is_terminal_for_generic_retry() {
+        let error = ActrError::DeliveryUncertain {
+            operation_id: "op-1".into(),
+            cause: "write returned after close".into(),
+        };
+        assert_eq!(error.kind(), ErrorKind::Internal);
+        assert!(!error.is_retryable());
+        assert!(format!("{error}").contains("op-1"));
     }
 
     #[test]

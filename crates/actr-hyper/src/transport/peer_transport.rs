@@ -11,6 +11,7 @@
 use super::Dest; // Re-exported from actr-framework
 use super::dest_transport::DestTransport;
 use super::error::{NetworkError, NetworkResult};
+use super::lane::{DeliveryProgress, DeliveryProgressCell};
 use super::wire_handle::{WireHandle, WireIdentity};
 use actr_protocol::{ActrId, PayloadType};
 use async_trait::async_trait;
@@ -225,6 +226,14 @@ impl Drop for CreatedDestTransportGuard {
 pub(crate) struct DestTransportRef {
     transport: Weak<DestTransport>,
     pub(crate) wire_identity: Option<WireIdentity>,
+}
+
+/// A peer send result paired with the progress observed by the destination
+/// transport.  The generic payload keeps normal and `ExistingOnly` paths
+/// distinct without exposing route identity to public callers.
+pub(crate) struct PeerSendAttempt<T> {
+    pub(crate) result: NetworkResult<T>,
+    pub(crate) progress: DeliveryProgress,
 }
 
 impl DestTransportRef {
@@ -604,8 +613,31 @@ impl PeerTransport {
         data: &[u8],
         record: Option<&SentTransportSlot>,
     ) -> NetworkResult<DestTransportRef> {
+        self.send_with_progress(dest, payload_type, data, record, None)
+            .await
+            .result
+    }
+
+    /// Send through a destination transport and retain the lane's delivery
+    /// progress for the operation owner.
+    pub(crate) async fn send_with_progress(
+        &self,
+        dest: &Dest,
+        payload_type: PayloadType,
+        data: &[u8],
+        record: Option<&SentTransportSlot>,
+        progress_sink: Option<&DeliveryProgressCell>,
+    ) -> PeerSendAttempt<DestTransportRef> {
         // Get or create DestTransport for this Dest
-        let transport = self.get_or_create_transport(dest).await?;
+        let transport = match self.get_or_create_transport(dest).await {
+            Ok(transport) => transport,
+            Err(error) => {
+                return PeerSendAttempt {
+                    result: Err(error),
+                    progress: DeliveryProgress::NotAttempted,
+                };
+            }
+        };
 
         // Record the selected transport before the wire send: if the send
         // hangs (half-open wire with no FIN), the caller's deadline can still
@@ -615,12 +647,26 @@ impl PeerTransport {
         }
 
         // Send through DestTransport
-        let wire_identity = transport.send_with_identity(payload_type, data).await?;
-        let sent = DestTransportRef::new(&transport, wire_identity);
-        if let Some(slot) = record {
-            *slot.lock().await = Some(sent.clone());
+        let attempt = transport
+            .send_with_progress(payload_type, data, progress_sink)
+            .await;
+        let progress = attempt.progress;
+        match attempt.result {
+            Ok(wire_identity) => {
+                let sent = DestTransportRef::new(&transport, wire_identity);
+                if let Some(slot) = record {
+                    *slot.lock().await = Some(sent.clone());
+                }
+                PeerSendAttempt {
+                    result: Ok(sent),
+                    progress,
+                }
+            }
+            Err(error) => PeerSendAttempt {
+                result: Err(error),
+                progress,
+            },
         }
-        Ok(sent)
     }
 
     /// Send only through an existing physical connection.
@@ -631,6 +677,7 @@ impl PeerTransport {
     /// destination flight is active, or the destination is being closed.
     /// Unlike [`Self::send_with_identity`], this path never dials or negotiates
     /// a replacement connection.
+    #[allow(dead_code)] // Compatibility wrapper retained for transport tests.
     pub(crate) async fn send_existing_with_identity(
         &self,
         dest: &Dest,
@@ -638,8 +685,34 @@ impl PeerTransport {
         data: &[u8],
         record: Option<&SentTransportSlot>,
     ) -> NetworkResult<Option<DestTransportRef>> {
-        let Some(transport) = self.get_or_materialize_existing_transport(dest).await? else {
-            return Ok(None);
+        self.send_existing_with_progress(dest, payload_type, data, record, None)
+            .await
+            .result
+    }
+
+    /// Existing-only variant of [`Self::send_with_progress`].
+    pub(crate) async fn send_existing_with_progress(
+        &self,
+        dest: &Dest,
+        payload_type: PayloadType,
+        data: &[u8],
+        record: Option<&SentTransportSlot>,
+        progress_sink: Option<&DeliveryProgressCell>,
+    ) -> PeerSendAttempt<Option<DestTransportRef>> {
+        let transport = match self.get_or_materialize_existing_transport(dest).await {
+            Ok(Some(transport)) => transport,
+            Ok(None) => {
+                return PeerSendAttempt {
+                    result: Ok(None),
+                    progress: DeliveryProgress::NotAttempted,
+                };
+            }
+            Err(error) => {
+                return PeerSendAttempt {
+                    result: Err(error),
+                    progress: DeliveryProgress::NotAttempted,
+                };
+            }
         };
 
         // Same selection-time record as `send_with_identity`: a hung wire send
@@ -648,12 +721,26 @@ impl PeerTransport {
             *slot.lock().await = Some(DestTransportRef::new(&transport, None));
         }
 
-        let wire_identity = transport.send_with_identity(payload_type, data).await?;
-        let sent = DestTransportRef::new(&transport, wire_identity);
-        if let Some(slot) = record {
-            *slot.lock().await = Some(sent.clone());
+        let attempt = transport
+            .send_with_progress(payload_type, data, progress_sink)
+            .await;
+        let progress = attempt.progress;
+        match attempt.result {
+            Ok(wire_identity) => {
+                let sent = DestTransportRef::new(&transport, wire_identity);
+                if let Some(slot) = record {
+                    *slot.lock().await = Some(sent.clone());
+                }
+                PeerSendAttempt {
+                    result: Ok(Some(sent)),
+                    progress,
+                }
+            }
+            Err(error) => PeerSendAttempt {
+                result: Err(error),
+                progress,
+            },
         }
-        Ok(Some(sent))
     }
 
     /// Return a committed destination transport, or materialize one around a
