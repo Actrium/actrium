@@ -634,6 +634,7 @@ impl PeerGate {
             .await
     }
 
+    #[cfg(any(test, feature = "test-utils"))]
     async fn send_with_retry_for_operation(
         &self,
         dest: &Dest,
@@ -676,6 +677,7 @@ impl PeerGate {
         .await
     }
 
+    #[cfg(any(test, feature = "test-utils"))]
     async fn send_with_retry_policy(
         &self,
         dest: &Dest,
@@ -766,6 +768,11 @@ impl PeerGate {
         }
     }
 
+    /// Retry only completed, proven `NotAttempted` failures. The retry loop
+    /// intentionally has no progress sink: ambiguous (`Unknown`) results
+    /// return before backoff, while timeout-sensitive one-way sends use the
+    /// progress-aware `send_once_with_admission` path below. This keeps a
+    /// retry from overwriting an earlier delivery fact with a later attempt.
     #[allow(clippy::too_many_arguments)] // Keeps retry context explicit at this internal boundary.
     async fn send_with_retry_policy_record_identity(
         &self,
@@ -1093,8 +1100,9 @@ impl PeerGate {
     }
 
     /// Send a Tell under the absolute budget created by the runtime context.
-    /// The retry policy is intentionally unchanged in this deadline-only PR;
-    /// retry ownership is split into its own RFC-0507 follow-up.
+    /// Tell is submitted at most once; its progress cell distinguishes a
+    /// deadline before submission from a deadline after bytes may have entered
+    /// the transport.
     pub(crate) async fn send_tell_with_type_until(
         &self,
         target: &ActrId,
@@ -1105,8 +1113,13 @@ impl PeerGate {
         deadline.ensure_remaining()?;
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Tell);
         let dest = Self::actr_id_to_dest(target);
-        let operation_id = envelope.request_id.clone();
+        let operation_id = if envelope.request_id.is_empty() {
+            None
+        } else {
+            Some(envelope.request_id.clone())
+        };
 
+        let progress_cell = new_delivery_progress_cell();
         match crate::timer::timeout_at(
             crate::timer::ids::OUTBOUND_TELL_DEADLINE,
             deadline.instant(),
@@ -1114,20 +1127,31 @@ impl PeerGate {
                 let data = Self::serialize_envelope(&envelope);
                 let admission = self.preflight_send(target, &dest).await?;
                 deadline.ensure_remaining()?;
-                self.send_with_retry_for_operation(
+                self.send_once_with_admission(
                     &dest,
                     payload_type,
                     &data,
                     admission,
-                    &operation_id,
+                    None,
+                    operation_id.as_deref(),
+                    Some(&progress_cell),
                 )
                 .await
+                .map(|_| ())
             },
         )
         .await
         {
             Ok(result) => result,
-            Err(_) => Err(ActrError::TimedOut),
+            Err(_) => match observed_delivery_progress(&progress_cell) {
+                None | Some(DeliveryProgress::NotAttempted) => Err(ActrError::TimedOut),
+                Some(DeliveryProgress::SubmittedLocally) | Some(DeliveryProgress::Unknown) => {
+                    Err(Self::delivery_uncertain_error(
+                        operation_id.as_deref(),
+                        "tell send deadline elapsed after transport submission",
+                    ))
+                }
+            },
         }
     }
 
@@ -2155,6 +2179,43 @@ mod tests {
             matches!(
                 &err,
                 ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "stream-1"
+            ),
+            "got {err:?}"
+        );
+        assert!(!err.is_retryable());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tell_timeout_mid_write_is_delivery_uncertain() {
+        let transport = Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(PendingWireBuilder),
+        ));
+        let gate = PeerGate::for_test(transport);
+        let target = test_actor_id(2);
+        let envelope = RpcEnvelope {
+            request_id: "tell-timeout".to_string(),
+            ..envelope_with_direction(None)
+        };
+
+        let err = gate
+            .send_tell_with_type_until(
+                &target,
+                PayloadType::RpcReliable,
+                envelope,
+                RpcDeadline::from_duration(Duration::from_millis(250)),
+            )
+            .await
+            .unwrap_err();
+
+        // Tell is one-shot: once the lane write was entered, a deadline must
+        // not be reported as a retryable timeout that could replay the
+        // payload. The operation ID remains caller-correlatable.
+        assert!(
+            matches!(
+                &err,
+                ActrError::DeliveryUncertain { operation_id, .. }
+                    if operation_id == "tell-timeout"
             ),
             "got {err:?}"
         );

@@ -74,6 +74,9 @@ impl From<ConnectionNotReadyInfo> for ProtoConnectionNotReadyInfo {
 /// this case does not renumber the established UniFFI error discriminants.
 /// The binding-local `Config` variant captures failures that originate inside
 /// the FFI shell before the protocol layer is reached.
+/// UniFFI error discriminants are append-only: future protocol variants must
+/// be appended after the existing cases and mirrored in every generated SDK;
+/// never reorder or remove an established case.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum ActrError {
     // ── Transient ─────────────────────────────────────────────────────────
