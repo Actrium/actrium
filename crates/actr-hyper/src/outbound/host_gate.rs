@@ -256,6 +256,7 @@ impl HostGate {
         stream_id: &str,
         data: Bytes,
         deadline: RpcDeadline,
+        _operation_id: &str,
     ) -> ActorResult<()> {
         tracing::debug!(
             "HostGate::send_data_chunk_until stream_id={}, size={} bytes",

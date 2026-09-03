@@ -20,7 +20,7 @@
 //! session `SecureCell`.
 
 use super::error::{NetworkError, NetworkResult};
-use super::lane::DataLane;
+use super::lane::{DataLane, DeliveryProgress, SendAttemptResult};
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::sync::Arc;
@@ -286,8 +286,14 @@ impl SecureDataLane {
 #[async_trait]
 impl DataLane for SecureDataLane {
     async fn send(&self, data: Bytes) -> NetworkResult<()> {
-        self.gate()?;
-        self.inner.send(data).await
+        self.send_with_progress(data).await.into_result()
+    }
+
+    async fn send_with_progress(&self, data: Bytes) -> SendAttemptResult {
+        if let Err(error) = self.gate() {
+            return SendAttemptResult::failed(error, DeliveryProgress::NotAttempted);
+        }
+        self.inner.send_with_progress(data).await
     }
 
     async fn recv(&self) -> NetworkResult<Bytes> {
@@ -342,5 +348,70 @@ impl DataLane for SecureDataLane {
         self.cell.state().is_sendable()
             && self.cell.epoch() == self.epoch_at_wrap
             && self.inner.is_healthy()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Inner lane whose send fails after an ambiguous partial write.
+    #[derive(Debug)]
+    struct AmbiguousInnerLane;
+
+    #[async_trait::async_trait]
+    impl DataLane for AmbiguousInnerLane {
+        async fn send(&self, _data: Bytes) -> NetworkResult<()> {
+            unreachable!("AmbiguousInnerLane is driven through send_with_progress")
+        }
+
+        async fn send_with_progress(&self, _data: Bytes) -> SendAttemptResult {
+            SendAttemptResult::failed(
+                NetworkError::SendError("partial write".into()),
+                DeliveryProgress::Unknown,
+            )
+        }
+
+        fn lane_type(&self) -> &'static str {
+            "ambiguous-inner"
+        }
+    }
+
+    #[tokio::test]
+    async fn secure_lane_preserves_inner_uncertain_progress() {
+        let cell = SecureCell::new(SecureChannelState::Verified);
+        let lane = SecureDataLane::new(Arc::new(AmbiguousInnerLane), cell);
+
+        let attempt = lane
+            .send_with_progress(Bytes::from_static(b"payload"))
+            .await;
+
+        assert!(
+            matches!(attempt.result, Err(NetworkError::SendError(_))),
+            "the inner error must pass through the decorator: {attempt:?}"
+        );
+        assert_eq!(
+            attempt.progress,
+            DeliveryProgress::Unknown,
+            "the decorator must not reclassify an inner ambiguous failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn secure_gate_failure_is_proven_not_attempted() {
+        // A not-sendable secure state rejects before the inner lane is ever
+        // invoked: no bytes can have entered the transport.
+        let cell = SecureCell::new(SecureChannelState::Rekeying);
+        let lane = SecureDataLane::new(Arc::new(AmbiguousInnerLane), cell);
+
+        let attempt = lane
+            .send_with_progress(Bytes::from_static(b"payload"))
+            .await;
+
+        assert!(matches!(
+            attempt.result,
+            Err(NetworkError::SecureChannelNotReady(_))
+        ));
+        assert_eq!(attempt.progress, DeliveryProgress::NotAttempted);
     }
 }

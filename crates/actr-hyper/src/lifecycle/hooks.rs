@@ -508,9 +508,10 @@ async fn deliver_hook_event(
         } => {
             if let (Some(ctx), Some(observer)) = (ctx_opt.as_ref(), observer) {
                 let event = ErrorEvent::now(
-                    ActrError::Unavailable(
-                        "data stream delivery uncertain after WebRTC disconnect".to_string(),
-                    ),
+                    ActrError::DeliveryUncertain {
+                        operation_id: stream_id.clone(),
+                        cause: "data stream delivery uncertain after WebRTC disconnect".to_string(),
+                    },
                     ErrorCategory::DataChunkDeliveryUncertain,
                     format!("stream_id={stream_id}; session_id={session_id}; reason={reason}"),
                 );
