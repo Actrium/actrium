@@ -16,6 +16,14 @@ function loadHostErrorMap(sourceUrl) {
   return new Function(`${body}\nreturn mapHostErrorToActr;`)();
 }
 
+function hostErrorMapBody(sourceUrl) {
+  const source = readFileSync(sourceUrl, 'utf8');
+  return source.slice(
+    source.indexOf('// @host-error-map begin'),
+    source.indexOf('// @host-error-map end'),
+  );
+}
+
 const swSource = new URL('./actor.sw.js', import.meta.url);
 // The CLI embeds a copy of the runtime; both must carry the same mapping.
 const cliCopySource = new URL(
@@ -69,17 +77,15 @@ describe('mapHostErrorToActr (actor.sw.js)', () => {
   });
 
   it('keeps the CLI-embedded runtime copy byte-identical to the web-sdk mapping', () => {
-    const swBody = readFileSync(swSource, 'utf8').slice(
-      readFileSync(swSource, 'utf8').indexOf('// @host-error-map begin'),
-    );
-    const cliBody = readFileSync(cliCopySource, 'utf8').slice(
-      readFileSync(cliCopySource, 'utf8').indexOf('// @host-error-map begin'),
-    );
-    const swFn = swBody.slice(0, swBody.indexOf('// @host-error-map end'));
-    const cliFn = cliBody.slice(0, cliBody.indexOf('// @host-error-map end'));
+    const swFn = hostErrorMapBody(swSource);
+    const cliFn = hostErrorMapBody(cliCopySource);
     // Only the marker comment differs between the two copies; the function
     // body must be identical so neither runtime diverges.
-    const stripMarkerComment = (text) => text.split('\n').filter((line) => !line.startsWith('//')).join('\n');
+    const stripMarkerComment = (text) =>
+      text
+        .split('\n')
+        .filter((line) => !line.startsWith('//'))
+        .join('\n');
     expect(stripMarkerComment(cliFn)).toBe(stripMarkerComment(swFn));
   });
 });

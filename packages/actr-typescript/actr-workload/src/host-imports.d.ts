@@ -99,9 +99,7 @@ declare module 'actr:workload/host@0.7.0' {
   };
 
   export type Dest =
-    | { tag: 'host' }
-    | { tag: 'workload' }
-    | { tag: 'peer'; val: ActrId };
+    { tag: 'host' } | { tag: 'workload' } | { tag: 'peer'; val: ActrId };
 
   export type DataChunk = {
     streamId: string;
