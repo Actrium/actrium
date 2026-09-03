@@ -186,6 +186,14 @@ if [[ "${ACTR_BUILD_ANDROID_NATIVE}" == true ]]; then
         exit 1
     }
 
+    # Re-export the resolved NDK root. CMake's Android platform detection
+    # (Platform/Android-Determine.cmake) locates the NDK via the
+    # ANDROID_NDK_ROOT environment variable when no toolchain file is passed.
+    # Without it, CMake-cross builds of C dependencies (audiopus_sys) fail with
+    # "Neither the NDK or a standalone toolchain was found", and falling back
+    # to the NDK toolchain file silently targets the armeabi-v7a default ABI.
+    export ANDROID_NDK_ROOT="${NDK_PATH}"
+
     export PATH="${TOOLCHAIN_PATH}/bin:${PATH}"
     export CC_aarch64_linux_android="${TOOLCHAIN_PATH}/bin/aarch64-linux-android${ANDROID_API_LEVEL}-clang"
     export AR_aarch64_linux_android="${TOOLCHAIN_PATH}/bin/llvm-ar"
