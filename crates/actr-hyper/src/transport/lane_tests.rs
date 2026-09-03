@@ -69,28 +69,32 @@ impl DataLane for DefaultProgressLane {
 }
 
 #[tokio::test]
-async fn default_send_with_progress_preserves_recovery_for_pre_send_errors() {
-    // Closed-like and secure-not-ready errors are raised by the default lane
-    // before a concrete write, so DestTransport may invalidate/reselect the
-    // route. Only an unclassified error remains conservatively Unknown.
-    for mode in [
-        DefaultProgressMode::ClosedLike,
-        DefaultProgressMode::SecureNotReady,
-    ] {
-        let lane = DefaultProgressLane { mode };
-        let attempt = lane
-            .send_with_progress(Bytes::from_static(b"payload"))
-            .await;
-        assert!(
-            attempt.result.is_err(),
-            "{mode:?} should surface the send error"
-        );
-        assert_eq!(
-            attempt.progress,
-            DeliveryProgress::NotAttempted,
-            "{mode:?} must remain retryable under the default contract"
-        );
-    }
+async fn default_send_with_progress_is_fail_safe_for_closed_like_errors() {
+    // A lane that only implements `send` cannot prove where a closed-like
+    // error happened relative to the wire, so the default must classify it
+    // Unknown: auto-replaying a send that may have partially entered the
+    // transport would duplicate the payload. Adapters with a proven pre-send
+    // state check override `send_with_progress` to report NotAttempted (see
+    // ClosedLikePreSendLane in dest_transport_tests).
+    let lane = DefaultProgressLane {
+        mode: DefaultProgressMode::ClosedLike,
+    };
+    let attempt = lane
+        .send_with_progress(Bytes::from_static(b"payload"))
+        .await;
+    assert!(attempt.result.is_err());
+    assert_eq!(attempt.progress, DeliveryProgress::Unknown);
+
+    // Secure-readiness is a pre-send gate by construction: without a ready
+    // session no bytes were framed or written, so recovery stays available.
+    let lane = DefaultProgressLane {
+        mode: DefaultProgressMode::SecureNotReady,
+    };
+    let attempt = lane
+        .send_with_progress(Bytes::from_static(b"payload"))
+        .await;
+    assert!(attempt.result.is_err());
+    assert_eq!(attempt.progress, DeliveryProgress::NotAttempted);
 
     let lane = DefaultProgressLane {
         mode: DefaultProgressMode::Generic,

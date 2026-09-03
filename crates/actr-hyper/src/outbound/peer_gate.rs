@@ -1722,6 +1722,10 @@ impl PeerGate {
     /// - `payload_type`: PayloadType (StreamReliable or StreamLatencyFirst)
     /// - `stream_id`: DataChunk identifier already known before serialization
     /// - `data`: Serialized DataChunk bytes
+    /// - `operation_id`: caller-derived identity for this logical send
+    ///   (`stream_id#sequence` from the still-decoded `DataChunk`), threaded
+    ///   through unchanged so one send can never surface under two
+    ///   reconciliation keys
     ///
     /// # Implementation Note
     /// Sends via PeerTransport using WebRTC DataChannel or WebSocket
@@ -1732,6 +1736,7 @@ impl PeerGate {
         payload_type: PayloadType,
         stream_id: &str,
         data: Bytes,
+        operation_id: &str,
     ) -> ActorResult<()> {
         self.send_data_chunk_with_timeout(
             target,
@@ -1739,6 +1744,7 @@ impl PeerGate {
             stream_id,
             data,
             DATA_CHUNK_SEND_TIMEOUT,
+            operation_id,
         )
         .await
     }
@@ -1751,22 +1757,16 @@ impl PeerGate {
         stream_id: &str,
         data: Bytes,
         send_timeout: Duration,
+        operation_id: &str,
     ) -> ActorResult<()> {
         let deadline = RpcDeadline::from_duration(send_timeout);
-        // Keep the stream and sequence together: two uncertain chunks on one
-        // stream must remain independently addressable by caller idempotency
-        // records. Invalid test payloads retain the stream-only fallback.
-        let operation_id = match actr_protocol::DataChunk::decode(data.as_ref()) {
-            Ok(chunk) => data_chunk_operation_id(stream_id, chunk.sequence),
-            Err(_) => stream_id.to_string(),
-        };
         self.send_data_chunk_until(
             target,
             payload_type,
             stream_id,
             data,
             deadline,
-            &operation_id,
+            operation_id,
         )
         .await
     }
@@ -2249,6 +2249,7 @@ mod tests {
                 "existing-only-stream",
                 Bytes::from_static(b"chunk"),
                 Duration::from_secs(1),
+                "existing-only-stream",
             )
             .await
             .expect_err("data-chunk send must use the same no-create admission");
@@ -2976,6 +2977,7 @@ mod tests {
                 "stream-1",
                 Bytes::from(chunk.encode_to_vec()),
                 Duration::from_millis(250),
+                "stream-1#4",
             )
             .await
             .unwrap_err();
@@ -3090,6 +3092,7 @@ mod tests {
                 "stream-1",
                 Bytes::from_static(b"chunk"),
                 Duration::from_millis(250),
+                "stream-1",
             )
             .await
             .unwrap_err();

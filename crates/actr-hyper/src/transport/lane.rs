@@ -589,19 +589,22 @@ pub trait DataLane: Send + Sync + std::fmt::Debug {
     /// Send raw bytes and retain the delivery-progress fact for the recovery
     /// layer.
     ///
-    /// The default is for adapters whose `send` contract checks the typed
-    /// closed/not-open or secure-not-ready state before touching the wire;
-    /// those errors are therefore proven `NotAttempted` and route-level
-    /// self-healing remains available. An adapter whose `send` can return a
-    /// closed-like error after a write has started MUST override this method
-    /// and report `Unknown`, so an interrupted write is never replayed.
+    /// The default is fail-safe: a lane that only implements `send` cannot
+    /// prove where an error happened relative to the wire, so every closed-like
+    /// error is classified `Unknown` — a send that may have partially entered
+    /// the transport must never be auto-replayed. The one exception is
+    /// `SecureChannelNotReady`, a pre-send gate by construction (without a
+    /// ready session no bytes were framed or written).
+    ///
+    /// An adapter whose `send` checks the typed closed/not-open state before
+    /// touching the wire MAY override this method and report `NotAttempted`
+    /// for those proven pre-send failures, keeping route-level self-healing
+    /// available (see `WebSocketDataLane` for the pattern).
     async fn send_with_progress(&self, data: bytes::Bytes) -> SendAttemptResult {
         match self.send(data).await {
             Ok(()) => SendAttemptResult::submitted(),
             Err(error) => {
-                let progress = if error.is_closed_like()
-                    || matches!(error, NetworkError::SecureChannelNotReady(_))
-                {
+                let progress = if matches!(error, NetworkError::SecureChannelNotReady(_)) {
                     DeliveryProgress::NotAttempted
                 } else {
                     DeliveryProgress::Unknown
