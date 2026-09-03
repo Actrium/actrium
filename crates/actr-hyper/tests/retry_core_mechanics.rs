@@ -26,8 +26,8 @@ use actr_hyper::lifecycle::{
 use actr_hyper::outbound::PeerGate;
 use actr_hyper::test_support::{TestDedupOutcome, TestDedupState, make_actor_id};
 use actr_hyper::transport::{
-    ConnType, DataLane, Dest, NetworkError, NetworkResult, PeerTransport, WireBuilder, WireHandle,
-    WireIdentity,
+    ConnType, DataLane, DeliveryProgress, Dest, NetworkError, NetworkResult, PeerTransport,
+    SendAttemptResult, WireBuilder, WireHandle, WireIdentity,
 };
 use actr_protocol::prost::Message;
 
@@ -152,17 +152,55 @@ impl BuilderStats {
 
 struct ScriptedLane {
     sent: Arc<StdMutex<Vec<Bytes>>>,
-    outcomes: Arc<StdMutex<VecDeque<NetworkResult<()>>>>,
+    outcomes: Arc<StdMutex<VecDeque<ScriptedOutcome>>>,
     delivery_hook: Option<DeliveryHook>,
+}
+
+struct ScriptedOutcome {
+    result: NetworkResult<()>,
+    progress: DeliveryProgress,
+}
+
+impl ScriptedOutcome {
+    fn from_result(result: NetworkResult<()>) -> Self {
+        let progress = if result.is_ok() {
+            DeliveryProgress::SubmittedLocally
+        } else {
+            // A plain scripted failure models a pre-send transport failure.
+            // Tests that simulate bytes entering the transport must opt into
+            // `Unknown` explicitly.
+            DeliveryProgress::NotAttempted
+        };
+        Self { result, progress }
+    }
 }
 
 impl ScriptedLane {
     fn new(outcomes: Vec<NetworkResult<()>>) -> Self {
         Self {
             sent: Arc::new(StdMutex::new(Vec::new())),
-            outcomes: Arc::new(StdMutex::new(VecDeque::from(outcomes))),
+            outcomes: Arc::new(StdMutex::new(
+                outcomes
+                    .into_iter()
+                    .map(ScriptedOutcome::from_result)
+                    .collect(),
+            )),
             delivery_hook: None,
         }
+    }
+
+    fn with_delivery_progress(self, progress: DeliveryProgress) -> Self {
+        for outcome in self
+            .outcomes
+            .lock()
+            .expect("scripted outcomes mutex poisoned")
+            .iter_mut()
+        {
+            if outcome.result.is_err() {
+                outcome.progress = progress;
+            }
+        }
+        self
     }
 
     fn with_delivery_hook(mut self, hook: DeliveryHook) -> Self {
@@ -187,20 +225,29 @@ impl fmt::Debug for ScriptedLane {
 #[async_trait]
 impl DataLane for ScriptedLane {
     async fn send(&self, data: Bytes) -> NetworkResult<()> {
+        self.send_with_progress(data).await.into_result()
+    }
+
+    async fn send_with_progress(&self, data: Bytes) -> SendAttemptResult {
+        let outcome = self
+            .outcomes
+            .lock()
+            .expect("outcome mutex poisoned")
+            .pop_front()
+            .unwrap_or_else(|| ScriptedOutcome::from_result(Ok(())));
+
         self.sent
             .lock()
             .expect("sent payload mutex poisoned")
             .push(data.clone());
 
-        if let Some(hook) = &self.delivery_hook {
+        if outcome.progress != DeliveryProgress::NotAttempted
+            && let Some(hook) = &self.delivery_hook
+        {
             hook(data);
         }
 
-        self.outcomes
-            .lock()
-            .expect("outcome mutex poisoned")
-            .pop_front()
-            .unwrap_or(Ok(()))
+        SendAttemptResult::for_test(outcome.result, outcome.progress)
     }
 
     fn lane_type(&self) -> &'static str {
@@ -854,7 +901,7 @@ async fn slow_connection_creation_is_singleflight_and_does_not_duplicate_message
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn ambiguous_delivery_retry_is_receiver_deduped_for_serialized_send_and_tell() {
+async fn ambiguous_delivery_returns_uncertain_without_retry_for_serialized_send_and_tell() {
     #[derive(Clone, Copy)]
     enum SendPath {
         SerializedCore,
@@ -883,11 +930,12 @@ async fn ambiguous_delivery_retry_is_receiver_deduped_for_serialized_send_and_te
                 ))),
                 Ok(()),
             ])
+            .with_delivery_progress(DeliveryProgress::Unknown)
             .with_delivery_hook(delivery_hook),
             Duration::ZERO,
         );
 
-        match path {
+        let result = match path {
             SendPath::SerializedCore => {
                 gate.send_serialized_with_zero_retry_delay_for_test(
                     &target,
@@ -900,8 +948,26 @@ async fn ambiguous_delivery_retry_is_receiver_deduped_for_serialized_send_and_te
                 gate.send_message_with_type(&target, PayloadType::RpcReliable, envelope(request_id))
                     .await
             }
+        };
+        // The correlation promise: a caller with its own idempotency policy
+        // must be able to match the error to its operation. Tell carries the
+        // envelope request_id; the serialized test helper sends opaque bytes
+        // and therefore reports the pinned "unknown" placeholder.
+        let expected_operation_id = match path {
+            SendPath::SerializedCore => "unknown",
+            SendPath::Tell => request_id,
+        };
+        match &result {
+            Err(actr_protocol::ActrError::DeliveryUncertain { operation_id, .. }) => {
+                assert_eq!(
+                    operation_id, expected_operation_id,
+                    "{label} must surface a correlatable operation id"
+                );
+            }
+            _ => panic!(
+                "{label} should surface uncertain delivery without replaying the payload: {result:?}"
+            ),
         }
-        .unwrap_or_else(|err| panic!("{label} retry should eventually succeed: {err}"));
 
         let sent = lane.sent_payloads();
         let request_ids: Vec<_> = sent
@@ -913,11 +979,15 @@ async fn ambiguous_delivery_retry_is_receiver_deduped_for_serialized_send_and_te
             .expect("receiver results mutex poisoned")
             .clone();
 
-        assert_eq!(sent.len(), 2, "{label} should be retried once");
+        assert_eq!(
+            sent.len(),
+            1,
+            "{label} must not be retried after uncertain delivery"
+        );
         assert_eq!(
             request_ids,
-            vec![request_id.to_string(), request_id.to_string()],
-            "{label} retry must preserve request_id"
+            vec![request_id.to_string()],
+            "{label} should submit the original request only once"
         );
         assert_eq!(
             handler_calls.load(Ordering::SeqCst),
@@ -926,8 +996,8 @@ async fn ambiguous_delivery_retry_is_receiver_deduped_for_serialized_send_and_te
         );
         assert_eq!(
             receiver_results,
-            vec!["ok:handled".to_string(), "ok:handled".to_string()],
-            "{label} duplicate delivery should receive the cached handler result"
+            vec!["ok:handled".to_string()],
+            "{label} receiver should process the single delivered payload"
         );
         if matches!(path, SendPath::Tell) {
             assert_eq!(
@@ -1133,7 +1203,7 @@ async fn request_timeout_then_late_old_response_does_not_complete_new_request() 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn ambiguous_delivery_with_slow_handler_does_not_return_inflight_error() {
+async fn ambiguous_delivery_does_not_retry_while_handler_is_in_flight() {
     let target = make_actor_id(2);
     let receiver_dedup = Arc::new(StdMutex::new(TestDedupState::new()));
     let handler_calls = Arc::new(AtomicUsize::new(0));
@@ -1153,33 +1223,35 @@ async fn ambiguous_delivery_with_slow_handler_does_not_return_inflight_error() {
             )),
             Ok(()),
         ])
+        .with_delivery_progress(DeliveryProgress::Unknown)
         .with_delivery_hook(delivery_hook),
         Duration::ZERO,
     );
 
-    gate.send_serialized_with_zero_retry_delay_for_test(
-        &target,
-        PayloadType::RpcReliable,
-        &encoded_envelope("ambiguous-slow-handler"),
-    )
-    .await
-    .expect("retry should eventually succeed");
+    let result = gate
+        .send_serialized_with_zero_retry_delay_for_test(
+            &target,
+            PayloadType::RpcReliable,
+            &encoded_envelope("ambiguous-slow-handler"),
+        )
+        .await;
+    assert!(matches!(
+        result,
+        Err(actr_protocol::ActrError::DeliveryUncertain { .. })
+    ));
 
     let sent = lane.sent_payloads();
     let request_ids: Vec<_> = sent
         .iter()
         .map(|payload| decode_request_id(payload.as_ref()))
         .collect();
-    let receiver_results = wait_for_receiver_results(receiver_results, 2).await;
+    let receiver_results = wait_for_receiver_results(receiver_results, 1).await;
 
-    assert_eq!(sent.len(), 2, "ambiguous delivery should cause one retry");
+    assert_eq!(sent.len(), 1, "ambiguous delivery must not be replayed");
     assert_eq!(
         request_ids,
-        vec![
-            "ambiguous-slow-handler".to_string(),
-            "ambiguous-slow-handler".to_string()
-        ],
-        "both deliveries must carry the same request_id"
+        vec!["ambiguous-slow-handler".to_string()],
+        "only the original delivery should be submitted"
     );
     assert_eq!(
         handler_calls.load(Ordering::SeqCst),
@@ -1188,13 +1260,13 @@ async fn ambiguous_delivery_with_slow_handler_does_not_return_inflight_error() {
     );
     assert_eq!(
         receiver_results,
-        vec!["ok:slow-handled".to_string(), "ok:slow-handled".to_string()],
-        "duplicate should return the original result instead of an in-flight error"
+        vec!["ok:slow-handled".to_string()],
+        "the receiver should complete the original handler once"
     );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn mobile_event_batch_during_retry_backoff_does_not_duplicate_handler() {
+async fn mobile_event_batch_during_ambiguous_send_does_not_retry() {
     let target = make_actor_id(2);
     let receiver_dedup = Arc::new(StdMutex::new(TestDedupState::new()));
     let handler_calls = Arc::new(AtomicUsize::new(0));
@@ -1213,6 +1285,7 @@ async fn mobile_event_batch_during_retry_backoff_does_not_duplicate_handler() {
             )),
             Ok(()),
         ])
+        .with_delivery_progress(DeliveryProgress::Unknown)
         .with_delivery_hook(delivery_hook),
         Duration::ZERO,
     );
@@ -1247,17 +1320,18 @@ async fn mobile_event_batch_during_retry_backoff_does_not_duplicate_handler() {
     )
     .await;
 
-    send_task
-        .await
-        .expect("send task should not panic")
-        .expect("send should recover after retry");
+    let send_result = send_task.await.expect("send task should not panic");
+    assert!(matches!(
+        send_result,
+        Err(actr_protocol::ActrError::DeliveryUncertain { .. })
+    ));
 
     let sent = lane.sent_payloads();
     let request_ids: Vec<_> = sent
         .iter()
         .map(|payload| decode_request_id(payload.as_ref()))
         .collect();
-    let receiver_results = wait_for_receiver_results(receiver_results, 2).await;
+    let receiver_results = wait_for_receiver_results(receiver_results, 1).await;
     let actions = actions
         .lock()
         .expect("mobile event actions mutex poisoned")
@@ -1270,14 +1344,11 @@ async fn mobile_event_batch_during_retry_backoff_does_not_duplicate_handler() {
         vec![NetworkRecoveryAction::Restore],
         "Lost -> Available -> TypeChanged should settle to one Restore action"
     );
-    assert_eq!(sent.len(), 2, "send should retry exactly once");
+    assert_eq!(sent.len(), 1, "ambiguous send must not be replayed");
     assert_eq!(
         request_ids,
-        vec![
-            "mobile-event-during-retry".to_string(),
-            "mobile-event-during-retry".to_string()
-        ],
-        "retry during mobile event storm must preserve request_id"
+        vec!["mobile-event-during-retry".to_string()],
+        "mobile event processing must not trigger a replay"
     );
     assert_eq!(
         handler_calls.load(Ordering::SeqCst),
@@ -1286,8 +1357,8 @@ async fn mobile_event_batch_during_retry_backoff_does_not_duplicate_handler() {
     );
     assert_eq!(
         receiver_results,
-        vec!["ok:slow-handled".to_string(), "ok:slow-handled".to_string()],
-        "retry duplicate should wait for/cache original handler result"
+        vec!["ok:slow-handled".to_string()],
+        "the original handler should complete once"
     );
 }
 

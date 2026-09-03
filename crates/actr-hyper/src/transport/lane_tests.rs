@@ -1,6 +1,116 @@
 use super::*;
 use bytes::Bytes;
 
+#[tokio::test]
+async fn websocket_without_a_sink_is_proven_not_attempted() {
+    let sink: WsSink = Arc::new(Mutex::new(None));
+    let lane = WebSocketDataLane::new(sink, PayloadType::RpcReliable, mpsc::channel(1).1);
+
+    let attempt = lane
+        .send_with_progress(Bytes::from_static(b"payload"))
+        .await;
+    assert_eq!(attempt.progress, DeliveryProgress::NotAttempted);
+    assert!(matches!(
+        attempt.result,
+        Err(NetworkError::WebSocketClosed(_))
+    ));
+}
+
+#[test]
+fn websocket_interrupted_write_is_unknown_and_not_retryable() {
+    use tokio_tungstenite::tungstenite::Error as WsError;
+
+    // A sink error after `send()` has started is intentionally modeled as an
+    // interrupted/partially accepted write. The adapter must not claim that
+    // the payload was NotAttempted, because DestTransport would replay it.
+    let attempt = map_websocket_send_result(Err(WsError::ConnectionClosed));
+    assert_eq!(attempt.progress, DeliveryProgress::Unknown);
+    assert!(matches!(
+        attempt.result,
+        Err(NetworkError::WebSocketClosed(_))
+    ));
+}
+
+// ── Trait-default `send_with_progress` contract ─────────────────────────────
+
+/// Lane that only implements `send`, inheriting the trait-default
+/// `send_with_progress` classification.
+#[derive(Debug)]
+struct DefaultProgressLane {
+    mode: DefaultProgressMode,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DefaultProgressMode {
+    ClosedLike,
+    SecureNotReady,
+    Generic,
+    Ok,
+}
+
+#[async_trait::async_trait]
+impl DataLane for DefaultProgressLane {
+    async fn send(&self, _data: Bytes) -> NetworkResult<()> {
+        match self.mode {
+            DefaultProgressMode::ClosedLike => Err(NetworkError::DataChannelClosed(
+                "closed before write".into(),
+            )),
+            DefaultProgressMode::SecureNotReady => Err(NetworkError::SecureChannelNotReady(
+                "secure gate not ready before write".into(),
+            )),
+            DefaultProgressMode::Generic => Err(NetworkError::SendError("boom".into())),
+            DefaultProgressMode::Ok => Ok(()),
+        }
+    }
+
+    fn lane_type(&self) -> &'static str {
+        "default-progress"
+    }
+}
+
+#[tokio::test]
+async fn default_send_with_progress_preserves_recovery_for_pre_send_errors() {
+    // Closed-like and secure-not-ready errors are raised by the default lane
+    // before a concrete write, so DestTransport may invalidate/reselect the
+    // route. Only an unclassified error remains conservatively Unknown.
+    for mode in [
+        DefaultProgressMode::ClosedLike,
+        DefaultProgressMode::SecureNotReady,
+    ] {
+        let lane = DefaultProgressLane { mode };
+        let attempt = lane
+            .send_with_progress(Bytes::from_static(b"payload"))
+            .await;
+        assert!(
+            attempt.result.is_err(),
+            "{mode:?} should surface the send error"
+        );
+        assert_eq!(
+            attempt.progress,
+            DeliveryProgress::NotAttempted,
+            "{mode:?} must remain retryable under the default contract"
+        );
+    }
+
+    let lane = DefaultProgressLane {
+        mode: DefaultProgressMode::Generic,
+    };
+    let attempt = lane
+        .send_with_progress(Bytes::from_static(b"payload"))
+        .await;
+    assert!(attempt.result.is_err());
+    assert_eq!(attempt.progress, DeliveryProgress::Unknown);
+
+    let lane = DefaultProgressLane {
+        mode: DefaultProgressMode::Ok,
+    };
+    let attempt = lane
+        .send_with_progress(Bytes::from_static(b"payload"))
+        .await;
+    assert!(attempt.result.is_ok());
+    assert_eq!(attempt.progress, DeliveryProgress::SubmittedLocally);
+}
+
 // ── Fragment header encode / decode ───────────────────────────────────────
 
 #[test]

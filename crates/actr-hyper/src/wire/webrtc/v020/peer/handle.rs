@@ -17,7 +17,7 @@ use webrtc::peer_connection::{RTCIceCandidateInit, RTCSessionDescription};
 use crate::wire::webrtc::v020::media::OutboundTrackWriter;
 use crate::wire::webrtc::v020::peer::lane_handle::{ActiveLaneRegistry, LaneHandle};
 use crate::wire::webrtc::v020::peer::reducer::RtcPeerCommand;
-use crate::wire::webrtc::v020::peer::send::RtcSendError;
+use crate::wire::webrtc::v020::peer::send::{RtcSendAttempt, RtcSendError};
 use crate::wire::webrtc::v020::status::{LaneKind, RtcPeerSnapshot};
 
 /// Error returned when the controller task has gone away (e.g. after close).
@@ -255,6 +255,23 @@ impl RtcPeerControllerHandle {
     ) -> Result<(), RtcSendError> {
         let permit = self.permit_for(lane).await?;
         self.send_with_permit(&permit, payload, true).await
+    }
+
+    /// Internal send seam carrying delivery progress to the transport layer.
+    /// `SendPermit` remains private to this module; callers receive only the
+    /// stable RTC error plus the conservative progress classification.
+    pub(crate) async fn send_with_progress(
+        &self,
+        lane: LaneKind,
+        payload: bytes::Bytes,
+        non_blocking: bool,
+    ) -> RtcSendAttempt {
+        let result = if non_blocking {
+            self.try_send(lane, payload).await
+        } else {
+            self.send(lane, payload).await
+        };
+        RtcSendAttempt::from_result(result)
     }
 
     /// Run a send against a validated permit: `send`/`try_send`, mapping a

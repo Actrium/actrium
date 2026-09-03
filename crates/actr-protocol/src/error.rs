@@ -20,7 +20,7 @@
 //! |-----------|--------------------------------|--------|------|
 //! | Transient | Environmental fluctuation      | yes    | no   |
 //! | Client    | Caller error (bad request)     | no     | no   |
-//! | Internal  | Framework bug / panic          | no     | no   |
+//! | Internal  | Framework fault or uncertain outcome | no  | no   |
 //! | Corrupt   | Data corruption                | no     | yes  |
 //!
 //! Use the `Classify` trait to query classification from any error type.
@@ -88,6 +88,14 @@ pub enum ActrError {
     #[error("timed out")]
     TimedOut,
 
+    /// The framework cannot prove whether a send entered the transport.
+    ///
+    /// This is intentionally terminal for generic automatic retry.  The
+    /// operation identifier and cause are retained for diagnostics and for a
+    /// caller that has its own idempotency policy.
+    #[error("delivery uncertain for operation {operation_id}: {cause}")]
+    DeliveryUncertain { operation_id: String, cause: String },
+
     // ── Client ─────────────────────────────────────────────────────────────
     /// Target actor not found.
     ///
@@ -136,7 +144,8 @@ pub enum ActrError {
     #[error("not implemented: {0}")]
     NotImplemented(String),
 
-    /// Internal framework error: bug, panic, or unrecoverable state.
+    /// Internal framework error: bug, panic, unrecoverable state, or an
+    /// uncertain delivery outcome that requires caller reconciliation.
     ///
     /// `ErrorKind::Internal` — do not retry; investigate logs.
     #[error("internal error: {0}")]
@@ -161,7 +170,8 @@ pub enum ErrorKind {
     Transient,
     /// Caller error — bad request or system state; do not retry.
     Client,
-    /// Framework bug or panic — do not retry; alert.
+    /// Framework fault or uncertain delivery — do not retry. Framework faults
+    /// are alertable; uncertain delivery requires caller reconciliation.
     Internal,
     /// Data corruption — route to Dead Letter Queue; manual intervention required.
     Corrupt,
@@ -207,7 +217,9 @@ impl Classify for ActrError {
 
             ActrError::DecodeFailure(_) => ErrorKind::Corrupt,
 
-            ActrError::NotImplemented(_) | ActrError::Internal(_) => ErrorKind::Internal,
+            ActrError::NotImplemented(_)
+            | ActrError::Internal(_)
+            | ActrError::DeliveryUncertain { .. } => ErrorKind::Internal,
         }
     }
 }
@@ -284,6 +296,17 @@ mod tests {
         assert!(!ActrError::NotFound("x".into()).is_retryable());
         assert!(!ActrError::DecodeFailure("x".into()).is_retryable());
         assert!(!ActrError::Internal("x".into()).is_retryable());
+    }
+
+    #[test]
+    fn delivery_uncertain_is_terminal_for_generic_retry() {
+        let error = ActrError::DeliveryUncertain {
+            operation_id: "op-1".into(),
+            cause: "write returned after close".into(),
+        };
+        assert_eq!(error.kind(), ErrorKind::Internal);
+        assert!(!error.is_retryable());
+        assert!(format!("{error}").contains("op-1"));
     }
 
     #[test]

@@ -510,6 +510,7 @@ impl RuntimeContext {
 
         let payload = chunk.encode_to_vec();
         let stream_id = chunk.stream_id.as_str();
+        let operation_id = crate::outbound::data_chunk_operation_id(stream_id, chunk.sequence);
 
         let gate = self.select_gate(target)?;
         let target_id = self.extract_target_id(target);
@@ -520,6 +521,7 @@ impl RuntimeContext {
             stream_id,
             bytes::Bytes::from(payload),
             deadline,
+            &operation_id,
         )
         .await
     }
@@ -931,6 +933,7 @@ impl Context for RuntimeContext {
         // 1. Serialize DataChunk to bytes
         let payload = chunk.encode_to_vec();
         let stream_id = chunk.stream_id.as_str();
+        let operation_id = crate::outbound::data_chunk_operation_id(stream_id, chunk.sequence);
 
         tracing::debug!(
             "📤 Sending DataChunk: stream_id={}, sequence={}, size={} bytes",
@@ -950,6 +953,7 @@ impl Context for RuntimeContext {
             stream_id,
             bytes::Bytes::from(payload),
             deadline,
+            &operation_id,
         )
         .await
     }
