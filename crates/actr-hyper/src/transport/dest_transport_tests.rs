@@ -1,4 +1,5 @@
 use super::*;
+use crate::transport::SendAttemptResult;
 use crate::transport::lane::DataLane;
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -20,6 +21,19 @@ impl DataLane for FakeLane {
             ));
         }
         Ok(())
+    }
+
+    async fn send_with_progress(&self, data: bytes::Bytes) -> SendAttemptResult {
+        // This lane models a failure detected *before* any concrete write, so
+        // it explicitly declares the proven pre-send classification the
+        // production default cannot infer.
+        let progress = if self.send_closed {
+            DeliveryProgress::NotAttempted
+        } else {
+            DeliveryProgress::SubmittedLocally
+        };
+        let result = self.send(data).await;
+        SendAttemptResult { result, progress }
     }
 
     fn lane_type(&self) -> &'static str {
@@ -381,6 +395,20 @@ impl DataLane for RekeyRecoveryLane {
         Ok(())
     }
 
+    async fn send_with_progress(&self, data: bytes::Bytes) -> SendAttemptResult {
+        // The scripted `SecureChannelNotReady` is raised before any write is
+        // attempted (the rekey gate never touches the transport), so this
+        // lane explicitly declares the proven pre-send classification.
+        let first = self.send_attempts.load(Ordering::Relaxed) == 0;
+        let progress = if first {
+            DeliveryProgress::NotAttempted
+        } else {
+            DeliveryProgress::SubmittedLocally
+        };
+        let result = self.send(data).await;
+        SendAttemptResult { result, progress }
+    }
+
     fn lane_type(&self) -> &'static str {
         "rekey-recovery"
     }
@@ -459,5 +487,188 @@ async fn rekey_not_ready_does_not_evict_wire_and_send_recovers() {
             .get_connection(ConnType::WebRTC)
             .await
             .is_some()
+    );
+}
+
+// ── Route selection vs. delivery progress (RFC-0507) ─────────────────────
+
+/// Wire that always serves the same pre-built lane, so a route-selection test
+/// controls the exact `SendAttemptResult` the route loop observes.
+#[derive(Debug)]
+struct StaticLaneWire {
+    conn_type: ConnType,
+    lane: Arc<dyn DataLane>,
+    identity: Option<WireIdentity>,
+}
+
+#[async_trait]
+impl WireHandle for StaticLaneWire {
+    fn connection_type(&self) -> ConnType {
+        self.conn_type
+    }
+
+    fn priority(&self) -> u8 {
+        match self.conn_type {
+            ConnType::WebSocket => 0,
+            ConnType::WebRTC => 1,
+        }
+    }
+
+    async fn connect(&self) -> NetworkResult<()> {
+        Ok(())
+    }
+
+    fn is_connected(&self) -> bool {
+        true
+    }
+
+    async fn close(&self) -> NetworkResult<()> {
+        Ok(())
+    }
+
+    async fn get_lane(&self, _payload_type: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
+        Ok(self.lane.clone())
+    }
+
+    async fn invalidate_lane(&self, _payload_type: PayloadType) {}
+
+    fn identity(&self) -> Option<WireIdentity> {
+        self.identity.clone()
+    }
+}
+
+/// Lane whose send fails after an ambiguous partial write: the error gives no
+/// proof about how many bytes entered the transport.
+#[derive(Debug)]
+struct AmbiguousLane {
+    send_count: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl DataLane for AmbiguousLane {
+    async fn send(&self, _data: bytes::Bytes) -> NetworkResult<()> {
+        unreachable!("AmbiguousLane is driven through send_with_progress")
+    }
+
+    async fn send_with_progress(&self, _data: bytes::Bytes) -> SendAttemptResult {
+        self.send_count.fetch_add(1, Ordering::Relaxed);
+        SendAttemptResult::failed(
+            NetworkError::SendError("ambiguous partial write".into()),
+            DeliveryProgress::Unknown,
+        )
+    }
+
+    fn lane_type(&self) -> &'static str {
+        "ambiguous"
+    }
+}
+
+/// Lane whose send provably fails before any write, declared explicitly like
+/// a production adapter with a pre-send check.
+#[derive(Debug)]
+struct ClosedLikePreSendLane {
+    send_count: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl DataLane for ClosedLikePreSendLane {
+    async fn send(&self, _data: bytes::Bytes) -> NetworkResult<()> {
+        unreachable!("ClosedLikePreSendLane is driven through send_with_progress")
+    }
+
+    async fn send_with_progress(&self, _data: bytes::Bytes) -> SendAttemptResult {
+        self.send_count.fetch_add(1, Ordering::Relaxed);
+        SendAttemptResult::failed(
+            NetworkError::DataChannelClosed("proven pre-send closure".into()),
+            DeliveryProgress::NotAttempted,
+        )
+    }
+
+    fn lane_type(&self) -> &'static str {
+        "closed-like-pre-send"
+    }
+}
+
+#[tokio::test]
+async fn uncertain_first_lane_suppresses_fallback_replay() {
+    let webrtc_sends = Arc::new(AtomicUsize::new(0));
+    let websocket_sends = Arc::new(AtomicUsize::new(0));
+    let peer_id = actr_protocol::ActrId::default();
+    let transport = test_transport(vec![
+        Arc::new(StaticLaneWire {
+            conn_type: ConnType::WebRTC,
+            lane: Arc::new(AmbiguousLane {
+                send_count: Arc::clone(&webrtc_sends),
+            }),
+            identity: Some(WireIdentity::WebRtc {
+                peer_id,
+                session_id: 11,
+            }),
+        }),
+        Arc::new(FakeWire::new(ConnType::WebSocket).with_send_count(Arc::clone(&websocket_sends))),
+    ])
+    .await;
+
+    let attempt = timeout(
+        Duration::from_secs(1),
+        transport.send_with_progress(PayloadType::RpcReliable, b"payload", None),
+    )
+    .await
+    .expect("send should not hang");
+
+    assert_eq!(
+        attempt.progress,
+        DeliveryProgress::Unknown,
+        "the ambiguous progress fact must reach the operation owner"
+    );
+    assert!(attempt.result.is_err());
+    assert_eq!(webrtc_sends.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        websocket_sends.load(Ordering::Relaxed),
+        0,
+        "an uncertain first lane must not be replayed on a fallback route"
+    );
+}
+
+#[tokio::test]
+async fn not_attempted_first_lane_still_falls_back() {
+    let webrtc_sends = Arc::new(AtomicUsize::new(0));
+    let websocket_sends = Arc::new(AtomicUsize::new(0));
+    let peer_id = actr_protocol::ActrId::default();
+    let transport = test_transport(vec![
+        Arc::new(StaticLaneWire {
+            conn_type: ConnType::WebRTC,
+            lane: Arc::new(ClosedLikePreSendLane {
+                send_count: Arc::clone(&webrtc_sends),
+            }),
+            identity: Some(WireIdentity::WebRtc {
+                peer_id,
+                session_id: 12,
+            }),
+        }),
+        Arc::new(FakeWire::new(ConnType::WebSocket).with_send_count(Arc::clone(&websocket_sends))),
+    ])
+    .await;
+
+    let attempt = timeout(
+        Duration::from_secs(1),
+        transport.send_with_progress(PayloadType::RpcReliable, b"payload", None),
+    )
+    .await
+    .expect("send should not hang");
+
+    assert!(
+        attempt.result.is_ok(),
+        "a proven pre-send failure keeps the self-heal fallback: {:?}",
+        attempt.result
+    );
+    assert!(
+        webrtc_sends.load(Ordering::Relaxed) >= 1,
+        "the WebRTC lane was tried first"
+    );
+    assert_eq!(
+        websocket_sends.load(Ordering::Relaxed),
+        1,
+        "a NotAttempted first lane may still fall back to WebSocket exactly once"
     );
 }

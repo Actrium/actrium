@@ -23,7 +23,7 @@ use async_trait::async_trait;
 
 use actr_protocol::PayloadType;
 
-use crate::transport::{DataLane, NetworkError, NetworkResult};
+use crate::transport::{DataLane, NetworkError, NetworkResult, SendAttemptResult};
 use crate::wire::webrtc::v020::peer::handle::RtcPeerControllerHandle;
 use crate::wire::webrtc::v020::peer::send::RtcSendError;
 use crate::wire::webrtc::v020::status::LaneKind;
@@ -86,13 +86,18 @@ impl V020DataLane {
 #[async_trait]
 impl DataLane for V020DataLane {
     async fn send(&self, data: bytes::Bytes) -> NetworkResult<()> {
+        self.send_with_progress(data).await.into_result()
+    }
+
+    async fn send_with_progress(&self, data: bytes::Bytes) -> SendAttemptResult {
         let result = if self.non_blocking {
-            self.handle.try_send(self.lane, data).await
+            self.handle.send_with_progress(self.lane, data, true).await
         } else {
-            self.handle.send(self.lane, data).await
+            self.handle.send_with_progress(self.lane, data, false).await
         };
-        match result {
-            Ok(()) => Ok(()),
+        let progress = result.progress;
+        match result.result {
+            Ok(()) => SendAttemptResult::submitted(),
             Err(error) => {
                 if matches!(
                     error,
@@ -105,7 +110,7 @@ impl DataLane for V020DataLane {
                         "v0.20 lane send hit stale data-plane state"
                     );
                 }
-                Err(Self::map_error(error))
+                SendAttemptResult::failed(Self::map_error(error), progress)
             }
         }
     }
