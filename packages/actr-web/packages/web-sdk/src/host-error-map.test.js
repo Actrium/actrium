@@ -20,7 +20,7 @@ function hostErrorMapBody(sourceUrl) {
   const source = readFileSync(sourceUrl, 'utf8');
   return source.slice(
     source.indexOf('// @host-error-map begin'),
-    source.indexOf('// @host-error-map end'),
+    source.indexOf('// @host-error-map end')
   );
 }
 
@@ -28,7 +28,7 @@ const swSource = new URL('./actor.sw.js', import.meta.url);
 // The CLI embeds a copy of the runtime; both must carry the same mapping.
 const cliCopySource = new URL(
   '../../../../../crates/actr-cli/assets/web-runtime/actor.sw.js',
-  import.meta.url,
+  import.meta.url
 );
 
 describe('mapHostErrorToActr (actor.sw.js)', () => {
