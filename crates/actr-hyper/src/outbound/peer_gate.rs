@@ -31,6 +31,13 @@ use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::sync::{Mutex, watch};
 
+/// Build a stable caller-correlatable identity for one DataChunk. Stream IDs
+/// identify the logical stream; the sequence suffix distinguishes chunks that
+/// may be uncertain independently on the same stream.
+pub(crate) fn data_chunk_operation_id(stream_id: &str, sequence: u64) -> String {
+    format!("{stream_id}#{sequence}")
+}
+
 /// Preserve in-flight reliable RPCs across a brief sendability dip, but do not
 /// let a remote-side recovery leave response waits parked until their much
 /// longer business deadline.
@@ -1603,36 +1610,14 @@ impl PeerGate {
         envelope: RpcEnvelope,
         send_timeout: Option<Duration>,
     ) -> ActorResult<()> {
-        let envelope = Self::stamp_envelope_direction(envelope, Direction::Tell);
-        let data = Self::serialize_envelope(&envelope);
-        let dest = Self::actr_id_to_dest(target);
-        let admission = self.preflight_send(target, &dest, payload_type).await?;
-        let send = async {
-            self.send_with_retry_record_identity_for_operation(
-                &dest,
-                payload_type,
-                &data,
-                admission,
-                None,
-                &envelope.request_id,
-            )
+        // Keep the test-only compatibility entry point on the same one-shot,
+        // progress-aware path as production Tell. This prevents a caller
+        // timeout from flattening an interrupted write into retryable
+        // `TimedOut`.
+        let deadline =
+            RpcDeadline::from_duration(send_timeout.unwrap_or(crate::transport::TELL_SEND_TIMEOUT));
+        self.send_tell_with_type_until(target, payload_type, envelope, deadline)
             .await
-            .map(|_| ())
-        };
-        if let Some(send_timeout) = send_timeout {
-            match crate::timer::timeout(
-                crate::timer::ids::PEER_REQUEST_DEADLINE,
-                send_timeout,
-                send,
-            )
-            .await
-            {
-                Ok(result) => result,
-                Err(_) => Err(ActrError::TimedOut),
-            }
-        } else {
-            send.await
-        }
     }
 
     /// S6-10: v0.20 `send_media_sample` — the peer's outbound track writer
@@ -1820,11 +1805,13 @@ impl PeerGate {
         send_timeout: Duration,
     ) -> ActorResult<()> {
         let deadline = RpcDeadline::from_duration(send_timeout);
-        // The caller-visible `stream_id` is the operation identity: the
-        // `DataChunkDeliveryUncertain` lifecycle hook reports the same value,
-        // so a `DeliveryUncertain` error can be correlated with the caller's
-        // own idempotency record.
-        let operation_id = stream_id.to_string();
+        // Keep the stream and sequence together: two uncertain chunks on one
+        // stream must remain independently addressable by caller idempotency
+        // records. Invalid test payloads retain the stream-only fallback.
+        let operation_id = match actr_protocol::DataChunk::decode(data.as_ref()) {
+            Ok(chunk) => data_chunk_operation_id(stream_id, chunk.sequence),
+            Err(_) => stream_id.to_string(),
+        };
         self.send_data_chunk_until(
             target,
             payload_type,
@@ -1954,6 +1941,15 @@ mod tests {
             direction,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn data_chunk_operation_id_distinguishes_sequences() {
+        assert_ne!(
+            data_chunk_operation_id("stream-1", 4),
+            data_chunk_operation_id("stream-1", 5)
+        );
+        assert_eq!(data_chunk_operation_id("stream-1", 4), "stream-1#4");
     }
 
     #[test]
@@ -3265,13 +3261,20 @@ mod tests {
         ));
         let gate = PeerGate::for_test(transport);
         let target = test_actor_id(2);
+        let chunk = actr_protocol::DataChunk {
+            stream_id: "stream-1".to_string(),
+            sequence: 4,
+            payload: Bytes::from_static(b"chunk"),
+            metadata: vec![],
+            timestamp_ms: None,
+        };
 
         let err = gate
             .send_data_chunk_with_timeout(
                 &target,
                 PayloadType::StreamReliable,
                 "stream-1",
-                Bytes::from_static(b"chunk"),
+                Bytes::from(chunk.encode_to_vec()),
                 Duration::from_millis(250),
             )
             .await
@@ -3280,12 +3283,12 @@ mod tests {
         // The deadline cancelled the send while a lane write was in flight.
         // Bytes may already have entered the transport and the data-chunk
         // path has no dedup, so the failure must be terminal and correlate to
-        // the caller-visible stream id — never a retryable TimedOut that an
-        // auto-retry would turn into a duplicate delivery.
+        // the caller-visible stream + sequence identity — never a retryable
+        // TimedOut that an auto-retry would turn into a duplicate delivery.
         assert!(
             matches!(
                 &err,
-                ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "stream-1"
+                ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "stream-1#4"
             ),
             "got {err:?}"
         );

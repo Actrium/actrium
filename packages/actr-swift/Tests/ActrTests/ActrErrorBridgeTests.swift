@@ -13,6 +13,10 @@ struct ActrErrorBridgeTests {
         let roundTrip = ActrError(bridge: original.bridge)
 
         #expect(roundTrip == original)
+        // Send the generated discriminant through the Rust FFI classifier as
+        // well, so the Rust reader and Swift writer agree on case 13.
+        #expect(actrErrorKind(original) == .internal)
+        #expect(!actrErrorIsRetryable(original))
         guard case let .DeliveryUncertain(operationId, cause) = roundTrip else {
             Issue.record("DeliveryUncertain was not preserved by the bridge")
             return
