@@ -1553,15 +1553,19 @@ impl PeerGate {
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Tell);
         let data = Self::serialize_envelope(&envelope);
         let dest = Self::actr_id_to_dest(target);
-        let admission = self.preflight_send(target, &dest).await?;
-        self.send_with_retry_for_operation(
+        let admission = self
+            .preflight_send(target, &dest, payload_type)
+            .await?;
+        self.send_with_retry_record_identity_for_operation(
             &dest,
             payload_type,
             &data,
             admission,
+            None,
             &envelope.request_id,
         )
         .await
+        .map(|_| ())
     }
 
     /// S6-10: v0.20 `send_media_sample` — the peer's outbound track writer
