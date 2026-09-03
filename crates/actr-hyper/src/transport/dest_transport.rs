@@ -289,6 +289,22 @@ impl DestTransport {
                                 record_delivery_progress(cell, progress);
                             }
 
+                            // Secure readiness is a pre-send condition even
+                            // when a custom adapter misreports its progress
+                            // as `Unknown`. Recover the lane before applying
+                            // the terminal ambiguous-send rule below.
+                            if let Err(error) = attempt.result.as_ref() {
+                                if matches!(error, NetworkError::SecureChannelNotReady(_)) {
+                                    tracing::info!(
+                                        "🔐 secure channel not ready for {:?} ({}), waiting for readiness",
+                                        conn_type,
+                                        error,
+                                    );
+                                    conn.invalidate_lane(payload_type).await;
+                                    continue 'send;
+                                }
+                            }
+
                             // Once a concrete adapter reports that bytes may
                             // have entered the transport, the route loop must
                             // not replay this payload.  Preserve the progress
@@ -326,12 +342,6 @@ impl DestTransport {
                                             }
                                             return match retry.result {
                                                 Ok(()) => DestSendAttempt::submitted(wire_identity),
-                                                Err(error)
-                                                    if retry_progress
-                                                        == DeliveryProgress::Unknown =>
-                                                {
-                                                    DestSendAttempt::failed(error, retry_progress)
-                                                }
                                                 Err(NetworkError::SecureChannelNotReady(_)) => {
                                                     // Secure epoch rotated again
                                                     // mid-retry: wait for a
@@ -339,6 +349,12 @@ impl DestTransport {
                                                     // still healthy.
                                                     conn.invalidate_lane(payload_type).await;
                                                     continue 'send;
+                                                }
+                                                Err(error)
+                                                    if retry_progress
+                                                        == DeliveryProgress::Unknown =>
+                                                {
+                                                    DestSendAttempt::failed(error, retry_progress)
                                                 }
                                                 Err(error) if error.is_closed_like() => {
                                                     self.evict_closed_like_connection(
