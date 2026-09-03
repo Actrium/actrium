@@ -617,16 +617,12 @@ pub trait DataLane: Send + Sync + std::fmt::Debug {
     /// Send raw bytes and retain the delivery-progress fact for the recovery
     /// layer.
     ///
-    /// Default classification for lanes that only implement `send`: a typed
-    /// closed/not-open or secure-not-ready error is raised before any concrete
-    /// write is attempted, so it is a proven `NotAttempted` and route-level
-    /// self-healing (lane invalidation, connection eviction, fallback) stays
-    /// available. Any other error is conservatively `Unknown`.
-    ///
-    /// Adapters whose writes can fail *after* bytes entered a transport
-    /// (WebSocket sink mid-flush, v0.20 multi-fragment channel sends) MUST
-    /// override this method and report `Unknown` — the in-tree
-    /// `WebSocketDataLane` and `V020DataLane` do so.
+    /// The default is for adapters whose `send` contract checks the typed
+    /// closed/not-open or secure-not-ready state before touching the wire;
+    /// those errors are therefore proven `NotAttempted` and route-level
+    /// self-healing remains available. An adapter whose `send` can return a
+    /// closed-like error after a write has started MUST override this method
+    /// and report `Unknown`, so an interrupted write is never replayed.
     async fn send_with_progress(&self, data: bytes::Bytes) -> SendAttemptResult {
         match self.send(data).await {
             Ok(()) => SendAttemptResult::submitted(),

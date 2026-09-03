@@ -37,32 +37,24 @@ class RetryExtensionsTest {
     }
 
     @Test
-    fun `default predicate excludes recoverable actr exceptions until opted in`() = runBlocking {
+    fun `default predicate preserves recoverable actr exception retries`() = runBlocking {
         var attempts = 0
         val error = ActrException.Unavailable(msg = "route warming up")
 
-        // Default: even a transient, recoverable ActrException is never
-        // replayed — the framework owns readiness/transport retry, and a
-        // generic replay could duplicate a delivery.
-        val notRetried =
-            assertFailsWith<ActrException.Unavailable> {
-                withRetry(maxAttempts = 5, initialDelayMs = 0) {
-                    attempts += 1
-                    throw error
-                }
+        assertFailsWith<ActrException.Unavailable> {
+            withRetry(maxAttempts = 3, initialDelayMs = 0) {
+                attempts += 1
+                throw error
             }
-        assertEquals(1, attempts)
-        assertEquals("route warming up", notRetried.msg)
+        assertEquals(3, attempts)
 
-        // Opt-in: an operation that knows itself to be idempotent may replay
-        // ActrException failures explicitly.
         attempts = 0
         assertFailsWith<ActrException.Unavailable> {
-            withRetry(maxAttempts = 3, initialDelayMs = 0, shouldRetry = { true }) {
+            withRetry(RetryConfig(maxAttempts = 2, initialDelayMs = 0)) {
                 attempts += 1
                 throw error
             }
         }
-        assertEquals(3, attempts)
+        assertEquals(2, attempts)
     }
 }

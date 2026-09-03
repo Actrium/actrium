@@ -1169,6 +1169,11 @@ impl PeerGate {
         }
     }
 
+    /// Retry only completed, proven `NotAttempted` failures. The retry loop
+    /// intentionally has no progress sink: ambiguous (`Unknown`) results
+    /// return before backoff, while timeout-sensitive one-way sends use the
+    /// progress-aware `send_once_with_admission` path. This keeps a retry from
+    /// overwriting an earlier delivery fact with a later attempt.
     #[allow(clippy::too_many_arguments)] // Keeps retry context explicit at this internal boundary.
     async fn send_with_retry_policy_record_identity(
         &self,

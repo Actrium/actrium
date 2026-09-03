@@ -53,10 +53,10 @@ impl DataLane for DefaultProgressLane {
     async fn send(&self, _data: Bytes) -> NetworkResult<()> {
         match self.mode {
             DefaultProgressMode::ClosedLike => Err(NetworkError::DataChannelClosed(
-                "closed after partial flush".into(),
+                "closed before write".into(),
             )),
             DefaultProgressMode::SecureNotReady => Err(NetworkError::SecureChannelNotReady(
-                "epoch rotated mid-write".into(),
+                "secure gate not ready before write".into(),
             )),
             DefaultProgressMode::Generic => Err(NetworkError::SendError("boom".into())),
             DefaultProgressMode::Ok => Ok(()),
