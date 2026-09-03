@@ -268,7 +268,7 @@ async fn test_grpc_rejects_stale_timestamp() {
 }
 
 #[tokio::test]
-async fn test_grpc_sign_expired_key_beyond_tolerance_returns_not_found() {
+async fn test_grpc_sign_expired_key_returns_failed_precondition() {
     let psk = "test-ks-grpc-psk";
     let server = start_grpc_server(psk, 1, 0).await;
     let mut client = connect_client(&server.endpoint).await;
@@ -291,7 +291,7 @@ async fn test_grpc_sign_expired_key_beyond_tolerance_returns_not_found() {
         })
         .await
         .expect_err("expired key should be unavailable");
-    assert_eq!(err.code(), Code::NotFound);
+    assert_eq!(err.code(), Code::FailedPrecondition);
 }
 
 #[tokio::test]

@@ -19,8 +19,12 @@
 //! # Refresh Strategy
 //!
 //! - **Early refresh**: trigger refresh 10 minutes before key expiry
-//! - **Tolerance window**: keys remain valid for 24 hours after expiry (avoids clock skew)
-//! - **Beyond tolerance**: force fetch a new key from KS
+//! - **Minting deadline**: an expired key is never usable for minting — the
+//!   issuer rotates as soon as `expires_at` passes (minus a small clock-skew
+//!   margin), because signaling drops verifying keys at `expires_at` with no
+//!   tolerance
+//! - **Tolerance window**: only governs how long KS keeps the key material
+//!   readable; it does not extend minting usability on the AIS side
 //!
 //! # Thread Safety
 //!
@@ -225,7 +229,12 @@ impl KeyStorage {
 
     /// Check whether the key has fully expired (beyond the tolerance window)
     ///
-    /// Returns true if the key expired more than 24 hours ago
+    /// Returns true if the key expired more than `tolerance_seconds` ago.
+    ///
+    /// Note: this reflects KS's key-*material* retention window, not minting
+    /// usability. The issuer refuses to mint with any
+    /// key past `expires_at` and rotates instead, regardless of the tolerance
+    /// window; this method is kept for observability of the retention window.
     pub async fn is_expired_beyond_tolerance(&self) -> Result<bool> {
         let key = match self.get_current_key().await? {
             Some(key) => key,
