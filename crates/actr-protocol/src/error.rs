@@ -20,7 +20,7 @@
 //! |-----------|--------------------------------|--------|------|
 //! | Transient | Environmental fluctuation      | yes    | no   |
 //! | Client    | Caller error (bad request)     | no     | no   |
-//! | Internal  | Framework bug / panic          | no     | no   |
+//! | Internal  | Framework fault or uncertain outcome | no  | no   |
 //! | Corrupt   | Data corruption                | no     | yes  |
 //!
 //! Use the `Classify` trait to query classification from any error type.
@@ -144,7 +144,8 @@ pub enum ActrError {
     #[error("not implemented: {0}")]
     NotImplemented(String),
 
-    /// Internal framework error: bug, panic, or unrecoverable state.
+    /// Internal framework error: bug, panic, unrecoverable state, or an
+    /// uncertain delivery outcome that requires caller reconciliation.
     ///
     /// `ErrorKind::Internal` — do not retry; investigate logs.
     #[error("internal error: {0}")]
@@ -169,7 +170,8 @@ pub enum ErrorKind {
     Transient,
     /// Caller error — bad request or system state; do not retry.
     Client,
-    /// Framework bug or panic — do not retry; alert.
+    /// Framework fault or uncertain delivery — do not retry. Framework faults
+    /// are alertable; uncertain delivery requires caller reconciliation.
     Internal,
     /// Data corruption — route to Dead Letter Queue; manual intervention required.
     Corrupt,

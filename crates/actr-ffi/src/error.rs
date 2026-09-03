@@ -21,7 +21,8 @@ pub enum ErrorKind {
     Transient,
     /// Caller error — bad request or system state; do not retry.
     Client,
-    /// Framework bug or panic — do not retry; alert.
+    /// Framework fault or uncertain delivery — do not retry. Framework faults
+    /// are alertable; uncertain delivery requires caller reconciliation.
     Internal,
     /// Data corruption — route to Dead Letter Queue; manual intervention.
     Corrupt,
