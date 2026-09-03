@@ -130,3 +130,17 @@ The migrated commits preserve source author names and author timestamps while
 using verified GitHub noreply identities. A destination-only follow-up,
 `79417247`, normalizes the generated TypeScript contract terminator so the
 checked-in output and generator agree.
+
+The source was frozen again on 2026-09-03. Two further `main` commits were
+reviewed and migrated through their consolidated ownership paths:
+
+| Source commit | Consolidated commit | Disposition |
+| --- | --- | --- |
+| `900d493c` | `dc1dac20` | Migrated from `bindings/kotlin` to `packages/actr-kotlin` |
+| `32927127` | `15d65aff` | Migrated from Actrix service paths to the corresponding Loran crates and documentation |
+
+The remaining source pull requests are recorded in
+[`Actrium/actrium#185`](https://github.com/Actrium/actrium/issues/185). GitHub
+cannot transfer pull requests between repositories, so continuing work is
+recreated against the monorepo while the archived source pages preserve the
+original review and patch history.

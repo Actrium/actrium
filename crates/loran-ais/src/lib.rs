@@ -46,9 +46,10 @@
 //!
 //! ## Key Management
 //!
-//! - **Fetch**: On startup, load the cached key from local SQLite; if expired, fetch from Signer
+//! - **Fetch**: On startup, load the cached key from local SQLite; if expired or too close to expiry, fetch from Signer
 //! - **Refresh**: Background task checks every 10 minutes; refreshes keys expiring within 10 minutes
-//! - **Tolerance**: Keys remain usable for 24 hours after expiry (avoids clock skew disruptions)
+//! - **Minting deadline**: Never mint with a key at or within 10 seconds of `expires_at`, because signaling drops the key at that instant
+//! - **Tolerance**: Signer key-material retention after expiry is read-only and does not extend the AIS minting window
 //!
 //! # Usage Example
 //!

@@ -54,11 +54,22 @@ impl TestEnv {
     }
 }
 
-async fn start_embedded_signer(
+async fn start_embedded_signer_with_config(
     shared_key: &str,
     sqlite_path: &Path,
+    service_config: SignerServiceConfig,
 ) -> (String, JoinHandle<()>, oneshot::Sender<()>) {
-    let service_config = SignerServiceConfig::default();
+    start_embedded_signer_at(shared_key, sqlite_path, service_config, None).await
+}
+
+/// Start an embedded Signer, optionally pinned to a fixed address (used to
+/// simulate a KS restart on the same endpoint).
+async fn start_embedded_signer_at(
+    shared_key: &str,
+    sqlite_path: &Path,
+    service_config: SignerServiceConfig,
+    fixed_addr: Option<std::net::SocketAddr>,
+) -> (String, JoinHandle<()>, oneshot::Sender<()>) {
     let storage = KeyStorage::from_config(
         &service_config.storage,
         signer::KeyEncryptor::no_encryption(),
@@ -67,9 +78,15 @@ async fn start_embedded_signer(
     .await
     .expect("Failed to create Signer storage");
 
-    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind ephemeral port");
-    let addr = listener.local_addr().expect("Failed to get local addr");
-    drop(listener);
+    let addr = match fixed_addr {
+        Some(addr) => addr,
+        None => {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind ephemeral port");
+            let addr = listener.local_addr().expect("Failed to get local addr");
+            drop(listener);
+            addr
+        }
+    };
 
     let service = create_grpc_service(
         storage,
@@ -124,14 +141,24 @@ async fn start_embedded_signer(
 }
 
 async fn setup_test_environment() -> TestEnv {
+    setup_test_environment_with_signer_config(SignerServiceConfig::default()).await
+}
+
+async fn setup_test_environment_with_signer_config(
+    signer_service_config: SignerServiceConfig,
+) -> TestEnv {
     use std::sync::OnceLock;
     static DB_DIR: OnceLock<TempDir> = OnceLock::new();
 
     let issuer_temp_dir = TempDir::new().expect("Failed to create issuer temp dir");
     let signer_temp_dir = TempDir::new().expect("Failed to create signer temp dir");
     let shared_key = "test-shared-key".to_string();
-    let (endpoint, signer_handle, signer_shutdown_tx) =
-        start_embedded_signer(&shared_key, signer_temp_dir.path()).await;
+    let (endpoint, signer_handle, signer_shutdown_tx) = start_embedded_signer_with_config(
+        &shared_key,
+        signer_temp_dir.path(),
+        signer_service_config,
+    )
+    .await;
 
     // Initialize the global database once with a persistent temp dir.
     // The OnceLock ensures the TempDir (and its SQLite file) lives for the
