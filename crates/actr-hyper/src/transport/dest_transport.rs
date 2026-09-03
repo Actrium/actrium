@@ -256,6 +256,20 @@ impl DestTransport {
                     // Use original payload_type to create DataLane
                     match conn.get_lane(payload_type).await {
                         Ok(lane) => {
+                            // A physical wire can remain in WirePool's
+                            // ready-set while its concrete lane is no longer
+                            // sendable (for example, v0.20 controller
+                            // recovery).  Do not select that stale candidate;
+                            // continue to the next payload-capable route so a
+                            // ready WebSocket fallback can carry the send.
+                            if !lane.is_healthy() {
+                                tracing::debug!(
+                                    "🔍 {:?} lane on {:?} is not healthy, trying next route",
+                                    payload_type,
+                                    conn_type
+                                );
+                                continue;
+                            }
                             tracing::info!(
                                 "📡 [channel={:?}] {:?} ({} bytes)",
                                 conn_type,

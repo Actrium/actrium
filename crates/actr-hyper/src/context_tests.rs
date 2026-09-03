@@ -137,6 +137,80 @@ async fn ensure_session_ready_rejects_stale_generation() {
     assert!(c.ensure_session_ready().await.is_ok());
 }
 
+#[tokio::test]
+async fn ensure_session_ready_until_waits_for_rebinding_to_finish() {
+    let mut c = ctx();
+    let ss = SessionState::new(
+        crate::lifecycle::session_state::SessionSnapshot::empty_with_id(ActrId::default(), 7),
+    );
+    c.session_state = Some(ss.clone());
+    c.context_generation = 7;
+    ss.enter_rebinding().await;
+
+    let deadline = crate::transport::RpcDeadline::from_duration(std::time::Duration::from_secs(1));
+    let mut wait =
+        Box::pin(c.ensure_session_ready_until(crate::timer::ids::RUNTIME_CALL_PREFLIGHT, deadline));
+
+    // The preflight must remain pending while the current generation is
+    // rebinding instead of surfacing an immediate ConnectionNotReady.
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(20), &mut wait)
+            .await
+            .is_err()
+    );
+
+    ss.set_active().await;
+    assert!(wait.await.is_ok());
+}
+
+#[tokio::test]
+async fn ensure_session_ready_until_rejects_replaced_generation() {
+    let mut c = ctx();
+    let ss = SessionState::new(
+        crate::lifecycle::session_state::SessionSnapshot::empty_with_id(ActrId::default(), 7),
+    );
+    c.session_state = Some(ss.clone());
+    c.context_generation = 7;
+    ss.enter_rebinding().await;
+
+    let deadline = crate::transport::RpcDeadline::from_duration(std::time::Duration::from_secs(1));
+    let waiter = tokio::spawn(async move {
+        c.ensure_session_ready_until(crate::timer::ids::RUNTIME_CALL_PREFLIGHT, deadline)
+            .await
+    });
+
+    ss.commit_hard_rebind_unpublished(
+        crate::lifecycle::session_state::SessionSnapshot::empty_with_id(ActrId::default(), 8),
+    )
+    .await;
+
+    let error = waiter
+        .await
+        .expect("session preflight must not panic")
+        .expect_err("an old context must not revive after a generation change");
+    assert!(matches!(error, ActrError::ConnectionNotReady(_)));
+}
+
+#[tokio::test]
+async fn ensure_session_ready_until_times_out_while_rebinding() {
+    let mut c = ctx();
+    let ss = SessionState::new(
+        crate::lifecycle::session_state::SessionSnapshot::empty_with_id(ActrId::default(), 7),
+    );
+    c.session_state = Some(ss.clone());
+    c.context_generation = 7;
+    ss.enter_rebinding().await;
+
+    let error = c
+        .ensure_session_ready_until(
+            crate::timer::ids::RUNTIME_CALL_PREFLIGHT,
+            crate::transport::RpcDeadline::from_duration(std::time::Duration::from_millis(20)),
+        )
+        .await
+        .expect_err("a rebinding session must not wait beyond its deadline");
+    assert!(matches!(error, ActrError::TimedOut));
+}
+
 async fn ctx_with_active_session() -> (RuntimeContext, SessionState) {
     let mut c = ctx();
     let snap =
@@ -154,10 +228,10 @@ async fn ctx_with_active_session() -> (RuntimeContext, SessionState) {
 async fn call_readiness_consumes_caller_deadline_before_gate_dispatch() {
     let (c, ss) = ctx_with_active_session().await;
 
-    // Hold the session-state inner write lock so readiness checks block.
-    // The caller deadline must bound this wait; a later stage must not get a
-    // fresh budget after a full readiness stall.
-    let readiness_guard = ss.hold_inner_write_for_test().await;
+    // Put the current session generation into the actual readiness phase used
+    // by outbound preflight. The caller deadline must bound this wait; a later
+    // stage must not get a fresh budget after a full readiness stall.
+    ss.enter_rebinding().await;
     let request = tokio::spawn(async move {
         c.call(&Dest::Host, TimeoutRequest { payload: vec![1] }, 100)
             .await
@@ -176,15 +250,13 @@ async fn call_readiness_consumes_caller_deadline_before_gate_dispatch() {
         .expect("request task should not panic")
         .expect_err("blocked readiness should time out");
     assert!(matches!(error, ActrError::TimedOut), "got {error:?}");
-
-    drop(readiness_guard);
 }
 
 #[tokio::test(start_paused = true)]
 async fn tell_readiness_consumes_send_budget_before_gate_dispatch() {
     let (c, ss) = ctx_with_active_session().await;
 
-    let readiness_guard = ss.hold_inner_write_for_test().await;
+    ss.enter_rebinding().await;
     let request = tokio::spawn(async move {
         c.tell(&Dest::Host, TimeoutRequest { payload: vec![1] })
             .await
@@ -206,15 +278,13 @@ async fn tell_readiness_consumes_send_budget_before_gate_dispatch() {
         .expect("request task should not panic")
         .expect_err("blocked readiness should time out");
     assert!(matches!(error, ActrError::TimedOut), "got {error:?}");
-
-    drop(readiness_guard);
 }
 
 #[tokio::test(start_paused = true)]
 async fn data_chunk_readiness_consumes_send_budget_before_gate_dispatch() {
     let (c, ss) = ctx_with_active_session().await;
 
-    let readiness_guard = ss.hold_inner_write_for_test().await;
+    ss.enter_rebinding().await;
     let request = tokio::spawn(async move {
         c.send_data_chunk(
             &Dest::Host,
@@ -241,8 +311,6 @@ async fn data_chunk_readiness_consumes_send_budget_before_gate_dispatch() {
         .expect("request task should not panic")
         .expect_err("blocked readiness should time out");
     assert!(matches!(error, ActrError::TimedOut), "got {error:?}");
-
-    drop(readiness_guard);
 }
 
 // ── BootstrapContextBuilder ─────────────────────────────────────────────
