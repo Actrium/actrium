@@ -19,6 +19,22 @@ pub mod recording;
 pub mod storage;
 pub mod types;
 
+/// Whether a signing key with this `expires_at` may still mint signatures at
+/// `now` (both Unix seconds).
+///
+/// This is the single expiry decision shared by the gRPC and HTTP Sign
+/// handlers, and it deliberately ignores the tolerance window: verifiers
+/// verifier caches drop verifying keys at `expires_at` without any
+/// tolerance, so a signature created at or after that instant yields a
+/// credential that fails every handshake with 401. Tolerance only governs how
+/// long key *material* stays
+/// readable (`get_verifying_key`, storage cleanup), never minting.
+///
+/// `expires_at == 0` means the key never expires.
+pub(crate) fn key_expired_for_signing(expires_at: u64, now: u64) -> bool {
+    expires_at > 0 && expires_at <= now
+}
+
 // Re-export commonly used items
 #[cfg(test)]
 pub use client::{Client, ClientConfig};
@@ -72,5 +88,21 @@ mod tests {
         )
         .await;
         assert!(state.is_ok());
+    }
+
+    #[test]
+    fn test_key_expired_for_signing_never_expires() {
+        assert!(!key_expired_for_signing(0, u64::MAX));
+        assert!(!key_expired_for_signing(0, 0));
+    }
+
+    #[test]
+    fn test_key_expired_for_signing_boundary() {
+        let now = 1_000_000u64;
+        // Still valid one second before expiry, expired exactly at expiry,
+        // and expired long ago (even inside any tolerance window).
+        assert!(!key_expired_for_signing(now + 1, now));
+        assert!(key_expired_for_signing(now, now));
+        assert!(key_expired_for_signing(now - 1, now));
     }
 }

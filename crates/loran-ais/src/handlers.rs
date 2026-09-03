@@ -841,15 +841,24 @@ async fn health_check(State(state): State<AISState>) -> Json<Value> {
     Json(checks)
 }
 
-/// Get the current key ID
+/// Get the current key status (id, expiry, minting usability)
 ///
-/// For monitoring and debugging
+/// For monitoring and debugging. Reports `status: "expired"` once the key
+/// can no longer mint credentials: the endpoint used to
+/// keep answering `success` for an expired key, hiding an ongoing outage
+/// while every signaling handshake failed with 401.
 async fn get_current_key(State(state): State<AISState>) -> Json<Value> {
-    match state.issuer.get_current_key_id().await {
-        Ok(key_id) => Json(json!({
-            "status": "success",
-            "key_id": key_id
-        })),
+    match state.issuer.get_current_key_status().await {
+        Ok(status) => {
+            let status_word = if status.usable { "success" } else { "expired" };
+            Json(json!({
+                "status": status_word,
+                "key_id": status.key_id,
+                "expires_at": status.expires_at,
+                "expires_in": status.expires_in,
+                "expired": !status.usable
+            }))
+        }
         Err(e) => {
             platform::recording::error!("Failed to get current key: {}", e);
             Json(json!({
@@ -1125,7 +1134,12 @@ fn aid_error_to_response(err: AidError) -> (u32, String) {
         // Server errors (5xx)
         AidError::GenerationFailed(msg) => {
             // If KS is unavailable, return 503 (Service Unavailable)
-            if msg.contains("KS unavailable") || msg.contains("KS service") {
+            // A lost race with an expired KS key is also retryable: rotation
+            // may have produced a usable key by the next request.
+            if msg.contains("KS unavailable")
+                || msg.contains("KS service")
+                || msg.contains("has expired")
+            {
                 503
             } else {
                 500

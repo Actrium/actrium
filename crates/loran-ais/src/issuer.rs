@@ -20,18 +20,30 @@
 //! ## Initialization Phase
 //!
 //! 1. Attempt to load cached key from local SQLite
-//! 2. If the key does not exist or has expired beyond the tolerance window, fetch a new key from KS
+//! 2. If the key does not exist, or can no longer mint credentials (any key
+//!    past `expires_at`, tolerance window notwithstanding — see below), fetch
+//!    a new key from KS
 //! 3. Start the background refresh task
 //!
 //! ## Runtime Refresh
 //!
-//! - Check frequency: every 10 minutes
+//! - Check frequency: every 10 minutes; a failed rotation retries after a
+//!   short doubling backoff (30 s → 600 s) instead of waiting the full cycle
 //! - Refresh trigger: time to expiry < 10 minutes
-//! - Tolerance window: keys remain usable for 24 hours after expiry
+//!
+//! ## Validity semantics
+//!
+//! Verifier caches drop verifying keys at `expires_at` with no tolerance, so
+//! the issuer treats `expires_at` as a hard minting deadline:
+//! credentials are only minted while the key outlives the current time by
+//! more than [`KEY_EXPIRY_SAFETY_MARGIN_SECS`]. The Signer's tolerance window
+//! only governs how long key material stays readable on KS; it never extends
+//! the minting window here. Minting past expiry used to hand clients
+//! born-invalid credentials that failed every signaling handshake with 401.
 //!
 //! ## Error Handling
 //!
-//! - Background refresh failure: log a warning and retry on the next cycle
+//! - Background refresh failure: log a warning and retry with a short backoff
 //! - Synchronous refresh failure: return `AidError::GenerationFailed`
 //!
 //! # Example
@@ -72,6 +84,27 @@ use crate::storage::{KeyRecord, KeyStorage};
 ///
 /// The background task checks whether the key needs refreshing at this interval
 const KEY_REFRESH_CHECK_INTERVAL_SECS: u64 = 600; // 10 minutes
+
+/// Safety margin (seconds) before `expires_at` at which the issuer stops
+/// minting credentials with the key.
+///
+/// Verifier caches drop verifying keys at `expires_at` without any tolerance,
+/// so a credential signed after that instant is born-invalid and fails every
+/// handshake with 401. The margin absorbs
+/// small clock skews between AIS, KS, and signaling so a "still valid"
+/// decision on one host does not race past expiry on another. It is kept
+/// small on purpose: a deployment with `key_ttl_seconds` at or below this
+/// margin would never mint at all.
+const KEY_EXPIRY_SAFETY_MARGIN_SECS: u64 = 10;
+
+/// Initial delay (seconds) before retrying a failed background key rotation.
+///
+/// Doubled after each consecutive failure up to
+/// [`KEY_REFRESH_CHECK_INTERVAL_SECS`], and reset after a success. A fixed
+/// full-cycle retry used to leave an expired key in place for up to 10
+/// minutes per rotation attempt.
+const KEY_ROTATION_RETRY_BACKOFF_START_SECS: u64 = 30;
+
 const MANUFACTURER_SIGNED_AT_MAX_AGE_SECS: u64 = 5 * 60;
 const MANUFACTURER_SIGNED_AT_FUTURE_SKEW_SECS: u64 = 60;
 const MANUFACTURER_NONCE_TTL_SECS: u64 = 10 * 60;
@@ -91,7 +124,7 @@ use prost_types::Timestamp;
 use sha1::Sha1;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 type HmacSha1 = Hmac<Sha1>;
 
@@ -120,7 +153,14 @@ fn aid_error_to_code(err: &AidError) -> u32 {
             403
         }
         AidError::GenerationFailed(msg) => {
-            if msg.contains("KS unavailable") || msg.contains("KS service") {
+            // "has expired" comes from KS refusing to sign with an expired
+            // key (a lost race against rotation): the caller should retry
+            // later, when rotation has produced a fresh key, so map it to a
+            // retryable service-unavailable instead of a hard 500.
+            if msg.contains("KS unavailable")
+                || msg.contains("KS service")
+                || msg.contains("has expired")
+            {
                 503
             } else {
                 500
@@ -296,10 +336,44 @@ impl Default for IssuerConfig {
 struct KeyCache {
     key_id: u32,
     verifying_key: VerifyingKey,
-    #[allow(dead_code)]
+    /// Hard minting deadline, aligned with the verifier's key validity window;
+    /// see [`key_usable_for_minting`].
     expires_at: u64,
+    /// KS key-material retention window; informational only — it never
+    /// extends the minting window.
     #[allow(dead_code)]
     tolerance_seconds: u64,
+}
+
+/// Current Unix time in seconds.
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// Whether a key with this `expires_at` may still mint credentials at `now`
+/// (both Unix seconds).
+///
+/// `expires_at == 0` means the key never expires. Otherwise the key must
+/// outlive `now` by more than [`KEY_EXPIRY_SAFETY_MARGIN_SECS`]:
+/// Verifier caches drop verifying keys at `expires_at` with no tolerance, so
+/// any credential minted later is born-invalid and fails every handshake with
+/// 401. KS's tolerance window does not
+/// widen this check — it only covers key-material retention on the KS side.
+fn key_usable_for_minting(expires_at: u64, now: u64) -> bool {
+    expires_at == 0 || now.saturating_add(KEY_EXPIRY_SAFETY_MARGIN_SECS) < expires_at
+}
+
+/// Calculate a credential deadline without extending beyond its signing key.
+fn credential_expiry_for_key(now: u64, token_ttl_secs: u64, key_expires_at: u64) -> u64 {
+    let token_expires_at = now.saturating_add(token_ttl_secs);
+    if key_expires_at == 0 {
+        token_expires_at
+    } else {
+        token_expires_at.min(key_expires_at)
+    }
 }
 
 /// AId Token issuer - focused on issuing new Actor Identity Tokens
@@ -307,6 +381,10 @@ pub struct AIdIssuer {
     signer_client: SignerClientWrapper,
     key_storage: Arc<KeyStorage>,
     key_cache: Arc<RwLock<Option<KeyCache>>>,
+    /// Serializes key creation across request-triggered, manual, and background
+    /// rotations. Without this, concurrent registrations that all observe an
+    /// expired key can each generate a distinct replacement key.
+    key_rotation_lock: Arc<Mutex<()>>,
     /// Issuer configuration (public for renewal handler access).
     pub config: IssuerConfig,
 }
@@ -328,6 +406,7 @@ impl AIdIssuer {
             signer_client,
             key_storage: Arc::new(key_storage),
             key_cache: Arc::new(RwLock::new(None)),
+            key_rotation_lock: Arc::new(Mutex::new(())),
             config,
         };
 
@@ -337,46 +416,102 @@ impl AIdIssuer {
             platform::recording::warn!("Initial KS key load deferred, will retry on demand: {}", e);
         }
 
-        // Start the background key refresh task
-        issuer.spawn_key_refresh_task(cancel);
+        // Start the background key refresh task unless shutdown has already
+        // been requested. This also makes construction with a pre-cancelled
+        // token deterministic for isolated callers and tests.
+        if cancel.is_cancelled() {
+            platform::recording::debug!(
+                "Skipping AIS key refresh task because cancellation was requested"
+            );
+        } else {
+            issuer.spawn_key_refresh_task(cancel);
+        }
 
         Ok(issuer)
     }
 
-    /// Ensure the key has been loaded
+    /// Ensure a key that can still mint credentials is loaded
+    ///
+    /// A key is usable only while it outlives the current time by more than
+    /// [`KEY_EXPIRY_SAFETY_MARGIN_SECS`] (see [`key_usable_for_minting`]).
+    /// An expired — or nearly expired — key, whether in the in-memory cache
+    /// or in local storage and regardless of the KS tolerance window,
+    /// triggers a synchronous rotation instead of being used: signaling
+    /// drops verifying keys at `expires_at` with no tolerance, so minting
+    /// with such a key hands clients credentials that fail every handshake
+    /// with 401 (the self-locking loop). If KS is
+    /// unreachable the error propagates so registration fails honestly
+    /// (503) rather than issuing a born-invalid credential.
     async fn ensure_key_loaded(&self) -> Result<(), AidError> {
-        // Try loading from cache first
-        if self.key_cache.read().await.is_some() {
-            platform::recording::debug!("Key already in cache");
-            return Ok(());
+        let now = now_secs();
+
+        // A cached key that is still usable needs no work.
+        let cached_key = {
+            let cache = self.key_cache.read().await;
+            cache.as_ref().map(|cache| (cache.key_id, cache.expires_at))
+        };
+        if let Some((key_id, expires_at)) = cached_key {
+            if key_usable_for_minting(expires_at, now) {
+                platform::recording::debug!("Key already in cache: key_id={}", key_id);
+                return Ok(());
+            }
+            platform::recording::warn!(
+                "Cached key can no longer mint credentials, rotating: key_id={}, expires_at={}",
+                key_id,
+                expires_at
+            );
         }
 
-        // Try loading from storage
-        if let Some(record) = self.key_storage.get_current_key().await.map_err(|e| {
+        // Collapse concurrent expiry observations into one rotation. Recheck
+        // after acquiring the lock because another request may have refreshed
+        // the cache while this request was waiting.
+        let _rotation = self.key_rotation_lock.lock().await;
+        let now = now_secs();
+        let cached_key = {
+            let cache = self.key_cache.read().await;
+            cache.as_ref().map(|cache| (cache.key_id, cache.expires_at))
+        };
+        if let Some((key_id, expires_at)) = cached_key {
+            if key_usable_for_minting(expires_at, now) {
+                platform::recording::debug!("Key refreshed by another request: key_id={}", key_id);
+                return Ok(());
+            }
+            platform::recording::warn!(
+                "Cached key can no longer mint credentials, rotating: key_id={}, expires_at={}",
+                key_id,
+                expires_at
+            );
+            return self.refresh_key_from_ks_locked().await;
+        }
+
+        // Try loading from storage, but only if it can still mint credentials.
+        let stored = self.key_storage.get_current_key().await.map_err(|e| {
             AidError::GenerationFailed(format!("Failed to get key from storage: {e}"))
-        })? {
-            // Check if expired beyond the tolerance window
-            if self
+        })?;
+        if let Some(record) = stored {
+            if key_usable_for_minting(record.expires_at, now) {
+                platform::recording::debug!("Loaded key from storage: key_id={}", record.key_id);
+                return self.load_key_from_record(&record);
+            }
+            // Observability only: whether KS has also dropped the key
+            // material (beyond its retention window) or just its minting
+            // deadline passed.
+            let beyond_tolerance = self
                 .key_storage
                 .is_expired_beyond_tolerance()
                 .await
-                .map_err(|e| AidError::GenerationFailed(e.to_string()))?
-            {
-                platform::recording::warn!(
-                    "Stored key expired beyond tolerance, fetching new key from KS"
-                );
-                self.refresh_key_from_ks().await?;
-            } else {
-                platform::recording::debug!("Loaded key from storage: key_id={}", record.key_id);
-                self.load_key_from_record(&record)?;
-            }
+                .unwrap_or(false);
+            platform::recording::warn!(
+                "Stored key expired for minting, fetching new key from KS: key_id={}, expires_at={}, beyond_tolerance={}",
+                record.key_id,
+                record.expires_at,
+                beyond_tolerance
+            );
         } else {
-            // No stored key, fetch from KS
             platform::recording::info!("No stored key found, fetching from KS");
-            self.refresh_key_from_ks().await?;
         }
 
-        Ok(())
+        self.refresh_key_from_ks_locked().await
     }
 
     /// Load the Ed25519 verifying key from a KeyRecord into the cache
@@ -434,8 +569,8 @@ impl AIdIssuer {
         Ok(())
     }
 
-    /// Refresh the key from KS
-    async fn refresh_key_from_ks(&self) -> Result<(), AidError> {
+    /// Refresh the key from KS while [`key_rotation_lock`] is held.
+    async fn refresh_key_from_ks_locked(&self) -> Result<(), AidError> {
         platform::recording::info!("Fetching new key from KS");
 
         Self::refresh_key_internal(
@@ -457,13 +592,10 @@ impl AIdIssuer {
     pub async fn rotate_key(&self) -> Result<u32, AidError> {
         platform::recording::info!("Manual key rotation triggered");
 
-        Self::refresh_key_internal(
-            &self.signer_client,
-            &self.key_storage,
-            &self.key_cache,
-            &self.config,
-        )
-        .await?;
+        {
+            let _rotation = self.key_rotation_lock.lock().await;
+            self.refresh_key_from_ks_locked().await?;
+        }
 
         // Read the new key_id
         let cache = self.key_cache.read().await;
@@ -484,6 +616,27 @@ impl AIdIssuer {
             .ok_or_else(|| AidError::GenerationFailed("No key loaded".to_string()))
     }
 
+    /// Get the current key's status for reporting (id, expiry, usability)
+    ///
+    /// Read-only snapshot for the `/ais/current-key` endpoint and health
+    /// tooling: it surfaces expiry so an expired-key outage is visible
+    /// instead of masquerading as success. Does not
+    /// attempt any key load or rotation.
+    pub async fn get_current_key_status(&self) -> Result<CurrentKeyStatus, AidError> {
+        let cache = self.key_cache.read().await;
+        let cache = cache
+            .as_ref()
+            .ok_or_else(|| AidError::GenerationFailed("No key loaded".to_string()))?;
+
+        let now = now_secs();
+        Ok(CurrentKeyStatus {
+            key_id: cache.key_id,
+            expires_at: cache.expires_at,
+            expires_in: cache.expires_at.saturating_sub(now),
+            usable: key_usable_for_minting(cache.expires_at, now),
+        })
+    }
+
     /// Return the current signing public key (key_id + raw 32-byte verifying key)
     ///
     /// Used by the `/ais/signing-pubkey` HTTP endpoint,
@@ -501,16 +654,24 @@ impl AIdIssuer {
         let signer_client = self.signer_client.clone();
         let key_storage = self.key_storage.clone();
         let key_cache = self.key_cache.clone();
+        let key_rotation_lock = self.key_rotation_lock.clone();
         let config = self.config.clone();
 
         tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(Duration::from_secs(KEY_REFRESH_CHECK_INTERVAL_SECS));
+            // Delay before the next check. Steady state is the regular check
+            // interval; after a failed rotation the task retries after a
+            // short doubling backoff (capped at the regular interval), so a
+            // transient KS outage no longer pins an expired key for a full
+            // 10-minute cycle per attempt.
+            // The initial zero delay preserves the old `interval` behavior of
+            // checking once right after startup.
+            let mut next_wait_secs: u64 = 0;
+            let mut retry_backoff_secs = KEY_ROTATION_RETRY_BACKOFF_START_SECS;
 
             loop {
                 tokio::select! {
                     _ = cancel.cancelled() => break,
-                    _ = interval.tick() => {}
+                    _ = tokio::time::sleep(Duration::from_secs(next_wait_secs)) => {}
                 }
 
                 let mut should_rotate = false;
@@ -520,6 +681,9 @@ impl AIdIssuer {
                     Ok(should) => should,
                     Err(e) => {
                         platform::recording::error!("Failed to check key refresh status: {}", e);
+                        next_wait_secs = retry_backoff_secs;
+                        retry_backoff_secs =
+                            (retry_backoff_secs * 2).min(KEY_REFRESH_CHECK_INTERVAL_SECS);
                         continue;
                     }
                 };
@@ -544,6 +708,9 @@ impl AIdIssuer {
                                 "Failed to check periodic rotation status: {}",
                                 e
                             );
+                            next_wait_secs = retry_backoff_secs;
+                            retry_backoff_secs =
+                                (retry_backoff_secs * 2).min(KEY_REFRESH_CHECK_INTERVAL_SECS);
                             continue;
                         }
                     }
@@ -551,21 +718,33 @@ impl AIdIssuer {
 
                 if !should_rotate {
                     platform::recording::debug!("Key rotation not needed yet");
+                    next_wait_secs = KEY_REFRESH_CHECK_INTERVAL_SECS;
                     continue;
                 }
 
                 platform::recording::debug!("Background key rotation triggered");
 
                 // Rotate the key
-                match Self::refresh_key_internal(&signer_client, &key_storage, &key_cache, &config)
-                    .await
-                {
-                    Ok(()) => platform::recording::info!("Background key rotation successful"),
+                let rotation_result = {
+                    let _rotation = key_rotation_lock.lock().await;
+                    Self::refresh_key_internal(&signer_client, &key_storage, &key_cache, &config)
+                        .await
+                };
+                match rotation_result {
+                    Ok(()) => {
+                        platform::recording::info!("Background key rotation successful");
+                        retry_backoff_secs = KEY_ROTATION_RETRY_BACKOFF_START_SECS;
+                        next_wait_secs = KEY_REFRESH_CHECK_INTERVAL_SECS;
+                    }
                     Err(e) => {
+                        next_wait_secs = retry_backoff_secs;
                         platform::recording::warn!(
-                            "Background key rotation failed: {}, will retry later",
-                            e
+                            "Background key rotation failed: {}, next retry in {}s",
+                            e,
+                            next_wait_secs
                         );
+                        retry_backoff_secs =
+                            (retry_backoff_secs * 2).min(KEY_REFRESH_CHECK_INTERVAL_SECS);
                     }
                 }
             }
@@ -626,6 +805,12 @@ impl AIdIssuer {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
+
+        if !key_usable_for_minting(expires_at, now) {
+            return Err(AidError::GenerationFailed(format!(
+                "Signer returned a key too close to expiry: key_id={key_id}, expires_at={expires_at}, now={now}"
+            )));
+        }
 
         // Update the cache (storing only the verifying key)
         let cache = KeyCache {
@@ -919,9 +1104,6 @@ impl AIdIssuer {
         request: &RegisterRequest,
         realm_secret_check: Option<&RealmSecretCheck>,
     ) -> Result<PreparedRegistration, AidError> {
-        // Ensure a usable key is available
-        self.ensure_key_loaded().await?;
-
         let manufacturer_nonce = self
             .verify_registration_identity(request, realm_secret_check)
             .await?;
@@ -929,8 +1111,18 @@ impl AIdIssuer {
         // Generate ActrId
         let actr_id = self.generate_actr_id(&request.actr_type, &request.realm)?;
 
-        // Generate expiry time
-        let expr_time = self.calculate_expiry_time();
+        // Load and snapshot a usable key as close to signing as possible.
+        self.ensure_key_loaded().await?;
+        let (key_id, verifying_key, key_expires_at) = {
+            let cache = self.key_cache.read().await;
+            let cache = cache
+                .as_ref()
+                .ok_or_else(|| AidError::GenerationFailed("No key available".to_string()))?;
+            (cache.key_id, cache.verifying_key, cache.expires_at)
+        };
+
+        // Credentials and TURN access must not outlive the verifying key.
+        let expr_time = self.calculate_expiry_time(key_expires_at);
 
         // Build IdentityClaims (proto type, plaintext)
         let claims_proto = IdentityClaims {
@@ -941,15 +1133,6 @@ impl AIdIssuer {
 
         // Proto-encode claims bytes
         let claims_bytes = claims_proto.encode_to_vec();
-
-        // Read key_id and verifying_key from cache (release read lock before async signing)
-        let (key_id, verifying_key) = {
-            let cache = self.key_cache.read().await;
-            let cache = cache
-                .as_ref()
-                .ok_or_else(|| AidError::GenerationFailed("No key available".to_string()))?;
-            (cache.key_id, cache.verifying_key)
-        };
 
         // Sign via KS Sign RPC (private key never leaves KS)
         let signature_bytes = self
@@ -1495,13 +1678,9 @@ impl AIdIssuer {
         })
     }
 
-    /// Calculate expiry time (Unix timestamp, seconds)
-    fn calculate_expiry_time(&self) -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            + self.config.token_ttl_secs
+    /// Calculate expiry time capped by the signing key deadline.
+    fn calculate_expiry_time(&self, key_expires_at: u64) -> u64 {
+        credential_expiry_for_key(now_secs(), self.config.token_ttl_secs, key_expires_at)
     }
 
     /// Calculate renewal token expiry time (Unix timestamp, seconds, i64 for SQLite)
@@ -1531,8 +1710,17 @@ impl AIdIssuer {
         // Ensure a usable signing key is available
         self.ensure_key_loaded().await?;
 
-        // Generate expiry time
-        let expr_time = self.calculate_expiry_time();
+        // Snapshot the key before deriving the credential deadline.
+        let (key_id, verifying_key, key_expires_at) = {
+            let cache = self.key_cache.read().await;
+            let cache = cache
+                .as_ref()
+                .ok_or_else(|| AidError::GenerationFailed("No key available".to_string()))?;
+            (cache.key_id, cache.verifying_key, cache.expires_at)
+        };
+
+        // Credentials and TURN access must not outlive the verifying key.
+        let expr_time = self.calculate_expiry_time(key_expires_at);
 
         // Build IdentityClaims
         let claims_proto = IdentityClaims {
@@ -1542,15 +1730,6 @@ impl AIdIssuer {
         };
 
         let claims_bytes = claims_proto.encode_to_vec();
-
-        // Read key_id and verifying_key from cache
-        let (key_id, verifying_key) = {
-            let cache = self.key_cache.read().await;
-            let cache = cache
-                .as_ref()
-                .ok_or_else(|| AidError::GenerationFailed("No key available".to_string()))?;
-            (cache.key_id, cache.verifying_key)
-        };
 
         // Sign via KS Sign RPC
         let signature_bytes = self
@@ -1637,21 +1816,17 @@ impl AIdIssuer {
             self.ensure_key_loaded().await?;
         }
 
-        let cache = self.key_cache.read().await;
-        let cache = cache
-            .as_ref()
-            .ok_or_else(|| AidError::GenerationFailed("No key in cache".to_string()))?;
-
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        let expires_in = cache.expires_at.saturating_sub(now);
+        let status = self.get_current_key_status().await?;
+        if !status.usable {
+            return Err(AidError::GenerationFailed(format!(
+                "Signing key is not usable: key_id={}, expires_at={}",
+                status.key_id, status.expires_at
+            )));
+        }
 
         Ok(KeyCacheInfo {
-            key_id: cache.key_id,
-            expires_in,
+            key_id: status.key_id,
+            expires_in: status.expires_in,
         })
     }
 }
@@ -1662,9 +1837,185 @@ pub struct KeyCacheInfo {
     pub expires_in: u64,
 }
 
+/// Snapshot of the current signing key's status
+pub struct CurrentKeyStatus {
+    pub key_id: u32,
+    /// Unix seconds; 0 means the key never expires
+    pub expires_at: u64,
+    /// Unix seconds until expiry (0 once expired)
+    pub expires_in: u64,
+    /// Whether the key may still mint credentials (see [`key_usable_for_minting`])
+    pub usable: bool,
+}
+
 #[cfg(test)]
 mod tests {
+    // Note: Full tests requiring a running KS service live in
+    // tests/integration_test.rs; these are the pure, KS-free units.
 
-    // Note: Full tests require a running KS service; only basic unit tests here.
-    // Integration tests are in lib.rs.
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_key_usable_for_minting_never_expires() {
+        assert!(key_usable_for_minting(0, u64::MAX));
+        assert!(key_usable_for_minting(0, 0));
+    }
+
+    #[test]
+    fn test_key_usable_for_minting_respects_safety_margin() {
+        let now = 1_000_000u64;
+        // Comfortably before expiry: usable.
+        assert!(key_usable_for_minting(now + 3600, now));
+        // Inside the safety margin before expiry: not usable.
+        assert!(!key_usable_for_minting(
+            now + KEY_EXPIRY_SAFETY_MARGIN_SECS,
+            now
+        ));
+        assert!(!key_usable_for_minting(
+            now + KEY_EXPIRY_SAFETY_MARGIN_SECS - 1,
+            now
+        ));
+        // Just past the margin on the other side: usable again.
+        assert!(key_usable_for_minting(
+            now + KEY_EXPIRY_SAFETY_MARGIN_SECS + 1,
+            now
+        ));
+        // At or past expiry — including inside any KS tolerance window:
+        // never usable, these minted born-invalid credentials before #7.
+        assert!(!key_usable_for_minting(now, now));
+        assert!(!key_usable_for_minting(now - 1, now));
+        assert!(!key_usable_for_minting(1, now));
+    }
+
+    #[test]
+    fn test_credential_expiry_respects_token_ttl_for_non_expiring_key() {
+        assert_eq!(credential_expiry_for_key(1_000, 3_600, 0), 4_600);
+    }
+
+    #[test]
+    fn test_credential_expiry_is_capped_by_key_expiry() {
+        assert_eq!(credential_expiry_for_key(1_000, 3_600, 1_200), 1_200);
+        assert_eq!(credential_expiry_for_key(1_000, 60, 1_200), 1_060);
+    }
+
+    /// A KS pointing at a closed port: connection refused immediately, so
+    /// refresh attempts fail fast without a real server.
+    fn unreachable_signer_wrapper() -> SignerClientWrapper {
+        SignerClientWrapper::new(signer::GrpcClientConfig {
+            endpoint: "http://127.0.0.1:1".to_string(),
+            actrix_shared_key: "test".to_string(),
+            timeout_seconds: 1,
+            enable_tls: false,
+            tls_domain: None,
+            ca_cert: None,
+            client_cert: None,
+            client_key: None,
+        })
+    }
+
+    fn test_config(dir: &std::path::Path) -> IssuerConfig {
+        IssuerConfig {
+            key_storage_file: dir.join("ais_keys.db"),
+            sqlite_path: dir.to_path_buf(),
+            renewal_token_secret: vec![0u8; 32],
+            ..Default::default()
+        }
+    }
+
+    async fn seed_stored_key(dir: &std::path::Path, expires_at: u64) -> AIdIssuer {
+        let storage = KeyStorage::new(&dir.join("ais_keys.db"))
+            .await
+            .expect("storage");
+        let verifying_key = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
+        storage
+            .update_current_key(&KeyRecord {
+                key_id: 7,
+                public_key: BASE64_STANDARD.encode(verifying_key.verifying_key().as_bytes()),
+                fetched_at: now_secs(),
+                expires_at,
+                tolerance_seconds: 3600,
+            })
+            .await
+            .expect("seed key");
+
+        AIdIssuer {
+            signer_client: unreachable_signer_wrapper(),
+            key_storage: Arc::new(storage),
+            key_cache: Arc::new(RwLock::new(None)),
+            key_rotation_lock: Arc::new(Mutex::new(())),
+            config: test_config(dir),
+        }
+    }
+
+    /// Regression: a stored key that is
+    /// expired-but-within-tolerance must NOT be loaded and used — that is
+    /// exactly how born-invalid credentials were minted. With KS
+    /// unreachable, the load must fail instead of silently using the key.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_ensure_key_loaded_rejects_expired_stored_key_even_within_tolerance() {
+        let dir = tempdir().unwrap();
+        let issuer = seed_stored_key(dir.path(), now_secs().saturating_sub(10)).await;
+
+        let result = issuer.ensure_key_loaded().await;
+        assert!(
+            result.is_err(),
+            "an expired stored key must trigger a KS fetch, not be loaded"
+        );
+        assert!(
+            issuer.key_cache.read().await.is_none(),
+            "no expired key may end up in the minting cache"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_ensure_key_loaded_accepts_unexpired_stored_key() {
+        let dir = tempdir().unwrap();
+        let issuer = seed_stored_key(dir.path(), now_secs() + 3600).await;
+
+        issuer.ensure_key_loaded().await.expect("usable key loads");
+        let cache = issuer.key_cache.read().await;
+        assert_eq!(cache.as_ref().expect("key cached").key_id, 7);
+    }
+
+    /// Regression: an expired cached key
+    /// must be visible as unusable in the status snapshot.
+    #[tokio::test]
+    async fn test_get_current_key_status_reports_expired_key() {
+        let dir = tempdir().unwrap();
+        let issuer = seed_stored_key(dir.path(), now_secs() + 3600).await;
+
+        let verifying_key = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
+        *issuer.key_cache.write().await = Some(KeyCache {
+            key_id: 9,
+            verifying_key: verifying_key.verifying_key(),
+            expires_at: now_secs().saturating_sub(5),
+            tolerance_seconds: 3600,
+        });
+
+        let status = issuer.get_current_key_status().await.expect("status");
+        assert_eq!(status.key_id, 9);
+        assert!(!status.usable, "expired key must report as unusable");
+        assert_eq!(status.expires_in, 0);
+
+        let fresh = issuer.get_current_key_id().await.expect("key id");
+        assert_eq!(fresh, 9);
+    }
+
+    #[tokio::test]
+    async fn test_key_cache_health_rejects_expired_key() {
+        let dir = tempdir().unwrap();
+        let issuer = seed_stored_key(dir.path(), now_secs() + 3600).await;
+
+        let verifying_key = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
+        *issuer.key_cache.write().await = Some(KeyCache {
+            key_id: 9,
+            verifying_key: verifying_key.verifying_key(),
+            expires_at: now_secs().saturating_sub(5),
+            tolerance_seconds: 3600,
+        });
+
+        let result = issuer.check_key_cache_health().await;
+        assert!(result.is_err(), "expired key must make health degraded");
+    }
 }

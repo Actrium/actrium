@@ -338,7 +338,11 @@ async fn sign_handler(
     }
     verify_result?;
 
-    // Check whether the key is still valid within the tolerance period
+    // A key that has passed `expires_at` must not mint anything: verifiers
+    // verifier caches drop verifying keys at `expires_at` with no
+    // tolerance, so signing now would hand out born-invalid credentials that
+    // fail every handshake with 401. Tolerance only keeps
+    // key material readable, never extends the signing window.
     let key_record = app_state
         .storage
         .get_key_record(key_id)
@@ -348,19 +352,23 @@ async fn sign_handler(
     if key_record.expires_at > 0 {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
 
-        if key_record.expires_at + app_state.tolerance_seconds < now {
-            crate::recording::warn!("Key {} has expired beyond tolerance period", key_id);
+        if crate::key_expired_for_signing(key_record.expires_at, now) {
+            crate::recording::warn!(
+                "Key {} has expired; refusing to sign (expired_at={})",
+                key_id,
+                key_record.expires_at
+            );
             let duration = start_time.elapsed().as_secs_f64();
             KS_REQUEST_DURATION
-                .with_label_values(&["signer", "POST", "/sign", "404"])
+                .with_label_values(&["signer", "POST", "/sign", "410"])
                 .observe(duration);
             KS_REQUESTS_TOTAL
-                .with_label_values(&["signer", "POST", "/sign", "404"])
+                .with_label_values(&["signer", "POST", "/sign", "410"])
                 .inc();
-            return Err(SignerError::KeyNotFound(key_id));
+            return Err(SignerError::KeyExpired(key_id));
         }
     }
 
@@ -422,11 +430,17 @@ mod tests {
     use tower::ServiceExt;
 
     async fn create_test_app() -> (Router, String, tempfile::TempDir) {
+        create_test_app_with_key_ttl(3600).await
+    }
+
+    async fn create_test_app_with_key_ttl(
+        key_ttl_seconds: u64,
+    ) -> (Router, String, tempfile::TempDir) {
         let temp_dir = tempdir().unwrap();
         let config = crate::config::SignerServiceConfig {
             storage: crate::storage::StorageConfig {
                 backend: crate::storage::StorageBackend::Sqlite,
-                key_ttl_seconds: 3600,
+                key_ttl_seconds,
                 sqlite: Some(crate::storage::SqliteConfig {}),
                 postgres: None,
             },
@@ -620,5 +634,87 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    async fn generate_key_via_http(app: &Router, psk: &str) -> GenerateSigningKeyResponse {
+        let credential = create_credential_for_request(psk, "generate_signing_key");
+        let request_body = serde_json::to_value(GenerateSigningKeyRequest { credential }).unwrap();
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/generate-signing-key")
+                    .header("content-type", "application/json")
+                    .body(Body::from(request_body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    async fn post_sign(app: &Router, psk: &str, key_id: u32) -> StatusCode {
+        let request_data = format!("sign:{key_id}");
+        let credential = create_credential_for_request(psk, &request_data);
+        let request = SignRequest {
+            key_id,
+            message: b"issue-7-probe".to_vec(),
+            credential,
+        };
+        let request_body = serde_json::to_value(request).unwrap();
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/sign/{key_id}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(request_body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        response.status()
+    }
+
+    #[tokio::test]
+    async fn test_sign_with_valid_key_succeeds() {
+        let (app, psk, _temp_dir) = create_test_app().await;
+        let key = generate_key_via_http(&app, &psk).await;
+
+        let status = post_sign(&app, &psk, key.key_id).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    /// Regression: an expired key must never mint
+    /// signatures, even inside the tolerance window. The old behavior logged
+    /// "in tolerance period, signing allowed" and returned a signature that
+    /// no verifier would accept, producing born-invalid credentials and the
+    /// signaling authentication failure loop.
+    #[tokio::test]
+    async fn test_sign_refuses_expired_key_inside_tolerance_window() {
+        // 1-second key TTL, 1-hour tolerance: the key below is always expired
+        // strictly inside the tolerance window.
+        let (app, psk, _temp_dir) = create_test_app_with_key_ttl(1).await;
+        let key = generate_key_via_http(&app, &psk).await;
+
+        // expires_at has second granularity, so 2 s always crosses it.
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        let status = post_sign(&app, &psk, key.key_id).await;
+        assert_eq!(
+            status,
+            StatusCode::GONE,
+            "signing with an expired key must be refused with 410, not tolerated"
+        );
     }
 }
