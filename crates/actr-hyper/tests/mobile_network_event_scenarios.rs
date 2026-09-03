@@ -910,12 +910,14 @@ async fn send_data_chunk_bounded(
         metadata: Vec::new(),
         timestamp_ms: Some(0),
     };
+    let operation_id = format!("{}#{}", stream.stream_id, stream.sequence);
     let payload = bytes::Bytes::from(stream.encode_to_vec());
     let send = harness.peer(from_serial).gate.send_data_chunk(
         &target_id,
         PayloadType::StreamReliable,
         &stream.stream_id,
         payload,
+        &operation_id,
     );
 
     let result = tokio::time::timeout(timeout, send)

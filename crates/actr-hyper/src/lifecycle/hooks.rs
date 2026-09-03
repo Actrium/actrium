@@ -509,6 +509,10 @@ async fn deliver_hook_event(
             if let (Some(ctx), Some(observer)) = (ctx_opt.as_ref(), observer) {
                 let event = ErrorEvent::now(
                     ActrError::DeliveryUncertain {
+                        // Stream-scoped identity: the bare `stream_id`, not a
+                        // chunk-level `stream_id#sequence` key — the
+                        // disconnect invalidates every outstanding chunk on
+                        // the stream, so no single sequence applies.
                         operation_id: stream_id.clone(),
                         cause: "data stream delivery uncertain after WebRTC disconnect".to_string(),
                     },
