@@ -634,26 +634,6 @@ impl PeerGate {
             .await
     }
 
-    async fn send_with_retry_for_operation(
-        &self,
-        dest: &Dest,
-        payload_type: PayloadType,
-        data: &[u8],
-        admission: SendAdmission,
-        operation_id: &str,
-    ) -> ActorResult<()> {
-        let policy = payload_type.retry_policy();
-        self.send_with_retry_policy(
-            dest,
-            payload_type,
-            data,
-            policy,
-            admission,
-            Some(operation_id),
-        )
-        .await
-    }
-
     async fn send_with_retry_record_identity_for_operation(
         &self,
         dest: &Dest,
@@ -676,6 +656,7 @@ impl PeerGate {
         .await
     }
 
+    #[cfg(any(test, feature = "test-utils"))]
     async fn send_with_retry_policy(
         &self,
         dest: &Dest,
@@ -1055,14 +1036,16 @@ impl PeerGate {
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Response);
         let data = Self::serialize_envelope(&envelope);
         let dest = Self::actr_id_to_dest(target);
-        self.send_with_retry_for_operation(
+        self.send_with_retry_record_identity_for_operation(
             &dest,
             PayloadType::RpcReliable,
             &data,
             SendAdmission::ExistingOnly,
+            None,
             &envelope.request_id,
         )
         .await
+        .map(|_| ())
     }
 
     /// Send one-way message with specified PayloadType.
@@ -1093,8 +1076,8 @@ impl PeerGate {
     }
 
     /// Send a Tell under the absolute budget created by the runtime context.
-    /// The retry policy is intentionally unchanged in this deadline-only PR;
-    /// retry ownership is split into its own RFC-0507 follow-up.
+    /// The route may reselect a lane before submission, but the payload itself
+    /// is submitted at most once for this logical operation.
     pub(crate) async fn send_tell_with_type_until(
         &self,
         target: &ActrId,
@@ -1105,8 +1088,18 @@ impl PeerGate {
         deadline.ensure_remaining()?;
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Tell);
         let dest = Self::actr_id_to_dest(target);
-        let operation_id = envelope.request_id.clone();
+        // An empty request id carries no correlation value; report the
+        // documented placeholder instead of an empty operation id.
+        let operation_id = if envelope.request_id.is_empty() {
+            None
+        } else {
+            Some(envelope.request_id.clone())
+        };
 
+        // Same cancellation-classification contract as the data-chunk path:
+        // a deadline that fires mid-write must surface terminal
+        // `DeliveryUncertain`, not a retryable `TimedOut`.
+        let progress_cell = new_delivery_progress_cell();
         match crate::timer::timeout_at(
             crate::timer::ids::OUTBOUND_TELL_DEADLINE,
             deadline.instant(),
@@ -1114,20 +1107,31 @@ impl PeerGate {
                 let data = Self::serialize_envelope(&envelope);
                 let admission = self.preflight_send(target, &dest).await?;
                 deadline.ensure_remaining()?;
-                self.send_with_retry_for_operation(
+                self.send_once_with_admission(
                     &dest,
                     payload_type,
                     &data,
                     admission,
-                    &operation_id,
+                    None,
+                    operation_id.as_deref(),
+                    Some(&progress_cell),
                 )
                 .await
+                .map(|_| ())
             },
         )
         .await
         {
             Ok(result) => result,
-            Err(_) => Err(ActrError::TimedOut),
+            Err(_) => match observed_delivery_progress(&progress_cell) {
+                None | Some(DeliveryProgress::NotAttempted) => Err(ActrError::TimedOut),
+                Some(DeliveryProgress::SubmittedLocally) | Some(DeliveryProgress::Unknown) => {
+                    Err(Self::delivery_uncertain_error(
+                        operation_id.as_deref(),
+                        "tell send deadline elapsed after transport submission",
+                    ))
+                }
+            },
         }
     }
 
@@ -1143,13 +1147,18 @@ impl PeerGate {
         let data = Self::serialize_envelope(&envelope);
         let dest = Self::actr_id_to_dest(target);
         let admission = self.preflight_send(target, &dest).await?;
-        let send = self.send_with_retry_for_operation(
-            &dest,
-            payload_type,
-            &data,
-            admission,
-            &envelope.request_id,
-        );
+        let send = async {
+            self.send_with_retry_record_identity_for_operation(
+                &dest,
+                payload_type,
+                &data,
+                admission,
+                None,
+                &envelope.request_id,
+            )
+            .await
+            .map(|_| ())
+        };
         if let Some(send_timeout) = send_timeout {
             match crate::timer::timeout(
                 crate::timer::ids::PEER_REQUEST_DEADLINE,
@@ -2067,6 +2076,39 @@ mod tests {
             ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "req-direction"
         ));
         assert!(!err.is_retryable());
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tell_submits_at_most_once_when_delivery_is_uncertain() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let transport = Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(RetryFailingWireBuilder {
+                attempts: attempts.clone(),
+            }),
+        ));
+        let gate = PeerGate::for_test(transport);
+        let target = test_actor_id(2);
+        let envelope = RpcEnvelope {
+            request_id: "tell-once".to_string(),
+            ..envelope_with_direction(None)
+        };
+
+        let error = gate
+            .send_tell_with_type_until(
+                &target,
+                PayloadType::RpcReliable,
+                envelope,
+                RpcDeadline::from_duration(Duration::from_secs(1)),
+            )
+            .await
+            .expect_err("an uncertain send must surface an error");
+
+        assert!(matches!(
+            error,
+            ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "tell-once"
+        ));
         assert_eq!(attempts.load(Ordering::SeqCst), 1);
     }
 
