@@ -12,7 +12,9 @@ use super::Dest; // Re-exported from actr-framework
 use super::dest_transport::DestTransport;
 use super::error::{NetworkError, NetworkResult};
 use super::lane::{DeliveryProgress, DeliveryProgressCell};
+use super::route_table::PayloadTypeExt;
 use super::wire_handle::{WireHandle, WireIdentity};
+use super::wire_pool::ReadySet;
 use actr_protocol::{ActrId, PayloadType};
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -21,7 +23,7 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
-use tokio::sync::{Mutex, Notify, RwLock};
+use tokio::sync::{Mutex, Notify, RwLock, watch};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
@@ -361,6 +363,48 @@ impl PeerTransport {
             return false;
         }
         self.transports.read().await.contains_key(dest)
+    }
+
+    /// Whether an already-materialized destination currently has a non-WebRTC
+    /// fallback route that can carry `payload_type`.  WebRTC is deliberately
+    /// excluded: its `ReadySet` entry reflects the physical wire, while the
+    /// v0.20 controller separately owns peer sendability and may be in
+    /// `Recovering` even when the physical WebRTC wire is still marked ready.
+    /// This is a read-only check used by the readiness waiter; it never creates
+    /// a connection or a lane.
+    pub(crate) async fn has_ready_fallback_connection_for_payload(
+        &self,
+        dest: &Dest,
+        payload_type: PayloadType,
+    ) -> bool {
+        let transport = {
+            let transports = self.transports.read().await;
+            match transports.get(dest) {
+                Some(DestState::Connected(transport)) => Some(Arc::clone(transport)),
+                _ => None,
+            }
+        };
+        let Some(transport) = transport else {
+            return false;
+        };
+        let ready = transport.watch_ready().borrow().clone();
+        payload_type.data_lane_types().iter().any(|lane| {
+            !lane.needs_webrtc() && ready.contains(&super::wire_pool::ConnType::WebSocket)
+        })
+    }
+
+    /// Subscribe to the ready-set of an already-materialized destination.
+    /// `None` means the first send still needs to create its destination
+    /// transport, so the caller should wait on the other authoritative hints.
+    pub(crate) async fn watch_ready_for(&self, dest: &Dest) -> Option<watch::Receiver<ReadySet>> {
+        let transport = {
+            let transports = self.transports.read().await;
+            match transports.get(dest) {
+                Some(DestState::Connected(transport)) => Some(Arc::clone(transport)),
+                _ => None,
+            }
+        }?;
+        Some(transport.watch_ready())
     }
 
     /// Get or create DestTransport for specified Dest

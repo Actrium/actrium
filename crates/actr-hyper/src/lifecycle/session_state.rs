@@ -17,7 +17,7 @@ use std::sync::Arc;
 use actr_protocol::{AIdCredential, ActrId, TurnCredential};
 use prost::bytes::Bytes;
 use prost_types::Timestamp;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, watch};
 
 use super::SupervisorFactSink;
 
@@ -36,6 +36,16 @@ pub enum SessionPhase {
     /// Realm returned 403 — no hard register allowed; peers stay alive
     /// but the credential manager stops attempting renewal.
     RealmUnavailable,
+}
+
+/// Readiness projection used by outbound callers that need to wait for a
+/// hard-rebind to finish.  The generation is part of the projection so an
+/// old context can be invalidated even when the replacement session is still
+/// rebinding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SessionReadiness {
+    pub(crate) phase: SessionPhase,
+    pub(crate) generation: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -65,6 +75,7 @@ pub struct SessionSnapshot {
 #[derive(Clone)]
 pub struct SessionState {
     inner: Arc<RwLock<SessionStateInner>>,
+    readiness_tx: watch::Sender<SessionReadiness>,
 }
 
 struct SessionStateInner {
@@ -78,18 +89,14 @@ struct SessionStateInner {
     fact_sink: Option<SupervisorFactSink>,
 }
 
-/// Opaque inner-state write lock held by
-/// [`SessionState::hold_inner_write_for_test`]. Wrapping the guard keeps the
-/// private inner state out of any callable signature.
-#[cfg(any(test, feature = "test-utils"))]
-#[cfg_attr(not(test), allow(dead_code))] // test-utils builds compile this without unit tests
-pub(crate) struct SessionStateBlockGuard<'a> {
-    _guard: tokio::sync::RwLockWriteGuard<'a, SessionStateInner>,
-}
-
 impl SessionState {
     /// Create a new `SessionState` in the `Active` phase with generation 1.
     pub fn new(snapshot: SessionSnapshot) -> Self {
+        let generation = snapshot.generation;
+        let (readiness_tx, _readiness_rx) = watch::channel(SessionReadiness {
+            phase: SessionPhase::Active,
+            generation,
+        });
         Self {
             inner: Arc::new(RwLock::new(SessionStateInner {
                 phase: SessionPhase::Active,
@@ -97,6 +104,7 @@ impl SessionState {
                 snapshot,
                 fact_sink: None,
             })),
+            readiness_tx,
         }
     }
 
@@ -104,18 +112,6 @@ impl SessionState {
     /// (hard rebind) reports `SessionActivated` to the connection supervisor.
     pub(crate) async fn set_fact_sink(&self, sink: SupervisorFactSink) {
         self.inner.write().await.fact_sink = Some(sink);
-    }
-
-    /// Test-only: hold the inner state write lock so readiness checks
-    /// (`is_current_generation`, `phase`) block until the guard drops.
-    /// Stage-composition regression tests use this to stall readiness
-    /// deterministically.
-    #[cfg(any(test, feature = "test-utils"))]
-    #[cfg_attr(not(test), allow(dead_code))] // test-utils builds compile this without unit tests
-    pub(crate) async fn hold_inner_write_for_test(&self) -> SessionStateBlockGuard<'_> {
-        SessionStateBlockGuard {
-            _guard: self.inner.write().await,
-        }
     }
 
     // ---- readers -----------------------------------------------------------
@@ -188,6 +184,25 @@ impl SessionState {
         self.inner.read().await.current_generation == generation
     }
 
+    /// Subscribe to phase/generation changes for bounded outbound waits.
+    pub(crate) fn subscribe_readiness(&self) -> watch::Receiver<SessionReadiness> {
+        self.readiness_tx.subscribe()
+    }
+
+    async fn publish_readiness(&self) {
+        let readiness = {
+            let guard = self.inner.read().await;
+            SessionReadiness {
+                phase: guard.phase,
+                generation: guard.current_generation,
+            }
+        };
+        // `send_replace` updates the stored value even when no receiver is
+        // currently waiting.  A later outbound subscriber must observe the
+        // latest phase/generation rather than the initial Active state.
+        self.readiness_tx.send_replace(readiness);
+    }
+
     // ---- writers -----------------------------------------------------------
 
     /// Atomically replace credentials (soft renew path).
@@ -213,6 +228,7 @@ impl SessionState {
     /// Transition to `Rebinding` — new outbound is gated.
     pub(crate) async fn enter_rebinding(&self) {
         self.inner.write().await.phase = SessionPhase::Rebinding;
+        self.publish_readiness().await;
     }
 
     /// Atomically commit a hard rebind.
@@ -239,10 +255,14 @@ impl SessionState {
         &self,
         new_snapshot: SessionSnapshot,
     ) -> SessionSnapshot {
-        let mut guard = self.inner.write().await;
-        let old = guard.snapshot.clone();
-        guard.snapshot = new_snapshot;
-        guard.current_generation = guard.snapshot.generation;
+        let old = {
+            let mut guard = self.inner.write().await;
+            let old = guard.snapshot.clone();
+            guard.snapshot = new_snapshot;
+            guard.current_generation = guard.snapshot.generation;
+            old
+        };
+        self.publish_readiness().await;
         old
     }
 
@@ -264,11 +284,13 @@ impl SessionState {
     /// Transition back to `Active` after signaling reconnect succeeds.
     pub(crate) async fn set_active(&self) {
         self.inner.write().await.phase = SessionPhase::Active;
+        self.publish_readiness().await;
     }
 
     /// Transition to `RealmUnavailable` — no further renewal attempts.
     pub(crate) async fn set_realm_unavailable(&self) {
         self.inner.write().await.phase = SessionPhase::RealmUnavailable;
+        self.publish_readiness().await;
     }
 }
 

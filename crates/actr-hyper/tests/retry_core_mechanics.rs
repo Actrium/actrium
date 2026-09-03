@@ -1266,6 +1266,41 @@ async fn ambiguous_delivery_does_not_retry_while_handler_is_in_flight() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn concurrent_duplicate_delivery_dedups_under_slow_handler() {
+    // A duplicated wire delivery racing an in-flight handler must wait for
+    // that handler and share its result, never execute it twice. This pins
+    // the receiver-side dedup contract that makes "never replay an ambiguous
+    // send" safe to combine with best-effort redelivery by the transport.
+    let receiver_dedup = Arc::new(StdMutex::new(TestDedupState::new()));
+    let handler_calls = Arc::new(AtomicUsize::new(0));
+    let receiver_results = Arc::new(StdMutex::new(Vec::<String>::new()));
+    let delivery_hook = install_slow_receiver_delivery_hook(
+        receiver_dedup,
+        handler_calls.clone(),
+        receiver_results.clone(),
+        Duration::from_millis(150),
+    );
+
+    let payload = Bytes::from(encoded_envelope("dup-under-slow-handler"));
+    delivery_hook(payload.clone());
+    delivery_hook(payload);
+
+    let receiver_results = wait_for_receiver_results(receiver_results, 2).await;
+    assert_eq!(
+        handler_calls.load(Ordering::SeqCst),
+        1,
+        "a concurrent duplicate must not execute the handler twice"
+    );
+    assert_eq!(receiver_results.len(), 2);
+    assert!(
+        receiver_results
+            .iter()
+            .all(|result| result == "ok:slow-handled"),
+        "both deliveries observe the single handler's result: {receiver_results:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mobile_event_batch_during_ambiguous_send_does_not_retry() {
     let target = make_actor_id(2);
     let receiver_dedup = Arc::new(StdMutex::new(TestDedupState::new()));
@@ -1913,9 +1948,14 @@ async fn peer_data_chunk_rejects_non_stream_payload_type_before_transport() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unrecoverable_data_chunk_send_failure_is_explicit_and_bounded() {
     let (gate, lane, _stats, _transport) = gate_with_lane_and_transport(
-        ScriptedLane::new(vec![Err(NetworkError::ChannelClosed(
-            "stream channel permanently closed".into(),
-        ))]),
+        ScriptedLane::new(vec![
+            Err(NetworkError::ChannelClosed(
+                "stream channel permanently closed".into(),
+            )),
+            Err(NetworkError::ChannelClosed(
+                "stream channel permanently closed".into(),
+            )),
+        ]),
         Duration::ZERO,
     );
     let target = make_actor_id(2);
@@ -1940,7 +1980,8 @@ async fn unrecoverable_data_chunk_send_failure_is_explicit_and_bounded() {
     );
     assert_eq!(
         lane.sent_payloads().len(),
-        1,
-        "DataChunk should make one bounded send attempt"
+        2,
+        "a proven pre-send transient failure earns exactly one safe re-attempt \
+         (nothing entered a transport, so replay cannot duplicate) and no more"
     );
 }

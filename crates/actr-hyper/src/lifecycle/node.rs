@@ -3255,6 +3255,36 @@ impl Inner {
             self.outproc_gate = Some(outproc_gate_enum);
             tracing::info!("✅ Node runtime gates fully initialized (inproc + outproc)");
 
+            // Install the outbound delivery-uncertainty hook: a synchronous
+            // `DeliveryUncertain` returned by the send path must also reach
+            // workload hook observers. Snapshot taken after the gate is live
+            // so hook contexts can issue `Dest::Peer(_)` calls.
+            #[cfg(feature = "webrtc-v020")]
+            {
+                let actor_id_for_hook = actor_id.clone();
+                let credential_state_for_hook = credential_state.clone();
+                let ctx_builder_snapshot = self.bootstrap_ctx_builder();
+                let ctx_builder: crate::lifecycle::hooks::HookContextBuilder =
+                    Arc::new(move || {
+                        let snapshot = ctx_builder_snapshot.clone();
+                        let actor_id = actor_id_for_hook.clone();
+                        let credential_state = credential_state_for_hook.clone();
+                        Box::pin(async move {
+                            Some(
+                                snapshot.build_bootstrap(
+                                    &actor_id,
+                                    &credential_state.credential().await,
+                                ),
+                            )
+                        })
+                    });
+                let cb = crate::lifecycle::hooks::build_hook_callback(
+                    self.hook_observer.clone(),
+                    ctx_builder,
+                );
+                outproc_gate.set_hook_callback(cb);
+            }
+
             // Save references. The v0.20 manager backs the node-level status
             // APIs (S6-4).
             #[cfg(feature = "webrtc-v020")]
