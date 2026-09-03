@@ -3743,9 +3743,9 @@ public func FfiConverterTypeWebRtcPeerStateBridge_lower(_ value: WebRtcPeerState
 /**
  * Error type for actr operations.
  *
- * The first ten variants mirror `actr_protocol::ActrError` exactly; the
- * remaining binding-local variants capture pre-protocol failures that
- * originate inside the FFI shell (config parsing, package loading, etc.).
+ * Protocol errors are mirrored one-for-one where the binding ABI exposes
+ * them. DeliveryUncertain is appended so the existing UniFFI error
+ * discriminants remain stable; Config is a binding-local pre-protocol error.
  */
 public enum ActrError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
 
@@ -3780,6 +3780,9 @@ public enum ActrError: Swift.Error, Equatable, Hashable, Foundation.LocalizedErr
      * or runtime config.
      */
     case Config(msg: String
+    )
+
+    case DeliveryUncertain(operationId: String, cause: String
     )
 
     
@@ -3844,6 +3847,10 @@ public struct FfiConverterTypeActrError: FfiConverterRustBuffer {
             )
         case 12: return .Config(
             msg: try FfiConverterString.read(from: &buf)
+            )
+        case 13: return .DeliveryUncertain(
+            operationId: try FfiConverterString.read(from: &buf),
+            cause: try FfiConverterString.read(from: &buf)
             )
 
          default: throw UniffiInternalError.unexpectedEnumCase
@@ -3916,6 +3923,11 @@ public struct FfiConverterTypeActrError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(12))
             FfiConverterString.write(msg, into: &buf)
             
+        case let .DeliveryUncertain(operationId, cause):
+            writeInt(&buf, Int32(13))
+            FfiConverterString.write(operationId, into: &buf)
+            FfiConverterString.write(cause, into: &buf)
+
         }
     }
 }
