@@ -69,6 +69,7 @@ async fn send_stream(harness: &TestHarness, from: u64, to: u64, stream_id: &str)
         metadata: Vec::new(),
         timestamp_ms: Some(0),
     };
+    let operation_id = format!("{stream_id}#{}", chunk.sequence);
     harness
         .peer(from)
         .gate
@@ -77,6 +78,7 @@ async fn send_stream(harness: &TestHarness, from: u64, to: u64, stream_id: &str)
             PayloadType::StreamReliable,
             stream_id,
             bytes::Bytes::from(chunk.encode_to_vec()),
+            &operation_id,
         )
         .await
         .expect("stream send");
