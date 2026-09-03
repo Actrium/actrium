@@ -295,6 +295,15 @@ impl RuntimeContext {
         }
     }
 
+    /// Terminal permission error for a realm-denied session, shared by every
+    /// readiness entry point so identical sessions surface one error class
+    /// regardless of which path checked readiness.
+    fn realm_unavailable_error() -> ActrError {
+        ActrError::PermissionDenied(
+            "realm unavailable: membership denied for this session".to_string(),
+        )
+    }
+
     async fn ensure_session_ready(&self) -> ActorResult<()> {
         let Some(session_state) = &self.session_state else {
             return Ok(());
@@ -309,13 +318,16 @@ impl RuntimeContext {
             ));
         }
 
-        if session_state.phase().await != SessionPhase::Active {
-            return Err(ActrError::ConnectionNotReady(
+        // Same phase contract as `ensure_session_ready_until`: a realm-denied
+        // session is terminal and must surface `PermissionDenied`, never a
+        // retryable `ConnectionNotReady`.
+        match session_state.phase().await {
+            SessionPhase::Active => Ok(()),
+            SessionPhase::RealmUnavailable => Err(Self::realm_unavailable_error()),
+            SessionPhase::Rebinding => Err(ActrError::ConnectionNotReady(
                 ConnectionNotReadyInfo::without_retry_hint(),
-            ));
+            )),
         }
-
-        Ok(())
     }
 
     /// Wait for the context's session generation to become active under the
@@ -357,9 +369,7 @@ impl RuntimeContext {
                     // callers stop instead of polling a phase that cannot
                     // transition back to Active automatically.
                     SessionPhase::RealmUnavailable => {
-                        return Err(ActrError::PermissionDenied(
-                            "realm unavailable: membership denied for this session".to_string(),
-                        ));
+                        return Err(Self::realm_unavailable_error());
                     }
                     SessionPhase::Rebinding => {}
                 }

@@ -203,6 +203,17 @@ impl SessionState {
         self.readiness_tx.send_replace(readiness);
     }
 
+    /// Transition the phase and publish readiness as one step.
+    ///
+    /// All phase mutations MUST go through this method: writing
+    /// `inner.phase` directly would leave subscribers stranded on a stale
+    /// readiness value until the next unrelated publish, and waiters blocked
+    /// in `ensure_session_ready_until` would miss the transition entirely.
+    pub(crate) async fn set_phase(&self, phase: SessionPhase) {
+        self.inner.write().await.phase = phase;
+        self.publish_readiness().await;
+    }
+
     // ---- writers -----------------------------------------------------------
 
     /// Atomically replace credentials (soft renew path).
@@ -227,8 +238,7 @@ impl SessionState {
 
     /// Transition to `Rebinding` — new outbound is gated.
     pub(crate) async fn enter_rebinding(&self) {
-        self.inner.write().await.phase = SessionPhase::Rebinding;
-        self.publish_readiness().await;
+        self.set_phase(SessionPhase::Rebinding).await;
     }
 
     /// Atomically commit a hard rebind.
@@ -283,14 +293,12 @@ impl SessionState {
 
     /// Transition back to `Active` after signaling reconnect succeeds.
     pub(crate) async fn set_active(&self) {
-        self.inner.write().await.phase = SessionPhase::Active;
-        self.publish_readiness().await;
+        self.set_phase(SessionPhase::Active).await;
     }
 
     /// Transition to `RealmUnavailable` — no further renewal attempts.
     pub(crate) async fn set_realm_unavailable(&self) {
-        self.inner.write().await.phase = SessionPhase::RealmUnavailable;
-        self.publish_readiness().await;
+        self.set_phase(SessionPhase::RealmUnavailable).await;
     }
 }
 
