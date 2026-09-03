@@ -221,14 +221,23 @@ val ActrException.isConnectionError: Boolean
  * terminal failure.
  */
 val ActrException.isRecoverable: Boolean
-    get() = actrErrorIsRetryable(this)
+    get() = when (this) {
+        // Keep this terminal classification usable in JVM-only unit tests and
+        // before the native runtime has been loaded; the Rust classifier uses
+        // the same non-retryable rule at the FFI boundary.
+        is ActrException.DeliveryUncertain -> false
+        else -> actrErrorIsRetryable(this)
+    }
 
 /**
  * Fault-domain bucket for this exception — one of `Transient` / `Client` /
  * `Internal` / `Corrupt`.
  */
 val ActrException.kind: ErrorKind
-    get() = actrErrorKind(this)
+    get() = when (this) {
+        is ActrException.DeliveryUncertain -> ErrorKind.INTERNAL
+        else -> actrErrorKind(this)
+    }
 
 /**
  * `true` iff the underlying payload should be routed to a Dead Letter
