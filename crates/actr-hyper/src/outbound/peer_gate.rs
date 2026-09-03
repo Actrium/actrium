@@ -1562,9 +1562,7 @@ impl PeerGate {
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Tell);
         let data = Self::serialize_envelope(&envelope);
         let dest = Self::actr_id_to_dest(target);
-        let admission = self
-            .preflight_send(target, &dest, payload_type)
-            .await?;
+        let admission = self.preflight_send(target, &dest, payload_type).await?;
         self.send_with_retry_record_identity_for_operation(
             &dest,
             payload_type,
