@@ -168,10 +168,12 @@ suspend fun NetworkEventHandle.forceReconnectCatching(
 // Exception Extensions
 // ============================================================================
 //
-// The underlying sealed `ActrException` mirrors `actr_protocol::ActrError`
-// 1:1 (10 variants) plus a small number of binding-local variants. Rather
-// than reasoning about each concrete subclass, consumers typically branch
-// on fault domain via `ErrorKind` — see `actrErrorKind(ex)` below.
+// The underlying sealed `ActrException` mirrors the protocol error surface
+// plus a small number of binding-local variants. Rather than reasoning about
+// each concrete subclass, consumers typically branch on fault domain via
+// `ErrorKind` — see `actrErrorKind(ex)` below. Framework-owned Call/Tell and
+// StreamReliable operations already wait/retry inside Rust; SDK helpers must
+// not replay those operations implicitly.
 
 /** Get a user-friendly error message for logs or UI. */
 val ActrException.userMessage: String
@@ -193,6 +195,8 @@ val ActrException.userMessage: String
             is ActrException.NotImplemented -> "Not implemented: $msg"
             is ActrException.Internal -> "Internal error: $msg"
             is ActrException.Config -> "Configuration error: $msg"
+            is ActrException.DeliveryUncertain ->
+                "Delivery uncertain for operation $operationId: $causeDetail. Do not retry automatically."
         }
 
 /** Check if the exception is a timeout. */
@@ -246,12 +250,16 @@ data class RetryConfig(
 )
 
 /**
- * Execute a suspending block with exponential backoff retry.
+ * Execute a non-framework suspending block with exponential backoff retry.
+ *
+ * Ordinary `ActrRef.call`, `tell`, and `sendDataChunk` operations already own
+ * readiness and transport retry. The default predicate therefore excludes
+ * `ActrException`; callers must opt in explicitly for an idempotent operation.
  *
  * Example:
  * ```kotlin
- * val result = withRetry(maxAttempts = 5) {
- *     ref.discover("acme:EchoService")
+ * val result = withRetry(shouldRetry = { it is java.io.IOException }) {
+ *     fetchFromAnExternalService()
  * }
  * ```
  */
@@ -260,7 +268,7 @@ suspend fun <T> withRetry(
     initialDelayMs: Long = 1000,
     maxDelayMs: Long = 10000,
     factor: Double = 2.0,
-    shouldRetry: (Exception) -> Boolean = { it is ActrException && it.isRecoverable },
+    shouldRetry: (Exception) -> Boolean = { it !is ActrException },
     block: suspend () -> T,
 ): T {
     var currentDelay = initialDelayMs
@@ -285,7 +293,7 @@ suspend fun <T> withRetry(
 /** Execute a suspending block with retry using RetryConfig. */
 suspend fun <T> withRetry(
     config: RetryConfig,
-    shouldRetry: (Exception) -> Boolean = { it is ActrException && it.isRecoverable },
+    shouldRetry: (Exception) -> Boolean = { it !is ActrException },
     block: suspend () -> T,
 ): T =
     withRetry(

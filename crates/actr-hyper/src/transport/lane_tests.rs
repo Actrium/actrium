@@ -69,15 +69,13 @@ impl DataLane for DefaultProgressLane {
 }
 
 #[tokio::test]
-async fn default_send_with_progress_is_conservatively_unknown() {
-    // The default implementation can never prove that a failed `send` left no
-    // bytes inside a transport, so every error shape — closed-like,
-    // secure-not-ready, or generic — must classify as Unknown, never as a
-    // replayable NotAttempted.
+async fn default_send_with_progress_preserves_recovery_for_pre_send_errors() {
+    // Closed-like and secure-not-ready errors are raised by the default lane
+    // before a concrete write, so DestTransport may invalidate/reselect the
+    // route. Only an unclassified error remains conservatively Unknown.
     for mode in [
         DefaultProgressMode::ClosedLike,
         DefaultProgressMode::SecureNotReady,
-        DefaultProgressMode::Generic,
     ] {
         let lane = DefaultProgressLane { mode };
         let attempt = lane
@@ -89,10 +87,19 @@ async fn default_send_with_progress_is_conservatively_unknown() {
         );
         assert_eq!(
             attempt.progress,
-            DeliveryProgress::Unknown,
-            "{mode:?} must be conservatively Unknown under the default contract"
+            DeliveryProgress::NotAttempted,
+            "{mode:?} must remain retryable under the default contract"
         );
     }
+
+    let lane = DefaultProgressLane {
+        mode: DefaultProgressMode::Generic,
+    };
+    let attempt = lane
+        .send_with_progress(Bytes::from_static(b"payload"))
+        .await;
+    assert!(attempt.result.is_err());
+    assert_eq!(attempt.progress, DeliveryProgress::Unknown);
 
     let lane = DefaultProgressLane {
         mode: DefaultProgressMode::Ok,

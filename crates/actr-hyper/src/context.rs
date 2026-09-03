@@ -563,8 +563,9 @@ impl RuntimeContext {
             stream_id,
             bytes::Bytes::from(payload),
             deadline,
-            // The caller-visible stream id is the operation identity, matching
-            // the `DataChunkDeliveryUncertain` hook report.
+            // Use the caller-visible stream ID as the operation identity so
+            // DeliveryUncertain errors and lifecycle hooks correlate to the
+            // same DataChunk operation.
             stream_id,
         )
         .await

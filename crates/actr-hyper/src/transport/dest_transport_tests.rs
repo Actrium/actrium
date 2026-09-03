@@ -570,6 +570,74 @@ impl WireHandle for StaticLaneWire {
     }
 }
 
+/// Lane that raises a secure-readiness error but incorrectly reports
+/// `Unknown`. DestTransport must still recover this pre-send condition before
+/// applying the terminal ambiguous-delivery rule.
+#[derive(Debug)]
+struct MisclassifiedSecureLane {
+    send_attempts: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl DataLane for MisclassifiedSecureLane {
+    async fn send(&self, _data: bytes::Bytes) -> NetworkResult<()> {
+        if self.send_attempts.fetch_add(1, Ordering::Relaxed) == 0 {
+            Err(NetworkError::SecureChannelNotReady(
+                "rekey in flight".to_string(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn send_with_progress(&self, data: bytes::Bytes) -> SendAttemptResult {
+        let result = self.send(data).await;
+        SendAttemptResult {
+            result,
+            // Intentionally model an adapter that failed to classify the
+            // secure gate before the write.
+            progress: DeliveryProgress::Unknown,
+        }
+    }
+
+    fn lane_type(&self) -> &'static str {
+        "misclassified-secure"
+    }
+}
+
+#[tokio::test]
+async fn secure_not_ready_precedes_unknown_delivery_classification() {
+    let send_attempts = Arc::new(AtomicUsize::new(0));
+    let transport = test_transport(vec![Arc::new(StaticLaneWire {
+        conn_type: ConnType::WebRTC,
+        lane: Arc::new(MisclassifiedSecureLane {
+            send_attempts: Arc::clone(&send_attempts),
+        }),
+        identity: Some(WireIdentity::WebRtc {
+            peer_id: actr_protocol::ActrId::default(),
+            session_id: 23,
+        }),
+    })])
+    .await;
+
+    let result = timeout(
+        Duration::from_secs(1),
+        transport.send_with_identity(PayloadType::RpcReliable, b"payload"),
+    )
+    .await
+    .expect("misclassified secure readiness must not hang");
+
+    assert!(
+        result.is_ok(),
+        "secure readiness should recover: {result:?}"
+    );
+    assert_eq!(
+        send_attempts.load(Ordering::Relaxed),
+        2,
+        "the send should be retried after secure readiness, not surfaced as uncertain"
+    );
+}
+
 /// Lane whose send fails after an ambiguous partial write: the error gives no
 /// proof about how many bytes entered the transport.
 #[derive(Debug)]
