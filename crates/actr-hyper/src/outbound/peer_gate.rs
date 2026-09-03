@@ -1112,6 +1112,11 @@ impl PeerGate {
         }
     }
 
+    /// Retry only completed, proven `NotAttempted` failures. The retry loop
+    /// intentionally has no progress sink: ambiguous (`Unknown`) results
+    /// return before backoff, while timeout-sensitive one-way sends use the
+    /// progress-aware `send_once_with_admission` path below. This keeps a
+    /// retry from overwriting an earlier delivery fact with a later attempt.
     #[allow(clippy::too_many_arguments)] // Keeps retry context explicit at this internal boundary.
     async fn send_with_retry_policy_record_identity(
         &self,
@@ -2961,6 +2966,43 @@ mod tests {
             matches!(
                 &err,
                 ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "stream-1"
+            ),
+            "got {err:?}"
+        );
+        assert!(!err.is_retryable());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tell_timeout_mid_write_is_delivery_uncertain() {
+        let transport = Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(PendingWireBuilder),
+        ));
+        let gate = PeerGate::for_test(transport);
+        let target = test_actor_id(2);
+        let envelope = RpcEnvelope {
+            request_id: "tell-timeout".to_string(),
+            ..envelope_with_direction(None)
+        };
+
+        let err = gate
+            .send_tell_with_type_until(
+                &target,
+                PayloadType::RpcReliable,
+                envelope,
+                RpcDeadline::from_duration(Duration::from_millis(250)),
+            )
+            .await
+            .unwrap_err();
+
+        // Tell is one-shot: once the lane write was entered, a deadline must
+        // not be reported as a retryable timeout that could replay the
+        // payload. The operation ID remains caller-correlatable.
+        assert!(
+            matches!(
+                &err,
+                ActrError::DeliveryUncertain { operation_id, .. }
+                    if operation_id == "tell-timeout"
             ),
             "got {err:?}"
         );

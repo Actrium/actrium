@@ -250,11 +250,13 @@ data class RetryConfig(
 )
 
 /**
- * Execute a non-framework suspending block with exponential backoff retry.
+ * Execute a suspending block with exponential backoff retry.
  *
- * Ordinary `ActrRef.call`, `tell`, and `sendDataChunk` operations already own
- * readiness and transport retry. The default predicate therefore excludes
- * `ActrException`; callers must opt in explicitly for an idempotent operation.
+ * The default preserves the existing behavior: retry ActrException failures
+ * classified as recoverable. `DeliveryUncertain` is intentionally not
+ * recoverable, so an ambiguous send is never replayed by this helper. For
+ * framework-owned Call/Tell/DataStream operations, prefer the direct API or
+ * provide an explicit predicate when a second retry layer is intentional.
  *
  * Example:
  * ```kotlin
@@ -268,7 +270,7 @@ suspend fun <T> withRetry(
     initialDelayMs: Long = 1000,
     maxDelayMs: Long = 10000,
     factor: Double = 2.0,
-    shouldRetry: (Exception) -> Boolean = { it !is ActrException },
+    shouldRetry: (Exception) -> Boolean = { it is ActrException && it.isRecoverable },
     block: suspend () -> T,
 ): T {
     var currentDelay = initialDelayMs
@@ -293,7 +295,7 @@ suspend fun <T> withRetry(
 /** Execute a suspending block with retry using RetryConfig. */
 suspend fun <T> withRetry(
     config: RetryConfig,
-    shouldRetry: (Exception) -> Boolean = { it !is ActrException },
+    shouldRetry: (Exception) -> Boolean = { it is ActrException && it.isRecoverable },
     block: suspend () -> T,
 ): T =
     withRetry(
