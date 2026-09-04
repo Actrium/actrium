@@ -644,7 +644,18 @@ pub trait DataLane: Send + Sync + std::fmt::Debug {
         match self.send(data).await {
             Ok(()) => SendAttemptResult::submitted(),
             Err(error) => {
-                let progress = if matches!(error, NetworkError::SecureChannelNotReady(_)) {
+                // Known non-retryable pre-send client errors (argument and
+                // operation validation) cannot have reached the wire by
+                // construction, so they stay ordinary retryable-refusing
+                // errors; the secure-readiness gate is likewise provably
+                // pre-send. Everything else keeps the fail-safe `Unknown` —
+                // an unknown error may have partially entered a transport.
+                let progress = if matches!(
+                    error,
+                    NetworkError::SecureChannelNotReady(_)
+                        | NetworkError::InvalidArgument(_)
+                        | NetworkError::InvalidOperation(_)
+                ) {
                     DeliveryProgress::NotAttempted
                 } else {
                     DeliveryProgress::Unknown
