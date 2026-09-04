@@ -189,29 +189,23 @@ impl SessionState {
         self.readiness_tx.subscribe()
     }
 
-    async fn publish_readiness(&self) {
-        let readiness = {
-            let guard = self.inner.read().await;
-            SessionReadiness {
-                phase: guard.phase,
-                generation: guard.current_generation,
-            }
-        };
-        // `send_replace` updates the stored value even when no receiver is
-        // currently waiting.  A later outbound subscriber must observe the
-        // latest phase/generation rather than the initial Active state.
-        self.readiness_tx.send_replace(readiness);
-    }
-
-    /// Transition the phase and publish readiness as one step.
+    /// Transition the phase and publish readiness as one indivisible step.
     ///
-    /// All phase mutations MUST go through this method: writing
-    /// `inner.phase` directly would leave subscribers stranded on a stale
-    /// readiness value until the next unrelated publish, and waiters blocked
-    /// in `ensure_session_ready_until` would miss the transition entirely.
+    /// All phase mutations MUST go through this method. The watch update
+    /// happens while the write guard is still held: releasing the guard
+    /// before publishing would open a window where `inner.phase` has moved
+    /// but a subscriber that acquired its receiver in that window still
+    /// observes the old projection (e.g. admitting outbound work under
+    /// `Active` while the session is already `Rebinding`). `send_replace`
+    /// also stores the value for later subscribers, so a receiver obtained
+    /// after this call returns always sees the new phase/generation.
     pub(crate) async fn set_phase(&self, phase: SessionPhase) {
-        self.inner.write().await.phase = phase;
-        self.publish_readiness().await;
+        let mut guard = self.inner.write().await;
+        guard.phase = phase;
+        self.readiness_tx.send_replace(SessionReadiness {
+            phase: guard.phase,
+            generation: guard.current_generation,
+        });
     }
 
     // ---- writers -----------------------------------------------------------
@@ -261,19 +255,25 @@ impl SessionState {
     /// Credential recovery uses this form while it updates every dependent
     /// runtime handle. Publishing before those projections are installed can
     /// let the supervisor open a socket with mixed old/new identity material.
+    /// The readiness projection is updated inside the write critical
+    /// section: a subscriber that acquired its receiver while the guard was
+    /// held must never observe the pre-rebind generation once the commit
+    /// returns.
     pub(crate) async fn commit_hard_rebind_unpublished(
         &self,
         new_snapshot: SessionSnapshot,
     ) -> SessionSnapshot {
-        let old = {
+        {
             let mut guard = self.inner.write().await;
             let old = guard.snapshot.clone();
             guard.snapshot = new_snapshot;
             guard.current_generation = guard.snapshot.generation;
+            self.readiness_tx.send_replace(SessionReadiness {
+                phase: guard.phase,
+                generation: guard.current_generation,
+            });
             old
-        };
-        self.publish_readiness().await;
-        old
+        }
     }
 
     /// Publish an already-committed generation after all runtime projections
