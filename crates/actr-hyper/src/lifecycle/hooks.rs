@@ -638,17 +638,13 @@ fn log_hook_event(event: &HookEvent) {
             reason,
         } => {
             tracing::warn!(
-                            operation_id = %operation_id,
-            <<<<<<< HEAD
-                            session_id = session_id
-                                .map(|id| id.to_string())
-                                .unwrap_or_else(|| "unknown".to_string()),
-            =======
-                            session_id = *session_id,
-            >>>>>>> 5475820f (fix(actr-hyper): make stream- and chunk-scoped uncertain-delivery keys disjoint (RFC-0507/3))
-                            reason = %reason,
-                            "data stream delivery uncertain",
-                        );
+                operation_id = %operation_id,
+                session_id = session_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                reason = %reason,
+                "data stream delivery uncertain",
+            );
         }
         HookEvent::WebSocketConnectStart { peer_id } => {
             tracing::debug!(peer = %peer_id, "websocket connecting");
