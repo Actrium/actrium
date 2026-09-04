@@ -597,6 +597,7 @@ impl MobileRtcPairHarness {
             metadata: Vec::new(),
             timestamp_ms: Some(0),
         };
+        let operation_id = crate::outbound::data_chunk_operation_id(stream_id, chunk.sequence);
         self.harness
             .peer(self.serial(from))
             .gate
@@ -605,6 +606,7 @@ impl MobileRtcPairHarness {
                 PayloadType::StreamReliable,
                 stream_id,
                 bytes::Bytes::from(chunk.encode_to_vec()),
+                &operation_id,
             )
             .await
             .expect("pair DataChunk send");
@@ -659,6 +661,8 @@ impl MobileRtcPairHarness {
             metadata: Vec::new(),
             timestamp_ms: Some(0),
         };
+        let operation_id =
+            crate::outbound::data_chunk_operation_id(&chunk.stream_id, chunk.sequence);
         let gate = self.harness.peer(self.serial(from)).gate.clone();
         let target = self.id(to);
         let stream_id = stream_id.to_owned();
@@ -668,6 +672,7 @@ impl MobileRtcPairHarness {
                 PayloadType::StreamReliable,
                 &stream_id,
                 bytes::Bytes::from(chunk.encode_to_vec()),
+                &operation_id,
             )
             .await
         })

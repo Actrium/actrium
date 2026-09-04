@@ -538,7 +538,7 @@ async fn data_chunk_uncertain_hook_routes_to_on_error() {
     let cb = build_hook_callback(Some(observer), ctx_builder);
 
     cb(HookEvent::DataChunkDeliveryUncertain {
-        stream_id: "mobile-upload".to_string(),
+        operation_id: crate::outbound::data_stream_operation_id("mobile-upload"),
         session_id: 99,
         reason: "data channel closed".to_string(),
     })
@@ -552,9 +552,9 @@ async fn data_chunk_uncertain_hook_routes_to_on_error() {
     assert_eq!(event.category, ErrorCategory::DataChunkDeliveryUncertain);
     assert!(matches!(
         event.source,
-        ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "mobile-upload"
+        ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "mobile-upload#stream"
     ));
-    assert!(event.context.contains("stream_id=mobile-upload"));
+    assert!(event.context.contains("operation_id=mobile-upload#stream"));
     assert!(event.context.contains("session_id=99"));
     assert!(event.context.contains("reason=data channel closed"));
 }
@@ -1006,7 +1006,7 @@ fn log_hook_event_covers_all_variants() {
         status: WebRtcPeerStatus::Idle,
     });
     log_hook_event(&HookEvent::DataChunkDeliveryUncertain {
-        stream_id: "s".into(),
+        operation_id: "s".into(),
         session_id: 1,
         reason: "r".into(),
     });

@@ -288,6 +288,7 @@ async fn test_send_data_chunk_rejected_during_recovery() {
             PayloadType::StreamReliable,
             "healthy",
             bytes::Bytes::from_static(b"chunk"),
+            "healthy",
         )
         .await
         .expect("healthy stream send");
@@ -302,6 +303,7 @@ async fn test_send_data_chunk_rejected_during_recovery() {
             PayloadType::StreamReliable,
             "recovering",
             bytes::Bytes::from_static(b"chunk"),
+            "recovering",
         )
         .await
         .expect_err("recovery must reject stream send");

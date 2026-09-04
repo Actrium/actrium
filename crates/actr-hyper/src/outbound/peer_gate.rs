@@ -37,6 +37,25 @@ pub(crate) fn data_chunk_operation_id(stream_id: &str, sequence: u64) -> String 
     format!("{stream_id}#{sequence}")
 }
 
+/// Build the caller-visible identity for a whole-stream delivery-uncertainty
+/// event (a WebRTC session close invalidating every outstanding chunk on the
+/// stream at once, where no single sequence is authoritative).
+///
+/// Chunk keys end in `#` followed by the decimal sequence
+/// ([`data_chunk_operation_id`]); this key ends in the non-numeric marker
+/// `#stream`. Because a chunk sequence is always decimal, no chunk key can
+/// end in `#stream`, and this key never ends in `#` + digits — the two
+/// scopes are disjoint by construction even when a stream id itself contains
+/// `#` (e.g. stream `"s#4"` stream-scoped key is `"s#4#stream"`, which
+/// cannot collide with the chunk key `"s#4"` of stream `"s"`).
+///
+/// Contract for stream-scoped uncertain-delivery emitters; exercised by the
+/// hook tests today (a production stream-wide emitter adopts it on landing).
+#[allow(dead_code)]
+pub(crate) fn data_stream_operation_id(stream_id: &str) -> String {
+    format!("{stream_id}#stream")
+}
+
 /// Preserve in-flight reliable RPCs across a brief sendability dip, but do not
 /// let a remote-side recovery leave response waits parked until their much
 /// longer business deadline.
@@ -641,27 +660,6 @@ impl PeerGate {
             .await
     }
 
-    #[cfg(any(test, feature = "test-utils"))]
-    async fn send_with_retry_for_operation(
-        &self,
-        dest: &Dest,
-        payload_type: PayloadType,
-        data: &[u8],
-        admission: SendAdmission,
-        operation_id: &str,
-    ) -> ActorResult<()> {
-        let policy = payload_type.retry_policy();
-        self.send_with_retry_policy(
-            dest,
-            payload_type,
-            data,
-            policy,
-            admission,
-            Some(operation_id),
-        )
-        .await
-    }
-
     async fn send_with_retry_record_identity_for_operation(
         &self,
         dest: &Dest,
@@ -1069,14 +1067,16 @@ impl PeerGate {
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Response);
         let data = Self::serialize_envelope(&envelope);
         let dest = Self::actr_id_to_dest(target);
-        self.send_with_retry_for_operation(
+        self.send_with_retry_record_identity_for_operation(
             &dest,
             PayloadType::RpcReliable,
             &data,
             SendAdmission::ExistingOnly,
+            None,
             &envelope.request_id,
         )
         .await
+        .map(|_| ())
     }
 
     /// Send one-way message with specified PayloadType.
@@ -1107,9 +1107,8 @@ impl PeerGate {
     }
 
     /// Send a Tell under the absolute budget created by the runtime context.
-    /// Tell is submitted at most once; its progress cell distinguishes a
-    /// deadline before submission from a deadline after bytes may have entered
-    /// the transport.
+    /// The route may reselect a lane before submission, but the payload itself
+    /// is submitted at most once for this logical operation.
     pub(crate) async fn send_tell_with_type_until(
         &self,
         target: &ActrId,
@@ -1120,12 +1119,17 @@ impl PeerGate {
         deadline.ensure_remaining()?;
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Tell);
         let dest = Self::actr_id_to_dest(target);
+        // An empty request id carries no correlation value; report the
+        // documented placeholder instead of an empty operation id.
         let operation_id = if envelope.request_id.is_empty() {
             None
         } else {
             Some(envelope.request_id.clone())
         };
 
+        // Same cancellation-classification contract as the data-chunk path:
+        // a deadline that fires mid-write must surface terminal
+        // `DeliveryUncertain`, not a retryable `TimedOut`.
         let progress_cell = new_delivery_progress_cell();
         match crate::timer::timeout_at(
             crate::timer::ids::OUTBOUND_TELL_DEADLINE,
@@ -1186,14 +1190,16 @@ impl PeerGate {
         let data = Self::serialize_envelope(&envelope);
         let dest = Self::actr_id_to_dest(target);
         let admission = self.preflight_send(target, &dest).await?;
-        self.send_with_retry_for_operation(
+        self.send_with_retry_record_identity_for_operation(
             &dest,
             payload_type,
             &data,
             admission,
+            None,
             &envelope.request_id,
         )
         .await
+        .map(|_| ())
     }
 
     /// S6-10: v0.20 `send_media_sample` — the peer's outbound track writer
@@ -1344,6 +1350,10 @@ impl PeerGate {
     /// - `payload_type`: PayloadType (StreamReliable or StreamLatencyFirst)
     /// - `stream_id`: DataChunk identifier already known before serialization
     /// - `data`: Serialized DataChunk bytes
+    /// - `operation_id`: caller-derived identity for this logical send
+    ///   (`stream_id#sequence` from the still-decoded `DataChunk`), threaded
+    ///   through unchanged so one send can never surface under two
+    ///   reconciliation keys
     ///
     /// # Implementation Note
     /// Sends via PeerTransport using WebRTC DataChannel or WebSocket
@@ -1354,6 +1364,7 @@ impl PeerGate {
         payload_type: PayloadType,
         stream_id: &str,
         data: Bytes,
+        operation_id: &str,
     ) -> ActorResult<()> {
         self.send_data_chunk_with_timeout(
             target,
@@ -1361,6 +1372,7 @@ impl PeerGate {
             stream_id,
             data,
             DATA_CHUNK_SEND_TIMEOUT,
+            operation_id,
         )
         .await
     }
@@ -1373,22 +1385,16 @@ impl PeerGate {
         stream_id: &str,
         data: Bytes,
         send_timeout: Duration,
+        operation_id: &str,
     ) -> ActorResult<()> {
         let deadline = RpcDeadline::from_duration(send_timeout);
-        // Keep the stream and sequence together: two uncertain chunks on one
-        // stream must remain independently addressable by caller idempotency
-        // records. Invalid test payloads retain the stream-only fallback.
-        let operation_id = match actr_protocol::DataChunk::decode(data.as_ref()) {
-            Ok(chunk) => data_chunk_operation_id(stream_id, chunk.sequence),
-            Err(_) => stream_id.to_string(),
-        };
         self.send_data_chunk_until(
             target,
             payload_type,
             stream_id,
             data,
             deadline,
-            &operation_id,
+            operation_id,
         )
         .await
     }
@@ -1514,6 +1520,35 @@ mod tests {
             data_chunk_operation_id("stream-1", 5)
         );
         assert_eq!(data_chunk_operation_id("stream-1", 4), "stream-1#4");
+    }
+
+    #[test]
+    fn data_stream_operation_id_never_collides_with_chunk_keys() {
+        // Stream ids are unconstrained protobuf strings and may contain `#`.
+        // The stream-scoped key must therefore stay disjoint from every
+        // chunk-scoped key by construction, not by convention.
+        assert_eq!(data_stream_operation_id("s"), "s#stream");
+        assert_ne!(
+            data_stream_operation_id("s#4"),
+            data_chunk_operation_id("s", 4),
+            "a stream literally named `s#4` must not collide with stream `s` sequence 4"
+        );
+        // Exhaustive over the digit-tail rule: a chunk key always ends in
+        // `#` + decimal digits, a stream key always ends in `#stream`.
+        for (stream, sequence) in [("s", 4u64), ("s#4", 5), ("a#b#c", 123)] {
+            let chunk_key = data_chunk_operation_id(stream, sequence);
+            assert!(
+                chunk_key.rsplit_once('#').is_some_and(|(_, seq)| {
+                    !seq.is_empty() && seq.bytes().all(|b| b.is_ascii_digit())
+                }),
+                "chunk keys end in #digits: {chunk_key}"
+            );
+            assert_ne!(
+                chunk_key,
+                data_stream_operation_id(stream),
+                "scopes must stay disjoint for stream {stream:?}"
+            );
+        }
     }
 
     #[test]
@@ -1865,6 +1900,7 @@ mod tests {
                 "existing-only-stream",
                 Bytes::from_static(b"chunk"),
                 Duration::from_secs(1),
+                "existing-only-stream",
             )
             .await
             .expect_err("data-chunk send must use the same no-create admission");
@@ -2111,6 +2147,39 @@ mod tests {
         assert_eq!(attempts.load(Ordering::SeqCst), 1);
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tell_submits_at_most_once_when_delivery_is_uncertain() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let transport = Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(RetryFailingWireBuilder {
+                attempts: attempts.clone(),
+            }),
+        ));
+        let gate = PeerGate::for_test(transport);
+        let target = test_actor_id(2);
+        let envelope = RpcEnvelope {
+            request_id: "tell-once".to_string(),
+            ..envelope_with_direction(None)
+        };
+
+        let error = gate
+            .send_tell_with_type_until(
+                &target,
+                PayloadType::RpcReliable,
+                envelope,
+                RpcDeadline::from_duration(Duration::from_secs(1)),
+            )
+            .await
+            .expect_err("an uncertain send must surface an error");
+
+        assert!(matches!(
+            error,
+            ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "tell-once"
+        ));
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    }
+
     #[derive(Debug)]
     struct PendingLane;
 
@@ -2190,6 +2259,7 @@ mod tests {
                 "stream-1",
                 Bytes::from(chunk.encode_to_vec()),
                 Duration::from_millis(250),
+                "stream-1#4",
             )
             .await
             .unwrap_err();
@@ -2304,6 +2374,7 @@ mod tests {
                 "stream-1",
                 Bytes::from_static(b"chunk"),
                 Duration::from_millis(250),
+                "stream-1",
             )
             .await
             .unwrap_err();

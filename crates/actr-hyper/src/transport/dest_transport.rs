@@ -172,10 +172,12 @@ impl DestTransport {
     /// - If connection available, send immediately
     /// - If not, wait for connection status change (via watch channel)
     /// - WirePool already handles priority, only need to try DataLane Types in order
-    /// - Stale self-heal: when `get_lane()` returns a closed-like error, the
-    ///   current WebRTC wire may be stale. We conditionally mark it Failed
-    ///   (only if it still carries the same identity) so the outer loop can
-    ///   wait for a new connection or fallback instead of spinning forever.
+    /// - Stale self-heal: when lane acquisition or a concrete send fails before
+    ///   submission, the current wire may be stale. We conditionally mark it
+    ///   Failed (only if it still carries the same identity) so the outer loop
+    ///   can wait for a new connection or fallback instead of spinning
+    ///   forever. An ambiguous send is returned immediately and is never
+    ///   replayed here.
     #[cfg_attr(
         feature = "opentelemetry",
         tracing::instrument(skip_all, name = "DestTransport.send")
@@ -300,9 +302,13 @@ impl DestTransport {
 
                             // If the lane went stale after selection, drop the
                             // cached lane and retry once before surfacing the
-                            // error. Transport-agnostic: a closed-like error
-                            // means the underlying wire (WebRTC *or* WebSocket)
-                            // is no longer sendable and should be self-healed.
+                            // error. This self-heal applies only to proven
+                            // `NotAttempted` failures (ambiguous `Unknown`
+                            // attempts returned above): a closed-like error on
+                            // that path means the underlying wire (WebRTC *or*
+                            // WebSocket) is no longer sendable and nothing
+                            // entered a transport, so evicting the lane and
+                            // re-dialing cannot duplicate a payload.
                             if let Err(e) = attempt.result.as_ref() {
                                 if e.is_closed_like() {
                                     tracing::warn!(

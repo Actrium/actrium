@@ -574,6 +574,7 @@ async fn inv17_blackbox_teardown_releases_waiters_on_every_payload_type_under_on
             lane,
             lane.as_str_name(),
             Bytes::from_static(b"lane-probe"),
+            lane.as_str_name(),
         )
         .await
         .expect("stream lane");

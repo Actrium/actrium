@@ -453,8 +453,21 @@ pub enum HookEvent {
     WebRtcStateChanged {
         state: actr_framework::WebRtcPeerState,
     },
+    /// A delivery-uncertainty event for outbound data. `operation_id`
+    /// occupies the same caller-visible reconciliation namespace as the
+    /// `DeliveryUncertain` error, in one of two provably disjoint forms:
+    /// chunk-scoped emitters pass
+    /// [`data_chunk_operation_id`](crate::outbound::data_chunk_operation_id)
+    /// (`{stream_id}#{sequence}`, tail `#` + decimal sequence); stream-scoped
+    /// emitters (a session close invalidating every outstanding chunk at
+    /// once, where no single sequence is authoritative) pass
+    /// [`data_stream_operation_id`](crate::outbound::data_stream_operation_id)
+    /// (`{stream_id}#stream`, non-numeric tail). A stream id may itself
+    /// contain `#`, so emitters must never hand-compose a bare stream id —
+    /// SDK reconciliation maps keyed by operation id rely on the two scopes
+    /// never colliding.
     DataChunkDeliveryUncertain {
-        stream_id: String,
+        operation_id: String,
         session_id: u64,
         reason: String,
     },
