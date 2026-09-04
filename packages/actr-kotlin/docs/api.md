@@ -521,14 +521,14 @@ suspend fun <T> withRetry(
     initialDelayMs: Long = 1000,
     maxDelayMs: Long = 10000,
     factor: Double = 2.0,
-    shouldRetry: (Exception) -> Boolean = { it !is ActrException },
+    shouldRetry: (Exception) -> Boolean = { it is ActrException && it.isRecoverable },
     block: suspend () -> T,
 ): T
 
 // Retry with config object
 suspend fun <T> withRetry(
     config: RetryConfig,
-    shouldRetry: (Exception) -> Boolean = { it !is ActrException },
+    shouldRetry: (Exception) -> Boolean = { it is ActrException && it.isRecoverable },
     block: suspend () -> T,
 ): T
 ```

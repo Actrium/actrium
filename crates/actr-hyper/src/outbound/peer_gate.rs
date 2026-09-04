@@ -91,6 +91,12 @@ enum SendAdmission {
 struct GateSendAttempt {
     result: ActorResult<Option<DestTransportRef>>,
     progress: DeliveryProgress,
+    /// Framework-verified proof that the failing error belongs to the closed
+    /// pre-send variant set (`NetworkError::is_proven_pre_send`), computed at
+    /// the transport boundary before the error collapses into `ActrError`.
+    /// The one-shot safe reattempt requires it, so a lane adapter that
+    /// misclassifies a post-write failure as `NotAttempted` fails closed.
+    proven_pre_send: bool,
 }
 
 /// Hard limits for readiness waiters.  These are deliberately conservative:
@@ -400,7 +406,18 @@ impl PeerGate {
     /// caller-visible operation id (`stream_id#sequence`) so both channels
     /// reconcile on one key.
     fn emit_data_chunk_uncertain_hook(&self, operation_id: &str, cause: &str) {
-        if let Some(callback) = self.hook_callback.get() {
+        let Some(callback) = self.hook_callback.get() else {
+            // Gates constructed outside the normal node wiring path have no
+            // workload hook: the caller still receives the terminal error,
+            // but the mirror event is dropped — surface that so the missing
+            // wiring is diagnosable instead of silent.
+            tracing::debug!(
+                operation_id,
+                "DeliveryUncertain returned without a workload hook callback installed",
+            );
+            return;
+        };
+        {
             // The dispatcher enqueues synchronously inside the closure; the
             // returned future is a no-op handle and may be dropped.
             drop(callback(
@@ -919,6 +936,16 @@ impl PeerGate {
     /// controller yet is admitted so the transport dials on demand (0.14
     /// parity: no recovery entry -> admit), which also keeps WebSocket-only
     /// destinations sendable.
+    ///
+    /// Bounded inconsistency, documented deliberately: the fallback exemption
+    /// consults the transport-level WebSocket ready-set, while the later
+    /// destination selection re-checks per-lane `is_healthy()`. The two can
+    /// briefly disagree (a lane flapping healthy between the two reads), so
+    /// an admitted send may find its chosen lane unhealthy and fail with a
+    /// retryable error — bounded by one attempt and re-run through this same
+    /// preflight, never an unsafe replay. Sharing a lane-aware probe would
+    /// serialize lane health checks behind the transport lock for every
+    /// preflight; this window is accepted instead.
     async fn preflight_send(
         &self,
         target: &ActrId,
@@ -1230,9 +1257,14 @@ impl PeerGate {
                     .transport_manager
                     .send_with_progress(dest, payload_type, data, record, progress_sink)
                     .await;
+                let proven_pre_send = result
+                    .as_ref()
+                    .err()
+                    .is_some_and(crate::transport::NetworkError::is_proven_pre_send);
                 GateSendAttempt {
                     result: result.map(Some).map_err(ActrError::from),
                     progress,
+                    proven_pre_send,
                 }
             }
             SendAdmission::ExistingOnly => {
@@ -1240,9 +1272,15 @@ impl PeerGate {
                     .transport_manager
                     .send_existing_with_progress(dest, payload_type, data, record, progress_sink)
                     .await;
+                let proven_pre_send = attempt
+                    .result
+                    .as_ref()
+                    .err()
+                    .is_some_and(crate::transport::NetworkError::is_proven_pre_send);
                 GateSendAttempt {
                     result: attempt.result.map_err(ActrError::from),
                     progress: attempt.progress,
+                    proven_pre_send,
                 }
             }
         }
@@ -1294,6 +1332,7 @@ impl PeerGate {
                 Err(error)
                     if attempt.progress == DeliveryProgress::NotAttempted
                         && error.is_retryable()
+                        && attempt.proven_pre_send
                         && reattempts < MAX_SAFE_REATTEMPTS =>
                 {
                     reattempts += 1;

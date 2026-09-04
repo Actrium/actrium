@@ -921,6 +921,17 @@ jobs:
       - name: crates/actr-cli/assets sync drift gate
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --check --skip-sw-host
 
+      - name: Run web-sdk unit tests (vitest)
+        working-directory: packages/actr-web
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+          PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.15.9 --activate
+          pnpm install --frozen-lockfile
+          pnpm --filter @actrium/actr-web run test
+
   c_go_workloads:
     name: C and Go Workloads
     needs: determine

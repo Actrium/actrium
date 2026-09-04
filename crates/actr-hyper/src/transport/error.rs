@@ -446,6 +446,28 @@ impl NetworkError {
         }
     }
 
+    /// Return true for the closed set of variants that are **proven
+    /// pre-send by construction** across every lane: typed closed/not-open
+    /// states, the secure-readiness gate, and argument/operation validation.
+    /// The one-shot safe reattempt and any future replay decision gate on
+    /// this, so a lane adapter that misclassifies a post-write failure as
+    /// `NotAttempted` fails closed (terminal uncertainty) instead of being
+    /// replayed: `NotAttempted` plus retryability alone is the adapter's
+    /// word, this set is the framework's.
+    pub fn is_proven_pre_send(&self) -> bool {
+        matches!(
+            self,
+            NetworkError::ConnectionClosed(_)
+                | NetworkError::PeerConnectionClosed(_)
+                | NetworkError::DataChannelClosed(_)
+                | NetworkError::DataChannelNotOpen(_)
+                | NetworkError::WebSocketClosed(_)
+                | NetworkError::SecureChannelNotReady(_)
+                | NetworkError::InvalidArgument(_)
+                | NetworkError::InvalidOperation(_)
+        )
+    }
+
     /// Return true when the error means the underlying transport is no
     /// longer sendable and should be treated as a stale/closed candidate.
     ///

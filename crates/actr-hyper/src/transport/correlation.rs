@@ -228,26 +228,6 @@ impl<M> RpcCorrelation<M> {
 
     /// Remove-and-fail every entry whose metadata matches the predicate
     /// (peer-disconnect sweep). Returns the number of entries removed.
-    #[cfg(test)]
-    pub(crate) fn fail_where(
-        &self,
-        mut pred: impl FnMut(&M) -> bool,
-        err: impl Fn() -> ActrError,
-    ) -> usize {
-        let mut map = lock_ignore_poison(&self.inner);
-        let matching: Vec<String> = map
-            .iter()
-            .filter(|(_, entry)| pred(&entry.meta))
-            .map(|(id, _)| id.clone())
-            .collect();
-        for request_id in &matching {
-            if let Some(entry) = map.remove(request_id) {
-                let _ = entry.tx.send(Err(err()));
-            }
-        }
-        matching.len()
-    }
-
     /// Number of in-flight entries.
     #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn len(&self) -> usize {
@@ -451,34 +431,6 @@ mod tests {
         // route and is still reclaimed by its normal RAII drop path.
         drop(awaiting);
         assert_eq!(correlation.len(), 0);
-    }
-
-    #[tokio::test]
-    async fn fail_where_removes_only_matching_metas() {
-        let correlation: RpcCorrelation<u8> = RpcCorrelation::new();
-        let pending_a = correlation.register("req-a", 1);
-        let pending_b = correlation.register("req-b", 2);
-        let pending_c = correlation.register("req-c", 1);
-        assert_eq!(correlation.len(), 3);
-
-        let removed = correlation.fail_where(
-            |meta| *meta == 1,
-            || ActrError::Unavailable("Connection closed".into()),
-        );
-        assert_eq!(removed, 2);
-        assert_eq!(correlation.len(), 1);
-
-        let err = pending_a.recv().await.unwrap_err();
-        assert!(matches!(err, ActrError::Unavailable(_)), "got {err:?}");
-        let err = pending_c.recv().await.unwrap_err();
-        assert!(matches!(err, ActrError::Unavailable(_)), "got {err:?}");
-
-        // Non-matching entry still completes normally.
-        assert_eq!(
-            correlation.complete("req-b", Ok(Bytes::from_static(b"ok"))),
-            CompleteOutcome::Completed
-        );
-        assert_eq!(pending_b.recv().await.unwrap(), Bytes::from_static(b"ok"));
     }
 
     #[tokio::test]
