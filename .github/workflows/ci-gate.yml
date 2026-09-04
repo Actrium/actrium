@@ -145,7 +145,7 @@ jobs:
     name: E2E Package Runtime
     needs: determine
     if: needs.determine.outputs.e2e_package_runtime == 'true'
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64, high]
     timeout-minutes: 45
     permissions:
       contents: read
@@ -166,7 +166,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           version: ${{ vars.PROTOC_VERSION }}
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: cargo install wasm-pack --version 0.15.0 --locked --force
       - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
@@ -283,7 +283,7 @@ jobs:
     name: Test (Rust, ${{ matrix.shard }})
     needs: determine
     if: needs.determine.outputs.rust_core == 'true'
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64, high]
     permissions:
       contents: read
       actions: read
@@ -1004,7 +1004,7 @@ jobs:
     name: WebRTC v0.20
     needs: determine
     if: needs.determine.outputs.rust_core == 'true'
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64, high]
     permissions:
       contents: read
     env:
@@ -1022,6 +1022,10 @@ jobs:
           repo-token: ${{ github.token }}
           version: ${{ vars.PROTOC_VERSION }}
       - uses: Swatinem/rust-cache@v2
+        with:
+          # The high ARC fleet uses the in-cluster sccache/MinIO backend.
+          # GitHub cache save never restores on this fleet and costs >2m.
+          save-if: "false"
       - name: Install cargo-nextest
         uses: taiki-e/install-action@cargo-nextest
       # Gate the parallel webrtc-rs v0.20 migration path (the `webrtc-v020`
