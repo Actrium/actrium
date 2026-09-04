@@ -1899,6 +1899,7 @@ async fn peer_data_chunk_rejects_non_stream_payload_type_before_transport() {
             PayloadType::RpcReliable,
             "not-a-stream-lane",
             Bytes::from_static(b"stream-payload"),
+            "not-a-stream-lane",
         )
         .await
         .expect_err("non-stream payload must be rejected before transport send");
@@ -1927,6 +1928,7 @@ async fn unrecoverable_data_chunk_send_failure_is_explicit_and_bounded() {
             PayloadType::StreamReliable,
             "unrecoverable-stream",
             Bytes::from_static(b"stream-payload"),
+            "unrecoverable-stream",
         ),
     )
     .await
