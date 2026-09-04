@@ -68,7 +68,7 @@ pub(crate) fn data_stream_operation_id(stream_id: &str) -> String {
 /// a route that clears within this slice of the deadline is refused pre-send
 /// (retryable `TimedOut`) instead of committing bytes whose mid-write expiry
 /// would surface as terminal `DeliveryUncertain`.
-const MIN_ONE_SHOT_SEND_SLICE: Duration = Duration::from_millis(25);
+const MIN_ONE_SHOT_SEND_SLICE: std::time::Duration = std::time::Duration::from_millis(25);
 
 /// Preserve in-flight reliable RPCs across a brief sendability dip, but do not
 /// let a remote-side recovery leave response waits parked until their much
@@ -2879,11 +2879,87 @@ mod tests {
             )
             .await;
         match overflow {
-            Err(ActrError::Unavailable(message)) => assert!(
-                message.contains("outbound readiness waiter capacity exhausted"),
-                "unexpected exhaustion diagnostic: {message}"
-            ),
+            Err(ActrError::Unavailable(message)) => {
+                assert!(
+                    message.contains("outbound readiness waiter capacity exhausted"),
+                    "unexpected exhaustion diagnostic: {message}"
+                );
+                // The denial names the exact ceiling: this overflow fills the
+                // per-peer waiter count for the target.
+                assert!(
+                    message.contains("per-peer waiter count limit"),
+                    "the diagnostic must name the per-peer count limit: {message}"
+                );
+                assert!(
+                    message.contains("class RpcReliable"),
+                    "the diagnostic carries the waiter class: {message}"
+                );
+            }
             other => panic!("the overflowing waiter must fail fast, got {other:?}"),
+        }
+
+        // The other denial labels propagate too: the global waiter count and
+        // both byte-budget ceilings are asserted at the budget layer.
+        {
+            let budget = Arc::new(WaiterBudget::default());
+            let peer = test_actor_id(11);
+            // Class waiter count: distinct peers fill the Rpc class ceiling
+            // (the global ceiling is not yet reached).
+            let mut class_guards = Vec::new();
+            for i in 0..MAX_RPC_WAITERS {
+                if let Ok(guard) = budget.try_acquire_explained(
+                    &test_actor_id(1_000 + i as u64),
+                    WaiterClass::Rpc,
+                    1,
+                ) {
+                    class_guards.push(guard);
+                }
+            }
+            let class_label = budget
+                .try_acquire_explained(&test_actor_id(9_000), WaiterClass::Rpc, 1)
+                .map(|_| ())
+                .unwrap_err();
+            assert_eq!(class_label, "class waiter count");
+            drop(class_guards);
+            // Global waiter count: mixed classes across distinct peers fill
+            // both class ceilings and the global one simultaneously.
+            let mut all_guards = Vec::new();
+            for i in 0..MAX_GLOBAL_WAITERS {
+                let class = if i % 2 == 0 {
+                    WaiterClass::Rpc
+                } else {
+                    WaiterClass::Stream
+                };
+                if let Ok(guard) =
+                    budget.try_acquire_explained(&test_actor_id(2_000 + i as u64), class, 1)
+                {
+                    all_guards.push(guard);
+                }
+            }
+            let global_label = budget
+                .try_acquire_explained(&peer, WaiterClass::Stream, 1)
+                .map(|_| ())
+                .unwrap_err();
+            assert_eq!(global_label, "global waiter count");
+            drop(all_guards);
+            // Global byte budget: a single over-ceiling payload is denied
+            // before any waiter count is consumed.
+            let global_bytes_label = budget
+                .try_acquire_explained(&peer, WaiterClass::Rpc, MAX_GLOBAL_WAITER_BYTES + 1)
+                .map(|_| ())
+                .unwrap_err();
+            assert_eq!(global_bytes_label, "global waiter byte budget");
+            // Per-peer byte budget: a peer retaining its full per-peer
+            // ceiling alone is denied at the per-peer boundary.
+            let peer_budget = Arc::new(WaiterBudget::default());
+            let _guard = peer_budget
+                .try_acquire_explained(&peer, WaiterClass::Stream, MAX_PEER_WAITER_BYTES)
+                .expect("exactly-at-ceiling acquisition must fit");
+            let peer_bytes_label = peer_budget
+                .try_acquire_explained(&peer, WaiterClass::Stream, 1)
+                .map(|_| ())
+                .unwrap_err();
+            assert_eq!(peer_bytes_label, "per-peer waiter byte budget");
         }
 
         // Release: clearing the projection admits every parked waiter and
@@ -2903,7 +2979,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "webrtc-v020")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn parked_reliable_tell_resumes_when_destination_materializes() {
         // End-to-end waiter regression: with a controller parked in
