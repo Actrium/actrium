@@ -7863,6 +7863,20 @@ public func actrErrorRequiresDlq(err: ActrError) -> Bool  {
 })
 }
 /**
+ * Test hook: fail with `err` so foreign-side error-buffer readers are
+ * exercised against the real Rust UniFFI writer — the discriminant, field
+ * order, and integer widths crossing the boundary are exactly the ones a
+ * production throw produces. Swift/Kotlin tests call this to prove their
+ * `FfiConverterTypeActrError.read` lifts a Rust-generated case-13
+ * `DeliveryUncertain` without losing `operation_id` or `cause`.
+ */
+public func actrErrorThrowForTest(err: ActrError)throws   {try rustCallWithError(FfiConverterTypeActrError_lift) {
+    uniffi_actr_fn_func_actr_error_throw_for_test(
+        FfiConverterTypeActrError_lower(err),$0
+    )
+}
+}
+/**
  * Set or clear the global log callback.
  *
  * Must be called **before** the actr node is created. The tracing subscriber

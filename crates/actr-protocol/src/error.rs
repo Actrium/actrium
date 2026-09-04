@@ -93,6 +93,13 @@ pub enum ActrError {
     /// This is intentionally terminal for generic automatic retry.  The
     /// operation identifier and cause are retained for diagnostics and for a
     /// caller that has its own idempotency policy.
+    ///
+    /// Folded into `ErrorKind::Internal` (not retryable) rather than given a
+    /// dedicated kind: like other `Internal` failures the framework has lost
+    /// the ability to reason about the outcome, so blanket retry is unsafe —
+    /// replaying bytes that may already be inside a transport could deliver
+    /// the payload twice. The classification is about retry ownership, not
+    /// about who is at fault.
     #[error("delivery uncertain for operation {operation_id}: {cause}")]
     DeliveryUncertain { operation_id: String, cause: String },
 

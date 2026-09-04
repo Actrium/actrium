@@ -468,7 +468,13 @@ pub enum HookEvent {
     /// never colliding.
     DataChunkDeliveryUncertain {
         operation_id: String,
-        session_id: u64,
+        /// `None` means the session is unknown or not applicable: the
+        /// synchronous send classification happens before or independently of
+        /// session selection (the failure may even travel over WebSocket).
+        /// Emitters that can name the WebRTC session invalidated by a
+        /// disconnect pass `Some(session_id)` so reconciliation can group the
+        /// uncertainty by session.
+        session_id: Option<u64>,
         reason: String,
     },
     // ── WebSocket ──

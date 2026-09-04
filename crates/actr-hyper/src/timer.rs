@@ -61,6 +61,7 @@ pub(crate) struct TimerDefinition {
 macro_rules! timer_inventory {
     (
         $(
+            $(#[$entry_attr:meta])*
             $symbol:ident => {
                 id: $id:literal,
                 owner: $owner:literal,
@@ -85,6 +86,7 @@ macro_rules! timer_inventory {
                 Duration::from_millis(100);
 
             $(
+                $(#[$entry_attr])*
                 #[allow(dead_code)] // Some entries are feature-gated in production.
                 pub(crate) const $symbol: TimerDefinition = TimerDefinition {
                     symbol: stringify!($symbol),
@@ -102,7 +104,8 @@ macro_rules! timer_inventory {
             )+
 
             #[allow(dead_code)] // Read by audit tests and external inventory tooling.
-            pub(crate) const ALL: &[TimerDefinition] = &[$($symbol),+];
+            pub(crate) const ALL: &[TimerDefinition] =
+                &[$($(#[$entry_attr])* $symbol),+];
         }
     };
 }
@@ -325,6 +328,13 @@ timer_inventory! {
         success: "the same peer becomes sendable again", interrupt: "peer recovery or gate shutdown",
         expiry: "release pending RPC response waits without closing the destination transport",
         reset: "each distinct sendability falling edge", external: false
+    },
+    #[cfg(test)]
+    PEER_TEST_EVENT_DELAY => {
+        id: "outbound.peer.test_event_delay", owner: "peer_gate tests", category: ProtocolSchedule,
+        duration: "test-chosen delay", arm: "a test schedules a projection/readiness event",
+        success: "delay elapses and the scheduled event fires", interrupt: "test cancellation",
+        expiry: "fire the scheduled test event", reset: "each scheduled event", external: false
     },
     PEER_TRANSPORT_CREATE => {
         id: "transport.peer.create", owner: "peer_transport", category: FailureDeadline,
