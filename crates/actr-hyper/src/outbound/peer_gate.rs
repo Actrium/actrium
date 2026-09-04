@@ -60,6 +60,14 @@ pub(crate) fn data_stream_operation_id(stream_id: &str) -> String {
     format!("{stream_id}#stream")
 }
 
+/// Minimum remaining budget a one-shot send (Tell/DataChunk) must retain
+/// after route readiness before committing to a transport write. This is a
+/// small absolute slice, deliberately not proportional to the caller budget:
+/// a route that clears within this slice of the deadline is refused pre-send
+/// (retryable `TimedOut`) instead of committing bytes whose mid-write expiry
+/// would surface as terminal `DeliveryUncertain`.
+const MIN_ONE_SHOT_SEND_SLICE: Duration = Duration::from_millis(25);
+
 /// Preserve in-flight reliable RPCs across a brief sendability dip, but do not
 /// let a remote-side recovery leave response waits parked until their much
 /// longer business deadline.
@@ -1196,9 +1204,6 @@ impl PeerGate {
         deadline: RpcDeadline,
     ) -> ActorResult<Bytes> {
         deadline.ensure_remaining()?;
-        let total_budget = deadline
-            .instant()
-            .saturating_duration_since(tokio::time::Instant::now());
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Request);
         let dest = Self::actr_id_to_dest(target);
         let request_id = envelope.request_id.clone();
@@ -1213,16 +1218,17 @@ impl PeerGate {
                 let admission = self
                     .wait_until_route_ready(target, &dest, payload_type, deadline)
                     .await?;
-                // Admission floor: a late-clearing route must not commit a
-                // send whose remaining budget cannot cover a meaningful
-                // response wait. Without the guard the request could be
-                // delivered while the caller has already timed out, and the
-                // timeout arm would tear down a healthy transport. Refusing
-                // admission commits nothing, so the caller may safely retry
-                // with a fresh budget. The floor is proportional (half the
-                // operation budget) so short caller-chosen timeouts still
-                // admit.
-                deadline.ensure_min_remaining(total_budget / 2)?;
+                // No proportional admission floor here: a floor derived from
+                // the total budget would reject usable residual budgets solely
+                // because route readiness consumed more than half of it (a
+                // 100 ms call whose route clears at 55 ms would refuse with
+                // 45 ms still usable, and retrying with a bigger budget
+                // changes the caller's timing semantics). The remaining
+                // budget is still bounded by `ensure_remaining` at
+                // registration and by the request deadline itself: a request
+                // committed with a thin slice simply races its own deadline,
+                // and the timeout arm tears down exactly the transport it was
+                // submitted to.
 
                 // The RAII guard removes pending state on send failure,
                 // response-channel closure, timeout, or caller cancellation.
@@ -1388,6 +1394,10 @@ impl PeerGate {
                     .wait_until_route_ready(target, &dest, payload_type, deadline)
                     .await?;
                 deadline.ensure_remaining()?;
+                // One-shot admission floor: committing bytes with less than
+                // the minimal slice left makes a mid-write expiry (terminal
+                // `DeliveryUncertain`) likelier than a safe pre-send refusal.
+                deadline.ensure_min_remaining(MIN_ONE_SHOT_SEND_SLICE)?;
                 self.send_once_with_admission(
                     &dest,
                     payload_type,
@@ -1705,6 +1715,10 @@ impl PeerGate {
                     .wait_until_route_ready(target, &dest, payload_type, deadline)
                     .await?;
                 deadline.ensure_remaining()?;
+                // One-shot admission floor: committing bytes with less than
+                // the minimal slice left makes a mid-write expiry (terminal
+                // `DeliveryUncertain`) likelier than a safe pre-send refusal.
+                deadline.ensure_min_remaining(MIN_ONE_SHOT_SEND_SLICE)?;
                 self.send_once_with_admission(
                     &dest,
                     payload_type,
@@ -2380,14 +2394,16 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn request_admission_refused_when_route_wait_consumes_budget() {
+    async fn request_admits_usable_residual_budget_after_route_wait() {
         let (gate, _transport, projection_tx, _builds, sends) =
             gate_with_projection(SendProjection::Blocked);
         let target = test_actor_id(2);
 
-        // The projection clears only after most of the 200ms budget is gone:
-        // admitting now would commit a send with ~no response budget, and the
-        // deadline arm would tear down the transport for a delivered request.
+        // The projection clears only after most of the 200ms budget is gone.
+        // There is deliberately no proportional admission floor for requests:
+        // the ~20ms residual budget is usable, the request is committed, and
+        // the deadline arm tears down exactly the transport it was submitted
+        // to when the response does not arrive in time.
         tokio::spawn(async move {
             crate::timer::sleep(
                 crate::timer::ids::PEER_TEST_EVENT_DELAY,
@@ -2410,13 +2426,13 @@ mod tests {
                 RpcDeadline::from_duration(Duration::from_millis(200)),
             )
             .await
-            .expect_err("admission below the remaining-budget floor must fail fast");
+            .expect_err("the response wait still races the residual budget");
 
         assert!(matches!(error, ActrError::TimedOut), "got {error:?}");
         assert_eq!(
             sends.load(Ordering::SeqCst),
-            0,
-            "nothing may be committed once the admission floor is missed"
+            1,
+            "the usable residual budget must commit the request — refusing it would reject usable budgets solely because readiness consumed half of the total"
         );
         assert_eq!(
             gate.pending_count().await,
@@ -3078,6 +3094,133 @@ mod tests {
         assert!(
             *revision.borrow_and_update() > after_commit,
             "removal must bump the revision"
+        );
+    }
+    #[cfg(feature = "webrtc-v020")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn at_most_once_survives_an_unsafe_reattempt_after_unknown() {
+        // Adversarial pin for the safe-reattempt boundary: a lane may report
+        // an honest `NotAttempted` failure (which earns the single bounded
+        // reattempt), but the moment an attempt classifies as `Unknown` no
+        // further wire write may happen — the third scripted outcome (`Ok`)
+        // would be reached and delivered if the boundary regressed into an
+        // unsafe replay.
+        use crate::transport::SendAttemptResult;
+        use std::collections::VecDeque;
+
+        #[derive(Debug)]
+        struct AdversarialLane {
+            writes: Arc<AtomicUsize>,
+            outcomes: tokio::sync::Mutex<VecDeque<SendAttemptResult>>,
+        }
+
+        #[async_trait]
+        impl DataLane for AdversarialLane {
+            async fn send_with_progress(&self, _data: bytes::Bytes) -> SendAttemptResult {
+                self.writes.fetch_add(1, Ordering::SeqCst);
+                self.outcomes
+                    .lock()
+                    .await
+                    .pop_front()
+                    .expect("script must cover every attempted write")
+            }
+
+            fn lane_type(&self) -> &'static str {
+                "adversarial-at-most-once"
+            }
+        }
+
+        #[derive(Debug)]
+        struct AdversarialWire {
+            lane: Arc<AdversarialLane>,
+        }
+
+        #[async_trait]
+        impl WireHandle for AdversarialWire {
+            fn connection_type(&self) -> crate::transport::ConnType {
+                crate::transport::ConnType::WebSocket
+            }
+            fn priority(&self) -> u8 {
+                1
+            }
+            async fn connect(&self) -> NetworkResult<()> {
+                Ok(())
+            }
+            fn is_connected(&self) -> bool {
+                true
+            }
+            async fn close(&self) -> NetworkResult<()> {
+                Ok(())
+            }
+            async fn get_lane(&self, _t: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
+                Ok(self.lane.clone())
+            }
+        }
+
+        #[derive(Debug)]
+        struct AdversarialWireBuilder {
+            wire: Arc<AdversarialWire>,
+        }
+
+        #[async_trait]
+        impl WireBuilder for AdversarialWireBuilder {
+            async fn create_connections(
+                &self,
+                _d: &Dest,
+            ) -> NetworkResult<Vec<Arc<dyn WireHandle>>> {
+                Ok(vec![self.wire.clone()])
+            }
+        }
+
+        let writes = Arc::new(AtomicUsize::new(0));
+        let outcomes = VecDeque::from(vec![
+            // First write: proven pre-send closure — eligible for the single
+            // bounded reattempt.
+            SendAttemptResult::failed(
+                NetworkError::DataChannelClosed("closed before write".into()),
+                DeliveryProgress::NotAttempted,
+            ),
+            // Second write: an ambiguous failure. Any further write here
+            // would be an unsafe replay.
+            SendAttemptResult::failed(
+                NetworkError::SendError("ambiguous partial write".into()),
+                DeliveryProgress::Unknown,
+            ),
+            // Third outcome: only reached if the boundary regresses.
+            SendAttemptResult::submitted(),
+        ]);
+
+        let gate = PeerGate::for_test(Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(AdversarialWireBuilder {
+                wire: Arc::new(AdversarialWire {
+                    lane: Arc::new(AdversarialLane {
+                        writes: writes.clone(),
+                        outcomes: tokio::sync::Mutex::new(outcomes),
+                    }),
+                }),
+            }),
+        )));
+
+        let err = gate
+            .send_tell_with_type_until(
+                &test_actor_id(2),
+                PayloadType::RpcReliable,
+                RpcEnvelope::default(),
+                RpcDeadline::from_duration(Duration::from_secs(1)),
+            )
+            .await
+            .expect_err("the ambiguous attempt must surface");
+
+        assert!(
+            matches!(&err, ActrError::DeliveryUncertain { .. }),
+            "got {err:?}"
+        );
+        assert!(!err.is_retryable());
+        assert_eq!(
+            writes.load(Ordering::SeqCst),
+            2,
+            "exactly two wire writes: initial + one safe reattempt; the Unknown attempt must never be replayed"
         );
     }
 }
