@@ -37,6 +37,25 @@ pub(crate) fn data_chunk_operation_id(stream_id: &str, sequence: u64) -> String 
     format!("{stream_id}#{sequence}")
 }
 
+/// Build the caller-visible identity for a whole-stream delivery-uncertainty
+/// event (a WebRTC session close invalidating every outstanding chunk on the
+/// stream at once, where no single sequence is authoritative).
+///
+/// Chunk keys end in `#` followed by the decimal sequence
+/// ([`data_chunk_operation_id`]); this key ends in the non-numeric marker
+/// `#stream`. Because a chunk sequence is always decimal, no chunk key can
+/// end in `#stream`, and this key never ends in `#` + digits — the two
+/// scopes are disjoint by construction even when a stream id itself contains
+/// `#` (e.g. stream `"s#4"` stream-scoped key is `"s#4#stream"`, which
+/// cannot collide with the chunk key `"s#4"` of stream `"s"`).
+///
+/// Contract for stream-scoped uncertain-delivery emitters; exercised by the
+/// hook tests today (a production stream-wide emitter adopts it on landing).
+#[allow(dead_code)]
+pub(crate) fn data_stream_operation_id(stream_id: &str) -> String {
+    format!("{stream_id}#stream")
+}
+
 /// Preserve in-flight reliable RPCs across a brief sendability dip, but do not
 /// let a remote-side recovery leave response waits parked until their much
 /// longer business deadline.
@@ -1501,6 +1520,35 @@ mod tests {
             data_chunk_operation_id("stream-1", 5)
         );
         assert_eq!(data_chunk_operation_id("stream-1", 4), "stream-1#4");
+    }
+
+    #[test]
+    fn data_stream_operation_id_never_collides_with_chunk_keys() {
+        // Stream ids are unconstrained protobuf strings and may contain `#`.
+        // The stream-scoped key must therefore stay disjoint from every
+        // chunk-scoped key by construction, not by convention.
+        assert_eq!(data_stream_operation_id("s"), "s#stream");
+        assert_ne!(
+            data_stream_operation_id("s#4"),
+            data_chunk_operation_id("s", 4),
+            "a stream literally named `s#4` must not collide with stream `s` sequence 4"
+        );
+        // Exhaustive over the digit-tail rule: a chunk key always ends in
+        // `#` + decimal digits, a stream key always ends in `#stream`.
+        for (stream, sequence) in [("s", 4u64), ("s#4", 5), ("a#b#c", 123)] {
+            let chunk_key = data_chunk_operation_id(stream, sequence);
+            assert!(
+                chunk_key.rsplit_once('#').is_some_and(|(_, seq)| {
+                    !seq.is_empty() && seq.bytes().all(|b| b.is_ascii_digit())
+                }),
+                "chunk keys end in #digits: {chunk_key}"
+            );
+            assert_ne!(
+                chunk_key,
+                data_stream_operation_id(stream),
+                "scopes must stay disjoint for stream {stream:?}"
+            );
+        }
     }
 
     #[test]

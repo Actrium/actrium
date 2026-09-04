@@ -502,22 +502,25 @@ async fn deliver_hook_event(
             }
         }
         HookEvent::DataChunkDeliveryUncertain {
-            stream_id,
+            operation_id,
             session_id,
             reason,
         } => {
             if let (Some(ctx), Some(observer)) = (ctx_opt.as_ref(), observer) {
                 let event = ErrorEvent::now(
                     ActrError::DeliveryUncertain {
-                        // Stream-scoped identity: the bare `stream_id`, not a
-                        // chunk-level `stream_id#sequence` key — the
-                        // disconnect invalidates every outstanding chunk on
-                        // the stream, so no single sequence applies.
-                        operation_id: stream_id.clone(),
+                        // The emitter composes the scope-correct key
+                        // (chunk-scoped `stream#sequence` or stream-scoped
+                        // `stream#stream`); both forms are disjoint by
+                        // construction, so reconciliation by operation id is
+                        // unambiguous.
+                        operation_id: operation_id.clone(),
                         cause: "data stream delivery uncertain after WebRTC disconnect".to_string(),
                     },
                     ErrorCategory::DataChunkDeliveryUncertain,
-                    format!("stream_id={stream_id}; session_id={session_id}; reason={reason}"),
+                    format!(
+                        "operation_id={operation_id}; session_id={session_id}; reason={reason}"
+                    ),
                 );
                 if let Err(e) = observer.on_error(ctx, &event).await {
                     tracing::warn!(error = %e, "workload on_error returned Err");
@@ -627,12 +630,12 @@ fn log_hook_event(event: &HookEvent) {
             );
         }
         HookEvent::DataChunkDeliveryUncertain {
-            stream_id,
+            operation_id,
             session_id,
             reason,
         } => {
             tracing::warn!(
-                stream_id = %stream_id,
+                operation_id = %operation_id,
                 session_id = *session_id,
                 reason = %reason,
                 "data stream delivery uncertain",
