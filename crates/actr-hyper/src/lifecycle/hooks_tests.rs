@@ -539,7 +539,7 @@ async fn data_chunk_uncertain_hook_routes_to_on_error() {
 
     cb(HookEvent::DataChunkDeliveryUncertain {
         operation_id: "mobile-upload#7".to_string(),
-        session_id: 99,
+        session_id: Some(99),
         reason: "data channel closed".to_string(),
     })
     .await;
@@ -1009,7 +1009,7 @@ fn log_hook_event_covers_all_variants() {
     });
     log_hook_event(&HookEvent::DataChunkDeliveryUncertain {
         operation_id: "s".into(),
-        session_id: 1,
+        session_id: Some(1),
         reason: "r".into(),
     });
     log_hook_event(&HookEvent::WebSocketConnectStart {

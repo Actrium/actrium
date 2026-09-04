@@ -661,3 +661,33 @@ async fn tell_raw_accepts_rpc_signal_and_stamps_tell() {
     assert_eq!(sent.direction, Some(Direction::Tell as i32));
     assert_eq!(sent.timeout_ms, 0);
 }
+
+#[tokio::test]
+async fn realm_unavailable_maps_to_permission_denied_on_both_readiness_paths() {
+    // A realm-denied session is terminal: both readiness entry points must
+    // surface the same PermissionDenied contract, never a retryable
+    // ConnectionNotReady.
+    let mut c = ctx();
+    let ss = SessionState::new(
+        crate::lifecycle::session_state::SessionSnapshot::empty_with_id(ActrId::default(), 9),
+    );
+    c.session_state = Some(ss.clone());
+    c.context_generation = 9;
+    ss.set_realm_unavailable().await;
+
+    let err = c.ensure_session_ready().await.unwrap_err();
+    assert!(
+        matches!(err, ActrError::PermissionDenied(_)),
+        "legacy path: got {err:?}"
+    );
+
+    let deadline = crate::transport::RpcDeadline::from_duration(std::time::Duration::from_secs(1));
+    let err = c
+        .ensure_session_ready_until(crate::timer::ids::RUNTIME_CALL_PREFLIGHT, deadline)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ActrError::PermissionDenied(_)),
+        "deadline path: got {err:?}"
+    );
+}

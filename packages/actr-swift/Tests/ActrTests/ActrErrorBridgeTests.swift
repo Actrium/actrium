@@ -1,4 +1,5 @@
 @testable import Actr
+import ActrBindings
 import Testing
 
 @Suite(.serialized)
@@ -28,24 +29,27 @@ struct ActrErrorBridgeTests {
     @Test
     func rustThrownDeliveryUncertainLiftsThroughErrorBuffer() throws {
         // Drive a genuine Rust UniFFI throw through the FFI error buffer so
-        // the Swift reader (discriminant, field order, integer width) is
-        // exercised against the Rust writer, not just against itself.
+        // the generated reader (discriminant, field order, integer width) is
+        // exercised against the Rust writer, not just against itself. The
+        // throw/lift cycle stays at the ActrBindings level; the lifted value
+        // is then fed through the high-level classifier wrappers.
         do {
-            try actrErrorThrowForTest(
+            try ActrBindings.actrErrorThrowForTest(
                 err: .DeliveryUncertain(
                     operationId: "swift-ffi-1",
                     cause: "ambiguous partial write"
                 ))
             Issue.record("actrErrorThrowForTest was expected to throw")
-        } catch let error as ActrError {
+        } catch let error as ActrBindings.ActrError {
             guard case let .DeliveryUncertain(operationId, cause) = error else {
                 Issue.record("expected DeliveryUncertain, got \(error)")
                 return
             }
             #expect(operationId == "swift-ffi-1")
             #expect(cause == "ambiguous partial write")
-            #expect(actrErrorKind(error) == .internal)
-            #expect(!actrErrorIsRetryable(error))
+            let lifted = ActrError(bridge: error)
+            #expect(actrErrorKind(lifted) == .internal)
+            #expect(!actrErrorIsRetryable(lifted))
         }
     }
 }
