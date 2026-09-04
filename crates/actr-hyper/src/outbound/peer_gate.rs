@@ -173,14 +173,16 @@ impl PeerGate {
     /// Mirror a synchronous `DeliveryUncertain` to hook observers. The send
     /// path cannot name a session (the failure may precede session selection
     /// or travel over WebSocket), so `session_id` is reported as 0 and the
-    /// reason carries the caller-visible cause.
-    fn emit_data_chunk_uncertain_hook(&self, stream_id: &str, cause: &str) {
+    /// reason carries the caller-visible cause. The event uses the exact
+    /// caller-visible operation id (`stream_id#sequence`) so both channels
+    /// reconcile on one key.
+    fn emit_data_chunk_uncertain_hook(&self, operation_id: &str, cause: &str) {
         if let Some(callback) = self.hook_callback.get() {
             // The dispatcher enqueues synchronously inside the closure; the
             // returned future is a no-op handle and may be dropped.
             drop(callback(
                 crate::wire::webrtc::HookEvent::DataChunkDeliveryUncertain {
-                    stream_id: stream_id.to_string(),
+                    operation_id: operation_id.to_string(),
                     session_id: 0,
                     reason: format!("synchronous send classification: {cause}"),
                 },
@@ -697,8 +699,10 @@ impl PeerGate {
 
                     #[cfg(feature = "webrtc-v020")]
                     let snapshot_changed = async {
+                        // Any snapshot revision may unblock the wait: the
+                        // readiness projection is destination-wide, so there
+                        // is no per-peer filtering to apply — both arms wake.
                         match snapshots.recv().await {
-                            Ok(snapshot) if snapshot.peer == *target => Ok(()),
                             Ok(_) => Ok(()),
                             Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => Ok(()),
                             Err(tokio::sync::broadcast::error::RecvError::Closed) => Err(()),
@@ -1190,6 +1194,17 @@ impl PeerGate {
                 // Unavailable so callers and language bindings can distinguish
                 // "request never reached the server" from "server did not reply
                 // in time".
+                //
+                // Deliberate asymmetry vs Tell/DataChunk: a request that
+                // timed out after submission stays retryable because this
+                // arm force-closes the transport it was submitted to
+                // (`close_timed_out_request_transport`) — a caller retry
+                // cannot double-deliver on the stale wire, and the pending
+                // response correlation is reclaimed rather than left
+                // ambiguous. One-way Tell/DataChunk sends have no such
+                // correlation handle to reclaim and no dedup on the far
+                // side, so those surfaces are terminal `DeliveryUncertain`
+                // after an ambiguous submission instead.
                 if send_started {
                     let transport_manager = self.transport_manager.clone();
                     let stale_dest = dest.clone();
@@ -1644,7 +1659,7 @@ impl PeerGate {
             Ok(Ok(_identity)) => Ok(()),
             Ok(Err(e)) => {
                 if let ActrError::DeliveryUncertain { cause, .. } = &e {
-                    self.emit_data_chunk_uncertain_hook(stream_id, cause);
+                    self.emit_data_chunk_uncertain_hook(operation_id, cause);
                 }
                 Err(e)
             }
@@ -1652,7 +1667,7 @@ impl PeerGate {
                 None | Some(DeliveryProgress::NotAttempted) => Err(ActrError::TimedOut),
                 Some(DeliveryProgress::SubmittedLocally) | Some(DeliveryProgress::Unknown) => {
                     let cause = "data chunk send deadline elapsed after transport submission";
-                    self.emit_data_chunk_uncertain_hook(stream_id, cause);
+                    self.emit_data_chunk_uncertain_hook(operation_id, cause);
                     Err(Self::delivery_uncertain_error(Some(operation_id), cause))
                 }
             },

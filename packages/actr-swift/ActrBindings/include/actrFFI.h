@@ -843,6 +843,11 @@ RustBuffer uniffi_actr_fn_func_actr_error_kind(RustBuffer err, RustCallStatus *_
 int8_t uniffi_actr_fn_func_actr_error_requires_dlq(RustBuffer err, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_FUNC_ACTR_ERROR_THROW_FOR_TEST
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_FUNC_ACTR_ERROR_THROW_FOR_TEST
+void uniffi_actr_fn_func_actr_error_throw_for_test(RustBuffer err, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_FUNC_SET_LOG_CALLBACK
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_FUNC_SET_LOG_CALLBACK
 void uniffi_actr_fn_func_set_log_callback(RustBuffer callback, RustCallStatus *_Nonnull out_status
@@ -1138,7 +1143,13 @@ uint16_t uniffi_actr_checksum_func_actr_error_kind(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_FUNC_ACTR_ERROR_REQUIRES_DLQ
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_FUNC_ACTR_ERROR_REQUIRES_DLQ
 uint16_t uniffi_actr_checksum_func_actr_error_requires_dlq(void
-    
+
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_FUNC_ACTR_ERROR_THROW_FOR_TEST
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_FUNC_ACTR_ERROR_THROW_FOR_TEST
+uint16_t uniffi_actr_checksum_func_actr_error_throw_for_test(void
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_FUNC_SET_LOG_CALLBACK
