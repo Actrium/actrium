@@ -224,6 +224,9 @@ jobs:
           # wasm32-wasip2 is required by crates/actr-hyper/build.rs to compile
           # the wasm_actor_fixture Component under --all-features.
           targets: wasm32-wasip2
+          # rustfmt + clippy are not in the minimal profile; this job runs
+          # `cargo fmt --check` and clippy with -D warnings.
+          components: rustfmt,clippy
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.9
       - name: OTel payload-logging guard
