@@ -6,12 +6,15 @@ import Testing
 struct ActrErrorBridgeTests {
     @Test
     func deliveryUncertainBridgeRoundTripPreservesFields() {
-        let original = ActrError.DeliveryUncertain(
+        // Both modules define `ActrError` (the high-level wrapper in `Actr`
+        // and the generated enum in `ActrBindings`), so every reference here
+        // is module-qualified.
+        let original = Actr.ActrError.DeliveryUncertain(
             operationId: "swift-call-1",
             cause: "WebRTC generation replaced before Response"
         )
 
-        let roundTrip = ActrError(bridge: original.bridge)
+        let roundTrip = Actr.ActrError(bridge: original.bridge)
 
         #expect(roundTrip == original)
         // Send the generated discriminant through the Rust FFI classifier as
@@ -47,7 +50,7 @@ struct ActrErrorBridgeTests {
             }
             #expect(operationId == "swift-ffi-1")
             #expect(cause == "ambiguous partial write")
-            let lifted = ActrError(bridge: error)
+            let lifted = Actr.ActrError(bridge: error)
             #expect(actrErrorKind(lifted) == .internal)
             #expect(!actrErrorIsRetryable(lifted))
         }
