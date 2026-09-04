@@ -20,7 +20,7 @@ Official release artifacts are published from the package-sync repository:
   v
 [actr-kotlin-package-sync/.github/workflows/release.yml]
   |
-  | 1. Checkout Actrium/actr @ v{version}
+  | 1. Checkout Actrium/actrium @ v{version}
   | 2. build-android.sh → jniLibs/{arm64-v8a,x86_64}/libactr.so
   | 3. scripts/package-binary.sh → dist/actr-kotlin-native.zip
   | 4. ./gradlew :actr-kotlin:publish → GitHub Packages (Maven)
