@@ -411,9 +411,15 @@ impl PeerTransport {
             return false;
         };
         let ready = transport.watch_ready().borrow().clone();
-        payload_type.data_lane_types().iter().any(|lane| {
-            !lane.needs_webrtc() && ready.contains(&super::wire_pool::ConnType::WebSocket)
-        })
+        // The fallback question is "could a plain (non-WebRTC) lane of this
+        // payload ride the already-ready WebSocket". WebSocket readiness is
+        // per-transport, not per-lane, so the per-lane term only decides
+        // whether the payload can use non-WebRTC lanes at all.
+        let can_use_plain_lane = payload_type
+            .data_lane_types()
+            .iter()
+            .any(|lane| !lane.needs_webrtc());
+        can_use_plain_lane && ready.contains(&super::wire_pool::ConnType::WebSocket)
     }
 
     /// Subscribe to the ready-set of an already-materialized destination.
