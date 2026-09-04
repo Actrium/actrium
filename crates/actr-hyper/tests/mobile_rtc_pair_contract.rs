@@ -56,6 +56,20 @@ fn pause_after_first_fragment() -> (
     )
 }
 
+/// A fresh physical connection must be initiated by the stable Offerer. The
+/// Answerer only waits for this Offer after its request-only recovery attempt.
+async fn reconnect_from_offerer(
+    pair: &MobileRtcPairHarness,
+    offerer_endpoint: PairEndpoint,
+    answerer_endpoint: PairEndpoint,
+) {
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let answerer = pair.id(answerer_endpoint);
+    let offerer = pair.harness().peer(pair.serial(offerer_endpoint));
+    let _ = offerer.rtc.close_peer(&answerer).await;
+    offerer.rtc.connect(answerer).await;
+}
+
 fn wifi() -> NetworkTransportFlags {
     NetworkTransportFlags {
         wifi: true,
@@ -278,6 +292,7 @@ async fn p03_a_only_long_background_preserves_duration_and_hard_rebuilds_pair() 
     pair.wait_rtc_fault_hit(Duration::from_secs(10)).await;
     pair.foreground(PairEndpoint::A, Duration::from_secs(65))
         .await;
+    reconnect_from_offerer(&pair, PairEndpoint::A, PairEndpoint::B).await;
     pair.harness()
         .peer(pair.serial(PairEndpoint::A))
         .rtc
@@ -981,6 +996,7 @@ async fn p14_inflight_rpc_is_bounded_across_hard_recovery(
     pair.background(PairEndpoint::A).await;
     pair.foreground(PairEndpoint::A, Duration::from_secs(65))
         .await;
+    reconnect_from_offerer(&pair, PairEndpoint::A, PairEndpoint::B).await;
     let outcome = tokio::time::timeout(Duration::from_secs(15), request)
         .await
         .expect("in-flight request must complete or fail within the recovery bound")
@@ -1064,6 +1080,7 @@ async fn p15_inflight_fragmented_message_is_integral_or_bounded(
     pair.background(PairEndpoint::A).await;
     pair.foreground(PairEndpoint::A, Duration::from_secs(65))
         .await;
+    reconnect_from_offerer(&pair, PairEndpoint::A, PairEndpoint::B).await;
     release.notify_waiters();
     drop(hook_guard);
 
@@ -1122,6 +1139,7 @@ async fn p15_inflight_fragmented_message_is_integral_or_bounded(
     pair.background(PairEndpoint::A).await;
     pair.foreground(PairEndpoint::A, Duration::from_secs(65))
         .await;
+    reconnect_from_offerer(&pair, PairEndpoint::A, PairEndpoint::B).await;
     data_release.notify_waiters();
     drop(data_hook_guard);
     let data_outcome = tokio::time::timeout(Duration::from_secs(20), data_send)

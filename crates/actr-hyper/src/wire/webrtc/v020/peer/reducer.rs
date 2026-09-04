@@ -38,8 +38,6 @@ use super::state::{
 /// finite even when candidates for future ICE generations never become usable.
 const MAX_BUFFERED_ICE_CANDIDATES: usize = 256;
 
-const ANSWERER_RESTART_REQUEST_MAX_ATTEMPTS: u32 = 3;
-
 /// Business / manager control commands (bounded mpsc into the controller).
 ///
 /// `Debug` is manual: the S6-2 media variants carry `Arc<dyn …>` trait objects
@@ -821,11 +819,17 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                 } else if state.role == Role::Answerer
                     && state.active_generation.is_some()
                     && !state.recovery_negotiated
-                    && state.local_restart_request_attempt < ANSWERER_RESTART_REQUEST_MAX_ATTEMPTS
+                    && !state.awaiting_offer
+                    && !state.address_changed
                 {
                     // Lost request/offer: retransmit the same correlated
                     // request and move to a new attempt epoch so the controller
-                    // arms one fresh per-attempt deadline.
+                    // arms one fresh per-attempt deadline. The attempt counter
+                    // is observability only; the stable recovery-cycle budget
+                    // is the sole bound. Do not escalate to Hard Recovery just
+                    // because a request has timed out: an Answerer cannot
+                    // create the restart offer and a new PC would churn while
+                    // waiting for the Offerer to wake up.
                     state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
                     send_answerer_restart_request(state, &mut effects);
                 } else if state.role == Role::Offerer
@@ -847,14 +851,21 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                     // unusable/closed Session, or another explicit hard-failure
                     // fact instead of being the first timeout response.
                     //
-                    // The Answerer is intentionally excluded. It already
-                    // retransmits one correlated restart request up to its
-                    // bounded request budget above; exhausting that budget is
-                    // evidence that the remote Session may no longer exist and
-                    // must keep the legacy Hard Recovery fallback.
+                    // The Answerer follows the same stable recovery-cycle
+                    // budget while it still has a live physical Session: it
+                    // retransmits the correlated restart request until the
+                    // 60-second budget expires. Once it must replace that
+                    // Session, it parks and waits for the Offerer instead of
+                    // creating a local Hard-Recovery generation.
                     state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
                     state.recovery_attempt_started = false;
                     start_soft_recovery(state, &mut effects);
+                } else if state.role == Role::Answerer && state.awaiting_offer {
+                    // The Answerer has no local SDP with which to create a
+                    // replacement. Its recovery is deliberately parked until
+                    // the Offerer starts a fresh physical connection; no
+                    // deadline may turn this passive wait into hard-recovery
+                    // churn.
                 } else {
                     start_hard_recovery(state, &mut effects);
                 }
@@ -1168,8 +1179,8 @@ fn supersede_transport_attempt_with_offer(
     state.begin_transport_attempt();
 }
 
-/// Rebase an already-building Hard-Recovery replacement onto a fresh remote
-/// ordinary Offer without allocating a wasteful third PeerConnection.
+/// Rebase an already-building replacement onto a fresh remote ordinary Offer
+/// without allocating a wasteful third PeerConnection.
 ///
 /// The replacement Session itself is reusable, but the recovery budget and all
 /// SDP/ICE correlation facts that led to it are not. Keeping the old
@@ -1561,11 +1572,13 @@ fn reduce_command(
                                 && (state.building_generation.is_some()
                                     || state.pending_generation.is_some())
                             {
-                                // Both peers can start Hard Recovery concurrently.
-                                // Apply the offer to our replacement if its Session
-                                // already exists; otherwise hold it for the in-flight
-                                // build. Never discard that replacement and allocate
-                                // a third generation merely because its remote ICE
+                                // The Offerer may send a fresh Offer while this
+                                // Answerer still has a replacement slot from an
+                                // earlier connection flow. Apply the offer to
+                                // that replacement if its Session already exists;
+                                // otherwise hold it for the in-flight build. Never
+                                // discard that replacement and allocate a third
+                                // generation merely because its remote ICE
                                 // credentials are new.
                                 if is_new_connection {
                                     rebase_replacement_attempt_with_offer(
@@ -1776,18 +1789,21 @@ fn restart_initial_as_offerer(state: &mut RtcPeerState, effects: &mut Vec<RtcPee
 /// * `NetworkAvailable`: if recovering and the address hasn't changed, start
 ///   Soft Recovery (ICE restart). If `address_changed`, start Hard Recovery
 ///   (the current PeerConnection's ICE candidates are stale).
-/// * `LocalAddressChanged`: set `address_changed = true`; start Hard Recovery
-///   once the lifecycle supervisor has committed a usable signaling
-///   generation (RFC §"Hard Recovery is suitable for: local interface or IP
+/// * `LocalAddressChanged`: set `address_changed = true`; the Offerer starts
+///   Hard Recovery once the lifecycle supervisor has committed a usable
+///   signaling generation. An Answerer waits for the Offerer to send the next
+///   Offer (RFC §"Hard Recovery is suitable for: local interface or IP
 ///   changes").
 /// * `AppBackground`: if the peer is `Sendable`, enter `Recovering`
 ///   (sendable=false) because the platform may suspend the process and the
 ///   connection must be re-established on foreground. No restart is issued
 ///   yet — recovery resumes on `AppForeground`.
 /// * `AppForeground`: if recovering and address hasn't changed, start Soft
-///   Recovery. If `address_changed`, start Hard Recovery.
-/// * `ForceReconnect`: set `address_changed = true` (force Hard) and wait for
-///   the supervisor-owned signaling recovery gate before rebuilding.
+///   Recovery. If `address_changed`, the Offerer starts Hard Recovery and the
+///   Answerer waits for its next Offer.
+/// * `ForceReconnect`: set `address_changed = true` (force Hard for the
+///   Offerer) and wait for the supervisor-owned signaling recovery gate before
+///   rebuilding.
 fn recovery_gate_open(state: &RtcPeerState) -> bool {
     state.network_available
         && state.app_foreground
@@ -1837,6 +1853,9 @@ fn defer_recovery_until_gate(state: &mut RtcPeerState, hard: bool) {
 
 fn maybe_start_deferred_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect>) {
     if !state.recovery_inflight || state.recovery_attempt_started || !recovery_gate_open(state) {
+        return;
+    }
+    if state.role == Role::Answerer && state.awaiting_offer {
         return;
     }
     if state.address_changed {
@@ -1998,6 +2017,9 @@ fn clear_negotiation_for_recovery(state: &mut RtcPeerState) {
 
 fn start_soft_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect>) {
     if state.recovery_attempt_started {
+        return;
+    }
+    if state.role == Role::Answerer && state.recovery_inflight && state.awaiting_offer {
         return;
     }
     if !recovery_gate_open(state) {
@@ -2209,22 +2231,29 @@ fn terminate_transport_attempt(
     state.bump_revision();
 }
 
-/// S5-3/S5-4: start Hard Recovery — increase the PC generation and build a
-/// replacement (RFC §"Hard Recovery" process: steps 2/3/4). When there is an
-/// active session, uses make-before-break: the old session stays alive while
-/// the replacement is built as `pending_generation`. When the pending session
-/// is fully ready (connected + RpcReliable open), `atomic_switch` fires (old →
-/// retiring, pending → active). When there is no active session (initial
-/// build failure, orphaned), falls back to break-before-make.
+/// S5-3/S5-4: start Offerer-side Hard Recovery — increase the PC generation and
+/// build a replacement (RFC §"Hard Recovery" process: steps 2/3/4). When there
+/// is an active session, uses make-before-break: the old session stays alive
+/// while the replacement is built as `pending_generation`. When the pending
+/// session is fully ready (connected + RpcReliable open), `atomic_switch` fires
+/// (old → retiring, pending → active). When there is no active session (initial
+/// build failure, orphaned), falls back to break-before-make. An Answerer has no
+/// local Offer to negotiate a replacement, so it is parked by
+/// `wait_for_offerer_offer` instead.
 ///
-/// Triggers: local address change, irrecoverable Soft Recovery failure, mailbox
-/// overflow, `ForceReconnect`. Hard Recovery is also suitable for: driver exit,
-/// non-converging status, socket/bind plan unusable, app lifecycle policy
-/// (RFC §"Hard Recovery is suitable for").
+/// Offerer triggers: local address change, irrecoverable Soft Recovery failure,
+/// mailbox overflow, `ForceReconnect`, driver exit, non-converging status,
+/// socket/bind plan unusable, or app lifecycle policy (RFC §"Hard Recovery is
+/// suitable for"). The same physical failures on an Answerer park the logical
+/// attempt and wait for an Offerer-created Offer.
 fn start_hard_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect>) {
     if state.recovery_attempt_started
         && (state.building_generation.is_some() || state.pending_generation.is_some())
     {
+        return;
+    }
+    if state.role == Role::Answerer {
+        wait_for_offerer_offer(state);
         return;
     }
     if !recovery_gate_open(state) {
@@ -2305,25 +2334,36 @@ fn start_hard_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
         generation: new_generation,
         operation_id,
     });
+}
 
-    // An answerer cannot produce the replacement offer itself. Re-run the
-    // server-owned role arbitration so the stable offerer is explicitly
-    // woken and rebuilds its side of the physical Session. The repeated
-    // offerer assignment is handled by `ApplyRoleAssignment` above; when its
-    // fresh offer arrives, this answerer's in-flight/pending replacement
-    // consumes it. Without this wake, an answerer-only address change or
-    // ForceReconnect builds a PC that can never leave Negotiating.
-    if state.role == Role::Answerer {
-        tracing::debug!(
-            peer = %state.peer_id.to_string_repr(),
-            new_generation,
-            "v0.20 answerer re-running role negotiation for the hard recovery"
-        );
-        effects.push(RtcPeerEffect::SendSignaling {
-            generation: new_generation,
-            message: SignalingMessage::RoleNegotiation,
-        });
+/// An Answerer cannot create a useful replacement PeerConnection: it has no
+/// local Offer to negotiate against. Keep the logical recovery cycle alive and
+/// wait for the stable Offerer to initiate the next physical connection. The
+/// six-second attempt timer is disarmed; the single end-to-end recovery budget
+/// remains the backstop and performs the normal terminal cleanup.
+fn wait_for_offerer_offer(state: &mut RtcPeerState) {
+    if !state.recovery_inflight {
+        state.recovery_cycle = state.recovery_cycle.wrapping_add(1);
     }
+    state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
+    clear_negotiation_for_recovery(state);
+    state.recovery_inflight = true;
+    state.recovery_attempt_started = false;
+    state.recovery_negotiated = false;
+    state.address_changed = false;
+    state.pc_connected = false;
+    state.rpc_reliable_open = false;
+    state.awaiting_offer = true;
+    state.phase = RtcPeerPhase::Recovering;
+    state.bump_revision();
+    tracing::info!(
+        peer = %state.peer_id.to_string_repr(),
+        role = ?state.role,
+        recovery_cycle = state.recovery_cycle,
+        recovery_epoch = state.recovery_epoch,
+        generation = state.active_generation,
+        "v0.20 answerer waiting for offerer to initiate recovery"
+    );
 }
 
 /// Exhaust one complete recovery cycle without terminating the Controller.
@@ -2516,20 +2556,25 @@ fn reduce_state_tick(
         state.pc_connected = false;
         if state.ever_connected {
             // S5-2/S5-3: a previously-connected peer failing transitions to
-            // Recovering and starts Soft Recovery (ICE restart) unless the
-            // address changed (which forces Hard Recovery: PC generation + 1).
-            if !state.recovery_inflight {
+            // Recovering. Only the Offerer can choose between Soft Recovery
+            // and a new Hard-Recovery PC. An Answerer whose physical PC has
+            // failed cannot restart it locally; it waits for the Offerer to
+            // initiate a new Offer.
+            if state.role == Role::Answerer {
+                wait_for_offerer_offer(state);
+            } else if !state.recovery_inflight {
                 state.phase = RtcPeerPhase::Recovering;
                 if !state.address_changed {
                     start_soft_recovery(state, effects);
                 } else {
-                    // S5-3: address changed → Hard Recovery.
+                    // S5-3: address changed → Offerer Hard Recovery.
                     start_hard_recovery(state, effects);
                 }
             } else if state.address_changed {
                 // S5-3: Soft Recovery was in flight but the address changed —
-                // escalate to Hard Recovery (the current PeerConnection's
-                // candidates are stale).
+                // escalate the Offerer to Hard Recovery (the current
+                // PeerConnection's candidates are stale). An Answerer remains
+                // parked until the Offerer sends a fresh Offer.
                 start_hard_recovery(state, effects);
             }
         } else {
@@ -2549,13 +2594,15 @@ fn reduce_state_tick(
                 // S5-2: temporary network loss starts Soft Recovery.
                 start_soft_recovery(state, effects);
             } else {
-                // S5-3: address changed → Hard Recovery.
+                // S5-3: address changed → Offerer Hard Recovery; an Answerer
+                // waits for the Offerer to initiate a new Offer.
                 start_hard_recovery(state, effects);
             }
         }
     } else if closed && !state.close_requested {
         // A physically closed established Session cannot Soft Recover. Retire
-        // that generation and rebuild under the same logical transport flight.
+        // that generation and let the Offerer rebuild under the same logical
+        // transport flight; an Answerer waits for the resulting fresh Offer.
         // A close during the initial attempt is terminal and must release both
         // the Session and the transport-layer cache entry.
         state.pc_connected = false;
@@ -3289,10 +3336,10 @@ fn reduce_build_session(
             }
         }
         Err(_) => {
-            // S5-3/S5-4: a build failure during Hard Recovery (ever_connected)
-            // must stay in Recovering so a retry can be attempted, not Idle.
-            // If this was a make-before-break replacement (old active still
-            // alive), retire the old session — it was already failing.
+            // S5-3/S5-4: a build failure after an established connection must
+            // stay in Recovering, not Idle. If this was a make-before-break
+            // replacement (old active still alive), retire the old session —
+            // it was already failing.
             if state.ever_connected {
                 if let Some(old) = state.active_generation.take() {
                     state.sessions_to_close.insert(old);
@@ -3302,8 +3349,15 @@ fn reduce_build_session(
                 state.rpc_reliable_open = false;
                 state.pending_pc_connected = false;
                 state.pending_rpc_reliable_open = false;
-                state.phase = RtcPeerPhase::Recovering;
-                state.recovery_inflight = true;
+                if state.role == Role::Answerer {
+                    // A failed Answerer build cannot be repaired by creating
+                    // another local PC. Park the logical recovery attempt and
+                    // wait for the Offerer to send a fresh ordinary Offer.
+                    wait_for_offerer_offer(state);
+                } else {
+                    state.phase = RtcPeerPhase::Recovering;
+                    state.recovery_inflight = true;
+                }
             } else {
                 // Initial build failed.
                 terminate_transport_attempt(
