@@ -893,9 +893,10 @@ impl PeerGate {
         // A destination that does not exist yet has no ready-set to watch, so
         // its eventual materialization (including a WebSocket fallback
         // committed by another path) must come through the manager's
-        // destination-lifecycle channel — otherwise the waiter below parks
-        // until the operation deadline.
-        let mut dest_state = self.transport_manager.watch_dest_state();
+        // transports-map revision — bumped inside every lifecycle transition
+        // (Connecting insert, Connected commit, removal, teardown) —
+        // otherwise the waiter below parks until the operation deadline.
+        let mut dest_state = self.transport_manager.watch_transports_revision();
         let mut waiter = None;
 
         loop {
@@ -1408,7 +1409,12 @@ impl PeerGate {
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Request);
         let dest = Self::actr_id_to_dest(target);
         let request_id = envelope.request_id.clone();
-        let payload_bytes = envelope.payload.as_ref().map_or(0, |payload| payload.len());
+        let data = Self::serialize_envelope(&envelope);
+        // Account the serialized envelope (metadata, correlation fields and
+        // framing included), consistent with how stream chunks account their
+        // serialized bytes — otherwise retained memory can exceed the
+        // configured waiter byte ceilings.
+        let payload_bytes = data.len();
         let sent_transport = Arc::new(Mutex::new(None));
         let sent_transport_for_send = Arc::clone(&sent_transport);
         let mut send_started = false;
@@ -1437,7 +1443,6 @@ impl PeerGate {
                 let pending = self
                     .pending_requests
                     .register(request_id.clone(), target.clone());
-                let data = Self::serialize_envelope(&envelope);
                 deadline.ensure_remaining()?;
                 send_started = true;
 
@@ -1582,7 +1587,9 @@ impl PeerGate {
         } else {
             Some(envelope.request_id.clone())
         };
-        let payload_bytes = envelope.payload.as_ref().map_or(0, |payload| payload.len());
+        let data = Self::serialize_envelope(&envelope);
+        // Same serialized-bytes accounting as the request path.
+        let payload_bytes = data.len();
 
         // Same cancellation-classification contract as the data-chunk path:
         // a deadline that fires mid-write must surface terminal
@@ -1592,7 +1599,6 @@ impl PeerGate {
             crate::timer::ids::OUTBOUND_TELL_DEADLINE,
             deadline.instant(),
             async {
-                let data = Self::serialize_envelope(&envelope);
                 let admission = self
                     .wait_until_route_ready(target, &dest, payload_type, deadline, payload_bytes)
                     .await?;
@@ -2874,26 +2880,50 @@ mod tests {
         let dest = PeerGate::actr_id_to_dest(&target);
         let _gate = gate;
 
-        // The parked-waiter scenario the lifecycle channel exists for: the
+        // The parked-waiter scenario the wake source exists for: the
         // destination does not exist yet, so `watch_ready_for` yields no
-        // ready-set and only the destination lifecycle signal can report its
+        // ready-set and only the transports-map revision can report its
         // materialization (e.g. a WebSocket fallback committed elsewhere).
+        // The revision is destination-agnostic by design — every subscriber
+        // re-runs its own preflight and re-acquires its own ready-set — and
+        // it fires on EVERY lifecycle transition, not just successful
+        // Connected commits, so non-committed changes (flight insert,
+        // removal, teardown) also wake parked waiters instead of leaving
+        // them stranded until their operation deadline.
         assert!(transport.watch_ready_for(&dest).await.is_none());
-        let mut dest_state = transport.watch_dest_state();
+        let mut revision = transport.watch_transports_revision();
+        let baseline = *revision.borrow_and_update();
 
         transport
             .get_or_create_transport(&dest)
             .await
             .expect("destination transport should materialize");
 
-        dest_state
+        revision
             .changed()
             .await
             .expect("destination materialization must be observable");
         assert!(
+            *revision.borrow_and_update() >= baseline + 2,
+            "the Connecting insert and the Connected commit each bump the revision"
+        );
+        assert!(
             transport.watch_ready_for(&dest).await.is_some(),
             "after the wake the waiter can acquire the ready-set it lacked"
         );
+
+        // Non-committed lifecycle transitions wake too: closing the
+        // destination removes it and bumps the revision again, so a waiter
+        // parked on a vanished route re-runs instead of stranding.
+        transport
+            .close_transport(&dest)
+            .await
+            .expect("close must succeed");
+        revision
+            .changed()
+            .await
+            .expect("destination removal must be observable");
+        assert!(transport.watch_ready_for(&dest).await.is_none());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
