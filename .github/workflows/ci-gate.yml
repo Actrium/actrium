@@ -160,7 +160,10 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome*
           sudo apt-get update
           sudo apt-get install -y jq sqlite3 lsof perl
+      # protoc 29.3 ships in the self-hosted runner image; skip the
+      # download (and its proxy-tunnel flakiness) there.
       - name: Install protoc
+        if: runner.environment != 'self-hosted'
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -341,7 +344,10 @@ jobs:
           # wasm32-wasip2 is required by crates/actr-hyper/build.rs to compile the
           # wasm_actor_fixture Component under --all-features (wasm-engine).
           targets: wasm32-wasip2,wasm32-unknown-unknown
+      # protoc 29.3 ships in the self-hosted runner image; skip the
+      # download (and its proxy-tunnel flakiness) there.
       - name: Install protoc
+        if: runner.environment != 'self-hosted'
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
@@ -1016,7 +1022,11 @@ jobs:
         uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: wasm32-wasip2,wasm32-unknown-unknown
+          components: clippy
+      # protoc 29.3 ships in the self-hosted runner image; skip the
+      # download (and its proxy-tunnel flakiness) there.
       - name: Install protoc
+        if: runner.environment != 'self-hosted'
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
