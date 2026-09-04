@@ -116,6 +116,7 @@ enum DestState {
 /// immediately.
 struct ConnectionCreatorGuard {
     transports: Arc<RwLock<HashMap<Dest, DestState>>>,
+    transports_revision: watch::Sender<u64>,
     dest: Dest,
     flight: Arc<ConnectionFlight>,
     armed: bool,
@@ -124,11 +125,13 @@ struct ConnectionCreatorGuard {
 impl ConnectionCreatorGuard {
     fn new(
         transports: Arc<RwLock<HashMap<Dest, DestState>>>,
+        transports_revision: watch::Sender<u64>,
         dest: Dest,
         flight: Arc<ConnectionFlight>,
     ) -> Self {
         Self {
             transports,
+            transports_revision,
             dest,
             flight,
             armed: true,
@@ -150,6 +153,7 @@ impl Drop for ConnectionCreatorGuard {
         let transports = Arc::clone(&self.transports);
         let dest = self.dest.clone();
         let flight = Arc::clone(&self.flight);
+        let revision = self.transports_revision.clone();
         tokio::spawn(async move {
             let mut transports = transports.write().await;
             let owns_flight = matches!(
@@ -158,6 +162,7 @@ impl Drop for ConnectionCreatorGuard {
             );
             if owns_flight {
                 transports.remove(&dest);
+                revision.send_modify(|rev| *rev += 1);
             }
             drop(transports);
             flight.completion.notify_waiters();
@@ -290,6 +295,13 @@ pub struct PeerTransport {
     /// todo: Set of peers currently being closed (to reject new connection attempts) ,closed requests will be cleaned up in event listener
     closing_peers: Arc<RwLock<HashSet<Dest>>>,
 
+    /// Revision of the `transports` map, bumped inside every mutation.
+    /// `wait_until_route_ready` subscribers that found no destination
+    /// ready-set watch this instead of parking forever, so a later
+    /// materialization (another path committing a `DestTransport`) wakes
+    /// them to re-run the lookup.
+    transports_revision: watch::Sender<u64>,
+
     #[cfg(test)]
     dest_transport_creation_barrier: OnceLock<Arc<tokio::sync::Barrier>>,
     #[cfg(test)]
@@ -297,6 +309,20 @@ pub struct PeerTransport {
 }
 
 impl PeerTransport {
+    /// Subscribe to the `transports`-map revision. Every insert, commit, or
+    /// removal increments it; readiness waiters use it as the wake source for
+    /// destination materialization itself.
+    pub(crate) fn watch_transports_revision(&self) -> watch::Receiver<u64> {
+        self.transports_revision.subscribe()
+    }
+
+    /// Wake destination-materialization waiters. Call inside the same
+    /// critical section as the map mutation.
+    fn bump_transports_revision(&self) {
+        self.transports_revision
+            .send_modify(|revision| *revision += 1);
+    }
+
     /// Create new PeerTransport
     ///
     /// # Arguments
@@ -308,6 +334,7 @@ impl PeerTransport {
             transports: Arc::new(RwLock::new(HashMap::new())),
             conn_factory,
             closing_peers: Arc::new(RwLock::new(HashSet::new())),
+            transports_revision: watch::channel(0).0,
             #[cfg(test)]
             dest_transport_creation_barrier: OnceLock::new(),
             #[cfg(test)]
@@ -460,6 +487,7 @@ impl PeerTransport {
                         }
                         let flight = Arc::new(ConnectionFlight::new());
                         transports.insert(dest.clone(), DestState::Connecting(Arc::clone(&flight)));
+                        self.bump_transports_revision();
                         tracing::debug!("Started connection flight for: {:?}", dest);
                         (flight, true)
                     }
@@ -502,6 +530,7 @@ impl PeerTransport {
             tracing::info!("Creating new connection for: {:?}", dest);
             let mut creator_guard = ConnectionCreatorGuard::new(
                 Arc::clone(&self.transports),
+                self.transports_revision.clone(),
                 dest.clone(),
                 Arc::clone(&flight),
             );
@@ -613,6 +642,7 @@ impl PeerTransport {
                     let transport = Arc::clone(transport_guard.transport());
                     tracing::info!("Connection established: {:?}", dest);
                     transports.insert(dest.clone(), DestState::Connected(Arc::clone(&transport)));
+                    self.bump_transports_revision();
                     drop(transports);
                     self.spawn_ready_monitor(dest.clone(), Arc::clone(&transport));
                     transport_guard.disarm();
@@ -623,6 +653,7 @@ impl PeerTransport {
                 Err(e) => {
                     tracing::error!("Connection failed: {:?}: {}", dest, e);
                     transports.remove(dest);
+                    self.bump_transports_revision();
                     drop(transports);
                     creator_guard.disarm();
                     flight.completion.notify_waiters();
@@ -821,6 +852,7 @@ impl PeerTransport {
                     }
                     let flight = Arc::new(ConnectionFlight::new());
                     transports.insert(dest.clone(), DestState::Connecting(Arc::clone(&flight)));
+                    self.bump_transports_revision();
                     flight
                 }
             }
@@ -828,6 +860,7 @@ impl PeerTransport {
 
         let mut creator_guard = ConnectionCreatorGuard::new(
             Arc::clone(&self.transports),
+            self.transports_revision.clone(),
             dest.clone(),
             Arc::clone(&flight),
         );
@@ -911,6 +944,7 @@ impl PeerTransport {
             Ok(Some(mut transport_guard)) => {
                 let transport = Arc::clone(transport_guard.transport());
                 transports.insert(dest.clone(), DestState::Connected(Arc::clone(&transport)));
+                self.bump_transports_revision();
                 drop(transports);
                 self.spawn_ready_monitor(dest.clone(), Arc::clone(&transport));
                 transport_guard.disarm();
@@ -920,6 +954,7 @@ impl PeerTransport {
             }
             Ok(None) => {
                 transports.remove(dest);
+                self.bump_transports_revision();
                 drop(transports);
                 creator_guard.disarm();
                 flight.completion.notify_waiters();
@@ -927,6 +962,7 @@ impl PeerTransport {
             }
             Err(error) => {
                 transports.remove(dest);
+                self.bump_transports_revision();
                 drop(transports);
                 creator_guard.disarm();
                 flight.completion.notify_waiters();
@@ -1004,7 +1040,9 @@ impl PeerTransport {
         // stale transport it produced.
         let current_state = {
             let mut transports = self.transports.write().await;
-            transports.remove(dest)
+            let removed = transports.remove(dest);
+            self.bump_transports_revision();
+            removed
         };
 
         let close_result = match current_state {
@@ -1201,7 +1239,9 @@ impl PeerTransport {
         let states = {
             let mut transports = self.transports.write().await;
             tracing::info!("Closing all DestTransports (count: {})", transports.len());
-            transports.drain().collect::<Vec<_>>()
+            let states = transports.drain().collect::<Vec<_>>();
+            self.bump_transports_revision();
+            states
         };
 
         for (dest, state) in states {

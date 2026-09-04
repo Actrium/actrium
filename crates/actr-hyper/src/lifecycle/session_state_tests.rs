@@ -202,3 +202,46 @@ async fn commit_hard_rebind_emits_session_activated_for_new_generation() {
         "one hard-rebind commit should emit exactly one activation fact"
     );
 }
+
+#[tokio::test]
+async fn phase_transition_is_visible_before_the_writer_returns() {
+    // Regression for the publish race: the watch update must happen inside
+    // the same critical section as the phase write. A receiver obtained
+    // BEFORE the transition must already observe the new projection once
+    // set_phase returns — no window where `inner.phase` has moved but the
+    // watch still admits under the old value.
+    let snapshot = SessionSnapshot::empty_with_id(test_actor_id(), 4);
+    let state = SessionState::new(snapshot);
+    let mut readiness = state.subscribe_readiness();
+
+    state.enter_rebinding().await;
+
+    assert_eq!(
+        *readiness.borrow_and_update(),
+        SessionReadiness {
+            phase: SessionPhase::Rebinding,
+            generation: 4,
+        }
+    );
+}
+
+#[tokio::test]
+async fn hard_rebind_generation_is_visible_before_the_writer_returns() {
+    // Same contract for the generation bump: once the hard-rebind commit
+    // returns, an old-generation receiver must already observe the new
+    // generation, so a stale context cannot pass the readiness check.
+    let snapshot = SessionSnapshot::empty_with_id(test_actor_id(), 5);
+    let state = SessionState::new(snapshot);
+    let mut readiness = state.subscribe_readiness();
+
+    let replacement = SessionSnapshot::empty_with_id(test_actor_id(), 6);
+    state.commit_hard_rebind(replacement).await;
+
+    assert_eq!(
+        *readiness.borrow_and_update(),
+        SessionReadiness {
+            phase: SessionPhase::Active,
+            generation: 6,
+        }
+    );
+}

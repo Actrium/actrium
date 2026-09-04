@@ -699,6 +699,13 @@ impl PeerGate {
         let mut projection = self.send_projection_rx.clone();
         #[cfg(feature = "webrtc-v020")]
         let mut snapshots = self.v020_manager.subscribe_peer_snapshot_events();
+        // Subscribe to the materialization revision BEFORE resolving the
+        // destination ready-set: if the destination is absent or still
+        // `Connecting` there is no ready-set to watch, and without this
+        // revision subscription a later commit by another path would never
+        // wake this waiter — it would expire at the outer deadline despite a
+        // usable route.
+        let mut materialization = self.transport_manager.watch_transports_revision();
         let mut ready = self.transport_manager.watch_ready_for(dest).await;
 
         loop {
@@ -769,6 +776,19 @@ impl PeerGate {
                         changed = ready_changed => {
                             if changed.is_err() {
                                 ready = None;
+                            }
+                        },
+                        // Destination materialization itself: a fresh
+                        // destination has no ready-set to watch, so the map
+                        // revision is the only wake source for a later
+                        // `DestTransport` commit (e.g. another path dialing
+                        // the WebSocket fallback). Cheap re-run of the loop.
+                        changed = materialization.changed() => {
+                            if changed.is_err() {
+                                return Err(error);
+                            }
+                            if ready.is_none() {
+                                ready = self.transport_manager.watch_ready_for(dest).await;
                             }
                         },
                     }
@@ -2960,6 +2980,104 @@ mod tests {
             ws_sends.load(Ordering::SeqCst),
             2,
             "both sends must ride the ready WebSocket lane despite the non-sendable controller"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn transports_revision_wakes_on_every_materialization_transition() {
+        use crate::transport::ConnType;
+
+        // Wake source for readiness waiters that found no destination
+        // ready-set (`wait_until_route_ready` parks only when the RTC
+        // preflight blocks AND no fallback exists): every transports-map
+        // transition — Connecting flight insert, Connected commit, removal —
+        // must bump the revision while the map lock is held, so a waiter
+        // parked before the transition re-runs its lookup afterwards instead
+        // of expiring at the outer deadline. (Driving the full park-then-
+        // materialize interleave end to end requires a live RTC session; the
+        // revision contract is pinned here and consumed by the select arm in
+        // wait_until_route_ready.)
+        #[derive(Debug)]
+        struct RevWsLane;
+
+        #[derive(Debug)]
+        struct RevWsWire;
+
+        #[derive(Debug)]
+        struct RevWsWireBuilder;
+
+        #[async_trait]
+        impl DataLane for RevWsLane {
+            async fn send(&self, _data: bytes::Bytes) -> NetworkResult<()> {
+                Ok(())
+            }
+            fn lane_type(&self) -> &'static str {
+                "rev-ws-test"
+            }
+        }
+
+        #[async_trait]
+        impl WireHandle for RevWsWire {
+            fn connection_type(&self) -> ConnType {
+                ConnType::WebSocket
+            }
+            fn priority(&self) -> u8 {
+                1
+            }
+            async fn connect(&self) -> NetworkResult<()> {
+                Ok(())
+            }
+            fn is_connected(&self) -> bool {
+                true
+            }
+            async fn close(&self) -> NetworkResult<()> {
+                Ok(())
+            }
+            async fn get_lane(&self, _t: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
+                Ok(Arc::new(RevWsLane))
+            }
+        }
+
+        #[async_trait]
+        impl WireBuilder for RevWsWireBuilder {
+            async fn create_connections(
+                &self,
+                _d: &Dest,
+            ) -> NetworkResult<Vec<Arc<dyn WireHandle>>> {
+                Ok(vec![Arc::new(RevWsWire)])
+            }
+        }
+
+        let transport = Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(RevWsWireBuilder),
+        ));
+        let mut revision = transport.watch_transports_revision();
+        assert_eq!(*revision.borrow_and_update(), 0);
+
+        // Materialize: inserting the Connecting flight and committing the
+        // Connected DestTransport each bump the revision.
+        let dest = Dest::peer(test_actor_id(2));
+        let committed = transport
+            .get_or_create_transport(&dest)
+            .await
+            .expect("destination must materialize");
+        assert!(Arc::ptr_eq(&committed, &committed)); // keep the transport alive
+        let after_commit = *revision.borrow_and_update();
+        assert!(
+            after_commit >= 2,
+            "flight insert + Connected commit must each bump the revision: {after_commit}"
+        );
+
+        // Closing removes the destination and bumps again, so waiters also
+        // re-run after a route disappears.
+        transport
+            .close_transport(&dest)
+            .await
+            .expect("close must succeed");
+        assert!(
+            *revision.borrow_and_update() > after_commit,
+            "removal must bump the revision"
         );
     }
 }
