@@ -55,7 +55,7 @@ jobs:
             --no-daemon \
             -PactrGroup=io.actrium \
             -PactrVersion=9.8.7-rc.1 \
-            -PactrSourceRepository=Actrium/actr \
+            -PactrSourceRepository=Actrium/actrium \
             -PactrSourceTag=validation-v9.8.7-rc.1 \
             -PactrSourceSha=0123456789abcdef
           python3 - <<'PY'
@@ -80,7 +80,7 @@ jobs:
               for child in properties
           }
           expected_provenance = {
-              "actr.source.repository": "Actrium/actr",
+              "actr.source.repository": "Actrium/actrium",
               "actr.source.tag": "validation-v9.8.7-rc.1",
               "actr.source.sha": "0123456789abcdef",
           }
