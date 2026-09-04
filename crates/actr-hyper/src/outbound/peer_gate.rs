@@ -112,6 +112,13 @@ enum WaiterClass {
     Stream,
 }
 
+fn waiter_class_label(class: WaiterClass) -> &'static str {
+    match class {
+        WaiterClass::Rpc => "RpcReliable",
+        WaiterClass::Stream => "StreamReliable",
+    }
+}
+
 impl WaiterClass {
     fn for_payload(payload_type: PayloadType) -> Option<Self> {
         match payload_type {
@@ -152,12 +159,27 @@ impl Default for WaiterBudget {
 }
 
 impl WaiterBudget {
+    /// Test-facing Option wrapper over
+    /// [`Self::try_acquire_explained`].
+    #[cfg(test)]
     fn try_acquire(
         self: &Arc<Self>,
         peer: &ActrId,
         class: WaiterClass,
         payload_bytes: usize,
     ) -> Option<WaiterGuard> {
+        self.try_acquire_explained(peer, class, payload_bytes).ok()
+    }
+
+    /// Acquire a waiter slot, or return a denial reason naming the exact limit
+    /// that was hit, so callers can surface which ceiling (global/class
+    /// waiter count, global/per-peer byte budget) rejected the operation.
+    fn try_acquire_explained(
+        self: &Arc<Self>,
+        peer: &ActrId,
+        class: WaiterClass,
+        payload_bytes: usize,
+    ) -> Result<WaiterGuard, &'static str> {
         let mut usage = self
             .usage
             .lock()
@@ -175,18 +197,30 @@ impl WaiterBudget {
             WaiterClass::Rpc => MAX_RPC_WAITERS,
             WaiterClass::Stream => MAX_STREAM_WAITERS,
         };
-        let fits = usage.global_waiters < MAX_GLOBAL_WAITERS
-            && class_waiters < class_limit
-            && peer_waiters < MAX_PEER_WAITERS
-            && usage
-                .global_bytes
-                .checked_add(payload_bytes)
-                .is_some_and(|bytes| bytes <= MAX_GLOBAL_WAITER_BYTES)
-            && peer_bytes
-                .checked_add(payload_bytes)
-                .is_some_and(|bytes| bytes <= MAX_PEER_WAITER_BYTES);
-        if !fits {
-            return None;
+        // Name the first ceiling that rejects the wait so the denial is
+        // diagnosable instead of a generic exhaustion message.
+        let denial = if usage.global_waiters >= MAX_GLOBAL_WAITERS {
+            "global waiter count"
+        } else if class_waiters >= class_limit {
+            "class waiter count"
+        } else if peer_waiters >= MAX_PEER_WAITERS {
+            "per-peer waiter count"
+        } else if usage
+            .global_bytes
+            .checked_add(payload_bytes)
+            .is_none_or(|bytes| bytes > MAX_GLOBAL_WAITER_BYTES)
+        {
+            "global waiter byte budget"
+        } else if peer_bytes
+            .checked_add(payload_bytes)
+            .is_none_or(|bytes| bytes > MAX_PEER_WAITER_BYTES)
+        {
+            "per-peer waiter byte budget"
+        } else {
+            ""
+        };
+        if !denial.is_empty() {
+            return Err(denial);
         }
 
         usage.global_waiters += 1;
@@ -201,12 +235,13 @@ impl WaiterBudget {
         peer_usage.waiters += 1;
         peer_usage.bytes += payload_bytes;
 
-        Some(WaiterGuard {
+        let guard = WaiterGuard {
             budget: Arc::clone(self),
             peer: peer.clone(),
             class,
             payload_bytes,
-        })
+        };
+        Ok(guard)
     }
 
     #[cfg(test)]
@@ -888,15 +923,16 @@ impl PeerGate {
         // revision subscription a later commit by another path would never
         // wake this waiter — it would expire at the outer deadline despite a
         // usable route.
-        let mut materialization = self.transport_manager.watch_transports_revision();
-        let mut ready = self.transport_manager.watch_ready_for(dest).await;
         // A destination that does not exist yet has no ready-set to watch, so
         // its eventual materialization (including a WebSocket fallback
         // committed by another path) must come through the manager's
         // transports-map revision — bumped inside every lifecycle transition
         // (Connecting insert, Connected commit, removal, teardown) —
         // otherwise the waiter below parks until the operation deadline.
-        let mut dest_state = self.transport_manager.watch_transports_revision();
+        // Subscribe BEFORE resolving the destination ready-set so the
+        // check-then-sleep sequence cannot lose a transition.
+        let mut materialization = self.transport_manager.watch_transports_revision();
+        let mut ready = self.transport_manager.watch_ready_for(dest).await;
         let mut waiter = None;
 
         loop {
@@ -920,11 +956,13 @@ impl PeerGate {
                     if waiter.is_none() {
                         waiter = Some(
                             self.waiter_budget
-                                .try_acquire(target, waiter_class, payload_bytes)
-                                .ok_or_else(|| {
-                                    ActrError::Unavailable(
-                                        "outbound readiness waiter capacity exhausted".to_string(),
-                                    )
+                                .try_acquire_explained(target, waiter_class, payload_bytes)
+                                .map_err(|limit| {
+                                    ActrError::Unavailable(format!(
+                                        "outbound readiness waiter capacity exhausted: {limit} limit (class {}, peer serial {})",
+                                        waiter_class_label(waiter_class),
+                                        target.serial_number
+                                    ))
                                 })?,
                         );
                     }
@@ -975,14 +1013,6 @@ impl PeerGate {
                                 return Err(error);
                             }
                         },
-                        changed = dest_state.changed() => {
-                            // Destination materialization (or fallback
-                            // commit): the loop re-runs preflight and
-                            // re-acquires the ready-set watch above.
-                            if changed.is_err() {
-                                return Err(error);
-                            }
-                        },
                         changed = ready_changed => {
                             if changed.is_err() {
                                 ready = None;
@@ -992,7 +1022,8 @@ impl PeerGate {
                         // destination has no ready-set to watch, so the map
                         // revision is the only wake source for a later
                         // `DestTransport` commit (e.g. another path dialing
-                        // the WebSocket fallback). Cheap re-run of the loop.
+                        // the WebSocket fallback). Cheap re-run of the loop,
+                        // with the ready-set reacquired before the next poll.
                         changed = materialization.changed() => {
                             if changed.is_err() {
                                 return Err(error);
@@ -2869,6 +2900,162 @@ mod tests {
             gate.waiter_budget.snapshot(),
             (0, 0, 0, 0),
             "all waiter budget must be released after completion"
+        );
+    }
+
+    #[cfg(feature = "webrtc-v020")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn parked_reliable_tell_resumes_when_destination_materializes() {
+        // End-to-end waiter regression: with a controller parked in
+        // Connecting (non-sendable, non-exempted) and no destination
+        // ready-set, a reliable Tell parks inside wait_until_route_ready;
+        // an external materialization of the destination (WebSocket
+        // fallback committed by another path) must wake it and let the
+        // public send complete instead of expiring at its deadline.
+        let ws_sends = Arc::new(AtomicUsize::new(0));
+        let target = test_actor_id(2);
+        let dest = Dest::peer(target.clone());
+
+        #[derive(Debug)]
+        struct ParkWsLane {
+            sends: Arc<AtomicUsize>,
+        }
+
+        #[derive(Debug)]
+        struct ParkWsWire {
+            lane: Arc<ParkWsLane>,
+        }
+
+        #[derive(Debug)]
+        struct ParkWsWireBuilder {
+            wire: Arc<ParkWsWire>,
+        }
+
+        #[async_trait]
+        impl DataLane for ParkWsLane {
+            async fn send(&self, _data: bytes::Bytes) -> NetworkResult<()> {
+                self.sends.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+            fn lane_type(&self) -> &'static str {
+                "park-ws-test"
+            }
+        }
+
+        #[async_trait]
+        impl WireHandle for ParkWsWire {
+            fn connection_type(&self) -> crate::transport::ConnType {
+                crate::transport::ConnType::WebSocket
+            }
+            fn priority(&self) -> u8 {
+                1
+            }
+            async fn connect(&self) -> NetworkResult<()> {
+                Ok(())
+            }
+            fn is_connected(&self) -> bool {
+                true
+            }
+            async fn close(&self) -> NetworkResult<()> {
+                Ok(())
+            }
+            async fn get_lane(&self, _t: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
+                Ok(self.lane.clone())
+            }
+        }
+
+        #[async_trait]
+        impl WireBuilder for ParkWsWireBuilder {
+            async fn create_connections(
+                &self,
+                _d: &Dest,
+            ) -> NetworkResult<Vec<Arc<dyn WireHandle>>> {
+                Ok(vec![self.wire.clone()])
+            }
+        }
+
+        let transport = Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(ParkWsWireBuilder {
+                wire: Arc::new(ParkWsWire {
+                    lane: Arc::new(ParkWsLane {
+                        sends: ws_sends.clone(),
+                    }),
+                }),
+            }),
+        ));
+        // Park source note: the only deterministic park the manager test
+        // seams allow is the global send projection (the no-op session
+        // factory lands controllers in Idle — unblocked — and injected
+        // driver states never drain without a live session loop, so an
+        // RTC-blocked park cannot be synthesized without a real session).
+        // The public-send park below therefore blocks via the projection;
+        // the destination is materialized WHILE parked, and the wake +
+        // ready-set reacquisition path is identical to the RTC-blocked case.
+        let (projection_tx, projection_rx) = watch::channel(SendProjection::Blocked);
+        let gate = Arc::new(PeerGate::with_v020_manager(
+            transport.clone(),
+            PeerGate::empty_manager_for_test(),
+            Arc::new(RpcCorrelation::new()),
+            Some(projection_rx),
+        ));
+        assert!(!transport.has_outbound_materialization(&dest).await);
+
+        let send_target = target.clone();
+        let send_gate = gate.clone();
+        let send = tokio::spawn(async move {
+            send_gate
+                .send_tell_with_type_until(
+                    &send_target,
+                    PayloadType::RpcReliable,
+                    RpcEnvelope::default(),
+                    RpcDeadline::from_duration(Duration::from_secs(5)),
+                )
+                .await
+        });
+        crate::timer::sleep(
+            crate::timer::ids::PEER_TRANSPORT_HEALTH,
+            Duration::from_millis(200),
+        )
+        .await;
+        assert!(
+            !send.is_finished(),
+            "the reliable Tell must be parked while the projection is blocked"
+        );
+
+        // While the public send is parked, another path materializes the
+        // destination (a WebSocket fallback committed externally): the
+        // waiter's materialization arm observes the revision and re-runs
+        // its lookup, acquiring the ready-set it lacked.
+        let materializer = transport.clone();
+        let materialized =
+            tokio::spawn(async move { materializer.get_or_create_transport(&dest).await });
+        let _committed = timeout(
+            crate::timer::ids::PEER_TRANSPORT_HEALTH,
+            Duration::from_secs(5),
+            materialized,
+        )
+        .await
+        .expect("materialization must complete")
+        .expect("materializer must not panic")
+        .expect("destination must materialize over the ready WebSocket wire");
+
+        // The parked public send is still withheld by the projection; clear
+        // it and the same wake-and-recheck loop must admit the send over the
+        // now-existing route (no second dial, exactly one lane write).
+        projection_tx.send_replace(SendProjection::Normal);
+        let result = timeout(
+            crate::timer::ids::PEER_TRANSPORT_HEALTH,
+            Duration::from_secs(5),
+            send,
+        )
+        .await
+        .expect("the parked Tell must resume after the wake");
+        assert!(result.is_ok(), "the Tell must complete: {result:?}");
+        assert_eq!(
+            ws_sends.load(Ordering::SeqCst),
+            1,
+            "the resumed Tell rides the materialized WebSocket lane exactly once"
         );
     }
 
