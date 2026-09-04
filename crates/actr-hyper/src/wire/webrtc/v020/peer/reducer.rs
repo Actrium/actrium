@@ -1512,14 +1512,19 @@ fn reduce_command(
                 return;
             }
 
-            // A newer correlated answerer attempt is an explicit retry wake,
-            // unlike a duplicate NetworkAvailable fact. Re-run restart_ice and
-            // create a fresh offer on the same PC generation.
-            if state.recovery_inflight {
-                state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
-                state.recovery_attempt_started = false;
-            }
-            start_soft_recovery(state, effects);
+            // The request is proof the answerer's physical session is dead
+            // (an answerer only sends it from its own recovery). Soft
+            // recovery — an ICE restart on THIS PC generation — cannot
+            // repair an asymmetric failure: the answerer has no live session
+            // to accept the restart offer, would park awaiting one, and
+            // eventually exhaust to Idle with transport down. Drive Hard
+            // Recovery instead: the replacement Session allocates a fresh
+            // generation and produces the replacement Offer the passive
+            // answerer needs. A request that overtakes a soft round already
+            // in flight was returned above, so this cannot corrupt an
+            // in-progress restart; a newer attempt while a replacement is
+            // already building is a no-op inside start_hard_recovery.
+            start_hard_recovery(state, effects);
         }
         RtcPeerCommand::ApplyRemoteDescription(desc) => {
             reduce_command(

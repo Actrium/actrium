@@ -18,13 +18,17 @@ function loadHostErrorMap(sourceUrl) {
 
 // The two runtime copies intentionally carry different marker-comment
 // blocks (each documents its own role); everything from the function
-// declaration to the end marker must be byte-identical, comments included.
+// declaration (located directly, independent of the marker comments) to the
+// end of the file's mapping section must be byte-identical, comments
+// included. The region ends at the next top-level declaration so trailing
+// whitespace differences cannot mask divergence either.
 function hostErrorMapFunctionRegion(sourceUrl) {
   const source = readFileSync(sourceUrl, 'utf8');
-  return source.slice(
-    source.indexOf('function mapHostErrorToActr'),
-    source.indexOf('// @host-error-map end')
-  );
+  const start = source.indexOf('function mapHostErrorToActr');
+  const endMarker = source.indexOf('// @host-error-map end');
+  const nextDeclaration = source.indexOf('\nfunction ', start + 1);
+  const end = nextDeclaration === -1 || nextDeclaration > endMarker ? endMarker : nextDeclaration;
+  return source.slice(start, end);
 }
 
 const swSource = new URL('./actor.sw.js', import.meta.url);

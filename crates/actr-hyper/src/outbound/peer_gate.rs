@@ -68,7 +68,7 @@ pub(crate) fn data_stream_operation_id(stream_id: &str) -> String {
 /// a route that clears within this slice of the deadline is refused pre-send
 /// (retryable `TimedOut`) instead of committing bytes whose mid-write expiry
 /// would surface as terminal `DeliveryUncertain`.
-const MIN_ONE_SHOT_SEND_SLICE: Duration = Duration::from_millis(25);
+const MIN_ONE_SHOT_SEND_SLICE: std::time::Duration = std::time::Duration::from_millis(25);
 
 /// Preserve in-flight reliable RPCs across a brief sendability dip, but do not
 /// let a remote-side recovery leave response waits parked until their much
@@ -1380,14 +1380,19 @@ impl PeerGate {
                 }
                 Err(e) => {
                     attempt_count += 1;
-                    let retryable = e.is_retryable();
+                    // Same fail-closed gate as the one-shot path: only a
+                    // framework-verified proven pre-send failure may be
+                    // replayed. An adapter that misclassifies a post-write
+                    // failure as `NotAttempted` must not turn generic
+                    // Call/DataChunk backoff into duplicate delivery.
+                    let replayable = e.is_retryable() && send_attempt.proven_pre_send;
                     let remaining = policy.max_attempts.saturating_sub(attempt_count);
-                    if retryable && remaining > 0 {
+                    if replayable && remaining > 0 {
                         tracing::warn!(
                             attempt = attempt_count,
                             remaining,
                             error = %e,
-                            "transient send failure, retrying after {:?}",
+                            "proven pre-send transient failure, retrying after {:?}",
                             delay,
                         );
                         crate::timer::sleep(crate::timer::ids::PEER_SEND_BACKOFF, delay).await;
@@ -1398,7 +1403,7 @@ impl PeerGate {
                             tracing::warn!(
                                 attempt = attempt_count,
                                 error = %e,
-                                retryable,
+                                replayable,
                                 "send failed after {} attempt(s)",
                                 attempt_count,
                             );
@@ -4071,14 +4076,22 @@ mod tests {
             .send_tell_with_type_until(
                 &test_actor_id(2),
                 PayloadType::RpcReliable,
-                RpcEnvelope::default(),
+                RpcEnvelope {
+                    request_id: "at-most-once-tell".to_string(),
+                    ..RpcEnvelope::default()
+                },
                 RpcDeadline::from_duration(Duration::from_secs(1)),
             )
             .await
             .expect_err("the ambiguous attempt must surface");
 
         assert!(
-            matches!(&err, ActrError::DeliveryUncertain { .. }),
+            matches!(
+                &err,
+                ActrError::DeliveryUncertain { operation_id, cause }
+                    if operation_id == "at-most-once-tell"
+                        && cause.contains("ambiguous partial write")
+            ),
             "got {err:?}"
         );
         assert!(!err.is_retryable());

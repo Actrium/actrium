@@ -462,6 +462,7 @@ impl NetworkError {
                 | NetworkError::DataChannelClosed(_)
                 | NetworkError::DataChannelNotOpen(_)
                 | NetworkError::WebSocketClosed(_)
+                | NetworkError::ChannelClosed(_)
                 | NetworkError::SecureChannelNotReady(_)
                 | NetworkError::InvalidArgument(_)
                 | NetworkError::InvalidOperation(_)

@@ -2639,11 +2639,59 @@ fn restart_ice_completion_offerer_creates_restart_offer() {
 }
 
 #[test]
+fn answerer_asymmetric_failure_request_drives_offerer_replacement_offer() {
+    // Asymmetric physical failure: the answerer's session dies while the
+    // offerer stays sendable. The answerer cannot build a replacement (no
+    // local Offer), so its restart request must make the STABLE offerer
+    // hard-recover: a replacement generation whose completed build creates
+    // the fresh Offer the passive answerer accepts. Soft recovery alone
+    // would leave the answerer parked on a dead generation until Idle.
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+
+    let request = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequest {
+            request_id: "asymmetric-1".to_string(),
+            attempt: 1,
+        }),
+    );
+    assert!(
+        has_build_session(&request, generation + 1),
+        "the stable offerer must build a replacement session for the dead answerer"
+    );
+    assert!(
+        !has_restart_ice(&request, generation),
+        "no soft restart: the offerer's own generation is healthy"
+    );
+    // Make-before-break: the healthy offerer session stays alive while the
+    // replacement negotiates.
+    assert_eq!(state.active_generation, Some(generation));
+
+    // The replacement build completes: the offerer creates the fresh Offer
+    // the passive answerer needs.
+    let operation_id = pending_operation(
+        &state,
+        PendingRtcOperationKind::BuildSession,
+        generation + 1,
+    );
+    let offer_effects = reduce(&mut state, build_ok(generation + 1, operation_id));
+    assert!(
+        has_create_offer(&offer_effects, generation + 1),
+        "the replacement build must produce a fresh Offer for the answerer"
+    );
+}
+
+#[test]
 fn offerer_deduplicates_restart_request_but_retries_newer_attempt() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let generation = drive_offerer_to_sendable(&mut state);
     let ice_before = state.ice_generation;
 
+    // The answerer restart request is proof of an asymmetric physical
+    // failure on the answerer side, so a stable offerer must Hard-Recover:
+    // a fresh generation whose Offer the passive answerer can accept. Soft
+    // recovery (RestartIce on the live generation) cannot repair it.
     let first = reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequest {
@@ -2651,8 +2699,15 @@ fn offerer_deduplicates_restart_request_but_retries_newer_attempt() {
             attempt: 1,
         }),
     );
-    assert!(has_restart_ice(&first, generation));
-    assert_eq!(state.ice_generation, ice_before + 1);
+    assert!(
+        has_build_session(&first, generation + 1),
+        "a stable offerer must build a replacement session, not restart ICE"
+    );
+    assert!(
+        !has_restart_ice(&first, generation),
+        "no soft restart on the live generation"
+    );
+    assert_eq!(state.ice_generation, ice_before, "new PC resets ICE gen");
 
     let duplicate = reduce(
         &mut state,
@@ -2663,6 +2718,9 @@ fn offerer_deduplicates_restart_request_but_retries_newer_attempt() {
     );
     assert!(duplicate.is_empty());
 
+    // A newer attempt while the replacement is already building is a no-op
+    // (start_hard_recovery's in-flight guard): the pending build IS the
+    // response to the retransmission.
     let retry = reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequest {
@@ -2670,8 +2728,7 @@ fn offerer_deduplicates_restart_request_but_retries_newer_attempt() {
             attempt: 2,
         }),
     );
-    assert!(has_restart_ice(&retry, generation));
-    assert_eq!(state.ice_generation, ice_before + 2);
+    assert!(retry.is_empty());
 
     let duplicate_retry = reduce(
         &mut state,
@@ -2684,7 +2741,6 @@ fn offerer_deduplicates_restart_request_but_retries_newer_attempt() {
         duplicate_retry.is_empty(),
         "the same retransmission attempt must remain deduplicated after recovery state is reset"
     );
-    assert_eq!(state.ice_generation, ice_before + 2);
 }
 
 #[test]
@@ -2711,11 +2767,13 @@ fn ineligible_restart_request_is_not_consumed_before_session_is_ready() {
             attempt: 1,
         }),
     );
-    assert!(has_restart_ice(&effects, generation));
-    assert_eq!(
-        state.last_remote_restart_request.as_ref(),
-        Some(&("early-request".to_string(), 1))
+    assert!(
+        has_build_session(&effects, generation + 1),
+        "an eligible request drives hard recovery (replacement session)"
     );
+    // Hard recovery resets remote request identities: the retired session's
+    // request must not suppress wakes for the replacement session.
+    assert_eq!(state.last_remote_restart_request, None);
 }
 
 #[test]
@@ -2748,6 +2806,9 @@ fn offerer_does_not_double_restart_when_first_answerer_wake_races_network_availa
     assert!(raced_wake.is_empty());
     assert_eq!(state.ice_generation, ice_generation);
 
+    // A newer attempt after the soft round is committed supersedes it with
+    // Hard Recovery: the soft restart cannot repair an answerer whose
+    // physical session is dead.
     let retry = reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequest {
@@ -2755,8 +2816,11 @@ fn offerer_does_not_double_restart_when_first_answerer_wake_races_network_availa
             attempt: 2,
         }),
     );
-    assert!(has_restart_ice(&retry, generation));
-    assert_eq!(state.ice_generation, ice_generation + 1);
+    assert!(
+        has_build_session(&retry, generation + 1),
+        "the retry wake must build a replacement session"
+    );
+    assert!(!has_restart_ice(&retry, generation));
 }
 
 #[test]
