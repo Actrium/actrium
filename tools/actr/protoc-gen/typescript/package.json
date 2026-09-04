@@ -1,6 +1,6 @@
 {
   "name": "framework-codegen-typescript",
-  "version": "0.10.0-alpha.5",
+  "version": "0.10.0-alpha.6",
   "private": true,
   "description": "TypeScript protoc plugin for Actor-RTC framework",
   "bin": {

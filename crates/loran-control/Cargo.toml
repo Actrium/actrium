@@ -25,9 +25,9 @@ pwrzv = { version = "0.7.0" }
 
 sqlx = { workspace = true }
 
-platform = { path = "../loran-platform", package = "actrix-platform", version = "0.10.0-alpha.5" }
-actrix-proto = { path = "../loran-proto", version = "0.10.0-alpha.5" }
-actrix-ais = { path = "../loran-ais", version = "0.10.0-alpha.5" }
+platform = { path = "../loran-platform", package = "actrix-platform", version = "0.10.0-alpha.6" }
+actrix-proto = { path = "../loran-proto", version = "0.10.0-alpha.6" }
+actrix-ais = { path = "../loran-ais", version = "0.10.0-alpha.6" }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.30", features = ["signal"] }
