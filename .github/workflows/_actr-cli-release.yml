@@ -87,7 +87,7 @@ jobs:
           ref: ${{ inputs.source_ref }}
           path: source
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: wasm32-unknown-unknown
       - name: Install protoc
@@ -143,7 +143,7 @@ jobs:
           path: source
           fetch-depth: 0
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: ${{ matrix.target }}
       - uses: arduino/setup-protoc@v3
