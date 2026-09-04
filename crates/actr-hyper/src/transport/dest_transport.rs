@@ -316,9 +316,13 @@ impl DestTransport {
 
                             // If the lane went stale after selection, drop the
                             // cached lane and retry once before surfacing the
-                            // error. Transport-agnostic: a closed-like error
-                            // means the underlying wire (WebRTC *or* WebSocket)
-                            // is no longer sendable and should be self-healed.
+                            // error. This self-heal applies only to proven
+                            // `NotAttempted` failures (ambiguous `Unknown`
+                            // attempts returned above): a closed-like error on
+                            // that path means the underlying wire (WebRTC *or*
+                            // WebSocket) is no longer sendable and nothing
+                            // entered a transport, so evicting the lane and
+                            // re-dialing cannot duplicate a payload.
                             if let Err(e) = attempt.result.as_ref() {
                                 if e.is_closed_like() {
                                     tracing::warn!(
