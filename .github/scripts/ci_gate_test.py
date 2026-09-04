@@ -14,6 +14,7 @@ CI_CSHARP_E2E_WORKFLOW = ROOT / ".github/workflows/ci-csharp-e2e.yml"
 CI_TYPESCRIPT_WORKFLOW = ROOT / ".github/workflows/ci-typescript.yml"
 RELEASE_TRAIN_WORKFLOW = ROOT / ".github/workflows/release-train.yml"
 RELEASE_TRAIN_VERIFY_WORKFLOW = ROOT / ".github/workflows/release-train-verify.yml"
+RELEASE_PREPARE_WORKFLOW = ROOT / ".github/workflows/release-prepare.yml"
 RELEASE_TRAIN_SCRIPT = ROOT / "scripts/actr/release-train.sh"
 PUBLISH_ACTRSHARP_WORKFLOW = ROOT / ".github/workflows/publish-actrsharp.yml"
 GO_WORKLOAD_BUILD = ROOT / "examples/actr/go/echo-workload/build.sh"
@@ -274,6 +275,19 @@ def test_release_train_verifies_ci_gate_triggered() -> None:
     assert "actions/workflows/ci-gate.yml/runs" in gate_job
     assert "head_sha=${RELEASE_SHA}" in gate_job
     assert "we do NOT block on" in gate_job
+
+
+def test_only_release_prepare_can_write_pull_requests() -> None:
+    writers = sorted(
+        workflow.name
+        for workflow in (ROOT / ".github/workflows").glob("*.yml")
+        if any(
+            line.strip() == "pull-requests: write"
+            for line in workflow.read_text(encoding="utf-8").splitlines()
+        )
+    )
+
+    assert writers == [RELEASE_PREPARE_WORKFLOW.name]
 
 
 def test_release_train_reuses_actrsharp_workflow() -> None:
@@ -888,6 +902,7 @@ if __name__ == "__main__":
     test_pr_gate_swift_uses_macos_only_xcframework()
     test_release_train_has_valid_publish_steps()
     test_release_train_verifies_ci_gate_triggered()
+    test_only_release_prepare_can_write_pull_requests()
     test_release_train_reuses_actrsharp_workflow()
     test_csharp_pr_gate_uses_light_fixture_and_nightly_keeps_full_matrix()
     test_release_train_forwards_release_context()

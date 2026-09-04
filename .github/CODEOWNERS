@@ -1,0 +1,9 @@
+# GitHub workflow files control which automation receives elevated tokens.
+/.github/CODEOWNERS @Actrium/core
+/.github/workflows/ @Actrium/core
+/.github/scripts/ci_gate_test.py @Actrium/core
+
+# Release scripts execute inside workflows that can write repository contents.
+/scripts/actr/release-*.sh @Actrium/core
+/scripts/actr/detect-pre-release-label.sh @Actrium/core
+/scripts/actr/tests/release-*.sh @Actrium/core
