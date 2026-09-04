@@ -3240,6 +3240,12 @@ impl Inner {
                 pending_requests.clone(),
                 self.send_projection_rx.take(),
             ));
+            #[cfg(not(feature = "webrtc-v020"))]
+            let outproc_gate = Arc::new(PeerGate::new(
+                transport_manager.clone(),
+                pending_requests.clone(),
+                self.send_projection_rx.take(),
+            ));
             let outproc_gate_enum = Gate::Peer(outproc_gate.clone());
             tracing::info!("PeerTransport + PeerGate initialized");
 
@@ -3254,6 +3260,41 @@ impl Inner {
             tracing::info!("🔧 Wiring outproc_gate into node");
             self.outproc_gate = Some(outproc_gate_enum);
             tracing::info!("✅ Node runtime gates fully initialized (inproc + outproc)");
+
+            // Install the outbound delivery-uncertainty hook: a synchronous
+            // `DeliveryUncertain` returned by the send path must also reach
+            // workload hook observers. Snapshot taken after the gate is live
+            // so hook contexts can issue `Dest::Peer(_)` calls.
+            //
+            // Unconditional: WebSocket lanes carry peer traffic in every
+            // feature configuration (including builds without `webrtc-v020`)
+            // and can classify a post-submission failure as
+            // `DeliveryProgress::Unknown`, so the hook must be installed in
+            // all of them.
+            {
+                let actor_id_for_hook = actor_id.clone();
+                let credential_state_for_hook = credential_state.clone();
+                let ctx_builder_snapshot = self.bootstrap_ctx_builder();
+                let ctx_builder: crate::lifecycle::hooks::HookContextBuilder =
+                    Arc::new(move || {
+                        let snapshot = ctx_builder_snapshot.clone();
+                        let actor_id = actor_id_for_hook.clone();
+                        let credential_state = credential_state_for_hook.clone();
+                        Box::pin(async move {
+                            Some(
+                                snapshot.build_bootstrap(
+                                    &actor_id,
+                                    &credential_state.credential().await,
+                                ),
+                            )
+                        })
+                    });
+                let cb = crate::lifecycle::hooks::build_hook_callback(
+                    self.hook_observer.clone(),
+                    ctx_builder,
+                );
+                outproc_gate.set_hook_callback(cb);
+            }
 
             // Save references. The v0.20 manager backs the node-level status
             // APIs (S6-4).
