@@ -349,6 +349,7 @@ impl PeerGate {
             pending_requests,
             send_projection_rx: send_projection_rx
                 .unwrap_or_else(Self::normal_send_projection_receiver),
+            waiter_budget: Arc::new(WaiterBudget::default()),
             hook_callback: std::sync::OnceLock::new(),
         }
     }
