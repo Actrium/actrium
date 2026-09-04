@@ -901,7 +901,7 @@ jobs:
     runs-on: ubuntu-latest
     if: always() && needs.context.result == 'success' && needs.collect-report.result == 'success'
     env:
-      RELEASE_WEBHOOK_URL: ${{ secrets.RELEASE_WEBHOOK_URL }}
+      RELEASE_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
     steps:
       - name: Checkout target branch
         uses: actions/checkout@v5
