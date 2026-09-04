@@ -21,7 +21,7 @@ Outputs:
 
 ## Publish
 
-Releases are published from the repository-root workflow `.github/workflows/publish-protoc-plugins.yml`, triggered manually against an existing `Actrium/actr` release tag. All six protoc plugins (Rust, Swift, Kotlin, TypeScript, Python, Web) are built and published together every run.
+Releases are published from the repository-root workflow `.github/workflows/publish-protoc-plugins.yml`, triggered manually against an existing `Actrium/actrium` release tag. All six protoc plugins (Rust, Swift, Kotlin, TypeScript, Python, Web) are built and published together every run.
 
 1. Ensure the release tag already exists (created by the release train).
 2. In GitHub Actions, run the **Publish Protoc Plugins** workflow with `tag` set to the release tag, e.g. `v0.3.11`.
