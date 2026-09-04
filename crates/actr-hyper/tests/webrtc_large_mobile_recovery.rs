@@ -704,12 +704,14 @@ async fn mobile_data_chunk_channel_close_reports_delivery_uncertain(case: RoleCa
         let gate = harness.peer(direction.from_serial).gate.clone();
         let target_for_send = target_id.clone();
         let stream_id = stream.stream_id.clone();
+        let operation_id = format!("{stream_id}#{}", stream.sequence);
         let send = tokio::spawn(async move {
             gate.send_data_chunk(
                 &target_for_send,
                 PayloadType::StreamReliable,
                 &stream_id,
                 payload,
+                &operation_id,
             )
             .await
         });
@@ -769,12 +771,14 @@ async fn inflight_data_chunk_long_offline_is_bounded_or_delivery_uncertain(case:
         let gate = harness.peer(direction.from_serial).gate.clone();
         let target_for_send = target_id.clone();
         let stream_id = stream.stream_id.clone();
+        let operation_id = format!("{stream_id}#{}", stream.sequence);
         let send = tokio::spawn(async move {
             gate.send_data_chunk(
                 &target_for_send,
                 PayloadType::StreamReliable,
                 &stream_id,
                 payload,
+                &operation_id,
             )
             .await
         });
@@ -866,6 +870,7 @@ async fn mobile_event_storm_during_call_and_data_chunk_does_not_hang() {
             PayloadType::StreamReliable,
             &stream_id,
             Bytes::from(vec![0x42; LARGE_PAYLOAD_SIZE]),
+            &stream_id,
         );
         let (storm_result, call_result, stream_result) =
             tokio::time::timeout(Duration::from_secs(25), async {

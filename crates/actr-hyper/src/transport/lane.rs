@@ -589,19 +589,34 @@ pub trait DataLane: Send + Sync + std::fmt::Debug {
     /// Send raw bytes and retain the delivery-progress fact for the recovery
     /// layer.
     ///
-    /// The default is for adapters whose `send` contract checks the typed
-    /// closed/not-open or secure-not-ready state before touching the wire;
-    /// those errors are therefore proven `NotAttempted` and route-level
-    /// self-healing remains available. An adapter whose `send` can return a
-    /// closed-like error after a write has started MUST override this method
-    /// and report `Unknown`, so an interrupted write is never replayed.
+    /// The default is fail-safe: a lane that only implements `send` cannot
+    /// prove where an error happened relative to the wire, so every closed-like
+    /// error is classified `Unknown` — a send that may have partially entered
+    /// the transport must never be auto-replayed. The one exception is
+    /// `SecureChannelNotReady`, a pre-send gate by construction (without a
+    /// ready session no bytes were framed or written).
+    ///
+    /// # Override checklist (all items are REQUIRED to report `NotAttempted`)
+    ///
+    /// An adapter may override this method to keep route-level self-healing
+    /// for typed closed/not-open errors only if, for every error it maps to
+    /// `NotAttempted`:
+    ///
+    /// 1. the state check runs **before any byte can reach the wire**
+    ///    (`WebSocketDataLane`'s missing-sink arm is the reference pattern;
+    ///    its post-write arm reports `Unknown`);
+    /// 2. the adapter documents where that check happens in its `send`; and
+    /// 3. a test pins the classification (see the `ClosedLikePreSend*` lanes
+    ///    in `dest_transport_tests` and the trait-default tests in
+    ///    `lane_tests`).
+    ///
+    /// An override that cannot satisfy all three must classify `Unknown`
+    /// instead.
     async fn send_with_progress(&self, data: bytes::Bytes) -> SendAttemptResult {
         match self.send(data).await {
             Ok(()) => SendAttemptResult::submitted(),
             Err(error) => {
-                let progress = if error.is_closed_like()
-                    || matches!(error, NetworkError::SecureChannelNotReady(_))
-                {
+                let progress = if matches!(error, NetworkError::SecureChannelNotReady(_)) {
                     DeliveryProgress::NotAttempted
                 } else {
                     DeliveryProgress::Unknown
