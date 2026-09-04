@@ -86,7 +86,7 @@ jobs:
           ref: ${{ inputs.source_ref }}
           persist-credentials: false
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
@@ -167,7 +167,7 @@ jobs:
           ref: ${{ inputs.source_ref }}
           persist-credentials: false
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
