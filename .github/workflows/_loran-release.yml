@@ -111,7 +111,7 @@ jobs:
           repo-token: ${{ github.token }}
           version: ${{ vars.PROTOC_VERSION }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.0
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -193,7 +193,7 @@ jobs:
           ref: ${{ inputs.source_ref }}
           path: source
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.0
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:

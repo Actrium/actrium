@@ -149,7 +149,7 @@ fn derive_key_with_iterations(password: &str, salt: &[u8], iterations: u32) -> V
 
 #[cfg(test)]
 mod tests {
-    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use base64::engine::general_purpose::STANDARD;
 
     use super::*;
 

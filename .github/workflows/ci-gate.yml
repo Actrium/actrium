@@ -152,7 +152,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: wasm32-unknown-unknown
       - name: Install Linux e2e dependencies
@@ -160,7 +160,10 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/google-chrome*
           sudo apt-get update
           sudo apt-get install -y jq sqlite3 lsof perl
+      # protoc 29.3 ships in the self-hosted runner image; skip the
+      # download (and its proxy-tunnel flakiness) there.
       - name: Install protoc
+        if: runner.environment != 'self-hosted'
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -182,6 +185,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.98.0
       - name: Install cargo-audit
         run: cargo install cargo-audit --version 0.22.2 --locked --force
       - name: Audit Cargo.lock
@@ -213,6 +218,15 @@ jobs:
       SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          # wasm32-wasip2 is required by crates/actr-hyper/build.rs to compile
+          # the wasm_actor_fixture Component under --all-features.
+          targets: wasm32-wasip2
+          # rustfmt + clippy are not in the minimal profile; this job runs
+          # `cargo fmt --check` and clippy with -D warnings.
+          components: rustfmt,clippy
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.9
       - name: OTel payload-logging guard
@@ -336,12 +350,15 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           # wasm32-wasip2 is required by crates/actr-hyper/build.rs to compile the
           # wasm_actor_fixture Component under --all-features (wasm-engine).
           targets: wasm32-wasip2,wasm32-unknown-unknown
+      # protoc 29.3 ships in the self-hosted runner image; skip the
+      # download (and its proxy-tunnel flakiness) there.
       - name: Install protoc
+        if: runner.environment != 'self-hosted'
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
@@ -771,7 +788,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
@@ -1013,10 +1030,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: wasm32-wasip2,wasm32-unknown-unknown
+          components: clippy
+      # protoc 29.3 ships in the self-hosted runner image; skip the
+      # download (and its proxy-tunnel flakiness) there.
       - name: Install protoc
+        if: runner.environment != 'self-hosted'
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
