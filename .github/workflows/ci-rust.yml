@@ -24,6 +24,10 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v5
+      # Self-hosted runners resolve an unpinned toolchain to the runner image's
+      # rustup default, which drifts with image rebuilds. Pin explicitly.
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.98.0
       - name: Install cargo-audit
         run: cargo install cargo-audit --version 0.22.2 --locked --force
       - name: Audit Cargo.lock
@@ -43,6 +47,10 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -59,6 +67,8 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.98.0
       - name: WIT <-> DynClib ABI drift check
         run: cargo run -p wit-lint --release
 
@@ -86,6 +96,10 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          targets: wasm32-unknown-unknown,wasm32-wasip2
       # Component Model toolchain:
       # - wasm-component-ld >= 0.5.22 is required to link the V2 async-world
       #   guest fixture (actr:workload@0.6.0) built by crates/actr-hyper/build.rs; that
@@ -116,6 +130,10 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          targets: wasm32-unknown-unknown,wasm32-wasip2
       # Phase 1 Component Model toolchain — see `build` job for rationale.
       - name: Install wasm Component Model toolchain
         run: |
@@ -138,6 +156,10 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          targets: wasm32-wasip2
       - name: Run dynclib tests
         run: |
           set -euo pipefail
