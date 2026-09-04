@@ -453,15 +453,15 @@ pub enum HookEvent {
     WebRtcStateChanged {
         state: actr_framework::WebRtcPeerState,
     },
-    /// A whole data stream's in-flight sends became delivery-uncertain (e.g.
-    /// a WebRTC session close with chunks outstanding). The identity is
-    /// stream-scoped: `stream_id` is the bare stream id, deliberately NOT a
-    /// chunk-level `stream_id#sequence` operation key — the disconnect
-    /// invalidates every outstanding chunk on the stream at once, so no
-    /// single sequence is authoritative. SDK-side reconciliation must not
-    /// mistake this event's id for a chunk-level reconciliation key.
+    /// A data-chunk send became delivery-uncertain. `operation_id` carries
+    /// the same chunk-level `stream_id#sequence` reconciliation key as the
+    /// caller-visible error, so consumers see one identifier contract across
+    /// both channels. Emitters that can only name the whole stream (a WebRTC
+    /// session close invalidating every outstanding chunk at once) pass the
+    /// bare stream id there — no single sequence is authoritative for that
+    /// stream-wide case.
     DataChunkDeliveryUncertain {
-        stream_id: String,
+        operation_id: String,
         session_id: u64,
         reason: String,
     },
