@@ -3240,6 +3240,12 @@ impl Inner {
                 pending_requests.clone(),
                 self.send_projection_rx.take(),
             ));
+            #[cfg(not(feature = "webrtc-v020"))]
+            let outproc_gate = Arc::new(PeerGate::new(
+                transport_manager.clone(),
+                pending_requests.clone(),
+                self.send_projection_rx.take(),
+            ));
             let outproc_gate_enum = Gate::Peer(outproc_gate.clone());
             tracing::info!("PeerTransport + PeerGate initialized");
 
@@ -3259,7 +3265,12 @@ impl Inner {
             // `DeliveryUncertain` returned by the send path must also reach
             // workload hook observers. Snapshot taken after the gate is live
             // so hook contexts can issue `Dest::Peer(_)` calls.
-            #[cfg(feature = "webrtc-v020")]
+            //
+            // Unconditional: WebSocket lanes carry peer traffic in every
+            // feature configuration (including builds without `webrtc-v020`)
+            // and can classify a post-submission failure as
+            // `DeliveryProgress::Unknown`, so the hook must be installed in
+            // all of them.
             {
                 let actor_id_for_hook = actor_id.clone();
                 let credential_state_for_hook = credential_state.clone();

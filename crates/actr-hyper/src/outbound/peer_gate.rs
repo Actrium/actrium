@@ -17,14 +17,18 @@ use crate::transport::{
     PeerSendAttempt, PeerTransport, RpcDeadline, SentTransportSlot, WireIdentity,
     new_delivery_progress_cell, observed_delivery_progress,
 };
-use actr_framework::{Bytes, MediaSample};
+use actr_framework::Bytes;
+#[cfg(any(feature = "webrtc-v020", test))]
+use actr_framework::MediaSample;
 use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{
     ActorResult, ActrError, ActrId, Classify, ConnectionNotReadyInfo, Direction, PayloadType,
     RpcEnvelope,
 };
+#[cfg(feature = "webrtc-v020")]
 use std::collections::HashMap;
 use std::sync::Arc;
+#[cfg(any(test, feature = "test-utils", feature = "webrtc-v020"))]
 use std::time::Duration;
 #[cfg(any(test, feature = "test-utils"))]
 use tokio::sync::oneshot;
@@ -158,6 +162,26 @@ impl PeerGate {
         }
     }
 
+    /// Create a PeerGate for configurations without the `webrtc-v020`
+    /// backend: WebSocket lanes carry peer traffic and there is no RTC
+    /// preflight authority, so admission comes from the send projection
+    /// alone. The delivery-uncertainty hook stays installable — a WebSocket
+    /// write can still classify as `DeliveryUncertain`.
+    #[cfg(not(feature = "webrtc-v020"))]
+    pub(crate) fn new(
+        transport_manager: Arc<PeerTransport>,
+        pending_requests: PendingRequestsMap,
+        send_projection_rx: Option<watch::Receiver<SendProjection>>,
+    ) -> Self {
+        Self {
+            transport_manager,
+            pending_requests,
+            send_projection_rx: send_projection_rx
+                .unwrap_or_else(Self::normal_send_projection_receiver),
+            hook_callback: std::sync::OnceLock::new(),
+        }
+    }
+
     /// Install the workload hook callback used to mirror synchronous
     /// delivery-uncertainty failures to hook observers. Installing twice is a
     /// caller bug: the first callback is retained and the ignored
@@ -172,8 +196,8 @@ impl PeerGate {
 
     /// Mirror a synchronous `DeliveryUncertain` to hook observers. The send
     /// path cannot name a session (the failure may precede session selection
-    /// or travel over WebSocket), so `session_id` is reported as 0 and the
-    /// reason carries the caller-visible cause. The event uses the exact
+    /// or travel over WebSocket), so `session_id` is reported as `None` and
+    /// the reason carries the caller-visible cause. The event uses the exact
     /// caller-visible operation id (`stream_id#sequence`) so both channels
     /// reconcile on one key.
     fn emit_data_chunk_uncertain_hook(&self, operation_id: &str, cause: &str) {
@@ -183,7 +207,7 @@ impl PeerGate {
             drop(callback(
                 crate::wire::webrtc::HookEvent::DataChunkDeliveryUncertain {
                     operation_id: operation_id.to_string(),
-                    session_id: 0,
+                    session_id: None,
                     reason: format!("synchronous send classification: {cause}"),
                 },
             ));
@@ -2768,6 +2792,126 @@ mod tests {
             pending_requests.len(),
             0,
             "PendingRpc RAII must drop the entry with the request future"
+        );
+    }
+
+    #[cfg(feature = "webrtc-v020")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn non_sendable_controller_with_ready_websocket_fallback_admits() {
+        use crate::transport::ConnType;
+
+        // A controller created against the no-op session factory never
+        // connects, so its snapshot stays non-sendable. Together with a
+        // destination whose WebSocket lane is ready, the RTC preflight must
+        // still admit a reliable send — the peer is reachable through the
+        // fallback wire, so the send is delivered instead of rejected.
+        let ws_sends = Arc::new(AtomicUsize::new(0));
+        let target = test_actor_id(2);
+
+        #[derive(Debug)]
+        struct ReadyWsLane {
+            sends: Arc<AtomicUsize>,
+        }
+
+        #[async_trait]
+        impl DataLane for ReadyWsLane {
+            async fn send(&self, _data: bytes::Bytes) -> NetworkResult<()> {
+                self.sends.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+
+            fn lane_type(&self) -> &'static str {
+                "ready-ws-test"
+            }
+        }
+
+        #[derive(Debug)]
+        struct ReadyWsWire {
+            lane: Arc<ReadyWsLane>,
+        }
+
+        #[async_trait]
+        impl WireHandle for ReadyWsWire {
+            fn connection_type(&self) -> ConnType {
+                ConnType::WebSocket
+            }
+
+            fn priority(&self) -> u8 {
+                1
+            }
+
+            async fn connect(&self) -> NetworkResult<()> {
+                Ok(())
+            }
+
+            fn is_connected(&self) -> bool {
+                true
+            }
+
+            async fn close(&self) -> NetworkResult<()> {
+                Ok(())
+            }
+
+            async fn get_lane(&self, _t: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
+                Ok(self.lane.clone())
+            }
+        }
+
+        #[derive(Debug)]
+        struct ReadyWsWireBuilder {
+            wire: Arc<ReadyWsWire>,
+        }
+
+        #[async_trait]
+        impl WireBuilder for ReadyWsWireBuilder {
+            async fn create_connections(
+                &self,
+                _dest: &Dest,
+            ) -> NetworkResult<Vec<Arc<dyn WireHandle>>> {
+                Ok(vec![self.wire.clone()])
+            }
+        }
+
+        let transport = Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(ReadyWsWireBuilder {
+                wire: Arc::new(ReadyWsWire {
+                    lane: Arc::new(ReadyWsLane {
+                        sends: ws_sends.clone(),
+                    }),
+                }),
+            }),
+        ));
+        let manager = PeerGate::empty_manager_for_test();
+        let pending_requests: PendingRequestsMap = Arc::new(RpcCorrelation::new());
+        let gate =
+            PeerGate::with_v020_manager(transport.clone(), manager.clone(), pending_requests, None);
+
+        // Force a non-sendable controller for the target: it exists, but the
+        // no-op factory never completes a session, so `sendable` is false.
+        let _controller = manager.ensure_controller(target.clone()).await;
+        let snapshot = manager.get_snapshot(&target).await;
+        assert!(
+            snapshot.as_ref().is_some_and(|s| !s.sendable),
+            "controller snapshot must be non-sendable in this fixture: {snapshot:?}"
+        );
+
+        // Seed the destination transport so the ready WebSocket wire is
+        // materialized for the dest before the reliable send is issued.
+        gate.send_message_with_type(&target, PayloadType::RpcReliable, RpcEnvelope::default())
+            .await
+            .expect("seed send materializes the WebSocket destination");
+        let dest = Dest::peer(target.clone());
+        assert!(transport.has_outbound_materialization(&dest).await);
+
+        gate.send_message_with_type(&target, PayloadType::RpcReliable, RpcEnvelope::default())
+            .await
+            .expect("reliable send must be admitted over the ready WebSocket fallback");
+
+        assert_eq!(
+            ws_sends.load(Ordering::SeqCst),
+            2,
+            "both sends must ride the ready WebSocket lane despite the non-sendable controller"
         );
     }
 }
