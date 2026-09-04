@@ -763,9 +763,11 @@ async fn not_attempted_first_lane_still_falls_back() {
         "a proven pre-send failure keeps the self-heal fallback: {:?}",
         attempt.result
     );
-    assert!(
-        webrtc_sends.load(Ordering::Relaxed) >= 1,
-        "the WebRTC lane was tried first"
+    assert_eq!(
+        webrtc_sends.load(Ordering::Relaxed),
+        2,
+        "the WebRTC lane is attempted at most twice (initial + one bounded \
+         self-heal retry) before the WebSocket fallback"
     );
     assert_eq!(
         websocket_sends.load(Ordering::Relaxed),
