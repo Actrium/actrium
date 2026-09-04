@@ -32,6 +32,7 @@ dependencyResolutionManagement {
 rootProject.name = "actr-kotlin"
 
 include(":actr-kotlin")
+if (file("datastream-app").isDirectory) { include(":datastream-app") }
 if (file("demo").isDirectory) {
     include(":demo")
 }

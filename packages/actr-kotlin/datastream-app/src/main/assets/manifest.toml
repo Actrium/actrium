@@ -1,0 +1,15 @@
+# manifest.toml — package declaration and dependencies (1:1 with the iOS
+# DataStreamApp manifest, minus the iOS-only `exports` codegen hint — Android
+# dispatches the local ProbeService RPC manually inside the workload's
+# dispatch()).
+
+edition = 1
+
+[package]
+name = "DataStreamApp"
+manufacturer = "org-zhj"
+version = "0.1.0"
+description = "Actrium DataStreamApp — Android linked runtime"
+
+[dependencies]
+duplex_stream = { actr_type = "org-zhj:DuplexStreamService:1.0.1" }

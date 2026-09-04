@@ -228,6 +228,7 @@ impl<M> RpcCorrelation<M> {
 
     /// Remove-and-fail every entry whose metadata matches the predicate
     /// (peer-disconnect sweep). Returns the number of entries removed.
+    #[cfg(test)]
     pub(crate) fn fail_where(
         &self,
         mut pred: impl FnMut(&M) -> bool,

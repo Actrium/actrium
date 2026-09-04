@@ -1255,11 +1255,11 @@ external fun uniffi_actr_fn_func_actr_error_is_retryable(`err`: RustBuffer.ByVal
 ): Byte
 external fun uniffi_actr_fn_func_actr_error_kind(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_actr_fn_func_actr_error_requires_dlq(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+external fun uniffi_actr_fn_func_actr_error_requires_dlq(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
-external fun uniffi_actr_fn_func_actr_error_throw_for_test(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+external fun uniffi_actr_fn_func_actr_error_throw_for_test(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
-external fun uniffi_actr_fn_func_set_log_callback(`callback`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+external fun uniffi_actr_fn_func_set_log_callback(`callback`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_actr_fn_func_resolve_manifest_dependency(`manifestPath`: RustBuffer.ByValue,`dependencyAlias`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1395,7 +1395,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_func_actr_error_requires_dlq() != 62057.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_func_actr_error_throw_for_test() != 53545.toShort()) {
+    if (lib.uniffi_actr_checksum_func_actr_error_throw_for_test() != 12923.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_func_set_log_callback() != 22627.toShort()) {
@@ -3004,12 +3004,13 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
         { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         ActrException.ErrorHandler,
     )
     }
 
+    
     /**
      * Wait for shutdown to complete.
      */
@@ -3206,7 +3207,7 @@ public interface ContextBridgeInterface {
      * may legitimately encode to zero bytes.
      */
     suspend fun `claimReply`()
-
+    
     /**
      * Discover an actor of the specified type
      *
@@ -3242,12 +3243,12 @@ public interface ContextBridgeInterface {
      * Deliver an error response through the current inbound RPC reply boundary.
      */
     suspend fun `replyError`(`error`: ActrException)
-
+    
     /**
      * Deliver a response through the current inbound RPC reply boundary.
      */
     suspend fun `replyRaw`(`payload`: kotlin.ByteArray)
-
+    
     /**
      * Request ID associated with the current dispatch or lifecycle context.
      */
@@ -3401,6 +3402,7 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         }
     }
 
+    
     /**
      * Add a media track to the WebRTC connection with the target
      */
@@ -3491,6 +3493,7 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         callWithHandle { uniffiHandle ->
             UniffiLib.uniffi_actr_fn_method_contextbridge_claim_reply(
                 uniffiHandle,
+                
             )
         },
         { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_void(future, callback, continuation) },
@@ -3498,12 +3501,13 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
         // lift function
         { Unit },
+        
         // Error FFI converter
         ActrException.ErrorHandler,
     )
     }
 
-
+    
     /**
      * Discover an actor of the specified type
      *
@@ -3642,12 +3646,13 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         ActrException.ErrorHandler,
     )
     }
 
+    
     /**
      * Deliver a response through the current inbound RPC reply boundary.
      */
@@ -3666,13 +3671,13 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         ActrException.ErrorHandler,
     )
     }
 
-
+    
     /**
      * Request ID associated with the current dispatch or lifecycle context.
      */override fun `requestId`(): kotlin.String {
@@ -6179,8 +6184,13 @@ public object FfiConverterTypeWebRtcPeerStateBridge: FfiConverterRustBuffer<WebR
  * Error type for actr operations.
  *
  * Protocol errors are mirrored one-for-one where the binding ABI exposes
- * them. DeliveryUncertain is appended so the existing UniFFI error
- * discriminants remain stable; Config is a binding-local pre-protocol error.
+ * them. `DeliveryUncertain` is appended after the existing variants so adding
+ * this case does not renumber the established UniFFI error discriminants.
+ * The binding-local `Config` variant captures failures that originate inside
+ * the FFI shell before the protocol layer is reached.
+ * UniFFI error discriminants are append-only: future protocol variants must
+ * be appended after the existing cases and mirrored in every generated SDK;
+ * never reorder or remove an established case.
  */
 sealed class ActrException: kotlin.Exception() {
     
@@ -6286,12 +6296,18 @@ sealed class ActrException: kotlin.Exception() {
         override val message
             get() = "msg=${ `msg` }"
     }
-
-    /** The operation may have entered the transport; generic retry is unsafe. */
+    
+    /**
+     * The operation may have entered the transport, so generic retry is
+     * unsafe. Keep the operation ID and cause available to SDK callers.
+     *
+     * This variant is intentionally appended to preserve the discriminants
+     * of the existing UniFFI ABI.
+     */
     class DeliveryUncertain(
-
-        val `operationId`: kotlin.String,
-
+        
+        val `operationId`: kotlin.String, 
+        
         val causeDetail: kotlin.String
         ) : ActrException() {
         override val message
@@ -6675,7 +6691,8 @@ enum class ErrorKind {
      */
     CLIENT,
     /**
-     * Framework bug or panic — do not retry; alert.
+     * Framework fault or uncertain delivery — do not retry. Framework faults
+     * are alertable; uncertain delivery requires caller reconciliation.
      */
     INTERNAL,
     /**
@@ -9142,25 +9159,32 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
             return FfiConverterBoolean.lift(
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_actr_fn_func_actr_error_requires_dlq(
-
+    
         FfiConverterTypeActrError.lower(`err`),_status)
 }
     )
     }
-
+    
 
         /**
-         * Test hook: fail with `err` so the error-buffer reader is exercised
-         * against the real Rust UniFFI writer — the discriminant, field order,
-         * and integer widths crossing the boundary are exactly the ones a
-         * production throw produces.
-         */ @Throws(ActrException::class) fun `actrErrorThrowForTest`(`err`: ActrException)
-        =
+         * Test hook: fail with `err` so foreign-side error-buffer readers are
+         * exercised against the real Rust UniFFI writer — the discriminant, field
+         * order, and integer widths crossing the boundary are exactly the ones a
+         * production throw produces. The Swift test calls this to prove its
+         * `FfiConverterTypeActrError.read` lifts a Rust-generated case-13
+         * `DeliveryUncertain` without losing `operation_id` or `cause`; the Kotlin
+         * unit suite is JVM-only, so its `ActrErrorFfiReadTest` hand-builds the
+         * same buffer layout instead of calling this hook.
+         */
+    @Throws(ActrException::class) fun `actrErrorThrowForTest`(`err`: ActrException)
+        = 
     uniffiRustCallWithError(ActrException) { _status ->
     UniffiLib.uniffi_actr_fn_func_actr_error_throw_for_test(
-
+    
         FfiConverterTypeActrError.lower(`err`),_status)
 }
+    
+    
 
         /**
          * Set or clear the global log callback.
@@ -9234,3 +9258,5 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
     )
     }
     
+
+

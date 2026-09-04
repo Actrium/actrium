@@ -2719,9 +2719,13 @@ mod tests {
         // send may still commit, so a wakeup here could combine caller retry
         // with the original delivery.
         assert!(
-            tokio::time::timeout(Duration::from_millis(50), awaiting)
-                .await
-                .is_err(),
+            crate::timer::timeout(
+                crate::timer::ids::PEER_TRANSPORT_HEALTH,
+                Duration::from_millis(50),
+                awaiting,
+            )
+            .await
+            .is_err(),
             "AwaitingSend entries must not be released by terminal retirement"
         );
         timeout(
