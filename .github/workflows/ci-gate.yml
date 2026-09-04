@@ -110,9 +110,6 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v5
-      # Pin like the other self-hosted Rust jobs (runner image default drifts).
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.98.0
       - name: Install native dependencies
         run: |
           sudo apt-get update
