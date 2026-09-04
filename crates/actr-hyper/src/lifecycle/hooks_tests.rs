@@ -538,7 +538,7 @@ async fn data_chunk_uncertain_hook_routes_to_on_error() {
     let cb = build_hook_callback(Some(observer), ctx_builder);
 
     cb(HookEvent::DataChunkDeliveryUncertain {
-        operation_id: "mobile-upload#7".to_string(),
+        operation_id: crate::outbound::data_stream_operation_id("mobile-upload"),
         session_id: Some(99),
         reason: "data channel closed".to_string(),
     })
@@ -553,10 +553,10 @@ async fn data_chunk_uncertain_hook_routes_to_on_error() {
     assert!(matches!(
         &event.source,
         ActrError::DeliveryUncertain { operation_id, cause }
-            if operation_id == "mobile-upload#7"
+            if operation_id == "mobile-upload#stream"
                 && cause == "data stream delivery uncertain: data channel closed"
     ));
-    assert!(event.context.contains("operation_id=mobile-upload#7"));
+    assert!(event.context.contains("operation_id=mobile-upload#stream"));
     assert!(event.context.contains("session_id=99"));
     assert!(event.context.contains("reason=data channel closed"));
 }

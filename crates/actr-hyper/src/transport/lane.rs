@@ -624,10 +624,22 @@ pub trait DataLane: Send + Sync + std::fmt::Debug {
     /// `SecureChannelNotReady`, a pre-send gate by construction (without a
     /// ready session no bytes were framed or written).
     ///
-    /// An adapter whose `send` checks the typed closed/not-open state before
-    /// touching the wire MAY override this method and report `NotAttempted`
-    /// for those proven pre-send failures, keeping route-level self-healing
-    /// available (see `WebSocketDataLane` for the pattern).
+    /// # Override checklist (all items are REQUIRED to report `NotAttempted`)
+    ///
+    /// An adapter may override this method to keep route-level self-healing
+    /// for typed closed/not-open errors only if, for every error it maps to
+    /// `NotAttempted`:
+    ///
+    /// 1. the state check runs **before any byte can reach the wire**
+    ///    (`WebSocketDataLane`'s missing-sink arm is the reference pattern;
+    ///    its post-write arm reports `Unknown`);
+    /// 2. the adapter documents where that check happens in its `send`; and
+    /// 3. a test pins the classification (see the `ClosedLikePreSend*` lanes
+    ///    in `dest_transport_tests` and the trait-default tests in
+    ///    `lane_tests`).
+    ///
+    /// An override that cannot satisfy all three must classify `Unknown`
+    /// instead.
     async fn send_with_progress(&self, data: bytes::Bytes) -> SendAttemptResult {
         match self.send(data).await {
             Ok(()) => SendAttemptResult::submitted(),
