@@ -721,8 +721,11 @@ async fn retry_attempt_matrix_matches_payload_type_policy() {
     ];
 
     for (payload_type, expected_attempts) in cases {
+        // ChannelClosed is a structurally proven pre-send variant: under the
+        // fail-closed replay contract only such variants earn the policy's
+        // backoff retries.
         let outcomes = (0..expected_attempts)
-            .map(|_| Err(NetworkError::SendError("transient failure".into())))
+            .map(|_| Err(NetworkError::ChannelClosed("transient failure".into())))
             .collect();
         let (gate, lane, _stats) = gate_with_lane(ScriptedLane::new(outcomes), Duration::ZERO);
         let result = gate
@@ -746,28 +749,12 @@ async fn retry_attempt_matrix_matches_payload_type_policy() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn retryable_error_kinds_retry_once_preserve_request_id_and_reuse_transport() {
+async fn proven_pre_send_error_kinds_retry_once_preserve_request_id_and_reuse_transport() {
     let target = make_actor_id(2);
-    let cases: [(&str, ErrorCtor); 12] = [
-        ("ConnectionError", NetworkError::ConnectionError),
-        ("ConnectionClosed", NetworkError::ConnectionClosed),
-        ("ChannelClosed", NetworkError::ChannelClosed),
-        ("SendError", NetworkError::SendError),
-        (
-            "NetworkUnreachableError",
-            NetworkError::NetworkUnreachableError,
-        ),
-        (
-            "ResourceExhaustedError",
-            NetworkError::ResourceExhaustedError,
-        ),
-        ("WebSocketError", NetworkError::WebSocketError),
-        ("SignalingError", NetworkError::SignalingError),
-        ("WebRtcError", NetworkError::WebRtcError),
-        ("NatTraversalError", NetworkError::NatTraversalError),
-        ("IceError", NetworkError::IceError),
-        ("TimeoutError", NetworkError::TimeoutError),
-    ];
+    // Only structurally proven pre-send variants earn the bounded replay:
+    // an in-process channel send failure writes nothing, and the remaining
+    // kinds below fail-closed (see the companion test).
+    let cases: [(&str, ErrorCtor); 1] = [("ChannelClosed", NetworkError::ChannelClosed)];
 
     for (name, make_error) in cases {
         let request_id = format!("retryable-{name}");
@@ -799,6 +786,58 @@ async fn retryable_error_kinds_retry_once_preserve_request_id_and_reuse_transpor
             stats.create_calls.load(Ordering::SeqCst),
             1,
             "{name} retry should reuse the existing DestTransport"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ambiguous_retryable_error_kinds_fail_closed_without_replay() {
+    let target = make_actor_id(2);
+    // These kinds are retryable at the error-classification level but carry
+    // no framework-verified pre-send proof: replaying them after a possibly
+    // partial write could duplicate delivery, so the gate must surface the
+    // error on the first attempt without a retry.
+    // ConnectionClosed is excluded: the DestTransport layer independently
+    // evicts a closed-like lane and retries once (covered by the
+    // dest_transport fallback tests), which is route self-heal, not gate
+    // replay.
+    let cases: [(&str, ErrorCtor); 10] = [
+        ("ConnectionError", NetworkError::ConnectionError),
+        ("SendError", NetworkError::SendError),
+        (
+            "NetworkUnreachableError",
+            NetworkError::NetworkUnreachableError,
+        ),
+        (
+            "ResourceExhaustedError",
+            NetworkError::ResourceExhaustedError,
+        ),
+        ("WebSocketError", NetworkError::WebSocketError),
+        ("SignalingError", NetworkError::SignalingError),
+        ("WebRtcError", NetworkError::WebRtcError),
+        ("NatTraversalError", NetworkError::NatTraversalError),
+        ("IceError", NetworkError::IceError),
+        ("TimeoutError", NetworkError::TimeoutError),
+    ];
+
+    for (name, make_error) in cases {
+        let (gate, lane, _stats) = gate_with_lane(
+            ScriptedLane::new(vec![Err(make_error(format!("{name} transient"))), Ok(())]),
+            Duration::ZERO,
+        );
+
+        let result = gate
+            .send_serialized_with_zero_retry_delay_for_test(
+                &target,
+                PayloadType::RpcReliable,
+                &encoded_envelope(&format!("fail-closed-{name}")),
+            )
+            .await;
+        assert!(result.is_err(), "{name} must surface its error");
+        assert_eq!(
+            lane.sent_payloads().len(),
+            1,
+            "{name} must not be replayed without proven pre-send status"
         );
     }
 }

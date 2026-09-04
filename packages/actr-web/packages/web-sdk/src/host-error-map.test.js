@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
@@ -9,9 +9,14 @@ import { describe, expect, it } from 'vitest';
 function loadHostErrorMap(sourceUrl) {
   const source = readFileSync(sourceUrl, 'utf8');
   const begin = source.indexOf('// @host-error-map begin');
-  const end = source.indexOf('// @host-error-map end');
+  // Search for the end marker only at or after the begin marker so a missing
+  // marker cannot produce a nonsensical negative range.
+  const end = source.indexOf('// @host-error-map end', begin + 1);
   expect(begin, 'actor.sw.js must keep the @host-error-map begin marker').toBeGreaterThan(-1);
-  expect(end, 'actor.sw.js must keep the @host-error-map end marker').toBeGreaterThan(begin);
+  expect(
+    end,
+    'actor.sw.js must keep the @host-error-map end marker after the begin marker'
+  ).toBeGreaterThan(begin);
   const body = source.slice(begin, end);
   return new Function(`${body}\nreturn mapHostErrorToActr;`)();
 }
@@ -37,6 +42,13 @@ const cliCopySource = new URL(
   '../../../../../crates/actr-cli/assets/web-runtime/actor.sw.js',
   import.meta.url
 );
+// The package publishes the built worker; CI builds before testing, so the
+// published dist bytes must exist and match the sources (a stale or
+// diverging build cannot ship an old error mapping behind a green
+// source-level test). When dist is absent (pre-build local run), the
+// source-level assertions below still gate the mapping.
+const swDistSource = new URL('../dist/actor.sw.js', import.meta.url);
+const swDistExists = existsSync(swDistSource);
 
 describe('mapHostErrorToActr (actor.sw.js)', () => {
   const mapHostErrorToActr = loadHostErrorMap(swSource);
@@ -90,5 +102,28 @@ describe('mapHostErrorToActr (actor.sw.js)', () => {
     // two copies; the function region itself — comments included — must be
     // byte-identical so neither runtime diverges.
     expect(cliFn).toBe(swFn);
+  });
+
+  it('publishes the same mapping through the built dist service worker', () => {
+    if (!swDistExists) {
+      // Source-level coverage still ran above; the dist gate is enforced in
+      // CI, which builds the SDK before running this suite.
+      return;
+    }
+    const distFn = hostErrorMapFunctionRegion(swDistSource);
+    const srcFn = hostErrorMapFunctionRegion(swSource);
+    expect(distFn).toBe(srcFn);
+    const mapped = loadHostErrorMap(swDistSource)({
+      actrErrorTag: 'delivery-uncertain',
+      actrMessage: 'write may have entered transport',
+      actrOperationId: 'stream-1#4',
+      message: 'delivery-uncertain: write may have entered transport',
+    });
+    expect(mapped).toEqual({
+      'delivery-uncertain': {
+        'operation-id': 'stream-1#4',
+        cause: 'write may have entered transport',
+      },
+    });
   });
 });

@@ -446,23 +446,26 @@ impl NetworkError {
         }
     }
 
-    /// Return true for the closed set of variants that are **proven
-    /// pre-send by construction** across every lane: typed closed/not-open
-    /// states, the secure-readiness gate, and argument/operation validation.
-    /// The one-shot safe reattempt and any future replay decision gate on
-    /// this, so a lane adapter that misclassifies a post-write failure as
-    /// `NotAttempted` fails closed (terminal uncertainty) instead of being
-    /// replayed: `NotAttempted` plus retryability alone is the adapter's
-    /// word, this set is the framework's.
+    /// Return true for the closed set of variants that are **structurally
+    /// pre-send** — they can only be produced before any byte reaches a
+    /// wire, on every lane: the secure-readiness gate (checked before the
+    /// inner lane is touched), argument/operation validation (rejected
+    /// before any lane call), and an in-process channel send failure
+    /// (nothing was enqueued).
+    ///
+    /// Typed closed/not-open transport variants are deliberately NOT
+    /// included: whether a closed-like error happened before or after a
+    /// partial write is **lane-specific** knowledge. A lane whose `send`
+    /// checks closed state before touching the wire must override
+    /// `send_with_progress` to report `NotAttempted` AND a lane-side
+    /// proven-pre-send marker; the framework-level replay decisions (the
+    /// one-shot safe reattempt and generic backoff) only trust this
+    /// structural set, so an adapter misclassifying a post-write failure
+    /// fails closed (terminal uncertainty) instead of being replayed.
     pub fn is_proven_pre_send(&self) -> bool {
         matches!(
             self,
-            NetworkError::ConnectionClosed(_)
-                | NetworkError::PeerConnectionClosed(_)
-                | NetworkError::DataChannelClosed(_)
-                | NetworkError::DataChannelNotOpen(_)
-                | NetworkError::WebSocketClosed(_)
-                | NetworkError::ChannelClosed(_)
+            NetworkError::ChannelClosed(_)
                 | NetworkError::SecureChannelNotReady(_)
                 | NetworkError::InvalidArgument(_)
                 | NetworkError::InvalidOperation(_)

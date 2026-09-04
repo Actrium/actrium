@@ -821,6 +821,7 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                     && !state.recovery_negotiated
                     && !state.awaiting_offer
                     && !state.address_changed
+                    && !answerer_parked(state)
                 {
                     // Lost request/offer: retransmit the same correlated
                     // request and move to a new attempt epoch so the controller
@@ -1512,19 +1513,32 @@ fn reduce_command(
                 return;
             }
 
-            // The request is proof the answerer's physical session is dead
-            // (an answerer only sends it from its own recovery). Soft
-            // recovery — an ICE restart on THIS PC generation — cannot
-            // repair an asymmetric failure: the answerer has no live session
-            // to accept the restart offer, would park awaiting one, and
-            // eventually exhaust to Idle with transport down. Drive Hard
-            // Recovery instead: the replacement Session allocates a fresh
+            // Attempts below the escalation threshold drive the ordinary
+            // soft path: both endpoints normally recover from a shared
+            // network blip with an ICE restart on the live generation, and
+            // the answerer's live session can accept the restart offer.
+            //
+            // Persistent retransmission is proof soft recovery cannot
+            // repair the answerer — its physical session is dead (an
+            // answerer retransmits indefinitely while parked awaiting an
+            // offer it can never receive on a dead generation). Escalate to
+            // Hard Recovery: the replacement Session allocates a fresh
             // generation and produces the replacement Offer the passive
-            // answerer needs. A request that overtakes a soft round already
+            // answerer needs, instead of letting it exhaust to Idle with
+            // transport down. A request that overtakes a soft round already
             // in flight was returned above, so this cannot corrupt an
             // in-progress restart; a newer attempt while a replacement is
             // already building is a no-op inside start_hard_recovery.
-            start_hard_recovery(state, effects);
+            const ANSWERER_HARD_ESCALATION_ATTEMPT: u32 = 4;
+            if attempt >= ANSWERER_HARD_ESCALATION_ATTEMPT {
+                start_hard_recovery(state, effects);
+            } else {
+                if state.recovery_inflight {
+                    state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
+                    state.recovery_attempt_started = false;
+                }
+                start_soft_recovery(state, effects);
+            }
         }
         RtcPeerCommand::ApplyRemoteDescription(desc) => {
             reduce_command(
@@ -2020,11 +2034,19 @@ fn clear_negotiation_for_recovery(state: &mut RtcPeerState) {
     state.pending_candidates.clear();
 }
 
+/// Whether this peer is an Answerer parked awaiting the stable Offerer's
+/// replacement Offer. Centralizing the (role, recovery, awaiting) coupling
+/// keeps future refactors from quietly re-enabling Answerer-side restart
+/// churn: a parked answerer must never issue RestartIce/BuildSession.
+fn answerer_parked(state: &RtcPeerState) -> bool {
+    state.role == Role::Answerer && state.recovery_inflight && state.awaiting_offer
+}
+
 fn start_soft_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect>) {
     if state.recovery_attempt_started {
         return;
     }
-    if state.role == Role::Answerer && state.recovery_inflight && state.awaiting_offer {
+    if answerer_parked(state) {
         return;
     }
     if !recovery_gate_open(state) {

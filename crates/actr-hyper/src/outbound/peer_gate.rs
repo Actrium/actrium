@@ -103,6 +103,15 @@ struct GateSendAttempt {
 /// waiting is bounded work, not an offline payload queue.  Each class retains
 /// a minimum share so a burst of one operation type cannot consume the entire
 /// global budget.
+///
+/// Scope: these ceilings bound ONE `PeerGate` (the node builds a single
+/// outbound gate per runtime, so in practice they bound the node). A host
+/// constructing multiple gates gets one budget per gate — the ceilings are
+/// not a node-level aggregate across gates. Byte ceilings charge the
+/// serialized payload handed to the admission layer; v0.20 stream framing
+/// adds an 8-byte fragment header per transmitted frame, which is excluded
+/// from the retained-byte accounting (bounded at ~0.2% of the per-peer
+/// ceiling per waiter).
 const MAX_GLOBAL_WAITERS: usize = 256;
 const MAX_PEER_WAITERS: usize = 64;
 const MAX_GLOBAL_WAITER_BYTES: usize = 16 * 1024 * 1024;
