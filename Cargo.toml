@@ -61,7 +61,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.10.0-alpha.4"
+version = "0.10.0-alpha.5"
 edition = "2024"
 rust-version = "1.95"
 license = "Apache-2.0"
@@ -74,20 +74,20 @@ collapsible_else_if = "allow"
 
 [workspace.dependencies]
 # === Internal Dependencies ===
-actr-protocol = { path = "crates/actr-protocol", version = "0.10.0-alpha.4" }
+actr-protocol = { path = "crates/actr-protocol", version = "0.10.0-alpha.5" }
 proto-fingerprint = "0.1.0"
-actr-service-compat = { path = "crates/actr-service-compat", version = "0.10.0-alpha.4" }
-actr-config = { path = "crates/actr-config", version = "0.10.0-alpha.4" }
-actr-framework = { path = "crates/actr-framework", version = "0.10.0-alpha.4" }
-actr-framework-protoc-codegen = { path = "tools/actr/protoc-gen/rust", version = "0.10.0-alpha.4" }
-actr-runtime = { path = "crates/actr-runtime", version = "0.10.0-alpha.4" }
-actr-runtime-mailbox = { path = "crates/actr-runtime-mailbox", version = "0.10.0-alpha.4" }
-actr-hyper = { path = "crates/actr-hyper", version = "0.10.0-alpha.4" }
-actr-platform-traits = { path = "crates/actr-platform-traits", version = "0.10.0-alpha.4" }
-actr-platform-native = { path = "crates/actr-platform-native", version = "0.10.0-alpha.4" }
-actr-pack = { path = "crates/actr-pack", version = "0.10.0-alpha.4" }
+actr-service-compat = { path = "crates/actr-service-compat", version = "0.10.0-alpha.5" }
+actr-config = { path = "crates/actr-config", version = "0.10.0-alpha.5" }
+actr-framework = { path = "crates/actr-framework", version = "0.10.0-alpha.5" }
+actr-framework-protoc-codegen = { path = "tools/actr/protoc-gen/rust", version = "0.10.0-alpha.5" }
+actr-runtime = { path = "crates/actr-runtime", version = "0.10.0-alpha.5" }
+actr-runtime-mailbox = { path = "crates/actr-runtime-mailbox", version = "0.10.0-alpha.5" }
+actr-hyper = { path = "crates/actr-hyper", version = "0.10.0-alpha.5" }
+actr-platform-traits = { path = "crates/actr-platform-traits", version = "0.10.0-alpha.5" }
+actr-platform-native = { path = "crates/actr-platform-native", version = "0.10.0-alpha.5" }
+actr-pack = { path = "crates/actr-pack", version = "0.10.0-alpha.5" }
 actr-hlc = { path = "crates/actr-hlc", version = "0.5.9" }
-actr-mock-actrix = { path = "crates/actr-mock-actrix", version = "0.10.0-alpha.4" }
+actr-mock-actrix = { path = "crates/actr-mock-actrix", version = "0.10.0-alpha.5" }
 
 # === Async Runtime ===
 tokio = { version = "1.48", features = ["full"] }

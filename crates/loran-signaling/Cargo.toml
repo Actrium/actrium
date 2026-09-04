@@ -36,7 +36,7 @@ prost = { workspace = true }
 base64 = { workspace = true }
 
 # Internal dependencies
-platform = { path = "../loran-platform", package = "actrix-platform", version = "0.10.0-alpha.4" }
+platform = { path = "../loran-platform", package = "actrix-platform", version = "0.10.0-alpha.5" }
 
 # Database
 sqlx = { workspace = true }
