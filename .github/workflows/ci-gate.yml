@@ -185,6 +185,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.98.0
       - name: Install cargo-audit
         run: cargo install cargo-audit --version 0.22.2 --locked --force
       - name: Audit Cargo.lock
@@ -216,6 +218,12 @@ jobs:
       SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          # wasm32-wasip2 is required by crates/actr-hyper/build.rs to compile
+          # the wasm_actor_fixture Component under --all-features.
+          targets: wasm32-wasip2
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.9
       - name: OTel payload-logging guard
