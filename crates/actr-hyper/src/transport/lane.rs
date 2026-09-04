@@ -644,21 +644,55 @@ pub trait DataLane: Send + Sync + std::fmt::Debug {
         match self.send(data).await {
             Ok(()) => SendAttemptResult::submitted(),
             Err(error) => {
-                // Known non-retryable pre-send client errors (argument and
-                // operation validation) cannot have reached the wire by
-                // construction, so they stay ordinary retryable-refusing
-                // errors; the secure-readiness gate is likewise provably
-                // pre-send. Everything else keeps the fail-safe `Unknown` —
-                // an unknown error may have partially entered a transport.
-                let progress = if matches!(
-                    error,
+                // Exhaustive per-variant classification (same-crate enum,
+                // no wildcard arm): adding a `NetworkError` variant breaks
+                // this match, forcing an explicit delivery-progress decision
+                // instead of silently inheriting `Unknown` — or worse,
+                // silently joining the pre-send allowlist and enabling
+                // replay of a partially written send.
+                let progress = match &error {
+                    // Provably pre-send by construction.
                     NetworkError::SecureChannelNotReady(_)
-                        | NetworkError::InvalidArgument(_)
-                        | NetworkError::InvalidOperation(_)
-                ) {
-                    DeliveryProgress::NotAttempted
-                } else {
-                    DeliveryProgress::Unknown
+                    | NetworkError::InvalidArgument(_)
+                    | NetworkError::InvalidOperation(_) => DeliveryProgress::NotAttempted,
+                    // Transport and genuinely ambiguous failures: the write
+                    // may have partially entered the wire.
+                    NetworkError::ConnectionError(_)
+                    | NetworkError::SignalingError(_)
+                    | NetworkError::WebRtcError(_)
+                    | NetworkError::ProtocolError(_)
+                    | NetworkError::SerializationError(_)
+                    | NetworkError::DeserializationError(_)
+                    | NetworkError::TimeoutError(_)
+                    | NetworkError::AuthenticationError(_)
+                    | NetworkError::CredentialExpired(_)
+                    | NetworkError::PermissionError(_)
+                    | NetworkError::ConfigurationError(_)
+                    | NetworkError::ResourceExhaustedError(_)
+                    | NetworkError::NetworkUnreachableError(_)
+                    | NetworkError::ServiceDiscoveryError(_)
+                    | NetworkError::NatTraversalError(_)
+                    | NetworkError::DataChannelError(_)
+                    | NetworkError::DataChannelClosed(_)
+                    | NetworkError::DataChannelNotOpen(_)
+                    | NetworkError::BroadcastError(_)
+                    | NetworkError::IceError(_)
+                    | NetworkError::DtlsError(_)
+                    | NetworkError::StunTurnError(_)
+                    | NetworkError::WebSocketError(_)
+                    | NetworkError::WebSocketClosed(_)
+                    | NetworkError::ConnectionNotFound(_)
+                    | NetworkError::ConnectionClosed(_)
+                    | NetworkError::PeerConnectionClosed(_)
+                    | NetworkError::NotImplemented(_)
+                    | NetworkError::ChannelClosed(_)
+                    | NetworkError::SendError(_)
+                    | NetworkError::NoRoute(_)
+                    | NetworkError::ChannelNotFound(_)
+                    | NetworkError::IoError(_)
+                    | NetworkError::UrlParseError(_)
+                    | NetworkError::JsonError(_)
+                    | NetworkError::Other(_) => DeliveryProgress::Unknown,
                 };
                 SendAttemptResult::failed(error, progress)
             }

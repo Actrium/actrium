@@ -16,10 +16,13 @@ function loadHostErrorMap(sourceUrl) {
   return new Function(`${body}\nreturn mapHostErrorToActr;`)();
 }
 
-function hostErrorMapBody(sourceUrl) {
+// The two runtime copies intentionally carry different marker-comment
+// blocks (each documents its own role); everything from the function
+// declaration to the end marker must be byte-identical, comments included.
+function hostErrorMapFunctionRegion(sourceUrl) {
   const source = readFileSync(sourceUrl, 'utf8');
   return source.slice(
-    source.indexOf('// @host-error-map begin'),
+    source.indexOf('function mapHostErrorToActr'),
     source.indexOf('// @host-error-map end')
   );
 }
@@ -77,15 +80,11 @@ describe('mapHostErrorToActr (actor.sw.js)', () => {
   });
 
   it('keeps the CLI-embedded runtime copy byte-identical to the web-sdk mapping', () => {
-    const swFn = hostErrorMapBody(swSource);
-    const cliFn = hostErrorMapBody(cliCopySource);
-    // Only the marker comment differs between the two copies; the function
-    // body must be identical so neither runtime diverges.
-    const stripMarkerComment = (text) =>
-      text
-        .split('\n')
-        .filter((line) => !line.startsWith('//'))
-        .join('\n');
-    expect(stripMarkerComment(cliFn)).toBe(stripMarkerComment(swFn));
+    const swFn = hostErrorMapFunctionRegion(swSource);
+    const cliFn = hostErrorMapFunctionRegion(cliCopySource);
+    // Only the marker comment block above the function differs between the
+    // two copies; the function region itself — comments included — must be
+    // byte-identical so neither runtime diverges.
+    expect(cliFn).toBe(swFn);
   });
 });

@@ -436,9 +436,22 @@ impl PeerGate {
                         let Some(pending) = pending.upgrade() else {
                             break;
                         };
-                        pending.fail_where(
+                        // AwaitingSend entries are deliberately left: their
+                        // send task is still resolving and a retryable
+                        // release here could race the physical send into a
+                        // duplicate delivery. Submitted entries rode the now
+                        // retired transport, so their responses can never
+                        // arrive — release them with terminal uncertainty and
+                        // let caller idempotency decide.
+                        pending.fail_submitted_where(
                             |target| target == &peer,
-                            Self::send_projection_not_ready_error,
+                            |_| true,
+                            |request_id, _| {
+                                Self::delivery_uncertain_error(
+                                    Some(request_id),
+                                    "terminal WebRTC transport retirement before the response arrived",
+                                )
+                            },
                         );
 
                         if let Some(transports) = transports.upgrade() {
@@ -476,7 +489,21 @@ impl PeerGate {
                         let Some(pending) = pending.upgrade() else {
                             break;
                         };
-                        pending.fail_where(|_| true, Self::send_projection_not_ready_error);
+                        // Lagged: conservatively release only submitted
+                        // entries with terminal uncertainty (retryable here
+                        // would invite replay of possibly-delivered
+                        // requests); AwaitingSend entries keep resolving
+                        // through their own send tasks.
+                        pending.fail_submitted_where(
+                            |_| true,
+                            |_| true,
+                            |request_id, _| {
+                                Self::delivery_uncertain_error(
+                                    Some(request_id),
+                                    "terminal transport retirement events were missed by the cleanup subscriber",
+                                )
+                            },
+                        );
                         let (Some(manager), Some(transports)) =
                             (manager.upgrade(), transports.upgrade())
                         else {
@@ -521,9 +548,17 @@ impl PeerGate {
                         let Some(pending) = pending.upgrade() else {
                             break;
                         };
-                        pending.fail_where(
+                        // Same contract as terminal retirement: only
+                        // submitted entries are released, terminally.
+                        pending.fail_submitted_where(
                             |target| target == &peer,
-                            Self::send_projection_not_ready_error,
+                            |_| true,
+                            |request_id, _| {
+                                Self::delivery_uncertain_error(
+                                    Some(request_id),
+                                    "peer transport closed before the response arrived",
+                                )
+                            },
                         );
                         if let Some(transports) = transports.upgrade() {
                             let dest = Dest::peer(peer.clone());
@@ -550,7 +585,16 @@ impl PeerGate {
                         let Some(pending) = pending.upgrade() else {
                             break;
                         };
-                        pending.fail_where(|_| true, Self::send_projection_not_ready_error);
+                        pending.fail_submitted_where(
+                            |_| true,
+                            |_| true,
+                            |request_id, _| {
+                                Self::delivery_uncertain_error(
+                                    Some(request_id),
+                                    "peer close events were missed by the cleanup subscriber",
+                                )
+                            },
+                        );
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
@@ -2636,6 +2680,17 @@ mod tests {
         let pending = gate
             .register_pending_for_test("terminal-pending", target.clone())
             .await;
+        // Flip to Submitted, the phase whose requests the terminal cleanup
+        // releases (an AwaitingSend entry stays with its send task — see the
+        // twin assertion after the retirement below).
+        assert!(
+            gate.pending_requests
+                .mark_submitted("terminal-pending", None),
+            "test seed must flip the pending entry to Submitted"
+        );
+        let awaiting = gate
+            .register_pending_for_test("terminal-awaiting", target.clone())
+            .await;
 
         manager.publish_peer_transport_retired_for_test(
             crate::wire::webrtc::v020::status::PeerTransportRetirement {
@@ -2652,10 +2707,23 @@ mod tests {
         .await
         .expect("terminal cleanup must wake pending RPC")
         .expect("pending sender must resolve");
+        // Submitted entries on a retired transport are released with
+        // terminal uncertainty (never a retryable error that could replay a
+        // possibly-delivered request); AwaitingSend entries stay with their
+        // own send tasks.
         assert!(matches!(
             pending_result,
-            Err(ActrError::ConnectionNotReady(_))
+            Err(ActrError::DeliveryUncertain { .. })
         ));
+        // The AwaitingSend twin must NOT have been released: its physical
+        // send may still commit, so a wakeup here could combine caller retry
+        // with the original delivery.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), awaiting)
+                .await
+                .is_err(),
+            "AwaitingSend entries must not be released by terminal retirement"
+        );
         timeout(
             crate::timer::ids::PEER_TRANSPORT_HEALTH,
             Duration::from_secs(1),
@@ -2721,6 +2789,47 @@ mod tests {
         assert!(matches!(error, ActrError::ConnectionNotReady(_)));
         assert_eq!(builds.load(Ordering::SeqCst), 0);
         assert_eq!(sends.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn one_shot_send_refused_below_min_slice_boundary() {
+        // Boundary pin for MIN_ONE_SHOT_SEND_SLICE (25ms): when route
+        // readiness completes with 0-24ms of the budget left, a one-shot
+        // Tell must refuse BEFORE any lane write (retryable TimedOut), so a
+        // route clearing at the deadline edge cannot commit bytes whose
+        // mid-write expiry would surface as terminal DeliveryUncertain.
+        let (gate, _transport, projection_tx, _builds, sends) =
+            gate_with_projection(SendProjection::Blocked);
+        let target = test_actor_id(2);
+
+        // 200ms budget, projection clears at 190ms: ~10ms remains, below
+        // the 25ms one-shot floor.
+        tokio::spawn(async move {
+            crate::timer::sleep(
+                crate::timer::ids::PEER_TEST_EVENT_DELAY,
+                Duration::from_millis(190),
+            )
+            .await;
+            projection_tx.send_replace(SendProjection::Normal);
+        });
+
+        let error = gate
+            .send_tell_with_type_until(
+                &target,
+                PayloadType::RpcReliable,
+                RpcEnvelope::default(),
+                RpcDeadline::from_duration(Duration::from_millis(200)),
+            )
+            .await
+            .expect_err("a below-floor residual slice must refuse pre-send");
+
+        assert!(matches!(error, ActrError::TimedOut), "got {error:?}");
+        assert!(error.is_retryable(), "the refusal must stay retryable");
+        assert_eq!(
+            sends.load(Ordering::SeqCst),
+            0,
+            "no lane write may happen below the one-shot admission floor"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
