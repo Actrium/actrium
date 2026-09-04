@@ -145,6 +145,26 @@ impl RpcDeadline {
             Ok(())
         }
     }
+
+    /// Guard an admission point that must keep at least `min` of budget after
+    /// admission.  Committing work (pending registration + send) with less
+    /// than `min` remaining guarantees the operation fails mid-flight while
+    /// its bytes may already be delivered — refuse before anything is
+    /// committed so the caller may retry with a fresh budget.
+    pub(crate) fn ensure_min_remaining(
+        self,
+        min: std::time::Duration,
+    ) -> actr_protocol::ActorResult<()> {
+        if self
+            .0
+            .saturating_duration_since(tokio::time::Instant::now())
+            < min
+        {
+            Err(actr_protocol::ActrError::TimedOut)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// Validate a caller-supplied RPC timeout at a call entry point and convert

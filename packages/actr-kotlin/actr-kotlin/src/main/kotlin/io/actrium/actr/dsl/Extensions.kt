@@ -219,6 +219,11 @@ val ActrException.isConnectionError: Boolean
  * Delegates to the fault-domain classifier exported by the Rust binding:
  * only `ErrorKind.TRANSIENT` errors are retryable, everything else is a
  * terminal failure.
+ *
+ * Source of truth: `ActrError::is_retryable` in `crates/actr-ffi/src/error.rs`
+ * — the Rust classifier behind `actrErrorIsRetryable`. The JVM-only
+ * `DeliveryUncertain` special case below must mirror that classifier's
+ * non-retryable rule for case 13.
  */
 val ActrException.isRecoverable: Boolean
     get() = when (this) {

@@ -89,6 +89,61 @@ async fn phase_transitions_cover_all_states() {
 }
 
 #[tokio::test]
+async fn readiness_subscription_tracks_phase_and_generation() {
+    let state = SessionState::new(SessionSnapshot::empty_with_id(test_actor_id(), 1));
+    let mut readiness = state.subscribe_readiness();
+
+    assert_eq!(
+        *readiness.borrow(),
+        SessionReadiness {
+            phase: SessionPhase::Active,
+            generation: 1,
+        }
+    );
+
+    state.enter_rebinding().await;
+    readiness
+        .changed()
+        .await
+        .expect("phase change should be published");
+    assert_eq!(
+        *readiness.borrow(),
+        SessionReadiness {
+            phase: SessionPhase::Rebinding,
+            generation: 1,
+        }
+    );
+
+    state
+        .commit_hard_rebind_unpublished(SessionSnapshot::empty_with_id(test_actor_id(), 2))
+        .await;
+    readiness
+        .changed()
+        .await
+        .expect("generation change should be published");
+    assert_eq!(
+        *readiness.borrow(),
+        SessionReadiness {
+            phase: SessionPhase::Rebinding,
+            generation: 2,
+        }
+    );
+
+    state.set_active().await;
+    readiness
+        .changed()
+        .await
+        .expect("active transition should be published");
+    assert_eq!(
+        *readiness.borrow(),
+        SessionReadiness {
+            phase: SessionPhase::Active,
+            generation: 2,
+        }
+    );
+}
+
+#[tokio::test]
 async fn sync_readers_return_some_when_unlocked() {
     let state = SessionState::new(SessionSnapshot::empty_with_id(test_actor_id(), 7));
     // No contending lock held → try_read succeeds.
@@ -145,5 +200,48 @@ async fn commit_hard_rebind_emits_session_activated_for_new_generation() {
     assert!(
         fact_rx.try_recv().is_err(),
         "one hard-rebind commit should emit exactly one activation fact"
+    );
+}
+
+#[tokio::test]
+async fn phase_transition_is_visible_before_the_writer_returns() {
+    // Regression for the publish race: the watch update must happen inside
+    // the same critical section as the phase write. A receiver obtained
+    // BEFORE the transition must already observe the new projection once
+    // set_phase returns — no window where `inner.phase` has moved but the
+    // watch still admits under the old value.
+    let snapshot = SessionSnapshot::empty_with_id(test_actor_id(), 4);
+    let state = SessionState::new(snapshot);
+    let mut readiness = state.subscribe_readiness();
+
+    state.enter_rebinding().await;
+
+    assert_eq!(
+        *readiness.borrow_and_update(),
+        SessionReadiness {
+            phase: SessionPhase::Rebinding,
+            generation: 4,
+        }
+    );
+}
+
+#[tokio::test]
+async fn hard_rebind_generation_is_visible_before_the_writer_returns() {
+    // Same contract for the generation bump: once the hard-rebind commit
+    // returns, an old-generation receiver must already observe the new
+    // generation, so a stale context cannot pass the readiness check.
+    let snapshot = SessionSnapshot::empty_with_id(test_actor_id(), 5);
+    let state = SessionState::new(snapshot);
+    let mut readiness = state.subscribe_readiness();
+
+    let replacement = SessionSnapshot::empty_with_id(test_actor_id(), 6);
+    state.commit_hard_rebind(replacement).await;
+
+    assert_eq!(
+        *readiness.borrow_and_update(),
+        SessionReadiness {
+            phase: SessionPhase::Active,
+            generation: 6,
+        }
     );
 }
