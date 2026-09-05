@@ -272,6 +272,170 @@ impl Drop for WaiterGuard {
     }
 }
 
+/// Hard limits for readiness waiters.  These are deliberately conservative:
+/// waiting is bounded work, not an offline payload queue.  Each class retains
+/// a minimum share so a burst of one operation type cannot consume the entire
+/// global budget.
+const MAX_GLOBAL_WAITERS: usize = 256;
+const MAX_PEER_WAITERS: usize = 64;
+const MAX_GLOBAL_WAITER_BYTES: usize = 16 * 1024 * 1024;
+const MAX_PEER_WAITER_BYTES: usize = 4 * 1024 * 1024;
+const MIN_RPC_WAITERS: usize = 32;
+const MIN_STREAM_WAITERS: usize = 32;
+const MAX_RPC_WAITERS: usize = MAX_GLOBAL_WAITERS - MIN_STREAM_WAITERS;
+const MAX_STREAM_WAITERS: usize = MAX_GLOBAL_WAITERS - MIN_RPC_WAITERS;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WaiterClass {
+    Rpc,
+    Stream,
+}
+
+impl WaiterClass {
+    fn for_payload(payload_type: PayloadType) -> Option<Self> {
+        match payload_type {
+            PayloadType::RpcReliable => Some(Self::Rpc),
+            PayloadType::StreamReliable => Some(Self::Stream),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Default)]
+struct PeerWaiterUsage {
+    waiters: usize,
+    bytes: usize,
+}
+
+#[derive(Default)]
+struct WaiterUsage {
+    global_waiters: usize,
+    global_bytes: usize,
+    rpc_waiters: usize,
+    stream_waiters: usize,
+    peers: HashMap<ActrId, PeerWaiterUsage>,
+}
+
+/// Synchronous accounting for readiness waiters.  The lock is held only while
+/// checking/incrementing counters; it is never held across an `.await`.
+struct WaiterBudget {
+    usage: StdMutex<WaiterUsage>,
+}
+
+impl Default for WaiterBudget {
+    fn default() -> Self {
+        Self {
+            usage: StdMutex::new(WaiterUsage::default()),
+        }
+    }
+}
+
+impl WaiterBudget {
+    fn try_acquire(
+        self: &Arc<Self>,
+        peer: &ActrId,
+        class: WaiterClass,
+        payload_bytes: usize,
+    ) -> Option<WaiterGuard> {
+        let mut usage = self
+            .usage
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (peer_waiters, peer_bytes) = usage
+            .peers
+            .get(peer)
+            .map(|peer_usage| (peer_usage.waiters, peer_usage.bytes))
+            .unwrap_or_default();
+        let class_waiters = match class {
+            WaiterClass::Rpc => usage.rpc_waiters,
+            WaiterClass::Stream => usage.stream_waiters,
+        };
+        let class_limit = match class {
+            WaiterClass::Rpc => MAX_RPC_WAITERS,
+            WaiterClass::Stream => MAX_STREAM_WAITERS,
+        };
+        let fits = usage.global_waiters < MAX_GLOBAL_WAITERS
+            && class_waiters < class_limit
+            && peer_waiters < MAX_PEER_WAITERS
+            && usage
+                .global_bytes
+                .checked_add(payload_bytes)
+                .is_some_and(|bytes| bytes <= MAX_GLOBAL_WAITER_BYTES)
+            && peer_bytes
+                .checked_add(payload_bytes)
+                .is_some_and(|bytes| bytes <= MAX_PEER_WAITER_BYTES);
+        if !fits {
+            return None;
+        }
+
+        usage.global_waiters += 1;
+        usage.global_bytes += payload_bytes;
+        match class {
+            WaiterClass::Rpc => usage.rpc_waiters += 1,
+            WaiterClass::Stream => usage.stream_waiters += 1,
+        }
+        // `peer_usage` points into the map, so reacquire it after the counter
+        // updates (which may have reborrowed `usage`).
+        let peer_usage = usage.peers.entry(peer.clone()).or_default();
+        peer_usage.waiters += 1;
+        peer_usage.bytes += payload_bytes;
+
+        Some(WaiterGuard {
+            budget: Arc::clone(self),
+            peer: peer.clone(),
+            class,
+            payload_bytes,
+        })
+    }
+
+    #[cfg(test)]
+    fn snapshot(&self) -> (usize, usize, usize, usize) {
+        let usage = self
+            .usage
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        (
+            usage.global_waiters,
+            usage.global_bytes,
+            usage.rpc_waiters,
+            usage.stream_waiters,
+        )
+    }
+}
+
+struct WaiterGuard {
+    budget: Arc<WaiterBudget>,
+    peer: ActrId,
+    class: WaiterClass,
+    payload_bytes: usize,
+}
+
+impl Drop for WaiterGuard {
+    fn drop(&mut self) {
+        let mut usage = self
+            .budget
+            .usage
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        usage.global_waiters = usage.global_waiters.saturating_sub(1);
+        usage.global_bytes = usage.global_bytes.saturating_sub(self.payload_bytes);
+        match self.class {
+            WaiterClass::Rpc => usage.rpc_waiters = usage.rpc_waiters.saturating_sub(1),
+            WaiterClass::Stream => usage.stream_waiters = usage.stream_waiters.saturating_sub(1),
+        }
+        let remove_peer = if let Some(peer_usage) = usage.peers.get_mut(&self.peer) {
+            peer_usage.waiters = peer_usage.waiters.saturating_sub(1);
+            peer_usage.bytes = peer_usage.bytes.saturating_sub(self.payload_bytes);
+            peer_usage.waiters == 0
+        } else {
+            false
+        };
+        if remove_peer {
+            usage.peers.remove(&self.peer);
+        }
+    }
+}
+
 impl SendAdmission {
     fn tighten(self, other: Self) -> Self {
         if self == Self::ExistingOnly || other == Self::ExistingOnly {
@@ -1224,6 +1388,7 @@ impl PeerGate {
             admission,
             record,
             Some(operation_id),
+            None::<fn(Option<WireIdentity>)>,
         )
         .await
     }
@@ -1246,6 +1411,7 @@ impl PeerGate {
             admission,
             None,
             operation_id,
+            None::<fn(Option<WireIdentity>)>,
         )
         .await
         .map(|_| ())
@@ -1369,6 +1535,7 @@ impl PeerGate {
         mut admission: SendAdmission,
         record: Option<&SentTransportSlot>,
         operation_id: Option<&str>,
+        mut on_first_attempt_resolved: Option<impl FnMut(Option<WireIdentity>) + Send>,
     ) -> ActorResult<DestTransportRef> {
         let mut delay = policy.initial_delay;
         let mut attempt_count = 0u32;
@@ -1378,6 +1545,14 @@ impl PeerGate {
             let send_attempt = self
                 .attempt_send(dest, payload_type, data, admission, record, None)
                 .await;
+            if attempt_count == 0 {
+                if let Some(callback) = on_first_attempt_resolved.as_mut() {
+                    callback(match &send_attempt.result {
+                        Ok(Some(identity)) => identity.wire_identity.clone(),
+                        _ => None,
+                    });
+                }
+            }
             match send_attempt.result {
                 Ok(Some(identity)) => return Ok(identity),
                 // `ExistingOnly` with no committed destination is an
@@ -3570,6 +3745,45 @@ mod tests {
         ) -> NetworkResult<Vec<Arc<dyn WireHandle>>> {
             Ok(vec![Arc::new(PendingWebSocketWire)])
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tell_timeout_mid_write_is_delivery_uncertain() {
+        let transport = Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(PendingWireBuilder),
+        ));
+        let gate = PeerGate::for_test(transport);
+        let target = test_actor_id(2);
+        let envelope = RpcEnvelope {
+            request_id: "tell-timeout".to_string(),
+            ..envelope_with_direction(None)
+        };
+
+        let err = gate
+            .send_tell_with_type_until(
+                &target,
+                PayloadType::RpcReliable,
+                envelope,
+                RpcDeadline::from_duration(Duration::from_millis(250)),
+            )
+            .await
+            .unwrap_err();
+
+        // Tell is one-shot: once the lane write was entered, a deadline must
+        // not be reported as a retryable timeout that could replay the
+        // payload. The operation ID remains caller-correlatable. This pins
+        // the PUBLIC Tell classification (write_in_flight overriding an
+        // earlier completed attempt), complementing the data-chunk cell test.
+        assert!(
+            matches!(
+                &err,
+                ActrError::DeliveryUncertain { operation_id, .. }
+                    if operation_id == "tell-timeout"
+            ),
+            "got {err:?}"
+        );
+        assert!(!err.is_retryable());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

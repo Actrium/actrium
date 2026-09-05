@@ -301,6 +301,7 @@ pub struct PeerTransport {
 
     #[allow(unused)]
     /// todo: Set of peers currently being closed (to reject new connection attempts) ,closed requests will be cleaned up in event listener
+    #[allow(unused)]
     closing_peers: Arc<RwLock<HashSet<Dest>>>,
 
     /// Revision of the `transports` map, bumped inside every mutation.
@@ -1168,7 +1169,7 @@ impl PeerTransport {
         self.closing_peers.write().await.insert(dest.clone());
         let detached = {
             let mut transports = self.transports.write().await;
-            match transports.get(dest) {
+            let detached = match transports.get(dest) {
                 Some(DestState::Connected(current)) if Arc::ptr_eq(current, &transport) => {
                     match transports.remove(dest) {
                         Some(DestState::Connected(current)) => Some(current),
@@ -1176,7 +1177,11 @@ impl PeerTransport {
                     }
                 }
                 _ => None,
+            };
+            if detached.is_some() {
+                self.bump_transports_revision();
             }
+            detached
         };
         let Some(detached) = detached else {
             self.closing_peers.write().await.remove(dest);
@@ -1229,7 +1234,7 @@ impl PeerTransport {
 
         let transport = {
             let mut transports = self.transports.write().await;
-            match transports.get(dest) {
+            let removed = match transports.get(dest) {
                 Some(DestState::Connected(transport))
                     if Arc::ptr_eq(transport, &sent_transport) =>
                 {
@@ -1239,7 +1244,11 @@ impl PeerTransport {
                     }
                 }
                 _ => None,
+            };
+            if removed.is_some() {
+                self.bump_transports_revision();
             }
+            removed
         };
 
         let Some(transport) = transport else {
@@ -1321,6 +1330,11 @@ impl PeerTransport {
     /// all fail before any one of them has ever reached `Ready`.
     fn spawn_ready_monitor(&self, dest: Dest, transport: Arc<DestTransport>) {
         let transports = Arc::clone(&self.transports);
+        // Share the revision sender so the teardown removal below wakes
+        // destination-less readiness waiters exactly like every other map
+        // mutation; a closed ready-watch receiver alone is not an
+        // authoritative edge a parked send can re-evaluate on.
+        let revision = self.transports_revision.clone();
         tokio::spawn(async move {
             let mut rx = transport.watch_ready();
 
@@ -1336,6 +1350,7 @@ impl PeerTransport {
                     );
                     if matched {
                         map.remove(&dest);
+                        revision.send_modify(|rev| *rev += 1);
                         drop(map);
 
                         tracing::warn!(
