@@ -1521,9 +1521,10 @@ impl PeerGate {
                 // fence gap (the generation cleanup fences Submitted
                 // entries); when the chain later resolves, the identity is
                 // already recorded or the entry was legitimately completed.
-                let mut early_submitted = false;
+                let early_submitted = Arc::new(std::sync::atomic::AtomicBool::new(false));
                 let pending_requests = self.pending_requests.clone();
                 let request_id_for_hook = request_id.clone();
+                let early_flag = Arc::clone(&early_submitted);
                 let sent = self
                     .send_with_retry_policy_record_identity(
                         &dest,
@@ -1534,12 +1535,14 @@ impl PeerGate {
                         Some(&sent_transport_for_send),
                         Some(&request_id),
                         Some(move |wire_identity: Option<WireIdentity>| {
-                            early_submitted = pending_requests
-                                .mark_submitted(&request_id_for_hook, wire_identity);
+                            if pending_requests.mark_submitted(&request_id_for_hook, wire_identity)
+                            {
+                                early_flag.store(true, std::sync::atomic::Ordering::Release);
+                            }
                         }),
                     )
                     .await?;
-                if !early_submitted
+                if !early_submitted.load(std::sync::atomic::Ordering::Acquire)
                     && !self
                         .pending_requests
                         .mark_submitted(&request_id, sent.wire_identity.clone())
