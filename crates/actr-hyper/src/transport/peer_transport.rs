@@ -297,7 +297,6 @@ pub struct PeerTransport {
     /// destination did not exist when they parked) subscribe to this so a
     /// fallback that becomes ready wakes them instead of parking until the
     /// operation deadline.
-    dest_state_epoch: watch::Sender<u64>,
 
     #[allow(unused)]
     /// todo: Set of peers currently being closed (to reject new connection attempts) ,closed requests will be cleaned up in event listener
@@ -342,7 +341,6 @@ impl PeerTransport {
             local_id,
             transports: Arc::new(RwLock::new(HashMap::new())),
             conn_factory,
-            dest_state_epoch: watch::channel(0).0,
             closing_peers: Arc::new(RwLock::new(HashSet::new())),
             transports_revision: watch::channel(0).0,
             #[cfg(test)]
@@ -350,20 +348,6 @@ impl PeerTransport {
             #[cfg(test)]
             final_commit_barrier: OnceLock::new(),
         }
-    }
-
-    /// Subscribe to destination lifecycle transitions. Every materialization
-    /// of a `DestTransport` (creation or fallback) bumps the generation; a
-    /// woken waiter re-runs its preflight and re-acquires the destination's
-    /// ready-set watch if the destination now exists.
-    pub(crate) fn watch_dest_state(&self) -> watch::Receiver<u64> {
-        self.dest_state_epoch.subscribe()
-    }
-
-    /// Announce that `dest` has become `Connected`.
-    fn announce_dest_connected(&self) {
-        self.dest_state_epoch
-            .send_modify(|generation| *generation += 1);
     }
 
     #[cfg(test)]
@@ -668,7 +652,6 @@ impl PeerTransport {
                     transports.insert(dest.clone(), DestState::Connected(Arc::clone(&transport)));
                     self.bump_transports_revision();
                     drop(transports);
-                    self.announce_dest_connected();
                     self.spawn_ready_monitor(dest.clone(), Arc::clone(&transport));
                     transport_guard.disarm();
                     creator_guard.disarm();
@@ -971,7 +954,6 @@ impl PeerTransport {
                 transports.insert(dest.clone(), DestState::Connected(Arc::clone(&transport)));
                 self.bump_transports_revision();
                 drop(transports);
-                self.announce_dest_connected();
                 self.spawn_ready_monitor(dest.clone(), Arc::clone(&transport));
                 transport_guard.disarm();
                 creator_guard.disarm();

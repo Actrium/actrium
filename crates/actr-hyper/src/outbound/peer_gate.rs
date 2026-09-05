@@ -952,7 +952,7 @@ impl PeerGate {
         // committed by another path) must come through the manager's
         // destination-lifecycle channel — otherwise the waiter below parks
         // until the operation deadline.
-        let mut dest_state = self.transport_manager.watch_dest_state();
+        let mut dest_state = self.transport_manager.watch_transports_revision();
         let mut waiter = None;
 
         loop {
@@ -1144,6 +1144,7 @@ impl PeerGate {
             admission,
             record,
             Some(operation_id),
+            None::<fn(Option<WireIdentity>)>,
         )
         .await
     }
@@ -1166,6 +1167,7 @@ impl PeerGate {
             admission,
             None,
             operation_id,
+            None::<fn(Option<WireIdentity>)>,
         )
         .await
         .map(|_| ())
@@ -1277,6 +1279,7 @@ impl PeerGate {
         mut admission: SendAdmission,
         record: Option<&SentTransportSlot>,
         operation_id: Option<&str>,
+        mut on_first_attempt_resolved: Option<impl FnMut(Option<WireIdentity>) + Send>,
     ) -> ActorResult<DestTransportRef> {
         let mut delay = policy.initial_delay;
         let mut attempt_count = 0u32;
@@ -1286,6 +1289,14 @@ impl PeerGate {
             let send_attempt = self
                 .attempt_send(dest, payload_type, data, admission, record, None)
                 .await;
+            if attempt_count == 0 {
+                if let Some(callback) = on_first_attempt_resolved.as_mut() {
+                    callback(match &send_attempt.result {
+                        Ok(Some(identity)) => identity.wire_identity.clone(),
+                        _ => None,
+                    });
+                }
+            }
             match send_attempt.result {
                 Ok(Some(identity)) => return Ok(identity),
                 // `ExistingOnly` with no committed destination is an
@@ -1501,19 +1512,37 @@ impl PeerGate {
                 deadline.ensure_remaining()?;
                 send_started = true;
 
+                // Mark the entry Submitted as soon as the FIRST physical
+                // attempt resolves — before any retry backoff sleeps. With
+                // the mark deferred to chain completion, a WebRTC generation
+                // invalidated during backoff skipped the still-AwaitingSend
+                // entry, and attempt 2 could reuse the cached invalidated
+                // generation's transport. Early submission closes that
+                // fence gap (the generation cleanup fences Submitted
+                // entries); when the chain later resolves, the identity is
+                // already recorded or the entry was legitimately completed.
+                let mut early_submitted = false;
+                let pending_requests = self.pending_requests.clone();
+                let request_id_for_hook = request_id.clone();
                 let sent = self
-                    .send_with_retry_record_identity_for_operation(
+                    .send_with_retry_policy_record_identity(
                         &dest,
                         payload_type,
                         &data,
+                        payload_type.retry_policy(),
                         admission,
                         Some(&sent_transport_for_send),
-                        &request_id,
+                        Some(&request_id),
+                        Some(move |wire_identity: Option<WireIdentity>| {
+                            early_submitted = pending_requests
+                                .mark_submitted(&request_id_for_hook, wire_identity);
+                        }),
                     )
                     .await?;
-                if !self
-                    .pending_requests
-                    .mark_submitted(&request_id, sent.wire_identity.clone())
+                if !early_submitted
+                    && !self
+                        .pending_requests
+                        .mark_submitted(&request_id, sent.wire_identity.clone())
                 {
                     tracing::debug!(
                         request_id = %request_id,
@@ -3139,7 +3168,7 @@ mod tests {
         // ready-set and only the destination lifecycle signal can report its
         // materialization (e.g. a WebSocket fallback committed elsewhere).
         assert!(transport.watch_ready_for(&dest).await.is_none());
-        let mut dest_state = transport.watch_dest_state();
+        let mut dest_state = transport.watch_transports_revision();
 
         transport
             .get_or_create_transport(&dest)
@@ -3404,6 +3433,45 @@ mod tests {
         ) -> NetworkResult<Vec<Arc<dyn WireHandle>>> {
             Ok(vec![Arc::new(PendingWebSocketWire)])
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tell_timeout_mid_write_is_delivery_uncertain() {
+        let transport = Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(PendingWireBuilder),
+        ));
+        let gate = PeerGate::for_test(transport);
+        let target = test_actor_id(2);
+        let envelope = RpcEnvelope {
+            request_id: "tell-timeout".to_string(),
+            ..envelope_with_direction(None)
+        };
+
+        let err = gate
+            .send_tell_with_type_until(
+                &target,
+                PayloadType::RpcReliable,
+                envelope,
+                RpcDeadline::from_duration(Duration::from_millis(250)),
+            )
+            .await
+            .unwrap_err();
+
+        // Tell is one-shot: once the lane write was entered, a deadline must
+        // not be reported as a retryable timeout that could replay the
+        // payload. The operation ID remains caller-correlatable. This pins
+        // the PUBLIC Tell classification (write_in_flight overriding an
+        // earlier completed attempt), complementing the data-chunk cell test.
+        assert!(
+            matches!(
+                &err,
+                ActrError::DeliveryUncertain { operation_id, .. }
+                    if operation_id == "tell-timeout"
+            ),
+            "got {err:?}"
+        );
+        assert!(!err.is_retryable());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
