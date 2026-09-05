@@ -85,8 +85,8 @@ component: $(OUT)
 verify: component
 	@echo "==> wasm-tools component wit $(OUT)"
 	$(WASM_TOOLS) component wit $(OUT) | tee $(WIT_DUMP)
-	grep -q "actr:workload/types@0.6.0" $(WIT_DUMP)
-	grep -q "actr:workload/workload@0.6.0" $(WIT_DUMP)
+	grep -q "actr:workload/types@0.7.0" $(WIT_DUMP)
+	grep -q "actr:workload/workload@0.7.0" $(WIT_DUMP)
 	grep -q "dispatch: async func" $(WIT_DUMP)
 	grep -q "ctx: invocation-ctx" $(WIT_DUMP)
 	! grep -q "actr:workload/.*@0.1.0" $(WIT_DUMP)

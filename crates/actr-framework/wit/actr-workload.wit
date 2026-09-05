@@ -149,12 +149,24 @@ interface types {
         decode-failure(string),
         not-implemented(string),
         internal(string),
+        // RFC-0507: the framework cannot prove whether the send entered the
+        // transport; terminal for generic retry. Carries the caller-visible
+        // operation id so binding consumers can correlate with their own
+        // idempotency records. Appended (not interleaved) to keep the
+        // discriminant order of the closed 0.6.0 variant stable.
+        delivery-uncertain(delivery-uncertain-payload),
     }
 
     // Payload for the `dependency-not-found` arm.
     record dependency-not-found-payload {
         service-name: string,
         message: string,
+    }
+
+    // Payload for the `delivery-uncertain` arm.
+    record delivery-uncertain-payload {
+        operation-id: string,
+        cause: string,
     }
 
     // Send preflight failure payload. The operation did not enter transport.

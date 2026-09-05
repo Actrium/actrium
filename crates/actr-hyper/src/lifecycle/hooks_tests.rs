@@ -551,12 +551,49 @@ async fn data_chunk_uncertain_hook_routes_to_on_error() {
 
     assert_eq!(event.category, ErrorCategory::DataChunkDeliveryUncertain);
     assert!(matches!(
-        event.source,
-        ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "mobile-upload#stream"
+        &event.source,
+        ActrError::DeliveryUncertain { operation_id, cause }
+            if operation_id == "mobile-upload#stream"
+                && cause == "data stream delivery uncertain: data channel closed"
     ));
     assert!(event.context.contains("operation_id=mobile-upload#stream"));
     assert!(event.context.contains("session_id=99"));
     assert!(event.context.contains("reason=data channel closed"));
+
+    // The synchronous PeerGate classifier emits `session_id: None` (session
+    // unknown or not applicable): the observer context must render
+    // `session_id=unknown` rather than a misleading 0, and the cause stays
+    // reason-driven.
+    let (tx_none, mut rx_none) = mpsc::unbounded_channel();
+    let observer_none: WorkloadHookObserverRef = Arc::new(ErrorRecorder { tx: tx_none });
+    let ctx_none = test_runtime_context();
+    let ctx_builder_none: HookContextBuilder = Arc::new(move || {
+        let ctx_none = ctx_none.clone();
+        Box::pin(async move { Some(ctx_none) })
+    });
+    let cb_none = build_hook_callback(Some(observer_none), ctx_builder_none);
+
+    cb_none(HookEvent::DataChunkDeliveryUncertain {
+        operation_id: crate::outbound::data_chunk_operation_id("peer-chat", 3),
+        session_id: None,
+        reason: "synchronous send classification: ambiguous partial write".to_string(),
+    })
+    .await;
+
+    let event_none = tokio::time::timeout(std::time::Duration::from_secs(1), rx_none.recv())
+        .await
+        .expect("on_error was not called for the session-less event")
+        .expect("error recorder dropped");
+
+    assert!(matches!(
+        &event_none.source,
+        ActrError::DeliveryUncertain { operation_id, cause }
+            if operation_id == "peer-chat#3"
+                && cause
+                    == "data stream delivery uncertain: synchronous send classification: ambiguous partial write"
+    ));
+    assert!(event_none.context.contains("session_id=unknown"));
+    assert!(event_none.context.contains("operation_id=peer-chat#3"));
 }
 
 // ── chain_observers + ChainedHookObserver delivery ──────────────────────

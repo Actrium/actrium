@@ -921,6 +921,25 @@ jobs:
       - name: crates/actr-cli/assets sync drift gate
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --check --skip-sw-host
 
+      - name: Run web-sdk unit tests (vitest)
+        working-directory: packages/actr-web
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+          PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.15.9 --activate
+          pnpm install --frozen-lockfile
+          # Build the SDK (and its @actrium/actr-dom dependency, whose
+          # type declarations the SDK build consumes) so the test asserts
+          # the published dist service-worker bytes, not just the sources.
+          pnpm --filter @actrium/actr-dom run build
+          pnpm --filter @actrium/actr-web run build
+          # `pnpm exec` fails when the filter matches no project, so a
+          # removed/renamed web-sdk cannot silently turn this into a green
+          # no-op; `vitest run` fails when no test files are found.
+          pnpm --filter @actrium/actr-web exec vitest run
+
   c_go_workloads:
     name: C and Go Workloads
     needs: determine
