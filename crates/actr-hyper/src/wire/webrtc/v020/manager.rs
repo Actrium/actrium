@@ -420,6 +420,18 @@ impl RtcConnectionManager {
         self.peer_generation_invalidated.subscribe()
     }
 
+    /// Test-only seam for exercising pending-request cleanup when a hard
+    /// recovery invalidates a WebRTC generation. Production callers publish
+    /// the same event from the Controller after the replacement build starts.
+    #[cfg(test)]
+    pub(crate) fn publish_peer_generation_invalidated_for_test(
+        &self,
+        peer: ActrId,
+        generation: u64,
+    ) {
+        let _ = self.peer_generation_invalidated.send((peer, generation));
+    }
+
     /// Subscribe to authoritative Controller sendability edges. Both sides of
     /// the edge are emitted so consumers can cancel recovery hysteresis when
     /// the same logical peer becomes usable again.

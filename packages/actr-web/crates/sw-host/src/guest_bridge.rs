@@ -324,6 +324,11 @@ fn actr_error_to_js(error: ActrError) -> JsValue {
         ActrError::DecodeFailure(m) => ("decode-failure", m.clone()),
         ActrError::NotImplemented(m) => ("not-implemented", m.clone()),
         ActrError::Internal(m) => ("internal", m.clone()),
+        // The operation id stays in its dedicated `actrOperationId` field and
+        // the message carries only the cause, so the SW-side reconstruction
+        // can neither duplicate the operation id inside the cause nor let
+        // the two halves diverge.
+        ActrError::DeliveryUncertain { cause, .. } => ("delivery-uncertain", cause.clone()),
         // `ActrError` is `#[non_exhaustive]`: unmapped future variants are
         // surfaced under the generic "internal" tag so the JS boundary
         // never panics.
@@ -346,6 +351,13 @@ fn actr_error_to_js(error: ActrError) -> JsValue {
             &err,
             &JsValue::from_str("actrServiceName"),
             &JsValue::from_str(service_name),
+        );
+    }
+    if let ActrError::DeliveryUncertain { operation_id, .. } = &error {
+        let _ = js_sys::Reflect::set(
+            &err,
+            &JsValue::from_str("actrOperationId"),
+            &JsValue::from_str(operation_id),
         );
     }
     if tag == "connection-not-ready" {

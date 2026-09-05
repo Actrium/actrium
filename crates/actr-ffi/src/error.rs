@@ -249,9 +249,11 @@ pub fn actr_error_requires_dlq(err: ActrError) -> bool {
 /// Test hook: fail with `err` so foreign-side error-buffer readers are
 /// exercised against the real Rust UniFFI writer — the discriminant, field
 /// order, and integer widths crossing the boundary are exactly the ones a
-/// production throw produces. Swift/Kotlin tests call this to prove their
+/// production throw produces. The Swift test calls this to prove its
 /// `FfiConverterTypeActrError.read` lifts a Rust-generated case-13
-/// `DeliveryUncertain` without losing `operation_id` or `cause`.
+/// `DeliveryUncertain` without losing `operation_id` or `cause`; the Kotlin
+/// unit suite is JVM-only, so its `ActrErrorFfiReadTest` hand-builds the
+/// same buffer layout instead of calling this hook.
 #[uniffi::export]
 pub fn actr_error_throw_for_test(err: ActrError) -> Result<(), ActrError> {
     Err(err)

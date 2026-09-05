@@ -291,19 +291,23 @@ pub struct PeerTransport {
     /// Wire builder (used to create Wire handles for new DestTransport)
     conn_factory: Arc<dyn WireBuilder>,
 
+    /// Generation counter bumped on every destination lifecycle transition
+    /// (`Connecting -> Connected`, including fallback materializations).
+    /// Readiness waiters that hold no per-destination ready-set yet (the
+    /// destination did not exist when they parked) subscribe to this so a
+    /// fallback that becomes ready wakes them instead of parking until the
+    /// operation deadline.
+
+    #[allow(unused)]
     /// todo: Set of peers currently being closed (to reject new connection attempts) ,closed requests will be cleaned up in event listener
     #[allow(unused)]
     closing_peers: Arc<RwLock<HashSet<Dest>>>,
 
-    /// Revision of the `transports` map, bumped inside **every** mutation —
-    /// Connecting flight insert, Connected commit (including fallback
-    /// materializations), removal, teardown, and creator-cancel cleanup.
-    /// Readiness waiters that hold no per-destination ready-set yet (the
-    /// destination did not exist, or was torn down, when they parked)
-    /// subscribe to this so any lifecycle transition wakes them to re-run
-    /// their preflight and re-acquire the ready-set instead of parking
-    /// until the operation deadline. The revision is destination-agnostic
-    /// by design: every subscriber re-runs its own destination checks.
+    /// Revision of the `transports` map, bumped inside every mutation.
+    /// `wait_until_route_ready` subscribers that found no destination
+    /// ready-set watch this instead of parking forever, so a later
+    /// materialization (another path committing a `DestTransport`) wakes
+    /// them to re-run the lookup.
     transports_revision: watch::Sender<u64>,
 
     #[cfg(test)]

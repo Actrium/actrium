@@ -343,7 +343,7 @@ fn check_function(
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// The canonical mapping table for actr-workload@0.6.0.
+// The canonical mapping table for actr-workload@0.7.0.
 // ─────────────────────────────────────────────────────────────────────────
 
 /// Canonical mapping used by the production lint invocation.
@@ -460,6 +460,7 @@ pub fn default_mapping() -> Mapping {
             "error-category",
             "actr-error",
             "dependency-not-found-payload",
+            "delivery-uncertain-payload",
             "timestamp",
             "realm",
             "actr-type",

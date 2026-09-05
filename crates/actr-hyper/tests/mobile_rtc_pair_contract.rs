@@ -13,7 +13,7 @@ use actr_hyper::test_support::{
     WebRtcFragmentSendHook, install_webrtc_fragment_send_hook_for_test,
 };
 use actr_protocol::prost::Message as _;
-use actr_protocol::{DataChunk, PayloadType};
+use actr_protocol::{ActrError, DataChunk, PayloadType};
 use tokio::sync::{Mutex as AsyncMutex, Notify, oneshot};
 
 const WAIT: Duration = Duration::from_secs(30);
@@ -1077,7 +1077,19 @@ async fn p15_inflight_fragmented_message_is_integral_or_bounded(
             assert_eq!(response.as_ref(), payload.as_ref());
             true
         }
-        Err(_) => false,
+        Err(error) => {
+            assert!(
+                matches!(
+                    &error,
+                    ActrError::ConnectionNotReady(_)
+                        | ActrError::Unavailable(_)
+                        | ActrError::TimedOut
+                        | ActrError::DeliveryUncertain { .. }
+                ),
+                "in-flight RPC returned an unexpected transport error: {error}"
+            );
+            false
+        }
     };
     let remote_execution_count = pair
         .harness()

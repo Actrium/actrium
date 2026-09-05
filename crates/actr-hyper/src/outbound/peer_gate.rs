@@ -68,7 +68,7 @@ pub(crate) fn data_stream_operation_id(stream_id: &str) -> String {
 /// a route that clears within this slice of the deadline is refused pre-send
 /// (retryable `TimedOut`) instead of committing bytes whose mid-write expiry
 /// would surface as terminal `DeliveryUncertain`.
-const MIN_ONE_SHOT_SEND_SLICE: std::time::Duration = std::time::Duration::from_millis(25);
+const MIN_ONE_SHOT_SEND_SLICE: Duration = Duration::from_millis(25);
 
 /// Preserve in-flight reliable RPCs across a brief sendability dip, but do not
 /// let a remote-side recovery leave response waits parked until their much
@@ -112,13 +112,6 @@ enum WaiterClass {
     Stream,
 }
 
-fn waiter_class_label(class: WaiterClass) -> &'static str {
-    match class {
-        WaiterClass::Rpc => "RpcReliable",
-        WaiterClass::Stream => "StreamReliable",
-    }
-}
-
 impl WaiterClass {
     fn for_payload(payload_type: PayloadType) -> Option<Self> {
         match payload_type {
@@ -159,27 +152,12 @@ impl Default for WaiterBudget {
 }
 
 impl WaiterBudget {
-    /// Test-facing Option wrapper over
-    /// [`Self::try_acquire_explained`].
-    #[cfg(test)]
     fn try_acquire(
         self: &Arc<Self>,
         peer: &ActrId,
         class: WaiterClass,
         payload_bytes: usize,
     ) -> Option<WaiterGuard> {
-        self.try_acquire_explained(peer, class, payload_bytes).ok()
-    }
-
-    /// Acquire a waiter slot, or return a denial reason naming the exact limit
-    /// that was hit, so callers can surface which ceiling (global/class
-    /// waiter count, global/per-peer byte budget) rejected the operation.
-    fn try_acquire_explained(
-        self: &Arc<Self>,
-        peer: &ActrId,
-        class: WaiterClass,
-        payload_bytes: usize,
-    ) -> Result<WaiterGuard, &'static str> {
         let mut usage = self
             .usage
             .lock()
@@ -197,30 +175,18 @@ impl WaiterBudget {
             WaiterClass::Rpc => MAX_RPC_WAITERS,
             WaiterClass::Stream => MAX_STREAM_WAITERS,
         };
-        // Name the first ceiling that rejects the wait so the denial is
-        // diagnosable instead of a generic exhaustion message.
-        let denial = if usage.global_waiters >= MAX_GLOBAL_WAITERS {
-            "global waiter count"
-        } else if class_waiters >= class_limit {
-            "class waiter count"
-        } else if peer_waiters >= MAX_PEER_WAITERS {
-            "per-peer waiter count"
-        } else if usage
-            .global_bytes
-            .checked_add(payload_bytes)
-            .is_none_or(|bytes| bytes > MAX_GLOBAL_WAITER_BYTES)
-        {
-            "global waiter byte budget"
-        } else if peer_bytes
-            .checked_add(payload_bytes)
-            .is_none_or(|bytes| bytes > MAX_PEER_WAITER_BYTES)
-        {
-            "per-peer waiter byte budget"
-        } else {
-            ""
-        };
-        if !denial.is_empty() {
-            return Err(denial);
+        let fits = usage.global_waiters < MAX_GLOBAL_WAITERS
+            && class_waiters < class_limit
+            && peer_waiters < MAX_PEER_WAITERS
+            && usage
+                .global_bytes
+                .checked_add(payload_bytes)
+                .is_some_and(|bytes| bytes <= MAX_GLOBAL_WAITER_BYTES)
+            && peer_bytes
+                .checked_add(payload_bytes)
+                .is_some_and(|bytes| bytes <= MAX_PEER_WAITER_BYTES);
+        if !fits {
+            return None;
         }
 
         usage.global_waiters += 1;
@@ -235,13 +201,12 @@ impl WaiterBudget {
         peer_usage.waiters += 1;
         peer_usage.bytes += payload_bytes;
 
-        let guard = WaiterGuard {
+        Some(WaiterGuard {
             budget: Arc::clone(self),
             peer: peer.clone(),
             class,
             payload_bytes,
-        };
-        Ok(guard)
+        })
     }
 
     #[cfg(test)]
@@ -597,8 +562,10 @@ impl PeerGate {
     /// that carried them. Unlike explicit close cleanup, this deliberately
     /// keeps the DestTransport: hard recovery replaces its generation in place
     /// and the generation-aware v0.20 lanes become usable after convergence.
-    /// A soft-recovery sendability dip does not retire a Session, so reliable
-    /// work already accepted by the lane remains eligible to complete.
+    /// A request that has not reached a concrete lane yet must remain eligible
+    /// for that replacement. Only a request already accepted by the invalidated
+    /// WebRTC generation is released, and that result is explicitly uncertain
+    /// rather than retryable.
     #[cfg(feature = "webrtc-v020")]
     fn spawn_pending_invalidated_generation_cleanup(
         manager: &Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
@@ -609,24 +576,60 @@ impl PeerGate {
         tokio::spawn(async move {
             loop {
                 match invalidated.recv().await {
-                    Ok((peer, _generation)) => {
+                    Ok((peer, generation)) => {
                         let Some(pending) = pending.upgrade() else {
                             break;
                         };
-                        pending.fail_where(
+                        let removed = pending.fail_submitted_where(
                             |target| target == &peer,
-                            Self::send_projection_not_ready_error,
+                            |identity| {
+                                matches!(
+                                    identity,
+                                    Some(WireIdentity::WebRtc { peer_id, session_id })
+                                        if peer_id == &peer && *session_id == generation
+                                )
+                            },
+                            |request_id, _| {
+                                Self::delivery_uncertain_error(
+                                    Some(request_id),
+                                    format!(
+                                        "WebRTC generation {generation} was invalidated before the response arrived"
+                                    ),
+                                )
+                            },
                         );
+                        if removed > 0 {
+                            tracing::debug!(
+                                peer = ?peer,
+                                generation,
+                                removed,
+                                "released submitted RPCs on WebRTC generation invalidation"
+                            );
+                        }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                         tracing::warn!(
                             skipped,
-                            "generation-invalidation cleanup lagged; releasing all pending RPCs"
+                            "generation-invalidation cleanup lagged; conservatively releasing submitted RPCs"
                         );
                         let Some(pending) = pending.upgrade() else {
                             break;
                         };
-                        pending.fail_where(|_| true, Self::send_projection_not_ready_error);
+                        // Events were missed, so any submitted RPC may ride an
+                        // already-invalidated generation. Releasing with a
+                        // retryable error would invite caller-side replay and
+                        // duplicate delivery; surface terminal uncertainty and
+                        // let each caller's idempotency policy decide.
+                        pending.fail_submitted_where(
+                            |_| true,
+                            |_| true,
+                            |request_id, _| {
+                                Self::delivery_uncertain_error(
+                                    Some(request_id),
+                                    "WebRTC generation invalidation events were missed by the cleanup subscriber",
+                                )
+                            },
+                        );
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
@@ -692,10 +695,29 @@ impl PeerGate {
                                     .is_some_and(|snapshot| snapshot.sendable)
                             {
                             } else if let Some(pending) = task_pending.upgrade() {
-                                pending.fail_where(
+                                let removed = pending.fail_submitted_where(
                                     |target| target == &task_peer,
-                                    Self::send_projection_not_ready_error,
+                                    |identity| {
+                                        matches!(
+                                            identity,
+                                            Some(WireIdentity::WebRtc { peer_id, .. })
+                                                if peer_id == &task_peer
+                                        )
+                                    },
+                                    |request_id, _| {
+                                        Self::delivery_uncertain_error(
+                                            Some(request_id),
+                                            "WebRTC peer remained non-sendable during the recovery grace period",
+                                        )
+                                    },
                                 );
+                                if removed > 0 {
+                                    tracing::debug!(
+                                        peer = ?task_peer,
+                                        removed,
+                                        "released submitted RPCs after prolonged WebRTC recovery"
+                                    );
+                                }
                             }
                             // Self-cleanup on every exit path: drop this task's
                             // registration unless a newer grace task for the
@@ -923,16 +945,14 @@ impl PeerGate {
         // revision subscription a later commit by another path would never
         // wake this waiter — it would expire at the outer deadline despite a
         // usable route.
+        let mut materialization = self.transport_manager.watch_transports_revision();
+        let mut ready = self.transport_manager.watch_ready_for(dest).await;
         // A destination that does not exist yet has no ready-set to watch, so
         // its eventual materialization (including a WebSocket fallback
         // committed by another path) must come through the manager's
-        // transports-map revision — bumped inside every lifecycle transition
-        // (Connecting insert, Connected commit, removal, teardown) —
-        // otherwise the waiter below parks until the operation deadline.
-        // Subscribe BEFORE resolving the destination ready-set so the
-        // check-then-sleep sequence cannot lose a transition.
-        let mut materialization = self.transport_manager.watch_transports_revision();
-        let mut ready = self.transport_manager.watch_ready_for(dest).await;
+        // destination-lifecycle channel — otherwise the waiter below parks
+        // until the operation deadline.
+        let mut dest_state = self.transport_manager.watch_transports_revision();
         let mut waiter = None;
 
         loop {
@@ -956,13 +976,11 @@ impl PeerGate {
                     if waiter.is_none() {
                         waiter = Some(
                             self.waiter_budget
-                                .try_acquire_explained(target, waiter_class, payload_bytes)
-                                .map_err(|limit| {
-                                    ActrError::Unavailable(format!(
-                                        "outbound readiness waiter capacity exhausted: {limit} limit (class {}, peer serial {})",
-                                        waiter_class_label(waiter_class),
-                                        target.serial_number
-                                    ))
+                                .try_acquire(target, waiter_class, payload_bytes)
+                                .ok_or_else(|| {
+                                    ActrError::Unavailable(
+                                        "outbound readiness waiter capacity exhausted".to_string(),
+                                    )
                                 })?,
                         );
                     }
@@ -1013,6 +1031,14 @@ impl PeerGate {
                                 return Err(error);
                             }
                         },
+                        changed = dest_state.changed() => {
+                            // Destination materialization (or fallback
+                            // commit): the loop re-runs preflight and
+                            // re-acquires the ready-set watch above.
+                            if changed.is_err() {
+                                return Err(error);
+                            }
+                        },
                         changed = ready_changed => {
                             if changed.is_err() {
                                 ready = None;
@@ -1022,8 +1048,7 @@ impl PeerGate {
                         // destination has no ready-set to watch, so the map
                         // revision is the only wake source for a later
                         // `DestTransport` commit (e.g. another path dialing
-                        // the WebSocket fallback). Cheap re-run of the loop,
-                        // with the ready-set reacquired before the next poll.
+                        // the WebSocket fallback). Cheap re-run of the loop.
                         changed = materialization.changed() => {
                             if changed.is_err() {
                                 return Err(error);
@@ -1119,6 +1144,7 @@ impl PeerGate {
             admission,
             record,
             Some(operation_id),
+            None::<fn(Option<WireIdentity>)>,
         )
         .await
     }
@@ -1141,6 +1167,7 @@ impl PeerGate {
             admission,
             None,
             operation_id,
+            None::<fn(Option<WireIdentity>)>,
         )
         .await
         .map(|_| ())
@@ -1240,8 +1267,8 @@ impl PeerGate {
     /// Retry only completed, proven `NotAttempted` failures. The retry loop
     /// intentionally has no progress sink: ambiguous (`Unknown`) results
     /// return before backoff, while timeout-sensitive one-way sends use the
-    /// progress-aware `send_once_with_admission` path below. This keeps a
-    /// retry from overwriting an earlier delivery fact with a later attempt.
+    /// progress-aware `send_once_with_admission` path. This keeps a retry from
+    /// overwriting an earlier delivery fact with a later attempt.
     #[allow(clippy::too_many_arguments)] // Keeps retry context explicit at this internal boundary.
     async fn send_with_retry_policy_record_identity(
         &self,
@@ -1252,6 +1279,7 @@ impl PeerGate {
         mut admission: SendAdmission,
         record: Option<&SentTransportSlot>,
         operation_id: Option<&str>,
+        mut on_first_attempt_resolved: Option<impl FnMut(Option<WireIdentity>) + Send>,
     ) -> ActorResult<DestTransportRef> {
         let mut delay = policy.initial_delay;
         let mut attempt_count = 0u32;
@@ -1261,6 +1289,14 @@ impl PeerGate {
             let send_attempt = self
                 .attempt_send(dest, payload_type, data, admission, record, None)
                 .await;
+            if attempt_count == 0 {
+                if let Some(callback) = on_first_attempt_resolved.as_mut() {
+                    callback(match &send_attempt.result {
+                        Ok(Some(identity)) => identity.wire_identity.clone(),
+                        _ => None,
+                    });
+                }
+            }
             match send_attempt.result {
                 Ok(Some(identity)) => return Ok(identity),
                 // `ExistingOnly` with no committed destination is an
@@ -1440,11 +1476,10 @@ impl PeerGate {
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Request);
         let dest = Self::actr_id_to_dest(target);
         let request_id = envelope.request_id.clone();
+        // Serialize once up front so the waiter budget retains the full
+        // envelope (payload + metadata), not just the payload: metadata-heavy
+        // envelopes must not bypass the documented byte ceilings.
         let data = Self::serialize_envelope(&envelope);
-        // Account the serialized envelope (metadata, correlation fields and
-        // framing included), consistent with how stream chunks account their
-        // serialized bytes — otherwise retained memory can exceed the
-        // configured waiter byte ceilings.
         let payload_bytes = data.len();
         let sent_transport = Arc::new(Mutex::new(None));
         let sent_transport_for_send = Arc::clone(&sent_transport);
@@ -1477,15 +1512,46 @@ impl PeerGate {
                 deadline.ensure_remaining()?;
                 send_started = true;
 
-                self.send_with_retry_record_identity_for_operation(
-                    &dest,
-                    payload_type,
-                    &data,
-                    admission,
-                    Some(&sent_transport_for_send),
-                    &request_id,
-                )
-                .await?;
+                // Mark the entry Submitted as soon as the FIRST physical
+                // attempt resolves — before any retry backoff sleeps. With
+                // the mark deferred to chain completion, a WebRTC generation
+                // invalidated during backoff skipped the still-AwaitingSend
+                // entry, and attempt 2 could reuse the cached invalidated
+                // generation's transport. Early submission closes that
+                // fence gap (the generation cleanup fences Submitted
+                // entries); when the chain later resolves, the identity is
+                // already recorded or the entry was legitimately completed.
+                let early_submitted = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let pending_requests = self.pending_requests.clone();
+                let request_id_for_hook = request_id.clone();
+                let early_flag = Arc::clone(&early_submitted);
+                let sent = self
+                    .send_with_retry_policy_record_identity(
+                        &dest,
+                        payload_type,
+                        &data,
+                        payload_type.retry_policy(),
+                        admission,
+                        Some(&sent_transport_for_send),
+                        Some(&request_id),
+                        Some(move |wire_identity: Option<WireIdentity>| {
+                            if pending_requests.mark_submitted(&request_id_for_hook, wire_identity)
+                            {
+                                early_flag.store(true, std::sync::atomic::Ordering::Release);
+                            }
+                        }),
+                    )
+                    .await?;
+                if !early_submitted.load(std::sync::atomic::Ordering::Acquire)
+                    && !self
+                        .pending_requests
+                        .mark_submitted(&request_id, sent.wire_identity.clone())
+                {
+                    tracing::debug!(
+                        request_id = %request_id,
+                        "pending RPC was completed while the physical send was resolving"
+                    );
+                }
                 tracing::debug!("Sent request to {:?}", target);
 
                 // The outer timeout owns the combined send + response budget.
@@ -1618,8 +1684,9 @@ impl PeerGate {
         } else {
             Some(envelope.request_id.clone())
         };
+        // Serialize once up front so the waiter budget retains the full
+        // envelope (payload + metadata), not just the payload.
         let data = Self::serialize_envelope(&envelope);
-        // Same serialized-bytes accounting as the request path.
         let payload_bytes = data.len();
 
         // Same cancellation-classification contract as the data-chunk path:
@@ -2268,6 +2335,61 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct ReadyWebRtcCallWire {
+        lane: Arc<SuccessfulLane>,
+        peer_id: ActrId,
+        session_id: u64,
+    }
+
+    #[async_trait]
+    impl WireHandle for ReadyWebRtcCallWire {
+        fn connection_type(&self) -> ConnType {
+            ConnType::WebRTC
+        }
+
+        fn priority(&self) -> u8 {
+            1
+        }
+
+        async fn connect(&self) -> NetworkResult<()> {
+            Ok(())
+        }
+
+        fn is_connected(&self) -> bool {
+            true
+        }
+
+        async fn close(&self) -> NetworkResult<()> {
+            Ok(())
+        }
+
+        async fn get_lane(&self, _payload_type: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
+            Ok(self.lane.clone())
+        }
+
+        fn identity(&self) -> Option<WireIdentity> {
+            Some(WireIdentity::WebRtc {
+                peer_id: self.peer_id.clone(),
+                session_id: self.session_id,
+            })
+        }
+    }
+
+    struct ReadyWebRtcCallWireBuilder {
+        wire: Arc<ReadyWebRtcCallWire>,
+    }
+
+    #[async_trait]
+    impl WireBuilder for ReadyWebRtcCallWireBuilder {
+        async fn create_connections(
+            &self,
+            _dest: &Dest,
+        ) -> NetworkResult<Vec<Arc<dyn WireHandle>>> {
+            Ok(vec![self.wire.clone()])
+        }
+    }
+
     #[async_trait]
     impl WireBuilder for CountingSuccessfulWireBuilder {
         async fn create_connections(
@@ -2706,6 +2828,139 @@ mod tests {
         assert_eq!(admission, SendAdmission::Normal);
     }
 
+    #[tokio::test]
+    async fn generation_invalidation_keeps_unsubmitted_rpc_and_fails_matching_submitted_rpc() {
+        let (gate, _transport, _projection_tx, _builds, _sends) =
+            gate_with_projection(SendProjection::Normal);
+        let peer = test_actor_id(2);
+        let manager = gate.v020_manager.clone();
+
+        let awaiting = gate
+            .pending_requests
+            .register("awaiting-generation-replacement", peer.clone());
+        let submitted = gate
+            .pending_requests
+            .register("submitted-old-generation", peer.clone());
+        assert!(gate.pending_requests.mark_submitted(
+            "submitted-old-generation",
+            Some(WireIdentity::WebRtc {
+                peer_id: peer.clone(),
+                session_id: 7,
+            }),
+        ));
+
+        manager.publish_peer_generation_invalidated_for_test(peer.clone(), 7);
+
+        let submitted_error = timeout(
+            crate::timer::ids::PEER_REQUEST_DEADLINE,
+            Duration::from_secs(1),
+            submitted.recv(),
+        )
+        .await
+        .expect("generation invalidation must wake submitted RPC")
+        .expect_err("submitted RPC must receive an error");
+        assert!(matches!(
+            submitted_error,
+            ActrError::DeliveryUncertain { operation_id, .. }
+                if operation_id == "submitted-old-generation"
+        ));
+
+        // The replacement event must not remove an operation that has not
+        // reached a concrete lane. Its send task can therefore continue on
+        // the replacement generation without producing an orphan response.
+        assert_eq!(gate.pending_requests.len(), 1);
+        drop(awaiting);
+        assert_eq!(gate.pending_requests.len(), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn submitted_call_without_response_is_delivery_uncertain() {
+        let peer = test_actor_id(2);
+        let sends = Arc::new(AtomicUsize::new(0));
+        let session_id = 17;
+        let transport = Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(ReadyWebRtcCallWireBuilder {
+                wire: Arc::new(ReadyWebRtcCallWire {
+                    lane: Arc::new(SuccessfulLane {
+                        sends: sends.clone(),
+                    }),
+                    peer_id: peer.clone(),
+                    session_id,
+                }),
+            }),
+        ));
+        let manager = PeerGate::empty_manager_for_test();
+        let pending_requests: PendingRequestsMap = Arc::new(RpcCorrelation::new());
+        let gate = Arc::new(PeerGate::with_v020_manager(
+            transport,
+            manager.clone(),
+            pending_requests,
+            None,
+        ));
+        let request_id = "submitted-call-without-response";
+
+        // The local wire accepts the Call, but no Response is ever injected.
+        // A generation replacement must resolve the waiting Call as uncertain
+        // instead of allowing a timeout/retry to replay the payload.
+        let request = {
+            let gate = Arc::clone(&gate);
+            let peer = peer.clone();
+            tokio::spawn(async move {
+                gate.send_request_with_type(
+                    &peer,
+                    PayloadType::RpcReliable,
+                    RpcEnvelope {
+                        request_id: request_id.to_string(),
+                        route_key: "test.echo".to_string(),
+                        timeout_ms: 5_000,
+                        ..Default::default()
+                    },
+                )
+                .await
+            })
+        };
+
+        let send_deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        while sends.load(Ordering::SeqCst) == 0 {
+            assert!(
+                tokio::time::Instant::now() < send_deadline,
+                "Call was never submitted to the local WebRTC wire"
+            );
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(sends.load(Ordering::SeqCst), 1);
+
+        // Publishing more than once closes the small scheduling window between
+        // the lane returning and `mark_submitted`; only the first matching event
+        // can complete the pending Call, and no retry is ever started.
+        for _ in 0..32 {
+            manager.publish_peer_generation_invalidated_for_test(peer.clone(), session_id);
+            tokio::task::yield_now().await;
+            if request.is_finished() {
+                break;
+            }
+        }
+
+        let error = crate::timer::timeout(
+            crate::timer::ids::PEER_REQUEST_DEADLINE,
+            Duration::from_secs(1),
+            request,
+        )
+        .await
+        .expect("submitted Call must resolve when its generation is replaced")
+        .expect("Call task must not panic")
+        .expect_err("a Call without a Response must return an error");
+        assert!(matches!(
+            &error,
+            ActrError::DeliveryUncertain { operation_id, .. }
+                if operation_id == request_id
+        ));
+        assert!(!error.is_retryable());
+        assert_eq!(sends.load(Ordering::SeqCst), 1);
+        assert_eq!(gate.pending_requests.len(), 0);
+    }
+
     #[test]
     fn waiter_budget_enforces_peer_cap_and_releases_raii() {
         let budget = Arc::new(WaiterBudget::default());
@@ -2879,87 +3134,11 @@ mod tests {
             )
             .await;
         match overflow {
-            Err(ActrError::Unavailable(message)) => {
-                assert!(
-                    message.contains("outbound readiness waiter capacity exhausted"),
-                    "unexpected exhaustion diagnostic: {message}"
-                );
-                // The denial names the exact ceiling: this overflow fills the
-                // per-peer waiter count for the target.
-                assert!(
-                    message.contains("per-peer waiter count limit"),
-                    "the diagnostic must name the per-peer count limit: {message}"
-                );
-                assert!(
-                    message.contains("class RpcReliable"),
-                    "the diagnostic carries the waiter class: {message}"
-                );
-            }
+            Err(ActrError::Unavailable(message)) => assert!(
+                message.contains("outbound readiness waiter capacity exhausted"),
+                "unexpected exhaustion diagnostic: {message}"
+            ),
             other => panic!("the overflowing waiter must fail fast, got {other:?}"),
-        }
-
-        // The other denial labels propagate too: the global waiter count and
-        // both byte-budget ceilings are asserted at the budget layer.
-        {
-            let budget = Arc::new(WaiterBudget::default());
-            let peer = test_actor_id(11);
-            // Class waiter count: distinct peers fill the Rpc class ceiling
-            // (the global ceiling is not yet reached).
-            let mut class_guards = Vec::new();
-            for i in 0..MAX_RPC_WAITERS {
-                if let Ok(guard) = budget.try_acquire_explained(
-                    &test_actor_id(1_000 + i as u64),
-                    WaiterClass::Rpc,
-                    1,
-                ) {
-                    class_guards.push(guard);
-                }
-            }
-            let class_label = budget
-                .try_acquire_explained(&test_actor_id(9_000), WaiterClass::Rpc, 1)
-                .map(|_| ())
-                .unwrap_err();
-            assert_eq!(class_label, "class waiter count");
-            drop(class_guards);
-            // Global waiter count: mixed classes across distinct peers fill
-            // both class ceilings and the global one simultaneously.
-            let mut all_guards = Vec::new();
-            for i in 0..MAX_GLOBAL_WAITERS {
-                let class = if i % 2 == 0 {
-                    WaiterClass::Rpc
-                } else {
-                    WaiterClass::Stream
-                };
-                if let Ok(guard) =
-                    budget.try_acquire_explained(&test_actor_id(2_000 + i as u64), class, 1)
-                {
-                    all_guards.push(guard);
-                }
-            }
-            let global_label = budget
-                .try_acquire_explained(&peer, WaiterClass::Stream, 1)
-                .map(|_| ())
-                .unwrap_err();
-            assert_eq!(global_label, "global waiter count");
-            drop(all_guards);
-            // Global byte budget: a single over-ceiling payload is denied
-            // before any waiter count is consumed.
-            let global_bytes_label = budget
-                .try_acquire_explained(&peer, WaiterClass::Rpc, MAX_GLOBAL_WAITER_BYTES + 1)
-                .map(|_| ())
-                .unwrap_err();
-            assert_eq!(global_bytes_label, "global waiter byte budget");
-            // Per-peer byte budget: a peer retaining its full per-peer
-            // ceiling alone is denied at the per-peer boundary.
-            let peer_budget = Arc::new(WaiterBudget::default());
-            let _guard = peer_budget
-                .try_acquire_explained(&peer, WaiterClass::Stream, MAX_PEER_WAITER_BYTES)
-                .expect("exactly-at-ceiling acquisition must fit");
-            let peer_bytes_label = peer_budget
-                .try_acquire_explained(&peer, WaiterClass::Stream, 1)
-                .map(|_| ())
-                .unwrap_err();
-            assert_eq!(peer_bytes_label, "per-peer waiter byte budget");
         }
 
         // Release: clearing the projection admits every parked waiter and
@@ -2979,161 +3158,6 @@ mod tests {
         );
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn parked_reliable_tell_resumes_when_destination_materializes() {
-        // End-to-end waiter regression: with a controller parked in
-        // Connecting (non-sendable, non-exempted) and no destination
-        // ready-set, a reliable Tell parks inside wait_until_route_ready;
-        // an external materialization of the destination (WebSocket
-        // fallback committed by another path) must wake it and let the
-        // public send complete instead of expiring at its deadline.
-        let ws_sends = Arc::new(AtomicUsize::new(0));
-        let target = test_actor_id(2);
-        let dest = Dest::peer(target.clone());
-
-        #[derive(Debug)]
-        struct ParkWsLane {
-            sends: Arc<AtomicUsize>,
-        }
-
-        #[derive(Debug)]
-        struct ParkWsWire {
-            lane: Arc<ParkWsLane>,
-        }
-
-        #[derive(Debug)]
-        struct ParkWsWireBuilder {
-            wire: Arc<ParkWsWire>,
-        }
-
-        #[async_trait]
-        impl DataLane for ParkWsLane {
-            async fn send(&self, _data: bytes::Bytes) -> NetworkResult<()> {
-                self.sends.fetch_add(1, Ordering::SeqCst);
-                Ok(())
-            }
-            fn lane_type(&self) -> &'static str {
-                "park-ws-test"
-            }
-        }
-
-        #[async_trait]
-        impl WireHandle for ParkWsWire {
-            fn connection_type(&self) -> crate::transport::ConnType {
-                crate::transport::ConnType::WebSocket
-            }
-            fn priority(&self) -> u8 {
-                1
-            }
-            async fn connect(&self) -> NetworkResult<()> {
-                Ok(())
-            }
-            fn is_connected(&self) -> bool {
-                true
-            }
-            async fn close(&self) -> NetworkResult<()> {
-                Ok(())
-            }
-            async fn get_lane(&self, _t: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
-                Ok(self.lane.clone())
-            }
-        }
-
-        #[async_trait]
-        impl WireBuilder for ParkWsWireBuilder {
-            async fn create_connections(
-                &self,
-                _d: &Dest,
-            ) -> NetworkResult<Vec<Arc<dyn WireHandle>>> {
-                Ok(vec![self.wire.clone()])
-            }
-        }
-
-        let transport = Arc::new(PeerTransport::new(
-            test_actor_id(1),
-            Arc::new(ParkWsWireBuilder {
-                wire: Arc::new(ParkWsWire {
-                    lane: Arc::new(ParkWsLane {
-                        sends: ws_sends.clone(),
-                    }),
-                }),
-            }),
-        ));
-        // Park source note: the only deterministic park the manager test
-        // seams allow is the global send projection (the no-op session
-        // factory lands controllers in Idle — unblocked — and injected
-        // driver states never drain without a live session loop, so an
-        // RTC-blocked park cannot be synthesized without a real session).
-        // The public-send park below therefore blocks via the projection;
-        // the destination is materialized WHILE parked, and the wake +
-        // ready-set reacquisition path is identical to the RTC-blocked case.
-        let (projection_tx, projection_rx) = watch::channel(SendProjection::Blocked);
-        let gate = Arc::new(PeerGate::with_v020_manager(
-            transport.clone(),
-            PeerGate::empty_manager_for_test(),
-            Arc::new(RpcCorrelation::new()),
-            Some(projection_rx),
-        ));
-        assert!(!transport.has_outbound_materialization(&dest).await);
-
-        let send_target = target.clone();
-        let send_gate = gate.clone();
-        let send = tokio::spawn(async move {
-            send_gate
-                .send_tell_with_type_until(
-                    &send_target,
-                    PayloadType::RpcReliable,
-                    RpcEnvelope::default(),
-                    RpcDeadline::from_duration(Duration::from_secs(5)),
-                )
-                .await
-        });
-        crate::timer::sleep(
-            crate::timer::ids::PEER_TRANSPORT_HEALTH,
-            Duration::from_millis(200),
-        )
-        .await;
-        assert!(
-            !send.is_finished(),
-            "the reliable Tell must be parked while the projection is blocked"
-        );
-
-        // While the public send is parked, another path materializes the
-        // destination (a WebSocket fallback committed externally): the
-        // waiter's materialization arm observes the revision and re-runs
-        // its lookup, acquiring the ready-set it lacked.
-        let materializer = transport.clone();
-        let materialized =
-            tokio::spawn(async move { materializer.get_or_create_transport(&dest).await });
-        let _committed = timeout(
-            crate::timer::ids::PEER_TRANSPORT_HEALTH,
-            Duration::from_secs(5),
-            materialized,
-        )
-        .await
-        .expect("materialization must complete")
-        .expect("materializer must not panic")
-        .expect("destination must materialize over the ready WebSocket wire");
-
-        // The parked public send is still withheld by the projection; clear
-        // it and the same wake-and-recheck loop must admit the send over the
-        // now-existing route (no second dial, exactly one lane write).
-        projection_tx.send_replace(SendProjection::Normal);
-        let result = timeout(
-            crate::timer::ids::PEER_TRANSPORT_HEALTH,
-            Duration::from_secs(5),
-            send,
-        )
-        .await
-        .expect("the parked Tell must resume after the wake");
-        assert!(result.is_ok(), "the Tell must complete: {result:?}");
-        assert_eq!(
-            ws_sends.load(Ordering::SeqCst),
-            1,
-            "the resumed Tell rides the materialized WebSocket lane exactly once"
-        );
-    }
-
     #[tokio::test]
     async fn route_waiter_wakes_on_destination_materialization_signal() {
         let (gate, transport, _projection_tx, _builds, _sends) =
@@ -3142,50 +3166,86 @@ mod tests {
         let dest = PeerGate::actr_id_to_dest(&target);
         let _gate = gate;
 
-        // The parked-waiter scenario the wake source exists for: the
+        // The parked-waiter scenario the lifecycle channel exists for: the
         // destination does not exist yet, so `watch_ready_for` yields no
-        // ready-set and only the transports-map revision can report its
+        // ready-set and only the destination lifecycle signal can report its
         // materialization (e.g. a WebSocket fallback committed elsewhere).
-        // The revision is destination-agnostic by design — every subscriber
-        // re-runs its own preflight and re-acquires its own ready-set — and
-        // it fires on EVERY lifecycle transition, not just successful
-        // Connected commits, so non-committed changes (flight insert,
-        // removal, teardown) also wake parked waiters instead of leaving
-        // them stranded until their operation deadline.
         assert!(transport.watch_ready_for(&dest).await.is_none());
-        let mut revision = transport.watch_transports_revision();
-        let baseline = *revision.borrow_and_update();
+        let mut dest_state = transport.watch_transports_revision();
 
         transport
             .get_or_create_transport(&dest)
             .await
             .expect("destination transport should materialize");
 
-        revision
+        dest_state
             .changed()
             .await
             .expect("destination materialization must be observable");
         assert!(
-            *revision.borrow_and_update() >= baseline + 2,
-            "the Connecting insert and the Connected commit each bump the revision"
-        );
-        assert!(
             transport.watch_ready_for(&dest).await.is_some(),
             "after the wake the waiter can acquire the ready-set it lacked"
         );
+    }
 
-        // Non-committed lifecycle transitions wake too: closing the
-        // destination removes it and bumps the revision again, so a waiter
-        // parked on a vanished route re-runs instead of stranding.
-        transport
-            .close_transport(&dest)
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tell_waiter_retains_full_envelope_bytes() {
+        let (gate, _transport, projection_tx, _builds, _sends) =
+            gate_with_projection(SendProjection::Blocked);
+        let gate = Arc::new(gate);
+        let target = test_actor_id(6);
+
+        let request = {
+            let gate = Arc::clone(&gate);
+            let target = target.clone();
+            tokio::spawn(async move {
+                gate.send_tell_with_type_until(
+                    &target,
+                    PayloadType::RpcReliable,
+                    RpcEnvelope {
+                        request_id: "meta-heavy-tell".to_string(),
+                        payload: Some(Bytes::from_static(b"abcd")),
+                        metadata: vec![actr_protocol::MetadataEntry {
+                            key: "trace.baggage".to_string(),
+                            value: "v".repeat(4096),
+                        }],
+                        ..Default::default()
+                    },
+                    RpcDeadline::from_duration(Duration::from_secs(5)),
+                )
+                .await
+            })
+        };
+
+        let registered = tokio::time::Instant::now() + Duration::from_secs(5);
+        while gate.waiter_budget.snapshot().0 < 1 {
+            assert!(
+                tokio::time::Instant::now() < registered,
+                "waiter never registered"
+            );
+            crate::timer::sleep(
+                crate::timer::ids::PEER_TEST_EVENT_DELAY,
+                Duration::from_millis(5),
+            )
+            .await;
+        }
+
+        let retained = gate.waiter_budget.snapshot().1;
+        assert!(
+            retained > 4096 + "abcd".len(),
+            "the waiter must retain the serialized envelope (payload + metadata), got {retained}"
+        );
+
+        projection_tx.send_replace(SendProjection::Normal);
+        request
             .await
-            .expect("close must succeed");
-        revision
-            .changed()
-            .await
-            .expect("destination removal must be observable");
-        assert!(transport.watch_ready_for(&dest).await.is_none());
+            .expect("tell task must not panic")
+            .expect("tell should submit after the route becomes ready");
+        assert_eq!(
+            gate.waiter_budget.snapshot(),
+            (0, 0, 0, 0),
+            "retained envelope bytes must be released after admission"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3379,6 +3439,45 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tell_timeout_mid_write_is_delivery_uncertain() {
+        let transport = Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(PendingWireBuilder),
+        ));
+        let gate = PeerGate::for_test(transport);
+        let target = test_actor_id(2);
+        let envelope = RpcEnvelope {
+            request_id: "tell-timeout".to_string(),
+            ..envelope_with_direction(None)
+        };
+
+        let err = gate
+            .send_tell_with_type_until(
+                &target,
+                PayloadType::RpcReliable,
+                envelope,
+                RpcDeadline::from_duration(Duration::from_millis(250)),
+            )
+            .await
+            .unwrap_err();
+
+        // Tell is one-shot: once the lane write was entered, a deadline must
+        // not be reported as a retryable timeout that could replay the
+        // payload. The operation ID remains caller-correlatable. This pins
+        // the PUBLIC Tell classification (write_in_flight overriding an
+        // earlier completed attempt), complementing the data-chunk cell test.
+        assert!(
+            matches!(
+                &err,
+                ActrError::DeliveryUncertain { operation_id, .. }
+                    if operation_id == "tell-timeout"
+            ),
+            "got {err:?}"
+        );
+        assert!(!err.is_retryable());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn send_data_chunk_timeout_mid_write_is_delivery_uncertain() {
         let transport = Arc::new(PeerTransport::new(
             test_actor_id(1),
@@ -3415,43 +3514,6 @@ mod tests {
             matches!(
                 &err,
                 ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "stream-1#4"
-            ),
-            "got {err:?}"
-        );
-        assert!(!err.is_retryable());
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn tell_timeout_mid_write_is_delivery_uncertain() {
-        let transport = Arc::new(PeerTransport::new(
-            test_actor_id(1),
-            Arc::new(PendingWireBuilder),
-        ));
-        let gate = PeerGate::for_test(transport);
-        let target = test_actor_id(2);
-        let envelope = RpcEnvelope {
-            request_id: "tell-timeout".to_string(),
-            ..envelope_with_direction(None)
-        };
-
-        let err = gate
-            .send_tell_with_type_until(
-                &target,
-                PayloadType::RpcReliable,
-                envelope,
-                RpcDeadline::from_duration(Duration::from_millis(250)),
-            )
-            .await
-            .unwrap_err();
-
-        // Tell is one-shot: once the lane write was entered, a deadline must
-        // not be reported as a retryable timeout that could replay the
-        // payload. The operation ID remains caller-correlatable.
-        assert!(
-            matches!(
-                &err,
-                ActrError::DeliveryUncertain { operation_id, .. }
-                    if operation_id == "tell-timeout"
             ),
             "got {err:?}"
         );

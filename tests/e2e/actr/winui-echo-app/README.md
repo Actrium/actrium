@@ -73,16 +73,16 @@ Known risks / assumptions (see also the commit message):
   to stderr via `Console.Error`; run.sh launches the exe with stderr
   redirected to a log. If the GUI subsystem has no stderr handle, the marker
   won't appear — a direct `GetStdHandle`/`WriteFile` fallback may be needed.
-- **ConnectionNotReady detection.** The C ABI surfaces all call errors as a
-  generic `-50` `ActrCabiException`; `ActrService` matches the
-  `"connection not ready"` message prefix to decide retries (fragile).
+- **Connection readiness.** Ordinary RPC Call waits for a usable route and
+  consumes one framework deadline. The C# UI does not match
+  `ConnectionNotReady` text, retain payloads, or run a fallback retry timer.
 
 ## Files
 
 | Path | Purpose |
 |------|---------|
 | `workload/Cargo.toml`, `workload/src/lib.rs` | Rust `cabi.EchoApp` forwarding workload |
-| `WinUiEchoApp/ActrService.cs` | Node typestate chain + echo + retry |
+| `WinUiEchoApp/ActrService.cs` | Node typestate chain + echo call |
 | `WinUiEchoApp/EchoProto.cs` | Manual protobuf codec for EchoRequest/EchoResponse |
 | `WinUiEchoApp/MainWindow.xaml`(+`.cs`) | UI: input + Send + reply |
 | `WinUiEchoApp/App.xaml`(+`.cs`) | WinUI entry point |
