@@ -106,8 +106,12 @@ describe('mapHostErrorToActr (actor.sw.js)', () => {
 
   it('publishes the same mapping through the built dist service worker', () => {
     if (!swDistExists) {
-      // Source-level coverage still ran above; the dist gate is enforced in
-      // CI, which builds the SDK before running this suite.
+      // Source-level coverage still ran above. Under CI the SDK is always
+      // built first, so a missing dist there means the build failed to copy
+      // the worker — fail instead of silently skipping the dist gate.
+      if (process.env.CI) {
+        throw new Error('CI must build the web-sdk before running this suite');
+      }
       return;
     }
     const distFn = hostErrorMapFunctionRegion(swDistSource);

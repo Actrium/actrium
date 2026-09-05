@@ -708,7 +708,7 @@ fn probe_world(component: &Component, engine: &Engine) -> WasmResult<()> {
     }
     Err(WasmError::LoadFailed(
         "component exports no recognised actr:workload/workload world \
-         (expected @0.6.0); rebuild the package with a current SDK"
+         (expected @0.7.0); rebuild the package with a current SDK"
             .to_string(),
     ))
 }

@@ -832,6 +832,16 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                     // create the restart offer and a new PC would churn while
                     // waiting for the Offerer to wake up.
                     state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
+                    // Intermediate parked signal: one warn per retransmission
+                    // attempt distinguishes a parked-but-live answerer from a
+                    // silently dead one before the terminal recovery-budget
+                    // cleanup exhausts.
+                    tracing::warn!(
+                        peer = %state.peer_id.to_string_repr(),
+                        recovery_cycle = state.recovery_cycle,
+                        attempt = state.local_restart_request_attempt + 1,
+                        "answerer still parked awaiting offerer; retransmitting restart request"
+                    );
                     send_answerer_restart_request(state, &mut effects);
                 } else if state.role == Role::Offerer
                     && state.active_generation.is_some()

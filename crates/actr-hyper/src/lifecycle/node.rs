@@ -1299,6 +1299,7 @@ async fn stream_callback_host_operation_handler(
 /// | 10009 | NotImplemented     |
 /// | 10010 | Internal           |
 /// | 10011 | ConnectionNotReady |
+/// | 10012 | DeliveryUncertain  |
 pub(crate) fn protocol_error_to_code(err: &ActrError) -> u32 {
     match err {
         ActrError::Unavailable(_) => 10001,
@@ -1312,6 +1313,11 @@ pub(crate) fn protocol_error_to_code(err: &ActrError) -> u32 {
         ActrError::DecodeFailure(_) => 10008,
         ActrError::NotImplemented(_) => 10009,
         ActrError::Internal(_) => 10010,
+        // Dedicated code so a responder's uncertain delivery round-trips as
+        // the structured variant instead of collapsing into Internal: the
+        // caller's idempotency correlation depends on `operation_id`
+        // surviving this boundary.
+        ActrError::DeliveryUncertain { .. } => 10012,
         // `ActrError` is `#[non_exhaustive]`: unmapped future variants fall
         // back to the generic Internal code so they round-trip as an
         // identifiable error rather than panicking at this boundary.
@@ -1341,9 +1347,31 @@ pub(crate) fn wire_code_to_actr_error(code: u32, message: String) -> ActrError {
         10011 => ActrError::ConnectionNotReady(ConnectionNotReadyInfo {
             retry_after_ms: parse_connection_not_ready_retry_hint(&message),
         }),
+        10012 => parse_delivery_uncertain(&message),
         // Legacy HTTP-ish codes emitted before this scheme was introduced,
         // or any unknown future code: treat as Unavailable.
         _ => ActrError::Unavailable(format!("rpc error {code}: {message}")),
+    }
+}
+
+/// Reconstruct the structured `DeliveryUncertain` from its display string.
+/// `protocol_error_to_code` sends the variant's Display form
+/// (`delivery uncertain for operation {operation_id}: {cause}`), so both
+/// fields survive the code+message wire boundary; a malformed or legacy
+/// message degrades to a placeholder instead of losing the variant.
+fn parse_delivery_uncertain(message: &str) -> ActrError {
+    const PREFIX: &str = "delivery uncertain for operation ";
+    if let Some(rest) = message.strip_prefix(PREFIX) {
+        if let Some((operation_id, cause)) = rest.split_once(": ") {
+            return ActrError::DeliveryUncertain {
+                operation_id: operation_id.to_string(),
+                cause: cause.to_string(),
+            };
+        }
+    }
+    ActrError::DeliveryUncertain {
+        operation_id: "unknown".to_string(),
+        cause: message.to_string(),
     }
 }
 
