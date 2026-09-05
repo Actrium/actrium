@@ -84,6 +84,7 @@ fn is_expected_recovery_error(message: &str) -> bool {
         "not opened",
         "timeout",
         "unavailable",
+        "delivery uncertain",
     ]
     .iter()
     .any(|needle| message.contains(needle))

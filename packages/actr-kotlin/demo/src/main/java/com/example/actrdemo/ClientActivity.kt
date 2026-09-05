@@ -75,8 +75,8 @@ class ClientActivity : AppCompatActivity() {
     private var clientRef: ActrRef? = null
     private var clientSystem: ActrNode? = null
 
-    // Tracks signaling + per-peer WebRTC state from host-side hooks and owns the
-    // send-retry slot for ConnectionNotReady. See ConnectionTracker for the pattern.
+    // Tracks signaling + per-peer WebRTC state for display only. The framework
+    // owns readiness waiting and delivery retry decisions.
     private var tracker: ConnectionTracker? = null
 
     // Logcat reader - streams native actr library logs to the UI
@@ -264,8 +264,8 @@ class ClientActivity : AppCompatActivity() {
                 val actorType = resolveActorType(manifestPath)
                 Log.i(TAG, "Actor type from manifest: ${actorType.manufacturer}:${actorType.name}:${actorType.version}")
 
-                // Host-side transport hooks: signaling + per-peer WebRTC state drive the
-                // status text and the Send button, and own the ConnectionNotReady retry.
+                // Host-side transport hooks: signaling + per-peer WebRTC state
+                // drive status text only. They are not a send/retry mechanism.
                 val t =
                     ConnectionTracker().apply {
                         onEvent = { msg ->
@@ -375,18 +375,12 @@ class ClientActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Send an echo, retrying once on ConnectionNotReady. The runtime rejects the
-     * send before it goes out when the target isn't ready; we stash a retry and
-     * let on_webrtc_connected (or a retryAfterMs fallback timer) re-send. The
-     * retry re-enters [attemptEcho] so a still-not-ready target re-schedules.
-     */
+    /** The framework waits for a usable route and owns transport-level retry. */
     private suspend fun attemptEcho(
         ref: ActrRef,
         message: String,
     ) {
-        val t = tracker ?: return
-        val doSend: suspend () -> Unit = {
+        try {
             val request = EchoRequest.newBuilder().setMessage(message).build()
             val responsePayload =
                 ref.call(
@@ -401,19 +395,9 @@ class ClientActivity : AppCompatActivity() {
                 logMessage("📥 Received: ${response.reply}")
                 refreshUi()
             }
-        }
-        try {
-            doSend()
         } catch (e: ActrException.ConnectionNotReady) {
-            val retryAfter = e.info.retryAfterMs
-            withContext(Dispatchers.Main) {
-                logMessage(
-                    "⏳ Connection recovering, waiting for on_webrtc_connected" +
-                        (retryAfter?.let { " or ${it}ms fallback retry" } ?: " (no fallback retry)"),
-                )
-                refreshUi()
-            }
-            t.scheduleRetry({ attemptEcho(ref, message) }, retryAfter, lifecycleScope)
+            Log.e(TAG, "Framework reported terminal connection-not-ready", e)
+            withContext(Dispatchers.Main) { logMessage("❌ Echo route not ready: ${e.message}") }
         } catch (e: Exception) {
             Log.e(TAG, "Echo send error", e)
             withContext(Dispatchers.Main) { logMessage("❌ Echo error: ${e.message}") }
@@ -500,7 +484,7 @@ class ClientActivity : AppCompatActivity() {
         statusText.text = "Status: $status"
     }
 
-    /** Reflect signaling + per-peer WebRTC state in the status bar and gate the Send button. */
+    /** Reflect observational signaling + per-peer WebRTC state in the status bar. */
     private fun refreshUi() {
         val t = tracker
         if (t == null) {
@@ -514,7 +498,9 @@ class ClientActivity : AppCompatActivity() {
                 ?.let { "${it.key.serialNumber}:${it.value.name.lowercase()}" }
                 ?: "idle"
         statusText.text = "Status: signaling=$sig webrtc=$webrtc"
-        sendButton.isEnabled = messageInput.isEnabled && t.canSend()
+        // A recovering peer is still a valid user action: the framework waits
+        // within the operation deadline instead of requiring a UI retry gate.
+        sendButton.isEnabled = messageInput.isEnabled
     }
 
     private fun log(message: String) {

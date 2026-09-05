@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using ActrSharp;
 
 namespace WinUiEchoApp;
@@ -20,8 +19,6 @@ internal sealed class ActrService
     private const string LocalRouteKey = "cabi.EchoApp.Echo";
     private const string LocalPrefix = "winui-local:";   // mirrors Swift's "swift-local:"
     private const long CallTimeoutMs = 30_000;
-    private const int ReadyRetryTotalSeconds = 20;
-    private const int ReadyRetryDelayMs = 250;
 
     private ActrCabiNode? _node;
     private bool _hasAutoSent;
@@ -76,30 +73,6 @@ internal sealed class ActrService
         var resp = await _node.Call(LocalRouteKey, payload, CallTimeoutMs);
         _hasAutoSent = true;
         return EchoProto.DecodeEchoReply(resp);
-    }
-
-    // Retry on ConnectionNotReady, mirroring Swift's sendEchoWhenReady. The C
-    // ABI surfaces all call errors as a generic ActrCabiException (-50) whose
-    // message is the ActrError Display string; ConnectionNotReady renders as
-    // "connection not ready: ...", so match on the message prefix.
-    public async Task<string> SendEchoWhenReadyAsync(string input)
-    {
-        var sw = Stopwatch.StartNew();
-        while (true)
-        {
-            try
-            {
-                return await SendEchoAsync(input);
-            }
-            catch (ActrCabiException e) when (e.Message.Contains("connection not ready"))
-            {
-                if (sw.Elapsed.TotalSeconds >= ReadyRetryTotalSeconds) throw;
-                RuntimeLog.Info("ACTR call waiting for connection");
-                Console.Error.WriteLine(
-                    $"ACTR_E2E_RETRY:ConnectionNotReady retryAfterMs={ReadyRetryDelayMs}");
-                await Task.Delay(ReadyRetryDelayMs);
-            }
-        }
     }
 
     public async Task ShutdownAsync()

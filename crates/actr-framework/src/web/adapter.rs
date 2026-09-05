@@ -133,6 +133,10 @@ fn wit_error_to_proto(e: wit::ActrError) -> ActrError {
         wit::ActrError::DecodeFailure(m) => ActrError::DecodeFailure(m),
         wit::ActrError::NotImplemented(m) => ActrError::NotImplemented(m),
         wit::ActrError::Internal(m) => ActrError::Internal(m),
+        wit::ActrError::DeliveryUncertain(p) => ActrError::DeliveryUncertain {
+            operation_id: p.operation_id,
+            cause: p.cause,
+        },
     }
 }
 
@@ -157,6 +161,13 @@ fn proto_error_to_wit(e: ActrError) -> wit::ActrError {
         ActrError::DecodeFailure(m) => wit::ActrError::DecodeFailure(m),
         ActrError::NotImplemented(m) => wit::ActrError::NotImplemented(m),
         ActrError::Internal(m) => wit::ActrError::Internal(m),
+        ActrError::DeliveryUncertain {
+            operation_id,
+            cause,
+        } => wit::ActrError::DeliveryUncertain(wit::DeliveryUncertainPayload {
+            operation_id,
+            cause,
+        }),
         // `ActrError` is `#[non_exhaustive]`: unmapped future variants map
         // to the generic Internal wire variant so they survive the WIT
         // boundary rather than being lost.
