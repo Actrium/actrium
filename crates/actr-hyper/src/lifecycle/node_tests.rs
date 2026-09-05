@@ -2434,3 +2434,55 @@ async fn claimed_scope_reaches_guest_and_bounds_child_deadlines() {
         "child scopes must sit under the root cancellation token"
     );
 }
+
+#[test]
+fn delivery_uncertain_wire_code_round_trips_typed_fields() {
+    use super::*;
+    let original = ActrError::DeliveryUncertain {
+        // The operation id contains the legacy delimiter; the typed encoding
+        // must preserve both fields verbatim.
+        operation_id: "upload: part 3".to_string(),
+        cause: "ambiguous partial write: stream stalled".to_string(),
+    };
+    let code = protocol_error_to_code(&original);
+    assert_eq!(code, 10012, "DeliveryUncertain owns a dedicated wire code");
+    let encoded = encode_delivery_uncertain_for_wire(&original);
+    let round_tripped = wire_code_to_actr_error(code, encoded);
+    assert!(
+        matches!(
+            &round_tripped,
+            ActrError::DeliveryUncertain { operation_id, cause }
+                if operation_id == "upload: part 3"
+                    && cause == "ambiguous partial write: stream stalled"
+        ),
+        "the typed encoding must round-trip ids and causes containing ': ': {round_tripped:?}"
+    );
+}
+
+#[test]
+fn delivery_uncertain_wire_code_legacy_display_falls_back() {
+    use super::*;
+    // A peer built before the typed encoding sends the Display form.
+    let legacy = wire_code_to_actr_error(
+        10012,
+        "delivery uncertain for operation stream-1#4: write may have entered transport".to_string(),
+    );
+    assert!(matches!(
+        &legacy,
+        ActrError::DeliveryUncertain { operation_id, cause }
+            if operation_id == "stream-1#4" && cause == "write may have entered transport"
+    ));
+    // A malformed/unknown-shaped message keeps the variant with a
+    // placeholder id instead of collapsing to Internal.
+    let malformed = wire_code_to_actr_error(10012, "garbage".to_string());
+    assert!(matches!(
+        &malformed,
+        ActrError::DeliveryUncertain { operation_id, cause }
+            if operation_id == "unknown" && cause == "garbage"
+    ));
+    // Non-DeliveryUncertain codes still bypass the parser entirely.
+    assert!(matches!(
+        wire_code_to_actr_error(10010, "bug".to_string()),
+        ActrError::Internal(_)
+    ));
+}

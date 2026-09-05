@@ -876,7 +876,18 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                     // replacement. Its recovery is deliberately parked until
                     // the Offerer starts a fresh physical connection; no
                     // deadline may turn this passive wait into hard-recovery
-                    // churn.
+                    // churn. BUT a parked wait must not go silent: the offerer
+                    // only escalates to Hard Recovery on persistent
+                    // retransmission, and an answerer that never retransmits
+                    // strands both sides (the offerer stays on its healthy
+                    // generation while this side exhausts its budget). Each
+                    // per-attempt deadline therefore re-arms the attempt epoch
+                    // and retransmits the correlated restart request, driving
+                    // the offerer's attempt counter toward the escalation
+                    // threshold.
+                    state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
+                    state.recovery_attempt_started = false;
+                    send_answerer_restart_request(state, &mut effects);
                 } else {
                     start_hard_recovery(state, &mut effects);
                 }

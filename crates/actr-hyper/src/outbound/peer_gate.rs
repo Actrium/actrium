@@ -2870,14 +2870,18 @@ mod tests {
             gate_with_projection(SendProjection::Blocked);
         let target = test_actor_id(2);
 
-        // 200ms budget, projection clears at 190ms: ~10ms remains, below
-        // the 25ms one-shot floor.
+        // Deterministic below-floor flip: instead of racing a wall-clock
+        // 190ms sleep against the 200ms budget (scheduling jitter could move
+        // the flip across the floor), the projection clears only once the
+        // OBSERVED remaining budget is at most 10ms — firmly below the 25ms
+        // floor on every schedule, and never before the wait has parked.
+        let start = tokio::time::Instant::now();
+        let budget = Duration::from_millis(200);
+        let flip_at = start + budget - Duration::from_millis(10);
         tokio::spawn(async move {
-            crate::timer::sleep(
-                crate::timer::ids::PEER_TEST_EVENT_DELAY,
-                Duration::from_millis(190),
-            )
-            .await;
+            while tokio::time::Instant::now() < flip_at {
+                tokio::task::yield_now().await;
+            }
             projection_tx.send_replace(SendProjection::Normal);
         });
 
@@ -2886,7 +2890,7 @@ mod tests {
                 &target,
                 PayloadType::RpcReliable,
                 RpcEnvelope::default(),
-                RpcDeadline::from_duration(Duration::from_millis(200)),
+                RpcDeadline::from_duration(budget),
             )
             .await
             .expect_err("a below-floor residual slice must refuse pre-send");

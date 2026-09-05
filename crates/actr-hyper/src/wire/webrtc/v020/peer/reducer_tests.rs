@@ -3714,17 +3714,41 @@ fn answerer_waits_for_offerer_offer_instead_of_hard_recovery() {
     let recovery_cycle = state.recovery_cycle;
     let old_transport_epoch = state.transport_epoch;
 
-    // A stale attempt deadline must not convert the passive Answerer wait into
-    // a locally-created replacement generation.
+    // An attempt deadline must not convert the passive Answerer wait into a
+    // locally-created replacement generation — but it is no longer silent:
+    // the parked wait re-arms its epoch and RETRANSMITS the correlated
+    // restart request so a healthy offerer's attempt counter reaches its
+    // hard-recovery escalation (a silent park would strand both sides).
+    // Parked via a hard-recovery path, no restart request has been sent
+    // yet: the first parked deadline sends attempt 1 (initial wake).
+    let attempt_before = state.local_restart_request_attempt;
+    assert_eq!(attempt_before, 0);
     let deadline_effects = reduce(
         &mut state,
         RtcPeerInput::RecoveryDeadlineElapsed { recovery_epoch },
     );
-    assert!(deadline_effects.is_empty());
-    assert_eq!(state.recovery_epoch, recovery_epoch);
+    assert!(
+        deadline_effects.iter().any(|e| matches!(
+            e,
+            RtcPeerEffect::SendSignaling {
+                message: SignalingMessage::IceRestartRequest { .. },
+                ..
+            }
+        )),
+        "the parked deadline must retransmit the restart request"
+    );
+    assert!(
+        !has_build_session(&deadline_effects, old_gen + 1),
+        "no locally-created replacement generation"
+    );
     assert_eq!(state.recovery_cycle, recovery_cycle);
     assert_eq!(state.active_generation, Some(old_gen));
     assert_eq!(state.building_generation, None);
+    assert_eq!(
+        state.local_restart_request_attempt,
+        attempt_before + 1,
+        "each parked deadline drives the retransmission counter"
+    );
 
     // The Offerer now initiates a fresh ordinary Offer. The Answerer accepts
     // it by superseding the old physical session and building exactly one new
@@ -3763,14 +3787,31 @@ fn answerer_physical_failure_waits_without_restart_or_rebuild() {
     assert!(state.awaiting_offer);
     assert_eq!(state.active_generation, Some(generation));
 
-    // A per-attempt deadline is disarmed while the Answerer waits. The single
-    // recovery budget still performs the terminal cleanup if no Offer arrives.
+    // A per-attempt deadline does not create a local replacement (no build),
+    // but it is no longer silent: it sends/retransmits the correlated
+    // restart request so a healthy offerer wakes toward hard recovery. The
+    // single recovery budget still performs the terminal cleanup if no Offer
+    // arrives.
     let recovery_epoch = state.recovery_epoch;
     let deadline_effects = reduce(
         &mut state,
         RtcPeerInput::RecoveryDeadlineElapsed { recovery_epoch },
     );
-    assert!(deadline_effects.is_empty());
+    assert!(
+        deadline_effects.iter().any(|e| matches!(
+            e,
+            RtcPeerEffect::SendSignaling {
+                message: SignalingMessage::IceRestartRequest { .. },
+                ..
+            }
+        )),
+        "the parked deadline must drive the offerer wake"
+    );
+    assert!(
+        !deadline_effects
+            .iter()
+            .any(|e| matches!(e, RtcPeerEffect::BuildSession { .. }))
+    );
 
     let recovery_cycle = state.recovery_cycle;
     let budget_effects = reduce(

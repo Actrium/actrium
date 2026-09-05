@@ -199,7 +199,7 @@ pub(crate) async fn inproc_send_reply(
             if expects_response {
                 let error_response = actr_protocol::ErrorResponse {
                     code: protocol_error_to_code(&e),
-                    message: e.to_string(),
+                    message: encode_delivery_uncertain_for_wire(&e),
                 };
                 #[cfg_attr(not(feature = "opentelemetry"), allow(unused_mut))]
                 let mut error_envelope = Inner::build_response_envelope(
@@ -492,7 +492,7 @@ pub(crate) async fn mailbox_send_reply(
             if let (true, Ok(caller)) = (expects_response, caller) {
                 let error_response = actr_protocol::ErrorResponse {
                     code: protocol_error_to_code(&e),
-                    message: e.to_string(),
+                    message: encode_delivery_uncertain_for_wire(&e),
                 };
                 #[cfg_attr(not(feature = "opentelemetry"), allow(unused_mut))]
                 let mut error_envelope = Inner::build_response_envelope(
@@ -1354,12 +1354,44 @@ pub(crate) fn wire_code_to_actr_error(code: u32, message: String) -> ActrError {
     }
 }
 
+/// Encode a `DeliveryUncertain` for the code+message wire boundary with an
+/// unambiguous field separator. Operation/request IDs are unrestricted
+/// strings and may themselves contain `": "`, so parsing the human-readable
+/// Display form is lossy; the `\u{001E}` record separator cannot appear in
+/// either field from normal traffic and delimits them deterministically.
+/// `wire_code_to_actr_error` falls back to the legacy Display parse when the
+/// separator is absent, so mixed-version peers keep a best-effort
+/// reconstruction.
+fn encode_delivery_uncertain_for_wire(err: &ActrError) -> String {
+    match err {
+        ActrError::DeliveryUncertain {
+            operation_id,
+            cause,
+        } => {
+            format!("{operation_id}\u{001E}{cause}")
+        }
+        other => other.to_string(),
+    }
+}
+
 /// Reconstruct the structured `DeliveryUncertain` from its display string.
 /// `protocol_error_to_code` sends the variant's Display form
 /// (`delivery uncertain for operation {operation_id}: {cause}`), so both
 /// fields survive the code+message wire boundary; a malformed or legacy
 /// message degrades to a placeholder instead of losing the variant.
 fn parse_delivery_uncertain(message: &str) -> ActrError {
+    // Preferred: the unambiguous record-separator encoding (see
+    // `encode_delivery_uncertain_for_wire`). Both fields are unrestricted
+    // strings, so this split cannot lose data.
+    if let Some((operation_id, cause)) = message.split_once('\u{001E}') {
+        return ActrError::DeliveryUncertain {
+            operation_id: operation_id.to_string(),
+            cause: cause.to_string(),
+        };
+    }
+    // Legacy Display form from a peer built before the typed encoding:
+    // best-effort split on the first `": "` (lossy when the operation id
+    // itself contains `": "`), keeping the variant intact.
     const PREFIX: &str = "delivery uncertain for operation ";
     if let Some(rest) = message.strip_prefix(PREFIX) {
         if let Some((operation_id, cause)) = rest.split_once(": ") {
