@@ -48,9 +48,9 @@ governor = "0.10"
 
 
 # Internal dependencies
-platform = { path = "../loran-platform", package = "actrix-platform", version = "0.10.0-alpha.4" }
-signer = { path = "../loran-signer", package = "actrix-signer", version = "0.10.0-alpha.4" }
-actrix-mfr = { path = "../loran-mfr", version = "0.10.0-alpha.4" }
+platform = { path = "../loran-platform", package = "actrix-platform", version = "0.10.0-alpha.6" }
+signer = { path = "../loran-signer", package = "actrix-signer", version = "0.10.0-alpha.6" }
+actrix-mfr = { path = "../loran-mfr", version = "0.10.0-alpha.6" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
