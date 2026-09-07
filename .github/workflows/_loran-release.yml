@@ -121,11 +121,6 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
-        with:
-          bun-version: latest
-
       - name: Setup pnpm
         run: |
           corepack enable
@@ -158,10 +153,17 @@ jobs:
       # Build the Admin UI so the release binary embeds the real dist
       # (rust-embed). build.rs would also try this, but doing it explicitly
       # keeps the release reproducible (frozen lockfile).
+      #
+      # --ignore-workspace is required: admin/web is not a member of the root
+      # pnpm workspace (pnpm-workspace.yaml). Without it pnpm resolves the
+      # workspace root four levels up, installs all 6 workspace projects
+      # (~1150 packages) while leaving this directory without node_modules
+      # (vite/tsc unavailable), and runs unrelated workspace lifecycle hooks
+      # (packages/actrium-app-sdk prepublishOnly needs Bun).
       - name: Build Admin UI
         working-directory: source/crates/loran-server/admin/web
         run: |
-          pnpm install --frozen-lockfile
+          pnpm --ignore-workspace install --frozen-lockfile
           pnpm run build
 
       - name: Build actrix (release)
