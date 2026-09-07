@@ -77,6 +77,17 @@ private final class MobileLifecycleObserverProbe: MobileLifecycleObserver, @unch
 
 @Suite(.serialized)
 private struct DynamicWorkloadTests {
+    @Test func deliveryUncertainPreservesNonRetryableSemantics() {
+        let error = ActrError.DeliveryUncertain(
+            operationId: "swift-call-1",
+            cause: "WebRTC generation replaced before Response"
+        )
+
+        #expect(actrErrorKind(error) == .internal)
+        #expect(!actrErrorIsRetryable(error))
+        #expect(error.errorDescription?.contains("swift-call-1") == true)
+    }
+
     @Test func packageRuntimeObserversExposeReadinessHooksAndConnectionNotReady() async throws {
         let probe = RuntimeObserverProbe()
         let observers = runtimeObservers(signaling: probe, webrtc: probe)

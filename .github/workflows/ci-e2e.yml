@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: wasm32-unknown-unknown
       - name: Install Linux e2e dependencies
@@ -66,7 +66,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: wasm32-wasip2,wasm32-unknown-unknown
       - name: Install Linux e2e dependencies
@@ -196,7 +196,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: wasm32-wasip2,wasm32-unknown-unknown
       - name: Setup Node.js
@@ -237,7 +237,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: wasm32-wasip2,wasm32-unknown-unknown
       - name: Setup Node.js
@@ -301,7 +301,7 @@ jobs:
           restore-keys: |
             spm-${{ runner.os }}-
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: wasm32-unknown-unknown,aarch64-apple-ios,aarch64-apple-ios-sim
       - name: Setup Xcode
@@ -385,7 +385,7 @@ jobs:
           restore-keys: |
             spm-${{ runner.os }}-
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: wasm32-unknown-unknown,aarch64-apple-ios,aarch64-apple-ios-sim
       - name: Setup Xcode
@@ -469,7 +469,7 @@ jobs:
           restore-keys: |
             spm-${{ runner.os }}-
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: wasm32-wasip2,wasm32-unknown-unknown,aarch64-apple-ios,aarch64-apple-ios-sim
       - name: Setup Xcode
@@ -552,7 +552,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: wasm32-wasip2,wasm32-unknown-unknown
       - name: Install protoc
@@ -617,7 +617,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: wasm32-unknown-unknown,aarch64-linux-android,x86_64-linux-android
       - name: Setup Java 17

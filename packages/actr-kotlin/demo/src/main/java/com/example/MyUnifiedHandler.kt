@@ -7,7 +7,6 @@ import io.actrium.actr.DataChunk
 import io.actrium.actr.DataChunkCallback
 import io.actrium.actr.PayloadType
 import io.actrium.actr.dsl.ActrContext
-import io.actrium.actr.dsl.withRetry
 import kotlinx.coroutines.delay
 
 /**
@@ -57,16 +56,16 @@ class MyUnifiedHandler : ActrDispatchHandler {
                     .setNote("Android duplex stream test")
                     .build()
 
+            // RpcReliable Call already owns its transport retry and readiness
+            // deadline. Do not wrap this ordinary call in a second SDK retry.
             val startRespPayload =
-                withRetry(maxAttempts = 5) {
-                    ctx.callRaw(
-                        serverId,
-                        "local.DuplexStreamService.StartDuplexStream",
-                        PayloadType.RPC_RELIABLE,
-                        startReq.toByteArray(),
-                        30000L,
-                    )
-                }
+                ctx.callRaw(
+                    serverId,
+                    "local.DuplexStreamService.StartDuplexStream",
+                    PayloadType.RPC_RELIABLE,
+                    startReq.toByteArray(),
+                    30000L,
+                )
             val startResp = local.DataStreamPeer.StartDuplexStreamResponse.parseFrom(startRespPayload)
             Log.i(
                 TAG,

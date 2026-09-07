@@ -1,4 +1,4 @@
-//! WasmWorkloadV2 — the `actr:workload@0.6.0` async-world execution path.
+//! WasmWorkloadV2 — the `actr:workload@0.7.0` async-world execution path.
 //!
 //! The sole actr:workload execution path (the 0.1.0 synchronous serial
 //! world is retired — a component exporting it is rejected at load by
@@ -493,6 +493,13 @@ fn actr_error_to_wit(error: ActrError) -> WitActrError {
         ActrError::DecodeFailure(message) => WitActrError::DecodeFailure(message),
         ActrError::NotImplemented(message) => WitActrError::NotImplemented(message),
         ActrError::Internal(message) => WitActrError::Internal(message),
+        ActrError::DeliveryUncertain {
+            operation_id,
+            cause,
+        } => WitActrError::DeliveryUncertain(wit2::DeliveryUncertainPayload {
+            operation_id,
+            cause,
+        }),
         // `ActrError` is `#[non_exhaustive]`: unmapped future variants map
         // to the generic Internal wire variant so they survive the WIT
         // boundary rather than being lost.
@@ -518,6 +525,10 @@ fn wit_actr_error_to_proto(e: WitActrError) -> ActrError {
         WitActrError::DecodeFailure(msg) => ActrError::DecodeFailure(msg),
         WitActrError::NotImplemented(msg) => ActrError::NotImplemented(msg),
         WitActrError::Internal(msg) => ActrError::Internal(msg),
+        WitActrError::DeliveryUncertain(p) => ActrError::DeliveryUncertain {
+            operation_id: p.operation_id,
+            cause: p.cause,
+        },
     }
 }
 

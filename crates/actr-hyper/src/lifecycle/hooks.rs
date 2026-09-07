@@ -515,11 +515,14 @@ async fn deliver_hook_event(
                         // construction, so reconciliation by operation id is
                         // unambiguous.
                         operation_id: operation_id.clone(),
-                        cause: "data stream delivery uncertain after WebRTC disconnect".to_string(),
+                        cause: format!("data stream delivery uncertain: {reason}"),
                     },
                     ErrorCategory::DataChunkDeliveryUncertain,
                     format!(
-                        "operation_id={operation_id}; session_id={session_id}; reason={reason}"
+                        "operation_id={operation_id}; session_id={}; reason={reason}",
+                        session_id
+                            .map(|id| id.to_string())
+                            .unwrap_or_else(|| "unknown".to_string()),
                     ),
                 );
                 if let Err(e) = observer.on_error(ctx, &event).await {
@@ -636,7 +639,9 @@ fn log_hook_event(event: &HookEvent) {
         } => {
             tracing::warn!(
                 operation_id = %operation_id,
-                session_id = *session_id,
+                session_id = session_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
                 reason = %reason,
                 "data stream delivery uncertain",
             );

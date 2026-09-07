@@ -72,38 +72,6 @@ final class ActrService: ObservableObject {
         return response.reply
     }
 
-    func sendEchoWhenReady(_ input: String) async throws -> String {
-        let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: .seconds(20))
-
-        while true {
-            do {
-                return try await sendEcho(input)
-            } catch let error as ActrError {
-                guard case let .ConnectionNotReady(info) = error, clock.now < deadline else {
-                    throw error
-                }
-
-                let retryAfterMs = min(max(info.retryAfterMs ?? 250, 100), 5_000)
-                let marker = "ACTR_E2E_RETRY:ConnectionNotReady retryAfterMs=\(retryAfterMs)"
-                print(marker)
-                FileHandle.standardError.write(Data("\(marker)\n".utf8))
-
-                // S6-8: post-Connected retry contract via the unified
-                // snapshot. If any tracked peer is already sendable, retry
-                // immediately instead of sleeping out the hint — the hint is
-                // a fallback, not a readiness promise.
-                if let actorRef,
-                   await actorRef.listRtcPeerStatuses().contains(where: { $0.sendable })
-                {
-                    continue
-                }
-
-                try await Task.sleep(for: .milliseconds(Int64(retryAfterMs)))
-            }
-        }
-    }
-
     func shouldAutoSend() -> Bool {
         ProcessInfo.processInfo.environment["ACTR_ECHOAPP_AUTO_SEND"] == "1" && !hasAutoSent
     }
