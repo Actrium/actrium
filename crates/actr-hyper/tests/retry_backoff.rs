@@ -174,7 +174,10 @@ impl WireBuilder for ControlledWireBuilder {
             times.push(Instant::now());
         }
         if call_no < self.fail_count {
-            Err(NetworkError::ConnectionError(format!(
+            // A proven pre-send variant (dialing failed before any wire was
+            // handed back), matching the fail-closed replay contract: generic
+            // backoff only retries framework-verified pre-send failures.
+            Err(NetworkError::ChannelClosed(format!(
                 "simulated transient failure #{call_no}"
             )))
         } else {

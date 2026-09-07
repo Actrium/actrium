@@ -501,14 +501,19 @@ impl RtcPeerController {
             }
 
             // Arm one non-extendable timer for the exact recovery-attempt
-            // epoch. It bounds a Soft restart while an active PC exists and
+            // epoch. It bounds a Soft restart while an active PC exists,
             // supplies the retry delay after a transient Hard replacement
-            // build failure leaves no live PC. While a replacement is actually
-            // building/pending, its effects own convergence and no timer is
-            // armed. Duplicate network facts retain the epoch and cannot move
-            // the deadline.
+            // build failure leaves no live PC, and retransmits a signaling wake
+            // while an Answerer is parked after retiring its physical session.
+            // While a replacement is actually building/pending, its effects own
+            // convergence and no timer is armed. Duplicate network facts
+            // retain the epoch and cannot move the deadline.
             let recovery_attempt_epoch = (self.state.recovery_inflight
-                && self.state.recovery_attempt_started
+                && (self.state.recovery_attempt_started
+                    || (self.state.role == super::state::Role::Answerer
+                        && self.state.awaiting_offer
+                        && (self.state.active_generation.is_some()
+                            || self.state.parked_signaling_generation.is_some())))
                 && self.state.building_generation.is_none()
                 && matches!(
                     self.state.phase,
@@ -1322,6 +1327,9 @@ impl RtcPeerController {
             self.state.initial_connection_inflight
         } else {
             self.state.is_live_generation(retained.generation)
+                || (self.state.role == super::state::Role::Answerer
+                    && self.state.awaiting_offer
+                    && self.state.parked_signaling_generation == Some(retained.generation))
         }
     }
 

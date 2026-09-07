@@ -504,6 +504,10 @@ pub enum DeliveryProgress {
 pub struct SendAttemptResult {
     pub(crate) result: NetworkResult<()>,
     pub(crate) progress: DeliveryProgress,
+    /// The adapter proved that no byte could have reached its transport.
+    /// This is separate from `progress`: a custom adapter may report
+    /// `NotAttempted` without satisfying the framework's replay proof.
+    pub(crate) proven_pre_send: bool,
 }
 
 impl SendAttemptResult {
@@ -514,20 +518,50 @@ impl SendAttemptResult {
     /// ambiguous failures without weakening the production default.
     #[cfg(feature = "test-utils")]
     pub fn for_test(result: NetworkResult<()>, progress: DeliveryProgress) -> Self {
-        Self { result, progress }
+        Self::for_test_with_proof(result, progress, false)
+    }
+
+    /// Construct a test attempt with an explicit adapter-level pre-send proof.
+    /// Keeping this bit separate from `DeliveryProgress::NotAttempted` lets
+    /// tests prove that framework replay requires both facts.
+    #[cfg(feature = "test-utils")]
+    pub fn for_test_with_proof(
+        result: NetworkResult<()>,
+        progress: DeliveryProgress,
+        proven_pre_send: bool,
+    ) -> Self {
+        Self {
+            result,
+            progress,
+            proven_pre_send: proven_pre_send && progress == DeliveryProgress::NotAttempted,
+        }
     }
 
     pub(crate) fn submitted() -> Self {
         Self {
             result: Ok(()),
             progress: DeliveryProgress::SubmittedLocally,
+            proven_pre_send: false,
         }
     }
 
     pub(crate) fn failed(error: NetworkError, progress: DeliveryProgress) -> Self {
+        Self::failed_with_proof(error, progress, false)
+    }
+
+    pub(crate) fn failed_pre_send(error: NetworkError) -> Self {
+        Self::failed_with_proof(error, DeliveryProgress::NotAttempted, true)
+    }
+
+    pub(crate) fn failed_with_proof(
+        error: NetworkError,
+        progress: DeliveryProgress,
+        proven_pre_send: bool,
+    ) -> Self {
         Self {
             result: Err(error),
             progress,
+            proven_pre_send: proven_pre_send && progress == DeliveryProgress::NotAttempted,
         }
     }
 
@@ -620,15 +654,17 @@ pub trait DataLane: Send + Sync + std::fmt::Debug {
     /// The default is fail-safe: a lane that only implements `send` cannot
     /// prove where an error happened relative to the wire, so every closed-like
     /// error is classified `Unknown` — a send that may have partially entered
-    /// the transport must never be auto-replayed. The one exception is
-    /// `SecureChannelNotReady`, a pre-send gate by construction (without a
-    /// ready session no bytes were framed or written).
+    /// the transport must never be auto-replayed. Structural validation and
+    /// `SecureChannelNotReady` are pre-send by construction (no lane bytes
+    /// were framed or written), so those cases also carry the returned
+    /// `proven_pre_send` bit. A lane-specific closed/not-open check must
+    /// override this method and set the bit explicitly.
     ///
-    /// # Override checklist (all items are REQUIRED to report `NotAttempted`)
+    /// # Override checklist (all items are REQUIRED to report `NotAttempted` with proof)
     ///
     /// An adapter may override this method to keep route-level self-healing
     /// for typed closed/not-open errors only if, for every error it maps to
-    /// `NotAttempted`:
+    /// `NotAttempted` plus `proven_pre_send`:
     ///
     /// 1. the state check runs **before any byte can reach the wire**
     ///    (`WebSocketDataLane`'s missing-sink arm is the reference pattern;
@@ -637,30 +673,78 @@ pub trait DataLane: Send + Sync + std::fmt::Debug {
     /// 3. a test pins the classification (see the `ClosedLikePreSend*` lanes
     ///    in `dest_transport_tests` and the trait-default tests in
     ///    `lane_tests`).
+    /// 4. the adapter constructs the result with `failed_pre_send` or
+    ///    `failed_with_proof`, rather than relying on `NotAttempted` alone.
     ///
-    /// An override that cannot satisfy all three must classify `Unknown`
+    /// An override that cannot satisfy all four must classify `Unknown`
     /// instead.
     async fn send_with_progress(&self, data: bytes::Bytes) -> SendAttemptResult {
         match self.send(data).await {
             Ok(()) => SendAttemptResult::submitted(),
             Err(error) => {
-                // Known non-retryable pre-send client errors (argument and
-                // operation validation) cannot have reached the wire by
-                // construction, so they stay ordinary retryable-refusing
-                // errors; the secure-readiness gate is likewise provably
-                // pre-send. Everything else keeps the fail-safe `Unknown` —
-                // an unknown error may have partially entered a transport.
-                let progress = if matches!(
-                    error,
+                // Exhaustive per-variant classification (same-crate enum,
+                // no wildcard arm): adding a `NetworkError` variant breaks
+                // this match, forcing an explicit delivery-progress decision
+                // instead of silently inheriting `Unknown` — or worse,
+                // silently joining the pre-send allowlist and enabling
+                // replay of a partially written send.
+                let progress = match &error {
+                    // Provably pre-send by construction.
                     NetworkError::SecureChannelNotReady(_)
-                        | NetworkError::InvalidArgument(_)
-                        | NetworkError::InvalidOperation(_)
-                ) {
-                    DeliveryProgress::NotAttempted
-                } else {
-                    DeliveryProgress::Unknown
+                    | NetworkError::InvalidArgument(_)
+                    | NetworkError::InvalidOperation(_) => DeliveryProgress::NotAttempted,
+                    // Transport and genuinely ambiguous failures: the write
+                    // may have partially entered the wire.
+                    NetworkError::ConnectionError(_)
+                    | NetworkError::SignalingError(_)
+                    | NetworkError::WebRtcError(_)
+                    | NetworkError::ProtocolError(_)
+                    | NetworkError::SerializationError(_)
+                    | NetworkError::DeserializationError(_)
+                    | NetworkError::TimeoutError(_)
+                    | NetworkError::AuthenticationError(_)
+                    | NetworkError::CredentialExpired(_)
+                    | NetworkError::PermissionError(_)
+                    | NetworkError::ConfigurationError(_)
+                    | NetworkError::ResourceExhaustedError(_)
+                    | NetworkError::NetworkUnreachableError(_)
+                    | NetworkError::ServiceDiscoveryError(_)
+                    | NetworkError::NatTraversalError(_)
+                    | NetworkError::DataChannelError(_)
+                    | NetworkError::DataChannelClosed(_)
+                    | NetworkError::DataChannelNotOpen(_)
+                    | NetworkError::BroadcastError(_)
+                    | NetworkError::IceError(_)
+                    | NetworkError::DtlsError(_)
+                    | NetworkError::StunTurnError(_)
+                    | NetworkError::WebSocketError(_)
+                    | NetworkError::WebSocketClosed(_)
+                    | NetworkError::ConnectionNotFound(_)
+                    | NetworkError::ConnectionClosed(_)
+                    | NetworkError::PeerConnectionClosed(_)
+                    | NetworkError::NotImplemented(_)
+                    | NetworkError::ChannelClosed(_)
+                    | NetworkError::SendError(_)
+                    | NetworkError::NoRoute(_)
+                    | NetworkError::ChannelNotFound(_)
+                    | NetworkError::IoError(_)
+                    | NetworkError::UrlParseError(_)
+                    | NetworkError::JsonError(_)
+                    | NetworkError::Other(_) => DeliveryProgress::Unknown,
                 };
-                SendAttemptResult::failed(error, progress)
+                match progress {
+                    DeliveryProgress::NotAttempted
+                        if matches!(
+                            &error,
+                            NetworkError::SecureChannelNotReady(_)
+                                | NetworkError::InvalidArgument(_)
+                                | NetworkError::InvalidOperation(_)
+                        ) =>
+                    {
+                        SendAttemptResult::failed_pre_send(error)
+                    }
+                    _ => SendAttemptResult::failed(error, progress),
+                }
             }
         }
     }
@@ -896,10 +980,9 @@ impl DataLane for WebSocketDataLane {
             }
             attempt
         } else {
-            SendAttemptResult::failed(
-                NetworkError::WebSocketClosed("WebSocket not connected".to_string()),
-                DeliveryProgress::NotAttempted,
-            )
+            SendAttemptResult::failed_pre_send(NetworkError::WebSocketClosed(
+                "WebSocket not connected".to_string(),
+            ))
         }
     }
 

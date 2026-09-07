@@ -61,6 +61,16 @@ pub(crate) enum IncomingOutcome {
 /// into a `FuturesUnordered` and keep dequeuing.
 pub(crate) type IncomingContinuation = Pin<Box<dyn Future<Output = IncomingOutcome> + Send>>;
 
+/// Build the code/message pair used by every RPC error reply. Keeping the
+/// numeric code and the DeliveryUncertain field encoding together prevents a
+/// future reply path from accidentally sending a lossy Display string.
+fn error_response_for_wire(error: &ActrError) -> actr_protocol::ErrorResponse {
+    actr_protocol::ErrorResponse {
+        code: protocol_error_to_code(error),
+        message: encode_delivery_uncertain_for_wire(error),
+    }
+}
+
 pub(crate) type MailboxTail = Pin<Box<dyn Future<Output = ()> + Send>>;
 type MailboxDepthCallback = Arc<dyn Fn(usize) + Send + Sync + 'static>;
 
@@ -197,10 +207,7 @@ pub(crate) async fn inproc_send_reply(
             // an error envelope for a `tell`: the caller registered no pending
             // entry to receive it (#262).
             if expects_response {
-                let error_response = actr_protocol::ErrorResponse {
-                    code: protocol_error_to_code(&e),
-                    message: e.to_string(),
-                };
+                let error_response = error_response_for_wire(&e);
                 #[cfg_attr(not(feature = "opentelemetry"), allow(unused_mut))]
                 let mut error_envelope = Inner::build_response_envelope(
                     request_id.clone(),
@@ -490,10 +497,7 @@ pub(crate) async fn mailbox_send_reply(
             // (timeout_ms == 0) registered no pending entry, so skip the reply —
             // the local error log above still records the failure (#262).
             if let (true, Ok(caller)) = (expects_response, caller) {
-                let error_response = actr_protocol::ErrorResponse {
-                    code: protocol_error_to_code(&e),
-                    message: e.to_string(),
-                };
+                let error_response = error_response_for_wire(&e);
                 #[cfg_attr(not(feature = "opentelemetry"), allow(unused_mut))]
                 let mut error_envelope = Inner::build_response_envelope(
                     request_id.clone(),
@@ -1299,6 +1303,7 @@ async fn stream_callback_host_operation_handler(
 /// | 10009 | NotImplemented     |
 /// | 10010 | Internal           |
 /// | 10011 | ConnectionNotReady |
+/// | 10012 | DeliveryUncertain  |
 pub(crate) fn protocol_error_to_code(err: &ActrError) -> u32 {
     match err {
         ActrError::Unavailable(_) => 10001,
@@ -1312,6 +1317,11 @@ pub(crate) fn protocol_error_to_code(err: &ActrError) -> u32 {
         ActrError::DecodeFailure(_) => 10008,
         ActrError::NotImplemented(_) => 10009,
         ActrError::Internal(_) => 10010,
+        // Dedicated code so a responder's uncertain delivery round-trips as
+        // the structured variant instead of collapsing into Internal: the
+        // caller's idempotency correlation depends on `operation_id`
+        // surviving this boundary.
+        ActrError::DeliveryUncertain { .. } => 10012,
         // `ActrError` is `#[non_exhaustive]`: unmapped future variants fall
         // back to the generic Internal code so they round-trip as an
         // identifiable error rather than panicking at this boundary.
@@ -1341,10 +1351,97 @@ pub(crate) fn wire_code_to_actr_error(code: u32, message: String) -> ActrError {
         10011 => ActrError::ConnectionNotReady(ConnectionNotReadyInfo {
             retry_after_ms: parse_connection_not_ready_retry_hint(&message),
         }),
+        10012 => parse_delivery_uncertain(&message),
         // Legacy HTTP-ish codes emitted before this scheme was introduced,
         // or any unknown future code: treat as Unavailable.
         _ => ActrError::Unavailable(format!("rpc error {code}: {message}")),
     }
+}
+
+/// Encode a `DeliveryUncertain` for the code+message wire boundary with
+/// byte-length-prefixed fields. Operation/request IDs and causes are
+/// unrestricted UTF-8 strings, so a length prefix preserves every character,
+/// including control characters and both historical delimiters.
+/// `wire_code_to_actr_error` also accepts the previous record-separator format
+/// and the legacy Display form for mixed-version peers.
+const DELIVERY_UNCERTAIN_WIRE_PREFIX: &str = "delivery-uncertain-v1:";
+
+fn encode_delivery_uncertain_for_wire(err: &ActrError) -> String {
+    match err {
+        ActrError::DeliveryUncertain {
+            operation_id,
+            cause,
+        } => {
+            format!(
+                "{DELIVERY_UNCERTAIN_WIRE_PREFIX}{}:{}:{operation_id}{cause}",
+                operation_id.len(),
+                cause.len(),
+            )
+        }
+        other => other.to_string(),
+    }
+}
+
+/// Reconstruct the structured `DeliveryUncertain` from the versioned wire
+/// payload, the previous record-separator payload, or the legacy Display
+/// string. Malformed input keeps the typed variant with a placeholder ID.
+fn parse_delivery_uncertain(message: &str) -> ActrError {
+    // A message carrying the v1 prefix must be interpreted only as v1. If its
+    // length framing is malformed, falling through to the legacy separator
+    // format could fabricate an operation ID from attacker-controlled text.
+    if message.starts_with(DELIVERY_UNCERTAIN_WIRE_PREFIX) {
+        return parse_length_prefixed_delivery_uncertain(message).unwrap_or_else(|| {
+            ActrError::DeliveryUncertain {
+                operation_id: "unknown".to_string(),
+                cause: message.to_string(),
+            }
+        });
+    }
+
+    // Compatibility with the immediately previous typed encoding. It used a
+    // record separator without escaping; reject a second separator instead of
+    // silently assigning part of a field to the other field.
+    if let Some((operation_id, cause)) = message.split_once('\u{001E}') {
+        if !cause.contains('\u{001E}') {
+            return ActrError::DeliveryUncertain {
+                operation_id: operation_id.to_string(),
+                cause: cause.to_string(),
+            };
+        }
+    }
+    // Legacy Display form from a peer built before the typed encoding:
+    // best-effort split on the first `": "` (lossy when the operation id
+    // itself contains `": "`), keeping the variant intact.
+    const PREFIX: &str = "delivery uncertain for operation ";
+    if let Some(rest) = message.strip_prefix(PREFIX) {
+        if let Some((operation_id, cause)) = rest.split_once(": ") {
+            return ActrError::DeliveryUncertain {
+                operation_id: operation_id.to_string(),
+                cause: cause.to_string(),
+            };
+        }
+    }
+    ActrError::DeliveryUncertain {
+        operation_id: "unknown".to_string(),
+        cause: message.to_string(),
+    }
+}
+
+fn parse_length_prefixed_delivery_uncertain(message: &str) -> Option<ActrError> {
+    let rest = message.strip_prefix(DELIVERY_UNCERTAIN_WIRE_PREFIX)?;
+    let (operation_id_len, rest) = rest.split_once(':')?;
+    let (cause_len, payload) = rest.split_once(':')?;
+    let operation_id_len = operation_id_len.parse::<usize>().ok()?;
+    let cause_len = cause_len.parse::<usize>().ok()?;
+    let total_len = operation_id_len.checked_add(cause_len)?;
+    if payload.len() != total_len || !payload.is_char_boundary(operation_id_len) {
+        return None;
+    }
+    let (operation_id, cause) = payload.split_at(operation_id_len);
+    Some(ActrError::DeliveryUncertain {
+        operation_id: operation_id.to_string(),
+        cause: cause.to_string(),
+    })
 }
 
 fn parse_connection_not_ready_retry_hint(message: &str) -> Option<u64> {
