@@ -96,6 +96,7 @@ impl DataLane for V020DataLane {
             self.handle.send_with_progress(self.lane, data, false).await
         };
         let progress = result.progress;
+        let proven_pre_send = result.proven_pre_send;
         match result.result {
             Ok(()) => SendAttemptResult::submitted(),
             Err(error) => {
@@ -110,7 +111,11 @@ impl DataLane for V020DataLane {
                         "v0.20 lane send hit stale data-plane state"
                     );
                 }
-                SendAttemptResult::failed(Self::map_error(error), progress)
+                SendAttemptResult::failed_with_proof(
+                    Self::map_error(error),
+                    progress,
+                    proven_pre_send,
+                )
             }
         }
     }

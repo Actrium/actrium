@@ -33,6 +33,7 @@ pub(crate) struct DestTransport {
 pub(crate) struct DestSendAttempt {
     pub(crate) result: NetworkResult<Option<WireIdentity>>,
     pub(crate) progress: DeliveryProgress,
+    pub(crate) proven_pre_send: bool,
 }
 
 impl DestSendAttempt {
@@ -40,13 +41,27 @@ impl DestSendAttempt {
         Self {
             result: Ok(identity),
             progress: DeliveryProgress::SubmittedLocally,
+            proven_pre_send: false,
         }
     }
 
     fn failed(error: NetworkError, progress: DeliveryProgress) -> Self {
+        Self::failed_with_proof(error, progress, false)
+    }
+
+    fn failed_pre_send(error: NetworkError) -> Self {
+        Self::failed_with_proof(error, DeliveryProgress::NotAttempted, true)
+    }
+
+    fn failed_with_proof(
+        error: NetworkError,
+        progress: DeliveryProgress,
+        proven_pre_send: bool,
+    ) -> Self {
         Self {
             result: Err(error),
             progress,
+            proven_pre_send: proven_pre_send && progress == DeliveryProgress::NotAttempted,
         }
     }
 }
@@ -312,7 +327,11 @@ impl DestTransport {
                             if progress == DeliveryProgress::Unknown {
                                 return match attempt.result {
                                     Ok(()) => DestSendAttempt::submitted(wire_identity),
-                                    Err(error) => DestSendAttempt::failed(error, progress),
+                                    Err(error) => DestSendAttempt::failed_with_proof(
+                                        error,
+                                        progress,
+                                        attempt.proven_pre_send,
+                                    ),
                                 };
                             }
 
@@ -326,7 +345,7 @@ impl DestTransport {
                             // entered a transport, so evicting the lane and
                             // re-dialing cannot duplicate a payload.
                             if let Err(e) = attempt.result.as_ref() {
-                                if e.is_closed_like() {
+                                if e.is_closed_like() && attempt.proven_pre_send {
                                     tracing::warn!(
                                         "♻️ lane closed-like error for {:?} ({:?}), invalidating lane and retrying once: {}",
                                         payload_type,
@@ -358,9 +377,16 @@ impl DestTransport {
                                                     if retry_progress
                                                         == DeliveryProgress::Unknown =>
                                                 {
-                                                    DestSendAttempt::failed(error, retry_progress)
+                                                    DestSendAttempt::failed_with_proof(
+                                                        error,
+                                                        retry_progress,
+                                                        retry.proven_pre_send,
+                                                    )
                                                 }
-                                                Err(error) if error.is_closed_like() => {
+                                                Err(error)
+                                                    if error.is_closed_like()
+                                                        && retry.proven_pre_send =>
+                                                {
                                                     self.evict_closed_like_connection(
                                                         &conn,
                                                         conn_type,
@@ -370,9 +396,11 @@ impl DestTransport {
                                                     .await;
                                                     continue 'send;
                                                 }
-                                                Err(error) => {
-                                                    DestSendAttempt::failed(error, retry_progress)
-                                                }
+                                                Err(error) => DestSendAttempt::failed_with_proof(
+                                                    error,
+                                                    retry_progress,
+                                                    retry.proven_pre_send,
+                                                ),
                                             };
                                         }
                                         Err(retry_err) => {
@@ -396,10 +424,7 @@ impl DestTransport {
                                                 .await;
                                                 continue 'send;
                                             }
-                                            return DestSendAttempt::failed(
-                                                retry_err,
-                                                DeliveryProgress::NotAttempted,
-                                            );
+                                            return DestSendAttempt::failed_pre_send(retry_err);
                                         }
                                     }
                                 }
@@ -421,7 +446,11 @@ impl DestTransport {
 
                             return match attempt.result {
                                 Ok(()) => DestSendAttempt::submitted(wire_identity),
-                                Err(error) => DestSendAttempt::failed(error, progress),
+                                Err(error) => DestSendAttempt::failed_with_proof(
+                                    error,
+                                    progress,
+                                    attempt.proven_pre_send,
+                                ),
                             };
                         }
                         Err(e) => {
@@ -460,10 +489,9 @@ impl DestTransport {
             tracing::info!("⏳ Waiting for connection status...");
 
             if self.conn_mgr.is_closed() {
-                return DestSendAttempt::failed(
-                    NetworkError::ChannelClosed("connection manager closed".into()),
-                    DeliveryProgress::NotAttempted,
-                );
+                return DestSendAttempt::failed_pre_send(NetworkError::ChannelClosed(
+                    "connection manager closed".into(),
+                ));
             }
 
             if !self
@@ -481,10 +509,9 @@ impl DestTransport {
 
             // Event-driven wait!
             if conn_watcher.changed().await.is_err() {
-                return DestSendAttempt::failed(
-                    NetworkError::ChannelClosed("connection manager closed".into()),
-                    DeliveryProgress::NotAttempted,
-                );
+                return DestSendAttempt::failed_pre_send(NetworkError::ChannelClosed(
+                    "connection manager closed".into(),
+                ));
             }
 
             tracing::debug!("🔔 Connection status updated, retrying...");

@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use actr_hyper::test_support::{TestHarness, install_test_crypto_provider};
+use actr_hyper::test_support::{TestHarness, TestRtcRole, install_test_crypto_provider};
 
 const WAIT: Duration = Duration::from_secs(35);
 
@@ -114,12 +114,24 @@ async fn test_answerer_retransmits_lost_ice_restart_request() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn test_readiness_timeout_after_restart_answer_triggers_rebuild() {
+async fn test_offerer_initiated_rebuild_recovers_after_restart_disruption() {
     install_test_crypto_provider();
     let harness = connected(true, 107, 208).await;
-    let offerer = harness.peer(107).id.clone();
-    let answerer = harness.peer(208).id.clone();
-    let old_generation = harness.peer(107).rtc.generation(&answerer).await.unwrap();
+    let first_id = harness.peer(107).id.clone();
+    let second_id = harness.peer(208).id.clone();
+    let first_role = harness.peer(107).rtc.role(&second_id).await.unwrap();
+    let (offerer_serial, offerer, answerer_serial, answerer) = if first_role == TestRtcRole::Offerer
+    {
+        (107, first_id, 208, second_id)
+    } else {
+        (208, second_id, 107, first_id)
+    };
+    let old_generation = harness
+        .peer(offerer_serial)
+        .rtc
+        .generation(&answerer)
+        .await
+        .unwrap();
 
     let vnet = harness.vnet.as_ref().expect("VNet harness");
     vnet.block_network();
@@ -128,24 +140,37 @@ async fn test_readiness_timeout_after_restart_answer_triggers_rebuild() {
     harness.peer(107).rtc.network_available();
     harness.peer(208).rtc.network_available();
 
-    // Keep packets blocked until the soft-recovery timeout escalates to a hard
-    // rebuild and the generation advances.
-    let rebuilding = harness
-        .peer(107)
+    // An Answerer does not create a replacement PC after its physical recovery
+    // fails. Explicitly restart from the stable Offerer so the Answerer can
+    // consume the resulting fresh ordinary Offer.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    harness.peer(offerer_serial).rtc.close_peer(&answerer).await;
+    harness
+        .peer(offerer_serial)
         .rtc
-        .wait_state(&answerer, WAIT, |state| {
-            state.pc_generation > old_generation
-        })
+        .connect(answerer.clone())
+        .await;
+
+    let rebuilding = harness
+        .peer(answerer_serial)
+        .rtc
+        .wait_state(&offerer, WAIT, |state| state.pc_generation > old_generation)
         .await
-        .expect("failed soft recovery should escalate to hard recovery");
+        .expect("Offerer restart should deliver a fresh Offer to the Answerer");
     assert!(!rebuilding.sendable);
 
     vnet.unblock_network();
-    harness.peer(107).rtc.network_available();
-    harness.peer(208).rtc.network_available();
+    harness.peer(offerer_serial).rtc.network_available();
+    harness.peer(answerer_serial).rtc.network_available();
     let (recovered, _) = tokio::join!(
-        harness.peer(107).rtc.wait_sendable(&answerer, WAIT),
-        harness.peer(208).rtc.wait_sendable(&offerer, WAIT),
+        harness
+            .peer(offerer_serial)
+            .rtc
+            .wait_sendable(&answerer, WAIT),
+        harness
+            .peer(answerer_serial)
+            .rtc
+            .wait_sendable(&offerer, WAIT),
     );
     assert!(recovered.pc_generation > old_generation);
     tokio::time::timeout(Duration::from_secs(30), harness.shutdown())

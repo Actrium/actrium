@@ -982,6 +982,158 @@ async fn manual_policy_clock_enforces_one_non_extendable_total_recovery_budget()
 }
 
 #[tokio::test]
+async fn manual_policy_clock_retries_answerer_request_until_budget_without_pc_churn() {
+    let mut h = ControllerTestHarness::spawn(709);
+    drive_answerer_to_sendable(&mut h).await;
+
+    h.supervisor.publish(RtcNetworkEvent::NetworkUnavailable);
+    await_snapshot(&h.handle, "T1 answerer recovery entry", |snapshot| {
+        snapshot.status == actr_framework::WebRtcPeerStatus::Recovering && !snapshot.sendable
+    })
+    .await;
+
+    h.supervisor.publish(RtcNetworkEvent::NetworkAvailable);
+    let first = timeout(WAIT, h.signaling_rx.recv())
+        .await
+        .expect("T1 first answerer restart request timeout")
+        .expect("T1 signaling channel closed");
+    let request_id = match first.message {
+        SignalingMessage::IceRestartRequest {
+            request_id,
+            attempt: 1,
+        } => request_id,
+        other => panic!("expected answerer restart request #1, got {other:?}"),
+    };
+
+    // The six-second attempt timer only retransmits the same request. It must
+    // not create a hard-recovery generation after the old fixed request cap.
+    for expected_attempt in 2..=8 {
+        h.clock.advance(Duration::from_secs(6));
+        let dispatch = timeout(WAIT, h.signaling_rx.recv())
+            .await
+            .expect("T1 answerer restart request timeout")
+            .expect("T1 signaling channel closed");
+        assert!(matches!(
+            &dispatch.message,
+            SignalingMessage::IceRestartRequest {
+                request_id: actual_id,
+                attempt,
+            } if actual_id == &request_id && *attempt == expected_attempt
+        ));
+        let snapshot = h.handle.snapshot();
+        assert_eq!(snapshot.pc_generation, 1);
+        assert_eq!(
+            snapshot.status,
+            actr_framework::WebRtcPeerStatus::Recovering
+        );
+        assert!(!snapshot.sendable);
+    }
+
+    h.clock
+        .advance(NETWORK_RECOVERY_TIMEOUT - Duration::from_secs(7 * 6) - Duration::from_millis(1));
+    tokio::task::yield_now().await;
+    assert_eq!(
+        h.handle.snapshot().status,
+        actr_framework::WebRtcPeerStatus::Recovering,
+        "the total budget must remain open until its deadline"
+    );
+
+    h.clock.advance(Duration::from_millis(1));
+    let exhausted = await_snapshot(&h.handle, "T1 answerer recovery exhaustion", |snapshot| {
+        snapshot.status == actr_framework::WebRtcPeerStatus::Idle
+            && snapshot.unavailable_reason
+                == Some(actr_framework::WebRtcUnavailableReason::RecoveryExhausted)
+    })
+    .await;
+    assert!(!exhausted.sendable);
+    assert_eq!(exhausted.pc_generation, 0);
+
+    let retirement = timeout(WAIT, h.retirement_rx.recv())
+        .await
+        .expect("terminal answerer transport-retirement timeout")
+        .expect("terminal answerer transport-retirement channel closed");
+    assert_eq!(
+        retirement.reason,
+        actr_framework::WebRtcUnavailableReason::RecoveryExhausted
+    );
+
+    let close = h.next_effect().await;
+    assert!(matches!(
+        close.effect,
+        RtcPeerEffect::CloseSession { generation: 1, .. }
+    ));
+    h.effects
+        .complete(EffectCompletion::CloseSession {
+            generation: close.identity.pc_generation,
+            operation_id: close.identity.operation_id,
+            result: Ok(()),
+        })
+        .await
+        .expect("complete T1 answerer exhausted-session close");
+    h.shutdown().await;
+}
+
+#[tokio::test]
+async fn manual_policy_clock_wakes_closed_answerer_after_generation_retirement() {
+    let mut h = ControllerTestHarness::spawn(710);
+    drive_answerer_to_sendable(&mut h).await;
+
+    // A physical close retires the old session before the passive Answerer can
+    // ask the Offerer for a replacement Offer.
+    h.facts.driver(PeerDriverEvent::PeerConnectionStateChanged {
+        generation: 1,
+        state: RTCPeerConnectionState::Closed,
+    });
+    await_snapshot(
+        &h.handle,
+        "closed Answerer enters parked recovery",
+        |snapshot| {
+            snapshot.status == actr_framework::WebRtcPeerStatus::Recovering
+                && snapshot.pc_generation == 0
+                && !snapshot.sendable
+        },
+    )
+    .await;
+
+    let close = h.next_effect().await;
+    assert!(matches!(
+        close.effect,
+        RtcPeerEffect::CloseSession { generation: 1, .. }
+    ));
+    h.effects
+        .complete(EffectCompletion::CloseSession {
+            generation: close.identity.pc_generation,
+            operation_id: close.identity.operation_id,
+            result: Ok(()),
+        })
+        .await
+        .expect("complete closed Answerer session");
+
+    // The parked Answerer keeps a six-second attempt timer even though the
+    // physical generation is no longer live. Its wake must carry the retired
+    // generation only as signaling metadata and must not rebuild locally.
+    tokio::task::yield_now().await;
+    h.clock.advance(Duration::from_secs(6));
+    let wake = timeout(WAIT, h.signaling_rx.recv())
+        .await
+        .expect("closed Answerer wake timeout")
+        .expect("signaling channel closed");
+    assert!(matches!(
+        wake.message,
+        SignalingMessage::IceRestartRequest { attempt: 1, .. }
+    ));
+    assert_eq!(
+        wake.attempt
+            .expect("restart request carries relay identity")
+            .pc_generation,
+        1,
+        "the retired generation is retained only to route the signaling wake"
+    );
+
+    h.shutdown().await;
+}
+
+#[tokio::test]
 async fn fresh_remote_offer_replaces_recovery_with_a_bounded_initial_attempt() {
     let mut h = ControllerTestHarness::spawn(707);
     drive_answerer_to_sendable(&mut h).await;
