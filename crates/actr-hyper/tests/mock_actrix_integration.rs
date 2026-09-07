@@ -100,7 +100,10 @@ async fn mfr_verifying_key_roundtrip_via_mfr_cert_cache() {
 async fn mfr_verifying_key_404_for_unregistered_mfr() {
     let server = MockActrixServer::start().await.unwrap();
 
-    let url = format!("{}/mfr/ghost/verifying_key", server.http_url());
+    let url = format!(
+        "{}/registry/publishers/ghost/verifying-key",
+        server.http_url()
+    );
     let status = reqwest::get(&url).await.unwrap().status();
     assert_eq!(status, 404);
 }
@@ -115,7 +118,7 @@ async fn admin_mfr_seeds_verifying_key() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/admin/mfr", server.http_url()))
+        .post(format!("{}/admin/publisher", server.http_url()))
         .json(&serde_json::json!({
             "name": "seeded",
             "pubkey_b64": pubkey_b64,
@@ -165,8 +168,8 @@ async fn publish_flow_via_nonce_and_publish() {
 
     // Step 1: get a nonce.
     let nonce_resp: serde_json::Value = client
-        .post(format!("{}/mfr/pkg/nonce", server.http_url()))
-        .json(&serde_json::json!({ "manufacturer": "acme" }))
+        .post(format!("{}/registry/packages/nonce", server.http_url()))
+        .json(&serde_json::json!({ "publisher": "apps.example.com" }))
         .send()
         .await
         .unwrap()
@@ -177,9 +180,9 @@ async fn publish_flow_via_nonce_and_publish() {
 
     // Step 2: publish with that nonce.
     let publish: serde_json::Value = client
-        .post(format!("{}/mfr/pkg/publish", server.http_url()))
+        .post(format!("{}/registry/packages/publish", server.http_url()))
         .json(&serde_json::json!({
-            "manufacturer": "acme",
+            "publisher": "apps.example.com",
             "name": "EchoSvc",
             "version": "0.1.0",
             "target": "wasm32-wasip2",
@@ -195,14 +198,14 @@ async fn publish_flow_via_nonce_and_publish() {
         .json()
         .await
         .unwrap();
-    assert_eq!(publish["type_str"], "acme:EchoSvc:0.1.0");
+    assert_eq!(publish["type_str"], "apps.example.com/EchoSvc@0.1.0");
     assert_eq!(publish["status"], "active");
 
     // Step 3: same nonce cannot be reused.
     let reuse = client
-        .post(format!("{}/mfr/pkg/publish", server.http_url()))
+        .post(format!("{}/registry/packages/publish", server.http_url()))
         .json(&serde_json::json!({
-            "manufacturer": "acme",
+            "publisher": "apps.example.com",
             "name": "EchoSvc",
             "version": "0.1.0",
             "target": "wasm32-wasip2",

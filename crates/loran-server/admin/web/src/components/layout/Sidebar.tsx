@@ -46,7 +46,7 @@ const serviceItems: NavItem[] = [
   { to: "/admin/services/stun", icon: Shield, label: "STUN" },
   { to: "/admin/services/turn", icon: ArrowLeftRight, label: "TURN" },
   { to: "/admin/services/signaling", icon: Radio, label: "Signaling" },
-  { to: "/admin/mfr", icon: Building2, label: "MFR" },
+  { to: "/admin/publishers", icon: Building2, label: "Publisher Registry" },
   { to: "/admin/services/ais", icon: Fingerprint, label: "AIS" },
   { to: "/admin/services/signer", icon: Key, label: "Signer" },
 ];

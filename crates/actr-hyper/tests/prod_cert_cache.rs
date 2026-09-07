@@ -83,7 +83,7 @@ async fn production_mode_fetches_mfr_key_and_verifies() {
     let mock = server
         .mock(
             "GET",
-            format!("/mfr/acme/verifying_key?key_id={}", key_id).as_str(),
+            format!("/registry/publishers/acme/verifying-key?key_id={}", key_id).as_str(),
         )
         .with_status(200)
         .with_header("content-type", "application/json")
@@ -120,7 +120,11 @@ async fn production_mode_caches_mfr_key_on_second_verify() {
     let mock = server
         .mock(
             "GET",
-            format!("/mfr/cached-mfr/verifying_key?key_id={}", key_id).as_str(),
+            format!(
+                "/registry/publishers/cached-mfr/verifying-key?key_id={}",
+                key_id
+            )
+            .as_str(),
         )
         .with_status(200)
         .with_header("content-type", "application/json")
@@ -159,7 +163,11 @@ async fn production_mode_returns_untrusted_for_unknown_mfr() {
     server
         .mock(
             "GET",
-            format!("/mfr/unknown-mfr/verifying_key?key_id={}", key_id).as_str(),
+            format!(
+                "/registry/publishers/unknown-mfr/verifying-key?key_id={}",
+                key_id
+            )
+            .as_str(),
         )
         .with_status(404)
         .create_async()
@@ -191,7 +199,7 @@ async fn production_mode_rejects_wrong_cached_key() {
     server
         .mock(
             "GET",
-            format!("/mfr/mfr-x/verifying_key?key_id={}", key_id).as_str(),
+            format!("/registry/publishers/mfr-x/verifying-key?key_id={}", key_id).as_str(),
         )
         .with_status(200)
         .with_header("content-type", "application/json")
@@ -226,7 +234,11 @@ async fn production_mode_independent_caches_per_manufacturer() {
     server
         .mock(
             "GET",
-            format!("/mfr/mfr-a/verifying_key?key_id={}", key_id_a).as_str(),
+            format!(
+                "/registry/publishers/mfr-a/verifying-key?key_id={}",
+                key_id_a
+            )
+            .as_str(),
         )
         .with_status(200)
         .with_header("content-type", "application/json")
@@ -236,7 +248,11 @@ async fn production_mode_independent_caches_per_manufacturer() {
     server
         .mock(
             "GET",
-            format!("/mfr/mfr-b/verifying_key?key_id={}", key_id_b).as_str(),
+            format!(
+                "/registry/publishers/mfr-b/verifying-key?key_id={}",
+                key_id_b
+            )
+            .as_str(),
         )
         .with_status(200)
         .with_header("content-type", "application/json")
@@ -277,7 +293,11 @@ async fn cert_cache_get_from_cache_after_prefetch() {
     server
         .mock(
             "GET",
-            format!("/mfr/sync-mfr/verifying_key?key_id={}", key_id).as_str(),
+            format!(
+                "/registry/publishers/sync-mfr/verifying-key?key_id={}",
+                key_id
+            )
+            .as_str(),
         )
         .with_status(200)
         .with_header("content-type", "application/json")

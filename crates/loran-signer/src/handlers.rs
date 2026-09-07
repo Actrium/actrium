@@ -18,7 +18,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicU32, Ordering},
 };
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 lazy_static! {
     /// Signer service metrics
@@ -58,8 +58,8 @@ pub fn register_signer_metrics(registry: &prometheus::Registry) -> Result<(), pr
 }
 
 /// Lazy cleanup trigger conditions
-const CLEANUP_CHECK_INTERVAL: u32 = 100; // Check every 100 requests
-const CLEANUP_MIN_KEYS: u32 = 10; // Only clean up when at least 10 keys exist
+const CLEANUP_CHECK_INTERVAL: u32 = 100; // Check once every 100 requests
+const CLEANUP_MIN_KEYS: u32 = 10; // Only clean up when there are at least 10 keys
 
 /// Signer service state
 #[derive(Clone)]
@@ -67,9 +67,9 @@ pub struct SignerState {
     pub storage: KeyStorage,
     pub nonce_storage: Arc<dyn NonceStorage + Send + Sync>,
     pub psk: String,
-    /// Tolerance period (seconds)
+    /// Tolerance window (seconds)
     pub tolerance_seconds: u64,
-    /// Request counter (for lazy cleanup triggering)
+    /// Request counter (used to trigger lazy cleanup)
     request_counter: Arc<AtomicU32>,
 }
 
@@ -92,7 +92,7 @@ impl SignerState {
     /// Lazy cleanup: check whether expired keys need to be cleaned up during request handling
     ///
     /// Trigger conditions:
-    /// - Every CLEANUP_CHECK_INTERVAL requests
+    /// - Check once every CLEANUP_CHECK_INTERVAL requests
     /// - At least CLEANUP_MIN_KEYS keys in the database
     async fn maybe_cleanup_expired_keys(&self) {
         let count = self.request_counter.fetch_add(1, Ordering::Relaxed);
@@ -106,7 +106,7 @@ impl SignerState {
         let storage = self.storage.clone();
         let tolerance = self.tolerance_seconds;
         tokio::spawn(async move {
-            // First check the total key count
+            // Check total key count first
             let total_keys = match storage.get_key_count().await {
                 Ok(count) => count,
                 Err(e) => {
@@ -124,7 +124,7 @@ impl SignerState {
                 return;
             }
 
-            // Perform cleanup (only delete keys beyond the tolerance period)
+            // Perform cleanup (only delete keys beyond the tolerance window)
             match storage.cleanup_expired_keys(tolerance).await {
                 Ok(cleaned) => {
                     if cleaned > 0 {
@@ -169,7 +169,7 @@ impl SignerState {
     }
 }
 
-/// Create SignerState from Signer configuration
+/// Create SignerState from Signer config
 ///
 /// Note: Nonce storage must be provided by the caller to avoid circular dependencies
 /// between ks and platform crates.
@@ -181,12 +181,10 @@ pub async fn create_signer_state<N: NonceStorage + Send + Sync + 'static>(
 ) -> Result<SignerState, SignerError> {
     crate::recording::info!("Initializing Signer state from SignerServiceConfig");
 
-    // Create key encryptor
+    // Create the key encryptor
     let encryptor = match service_config.get_kek_source() {
         Some(kek_source) => {
-            crate::recording::info!(
-                "KEK source configured; activating private key encryption in storage backend"
-            );
+            crate::recording::info!("KEK configured, enabling private key encryption");
             KeyEncryptor::from_kek_source(&kek_source)?
         }
         None => {
@@ -195,7 +193,7 @@ pub async fn create_signer_state<N: NonceStorage + Send + Sync + 'static>(
         }
     };
 
-    // Create storage instance from configuration (async)
+    // Create the storage instance from config (async)
     let key_storage =
         KeyStorage::from_config(&service_config.storage, encryptor, sqlite_path).await?;
 
@@ -207,7 +205,7 @@ pub async fn create_signer_state<N: NonceStorage + Send + Sync + 'static>(
     ))
 }
 
-/// Create the Signer service routes
+/// Create the router for the Signer service
 pub fn create_router(state: SignerState) -> Router {
     Router::new()
         .route("/generate-signing-key", post(generate_signing_key_handler))
@@ -235,14 +233,14 @@ async fn generate_signing_key_handler(
     let start_time = Instant::now();
     crate::recording::info!("Received Ed25519 signing key generation request");
 
-    // Verify credential
+    // Verify the credential
     let request_data = request.request_payload();
     let verify_result = app_state
         .verify_credential(&request.credential, &request_data)
         .await;
 
     if let Err(ref e) = verify_result {
-        // Record authentication failure metrics
+        // Record authentication failure metric
         let reason = match e {
             SignerError::ReplayAttack(_) => "replay_attack",
             SignerError::Authentication(_) => "invalid_signature",
@@ -264,10 +262,10 @@ async fn generate_signing_key_handler(
     }
     verify_result?;
 
-    // Generate and store Ed25519 key pair
+    // Generate and store an Ed25519 key pair
     let key_pair = app_state.storage.generate_and_store_key().await?;
 
-    // Get key record to obtain the correct expiration time
+    // Get the key record to obtain the correct expiry time
     let key_record = app_state
         .storage
         .get_key_record(key_pair.key_id)
@@ -277,7 +275,7 @@ async fn generate_signing_key_handler(
     // Lazy cleanup
     app_state.maybe_cleanup_expired_keys().await;
 
-    // Record key generation metrics
+    // Record key generation metric
     KS_KEYS_GENERATED.with_label_values(&["ed25519"]).inc();
 
     let response = GenerateSigningKeyResponse {
@@ -310,7 +308,13 @@ async fn sign_handler(
     let start_time = Instant::now();
     crate::recording::info!("Received sign request for key_id: {}", key_id);
 
-    // Verify credential
+    if request.key_id != key_id {
+        return Err(SignerError::InvalidRequest(
+            "path key_id does not match request key_id".to_string(),
+        ));
+    }
+
+    // Verify the credential
     let request_data = request.request_payload();
     let verify_result = app_state
         .verify_credential(&request.credential, &request_data)
@@ -338,8 +342,8 @@ async fn sign_handler(
     }
     verify_result?;
 
-    // A key that has passed `expires_at` must not mint anything: verifiers
-    // verifier caches drop verifying keys at `expires_at` with no
+    // A key that has passed `expires_at` must not mint anything: verifier
+    // caches drop verifying keys at `expires_at` with no
     // tolerance, so signing now would hand out born-invalid credentials that
     // fail every handshake with 401. Tolerance only keeps
     // key material readable, never extends the signing window.
@@ -372,7 +376,7 @@ async fn sign_handler(
         }
     }
 
-    // Sign internally in the backend; private key does not leave Signer
+    // Sign inside the backend; the private key never leaves the Signer
     let signature = app_state
         .storage
         .sign(key_id, &request.message)
@@ -417,6 +421,57 @@ async fn health_check_handler(
     Ok(Json(response))
 }
 
+/// Interval between background passes that prune expired signing keys.
+///
+/// The gRPC signing path never triggers the lazy cleanup that the HTTP path
+/// performs, so without this loop expired keys accumulate without bound. Five
+/// minutes keeps the key table bounded at negligible cost.
+pub const KEY_CLEANUP_INTERVAL: Duration = Duration::from_secs(300);
+
+/// Run a cancellation-aware background loop that periodically removes expired
+/// signing keys from `storage`.
+///
+/// Only keys whose expiry is older than `tolerance_seconds` are deleted, so the
+/// verification tolerance window is preserved (this mirrors the lazy cleanup on
+/// the HTTP path). The loop wakes every [`KEY_CLEANUP_INTERVAL`] and exits
+/// cleanly as soon as `cancel` resolves, so callers can pass any shutdown future
+/// (for example `CancellationToken::cancelled_owned()`).
+pub async fn run_key_cleanup(
+    storage: KeyStorage,
+    tolerance_seconds: u64,
+    cancel: impl std::future::Future<Output = ()> + Send + 'static,
+) {
+    let mut ticker = tokio::time::interval(KEY_CLEANUP_INTERVAL);
+    // Drop missed ticks instead of firing a burst after a long stall.
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    tokio::pin!(cancel);
+
+    loop {
+        tokio::select! {
+            _ = &mut cancel => {
+                crate::recording::debug!("Signer key cleanup loop cancelled");
+                break;
+            }
+            _ = ticker.tick() => {
+                match storage.cleanup_expired_keys(tolerance_seconds).await {
+                    Ok(removed) if removed > 0 => {
+                        crate::recording::info!(
+                            "Signer key cleanup removed {} expired keys",
+                            removed
+                        );
+                    }
+                    Ok(_) => {
+                        crate::recording::debug!("Signer key cleanup found no expired keys");
+                    }
+                    Err(e) => {
+                        crate::recording::warn!("Signer key cleanup failed: {}", e);
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,13 +496,14 @@ mod tests {
             storage: crate::storage::StorageConfig {
                 backend: crate::storage::StorageBackend::Sqlite,
                 key_ttl_seconds,
-                sqlite: Some(crate::storage::SqliteConfig {}),
+                sqlite: Some(crate::storage::SqliteConfig::default()),
                 postgres: None,
             },
             kek: None,
             kek_env: None,
             kek_file: None,
             tolerance_seconds: 3600,
+            ..Default::default()
         };
 
         let psk = "test-psk".to_string();
@@ -478,13 +534,14 @@ mod tests {
             storage: crate::storage::StorageConfig {
                 backend: crate::storage::StorageBackend::Sqlite,
                 key_ttl_seconds: 3600,
-                sqlite: Some(crate::storage::SqliteConfig {}),
+                sqlite: Some(crate::storage::SqliteConfig::default()),
                 postgres: None,
             },
             kek: None,
             kek_env: None,
             kek_file: None,
             tolerance_seconds: 3600,
+            ..Default::default()
         };
 
         let nonce_storage = MemoryStorage::new();
@@ -509,13 +566,14 @@ mod tests {
             storage: crate::storage::StorageConfig {
                 backend: crate::storage::StorageBackend::Sqlite,
                 key_ttl_seconds: 3600,
-                sqlite: Some(crate::storage::SqliteConfig {}),
+                sqlite: Some(crate::storage::SqliteConfig::default()),
                 postgres: None,
             },
             kek: None,
             kek_env: None,
             kek_file: None,
             tolerance_seconds: 3600,
+            ..Default::default()
         };
 
         let nonce_storage = MemoryStorage::new();
@@ -535,13 +593,14 @@ mod tests {
             storage: crate::storage::StorageConfig {
                 backend: crate::storage::StorageBackend::Sqlite,
                 key_ttl_seconds: 3600,
-                sqlite: Some(crate::storage::SqliteConfig {}),
+                sqlite: Some(crate::storage::SqliteConfig::default()),
                 postgres: None,
             },
             kek: None,
             kek_env: None,
             kek_file: None,
             tolerance_seconds: 3600,
+            ..Default::default()
         };
 
         let nonce_storage = MemoryStorage::new();
@@ -661,11 +720,12 @@ mod tests {
     }
 
     async fn post_sign(app: &Router, psk: &str, key_id: u32) -> StatusCode {
-        let request_data = format!("sign:{key_id}");
+        let message = b"issue-7-probe".to_vec();
+        let request_data = crate::types::sign_request_payload(key_id, &message);
         let credential = create_credential_for_request(psk, &request_data);
         let request = SignRequest {
             key_id,
-            message: b"issue-7-probe".to_vec(),
+            message,
             credential,
         };
         let request_body = serde_json::to_value(request).unwrap();

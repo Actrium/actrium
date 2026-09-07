@@ -31,10 +31,11 @@ impl KeyHistoryStatus {
     }
 }
 
-/// A retired MFR signing key, preserved for JWKS-style historical verification.
+/// A retired Publisher signing key, preserved for historical verification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MfrKeyHistory {
     pub id: i64,
+    #[serde(rename = "publisher_id")]
     pub mfr_id: i64,
     pub key_id: String,
     pub public_key: String,
@@ -100,13 +101,17 @@ impl MfrKeyHistory {
 
     /// Look up a specific historical key by mfr_id + key_id.
     /// Returns None if the key is not found OR if it has been revoked.
+    ///
+    /// `ORDER BY id DESC LIMIT 1` resolves the newest archival row unambiguously
+    /// even if legacy data holds more than one row for the same (mfr_id, key_id).
     pub async fn get_by_key_id(
         pool: &SqlitePool,
         mfr_id: i64,
         key_id: &str,
     ) -> Result<Option<Self>, MfrError> {
         let entry = sqlx::query_as::<_, MfrKeyHistory>(
-            "SELECT * FROM mfr_key_history WHERE mfr_id = ? AND key_id = ?",
+            "SELECT * FROM mfr_key_history WHERE mfr_id = ? AND key_id = ?
+             ORDER BY id DESC LIMIT 1",
         )
         .bind(mfr_id)
         .bind(key_id)
@@ -116,7 +121,7 @@ impl MfrKeyHistory {
         match entry {
             Some(ref e) if e.status == KeyHistoryStatus::Revoked => {
                 platform::recording::warn!(
-                    "rejected lookup for revoked historical key: key_id={}, mfr_id={}",
+                    "rejected lookup for revoked historical key: key_id={}, publisher_id={}",
                     key_id,
                     mfr_id
                 );
@@ -134,7 +139,8 @@ impl MfrKeyHistory {
         key_id: &str,
     ) -> Result<Option<Self>, MfrError> {
         Ok(sqlx::query_as::<_, MfrKeyHistory>(
-            "SELECT * FROM mfr_key_history WHERE mfr_id = ? AND key_id = ?",
+            "SELECT * FROM mfr_key_history WHERE mfr_id = ? AND key_id = ?
+             ORDER BY id DESC LIMIT 1",
         )
         .bind(mfr_id)
         .bind(key_id)
@@ -142,7 +148,49 @@ impl MfrKeyHistory {
         .await?)
     }
 
-    /// List all historical keys for an MFR (most recent first).
+    /// Blacklist check: has this (mfr_id, key_id) ever been archived into the
+    /// history table, in any status (retired or revoked)?
+    ///
+    /// Unlike `get_by_key_id`, this does NOT treat revoked rows as absent, so it
+    /// is the correct primitive for refusing to reinstate a previously used
+    /// publisher key. A key that was rotated away from (retired) or emergency
+    /// revoked must never become the current key again.
+    pub async fn key_id_ever_used(
+        pool: &SqlitePool,
+        mfr_id: i64,
+        key_id: &str,
+    ) -> Result<bool, MfrError> {
+        let found: Option<i64> = sqlx::query_scalar(
+            "SELECT 1 FROM mfr_key_history WHERE mfr_id = ? AND key_id = ? LIMIT 1",
+        )
+        .bind(mfr_id)
+        .bind(key_id)
+        .fetch_optional(pool)
+        .await?;
+        Ok(found.is_some())
+    }
+
+    /// Is the most recent history row for this (mfr_id, key_id) revoked?
+    ///
+    /// Returns false when the key_id has no history row at all. Used to fail an
+    /// exact-key resolution closed even on the current-key fast path.
+    pub async fn is_key_id_revoked(
+        pool: &SqlitePool,
+        mfr_id: i64,
+        key_id: &str,
+    ) -> Result<bool, MfrError> {
+        let status: Option<String> = sqlx::query_scalar(
+            "SELECT status FROM mfr_key_history WHERE mfr_id = ? AND key_id = ?
+             ORDER BY id DESC LIMIT 1",
+        )
+        .bind(mfr_id)
+        .bind(key_id)
+        .fetch_optional(pool)
+        .await?;
+        Ok(matches!(status.as_deref(), Some("revoked")))
+    }
+
+    /// List all historical keys for an Publisher Registry (most recent first).
     pub async fn list_by_mfr(pool: &SqlitePool, mfr_id: i64) -> Result<Vec<Self>, MfrError> {
         Ok(sqlx::query_as::<_, MfrKeyHistory>(
             "SELECT * FROM mfr_key_history WHERE mfr_id = ? ORDER BY retired_at DESC",
@@ -152,7 +200,7 @@ impl MfrKeyHistory {
         .await?)
     }
 
-    /// Delete all history for an MFR (called when MFR is deleted).
+    /// Delete all history for an Publisher Registry (called when Publisher Registry is deleted).
     pub async fn delete_by_mfr(pool: &SqlitePool, mfr_id: i64) -> Result<(), MfrError> {
         sqlx::query("DELETE FROM mfr_key_history WHERE mfr_id = ?")
             .bind(mfr_id)

@@ -17,7 +17,7 @@ use webrtc::peer_connection::{
 };
 
 const TURN_REALM: &str = "actr.test";
-const TURN_SHARED_TEST_KEY: &str = "turn-rotation-integration-key";
+const TURN_SHARED_TEST_KEY: &str = "actrix-turn-rotation-integration-test-key";
 const WAIT: Duration = Duration::from_secs(60);
 
 type HmacSha1 = Hmac<Sha1>;
@@ -56,13 +56,23 @@ impl AuthHandler for CountingAuthenticator {
 }
 
 fn turn_credential(id: &ActrId, expires_at: u64) -> TurnCredential {
-    let username = format!("{expires_at}:{id}");
-    let mut mac = HmacSha1::new_from_slice(TURN_SHARED_TEST_KEY.as_bytes()).unwrap();
+    // Username must match the scoped format enforced by `turn::Authenticator`:
+    // `{expires_at}:realm={realm_id}:provider=actrix-official:audience=actr.turn:actor={actr_id}`
+    let username = format!(
+        "{expires_at}:realm={}:provider=actrix-official:audience=actr.turn:actor={id}",
+        id.realm.realm_id
+    );
+    let mut mac = HmacSha1::new_from_slice(TURN_SHARED_TEST_KEY.as_bytes())
+        .expect("HMAC-SHA1 accepts the fixed test key");
     mac.update(username.as_bytes());
     TurnCredential {
         username,
         password: BASE64_STANDARD.encode(mac.finalize().into_bytes()),
         expires_at,
+        protocol_version: 1,
+        realm_id: id.realm.realm_id,
+        provider: "actrix-official".to_string(),
+        audience: "actr.turn".to_string(),
     }
 }
 
@@ -111,9 +121,16 @@ async fn start_turn(
 ) -> (SocketAddr, turn_crate::server::Server) {
     let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
     let address = socket.local_addr().unwrap();
-    let server = turn::create_turn_server(socket, "127.0.0.1", TURN_REALM, auth)
-        .await
-        .expect("TURN server");
+    let server = turn::create_turn_server(
+        socket,
+        "127.0.0.1",
+        TURN_REALM,
+        (49_152, 65_535),
+        auth,
+        true,
+    )
+    .await
+    .expect("TURN server");
     (address, server)
 }
 

@@ -329,6 +329,7 @@ mod tests {
             username: username.to_string(),
             password: password.to_string(),
             expires_at: 1,
+            ..Default::default()
         }
     }
 

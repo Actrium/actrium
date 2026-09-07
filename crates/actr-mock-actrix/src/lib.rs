@@ -8,16 +8,16 @@
 //!   `ActrToSignaling(Ping|RouteCandidatesRequest|Unregister|...)` and
 //!   `ActrRelay` forwarding.
 //! - HTTP AIS endpoints at `/ais/register` + `/register` (protobuf body).
-//! - HTTP MFR registry endpoints at `/ais/mfr/{name}/verifying_key` +
-//!   `/mfr/{name}/verifying_key` for package verification.
-//! - HTTP publish endpoints at `/mfr/pkg/nonce` + `/mfr/pkg/publish` used by
+//! - HTTP MFR registry endpoints at `/ais/registry/publishers/{name}/verifying-key` +
+//!   `/registry/publishers/{name}/verifying-key` for package verification.
+//! - HTTP publish endpoints at `/registry/packages/nonce` + `/registry/packages/publish` used by
 //!   `actr pkg publish`.
 //! - Admin seeding endpoints under `/admin/*` (replaces the old
 //!   `register.sh` that used `sqlite3` directly on actrix.db).
 //!
 //! All state lives in memory and is shared between the WS and HTTP surfaces so
-//! an MFR that was registered via `POST /admin/mfr` is immediately visible to
-//! `GET /mfr/{name}/verifying_key`, etc.
+//! an MFR that was registered via `POST /admin/publisher` is immediately visible to
+//! `GET /registry/publishers/{name}/verifying-key`, etc.
 
 pub mod http;
 pub mod signaling;
@@ -182,14 +182,14 @@ impl MockActrixServer {
     }
 
     /// Register a manufacturer. The `verifying_key` will be returned by
-    /// `GET /mfr/{name}/verifying_key`.
+    /// `GET /registry/publishers/{name}/verifying-key`.
     pub async fn add_mfr(&self, name: &str, verifying_key: VerifyingKey) {
         self.state.add_mfr(name.to_string(), verifying_key).await;
     }
 
     /// Register a package (manufacturer + name + version + target). Used by
     /// tests that want to pre-seed the registry without going through
-    /// `POST /mfr/pkg/publish`.
+    /// `POST /registry/packages/publish`.
     pub async fn add_package(&self, manufacturer: &str, name: &str, version: &str, target: &str) {
         self.state
             .add_package(PackageEntry {
@@ -218,17 +218,6 @@ impl MockActrixServer {
         self.pause_forwarding.store(false, Ordering::Release);
     }
 
-    /// Drop the next N Answerer ICE restart requests while keeping every other
-    /// signaling payload flowing.
-    pub fn drop_next_ice_restart_requests(&self, count: u32) {
-        tracing::warn!(
-            "🧪 Dropping the next {} ICE restart request relay message(s)",
-            count
-        );
-        self.ice_restart_request_drop_count
-            .store(count, Ordering::SeqCst);
-    }
-
     /// Stop reading/writing frames for WebSocket connections that already
     /// exist, while allowing later reconnects to establish a fresh socket.
     pub fn blackhole_websocket_io(&self) {
@@ -245,6 +234,17 @@ impl MockActrixServer {
         self.state
             .blackhole_websocket_generation
             .store(0, Ordering::Release);
+    }
+
+    /// Drop the next N Answerer ICE restart requests while keeping every other
+    /// signaling payload flowing.
+    pub fn drop_next_ice_restart_requests(&self, count: u32) {
+        tracing::warn!(
+            "🧪 Dropping the next {} ICE restart request relay message(s)",
+            count
+        );
+        self.ice_restart_request_drop_count
+            .store(count, Ordering::SeqCst);
     }
 
     /// Drop the next N ICE candidate relay messages.
@@ -354,11 +354,14 @@ fn build_router(state: Arc<MockState>) -> Router {
         .route("/register", post(http::register_handler))
         .route("/renew", post(http::renew_handler))
         .route(
-            "/mfr/{name}/verifying_key",
+            "/registry/publishers/{name}/verifying-key",
             get(http::verifying_key_handler),
         )
-        .route("/mfr/pkg/nonce", post(http::publish_nonce_handler))
-        .route("/mfr/pkg/publish", post(http::publish_handler))
+        .route(
+            "/registry/packages/nonce",
+            post(http::publish_nonce_handler),
+        )
+        .route("/registry/packages/publish", post(http::publish_handler))
         .with_state(state.clone());
 
     Router::new()
@@ -372,14 +375,17 @@ fn build_router(state: Arc<MockState>) -> Router {
         .route("/register", post(http::register_handler))
         .route("/renew", post(http::renew_handler))
         .route(
-            "/mfr/{name}/verifying_key",
+            "/registry/publishers/{name}/verifying-key",
             get(http::verifying_key_handler),
         )
-        .route("/mfr/pkg/nonce", post(http::publish_nonce_handler))
-        .route("/mfr/pkg/publish", post(http::publish_handler))
+        .route(
+            "/registry/packages/nonce",
+            post(http::publish_nonce_handler),
+        )
+        .route("/registry/packages/publish", post(http::publish_handler))
         // Admin seeding API (replaces register.sh sqlite3 INSERTs).
         .route("/admin/realms", post(http::admin_realm_handler))
-        .route("/admin/mfr", post(http::admin_mfr_handler))
+        .route("/admin/publisher", post(http::admin_mfr_handler))
         .route("/admin/packages", post(http::admin_package_handler))
         .route("/admin/state", get(http::admin_state_handler))
         .with_state(state)

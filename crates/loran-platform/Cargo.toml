@@ -12,6 +12,7 @@ default = []
 opentelemetry = ["dep:opentelemetry", "dep:tracing-opentelemetry"]
 
 [dependencies]
+argon2 = "0.5"
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

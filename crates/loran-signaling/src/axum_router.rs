@@ -282,7 +282,9 @@ async fn websocket_handler(
             }
         };
 
-        match AIdCredentialValidator::check(&credential, actor_id.realm.realm_id).await {
+        match AIdCredentialValidator::check(&credential, actor_id.realm.realm_id, "actr.signaling")
+            .await
+        {
             Ok((claims, _in_tolerance)) => {
                 let expected_actor_id = actor_id.to_string_repr();
                 if claims.actor_id != expected_actor_id {

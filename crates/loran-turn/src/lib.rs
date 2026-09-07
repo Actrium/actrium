@@ -6,10 +6,12 @@
 // TURN server implementation modules
 mod authenticator;
 pub mod error;
+mod relay_filter;
 
 // Re-export types for convenience
 pub use authenticator::Authenticator;
 pub use error::{ErrorSeverity, TurnError};
+pub use relay_filter::is_forbidden_relay_peer;
 
 use std::net::IpAddr;
 use std::str::FromStr;
@@ -26,7 +28,13 @@ pub async fn create_turn_server(
     socket: Arc<UdpSocket>,
     advertised_ip: &str,
     realm: &str,
+    relay_port_range: (u16, u16),
     auth_handler: Arc<dyn AuthHandler + Send + Sync>,
+    // When false (production default), the relay drops datagrams to loopback,
+    // private, link-local and cloud-metadata peers to stop the relay being used
+    // as an SSRF primitive. Set true only for loopback tests/fixtures that
+    // legitimately relay between local addresses.
+    allow_private_relay_peers: bool,
 ) -> error::Result<Server> {
     platform::recording::info!("Creating TURN server with advertised IP: {}", advertised_ip);
 
@@ -59,19 +67,38 @@ pub async fn create_turn_server(
         }
     };
 
-    // Create TURN server configuration with dynamic relay port range
-    // Default ephemeral range: 49152-65535 (IANA recommended)
+    let (min_port, max_port) = relay_port_range;
+    platform::recording::info!(
+        "TURN relay allocation range configured: {}-{}",
+        min_port,
+        max_port
+    );
+
+    let base_generator = RelayAddressGeneratorRanges {
+        relay_address: relay_ip,
+        min_port,
+        max_port,
+        max_retries: 10,
+        address: local_addr,
+        net: Arc::new(Net::new(None)),
+    };
+    // Wrap the range generator so every allocated relay conn drops datagrams to
+    // forbidden peers (loopback / private / link-local / cloud metadata),
+    // preventing the relay from becoming an SSRF primitive. Upstream `turn` has
+    // no peer-filtering hook. Loopback tests/fixtures opt out explicitly.
+    let relay_addr_generator: Box<dyn turn_crate::relay::RelayAddressGenerator + Send + Sync> =
+        if allow_private_relay_peers {
+            Box::new(base_generator)
+        } else {
+            Box::new(relay_filter::FilteringRelayGenerator {
+                inner: base_generator,
+            })
+        };
+
     let server_config = ServerConfig {
         conn_configs: vec![ConnConfig {
             conn: socket,
-            relay_addr_generator: Box::new(RelayAddressGeneratorRanges {
-                relay_address: relay_ip,
-                min_port: 49152,
-                max_port: 65535,
-                max_retries: 10,
-                address: local_addr,
-                net: Arc::new(Net::new(None)),
-            }),
+            relay_addr_generator,
         }],
         realm: realm.to_string(),
         auth_handler,
@@ -136,7 +163,15 @@ mod tests {
         let auth_handler: Arc<dyn AuthHandler + Send + Sync> = Arc::new(MockAuthHandler);
 
         // Test server creation
-        let server = create_turn_server(socket, "127.0.0.1", "test.realm", auth_handler).await?;
+        let server = create_turn_server(
+            socket,
+            "127.0.0.1",
+            "test.realm",
+            (49_152, 65_535),
+            auth_handler,
+            true,
+        )
+        .await?;
 
         // Test server shutdown
         shutdown_turn_server(&server).await?;
@@ -150,8 +185,15 @@ mod tests {
         let auth_handler: Arc<dyn AuthHandler + Send + Sync> = Arc::new(MockAuthHandler);
 
         // Test with invalid IP
-        let result =
-            create_turn_server(socket, "invalid.ip.address", "test.realm", auth_handler).await;
+        let result = create_turn_server(
+            socket,
+            "invalid.ip.address",
+            "test.realm",
+            (49_152, 65_535),
+            auth_handler,
+            true,
+        )
+        .await;
 
         assert!(result.is_err());
     }

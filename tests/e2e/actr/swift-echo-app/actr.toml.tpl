@@ -5,7 +5,7 @@
 # package, binary, and build sections are intentionally omitted.
 #
 # The actor type is defined in Swift code:
-#     ActrType(manufacturer: "actrium", name: "EchoApp", version: "0.1.0")
+#     ActrType(manufacturer: "e2e.actrium.test", name: "EchoApp", version: "0.1.0")
 
 [signaling]
 url = "ws://__HOST__:__HTTP_PORT__/signaling/ws"
@@ -36,4 +36,4 @@ turn_urls = ["turn:__HOST__:__ICE_PORT__"]
 
 [[acl.rules]]
 permission = "allow"
-type = "actrium:EchoService:1.0.0"
+type = "e2e.actrium.test:EchoService:1.0.0"

@@ -23,7 +23,9 @@ impl std::fmt::Display for PkgStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActrPackage {
     pub id: i64,
+    #[serde(rename = "publisher_id")]
     pub mfr_id: i64,
+    #[serde(rename = "publisher")]
     pub manufacturer: String,
     pub name: String,
     pub version: String,
@@ -32,7 +34,7 @@ pub struct ActrPackage {
     pub target: String,
     pub manifest: String,
     pub signature: String,
-    /// MFR key that authenticated this package at publish time.
+    /// Publisher key that authenticated this package at publish time.
     pub signing_key_id: Option<String>,
     /// Proto files JSON for filing/audit (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -83,7 +85,7 @@ impl ActrPackage {
         signing_key_id: &str,
         proto_files: Option<&str>,
     ) -> Result<Self, MfrError> {
-        let type_str = format!("{}:{}:{}", manufacturer, name, version);
+        let type_str = format!("{}/{}@{}", manufacturer, name, version);
         let now = Utc::now().timestamp();
         let id = sqlx::query(
             "INSERT INTO mfr_package (mfr_id, manufacturer, name, version, type_str, target, manifest, signature, signing_key_id, proto_files, status, published_at)

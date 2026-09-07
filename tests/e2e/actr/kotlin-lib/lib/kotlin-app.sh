@@ -134,42 +134,7 @@ EOF
 }
 
 provision_mfr_keychain() {
-    section "🏷️  Provisioning MFR keychain via Admin API"
-    local apply_file="$RUN_DIR/mfr-apply.json"
-    local approve_file="$RUN_DIR/mfr-approve.json"
-    local now
-    now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-
-    curl -fsS -X POST \
-        "http://127.0.0.1:${HTTP_PORT}/admin/api/mfr/apply" \
-        -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-        -H 'Content-Type: application/json' \
-        -d "{\"github_login\":\"${MANUFACTURER}\",\"contact\":\"e2e@local.actr\"}" \
-        >"$apply_file"
-
-    local mfr_id
-    mfr_id="$(json_field "$apply_file" '.mfr_id')"
-
-    curl -fsS -X POST \
-        "http://127.0.0.1:${HTTP_PORT}/admin/api/mfr/admin/${mfr_id}/approve" \
-        -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-        -H 'Content-Type: application/json' \
-        -d '{}' \
-        >"$approve_file"
-
-    mkdir -p "$(dirname "$PROVISIONED_KEYCHAIN")"
-    jq -n \
-        --arg private_key "$(json_field "$approve_file" '.private_key')" \
-        --arg public_key "$(json_field "$approve_file" '.certificate.mfr_pubkey')" \
-        --arg created_at "$now" \
-        '{created_at:$created_at,note:"E2E manufacturer signing key issued by local actrix admin API",private_key:$private_key,public_key:$public_key}' \
-        >"$PROVISIONED_KEYCHAIN"
-    chmod 600 "$PROVISIONED_KEYCHAIN" 2>/dev/null || true
-
-    jq -n --arg public_key "$(json_field "$approve_file" '.certificate.mfr_pubkey')" \
-        '{public_key:$public_key}' >"$PROVISIONED_PUBLIC_KEY"
-
-    success "Generated manufacturer keychain for ${MANUFACTURER}"
+    provision_e2e_publisher
 }
 
 # Build + verify + publish a Rust service .actr package from an already-scaffolded

@@ -3,14 +3,14 @@
 //! Manages the lifecycle of various auxiliary services
 //! # Service Management Abstraction
 //!
-//! Provides a generic service management abstraction for fine-grained control over different service types (STUN, TURN, Signaling, KS, etc.)
+//! Provides a generic service management abstraction for managing Signer, AIS, Signaling, STUN/TURN, and other services.
 //!
 //! ## Core Concepts
 //!
-//! - `HttpRouterService`: Core trait for HTTP route services, provides axum router
-//! - `IceService`: Core trait for ICE services, standalone UDP server
-//! - `ServiceInfo`: Basic service information
-//! - `ServiceManager`: Service manager, responsible for managing the lifecycle of multiple services
+//! - `HttpRouterService`: core trait for HTTP routing services, provides an axum router
+//! - `IceService`: core trait for ICE services, standalone UDP server
+//! - `ServiceInfo`: basic service information
+//! - `ServiceManager`: service manager, responsible for managing the lifecycle of multiple services
 
 pub mod container;
 pub mod grpc;
@@ -27,14 +27,14 @@ use std::fmt::Debug;
 use url::Url;
 
 // Re-export service implementations
-pub use http::{AisService, MfrService, SignalingService};
+pub use http::{AisService, PublisherRegistryService, SignalingService};
 pub use ice::{StunService, TurnService};
 
 // Re-export core components
 pub use container::ServiceContainer;
 pub use manager::ServiceManager;
 
-/// Core trait for HTTP route services - provides axum router
+/// Core trait for HTTP routing services - provides a router for axum
 #[async_trait]
 pub trait HttpRouterService: Send + Sync + Debug {
     /// Get service information
@@ -43,10 +43,10 @@ pub trait HttpRouterService: Send + Sync + Debug {
     /// Get mutable service information
     fn info_mut(&mut self) -> &mut ServiceInfo;
 
-    /// Build axum router
+    /// Build the axum router
     async fn build_router(&mut self) -> Result<Router>;
 
-    /// Service start callback (called after router is built and started)
+    /// Service start callback (called after the router is built and started)
     async fn on_start(&mut self, base_url: Url) -> Result<()> {
         self.info_mut().set_running(base_url);
         Ok(())
@@ -59,7 +59,7 @@ pub trait HttpRouterService: Send + Sync + Debug {
         Ok(())
     }
 
-    /// Get route prefix (e.g. "/admin", "/authority", etc.)
+    /// Get the route prefix (e.g. "/admin", "/authority", etc.)
     fn route_prefix(&self) -> &str;
 }
 
@@ -72,14 +72,14 @@ pub trait IceService: Send + Sync + Debug {
     /// Get mutable service information
     fn info_mut(&mut self) -> &mut ServiceInfo;
 
-    /// Start ICE service
+    /// Start the ICE service
     async fn start(
         &mut self,
         shutdown_rx: tokio::sync::broadcast::Receiver<()>,
         oneshot_tx: tokio::sync::oneshot::Sender<ServiceInfo>,
     ) -> Result<()>;
 
-    /// Stop ICE service
+    /// Stop the ICE service
     async fn stop(&mut self) -> Result<()> {
         platform::recording::info!("ICE service '{}' stopped", self.info().name);
         self.info_mut().status = ServiceState::Unknown;

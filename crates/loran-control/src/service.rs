@@ -45,6 +45,11 @@ type ReloadFuture = Pin<Box<dyn Future<Output = AdminResult<bool>> + Send>>;
 type ReloadHandler = Arc<dyn Fn() -> ReloadFuture + Send + Sync>;
 type GrpcResult<T> = std::result::Result<T, Status>;
 
+/// Placeholder written in place of secret values returned to the Admin UI.
+/// A save request that echoes this placeholder back is treated as "unchanged"
+/// and the original on-disk value is preserved.
+const SECRET_MASK: &str = "***";
+
 #[derive(Hash, Eq, PartialEq, Clone)]
 struct ConfigKey {
     config_type: i32,
@@ -475,22 +480,64 @@ impl AdminApiService {
         let content = tokio::fs::read_to_string(path)
             .await
             .map_err(|e| Status::internal(format!("Failed to read config file: {e}")))?;
+        // Mask secret fields so the raw config.toml never leaks credentials to
+        // the Admin UI. A subsequent save that echoes the mask back is treated
+        // as "unchanged" (see save_config_file_direct).
         Ok(ConfigFileContent {
-            content,
+            content: mask_secrets_toml(&content),
             path: path_display,
         })
     }
 
     /// Write config file to disk (with TOML validation).
-    pub async fn save_config_file_direct(&self, content: &str) -> GrpcResult<()> {
+    ///
+    /// `superv_managed` reflects whether the realm is supervisor-managed (Admin
+    /// UI read-only for the control plane). When true, any change to the
+    /// `control.*` section is rejected so a config write + reload cannot
+    /// re-enable the gRPC API and bypass the realm-write lock.
+    pub async fn save_config_file_direct(
+        &self,
+        content: &str,
+        superv_managed: bool,
+    ) -> GrpcResult<()> {
         let path = self
             .config_path
             .as_ref()
             .ok_or_else(|| Status::failed_precondition("Config path not available"))?;
 
+        // Read the current on-disk content so masked secret placeholders can be
+        // restored to their real values. The Admin UI never receives real
+        // secrets, so an untouched secret field arrives back as the mask.
+        // A missing file is fine (first save: nothing to restore), but any
+        // other read failure must abort the save -- proceeding with an empty
+        // original would make restore_masked_secrets a no-op and persist the
+        // `***` mask over the real secrets, destroying them.
+        let original = match tokio::fs::read_to_string(path).await {
+            Ok(content) => content,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => {
+                return Err(Status::internal(format!(
+                    "Failed to read existing config file for secret restoration: {e}"
+                )));
+            }
+        };
+
+        // Restore masked secrets left untouched by the caller before parsing or
+        // writing, so the mask never lands in the real config file.
+        let content = restore_masked_secrets(content, &original);
+
         // Parse as TOML to validate syntax
-        let new_config = ActrixConfig::from_toml(content)
+        let new_config = ActrixConfig::from_toml(&content)
             .map_err(|e| Status::invalid_argument(format!("Invalid TOML: {e}")))?;
+
+        // Supervisor-managed: the control plane is off-limits to the local Admin
+        // UI. Reject any change to control.* (compared after secret restoration
+        // so an untouched shared_secret does not count as a change).
+        if superv_managed && control_section_changed(&new_config, &original) {
+            return Err(Status::permission_denied(
+                "control.* section is read-only while the realm is supervisor-managed",
+            ));
+        }
 
         // Validate config semantics
         if let Err(errors) = new_config.validate() {
@@ -1022,24 +1069,6 @@ impl AdminApiService {
         }
     }
 
-    /// Hard-delete a realm for local Admin UI standalone mode.
-    pub async fn delete_realm_hard_direct(&self, realm_id: u32) -> GrpcResult<DeleteRealmResponse> {
-        match Realm::delete(realm_id).await {
-            Ok(affected) if affected > 0 => Ok(DeleteRealmResponse {
-                success: true,
-                error_message: None,
-            }),
-            Ok(_) => Ok(DeleteRealmResponse {
-                success: false,
-                error_message: Some("Realm not found".to_string()),
-            }),
-            Err(err) => Ok(DeleteRealmResponse {
-                success: false,
-                error_message: Some(format!("Failed to delete realm: {err}")),
-            }),
-        }
-    }
-
     /// Rotate realm secret and return plaintext once.
     pub async fn rotate_realm_secret_direct(
         &self,
@@ -1067,10 +1096,16 @@ impl AdminApiService {
         let store = self.config_store.read().await;
 
         if let Some(value) = store.get(&key) {
+            // Never expose secret values through the config read path.
+            let config_value = if is_secret_config_key(&key.key) {
+                SECRET_MASK.to_string()
+            } else {
+                value.clone()
+            };
             Ok(GetConfigResponse {
                 success: true,
                 error_message: None,
-                config_value: Some(value.clone()),
+                config_value: Some(config_value),
             })
         } else {
             Ok(GetConfigResponse {
@@ -1180,7 +1215,7 @@ pub struct KeyInfo {
     pub is_expired: bool,
 }
 
-/// Realm secret rotation result (plaintext secret is returned only once).
+/// Realm secret rotation result (the plaintext secret is returned only once).
 #[derive(Debug, Clone, Serialize)]
 pub struct RealmSecretRotationResult {
     pub realm_id: u32,
@@ -1229,6 +1264,166 @@ fn build_secret_previous(hash: Option<String>, valid_until: Option<u64>) -> Opti
             Some((hash, valid_until))
         }
         _ => None,
+    }
+}
+
+// ── Secret masking helpers (ADM-02) ─────────────────────────────
+
+/// Extract the section name from a TOML section-header line (`[a.b]` or
+/// `[[a.b]]`), returning the dotted path inside the brackets.
+fn toml_section_of(trimmed_line: &str) -> String {
+    let start = trimmed_line.find('[').map(|i| i + 1).unwrap_or(0);
+    let end = trimmed_line.rfind(']').unwrap_or(trimmed_line.len());
+    if start <= end {
+        trimmed_line[start..end]
+            .trim_matches(|c| c == '[' || c == ']')
+            .trim()
+            .to_string()
+    } else {
+        String::new()
+    }
+}
+
+/// Decide whether a `key = value` line within `section` holds a secret that
+/// must be masked in the raw config.toml.
+fn is_secret_field(section: &str, key: &str) -> bool {
+    match key {
+        "actrix_shared_key" | "turn_secret" | "renewal_token_secret" => true,
+        "shared_secret" | "password_hash" => section.contains("control"),
+        "kek" => section.contains("signer"),
+        other => other.starts_with("kek_") && section.contains("signer"),
+    }
+}
+
+/// Decide whether a config key (possibly a dotted path) addresses a secret
+/// value in the get_config read path.
+fn is_secret_config_key(key: &str) -> bool {
+    let last = key.rsplit(['.', '/']).next().unwrap_or(key);
+    matches!(
+        last,
+        "actrix_shared_key"
+            | "shared_secret"
+            | "password_hash"
+            | "turn_secret"
+            | "renewal_token_secret"
+            | "kek"
+    ) || last.starts_with("kek_")
+}
+
+/// Replace the value of every secret field in a raw config.toml with the mask
+/// placeholder, preserving the key structure and everything else verbatim.
+fn mask_secrets_toml(content: &str) -> String {
+    let mut out = String::with_capacity(content.len() + 16);
+    let mut section = String::new();
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('[') {
+            section = toml_section_of(trimmed);
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if !trimmed.starts_with('#') {
+            if let Some(eq) = line.find('=') {
+                let key = line[..eq].trim();
+                if is_secret_field(&section, key) {
+                    out.push_str(&line[..=eq]);
+                    out.push_str(" \"");
+                    out.push_str(SECRET_MASK);
+                    out.push('"');
+                    out.push('\n');
+                    continue;
+                }
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if !content.ends_with('\n') {
+        out.pop();
+    }
+    out
+}
+
+/// Collect the raw right-hand side of every secret field, keyed by
+/// (section, key), from a raw config.toml.
+fn collect_secret_values(content: &str) -> HashMap<(String, String), String> {
+    let mut map = HashMap::new();
+    let mut section = String::new();
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('[') {
+            section = toml_section_of(trimmed);
+            continue;
+        }
+        if trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some(eq) = line.find('=') {
+            let key = line[..eq].trim().to_string();
+            if is_secret_field(&section, &key) {
+                map.insert((section.clone(), key), line[eq + 1..].to_string());
+            }
+        }
+    }
+    map
+}
+
+/// Restore secret fields left as the mask placeholder in `new_content` to their
+/// original values taken from `original_content`. Fields the caller actually
+/// changed (value differs from the mask) are left untouched.
+fn restore_masked_secrets(new_content: &str, original_content: &str) -> String {
+    let originals = collect_secret_values(original_content);
+    let mut out = String::with_capacity(new_content.len());
+    let mut section = String::new();
+    for line in new_content.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('[') {
+            section = toml_section_of(trimmed);
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if !trimmed.starts_with('#') {
+            if let Some(eq) = line.find('=') {
+                let key = line[..eq].trim();
+                if is_secret_field(&section, key) {
+                    let value = line[eq + 1..].trim().trim_matches('"');
+                    if value == SECRET_MASK {
+                        if let Some(orig_rhs) = originals.get(&(section.clone(), key.to_string())) {
+                            out.push_str(&line[..=eq]);
+                            out.push_str(orig_rhs);
+                            out.push('\n');
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if !new_content.ends_with('\n') {
+        out.pop();
+    }
+    out
+}
+
+/// Compare the `control.*` section of a parsed config against the original
+/// on-disk content. Returns true if it changed (or cannot be verified).
+fn control_section_changed(new_config: &ActrixConfig, original_content: &str) -> bool {
+    let old_config = match ActrixConfig::from_toml(original_content) {
+        Ok(cfg) => cfg,
+        // Cannot parse the previous file: fail safe by treating it as a change.
+        Err(_) => return true,
+    };
+    match (
+        serde_json::to_value(&new_config.control),
+        serde_json::to_value(&old_config.control),
+    ) {
+        (Ok(new_control), Ok(old_control)) => new_control != old_control,
+        // Serialization failure: fail safe.
+        _ => true,
     }
 }
 

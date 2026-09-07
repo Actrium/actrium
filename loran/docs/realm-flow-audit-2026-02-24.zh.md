@@ -138,3 +138,5 @@
 2. 依赖意图检查（`ServiceSpec.dependencies`）尚未接入判定链。  
 3. Admin UI 的跨 realm ACL 可视化编辑与审计展示待补。  
 4. 需进一步明确 gRPC 管控面下 realm secret 发放/轮转的统一接口形态（当前 Admin UI REST 已覆盖）。
+> 历史审计快照：用于解释旧问题，不代表当前 Realm v1 实现。
+> 当前契约见 `REALM_V1_ARCHITECTURE.zh.md` 与 `THREAT_MODEL_REALM_V1.zh.md`。

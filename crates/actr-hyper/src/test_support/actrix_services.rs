@@ -23,7 +23,7 @@ use webrtc::peer_connection::{
 };
 
 const TURN_REALM: &str = "actr.test";
-const TURN_SHARED_TEST_KEY: &str = "actrix-rtc-integration-test-key";
+const TURN_SHARED_TEST_KEY: &str = "actrix-rtc-integration-test-secret";
 const CREDENTIAL_LIFETIME: Duration = Duration::from_secs(10 * 60);
 const AID_KEY_ID: u32 = 7;
 const AID_SIGNING_KEY_BYTES: [u8; 32] = [0x5a; 32];
@@ -166,7 +166,9 @@ impl ActrixTestServices {
             turn_socket,
             &IpAddr::V4(Ipv4Addr::LOCALHOST).to_string(),
             TURN_REALM,
+            (49_152, 65_535),
             authenticator,
+            true,
         )
         .await
         .map_err(|error| anyhow::anyhow!("Actrix TURN service: {error}"))?;
@@ -208,7 +210,12 @@ impl ActrixTestServices {
             .unwrap_or_default()
             .saturating_add(CREDENTIAL_LIFETIME)
             .as_secs();
-        let username = format!("{expires_at}:{actor_id}");
+        // Username must match the scoped format enforced by `turn::Authenticator`:
+        // `{expires_at}:realm={realm_id}:provider=actrix-official:audience=actr.turn:actor={actr_id}`
+        let username = format!(
+            "{expires_at}:realm={}:provider=actrix-official:audience=actr.turn:actor={actor_id}",
+            actor_id.realm.realm_id
+        );
         let mut mac = HmacSha1::new_from_slice(TURN_SHARED_TEST_KEY.as_bytes())
             .expect("HMAC accepts an arbitrary key length");
         mac.update(username.as_bytes());
@@ -216,6 +223,10 @@ impl ActrixTestServices {
             username,
             password: BASE64_STANDARD.encode(mac.finalize().into_bytes()),
             expires_at,
+            protocol_version: 1,
+            realm_id: actor_id.realm.realm_id,
+            provider: "actrix-official".to_string(),
+            audience: "actr.turn".to_string(),
         }
     }
 
@@ -232,6 +243,10 @@ impl ActrixTestServices {
             realm_id: actor_id.realm.realm_id,
             actor_id: actor_id.to_string_repr(),
             expires_at,
+            protocol_version: 1,
+            issuer: format!("actr:realm:{}:authority", actor_id.realm.realm_id),
+            provider: "actrix-official".to_string(),
+            audience: "actr.signaling".to_string(),
         }
         .encode_to_vec();
         let signature = aid_signing_key().sign(&claims).to_bytes();

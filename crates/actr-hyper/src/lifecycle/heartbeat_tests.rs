@@ -45,6 +45,10 @@ fn test_credential_for_actor(actor_id: &ActrId, key_id: u32, expires_at: u64) ->
         realm_id: actor_id.realm.realm_id,
         actor_id: actor_id.to_string_repr(),
         expires_at,
+        protocol_version: 1,
+        issuer: format!("actr:realm:{}:authority", actor_id.realm.realm_id),
+        provider: "actrix-official".to_string(),
+        audience: "actr.signaling".to_string(),
     };
     AIdCredential {
         key_id,
@@ -636,6 +640,10 @@ async fn credential_expiry_does_not_re_register_or_update_webrtc_local_id() {
                 actr_id: renewed_id.clone(),
                 credential: test_credential(),
                 turn_credential: TurnCredential {
+                    protocol_version: 1,
+                    realm_id: 1,
+                    provider: "actrix-official".to_string(),
+                    audience: "actr.turn".to_string(),
                     username: "1000:actor".to_string(),
                     password: "password".to_string(),
                     expires_at: 1000,
@@ -752,6 +760,10 @@ async fn credential_warning_triggers_credential_manager_renewal() {
                 actr_id: actor_id.clone(),
                 credential: test_credential_for_actor(&actor_id, 9, NEW_EXPIRY as u64),
                 turn_credential: TurnCredential {
+                    protocol_version: 1,
+                    realm_id: 1,
+                    provider: "actrix-official".to_string(),
+                    audience: "actr.turn".to_string(),
                     username: "4000001000:actor".to_string(),
                     password: "new-password".to_string(),
                     expires_at: NEW_EXPIRY as u64,
@@ -788,6 +800,10 @@ async fn credential_warning_triggers_credential_manager_renewal() {
             nanos: 0,
         },
         turn_credential: TurnCredential {
+            protocol_version: 1,
+            realm_id: 1,
+            provider: "actrix-official".to_string(),
+            audience: "actr.turn".to_string(),
             username: "4000000000:actor".to_string(),
             password: "old-password".to_string(),
             expires_at: OLD_EXPIRY as u64,
@@ -975,6 +991,10 @@ async fn re_registration_sends_realm_secret_to_ais() {
                 actr_id: new_actor_id.clone(),
                 credential: test_realm_secret_credential(2),
                 turn_credential: TurnCredential {
+                    protocol_version: 1,
+                    realm_id: 1,
+                    provider: "actrix-official".to_string(),
+                    audience: "actr.turn".to_string(),
                     username: "turn-user".to_string(),
                     password: "turn-password".to_string(),
                     expires_at: 123,
@@ -1120,6 +1140,10 @@ async fn connected_heartbeat_403_reports_terminal_realm_denied() {
             nanos: 0,
         },
         turn_credential: TurnCredential {
+            protocol_version: 1,
+            realm_id: 1,
+            provider: "actrix-official".to_string(),
+            audience: "actr.turn".to_string(),
             username: "u".to_string(),
             password: "p".to_string(),
             expires_at: 4_000_000_000,

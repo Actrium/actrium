@@ -1,6 +1,7 @@
-//! Signer gRPC router builder
+//! Signer gRPC router construction.
 //!
-//! Mounts the Signer gRPC service onto the main HTTP/HTTPS listener port.
+//! Builds the Signer gRPC service router served on its own dedicated listener
+//! (SGN-02), separate from the shared primary HTTP/HTTPS listener.
 
 use anyhow::Result;
 use axum::Router;
@@ -10,7 +11,7 @@ use platform::{
 use signer::{KeyEncryptor, KeyStorage, create_grpc_service};
 use std::sync::Arc;
 
-/// Build Signer gRPC router mounted on the main HTTP listener.
+/// Build the Signer gRPC router served on the dedicated Signer listener.
 ///
 /// Primary route for tonic clients:
 /// `/signer.v1.Signer/<Method>`
@@ -20,6 +21,7 @@ use std::sync::Arc;
 pub async fn build_signer_grpc_router(
     config: &ActrixConfig,
     counters: Option<Arc<ServiceCounters>>,
+    cancel: tokio_util::sync::CancellationToken,
 ) -> Result<Router> {
     let signer_service_config = config
         .services
@@ -27,13 +29,13 @@ pub async fn build_signer_grpc_router(
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("Signer service configuration not found"))?;
 
-    // Create nonce storage instance (for replay attack prevention)
-    // Uses sqlite_path as directory path, automatically appends nonce.db internally
+    // Create the nonce storage instance (used for replay protection).
+    // `sqlite_path` is the directory; `nonce.db` is appended internally.
     let nonce_storage = SqliteNonceStorage::new_async(&config.sqlite_path)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create nonce storage: {e}"))?;
 
-    // Create key encryptor
+    // Create the key encryptor.
     let encryptor = match signer_service_config.get_kek_source() {
         Some(kek_source) => {
             platform::recording::info!("KEK configured, enabling private key encryption");
@@ -48,7 +50,7 @@ pub async fn build_signer_grpc_router(
         }
     };
 
-    // Create Signer storage
+    // Create the Signer storage.
     let storage = KeyStorage::from_config(
         &signer_service_config.storage,
         encryptor,
@@ -57,7 +59,22 @@ pub async fn build_signer_grpc_router(
     .await
     .map_err(|e| anyhow::anyhow!("Failed to create Signer storage: {e}"))?;
 
-    // Create gRPC service
+    // SGN-04/07: drive background pruning of expired signer keys and nonce
+    // rows on the gRPC path (the HTTP path has its own lazy, per-request
+    // trigger; the gRPC path had none, so both tables grew unbounded). Clone
+    // the stores before they are moved into the gRPC service; both loops exit
+    // when `cancel` fires on reload/shutdown.
+    tokio::spawn(signer::run_key_cleanup(
+        storage.clone(),
+        signer_service_config.tolerance_seconds,
+        cancel.clone().cancelled_owned(),
+    ));
+    tokio::spawn(platform::storage::nonce::run_nonce_cleanup(
+        Arc::new(nonce_storage.clone()),
+        cancel.cancelled_owned(),
+    ));
+
+    // Create the gRPC service (this moves the stores).
     let grpc_service = create_grpc_service(
         storage,
         nonce_storage,
@@ -65,7 +82,7 @@ pub async fn build_signer_grpc_router(
         signer_service_config.tolerance_seconds,
     );
 
-    platform::recording::info!("Signer gRPC service mounted on primary HTTP listener");
+    platform::recording::info!("Signer gRPC service router built for the dedicated listener");
 
     let mut router = Router::new().route_service("/signer.v1.Signer/{*grpc_method}", grpc_service);
 

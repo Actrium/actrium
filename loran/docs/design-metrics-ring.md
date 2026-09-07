@@ -1,11 +1,14 @@
 # Metrics Ring Buffer — Design
 
+Status: implemented for the single-node v1 profile. This document explains the
+design; the source of truth is `platform/src/monitoring/metrics_store.rs`.
+
 Single-node, in-memory metrics store for lightweight health diagnostics.
 Not a replacement for log-based observability; purpose is fast local dashboards.
 
 ## 1. Data Requirements (from UI)
 
-Each **service** (Signaling / STUN / TURN / AIS / KS) needs four time-series:
+Each **service** (Signaling / STUN / TURN / AIS / Signer) needs four time-series:
 
 | Metric           | Type    | Source                            | Semantics                  |
 |------------------|---------|-----------------------------------|----------------------------|
@@ -100,7 +103,7 @@ pub struct ServiceCounters {
 }
 ```
 
-Signaling, AIS, KS already have request handlers — instrument there.
+Signaling, AIS, Signer already have request handlers — instrument there.
 STUN/TURN have packet-level processing — increment on allocate/bind.
 
 The 1-minute sampler reads these counters, computes deltas, resets the
@@ -174,7 +177,7 @@ actrixd::service::http::admin_api   (admin-ui feature only)
 
 ## 8. Implementation Order
 
-1. **`ServiceCounters`** — add to `ServiceInfo`, instrument Signaling/AIS/KS request handlers and STUN/TURN packet paths.
+1. **`ServiceCounters`** — add to `ServiceInfo`, instrument Signaling/AIS/Signer request handlers and STUN/TURN packet paths.
 2. **`MetricsStore`** — ring buffer + sampler task in `platform::monitoring`.
 3. **API endpoint** — wire into admin_api.
 4. **Frontend** — replace `DEMO_STATS` / `genSeries` with real API calls.

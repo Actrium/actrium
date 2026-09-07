@@ -19,7 +19,7 @@ pub struct SignalingConfig {
 }
 
 /// Signaling server configuration
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SignalingServerConfig {
     /// WebSocket path
     pub ws_path: String,
@@ -37,7 +37,7 @@ pub struct SignalingServerConfig {
 ///
 /// Bound the number of WebSocket messages and bytes the server queues for a single client, and apply enqueue/write deadlines for slow-consuming/non-reading
 /// clients; on timeout the connection is closed and removed (healthy clients are unaffected).
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct EgressQueueConfig {
     /// Max number of data (Binary) messages queued per client (message-count bound)
     #[serde(default = "default_egress_max_messages")]
@@ -120,7 +120,7 @@ impl Default for EgressQueueConfig {
 }
 
 /// Rate limiting configuration
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 pub struct RateLimitConfig {
     /// Connection rate limiting configuration
     #[serde(default)]
@@ -132,7 +132,7 @@ pub struct RateLimitConfig {
 }
 
 /// Connection rate limiting configuration
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ConnectionRateLimit {
     /// Whether to enable connection rate limiting
     #[serde(default = "default_true")]
@@ -152,7 +152,7 @@ pub struct ConnectionRateLimit {
 }
 
 /// Message rate limiting configuration
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct MessageRateLimit {
     /// Whether to enable message rate limiting
     #[serde(default = "default_true")]
@@ -275,20 +275,17 @@ impl SignalingConfig {
 
         // Fallback: check if local Signer service is enabled
         if global_config.is_signer_enabled() && global_config.services.signer.is_some() {
-            // Auto-generate client configuration pointing to local Signer
-            // Signer gRPC reuses the instance's main HTTP/HTTPS port
-            let http_cfg = global_config.bind.http.as_ref();
-            let port = http_cfg.map(|h| h.port).unwrap_or(8080);
-            let use_tls = http_cfg.is_some_and(|h| h.is_tls());
-            let protocol = if use_tls { "https" } else { "http" };
+            // SGN-02: the Signer gRPC surface runs on its own dedicated listener,
+            // not the shared HTTP port. Dial the resolved Signer endpoint.
+            let use_tls = global_config.signer_listener_tls();
             let tls_domain = if use_tls {
-                http_cfg.map(|h| h.domain_name.clone())
+                Some(global_config.signer_tls_domain())
             } else {
                 None
             };
 
             return Some(SignerClientConfig {
-                endpoint: format!("{protocol}://127.0.0.1:{port}"),
+                endpoint: global_config.signer_client_endpoint(),
                 timeout_seconds: 30,
                 enable_tls: use_tls,
                 tls_domain,

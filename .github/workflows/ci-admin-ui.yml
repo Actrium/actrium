@@ -47,6 +47,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Audit dependencies
+        run: pnpm run audit:dependencies
+
       # `build` runs `tsc -b && vite build`, i.e. TypeScript type-check + bundle.
       - name: Type-check and build
         run: pnpm run build

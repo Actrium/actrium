@@ -2,7 +2,7 @@
 //!
 //! Subcommands:
 //!   - `discover`    — find services available on the network
-//!   - `publish`     — push a signed `.actr` package to the MFR registry
+//!   - `publish`     — push a signed `.actr` package to the Publisher Registry
 //!   - `fingerprint` — compute / verify / lock service semantic fingerprints
 
 use std::path::PathBuf;
@@ -27,7 +27,7 @@ pub struct RegistryArgs {
 pub enum RegistryCommand {
     /// Discover available Actor services on the network
     Discover(DiscoveryCommand),
-    /// Publish a signed .actr package to the MFR registry
+    /// Publish a signed .actr package to the Publisher Registry
     Publish(RegistryPublishArgs),
     /// Compute / verify / lock service semantic fingerprints
     Fingerprint(FingerprintCommand),
@@ -97,18 +97,18 @@ pub struct RegistryPublishArgs {
     #[arg(long, short = 'p', value_name = "FILE")]
     pub package: PathBuf,
 
-    /// Path to MFR keychain JSON file (used to verify publisher identity)
+    /// Path to Publisher keychain JSON file
     #[arg(long, short = 'k', value_name = "FILE")]
     pub keychain: PathBuf,
 
-    /// MFR registry endpoint URL (e.g. http://localhost:8081)
+    /// Publisher Registry endpoint URL (e.g. http://localhost:8081)
     #[arg(long, short = 'e', value_name = "URL")]
     pub endpoint: String,
 }
 
 #[derive(Serialize)]
 struct SignablePublishBody<'a> {
-    manufacturer: &'a str,
+    publisher: &'a str,
     name: &'a str,
     version: &'a str,
     target: &'a str,
@@ -121,7 +121,7 @@ struct SignablePublishBody<'a> {
 
 #[derive(Serialize)]
 struct FinalPublishBody<'a> {
-    manufacturer: &'a str,
+    publisher: &'a str,
     name: &'a str,
     version: &'a str,
     target: &'a str,
@@ -179,7 +179,7 @@ async fn execute_publish(args: &RegistryPublishArgs) -> Result<()> {
         Some(ref manifest_key_id) => {
             anyhow::bail!(
                 "Key mismatch: package was built with '{}' but keychain key is '{}'. \
-                 Rebuild with the correct MFR key, or use the matching keychain.",
+                 Rebuild with the correct Publisher key, or use the matching keychain.",
                 manifest_key_id,
                 kc_key_id
             );
@@ -195,7 +195,7 @@ async fn execute_publish(args: &RegistryPublishArgs) -> Result<()> {
     let sig_b64 = base64::engine::general_purpose::STANDARD.encode(&sig_raw);
 
     println!("📦 Publishing package: {}", manifest.actr_type_str());
-    println!("   manufacturer: {}", manifest.manufacturer);
+    println!("   publisher:    {}", manifest.manufacturer);
     println!("   name:         {}", manifest.name);
     println!("   version:      {}", manifest.version);
     println!("   target:       {}", manifest.binary.target);
@@ -227,13 +227,13 @@ async fn execute_publish(args: &RegistryPublishArgs) -> Result<()> {
         .to_string();
 
     let base_url = endpoint.trim_end_matches('/');
-    let nonce_url = format!("{}/mfr/pkg/nonce", base_url);
+    let nonce_url = format!("{}/registry/packages/nonce", base_url);
     let client = reqwest::Client::new();
 
     println!("🔑 Requesting publish nonce...");
     let nonce_resp = client
         .post(&nonce_url)
-        .json(&serde_json::json!({ "manufacturer": manifest.manufacturer }))
+        .json(&serde_json::json!({ "publisher": manifest.manufacturer }))
         .send()
         .await
         .with_context(|| format!("Failed to request nonce from: {}", nonce_url))?;
@@ -258,7 +258,7 @@ async fn execute_publish(args: &RegistryPublishArgs) -> Result<()> {
         .with_context(|| "Invalid nonce base64 from server")?;
 
     let signable_body = SignablePublishBody {
-        manufacturer: &manifest.manufacturer,
+        publisher: &manifest.manufacturer,
         name: &manifest.name,
         version: &manifest.version,
         target: &manifest.binary.target,
@@ -277,7 +277,7 @@ async fn execute_publish(args: &RegistryPublishArgs) -> Result<()> {
         let body_hash = hex::encode(Sha256::digest(&signable_body_bytes));
         let nonce_hex = hex::encode(&nonce_bytes);
         let payload = format!(
-            "ACTR-PUBLISH-V1\nmanufacturer={}\nmethod=POST\npath=/mfr/pkg/publish\nnonce={}\nbody_sha256={}",
+            "ACTR-PUBLISH-V2\npublisher={}\nmethod=POST\npath=/registry/packages/publish\nnonce={}\nbody_sha256={}",
             manifest.manufacturer, nonce_hex, body_hash
         );
         let sig = kc_signing_key.sign(payload.as_bytes());
@@ -285,11 +285,11 @@ async fn execute_publish(args: &RegistryPublishArgs) -> Result<()> {
     };
     println!("✅ Nonce signed (challenge-response)");
 
-    let publish_url = format!("{}/mfr/pkg/publish", base_url);
+    let publish_url = format!("{}/registry/packages/publish", base_url);
     println!("📡 Publishing to: {}", publish_url);
 
     let publish_body_bytes = serde_json::to_vec(&FinalPublishBody {
-        manufacturer: &manifest.manufacturer,
+        publisher: &manifest.manufacturer,
         name: &manifest.name,
         version: &manifest.version,
         target: &manifest.binary.target,
@@ -307,7 +307,7 @@ async fn execute_publish(args: &RegistryPublishArgs) -> Result<()> {
         .body(publish_body_bytes)
         .send()
         .await
-        .with_context(|| format!("Failed to connect to MFR endpoint: {}", publish_url))?;
+        .with_context(|| format!("Failed to connect to Publisher Registry: {}", publish_url))?;
 
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
@@ -315,7 +315,11 @@ async fn execute_publish(args: &RegistryPublishArgs) -> Result<()> {
     if !status.is_success() {
         eprintln!("❌ Publish failed (HTTP {})", status);
         eprintln!("   Response: {}", body);
-        anyhow::bail!("MFR publish failed with status {}: {}", status, body);
+        anyhow::bail!(
+            "Publisher Registry publish failed with status {}: {}",
+            status,
+            body
+        );
     }
 
     if let Ok(result) = serde_json::from_str::<serde_json::Value>(&body) {

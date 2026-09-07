@@ -23,7 +23,7 @@ source "$SCRIPT_DIR/../kotlin-lib/lib/kotlin-app.sh"
 HTTP_PORT=8081
 ICE_PORT=3478
 ADMIN_PASSWORD="e2e-test-password"
-MANUFACTURER="actrium"
+MANUFACTURER="e2e.actrium.test"
 ACTR_CLI_MANIFEST="$REPO_ROOT/crates/actr-cli/Cargo.toml"
 ACTRIX_CONFIG_TEMPLATE="$REPO_ROOT/tests/e2e/actr/package-runtime-echo/config/actrix.toml"
 E2E_TARGET_ROOT="$REPO_ROOT/target/e2e-cache/kotlin-echo-app"

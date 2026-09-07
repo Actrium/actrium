@@ -8,7 +8,7 @@ use base64::Engine as _;
 use nonce_auth::{CredentialBuilder, storage::MemoryStorage};
 use signer::{
     GrpcClient, GrpcClientConfig, KeyEncryptor, KeyStorage, SignerError, SignerServiceConfig,
-    create_grpc_service,
+    create_grpc_service, types::sign_request_payload,
 };
 use tempfile::TempDir;
 use tokio::{
@@ -166,7 +166,7 @@ async fn test_grpc_health_and_key_lifecycle() {
         .sign(SignRequest {
             key_id: generated.key_id,
             message: message.to_vec(),
-            credential: sign_credential(psk, &format!("sign:{}", generated.key_id)),
+            credential: sign_credential(psk, &sign_request_payload(generated.key_id, message)),
         })
         .await
         .expect("sign message")
@@ -214,6 +214,35 @@ async fn test_grpc_generate_rejects_invalid_signature() {
 }
 
 #[tokio::test]
+async fn test_grpc_sign_authentication_binds_exact_message() {
+    let psk = "test-ks-grpc-psk";
+    let server = start_grpc_server(psk, 3600, 3600).await;
+    let mut client = connect_client(&server.endpoint).await;
+    let generated = client
+        .generate_signing_key(GenerateSigningKeyRequest {
+            credential: sign_credential(psk, "generate_signing_key"),
+        })
+        .await
+        .expect("generate signing key")
+        .into_inner();
+
+    let approved_message = b"approved";
+    let error = client
+        .sign(SignRequest {
+            key_id: generated.key_id,
+            message: b"tampered".to_vec(),
+            credential: sign_credential(
+                psk,
+                &sign_request_payload(generated.key_id, approved_message),
+            ),
+        })
+        .await
+        .expect_err("credential for different bytes must be rejected");
+
+    assert_eq!(error.code(), Code::Unauthenticated);
+}
+
+#[tokio::test]
 async fn test_grpc_generate_rejects_replay_nonce() {
     let psk = "test-ks-grpc-psk";
     let server = start_grpc_server(psk, 3600, 3600).await;
@@ -241,11 +270,12 @@ async fn test_grpc_sign_nonexistent_key_returns_not_found() {
     let mut client = connect_client(&server.endpoint).await;
 
     let missing_key_id = 9_999_999_u32;
+    let message = b"test";
     let err = client
         .sign(SignRequest {
             key_id: missing_key_id,
-            message: b"test".to_vec(),
-            credential: sign_credential(psk, &format!("sign:{missing_key_id}")),
+            message: message.to_vec(),
+            credential: sign_credential(psk, &sign_request_payload(missing_key_id, message)),
         })
         .await
         .expect_err("missing key should return not found");
@@ -283,11 +313,12 @@ async fn test_grpc_sign_expired_key_returns_failed_precondition() {
 
     sleep(Duration::from_secs(2)).await;
 
+    let message = b"test";
     let err = client
         .sign(SignRequest {
             key_id: generated.key_id,
-            message: b"test".to_vec(),
-            credential: sign_credential(psk, &format!("sign:{}", generated.key_id)),
+            message: message.to_vec(),
+            credential: sign_credential(psk, &sign_request_payload(generated.key_id, message)),
         })
         .await
         .expect_err("expired key should be unavailable");

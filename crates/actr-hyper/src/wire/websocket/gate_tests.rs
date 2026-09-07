@@ -37,6 +37,10 @@ fn make_valid_credential(
         actor_id: actor_id.to_string_repr(),
         expires_at,
         realm_id: actor_id.realm.realm_id,
+        protocol_version: 1,
+        issuer: format!("actr:realm:{}:authority", actor_id.realm.realm_id),
+        provider: "actrix-official".to_string(),
+        audience: "actr.signaling".to_string(),
     };
     let claims_bytes = actr_protocol::prost::Message::encode_to_vec(&claims);
     let signature = sk.sign(&claims_bytes);

@@ -30,8 +30,8 @@ pub enum MfrError {
     InvalidSignature,
     #[error("package already published, revoke first")]
     PackageAlreadyPublished,
-    #[error("github api error: {0}")]
-    GitHub(String),
+    #[error("publisher discovery error: {0}")]
+    PublisherDiscovery(String),
     #[error("crypto error: {0}")]
     Crypto(String),
     #[error("unauthorized")]
@@ -59,6 +59,7 @@ impl IntoResponse for MfrError {
             MfrError::VerificationFailed(_) | MfrError::ChallengeNotFound => {
                 (StatusCode::BAD_REQUEST, self.to_string())
             }
+            MfrError::PublisherDiscovery(_) => (StatusCode::BAD_GATEWAY, self.to_string()),
             MfrError::KeyRevoked(_) | MfrError::CertificateExpired => {
                 (StatusCode::FORBIDDEN, self.to_string())
             }

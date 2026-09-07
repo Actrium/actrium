@@ -234,12 +234,6 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  deleteRealm: (id: number) =>
-    request<{ success: boolean; error_message: string | null }>(
-      `/realms/${id}`,
-      { method: "DELETE" },
-    ),
-
   rotateRealmSecret: (id: number) =>
     request<RealmSecretRotationResponse>(`/realms/${id}/secret/rotate`, {
       method: "POST",
@@ -331,8 +325,8 @@ export const api = {
     request<TimeseriesResponse>(`/metrics/timeseries?service_type=${serviceType}&tier=${tier}`),
 };
 
-// MFR types
-export interface Manufacturer {
+// Publisher Registry API types.
+export interface PublisherRecord {
   id: number;
   name: string;
   public_key: string;
@@ -349,8 +343,8 @@ export interface Manufacturer {
 
 export interface ActrPackage {
   id: number;
-  mfr_id: number;
-  manufacturer: string;
+  publisher_id: number;
+  publisher: string;
   name: string;
   version: string;
   type_str: string;
@@ -363,17 +357,17 @@ export interface ActrPackage {
   revoked_at?: number;
 }
 
-export interface MfrCertificate {
+export interface PublisherCertificate {
   key_id: string;
-  mfr_name: string;
-  mfr_pubkey: string;
+  publisher: string;
+  public_key: string;
   issued_at: number;
   expires_at: number;
 }
 
-export interface MfrKeyHistory {
+export interface PublisherKeyHistory {
   id: number;
-  mfr_id: number;
+  publisher_id: number;
   key_id: string;
   public_key: string;
   status: 'retired' | 'revoked';
@@ -381,82 +375,69 @@ export interface MfrKeyHistory {
   retired_at: number;
 }
 
-export type KeySource = 'generated' | 'uploaded';
-
-export interface ActivateResponse {
-  key_source: KeySource;
-  /** Present ONLY when key_source == 'generated'. */
-  private_key?: string;
-  certificate: MfrCertificate;
+export interface PublisherVerificationResponse {
+  certificate: PublisherCertificate;
 }
 
 export interface ApplyRequest {
-  github_login: string;
+  publisher: string;
   contact?: string;
 }
 
 export interface ApplyResponse {
-  mfr_id: number;
+  publisher_id: number;
   challenge_token: string;
   expires_at: number;
-  verify_file: string;
+  descriptor_url: string;
   instructions: string;
 }
 
-// MFR API functions — routed through /admin/api/mfr, so paths are relative to BASE
-export const mfrApi = {
+// Publisher Registry API functions, mounted under /admin/api/publishers.
+export const publisherApi = {
   list: (status?: string) => {
     const params = status ? `?status=${status}` : '';
-    return request<Manufacturer[]>(`/mfr/admin/list${params}`);
+    return request<PublisherRecord[]>(`/publishers/admin/list${params}`);
   },
 
   apply: (req: ApplyRequest) =>
-    request<ApplyResponse>('/mfr/apply', {
+    request<ApplyResponse>('/publishers/applications', {
       method: 'POST',
       body: JSON.stringify(req),
     }),
 
-  verify: (id: number, publicKey?: string) =>
-    request<ActivateResponse>(`/mfr/${id}/verify`, {
+  verify: (id: number) =>
+    request<PublisherVerificationResponse>(`/publishers/${id}/verify-domain`, {
       method: 'POST',
-      body: publicKey ? JSON.stringify({ public_key: publicKey }) : undefined,
     }),
 
   getChallenge: (id: number) =>
-    request<ApplyResponse>(`/mfr/${id}/challenge`),
-
-  approve: (id: number, publicKey?: string) =>
-    request<ActivateResponse>(`/mfr/admin/${id}/approve`, {
-      method: 'POST',
-      body: publicKey ? JSON.stringify({ public_key: publicKey }) : undefined,
-    }),
+    request<ApplyResponse>(`/publishers/${id}/challenge`),
 
   suspend: (id: number) =>
-    request<void>(`/mfr/admin/${id}/suspend`, { method: 'POST' }),
+    request<void>(`/publishers/admin/${id}/suspend`, { method: 'POST' }),
 
-  renewKey: (id: number, publicKey?: string) =>
-    request<ActivateResponse>(`/mfr/admin/${id}/renew`, {
+  beginKeyRotation: (id: number) =>
+    request<ApplyResponse>(`/publishers/${id}/rotation-challenge`, {
       method: 'POST',
-      body: publicKey ? JSON.stringify({ public_key: publicKey }) : undefined,
     }),
 
   reinstate: (id: number) =>
-    request<void>(`/mfr/admin/${id}/reinstate`, { method: 'POST' }),
+    request<void>(`/publishers/admin/${id}/reinstate`, { method: 'POST' }),
 
   delete: (id: number) =>
-    request<void>(`/mfr/admin/${id}`, { method: 'DELETE' }),
+    request<void>(`/publishers/admin/${id}`, { method: 'DELETE' }),
 
-  listPackages: (mfr?: string) => {
-    const params = mfr ? `?mfr=${mfr}` : '';
-    return request<ActrPackage[]>(`/mfr/pkg${params}`);
+  listPackages: (publisher?: string) => {
+    const params = publisher ? `?publisher=${publisher}` : '';
+    return request<ActrPackage[]>(`/publishers/packages${params}`);
   },
 
   revokePackage: (id: number) =>
-    request<void>(`/mfr/pkg/${id}/revoke`, { method: 'POST' }),
+    request<void>(`/publishers/packages/${id}/revoke`, { method: 'POST' }),
 
-  listKeys: (mfrId: number) =>
-    request<MfrKeyHistory[]>(`/mfr/admin/${mfrId}/keys`),
+  listKeys: (publisherId: number) =>
+    request<PublisherKeyHistory[]>(`/publishers/admin/${publisherId}/keys`),
 
   revokeHistoricalKey: (historyId: number) =>
-    request<void>(`/mfr/admin/keys/${historyId}/revoke`, { method: 'POST' }),
+    request<void>(`/publishers/admin/keys/${historyId}/revoke`, { method: 'POST' }),
 };

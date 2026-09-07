@@ -24,7 +24,7 @@ impl<B> MakeSpan<B> for HttpMakeSpan {
         let span = info_span!(
             "http.request",
             method = %request.method(),
-            uri = %request.uri(),
+            path = %request.uri().path(),
             version = ?request.version()
         );
 

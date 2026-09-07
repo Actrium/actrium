@@ -141,6 +141,10 @@ fn fake_register_response_bytes() -> Vec<u8> {
         realm_id: 1,
         actor_id: "test-actor-id".to_string(),
         expires_at: u64::MAX,
+        protocol_version: 1,
+        issuer: "actr:realm:1:authority".to_string(),
+        provider: "actrix-official".to_string(),
+        audience: "actr.signaling".to_string(),
     };
     let claims_bytes = claims.encode_to_vec();
 
@@ -161,6 +165,10 @@ fn fake_register_response_bytes() -> Vec<u8> {
     };
 
     let turn = TurnCredential {
+        protocol_version: 1,
+        realm_id: 1,
+        provider: "actrix-official".to_string(),
+        audience: "actr.turn".to_string(),
         username: "user".to_string(),
         password: "pass".to_string(),
         expires_at: u64::MAX,

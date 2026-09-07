@@ -27,3 +27,4 @@ tracing = "0.1"
 prost = "0.14"
 bytes = "1.11"
 async-trait = "0.1"
+ed25519-dalek = { version = "2", features = ["rand_core"] }

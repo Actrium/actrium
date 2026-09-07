@@ -2,7 +2,7 @@
 //!
 //! These helpers define the stable bytes signed by a package launcher using the
 //! package manufacturer's key. For unpublished package registration, AIS
-//! verifies this signature with the same MFR key that signed the package
+//! verifies this signature with the same Publisher key that signed the package
 //! manifest.
 
 use crate::ActrType;

@@ -32,7 +32,7 @@ pub struct RealmEntry {
     pub name: String,
 }
 
-/// Manufacturer entry — exposed via `GET /mfr/{name}/verifying_key`.
+/// Manufacturer entry — exposed via `GET /registry/publishers/{name}/verifying-key`.
 #[derive(Clone, Debug)]
 pub struct MfrEntry {
     pub name: String,
@@ -40,7 +40,7 @@ pub struct MfrEntry {
     pub contact: Option<String>,
 }
 
-/// Package registration entry — populated by `POST /mfr/pkg/publish` or the
+/// Package registration entry — populated by `POST /registry/packages/publish` or the
 /// admin seeding endpoint.
 #[derive(Clone, Debug)]
 pub struct PackageEntry {
@@ -52,8 +52,8 @@ pub struct PackageEntry {
     pub signature_b64: String,
 }
 
-/// Publish nonces issued via `POST /mfr/pkg/nonce`; consumed once by
-/// `POST /mfr/pkg/publish`.
+/// Publish nonces issued via `POST /registry/packages/nonce`; consumed once by
+/// `POST /registry/packages/publish`.
 #[derive(Default)]
 pub struct NonceStore {
     inner: RwLock<HashMap<String, String>>, // manufacturer -> nonce (b64)

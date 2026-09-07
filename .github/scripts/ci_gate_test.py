@@ -93,6 +93,22 @@ def test_rust_test_gate_restores_cache_before_installing_tools() -> None:
     assert "cache-targets: false" in test_job
 
 
+def test_actrix_schema_migration_is_a_required_gate() -> None:
+    workflow = CI_GATE_WORKFLOW.read_text(encoding="utf-8")
+    migration_job = _job(workflow, "actrix_migration", "rust")
+
+    assert "python-version: \"3.11\"" in migration_job
+    assert (
+        "python -m unittest scripts/loran/tests/test_migrate_schema_v1.py -v"
+        in migration_job
+    )
+    assert "      - actrix_migration" in workflow
+    assert "ACTRIX_MIGRATION_RESULT" in workflow
+    assert (
+        '"actrix_migration": os.environ["ACTRIX_MIGRATION_RESULT"]' in workflow
+    )
+
+
 def test_msrv_gate_builds_full_workspace_on_pinned_toolchain() -> None:
     workflow = CI_GATE_WORKFLOW.read_text(encoding="utf-8")
     msrv_job = _job(workflow, "rust_msrv", "typescript")

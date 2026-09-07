@@ -2680,7 +2680,7 @@ impl Inner {
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // The signaling server requires credential params in the WS URL for
         // authentication. We must set actor_id + credential BEFORE connecting
-        // so that build_url_with_identity() includes them in the query string.
+        // so that the signaling handshake includes them in authenticated headers.
         let pre_connect_credential_state = {
             let actor_id = register_ok.actr_id.clone();
             let credential_state = CredentialState::new(

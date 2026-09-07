@@ -1,31 +1,37 @@
 //! Rate limiting middleware for AIS service
 //!
 //! Rate limiting policy:
-//! - **IP level**: max 100 req/min per IP (burst of 100 requests)
+//! - **Per IP**: at most 100 req/min per IP (burst of 100 requests)
 //!
-//! Uses tower-governor v0.8 to implement rate limiting, preventing DoS attacks and resource exhaustion
+//! Implemented with tower-governor v0.8 to prevent DoS and resource exhaustion.
 
 use axum::body::Body;
 use governor::middleware::NoOpMiddleware;
 use std::sync::Arc;
 use tower_governor::{
-    GovernorLayer, governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor,
+    GovernorLayer, governor::GovernorConfigBuilder, key_extractor::PeerIpKeyExtractor,
 };
 
-/// IP-level rate limiter configuration
+/// Per-IP rate limiting configuration.
 ///
 /// Limiting policy:
 /// - 2 requests per second (120 req/min)
-/// - Burst of 100 requests allowed
-/// - Rate limited by client IP address
+/// - burst of up to 100 requests
+/// - keyed by client IP address
 ///
-/// Uses tower_governor v0.8.0 API
-pub fn ip_rate_limiter() -> GovernorLayer<SmartIpKeyExtractor, NoOpMiddleware, Body> {
+/// Uses the tower_governor v0.8.0 API.
+///
+/// Keying is based on the real transport peer IP (`PeerIpKeyExtractor`) rather
+/// than `SmartIpKeyExtractor`. Without a trusted reverse-proxy configuration,
+/// `SmartIpKeyExtractor` trusts `X-Forwarded-For` / `X-Real-IP` request headers,
+/// which a client can forge to bypass rate limiting or to impersonate a victim
+/// IP for a targeted DoS. The peer IP cannot be spoofed at this layer.
+pub fn ip_rate_limiter() -> GovernorLayer<PeerIpKeyExtractor, NoOpMiddleware, Body> {
     let governor_conf = Arc::new(
         GovernorConfigBuilder::default()
             .per_second(2) // 2 requests per second
             .burst_size(100) // allow a burst of 100 requests
-            .key_extractor(SmartIpKeyExtractor)
+            .key_extractor(PeerIpKeyExtractor)
             .finish()
             .unwrap(),
     );
@@ -40,6 +46,6 @@ mod tests {
     #[test]
     fn test_ip_rate_limiter_creation() {
         let _limiter = ip_rate_limiter();
-        // If creation succeeds, the configuration is valid
+        // Successful creation means the configuration is valid.
     }
 }

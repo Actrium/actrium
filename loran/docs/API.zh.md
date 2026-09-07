@@ -1,374 +1,115 @@
-# Actrix API 参考
+# Actrix Realm v1 API 边界
 
-**版本**: v0.1.0
-**最后更新**: 2025-11-03
-**基础 URL**: `https://actrix.example.com` (生产) / `http://localhost:8443` (开发)
+状态：首版契约。本文只描述当前实现，不承诺旧 KS/MFR HTTP API 兼容。
 
-本文档记录 Actrix 对外提供的 HTTP/WebSocket API 端点。
+## 传输与认证规则
 
----
+- 生产实例只接受 HTTPS/WSS；端口可以配置，但 endpoint/audience 必须进入凭证作用域。
+- 凭证不得放在 URL、query string、普通访问日志或错误文本中。
+- 原生 Signaling WebSocket 使用 `x-actr-id` 与
+  `Authorization: ActrCredential <base64url-protobuf>` upgrade headers。浏览器不能设置这
+  两个 header，因此改用 `actr.v1`、`actr.id.<base64url>` 和
+  `actr.credential.<base64url-protobuf>` 子协议项；服务器验证全部身份后只协商返回
+  `actr.v1`，避免把凭证暴露为页面可读的已选子协议。
+- Realm 管理、Publisher 管理和配置变更只允许系统管理员调用。
+- Signer 是内部信任平面；规范入口是同一 HTTP/2 监听器上的 gRPC，
+  不是公开 REST 密钥下载服务。
 
-## 📋 目录
+## Realm discovery
 
-- [认证机制](#认证机制)
-- [KS - Key Server API](#ks---key-server-api)
-- [错误响应](#错误响应)
-- [速率限制](#速率限制)
+`GET /.well-known/actr/realm.json`
 
----
+成功时返回当前实例唯一 Active Realm 的 v1 descriptor，包括 issuer、官方 provider、
+Signaling/TURN audience 与 endpoint。没有且仅有一个可用 Realm 时返回 `503`，不猜测。
 
-## 认证机制
+## Authority（AIS）
 
-### Nonce-Auth 签名认证
+路由前缀：`/ais`。
 
-所有 API 请求使用 PSK (Pre-Shared Key) + Nonce 签名机制防重放攻击。
+注册、续签与 signing-key 查询使用 protobuf body。Realm secret 是管理员或受信宿主的
+注册能力，不得下发给 Rill Guest。签发的 identity claims 固定包含：
 
-**流程**:
+- `protocol_version = 1`
+- `issuer = actr:realm:<realm_id>:authority`
+- `provider = actrix-official`
+- `audience = actr.signaling`
+- Realm、完整 Actor ID 与过期时间
 
+## Signaling
+
+`GET /signaling/ws` 升级到 WebSocket。身份只从原生 upgrade headers 或上述浏览器
+子协议项读取；连接身份、credential actor 与每条 envelope 的 source 必须完全一致。
+单帧最大 1 MiB，并执行连接/消息速率限制。
+
+## Publisher Registry
+
+公开路由前缀：`/registry`。
+
+- `GET /publishers/{domain}/verifying-key`
+- `POST /packages/nonce`
+- `POST /packages/publish`
+
+v1 JSON 统一使用 Publisher 术语：
+
+```json
+{"publisher":"apps.example.com"}
 ```
-1. 客户端生成 nonce (随机 UUID)
-2. 客户端生成 timestamp (当前 Unix 时间戳)
-3. 计算签名: HMAC-SHA256(psk, nonce + timestamp + payload)
-4. 构造 NonceCredential 对象
-5. 发送请求
-```
 
-**NonceCredential 结构**:
+发布 body 的身份字段同样为 `publisher`，成功返回的 package 使用
+`publisher_id`、`publisher` 和规范 `type_str`：
 
 ```json
 {
-  "nonce": "550e8400-e29b-41d4-a716-446655440000",
-  "timestamp": 1730611200,
-  "signature": "base64-encoded-hmac-sha256"
+  "publisher_id": 7,
+  "publisher": "apps.example.com",
+  "name": "editor",
+  "version": "1.2.0",
+  "type_str": "apps.example.com/editor@1.2.0"
 }
 ```
 
-**时间窗口**: ±300 秒 (5 分钟)
-**Nonce 唯一性**: 每个 nonce 只能使用一次
+旧 `mfr`、`mfr_id`、`manufacturer` JSON/query 名称不属于 v1 契约。内部 SQLite
+列名和 crate 名不构成 API。
 
-**Rust 客户端示例**:
+管理路由前缀：`/admin/api/publishers`，受 Admin JWT 保护。Publisher ID 是规范化 HTTPS
+域名；控制权通过固定路径
+`https://<publisher>/.well-known/actr/publisher.json` 的 v1 descriptor 证明。包的长期
+真实性由 publisher key、signature 与 digest 决定，下载 origin/registry 不是信任根。
 
-```rust
-use nonce_auth::CredentialSigner;
+Actor ID 的字符串形式为：
 
-let psk = "my-shared-key";
-let payload = "generate_key";
+`<serial-hex>@<realm-id>/<publisher-or-linked-namespace>/<program>@<version>`
 
-let credential = CredentialSigner::new()
-    .with_secret(psk.as_bytes())
-    .sign(payload.as_bytes())?;
-```
+可下载 package 的 Publisher 必须是规范 DNS 域名；linked/local workload 可以使用
+宿主管理的非 DNS namespace，但不能借此进入 Publisher Registry。
 
----
+## Signer
 
-## KS - Key Server API
+规范入口：`/signer.v1.Signer/<Method>`（gRPC）。
 
-**路由前缀**: `/ks`
-**认证**: Nonce-Auth (PSK: `actrix_shared_key`)
+方法包括 `GenerateSigningKey`、`Sign`、`GetVerifyingKey` 与 `HealthCheck`。认证使用
+nonce-auth request message；`Sign` 的认证 payload 同时绑定 protocol、`key_id` 和待签
+消息 SHA-256。不存在下载私钥的 API。生产环境必须配置 KEK，私钥明文落盘会导致配置
+校验失败。
 
-### 1. 生成密钥对
+## Admin
 
-生成新的 ECIES 椭圆曲线密钥对,返回公钥。
+- `POST /admin/api/auth/login`
+- 其余 `/admin/api/**` 需要 `Authorization: Bearer <JWT>`
 
-**端点**: `POST /ks/generate`
-**认证负载**: `"generate_key"`
+首版每实例只允许一个 Realm。在线 API 可以首次 provision、读取、更新和轮换 Realm
+secret，但不提供硬删除或替换另一个 Realm；替换属于停机迁移/重建操作。
 
-**请求**:
+## Schema migration
 
-```http
-POST /ks/generate HTTP/1.1
-Host: actrix.example.com
-Content-Type: application/json
-
-{
-  "credential": {
-    "nonce": "550e8400-e29b-41d4-a716-446655440000",
-    "timestamp": 1730611200,
-    "signature": "qMZ8vL3x..."
-  }
-}
-```
-
-**响应 200 OK**:
-
-```json
-{
-  "key_id": 123,
-  "public_key": "BHxN7Q8vK...",
-  "expires_at": 1730614800
-}
-```
-
-**字段说明**:
-- `key_id`: 密钥唯一标识符
-- `public_key`: Base64 编码的 ECIES 公钥
-- `expires_at`: 过期时间 (Unix 时间戳),0 表示永不过期
-
-**curl 示例**:
+运行时只自动初始化空数据库。旧的未版本化 SQLite 必须停机执行：
 
 ```bash
-# 使用 nonce-auth CLI 工具生成凭证
-credential=$(nonce-auth sign --secret "my-psk" --payload "generate_key")
-
-curl -X POST https://actrix.example.com/ks/generate \
-  -H "Content-Type: application/json" \
-  -d "{\"credential\": $credential}"
+python3 actrix/scripts/migrate_schema_v1.py /path/to/actrix.db
 ```
 
----
-
-### 2. 获取私钥
-
-根据 key_id 查询对应的私钥 (用于解密)。
-
-**端点**: `GET /ks/secret/{key_id}`
-**认证负载**: `"get_secret_key:{key_id}"`
-
-**请求**:
-
-```http
-GET /ks/secret/123?credential=%7B%22nonce%22%3A%22...%22%7D HTTP/1.1
-Host: actrix.example.com
-```
-
-**Query 参数**:
-- `key_id`: (path) 密钥 ID
-- `credential`: (query) URL 编码的 NonceCredential JSON
-
-**响应 200 OK**:
-
-```json
-{
-  "key_id": 123,
-  "secret_key": "VxPz9m2...",
-  "expires_at": 1730614800
-}
-```
-
-**字段说明**:
-- `key_id`: 密钥标识符
-- `secret_key`: Base64 编码的 ECIES 私钥
-- `expires_at`: 过期时间 (Unix 时间戳)
-
-**curl 示例**:
-
-```bash
-KEY_ID=123
-credential=$(nonce-auth sign --secret "my-psk" --payload "get_secret_key:$KEY_ID")
-
-curl "https://actrix.example.com/ks/secret/$KEY_ID?credential=$(urlencode $credential)"
-```
-
-**Rust 客户端示例**:
-
-```rust
-use ks::{Client, ClientConfig};
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let actrix_shared_key = "my-shared-key";  // 从全局配置获取
-    let client = Client::new(&ClientConfig {
-        endpoint: "https://actrix.example.com/ks".to_string(),
-        psk: actrix_shared_key.to_string(),
-        timeout_seconds: 30,
-        cache_db_path: None,
-    });
-
-    // 生成密钥对
-  let (key_id, public_key, expires_at, tolerance_seconds) = client.generate_key().await?;
-    println!("Generated key_id: {}", key_id);
-
-    // 获取私钥
-    let (secret_key, expires_at) = client.fetch_secret_key(key_id).await?;
-    println!("Secret key fetched, expires at: {}", expires_at);
-
-    Ok(())
-}
-```
-
----
-
-### 3. 健康检查
-
-检查 Signer 服务状态和数据库连接。
-
-**端点**: `GET /ks/health`
-**认证**: 无需认证
-
-**响应 200 OK**:
-
-```json
-{
-  "status": "healthy",
-  "version": "0.1.0",
-  "key_count": 42
-}
-```
-
-**字段说明**:
-- `status`: 服务状态 (`healthy` / `unhealthy`)
-- `version`: 服务版本号
-- `key_count`: 当前存储的密钥总数
-
-**curl 示例**:
-
-```bash
-curl https://actrix.example.com/ks/health
-```
-
----
-
-## 错误响应
-
-### 通用错误格式
-
-```json
-{
-  "error": "错误描述信息"
-}
-```
-
-### HTTP 状态码
-
-| 状态码                        | 说明           | 示例                              |
-| ----------------------------- | -------------- | --------------------------------- |
-| **200 OK**                    | 请求成功       | -                                 |
-| **400 Bad Request**           | 请求参数错误   | `{"error": "Invalid key_id"}`     |
-| **401 Unauthorized**          | 认证失败       | `{"error": "Invalid signature"}`  |
-| **403 Forbidden**             | 重放攻击检测   | `{"error": "Nonce already used"}` |
-| **404 Not Found**             | 资源不存在     | `{"error": "Key not found: 123"}` |
-| **500 Internal Server Error** | 服务器内部错误 | `{"error": "Database error"}`     |
-
-### 认证错误详情
-
-**401 Unauthorized - 签名错误**:
-```json
-{
-  "error": "Authentication error: Invalid signature"
-}
-```
-
-**原因**:
-- PSK 不匹配
-- payload 构造错误
-- 签名算法错误
-
-**403 Forbidden - 重放攻击**:
-```json
-{
-  "error": "Replay attack detected: Nonce already used"
-}
-```
-
-**原因**:
-- Nonce 已使用过
-- 时间戳超出允许窗口 (±300 秒)
-
-**404 Not Found - 密钥不存在**:
-```json
-{
-  "error": "Key not found: 123"
-}
-```
-
-**原因**:
-- key_id 不存在
-- 密钥已过期并被清理
-
----
-
-## 速率限制
-
-当前版本无全局速率限制,建议根据部署环境在反向代理层实现。
-
-**推荐限制** (nginx 示例):
-
-```nginx
-limit_req_zone $binary_remote_addr zone=ks_generate:10m rate=10r/s;
-limit_req_zone $binary_remote_addr zone=ks_secret:10m rate=100r/s;
-
-location /ks/generate {
-    limit_req zone=ks_generate burst=5 nodelay;
-    proxy_pass http://actrix_backend;
-}
-
-location /ks/secret {
-    limit_req zone=ks_secret burst=20 nodelay;
-    proxy_pass http://actrix_backend;
-}
-```
-
----
-
-## 🔒 安全最佳实践
-
-### 1. PSK 管理
-
-```bash
-# 生成强随机密钥
-openssl rand -hex 32 > /etc/actrix/secrets/psk.key
-
-# 设置严格权限
-chmod 600 /etc/actrix/secrets/psk.key
-chown actrix:actrix /etc/actrix/secrets/psk.key
-```
-
-### 2. TLS 强制
-
-生产环境必须使用 HTTPS:
-
-```toml
-env = "prod"
-
-[bind.https]
-ip = "0.0.0.0"
-port = 8443
-cert = "/etc/actrix/certs/server.crt"
-key = "/etc/actrix/certs/server.key"
-```
-
-### 3. 密钥轮转
-
-定期清理过期密钥:
-
-```bash
-# 查询过期密钥数量
-sqlite3 /var/lib/actrix/ks.db "
-  SELECT COUNT(*) FROM keys
-  WHERE expires_at > 0 AND expires_at < strftime('%s', 'now');
-"
-
-# 清理过期密钥
-sqlite3 /var/lib/actrix/ks.db "
-  DELETE FROM keys
-  WHERE expires_at > 0 AND expires_at < strftime('%s', 'now');
-"
-```
-
-### 4. 审计日志
-
-启用详细日志记录:
-
-```toml
-[recording]
-filter_level = "info"   # 可被 RUST_LOG 覆盖
-sink = "file:///var/log/actrix/actrix.log"
-service_name = "actrix-prod"
-
-[recording.audit]
-sink = "otlp+grpc://jaeger:4317"
-```
-
----
-
-## 📚 相关文档
-
-- [CRATES.md](./CRATES.zh.md) - KS 实现细节
-- [SERVICES.md](./SERVICES.zh.md) - 服务部署和管理
-- [CONFIGURATION.md](./CONFIGURATION.zh.md) - 配置参考
-
-**文件**: `crates/ks/src/types.rs` - API 数据类型定义
-**文件**: `crates/ks/src/handlers.rs` - API 处理器实现
-
-**最后验证时间**: 2025-11-03
-**代码版本**: v0.1.0+enhancements
+脚本先创建备份，并拒绝多 Realm 或无法安全映射的旧 publisher 数据。
+
+完整信任边界与发布门槛见
+[`REALM_V1_ARCHITECTURE.zh.md`](REALM_V1_ARCHITECTURE.zh.md) 和
+[`THREAT_MODEL_REALM_V1.zh.md`](THREAT_MODEL_REALM_V1.zh.md)。

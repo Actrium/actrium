@@ -92,19 +92,27 @@ impl IceService for TurnService {
             turn::Authenticator::new(self.config.turn.turn_secret.clone())
                 .map_err(|e| anyhow::anyhow!("Failed to create TURN authenticator: {e}"))?,
         );
+        let relay_port_range = self
+            .config
+            .turn
+            .relay_port_bounds()
+            .map_err(|error| anyhow::anyhow!(error))?;
 
         let turn_server = match turn::create_turn_server(
             socket.clone(),
             &self.config.bind.ice.advertised_ip,
             &realm,
+            relay_port_range,
             auth_handler,
+            // Production relay must never reach loopback/private/metadata peers.
+            false,
         )
         .await
         {
             Ok(server) => {
                 let url = Url::parse(&format!(
                     "turn:{}:{}?transport=udp",
-                    ice_bind.ip, ice_bind.port
+                    ice_bind.advertised_ip, ice_bind.advertised_port
                 ))?;
                 self.info.set_running(url);
                 // Attach counters to ServiceInfo and record TURN allocation

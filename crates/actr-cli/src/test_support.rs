@@ -892,7 +892,7 @@ actrix_shared_key = "actrix-e2e-shared-key-0123456789abcdef"
 head = "admin_ui"
 
 [control.admin_ui]
-password = "e2e-test-password"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [bind.http]
 domain_name = "127.0.0.1"
@@ -901,19 +901,15 @@ ip = "127.0.0.1"
 port = {http_port}
 
 [bind.ice]
-domain_name = "127.0.0.1"
 ip = "127.0.0.1"
 port = {ice_port}
 advertised_ip = "127.0.0.1"
 advertised_port = {ice_port}
 
 [turn]
-advertised_ip = "127.0.0.1"
-advertised_port = {ice_port}
 relay_port_range = "49152-49200"
 realm = "local.actrix"
-
-[services.ks]
+turn_secret = "actrix-e2e-turn-secret-0123456789abcdef"
 
 [services.signer]
 

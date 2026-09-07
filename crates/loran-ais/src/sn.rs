@@ -1,8 +1,8 @@
-//! Serial Number (SN) Generator - a 54-bit serial number generator based on the Snowflake algorithm
+//! Serial Number (SN) Generator - A 54-bit serial number generator based on the Snowflake algorithm
 //!
-//! # Protocol Constraints
+//! # Protocol constraints
 //!
-//! Per [actr-protocol](https://github.com/Actrium/proto) definition:
+//! Defined per [actr-protocol](https://github.com/Actrium/proto):
 //! ```proto
 //! message ActorId {
 //!     uint64 serial_number  = 1;  // 54-bit limit
@@ -15,7 +15,7 @@
 //! }
 //! ```
 //!
-//! # Bit Layout
+//! # Bit layout
 //!
 //! Internal structure of the 54-bit serial_number (Snowflake algorithm variant):
 //!
@@ -27,44 +27,43 @@
 //!
 //! - Timestamp (41 bits): milliseconds relative to 2023-01-01
 //!   - Representable range: ~69.7 years (2**41 / 1000 / 3600 / 24 / 365)
-//! - Worker ID (5 bits): node identifier (0-31)
-//!   - Generated from hostname + PID hash
+//! - Worker ID (5 bits): operator-assigned node identity (0-31)
 //! - Sequence (8 bits): sequence number within the same millisecond (0-255)
-//!   - Max 256 IDs per millisecond
+//!   - Up to 256 IDs per millisecond
 //! ```
 //!
 //! # Features
 //!
-//! - **Globally unique**: guarantees uniqueness in distributed environments (assuming no worker_id conflicts)
-//! - **Time-ordered**: IDs are roughly increasing by generation time
-//! - **High performance**: single node supports 256K IDs/sec (256 * 1000)
+//! - **Globally unique**: uniqueness guaranteed in distributed environments (worker_id must be kept unique by deployment lease)
+//! - **Time-ordered**: IDs are roughly monotonically increasing by generation time
+//! - **High performance**: a single node supports 256K IDs/sec (256 * 1000)
 //! - **Decentralized**: no central coordination service required
 //!
-//! # Clock Rollback Handling
+//! # Clock drift handling
 //!
-//! - **Minor rollback**: use the last timestamp + incrementing sequence number
-//! - **Sequence exhausted**: force the timestamp forward (may cause deviation from the real clock)
+//! - **Minor drift**: uses the last timestamp + an incrementing sequence number
+//! - **Sequence exhausted**: forces the timestamp forward (may cause drift from the real clock)
 //!
 //! # Example
 //!
 //! ```ignore
 //! use ais::sn::{SerialNumber, AIdSerialNumberIssuer};
 //!
-//! // Generate serial number
+//! // Generate a serial number
 //! let sn1 = SerialNumber::sn(1);  // realm_id = 1 (currently unused)
 //! let sn2 = SerialNumber::sn(1);
 //!
-//! // Serial number auto-increments
+//! // Serial numbers auto-increment
 //! assert!(sn2.value() > sn1.value());
 //!
-//! // Guaranteed within the 54-bit range
+//! // Guaranteed to fit within the 54-bit range
 //! assert!(sn1.value() <= SerialNumber::MAX_VALUE);
 //! ```
 //!
 //! # Notes
 //!
-//! Warning: **realm_id parameter is currently unused**: serial numbers are globally unique and not isolated by realm.
-//! For realm isolation, consider embedding realm_id into the high bits of worker_id.
+//! ⚠️ **The realm_id parameter is currently unused**: serial numbers are globally unique and not isolated by realm.
+//! If realm isolation is needed, consider embedding realm_id into the high bits of worker_id.
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -72,10 +71,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The number of bits used for the serial number.
 ///
-/// ActrId protocol defines the serial_number field using 54 bits:
+/// The ActrId protocol defines the serial_number field as 54 bits:
 /// - 41 bits: timestamp (milliseconds, relative to a custom epoch)
 /// - 5 bits: worker_id (supports 32 concurrent nodes)
-/// - 8 bits: sequence (max 256 IDs per millisecond)
+/// - 8 bits: sequence (up to 256 IDs per millisecond)
 pub const BITS_LEN_SERIAL_NUMBER: usize = 54;
 
 /// Snowflake-like algorithm constants for 54-bit SN
@@ -93,13 +92,13 @@ pub const MAX_SEQUENCE: u64 = (1 << SEQUENCE_BITS) - 1; // 255
 
 /// Snowflake generator state using lock-free atomics
 ///
-/// Performance optimization: use atomic operations instead of Mutex to improve high-concurrency performance
+/// Performance optimization: uses atomic operations instead of a Mutex to improve high-concurrency performance
 /// - AtomicU64 encoding: [41-bit timestamp][8-bit sequence][15-bit padding]
-/// - Worker ID is initialized only once, stored in OnceLock
+/// - Worker ID is explicitly configured once and stored in OnceLock
 static SNOWFLAKE_STATE: AtomicU64 = AtomicU64::new(0);
 static WORKER_ID: OnceLock<u64> = OnceLock::new();
 
-/// Decode timestamp and sequence from AtomicU64
+/// Decode timestamp and sequence from the AtomicU64
 #[inline]
 fn decode_state(state: u64) -> (u64, u64) {
     let timestamp = state >> 8; // timestamp in the high 56 bits
@@ -107,36 +106,27 @@ fn decode_state(state: u64) -> (u64, u64) {
     (timestamp, sequence)
 }
 
-/// Encode timestamp and sequence into AtomicU64
+/// Encode timestamp and sequence into an AtomicU64
 #[inline]
 fn encode_state(timestamp: u64, sequence: u64) -> u64 {
     (timestamp << 8) | (sequence & 0xFF)
 }
 
-/// Initialize worker_id (executed only once)
-fn init_worker_id() -> u64 {
-    *WORKER_ID.get_or_init(|| {
-        // Generate worker ID based on process ID and hostname hash
-        let hostname = std::env::var("HOSTNAME")
-            .or_else(|_| std::env::var("COMPUTERNAME"))
-            .unwrap_or_else(|_| "unknown".to_string());
-        let pid = std::process::id();
-
-        // Simple hash to generate worker ID within range
-        let combined = format!("{hostname}{pid}");
-        let mut hash = 0u64;
-        for byte in combined.bytes() {
-            hash = hash.wrapping_mul(31).wrapping_add(byte as u64);
-        }
-        hash & MAX_WORKER_ID
-    })
+fn configured_worker_id() -> u64 {
+    *WORKER_ID
+        .get()
+        .expect("BUG: Snowflake worker ID must be configured before issuing Actor IDs")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum SNError {
     /// The provided value exceeds the 54-bit limit.
     ValueOverflow(u64),
+    WorkerIdOutOfRange(u64),
+    WorkerIdAlreadyConfigured {
+        configured: u64,
+        requested: u64,
+    },
 }
 
 impl std::fmt::Display for SNError {
@@ -145,6 +135,16 @@ impl std::fmt::Display for SNError {
             SNError::ValueOverflow(val) => {
                 write!(f, "serial number value {val} exceeds the 54-bit limit")
             }
+            SNError::WorkerIdOutOfRange(value) => {
+                write!(f, "Snowflake worker ID {value} exceeds {MAX_WORKER_ID}")
+            }
+            SNError::WorkerIdAlreadyConfigured {
+                configured,
+                requested,
+            } => write!(
+                f,
+                "Snowflake worker ID is already configured as {configured}, not {requested}"
+            ),
         }
     }
 }
@@ -159,6 +159,32 @@ pub struct SerialNumber(u64);
 impl SerialNumber {
     /// The maximum possible value for a 54-bit serial number.
     pub const MAX_VALUE: u64 = (1 << BITS_LEN_SERIAL_NUMBER) - 1;
+
+    /// Configure the stable Snowflake worker identity.
+    ///
+    /// Production deployments must allocate a unique value per concurrent
+    /// issuer. Reconfiguration to a different value fails closed.
+    pub fn configure_worker_id(worker_id: u64) -> Result<(), SNError> {
+        if worker_id > MAX_WORKER_ID {
+            return Err(SNError::WorkerIdOutOfRange(worker_id));
+        }
+        if let Some(configured) = WORKER_ID.get() {
+            return if *configured == worker_id {
+                Ok(())
+            } else {
+                Err(SNError::WorkerIdAlreadyConfigured {
+                    configured: *configured,
+                    requested: worker_id,
+                })
+            };
+        }
+        WORKER_ID
+            .set(worker_id)
+            .map_err(|requested| SNError::WorkerIdAlreadyConfigured {
+                configured: *WORKER_ID.get().unwrap_or(&requested),
+                requested,
+            })
+    }
 
     /// Creates a new `SerialNumber`, returning an error if the value is out of bounds.
     pub fn new(value: u64) -> Result<Self, SNError> {
@@ -197,7 +223,7 @@ pub trait AIdSerialNumberIssuer {
 
 impl AIdSerialNumberIssuer for SerialNumber {
     fn sn(_realm_id: u32) -> SerialNumber {
-        let worker_id = init_worker_id();
+        let worker_id = configured_worker_id();
 
         // Get current timestamp in milliseconds
         let current_millis = SystemTime::now()
@@ -255,11 +281,11 @@ impl AIdSerialNumberIssuer for SerialNumber {
                 Err(_) => {
                     // CAS failed, another thread modified the state
                     // Retry with updated timestamp
-                    timestamp = SystemTime::now()
+                    timestamp = (SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .unwrap_or_default()
-                        .as_millis() as u64
-                        - CUSTOM_EPOCH;
+                        .as_millis() as u64)
+                        .saturating_sub(CUSTOM_EPOCH);
                     continue;
                 }
             }
@@ -276,8 +302,13 @@ mod tests {
     use std::collections::HashSet;
     use std::thread;
 
+    fn configure_test_worker() {
+        SerialNumber::configure_worker_id(0).expect("configure test worker ID");
+    }
+
     #[test]
     fn test_serial_number_creation() {
+        configure_test_worker();
         let sn1 = SerialNumber::sn(1);
         let sn2 = SerialNumber::sn(1);
         let sn3 = SerialNumber::sn(2);
@@ -295,6 +326,7 @@ mod tests {
 
     #[test]
     fn test_monotonic_generation() {
+        configure_test_worker();
         let mut _previous = SerialNumber::sn(1).value();
 
         // Generate several serial numbers and check they generally increase
@@ -310,6 +342,7 @@ mod tests {
 
     #[test]
     fn test_uniqueness_in_rapid_generation() {
+        configure_test_worker();
         let mut generated = HashSet::new();
 
         // Rapidly generate many serial numbers
@@ -327,6 +360,7 @@ mod tests {
 
     #[test]
     fn test_concurrent_generation() {
+        configure_test_worker();
         let handles: Vec<_> = (0..10)
             .map(|i| {
                 thread::spawn(move || {
@@ -356,6 +390,7 @@ mod tests {
 
     #[test]
     fn test_bit_layout_extraction() {
+        configure_test_worker();
         let sn = SerialNumber::sn(42);
         let value = sn.value();
 

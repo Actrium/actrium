@@ -52,11 +52,14 @@ mod tests {
 
     #[test]
     fn test_identity_claims_creation() {
-        let claims =
-            IdentityClaims::new(12345, "1a2b3c@12345/apple:user:1".to_string(), 1730614800);
+        let claims = IdentityClaims::new(
+            12345,
+            "1a2b3c@12345/apple.example/user@1".to_string(),
+            1730614800,
+        );
 
         assert_eq!(claims.realm_id, 12345);
-        assert_eq!(claims.actor_id, "1a2b3c@12345/apple:user:1");
+        assert_eq!(claims.actor_id, "1a2b3c@12345/apple.example/user@1");
         assert_eq!(claims.expr_time, 1730614800);
     }
 
@@ -68,11 +71,13 @@ mod tests {
             .as_secs();
 
         // Not expired.
-        let valid_claims = IdentityClaims::new(1, "123@1/acme:test:1".to_string(), now + 3600);
+        let valid_claims =
+            IdentityClaims::new(1, "123@1/apps.example.com/test@1".to_string(), now + 3600);
         assert!(!valid_claims.is_expired());
 
         // Expired.
-        let expired_claims = IdentityClaims::new(1, "123@1/acme:test:1".to_string(), now - 1);
+        let expired_claims =
+            IdentityClaims::new(1, "123@1/apps.example.com/test@1".to_string(), now - 1);
         assert!(expired_claims.is_expired());
     }
 }

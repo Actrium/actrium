@@ -55,9 +55,9 @@ pub async fn register_handler(
     let register_ok = signaling::build_register_ok(&req, &state).await;
 
     // Track the HTTP-registered actor in the WS registry so route discovery
-    // works once the actor opens its WebSocket with `?actor_id=...`. We
-    // record an empty `client_id` placeholder that the WS upgrade handler
-    // fills in when the peer connects.
+    // works once the actor opens its authenticated WebSocket. We record an
+    // empty `client_id` placeholder that the WS upgrade handler fills in when
+    // the peer connects.
     state.registry.write().await.push(RegisteredActor {
         actr_id: register_ok.actr_id.clone(),
         actr_type: req.actr_type.clone(),
@@ -174,7 +174,7 @@ pub async fn renew_handler(
 }
 
 // ---------------------------------------------------------------------------
-// MFR verifying key — `GET /mfr/{name}/verifying_key?key_id=X`
+// MFR verifying key — `GET /registry/publishers/{name}/verifying-key?key_id=X`
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
@@ -216,7 +216,7 @@ pub async fn verifying_key_handler(
 
 #[derive(Debug, Deserialize)]
 pub struct NonceRequest {
-    pub manufacturer: String,
+    pub publisher: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -230,13 +230,13 @@ pub async fn publish_nonce_handler(
 ) -> Json<NonceResponse> {
     let bytes: [u8; 32] = rand::random();
     let nonce = base64::engine::general_purpose::STANDARD.encode(bytes);
-    state.nonces.issue(&req.manufacturer, nonce.clone()).await;
+    state.nonces.issue(&req.publisher, nonce.clone()).await;
     Json(NonceResponse { nonce })
 }
 
 #[derive(Debug, Deserialize)]
 pub struct PublishRequest {
-    pub manufacturer: String,
+    pub publisher: String,
     pub name: String,
     pub version: String,
     pub target: String,
@@ -260,7 +260,7 @@ pub async fn publish_handler(
     Json(req): Json<PublishRequest>,
 ) -> Result<Json<PublishResponse>, ApiError> {
     // Consume the nonce.
-    if !state.nonces.take(&req.manufacturer, &req.nonce).await {
+    if !state.nonces.take(&req.publisher, &req.nonce).await {
         return Err(ApiError::bad_request(
             "publish nonce mismatch or already consumed".to_string(),
         ));
@@ -273,7 +273,7 @@ pub async fn publish_handler(
     let _ = req.proto_files;
 
     let entry = PackageEntry {
-        manufacturer: req.manufacturer.clone(),
+        manufacturer: req.publisher.clone(),
         name: req.name.clone(),
         version: req.version.clone(),
         target: req.target.clone(),
@@ -283,7 +283,7 @@ pub async fn publish_handler(
     state.add_package(entry).await;
 
     let id = state.packages.read().await.len() as u64;
-    let type_str = format!("{}:{}:{}", req.manufacturer, req.name, req.version);
+    let type_str = format!("{}/{}@{}", req.publisher, req.name, req.version);
 
     tracing::info!(%type_str, target = %req.target, "mock-actrix: package published");
 
@@ -352,13 +352,13 @@ pub async fn admin_mfr_handler(
             contact: req.contact,
         },
     );
-    tracing::info!(name = %req.name, "mock-actrix: MFR seeded via /admin/mfr");
+    tracing::info!(name = %req.name, "mock-actrix: MFR seeded via /admin/publisher");
     Ok(Json(AdminOk { ok: true }))
 }
 
 #[derive(Debug, Deserialize)]
 pub struct AdminPackageRequest {
-    pub manufacturer: String,
+    pub publisher: String,
     pub name: String,
     pub version: String,
     pub target: String,
@@ -374,7 +374,7 @@ pub async fn admin_package_handler(
 ) -> Json<AdminOk> {
     state
         .add_package(PackageEntry {
-            manufacturer: req.manufacturer,
+            manufacturer: req.publisher,
             name: req.name,
             version: req.version,
             target: req.target,
@@ -388,23 +388,23 @@ pub async fn admin_package_handler(
 #[derive(Debug, Serialize)]
 pub struct AdminStateSnapshot {
     pub realms: Vec<u32>,
-    pub mfrs: Vec<String>,
+    pub publishers: Vec<String>,
     pub packages: Vec<String>,
 }
 
 pub async fn admin_state_handler(State(state): State<Arc<MockState>>) -> Json<AdminStateSnapshot> {
     let realms: Vec<u32> = state.realms.read().await.keys().copied().collect();
-    let mfrs: Vec<String> = state.mfrs.read().await.keys().cloned().collect();
+    let publishers: Vec<String> = state.mfrs.read().await.keys().cloned().collect();
     let packages: Vec<String> = state
         .packages
         .read()
         .await
         .iter()
-        .map(|p| format!("{}:{}:{}@{}", p.manufacturer, p.name, p.version, p.target))
+        .map(|p| format!("{}/{}@{}#{}", p.manufacturer, p.name, p.version, p.target))
         .collect();
     Json(AdminStateSnapshot {
         realms,
-        mfrs,
+        publishers,
         packages,
     })
 }

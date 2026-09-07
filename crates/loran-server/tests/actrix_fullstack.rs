@@ -22,7 +22,8 @@ use std::{
 };
 use tokio::time::sleep;
 use tokio_tungstenite::{
-    MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message as WsMessage,
+    MaybeTlsStream, WebSocketStream, connect_async,
+    tungstenite::{Message as WsMessage, client::IntoClientRequest},
 };
 use uuid::Uuid;
 
@@ -42,6 +43,8 @@ struct ActrixHarness {
     #[allow(dead_code)]
     tmp: tempfile::TempDir,
     port: u16,
+    /// Dedicated Signer gRPC listener port (SGN-02).
+    signer_port: u16,
     log_path: PathBuf,
     data_dir: PathBuf,
     child: Child,
@@ -52,14 +55,19 @@ impl ActrixHarness {
     async fn start(token_ttl: u64) -> Self {
         let tmp = tempfile::tempdir().expect("temp dir");
         let port = choose_port();
-        let config_path = write_fullstack_config(tmp.path(), port, token_ttl);
+        let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, token_ttl);
         let log_path = tmp.path().join("actrix_fullstack.log");
         let data_dir = tmp.path().join("data");
         ensure_realm(&data_dir, 1001).await;
         let mut child = spawn_actrix(&config_path, &log_path);
 
         let base = format!("http://127.0.0.1:{port}");
-        wait_for_health(&format!("{base}/signer/health"), &mut child, &log_path).await;
+        wait_for_signer_ready(
+            &format!("http://127.0.0.1:{signer_port}"),
+            &mut child,
+            &log_path,
+        )
+        .await;
         wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
         wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
         ensure_realm(&data_dir, 1001).await;
@@ -67,6 +75,7 @@ impl ActrixHarness {
         Self {
             tmp,
             port,
+            signer_port,
             log_path,
             data_dir,
             child,
@@ -98,10 +107,14 @@ fn choose_port() -> u16 {
         .port()
 }
 
-fn write_fullstack_config(dir: &Path, port: u16, token_ttl_secs: u64) -> PathBuf {
+fn write_fullstack_config(dir: &Path, port: u16, token_ttl_secs: u64) -> (PathBuf, u16) {
     let data_dir = dir.join("data");
     fs::create_dir_all(&data_dir).expect("create data dir");
     let config_path = dir.join("config.toml");
+    // SGN-02: allocate an independent ephemeral port for the dedicated Signer
+    // gRPC listener so parallel test binaries cannot collide on the bind.http
+    // port + 1 default.
+    let signer_port = choose_port();
     let mut f = fs::File::create(&config_path).expect("create config file");
     writeln!(
         f,
@@ -112,6 +125,7 @@ env = "dev"
 sqlite_path = "{sqlite}"
 actrix_shared_key = "{shared}"
 location_tag = "local,test,fullstack"
+pid = "{pid}"
 
 [bind]
 [bind.http]
@@ -119,6 +133,12 @@ domain_name = "localhost"
 advertised_ip = "127.0.0.1"
 ip = "127.0.0.1"
 port = {port}
+
+[bind.signer]
+domain_name = "localhost"
+advertised_ip = "127.0.0.1"
+ip = "127.0.0.1"
+port = {signer_port}
 
 [bind.ice]
 advertised_ip = "127.0.0.1"
@@ -129,6 +149,7 @@ port = 0
 [turn]
 relay_port_range = "49152-65535"
 realm = "actrix.local"
+turn_secret = "fullstack-turn-secret-0123456789abcdef"
 
 [services.signer]
 [services.signer.storage]
@@ -147,22 +168,20 @@ renewal_token_secret = "{renewal_secret}"
 ws_path = "/signaling"
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
-
-[process]
-pid = "{pid}"
 "#,
         sqlite = data_dir.display(),
         shared = ACTRIX_SHARED_KEY,
         port = port,
+        signer_port = signer_port,
         token_ttl = token_ttl_secs,
         renewal_secret = RENEWAL_TOKEN_SECRET,
         pid = dir.join("actrix.pid").display()
     )
     .expect("write config");
-    config_path
+    (config_path, signer_port)
 }
 
 fn write_fullstack_config_with_rate_limits(
@@ -172,10 +191,12 @@ fn write_fullstack_config_with_rate_limits(
     max_concurrent_per_ip: u32,
     message_per_second: u32,
     message_burst_size: u32,
-) -> PathBuf {
+) -> (PathBuf, u16) {
     let data_dir = dir.join("data");
     fs::create_dir_all(&data_dir).expect("create data dir");
     let config_path = dir.join("config.toml");
+    // SGN-02: independent ephemeral port for the dedicated Signer listener.
+    let signer_port = choose_port();
     let mut f = fs::File::create(&config_path).expect("create config file");
     writeln!(
         f,
@@ -186,6 +207,7 @@ env = "dev"
 sqlite_path = "{sqlite}"
 actrix_shared_key = "{shared}"
 location_tag = "local,test,fullstack,ratelimit"
+pid = "{pid}"
 
 [bind]
 [bind.http]
@@ -193,6 +215,12 @@ domain_name = "localhost"
 advertised_ip = "127.0.0.1"
 ip = "127.0.0.1"
 port = {port}
+
+[bind.signer]
+domain_name = "localhost"
+advertised_ip = "127.0.0.1"
+ip = "127.0.0.1"
+port = {signer_port}
 
 [bind.ice]
 advertised_ip = "127.0.0.1"
@@ -203,6 +231,7 @@ port = 0
 [turn]
 relay_port_range = "49152-65535"
 realm = "actrix.local"
+turn_secret = "fullstack-turn-secret-0123456789abcdef"
 
 [services.signer]
 [services.signer.storage]
@@ -232,16 +261,14 @@ per_second = {message_per_second}
 burst_size = {message_burst}
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
-
-[process]
-pid = "{pid}"
 "#,
         sqlite = data_dir.display(),
         shared = ACTRIX_SHARED_KEY,
         port = port,
+        signer_port = signer_port,
         token_ttl = token_ttl_secs,
         renewal_secret = RENEWAL_TOKEN_SECRET,
         max_concurrent = max_concurrent_per_ip,
@@ -250,7 +277,7 @@ pid = "{pid}"
         pid = dir.join("actrix.pid").display()
     )
     .expect("write config");
-    config_path
+    (config_path, signer_port)
 }
 
 fn write_fullstack_config_with_ais_signer_endpoint(
@@ -258,10 +285,12 @@ fn write_fullstack_config_with_ais_signer_endpoint(
     port: u16,
     token_ttl_secs: u64,
     ais_signer_endpoint: &str,
-) -> PathBuf {
+) -> (PathBuf, u16) {
     let data_dir = dir.join("data");
     fs::create_dir_all(&data_dir).expect("create data dir");
     let config_path = dir.join("config.toml");
+    // SGN-02: independent ephemeral port for the dedicated Signer listener.
+    let signer_port = choose_port();
     let mut f = fs::File::create(&config_path).expect("create config file");
     writeln!(
         f,
@@ -272,6 +301,7 @@ env = "dev"
 sqlite_path = "{sqlite}"
 actrix_shared_key = "{shared}"
 location_tag = "local,test,fullstack,ais-dependency"
+pid = "{pid}"
 
 [bind]
 [bind.http]
@@ -279,6 +309,12 @@ domain_name = "localhost"
 advertised_ip = "127.0.0.1"
 ip = "127.0.0.1"
 port = {port}
+
+[bind.signer]
+domain_name = "localhost"
+advertised_ip = "127.0.0.1"
+ip = "127.0.0.1"
+port = {signer_port}
 
 [bind.ice]
 advertised_ip = "127.0.0.1"
@@ -289,6 +325,7 @@ port = 0
 [turn]
 relay_port_range = "49152-65535"
 realm = "actrix.local"
+turn_secret = "fullstack-turn-secret-0123456789abcdef"
 
 [services.signer]
 [services.signer.storage]
@@ -311,23 +348,21 @@ enable_tls = false
 ws_path = "/signaling"
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
-
-[process]
-pid = "{pid}"
 "#,
         sqlite = data_dir.display(),
         shared = ACTRIX_SHARED_KEY,
         port = port,
+        signer_port = signer_port,
         token_ttl = token_ttl_secs,
         renewal_secret = RENEWAL_TOKEN_SECRET,
         ais_signer_endpoint = ais_signer_endpoint,
         pid = dir.join("actrix.pid").display()
     )
     .expect("write config");
-    config_path
+    (config_path, signer_port)
 }
 
 #[allow(dead_code)]
@@ -345,6 +380,7 @@ env = "dev"
 sqlite_path = "{sqlite}"
 actrix_shared_key = "{shared}"
 location_tag = "local,test,fullstack,signaling-no-ais"
+pid = "{pid}"
 
 [bind]
 [bind.http]
@@ -378,12 +414,9 @@ endpoint = "http://127.0.0.1:1"
 timeout_seconds = 1
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
-
-[process]
-pid = "{pid}"
 "#,
         sqlite = data_dir.display(),
         shared = ACTRIX_SHARED_KEY,
@@ -497,11 +530,10 @@ async fn ais_register_http_with_secret(
     }
 }
 
-/// Connect WS with authentication parameters
-async fn connect_ws_authenticated(
+fn authenticated_ws_request(
     port: u16,
     ok: &register_response::RegisterOk,
-) -> (WsWrite, WsRead) {
+) -> tokio_tungstenite::tungstenite::http::Request<()> {
     let actor_id_str = ok.actr_id.to_string_repr();
     let claims_b64 = base64::engine::general_purpose::STANDARD.encode(&ok.credential.claims);
     let signature_b64 = base64::engine::general_purpose::STANDARD.encode(&ok.credential.signature);
@@ -514,11 +546,22 @@ async fn connect_ws_authenticated(
         urlencoding::encode(&claims_b64),
         urlencoding::encode(&signature_b64),
     );
-    let (ws_stream, _) = connect_async(&ws_url).await.expect("ws connect");
+    ws_url
+        .into_client_request()
+        .expect("valid WebSocket request")
+}
+
+/// Connect WS with authentication header
+async fn connect_ws_authenticated(
+    port: u16,
+    ok: &register_response::RegisterOk,
+) -> (WsWrite, WsRead) {
+    let request = authenticated_ws_request(port, ok);
+    let (ws_stream, _) = connect_async(request).await.expect("ws connect");
     ws_stream.split()
 }
 
-/// Bare WS connection without authentication (expected to be rejected - for negative testing only)
+/// Unauthenticated raw WS connection (expected to be rejected — negative test only)
 async fn connect_ws_raw(
     port: u16,
 ) -> Result<(WsWrite, WsRead), tokio_tungstenite::tungstenite::Error> {
@@ -592,16 +635,6 @@ async fn ws_register(
     ws_register_with_spec(port, manufacturer, name, acl, None).await
 }
 
-async fn ws_register_in_realm(
-    port: u16,
-    manufacturer: &str,
-    name: &str,
-    realm_id: u32,
-    acl: Option<Acl>,
-) -> (WsWrite, WsRead, register_response::RegisterOk) {
-    ws_register_in_realm_with_spec(port, manufacturer, name, realm_id, acl, None).await
-}
-
 async fn query_route_candidates(
     write: &mut WsWrite,
     read: &mut WsRead,
@@ -654,6 +687,124 @@ async fn query_route_candidates(
     }
 }
 
+async fn query_discovery_entries(
+    write: &mut WsWrite,
+    read: &mut WsRead,
+    source: &register_response::RegisterOk,
+    publisher: Option<&str>,
+) -> Vec<actr_protocol::discovery_response::TypeEntry> {
+    let request = actr_protocol::ActrToSignaling {
+        source: source.actr_id.clone(),
+        credential: source.credential.clone(),
+        payload: Some(actr_protocol::actr_to_signaling::Payload::DiscoveryRequest(
+            actr_protocol::DiscoveryRequest {
+                manufacturer: publisher.map(str::to_string),
+                limit: Some(64),
+            },
+        )),
+    };
+    send_envelope(
+        write,
+        make_envelope(signaling_envelope::Flow::ActrToServer(request)),
+    )
+    .await;
+
+    let response = recv_envelope(read).await;
+    match response.flow {
+        Some(signaling_envelope::Flow::ServerToActr(server_msg)) => match server_msg.payload {
+            Some(signaling_to_actr::Payload::DiscoveryResponse(response)) => {
+                match response.result {
+                    Some(actr_protocol::discovery_response::Result::Success(ok)) => ok.entries,
+                    other => panic!("unexpected discovery result {other:?}"),
+                }
+            }
+            other => panic!("unexpected discovery payload {other:?}"),
+        },
+        other => panic!("unexpected discovery flow {other:?}"),
+    }
+}
+
+async fn query_service_spec_result(
+    write: &mut WsWrite,
+    read: &mut WsRead,
+    source: &register_response::RegisterOk,
+    name: &str,
+) -> actr_protocol::get_service_spec_response::Result {
+    let request = actr_protocol::ActrToSignaling {
+        source: source.actr_id.clone(),
+        credential: source.credential.clone(),
+        payload: Some(
+            actr_protocol::actr_to_signaling::Payload::GetServiceSpecRequest(
+                actr_protocol::GetServiceSpecRequest {
+                    name: name.to_string(),
+                },
+            ),
+        ),
+    };
+    send_envelope(
+        write,
+        make_envelope(signaling_envelope::Flow::ActrToServer(request)),
+    )
+    .await;
+
+    let response = recv_envelope(read).await;
+    match response.flow {
+        Some(signaling_envelope::Flow::ServerToActr(server_msg)) => match server_msg.payload {
+            Some(signaling_to_actr::Payload::GetServiceSpecResponse(response)) => {
+                response.result.expect("service spec result missing")
+            }
+            other => panic!("unexpected service spec payload {other:?}"),
+        },
+        other => panic!("unexpected service spec flow {other:?}"),
+    }
+}
+
+async fn query_service_spec(
+    write: &mut WsWrite,
+    read: &mut WsRead,
+    source: &register_response::RegisterOk,
+    name: &str,
+) -> actr_protocol::ServiceSpec {
+    match query_service_spec_result(write, read, source, name).await {
+        actr_protocol::get_service_spec_response::Result::Success(spec) => spec,
+        other => panic!("unexpected service spec result {other:?}"),
+    }
+}
+
+async fn ping_and_wait_for_pong(
+    write: &mut WsWrite,
+    read: &mut WsRead,
+    source: &register_response::RegisterOk,
+) {
+    let ping = actr_protocol::ActrToSignaling {
+        source: source.actr_id.clone(),
+        credential: source.credential.clone(),
+        payload: Some(actr_protocol::actr_to_signaling::Payload::Ping(
+            actr_protocol::Ping {
+                availability: 0,
+                power_reserve: 1.0,
+                mailbox_backlog: 0.0,
+                sticky_client_ids: vec![],
+            },
+        )),
+    };
+    send_envelope(
+        write,
+        make_envelope(signaling_envelope::Flow::ActrToServer(ping)),
+    )
+    .await;
+
+    let response = recv_envelope(read).await;
+    match response.flow {
+        Some(signaling_envelope::Flow::ServerToActr(server_msg))
+            if matches!(
+                server_msg.payload,
+                Some(signaling_to_actr::Payload::Pong(_))
+            ) => {}
+        other => panic!("expected Pong, got {other:?}"),
+    }
+}
+
 fn make_service_spec(
     fingerprint: &str,
     package: &str,
@@ -676,39 +827,13 @@ fn make_service_spec(
 async fn wait_for_health(url: &str, child: &mut Child, log_path: &Path) {
     let client = reqwest::Client::new();
     let start = Instant::now();
-    let is_signer_health = url.ends_with("/signer/health");
-    let ks_grpc_endpoint = if is_signer_health {
-        Some(url.trim_end_matches("/signer/health").to_string())
-    } else {
-        None
-    };
     loop {
         if let Some(status) = child.try_wait().unwrap_or(None) {
             let log = fs::read_to_string(log_path).unwrap_or_default();
             panic!("actrix exited early: status={status:?}\nlogs:\n{log}");
         }
 
-        if is_signer_health {
-            let config = GrpcClientConfig {
-                endpoint: ks_grpc_endpoint
-                    .as_ref()
-                    .expect("ks grpc endpoint should exist")
-                    .clone(),
-                actrix_shared_key: ACTRIX_SHARED_KEY.to_string(),
-                timeout_seconds: 2,
-                enable_tls: false,
-                tls_domain: None,
-                ca_cert: None,
-                client_cert: None,
-                client_key: None,
-            };
-            if let Ok(mut grpc) = GrpcClient::new(&config).await
-                && let Ok(status) = grpc.health_check().await
-                && status == "healthy"
-            {
-                return;
-            }
-        } else if let Ok(resp) = client.get(url).send().await
+        if let Ok(resp) = client.get(url).send().await
             && resp.status().is_success()
         {
             return;
@@ -716,6 +841,42 @@ async fn wait_for_health(url: &str, child: &mut Child, log_path: &Path) {
         if start.elapsed() > START_TIMEOUT {
             let log = fs::read_to_string(log_path).unwrap_or_default();
             panic!("health check not ready at {}\nlogs:\n{}", url, log);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Wait until the Signer gRPC service is healthy on its dedicated listener
+/// (SGN-02). The Signer signing oracle is served on its own port, not the
+/// shared HTTP base, so its readiness is probed with an authenticated gRPC
+/// health check against `grpc_endpoint` (e.g. `http://127.0.0.1:{signer_port}`).
+async fn wait_for_signer_ready(grpc_endpoint: &str, child: &mut Child, log_path: &Path) {
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().unwrap_or(None) {
+            let log = fs::read_to_string(log_path).unwrap_or_default();
+            panic!("actrix exited early: status={status:?}\nlogs:\n{log}");
+        }
+
+        let config = GrpcClientConfig {
+            endpoint: grpc_endpoint.to_string(),
+            actrix_shared_key: ACTRIX_SHARED_KEY.to_string(),
+            timeout_seconds: 2,
+            enable_tls: false,
+            tls_domain: None,
+            ca_cert: None,
+            client_cert: None,
+            client_key: None,
+        };
+        if let Ok(mut grpc) = GrpcClient::new(&config).await
+            && let Ok(status) = grpc.health_check().await
+            && status == "healthy"
+        {
+            return;
+        }
+        if start.elapsed() > START_TIMEOUT {
+            let log = fs::read_to_string(log_path).unwrap_or_default();
+            panic!("signer gRPC not ready at {}\nlogs:\n{}", grpc_endpoint, log);
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -752,21 +913,17 @@ async fn actrix_end_to_end_register_and_health() {
     let signaling_health = format!("{base}/signaling/health");
 
     let log_path = harness.log_path().to_path_buf();
-    wait_for_health(
-        &format!("{base}/signer/health"),
-        &mut harness.child,
-        &log_path,
-    )
-    .await;
+    let signer_endpoint = format!("http://127.0.0.1:{}", harness.signer_port);
+    wait_for_signer_ready(&signer_endpoint, &mut harness.child, &log_path).await;
     wait_for_health(&ais_health, &mut harness.child, &log_path).await;
     wait_for_health(&signaling_health, &mut harness.child, &log_path).await;
     ensure_realm(&harness.data_dir, 1001).await;
 
     let client = reqwest::Client::new();
 
-    // KS health via authenticated gRPC call
+    // Signer health via authenticated gRPC call on the dedicated listener
     let mut ks_client = GrpcClient::new(&GrpcClientConfig {
-        endpoint: base.clone(),
+        endpoint: signer_endpoint.clone(),
         actrix_shared_key: ACTRIX_SHARED_KEY.to_string(),
         timeout_seconds: 5,
         enable_tls: false,
@@ -847,7 +1004,7 @@ async fn actrix_end_to_end_register_and_health() {
     AIdCredentialValidator::init(&harness.data_dir)
         .await
         .expect("validator init");
-    let (claims, _) = AIdCredentialValidator::check(&ok.credential, 1001)
+    let (claims, _) = AIdCredentialValidator::check(&ok.credential, 1001, "actr.signaling")
         .await
         .expect("validate credential");
     assert_eq!(claims.realm_id, 1001);
@@ -1104,7 +1261,7 @@ async fn ais_register_rejects_non_preprovisioned_realm() {
 
 #[tokio::test]
 #[serial]
-async fn ais_rotate_key_updates_current_key_endpoint() {
+async fn ais_does_not_expose_public_key_rotation() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
     let client = reqwest::Client::new();
     let base = harness.base_url();
@@ -1331,7 +1488,7 @@ async fn ais_register_enforces_realm_secret_when_configured() {
 async fn ais_health_and_endpoints_degrade_when_ks_dependency_is_unreachable() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
-    let config_path = write_fullstack_config_with_ais_signer_endpoint(
+    let (config_path, signer_port) = write_fullstack_config_with_ais_signer_endpoint(
         tmp.path(),
         port,
         DEFAULT_TOKEN_TTL,
@@ -1342,10 +1499,15 @@ async fn ais_health_and_endpoints_degrade_when_ks_dependency_is_unreachable() {
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
-    wait_for_health(&format!("{base}/signer/health"), &mut child, &log_path).await;
+    wait_for_signer_ready(
+        &format!("http://127.0.0.1:{signer_port}"),
+        &mut child,
+        &log_path,
+    )
+    .await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
 
-    // With lazy KS connection, AIS routes are mounted but degrade at runtime
+    // With lazy Signer connection, AIS routes are mounted but degrade at runtime
     let client = reqwest::Client::new();
     let ais_health = client
         .get(format!("{base}/ais/health"))
@@ -1356,7 +1518,7 @@ async fn ais_health_and_endpoints_degrade_when_ks_dependency_is_unreachable() {
     let body: serde_json::Value = ais_health.json().await.expect("health json");
     assert_eq!(
         body["status"], "degraded",
-        "AIS should report degraded when KS is unreachable"
+        "AIS should report degraded when Signer is unreachable"
     );
     assert_eq!(body["ks_service"], "failed");
 
@@ -1391,7 +1553,7 @@ async fn ais_health_and_endpoints_degrade_when_ks_dependency_is_unreachable() {
     let resp = RegisterResponse::decode(resp_bytes).expect("decode register response");
     assert!(
         matches!(resp.result, Some(register_response::Result::Error(_))),
-        "AIS register should return protobuf error when KS is unreachable, got {:?}",
+        "AIS register should return protobuf error when Signer is unreachable, got {:?}",
         resp.result
     );
 
@@ -1403,7 +1565,7 @@ async fn ais_health_and_endpoints_degrade_when_ks_dependency_is_unreachable() {
 async fn signaling_rejects_unauthenticated_ws_connection() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
 
-    // Bare connection without credentials should be rejected (401 Unauthorized -> WS upgrade fails)
+    // Unauthenticated raw connection should be rejected (401 Unauthorized → WS upgrade failure)
     let result = connect_ws_raw(harness.port).await;
     assert!(
         result.is_err(),
@@ -1415,29 +1577,16 @@ async fn signaling_rejects_unauthenticated_ws_connection() {
 
 #[tokio::test]
 #[serial]
-async fn signaling_url_identity_reconnect_replaces_stale_connection() {
+async fn signaling_handshake_identity_reconnect_replaces_stale_connection() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
 
     let (mut old_write, mut old_read, register_ok) =
         ws_register(harness.port, "acme", "url-id", None).await;
 
-    let actor_id = register_ok.actr_id.to_string_repr();
-    let signature_b64 =
-        base64::engine::general_purpose::STANDARD.encode(&register_ok.credential.signature);
-    let claims_b64 =
-        base64::engine::general_purpose::STANDARD.encode(&register_ok.credential.claims);
-    let ws_url = format!(
-        "ws://127.0.0.1:{}/signaling/ws?actor_id={}&key_id={}&claims={}&signature={}",
-        harness.port,
-        urlencoding::encode(&actor_id),
-        register_ok.credential.key_id,
-        urlencoding::encode(&claims_b64),
-        urlencoding::encode(&signature_b64),
-    );
-
-    let (reconnect_stream, _) = connect_async(&ws_url)
+    let request = authenticated_ws_request(harness.port, &register_ok);
+    let (reconnect_stream, _) = connect_async(request)
         .await
-        .expect("reconnect with url identity");
+        .expect("reconnect with handshake identity");
     let (mut new_write, mut new_read) = reconnect_stream.split();
 
     let new_ping = actr_protocol::ActrToSignaling {
@@ -1650,14 +1799,19 @@ async fn signaling_actr_payload_none_and_invalid_realm_are_rejected_safely() {
 async fn signaling_connection_rate_limit_rejects_second_concurrent_connection() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
-    let config_path =
+    let (config_path, signer_port) =
         write_fullstack_config_with_rate_limits(tmp.path(), port, DEFAULT_TOKEN_TTL, 1, 50, 50);
     let log_path = tmp.path().join("actrix_fullstack_ratelimit_conn.log");
     ensure_realm(&tmp.path().join("data"), 1001).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
-    wait_for_health(&format!("{base}/signer/health"), &mut child, &log_path).await;
+    wait_for_signer_ready(
+        &format!("http://127.0.0.1:{signer_port}"),
+        &mut child,
+        &log_path,
+    )
+    .await;
     wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
 
@@ -1669,17 +1823,7 @@ async fn signaling_connection_rate_limit_rejects_second_concurrent_connection() 
     let (_first_write, _first_read) = connect_ws_authenticated(port, &ok1).await;
 
     // Second connection should be rejected by concurrent limit
-    let actor_id_str = ok2.actr_id.to_string_repr();
-    let signature_b64 = base64::engine::general_purpose::STANDARD.encode(&ok2.credential.signature);
-    let claims_b64_2 = base64::engine::general_purpose::STANDARD.encode(&ok2.credential.claims);
-    let ws_url2 = format!(
-        "ws://127.0.0.1:{port}/signaling/ws?actor_id={}&key_id={}&claims={}&signature={}",
-        urlencoding::encode(&actor_id_str),
-        ok2.credential.key_id,
-        urlencoding::encode(&claims_b64_2),
-        urlencoding::encode(&signature_b64),
-    );
-    let second = connect_async(&ws_url2).await;
+    let second = connect_async(authenticated_ws_request(port, &ok2)).await;
     match second {
         Err(tokio_tungstenite::tungstenite::Error::Http(resp)) => {
             assert_eq!(
@@ -1700,14 +1844,19 @@ async fn signaling_connection_rate_limit_rejects_second_concurrent_connection() 
 async fn signaling_message_rate_limit_returns_envelope_error() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
-    let config_path =
+    let (config_path, signer_port) =
         write_fullstack_config_with_rate_limits(tmp.path(), port, DEFAULT_TOKEN_TTL, 20, 1, 1);
     let log_path = tmp.path().join("actrix_fullstack_ratelimit_msg.log");
     ensure_realm(&tmp.path().join("data"), 1001).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
-    wait_for_health(&format!("{base}/signer/health"), &mut child, &log_path).await;
+    wait_for_signer_ready(
+        &format!("http://127.0.0.1:{signer_port}"),
+        &mut child,
+        &log_path,
+    )
+    .await;
     wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
 
@@ -1761,13 +1910,18 @@ async fn signaling_message_rate_limit_returns_envelope_error() {
 async fn signaling_register_and_discovery_acl_allow() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
-    let config_path = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
+    let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
     let log_path = tmp.path().join("actrix_fullstack.log");
     ensure_realm(&tmp.path().join("data"), 1001).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
-    wait_for_health(&format!("{base}/signer/health"), &mut child, &log_path).await;
+    wait_for_signer_ready(
+        &format!("http://127.0.0.1:{signer_port}"),
+        &mut child,
+        &log_path,
+    )
+    .await;
     wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
     ensure_realm(&tmp.path().join("data"), 1001).await;
@@ -1831,13 +1985,18 @@ async fn signaling_register_and_discovery_acl_allow() {
 async fn signaling_discovery_acl_denied() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
-    let config_path = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
+    let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
     let log_path = tmp.path().join("actrix_fullstack.log");
     ensure_realm(&tmp.path().join("data"), 1001).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
-    wait_for_health(&format!("{base}/signer/health"), &mut child, &log_path).await;
+    wait_for_signer_ready(
+        &format!("http://127.0.0.1:{signer_port}"),
+        &mut child,
+        &log_path,
+    )
+    .await;
     wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
     ensure_realm(&tmp.path().join("data"), 1001).await;
@@ -1884,217 +2043,21 @@ async fn signaling_discovery_acl_denied() {
 
 #[tokio::test]
 #[serial]
-async fn signaling_discovery_cross_realm_isolated() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
-    ensure_realm(&harness.data_dir, 2002).await;
-
-    let (_service_write, _service_read, _service_ok) =
-        ws_register_in_realm(harness.port, "acme", "svc-cross-realm", 2002, None).await;
-    let (mut client_write, mut client_read, client_ok) =
-        ws_register_in_realm(harness.port, "acme", "client", 1001, None).await;
-
-    let discover = actr_protocol::ActrToSignaling {
-        source: client_ok.actr_id.clone(),
-        credential: client_ok.credential.clone(),
-        payload: Some(actr_protocol::actr_to_signaling::Payload::DiscoveryRequest(
-            actr_protocol::DiscoveryRequest {
-                manufacturer: Some("acme".into()),
-                limit: Some(10),
-            },
-        )),
-    };
-
-    send_envelope(
-        &mut client_write,
-        make_envelope(signaling_envelope::Flow::ActrToServer(discover)),
-    )
-    .await;
-
-    let resp = recv_envelope(&mut client_read).await;
-    match resp.flow {
-        Some(signaling_envelope::Flow::ServerToActr(server_msg)) => match server_msg.payload {
-            Some(signaling_to_actr::Payload::DiscoveryResponse(rsp)) => match rsp.result {
-                Some(actr_protocol::discovery_response::Result::Success(ok)) => {
-                    assert!(
-                        ok.entries.is_empty(),
-                        "cross-realm service should not appear in discovery results"
-                    );
-                }
-                other => panic!("unexpected discovery result {other:?}"),
-            },
-            other => panic!("unexpected payload {other:?}"),
-        },
-        other => panic!("unexpected flow {other:?}"),
-    }
-
-    let _ = client_write.send(WsMessage::Close(None)).await;
-    harness.shutdown();
-}
-
-#[tokio::test]
-#[serial]
-async fn signaling_discovery_cross_realm_acl_allow() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
-    ensure_realm(&harness.data_dir, 2002).await;
-
-    let service_acl = Acl {
-        rules: vec![AclRule {
-            permission: Permission::Allow as i32,
-            from_type: ActrType {
-                manufacturer: "acme".into(),
-                name: "client".into(),
-                version: "1.0.0".to_string(),
-            },
-            source_realm: Some(SourceRealm::RealmId(1001)),
-        }],
-    };
-
-    let (_service_write, _service_read, _service_ok) = ws_register_in_realm(
-        harness.port,
-        "acme",
-        "svc-cross-realm",
-        2002,
-        Some(service_acl),
-    )
-    .await;
-    let (mut client_write, mut client_read, client_ok) =
-        ws_register_in_realm(harness.port, "acme", "client", 1001, None).await;
-
-    let discover = actr_protocol::ActrToSignaling {
-        source: client_ok.actr_id.clone(),
-        credential: client_ok.credential.clone(),
-        payload: Some(actr_protocol::actr_to_signaling::Payload::DiscoveryRequest(
-            actr_protocol::DiscoveryRequest {
-                manufacturer: Some("acme".into()),
-                limit: Some(10),
-            },
-        )),
-    };
-
-    send_envelope(
-        &mut client_write,
-        make_envelope(signaling_envelope::Flow::ActrToServer(discover)),
-    )
-    .await;
-
-    let resp = recv_envelope(&mut client_read).await;
-    match resp.flow {
-        Some(signaling_envelope::Flow::ServerToActr(server_msg)) => match server_msg.payload {
-            Some(signaling_to_actr::Payload::DiscoveryResponse(rsp)) => match rsp.result {
-                Some(actr_protocol::discovery_response::Result::Success(ok)) => {
-                    assert!(
-                        !ok.entries.is_empty(),
-                        "cross-realm ACL allow should expose service in discovery"
-                    );
-                    assert!(
-                        ok.entries.iter().any(|entry| {
-                            entry.actr_type.manufacturer == "acme"
-                                && entry.actr_type.name == "svc-cross-realm"
-                        }),
-                        "expected cross-realm service entry"
-                    );
-                }
-                other => panic!("unexpected discovery result {other:?}"),
-            },
-            other => panic!("unexpected payload {other:?}"),
-        },
-        other => panic!("unexpected flow {other:?}"),
-    }
-
-    let _ = client_write.send(WsMessage::Close(None)).await;
-    harness.shutdown();
-}
-
-#[tokio::test]
-#[serial]
-async fn signaling_route_candidates_cross_realm_isolated() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
-    ensure_realm(&harness.data_dir, 2002).await;
-
-    let (_service_write, _service_read, _service_ok) =
-        ws_register_in_realm(harness.port, "acme", "svc-cross-route", 2002, None).await;
-
-    let (mut client_write, mut client_read, client_ok) =
-        ws_register_in_realm(harness.port, "acme", "client", 1001, None).await;
-
-    let candidates = query_route_candidates(
-        &mut client_write,
-        &mut client_read,
-        &client_ok,
-        "acme",
-        "svc-cross-route",
-    )
-    .await;
-    assert!(
-        candidates.is_empty(),
-        "route candidates should not include cross-realm actors"
-    );
-
-    let _ = client_write.send(WsMessage::Close(None)).await;
-    harness.shutdown();
-}
-
-#[tokio::test]
-#[serial]
-async fn signaling_route_candidates_cross_realm_acl_allow() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
-    ensure_realm(&harness.data_dir, 2002).await;
-
-    let service_acl = Acl {
-        rules: vec![AclRule {
-            permission: Permission::Allow as i32,
-            from_type: ActrType {
-                manufacturer: "acme".into(),
-                name: "client".into(),
-                version: "1.0.0".to_string(),
-            },
-            source_realm: Some(SourceRealm::RealmId(1001)),
-        }],
-    };
-
-    let (_service_write, _service_read, service_ok) = ws_register_in_realm(
-        harness.port,
-        "acme",
-        "svc-cross-route",
-        2002,
-        Some(service_acl),
-    )
-    .await;
-
-    let (mut client_write, mut client_read, client_ok) =
-        ws_register_in_realm(harness.port, "acme", "client", 1001, None).await;
-
-    let candidates = query_route_candidates(
-        &mut client_write,
-        &mut client_read,
-        &client_ok,
-        "acme",
-        "svc-cross-route",
-    )
-    .await;
-    assert!(
-        candidates
-            .iter()
-            .any(|candidate| candidate.serial_number == service_ok.actr_id.serial_number),
-        "cross-realm ACL allow should include route candidate"
-    );
-
-    let _ = client_write.send(WsMessage::Close(None)).await;
-    harness.shutdown();
-}
-
-#[tokio::test]
-#[serial]
 async fn signaling_rejects_expired_credential() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
-    let config_path = write_fullstack_config(tmp.path(), port, 1);
+    let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, 1);
     let log_path = tmp.path().join("actrix_fullstack.log");
     ensure_realm(&tmp.path().join("data"), 1001).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
-    wait_for_health(&format!("{base}/signer/health"), &mut child, &log_path).await;
+    wait_for_signer_ready(
+        &format!("http://127.0.0.1:{signer_port}"),
+        &mut child,
+        &log_path,
+    )
+    .await;
     wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
     ensure_realm(&tmp.path().join("data"), 1001).await;
@@ -2139,13 +2102,18 @@ async fn signaling_rejects_expired_credential() {
 async fn signaling_route_candidates_with_acl() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
-    let config_path = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
+    let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
     let log_path = tmp.path().join("actrix_fullstack.log");
     ensure_realm(&tmp.path().join("data"), 1001).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
-    wait_for_health(&format!("{base}/signer/health"), &mut child, &log_path).await;
+    wait_for_signer_ready(
+        &format!("http://127.0.0.1:{signer_port}"),
+        &mut child,
+        &log_path,
+    )
+    .await;
     wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
     ensure_realm(&tmp.path().join("data"), 1001).await;
@@ -2225,13 +2193,18 @@ async fn signaling_route_candidates_with_acl() {
 async fn signaling_route_candidates_acl_denied() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
-    let config_path = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
+    let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
     let log_path = tmp.path().join("actrix_fullstack.log");
     ensure_realm(&tmp.path().join("data"), 1001).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
-    wait_for_health(&format!("{base}/signer/health"), &mut child, &log_path).await;
+    wait_for_signer_ready(
+        &format!("http://127.0.0.1:{signer_port}"),
+        &mut child,
+        &log_path,
+    )
+    .await;
     wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
     ensure_realm(&tmp.path().join("data"), 1001).await;
@@ -2538,13 +2511,18 @@ async fn signaling_route_candidates_prefers_exact_fingerprint() {
 async fn signaling_get_service_spec_returns_spec() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
-    let config_path = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
+    let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
     let log_path = tmp.path().join("actrix_fullstack.log");
     ensure_realm(&tmp.path().join("data"), 1001).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
-    wait_for_health(&format!("{base}/signer/health"), &mut child, &log_path).await;
+    wait_for_signer_ready(
+        &format!("http://127.0.0.1:{signer_port}"),
+        &mut child,
+        &log_path,
+    )
+    .await;
     wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
     ensure_realm(&tmp.path().join("data"), 1001).await;
@@ -3088,13 +3066,18 @@ async fn signaling_concurrent_registration_keeps_unique_route_candidates() {
 async fn signaling_actr_relay_role_assignment() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
-    let config_path = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
+    let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
     let log_path = tmp.path().join("actrix_fullstack.log");
     ensure_realm(&tmp.path().join("data"), 1001).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
-    wait_for_health(&format!("{base}/signer/health"), &mut child, &log_path).await;
+    wait_for_signer_ready(
+        &format!("http://127.0.0.1:{signer_port}"),
+        &mut child,
+        &log_path,
+    )
+    .await;
     wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
     ensure_realm(&tmp.path().join("data"), 1001).await;
@@ -3200,16 +3183,17 @@ async fn signaling_rejects_register_request_via_ws() {
 
     match resp.flow {
         Some(signaling_envelope::Flow::ServerToActr(server_msg)) => match server_msg.payload {
-            Some(signaling_to_actr::Payload::RegisterResponse(RegisterResponse {
-                result: Some(register_response::Result::Error(err)),
-            })) => {
-                assert_eq!(err.code, 410, "WS register should return 410 Gone");
-                assert!(
-                    err.message.contains("/ais/register"),
-                    "error should direct to AIS HTTP, got: {}",
-                    err.message,
-                );
-            }
+            Some(signaling_to_actr::Payload::RegisterResponse(response)) => match response.result {
+                Some(register_response::Result::Error(err)) => {
+                    assert_eq!(err.code, 410, "WS register should return 410 Gone");
+                    assert!(
+                        err.message.contains("/ais/register"),
+                        "error should direct to AIS HTTP, got: {}",
+                        err.message,
+                    );
+                }
+                other => panic!("expected register error, got {other:?}"),
+            },
             other => panic!("expected register error, got {other:?}"),
         },
         other => panic!("unexpected flow {other:?}"),
@@ -3350,55 +3334,6 @@ async fn signaling_unregister_removes_actor_from_route_candidates() {
     }
 
     let _ = cli_w.send(WsMessage::Close(None)).await;
-    harness.shutdown();
-}
-
-#[tokio::test]
-#[serial]
-async fn signaling_relay_cross_realm_is_denied() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
-    let port = harness.port;
-
-    ensure_realm(&harness.data_dir, 1002).await;
-
-    let (mut src_w, mut src_r, src_ok) = ws_register(port, "acme", "relay-src", None).await;
-    let (_dst_w, _dst_r, dst_ok) =
-        ws_register_in_realm(port, "acme", "relay-dst", 1002, None).await;
-
-    let relay = ActrRelay {
-        source: src_ok.actr_id.clone(),
-        credential: src_ok.credential.clone(),
-        target: dst_ok.actr_id.clone(),
-        delivery_context: None,
-        payload: Some(actr_relay::Payload::RoleNegotiation(RoleNegotiation {
-            from: src_ok.actr_id.clone(),
-            to: dst_ok.actr_id.clone(),
-            realm_id: src_ok.actr_id.realm.realm_id,
-        })),
-    };
-    send_envelope(
-        &mut src_w,
-        make_envelope(signaling_envelope::Flow::ActrRelay(relay)),
-    )
-    .await;
-
-    let resp = recv_envelope(&mut src_r).await;
-    match resp.flow {
-        Some(signaling_envelope::Flow::ServerToActr(server_msg)) => match server_msg.payload {
-            Some(signaling_to_actr::Payload::Error(err)) => {
-                assert_eq!(err.code, 403, "cross-realm relay should be denied");
-                assert!(
-                    err.message.contains("ACL policy denies relay")
-                        || err.message.contains("Cross-realm relay is not allowed"),
-                    "unexpected relay deny message: {}",
-                    err.message
-                );
-            }
-            other => panic!("expected relay error, got {other:?}"),
-        },
-        other => panic!("unexpected flow {other:?}"),
-    }
-
     harness.shutdown();
 }
 
@@ -3795,14 +3730,19 @@ async fn service_registry_persists_across_restart() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let data_dir = tmp.path().join("data");
     let port = choose_port();
-    let config_path = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
+    let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
     let log_path = tmp.path().join("actrix_persist.log");
     ensure_realm(&data_dir, 1001).await;
 
     // first run: register a service
     let mut child = spawn_actrix(&config_path, &log_path);
     let base = format!("http://127.0.0.1:{port}");
-    wait_for_health(&format!("{base}/signer/health"), &mut child, &log_path).await;
+    wait_for_signer_ready(
+        &format!("http://127.0.0.1:{signer_port}"),
+        &mut child,
+        &log_path,
+    )
+    .await;
     wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
     ensure_realm(&data_dir, 1001).await;
@@ -3818,111 +3758,181 @@ async fn service_registry_persists_across_restart() {
             source_realm: Some(SourceRealm::RealmId(1001)),
         }],
     };
-    let (_svc_w, _svc_r, svc_ok) = ws_register(port, "acme", "svc", Some(acl)).await;
-    sleep(Duration::from_millis(100)).await;
+    let spec = make_service_spec(
+        "fp-persisted",
+        "persisted.v1",
+        r#"syntax = "proto3";
+            package persisted.v1;
+            message Ping { string msg = 1; }"#,
+    );
+    let (_svc_w, _svc_r, svc_ok) =
+        ws_register_with_spec(port, "acme", "svc", Some(acl), Some(spec.clone())).await;
 
     // Verify discovery before restart
     let (mut cli_w1, mut cli_r1, cli_ok1) = ws_register(port, "acme", "client", None).await;
-    let discover1 = actr_protocol::ActrToSignaling {
-        source: cli_ok1.actr_id.clone(),
-        credential: cli_ok1.credential.clone(),
-        payload: Some(actr_protocol::actr_to_signaling::Payload::DiscoveryRequest(
-            actr_protocol::DiscoveryRequest {
-                manufacturer: Some("acme".into()),
-                limit: Some(10),
-            },
-        )),
-    };
-    send_envelope(
-        &mut cli_w1,
-        make_envelope(signaling_envelope::Flow::ActrToServer(discover1)),
-    )
-    .await;
-    let resp1 = recv_envelope(&mut cli_r1).await;
-    let mut has_before = false;
-    if let Some(signaling_envelope::Flow::ServerToActr(server_msg)) = resp1.flow
-        && let Some(signaling_to_actr::Payload::DiscoveryResponse(rsp)) = server_msg.payload
-        && let Some(actr_protocol::discovery_response::Result::Success(ok)) = rsp.result
-    {
-        has_before = ok
-            .entries
+    let entries_before =
+        query_discovery_entries(&mut cli_w1, &mut cli_r1, &cli_ok1, Some("acme")).await;
+    assert!(
+        entries_before
             .iter()
-            .any(|e| e.actr_type == svc_ok.actr_id.r#type);
-    }
-    assert!(has_before, "service should be discoverable before restart");
+            .any(|entry| entry.actr_type == svc_ok.actr_id.r#type),
+        "service should be discoverable before restart"
+    );
     graceful_shutdown(child);
 
-    // second run: same data_dir, discovery should restore service from cache
+    // Second run: the cache restores identity and ServiceSpec metadata, but a
+    // disconnected Actor must stay out of network discovery and routing.
     let log_path2 = tmp.path().join("actrix_persist2.log");
     let mut child2 = spawn_actrix(&config_path, &log_path2);
-    wait_for_health(&format!("{base}/signer/health"), &mut child2, &log_path2).await;
+    wait_for_signer_ready(
+        &format!("http://127.0.0.1:{signer_port}"),
+        &mut child2,
+        &log_path2,
+    )
+    .await;
     wait_for_health(&format!("{base}/ais/health"), &mut child2, &log_path2).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child2, &log_path2).await;
     ensure_realm(&data_dir, 1001).await;
-    sleep(Duration::from_millis(200)).await;
-
-    // register client
-    // Since ACL is in SQLite without wait-for-fsync or WAL checkpointing might be flaky,
-    // re-apply the ACL explicitly so the restored route works.
-    let acl = Acl {
-        rules: vec![AclRule {
-            permission: Permission::Allow as i32,
-            from_type: ActrType {
-                manufacturer: "acme".into(),
-                name: "client".into(),
-                version: "1.0.0".to_string(),
-            },
-            source_realm: Some(SourceRealm::RealmId(1001)),
-        }],
-    };
-    ais_register_http(&base, 1001, "acme", "svc", None, Some(acl)).await;
 
     let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "acme", "client", None).await;
+    let entries_while_offline =
+        query_discovery_entries(&mut cli_w, &mut cli_r, &cli_ok, Some("acme")).await;
+    assert!(
+        !entries_while_offline
+            .iter()
+            .any(|entry| entry.actr_type == svc_ok.actr_id.r#type),
+        "persisted metadata must not advertise a disconnected service"
+    );
+    let routes_while_offline =
+        query_route_candidates(&mut cli_w, &mut cli_r, &cli_ok, "acme", "svc").await;
+    assert!(
+        routes_while_offline.is_empty(),
+        "persisted metadata must not create an offline route candidate"
+    );
 
-    let discover = actr_protocol::ActrToSignaling {
-        source: cli_ok.actr_id.clone(),
-        credential: cli_ok.credential.clone(),
-        payload: Some(actr_protocol::actr_to_signaling::Payload::DiscoveryRequest(
-            actr_protocol::DiscoveryRequest {
-                manufacturer: Some("acme".into()),
-                limit: Some(10),
-            },
-        )),
-    };
-    send_envelope(
-        &mut cli_w,
-        make_envelope(signaling_envelope::Flow::ActrToServer(discover)),
+    let restored_spec = query_service_spec(&mut cli_w, &mut cli_r, &cli_ok, &spec.name).await;
+    assert_eq!(restored_spec.fingerprint, spec.fingerprint);
+
+    // Reconnect with the original Actor identity and credential. A Pong proves
+    // the authenticated connection completed registry activation.
+    let (mut svc_w2, mut svc_r2) = connect_ws_authenticated(port, &svc_ok).await;
+    ping_and_wait_for_pong(&mut svc_w2, &mut svc_r2, &svc_ok).await;
+
+    let entries_after_reconnect =
+        query_discovery_entries(&mut cli_w, &mut cli_r, &cli_ok, Some("acme")).await;
+    assert!(
+        entries_after_reconnect
+            .iter()
+            .any(|entry| entry.actr_type == svc_ok.actr_id.r#type),
+        "the original service should become discoverable after reconnect"
+    );
+    let routes_after_reconnect =
+        query_route_candidates(&mut cli_w, &mut cli_r, &cli_ok, "acme", "svc").await;
+    assert!(
+        routes_after_reconnect
+            .iter()
+            .any(|candidate| candidate == &svc_ok.actr_id),
+        "the reconnected service should retain and route to its original Actor ID"
+    );
+
+    let _ = svc_w2.send(WsMessage::Close(None)).await;
+    let _ = cli_w.send(WsMessage::Close(None)).await;
+    graceful_shutdown(child2);
+}
+
+#[tokio::test]
+#[serial]
+async fn service_unregister_success_is_durable_across_restart() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let data_dir = tmp.path().join("data");
+    let port = choose_port();
+    let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
+    let log_path = tmp.path().join("actrix_unregister_persist.log");
+    ensure_realm(&data_dir, 1001).await;
+
+    let mut child = spawn_actrix(&config_path, &log_path);
+    let base = format!("http://127.0.0.1:{port}");
+    wait_for_signer_ready(
+        &format!("http://127.0.0.1:{signer_port}"),
+        &mut child,
+        &log_path,
     )
     .await;
-    let resp = recv_envelope(&mut cli_r).await;
-    match resp.flow {
-        Some(signaling_envelope::Flow::ServerToActr(server_msg)) => {
-            match server_msg.payload {
-                Some(signaling_to_actr::Payload::DiscoveryResponse(rsp)) => match rsp.result {
-                    Some(actr_protocol::discovery_response::Result::Success(ok)) => {
-                        if !ok.entries.iter().any(|e| {
-                            e.actr_type.name == "svc" && e.actr_type.manufacturer == "acme"
-                        }) {
-                            let log = std::fs::read_to_string(&log_path2).unwrap_or_default();
-                            panic!("expected restored service entry. LOG2:\n{log}");
-                        }
-                    }
-                    other => {
-                        let log = std::fs::read_to_string(&log_path2).unwrap_or_default();
-                        panic!("unexpected discovery result {other:?}\nLOG2:\n{log}");
-                    }
+    wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
+    wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
+    ensure_realm(&data_dir, 1001).await;
+
+    let spec = make_service_spec(
+        "fp-unregistered",
+        "unregistered.v1",
+        r#"syntax = "proto3";
+            package unregistered.v1;
+            message Ping { string msg = 1; }"#,
+    );
+    let (mut svc_w, mut svc_r, svc_ok) = ws_register_with_spec(
+        port,
+        "acme",
+        "svc-unregister-persist",
+        None,
+        Some(spec.clone()),
+    )
+    .await;
+
+    let unregister = actr_protocol::ActrToSignaling {
+        source: svc_ok.actr_id.clone(),
+        credential: svc_ok.credential.clone(),
+        payload: Some(
+            actr_protocol::actr_to_signaling::Payload::UnregisterRequest(
+                actr_protocol::UnregisterRequest {
+                    actr_id: svc_ok.actr_id.clone(),
+                    reason: Some("durability-test".into()),
                 },
-                other => {
-                    let log = std::fs::read_to_string(&log_path2).unwrap_or_default();
-                    panic!("unexpected payload {other:?}\nLOG2:\n{log}");
-                }
+            ),
+        ),
+    };
+    send_envelope(
+        &mut svc_w,
+        make_envelope(signaling_envelope::Flow::ActrToServer(unregister)),
+    )
+    .await;
+    let response = recv_envelope(&mut svc_r).await;
+    match response.flow {
+        Some(signaling_envelope::Flow::ServerToActr(server_msg)) => match server_msg.payload {
+            Some(signaling_to_actr::Payload::UnregisterResponse(response)) => {
+                assert!(matches!(
+                    response.result,
+                    Some(actr_protocol::unregister_response::Result::Success(_))
+                ));
             }
-        }
-        other => {
-            let log = std::fs::read_to_string(&log_path2).unwrap_or_default();
-            panic!("unexpected flow {other:?}\nLOG2:\n{log}");
-        }
+            other => panic!("unexpected unregister payload {other:?}"),
+        },
+        other => panic!("unexpected unregister flow {other:?}"),
     }
 
+    // No sleep or checkpoint: success must already mean the DELETE is durable.
+    graceful_shutdown(child);
+
+    let log_path2 = tmp.path().join("actrix_unregister_persist2.log");
+    let mut child2 = spawn_actrix(&config_path, &log_path2);
+    wait_for_signer_ready(
+        &format!("http://127.0.0.1:{signer_port}"),
+        &mut child2,
+        &log_path2,
+    )
+    .await;
+    wait_for_health(&format!("{base}/ais/health"), &mut child2, &log_path2).await;
+    wait_for_health(&format!("{base}/signaling/health"), &mut child2, &log_path2).await;
+    ensure_realm(&data_dir, 1001).await;
+
+    let (mut client_w, mut client_r, client_ok) =
+        ws_register(port, "acme", "unregister-verifier", None).await;
+    match query_service_spec_result(&mut client_w, &mut client_r, &client_ok, &spec.name).await {
+        actr_protocol::get_service_spec_response::Result::Error(error) => {
+            assert_eq!(error.code, 404);
+        }
+        other => panic!("unregistered ServiceSpec resurrected after restart: {other:?}"),
+    }
+
+    let _ = client_w.send(WsMessage::Close(None)).await;
     graceful_shutdown(child2);
 }

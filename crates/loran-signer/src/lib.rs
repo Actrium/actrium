@@ -1,8 +1,8 @@
 //! Signer - Ed25519 signing key generation and management service
 //!
-//! The Signer service provides the following functionality:
-//! 1. Generate Ed25519 signing key pairs; private keys never leave Signer
-//! 2. Expose a Sign API, performing signing operations on behalf of callers
+//! The Signer service provides the following capabilities:
+//! 1. Generate Ed25519 signing key pairs; the private key never leaves the Signer
+//! 2. Expose a Sign API to perform signing operations on behalf of callers
 //! 3. PSK signature verification and replay attack protection
 //! 4. Multiple storage backend support: SQLite, PostgreSQL
 #![deny(clippy::disallowed_macros)]
@@ -46,7 +46,8 @@ pub use grpc_handlers::{SignerGrpcService, create_grpc_service};
 // Re-export proto types from actrix-proto
 pub use actrix_proto::signer::v1::signer_server::{Signer, SignerServer};
 pub use handlers::{
-    SignerState, create_router, create_signer_state, get_stats, register_signer_metrics,
+    KEY_CLEANUP_INTERVAL, SignerState, create_router, create_signer_state, get_stats,
+    register_signer_metrics, run_key_cleanup,
 };
 pub use storage::{KeyStorage, StorageConfig};
 pub use types::{
@@ -69,16 +70,17 @@ mod tests {
             storage: StorageConfig {
                 backend: StorageBackend::Sqlite,
                 key_ttl_seconds: 3600,
-                sqlite: Some(SqliteConfig {}),
+                sqlite: Some(SqliteConfig::default()),
                 postgres: None,
             },
             kek: None,
             kek_env: None,
             kek_file: None,
             tolerance_seconds: 3600,
+            ..Default::default()
         };
 
-        // Use in-memory storage for testing (avoid file system dependency)
+        // Use in-memory storage for testing (avoid filesystem dependency)
         let nonce_storage = MemoryStorage::new();
         let state = create_signer_state(
             &config,

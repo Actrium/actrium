@@ -1,12 +1,14 @@
 //! Database connection and operation management
 //!
-//! Provides sqlx-based database connection pool and basic operations
+//! Provides a sqlx-based database connection pool and basic operations
 
 use anyhow::Result;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
+
+const ACTRIX_SCHEMA_VERSION: i64 = 1;
 
 /// Database manager
 #[derive(Clone)]
@@ -18,7 +20,7 @@ impl Database {
     /// Create a new database instance
     ///
     /// # Arguments
-    /// * `path` - Directory path for database file storage, must already exist
+    /// * `path` - Directory path for database file storage; must already exist
     ///   The main database file will be stored as `{path}/actrix.db`
     pub async fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
         let db_file = path.as_ref().join("actrix.db");
@@ -28,6 +30,7 @@ impl Database {
             .create_if_missing(true)
             .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
             .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
+            .foreign_keys(true)
             .busy_timeout(Duration::from_secs(5));
 
         // Create connection pool
@@ -38,15 +41,56 @@ impl Database {
 
         let db = Self { pool };
 
-        // Initialize database schema
+        // Schema changes are explicit and fail closed. Existing unversioned
+        // databases must be upgraded by the standalone migration tool.
+        db.verify_schema_version().await?;
         db.initialize_schema().await?;
 
         Ok(db)
     }
 
-    /// Initialize database schema
+    async fn verify_schema_version(&self) -> Result<()> {
+        let version: i64 = sqlx::query_scalar("PRAGMA user_version")
+            .fetch_one(&self.pool)
+            .await?;
+        if version == ACTRIX_SCHEMA_VERSION {
+            return Ok(());
+        }
+
+        if version == 0 {
+            let application_table_count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*)
+                 FROM sqlite_master
+                 WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+            )
+            .fetch_one(&self.pool)
+            .await?;
+            if application_table_count == 0 {
+                return Ok(());
+            }
+        }
+
+        anyhow::bail!(
+            "unsupported Actrix database schema version {version}; expected \
+             {ACTRIX_SCHEMA_VERSION}. Stop Actrix and run the standalone migration tool"
+        );
+    }
+
+    /// Initialize the database schema.
+    ///
+    /// All table/index DDL and the `PRAGMA user_version` bump run inside a single
+    /// transaction so a mid-initialization crash can never leave a half-built
+    /// database with tables present but `user_version = 0` (which the startup gate
+    /// rejects and the migration tool cannot repair). SQLite supports
+    /// transactional DDL and `PRAGMA user_version` participates in the enclosing
+    /// transaction, so the whole schema either lands atomically or rolls back.
+    /// Every statement stays idempotent (`IF NOT EXISTS`) so re-running is safe.
     async fn initialize_schema(&self) -> Result<()> {
-        // Create Realm table
+        let mut tx = self.pool.begin().await?;
+
+        // Create the Realm table.
+        // secret_current carries a CHECK so the non-empty invariant is enforced
+        // at the storage layer, not only by the three application entry points.
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS realm (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,21 +100,31 @@ impl Database {
                 expires_at INTEGER,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER,
-                secret_current TEXT NOT NULL DEFAULT '',
+                secret_current TEXT NOT NULL DEFAULT ''
+                    CHECK(length(trim(secret_current)) > 0),
                 secret_previous_hash TEXT,
                 secret_previous_valid_until INTEGER
             )",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
+        .await?;
+
+        // One Actrix instance is exactly one Realm in the v1 production profile.
+        // The expression index enforces that invariant under concurrent writers.
+        sqlx::query(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_realm_singleton
+             ON realm((1))",
+        )
+        .execute(&mut *tx)
         .await?;
 
         // Set autoincrement start to 2^25 = 33554432
         // Only insert if not already present (fresh database)
         sqlx::query("INSERT OR IGNORE INTO sqlite_sequence(name, seq) VALUES('realm', 33554431)")
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
 
-        // Create access control list table
+        // Create the access control list table.
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS actoracl (
                 rowid INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,73 +132,107 @@ impl Database {
                 source_realm_id INTEGER,
                 from_type TEXT NOT NULL,
                 to_type TEXT NOT NULL,
-                access INTEGER NOT NULL
+                access INTEGER NOT NULL CHECK(access IN (0, 1)),
+                FOREIGN KEY(realm_id) REFERENCES realm(id) ON DELETE CASCADE
             )",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
-        // Create indexes
+        // Create indexes.
         sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_realm_name
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_realm_name
              ON realm(name)",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_actoracl_realm_id
              ON actoracl(realm_id)",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_actoracl_lookup
              ON actoracl(realm_id, source_realm_id, from_type, to_type)",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_actoracl_policy
+             ON actoracl(
+                realm_id,
+                COALESCE(source_realm_id, -1),
+                from_type,
+                to_type
+             )",
+        )
+        .execute(&mut *tx)
         .await?;
 
         // Pending registration data: AIS writes, signaling reads on WS connect
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS pending_registration (
-                serial_number INTEGER PRIMARY KEY,
                 realm_id INTEGER NOT NULL,
+                serial_number INTEGER NOT NULL,
                 service_spec_blob BLOB,
                 ws_address TEXT,
-                created_at INTEGER NOT NULL
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER,
+                PRIMARY KEY(realm_id, serial_number),
+                FOREIGN KEY(realm_id) REFERENCES realm(id) ON DELETE CASCADE
             )",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
-        // Migrate: add ws_address column if it doesn't exist (for existing databases)
-        let _ = sqlx::query("ALTER TABLE pending_registration ADD COLUMN ws_address TEXT")
-            .execute(&self.pool)
-            .await; // intentionally ignore error (column may already exist)
-
-        // New registrations carry an explicit retention horizon. Existing rows
-        // remain NULL and are preserved until a successful renew/reissue writes
-        // a horizon for that actor.
-        let _ = sqlx::query("ALTER TABLE pending_registration ADD COLUMN expires_at INTEGER")
-            .execute(&self.pool)
-            .await; // intentionally ignore error (column may already exist)
-
+        // Signaling reads pending rows with `expires_at IS NULL OR expires_at >
+        // unixepoch()`; index the column so the expiry filter stays cheap.
         sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_pending_registration_expiry
+            "CREATE INDEX IF NOT EXISTS idx_pending_registration_expiry \
              ON pending_registration(expires_at)",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
-        // MFR (Manufacturer Registry) tables
-        // name = GitHub user/org login (lowercased), serves as manufacturer identity
+        // Permanent Actor instance identity ledger. Snowflake worker leases
+        // provide distributed uniqueness; this table additionally makes local
+        // uniqueness fail closed across process restarts and clock rollback.
+        // `target` persists the package target bound at registration so that
+        // /renew and /reissue can recheck the exact (type_str, target) package
+        // row instead of masking a revoked target behind a sibling that is still
+        // active.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS issued_actor_identity (
+                realm_id INTEGER NOT NULL,
+                serial_number INTEGER NOT NULL,
+                actor_type TEXT NOT NULL,
+                target TEXT,
+                issued_at INTEGER NOT NULL,
+                PRIMARY KEY(realm_id, serial_number),
+                FOREIGN KEY(realm_id) REFERENCES realm(id) ON DELETE CASCADE
+            )",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Legacy databases (created before the target column existed) lack it;
+        // add it idempotently so existing rows get NULL (per-target recheck
+        // degrades to type-only for those rows, logged in recheck_existing_actor).
+        add_column_if_missing(&mut tx, "issued_actor_identity", "target", "TEXT").await?;
+
+        // Publisher Registry (Manufacturer Registry) tables
+        // name is the canonical HTTPS publisher domain.
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS mfr (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 name         TEXT    NOT NULL UNIQUE,
                 public_key   TEXT    NOT NULL DEFAULT '',
+                key_id       TEXT    NOT NULL DEFAULT '',
+                descriptor_json TEXT NOT NULL DEFAULT '{}',
                 contact      TEXT,
                 status       TEXT    NOT NULL DEFAULT 'pending',
                 created_at   INTEGER NOT NULL,
@@ -155,10 +243,10 @@ impl Database {
                 key_expires_at  INTEGER
             )",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
-        // GitHub verification challenge for identity verification
+        // HTTPS publisher descriptor challenge for identity verification.
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS mfr_challenge (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -170,7 +258,7 @@ impl Database {
                 created_at  INTEGER NOT NULL
             )",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
         sqlx::query(
@@ -185,49 +273,27 @@ impl Database {
                 manifest     TEXT    NOT NULL,
                 signature    TEXT    NOT NULL,
                 signing_key_id TEXT,
+                proto_files  TEXT,
                 status       TEXT    NOT NULL DEFAULT 'active',
                 published_at INTEGER NOT NULL,
                 revoked_at   INTEGER,
                 UNIQUE(manufacturer, name, version, target)
             )",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
-        // Migrate: add target column if it doesn't exist (for existing databases)
-        let _ = sqlx::query(
-            "ALTER TABLE mfr_package ADD COLUMN target TEXT NOT NULL DEFAULT 'wasm32-wasip1'",
-        )
-        .execute(&self.pool)
-        .await; // intentionally ignore error (column may already exist)
-
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_mfr_package_type ON mfr_package(type_str)")
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
 
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_mfr_package_mfr ON mfr_package(mfr_id, status)",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
-        // Migrate: add proto_files column for proto filing (JSON text, nullable)
-        let _ = sqlx::query("ALTER TABLE mfr_package ADD COLUMN proto_files TEXT")
-            .execute(&self.pool)
-            .await; // intentionally ignore error (column may already exist)
-
-        // Migrate: record the MFR key that authenticated each newly published package.
-        // Existing rows remain nullable and are resolved from their signed manifest.
-        let _ = sqlx::query("ALTER TABLE mfr_package ADD COLUMN signing_key_id TEXT")
-            .execute(&self.pool)
-            .await; // intentionally ignore error (column may already exist)
-
-        // Migrate: add key_id column (auto-assigned on activate/renew)
-        let _ = sqlx::query("ALTER TABLE mfr ADD COLUMN key_id TEXT NOT NULL DEFAULT ''")
-            .execute(&self.pool)
-            .await;
-
-        // MFR key history: stores retired public keys for JWKS-style rotation
+        // Publisher Registry key history: stores retired public keys for JWKS-style rotation
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS mfr_key_history (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -239,17 +305,24 @@ impl Database {
                 retired_at   INTEGER NOT NULL
             )",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
+        // UNIQUE so a given (mfr_id, key_id) can be archived at most once. This
+        // backs the application-layer blacklist that forbids reinstating a
+        // previously used publisher key: even a code path that skipped the check
+        // cannot create a second history row for the same key. Normal forward
+        // rotation always archives a distinct outgoing key, so this never fires
+        // on the healthy path.
         sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_mfr_key_history_lookup
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_mfr_key_history_lookup
              ON mfr_key_history(mfr_id, key_id)",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
-        // Publish nonce table for Challenge-Response authentication on /mfr/pkg/publish
+        // Publish nonce table for challenge-response authentication on
+        // /registry/packages/publish.
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS mfr_publish_nonce (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -260,14 +333,14 @@ impl Database {
                 expires_at INTEGER NOT NULL
             )",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_mfr_publish_nonce_expires
              ON mfr_publish_nonce(expires_at)",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
         // AIS unpublished package manufacturer-proof nonce table. AIS inserts
@@ -284,106 +357,98 @@ impl Database {
                 UNIQUE(manufacturer, key_id, nonce)
             )",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_ais_manufacturer_auth_nonce_expires
              ON ais_manufacturer_auth_nonce(expires_at)",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
-        // Backfill key_id for existing MFRs that have a public_key but empty key_id.
-        // This runs on every startup but is a no-op when all rows already have a key_id.
-        {
-            use base64::Engine as _;
-            use sha2::{Digest, Sha256};
-
-            let rows: Vec<(i64, String)> = sqlx::query_as(
-                "SELECT id, public_key FROM mfr WHERE key_id = '' AND public_key != ''",
-            )
-            .fetch_all(&self.pool)
-            .await
-            .unwrap_or_default();
-
-            for (id, public_key_b64) in rows {
-                if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&public_key_b64)
-                {
-                    let hash = Sha256::digest(&bytes);
-                    let hex_str: String = hash.iter().map(|b| format!("{b:02x}")).collect();
-                    let key_id = format!("mfr-{}", &hex_str[..16]);
-                    let _ = sqlx::query("UPDATE mfr SET key_id = ? WHERE id = ?")
-                        .bind(&key_id)
-                        .bind(id)
-                        .execute(&self.pool)
-                        .await;
-                    crate::recording::info!(
-                        "backfilled key_id from public_key fingerprint: id={}, key_id={}",
-                        id,
-                        key_id
-                    );
-                }
-            }
-        }
-
         // AIS renewal token table — only stores SHA-256(token), never the raw token.
+        //
+        // `delivered_at` marks whether the response carrying this successor token
+        // was committed to the reissue response cache (same transaction). NULL
+        // means "consumed but not delivered" — a lost response — and the reissue
+        // replay guard relaxes to the binding grace window for that case so the
+        // client can retry. Non-NULL means the proof is fully spent.
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS ais_renewal_token (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 actor_id TEXT NOT NULL,
                 token_hash BLOB NOT NULL UNIQUE,
                 expires_at INTEGER NOT NULL,
-                created_at INTEGER NOT NULL
+                created_at INTEGER NOT NULL,
+                delivered_at INTEGER
             )",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+
+        add_column_if_missing(&mut tx, "ais_renewal_token", "delivered_at", "INTEGER").await?;
 
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_ais_renewal_token_actor
              ON ais_renewal_token(actor_id)",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_ais_renewal_token_expires
              ON ais_renewal_token(expires_at)",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
-        // Durable idempotency journal for AIS identity-state writes. Response
-        // bodies contain bearer credentials and are therefore encrypted by AIS
-        // before being stored in response_ciphertext.
+        // /reissue idempotent response cache. Keyed by SHA-256(nonce) so a lost-
+        // response retry of the same attempt decrypts and replays the exact
+        // credential AIS signed on the first attempt instead of re-signing. The
+        // nonce consume, this cache write, and the `delivered_at` mark on the
+        // successor row all commit in one BEGIN IMMEDIATE transaction, so a
+        // response is either durable for replay or none of the side effects land.
         sqlx::query(
-            "CREATE TABLE IF NOT EXISTS ais_control_attempt (
-                operation           TEXT    NOT NULL,
-                attempt_id          BLOB    NOT NULL,
-                actor_id            TEXT    NOT NULL,
-                request_hash        BLOB    NOT NULL,
-                state               INTEGER NOT NULL,
-                lease_id            BLOB,
-                lease_expires_at    INTEGER,
-                response_status     INTEGER,
-                response_ciphertext BLOB,
-                response_expires_at INTEGER,
-                tombstone_expires_at INTEGER NOT NULL,
-                created_at          INTEGER NOT NULL,
-                updated_at          INTEGER NOT NULL,
-                PRIMARY KEY(operation, attempt_id)
+            "CREATE TABLE IF NOT EXISTS ais_reissue_response_cache (
+                nonce_hash BLOB PRIMARY KEY,
+                response_ciphertext BLOB NOT NULL,
+                expires_at INTEGER NOT NULL,
+                created_at INTEGER NOT NULL
             )",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
         sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_ais_control_attempt_expiry
-             ON ais_control_attempt(state, tombstone_expires_at)",
+            "CREATE INDEX IF NOT EXISTS idx_ais_reissue_response_cache_expires
+             ON ais_reissue_response_cache(expires_at)",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+
+        // Explicit actor revocation list. A revoked (realm_id, serial_number)
+        // can never be renewed or reissued again, independent of any renewal
+        // token it may still hold: /renew and /reissue consult this table before
+        // signing. The composite primary key makes revocation idempotent.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS revoked_actor (
+                realm_id INTEGER NOT NULL,
+                serial_number INTEGER NOT NULL,
+                revoked_at INTEGER NOT NULL,
+                reason TEXT,
+                PRIMARY KEY(realm_id, serial_number),
+                FOREIGN KEY(realm_id) REFERENCES realm(id) ON DELETE CASCADE
+            )",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(&format!("PRAGMA user_version = {ACTRIX_SCHEMA_VERSION}"))
+            .execute(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
 
         Ok(())
     }
@@ -393,11 +458,34 @@ impl Database {
         &self.pool
     }
 
-    /// Execute SQL statement and return the number of affected rows
+    /// Execute an SQL statement and return the number of affected rows
     pub async fn execute(&self, sql: &str) -> Result<u64> {
         let result = sqlx::query(sql).execute(&self.pool).await?;
         Ok(result.rows_affected())
     }
+}
+
+/// Add a column to a table if it does not already exist. Used to evolve legacy
+/// databases that pre-date a column introduced in a schema bump, without
+/// forcing a full offline migration for an additive, nullable column.
+async fn add_column_if_missing(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    table: &str,
+    column: &str,
+    decl: &str,
+) -> Result<()> {
+    let exists: bool =
+        sqlx::query_scalar("SELECT COUNT(*) > 0 FROM pragma_table_info(?) WHERE name = ?")
+            .bind(table)
+            .bind(column)
+            .fetch_one(&mut **tx)
+            .await?;
+    if !exists {
+        sqlx::query(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))
+            .execute(&mut **tx)
+            .await?;
+    }
+    Ok(())
 }
 
 use tokio::sync::OnceCell;
@@ -405,7 +493,7 @@ use tokio::sync::OnceCell;
 /// Global database instance
 static GLOBAL_DATABASE: OnceCell<Database> = OnceCell::const_new();
 
-/// Set global database path
+/// Set the global database path
 pub async fn set_db_path(path: &Path) -> Result<()> {
     let database = Database::new(path).await?;
     GLOBAL_DATABASE
@@ -414,14 +502,74 @@ pub async fn set_db_path(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Get global database instance
+/// Get the global database instance
 pub fn get_database() -> &'static Database {
     GLOBAL_DATABASE
         .get()
         .expect("Database not initialized. Call set_db_path first.")
 }
 
-/// Check if database is initialized
+/// Check whether the database has been initialized
 pub fn is_database_initialized() -> bool {
     GLOBAL_DATABASE.get().is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn fresh_database_is_versioned_and_enforces_single_realm() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::new(dir.path()).await.unwrap();
+        let version: i64 = sqlx::query_scalar("PRAGMA user_version")
+            .fetch_one(db.get_pool())
+            .await
+            .unwrap();
+        assert_eq!(version, ACTRIX_SCHEMA_VERSION);
+
+        sqlx::query(
+            "INSERT INTO realm
+             (name, status, enabled, created_at, secret_current)
+             VALUES ('primary.example', 'Active', 1, 1, 'hash')",
+        )
+        .execute(db.get_pool())
+        .await
+        .unwrap();
+        let second = sqlx::query(
+            "INSERT INTO realm
+             (name, status, enabled, created_at, secret_current)
+             VALUES ('second.example', 'Active', 1, 2, 'hash')",
+        )
+        .execute(db.get_pool())
+        .await;
+        assert!(second.is_err(), "v1 must enforce one Realm per database");
+    }
+
+    #[tokio::test]
+    async fn unversioned_existing_database_requires_offline_migration() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_file = dir.path().join("actrix.db");
+        let options = SqliteConnectOptions::from_str(&format!("sqlite:{}", db_file.display()))
+            .unwrap()
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE realm (id INTEGER PRIMARY KEY)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+
+        let error = Database::new(dir.path())
+            .await
+            .err()
+            .expect("legacy database must be rejected");
+        let message = error.to_string();
+        assert!(message.contains("schema version 0"));
+        assert!(message.contains("standalone migration tool"));
+    }
 }

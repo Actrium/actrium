@@ -29,6 +29,10 @@ fn credential_for_actor(actor_id: &ActrId, key_id: u32, expires_at: u64) -> AIdC
             realm_id: actor_id.realm.realm_id,
             actor_id: actor_id.to_string_repr(),
             expires_at,
+            protocol_version: 1,
+            issuer: format!("actr:realm:{}:authority", actor_id.realm.realm_id),
+            provider: "actrix-official".to_string(),
+            audience: "actr.signaling".to_string(),
         }
         .encode_to_vec()
         .into(),
@@ -41,6 +45,10 @@ fn register_ok(actor_id: &ActrId, key_id: u32) -> register_response::RegisterOk 
         actr_id: actor_id.clone(),
         credential: credential_for_actor(actor_id, key_id, 4_000_000_000),
         turn_credential: TurnCredential {
+            protocol_version: 1,
+            realm_id: 1,
+            provider: "actrix-official".to_string(),
+            audience: "actr.turn".to_string(),
             username: "4000000000:actor".to_string(),
             password: "turn-password".to_string(),
             expires_at: 4_000_000_000,
@@ -69,6 +77,10 @@ fn session(actor_id: &ActrId, revision: u64, token_usable: bool) -> SessionState
             nanos: 0,
         },
         turn_credential: TurnCredential {
+            protocol_version: 1,
+            realm_id: 1,
+            provider: "actrix-official".to_string(),
+            audience: "actr.turn".to_string(),
             username: "old".to_string(),
             password: "old".to_string(),
             expires_at: 4_000_000_000,

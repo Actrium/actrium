@@ -1,7 +1,7 @@
 //! Production mode MFR public key cache
 //!
 //! `MfrCertCache` fetches manufacturer Ed25519 public keys on demand from
-//! AIS `GET /mfr/{name}/verifying_key`, caching locally (TTL 1 hour).
+//! AIS `GET /registry/publishers/{name}/verifying-key`, caching locally (TTL 1 hour).
 //!
 //! Uses `std::sync::RwLock` (not tokio) internally because:
 //! - Cache reads/writes are extremely short memory operations that won't block the tokio executor
@@ -125,7 +125,7 @@ impl MfrCertCache {
         Ok(key)
     }
 
-    /// Fetch public key from AIS `GET /mfr/{manufacturer}/verifying_key`
+    /// Fetch public key from AIS `GET /registry/publishers/{manufacturer}/verifying-key`
     async fn fetch_from_ais(
         &self,
         manufacturer: &str,
@@ -139,7 +139,7 @@ impl MfrCertCache {
         })?;
         url.path_segments_mut()
             .map_err(|_| HyperError::Config("AIS endpoint cannot be a base URL".to_string()))?
-            .extend(["mfr", manufacturer, "verifying_key"]);
+            .extend(["registry", "publishers", manufacturer, "verifying-key"]);
         if let Some(id) = key_id {
             url.query_pairs_mut().append_pair("key_id", id);
         }

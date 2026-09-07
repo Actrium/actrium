@@ -146,7 +146,7 @@ fn lock_bridge() -> std::sync::MutexGuard<'static, ()> {
 /// A valid ActrId (ActrId::default() has an empty ActrType.version, which
 /// trips to_string_repr's debug_assert in test builds).
 fn sender_id() -> ActrId {
-    ActrId::from_string_repr("1a2b3c@7/acme:AskService:1.0.0").expect("valid test actor id")
+    ActrId::from_string_repr("1a2b3c@7/acme/AskService@1.0.0").expect("valid test actor id")
 }
 
 // ── stream sink ────────────────────────────────────────────────────────────

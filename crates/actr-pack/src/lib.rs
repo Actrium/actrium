@@ -57,10 +57,10 @@ pub use verify::{
 
 /// Compute deterministic key_id from Ed25519 public key bytes.
 ///
-/// Algorithm: `"mfr-" + hex(sha256(public_key_bytes))[..16]`
+/// Algorithm: `"actr-pub-" + hex(sha256(public_key_bytes))[..16]`
 ///
 /// This MUST match the server-side implementation in `actrix-mfr::crypto::compute_key_id`.
 pub fn compute_key_id(public_key_bytes: &[u8]) -> String {
     let hex_str = util::sha256_hex(public_key_bytes);
-    format!("mfr-{}", &hex_str[..16])
+    format!("actr-pub-{}", &hex_str[..16])
 }

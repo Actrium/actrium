@@ -1,6 +1,6 @@
-//! KS-local log macros used to block direct `tracing::*!` callsites.
+//! Signer-local log macros used to block direct `tracing::*!` callsites.
 //!
-//! KS cannot depend on `platform::recording` due dependency direction.
+//! Signer cannot depend on `platform::recording` due dependency direction.
 //! These macros provide a migration facade with explicit namespaced usage.
 
 #[macro_export]

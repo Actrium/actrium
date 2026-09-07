@@ -37,15 +37,17 @@ impl std::str::FromStr for MfrStatus {
     }
 }
 
-/// Manufacturer record.
-/// `name` is the GitHub user/org login (lowercased) — it IS the identity.
+/// Publisher record.
+/// `name` is the canonical HTTPS publisher domain and is the identity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manufacturer {
     pub id: i64,
-    /// GitHub user/org login (lowercased), e.g. "octocat"
+    /// Canonical DNS domain, e.g. `apps.example.com`.
     pub name: String,
     pub public_key: String,
     pub key_id: String,
+    /// Last verified `actr.publisher/v1` descriptor.
+    pub descriptor_json: String,
     pub contact: Option<String>,
     pub status: MfrStatus,
     pub created_at: i64,
@@ -67,6 +69,9 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Manufacturer {
             name: row.try_get("name")?,
             public_key: row.try_get("public_key")?,
             key_id: row.try_get("key_id").unwrap_or_default(),
+            descriptor_json: row
+                .try_get("descriptor_json")
+                .unwrap_or_else(|_| "{}".to_string()),
             contact: row.try_get("contact")?,
             status,
             created_at: row.try_get("created_at")?,
@@ -223,6 +228,84 @@ impl Manufacturer {
         self.updated_at = Some(now);
 
         Ok(new_key_id)
+    }
+
+    /// Emergency-revoke the CURRENTLY ACTIVE signing key (private key compromised).
+    ///
+    /// `MfrKeyHistory::revoke` only touches keys that were already rotated away;
+    /// this closes the gap where the live key itself is compromised and must be
+    /// killed immediately. The operation is atomic:
+    ///   1. the live key is archived into `mfr_key_history` with status `revoked`
+    ///      (not `retired`), so both exact-key resolution (`is_key_id_revoked`,
+    ///      `get_by_key_id`) and the rollback blacklist (`key_id_ever_used`)
+    ///      reject it forever, and
+    ///   2. the key material and expiry are cleared from the publisher record.
+    ///
+    /// Coherent post-state: the publisher is deliberately LEFT in `active` status
+    /// but WITHOUT a usable key. With `public_key`/`key_id` blanked and
+    /// `key_expires_at` set to NULL, every current-key path fails closed -
+    /// `resolve_by_name` and `validate_publish_authority` return
+    /// `CertificateExpired`, and `resolve_key_by_id` for the old key_id returns
+    /// `KeyRevoked`. Recovery is only possible via `renew_key`, which requires
+    /// `active` status and, thanks to the blacklist, cannot reinstate the revoked
+    /// key - the publisher must rotate to a brand-new key.
+    ///
+    /// Doing both writes in one transaction is required for safety: a half-applied
+    /// state where the key is archived as revoked but still present on the `mfr`
+    /// row would let `resolve_by_name` (which does not consult the revoked set)
+    /// keep serving the compromised key.
+    pub async fn revoke_active_key(&mut self, pool: &SqlitePool) -> Result<(), MfrError> {
+        if self.status != MfrStatus::Active {
+            return Err(MfrError::InvalidStatus(format!(
+                "cannot revoke active key from status: {}",
+                self.status
+            )));
+        }
+        if self.public_key.is_empty() || self.key_id.is_empty() {
+            return Err(MfrError::InvalidStatus(
+                "publisher has no active key to revoke".to_string(),
+            ));
+        }
+
+        let now = Utc::now().timestamp();
+        let created_at = self.verified_at.unwrap_or(self.created_at);
+        let mut tx = pool.begin().await?;
+
+        // Archive the live key directly as `revoked`: a compromised key must be
+        // rejected by all future verification, not merely retired. The UNIQUE
+        // (mfr_id, key_id) index cannot conflict here because the current key has
+        // never been archived while it was in use.
+        sqlx::query(
+            "INSERT INTO mfr_key_history
+             (mfr_id, key_id, public_key, status, created_at, retired_at)
+             VALUES (?, ?, ?, 'revoked', ?, ?)",
+        )
+        .bind(self.id)
+        .bind(&self.key_id)
+        .bind(&self.public_key)
+        .bind(created_at)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+
+        // Blank the live key material and expiry so no resolution path can serve
+        // it and publish fails closed until the publisher renews to a fresh key.
+        sqlx::query(
+            "UPDATE mfr SET public_key = '', key_id = '', key_expires_at = NULL,
+                 updated_at = ? WHERE id = ?",
+        )
+        .bind(now)
+        .bind(self.id)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+
+        self.public_key = String::new();
+        self.key_id = String::new();
+        self.key_expires_at = None;
+        self.updated_at = Some(now);
+        Ok(())
     }
 
     pub async fn suspend(&mut self, pool: &SqlitePool) -> Result<(), MfrError> {

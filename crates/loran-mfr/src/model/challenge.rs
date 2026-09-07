@@ -7,22 +7,22 @@ use sqlx::SqlitePool;
 const CHALLENGE_TTL_SECS: i64 = 24 * 3600; // 24 hours
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GitHubRepoChallenge {
+pub struct PublisherChallenge {
     pub id: i64,
     pub mfr_id: i64,
-    /// Token that must appear inside the repo verification file
+    /// Token that must appear in the HTTPS publisher descriptor.
     pub token: String,
-    /// Verification repo URL (filled in at verify time, empty at creation)
+    /// Verified descriptor URL (filled in at verify time, empty at creation).
     pub verify_url: String,
     pub expires_at: i64,
     pub verified_at: Option<i64>,
     pub created_at: i64,
 }
 
-impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for GitHubRepoChallenge {
+impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for PublisherChallenge {
     fn from_row(row: &'r sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
         use sqlx::Row;
-        Ok(GitHubRepoChallenge {
+        Ok(PublisherChallenge {
             id: row.try_get("id")?,
             mfr_id: row.try_get("mfr_id")?,
             token: row.try_get("token")?,
@@ -34,7 +34,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for GitHubRepoChallenge {
     }
 }
 
-impl GitHubRepoChallenge {
+impl PublisherChallenge {
     pub async fn create(pool: &SqlitePool, mfr_id: i64) -> Result<Self, MfrError> {
         use rand::RngCore;
         let mut token_bytes = [0u8; 24];
@@ -57,7 +57,7 @@ impl GitHubRepoChallenge {
         .await?
         .last_insert_rowid();
 
-        Ok(GitHubRepoChallenge {
+        Ok(PublisherChallenge {
             id,
             mfr_id,
             token,
@@ -70,8 +70,11 @@ impl GitHubRepoChallenge {
 
     pub async fn get_active(pool: &SqlitePool, mfr_id: i64) -> Result<Option<Self>, MfrError> {
         let now = Utc::now().timestamp();
-        Ok(sqlx::query_as::<_, GitHubRepoChallenge>(
-            "SELECT * FROM mfr_challenge WHERE mfr_id = ? AND expires_at > ? AND verified_at IS NULL ORDER BY created_at DESC LIMIT 1",
+        Ok(sqlx::query_as::<_, PublisherChallenge>(
+            "SELECT * FROM mfr_challenge
+             WHERE mfr_id = ? AND expires_at > ? AND verified_at IS NULL
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1",
         )
         .bind(mfr_id)
         .bind(now)

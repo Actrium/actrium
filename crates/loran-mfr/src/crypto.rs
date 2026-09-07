@@ -1,18 +1,21 @@
 use crate::MfrError;
 use base64::Engine as _;
-use ed25519_dalek::{Signature, SigningKey, Verifier, VerifyingKey};
+#[cfg(test)]
+use ed25519_dalek::SigningKey;
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+#[cfg(test)]
 use rand::rngs::OsRng;
 use sha2::{Digest, Sha256};
 
 /// Compute deterministic key_id from Ed25519 public key bytes.
 ///
-/// Algorithm: `"mfr-" + hex(sha256(public_key_bytes))[..16]`
+/// Algorithm: `"actr-pub-" + hex(sha256(public_key_bytes))[..16]`
 ///
 /// This MUST match the client-side implementation in `actr_pack::compute_key_id`.
 pub fn compute_key_id(public_key_bytes: &[u8]) -> String {
     let hash = Sha256::digest(public_key_bytes);
     let hex_str: String = hash.iter().map(|b| format!("{b:02x}")).collect();
-    format!("mfr-{}", &hex_str[..16])
+    format!("actr-pub-{}", &hex_str[..16])
 }
 
 /// Compute key_id from a base64-encoded Ed25519 public key string.
@@ -51,6 +54,7 @@ pub fn verify_signature(
 
 /// Generate a new Ed25519 keypair.
 /// Returns (private_key_b64, public_key_b64).
+#[cfg(test)]
 pub fn generate_keypair() -> (String, String) {
     let signing_key = SigningKey::generate(&mut OsRng);
     let verifying_key = signing_key.verifying_key();
