@@ -62,3 +62,5 @@
 新增用例：
 - `platform::realm::acl::tests::test_cross_realm_acl_allow_and_deny`
 - `signaling::service_registry::tests::test_check_discovery_acl_cross_realm_and_full_type`
+> 历史研究资料：不属于 Realm v1 契约。v1 明确不实现跨 Realm federation；
+> 若后续立项，必须通过新 protocol/descriptor version 重新评审。

@@ -2,6 +2,7 @@
 
 use crate::types::{
     GenerateSigningKeyRequest, GenerateSigningKeyResponse, SignRequest, SignResponse,
+    sign_request_payload,
 };
 use base64::prelude::*;
 use ed25519_dalek::VerifyingKey;
@@ -25,12 +26,12 @@ pub struct ClientConfig {
     /// Signer service address
     ///
     /// Full URL of the Signer service, including protocol, host, and port.
-    /// Example: "http://127.0.0.1:8090" or "https://ks.example.com"
+    /// e.g. "http://127.0.0.1:8090" or "https://ks.example.com"
     pub endpoint: String,
 
-    /// PSK (Pre-Shared Key) - for authentication
+    /// PSK (Pre-Shared Key) - used for authentication
     ///
-    /// Authentication key for internal service-to-service communication, typically obtained from the global `actrix_shared_key` config
+    /// Shared key for internal inter-service authentication, typically obtained from the global config's `actrix_shared_key`
     pub psk: String,
 
     /// Request timeout (seconds)
@@ -57,7 +58,7 @@ impl Client {
     /// Generate a new Ed25519 signing key pair from the Signer service
     ///
     /// Returns (key_id, verifying_key_bytes[32], expires_at)
-    /// Private key remains on the Signer service side
+    /// The private key is retained on the Signer server side
     pub async fn generate_signing_key(
         &self,
     ) -> Result<(u32, VerifyingKey, u64), crate::error::SignerError> {
@@ -70,7 +71,7 @@ impl Client {
         let request = GenerateSigningKeyRequest { credential };
 
         crate::recording::debug!(
-            "Requesting Ed25519 signing key generation from KS at {}",
+            "Requesting Ed25519 signing key generation from Signer at {}",
             url
         );
 
@@ -80,7 +81,7 @@ impl Client {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
             return Err(crate::error::SignerError::Internal(format!(
-                "KS generate signing key request failed with status {status}: {error_text}"
+                "Signer generate signing key request failed with status {status}: {error_text}"
             )));
         }
 
@@ -105,16 +106,16 @@ impl Client {
         Ok((response.key_id, verifying_key, response.expires_at))
     }
 
-    /// Sign a message using a key stored in the Signer service
+    /// Sign a message using a key in the Signer service
     ///
-    /// Returns 64-byte Ed25519 signature
+    /// Returns a 64-byte Ed25519 signature
     pub async fn sign(
         &self,
         key_id: u32,
         message: &[u8],
     ) -> Result<Vec<u8>, crate::error::SignerError> {
         let url = format!("{}/sign/{}", self.endpoint, key_id);
-        let request_data = format!("sign:{key_id}");
+        let request_data = sign_request_payload(key_id, message);
 
         let credential = CredentialBuilder::new(self.actrix_shared_key.as_bytes())
             .sign(request_data.as_bytes())?;
@@ -126,7 +127,7 @@ impl Client {
         };
 
         crate::recording::debug!(
-            "Requesting signature for key_id={} from KS at {}",
+            "Requesting signature for key_id={} from Signer at {}",
             key_id,
             url
         );
@@ -137,7 +138,7 @@ impl Client {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
             return Err(crate::error::SignerError::Internal(format!(
-                "KS sign request failed with status {status}: {error_text}"
+                "Signer sign request failed with status {status}: {error_text}"
             )));
         }
 
@@ -151,7 +152,7 @@ impl Client {
         }
 
         crate::recording::info!(
-            "Successfully obtained signature for key_id={} from KS",
+            "Successfully obtained signature for key_id={} from Signer",
             key_id
         );
         Ok(response.signature)

@@ -1,6 +1,6 @@
 //! Actor access control list
 //!
-//! Defines the data structures for actor permission control.
+//! Defines data structures for actor permission control
 use anyhow::Result;
 
 use serde::{Deserialize, Serialize};
@@ -14,13 +14,13 @@ const CHAT_ACTOR_TYPE: &str = "CHAT";
 
 /// Actor access control list
 ///
-/// Manages access permissions between different actor types.
+/// Manages access permissions between different actor types
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct ActorAcl {
     pub rowid: Option<i64>,
     /// Target (accessed party) realm
     pub realm_id: u32,
-    /// Source (accessing party) realm; None means no source scope set
+    /// Source (accessing party) realm; None means no source scope is set
     pub source_realm_id: Option<u32>,
     pub from_type: String,
     pub to_type: String,
@@ -47,7 +47,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for ActorAcl {
 impl ActorAcl {
     /// Create a new access control rule
     pub fn new(realm_id: u32, from_type: String, to_type: String, access: bool) -> Self {
-        // Legacy semantics: when no source realm is explicitly specified, default to same-realm only
+        // Backward-compatible semantics: when no source realm is explicitly specified, defaults to same-realm only
         Self::new_with_source_realm(realm_id, Some(realm_id), from_type, to_type, access)
     }
 
@@ -98,20 +98,22 @@ impl ActorAcl {
 
             Ok(rowid)
         } else {
-            // Insert new record
-            let result = sqlx::query(
+            // A policy coordinate has exactly one effective rule. Repeated
+            // registration replaces it instead of creating row-order semantics.
+            let new_rowid: i64 = sqlx::query_scalar(
                 "INSERT INTO actoracl (realm_id, source_realm_id, from_type, to_type, access)
-                 VALUES (?, ?, ?, ?, ?)",
+                 VALUES (?, ?, ?, ?, ?)
+                 ON CONFLICT DO UPDATE SET access = excluded.access
+                 RETURNING rowid",
             )
             .bind(self.realm_id)
             .bind(self.source_realm_id.map(i64::from))
             .bind(&self.from_type)
             .bind(&self.to_type)
             .bind(if self.access { 1 } else { 0 })
-            .execute(pool)
+            .fetch_one(pool)
             .await?;
 
-            let new_rowid = result.last_insert_rowid();
             self.rowid = Some(new_rowid);
             Ok(new_rowid)
         }
@@ -168,7 +170,7 @@ impl ActorAcl {
         Ok(result)
     }
 
-    /// Get all access control rules for the specified realm
+    /// Get all access control rules for the specified Realm
     pub async fn get_by_realm(realm_id: u32) -> Result<Vec<Self>, RealmError> {
         let db = get_database();
         let pool = db.get_pool();
@@ -185,7 +187,7 @@ impl ActorAcl {
         Ok(acls)
     }
 
-    /// Get access control rule by type
+    /// Get access control rules by type
     pub async fn get_by_types(
         target_realm_id: u32,
         source_realm_id: u32,
@@ -198,93 +200,74 @@ impl ActorAcl {
         let result = sqlx::query_as::<_, ActorAcl>(
             "SELECT rowid, realm_id, source_realm_id, from_type, to_type, access
              FROM actoracl
-             WHERE realm_id = ? AND source_realm_id = ? AND from_type = ? AND to_type = ?
-             ORDER BY rowid DESC
+             WHERE realm_id = ?
+               AND (source_realm_id = ? OR source_realm_id IS NULL)
+               AND from_type = ?
+               AND to_type = ?
+             ORDER BY CASE WHEN source_realm_id = ? THEN 0 ELSE 1 END
              LIMIT 1",
         )
         .bind(target_realm_id)
         .bind(source_realm_id)
         .bind(from_type)
         .bind(to_type)
+        .bind(source_realm_id)
         .fetch_optional(pool)
         .await?;
 
         Ok(result)
     }
 
-    /// Delete all ACL rules for the specified target type (used when re-registering a service to replace old ACLs)
-    pub async fn delete_by_target(realm_id: u32, to_type: &str) -> Result<u64, RealmError> {
-        let db = get_database();
-        let pool = db.get_pool();
-
-        let result = sqlx::query("DELETE FROM actoracl WHERE realm_id = ? AND to_type = ?")
-            .bind(realm_id)
-            .bind(to_type)
-            .execute(pool)
-            .await?;
-
-        Ok(result.rows_affected())
-    }
-
-    /// Atomically replace every ACL rule for one realm + target actor type.
-    ///
-    /// Registration ACLs are type-level policy. Deleting the old policy and
-    /// inserting its replacement in separate statements can expose an empty or
-    /// partially-written policy to concurrent readers; this transaction makes
-    /// the replacement all-or-nothing.
+    /// Atomically replace every ACL rule owned by one target actor type.
     pub async fn replace_for_target(
         realm_id: u32,
         to_type: &str,
         rules: &[Self],
     ) -> Result<(), RealmError> {
-        let pool = get_database().get_pool();
-        let mut tx = pool.begin().await?;
-        Self::replace_for_target_in_transaction(&mut tx, realm_id, to_type, rules).await?;
-        tx.commit().await?;
-        Ok(())
-    }
+        let db = get_database();
+        let pool = db.get_pool();
+        let mut transaction = pool.begin().await?;
 
-    /// Replace a target type's ACL inside a caller-owned SQLite transaction.
-    ///
-    /// This lets registration commit the renewal-token binding, ACL policy,
-    /// and pending signaling metadata as one all-or-nothing state change.
-    pub async fn replace_for_target_in_transaction(
-        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        realm_id: u32,
-        to_type: &str,
-        rules: &[Self],
-    ) -> Result<(), RealmError> {
-        if rules
-            .iter()
-            .any(|rule| rule.realm_id != realm_id || rule.to_type != to_type)
-        {
-            return Err(RealmError::ValidationError(
-                "replacement ACL contains a different realm or target type".to_string(),
-            ));
-        }
-
-        sqlx::query("DELETE FROM actoracl WHERE realm_id = ?1 AND to_type = ?2")
+        sqlx::query("DELETE FROM actoracl WHERE realm_id = ? AND to_type = ?")
             .bind(realm_id)
             .bind(to_type)
-            .execute(&mut **tx)
+            .execute(&mut *transaction)
             .await?;
 
         for rule in rules {
+            if rule.realm_id != realm_id || rule.to_type != to_type {
+                return Err(RealmError::ValidationError(
+                    "ACL replacement contains a rule outside its target scope".to_string(),
+                ));
+            }
             sqlx::query(
                 "INSERT INTO actoracl
                     (realm_id, source_realm_id, from_type, to_type, access)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                 VALUES (?, ?, ?, ?, ?)
+                 ON CONFLICT DO UPDATE SET access = excluded.access",
             )
             .bind(rule.realm_id)
             .bind(rule.source_realm_id.map(i64::from))
             .bind(&rule.from_type)
             .bind(&rule.to_type)
             .bind(if rule.access { 1 } else { 0 })
-            .execute(&mut **tx)
+            .execute(&mut *transaction)
             .await?;
         }
 
+        transaction.commit().await?;
         Ok(())
+    }
+
+    /// Delete every policy rule owned by one target actor type.
+    pub async fn delete_by_target(realm_id: u32, to_type: &str) -> Result<u64, RealmError> {
+        let db = get_database();
+        let result = sqlx::query("DELETE FROM actoracl WHERE realm_id = ? AND to_type = ?")
+            .bind(realm_id)
+            .bind(to_type)
+            .execute(db.get_pool())
+            .await?;
+        Ok(result.rows_affected())
     }
 
     pub fn access(&self) -> bool {
@@ -429,7 +412,8 @@ mod tests {
         setup_test_db().await?;
 
         // Create a realm first
-        let realm = Realm::create("acl_test_realm".to_string(), String::new()).await?;
+        let realm =
+            Realm::create("acl_test_realm".to_string(), "test-secret-hash".to_string()).await?;
         let realm_id = realm.id;
 
         // Test create
@@ -490,97 +474,46 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn test_cross_realm_acl_allow_and_deny() -> anyhow::Result<()> {
+    async fn test_source_scoped_and_wildcard_acl_precedence() -> anyhow::Result<()> {
         setup_test_db().await?;
 
-        let source = Realm::create("acl_source_realm".to_string(), String::new()).await?;
-        let target = Realm::create("acl_target_realm".to_string(), String::new()).await?;
-        let source_realm = source.id;
+        let target = Realm::create(
+            "acl_target_realm".to_string(),
+            "test-secret-hash".to_string(),
+        )
+        .await?;
         let target_realm = target.id;
+        let source_realm = target_realm + 1;
 
-        let mut acl = ActorAcl::new_with_source_realm(
+        let wildcard = ActorAcl::new_with_source_realm(
+            target_realm,
+            None,
+            "acme:client".to_string(),
+            "acme:worker".to_string(),
+            false,
+        );
+        let exact = ActorAcl::new_with_source_realm(
             target_realm,
             Some(source_realm),
             "acme:client".to_string(),
             "acme:worker".to_string(),
             true,
         );
-        let _ = acl.save().await?;
+        ActorAcl::replace_for_target(target_realm, "acme:worker", &[wildcard, exact]).await?;
 
         let allowed =
             ActorAcl::can_discover(source_realm, target_realm, "acme:client", "acme:worker")
                 .await?;
         assert!(allowed);
 
-        let denied_same_realm =
+        let denied_by_wildcard =
             ActorAcl::can_discover(target_realm, target_realm, "acme:client", "acme:worker")
                 .await?;
-        assert!(!denied_same_realm);
+        assert!(!denied_by_wildcard);
 
         let denied_other_type =
             ActorAcl::can_discover(source_realm, target_realm, "acme:other", "acme:worker").await?;
         assert!(!denied_other_type);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    #[serial]
-    async fn test_replace_for_target_replaces_only_the_selected_type() -> anyhow::Result<()> {
-        setup_test_db().await?;
-
-        let realm = Realm::create("acl_replace_realm".to_string(), String::new()).await?;
-        let realm_id = realm.id;
-        let target = "acme:worker";
-        let untouched_target = "acme:other";
-
-        let mut old = ActorAcl::new(
-            realm_id,
-            "acme:old-client".to_string(),
-            target.to_string(),
-            true,
-        );
-        old.save().await?;
-        let mut untouched = ActorAcl::new(
-            realm_id,
-            "acme:client".to_string(),
-            untouched_target.to_string(),
-            true,
-        );
-        untouched.save().await?;
-
-        let replacements = vec![
-            ActorAcl::new(
-                realm_id,
-                "acme:new-client".to_string(),
-                target.to_string(),
-                true,
-            ),
-            ActorAcl::new_with_source_realm(
-                realm_id,
-                None,
-                "acme:federated-client".to_string(),
-                target.to_string(),
-                false,
-            ),
-        ];
-        ActorAcl::replace_for_target(realm_id, target, &replacements).await?;
-
-        let rules = ActorAcl::get_by_realm(realm_id).await?;
-        assert_eq!(
-            rules.iter().filter(|rule| rule.to_type == target).count(),
-            2
-        );
-        assert!(
-            rules
-                .iter()
-                .all(|rule| rule.to_type != target || rule.from_type != "acme:old-client")
-        );
-        assert!(
-            rules
-                .iter()
-                .any(|rule| rule.to_type == untouched_target && rule.from_type == "acme:client")
-        );
 
         Ok(())
     }

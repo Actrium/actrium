@@ -112,11 +112,45 @@ async fn start_embedded_signer(
 }
 
 async fn setup_test_environment(signer_config: SignerServiceConfig) -> TestEnv {
+    use std::sync::OnceLock;
+    static DB_DIR: OnceLock<TempDir> = OnceLock::new();
+    static DB_INIT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     let issuer_temp_dir = TempDir::new().expect("create issuer temp dir");
     let signer_temp_dir = TempDir::new().expect("create Signer temp dir");
     let shared_key = "test-shared-key".to_string();
     let (endpoint, signer_handle, signer_shutdown_tx) =
         start_embedded_signer(&shared_key, signer_temp_dir.path(), signer_config, None).await;
+
+    // Issue-time rechecks (AIS-03) hit the global platform database, so it must
+    // be initialized and hold the realm the test actors belong to. The OnceLock
+    // keeps the SQLite file alive for the whole process; the mutex serializes
+    // the concurrent tests' first-time initialization.
+    {
+        let _guard = DB_INIT_LOCK.lock().await;
+        let db_dir = DB_DIR.get_or_init(|| TempDir::new().expect("create DB temp dir"));
+        if !platform::storage::db::is_database_initialized() {
+            platform::storage::db::set_db_path(db_dir.path())
+                .await
+                .expect("Failed to initialize test database");
+        }
+        let pool = platform::storage::db::get_database().get_pool();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let secret_current = platform::realm::hash_realm_secret("key-rotation-seed-realm-secret");
+        sqlx::query(
+            "INSERT OR REPLACE INTO realm (id, name, status, enabled, created_at, secret_current)
+             VALUES (1001, 'key-rotation-test-realm', 'Active', 1, ?, ?)",
+        )
+        .bind(now)
+        .bind(secret_current)
+        .execute(pool)
+        .await
+        .expect("seed realm");
+    }
+
     TestEnv {
         issuer_temp_dir,
         _signer_temp_dir: signer_temp_dir,
@@ -137,6 +171,7 @@ async fn setup_test_environment(signer_config: SignerServiceConfig) -> TestEnv {
 
 fn issuer_config(temp_dir: &TempDir) -> IssuerConfig {
     IssuerConfig {
+        worker_id: 0,
         token_ttl_secs: 3600,
         renewal_token_ttl_secs: 24 * 60 * 60,
         renewal_rotation_window_secs: 60 * 60,
@@ -146,7 +181,7 @@ fn issuer_config(temp_dir: &TempDir) -> IssuerConfig {
         key_storage_file: temp_dir.path().join("issuer_keys.db"),
         enable_periodic_rotation: false,
         key_rotation_interval_secs: 86400,
-        turn_secret: "test-turn-secret".to_string(),
+        turn_secret: "test-turn-secret-0123456789abcdef".to_string(),
         sqlite_path: temp_dir.path().to_path_buf(),
     }
 }
@@ -194,7 +229,7 @@ async fn expired_key_rotates_before_credential_issuance() {
     eprintln!("key rotation test: issuing credential after expiry");
     let issued = tokio::time::timeout(
         TEST_STEP_TIMEOUT,
-        issuer.issue_credential_for_actor(&actor_id),
+        issuer.issue_credential_for_actor(&actor_id, None),
     )
     .await
     .expect("credential issuance timed out")

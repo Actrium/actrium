@@ -1,6 +1,7 @@
 //! Signer gRPC client
 
 use crate::error::SignerError;
+use crate::types::sign_request_payload;
 use actrix_proto::admin::v1::NonceCredential;
 use actrix_proto::signer::v1::{
     GenerateSigningKeyRequest, GetVerifyingKeyRequest, HealthCheckRequest, SignRequest,
@@ -207,7 +208,7 @@ impl GrpcClient {
     /// Returns 64-byte Ed25519 signature
     /// Private key does not leave the Signer service
     pub async fn sign(&mut self, key_id: u32, message: &[u8]) -> Result<Vec<u8>, SignerError> {
-        let request_data = format!("sign:{key_id}");
+        let request_data = sign_request_payload(key_id, message);
 
         // Create nonce credential
         let nonce_credential = CredentialBuilder::new(self.actrix_shared_key.as_bytes())

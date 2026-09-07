@@ -36,32 +36,29 @@ fn sample_credential() -> AIdCredential {
 }
 
 #[test]
-fn build_signaling_url_with_identity_appends_auth_query() {
+fn build_signaling_request_with_identity_uses_url_query_params() {
     let signaling_url = Url::parse("ws://localhost:8081/signaling/ws?existing=1").unwrap();
     let actor_id = sample_actor_id();
     let credential = sample_credential();
 
-    let authenticated_url = NetworkServiceDiscovery::build_signaling_url_with_identity(
+    let request = NetworkServiceDiscovery::build_signaling_request_with_identity(
         &signaling_url,
         &actor_id,
         &credential,
-    );
-    let query_pairs: std::collections::HashMap<_, _> =
-        authenticated_url.query_pairs().into_owned().collect();
+    )
+    .unwrap();
 
-    assert_eq!(query_pairs.get("existing"), Some(&"1".to_string()));
-    assert_eq!(
-        query_pairs.get("actor_id"),
-        Some(&actor_id.to_string_repr())
-    );
-    assert_eq!(query_pairs.get("key_id"), Some(&"7".to_string()));
-    assert_eq!(
-        query_pairs.get("claims"),
-        Some(&base64::engine::general_purpose::STANDARD.encode([1, 2, 3, 4]))
-    );
-    assert_eq!(
-        query_pairs.get("signature"),
-        Some(&base64::engine::general_purpose::STANDARD.encode([5, 6, 7, 8]))
+    let parsed = Url::parse(&request.uri().to_string()).unwrap();
+    let params: std::collections::HashMap<String, String> =
+        parsed.query_pairs().into_owned().collect();
+    assert_eq!(params["existing"], "1", "existing params are preserved");
+    assert_eq!(params["actor_id"], actor_id.to_string_repr());
+    assert_eq!(params["key_id"], "7");
+    assert_eq!(params["claims"], "AQIDBA==");
+    assert_eq!(params["signature"], "BQYHCA==");
+    assert!(
+        request.headers().get("x-actr-id").is_none(),
+        "identity must not travel in headers"
     );
 }
 

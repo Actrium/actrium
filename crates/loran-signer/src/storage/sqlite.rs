@@ -1,6 +1,6 @@
 //! SQLite storage backend implementation
 //!
-//! Uses sqlx to provide native async SQLite storage support
+//! Provides native async SQLite storage support via sqlx
 
 use crate::crypto::KeyEncryptor;
 use crate::error::{SignerError, SignerResult};
@@ -16,7 +16,11 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// SQLite storage backend
+/// Current on-disk schema version for `signer_keys.db`, stored in
+/// `PRAGMA user_version`.
+const SIGNER_SCHEMA_VERSION: i64 = 1;
+
+/// SQLite storage backend.
 #[derive(Clone)]
 pub struct SqliteBackend {
     pool: SqlitePool,
@@ -37,10 +41,10 @@ impl SqliteBackend {
     /// Create a new SQLite backend instance
     ///
     /// # Arguments
-    /// * `_config` - SQLite configuration (currently unused, reserved for future use)
-    /// * `key_ttl` - Key TTL (seconds); 0 means never expires
-    /// * `encryptor` - Key encryptor
-    /// * `db_path` - Database file storage directory path (from ActrixConfig.sqlite_path)
+    /// * `_config` - SQLite config (reserved, currently unused)
+    /// * `key_ttl` - key TTL in seconds; 0 means never expires
+    /// * `encryptor` - key encryptor
+    /// * `db_path` - directory path for the database file (from ActrixConfig.sqlite_path)
     pub async fn new(
         _config: &SqliteConfig,
         key_ttl: u64,
@@ -49,7 +53,7 @@ impl SqliteBackend {
     ) -> SignerResult<Self> {
         let file = db_path.join("signer_keys.db");
 
-        // Create connection options and enable WAL mode
+        // Create connect options and enable WAL mode
         let options = SqliteConnectOptions::from_str(&format!("sqlite:{}", file.display()))
             .map_err(|e| SignerError::Internal(format!("Failed to parse SQLite URL: {e}")))?
             .create_if_missing(true)
@@ -57,7 +61,7 @@ impl SqliteBackend {
             .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
             .busy_timeout(std::time::Duration::from_secs(5));
 
-        // Create connection pool
+        // Create the connection pool
         let pool = SqlitePoolOptions::new()
             .max_connections(10)
             .connect_with(options)
@@ -87,7 +91,24 @@ impl SqliteBackend {
 #[async_trait]
 impl KeyStorageBackend for SqliteBackend {
     async fn init(&self) -> SignerResult<()> {
-        // Create keys table (secret_key column stores the encrypted Ed25519 signing key, public_key stores the verifying key)
+        // Schema version gate. Databases created before this stamp existed read
+        // back as version 0, so accept both 0 (unversioned legacy or freshly
+        // created) and the current version, and reject only a newer version this
+        // binary does not understand. The stamp is written after the idempotent
+        // DDL below, so fresh and legacy databases converge to the current version.
+        let version: i64 = sqlx::query_scalar("PRAGMA user_version")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| SignerError::Internal(format!("Failed to read schema version: {e}")))?;
+        if version > SIGNER_SCHEMA_VERSION {
+            return Err(SignerError::Internal(format!(
+                "unsupported signer key database schema version {version}; expected \
+                 at most {SIGNER_SCHEMA_VERSION}"
+            )));
+        }
+
+        // Create the keys table (secret_key stores the encrypted Ed25519 signing
+        // key, public_key stores the verifying key).
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS keys (
@@ -103,18 +124,30 @@ impl KeyStorageBackend for SqliteBackend {
         .await
         .map_err(|e| SignerError::Internal(format!("Failed to create keys table: {e}")))?;
 
-        // Create index
+        // Create indexes.
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_keys_expires_at ON keys(expires_at)")
             .execute(&self.pool)
             .await
             .map_err(|e| SignerError::Internal(format!("Failed to create index: {e}")))?;
+
+        // Stamp the schema version once the DDL is in place. Skip the write when
+        // the database is already at the current version so a healthy startup
+        // performs no header write.
+        if version != SIGNER_SCHEMA_VERSION {
+            sqlx::query(&format!("PRAGMA user_version = {SIGNER_SCHEMA_VERSION}"))
+                .execute(&self.pool)
+                .await
+                .map_err(|e| {
+                    SignerError::Internal(format!("Failed to stamp schema version: {e}"))
+                })?;
+        }
 
         crate::recording::debug!("SQLite tables and indexes initialized");
         Ok(())
     }
 
     async fn generate_and_store_key(&self) -> SignerResult<KeyPair> {
-        // Generate Ed25519 key pair
+        // Generate an Ed25519 key pair
         let signing_key = SigningKey::generate(&mut OsRng);
         let verifying_key = signing_key.verifying_key();
 
@@ -122,7 +155,7 @@ impl KeyStorageBackend for SqliteBackend {
         let verifying_key_b64 = BASE64_STANDARD.encode(verifying_key.as_bytes());
         let signing_key_b64 = BASE64_STANDARD.encode(signing_key.as_bytes());
 
-        // Encrypt signing key (if enabled)
+        // Encrypt the signing key (if enabled)
         let encrypted_signing_key = self.encryptor.encrypt(&signing_key_b64)?;
 
         let now = SystemTime::now()
@@ -130,14 +163,14 @@ impl KeyStorageBackend for SqliteBackend {
             .unwrap()
             .as_secs() as i64;
 
-        // Calculate expiration time
+        // Compute expiry time
         let expires_at = if self.key_ttl == 0 {
-            0 // Never expires
+            0 // never expires
         } else {
             now + self.key_ttl as i64
         };
 
-        // Insert key and return ID (public_key stores the verifying key, secret_key stores the encrypted signing key)
+        // Insert the key and return the ID (public_key stores the verifying key, secret_key stores the encrypted signing key)
         let result = sqlx::query(
             r#"INSERT INTO keys (public_key, secret_key, created_at, expires_at)
                VALUES (?1, ?2, ?3, ?4)"#,
@@ -181,7 +214,7 @@ impl KeyStorageBackend for SqliteBackend {
     }
 
     async fn sign(&self, key_id: u32, message: &[u8]) -> SignerResult<Vec<u8>> {
-        // Read encrypted signing key from database
+        // Read the encrypted signing key from the database
         let result = sqlx::query_as::<_, (String,)>("SELECT secret_key FROM keys WHERE key_id = ?")
             .bind(key_id as i64)
             .fetch_optional(&self.pool)
@@ -200,7 +233,7 @@ impl KeyStorageBackend for SqliteBackend {
             }
         };
 
-        // Decrypt signing key
+        // Decrypt the signing key
         let signing_key_b64 = self.encryptor.decrypt(&encrypted_signing_key)?;
 
         // Base64 decode
@@ -212,7 +245,7 @@ impl KeyStorageBackend for SqliteBackend {
             .try_into()
             .map_err(|_| SignerError::Crypto("Signing key must be exactly 32 bytes".to_string()))?;
 
-        // Reconstruct SigningKey and sign
+        // Rebuild the SigningKey and sign
         let signing_key = SigningKey::from_bytes(&signing_key_array);
         let signature = signing_key.sign(message);
 
@@ -289,7 +322,7 @@ mod tests {
     use tempfile::tempdir;
 
     async fn create_test_backend(path: &Path) -> SqliteBackend {
-        let config = SqliteConfig {};
+        let config = SqliteConfig::default();
         SqliteBackend::new(
             &config,
             3600,
@@ -313,20 +346,20 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let backend = create_test_backend(temp_dir.path()).await;
 
-        // Generate key
+        // Generate a key
         let key_pair = backend.generate_and_store_key().await.unwrap();
         assert!(key_pair.key_id > 0);
         assert!(!key_pair.verifying_key.is_empty());
 
-        // Verify verifying key is 32 bytes (after base64 decode)
+        // Verify the verifying key is 32 bytes (after base64 decode)
         let vk_bytes = BASE64_STANDARD.decode(&key_pair.verifying_key).unwrap();
         assert_eq!(vk_bytes.len(), 32, "Ed25519 verifying key must be 32 bytes");
 
-        // Query public key
+        // Query the public key
         let public_key = backend.get_public_key(key_pair.key_id).await.unwrap();
         assert_eq!(public_key, Some(key_pair.verifying_key.clone()));
 
-        // Query full record
+        // Query the full record
         let record = backend.get_key_record(key_pair.key_id).await.unwrap();
         assert!(record.is_some());
         let record = record.unwrap();
@@ -345,7 +378,7 @@ mod tests {
         let signature = backend.sign(key_pair.key_id, message).await.unwrap();
         assert_eq!(signature.len(), 64, "Ed25519 signature must be 64 bytes");
 
-        // Verify signature
+        // Verify the signature
         let vk_bytes = BASE64_STANDARD.decode(&key_pair.verifying_key).unwrap();
         let vk_array: [u8; 32] = vk_bytes.try_into().unwrap();
         let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(&vk_array).unwrap();
@@ -398,8 +431,8 @@ mod tests {
     async fn test_cleanup_expired_keys() {
         let temp_dir = tempdir().unwrap();
 
-        // Create backend with 1-second TTL
-        let config = SqliteConfig {};
+        // Create a backend with a 1-second TTL
+        let config = SqliteConfig::default();
         let backend = SqliteBackend::new(
             &config,
             1,
@@ -409,14 +442,14 @@ mod tests {
         .await
         .unwrap();
 
-        // Generate key
+        // Generate a key
         backend.generate_and_store_key().await.unwrap();
         assert_eq!(backend.get_key_count().await.unwrap(), 1);
 
-        // Wait for expiration
+        // Wait for expiry
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
-        // Clean up expired keys (tolerance=0 means delete immediately upon expiration)
+        // Clean up expired keys (tolerance=0 means delete on expiry)
         let cleaned = backend.cleanup_expired_keys(0).await.unwrap();
         assert_eq!(cleaned, 1);
         assert_eq!(backend.get_key_count().await.unwrap(), 0);
@@ -426,8 +459,8 @@ mod tests {
     async fn test_zero_ttl_never_expires() {
         let temp_dir = tempdir().unwrap();
 
-        // TTL is 0 (never expires)
-        let config = SqliteConfig {};
+        // TTL of 0 (never expires)
+        let config = SqliteConfig::default();
         let backend = SqliteBackend::new(
             &config,
             0,

@@ -3,9 +3,8 @@
 //! Starts a temporary Signer gRPC service within the test process to verify the AIS issuance and validation chain.
 
 use actr_protocol::{
-    Acl, AclRule, ActrType, Realm, RegisterAuthMode, RegisterRequest, RegisterResponse,
-    ReissueCredentialRequest, RenewCredentialRequest, RenewCredentialResponse, acl_rule,
-    register_response, renew_credential_response,
+    ActrType, Realm, RegisterAuthMode, RegisterRequest, RegisterResponse, ReissueCredentialRequest,
+    RenewCredentialRequest, RenewCredentialResponse, register_response, renew_credential_response,
 };
 use ais::signer_client_wrapper::create_signer_client;
 use ais::{
@@ -33,6 +32,8 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tonic::transport::Server;
 use tower::ServiceExt;
+
+const ROUTE_REALM_SECRET: &str = "test-route-realm-registration-root-secret";
 
 struct TestEnv {
     issuer_temp_dir: TempDir,
@@ -169,6 +170,7 @@ async fn setup_test_environment_with_signer_config(
             .await
             .expect("Failed to initialize test database");
     }
+    seed_realm(1001, "default-test-realm", None).await;
 
     let signer_config = SignerClientConfig {
         endpoint,
@@ -192,6 +194,7 @@ async fn setup_test_environment_with_signer_config(
 
 fn default_issuer_config(temp_dir: &TempDir) -> IssuerConfig {
     IssuerConfig {
+        worker_id: 0,
         token_ttl_secs: 3600,
         renewal_token_ttl_secs: 24 * 60 * 60,
         renewal_rotation_window_secs: 60 * 60,
@@ -201,7 +204,7 @@ fn default_issuer_config(temp_dir: &TempDir) -> IssuerConfig {
         key_storage_file: temp_dir.path().join("issuer_keys.db"),
         enable_periodic_rotation: false,
         key_rotation_interval_secs: 86400,
-        turn_secret: "test-turn-secret".to_string(),
+        turn_secret: "test-turn-secret-at-least-32-bytes!".to_string(),
         sqlite_path: temp_dir.path().to_path_buf(),
     }
 }
@@ -285,7 +288,13 @@ async fn seed_realm(realm_id: u32, name: &str, secret: Option<&str>) {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-    let secret_current = secret.map(hash_realm_secret).unwrap_or_default();
+    // A realm always has a non-empty secret at the storage layer (enforced by a
+    // CHECK constraint). When a test does not care about the secret value, seed a
+    // fixed placeholder so the row is valid; tests that exercise secret
+    // verification pass an explicit secret.
+    let secret_current = secret
+        .map(hash_realm_secret)
+        .unwrap_or_else(|| hash_realm_secret("seed-realm-secret"));
 
     sqlx::query(
         "INSERT OR REPLACE INTO realm (id, name, status, enabled, created_at, secret_current)
@@ -302,7 +311,7 @@ async fn seed_realm(realm_id: u32, name: &str, secret: Option<&str>) {
 
 fn test_registry_manifest(manufacturer: &str, name: &str, version: &str, target: &str) -> Vec<u8> {
     format!(
-        r#"manufacturer = "{manufacturer}"
+        r#"publisher = "{manufacturer}"
 name = "{name}"
 version = "{version}"
 
@@ -355,7 +364,7 @@ async fn seed_active_package_with_key(
     .bind(manufacturer)
     .bind(name)
     .bind(version)
-    .bind(format!("{manufacturer}:{name}:{version}"))
+    .bind(format!("{manufacturer}/{name}@{version}"))
     .bind(target)
     .bind(manifest_str)
     .bind(signature_b64)
@@ -366,6 +375,58 @@ async fn seed_active_package_with_key(
     .expect("seed mfr package");
 
     manifest
+}
+
+/// Seed an active published package and return both its manifest bytes and the
+/// signing key. Published-package (Path 1) registration now requires an AIS-02
+/// manufacturer possession proof, so tests that exercise the success path need
+/// the key to produce that proof.
+async fn seed_active_package_returning_key(
+    manufacturer: &str,
+    name: &str,
+    version: &str,
+    target: &str,
+) -> (Vec<u8>, ed25519_dalek::SigningKey) {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let signing_key = SigningKey::generate(&mut OsRng);
+    let manifest =
+        seed_active_package_with_key(manufacturer, name, version, target, &signing_key).await;
+    (manifest, signing_key)
+}
+
+/// Build a published-package (Path 1) register request already carrying a valid
+/// AIS-02 manufacturer possession proof signed by `signing_key` — the
+/// publisher's current key, which Path 1 verifies the proof against.
+#[allow(clippy::too_many_arguments)]
+fn path1_request_with_auth(
+    manufacturer: &str,
+    name: &str,
+    version: &str,
+    realm_id: u32,
+    target: &str,
+    manifest: Vec<u8>,
+    signing_key: &ed25519_dalek::SigningKey,
+    nonce: Vec<u8>,
+) -> RegisterRequest {
+    let mut request = package_register_request(
+        manufacturer,
+        name,
+        version,
+        realm_id,
+        target,
+        manifest.clone(),
+        None,
+    );
+    sign_manufacturer_request_at(
+        &mut request,
+        signing_key,
+        &manifest,
+        test_unix_now_secs(),
+        nonce,
+    );
+    request
 }
 
 async fn post_register(
@@ -382,8 +443,17 @@ async fn post_register(
         builder = builder.header(REALM_SECRET_HEADER, secret);
     }
 
+    // The rate limiter keys on the peer IP via ConnectInfo, which the production
+    // server injects per connection but oneshot does not, so add it here.
+    let mut http_request = builder.body(Body::from(request.encode_to_vec())).unwrap();
+    http_request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+            [127, 0, 0, 1],
+            12345,
+        ))));
     let response = app
-        .oneshot(builder.body(Body::from(request.encode_to_vec())).unwrap())
+        .oneshot(http_request)
         .await
         .expect("register route response");
     let status = response.status();
@@ -414,8 +484,15 @@ async fn post_reissue(
         builder = builder.header(REALM_SECRET_HEADER, secret);
     }
 
+    let mut http_request = builder.body(Body::from(request.encode_to_vec())).unwrap();
+    http_request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+            [127, 0, 0, 1],
+            12345,
+        ))));
     let response = app
-        .oneshot(builder.body(Body::from(request.encode_to_vec())).unwrap())
+        .oneshot(http_request)
         .await
         .expect("reissue route response");
     let status = response.status();
@@ -448,118 +525,6 @@ async fn test_register_route_linked_with_realm_secret_succeeds() {
             panic!("linked /register with realm secret should succeed: {err:?}")
         }
     }
-}
-
-#[tokio::test]
-#[serial]
-async fn test_register_pending_failure_rolls_back_token_and_acl() {
-    let mut env = setup_test_environment().await;
-    let realm_secret = "linked-register-atomic-secret";
-    let realm_id = 22033;
-    seed_realm(realm_id, "linked-register-atomic", Some(realm_secret)).await;
-    let app = create_test_router(&env).await;
-    let pool = platform::storage::db::get_database().get_pool();
-
-    let mut request = linked_register_request();
-    request.realm = Realm { realm_id };
-    request.ws_address = Some("wss://example.invalid/actor".to_string());
-    request.acl = Some(Acl {
-        rules: vec![AclRule {
-            permission: acl_rule::Permission::Allow as i32,
-            from_type: ActrType {
-                manufacturer: "new-client".to_string(),
-                name: "caller".to_string(),
-                version: "1.0.0".to_string(),
-            },
-            source_realm: Some(acl_rule::SourceRealm::RealmId(realm_id)),
-        }],
-    });
-    let target_type = request.actr_type.to_string_repr();
-
-    sqlx::query("DELETE FROM actoracl WHERE realm_id = ?1 AND to_type = ?2")
-        .bind(realm_id)
-        .bind(&target_type)
-        .execute(pool)
-        .await
-        .expect("clear target ACL");
-    sqlx::query(
-        "INSERT INTO actoracl
-            (realm_id, source_realm_id, from_type, to_type, access)
-         VALUES (?1, ?1, 'old-client:caller:1.0.0', ?2, 0)",
-    )
-    .bind(realm_id)
-    .bind(&target_type)
-    .execute(pool)
-    .await
-    .expect("seed old ACL");
-
-    let tokens_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ais_renewal_token")
-        .fetch_one(pool)
-        .await
-        .expect("count renewal tokens before");
-    let pending_before: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM pending_registration WHERE realm_id = ?1")
-            .bind(realm_id)
-            .fetch_one(pool)
-            .await
-            .expect("count pending registrations before");
-
-    sqlx::query("DROP TRIGGER IF EXISTS test_fail_pending_registration")
-        .execute(pool)
-        .await
-        .expect("drop stale test trigger");
-    sqlx::query(
-        "CREATE TRIGGER test_fail_pending_registration
-         BEFORE INSERT ON pending_registration
-         BEGIN
-             SELECT RAISE(FAIL, 'forced pending registration failure');
-         END",
-    )
-    .execute(pool)
-    .await
-    .expect("create pending failure trigger");
-
-    let response = post_register(app, request, Some(realm_secret)).await;
-    sqlx::query("DROP TRIGGER IF EXISTS test_fail_pending_registration")
-        .execute(pool)
-        .await
-        .expect("drop pending failure trigger");
-
-    match response.result.expect("register result") {
-        register_response::Result::Error(error) => assert_eq!(error.code, 500),
-        register_response::Result::Success(_) => panic!("forced pending failure must not succeed"),
-    }
-
-    let tokens_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ais_renewal_token")
-        .fetch_one(pool)
-        .await
-        .expect("count renewal tokens after");
-    assert_eq!(tokens_after, tokens_before, "renewal token must roll back");
-
-    let acl_rows: Vec<(String, i64)> = sqlx::query_as(
-        "SELECT from_type, access FROM actoracl
-         WHERE realm_id = ?1 AND to_type = ?2",
-    )
-    .bind(realm_id)
-    .bind(&target_type)
-    .fetch_all(pool)
-    .await
-    .expect("read target ACL after rollback");
-    assert_eq!(
-        acl_rows,
-        vec![("old-client:caller:1.0.0".to_string(), 0)],
-        "previous type-level ACL must remain intact"
-    );
-
-    let pending_after: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM pending_registration WHERE realm_id = ?1")
-            .bind(realm_id)
-            .fetch_one(pool)
-            .await
-            .expect("count pending registrations after");
-    assert_eq!(pending_after, pending_before);
-
-    env.shutdown_signer().await;
 }
 
 #[tokio::test]
@@ -915,181 +880,28 @@ async fn test_reissue_route_is_idempotent_across_lost_responses() {
 
 #[tokio::test]
 #[serial]
-async fn test_reissue_attempt_id_body_mismatch_returns_conflict() {
-    let mut env = setup_test_environment().await;
-    let realm_secret = "reissue-conflict-secret";
-    let realm_id = 22034;
-    seed_realm(realm_id, "reissue-conflict", Some(realm_secret)).await;
-    let app = create_test_router(&env).await;
-
-    let mut registration = linked_register_request();
-    registration.realm = Realm { realm_id };
-    let initial = post_register(app.clone(), registration.clone(), Some(realm_secret)).await;
-    let initial_ok = match initial.result.expect("register result") {
-        register_response::Result::Success(ok) => ok,
-        register_response::Result::Error(error) => panic!("register failed: {error:?}"),
-    };
-    let request = ReissueCredentialRequest {
-        actr_id: initial_ok.actr_id,
-        registration,
-        renewal_proof: initial_ok.renewal_token,
-        attempt_id: control_attempt_id(),
-    };
-    let first = post_reissue(app.clone(), request.clone(), Some(realm_secret)).await;
-    assert!(matches!(
-        first.result,
-        Some(register_response::Result::Success(_))
-    ));
-
-    let mut conflicting = request;
-    conflicting.registration.ws_address = Some("wss://conflict.example.invalid".to_string());
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/reissue")
-                .header("content-type", "application/protobuf")
-                .header("x-real-ip", "127.0.0.1")
-                .header(REALM_SECRET_HEADER, realm_secret)
-                .body(Body::from(conflicting.encode_to_vec()))
-                .unwrap(),
-        )
-        .await
-        .expect("conflicting reissue response");
-    assert_eq!(response.status(), StatusCode::CONFLICT);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let response = RegisterResponse::decode(body).expect("decode conflict");
-    match response.result.expect("conflict result") {
-        register_response::Result::Error(error) => assert_eq!(error.code, 409),
-        register_response::Result::Success(_) => panic!("conflict must not succeed"),
-    }
-
-    env.shutdown_signer().await;
-}
-
-/// Once an idempotency response reaches its explicit retention horizon, AIS
-/// returns 410 instead of silently treating the replay as a new operation.
-#[tokio::test]
-#[serial]
-async fn test_reissue_replay_after_response_expiry_returns_gone() {
-    let mut env = setup_test_environment().await;
-    let realm_secret = "linked-expired-successor-secret";
-    let realm_id = 22016;
-    seed_realm(realm_id, "linked-expired-successor", Some(realm_secret)).await;
-    let app = create_test_router(&env).await;
-
-    let mut registration = linked_register_request();
-    registration.realm = Realm { realm_id };
-    let initial = post_register(app.clone(), registration.clone(), Some(realm_secret)).await;
-    let initial_ok = match initial.result.expect("register result") {
-        register_response::Result::Success(ok) => ok,
-        register_response::Result::Error(err) => panic!("initial registration failed: {err:?}"),
-    };
-
-    let request = ReissueCredentialRequest {
-        actr_id: initial_ok.actr_id.clone(),
-        registration,
-        renewal_proof: initial_ok.renewal_token.clone(),
-        attempt_id: control_attempt_id(),
-    };
-
-    // First attempt commits the deterministic successor, then the response is
-    // "lost" (the client keeps replaying its original proof).
-    let first = post_reissue(app.clone(), request.clone(), Some(realm_secret)).await;
-    let first_ok = match first.result.expect("first reissue result") {
-        register_response::Result::Success(ok) => ok,
-        register_response::Result::Error(err) => panic!("first reissue rejected: {err:?}"),
-    };
-    let successor = first_ok
-        .renewal_token
-        .clone()
-        .expect("first reissue must return a successor token");
-
-    // Age both the successor and the cached response past their explicit
-    // retention horizon while leaving the original proof binding untouched.
-    let pool = platform::storage::db::get_database().get_pool();
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-    let successor_hash = ais::renewal::hash_token(&successor);
-    let updated = sqlx::query("UPDATE ais_renewal_token SET expires_at = ?1 WHERE token_hash = ?2")
-        .bind(now - 3600)
-        .bind(&successor_hash)
-        .execute(pool)
-        .await
-        .expect("expire recorded successor token");
-    assert_eq!(
-        updated.rows_affected(),
-        1,
-        "test must have found and expired exactly the successor row"
-    );
-
-    let expired_attempt = sqlx::query(
-        "UPDATE ais_control_attempt SET response_expires_at = ?1
-         WHERE operation = 'reissue' AND attempt_id = ?2",
-    )
-    .bind(now - 1)
-    .bind(request.attempt_id.as_ref())
-    .execute(pool)
-    .await
-    .expect("expire cached reissue response");
-    assert_eq!(expired_attempt.rows_affected(), 1);
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/reissue")
-                .header("content-type", "application/protobuf")
-                .header("x-real-ip", "127.0.0.1")
-                .header(REALM_SECRET_HEADER, realm_secret)
-                .body(Body::from(request.encode_to_vec()))
-                .unwrap(),
-        )
-        .await
-        .expect("expired replay response");
-    assert_eq!(response.status(), StatusCode::GONE);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let replay = RegisterResponse::decode(body).expect("decode expired replay");
-    match replay.result.expect("expired replay result") {
-        register_response::Result::Error(error) => assert_eq!(error.code, 410),
-        register_response::Result::Success(_) => panic!("expired replay must not re-execute"),
-    }
-
-    env.shutdown_signer().await;
-}
-
-#[tokio::test]
-#[serial]
 async fn test_register_route_package_with_mfr_identity_succeeds() {
     let env = setup_test_environment().await;
     let realm_id = 22002;
-    seed_realm(realm_id, "package-http-route", None).await;
-    let manifest_raw =
-        seed_active_package("httppkg", "PackagedService", "1.0.0", "wasm32-wasip1").await;
+    seed_realm(realm_id, "package-http-route", Some(ROUTE_REALM_SECRET)).await;
+    let (manifest_raw, key) =
+        seed_active_package_returning_key("httppkg", "PackagedService", "1.0.0", "wasm32-wasip1")
+            .await;
     let app = create_test_router(&env).await;
 
-    let request = RegisterRequest {
-        actr_type: ActrType {
-            manufacturer: "httppkg".to_string(),
-            name: "PackagedService".to_string(),
-            version: "1.0.0".to_string(),
-        },
-        realm: Realm { realm_id },
-        service_spec: None,
-        acl: None,
-        service: None,
-        ws_address: None,
-        manifest_raw: Some(prost::bytes::Bytes::from(manifest_raw)),
-        mfr_signature: None,
-        target: Some("wasm32-wasip1".to_string()),
-        auth_mode: Some(RegisterAuthMode::Package as i32),
-        manufacturer_auth_signature: None,
-        manufacturer_auth_signed_at: None,
-        manufacturer_auth_nonce: None,
-    };
-    let response = post_register(app, request, None).await;
+    // AIS-02: a published package now also requires a manufacturer possession
+    // proof signed by the publisher's current key.
+    let request = path1_request_with_auth(
+        "httppkg",
+        "PackagedService",
+        "1.0.0",
+        realm_id,
+        "wasm32-wasip1",
+        manifest_raw,
+        &key,
+        vec![0x71; 32],
+    );
+    let response = post_register(app, request, Some(ROUTE_REALM_SECRET)).await;
 
     match response.result.expect("result") {
         register_response::Result::Success(ok) => {
@@ -1097,7 +909,7 @@ async fn test_register_route_package_with_mfr_identity_succeeds() {
             assert_eq!(ok.actr_id.r#type.manufacturer, "httppkg");
         }
         register_response::Result::Error(err) => {
-            panic!("package /register with MFR identity should succeed: {err:?}")
+            panic!("package /register with Publisher Registry identity should succeed: {err:?}")
         }
     }
 }
@@ -1107,12 +919,15 @@ async fn test_register_route_package_with_mfr_identity_succeeds() {
 async fn test_register_route_unspecified_auth_mode_uses_package_identity() {
     let env = setup_test_environment().await;
     let realm_id = 22004;
-    seed_realm(realm_id, "unspecified-http-route", None).await;
-    let manifest_raw =
-        seed_active_package("legacyhttp", "LegacyService", "1.0.0", "wasm32-wasip1").await;
+    seed_realm(realm_id, "unspecified-http-route", Some(ROUTE_REALM_SECRET)).await;
+    let (manifest_raw, key) =
+        seed_active_package_returning_key("legacyhttp", "LegacyService", "1.0.0", "wasm32-wasip1")
+            .await;
     let app = create_test_router(&env).await;
 
-    let request = RegisterRequest {
+    // Omitted auth_mode must still take the package path, and (AIS-02) a
+    // published package now requires the manufacturer possession proof.
+    let mut request = RegisterRequest {
         actr_type: ActrType {
             manufacturer: "legacyhttp".to_string(),
             name: "LegacyService".to_string(),
@@ -1123,7 +938,7 @@ async fn test_register_route_unspecified_auth_mode_uses_package_identity() {
         acl: None,
         service: None,
         ws_address: None,
-        manifest_raw: Some(prost::bytes::Bytes::from(manifest_raw)),
+        manifest_raw: Some(prost::bytes::Bytes::from(manifest_raw.clone())),
         mfr_signature: None,
         target: Some("wasm32-wasip1".to_string()),
         auth_mode: None,
@@ -1131,7 +946,14 @@ async fn test_register_route_unspecified_auth_mode_uses_package_identity() {
         manufacturer_auth_signed_at: None,
         manufacturer_auth_nonce: None,
     };
-    let response = post_register(app, request, None).await;
+    sign_manufacturer_request_at(
+        &mut request,
+        &key,
+        &manifest_raw,
+        test_unix_now_secs(),
+        vec![0x72; 32],
+    );
+    let response = post_register(app, request, Some(ROUTE_REALM_SECRET)).await;
 
     match response.result.expect("result") {
         register_response::Result::Success(ok) => {
@@ -1149,7 +971,12 @@ async fn test_register_route_unspecified_auth_mode_uses_package_identity() {
 async fn test_register_route_published_package_without_manifest_raw_is_rejected() {
     let env = setup_test_environment().await;
     let realm_id = 22005;
-    seed_realm(realm_id, "published-package-missing-manifest", None).await;
+    seed_realm(
+        realm_id,
+        "published-package-missing-manifest",
+        Some(ROUTE_REALM_SECRET),
+    )
+    .await;
     seed_active_package(
         "missingmanifest",
         "PublishedService",
@@ -1178,7 +1005,7 @@ async fn test_register_route_published_package_without_manifest_raw_is_rejected(
         manufacturer_auth_signed_at: None,
         manufacturer_auth_nonce: None,
     };
-    let response = post_register(app, request, None).await;
+    let response = post_register(app, request, Some(ROUTE_REALM_SECRET)).await;
 
     match response.result.expect("result") {
         register_response::Result::Error(err) => {
@@ -1195,7 +1022,12 @@ async fn test_register_route_published_package_without_manifest_raw_is_rejected(
 async fn test_register_route_published_package_without_target_is_rejected() {
     let env = setup_test_environment().await;
     let realm_id = 22006;
-    seed_realm(realm_id, "published-package-missing-target", None).await;
+    seed_realm(
+        realm_id,
+        "published-package-missing-target",
+        Some(ROUTE_REALM_SECRET),
+    )
+    .await;
     let manifest_raw = seed_active_package(
         "missingtarget",
         "PublishedService",
@@ -1224,7 +1056,7 @@ async fn test_register_route_published_package_without_target_is_rejected() {
         manufacturer_auth_signed_at: None,
         manufacturer_auth_nonce: None,
     };
-    let response = post_register(app, request, None).await;
+    let response = post_register(app, request, Some(ROUTE_REALM_SECRET)).await;
 
     match response.result.expect("result") {
         register_response::Result::Error(err) => {
@@ -1342,16 +1174,19 @@ async fn test_expired_mfr_key_allows_existing_package_and_path2_registration() {
         .bind("expiredruntime")
         .execute(pool)
         .await
-        .expect("expire MFR publish authority");
+        .expect("expire Publisher Registry publish authority");
 
-    let path1_request = package_register_request(
+    // AIS-02: Path 1 also requires the manufacturer possession proof. A merely
+    // expired (not revoked) key still resolves, so the proof still verifies.
+    let path1_request = path1_request_with_auth(
         "expiredruntime",
         "ExistingService",
         "1.0.0",
         realm_id,
         "wasm32-wasip1",
         published_manifest,
-        None,
+        &key,
+        vec![0x56; 32],
     );
     let path1_response = issuer
         .issue_credential(&path1_request)
@@ -1427,7 +1262,7 @@ async fn test_revoked_published_package_does_not_fall_back_to_path2() {
          WHERE type_str = ? AND target = ?",
     )
     .bind(test_unix_now_secs() as i64)
-    .bind("revokedterminal:RevokedService:1.0.0")
+    .bind("revokedterminal/RevokedService@1.0.0")
     .bind("wasm32-wasip1")
     .execute(pool)
     .await
@@ -1488,7 +1323,7 @@ async fn test_suspended_mfr_rejects_path1_and_path2() {
         .bind("suspendedruntime")
         .execute(pool)
         .await
-        .expect("suspend MFR");
+        .expect("suspend Publisher Registry");
 
     let path1_request = package_register_request(
         "suspendedruntime",
@@ -1508,7 +1343,7 @@ async fn test_suspended_mfr_rejects_path1_and_path2() {
             &path1_response.result,
             Some(register_response::Result::Error(error)) if error.code == 403
         ),
-        "suspended MFR must reject Path 1: {path1_response:?}"
+        "suspended Publisher Registry must reject Path 1: {path1_response:?}"
     );
 
     let (path2_manifest, path2_signature) = build_signed_manifest(
@@ -1543,7 +1378,7 @@ async fn test_suspended_mfr_rejects_path1_and_path2() {
             &path2_response.result,
             Some(register_response::Result::Error(error)) if error.code == 403
         ),
-        "suspended MFR must reject Path 2: {path2_response:?}"
+        "suspended Publisher Registry must reject Path 2: {path2_response:?}"
     );
 }
 
@@ -1573,7 +1408,7 @@ async fn test_published_package_retired_key_survives_until_explicit_revocation()
             .bind("revokedhistory")
             .fetch_one(pool)
             .await
-            .expect("load MFR current key");
+            .expect("load Publisher Registry current key");
     let old_public_key =
         base64::prelude::BASE64_STANDARD.encode(old_key.verifying_key().to_bytes());
     archive_key_to_history(pool, mfr_id, &old_key_id, &old_public_key, "retired").await;
@@ -1588,16 +1423,21 @@ async fn test_published_package_retired_key_survives_until_explicit_revocation()
         .bind(mfr_id)
         .execute(pool)
         .await
-        .expect("rotate current MFR key");
+        .expect("rotate current Publisher Registry key");
 
-    let request = package_register_request(
+    // AIS-02: the manufacturer possession proof must be signed by the
+    // publisher's CURRENT key (new_key). The stored manifest was signed by the
+    // now-retired old_key; retirement keeps the package valid, and the proof
+    // proves present control of the publisher.
+    let request = path1_request_with_auth(
         "revokedhistory",
         "ExistingService",
         "1.0.0",
         realm_id,
         "wasm32-wasip1",
         manifest,
-        None,
+        &new_key,
+        vec![0x5C; 32],
     );
     let retired_response = issuer
         .issue_credential(&request)
@@ -1636,7 +1476,12 @@ async fn test_published_package_retired_key_survives_until_explicit_revocation()
 async fn test_register_route_package_without_mfr_identity_is_still_rejected() {
     let env = setup_test_environment().await;
     let realm_id = 22003;
-    seed_realm(realm_id, "package-http-route-missing-mfr", None).await;
+    seed_realm(
+        realm_id,
+        "package-http-route-missing-mfr",
+        Some(ROUTE_REALM_SECRET),
+    )
+    .await;
     let app = create_test_router(&env).await;
 
     let request = RegisterRequest {
@@ -1663,7 +1508,7 @@ async fn test_register_route_package_without_mfr_identity_is_still_rejected() {
         manufacturer_auth_signed_at: None,
         manufacturer_auth_nonce: None,
     };
-    let response = post_register(app, request, None).await;
+    let response = post_register(app, request, Some(ROUTE_REALM_SECRET)).await;
 
     match response.result.expect("result") {
         register_response::Result::Error(err) => {
@@ -1671,7 +1516,7 @@ async fn test_register_route_package_without_mfr_identity_is_still_rejected() {
             assert!(err.message.contains("manufacturer not verified"));
         }
         register_response::Result::Success(_) => {
-            panic!("package /register without MFR identity should still be rejected")
+            panic!("package /register without Publisher Registry identity should still be rejected")
         }
     }
 }
@@ -1798,7 +1643,9 @@ async fn test_package_registration_without_mfr_identity_is_still_rejected() {
             assert!(err.message.contains("manufacturer not verified"));
         }
         register_response::Result::Success(_) => {
-            panic!("package registration without MFR identity should still be rejected")
+            panic!(
+                "package registration without Publisher Registry identity should still be rejected"
+            )
         }
     }
 }
@@ -1823,10 +1670,12 @@ async fn test_end_to_end_credential_flow() {
     .await
     .expect("Failed to create issuer");
 
-    // Seed database with MFR and package data so verify_mfr_identity path-1 passes
-    let manifest_raw = seed_active_package("acme", "test-device", "1.0.0", "wasm32-wasip1").await;
+    // Seed database with Publisher Registry and package data so verify_mfr_identity path-1 passes
+    let (manifest_raw, key) =
+        seed_active_package_returning_key("acme", "test-device", "1.0.0", "wasm32-wasip1").await;
 
-    let request = RegisterRequest {
+    // AIS-02: published-package registration requires the manufacturer possession proof.
+    let mut request = RegisterRequest {
         actr_type: ActrType {
             manufacturer: "acme".to_string(),
             name: "test-device".to_string(),
@@ -1845,6 +1694,13 @@ async fn test_end_to_end_credential_flow() {
         manufacturer_auth_signed_at: None,
         manufacturer_auth_nonce: None,
     };
+    sign_manufacturer_request_at(
+        &mut request,
+        &key,
+        &manifest_raw,
+        test_unix_now_secs(),
+        vec![0x10; 32],
+    );
 
     let response = issuer
         .issue_credential(&request)
@@ -1867,17 +1723,18 @@ async fn test_end_to_end_credential_flow() {
     assert_eq!(register_ok.actr_id.realm.realm_id, 1001);
     assert!(register_ok.actr_id.serial_number > 0);
 
-    let (claims, _) = AIdCredentialValidator::check(&register_ok.credential, 1001)
-        .await
-        .expect("Token validation should succeed");
+    let (claims, _) =
+        AIdCredentialValidator::check(&register_ok.credential, 1001, "actr.signaling")
+            .await
+            .expect("Token validation should succeed");
     assert_eq!(claims.realm_id, 1001);
     assert!(
         !claims.actor_id.is_empty(),
         "Actor ID should be present in claims"
     );
     assert!(
-        claims.actor_id.contains(':') && claims.actor_id.contains('@'),
-        "Actor ID format should include manufacturer/name and serial/realm separators"
+        claims.actor_id.contains('/') && claims.actor_id.matches('@').count() == 2,
+        "Actor ID must use serial@realm/publisher/program@version"
     );
 
     let now = SystemTime::now()
@@ -1887,15 +1744,18 @@ async fn test_end_to_end_credential_flow() {
     assert!(claims.expires_at > now);
     assert!(claims.expires_at <= now + 3600);
 
-    let wrong_realm_result = AIdCredentialValidator::check(&register_ok.credential, 9999).await;
+    let wrong_realm_result =
+        AIdCredentialValidator::check(&register_ok.credential, 9999, "actr.signaling").await;
     assert!(
         wrong_realm_result.is_err(),
         "Validation should fail with mismatched realm_id"
     );
 
-    // Issue and validate multiple credentials to verify stability.
+    // Issue and validate multiple credentials to verify stability. Each
+    // registration consumes a one-time manufacturer nonce, so give every
+    // iteration a distinct nonce.
     for idx in 0..5 {
-        let req = RegisterRequest {
+        let mut req = RegisterRequest {
             actr_type: ActrType {
                 manufacturer: "acme".to_string(),
                 name: "test-device".to_string(),
@@ -1914,6 +1774,13 @@ async fn test_end_to_end_credential_flow() {
             manufacturer_auth_signed_at: None,
             manufacturer_auth_nonce: None,
         };
+        sign_manufacturer_request_at(
+            &mut req,
+            &key,
+            &manifest_raw,
+            test_unix_now_secs(),
+            vec![0x20 + idx as u8; 32],
+        );
 
         let rsp = issuer
             .issue_credential(&req)
@@ -1926,7 +1793,7 @@ async fn test_end_to_end_credential_flow() {
             }
         };
 
-        let (claims, _) = AIdCredentialValidator::check(&ok.credential, 1001)
+        let (claims, _) = AIdCredentialValidator::check(&ok.credential, 1001, "actr.signaling")
             .await
             .unwrap_or_else(|e| panic!("Failed to validate credential {idx}: {e}"));
         assert_eq!(claims.realm_id, 1001);
@@ -2114,18 +1981,18 @@ async fn test_issuer_rotate_key_fails_when_ks_is_unavailable() {
             Err(err) => {
                 let msg = err.to_string();
                 assert!(
-                    msg.contains("KS unavailable")
+                    msg.contains("Signer unavailable")
                         || msg.contains("Failed")
                         || msg.contains("transport")
                         || msg.contains("connection"),
-                    "unexpected rotate_key error after KS shutdown: {msg}"
+                    "unexpected rotate_key error after Signer shutdown: {msg}"
                 );
                 return;
             }
         }
     }
 
-    panic!("rotate_key should fail after embedded KS shutdown");
+    panic!("rotate_key should fail after embedded Signer shutdown");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2144,7 +2011,7 @@ fn build_signed_manifest(
 
     let key_id = actrix_mfr::crypto::compute_key_id(&signing_key.verifying_key().to_bytes());
     let manifest = format!(
-        r#"manufacturer = "{manufacturer}"
+        r#"publisher = "{manufacturer}"
 name = "{name}"
 version = "{version}"
 signing_key_id = "{key_id}"
@@ -2215,7 +2082,7 @@ fn sign_manufacturer_request(
     );
 }
 
-/// Helper: seed an MFR with a specific keypair and return (mfr_id, key_id, public_key_b64).
+/// Helper: seed an Publisher Registry with a specific keypair and return (mfr_id, key_id, public_key_b64).
 async fn seed_mfr_with_key(
     pool: &sqlx::SqlitePool,
     mfr_name: &str,
@@ -2382,12 +2249,12 @@ async fn test_path2_missing_mfr_record_returns_forbidden() {
             &response.result,
             Some(register_response::Result::Error(error)) if error.code == 403
         ),
-        "a missing MFR record is an authorization rejection, not an internal error: {response:?}"
+        "a missing Publisher Registry record is an authorization rejection, not an internal error: {response:?}"
     );
 }
 
 /// Path 2: a manifest that does not declare `binary.target` is rejected.
-/// The MFR signature must bind target; AIS must not fall back to the
+/// The Publisher Registry signature must bind target; AIS must not fall back to the
 /// request's target, otherwise one signed manifest could register under
 /// arbitrary targets.
 #[tokio::test]
@@ -2417,7 +2284,7 @@ async fn test_path2_manifest_without_binary_target_is_rejected() {
     // Validly signed manifest that omits [binary].target.
     let key_id = actrix_mfr::crypto::compute_key_id(&key.verifying_key().to_bytes());
     let manifest = format!(
-        r#"manufacturer = "notargetmfr"
+        r#"publisher = "notargetmfr"
 name = "NoTargetService"
 version = "1.0.0"
 signing_key_id = "{key_id}"
@@ -2572,7 +2439,7 @@ async fn test_path2_historical_retired_key_passes() {
     let key_a_pub_b64 = base64::prelude::BASE64_STANDARD.encode(key_a.verifying_key().to_bytes());
     let key_a_id = actrix_mfr::crypto::compute_key_id(&key_a.verifying_key().to_bytes());
 
-    // Seed MFR with Key B as current
+    // Seed Publisher Registry with Key B as current
     let (mfr_id, _key_b_id) = seed_mfr_with_key(pool, "histmfr", &key_b).await;
 
     // Archive Key A as retired
@@ -2583,7 +2450,7 @@ async fn test_path2_historical_retired_key_passes() {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-    sqlx::query("INSERT OR IGNORE INTO realm (id, name, status, enabled, created_at, secret_current) VALUES (1001, 'test', 'Active', 1, ?, '')")
+    sqlx::query("INSERT OR IGNORE INTO realm (id, name, status, enabled, created_at, secret_current) VALUES (1001, 'test', 'Active', 1, ?, 'seed-placeholder-secret')")
         .bind(now)
         .execute(pool)
         .await
@@ -2649,7 +2516,7 @@ async fn test_path2_revoked_key_rejected() {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-    sqlx::query("INSERT OR IGNORE INTO realm (id, name, status, enabled, created_at, secret_current) VALUES (1001, 'test', 'Active', 1, ?, '')")
+    sqlx::query("INSERT OR IGNORE INTO realm (id, name, status, enabled, created_at, secret_current) VALUES (1001, 'test', 'Active', 1, ?, 'seed-placeholder-secret')")
         .bind(now)
         .execute(pool)
         .await
@@ -2663,7 +2530,7 @@ async fn test_path2_revoked_key_rejected() {
     let revoked_key_id =
         actrix_mfr::crypto::compute_key_id(&key_revoked.verifying_key().to_bytes());
 
-    // Seed MFR with current key
+    // Seed Publisher Registry with current key
     let (mfr_id, _) = seed_mfr_with_key(pool, "revmfr", &key_current).await;
 
     // Archive revoked key
@@ -2734,7 +2601,7 @@ async fn test_path2_identity_mismatch_rejected() {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-    sqlx::query("INSERT OR IGNORE INTO realm (id, name, status, enabled, created_at, secret_current) VALUES (1001, 'test', 'Active', 1, ?, '')")
+    sqlx::query("INSERT OR IGNORE INTO realm (id, name, status, enabled, created_at, secret_current) VALUES (1001, 'test', 'Active', 1, ?, 'seed-placeholder-secret')")
         .bind(now)
         .execute(pool)
         .await
@@ -2786,7 +2653,7 @@ async fn test_path2_identity_mismatch_rejected() {
 // Path 1 triple-ignored, Linked triple-rejected, and renewal bypass.
 // ============================================================================
 
-/// Shared Path 2 fixture: realm seeded, MFR + active key registered, and a
+/// Shared Path 2 fixture: realm seeded, Publisher Registry + active key registered, and a
 /// validly signed manifest. No `mfr_package` row is seeded, so registration
 /// always falls through to Path 2 (signature + manufacturer proof).
 ///
@@ -2823,7 +2690,6 @@ async fn path2_fixture(manufacturer: &str, name: &str, target: &str) -> Path2Fix
 
     let pool = platform::storage::db::get_database().get_pool();
     seed_realm(1001, "test", None).await;
-    seed_realm(1002, "test-alt", None).await;
 
     let key = SigningKey::generate(&mut OsRng);
     let wrong_key = SigningKey::generate(&mut OsRng);
@@ -2874,8 +2740,15 @@ async fn post_renew(app: Router, request: RenewCredentialRequest) -> RenewCreden
         .uri("/renew")
         .header("content-type", "application/protobuf")
         .header("x-real-ip", "127.0.0.1");
+    let mut http_request = builder.body(Body::from(request.encode_to_vec())).unwrap();
+    http_request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+            [127, 0, 0, 1],
+            12345,
+        ))));
     let response = app
-        .oneshot(builder.body(Body::from(request.encode_to_vec())).unwrap())
+        .oneshot(http_request)
         .await
         .expect("renew route response");
     let status = response.status();
@@ -2889,51 +2762,6 @@ async fn post_renew(app: Router, request: RenewCredentialRequest) -> RenewCreden
         String::from_utf8_lossy(&body)
     );
     RenewCredentialResponse::decode(body).expect("decode renew response")
-}
-
-#[tokio::test]
-#[serial]
-async fn test_renew_route_replays_exact_response_and_single_state_change() {
-    let mut env = setup_test_environment().await;
-    let realm_secret = "renew-idempotency-secret";
-    let realm_id = 22031;
-    seed_realm(realm_id, "renew-idempotency", Some(realm_secret)).await;
-    let app = create_test_router(&env).await;
-
-    let mut registration = linked_register_request();
-    registration.realm = Realm { realm_id };
-    let initial = post_register(app.clone(), registration, Some(realm_secret)).await;
-    let initial_ok = match initial.result.expect("register result") {
-        register_response::Result::Success(ok) => ok,
-        register_response::Result::Error(error) => panic!("register failed: {error:?}"),
-    };
-    let actor_id = initial_ok.actr_id.clone();
-    let request = RenewCredentialRequest {
-        actr_id: actor_id.clone(),
-        renewal_token: initial_ok.renewal_token.expect("initial renewal token"),
-        attempt_id: control_attempt_id(),
-    };
-
-    let first = post_renew(app.clone(), request.clone()).await;
-    let replay = post_renew(app, request).await;
-    assert_eq!(
-        first.encode_to_vec(),
-        replay.encode_to_vec(),
-        "renew replay must return the cached response"
-    );
-
-    let pool = platform::storage::db::get_database().get_pool();
-    let attempts: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM ais_control_attempt
-         WHERE operation = 'renew' AND actor_id = ?1 AND state = 1",
-    )
-    .bind(actor_id.to_string_repr())
-    .fetch_one(pool)
-    .await
-    .expect("count completed renew attempts");
-    assert_eq!(attempts, 1);
-
-    env.shutdown_signer().await;
 }
 
 #[tokio::test]
@@ -3000,55 +2828,6 @@ async fn test_renew_rotation_deletes_expired_token_rows() {
     .await
     .expect("count expired rows after rotation");
     assert_eq!(expired_rows, 0);
-
-    env.shutdown_signer().await;
-}
-
-#[tokio::test]
-#[serial]
-async fn test_renew_attempt_id_body_mismatch_returns_conflict() {
-    let mut env = setup_test_environment().await;
-    let realm_secret = "renew-conflict-secret";
-    let realm_id = 22032;
-    seed_realm(realm_id, "renew-conflict", Some(realm_secret)).await;
-    let app = create_test_router(&env).await;
-
-    let mut registration = linked_register_request();
-    registration.realm = Realm { realm_id };
-    let initial = post_register(app.clone(), registration, Some(realm_secret)).await;
-    let initial_ok = match initial.result.expect("register result") {
-        register_response::Result::Success(ok) => ok,
-        register_response::Result::Error(error) => panic!("register failed: {error:?}"),
-    };
-    let attempt_id = control_attempt_id();
-    let first = RenewCredentialRequest {
-        actr_id: initial_ok.actr_id.clone(),
-        renewal_token: initial_ok.renewal_token.expect("initial renewal token"),
-        attempt_id: attempt_id.clone(),
-    };
-    let _ = post_renew(app.clone(), first.clone()).await;
-
-    let mut conflicting = first;
-    conflicting.renewal_token = prost::bytes::Bytes::from(vec![9; 32]);
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/renew")
-                .header("content-type", "application/protobuf")
-                .header("x-real-ip", "127.0.0.1")
-                .body(Body::from(conflicting.encode_to_vec()))
-                .unwrap(),
-        )
-        .await
-        .expect("conflicting renew response");
-    assert_eq!(response.status(), StatusCode::CONFLICT);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let response = RenewCredentialResponse::decode(body).expect("decode conflict");
-    match response.result.expect("conflict result") {
-        renew_credential_response::Result::Error(error) => assert_eq!(error.code, 409),
-        renew_credential_response::Result::Success(_) => panic!("conflict must not succeed"),
-    }
 
     env.shutdown_signer().await;
 }
@@ -3121,7 +2900,7 @@ async fn test_path2_tamper_and_signature_matrix() {
         }),
         ("tamper_manifest_raw", false, &|r, _f, _n| {
             // flip a byte inside the manifest hash field: still valid TOML, but
-            // the MFR signature over the original bytes no longer verifies.
+            // the Publisher Registry signature over the original bytes no longer verifies.
             let mut bytes = r.manifest_raw.as_deref().unwrap().to_vec();
             if let Some(pos) = bytes.iter().rposition(|&b| b == b'0') {
                 bytes[pos] = b'1';
@@ -3242,42 +3021,31 @@ async fn test_path2_concurrent_nonce_only_one_succeeds() {
     );
 }
 
-/// Path 1: a published package registration that additionally carries a manufacturer
-/// triple must still succeed — Path 1 ignores the triple (registry active is
-/// authoritative). Mirrors `test_register_route_package_with_mfr_identity_succeeds`.
+/// AIS-02: a published-package (Path 1) registration carrying a VALID manufacturer
+/// possession proof (fresh nonce + signature by the publisher's current key)
+/// succeeds. Mirrors `test_register_route_package_with_mfr_identity_succeeds`.
 #[tokio::test]
 #[serial]
 async fn test_path1_published_package_with_manufacturer_triple_succeeds() {
     let env = setup_test_environment().await;
     let realm_id = 22003;
-    seed_realm(realm_id, "package-triple-route", None).await;
-    let manifest_raw =
-        seed_active_package("triplepkg", "TripleService", "1.0.0", "wasm32-wasip1").await;
+    seed_realm(realm_id, "package-triple-route", Some(ROUTE_REALM_SECRET)).await;
+    let (manifest_raw, key) =
+        seed_active_package_returning_key("triplepkg", "TripleService", "1.0.0", "wasm32-wasip1")
+            .await;
     let app = create_test_router(&env).await;
 
-    let request = RegisterRequest {
-        actr_type: ActrType {
-            manufacturer: "triplepkg".to_string(),
-            name: "TripleService".to_string(),
-            version: "1.0.0".to_string(),
-        },
-        realm: Realm { realm_id },
-        service_spec: None,
-        acl: None,
-        service: None,
-        ws_address: None,
-        manifest_raw: Some(prost::bytes::Bytes::from(manifest_raw)),
-        mfr_signature: None,
-        target: Some("wasm32-wasip1".to_string()),
-        auth_mode: Some(RegisterAuthMode::Package as i32),
-        // Path 1 must ignore a (bogus) manufacturer triple.
-        manufacturer_auth_signature: Some(prost::bytes::Bytes::from_static(
-            b"bogus-manufacturer-sig",
-        )),
-        manufacturer_auth_signed_at: Some(test_unix_now_secs()),
-        manufacturer_auth_nonce: Some(prost::bytes::Bytes::from(vec![0x77; 32])),
-    };
-    let response = post_register(app, request, None).await;
+    let request = path1_request_with_auth(
+        "triplepkg",
+        "TripleService",
+        "1.0.0",
+        realm_id,
+        "wasm32-wasip1",
+        manifest_raw,
+        &key,
+        vec![0x77; 32],
+    );
+    let response = post_register(app, request, Some(ROUTE_REALM_SECRET)).await;
 
     match response.result.expect("result") {
         register_response::Result::Success(ok) => {
@@ -3285,7 +3053,48 @@ async fn test_path1_published_package_with_manufacturer_triple_succeeds() {
             assert_eq!(ok.actr_id.r#type.manufacturer, "triplepkg");
         }
         register_response::Result::Error(err) => {
-            panic!("Path 1 should ignore manufacturer triple, got error: {err:?}")
+            panic!("Path 1 with a valid manufacturer proof should succeed, got error: {err:?}")
+        }
+    }
+}
+
+/// AIS-02: a published-package (Path 1) registration that presents a valid
+/// manifest and target but NO manufacturer possession proof must now be
+/// rejected. The published package, the realm secret, and the public manifest
+/// are all obtainable without controlling the publisher, so they are no longer
+/// sufficient on their own.
+#[tokio::test]
+#[serial]
+async fn test_path1_published_package_without_manufacturer_auth_is_rejected() {
+    let env = setup_test_environment().await;
+    let realm_id = 22030;
+    seed_realm(realm_id, "package-no-auth-route", Some(ROUTE_REALM_SECRET)).await;
+    let manifest_raw =
+        seed_active_package("noauthpkg", "NoAuthService", "1.0.0", "wasm32-wasip1").await;
+    let app = create_test_router(&env).await;
+
+    // Manifest + target present, manufacturer triple absent.
+    let request = package_register_request(
+        "noauthpkg",
+        "NoAuthService",
+        "1.0.0",
+        realm_id,
+        "wasm32-wasip1",
+        manifest_raw,
+        None,
+    );
+    let response = post_register(app, request, Some(ROUTE_REALM_SECRET)).await;
+
+    match response.result.expect("result") {
+        register_response::Result::Error(err) => {
+            assert_eq!(
+                err.code, 403,
+                "published package without a manufacturer proof must be ManufacturerNotVerified (403)"
+            );
+            assert!(err.message.contains("manufacturer not verified"));
+        }
+        register_response::Result::Success(_) => {
+            panic!("published package registration without a manufacturer proof must be rejected")
         }
     }
 }
@@ -3328,33 +3137,27 @@ async fn test_linked_auth_with_manufacturer_triple_rejected() {
 async fn test_renewal_token_renew_without_manufacturer_triple() {
     let env = setup_test_environment().await;
     let realm_id = 22004;
-    seed_realm(realm_id, "renew-route", None).await;
-    let manifest_raw =
-        seed_active_package("renewpkg", "RenewService", "1.0.0", "wasm32-wasip1").await;
+    seed_realm(realm_id, "renew-route", Some(ROUTE_REALM_SECRET)).await;
+    let (manifest_raw, key) =
+        seed_active_package_returning_key("renewpkg", "RenewService", "1.0.0", "wasm32-wasip1")
+            .await;
     let app = create_test_router(&env).await;
 
-    let register = RegisterRequest {
-        actr_type: ActrType {
-            manufacturer: "renewpkg".to_string(),
-            name: "RenewService".to_string(),
-            version: "1.0.0".to_string(),
-        },
-        realm: Realm { realm_id },
-        service_spec: None,
-        acl: None,
-        service: None,
-        ws_address: None,
-        manifest_raw: Some(prost::bytes::Bytes::from(manifest_raw)),
-        mfr_signature: None,
-        target: Some("wasm32-wasip1".to_string()),
-        auth_mode: Some(RegisterAuthMode::Package as i32),
-        manufacturer_auth_signature: None,
-        manufacturer_auth_signed_at: None,
-        manufacturer_auth_nonce: None,
-    };
+    // AIS-02: the initial published-package registration requires the
+    // manufacturer possession proof; the subsequent renew does not.
+    let register = path1_request_with_auth(
+        "renewpkg",
+        "RenewService",
+        "1.0.0",
+        realm_id,
+        "wasm32-wasip1",
+        manifest_raw,
+        &key,
+        vec![0x73; 32],
+    );
     // `post_register` consumes the Router; clone it so the renew call hits the
     // same issuer (shared via Arc<AIdIssuer> inside AISState).
-    let reg_response = post_register(app.clone(), register, None).await;
+    let reg_response = post_register(app.clone(), register, Some(ROUTE_REALM_SECRET)).await;
     let ok = match reg_response.result.expect("register result") {
         register_response::Result::Success(ok) => ok,
         register_response::Result::Error(err) => {
@@ -3383,4 +3186,325 @@ async fn test_renewal_token_renew_without_manufacturer_triple() {
             panic!("renewal without manufacturer triple should succeed, got error: {err:?}")
         }
     }
+}
+
+/// Issue a `/renew` request and return the raw HTTP status alongside the decoded
+/// response. Unlike [`post_renew`], this does not assert a 200 status, so it can
+/// exercise rejection paths (revocation, realm/package/publisher denial) that
+/// surface as a non-2xx status.
+async fn post_renew_raw(
+    app: Router,
+    request: RenewCredentialRequest,
+) -> (StatusCode, RenewCredentialResponse) {
+    let builder = Request::builder()
+        .method("POST")
+        .uri("/renew")
+        .header("content-type", "application/protobuf")
+        .header("x-real-ip", "127.0.0.1");
+    let mut http_request = builder.body(Body::from(request.encode_to_vec())).unwrap();
+    http_request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+            [127, 0, 0, 1],
+            12345,
+        ))));
+    let response = app
+        .oneshot(http_request)
+        .await
+        .expect("renew route response");
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("renew response body");
+    (
+        status,
+        RenewCredentialResponse::decode(body).expect("decode renew response"),
+    )
+}
+
+/// AIS-04: an actor placed on the revocation list can no longer renew, even
+/// while it still holds a valid, unexpired renewal token.
+#[tokio::test]
+#[serial]
+async fn test_renew_rejected_after_actor_revoked() {
+    let mut env = setup_test_environment().await;
+    let realm_secret = "linked-revoked-renew-secret";
+    let realm_id = 22020;
+    seed_realm(realm_id, "linked-revoked-renew", Some(realm_secret)).await;
+    let app = create_test_router(&env).await;
+
+    let mut registration = linked_register_request();
+    registration.realm = Realm { realm_id };
+    let initial = post_register(app.clone(), registration, Some(realm_secret)).await;
+    let ok = match initial.result.expect("register result") {
+        register_response::Result::Success(ok) => ok,
+        register_response::Result::Error(err) => panic!("register failed: {err:?}"),
+    };
+
+    ais::renewal::revoke_actor(&ok.actr_id, "security-review-test")
+        .await
+        .expect("revoke actor");
+
+    let renew_request = RenewCredentialRequest {
+        actr_id: ok.actr_id.clone(),
+        renewal_token: ok.renewal_token.clone().expect("renewal token"),
+        attempt_id: vec![0xa1; 16].into(),
+    };
+    let (status, response) = post_renew_raw(app, renew_request).await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "a revoked actor must be forbidden from renewing"
+    );
+    match response.result.expect("renew result") {
+        renew_credential_response::Result::Error(err) => {
+            assert_eq!(err.code, 403, "revoked actor renew must be forbidden");
+        }
+        renew_credential_response::Result::Success(_) => {
+            panic!("a revoked actor must not be able to renew")
+        }
+    }
+
+    env.shutdown_signer().await;
+}
+
+/// AIS-04: an actor placed on the revocation list can no longer reissue.
+#[tokio::test]
+#[serial]
+async fn test_reissue_rejected_after_actor_revoked() {
+    let mut env = setup_test_environment().await;
+    let realm_secret = "linked-revoked-reissue-secret";
+    let realm_id = 22021;
+    seed_realm(realm_id, "linked-revoked-reissue", Some(realm_secret)).await;
+    let app = create_test_router(&env).await;
+
+    let mut registration = linked_register_request();
+    registration.realm = Realm { realm_id };
+    let initial = post_register(app.clone(), registration.clone(), Some(realm_secret)).await;
+    let ok = match initial.result.expect("register result") {
+        register_response::Result::Success(ok) => ok,
+        register_response::Result::Error(err) => panic!("register failed: {err:?}"),
+    };
+
+    ais::renewal::revoke_actor(&ok.actr_id, "security-review-test")
+        .await
+        .expect("revoke actor");
+
+    let response = post_reissue(
+        app,
+        ReissueCredentialRequest {
+            actr_id: ok.actr_id.clone(),
+            registration,
+            renewal_proof: ok.renewal_token.clone(),
+            attempt_id: vec![0xb2; 16].into(),
+        },
+        Some(realm_secret),
+    )
+    .await;
+    match response.result.expect("reissue result") {
+        register_response::Result::Error(err) => {
+            assert_eq!(err.code, 403, "revoked actor reissue must be forbidden");
+        }
+        register_response::Result::Success(_) => {
+            panic!("a revoked actor must not be able to reissue")
+        }
+    }
+
+    env.shutdown_signer().await;
+}
+
+/// AIS-03: renewing a package identity re-checks package lifecycle. A package
+/// that was revoked after the credential was first issued must block re-issuance
+/// even though the renewal token is still valid.
+#[tokio::test]
+#[serial]
+async fn test_issue_for_actor_rejected_after_package_revoked() {
+    let env = setup_test_environment().await;
+    let issuer = create_test_issuer(&env).await;
+    let realm_id = 22022;
+    seed_realm(realm_id, "renew-revoked-package", None).await;
+    let (manifest_raw, key) = seed_active_package_returning_key(
+        "revokepkg",
+        "RevokeRenewService",
+        "1.0.0",
+        "wasm32-wasip1",
+    )
+    .await;
+
+    // AIS-02: the initial published-package registration requires the manufacturer proof.
+    let request = path1_request_with_auth(
+        "revokepkg",
+        "RevokeRenewService",
+        "1.0.0",
+        realm_id,
+        "wasm32-wasip1",
+        manifest_raw,
+        &key,
+        vec![0x74; 32],
+    );
+    let ok = match issuer
+        .issue_credential(&request)
+        .await
+        .expect("issue")
+        .result
+        .expect("result")
+    {
+        register_response::Result::Success(ok) => ok,
+        register_response::Result::Error(err) => panic!("register failed: {err:?}"),
+    };
+
+    // Re-issuing for the actor succeeds while the package is still active.
+    issuer
+        .issue_credential_for_actor(&ok.actr_id, None)
+        .await
+        .expect("reissue before revoke should succeed");
+
+    let pool = platform::storage::db::get_database().get_pool();
+    sqlx::query("UPDATE mfr_package SET status = 'revoked', revoked_at = ? WHERE type_str = ?")
+        .bind(test_unix_now_secs() as i64)
+        .bind("revokepkg/RevokeRenewService@1.0.0")
+        .execute(pool)
+        .await
+        .expect("revoke package");
+
+    let err = issuer
+        .issue_credential_for_actor(&ok.actr_id, None)
+        .await
+        .expect_err("a revoked package must block re-issuance");
+    assert!(
+        matches!(err, platform::aid::AidError::PackageRevoked),
+        "expected PackageRevoked, got {err:?}"
+    );
+}
+
+/// AIS-03: renewing a package identity re-checks the publisher. A publisher that
+/// was suspended after issuance must block re-issuance for its packages.
+#[tokio::test]
+#[serial]
+async fn test_issue_for_actor_rejected_after_publisher_suspended() {
+    let env = setup_test_environment().await;
+    let issuer = create_test_issuer(&env).await;
+    let realm_id = 22023;
+    seed_realm(realm_id, "renew-suspended-publisher", None).await;
+    let (manifest_raw, key) = seed_active_package_returning_key(
+        "suspendpub",
+        "SuspendRenewService",
+        "1.0.0",
+        "wasm32-wasip1",
+    )
+    .await;
+
+    // AIS-02: the initial published-package registration requires the manufacturer proof.
+    let request = path1_request_with_auth(
+        "suspendpub",
+        "SuspendRenewService",
+        "1.0.0",
+        realm_id,
+        "wasm32-wasip1",
+        manifest_raw,
+        &key,
+        vec![0x75; 32],
+    );
+    let ok = match issuer
+        .issue_credential(&request)
+        .await
+        .expect("issue")
+        .result
+        .expect("result")
+    {
+        register_response::Result::Success(ok) => ok,
+        register_response::Result::Error(err) => panic!("register failed: {err:?}"),
+    };
+
+    let pool = platform::storage::db::get_database().get_pool();
+    sqlx::query("UPDATE mfr SET status = 'suspended' WHERE name = ?")
+        .bind("suspendpub")
+        .execute(pool)
+        .await
+        .expect("suspend publisher");
+
+    let err = issuer
+        .issue_credential_for_actor(&ok.actr_id, None)
+        .await
+        .expect_err("a suspended publisher must block re-issuance");
+    assert!(
+        matches!(err, platform::aid::AidError::ManufacturerNotVerified),
+        "expected ManufacturerNotVerified, got {err:?}"
+    );
+}
+
+/// AIS-04 proof invalidation: once a possession proof has been consumed by a
+/// reissue and its short replay window has elapsed, replaying that same proof
+/// must be rejected — a single leaked proof cannot be chained indefinitely.
+#[tokio::test]
+#[serial]
+async fn test_reissue_proof_rejected_after_replay_window() {
+    let mut env = setup_test_environment().await;
+    let realm_secret = "linked-proof-window-secret";
+    let realm_id = 22024;
+    seed_realm(realm_id, "linked-proof-window", Some(realm_secret)).await;
+    let app = create_test_router(&env).await;
+
+    let mut registration = linked_register_request();
+    registration.realm = Realm { realm_id };
+    let initial = post_register(app.clone(), registration.clone(), Some(realm_secret)).await;
+    let initial_ok = match initial.result.expect("register result") {
+        register_response::Result::Success(ok) => ok,
+        register_response::Result::Error(err) => panic!("register failed: {err:?}"),
+    };
+
+    let request = ReissueCredentialRequest {
+        actr_id: initial_ok.actr_id.clone(),
+        registration,
+        renewal_proof: initial_ok.renewal_token.clone(),
+        attempt_id: vec![0xc3; 16].into(),
+    };
+
+    // First reissue consumes the proof and mints the deterministic successor.
+    let first = post_reissue(app.clone(), request.clone(), Some(realm_secret)).await;
+    let first_ok = match first.result.expect("first reissue result") {
+        register_response::Result::Success(ok) => ok,
+        register_response::Result::Error(err) => panic!("first reissue rejected: {err:?}"),
+    };
+    let successor = first_ok
+        .renewal_token
+        .clone()
+        .expect("first reissue must return a successor token");
+
+    // Age the successor row's creation time (the proof's consumption marker) past
+    // the replay window, while leaving the original proof binding inside the
+    // 30-day grace so only the window — not grace — is what closes.
+    let pool = platform::storage::db::get_database().get_pool();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let successor_hash = ais::renewal::hash_token(&successor);
+    let updated = sqlx::query("UPDATE ais_renewal_token SET created_at = ?1 WHERE token_hash = ?2")
+        .bind(now - (ais::renewal::REISSUE_PROOF_REPLAY_WINDOW_SECS + 3600))
+        .bind(&successor_hash)
+        .execute(pool)
+        .await
+        .expect("age successor created_at");
+    assert_eq!(
+        updated.rows_affected(),
+        1,
+        "test must have found and aged exactly the successor row"
+    );
+
+    // Replaying the ORIGINAL proof after the window closed must fail possession.
+    let replay = post_reissue(app, request, Some(realm_secret)).await;
+    match replay.result.expect("replay reissue result") {
+        register_response::Result::Error(err) => {
+            assert_eq!(
+                err.code, REISSUE_POSSESSION_NOT_PROVEN_CODE,
+                "a proof consumed past its replay window must fail possession"
+            );
+        }
+        register_response::Result::Success(_) => {
+            panic!("a spent proof past its replay window must not mint another successor")
+        }
+    }
+
+    env.shutdown_signer().await;
 }

@@ -20,7 +20,10 @@ use tokio::{
     sync::Mutex,
     time::{Duration, sleep},
 };
-use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{Message as WsMessage, client::IntoClientRequest},
+};
 use url::Url;
 
 type SignalingSocket =
@@ -169,14 +172,17 @@ impl NetworkServiceDiscovery {
             None => return Err(anyhow!("AIS registration response is missing result")),
         };
 
-        let signaling_url = Self::build_signaling_url_with_identity(
+        let signaling_request = Self::build_signaling_request_with_identity(
             &self.context.signaling_url,
             &actr_id,
             &credential,
-        );
-        let (socket, _) = connect_async(signaling_url.as_str())
-            .await
-            .with_context(|| format!("Failed to connect to signaling: {signaling_url}"))?;
+        )?;
+        let (socket, _) = connect_async(signaling_request).await.with_context(|| {
+            format!(
+                "Failed to connect to signaling: {}",
+                self.context.signaling_url
+            )
+        })?;
 
         Ok(SignalingState {
             socket,
@@ -185,22 +191,31 @@ impl NetworkServiceDiscovery {
         })
     }
 
-    fn build_signaling_url_with_identity(
+    fn build_signaling_request_with_identity(
         signaling_url: &Url,
         actr_id: &ActrId,
         credential: &AIdCredential,
-    ) -> Url {
+    ) -> Result<tokio_tungstenite::tungstenite::http::Request<()>> {
+        // The signaling server validates identity from URL query params before
+        // the WebSocket upgrade (loran-signaling `parse_url_identity`); the
+        // scheme matches actr-hyper's `build_url_with_identity`.
         let mut url = signaling_url.clone();
-        let claims_b64 = base64::engine::general_purpose::STANDARD.encode(&credential.claims);
-        let signature_b64 = base64::engine::general_purpose::STANDARD.encode(&credential.signature);
-
-        url.query_pairs_mut()
-            .append_pair("actor_id", &actr_id.to_string_repr())
-            .append_pair("key_id", &credential.key_id.to_string())
-            .append_pair("claims", &claims_b64)
-            .append_pair("signature", &signature_b64);
-
-        url
+        {
+            let mut pairs = url.query_pairs_mut();
+            pairs.append_pair("actor_id", &actr_id.to_string_repr());
+            pairs.append_pair("key_id", &credential.key_id.to_string());
+            pairs.append_pair(
+                "claims",
+                &base64::engine::general_purpose::STANDARD.encode(&credential.claims),
+            );
+            pairs.append_pair(
+                "signature",
+                &base64::engine::general_purpose::STANDARD.encode(&credential.signature),
+            );
+        }
+        url.as_str()
+            .into_client_request()
+            .context("invalid signaling WebSocket URL")
     }
 
     fn as_error(context: &str, error: &ErrorResponse) -> anyhow::Error {

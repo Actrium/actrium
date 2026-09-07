@@ -1,9 +1,9 @@
-//! Publish nonce for Challenge-Response authentication on `/mfr/pkg/publish`.
+//! Publish nonce for Challenge-Response authentication on `/registry/packages/publish`.
 //!
 //! Flow:
-//! 1. CLI requests a nonce via `POST /mfr/pkg/nonce`
+//! 1. CLI requests a nonce via `POST /registry/packages/nonce`
 //! 2. Server generates a 32-byte random nonce, stores it with status=pending and TTL=5min
-//! 3. CLI signs `"ACTR-PUBLISH:{manufacturer}:{hex(nonce)}:{sha256(manifest)}"` with MFR private key
+//! 3. CLI signs `"ACTR-PUBLISH:{manufacturer}:{hex(nonce)}:{sha256(manifest)}"` with Publisher Registry private key
 //! 4. CLI sends the nonce + nonce_sig in the publish request body
 //! 5. Server verifies: nonce exists + pending + not expired → verify signature → mark used
 
@@ -40,7 +40,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for PublishNonce {
 }
 
 impl PublishNonce {
-    /// Create a new pending nonce for the given MFR.
+    /// Create a new pending nonce for the given Publisher Registry.
     ///
     /// Returns the raw 32-byte nonce value.
     pub async fn create(pool: &SqlitePool, mfr_id: i64) -> Result<Vec<u8>, MfrError> {

@@ -1,6 +1,6 @@
-//! SQLite nonce storage implementation
+//! SQLite Nonce Storage Implementation
 //!
-//! Provides SQLite-based nonce storage implementation with async support via sqlx
+//! Provides a SQLite-based nonce storage implementation with async support via sqlx.
 
 use anyhow::Result;
 use nonce_auth::NonceError;
@@ -14,14 +14,28 @@ use tokio::sync::RwLock;
 
 use super::db_nonce_entry::DbNonceEntry;
 
+/// Current on-disk schema version for `nonce.db`, stored in `PRAGMA user_version`.
+const NONCE_SCHEMA_VERSION: i64 = 1;
+
+/// Interval between background nonce-table cleanup passes.
+///
+/// The nonce table is append-only on the write path (`set` only inserts), so
+/// without periodic pruning it grows without bound. Five minutes keeps the
+/// table small while adding negligible load.
+const NONCE_CLEANUP_INTERVAL: Duration = Duration::from_secs(300);
+
 /// A sqlx-based implementation of NonceStorage for nonce-auth
+///
+/// Cloning is cheap: both the connection pool and the cleanup lock are shared
+/// behind `Arc`, so clones operate on the same underlying database and lock.
+#[derive(Clone)]
 pub struct SqliteNonceStorage {
     pool: Arc<SqlitePool>,
     cleanup_lock: Arc<RwLock<()>>,
 }
 
 impl SqliteNonceStorage {
-    /// Create a new nonce storage instance (synchronous method, for non-async contexts)
+    /// Create a new nonce storage instance (sync, for non-async contexts)
     pub fn new<P: AsRef<Path>>(db_path: P) -> Result<Self> {
         let db_file = db_path.as_ref().join("nonce.db");
 
@@ -35,7 +49,7 @@ impl SqliteNonceStorage {
         })
     }
 
-    /// Create a new nonce storage instance (async method, for async contexts)
+    /// Create a new nonce storage instance (async, for async contexts)
     pub async fn new_async<P: AsRef<Path>>(db_path: P) -> Result<Self> {
         let db_file = db_path.as_ref().join("nonce.db");
         let pool = Self::init_pool(&db_file).await?;
@@ -59,7 +73,22 @@ impl SqliteNonceStorage {
             .connect_with(options)
             .await?;
 
-        // Initialize database table
+        // Schema version gate. Databases created before this stamp existed read
+        // back as version 0, so accept both 0 (unversioned legacy or freshly
+        // created) and the current version, and reject only a newer version this
+        // binary does not understand. The stamp is written to the current version
+        // after the idempotent DDL below, so fresh and legacy databases converge.
+        let version: i64 = sqlx::query_scalar("PRAGMA user_version")
+            .fetch_one(&pool)
+            .await?;
+        if version > NONCE_SCHEMA_VERSION {
+            anyhow::bail!(
+                "unsupported nonce database schema version {version}; expected at \
+                 most {NONCE_SCHEMA_VERSION}"
+            );
+        }
+
+        // Initialize database tables.
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS nonce_entries (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -73,7 +102,7 @@ impl SqliteNonceStorage {
         .execute(&pool)
         .await?;
 
-        // Create indexes
+        // Create indexes.
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_nonce_context ON nonce_entries(nonce, context)",
         )
@@ -83,6 +112,15 @@ impl SqliteNonceStorage {
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_expires_at ON nonce_entries(expires_at)")
             .execute(&pool)
             .await?;
+
+        // Stamp the schema version once the DDL is in place. Skip the write when
+        // the database is already at the current version so a healthy startup
+        // performs no header write.
+        if version != NONCE_SCHEMA_VERSION {
+            sqlx::query(&format!("PRAGMA user_version = {NONCE_SCHEMA_VERSION}"))
+                .execute(&pool)
+                .await?;
+        }
 
         Ok(pool)
     }
@@ -192,7 +230,7 @@ impl NonceStorage for SqliteNonceStorage {
     }
 
     async fn cleanup_expired(&self, current_time: i64) -> Result<usize, NonceError> {
-        // Use lock to prevent concurrent cleanup
+        // Use a lock to prevent concurrent cleanup
         let _lock = self.cleanup_lock.write().await;
 
         let result = sqlx::query("DELETE FROM nonce_entries WHERE expires_at < ?")
@@ -214,6 +252,53 @@ impl NonceStorage for SqliteNonceStorage {
             total_records: total.0 as usize,
             backend_info: "SQLite (sqlx async)".to_string(),
         })
+    }
+}
+
+/// Run a cancellation-aware background loop that periodically deletes expired
+/// nonce rows from `storage`.
+///
+/// The loop wakes every [`NONCE_CLEANUP_INTERVAL`] and removes every row whose
+/// `expires_at` is already in the past (reusing the [`NonceStorage::cleanup_expired`]
+/// DELETE), then waits again. It exits cleanly as soon as `cancel` resolves, so
+/// callers can pass any shutdown future (for example
+/// `CancellationToken::cancelled_owned()`).
+pub async fn run_nonce_cleanup(
+    storage: Arc<SqliteNonceStorage>,
+    cancel: impl std::future::Future<Output = ()> + Send + 'static,
+) {
+    let mut ticker = tokio::time::interval(NONCE_CLEANUP_INTERVAL);
+    // Drop missed ticks instead of firing a burst after a long stall.
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    tokio::pin!(cancel);
+
+    loop {
+        tokio::select! {
+            _ = &mut cancel => {
+                crate::recording::debug!("Nonce cleanup loop cancelled");
+                break;
+            }
+            _ = ticker.tick() => {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64;
+                match NonceStorage::cleanup_expired(&*storage, now).await {
+                    Ok(removed) if removed > 0 => {
+                        crate::recording::info!(
+                            "Nonce cleanup removed {} expired entries",
+                            removed
+                        );
+                    }
+                    Ok(_) => {
+                        crate::recording::debug!("Nonce cleanup found no expired entries");
+                    }
+                    Err(e) => {
+                        crate::recording::warn!("Nonce cleanup failed: {}", e);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -279,7 +364,7 @@ mod tests {
             .await
             .unwrap();
 
-        // Add a non-expiring nonce (1 hour TTL)
+        // Add a non-expired nonce (1 hour TTL)
         storage
             .set("valid", None, Duration::from_secs(3600))
             .await
@@ -295,12 +380,12 @@ mod tests {
         println!("After sleep: {after_sleep}");
         println!("Time elapsed: {} seconds", after_sleep - before_insert);
 
-        // Call through NonceStorage trait (checks expiration)
+        // Call through the NonceStorage trait (checks expiry)
         use nonce_auth::storage::NonceStorage;
         let expired_entry = NonceStorage::get(&storage, "expired", None).await.unwrap();
         println!("Expired entry after trait call: {expired_entry:?}");
 
-        // Verify: expired nonce should not be found (trait method checks expiration internally)
+        // Verify: expired nonce should not be found (trait method checks expiry internally)
         assert!(
             expired_entry.is_none(),
             "Expected expired nonce to return None"

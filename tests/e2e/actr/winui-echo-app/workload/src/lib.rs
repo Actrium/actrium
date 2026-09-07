@@ -45,7 +45,7 @@ const HOST_BRIDGE_REQUEST_PAYLOAD: &[u8] = b"native-reverse-request-v1";
 const HOST_BRIDGE_RESPONSE_PAYLOAD: &[u8] = b"csharp-reverse-response-v1";
 const HOST_BRIDGE_SEQUENCE: u64 = 580;
 const HOST_BRIDGE_TIMESTAMP_MS: i64 = 1_735_689_600_123;
-const HOST_BRIDGE_SENDER: &str = "1a2b3c@7/acme:AskService:1.0.0";
+const HOST_BRIDGE_SENDER: &str = "1a2b3c@7/acme/AskService@1.0.0";
 /// Generic failure returned by this test-only fixture's C exports.
 ///
 /// This matches the C ABI's documented generic framework/runtime failure

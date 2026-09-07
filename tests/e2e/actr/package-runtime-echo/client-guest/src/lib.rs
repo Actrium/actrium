@@ -15,7 +15,7 @@ use prost::Message as ProstMessage;
 
 use echo::{EchoRequest, EchoResponse};
 
-const ECHO_SERVICE_MANUFACTURER: &str = "actrium";
+const ECHO_SERVICE_MANUFACTURER: &str = "e2e.actrium.test";
 const ECHO_SERVICE_NAME: &str = "EchoService";
 
 fn echo_service_version() -> String {

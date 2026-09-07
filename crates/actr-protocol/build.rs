@@ -32,6 +32,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute(
             "RenewCredentialResponse.result",
             "#[allow(clippy::large_enum_variant)]",
+        )
+        // `SignalingToActr.payload` carries `RegisterResponse`, which embeds the
+        // v1 `TurnCredential` (ICE servers + claims). The variant exceeds the
+        // 128-byte large_enum_variant threshold but is rarely constructed; the
+        // Box tradeoff is not worth the call-site churn across the signaling
+        // server, so suppress the lint at codegen time.
+        .type_attribute(
+            "SignalingToActr.payload",
+            "#[allow(clippy::large_enum_variant)]",
         );
 
     // Add serde and Ord/PartialOrd for core identity types

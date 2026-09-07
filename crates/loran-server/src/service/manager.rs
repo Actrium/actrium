@@ -1,12 +1,14 @@
-//! Service manager
+//! Service Manager
 //!
 //! Implements service start, stop, and management logic
-//! Service manager module - responsible for managing the lifecycle of multiple services
+//! Service manager module - manages the lifecycle of multiple services
 
 use super::{HttpRouterService, IceService, http::build_control_router};
 use crate::service::container::ServiceContainer;
 use crate::service::grpc::build_signer_grpc_router;
-use crate::service::http::{AisService, MfrService, SignalingService};
+use crate::service::http::{
+    AisService, PublisherRegistryService, SignalingService, build_realm_descriptor_router,
+};
 use crate::service::ice::{StunService, TurnService};
 use anyhow::Result;
 use axum::Router;
@@ -24,7 +26,7 @@ mod resource_type {
     pub const SIGNALING: i32 = 3;
     pub const AIS: i32 = 4;
     pub const SIGNER: i32 = 5;
-    pub const MFR: i32 = 6;
+    pub const PUBLISHER_REGISTRY: i32 = 6;
 
     /// Map a ServiceType to its proto ResourceType integer.
     pub fn from_service_type(st: &super::ServiceType) -> i32 {
@@ -33,8 +35,8 @@ mod resource_type {
             super::ServiceType::Turn => TURN,
             super::ServiceType::Signaling => SIGNALING,
             super::ServiceType::Ais => AIS,
-            super::ServiceType::Ks => SIGNER,
-            super::ServiceType::Mfr => MFR,
+            super::ServiceType::Signer => SIGNER,
+            super::ServiceType::PublisherRegistry => PUBLISHER_REGISTRY,
         }
     }
 }
@@ -43,9 +45,9 @@ use std::convert::Infallible;
 use std::future::{Ready, ready};
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{Notify, watch};
 use tokio::task::JoinHandle;
 use tower_service::Service;
@@ -111,6 +113,11 @@ pub struct ServiceManager {
     /// Cancellation token for background tasks spawned during router build.
     /// Cancelled on reload to stop old tasks before spawning new ones.
     bg_cancel: Option<tokio_util::sync::CancellationToken>,
+    /// Cancellation token for the dedicated Signer listener's background
+    /// cleanup tasks (SGN-04/07). Independent of `bg_cancel` so those tasks
+    /// live for the lifetime of the listener (which is not hot-reloaded) and
+    /// are cancelled only on shutdown.
+    signer_bg_cancel: Option<tokio_util::sync::CancellationToken>,
     /// In-memory metrics ring buffer, reused across reloads.
     metrics_store: MetricsStore,
     /// Per-service-type atomic counters, keyed by ResourceType i32.
@@ -138,6 +145,7 @@ impl ServiceManager {
             jwt_secret: None,
             config_store: None,
             bg_cancel: None,
+            signer_bg_cancel: None,
             metrics_store: MetricsStore::new(),
             service_counters: Arc::new(HashMap::new()),
         }
@@ -165,7 +173,7 @@ impl ServiceManager {
 
     /// Register services to the management platform
     pub async fn register_services(&self, services: Vec<ServiceInfo>) -> Result<()> {
-        // Control plane is pull-based (/admin), no active registration.
+        // Current control plane is pull-based (/admin), no active registration.
         platform::recording::debug!(
             "Control plane is pull-based, skipping active service registration for {} services",
             services.len()
@@ -192,7 +200,7 @@ impl ServiceManager {
             ),
             (
                 "Signer Service",
-                ServiceType::Ks,
+                ServiceType::Signer,
                 self.config.is_signer_enabled(),
             ),
         ];
@@ -222,7 +230,6 @@ impl ServiceManager {
     /// adds /metrics, and applies global middleware layers.
     async fn build_router_from_config(&mut self) -> Result<Router> {
         use crate::service::trace::http_trace_layer;
-        use tower_http::cors::CorsLayer;
 
         // Cancel any previously spawned background tasks (cleanup loops, key refresh)
         if let Some(old_cancel) = self.bg_cancel.take() {
@@ -232,6 +239,7 @@ impl ServiceManager {
         self.bg_cancel = Some(cancel.clone());
 
         let mut app = Router::new();
+        app = app.merge(build_realm_descriptor_router(self.config.clone()));
 
         // Refresh ServiceCollector to reflect currently enabled services.
         // This ensures the admin dashboard shows accurate service status after reload.
@@ -257,11 +265,49 @@ impl ServiceManager {
             let toml_content = std::fs::read_to_string(&self.config_path).unwrap_or_default();
             match platform::config::resolver::apply_overrides(&toml_content, &overrides) {
                 Ok(merged) => {
-                    platform::recording::info!(
-                        "Applied {} config override(s) from database",
-                        overrides.len()
-                    );
-                    self.config = merged;
+                    // CFG-02: The merged config (disk config + L2 SQLite overrides)
+                    // has never been validated as a whole. A single override could
+                    // silently relax a safety control (e.g. disable Signer KEK
+                    // enforcement). Validate before adopting; on failure keep the
+                    // file-only config and record a security-channel event.
+                    match merged.validate() {
+                        Ok(()) => {
+                            platform::recording::info!(
+                                "Applied {} config override(s) from database",
+                                overrides.len()
+                            );
+                            self.config = merged;
+                        }
+                        Err(errors) => {
+                            let non_warnings: Vec<_> = errors
+                                .iter()
+                                .filter(|e| !e.starts_with("Warning:"))
+                                .collect();
+                            if non_warnings.is_empty() {
+                                for w in errors.iter().filter(|e| e.starts_with("Warning:")) {
+                                    platform::recording::warn!("Config override warning: {}", w);
+                                }
+                                platform::recording::info!(
+                                    "Applied {} config override(s) from database",
+                                    overrides.len()
+                                );
+                                self.config = merged;
+                            } else {
+                                let joined = non_warnings
+                                    .iter()
+                                    .map(|s| s.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join("; ");
+                                platform::recording::error!(
+                                    "Rejected config overrides: merged config failed \
+                                     validation ({}). Falling back to file-only config.",
+                                    joined
+                                );
+                                emit_config_override_rejected(&joined);
+                                // Keep self.config as the file-only config.
+                            }
+                        }
+                    }
                 }
                 Err(e) => {
                     platform::recording::warn!(
@@ -384,27 +430,13 @@ impl ServiceManager {
             }
         }
 
-        if self.config.is_signer_enabled() {
-            let ks_counters = self.service_counters.get(&(resource_type::SIGNER)).cloned();
-            match build_signer_grpc_router(&self.config, ks_counters).await {
-                Ok(router) => {
-                    platform::recording::info!(
-                        "Adding gRPC route '/signer.v1.Signer/<Method>' for service 'Signer Service'"
-                    );
-                    app = app.merge(router);
-                }
-                Err(e) => {
-                    return Err(anyhow::anyhow!(
-                        "Failed to build gRPC router for service 'Signer Service': {:?}",
-                        e,
-                    ));
-                }
-            }
-        }
+        // SGN-02: the Signer gRPC signing oracle is no longer merged into this
+        // shared listener. It is served on its own dedicated listener (loopback
+        // by default, mTLS when configured) started via `start_signer_service`.
 
-        // MFR service - always mounted (no config gate yet)
+        // Publisher Registry service - always mounted (no config gate yet)
         {
-            let mut svc = MfrService::new(self.config.clone());
+            let mut svc = PublisherRegistryService::new(self.config.clone());
             match svc.build_router().await {
                 Ok(router) => {
                     let prefix = svc.route_prefix();
@@ -444,9 +476,7 @@ impl ServiceManager {
         }
 
         // Global middleware layers
-        app = app
-            .layer(http_trace_layer()) // HTTP tracing (with OpenTelemetry context propagation)
-            .layer(CorsLayer::permissive()); // CORS support
+        app = app.layer(http_trace_layer()); // HTTP tracing (with OpenTelemetry context propagation)
 
         Ok(app)
     }
@@ -507,6 +537,15 @@ impl ServiceManager {
             .await?;
         handle_futs.push(handle);
         notify.notified().await;
+
+        // Start the dedicated Signer gRPC listener (SGN-02), separate from the
+        // shared HTTP listener so the signing oracle is not exposed on the
+        // public port. Loopback-only by default; mTLS when configured.
+        if self.config.is_signer_enabled() {
+            let handle = self.start_signer_service(notify.clone()).await?;
+            handle_futs.push(handle);
+            notify.notified().await;
+        }
         let notify_clone = notify.clone();
 
         // Create ICE shutdown channel
@@ -528,7 +567,7 @@ impl ServiceManager {
         Ok(handle_futs)
     }
 
-    /// Start HTTP server, merging all HTTP route services
+    /// Start the HTTP server, merging all HTTP routing services
     async fn start_http_services(
         &mut self,
         mut service_containers: Vec<ServiceContainer>,
@@ -591,15 +630,8 @@ impl ServiceManager {
             }
         }
 
-        // Register KS gRPC service as running (it has no on_start callback)
-        if self.config.is_signer_enabled()
-            && let Some(mut info) = self.service_collector.get("Signer Service").await
-        {
-            info.set_running(public_url.clone());
-            self.service_collector
-                .insert("Signer Service".to_string(), info)
-                .await;
-        }
+        // The Signer gRPC service runs on its own dedicated listener (SGN-02);
+        // its running URL is registered in `start_signer_service`, not here.
 
         // Create watch channel for router hot-swap
         let (router_tx, router_rx) = watch::channel(initial_router);
@@ -662,7 +694,140 @@ impl ServiceManager {
         Ok(fut)
     }
 
-    /// Start a single ICE service
+    /// Start the dedicated Signer gRPC listener (SGN-02).
+    ///
+    /// The Signer signing oracle is served on its own listener instead of being
+    /// merged into the shared primary HTTP listener. By default it binds
+    /// loopback-only on `bind.http.port + 1`; operators can override the bind
+    /// address via `[bind.signer]`. When `services.signer.mtls_enabled()` is
+    /// true the listener terminates TLS with mutual client-certificate
+    /// verification; otherwise it serves plaintext h2c for loopback callers.
+    async fn start_signer_service(&mut self, notify: Arc<Notify>) -> Result<JoinHandle<()>> {
+        let signer_ip = self.config.signer_bind_ip();
+        let signer_port = self.config.signer_bind_port();
+        let bind_addr = parse_bind_socket_addr("bind.signer.ip", &signer_ip, signer_port)?;
+        let use_tls = self.config.signer_listener_tls();
+
+        // Dedicated cancellation token for the Signer background cleanup tasks
+        // (SGN-04/07), independent of the hot-reload token.
+        let signer_cancel = tokio_util::sync::CancellationToken::new();
+        self.signer_bg_cancel = Some(signer_cancel.clone());
+
+        // Build the rate-limited Signer gRPC router.
+        let ks_counters = self.service_counters.get(&(resource_type::SIGNER)).cloned();
+        let router = build_signer_grpc_router(&self.config, ks_counters, signer_cancel)
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to build gRPC router for service 'Signer Service': {e:?}")
+            })?;
+        let router = apply_signer_rate_limit(router);
+
+        // Inject ConnectInfo<SocketAddr> per connection so the per-IP rate
+        // limiter can read the source IP, mirroring the shared listener.
+        let make_svc = router.into_make_service_with_connect_info::<SocketAddr>();
+
+        // Build the mTLS server config when configured. install_crypto_provider
+        // is idempotent and mirrors start_http_services.
+        let tls_config =
+            if use_tls {
+                let signer_cfg = self
+                    .config
+                    .services
+                    .signer
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Signer service configuration not found"))?;
+                let ca = signer_cfg.mtls_ca_cert.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!("Signer mTLS enabled but mtls_ca_cert is missing")
+                })?;
+                let cert = signer_cfg.mtls_cert.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!("Signer mTLS enabled but mtls_cert is missing")
+                })?;
+                let key = signer_cfg.mtls_key.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!("Signer mTLS enabled but mtls_key is missing")
+                })?;
+                TlsConfigurer::install_crypto_provider();
+                let server_config = TlsConfigurer::create_mtls_server_config(ca, cert, key)
+                    .map_err(|e| anyhow::anyhow!("Failed to build Signer mTLS config: {e}"))?;
+                Some(RustlsConfig::from_config(Arc::new(server_config)))
+            } else {
+                None
+            };
+
+        let protocol = if use_tls { "gRPC/mTLS" } else { "gRPC/h2c" };
+        platform::recording::info!(
+            "Starting Signer {} listener on {} (loopback={})",
+            protocol,
+            bind_addr,
+            bind_addr.ip().is_loopback()
+        );
+
+        // Register the Signer service as running on its dedicated endpoint.
+        if let Some(mut info) = self.service_collector.get("Signer Service").await {
+            match Url::parse(&self.config.signer_client_endpoint()) {
+                Ok(url) => {
+                    info.set_running(url);
+                    self.service_collector
+                        .insert("Signer Service".to_string(), info)
+                        .await;
+                }
+                Err(e) => {
+                    platform::recording::error!("Failed to parse Signer service URL: {e}");
+                }
+            }
+        }
+
+        // Create axum_server Handle for graceful shutdown.
+        let handle = axum_server::Handle::new();
+        let handle_for_shutdown = handle.clone();
+        let shutdown_tx = self.shutdown_tx.clone();
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
+        tokio::spawn(async move {
+            let _ = shutdown_rx.recv().await;
+            platform::recording::info!("Signer listener received shutdown signal");
+            handle_for_shutdown.graceful_shutdown(Some(Duration::from_secs(10)));
+        });
+
+        platform::recording::info!("Signer listener listening on {}", bind_addr);
+        notify.notify_one();
+
+        let shutdown_tx_for_error = shutdown_tx.clone();
+        let fut = if let Some(tls_config) = tls_config {
+            tokio::spawn(async move {
+                if let Err(e) = axum_server::bind_rustls(bind_addr, tls_config)
+                    .handle(handle)
+                    .serve(make_svc)
+                    .await
+                {
+                    platform::recording::error!("Signer mTLS listener error: {}", e);
+                    let _ = shutdown_tx_for_error.send(());
+                }
+                platform::recording::info!("Signer listener stopped");
+            })
+        } else {
+            // Eagerly bind the TCP listener so port conflicts surface early.
+            let listener = tokio::net::TcpListener::bind(bind_addr)
+                .await
+                .map_err(|e| {
+                    anyhow::anyhow!("Failed to bind Signer listener to '{bind_addr}': {e}")
+                })?;
+            let std_listener = listener.into_std()?;
+            tokio::spawn(async move {
+                if let Err(e) = axum_server::from_tcp(std_listener)
+                    .handle(handle)
+                    .serve(make_svc)
+                    .await
+                {
+                    platform::recording::error!("Signer listener error: {}", e);
+                    let _ = shutdown_tx_for_error.send(());
+                }
+                platform::recording::info!("Signer listener stopped");
+            })
+        };
+
+        Ok(fut)
+    }
+
+    /// Start a single ICE service.
     async fn start_ice_service(
         &mut self,
         service: ServiceContainer,
@@ -807,6 +972,14 @@ impl ServiceManager {
         if old.env != new.env {
             reasons.push("env changed".into());
         }
+        if old.is_signaling_enabled() != new.is_signaling_enabled() {
+            reasons.push("signaling service enablement changed".into());
+        }
+        if old.services.signaling.as_ref().map(|config| &config.server)
+            != new.services.signaling.as_ref().map(|config| &config.server)
+        {
+            reasons.push("signaling server config changed".into());
+        }
 
         reasons
     }
@@ -874,6 +1047,41 @@ impl ServiceManager {
             self.config.sqlite_path = old_config.sqlite_path.clone();
             self.config.recording = old_config.recording.clone();
             self.config.env = old_config.env.clone();
+            if old_config.is_signaling_enabled() {
+                self.config.enable |= platform::config::ENABLE_SIGNALING;
+            } else {
+                self.config.enable &= !platform::config::ENABLE_SIGNALING;
+            }
+            self.config.services.signaling = old_config.services.signaling.clone();
+
+            // CFG-01: Reverting restart-only fields above produces a hybrid config
+            // (new file values for reloadable fields, old values for the reverted
+            // ones) that has never been validated as a whole. Re-validate the final
+            // config; if the mix now fails safety checks (e.g. a relaxed Signer KEK
+            // enforcement combined with a reverted field), discard this reload
+            // entirely and keep the previous config running.
+            if let Err(errors) = self.config.validate() {
+                let non_warnings: Vec<_> = errors
+                    .iter()
+                    .filter(|e| !e.starts_with("Warning:"))
+                    .collect();
+                if !non_warnings.is_empty() {
+                    platform::recording::error!(
+                        "Config reload discarded: merged config failed validation after \
+                         reverting restart-only fields: {:?}. Keeping old config.",
+                        non_warnings
+                    );
+                    self.config = old_config;
+                    return Err(anyhow::anyhow!(
+                        "Merged config validation failed after field revert: {}",
+                        non_warnings
+                            .iter()
+                            .map(|s| s.as_str())
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    ));
+                }
+            }
         }
 
         // 3. Build new Router
@@ -944,6 +1152,11 @@ impl ServiceManager {
             cancel.cancel();
         }
 
+        // Cancel the dedicated Signer listener's background cleanup tasks.
+        if let Some(cancel) = self.signer_bg_cancel.take() {
+            cancel.cancel();
+        }
+
         // Stop ICE services via independent channel
         if let Some(ref ice_tx) = self.ice_shutdown_tx {
             let _ = ice_tx.send(());
@@ -958,19 +1171,182 @@ impl ServiceManager {
             let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
         }
 
+        // Never unwrap here: one service failing to stop must not panic-abort the
+        // whole shutdown and skip the remaining services' cleanup (WAL checkpoints,
+        // file handles). Log and continue stopping the rest.
         for service in &mut self.services {
-            match service {
-                ServiceContainer::Signaling(s) => s.on_stop().await.unwrap(),
-                ServiceContainer::Ais(s) => s.on_stop().await.unwrap(),
-                ServiceContainer::Mfr(s) => s.on_stop().await.unwrap(),
-                ServiceContainer::Stun(s) => s.stop().await.unwrap(),
-                ServiceContainer::Turn(s) => s.stop().await.unwrap(),
+            let result = match service {
+                ServiceContainer::Signaling(s) => s.on_stop().await.map_err(|e| e.to_string()),
+                ServiceContainer::Ais(s) => s.on_stop().await.map_err(|e| e.to_string()),
+                ServiceContainer::PublisherRegistry(s) => {
+                    s.on_stop().await.map_err(|e| e.to_string())
+                }
+                ServiceContainer::Stun(s) => s.stop().await.map_err(|e| e.to_string()),
+                ServiceContainer::Turn(s) => s.stop().await.map_err(|e| e.to_string()),
+            };
+            if let Err(e) = result {
+                platform::recording::error!("Service failed to stop cleanly: {e}");
             }
         }
 
         platform::recording::info!("All services stopped");
         Ok(())
     }
+}
+
+/// Emit a security-channel record when L2 config overrides are rejected because
+/// the merged configuration failed validation. This surfaces a potential attempt
+/// to weaken a safety control through the dynamic override store.
+fn emit_config_override_rejected(errors: &str) {
+    use platform::recording::{
+        CHANNEL_SECURITY, Outcome, Record, RecordLevel, SecurityPayload, SecuritySeverity,
+        emit_with_callsite,
+    };
+
+    let mut record = Record::<{ CHANNEL_SECURITY }>::new("config.override.rejected");
+    record.common.level = RecordLevel::Error;
+    record.common.outcome = Outcome::Denied;
+    record.security = Some(SecurityPayload {
+        control: "config.override.validation".to_string(),
+        severity: SecuritySeverity::High,
+        category: Some("config".to_string()),
+        subject: Some("config_overrides".to_string()),
+        source_addr: None,
+        destination_addr: None,
+        evidence: Some(serde_json::json!({ "validation_errors": errors })),
+    });
+    let _ = emit_with_callsite(record, file!(), line!(), module_path!());
+}
+
+/// Upper bound on the number of per-IP token buckets kept in memory, so a flood
+/// from many distinct source IPs cannot grow the map without bound.
+const SIGNER_RL_MAX_BUCKETS: usize = 65_536;
+
+/// Idle time-to-live for a per-IP bucket. Buckets not consulted within this
+/// window become eligible for reclamation.
+const SIGNER_RL_IDLE_TTL: Duration = Duration::from_secs(600);
+
+/// Burst capacity (maximum tokens) for a single source IP.
+///
+/// Chosen generously so ordinary callers and the integration test-suite (which
+/// issue only a handful of requests from loopback) are never throttled, while a
+/// sustained per-IP flood is still capped.
+const SIGNER_RL_BURST: f64 = 200.0;
+
+/// Sustained refill rate, in tokens per second, for a single source IP.
+const SIGNER_RL_REFILL_PER_SEC: f64 = 100.0;
+
+/// A single source IP's token bucket.
+struct SignerTokenBucket {
+    /// Current number of available tokens.
+    tokens: f64,
+    /// Last time tokens were refilled.
+    last_refill: Instant,
+    /// Last time this bucket was consulted (for idle-TTL / LRU reclamation).
+    last_seen: Instant,
+}
+
+/// Per-IP token-bucket rate limiter for the Signer gRPC routes.
+///
+/// Deliberately dependency-free (no governor / tower rate-limit crate) so it can
+/// live entirely inside actrixd without pulling in a new dependency. The
+/// critical section is a short, non-async map update guarded by a std mutex.
+struct SignerRateLimiter {
+    buckets: Mutex<HashMap<IpAddr, SignerTokenBucket>>,
+}
+
+impl SignerRateLimiter {
+    fn new() -> Self {
+        Self {
+            buckets: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Returns true if a request from `ip` is allowed (consuming one token),
+    /// false if the source IP has exhausted its bucket.
+    fn check(&self, ip: IpAddr) -> bool {
+        let now = Instant::now();
+        let mut buckets = match self.buckets.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
+        // Only reclaim when a brand-new IP is about to be inserted, so
+        // steady-state traffic pays no eviction cost.
+        if !buckets.contains_key(&ip) {
+            Self::reclaim(&mut buckets, now);
+        }
+
+        let bucket = buckets.entry(ip).or_insert_with(|| SignerTokenBucket {
+            tokens: SIGNER_RL_BURST,
+            last_refill: now,
+            last_seen: now,
+        });
+
+        let elapsed = now.duration_since(bucket.last_refill).as_secs_f64();
+        bucket.tokens = (bucket.tokens + elapsed * SIGNER_RL_REFILL_PER_SEC).min(SIGNER_RL_BURST);
+        bucket.last_refill = now;
+        bucket.last_seen = now;
+
+        if bucket.tokens >= 1.0 {
+            bucket.tokens -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Reclaim per-IP buckets to keep the map bounded: first drop entries idle
+    /// longer than the TTL, then, if still at capacity, evict the
+    /// least-recently-seen entries (LRU) until there is room for one more.
+    fn reclaim(map: &mut HashMap<IpAddr, SignerTokenBucket>, now: Instant) {
+        map.retain(|_ip, bucket| now.duration_since(bucket.last_seen) < SIGNER_RL_IDLE_TTL);
+
+        while map.len() >= SIGNER_RL_MAX_BUCKETS {
+            let Some(oldest_ip) = map
+                .iter()
+                .min_by_key(|(_, bucket)| bucket.last_seen)
+                .map(|(ip, _)| *ip)
+            else {
+                break;
+            };
+            map.remove(&oldest_ip);
+        }
+    }
+}
+
+/// Wrap the Signer gRPC router with a per-source-IP token-bucket rate limit.
+///
+/// The source IP is read from the `ConnectInfo<SocketAddr>` extension injected
+/// per-connection in [`SwappableMakeService::call`]. If it is unavailable the
+/// request is allowed through (fail-open) rather than dropped. Over-limit
+/// requests get HTTP 429, which gRPC clients surface as an `UNAVAILABLE`
+/// transport error.
+fn apply_signer_rate_limit(router: Router) -> Router {
+    use axum::response::IntoResponse;
+
+    let limiter = Arc::new(SignerRateLimiter::new());
+    router.layer(axum::middleware::from_fn(
+        move |req: axum::extract::Request, next: axum::middleware::Next| {
+            let limiter = limiter.clone();
+            async move {
+                let ip = req
+                    .extensions()
+                    .get::<ConnectInfo<SocketAddr>>()
+                    .map(|ci| ci.0.ip());
+                if let Some(ip) = ip
+                    && !limiter.check(ip)
+                {
+                    platform::recording::warn!(
+                        "Signer gRPC request from {} rejected by per-IP rate limit",
+                        ip
+                    );
+                    return axum::http::StatusCode::TOO_MANY_REQUESTS.into_response();
+                }
+                next.run(req).await
+            }
+        },
+    ))
 }
 
 fn parse_bind_socket_addr(field_name: &str, ip: &str, port: u16) -> Result<SocketAddr> {

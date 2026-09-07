@@ -408,12 +408,13 @@ fn key_id_format_is_correct() {
     let key = SigningKey::generate(&mut OsRng);
     let key_id = actr_pack::compute_key_id(&key.verifying_key().to_bytes());
 
-    // Must start with "mfr-"
-    assert!(key_id.starts_with("mfr-"), "key_id must start with 'mfr-'");
-    // Must be "mfr-" + 16 hex chars = 20 chars total
-    assert_eq!(key_id.len(), 20, "key_id must be 20 chars (mfr- + 16 hex)");
+    assert!(
+        key_id.starts_with("actr-pub-"),
+        "key_id must start with 'actr-pub-'"
+    );
+    assert_eq!(key_id.len(), 25, "key_id must be actr-pub- + 16 hex chars");
     // The hex part must be valid hex
-    let hex_part = &key_id[4..];
+    let hex_part = &key_id["actr-pub-".len()..];
     assert!(
         hex_part.chars().all(|c| c.is_ascii_hexdigit()),
         "key_id suffix must be valid hex"

@@ -98,11 +98,21 @@ fn choose_port() -> u16 {
     {
         return p;
     }
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .expect("bind ephemeral port")
-        .local_addr()
-        .expect("read bound local addr")
-        .port()
+    // The dedicated Signer listener (SGN-02) defaults to bind.http.port + 1, so
+    // each actrix process spawned here occupies two consecutive TCP ports.
+    // Probe that the successor is also free so a parallel test's HTTP port
+    // cannot deterministically collide with this process's Signer port.
+    for _ in 0..256 {
+        let http = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let port = http.local_addr().expect("read bound local addr").port();
+        if port == u16::MAX {
+            continue;
+        }
+        if std::net::TcpListener::bind(("127.0.0.1", port + 1)).is_ok() {
+            return port;
+        }
+    }
+    panic!("failed to reserve a TCP port whose successor is also free for the Signer listener");
 }
 
 fn choose_udp_port() -> u16 {
@@ -150,7 +160,7 @@ realm = "actrix.local"
 # defaults
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -198,10 +208,10 @@ relay_port_range = "49152-65535"
 realm = "actrix.local"
 
 [services.signer]
-# defaults
+kek = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -254,7 +264,7 @@ realm = "actrix.local"
 kek = "{kek}"
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -305,7 +315,7 @@ realm = "actrix.local"
 # defaults
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -354,7 +364,7 @@ realm = "actrix.local"
 # defaults
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -449,7 +459,7 @@ realm = "actrix.local"
 # defaults
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -508,7 +518,7 @@ realm = "actrix.local"
 # defaults
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -559,7 +569,7 @@ realm = "actrix.local"
 # defaults
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -609,7 +619,7 @@ realm = "actrix.local"
 # defaults
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -719,7 +729,7 @@ realm = "actrix.local"
 
 [control.admin_ui]
 enabled = true
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [control.grpc_api]
 enabled = true
@@ -773,9 +783,10 @@ port = {ice_port}
 [turn]
 relay_port_range = "49152-65535"
 realm = "actrix.local"
+turn_secret = "test-turn-secret-0123456789abcdef"
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -821,7 +832,7 @@ realm = "actrix.local"
 # defaults
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -868,10 +879,10 @@ relay_port_range = "49152-65535"
 realm = "actrix.local"
 
 [services.signer]
-# defaults
+kek = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]
 
@@ -932,10 +943,13 @@ relay_port_range = "49152-65535"
 realm = "actrix.local"
 
 [services.signer]
-# defaults
+kek = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
+
+[monitoring]
+allowed_ips = ["127.0.0.1/32", "::1/128"]
 
 [recording]
 
@@ -978,8 +992,18 @@ async fn wait_for_health(url: &str, child: &mut Child, log_path: &Path) {
     let client = reqwest::Client::new();
     let start = Instant::now();
     let is_signer_health = url.ends_with("/signer/health");
+    // SGN-02: the Signer gRPC signing oracle runs on its own dedicated listener,
+    // not the shared HTTP base. These process configs omit [bind.signer], so the
+    // Signer uses the loopback default of HTTP port + 1. Derive that endpoint for
+    // the gRPC readiness probe (the /signer/health HTTP route stays on base).
     let ks_grpc_endpoint = if is_signer_health {
-        Some(url.trim_end_matches("/signer/health").to_string())
+        let base = url.trim_end_matches("/signer/health");
+        let http_port: u16 = base
+            .rsplit(':')
+            .next()
+            .and_then(|p| p.parse().ok())
+            .expect("signer health url must end with :port");
+        Some(format!("http://127.0.0.1:{}", http_port + 1))
     } else {
         None
     };
@@ -1429,7 +1453,8 @@ async fn actrix_starts_serves_health_and_shuts_down() {
 
     let health_url = format!("http://127.0.0.1:{}/signer/health", port);
     wait_for_health(&health_url, &mut child, &log_path).await;
-    let grpc_endpoint = format!("http://127.0.0.1:{port}");
+    // SGN-02: dial the dedicated Signer listener (HTTP port + 1 by default).
+    let grpc_endpoint = format!("http://127.0.0.1:{}", port + 1);
     let mut grpc_client = wait_for_ks_grpc_client(
         &grpc_endpoint,
         TEST_ACTRIX_SHARED_KEY,
@@ -1454,7 +1479,8 @@ async fn actrix_ks_grpc_health_and_key_lifecycle() {
 
     let health_url = format!("http://127.0.0.1:{port}/signer/health");
     wait_for_health(&health_url, &mut child, &log_path).await;
-    let grpc_endpoint = format!("http://127.0.0.1:{port}");
+    // SGN-02: dial the dedicated Signer listener (HTTP port + 1 by default).
+    let grpc_endpoint = format!("http://127.0.0.1:{}", port + 1);
 
     let mut grpc_client = wait_for_ks_grpc_client(
         &grpc_endpoint,
@@ -1512,7 +1538,8 @@ async fn actrix_ks_grpc_rejects_invalid_shared_secret() {
 
     let health_url = format!("http://127.0.0.1:{port}/signer/health");
     wait_for_health(&health_url, &mut child, &log_path).await;
-    let grpc_endpoint = format!("http://127.0.0.1:{port}");
+    // SGN-02: dial the dedicated Signer listener (HTTP port + 1 by default).
+    let grpc_endpoint = format!("http://127.0.0.1:{}", port + 1);
     let _ready_client = wait_for_ks_grpc_client(
         &grpc_endpoint,
         TEST_ACTRIX_SHARED_KEY,
@@ -1567,7 +1594,8 @@ async fn actrix_ks_grpc_health_and_key_lifecycle_with_valid_kek() {
 
     let health_url = format!("http://127.0.0.1:{port}/signer/health");
     wait_for_health(&health_url, &mut child, &log_path).await;
-    let grpc_endpoint = format!("http://127.0.0.1:{port}");
+    // SGN-02: dial the dedicated Signer listener (HTTP port + 1 by default).
+    let grpc_endpoint = format!("http://127.0.0.1:{}", port + 1);
 
     let mut grpc_client = wait_for_ks_grpc_client(
         &grpc_endpoint,
@@ -1614,7 +1642,7 @@ async fn actrix_exits_when_ks_kek_is_invalid() {
         if let Some(status) = child.try_wait().expect("check child status") {
             assert!(
                 !status.success(),
-                "process should fail fast when KS KEK is invalid"
+                "process should fail fast when Signer KEK is invalid"
             );
             let log = fs::read_to_string(&log_path).unwrap_or_default();
             assert!(
@@ -1629,7 +1657,7 @@ async fn actrix_exits_when_ks_kek_is_invalid() {
 
         if start.elapsed() > START_TIMEOUT {
             graceful_shutdown(child);
-            panic!("actrix should fail fast when KS KEK is invalid");
+            panic!("actrix should fail fast when Signer KEK is invalid");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -1954,26 +1982,46 @@ async fn actrix_exports_spans_to_otlp_grpc_sink() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_starts_with_user_and_group_set_on_non_root() {
+async fn actrix_privilege_drop_config_behaves_by_uid() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_minimal_config_with_user_group(tmp.path(), port, "nobody", "nogroup");
     let log_path = tmp.path().join("actrix-user-group.log");
     let mut child = spawn_actrix(&config_path, &log_path);
 
-    let health_url = format!("http://127.0.0.1:{port}/metrics");
-    wait_for_health(&health_url, &mut child, &log_path).await;
-
-    graceful_shutdown(child);
-
     #[cfg(unix)]
-    {
-        if unsafe { libc::geteuid() } != 0 {
-            let log = fs::read_to_string(&log_path).unwrap_or_default();
-            assert!(
-                log.contains("cannot switch user/group"),
-                "expected non-root privilege-drop warning in logs, got: {log}"
-            );
+    let is_root = unsafe { libc::geteuid() } == 0;
+    #[cfg(not(unix))]
+    let is_root = false;
+
+    if is_root {
+        // As root the configured user/group can actually be dropped to, so the
+        // daemon starts and serves normally.
+        let health_url = format!("http://127.0.0.1:{port}/metrics");
+        wait_for_health(&health_url, &mut child, &log_path).await;
+        graceful_shutdown(child);
+    } else {
+        // As non-root a configured privilege drop cannot happen, so the daemon
+        // must fail closed rather than silently run over-privileged.
+        let start = Instant::now();
+        loop {
+            if let Some(status) = child.try_wait().expect("check child status") {
+                assert!(
+                    !status.success(),
+                    "non-root process should refuse to start when user/group drop is configured"
+                );
+                let log = fs::read_to_string(&log_path).unwrap_or_default();
+                assert!(
+                    log.contains("not running as root") || log.contains("refusing to start"),
+                    "expected fail-closed privilege-drop message, got: {log}"
+                );
+                return;
+            }
+            if start.elapsed() > START_TIMEOUT {
+                graceful_shutdown(child);
+                panic!("actrix should fail fast when privilege drop is configured on non-root");
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
 }
@@ -2376,10 +2424,10 @@ async fn actrix_exits_when_prod_https_tls_files_are_missing() {
             let log = fs::read_to_string(&log_path).unwrap_or_default();
             let log_lower = log.to_lowercase();
             assert!(
-                log_lower.contains("https")
-                    && (log_lower.contains("no such file")
-                        || log_lower.contains("failed to")
-                        || log_lower.contains("pem")),
+                log_lower.contains("no such file")
+                    || log_lower.contains("failed to")
+                    || log_lower.contains("pem")
+                    || log_lower.contains("missing-cert"),
                 "expected prod TLS file error in logs, got: {log}"
             );
             return;

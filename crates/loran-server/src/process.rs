@@ -69,10 +69,17 @@ impl ProcessManager {
         // Get current user ID
         let current_uid = Uid::current();
 
-        // Only root can switch users
+        // Only root can switch users. If a drop target is configured but we are
+        // not root, fail closed: silently continuing would run the daemon with
+        // the current (possibly over-privileged) identity while the operator
+        // believes privileges were dropped. main.rs aborts startup on this Err.
         if !current_uid.is_root() {
             if user.is_some() || group.is_some() {
-                platform::recording::warn!("Not running as root, cannot switch user/group");
+                return Err(anyhow::anyhow!(
+                    "user/group privilege drop is configured (user={user:?}, group={group:?}) \
+                     but the process is not running as root; refusing to start without \
+                     dropping privileges"
+                ));
             }
             return Ok(());
         }
@@ -142,6 +149,92 @@ impl ProcessManager {
             );
         }
 
+        Ok(())
+    }
+
+    /// Tighten the process umask so every file created afterwards is owner-only.
+    ///
+    /// 0o077 => new files 0600, new dirs 0700. This keeps SQLite databases (incl.
+    /// the Signer private-key store), their `-wal`/`-shm` sidecars, migration
+    /// backups and the PID file unreadable by other local users — the in-scope
+    /// "same-host unprivileged process" attacker. Applies for the whole process
+    /// lifetime and survives the privilege drop.
+    #[cfg(unix)]
+    pub fn tighten_umask() {
+        use nix::sys::stat::{Mode, umask};
+        umask(Mode::from_bits_truncate(0o077));
+    }
+
+    /// Tighten umask on non-Unix systems (no-op).
+    #[cfg(not(unix))]
+    pub fn tighten_umask() {}
+
+    /// Secure the SQLite data directory before dropping privileges.
+    ///
+    /// Files created while still root would otherwise stay owned by root:root and
+    /// become unreadable to the target user after the drop. When a drop is
+    /// imminent (running as root with a configured user), chown the directory and
+    /// its files to the target user/group; in all cases tighten the modes to
+    /// 0700 (dir) / 0600 (files) so existing files created before the umask was
+    /// tightened are corrected too.
+    #[cfg(unix)]
+    pub fn secure_data_dir(
+        path: &std::path::Path,
+        user: Option<&str>,
+        group: Option<&str>,
+    ) -> Result<()> {
+        use nix::unistd::{Uid, chown};
+        use std::os::unix::fs::PermissionsExt;
+
+        if !path.exists() {
+            return Ok(());
+        }
+
+        let (uid, gid) = match (Uid::current().is_root(), user) {
+            (true, Some(user_name)) => {
+                let u = nix::unistd::User::from_name(user_name)?
+                    .ok_or_else(|| anyhow::anyhow!("User '{user_name}' not found"))?;
+                let gid = match group {
+                    Some(group_name) => {
+                        nix::unistd::Group::from_name(group_name)?
+                            .ok_or_else(|| anyhow::anyhow!("Group '{group_name}' not found"))?
+                            .gid
+                    }
+                    None => u.gid,
+                };
+                (Some(u.uid), Some(gid))
+            }
+            _ => (None, None),
+        };
+
+        let apply = |p: &std::path::Path, is_dir: bool| -> Result<()> {
+            let mode = if is_dir { 0o700 } else { 0o600 };
+            std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode))
+                .with_context(|| format!("Failed to chmod {}", p.display()))?;
+            if let Some(uid) = uid {
+                chown(p, Some(uid), gid)
+                    .with_context(|| format!("Failed to chown {}", p.display()))?;
+            }
+            Ok(())
+        };
+
+        apply(path, true)?;
+        for entry in std::fs::read_dir(path)? {
+            let entry = entry?;
+            let child = entry.path();
+            let is_dir = child.is_dir();
+            apply(&child, is_dir)?;
+        }
+        Ok(())
+    }
+
+    /// Secure the data directory on non-Unix systems (no-op).
+    #[cfg(not(unix))]
+    pub fn secure_data_dir(
+        _path: &std::path::Path,
+        _user: Option<&str>,
+        _group: Option<&str>,
+    ) -> Result<()> {
         Ok(())
     }
 

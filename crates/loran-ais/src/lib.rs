@@ -25,10 +25,10 @@
 //! │  │ (Snowflake)      │  │ (SQLite)   │  │
 //! │  └──────────────────┘  └────────────┘  │
 //! └──────────────┬───────────────────────────┘
-//!                │ KS Client
+//!                │ Signer Client
 //!                ▼
 //!         ┌─────────────┐
-//!         │ KS Service  │ (key generation)
+//!         │ Signer Service  │ (key generation)
 //!         └─────────────┘
 //! ```
 //!
@@ -64,7 +64,7 @@
 //! let ais_config = AisConfig::default();
 //! let cancel = CancellationToken::new();
 //!
-//! // Create the AIS router
+//! // Create AIS router
 //! let router = create_ais_router(&ais_config, &global_config, cancel).await?;
 //!
 //! // Integrate into the main HTTP service
@@ -76,17 +76,16 @@
 //! # Security Considerations
 //!
 //! - **Renewal token rotation**: renewal tokens are stored as hashes and rotated on use.
-//! - **Encrypted transport**: Tokens are encrypted using ECIES; only services holding the private key can decrypt them
-//! - **Serial number uniqueness**: The Snowflake algorithm guarantees global uniqueness in distributed environments
+//! - **Encrypted transport**: tokens are encrypted with ECIES; only services holding the private key can decrypt them
+//! - **Serial number uniqueness**: the Snowflake algorithm guarantees global uniqueness in distributed environments
 //! - **Key rotation**: old keys remain verifiable during the tolerance window.
 //!
 //! # Configuration Options
 //!
-//! See [`platform::config::AisConfig`] for the full configuration reference.
+//! See [`platform::config::AisConfig`] for full configuration details.
 #![deny(clippy::disallowed_macros)]
 
 pub mod handlers;
-mod idempotency;
 pub mod issuer;
 pub mod ratelimit;
 pub mod renewal;
@@ -137,12 +136,12 @@ pub async fn create_ais_state(
 ) -> Result<AISState> {
     platform::recording::info!("Creating AIS state with config");
 
-    // Get the Signer client configuration
+    // Get Signer client config
     let signer_client_config = config
         .get_signer_client_config(global_config)
         .context("Failed to get Signer client config. Ensure Signer is enabled or ais.dependencies.signer is configured.")?;
 
-    // Create the KS gRPC client
+    // Create Signer gRPC client
     let signer_client =
         create_signer_client(&signer_client_config, &global_config.actrix_shared_key)
             .await
@@ -150,7 +149,7 @@ pub async fn create_ais_state(
 
     platform::recording::info!("Signer gRPC client created successfully");
 
-    // Create the Issuer configuration
+    // Create Issuer config
     if config.server.renewal_token_secret.is_empty() {
         anyhow::bail!("services.ais.server.renewal_token_secret is required");
     }
@@ -167,11 +166,12 @@ pub async fn create_ais_state(
     }
 
     let issuer_config = IssuerConfig {
+        worker_id: config.server.worker_id,
         token_ttl_secs: config.server.token_ttl_secs,
         signaling_heartbeat_interval_secs: config.server.signaling_heartbeat_interval_secs,
         key_refresh_interval_secs: 3600, // 1 hour
         key_storage_file: global_config.sqlite_path.join("ais_keys.db"),
-        enable_periodic_rotation: false, // disabled by default, can be enabled via config
+        enable_periodic_rotation: false, // disabled by default; can be enabled via config
         key_rotation_interval_secs: 86400, // 24 hours
         turn_secret: global_config.turn.turn_secret.clone(),
         sqlite_path: global_config.sqlite_path.clone(),
@@ -180,7 +180,7 @@ pub async fn create_ais_state(
         renewal_token_secret,
     };
 
-    // Create the AId Token issuer
+    // Create AId token issuer
     let issuer = AIdIssuer::new(signer_client, issuer_config, cancel)
         .await
         .context("Failed to create AIS issuer")?;
@@ -203,7 +203,7 @@ pub fn create_router_from_state(state: AISState) -> Router {
 #[cfg(test)]
 mod tests {
 
-    // Note: Full integration tests require a running KS service.
-    // Only basic unit tests here.
-    // Actual testing is performed through HTTP endpoints after the main program starts.
+    // Note: full integration tests require the Signer service to be running
+    // Only basic unit tests here
+    // Actual testing is done via HTTP endpoints after the main program starts
 }

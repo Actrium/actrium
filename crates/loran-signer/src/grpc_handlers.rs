@@ -1,11 +1,11 @@
 //! Signer gRPC service implementation
 
-use crate::{error::SignerError, storage::KeyStorage};
+use crate::{error::SignerError, storage::KeyStorage, types::sign_request_payload};
 use nonce_auth::{CredentialVerifier, NonceError, storage::NonceStorage};
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
-// Import generated protobuf code
+// Import the generated protobuf code
 use actrix_proto::admin::v1::NonceCredential;
 use actrix_proto::signer::v1::signer_server::{Signer, SignerServer};
 use actrix_proto::signer::v1::*;
@@ -35,13 +35,13 @@ impl SignerGrpcService {
         }
     }
 
-    /// Verify the nonce credential of a request
+    /// Verify the request's nonce credential
     async fn verify_credential(
         &self,
         credential: &NonceCredential,
         request_payload: &str,
     ) -> Result<(), SignerError> {
-        // Convert protobuf NonceCredential to nonce_auth::NonceCredential
+        // Convert the protobuf NonceCredential into nonce_auth::NonceCredential
         let nonce_credential = nonce_auth::NonceCredential {
             timestamp: credential.timestamp,
             nonce: credential.nonce.clone(),
@@ -84,22 +84,22 @@ impl Signer for SignerGrpcService {
         let request_data = "generate_signing_key";
         self.verify_credential(&req.credential, request_data)
             .await
-            .map_err(|e| Status::unauthenticated(format!("Authentication failed: {e}")))?;
+            .map_err(Status::from)?;
 
-        // Generate Ed25519 key pair (private key stored in backend)
+        // Generate the Ed25519 key pair (the private key stays in the backend)
         let key_pair = self
             .storage
             .generate_and_store_key()
             .await
-            .map_err(|e| Status::internal(format!("Failed to generate signing key: {e}")))?;
+            .map_err(Status::from)?;
 
-        // Get the key record to obtain the expiration time
+        // Fetch the key record to obtain the expiry time
         let key_record = self
             .storage
             .get_key_record(key_pair.key_id)
             .await
-            .map_err(|e| Status::internal(format!("Failed to get key record: {e}")))?
-            .ok_or_else(|| Status::internal("Failed to get key record after creation"))?;
+            .map_err(Status::from)?
+            .ok_or_else(|| Status::internal("internal error"))?;
 
         crate::recording::info!(
             "Generated Ed25519 signing key with key_id: {}",
@@ -116,18 +116,18 @@ impl Signer for SignerGrpcService {
         Ok(Response::new(response))
     }
 
-    /// Sign a message with the specified key (Ed25519)
+    /// Sign a message with the given key using Ed25519
     async fn sign(&self, request: Request<SignRequest>) -> Result<Response<SignResponse>, Status> {
         let req = request.into_inner();
         let key_id = req.key_id;
 
         crate::recording::info!("Received gRPC Sign request for key_id: {}", key_id);
 
-        // nonce payload is bound to a specific key_id to prevent reuse
-        let request_data = format!("sign:{key_id}");
+        // Bind authentication to both the selected key and the exact message.
+        let request_data = sign_request_payload(key_id, &req.message);
         self.verify_credential(&req.credential, &request_data)
             .await
-            .map_err(|e| Status::unauthenticated(format!("Authentication failed: {e}")))?;
+            .map_err(Status::from)?;
 
         // A key that has passed `expires_at` must not mint anything.
         //
@@ -141,8 +141,8 @@ impl Signer for SignerGrpcService {
             .storage
             .get_key_record(key_id)
             .await
-            .map_err(|e| Status::internal(format!("Failed to get key record: {e}")))?
-            .ok_or_else(|| Status::not_found(format!("Key not found: {key_id}")))?;
+            .map_err(Status::from)?
+            .ok_or_else(|| Status::not_found("not found"))?;
 
         if key_record.expires_at > 0 {
             let now = std::time::SystemTime::now()
@@ -162,24 +162,19 @@ impl Signer for SignerGrpcService {
             }
         }
 
-        // Signing is performed internally in the backend; private key does not leave Signer
+        // Sign inside the backend; the private key never leaves the Signer
         let signature = self
             .storage
             .sign(key_id, &req.message)
             .await
-            .map_err(|e| match e {
-                crate::error::SignerError::NotFound(_) => {
-                    Status::not_found(format!("Key not found: {key_id}"))
-                }
-                other => Status::internal(format!("Sign failed: {other}")),
-            })?;
+            .map_err(Status::from)?;
 
         crate::recording::info!("Signed message for key_id: {}", key_id);
 
         Ok(Response::new(SignResponse { signature }))
     }
 
-    /// Get the verifying public key for the specified key_id
+    /// Get the verifying public key for the given key_id
     async fn get_verifying_key(
         &self,
         request: Request<GetVerifyingKeyRequest>,
@@ -195,16 +190,16 @@ impl Signer for SignerGrpcService {
         let request_data = format!("get_verifying_key:{key_id}");
         self.verify_credential(&req.credential, &request_data)
             .await
-            .map_err(|e| Status::unauthenticated(format!("Authentication failed: {e}")))?;
+            .map_err(Status::from)?;
 
         let key_record = self
             .storage
             .get_key_record(key_id)
             .await
-            .map_err(|e| Status::internal(format!("Failed to get key record: {e}")))?
-            .ok_or_else(|| Status::not_found(format!("Key not found: {key_id}")))?;
+            .map_err(Status::from)?
+            .ok_or_else(|| Status::not_found("not found"))?;
 
-        // Check whether the tolerance period has been exceeded
+        // Check whether the key is past its tolerance period
         if key_record.expires_at > 0 {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -212,11 +207,11 @@ impl Signer for SignerGrpcService {
                 .as_secs();
             if key_record.expires_at + self.tolerance_seconds < now {
                 crate::recording::warn!("Key {} has expired beyond tolerance period", key_id);
-                return Err(Status::not_found(format!("Key {key_id} has expired")));
+                return Err(Status::not_found("not found"));
             }
         }
 
-        crate::recording::debug!("Returning verifying key for key_id: {}", key_id);
+        crate::recording::debug!("Returning verifying key for key_id: {key_id}");
 
         Ok(Response::new(GetVerifyingKeyResponse {
             key_id,
@@ -234,16 +229,12 @@ impl Signer for SignerGrpcService {
         crate::recording::debug!("gRPC health check requested");
         let req = request.into_inner();
 
-        // Consistent with other methods: health also requires nonce-auth
+        // Like every other method, health also requires nonce-auth
         self.verify_credential(&req.credential, "health_check")
             .await
-            .map_err(|e| Status::unauthenticated(format!("Authentication failed: {e}")))?;
+            .map_err(Status::from)?;
 
-        let key_count = self
-            .storage
-            .get_key_count()
-            .await
-            .map_err(|e| Status::internal(format!("Failed to get key count: {e}")))?;
+        let key_count = self.storage.get_key_count().await.map_err(Status::from)?;
 
         let response = HealthCheckResponse {
             status: "healthy".to_string(),
@@ -260,7 +251,7 @@ impl Signer for SignerGrpcService {
     }
 }
 
-/// Create a gRPC server
+/// Create the gRPC server
 pub fn create_grpc_service<N: NonceStorage + Send + Sync + 'static>(
     storage: KeyStorage,
     nonce_storage: N,

@@ -37,7 +37,10 @@ pub async fn build_control_router(
     ais_issuer: Option<Arc<ais::AIdIssuer>>,
 ) -> Result<(Router, Vec<u8>)> {
     let mut router = Router::new();
-    let mut jwt = jwt_secret.unwrap_or_default();
+    // Discard any carried-over secret that is empty or too short: an empty key
+    // makes admin JWTs forgeable, so it must never be reused as-is. A discarded
+    // secret becomes `None` below so the admin router generates a fresh one.
+    let mut jwt = jwt_secret.filter(|s| s.len() >= 32).unwrap_or_default();
     let admin_ui_enabled = config.admin_ui_enabled();
     let grpc_api_enabled = config.grpc_api_enabled();
 
@@ -47,7 +50,7 @@ pub async fn build_control_router(
             service_collector.clone(),
             shutdown_tx.clone(),
             config_path.clone(),
-            Some(jwt),
+            if jwt.is_empty() { None } else { Some(jwt) },
             config_store.clone(),
             metrics_store,
             ais_issuer.clone(),
@@ -126,8 +129,10 @@ async fn build_admin_ui_router(
         }
     });
 
-    // Reuse existing JWT secret on reload, generate only on first call
-    let jwt_secret: Vec<u8> = jwt_secret.unwrap_or_else(|| {
+    // Reuse existing JWT secret on reload, generate only on first call.
+    // Reject empty/short secrets defensively: an empty HMAC key would let anyone
+    // forge admin tokens, so fall back to a freshly generated 32-byte secret.
+    let jwt_secret: Vec<u8> = jwt_secret.filter(|s| s.len() >= 32).unwrap_or_else(|| {
         use rand::RngCore;
         let mut buf = vec![0u8; 32];
         rand::rng().fill_bytes(&mut buf);
@@ -150,20 +155,14 @@ async fn build_admin_ui_router(
         realm_writes_enabled: !config.superv_managed(),
     });
 
-    // Build MFR router and nest under /admin/api/mfr
+    // Build Publisher Registry management router.
     let mfr_router = {
         use actrix_mfr::{
             MfrManager,
             handlers::{MfrState, create_admin_router},
         };
         let pool = platform::storage::db::get_database().get_pool().clone();
-        let domain = config
-            .bind
-            .http
-            .as_ref()
-            .map(|h| h.domain_name.clone())
-            .unwrap_or_else(|| "localhost".to_string());
-        let manager = MfrManager::new(pool).with_domain(domain);
+        let manager = MfrManager::new(pool);
         let mfr_state = MfrState {
             manager: Arc::new(manager),
         };

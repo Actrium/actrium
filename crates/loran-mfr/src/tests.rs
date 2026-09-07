@@ -1,19 +1,40 @@
-//! MFR module integration tests
-//!
-//! All tests requiring a database use an in-process SQLite in-memory store,
-//! each with its own independent pool so they do not interfere with each other.
+/// Publisher Registry module integration tests
+///
+/// All tests requiring a database use an in-process SQLite in-memory pool, each test has its own independent pool.
 use sqlx::SqlitePool;
 
 use crate::{
     MfrError, crypto,
-    manager::{KeySource, MfrManager, PublishRequest, lookup_package},
-    model::{ActrPackage, GitHubRepoChallenge, Manufacturer, MfrStatus, PkgStatus, PublishNonce},
-    reserved::validate_github_login,
+    manager::{MfrManager, NonceRequest, PublishRequest, PublisherCertificate, lookup_package},
+    model::{ActrPackage, Manufacturer, MfrStatus, PkgStatus, PublishNonce, PublisherChallenge},
 };
+
+#[test]
+fn public_json_contract_uses_publisher_terminology() {
+    let nonce = serde_json::to_value(NonceRequest {
+        publisher: "apps.example.com".to_string(),
+    })
+    .unwrap();
+    assert_eq!(nonce["publisher"], "apps.example.com");
+    assert!(nonce.get("manufacturer").is_none());
+
+    let certificate = serde_json::to_value(PublisherCertificate {
+        key_id: "publisher-key".to_string(),
+        publisher: "apps.example.com".to_string(),
+        public_key: "base64-key".to_string(),
+        issued_at: 1,
+        expires_at: 2,
+    })
+    .unwrap();
+    assert_eq!(certificate["publisher"], "apps.example.com");
+    assert_eq!(certificate["public_key"], "base64-key");
+    assert!(certificate.get("mfr_name").is_none());
+    assert!(certificate.get("mfr_pubkey").is_none());
+}
 
 #[derive(serde::Serialize)]
 struct SignablePublishBody<'a> {
-    manufacturer: &'a str,
+    publisher: &'a str,
     name: &'a str,
     version: &'a str,
     target: &'a str,
@@ -157,7 +178,7 @@ async fn make_publish_nonce(
     let nonce_b64 = base64::engine::general_purpose::STANDARD.encode(&nonce_bytes);
 
     let signable_body = SignablePublishBody {
-        manufacturer,
+        publisher: manufacturer,
         name,
         version,
         target,
@@ -171,7 +192,7 @@ async fn make_publish_nonce(
     let body_hash = hex::encode(Sha256::digest(&signable_body_bytes));
     let nonce_hex = hex::encode(&nonce_bytes);
     let payload = format!(
-        "ACTR-PUBLISH-V1\nmanufacturer={}\nmethod=POST\npath=/mfr/pkg/publish\nnonce={}\nbody_sha256={}",
+        "ACTR-PUBLISH-V2\npublisher={}\nmethod=POST\npath=/registry/packages/publish\nnonce={}\nbody_sha256={}",
         manufacturer, nonce_hex, body_hash
     );
     let sig = signing_key.sign(payload.as_bytes());
@@ -182,84 +203,11 @@ async fn make_publish_nonce(
 
 fn test_manifest(manufacturer: &str, name: &str, version: &str, target: &str) -> String {
     format!(
-        "manufacturer = \"{manufacturer}\"\nname = \"{name}\"\nversion = \"{version}\"\n\n[binary]\npath = \"bin/actor.wasm\"\ntarget = \"{target}\"\nhash = \"sha256:abc123\"\n"
+        "publisher = \"{manufacturer}\"\nname = \"{name}\"\nversion = \"{version}\"\n\n[binary]\npath = \"bin/actor.wasm\"\ntarget = \"{target}\"\nhash = \"sha256:abc123\"\n"
     )
 }
 
-// ─── reserved.rs tests ──────────────────────────────────────────────────
-
-#[test]
-fn test_validate_github_login_accepts_former_reserved() {
-    // Previously reserved names are now valid manufacturer names
-    assert!(validate_github_login("self").is_ok());
-    assert!(validate_github_login("acme").is_ok());
-    assert!(validate_github_login("actrix").is_ok());
-}
-
-#[test]
-fn test_validate_github_login_too_long() {
-    let long = "a".repeat(40);
-    assert!(matches!(
-        validate_github_login(&long),
-        Err(MfrError::InvalidName(_))
-    ));
-}
-
-#[test]
-fn test_validate_github_login_empty() {
-    assert!(matches!(
-        validate_github_login(""),
-        Err(MfrError::InvalidName(_))
-    ));
-}
-
-#[test]
-fn test_validate_github_login_hyphen_boundary() {
-    assert!(matches!(
-        validate_github_login("-abc"),
-        Err(MfrError::InvalidName(_))
-    ));
-    assert!(matches!(
-        validate_github_login("abc-"),
-        Err(MfrError::InvalidName(_))
-    ));
-}
-
-#[test]
-fn test_validate_github_login_consecutive_hyphens() {
-    assert!(matches!(
-        validate_github_login("a--b"),
-        Err(MfrError::InvalidName(_))
-    ));
-}
-
-#[test]
-fn test_validate_github_login_invalid_chars() {
-    assert!(matches!(
-        validate_github_login("my_company"),
-        Err(MfrError::InvalidName(_))
-    ));
-    assert!(matches!(
-        validate_github_login("my company"),
-        Err(MfrError::InvalidName(_))
-    ));
-    assert!(matches!(
-        validate_github_login("com.example"),
-        Err(MfrError::InvalidName(_))
-    ));
-}
-
-#[test]
-fn test_validate_github_login_valid() {
-    assert!(validate_github_login("octocat").is_ok());
-    assert!(validate_github_login("my-company").is_ok());
-    assert!(validate_github_login("user123").is_ok());
-    assert!(validate_github_login("a").is_ok());
-    let max = "a".repeat(39);
-    assert!(validate_github_login(&max).is_ok());
-}
-
-// ─── crypto.rs pure unit tests ────────────────────────────────────────────────
+// ─── crypto.rs pure unit tests ───────────────────────────────────────────────
 
 #[test]
 fn test_generate_keypair_roundtrip() {
@@ -353,7 +301,7 @@ fn test_verify_signature_bad_pubkey_encoding() {
     );
 }
 
-// ─── model/manufacturer.rs tests (requires DB) ──────────────────────────────
+// ─── model/manufacturer.rs tests (require DB) ────────────────────────────────
 
 #[tokio::test]
 async fn test_manufacturer_create_and_get() {
@@ -518,14 +466,14 @@ async fn test_manufacturer_delete() {
     assert!(found.is_none());
 }
 
-// ─── model/challenge.rs tests (requires DB) ──────────────────────────────────
+// ─── model/challenge.rs tests (require DB) ────────────────────────────────────
 
 #[tokio::test]
 async fn test_challenge_create() {
     let pool = setup_test_pool().await;
     let mfr = Manufacturer::create(&pool, "chco", None).await.unwrap();
 
-    let ch = GitHubRepoChallenge::create(&pool, mfr.id).await.unwrap();
+    let ch = PublisherChallenge::create(&pool, mfr.id).await.unwrap();
 
     assert!(
         ch.token.starts_with("actrix-verify="),
@@ -542,11 +490,9 @@ async fn test_challenge_create() {
 async fn test_challenge_get_active_found() {
     let pool = setup_test_pool().await;
     let mfr = Manufacturer::create(&pool, "activech", None).await.unwrap();
-    let ch = GitHubRepoChallenge::create(&pool, mfr.id).await.unwrap();
+    let ch = PublisherChallenge::create(&pool, mfr.id).await.unwrap();
 
-    let active = GitHubRepoChallenge::get_active(&pool, mfr.id)
-        .await
-        .unwrap();
+    let active = PublisherChallenge::get_active(&pool, mfr.id).await.unwrap();
     assert!(active.is_some());
     assert_eq!(active.unwrap().id, ch.id);
 }
@@ -556,9 +502,7 @@ async fn test_challenge_get_active_none_when_empty() {
     let pool = setup_test_pool().await;
     let mfr = Manufacturer::create(&pool, "nochco", None).await.unwrap();
 
-    let active = GitHubRepoChallenge::get_active(&pool, mfr.id)
-        .await
-        .unwrap();
+    let active = PublisherChallenge::get_active(&pool, mfr.id).await.unwrap();
     assert!(active.is_none());
 }
 
@@ -566,17 +510,21 @@ async fn test_challenge_get_active_none_when_empty() {
 async fn test_challenge_mark_verified() {
     let pool = setup_test_pool().await;
     let mfr = Manufacturer::create(&pool, "verch", None).await.unwrap();
-    let mut ch = GitHubRepoChallenge::create(&pool, mfr.id).await.unwrap();
+    let mut ch = PublisherChallenge::create(&pool, mfr.id).await.unwrap();
 
-    ch.mark_verified(&pool, "https://github.com/verch/actr-mfr-verify")
-        .await
-        .unwrap();
+    ch.mark_verified(
+        &pool,
+        "https://apps.example.com/.well-known/actr/publisher.json",
+    )
+    .await
+    .unwrap();
     assert!(ch.verified_at.is_some());
-    assert_eq!(ch.verify_url, "https://github.com/verch/actr-mfr-verify");
+    assert_eq!(
+        ch.verify_url,
+        "https://apps.example.com/.well-known/actr/publisher.json"
+    );
 
-    let active = GitHubRepoChallenge::get_active(&pool, mfr.id)
-        .await
-        .unwrap();
+    let active = PublisherChallenge::get_active(&pool, mfr.id).await.unwrap();
     assert!(
         active.is_none(),
         "verified challenge should not appear in get_active"
@@ -588,8 +536,8 @@ async fn test_challenge_token_unique() {
     let pool = setup_test_pool().await;
     let mfr = Manufacturer::create(&pool, "tokenco", None).await.unwrap();
 
-    let ch1 = GitHubRepoChallenge::create(&pool, mfr.id).await.unwrap();
-    let ch2 = GitHubRepoChallenge::create(&pool, mfr.id).await.unwrap();
+    let ch1 = PublisherChallenge::create(&pool, mfr.id).await.unwrap();
+    let ch2 = PublisherChallenge::create(&pool, mfr.id).await.unwrap();
 
     assert_ne!(
         ch1.token, ch2.token,
@@ -597,7 +545,7 @@ async fn test_challenge_token_unique() {
     );
 }
 
-// ─── model/package.rs tests (requires DB) ───────────────────────────────────
+// ─── model/package.rs tests (require DB) ─────────────────────────────────────
 
 #[tokio::test]
 async fn test_package_publish_and_get() {
@@ -626,13 +574,13 @@ async fn test_package_publish_and_get() {
     .await
     .unwrap();
 
-    assert_eq!(pkg.type_str, "pkgco:client:1.0.0");
+    assert_eq!(pkg.type_str, "pkgco/client@1.0.0");
     assert_eq!(pkg.status, PkgStatus::Active);
     assert_eq!(pkg.manufacturer, "pkgco");
     assert_eq!(pkg.name, "client");
     assert_eq!(pkg.version, "1.0.0");
 
-    let found = ActrPackage::get_by_type(&pool, "pkgco:client:1.0.0")
+    let found = ActrPackage::get_by_type(&pool, "pkgco/client@1.0.0")
         .await
         .unwrap()
         .expect("should find published package");
@@ -642,7 +590,7 @@ async fn test_package_publish_and_get() {
 #[tokio::test]
 async fn test_package_get_by_type_not_found() {
     let pool = setup_test_pool().await;
-    let found = ActrPackage::get_by_type(&pool, "nobody:nothing:v0")
+    let found = ActrPackage::get_by_type(&pool, "nobody/nothing@v0")
         .await
         .unwrap();
     assert!(found.is_none());
@@ -712,7 +660,7 @@ async fn test_package_revoke() {
     assert_eq!(pkg.status, PkgStatus::Revoked);
     assert!(pkg.revoked_at.is_some());
 
-    let found = ActrPackage::get_by_type(&pool, "revpkg:svc:1.0.0")
+    let found = ActrPackage::get_by_type(&pool, "revpkg/svc@1.0.0")
         .await
         .unwrap();
     assert!(
@@ -721,7 +669,7 @@ async fn test_package_revoke() {
     );
 
     let found_any_status =
-        ActrPackage::get_by_type_and_target_any_status(&pool, "revpkg:svc:1.0.0", "wasm32-wasip1")
+        ActrPackage::get_by_type_and_target_any_status(&pool, "revpkg/svc@1.0.0", "wasm32-wasip1")
             .await
             .unwrap()
             .expect("revoked package must remain visible to lifecycle-aware callers");
@@ -790,7 +738,7 @@ async fn test_package_get_by_id() {
 
     let found = ActrPackage::get_by_id(&pool, pkg.id).await.unwrap();
     assert!(found.is_some());
-    assert_eq!(found.unwrap().type_str, "idpkg:svc:1.0.0");
+    assert_eq!(found.unwrap().type_str, "idpkg/svc@1.0.0");
 }
 
 #[tokio::test]
@@ -848,24 +796,24 @@ async fn test_verify_legacy_package_without_signing_key_id_after_expiry() {
     assert_eq!(resolved_key_id, mfr.key_id);
 }
 
-// ─── manager.rs tests (requires DB) ──────────────────────────────────────────
+// ─── manager.rs tests (require DB) ────────────────────────────────────────────
 
 #[tokio::test]
 async fn test_lookup_package_no_reserved_shortcut() {
     let pool = setup_test_pool().await;
     // No reserved names anymore; unregistered names return false
     assert!(
-        !lookup_package(&pool, "self:anything:1.0.0", None, None)
+        !lookup_package(&pool, "self/anything@1.0.0", None, None)
             .await
             .unwrap()
     );
     assert!(
-        !lookup_package(&pool, "acme:client:1.0.0", None, None)
+        !lookup_package(&pool, "acme/client@1.0.0", None, None)
             .await
             .unwrap()
     );
     assert!(
-        !lookup_package(&pool, "actrix:core:1.0.0", None, None)
+        !lookup_package(&pool, "actrix/core@1.0.0", None, None)
             .await
             .unwrap()
     );
@@ -875,7 +823,7 @@ async fn test_lookup_package_no_reserved_shortcut() {
 async fn test_lookup_package_not_registered() {
     let pool = setup_test_pool().await;
     assert!(
-        !lookup_package(&pool, "unknown:svc:1.0.0", None, None)
+        !lookup_package(&pool, "unknown/svc@1.0.0", None, None)
             .await
             .unwrap()
     );
@@ -902,12 +850,12 @@ async fn test_lookup_package_active() {
     .unwrap();
 
     assert!(
-        lookup_package(&pool, "lookco:svc:1.0.0", None, None)
+        lookup_package(&pool, "lookco/svc@1.0.0", None, None)
             .await
             .unwrap()
     );
     assert!(
-        !lookup_package(&pool, "lookco:svc:v2", None, None)
+        !lookup_package(&pool, "lookco/svc@v2", None, None)
             .await
             .unwrap()
     );
@@ -937,7 +885,7 @@ async fn test_lookup_package_revoked() {
     pkg.revoke(&pool).await.unwrap();
 
     assert!(
-        !lookup_package(&pool, "revokedlook:svc:1.0.0", None, None)
+        !lookup_package(&pool, "revokedlook/svc@1.0.0", None, None)
             .await
             .unwrap(),
         "revoked package should not be found"
@@ -949,7 +897,7 @@ async fn test_manager_apply_formerly_reserved_accepted() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
     // Previously reserved names are now accepted
-    let result = manager.apply("acme", None).await;
+    let result = manager.apply("acme.example", None).await;
     assert!(result.is_ok());
 }
 
@@ -958,11 +906,11 @@ async fn test_manager_apply_valid() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
     let (mfr, challenge) = manager
-        .apply("octocat", Some("admin@octocat.dev"))
+        .apply("octocat.example", Some("admin@octocat.dev"))
         .await
         .unwrap();
 
-    assert_eq!(mfr.name, "octocat");
+    assert_eq!(mfr.name, "octocat.example");
     assert_eq!(mfr.status, MfrStatus::Pending);
     assert!(challenge.token.starts_with("actrix-verify="));
     assert!(challenge.verify_url.is_empty());
@@ -981,10 +929,10 @@ async fn test_manager_apply_invalid_login() {
 async fn test_manager_get_status() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    let (mfr, _) = manager.apply("statusco", None).await.unwrap();
+    let (mfr, _) = manager.apply("statusco.example", None).await.unwrap();
 
     let status = manager.get_status(mfr.id).await.unwrap();
-    assert_eq!(status.name, "statusco");
+    assert_eq!(status.name, "statusco.example");
     assert_eq!(status.status, MfrStatus::Pending);
 }
 
@@ -1000,22 +948,32 @@ async fn test_manager_get_status_not_found() {
 async fn test_manager_admin_approve() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    let (mfr, _) = manager.apply("approveco", None).await.unwrap();
+    let (mfr, _) = manager.apply("approveco.example", None).await.unwrap();
 
     let response = manager.admin_approve(mfr.id, None).await.unwrap();
-    assert_eq!(response.certificate.mfr_name, "approveco");
-    assert_eq!(response.key_source, KeySource::Generated);
-    assert!(response.private_key.is_some());
-    assert!(!response.private_key.as_ref().unwrap().is_empty());
-    assert!(!response.certificate.mfr_pubkey.is_empty());
+    assert_eq!(response.certificate.publisher, "approveco.example");
+    assert!(!response.certificate.public_key.is_empty());
     assert!(response.certificate.expires_at > response.certificate.issued_at);
+}
+
+#[tokio::test]
+async fn test_active_publisher_rotation_requires_fresh_challenge() {
+    let pool = setup_test_pool().await;
+    let manager = MfrManager::new(pool);
+    let (mfr, initial) = manager.apply("rotate.example.com", None).await.unwrap();
+    manager.admin_approve(mfr.id, None).await.unwrap();
+
+    let rotation = manager.begin_key_rotation(mfr.id).await.unwrap();
+    assert_ne!(rotation.token, initial.token);
+    let active = manager.get_challenge(mfr.id).await.unwrap();
+    assert_eq!(active.id, rotation.id);
 }
 
 #[tokio::test]
 async fn test_manager_admin_suspend_reinstate() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    let (mfr, _) = manager.apply("suspco", None).await.unwrap();
+    let (mfr, _) = manager.apply("suspco.example", None).await.unwrap();
     manager.admin_approve(mfr.id, None).await.unwrap();
 
     manager.admin_suspend(mfr.id).await.unwrap();
@@ -1031,7 +989,7 @@ async fn test_manager_admin_suspend_reinstate() {
 async fn test_manager_admin_delete() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    let (mfr, _) = manager.apply("deleteco", None).await.unwrap();
+    let (mfr, _) = manager.apply("deleteco.example", None).await.unwrap();
     let id = mfr.id;
 
     manager.admin_delete(id).await.unwrap();
@@ -1050,17 +1008,17 @@ async fn test_manager_publish_invalid_signature() {
     let pub_b64 = base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes());
 
     let manager = MfrManager::new(pool.clone());
-    let (mfr, _) = manager.apply("sigco", None).await.unwrap();
+    let (mfr, _) = manager.apply("sigco.example", None).await.unwrap();
     manager.admin_approve(mfr.id, Some(&pub_b64)).await.unwrap();
 
-    let manifest = test_manifest("sigco", "svc", "1.0.0", "wasm32-wasip1");
+    let manifest = test_manifest("sigco.example", "svc", "1.0.0", "wasm32-wasip1");
     let bad_sig = base64::engine::general_purpose::STANDARD.encode([0u8; 64]);
 
     // Valid nonce but bad manifest signature
     let (nonce_b64, nonce_sig_b64) = make_publish_nonce(
         &pool,
         mfr.id,
-        "sigco",
+        "sigco.example",
         "svc",
         "1.0.0",
         "wasm32-wasip1",
@@ -1073,7 +1031,7 @@ async fn test_manager_publish_invalid_signature() {
 
     let result = manager
         .publish_package(PublishRequest {
-            manufacturer: "sigco".to_string(),
+            publisher: "sigco.example".to_string(),
             name: "svc".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
@@ -1129,7 +1087,7 @@ async fn test_manager_publish_valid_signature() {
     let manager = MfrManager::new(pool);
     let pkg = manager
         .publish_package(PublishRequest {
-            manufacturer: "validpub".to_string(),
+            publisher: "validpub".to_string(),
             name: "client".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
@@ -1142,7 +1100,7 @@ async fn test_manager_publish_valid_signature() {
         .await
         .unwrap();
 
-    assert_eq!(pkg.type_str, "validpub:client:1.0.0");
+    assert_eq!(pkg.type_str, "validpub/client@1.0.0");
     assert_eq!(pkg.status, PkgStatus::Active);
 }
 
@@ -1156,7 +1114,7 @@ async fn test_manager_publish_inactive_mfr() {
     let manager = MfrManager::new(pool);
     let result = manager
         .publish_package(PublishRequest {
-            manufacturer: "pendingmfr".to_string(),
+            publisher: "pendingmfr".to_string(),
             name: "svc".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
@@ -1169,7 +1127,7 @@ async fn test_manager_publish_inactive_mfr() {
         .await;
     assert!(
         matches!(result, Err(MfrError::InvalidStatus(_))),
-        "publishing for pending MFR should fail with InvalidStatus"
+        "publishing for pending Publisher Registry should fail with InvalidStatus"
     );
 }
 
@@ -1177,11 +1135,11 @@ async fn test_manager_publish_inactive_mfr() {
 async fn test_manager_resolve_by_name() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    let (mfr, _) = manager.apply("resolveco", None).await.unwrap();
+    let (mfr, _) = manager.apply("resolveco.example", None).await.unwrap();
     manager.admin_approve(mfr.id, None).await.unwrap();
 
-    let info = manager.resolve_by_name("resolveco").await.unwrap();
-    assert_eq!(info.name, "resolveco");
+    let info = manager.resolve_by_name("resolveco.example").await.unwrap();
+    assert_eq!(info.name, "resolveco.example");
     assert!(!info.public_key.is_empty());
 }
 
@@ -1189,9 +1147,9 @@ async fn test_manager_resolve_by_name() {
 async fn test_manager_resolve_by_name_not_active() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    manager.apply("pendingres", None).await.unwrap();
+    manager.apply("pendingres.example", None).await.unwrap();
 
-    let result = manager.resolve_by_name("pendingres").await;
+    let result = manager.resolve_by_name("pendingres.example").await;
     assert!(matches!(result, Err(MfrError::InvalidStatus(_))));
 }
 
@@ -1229,7 +1187,7 @@ async fn test_manager_get_and_revoke_package() {
     let manager = MfrManager::new(pool);
     let pkg = manager
         .publish_package(PublishRequest {
-            manufacturer: "revmgr".to_string(),
+            publisher: "revmgr".to_string(),
             name: "svc".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
@@ -1242,12 +1200,12 @@ async fn test_manager_get_and_revoke_package() {
         .await
         .unwrap();
 
-    let found = manager.get_package("revmgr:svc:1.0.0").await.unwrap();
+    let found = manager.get_package("revmgr/svc@1.0.0").await.unwrap();
     assert_eq!(found.id, pkg.id);
 
     manager.revoke_package(pkg.id).await.unwrap();
 
-    let result = manager.get_package("revmgr:svc:1.0.0").await;
+    let result = manager.get_package("revmgr/svc@1.0.0").await;
     assert!(matches!(result, Err(MfrError::NotFound)));
 }
 
@@ -1256,8 +1214,8 @@ async fn test_manager_admin_list() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
 
-    manager.apply("adminlist1", None).await.unwrap();
-    let (mfr2, _) = manager.apply("adminlist2", None).await.unwrap();
+    manager.apply("adminlist1.example", None).await.unwrap();
+    let (mfr2, _) = manager.apply("adminlist2.example", None).await.unwrap();
     manager.admin_approve(mfr2.id, None).await.unwrap();
 
     let all = manager.admin_list(None).await.unwrap();
@@ -1265,7 +1223,7 @@ async fn test_manager_admin_list() {
 
     let active = manager.admin_list(Some(MfrStatus::Active)).await.unwrap();
     assert_eq!(active.len(), 1);
-    assert_eq!(active[0].name, "adminlist2");
+    assert_eq!(active[0].name, "adminlist2.example");
 }
 
 #[tokio::test]
@@ -1302,7 +1260,7 @@ async fn test_manager_list_packages_by_mfr() {
         .await;
         manager
             .publish_package(PublishRequest {
-                manufacturer: "listmgr".to_string(),
+                publisher: "listmgr".to_string(),
                 name: pkg_name.to_string(),
                 version: "1.0.0".to_string(),
                 target: "wasm32-wasip1".to_string(),
@@ -1372,7 +1330,7 @@ async fn test_manager_admin_approve_with_uploaded_key() {
 
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    let (mfr, _) = manager.apply("uploadco", None).await.unwrap();
+    let (mfr, _) = manager.apply("uploadco.example", None).await.unwrap();
 
     // User generates their own keypair
     let user_key = SigningKey::generate(&mut OsRng);
@@ -1384,20 +1342,15 @@ async fn test_manager_admin_approve_with_uploaded_key() {
         .await
         .unwrap();
 
-    assert_eq!(response.key_source, KeySource::Uploaded);
-    assert!(
-        response.private_key.is_none(),
-        "uploaded mode should NOT return a private key"
-    );
-    assert_eq!(response.certificate.mfr_pubkey, user_pub_b64);
-    assert_eq!(response.certificate.mfr_name, "uploadco");
+    assert_eq!(response.certificate.public_key, user_pub_b64);
+    assert_eq!(response.certificate.publisher, "uploadco.example");
 }
 
 #[tokio::test]
 async fn test_manager_admin_approve_with_invalid_key_rejected() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    let (mfr, _) = manager.apply("badkeyco", None).await.unwrap();
+    let (mfr, _) = manager.apply("badkeyco.example", None).await.unwrap();
 
     let result = manager.admin_approve(mfr.id, Some("not-a-valid-key")).await;
     assert!(
@@ -1405,30 +1358,25 @@ async fn test_manager_admin_approve_with_invalid_key_rejected() {
         "invalid public key should be rejected with Crypto error: {result:?}"
     );
 
-    // Verify MFR is still pending (not corrupted)
+    // Verify Publisher Registry is still pending (not corrupted)
     let status = manager.get_status(mfr.id).await.unwrap();
     assert_eq!(
         status.status,
         MfrStatus::Pending,
-        "MFR should remain pending after failed activation"
+        "Publisher Registry should remain pending after failed activation"
     );
 }
 
 #[tokio::test]
-async fn test_manager_admin_approve_generated_mode_default() {
+async fn test_manager_admin_approve_test_helper_generates_public_key() {
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    let (mfr, _) = manager.apply("gendefault", None).await.unwrap();
+    let (mfr, _) = manager.apply("gendefault.example", None).await.unwrap();
 
-    // No public_key passed => generated mode
+    // The private key exists only inside this test helper and is never returned.
     let response = manager.admin_approve(mfr.id, None).await.unwrap();
 
-    assert_eq!(response.key_source, KeySource::Generated);
-    assert!(
-        response.private_key.is_some(),
-        "generated mode should return a private key"
-    );
-    assert!(!response.private_key.as_ref().unwrap().is_empty());
+    assert!(!response.certificate.public_key.is_empty());
 }
 
 #[tokio::test]
@@ -1439,7 +1387,7 @@ async fn test_manager_uploaded_key_can_publish() {
 
     let pool = setup_test_pool().await;
     let manager = MfrManager::new(pool);
-    let (mfr, _) = manager.apply("pubupload", None).await.unwrap();
+    let (mfr, _) = manager.apply("pubupload.example", None).await.unwrap();
 
     // User generates their own keypair and uploads only the public key
     let user_key = SigningKey::generate(&mut OsRng);
@@ -1452,14 +1400,14 @@ async fn test_manager_uploaded_key_can_publish() {
         .unwrap();
 
     // Now sign and publish using the user's private key
-    let manifest = test_manifest("pubupload", "widget", "1.0.0", "wasm32-wasip1");
+    let manifest = test_manifest("pubupload.example", "widget", "1.0.0", "wasm32-wasip1");
     let sig = user_key.sign(manifest.as_bytes());
     let sig_b64 = base64::engine::general_purpose::STANDARD.encode(sig.to_bytes());
 
     let (nonce_b64, nonce_sig_b64) = make_publish_nonce(
         manager.pool(),
         mfr.id,
-        "pubupload",
+        "pubupload.example",
         "widget",
         "1.0.0",
         "wasm32-wasip1",
@@ -1472,7 +1420,7 @@ async fn test_manager_uploaded_key_can_publish() {
 
     let pkg = manager
         .publish_package(PublishRequest {
-            manufacturer: "pubupload".to_string(),
+            publisher: "pubupload.example".to_string(),
             name: "widget".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
@@ -1485,7 +1433,7 @@ async fn test_manager_uploaded_key_can_publish() {
         .await
         .unwrap();
 
-    assert_eq!(pkg.type_str, "pubupload:widget:1.0.0");
+    assert_eq!(pkg.type_str, "pubupload.example/widget@1.0.0");
     assert_eq!(pkg.status, PkgStatus::Active);
 }
 
@@ -1501,19 +1449,19 @@ async fn test_key_rotation_then_publish_with_new_key() {
     let manager = MfrManager::new(pool.clone());
 
     // Step 1: Apply and approve with initial key (key_A)
-    let (mfr, _) = manager.apply("rotpub", None).await.unwrap();
+    let (mfr, _) = manager.apply("rotpub.example", None).await.unwrap();
     let key_a = SigningKey::generate(&mut OsRng);
     let pub_a = base64::engine::general_purpose::STANDARD.encode(key_a.verifying_key().to_bytes());
     manager.admin_approve(mfr.id, Some(&pub_a)).await.unwrap();
 
     // Step 2: Publish with key_A — should succeed
-    let manifest_a = test_manifest("rotpub", "svc", "1.0.0", "wasm32-wasip1");
+    let manifest_a = test_manifest("rotpub.example", "svc", "1.0.0", "wasm32-wasip1");
     let sig_a = key_a.sign(manifest_a.as_bytes());
     let sig_a_b64 = base64::engine::general_purpose::STANDARD.encode(sig_a.to_bytes());
     let (nonce_a, nonce_sig_a) = make_publish_nonce(
         &pool,
         mfr.id,
-        "rotpub",
+        "rotpub.example",
         "svc",
         "1.0.0",
         "wasm32-wasip1",
@@ -1525,7 +1473,7 @@ async fn test_key_rotation_then_publish_with_new_key() {
     .await;
     let pkg_a = manager
         .publish_package(PublishRequest {
-            manufacturer: "rotpub".to_string(),
+            publisher: "rotpub.example".to_string(),
             name: "svc".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
@@ -1537,21 +1485,21 @@ async fn test_key_rotation_then_publish_with_new_key() {
         })
         .await
         .unwrap();
-    assert_eq!(pkg_a.type_str, "rotpub:svc:1.0.0");
+    assert_eq!(pkg_a.type_str, "rotpub.example/svc@1.0.0");
 
     // Step 3: Rotate key → key_B
     let key_b = SigningKey::generate(&mut OsRng);
     let pub_b = base64::engine::general_purpose::STANDARD.encode(key_b.verifying_key().to_bytes());
-    manager.renew_key(mfr.id, Some(&pub_b)).await.unwrap();
+    manager.renew_key(mfr.id, &pub_b).await.unwrap();
 
     // Step 4: Publish with key_B — should succeed (new version)
-    let manifest_b = test_manifest("rotpub", "svc", "2.0.0", "wasm32-wasip1");
+    let manifest_b = test_manifest("rotpub.example", "svc", "2.0.0", "wasm32-wasip1");
     let sig_b = key_b.sign(manifest_b.as_bytes());
     let sig_b_b64 = base64::engine::general_purpose::STANDARD.encode(sig_b.to_bytes());
     let (nonce_b, nonce_sig_b) = make_publish_nonce(
         &pool,
         mfr.id,
-        "rotpub",
+        "rotpub.example",
         "svc",
         "2.0.0",
         "wasm32-wasip1",
@@ -1563,7 +1511,7 @@ async fn test_key_rotation_then_publish_with_new_key() {
     .await;
     let pkg_b = manager
         .publish_package(PublishRequest {
-            manufacturer: "rotpub".to_string(),
+            publisher: "rotpub.example".to_string(),
             name: "svc".to_string(),
             version: "2.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
@@ -1575,19 +1523,19 @@ async fn test_key_rotation_then_publish_with_new_key() {
         })
         .await
         .unwrap();
-    assert_eq!(pkg_b.type_str, "rotpub:svc:2.0.0");
+    assert_eq!(pkg_b.type_str, "rotpub.example/svc@2.0.0");
 
     // Step 5: Publish with OLD key_A — should FAIL
-    // After key rotation, MFR's public_key is key_B. The nonce_sig signed by key_A
+    // After key rotation, Publisher Registry's public_key is key_B. The nonce_sig signed by key_A
     // won't verify against key_B → Unauthorized before reaching manifest sig check.
-    let manifest_c = test_manifest("rotpub", "svc", "3.0.0", "wasm32-wasip1");
+    let manifest_c = test_manifest("rotpub.example", "svc", "3.0.0", "wasm32-wasip1");
     let sig_c = key_a.sign(manifest_c.as_bytes());
     let sig_c_b64 = base64::engine::general_purpose::STANDARD.encode(sig_c.to_bytes());
-    // Sign nonce with old key_a — verification will fail since MFR now uses key_b
+    // Sign nonce with old key_a — verification will fail since Publisher Registry now uses key_b
     let (nonce_c, nonce_sig_c) = make_publish_nonce(
         &pool,
         mfr.id,
-        "rotpub",
+        "rotpub.example",
         "svc",
         "3.0.0",
         "wasm32-wasip1",
@@ -1599,7 +1547,7 @@ async fn test_key_rotation_then_publish_with_new_key() {
     .await;
     let result = manager
         .publish_package(PublishRequest {
-            manufacturer: "rotpub".to_string(),
+            publisher: "rotpub.example".to_string(),
             name: "svc".to_string(),
             version: "3.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
@@ -1626,7 +1574,7 @@ async fn test_key_rotation_historical_key_resolved() {
     let manager = MfrManager::new(pool.clone());
 
     // Apply + approve with key_A
-    let (mfr, _) = manager.apply("histkey", None).await.unwrap();
+    let (mfr, _) = manager.apply("histkey.example", None).await.unwrap();
     let key_a = SigningKey::generate(&mut OsRng);
     let pub_a = base64::engine::general_purpose::STANDARD.encode(key_a.verifying_key().to_bytes());
     let resp_a = manager.admin_approve(mfr.id, Some(&pub_a)).await.unwrap();
@@ -1635,17 +1583,17 @@ async fn test_key_rotation_historical_key_resolved() {
     // Rotate to key_B
     let key_b = SigningKey::generate(&mut OsRng);
     let pub_b = base64::engine::general_purpose::STANDARD.encode(key_b.verifying_key().to_bytes());
-    let resp_b = manager.renew_key(mfr.id, Some(&pub_b)).await.unwrap();
+    let resp_b = manager.renew_key(mfr.id, &pub_b).await.unwrap();
     let key_id_b = resp_b.certificate.key_id.clone();
 
     // Resolve current key (key_B)
-    let current = manager.resolve_by_name("histkey").await.unwrap();
+    let current = manager.resolve_by_name("histkey.example").await.unwrap();
     assert_eq!(current.key_id, key_id_b);
     assert_eq!(current.public_key, pub_b);
 
     // Resolve old key (key_A) by key_id — should still work
     let historical = manager
-        .resolve_key_by_id("histkey", &key_id_a)
+        .resolve_key_by_id("histkey.example", &key_id_a)
         .await
         .unwrap();
     assert_eq!(historical.key_id, key_id_a);
@@ -1653,7 +1601,7 @@ async fn test_key_rotation_historical_key_resolved() {
 
     // Resolve non-existent key_id — should fail
     let result = manager
-        .resolve_key_by_id("histkey", "mfr-nonexistent")
+        .resolve_key_by_id("histkey.example", "actr-pub-nonexistent")
         .await;
     assert!(matches!(result, Err(MfrError::NotFound)));
 
@@ -1662,7 +1610,9 @@ async fn test_key_rotation_historical_key_resolved() {
         .execute(&pool)
         .await
         .unwrap();
-    let result = manager.resolve_key_by_id("histkey", &key_id_a).await;
+    let result = manager
+        .resolve_key_by_id("histkey.example", &key_id_a)
+        .await;
     assert!(
         matches!(result, Err(MfrError::InvalidStatus(_))),
         "historical keys must not bypass manufacturer suspension: {result:?}"
@@ -1702,7 +1652,7 @@ async fn test_publish_with_expired_key_rejected() {
     let manager = MfrManager::new(pool);
     let result = manager
         .publish_package(PublishRequest {
-            manufacturer: "expiredco".to_string(),
+            publisher: "expiredco".to_string(),
             name: "svc".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
@@ -1787,7 +1737,7 @@ async fn test_publish_with_wrong_key_rejected() {
     let manager = MfrManager::new(pool);
     let result = manager
         .publish_package(PublishRequest {
-            manufacturer: "wrongkeyco".to_string(),
+            publisher: "wrongkeyco".to_string(),
             name: "svc".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
@@ -1827,7 +1777,7 @@ async fn test_publish_for_revoked_mfr_rejected() {
     let manager = MfrManager::new(pool);
     let result = manager
         .publish_package(PublishRequest {
-            manufacturer: "revokedmfr".to_string(),
+            publisher: "revokedmfr".to_string(),
             name: "svc".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
@@ -1840,7 +1790,7 @@ async fn test_publish_for_revoked_mfr_rejected() {
         .await;
     assert!(
         matches!(result, Err(MfrError::InvalidStatus(_))),
-        "revoked MFR should not be able to publish: {result:?}"
+        "revoked Publisher Registry should not be able to publish: {result:?}"
     );
 }
 
@@ -1867,7 +1817,7 @@ async fn test_publish_for_suspended_mfr_rejected() {
     let manager = MfrManager::new(pool);
     let result = manager
         .publish_package(PublishRequest {
-            manufacturer: "suspendedmfr".to_string(),
+            publisher: "suspendedmfr".to_string(),
             name: "svc".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
@@ -1880,7 +1830,7 @@ async fn test_publish_for_suspended_mfr_rejected() {
         .await;
     assert!(
         matches!(result, Err(MfrError::InvalidStatus(_))),
-        "suspended MFR should not be able to publish: {result:?}"
+        "suspended Publisher Registry should not be able to publish: {result:?}"
     );
 }
 
@@ -1933,7 +1883,7 @@ async fn test_multi_manufacturer_independent_publish() {
         .await;
         manager
             .publish_package(PublishRequest {
-                manufacturer: "alpha-corp".to_string(),
+                publisher: "alpha-corp".to_string(),
                 name: name.to_string(),
                 version: ver.to_string(),
                 target: "wasm32-wasip1".to_string(),
@@ -1967,7 +1917,7 @@ async fn test_multi_manufacturer_independent_publish() {
         .await;
         manager
             .publish_package(PublishRequest {
-                manufacturer: "beta-corp".to_string(),
+                publisher: "beta-corp".to_string(),
                 name: name.to_string(),
                 version: ver.to_string(),
                 target: "wasm32-wasip1".to_string(),
@@ -1981,7 +1931,7 @@ async fn test_multi_manufacturer_independent_publish() {
             .unwrap();
     }
 
-    // Verify isolation: each MFR sees only their own packages
+    // Verify isolation: each Publisher Registry sees only their own packages
     let alpha_pkgs = manager.list_packages(Some("alpha-corp")).await.unwrap();
     assert_eq!(alpha_pkgs.len(), 2);
     assert!(alpha_pkgs.iter().all(|p| p.manufacturer == "alpha-corp"));
@@ -1996,7 +1946,7 @@ async fn test_multi_manufacturer_independent_publish() {
 
     // Cross-manufacturer publish should FAIL: alpha's key signing for beta's name
     // The nonce is issued for beta-corp (mfr_beta.id), but signed with alpha's key.
-    // Nonce sig verification will fail since MFR beta-corp uses beta's public key.
+    // Nonce sig verification will fail since Publisher Registry beta-corp uses beta's public key.
     let cross_manifest = test_manifest("beta-corp", "hack", "1.0.0", "wasm32-wasip1");
     let cross_sig = key_alpha.sign(cross_manifest.as_bytes());
     let cross_sig_b64 = base64::engine::general_purpose::STANDARD.encode(cross_sig.to_bytes());
@@ -2015,7 +1965,7 @@ async fn test_multi_manufacturer_independent_publish() {
     .await;
     let result = manager
         .publish_package(PublishRequest {
-            manufacturer: "beta-corp".to_string(),
+            publisher: "beta-corp".to_string(),
             name: "hack".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
@@ -2056,7 +2006,7 @@ async fn test_multi_target_same_package() {
         "aarch64-apple-darwin",
     ] {
         let manifest = format!(
-            "manufacturer = \"multiarch\"\nname = \"server\"\nversion = \"1.0.0\"\n\n[binary]\npath = \"server.wasm\"\ntarget = \"{target}\"\nhash = \"sha256:abc123\""
+            "publisher = \"multiarch\"\nname = \"server\"\nversion = \"1.0.0\"\n\n[binary]\npath = \"server.wasm\"\ntarget = \"{target}\"\nhash = \"sha256:abc123\""
         );
         let sig = key.sign(manifest.as_bytes());
         let sig_b64 = base64::engine::general_purpose::STANDARD.encode(sig.to_bytes());
@@ -2075,7 +2025,7 @@ async fn test_multi_target_same_package() {
         .await;
         manager
             .publish_package(PublishRequest {
-                manufacturer: "multiarch".to_string(),
+                publisher: "multiarch".to_string(),
                 name: "server".to_string(),
                 version: "1.0.0".to_string(),
                 target: target.to_string(),
@@ -2145,7 +2095,7 @@ async fn test_publish_tampered_proto_files_rejected() {
     let manager = MfrManager::new(pool);
     let result = manager
         .publish_package(PublishRequest {
-            manufacturer: "protoco".to_string(),
+            publisher: "protoco".to_string(),
             name: "svc".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
@@ -2178,7 +2128,7 @@ async fn test_publish_manifest_missing_required_field_rejected() {
         .unwrap();
     mfr.activate(&pool, pub_b64).await.unwrap();
 
-    let manifest = r#"manufacturer = "missingfield"
+    let manifest = r#"publisher = "missingfield"
 name = "svc"
 
 [binary]
@@ -2205,7 +2155,7 @@ hash = "sha256:abc123"
     let manager = MfrManager::new(pool);
     let result = manager
         .publish_package(PublishRequest {
-            manufacturer: "missingfield".to_string(),
+            publisher: "missingfield".to_string(),
             name: "svc".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),

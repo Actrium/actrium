@@ -44,6 +44,7 @@ impl AIdCredentialValidator {
     pub async fn check(
         credential: &AIdCredential,
         realm_id: u32,
+        audience: &str,
     ) -> Result<(IdentityClaims, bool), AidError> {
         let cache = Self::get_cache()?;
         let key_id = credential.key_id;
@@ -56,6 +57,13 @@ impl AIdCredentialValidator {
         let claims = AIdCredentialVerifier::verify(credential, &verifying_key)?;
 
         if claims.realm_id != realm_id {
+            return Err(AidError::InvalidFormat);
+        }
+        if claims.protocol_version != 1
+            || claims.issuer != format!("actr:realm:{realm_id}:authority")
+            || claims.provider != "actrix-official"
+            || claims.audience != audience
+        {
             return Err(AidError::InvalidFormat);
         }
 
@@ -110,11 +118,12 @@ impl AIdCredentialValidator {
     pub fn check_sync(
         credential: &AIdCredential,
         realm_id: u32,
+        audience: &str,
     ) -> Result<IdentityClaims, AidError> {
         tokio::task::block_in_place(|| {
             let handle =
                 tokio::runtime::Handle::try_current().map_err(|_| AidError::InvalidFormat)?;
-            let (claims, _) = handle.block_on(Self::check(credential, realm_id))?;
+            let (claims, _) = handle.block_on(Self::check(credential, realm_id, audience))?;
             Ok(claims)
         })
     }

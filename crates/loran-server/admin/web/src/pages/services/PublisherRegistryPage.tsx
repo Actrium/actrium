@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Building2, CheckCircle, Clock, XCircle, AlertTriangle, Package, Key, Copy, Plus, Terminal, Download, ShieldOff, Timer } from 'lucide-react';
-import { mfrApi, type Manufacturer, type ActrPackage, type ActivateResponse, type ApplyResponse, type MfrKeyHistory } from '../../lib/api';
+import { Building2, CheckCircle, Clock, XCircle, AlertTriangle, Package, Key, Copy, Plus, Terminal, ShieldOff, Timer } from 'lucide-react';
+import { publisherApi, type PublisherRecord, type ActrPackage, type PublisherVerificationResponse, type ApplyResponse, type PublisherKeyHistory } from '../../lib/api';
 
 function copyText(text: string) {
   if (navigator.clipboard?.writeText) {
@@ -39,12 +39,11 @@ function CopyButton({ text, label = 'Copy', className = '' }: { text: string; la
   );
 }
 
-const VERIFY_REPO = 'actr-mfr-verify';
 const VERIFY_COOLDOWN_SECS = 15;
 
 // ── Status badge ──────────────────────────────────────────────────
 
-function StatusBadge({ status }: { status: Manufacturer['status'] }) {
+function StatusBadge({ status }: { status: PublisherRecord['status'] }) {
   const config = {
     active: { color: 'bg-green-100 text-green-800', icon: CheckCircle, label: 'Active' },
     pending: { color: 'bg-yellow-100 text-yellow-800', icon: Clock, label: 'Pending' },
@@ -117,25 +116,25 @@ function KeyExpiryBadge({ expiresAt }: { expiresAt?: number }) {
 
 // ── Key History Panel ────────────────────────────────────────────────
 
-function KeyHistoryPanel({ mfr, onRevoked }: { mfr: Manufacturer; onRevoked: () => void }) {
-  const [keys, setKeys] = useState<MfrKeyHistory[] | null>(null);
+function KeyHistoryPanel({ publisher, onRevoked }: { publisher: PublisherRecord; onRevoked: () => void }) {
+  const [keys, setKeys] = useState<PublisherKeyHistory[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<number | null>(null);
 
   useEffect(() => {
     setLoading(true);
-    mfrApi.listKeys(mfr.id)
+    publisherApi.listKeys(publisher.id)
       .then(setKeys)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [mfr.id]);
+  }, [publisher.id]);
 
-  const handleRevoke = async (k: MfrKeyHistory) => {
+  const handleRevoke = async (k: PublisherKeyHistory) => {
     if (!confirm(`Revoke key ${k.key_id}?\n\nThis is an emergency action. All packages signed with this key will fail verification immediately.`)) return;
     setRevoking(k.id);
     try {
-      await mfrApi.revokeHistoricalKey(k.id);
+      await publisherApi.revokeHistoricalKey(k.id);
       setKeys(prev => prev ? prev.map(x => x.id === k.id ? { ...x, status: 'revoked' } : x) : prev);
       onRevoked();
     } catch (e) {
@@ -151,7 +150,7 @@ function KeyHistoryPanel({ mfr, onRevoked }: { mfr: Manufacturer; onRevoked: () 
     <div className="bg-gray-50 border-t border-gray-100 px-6 py-4">
       <div className="flex items-center gap-2 mb-3">
         <Key size={13} className="text-gray-400" />
-        <span className="text-xs font-semibold text-gray-600 uppercase">Key History — {mfr.name}</span>
+        <span className="text-xs font-semibold text-gray-600 uppercase">Key History — {publisher.name}</span>
         <span className="text-xs text-gray-400 ml-1">(Retired keys still verify old packages until manually revoked)</span>
       </div>
       {loading && <div className="text-xs text-gray-400">Loading...</div>}
@@ -208,38 +207,25 @@ function KeyHistoryPanel({ mfr, onRevoked }: { mfr: Manufacturer; onRevoked: () 
   );
 }
 
-// ── Keychain modal ────────────────────────────────────────────────
+// ── Publisher verification modal ─────────────────────────────────
 
-function KeychainModal({ response, onClose }: { response: ActivateResponse; onClose: () => void }) {
+function VerificationModal({ response, onClose }: { response: PublisherVerificationResponse; onClose: () => void }) {
   const json = JSON.stringify(response, null, 2);
-  const name = response.certificate.mfr_name;
-  const isGenerated = response.key_source === 'generated';
-  const filename = `mfr-${name}-keychain.json`;
-  const saveCommand = `mkdir -p ~/.config/actrix && cat > ~/.config/actrix/${filename} << 'KEYCHAIN'\n${json}\nKEYCHAIN`;
-
-  const handleDownload = () => {
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl shadow-xl p-6 max-w-2xl w-full mx-4">
         <div className="flex items-center gap-2 mb-4">
-          <Key className="text-amber-500" size={20} />
-          <h2 className="text-lg font-semibold">
-            {isGenerated ? 'MFR Keychain Issued' : 'MFR Certificate Issued'}
-          </h2>
-          <span className={`ml-auto text-xs px-2 py-0.5 rounded-full font-medium ${
-            isGenerated ? 'bg-amber-100 text-amber-800' : 'bg-teal-100 text-teal-800'
-          }`}>
-            {isGenerated ? 'Server Generated' : 'Key Uploaded'}
+          <CheckCircle className="text-teal-600" size={20} />
+          <h2 className="text-lg font-semibold">Publisher Verified</h2>
+          <span className="ml-auto text-xs px-2 py-0.5 rounded-full font-medium bg-teal-100 text-teal-800">
+            Domain + Public Key Bound
           </span>
+        </div>
+
+        <div className="bg-teal-50 border border-teal-200 rounded-lg p-3 mb-4 text-sm text-teal-800">
+          Actrix verified the HTTPS descriptor and registered its public key. The publisher keeps
+          the private key; Actrix never receives, generates, or returns it.
         </div>
 
         <div className="mb-4">
@@ -250,30 +236,6 @@ function KeychainModal({ response, onClose }: { response: ActivateResponse; onCl
           </div>
         </div>
 
-        {isGenerated ? (
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-sm text-amber-800">
-            <p className="font-medium">Save this private key now. It will NOT be shown again.</p>
-            <p className="mt-1 text-amber-700">The platform only stores your public key for signature verification. Your private key is never stored, logged, or backed up — if lost, it cannot be recovered.</p>
-          </div>
-        ) : (
-          <div className="bg-teal-50 border border-teal-200 rounded-lg p-3 mb-4 text-sm text-teal-800">
-            Your uploaded public key has been registered. Use your own private key to sign packages.
-          </div>
-        )}
-
-        {/* One-liner save command (only for generated mode) */}
-        {isGenerated && (
-          <div className="mb-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Terminal size={12} className="text-gray-400" />
-              <label className="text-xs text-gray-500">Save to ~/.config/actrix/</label>
-              <CopyButton text={saveCommand} className="text-xs text-blue-600 hover:text-blue-800 ml-auto relative" />
-            </div>
-            <pre className="bg-gray-900 text-green-400 rounded-lg p-3 text-xs overflow-x-auto whitespace-pre-wrap font-mono max-h-40">{saveCommand}</pre>
-          </div>
-        )}
-
-        {/* Raw JSON (collapsed) */}
         <details className="mb-4">
           <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">Raw JSON</summary>
           <pre className="bg-gray-900 text-green-400 rounded-lg p-3 text-xs overflow-auto max-h-40 font-mono mt-1">{json}</pre>
@@ -285,12 +247,6 @@ function KeychainModal({ response, onClose }: { response: ActivateResponse; onCl
             label="Copy JSON"
             className="relative flex items-center gap-2 px-4 py-2 bg-gray-800 text-white rounded-lg text-sm hover:bg-gray-700"
           />
-          <button
-            onClick={handleDownload}
-            className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
-          >
-            <Download size={14} /> Download
-          </button>
           <button
             onClick={onClose}
             className="ml-auto px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
@@ -315,7 +271,7 @@ function HowItWorks() {
         <div className="px-4 pb-5 space-y-5">
           {/* Row 1: Registration & Identity */}
           <div>
-            <div className="text-xs font-medium text-gray-500 mb-2">Phase 1: MFR Registration & Identity</div>
+            <div className="text-xs font-medium text-gray-500 mb-2">Phase 1: HTTPS Publisher Identity</div>
             <svg viewBox="0 0 760 145" className="w-full" xmlns="http://www.w3.org/2000/svg">
               <defs>
                 <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f8fafc"/><stop offset="100%" stopColor="#e2e8f0"/></linearGradient>
@@ -332,11 +288,11 @@ function HowItWorks() {
                 <circle cx="50" cy="28" r="6" fill="#f1f5f9" />
                 <ellipse cx="50" cy="42" rx="10" ry="6" fill="#f1f5f9" />
                 <text x="50" y="72" textAnchor="middle" fontSize="10" fontWeight="600" fill="#475569">Register</text>
-                <text x="50" y="84" textAnchor="middle" fontSize="8" fill="#94a3b8">GitHub name</text>
+                <text x="50" y="84" textAnchor="middle" fontSize="8" fill="#94a3b8">HTTPS domain</text>
               </g>
 
               {/* Register desc */}
-              <text x="80" y="116" textAnchor="middle" fontSize="7.5" fill="#94a3b8">Account or Org</text>
+              <text x="80" y="116" textAnchor="middle" fontSize="7.5" fill="#94a3b8">Publisher ID</text>
 
               {/* Curved arrow 1 */}
               <path d="M138,57 C158,57 158,57 178,57" fill="none" stroke="#cbd5e1" strokeWidth="1.5" strokeDasharray="4 2"/>
@@ -354,28 +310,27 @@ function HowItWorks() {
               </g>
 
               {/* Challenge desc */}
-              <text x="240" y="116" textAnchor="middle" fontSize="7.5" fill="#94a3b8">{'actrix-verify={…} · 24h'}</text>
+              <text x="240" y="116" textAnchor="middle" fontSize="7.5" fill="#94a3b8">{'verification_challenge · 24h'}</text>
 
               {/* Curved arrow 2 */}
               <path d="M298,57 C318,57 318,57 338,57" fill="none" stroke="#cbd5e1" strokeWidth="1.5" strokeDasharray="4 2"/>
               <polygon points="336,53 344,57 336,61" fill="#cbd5e1"/>
 
-              {/* GitHub repo */}
+              {/* Publisher well-known descriptor */}
               <g transform="translate(350,12)" filter="url(#ds)">
                 <rect width="100" height="90" rx="12" fill="url(#g3)" stroke="#60a5fa" strokeWidth="1"/>
-                {/* GitHub-like mark */}
+                {/* HTTPS descriptor mark */}
                 <circle cx="50" cy="34" r="14" fill="#1e40af" opacity="0.15"/>
-                {/* Simplified octocat silhouette - a circle with tentacles hint */}
                 <circle cx="50" cy="31" r="8" fill="none" stroke="#3b82f6" strokeWidth="1.5"/>
                 <path d="M44,35 C44,41 56,41 56,35" fill="none" stroke="#3b82f6" strokeWidth="1.2"/>
                 <circle cx="47" cy="30" r="1.5" fill="#3b82f6"/>
                 <circle cx="53" cy="30" r="1.5" fill="#3b82f6"/>
                 <text x="50" y="72" textAnchor="middle" fontSize="10" fontWeight="600" fill="#1e40af">Prove</text>
-                <text x="50" y="84" textAnchor="middle" fontSize="8" fill="#3b82f6">Public repo</text>
+                <text x="50" y="84" textAnchor="middle" fontSize="8" fill="#3b82f6">Well-known JSON</text>
               </g>
 
               {/* Prove desc */}
-              <text x="400" y="116" textAnchor="middle" fontSize="7.5" fill="#94a3b8">{'actr-mfr-verify/{domain}.txt'}</text>
+              <text x="400" y="116" textAnchor="middle" fontSize="7.5" fill="#94a3b8">{'/.well-known/actr/publisher.json'}</text>
 
               {/* Curved arrow 3 */}
               <path d="M458,57 C478,57 478,57 498,57" fill="none" stroke="#cbd5e1" strokeWidth="1.5" strokeDasharray="4 2"/>
@@ -391,7 +346,7 @@ function HowItWorks() {
               </g>
 
               {/* Verified desc */}
-              <text x="560" y="116" textAnchor="middle" fontSize="7.5" fill="#94a3b8">via GitHub API</text>
+              <text x="560" y="116" textAnchor="middle" fontSize="7.5" fill="#94a3b8">HTTPS + DNS pinning</text>
 
               {/* Arrow 4 */}
               <path d="M618,57 C638,57 638,57 658,57" fill="none" stroke="#22c55e" strokeWidth="1.5"/>
@@ -406,20 +361,20 @@ function HowItWorks() {
                 <line x1="48" y1="30" x2="58" y2="30" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round"/>
                 <line x1="54" y1="30" x2="54" y2="35" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round"/>
                 <line x1="58" y1="30" x2="58" y2="35" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round"/>
-                <text x="40" y="58" textAnchor="middle" fontSize="9" fontWeight="700" fill="#166534">Keychain</text>
+                <text x="40" y="58" textAnchor="middle" fontSize="9" fontWeight="700" fill="#166534">Public Key</text>
                 <text x="40" y="70" textAnchor="middle" fontSize="7.5" fill="#16a34a">Ed25519</text>
-                <text x="40" y="80" textAnchor="middle" fontSize="7.5" fill="#16a34a">keypair</text>
+                <text x="40" y="80" textAnchor="middle" fontSize="7.5" fill="#16a34a">binding</text>
               </g>
 
               {/* Keychain desc */}
-              <text x="710" y="116" textAnchor="middle" fontSize="7.5" fill="#94a3b8">+ Certificate · 365 days</text>
+              <text x="710" y="116" textAnchor="middle" fontSize="7.5" fill="#94a3b8">Private key stays local</text>
 
             </svg>
           </div>
 
           {/* Row 2: Phase 2 — Build + Sign */}
           <div className="mt-8 relative pt-4 before:absolute before:inset-x-8 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-gray-200 before:to-transparent">
-            <div className="text-xs font-medium text-gray-500 mb-2">Phase 2: actr pkg build — SHA-256 + Ed25519 Sign (Requires MFR Keychain)</div>
+            <div className="text-xs font-medium text-gray-500 mb-2">Phase 2: actr pkg build — SHA-256 + Publisher Ed25519 Signature</div>
             <svg viewBox="0 0 760 210" className="w-full" xmlns="http://www.w3.org/2000/svg" fontFamily="system-ui, sans-serif">
               <defs>
                 <marker id="ar2a" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="7" markerHeight="5" orient="auto">
@@ -487,7 +442,7 @@ function HowItWorks() {
                 <line x1="26" y1="12" x2="26" y2="17" stroke="#f59e0b" strokeWidth="1.5" strokeLinecap="round"/>
                 <line x1="30" y1="12" x2="30" y2="17" stroke="#f59e0b" strokeWidth="1.5" strokeLinecap="round"/>
               </g>
-              <text x="432" y="124" textAnchor="middle" fontSize="8" fill="#b45309" fontWeight="600">MFR Keychain</text>
+              <text x="432" y="124" textAnchor="middle" fontSize="8" fill="#b45309" fontWeight="600">Publisher Signing Key</text>
               <text x="432" y="132" textAnchor="middle" fontSize="6.5" fill="#d97706">(Private Key)</text>
               <line x1="432" y1="90" x2="432" y2="80" stroke="#f59e0b" strokeWidth="1.2" markerEnd="url(#ar2a-amber)"/>
 
@@ -523,7 +478,7 @@ function HowItWorks() {
 
           {/* Row 3: Phase 3 — Publish with Nonce Challenge-Response */}
           <div className="mt-8 relative pt-4 before:absolute before:inset-x-8 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-gray-200 before:to-transparent">
-            <div className="text-xs font-medium text-gray-500 mb-2">Phase 3: actr pkg publish — Nonce Challenge-Response (Requires MFR Keychain)</div>
+            <div className="text-xs font-medium text-gray-500 mb-2">Phase 3: actr pkg publish — Nonce Challenge-Response</div>
             <svg viewBox="0 0 760 270" className="w-full" xmlns="http://www.w3.org/2000/svg" fontFamily="system-ui, sans-serif">
               <defs>
                 <marker id="ar2b" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="7" markerHeight="5" orient="auto">
@@ -546,48 +501,48 @@ function HowItWorks() {
               {/* Step 1: Request Nonce */}
               <g transform="translate(20,28)">
                 <rect width="200" height="32" rx="6" fill="#dbeafe" stroke="#2563eb" strokeWidth="1.2"/>
-                <text x="100" y="14" textAnchor="middle" fontSize="8" fontWeight="600" fill="#1d4ed8">1. POST /mfr/pkg/nonce</text>
-                <text x="100" y="26" textAnchor="middle" fontSize="7" fill="#3b82f6">manufacturer name</text>
+                <text x="100" y="14" textAnchor="middle" fontSize="8" fontWeight="600" fill="#1d4ed8">1. POST /registry/packages/nonce</text>
+                <text x="100" y="26" textAnchor="middle" fontSize="7" fill="#3b82f6">publisher domain</text>
               </g>
 
-              {/* Arrow: CLI → MFR (nonce request) */}
+              {/* Arrow: CLI → Publisher Registry (nonce request) */}
               <line x1="220" y1="44" x2="430" y2="44" stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#ar2b)"/>
 
-              {/* Arrow: MFR → CLI (nonce response) */}
+              {/* Arrow: Publisher Registry → CLI (nonce response) */}
               <line x1="430" y1="58" x2="220" y2="58" stroke="#94a3b8" strokeWidth="1.2" strokeDasharray="4 2" markerEnd="url(#ar2b-gray)"/>
               <text x="325" y="54" textAnchor="middle" fontSize="7" fill="#94a3b8">nonce base64 32 bytes</text>
 
               {/* Step 2: Build nonce_sig */}
               <g transform="translate(20,76)">
                 <rect width="200" height="56" rx="6" fill="#fef3c7" stroke="#f59e0b" strokeWidth="1.2"/>
-                {/* MFR Keychain icon inside box */}
+                {/* Publisher Registry Keychain icon inside box */}
                 <g transform="translate(20,12)">
                   <circle cx="12" cy="12" r="8" fill="none" stroke="#f59e0b" strokeWidth="1.5"/>
                   <circle cx="12" cy="12" r="3" fill="#fbbf24" opacity="0.4"/>
                   <line x1="20" y1="12" x2="32" y2="12" stroke="#f59e0b" strokeWidth="1.5" strokeLinecap="round"/>
                   <line x1="26" y1="12" x2="26" y2="17" stroke="#f59e0b" strokeWidth="1.5" strokeLinecap="round"/>
                   <line x1="30" y1="12" x2="30" y2="17" stroke="#f59e0b" strokeWidth="1.5" strokeLinecap="round"/>
-                  <text x="16" y="34" textAnchor="middle" fontSize="7" fill="#b45309" fontWeight="600">MFR Keychain</text>
+                  <text x="16" y="34" textAnchor="middle" fontSize="7" fill="#b45309" fontWeight="600">Signing Key</text>
                 </g>
                 <text x="130" y="14" textAnchor="middle" fontSize="8" fontWeight="600" fill="#92400e">2. Sign Nonce Payload</text>
-                <text x="130" y="26" textAnchor="middle" fontSize="7" fill="#b45309">ACTR-PUBLISH-V1</text>
-                <text x="130" y="36" textAnchor="middle" fontSize="7" fill="#b45309">mfr + method + path</text>
+                <text x="130" y="26" textAnchor="middle" fontSize="7" fill="#b45309">ACTR-PUBLISH-V2</text>
+                <text x="130" y="36" textAnchor="middle" fontSize="7" fill="#b45309">publisher + method + path</text>
                 <text x="130" y="46" textAnchor="middle" fontSize="7" fill="#b45309">+ nonce_hex + body_sha256</text>
               </g>
 
               {/* Step 3: POST publish */}
               <g transform="translate(20,146)">
                 <rect width="200" height="48" rx="6" fill="#dbeafe" stroke="#2563eb" strokeWidth="1.2"/>
-                <text x="100" y="14" textAnchor="middle" fontSize="8" fontWeight="600" fill="#1d4ed8">3. POST /mfr/pkg/publish</text>
+                <text x="100" y="14" textAnchor="middle" fontSize="8" fontWeight="600" fill="#1d4ed8">3. POST /registry/packages/publish</text>
                 <text x="100" y="26" textAnchor="middle" fontSize="7" fill="#3b82f6">manifest + actr.sig + proto_files</text>
                 <text x="100" y="36" textAnchor="middle" fontSize="7" fill="#3b82f6">+ nonce + nonce_sig</text>
               </g>
 
-              {/* Arrow: CLI → MFR (publish) */}
+              {/* Arrow: CLI → Publisher Registry (publish) */}
               <line x1="220" y1="170" x2="430" y2="170" stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#ar2b)"/>
 
-              {/* ====== RIGHT: MFR Service Side ====== */}
-              <text x="560" y="18" textAnchor="middle" fontSize="13" fontWeight="700" fill="#16a34a">MFR Service</text>
+              {/* ====== RIGHT: Publisher Registry Service Side ====== */}
+              <text x="560" y="18" textAnchor="middle" fontSize="13" fontWeight="700" fill="#16a34a">Publisher Registry</text>
 
               {/* Nonce generation */}
               <g transform="translate(440,28)">
@@ -596,14 +551,14 @@ function HowItWorks() {
                 <text x="120" y="26" textAnchor="middle" fontSize="7" fill="#16a34a">Store pending nonce in DB (TTL 5m)</text>
               </g>
 
-              {/* MFR verification pipeline */}
+              {/* Publisher Registry verification pipeline */}
               <g transform="translate(440,76)">
                 <rect width="240" height="126" rx="8" fill="#fafafa" stroke="#d1d5db" strokeWidth="1"/>
                 <text x="120" y="18" textAnchor="middle" fontSize="9" fontWeight="700" fill="#374151">Verification Pipeline</text>
 
                 <g transform="translate(10,26)">
                   <rect width="220" height="22" rx="4" fill="#fef9c3" stroke="#ca8a04" strokeWidth="0.8"/>
-                  <text x="110" y="15" textAnchor="middle" fontSize="7" fontWeight="600" fill="#854d0e">Validate Active MFR Identity &amp; Nonce State</text>
+                  <text x="110" y="15" textAnchor="middle" fontSize="7" fontWeight="600" fill="#854d0e">Validate Publisher Identity &amp; Nonce State</text>
                 </g>
 
                 <g transform="translate(10,54)">
@@ -634,9 +589,9 @@ function HowItWorks() {
               {/* Arrow: pipeline → DB */}
               <line x1="560" y1="202" x2="560" y2="216" stroke="#16a34a" strokeWidth="1.5" markerEnd="url(#ar2b-green)"/>
 
-              {/* Arrow: MFR → CLI (success response) */}
+              {/* Arrow: Publisher Registry → CLI (success response) */}
               <line x1="440" y1="234" x2="220" y2="234" stroke="#16a34a" strokeWidth="1.5" markerEnd="url(#ar2b-green)"/>
-              <text x="330" y="230" textAnchor="middle" fontSize="8" fill="#16a34a" fontWeight="600">Published: mfr:name:version</text>
+              <text x="330" y="230" textAnchor="middle" fontSize="8" fill="#16a34a" fontWeight="600">Published: publisher/program@version</text>
 
               {/* CLI receives result */}
               <g transform="translate(20,220)">
@@ -647,9 +602,9 @@ function HowItWorks() {
             </svg>
           </div>
 
-          {/* Row 4: MFR Key Rotation */}
+          {/* Row 4: Publisher Registry Key Rotation */}
           <div className="mt-8 relative pt-4 before:absolute before:inset-x-8 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-gray-200 before:to-transparent">
-            <div className="text-xs font-medium text-gray-500 mb-2">Phase 4: MFR Key Rotation (Backward Compatible)</div>
+            <div className="text-xs font-medium text-gray-500 mb-2">Phase 4: Publisher Key Rotation and Revocation</div>
             <svg viewBox="0 0 760 170" className="w-full" xmlns="http://www.w3.org/2000/svg" fontFamily="system-ui, sans-serif">
               <defs>
                 <marker id="ar4b" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="7" markerHeight="5" orient="auto">
@@ -664,15 +619,15 @@ function HowItWorks() {
               </defs>
 
                {/* Left: Admin */}
-               <text x="120" y="18" textAnchor="middle" fontSize="13" fontWeight="700" fill="#4f46e5">MFR Admin</text>
+               <text x="120" y="18" textAnchor="middle" fontSize="13" fontWeight="700" fill="#4f46e5">Realm Admin</text>
 
-               {/* Right: MFR */}
-               <text x="560" y="18" textAnchor="middle" fontSize="13" fontWeight="700" fill="#16a34a">MFR Service / DB</text>
+               {/* Right: Publisher Registry */}
+               <text x="560" y="18" textAnchor="middle" fontSize="13" fontWeight="700" fill="#16a34a">Publisher Registry / DB</text>
 
                {/* Step 1: POST renew */}
                <g transform="translate(20,40)">
                  <rect width="200" height="36" rx="6" fill="#e0e7ff" stroke="#4f46e5" strokeWidth="1.2"/>
-                 <text x="100" y="16" textAnchor="middle" fontSize="8" fontWeight="600" fill="#312e81">1. POST /mfr/admin/{`{id}`}/renew</text>
+                 <text x="100" y="16" textAnchor="middle" fontSize="8" fontWeight="600" fill="#312e81">1. POST /admin/api/publishers/…/renew</text>
                  <text x="100" y="28" textAnchor="middle" fontSize="7" fill="#4f46e5">(Optional: Provide new public key)</text>
                </g>
 
@@ -693,7 +648,7 @@ function HowItWorks() {
                <g transform="translate(440,76)">
                  <rect width="240" height="32" rx="6" fill="#dcfce7" stroke="#16a34a" strokeWidth="1.2"/>
                  <text x="120" y="14" textAnchor="middle" fontSize="8" fontWeight="600" fill="#166534">3. Activate New Key</text>
-                 <text x="120" y="26" textAnchor="middle" fontSize="7" fill="#15803d">Update MFR public_key &amp; key_id</text>
+                 <text x="120" y="26" textAnchor="middle" fontSize="7" fill="#15803d">Update publisher public_key &amp; key_id</text>
                </g>
 
                {/* Step Arrow */}
@@ -702,17 +657,17 @@ function HowItWorks() {
                {/* Success Response handling */}
                <g transform="translate(440,122)">
                  <rect width="240" height="28" rx="6" fill="#f0fdf4" stroke="#16a34a" strokeWidth="1"/>
-                 <text x="120" y="18" textAnchor="middle" fontSize="8" fontWeight="600" fill="#166534">Return new mfr-keychain.json</text>
+                 <text x="120" y="18" textAnchor="middle" fontSize="8" fontWeight="600" fill="#166534">Return new publisher-keychain.json</text>
                </g>
 
                {/* Arrow Response */}
                <line x1="440" y1="136" x2="220" y2="136" stroke="#16a34a" strokeWidth="1.5" markerEnd="url(#ar4b-green)"/>
-               <text x="330" y="132" textAnchor="middle" fontSize="8" fill="#16a34a" fontWeight="600">ActivateResponse</text>
+               <text x="330" y="132" textAnchor="middle" fontSize="8" fill="#16a34a" fontWeight="600">Verification Result</text>
 
                {/* Admin Receives */}
                <g transform="translate(20,118)">
                  <rect width="200" height="36" rx="6" fill="#d1fae5" stroke="#10b981" strokeWidth="1.2"/>
-                 <text x="100" y="16" textAnchor="middle" fontSize="8" fontWeight="600" fill="#065f46">Saved: New MFR Keychain</text>
+                 <text x="100" y="16" textAnchor="middle" fontSize="8" fontWeight="600" fill="#065f46">Publisher retains private key</text>
                  <text x="100" y="28" textAnchor="middle" fontSize="7" fill="#047857">Old keys still valid for old packages</text>
                </g>
             </svg>
@@ -730,35 +685,33 @@ type CreateStep = 'input' | 'verify' | 'done';
 function CreateModal({
   onClose,
   onDone,
-  resumeMfr,
+  resumePublisher,
 }: {
   onClose: () => void;
-  onDone: (response: ActivateResponse) => void;
-  resumeMfr?: Manufacturer;
+  onDone: (response: PublisherVerificationResponse) => void;
+  resumePublisher?: PublisherRecord;
 }) {
-  const [step, setStep] = useState<CreateStep>(resumeMfr ? 'verify' : 'input');
-  const [name, setName] = useState(resumeMfr?.name ?? '');
+  const [step, setStep] = useState<CreateStep>(resumePublisher ? 'verify' : 'input');
+  const [name, setName] = useState(resumePublisher?.name ?? '');
   const [contact, setContact] = useState('');
-  const [loading, setLoading] = useState(!!resumeMfr);
+  const [loading, setLoading] = useState(!!resumePublisher);
   const [error, setError] = useState<string | null>(null);
   const [applyResult, setApplyResult] = useState<ApplyResponse | null>(null);
   const [cooldown, setCooldown] = useState(0);
   const [verifyAttempted, setVerifyAttempted] = useState(false);
-  const [useOwnKey, setUseOwnKey] = useState(false);
-  const [publicKey, setPublicKey] = useState('');
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Resume: fetch existing challenge
   useEffect(() => {
-    if (!resumeMfr) return;
-    mfrApi.getChallenge(resumeMfr.id).then(res => {
+    if (!resumePublisher) return;
+    publisherApi.getChallenge(resumePublisher.id).then(res => {
       setApplyResult(res);
       setLoading(false);
     }).catch(e => {
       setError(String(e));
       setLoading(false);
     });
-  }, [resumeMfr]);
+  }, [resumePublisher]);
 
   // Cleanup cooldown timer
   useEffect(() => () => {
@@ -767,8 +720,8 @@ function CreateModal({
 
   // Cancel: void the pending record only if freshly created (not resumed)
   const handleCancel = () => {
-    if (applyResult && !resumeMfr) {
-      mfrApi.delete(applyResult.mfr_id).catch(() => {});
+    if (applyResult && !resumePublisher) {
+      publisherApi.delete(applyResult.publisher_id).catch(() => {});
     }
     onClose();
   };
@@ -793,8 +746,8 @@ function CreateModal({
     setLoading(true);
     setError(null);
     try {
-      const res = await mfrApi.apply({
-        github_login: name.trim(),
+      const res = await publisherApi.apply({
+        publisher: name.trim(),
         contact: contact.trim() || undefined,
       });
       setApplyResult(res);
@@ -811,7 +764,7 @@ function CreateModal({
     setLoading(true);
     setError(null);
     try {
-      const kc = await mfrApi.verify(applyResult.mfr_id, useOwnKey && publicKey.trim() ? publicKey.trim() : undefined);
+      const kc = await publisherApi.verify(applyResult.publisher_id);
       onDone(kc);
     } catch (e) {
       setError(String(e));
@@ -822,10 +775,17 @@ function CreateModal({
     }
   };
 
-  const loginName = name.trim().toLowerCase();
-  const verifyFile = applyResult?.verify_file ?? '';
-  const ghCommand = applyResult
-    ? `gh repo create ${loginName}/${VERIFY_REPO} --public 2>/dev/null; if [ -d ${VERIFY_REPO} ]; then cd ${VERIFY_REPO} && git pull; else gh repo clone ${loginName}/${VERIFY_REPO} && cd ${VERIFY_REPO}; fi && echo "${applyResult.challenge_token}" > ${verifyFile} && git add . && git commit -m "actrix verify" && git push -u origin main && cd -`
+  const publisher = name.trim().toLowerCase();
+  const descriptorTemplate = applyResult
+    ? JSON.stringify({
+        schema: 'actr.publisher/v1',
+        publisher,
+        key_id: 'actr-pub-<first-16-hex-of-sha256-public-key>',
+        public_key: '<base64-ed25519-public-key>',
+        registries: [`https://${publisher}/actr/registry/v1`],
+        origins: [`https://${publisher}/actr/packages/`],
+        verification_challenge: applyResult.challenge_token,
+      }, null, 2)
     : '';
 
   return (
@@ -833,7 +793,7 @@ function CreateModal({
       <div className="bg-white rounded-xl shadow-xl p-6 max-w-2xl w-full mx-4">
         {/* Header */}
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-semibold text-gray-900">Register Manufacturer</h2>
+          <h2 className="text-lg font-semibold text-gray-900">Register Publisher</h2>
           <button onClick={handleCancel} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
         </div>
 
@@ -864,17 +824,17 @@ function CreateModal({
         {step === 'input' && (
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">GitHub Account / Org Name</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Publisher Domain</label>
               <input
                 type="text"
                 value={name}
                 onChange={e => setName(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && void handleApply()}
-                placeholder="user or org name"
+                placeholder="apps.example.com"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
                 autoFocus
               />
-              <p className="text-xs text-gray-400 mt-1">This will be the manufacturer name in package identifiers.</p>
+              <p className="text-xs text-gray-400 mt-1">HTTPS is implicit. Do not include a scheme, port, or path.</p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Contact (optional)</label>
@@ -888,44 +848,11 @@ function CreateModal({
               />
             </div>
 
-            {/* Signing Key Mode */}
-            <div className="border border-gray-200 rounded-lg p-3">
-              <div className="flex items-center gap-3 mb-2">
-                <label className="text-sm font-medium text-gray-700">Signing Key</label>
-                <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setUseOwnKey(false)}
-                    className={`px-3 py-1 rounded-md transition-all ${!useOwnKey ? 'bg-white shadow text-gray-900 font-medium' : 'text-gray-500 hover:text-gray-700'}`}
-                  >Generate for me</button>
-                  <button
-                    type="button"
-                    onClick={() => setUseOwnKey(true)}
-                    className={`px-3 py-1 rounded-md transition-all ${useOwnKey ? 'bg-white shadow text-gray-900 font-medium' : 'text-gray-500 hover:text-gray-700'}`}
-                  >Use my own key</button>
-                </div>
-              </div>
-              {useOwnKey ? (
-                <div>
-                  <input
-                    type="text"
-                    value={publicKey}
-                    onChange={e => setPublicKey(e.target.value)}
-                    placeholder="Base64-encoded Ed25519 public key (32 bytes)"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-400"
-                  />
-                  <p className="text-xs text-gray-400 mt-1">Paste your Ed25519 public key. The private key stays with you — the platform will never see it.</p>
-                </div>
-              ) : (
-                <p className="text-xs text-gray-500">The platform will generate an Ed25519 keypair. The private key will be shown <strong>once</strong> and is never stored on the server.</p>
-              )}
-            </div>
-
             <div className="flex justify-end gap-2 pt-2">
               <button onClick={handleCancel} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
               <button
                 onClick={() => void handleApply()}
-                disabled={loading || !name.trim() || (useOwnKey && !publicKey.trim())}
+                disabled={loading || !name.trim()}
                 className="px-4 py-2 bg-gray-800 text-white rounded-lg text-sm hover:bg-gray-700 disabled:opacity-50"
               >
                 {loading ? 'Submitting...' : 'Next'}
@@ -938,7 +865,7 @@ function CreateModal({
         {step === 'verify' && applyResult && (
           <div className="space-y-4">
             <p className="text-sm text-gray-600">
-              On <strong>GitHub.com</strong>, create a public repo <code className="bg-gray-100 px-1 rounded text-gray-800">{loginName}/{VERIFY_REPO}</code> with a file <code className="bg-gray-100 px-1 rounded text-gray-800">{verifyFile}</code> containing the token below.
+              Publish the descriptor below at <code className="bg-gray-100 px-1 rounded text-gray-800">{applyResult.descriptor_url}</code>. It must be served directly over HTTPS without redirects.
             </p>
 
             {/* Token */}
@@ -950,26 +877,19 @@ function CreateModal({
               <div className="bg-gray-100 rounded-lg p-3 font-mono text-xs break-all select-all">{applyResult.challenge_token}</div>
             </div>
 
-            {/* gh command */}
+            {/* Descriptor */}
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <Terminal size={12} className="text-gray-400" />
-                <label className="text-xs text-gray-500">gh CLI (one-liner)</label>
-                <CopyButton text={ghCommand} className="text-xs text-blue-600 hover:text-blue-800 ml-auto relative" />
+                <label className="text-xs text-gray-500">Publisher descriptor template</label>
+                <CopyButton text={descriptorTemplate} className="text-xs text-blue-600 hover:text-blue-800 ml-auto relative" />
               </div>
-              <pre className="bg-gray-900 text-green-400 rounded-lg p-3 text-xs overflow-x-auto whitespace-pre-wrap">{ghCommand}</pre>
+              <pre className="bg-gray-900 text-green-400 rounded-lg p-3 text-xs overflow-x-auto whitespace-pre-wrap">{descriptorTemplate}</pre>
             </div>
 
-            {/* Manual steps */}
-            <details className="text-xs text-gray-500">
-              <summary className="cursor-pointer hover:text-gray-700">Manual steps</summary>
-              <ol className="list-decimal ml-4 mt-2 space-y-1">
-                <li>Go to <a href="https://github.com/new" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">github.com/new</a> and create a public repo named <code>{VERIFY_REPO}</code>{loginName.includes('-') || loginName.length > 15 ? '' : ` under ${loginName}`}</li>
-                <li>Add a file named <code>{verifyFile}</code></li>
-                <li>Paste the token above as the file content</li>
-                <li>Commit and push</li>
-              </ol>
-            </details>
+            <p className="text-xs text-gray-500">
+              The Ed25519 private key remains with the publisher. Actrix binds the domain to the public key discovered in this descriptor.
+            </p>
 
             <div className="text-xs text-gray-400">
               Expires: {new Date(applyResult.expires_at * 1000).toLocaleString()}
@@ -1016,7 +936,7 @@ function ProtoExpandableRow({
       <tr className={`hover:bg-gray-50 ${expanded ? 'bg-blue-50/30' : ''}`}>
         <td className="px-4 py-3 font-mono text-gray-900">{pkg.type_str}</td>
         <td className="px-4 py-3 text-gray-500 font-mono text-xs">{pkg.target || '—'}</td>
-        <td className="px-4 py-3 text-gray-600">{pkg.manufacturer}</td>
+        <td className="px-4 py-3 text-gray-600">{pkg.publisher}</td>
         <td className="px-4 py-3">
           {hasProto && protoCount > 0 ? (
             <button
@@ -1083,17 +1003,26 @@ function ProtoExpandableRow({
 
 // ── Rotate key modal ──────────────────────────────────────────────
 
-function RotateKeyModal({ mfr, onClose, onDone }: { mfr: Manufacturer; onClose: () => void; onDone: (res: ActivateResponse) => void }) {
-  const [useOwnKey, setUseOwnKey] = useState(false);
-  const [publicKey, setPublicKey] = useState('');
-  const [loading, setLoading] = useState(false);
+function RotateKeyModal({ publisher, onClose, onDone }: { publisher: PublisherRecord; onClose: () => void; onDone: (res: PublisherVerificationResponse) => void }) {
+  const [challenge, setChallenge] = useState<ApplyResponse | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const startedRef = useRef(false);
 
-  const handleSubmit = async () => {
+  useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+    publisherApi.beginKeyRotation(publisher.id)
+      .then(setChallenge)
+      .catch(e => setError(String(e)))
+      .finally(() => setLoading(false));
+  }, [publisher.id]);
+
+  const handleVerify = async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await mfrApi.renewKey(mfr.id, useOwnKey && publicKey.trim() ? publicKey.trim() : undefined);
+      const res = await publisherApi.verify(publisher.id);
       onDone(res);
     } catch (e) {
       setError(String(e));
@@ -1102,12 +1031,24 @@ function RotateKeyModal({ mfr, onClose, onDone }: { mfr: Manufacturer; onClose: 
     }
   };
 
+  const descriptorTemplate = challenge
+    ? JSON.stringify({
+        schema: 'actr.publisher/v1',
+        publisher: publisher.name,
+        key_id: 'actr-pub-<first-16-hex-of-sha256-public-key>',
+        public_key: '<new-base64-ed25519-public-key>',
+        registries: [`https://${publisher.name}/actr/registry/v1`],
+        origins: [`https://${publisher.name}/actr/packages/`],
+        verification_challenge: challenge.challenge_token,
+      }, null, 2)
+    : '';
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl p-6 max-w-lg w-full mx-4">
+      <div className="bg-white rounded-xl shadow-xl p-6 max-w-2xl w-full mx-4">
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-            <Key size={20} className="text-blue-500" /> Rotate Key — {mfr.name}
+            <Key size={20} className="text-blue-500" /> Rotate Key — {publisher.name}
           </h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
         </div>
@@ -1115,49 +1056,31 @@ function RotateKeyModal({ mfr, onClose, onDone }: { mfr: Manufacturer; onClose: 
         {error && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 mb-4">{error}</div>}
 
         <div className="mb-4 text-sm text-gray-600">
-          <p>Rotating the key will instantly invalidate the current public key for signing any <strong>NEW</strong> packages.</p>
-          <p className="mt-2">Packages signed with the old key will still verify successfully using the key history.</p>
+          <p>Generate the new private key on the publisher side, then publish the new public key and fresh challenge in the HTTPS descriptor.</p>
+          <p className="mt-2">Actrix will fetch and verify the descriptor before rotating. The old key remains available only for historical package verification unless explicitly revoked.</p>
         </div>
 
-        <div className="border border-gray-200 rounded-lg p-3 mb-4">
-          <div className="flex items-center gap-3 mb-2">
-            <label className="text-sm font-medium text-gray-700">New Signing Key</label>
-            <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs">
-              <button
-                type="button"
-                onClick={() => setUseOwnKey(false)}
-                className={`px-3 py-1 rounded-md transition-all ${!useOwnKey ? 'bg-white shadow text-gray-900 font-medium' : 'text-gray-500 hover:text-gray-700'}`}
-              >Generate for me</button>
-              <button
-                type="button"
-                onClick={() => setUseOwnKey(true)}
-                className={`px-3 py-1 rounded-md transition-all ${useOwnKey ? 'bg-white shadow text-gray-900 font-medium' : 'text-gray-500 hover:text-gray-700'}`}
-              >Use my own key</button>
+        {challenge && (
+          <div className="space-y-3 mb-4">
+            <p className="text-xs text-gray-500">
+              Publish at <code className="bg-gray-100 px-1 rounded">{challenge.descriptor_url}</code>
+            </p>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">Challenge</span>
+              <CopyButton text={challenge.challenge_token} className="text-xs text-blue-600 relative" />
             </div>
+            <pre className="bg-gray-900 text-green-400 rounded-lg p-3 text-xs overflow-x-auto whitespace-pre-wrap">{descriptorTemplate}</pre>
           </div>
-          {useOwnKey ? (
-            <div>
-              <input
-                type="text"
-                value={publicKey}
-                onChange={e => setPublicKey(e.target.value)}
-                placeholder="Base64-encoded Ed25519 public key (32 bytes)"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-400"
-              />
-            </div>
-          ) : (
-            <p className="text-xs text-gray-500">The platform will generate a new Ed25519 keypair and display the private key once.</p>
-          )}
-        </div>
+        )}
 
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={onClose} disabled={loading} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
           <button
-            onClick={() => void handleSubmit()}
-            disabled={loading || (useOwnKey && !publicKey.trim())}
+            onClick={() => void handleVerify()}
+            disabled={loading || !challenge}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50"
           >
-            {loading ? 'Rotating...' : 'Rotate Key'}
+            {loading ? 'Verifying...' : 'Verify & Rotate'}
           </button>
         </div>
       </div>
@@ -1167,25 +1090,25 @@ function RotateKeyModal({ mfr, onClose, onDone }: { mfr: Manufacturer; onClose: 
 
 // ── Main component ────────────────────────────────────────────────
 
-export function MfrService() {
-  const [manufacturers, setManufacturers] = useState<Manufacturer[]>([]);
+export function PublisherRegistryPage() {
+  const [publishers, setPublishers] = useState<PublisherRecord[]>([]);
   const [packages, setPackages] = useState<ActrPackage[]>([]);
-  const [selectedMfr, setSelectedMfr] = useState<Manufacturer | null>(null);
+  const [selectedPublisher, setSelectedPublisher] = useState<PublisherRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activateResult, setActivateResult] = useState<ActivateResponse | null>(null);
+  const [verificationResult, setVerificationResult] = useState<PublisherVerificationResponse | null>(null);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [resumeMfr, setResumeMfr] = useState<Manufacturer | null>(null);
-  const [rotateMfr, setRotateMfr] = useState<Manufacturer | null>(null);
+  const [resumePublisher, setResumePublisher] = useState<PublisherRecord | null>(null);
+  const [rotatePublisher, setRotatePublisher] = useState<PublisherRecord | null>(null);
 
   const loadData = useCallback(async () => {
     try {
-      const [mfrs, pkgs] = await Promise.all([
-        mfrApi.list(),
-        mfrApi.listPackages(),
+      const [publisherRecords, pkgs] = await Promise.all([
+        publisherApi.list(),
+        publisherApi.listPackages(),
       ]);
-      setManufacturers(mfrs);
+      setPublishers(publisherRecords);
       setPackages(pkgs);
       setError(null);
     } catch (e) {
@@ -1197,51 +1120,51 @@ export function MfrService() {
 
   useEffect(() => { void loadData(); }, [loadData]);
 
-  const handleSuspend = async (mfr: Manufacturer) => {
-    if (!confirm(`Suspend "${mfr.name}"?`)) return;
-    setActionLoading(mfr.id);
-    try { await mfrApi.suspend(mfr.id); await loadData(); }
+  const handleSuspend = async (publisher: PublisherRecord) => {
+    if (!confirm(`Suspend "${publisher.name}"?`)) return;
+    setActionLoading(publisher.id);
+    try { await publisherApi.suspend(publisher.id); await loadData(); }
     catch (e) { setError(String(e)); }
     finally { setActionLoading(null); }
   };
 
-  const handleReinstate = async (mfr: Manufacturer) => {
-    setActionLoading(mfr.id);
-    try { await mfrApi.reinstate(mfr.id); await loadData(); }
+  const handleReinstate = async (publisher: PublisherRecord) => {
+    setActionLoading(publisher.id);
+    try { await publisherApi.reinstate(publisher.id); await loadData(); }
     catch (e) { setError(String(e)); }
     finally { setActionLoading(null); }
   };
 
-  const handleDelete = async (mfr: Manufacturer) => {
-    if (!confirm(`Delete "${mfr.name}" and all its packages? This cannot be undone.`)) return;
-    setActionLoading(mfr.id);
-    try { await mfrApi.delete(mfr.id); await loadData(); }
+  const handleDelete = async (publisher: PublisherRecord) => {
+    if (!confirm(`Delete "${publisher.name}" and all its packages? This cannot be undone.`)) return;
+    setActionLoading(publisher.id);
+    try { await publisherApi.delete(publisher.id); await loadData(); }
     catch (e) { setError(String(e)); }
     finally { setActionLoading(null); }
   };
 
   const handleRevokePackage = async (pkg: ActrPackage) => {
     if (!confirm(`Revoke package "${pkg.type_str}"?`)) return;
-    try { await mfrApi.revokePackage(pkg.id); await loadData(); }
+    try { await publisherApi.revokePackage(pkg.id); await loadData(); }
     catch (e) { setError(String(e)); }
   };
 
-  const handleCreateDone = (res: ActivateResponse) => {
-    setActivateResult(res);
+  const handleCreateDone = (res: PublisherVerificationResponse) => {
+    setVerificationResult(res);
     setShowCreate(false);
-    setResumeMfr(null);
+    setResumePublisher(null);
     void loadData();
   };
 
   const stats = {
-    total: manufacturers.length,
-    active: manufacturers.filter(m => m.status === 'active').length,
-    pending: manufacturers.filter(m => m.status === 'pending').length,
-    suspended: manufacturers.filter(m => m.status === 'suspended').length,
+    total: publishers.length,
+    active: publishers.filter(m => m.status === 'active').length,
+    pending: publishers.filter(m => m.status === 'pending').length,
+    suspended: publishers.filter(m => m.status === 'suspended').length,
   };
 
-  const filteredPackages = selectedMfr
-    ? packages.filter(p => p.mfr_id === selectedMfr.id)
+  const filteredPackages = selectedPublisher
+    ? packages.filter(p => p.publisher_id === selectedPublisher.id)
     : packages;
 
   const ts = (t: number) => new Date(t * 1000).toLocaleDateString();
@@ -1250,21 +1173,21 @@ export function MfrService() {
 
   return (
     <div className="p-6 space-y-6">
-      {activateResult && <KeychainModal response={activateResult} onClose={() => setActivateResult(null)} />}
-      {(showCreate || resumeMfr) && (
+      {verificationResult && <VerificationModal response={verificationResult} onClose={() => setVerificationResult(null)} />}
+      {(showCreate || resumePublisher) && (
         <CreateModal
-          onClose={() => { setShowCreate(false); setResumeMfr(null); }}
+          onClose={() => { setShowCreate(false); setResumePublisher(null); }}
           onDone={handleCreateDone}
-          resumeMfr={resumeMfr ?? undefined}
+          resumePublisher={resumePublisher ?? undefined}
         />
       )}
-      {rotateMfr && (
+      {rotatePublisher && (
         <RotateKeyModal
-          mfr={rotateMfr}
-          onClose={() => setRotateMfr(null)}
+          publisher={rotatePublisher}
+          onClose={() => setRotatePublisher(null)}
           onDone={(res) => {
-            setRotateMfr(null);
-            setActivateResult(res);
+            setRotatePublisher(null);
+            setVerificationResult(res);
             void loadData();
           }}
         />
@@ -1273,9 +1196,9 @@ export function MfrService() {
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Building2 size={24} /> Manufacturer Registry
+            <Building2 size={24} /> Publisher Registry
           </h1>
-          <p className="text-gray-500 text-sm mt-1">Manage registered actor manufacturers and published packages.</p>
+          <p className="text-gray-500 text-sm mt-1">Manage HTTPS publisher identities, signing keys, and published packages.</p>
         </div>
         <button
           onClick={() => setShowCreate(true)}
@@ -1306,12 +1229,12 @@ export function MfrService() {
         ))}
       </div>
 
-      {/* MFR Table */}
+      {/* Publisher Registry Table */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-          <h2 className="font-semibold text-gray-800">Manufacturers</h2>
-          {selectedMfr && (
-            <button onClick={() => setSelectedMfr(null)} className="text-xs text-gray-500 hover:text-gray-800">
+          <h2 className="font-semibold text-gray-800">Publishers</h2>
+          {selectedPublisher && (
+            <button onClick={() => setSelectedPublisher(null)} className="text-xs text-gray-500 hover:text-gray-800">
               Clear filter
             </button>
           )}
@@ -1325,24 +1248,24 @@ export function MfrService() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {manufacturers.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No manufacturers registered</td></tr>
+            {publishers.length === 0 && (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No publishers registered</td></tr>
             )}
-            {manufacturers.map(mfr => {
-              const pkgCount = packages.filter(p => p.mfr_id === mfr.id).length;
-              const isSelected = selectedMfr?.id === mfr.id;
+            {publishers.map(publisher => {
+              const pkgCount = packages.filter(p => p.publisher_id === publisher.id).length;
+              const isSelected = selectedPublisher?.id === publisher.id;
               return (
                 <>
                   <tr
-                    key={mfr.id}
+                    key={publisher.id}
                     className={`hover:bg-gray-50 cursor-pointer ${isSelected ? 'bg-blue-50' : ''}`}
-                    onClick={() => setSelectedMfr(isSelected ? null : mfr)}
+                    onClick={() => setSelectedPublisher(isSelected ? null : publisher)}
                   >
-                    <td className="px-4 py-3 font-mono font-medium text-gray-900">{mfr.name}</td>
-                    <td className="px-4 py-3"><StatusBadge status={mfr.status} /></td>
-                    <td className="px-4 py-3 text-gray-500 font-mono text-[11px] truncate max-w-[120px]" title={mfr.key_id}>{mfr.key_id || '—'}</td>
+                    <td className="px-4 py-3 font-mono font-medium text-gray-900">{publisher.name}</td>
+                    <td className="px-4 py-3"><StatusBadge status={publisher.status} /></td>
+                    <td className="px-4 py-3 text-gray-500 font-mono text-[11px] truncate max-w-[120px]" title={publisher.key_id}>{publisher.key_id || '—'}</td>
                     <td className="px-4 py-3">
-                      <KeyExpiryBadge expiresAt={mfr.key_expires_at} />
+                      <KeyExpiryBadge expiresAt={publisher.key_expires_at} />
                     </td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center gap-1 text-gray-600">
@@ -1351,45 +1274,45 @@ export function MfrService() {
                     </td>
                     <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                       <div className="flex gap-1">
-                        {mfr.status === 'pending' && (
+                        {publisher.status === 'pending' && (
                           <button
-                            onClick={() => setResumeMfr(mfr)}
+                            onClick={() => setResumePublisher(publisher)}
                             className="px-2 py-1 text-xs bg-gray-800 text-white rounded hover:bg-gray-700"
                           >Continue</button>
                         )}
-                        {mfr.status === 'active' && (
+                        {publisher.status === 'active' && (
                           <>
                             <button
-                              onClick={() => setRotateMfr(mfr)}
-                              disabled={actionLoading === mfr.id}
+                              onClick={() => setRotatePublisher(publisher)}
+                              disabled={actionLoading === publisher.id}
                               className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
                             >Rotate Key</button>
                             <button
-                              onClick={() => void handleSuspend(mfr)}
-                              disabled={actionLoading === mfr.id}
+                              onClick={() => void handleSuspend(publisher)}
+                              disabled={actionLoading === publisher.id}
                               className="px-2 py-1 text-xs bg-orange-500 text-white rounded hover:bg-orange-600 disabled:opacity-50"
                             >Suspend</button>
                           </>
                         )}
-                        {mfr.status === 'suspended' && (
+                        {publisher.status === 'suspended' && (
                           <button
-                            onClick={() => void handleReinstate(mfr)}
-                            disabled={actionLoading === mfr.id}
+                            onClick={() => void handleReinstate(publisher)}
+                            disabled={actionLoading === publisher.id}
                             className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
                           >Reinstate</button>
                         )}
                         <button
-                          onClick={() => void handleDelete(mfr)}
-                          disabled={actionLoading === mfr.id}
+                          onClick={() => void handleDelete(publisher)}
+                          disabled={actionLoading === publisher.id}
                           className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50"
                         >Delete</button>
                       </div>
                     </td>
                   </tr>
                   {isSelected && (
-                    <tr key={`${mfr.id}-history`}>
+                    <tr key={`${publisher.id}-history`}>
                       <td colSpan={6} className="p-0">
-                        <KeyHistoryPanel mfr={mfr} onRevoked={() => void loadData()} />
+                        <KeyHistoryPanel publisher={publisher} onRevoked={() => void loadData()} />
                       </td>
                     </tr>
                   )}
@@ -1404,13 +1327,13 @@ export function MfrService() {
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100">
           <h2 className="font-semibold text-gray-800">
-            {selectedMfr ? `Packages — ${selectedMfr.name}` : 'All Packages'}
+            {selectedPublisher ? `Packages — ${selectedPublisher.name}` : 'All Packages'}
           </h2>
         </div>
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
             <tr>
-              {['Type', 'Target', 'Manufacturer', 'Proto', 'Status', 'Published', 'Actions'].map(h => (
+              {['Type', 'Target', 'Publisher', 'Proto', 'Status', 'Published', 'Actions'].map(h => (
                 <th key={h} className="px-4 py-2 text-left font-medium">{h}</th>
               ))}
             </tr>

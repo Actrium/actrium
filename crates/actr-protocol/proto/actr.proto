@@ -66,6 +66,10 @@ message IdentityClaims {
   required uint32 realm_id   = 1;
   required string actor_id   = 2;
   required uint64 expires_at = 3;
+  required uint32 protocol_version = 4;
+  required string issuer     = 5;
+  required string provider   = 6;
+  required string audience   = 7;
 }
 
 // Time-limited HMAC TURN credential in the format compatible with `coturn --use-auth-secret`.
@@ -73,6 +77,10 @@ message TurnCredential {
   required string username   = 1; // "<expires_at>:<actor_id>"
   required string password   = 2; // base64(HMAC-SHA1(turn_secret, username))
   required uint64 expires_at = 3;
+  required uint32 protocol_version = 4;
+  required uint32 realm_id   = 5;
+  required string provider   = 6;
+  required string audience   = 7;
 }
 
 // Credential structure for ActrId authentication
@@ -151,7 +159,7 @@ message ErrorResponse {
 // =========================================================================
 enum RegisterAuthMode {
   REGISTER_AUTH_MODE_UNSPECIFIED = 0;
-  // Package-backed registration authenticated by MFR package lookup,
+  // Package-backed registration authenticated by Publisher Registry lookup,
   // manifest signature verification, or package renewal credentials.
   REGISTER_AUTH_MODE_PACKAGE = 1;
   // Source-linked workload registration authenticated by realm authorization.
@@ -175,9 +183,9 @@ message RegisterRequest {
   // clients via RouteCandidatesResponse so they can connect without a relay.
   optional string ws_address = 6;
 
-  // Raw manifest bytes (original `actr.toml` from the `.actr` package) for MFR signature verification.
+  // Raw manifest bytes (original `actr.toml` from the `.actr` package) for Publisher signature verification.
   optional bytes manifest_raw = 10;
-  // Ed25519 signature over the manifest contents produced by the MFR, 64 bytes.
+  // Ed25519 signature over the manifest contents produced by the Publisher, 64 bytes.
   optional bytes mfr_signature = 11;
   // Target platform (e.g. "wasm32-wasip1", "x86_64-unknown-linux-gnu").
   // Extracted from manifest binary.target for AIS lookup path verification.
@@ -190,8 +198,8 @@ message RegisterRequest {
   reserved "psk_token";
 
   // Ed25519 signature over the ACTR-MANUFACTURER-REGISTER-V1 payload.
-  // A package launcher produces this fresh proof with the MFR key that signed
-  // manifest_raw, binding the running package to its manufacturer.
+  // A package launcher produces this fresh proof with the Publisher key that signed
+  // manifest_raw, binding the running package to its Publisher.
   // Required only for unpublished Package Path 2 registrations.
   optional bytes manufacturer_auth_signature = 15;
   // Unix seconds included in the manufacturer signature payload.

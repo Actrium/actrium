@@ -1,6 +1,6 @@
 import type { RealmInfo } from "../../lib/api";
 import { cn } from "../../lib/utils";
-import { KeyRound, Pencil, Trash2, Clock } from "lucide-react";
+import { KeyRound, Pencil, Clock } from "lucide-react";
 
 interface RealmTableProps {
   realms: RealmInfo[];
@@ -8,7 +8,6 @@ interface RealmTableProps {
   onToggleEnabled: (realm: RealmInfo) => void;
   onEdit: (realm: RealmInfo) => void;
   onRotateSecret: (realmId: number) => void;
-  onDelete: (realmId: number) => void;
 }
 
 export function RealmTable({
@@ -17,7 +16,6 @@ export function RealmTable({
   onToggleEnabled,
   onEdit,
   onRotateSecret,
-  onDelete,
 }: RealmTableProps) {
   if (realms.length === 0) {
     return (
@@ -96,14 +94,6 @@ export function RealmTable({
                     title={writesEnabled ? "Rotate secret" : "Managed by superv"}
                   >
                     <KeyRound className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={() => onDelete(realm.realm_id)}
-                    disabled={!writesEnabled}
-                    className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400"
-                    title={writesEnabled ? "Delete" : "Managed by superv"}
-                  >
-                    <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
               </td>

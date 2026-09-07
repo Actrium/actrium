@@ -7,12 +7,59 @@
 //!
 //! | Type     | Format                                        | Example                      |
 //! |----------|-----------------------------------------------|------------------------------|
-//! | ActrType | `manufacturer:name:version` | `acme:echo-service:1.0.0` |
-//! | ActrId   | `<serial_hex>@<realm_id>/<actr_type>`         | `1a2b3c@101/acme:echo:1.0.0` |
+//! | Program identity | `publisher/program@version` | `apps.example.com/echo@1.0.0` |
+//! | ActrId | `<serial_hex>@<realm_id>/<program_identity>` | `1a2b3c@101/apps.example.com/echo@1.0.0` |
 
 use crate::{ActrId, ActrType, Realm, name::Name};
 use std::str::FromStr;
 use thiserror::Error;
+
+fn validate_actor_namespace(value: &str) -> Result<(), ActrIdError> {
+    if value.is_empty()
+        || value.len() > 253
+        || value.starts_with('-')
+        || value.starts_with('.')
+        || value.ends_with('-')
+        || value.ends_with('.')
+        || !value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '.'))
+    {
+        return Err(ActrIdError::InvalidComponent(format!(
+            "Invalid actor namespace: {value}"
+        )));
+    }
+    Ok(())
+}
+
+/// Validate a legacy `ActrType` manufacturer parsed from the
+/// `manufacturer:name:version` colon form.
+///
+/// This is deliberately more permissive than [`validate_actor_namespace`]: DNS
+/// labels may start with a digit, and historical/linked-workload namespaces
+/// may use interior underscores, so the legacy parser must not reintroduce the
+/// old "starts with a letter" rule. A leading or trailing `-`, `_`, or `.` is
+/// still rejected, as is any character outside ASCII alphanumeric and `-_.`.
+/// Security-sensitive entry points use the strict [`ActrType::validate`]
+/// (Name-based) gate rather than this parser-level check.
+fn validate_legacy_manufacturer(value: &str) -> Result<(), ActrIdError> {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return Err(ActrIdError::InvalidComponent(format!(
+            "Invalid actor namespace: {value}"
+        )));
+    };
+    if value.len() > 253
+        || !first.is_ascii_alphanumeric()
+        || !chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        || !value.ends_with(|c: char| c.is_ascii_alphanumeric())
+    {
+        return Err(ActrIdError::InvalidComponent(format!(
+            "Invalid actor namespace: {value}"
+        )));
+    }
+    Ok(())
+}
 
 /// Maximum byte length of the `version` field in an [`ActrType`].
 ///
@@ -28,7 +75,7 @@ pub const MAX_ACTR_VERSION_BYTES: usize = 64;
 #[non_exhaustive]
 pub enum ActrIdError {
     #[error(
-        "Invalid Actor ID format: '{0}'. Expected: <serial_hex>@<realm_id>/<manufacturer>:<name>:<version>"
+        "Invalid Actor ID format: '{0}'. Expected: <serial_hex>@<realm_id>/<publisher>/<program>@<version>"
     )]
     InvalidFormat(String),
 
@@ -40,6 +87,67 @@ pub enum ActrIdError {
 }
 
 impl ActrType {
+    /// Canonical program identity used by registries and `actr://` URLs:
+    /// `publisher/program@version`.
+    pub fn to_program_identity(&self) -> String {
+        format!("{}/{}@{}", self.manufacturer, self.name, self.version)
+    }
+
+    /// Parse the canonical `publisher/program@version` registry identity.
+    pub fn from_program_identity(value: &str) -> Result<Self, ActrIdError> {
+        Self::parse_program_identity(value, true)
+    }
+
+    /// Parse the type embedded in an Actor ID.
+    ///
+    /// Published packages use a DNS Publisher and should enter through
+    /// `from_program_identity`. Linked/local workloads may use a non-DNS
+    /// namespace, but keep the same unambiguous slash/at-sign syntax.
+    fn from_actor_identity(value: &str) -> Result<Self, ActrIdError> {
+        Self::parse_program_identity(value, false)
+    }
+
+    fn parse_program_identity(
+        value: &str,
+        require_dns_publisher: bool,
+    ) -> Result<Self, ActrIdError> {
+        let (publisher, program_version) = value
+            .split_once('/')
+            .ok_or_else(|| ActrIdError::InvalidTypeFormat(value.to_string()))?;
+        let (program, version) = program_version
+            .rsplit_once('@')
+            .ok_or_else(|| ActrIdError::InvalidTypeFormat(value.to_string()))?;
+        if publisher.is_empty() || program.is_empty() || version.is_empty() {
+            return Err(ActrIdError::InvalidTypeFormat(value.to_string()));
+        }
+        validate_actor_namespace(publisher)?;
+        if publisher != publisher.to_ascii_lowercase()
+            || (require_dns_publisher && !publisher.contains('.'))
+            || publisher.split('.').any(|label| {
+                label.is_empty()
+                    || label.len() > 63
+                    || label.starts_with('-')
+                    || label.ends_with('-')
+            })
+        {
+            return Err(ActrIdError::InvalidComponent(
+                "program publisher must be a canonical lowercase DNS domain".to_string(),
+            ));
+        }
+        Name::new(program.to_string())
+            .map_err(|error| ActrIdError::InvalidComponent(error.to_string()))?;
+        // This parser feeds from untrusted wire input (WS actor_id query
+        // params, TURN usernames); an unvalidated version could smuggle the
+        // protocol separators ':' '@' '/' plus control characters into
+        // server-side identity strings and logs.
+        validate_version(version)?;
+        Ok(Self {
+            manufacturer: publisher.to_string(),
+            name: program.to_string(),
+            version: version.to_string(),
+        })
+    }
+
     /// Convert to stable string representation.
     ///
     /// Always returns `"manufacturer:name:version"`.
@@ -88,13 +196,15 @@ impl ActrType {
             _ => return Err(ActrIdError::InvalidTypeFormat(s.to_string())),
         };
 
-        let actr_type = ActrType {
+        validate_legacy_manufacturer(manufacturer)?;
+        Name::new(name.to_string())
+            .map_err(|e| ActrIdError::InvalidComponent(format!("Invalid type name: {e}")))?;
+        validate_version(version)?;
+        Ok(ActrType {
             manufacturer: manufacturer.to_string(),
             name: name.to_string(),
             version: version.to_string(),
-        };
-        actr_type.validate()?;
-        Ok(actr_type)
+        })
     }
 }
 
@@ -143,16 +253,13 @@ impl std::fmt::Display for ActrType {
 }
 
 impl ActrId {
-    /// Convert to `"<serial_hex>@<realm_id>/<actr_type>"`.
-    ///
-    /// The `/` separates the realm ID from the ActrType string, avoiding
-    /// ambiguity with the `:` separators used inside ActrType.
+    /// Convert to `"<serial_hex>@<realm_id>/<publisher>/<program>@<version>"`.
     pub fn to_string_repr(&self) -> String {
         format!(
             "{:x}@{}/{}",
             self.serial_number,
             self.realm.realm_id,
-            self.r#type.to_string_repr()
+            self.r#type.to_program_identity()
         )
     }
 
@@ -175,7 +282,7 @@ impl ActrId {
             ActrIdError::InvalidComponent(format!("Invalid realm ID: {realm_part}"))
         })?;
 
-        let actr_type = ActrType::from_string_repr(type_part)?;
+        let actr_type = ActrType::from_actor_identity(type_part)?;
 
         Ok(ActrId {
             realm: Realm { realm_id },
@@ -201,14 +308,14 @@ mod tests {
             realm: Realm { realm_id: 101 },
             serial_number: 0x1a2b3c,
             r#type: ActrType {
-                manufacturer: "acme".to_string(),
+                manufacturer: "apps.example.com".to_string(),
                 name: "echo-service".to_string(),
                 version: "1.0.0".to_string(),
             },
         };
 
         let s = original.to_string_repr();
-        assert_eq!(s, "1a2b3c@101/acme:echo-service:1.0.0");
+        assert_eq!(s, "1a2b3c@101/apps.example.com/echo-service@1.0.0");
 
         let parsed = ActrId::from_string_repr(&s).unwrap();
         assert_eq!(parsed.realm.realm_id, original.realm.realm_id);
@@ -219,9 +326,54 @@ mod tests {
     }
 
     #[test]
+    fn test_program_identity_roundtrip() {
+        let program =
+            ActrType::from_program_identity("apps.example.com/echo-service@1.0.0").unwrap();
+        assert_eq!(
+            program.to_program_identity(),
+            "apps.example.com/echo-service@1.0.0"
+        );
+    }
+
+    #[test]
+    fn test_program_identity_rejects_noncanonical_publisher() {
+        for invalid in [
+            "EXAMPLE.COM/echo@1.0.0",
+            "example..com/echo@1.0.0",
+            "-bad.example/echo@1.0.0",
+            "localhost/echo@1.0.0",
+        ] {
+            assert!(
+                ActrType::from_program_identity(invalid).is_err(),
+                "{invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn actor_id_allows_host_managed_linked_namespace() {
+        let linked = ActrId {
+            realm: Realm { realm_id: 7 },
+            serial_number: 42,
+            r#type: ActrType {
+                manufacturer: "local".to_string(),
+                name: "scratchpad".to_string(),
+                version: "1".to_string(),
+            },
+        };
+        let encoded = linked.to_string_repr();
+        assert_eq!(encoded, "2a@7/local/scratchpad@1");
+        assert_eq!(ActrId::from_string_repr(&encoded).unwrap(), linked);
+        assert!(
+            ActrType::from_program_identity("local/scratchpad@1").is_err(),
+            "a non-DNS linked namespace must not become a Registry Publisher"
+        );
+    }
+
+    #[test]
     fn test_actor_id_roundtrip_without_version_errors() {
         // Parsing a string without version should now return an error
-        let result = ActrId::from_string_repr("1a2b3c@101/acme:echo-service");
+        let result = ActrId::from_string_repr("1a2b3c@101/apps.example.com/echo-service");
         assert!(
             matches!(result, Err(ActrIdError::InvalidTypeFormat(_))),
             "Expected InvalidTypeFormat error, got: {:?}",
@@ -242,7 +394,7 @@ mod tests {
         ));
         // Invalid hex serial
         assert!(matches!(
-            ActrId::from_string_repr("xyz@101/acme:echo"),
+            ActrId::from_string_repr("xyz@101/apps.example.com/echo@1.0.0"),
             Err(ActrIdError::InvalidComponent(_))
         ));
     }
@@ -281,9 +433,12 @@ mod tests {
             ActrType::from_string_repr("a:b:c:d"),
             Err(ActrIdError::InvalidTypeFormat(_))
         ));
+        // DNS labels may start with a digit; the legacy ActrType namespace
+        // parser must not reintroduce the old "starts with a letter" rule.
+        assert!(ActrType::from_string_repr("1acme:echo:1.0.0").is_ok());
         // Invalid manufacturer
         assert!(matches!(
-            ActrType::from_string_repr("1acme:echo:1.0.0"),
+            ActrType::from_string_repr("_acme:echo:1.0.0"),
             Err(ActrIdError::InvalidComponent(_))
         ));
         // Invalid name

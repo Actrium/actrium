@@ -274,6 +274,24 @@ fn extract_basic_auth(headers: &HeaderMap) -> Option<(String, String)> {
     Some((user.to_string(), pass.to_string()))
 }
 
+/// Constant-time byte-slice equality.
+///
+/// ADM-05: htpasswd credential matching must not short-circuit on the first
+/// differing byte, otherwise response timing leaks how many leading characters
+/// of a username/password are correct. `subtle` is not a dependency of this
+/// crate, so we implement the constant-time compare directly. The length check
+/// only leaks the credential length, which is not sensitive here.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 /// Check credentials against an htpasswd file (plaintext format: user:password).
 fn check_htpasswd(path: &str, username: &str, password: &str) -> bool {
     let Ok(content) = std::fs::read_to_string(path) else {
@@ -285,8 +303,8 @@ fn check_htpasswd(path: &str, username: &str, password: &str) -> bool {
             continue;
         }
         if let Some((user, pass)) = line.split_once(':')
-            && user == username
-            && pass == password
+            && constant_time_eq(user.as_bytes(), username.as_bytes())
+            && constant_time_eq(pass.as_bytes(), password.as_bytes())
         {
             return true;
         }

@@ -406,7 +406,7 @@ static REGISTRY: &[ConfigFieldDef] = &[
         key: "control.admin_ui.session_expiry_secs",
         toml_path: "control.admin_ui.session_expiry_secs",
         value_type: ConfigValueType::U64,
-        default_value: "86400",
+        default_value: "3600",
         dynamic: true,
         reloadable: true,
         description: "Admin session TTL",

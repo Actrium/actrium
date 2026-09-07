@@ -991,6 +991,7 @@ async fn handle_actr_to_server(
     let in_tolerance_period = match AIdCredentialValidator::check(
         &actr_to_server.credential,
         source.realm.realm_id,
+        "actr.signaling",
     )
     .await
     {
@@ -1360,9 +1361,31 @@ async fn handle_actr_relay(
     let source_realm = source.realm.realm_id;
     let target_realm = target.realm.realm_id;
 
-    // Unified ACL check: same-realm / cross-realm both go through the same rule query
+    // Unified ACL check: same-realm / cross-realm both go through the same rule query.
+    // Source type is trusted (source passed credential validation above is not yet done,
+    // but source identity is bound to the connection); target type MUST be resolved from
+    // the server-known connected actor, never the self-asserted envelope field, otherwise
+    // a forged target type bypasses ACL (SIG-02).
     let source_type = type_key(&source.r#type);
-    let target_type = type_key(&target.r#type);
+    let target_type = {
+        let clients = server.clients.read().await;
+        clients
+            .iter()
+            .find_map(|(_, client)| {
+                client.actor_id.as_ref().and_then(|aid| {
+                    if aid.realm.realm_id == target.realm.realm_id
+                        && aid.serial_number == target.serial_number
+                    {
+                        Some(type_key(&aid.r#type))
+                    } else {
+                        None
+                    }
+                })
+            })
+            // Fallback to the asserted type only for ACL logging when the target is not
+            // currently connected — delivery will fail downstream regardless.
+            .unwrap_or_else(|| type_key(&target.r#type))
+    };
 
     let can_relay = ActorAcl::can_discover(source_realm, target_realm, &source_type, &target_type)
         .await
@@ -1387,7 +1410,12 @@ async fn handle_actr_relay(
     }
 
     // Validate credential and retain claims for identity verification below.
-    let claims = match AIdCredentialValidator::check(&relay.credential, source.realm.realm_id).await
+    let claims = match AIdCredentialValidator::check(
+        &relay.credential,
+        source.realm.realm_id,
+        "actr.signaling",
+    )
+    .await
     {
         Ok((claims, _)) => claims,
         Err(e) => {
@@ -1469,11 +1497,17 @@ async fn handle_actr_relay(
 
         drop(clients_guard);
 
+        // Both assignments are server-to-client notifications: the receiver only
+        // consumes `is_offerer`, so the sender's bearer credential must not ride
+        // along -- `to` is a peer and must never receive the initiator's live
+        // credential.
+        let empty_credential = AIdCredential::default();
+
         // Send RoleAssignment to from
         let new_relay = ActrRelay {
             // source: peer actor, target: receiver of this assignment
             source: from.clone(),
-            credential: relay.credential.clone(),
+            credential: empty_credential.clone(),
             target: to.clone(),
             delivery_context: None,
             payload: Some(actr_relay::Payload::RoleAssignment(RoleAssignment {
@@ -1494,7 +1528,7 @@ async fn handle_actr_relay(
         let new_relay = ActrRelay {
             // source: peer actor, target: receiver of this assignment
             source: from.clone(),
-            credential: relay.credential.clone(),
+            credential: empty_credential,
             target: to.clone(),
             delivery_context: None,
             payload: Some(actr_relay::Payload::RoleAssignment(RoleAssignment {
@@ -1544,6 +1578,13 @@ async fn handle_actr_relay(
     };
 
     if let Some(target_client_id) = target_client_id {
+        // Strip the sender's credential before forwarding to the peer: the credential is
+        // a bearer token, and forwarding it would let the peer impersonate the sender.
+        // The peer discards this field on receipt, so clearing it has no observable
+        // effect on behavior beyond closing the credential-leak vector.
+        let mut relay = relay;
+        relay.credential = Default::default();
+
         // Reconstruct envelope and forward
         let flow = signaling_envelope::Flow::ActrRelay(relay);
         #[allow(unused_mut)]

@@ -1,359 +1,173 @@
-# Actrix Auxiliary Servers
+# Actrix Realm Infrastructure
 
-A production-ready collection of WebRTC auxiliary servers providing STUN, TURN, Signer, and service coordination for the Actrix ecosystem.
+Actrix is the single-node Realm infrastructure for the Actr network. The v1 profile carries exactly one Realm per instance,
+combining Authority/AIS, Signaling (Rendezvous), STUN/TURN (Relay),
+Publisher Registry, Signer, and the management plane in a single process, with SQLite as the sole persistence dependency.
 
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.95%2B-orange.svg)](https://www.rust-lang.org/)
+This version is a production security baseline, not a security certification. Before a deployment is called
+production-ready, it must complete the interoperability, abuse, recovery, and independent security review gates
+listed in the [Threat Model](docs/THREAT_MODEL_REALM_V1.zh.md).
 
-## Features
+## v1 Contract
 
-### Core Services
-- **STUN Server**: NAT traversal assistance (UDP 3478)
-- **TURN Server**: Media relay for restricted networks with LRU authentication cache (+40% performance)
-- **Signer**: ECIES cryptographic key generation and management
+- Exactly one Realm per instance; the system administrator is the sole Realm management root for this instance.
+- Single-node, SQLite-first; no HA, federation, or cross-Realm migration is promised for the first version.
+- Authority issues Actor instance identities; Signaling only does rendezvous, it is not a trust root.
+- Actor ID carries Realm, instance serial number, and Actor type; program identity is specified as
+  `publisher/program@version`.
+- Publisher ID is a canonical HTTPS domain; the domain is for discovery, Ed25519 key and digest are for long-term
+  verification, the download origin is not a trust root.
+- TURN credential binds Realm, official provider, endpoint audience, Actor, and expiry time.
+- Native WebSocket passes identity via upgrade headers; browsers use a constrained WebSocket
+  subprotocol transport. Credentials must not appear in URLs.
+- Configuration and SQLite schema fail closed; legacy schema only upgrades via explicit offline script.
 
-### Infrastructure
-- ⚡ **High Performance**: LRU caching, async runtime, non-blocking I/O
-- 📊 **Observability**: OpenTelemetry tracing, structured recording pipeline
-- 🔐 **Security**: TLS/HTTPS, PSK authentication, nonce-based replay protection
-- 🎛️ **Flexible Configuration**: TOML-based, bitmask service control, comprehensive validation
-- 🚀 **Production Ready**: Systemd integration, automated deployment, health checks
+Full design documents:
 
-## Quick Start
+- [Realm v1 Architecture](docs/REALM_V1_ARCHITECTURE.zh.md)
+- [Threat Model and Release Gates](docs/THREAT_MODEL_REALM_V1.zh.md)
+- [TURN/STUN Interop and Abuse Testing](docs/TURN_STUN_INTEROP_TESTING.zh.md)
+- [Realm v1 Acceptance Evidence](docs/REALM_V1_ACCEPTANCE_EVIDENCE.zh.md)
+- [Dependency Risk Register](docs/DEPENDENCY_RISK_REGISTER.zh.md)
+- [Independent Security Review Package](docs/INDEPENDENT_SECURITY_REVIEW.zh.md)
+- [Current API Contract](docs/API.md)
+- [Signer Trust Boundary](docs/KS_GUIDE.md)
 
-### Installation
+## Services
+
+| Plane | Component | v1 Responsibility |
+|---|---|---|
+| Authority | AIS, Signer | Actor ID, short-lived credential, Realm signing |
+| Rendezvous | Signaling | Discovery, presence, signaling relay for authenticated Actors |
+| Relay | STUN/TURN | NAT probing and credential-constrained relay |
+| Distribution | Publisher Registry | Publisher domain discovery, key, package metadata |
+| Management | Admin HTTP/UI, gRPC | Single Realm provisioning, configuration, audit, and operations |
+
+These components can use different domain names and ports, but the recommended v1 deployment is a single Actrix process.
+Even within the same process, credential issuer/provider/audience are explicitly bound to their respective boundaries.
+
+## Build
+
+Requires Rust 1.95+, SQLite 3, and OpenSSL:
 
 ```bash
-# Clone repository
-git clone https://github.com/Actrium/actrix.git
-cd actrix
-
-# Build release binary
+git clone https://github.com/Actrium/actr.git
+cd actr/actrix
 cargo build --release
+```
 
-# With OpenTelemetry support
+Enable OpenTelemetry:
+
+```bash
 cargo build --release --features opentelemetry
 ```
 
-### Configuration
+## Configuration and Startup
 
-Copy and customize the example configuration:
+The example config intentionally retains unusable secret placeholders; validation must fail without replacement:
 
 ```bash
 cp config.example.toml config.toml
-nano config.toml
 ```
 
-Key settings to change:
-- `actrix_shared_key` - Generate with: `openssl rand -hex 32`
-- `turn.advertised_ip` - Your server's public IP
-- `bind.https.cert/key` - TLS certificate paths
-- `recording.sink` - Set to `file:///...` for production file sink
+At minimum you need to set:
 
-### Running
+- `actrix_shared_key`: an independently generated inter-service PSK;
+- `turn.turn_secret`: a stable per-Realm/per-provider secret;
+- `services.ais.server.renewal_token_secret`: a stable renewal secret;
+- `services.ais.server.worker_id`: an explicit 0..31 single-node worker ID;
+- `services.signer.kek_file`, `kek_env`, or `kek`: production Signer KEK source;
+- `control.admin_ui.password_hash`: Argon2id PHC hash, never a plaintext password;
+- `bind.http.cert`, `bind.http.key`: production HTTPS certificate;
+- `bind.ice.advertised_ip`: an externally reachable ICE address.
+
+It is recommended to inject KEK and secrets via files or a secret manager; config file permissions should be at least `0600`.
+All secrets must be independent and must not be reused.
 
 ```bash
-# Validate configuration
+# Validate
 ./target/release/actrix test config.toml
 
-# Start server
+# Start
 ./target/release/actrix --config config.toml
-
-# Or bootstrap with deploy helper
-cargo run --manifest-path deploy/Cargo.toml -- install
-cargo run --manifest-path deploy/Cargo.toml -- service
 ```
 
-## Configuration
+`enable = 31` is the v1 all-in-one profile. The `prod` environment requires HTTPS, Argon2id admin hash,
+non-placeholder secrets, Signer KEK, and other security conditions, otherwise it refuses to start.
 
-### Service Control (Bitmask)
+## Initial Provisioning
 
-```toml
-# Binary: xxxxx
-#         ││││└─ Signaling (1)  [Disabled]
-#         │││└── STUN      (2)
-#         ││└─── TURN      (4)
-#         │└──── AIS       (8)  [Disabled]
-#         └───── KS        (16)
+A new database creates schema v1 on first startup, but there is still no active Realm. The system administrator
+creates the unique Realm via the Admin UI or a protected Admin API, then:
 
-enable = 6   # STUN + TURN
-enable = 22  # KS + TURN + STUN (recommended)
-```
+1. `GET /.well-known/actr/realm.json` publishes the Realm descriptor;
+2. AIS can then register Actors for trusted hosts holding the Realm registration capability;
+3. Guest code never holds the Realm secret or that capability;
+4. Publishers first publish `/.well-known/actr/publisher.json`, then an administrator triggers domain verification.
 
-### Environment Types
+The online API does not provide Realm hard deletion or replacement. Realm rebuild, schema upgrade, and
+incompatible data handling are all offline operations.
 
-- `dev`: Development (HTTP allowed, console logs)
-- `prod`: Production (HTTPS required, file logs recommended)
-- `test`: Testing (automated tests)
+## SQLite Upgrade
 
-### Example Configuration
-
-```toml
-enable = 6
-name = "actrix-01"
-env = "prod"
-
-[recording]
-filter_level = "info"    # RUST_LOG overrides if set
-sink = "file:///var/log/actrix/actrix.log"
-service_name = "actrix"
-
-[recording.audit]
-sink = "otlp+http://127.0.0.1:4318/v1/logs"
-
-[bind.ice]
-advertised_ip = "203.0.113.10"
-ip = "0.0.0.0"
-port = 3478
-
-[turn]
-advertised_ip = "203.0.113.10"
-advertised_port = 3478
-relay_port_range = "49152-65535"
-realm = "example.com"
-```
-
-See [docs/CONFIGURATION.md](docs/CONFIGURATION.zh.md) for complete reference.
-
-## Recording
-
-### Logging
-
-**Console Output** (development):
-```toml
-[recording]
-filter_level = "debug"  # overridden by RUST_LOG if set
-# no sink: defaults to stdout
-```
-
-**File Output** (production):
-```toml
-[recording]
-filter_level = "info"  # overridden by RUST_LOG if set
-sink = "file:///var/log/actrix/actrix.log"
-service_name = "actrix-prod"
-
-[recording.security]
-sink = "otlp+grpc://otel-collector.internal:4317"
-```
-
-### OpenTelemetry Tracing
+Actrix does not guess or silently rewrite legacy databases in the main process. Stop the service first and run
+the standalone script:
 
 ```bash
-# 1. Start Jaeger
-docker-compose -f docker/jaeger-compose.yml up -d
-
-# 2. Build with tracing support
-cargo build --release --features opentelemetry
-
-# 3. Configure endpoint
-[recording]
-service_name = "actrix"
-sink = "otlp+grpc://127.0.0.1:4317"
-
-# 4. Access UI
-http://localhost:16686
+python3 scripts/migrate_schema_v1.py /var/lib/actrix/actrix.db
 ```
 
-## API Endpoints
+The script creates a backup, migrates within a transaction, and verifies `PRAGMA user_version`. Legacy Publisher
+data that cannot be safely mapped requires explicitly passing `--drop-publisher-data`; multi-Realm data will be
+rejected, and the administrator must first decide which Realm to keep.
 
-### Signer - `/ks/*`
-
-- `POST /ks/generate` - Generate ECIES key pair
-- `GET /ks/secret/{key_id}` - Get private key (authenticated)
-- `GET /ks/public/{key_id}` - Get public key
-- `GET /ks/public/keys` - List all public keys
-- `GET /ks/health` - Health check
-
-## Deployment
-
-### Systemd Service
+## Validation
 
 ```bash
-# Install binary payload
-cargo run --manifest-path deploy/Cargo.toml -- install
+cargo fmt --all --check
+cargo test --workspace -- --test-threads=1
+python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 
-# Install systemd unit
-cargo run --manifest-path deploy/Cargo.toml -- service
+# UDP protocol interop and bounded malformed traffic regression
+cargo test -p actrix-turn --test udp_interop -- --test-threads=1
+cargo test -p actrix-stun -- --test-threads=1
 
-# Start service
-sudo systemctl start actrix
-sudo systemctl enable actrix
-
-# View logs
-sudo journalctl -u actrix -f
+cd crates/actrixd/admin/web
+pnpm install --frozen-lockfile
+pnpm build
 ```
 
-See [deploy/README.md](deploy/README.md) for deployment details.
-
-### Docker (Future)
-
-Docker images planned for future releases.
-
-## Performance
-
-### TURN Authentication Cache
-
-- **Without cache**: ~10,000 req/s
-- **With LRU cache**: ~14,000 req/s (+40%)
-- **Cache hit rate**: 95%+
-- **Capacity**: 1000 entries
-
-### Benchmarks
+The Web Service Worker is in a separate Cargo workspace:
 
 ```bash
-# Run benchmarks (future)
-cargo bench
+cargo check \
+  --manifest-path ../bindings/web/crates/sw-host/Cargo.toml \
+  --target wasm32-unknown-unknown
 ```
 
-## Development
+## Explicitly Out of v1 Scope
 
-### Prerequisites
+- Multiple Realms per instance;
+- Multi-node HA, automatic worker lease, shared SQLite;
+- Third-party provider coordination or Realm federation;
+- Workspace lifecycle, user-held Workspace encryption keys;
+- Actro's Tab/Service URL, recovery, and multi-window product model.
 
-- Rust 1.95+ (Edition 2024)
-- SQLite 3.x
-- OpenSSL (for certificates)
+The latter two belong to the Actro/Service host layer and should not be dictated by Actrix's Realm infrastructure.
 
-### Build & Test
+## Release Gates
 
-```bash
-# Run quality checks
-make all  # fmt, clippy, test, build
+The current code implements fail-closed configuration, credential scoping, log redaction, rate/size limits,
+key rotation basics, SQLite schema gate, UDP allocation/relay testing, bounded malformed traffic regression,
+and a relay-only Chromium DataChannel interop fixture. However, a formal production declaration still requires:
 
-# Individual checks
-make fmt
-make clippy
-make test
-make coverage
-
-# Run specific tests
-cargo test -p ks
-cargo test -p turn
-```
-
-### Project Structure
-
-``` 
-actrix/
-├── crates/
-│   ├── actrixd/      # Main binary crate (orchestrator)
-│   │   ├── src/
-│   │   │   ├── admin/
-│   │   │   └── service/
-│   │   └── tests/
-│   ├── contracts/    # gRPC protobuf definitions (package: actrix-proto)
-│   ├── platform/     # Shared lifecycle/config/state/auth/event foundation
-│   ├── control/      # Canonical admin control-plane implementation (package: admin)
-│   ├── sdk/          # Unified public facade (package: actrix-sdk)
-│   ├── services/     # Node service implementations
-│   │   ├── ais/
-│   │   ├── ks/
-│   │   ├── signaling/
-│   │   ├── stun/
-│   │   └── turn/
-├── deploy/           # Minimal bootstrap helper (deps/install/service/uninstall)
-├── docs/            # Documentation
-└── AGENTS.md        # AI development guide
-```
-
-See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.zh.md) for development guide.
-
-## Documentation
-
-- [ARCHITECTURE.md](docs/ARCHITECTURE.zh.md) - System architecture
-- [CONFIGURATION.md](docs/CONFIGURATION.zh.md) - Configuration reference
-- [DEVELOPMENT.md](docs/DEVELOPMENT.zh.md) - Development guide
-- [deploy/README.md](deploy/README.md) - Deployment guide
-- [AGENTS.md](AGENTS.md) - AI assistant guide
-- [CLAUDE.md](CLAUDE.md) - Project context
-
-## Security
-
-### Current Status
-
-**Security Level**: B (Production-ready for internal use)
-
-### Security Features
-
-✅ **Implemented**:
-- TLS/HTTPS for API endpoints
-- PSK authentication with shared key
-- Nonce-based replay protection
-- SQLite file permissions
-- Systemd security hardening
-
-⚠️ **Limitations** (acceptable for internal deployment):
-- Keys stored Base64-encoded in SQLite
-- Shared PSK authentication
-- No automatic key rotation
-- Timing attack vulnerability in key lookups
-
-### Deployment Requirements
-
-- ✅ Change default `actrix_shared_key`
-- ✅ Use HTTPS in production
-- ✅ File permissions: `chmod 600 config.toml *.db`
-- ✅ Network isolation
-- ✅ Run as non-root user
-
-See [CLAUDE.md](CLAUDE.md) for detailed security analysis.
-
-## Roadmap
-
-### Completed (v0.2.0)
-
-- [x] OpenTelemetry tracing support
-- [x] URI-based recording sinks (file/OTLP)
-- [x] TURN LRU authentication cache
-- [x] Configuration validation
-- [x] Deployment automation (systemd)
-- [x] Comprehensive documentation
-
-### Planned
-
-- [ ] Re-enable AIS service with actr-protocol
-- [ ] PostgreSQL backend support
-- [ ] Prometheus metrics export
-- [ ] Configuration hot reload
-- [ ] Multi-region deployment support
-- [ ] Docker images
-
-## Contributing
-
-This is an internal project for the Actrix ecosystem. When contributing:
-
-1. Follow code patterns in [AGENTS.md](AGENTS.md)
-2. Add tests for new features
-3. Run `make all` before committing
-4. Use semantic commit messages (no AI tool mentions)
+- An interoperability matrix covering real browsers beyond Chrome/Chromium, native clients, mainstream
+  TURN/STUN implementations, and target NAT/mobile networks;
+- Sustained credential replay, TURN abuse, connection flood, and resource exhaustion stress testing;
+- SQLite backup, recovery, disk corruption, and node rebuild drills;
+- Key rotation/revocation drills and audit record checks;
+- At least one independent security review or penetration test, with all P0/P1 findings closed.
 
 ## License
 
-Apache License 2.0
-
-## Documentation
-
-Full documentation system (~4800 lines of refined docs):
-
-- **[INDEX.md](docs/INDEX.zh.md)** - Documentation navigation index (start here)
-- **[ARCHITECTURE.md](docs/ARCHITECTURE.zh.md)** - Architecture design (with code line references)
-- **[CRATES.md](docs/CRATES.zh.md)** - Code implementation details
-- **[SERVICES.md](docs/SERVICES.zh.md)** - Service management, deployment, operations
-- **[API.md](docs/API.zh.md)** - HTTP API reference
-- **[CONFIGURATION.md](docs/CONFIGURATION.zh.md)** - Configuration reference
-- **[deploy/README.md](deploy/README.md)** - Production deployment guide
-- **[DEVELOPMENT.md](docs/DEVELOPMENT.zh.md)** - Development guide
-
-## Related Projects
-
-- [actr-protocol](https://github.com/Actrium/actr-protocol) - Protobuf definitions
-- [actr-framework](https://github.com/Actrium/actr-framework) - Actor framework
-
-## Support
-
-- GitHub Issues: https://github.com/Actrium/actrix/issues
-- Documentation: [docs/INDEX.md](docs/INDEX.zh.md)
-
----
-
-**Note**: Designed for internal deployment in trusted networks. Requires security hardening for public internet exposure.
+Apache License 2.0.

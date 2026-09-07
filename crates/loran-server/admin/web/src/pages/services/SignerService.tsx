@@ -93,7 +93,7 @@ function IssuanceDiagram() {
       <text x="104" y={nodeY + 42} textAnchor="middle" className="sgn-node-subtitle" fill="#6366f1">refresh controller</text>
 
       <rect x="240" y={nodeY} width="154" height={nodeH} rx="14" fill="#fffbeb" stroke="#d97706" strokeWidth="1.6" filter="url(#sgn-shadow)" />
-      <text x="317" y={nodeY + 24} textAnchor="middle" className="sgn-node-title" fill="#92400e">Signer (KS)</text>
+      <text x="317" y={nodeY + 24} textAnchor="middle" className="sgn-node-title" fill="#92400e">Signer</text>
       <text x="317" y={nodeY + 42} textAnchor="middle" className="sgn-node-subtitle" fill="#d97706">guards private keys</text>
 
       <line x1="317" y1={nodeY + nodeH} x2="317" y2={storageY} stroke="#f59e0b" strokeWidth="1.2" strokeDasharray="4 3" markerEnd="url(#sgn-at)" />
@@ -141,11 +141,11 @@ function IssuanceDiagram() {
 
       <rect x="258" y={bPanelY + 54} width="240" height={nodeH} rx="14" fill="#eef2ff" stroke="#6366f1" strokeWidth="1.6" filter="url(#sgn-shadow)" />
       <text x="378" y={bPanelY + 74} textAnchor="middle" className="sgn-node-title" fill="#3730a3">AIS</text>
-      <text x="378" y={bPanelY + 90} textAnchor="middle" className="sgn-chip-caption" fill="#6366f1">verify MFR • build claims • select active key</text>
+      <text x="378" y={bPanelY + 90} textAnchor="middle" className="sgn-chip-caption" fill="#6366f1">verify publisher • build claims • select active key</text>
       <text x="378" y={bPanelY + 102} textAnchor="middle" className="sgn-chip-caption" fill="#6366f1">call Sign RPC • assemble credential bundle</text>
 
       <rect x="664" y={bPanelY + 54} width="144" height={nodeH} rx="14" fill="#fffbeb" stroke="#d97706" strokeWidth="1.6" filter="url(#sgn-shadow)" />
-      <text x="736" y={bPanelY + 78} textAnchor="middle" className="sgn-node-title" fill="#92400e">Signer (KS)</text>
+      <text x="736" y={bPanelY + 78} textAnchor="middle" className="sgn-node-title" fill="#92400e">Signer</text>
       <text x="736" y={bPanelY + 96} textAnchor="middle" className="sgn-node-subtitle" fill="#d97706">returns signature bytes</text>
 
       <line x1="180" y1={bPanelY + 80} x2="258" y2={bPanelY + 80} stroke="#3b82f6" strokeWidth="1.6" markerEnd="url(#sgn-ab)" />

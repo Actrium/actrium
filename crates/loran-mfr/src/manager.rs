@@ -1,39 +1,25 @@
 use crate::{
-    MfrError, crypto, github,
+    MfrError, crypto,
     model::{
-        ActrPackage, GitHubRepoChallenge, Manufacturer, MfrKeyHistory, MfrStatus, PkgStatus,
-        PublishNonce, key_history::KeyHistoryStatus,
+        ActrPackage, Manufacturer, MfrKeyHistory, MfrStatus, PkgStatus, PublishNonce,
+        PublisherChallenge, key_history::KeyHistoryStatus,
     },
-    reserved,
+    publisher::fetch_publisher_descriptor,
+    reserved::canonical_publisher_domain,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum KeySource {
-    /// Server generated the keypair; private_key is present.
-    Generated,
-    /// User uploaded their own public key; private_key is absent.
-    Uploaded,
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PublisherVerificationResponse {
+    pub certificate: PublisherCertificate,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ActivateResponse {
-    /// How the key was provisioned.
-    pub key_source: KeySource,
-    /// Ed25519 private key, base64. Present ONLY when key_source == Generated.
-    /// Returned ONCE — never stored by actrix.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub private_key: Option<String>,
-    pub certificate: MfrCertificate,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct MfrCertificate {
+pub struct PublisherCertificate {
     pub key_id: String,
-    pub mfr_name: String,
-    pub mfr_pubkey: String,
+    pub publisher: String,
+    pub public_key: String,
     pub issued_at: i64,
     /// End of this key's authority to publish new packages. Natural expiry
     /// does not invalidate signatures made by this key.
@@ -42,7 +28,7 @@ pub struct MfrCertificate {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PublishRequest {
-    pub manufacturer: String,
+    pub publisher: String,
     pub name: String,
     pub version: String,
     /// Target platform (e.g. "wasm32-wasip1", "x86_64-unknown-linux-gnu")
@@ -50,24 +36,24 @@ pub struct PublishRequest {
     pub target: String,
     /// Full content of actr.toml (with binary_hash field populated)
     pub manifest: String,
-    /// base64 Ed25519 signature by MFR private key over manifest bytes
+    /// base64 Ed25519 signature by the Publisher private key over manifest bytes
     pub signature: String,
     /// Proto files JSON for filing/audit (optional)
     #[serde(default)]
     pub proto_files: Option<serde_json::Value>,
-    /// Challenge-Response nonce (base64-encoded 32 bytes, obtained from POST /mfr/pkg/nonce)
+    /// Challenge-Response nonce from POST /registry/packages/nonce.
     #[serde(default)]
     pub nonce: Option<String>,
     /// Ed25519 signature over the request authorization payload:
-    /// ACTR-PUBLISH-V1 + manufacturer + method + path + hex(nonce) + sha256(signable_body)
+    /// ACTR-PUBLISH-V2 + publisher + method + path + hex(nonce) + sha256(signable_body)
     #[serde(default)]
     pub nonce_sig: Option<String>,
 }
 
-/// Request body for POST /mfr/pkg/nonce
+/// Request body for POST /registry/packages/nonce.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NonceRequest {
-    pub manufacturer: String,
+    pub publisher: String,
 }
 
 fn default_target() -> String {
@@ -76,7 +62,7 @@ fn default_target() -> String {
 
 #[derive(Serialize)]
 struct SignablePublishBody<'a> {
-    manufacturer: &'a str,
+    publisher: &'a str,
     name: &'a str,
     version: &'a str,
     target: &'a str,
@@ -89,7 +75,7 @@ struct SignablePublishBody<'a> {
 
 fn signable_publish_body_bytes(req: &PublishRequest, nonce: &str) -> Result<Vec<u8>, MfrError> {
     serde_json::to_vec(&SignablePublishBody {
-        manufacturer: &req.manufacturer,
+        publisher: &req.publisher,
         name: &req.name,
         version: &req.version,
         target: &req.target,
@@ -109,23 +95,23 @@ fn build_publish_auth_payload(
     body_sha256_hex: &str,
 ) -> String {
     format!(
-        "ACTR-PUBLISH-V1\nmanufacturer={manufacturer}\nmethod=POST\npath=/mfr/pkg/publish\nnonce={nonce_hex}\nbody_sha256={body_sha256_hex}"
+        "ACTR-PUBLISH-V2\npublisher={manufacturer}\nmethod=POST\npath=/registry/packages/publish\nnonce={nonce_hex}\nbody_sha256={body_sha256_hex}"
     )
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct MfrPublicInfo {
+pub struct PublisherPublicInfo {
     pub id: i64,
     pub key_id: String,
     pub name: String,
     pub public_key: String,
-    pub certificate: MfrCertificate,
+    pub certificate: PublisherCertificate,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub descriptor: Option<crate::publisher::PublisherDescriptor>,
 }
 
 pub struct MfrManager {
     pool: SqlitePool,
-    /// Domain of this actrix node, used as the verification filename.
-    domain: String,
     /// How long (seconds) to retain expired/used nonce records for auditing.
     /// Default: 86400 (24 hours).
     nonce_retain_secs: i64,
@@ -135,24 +121,14 @@ impl MfrManager {
     pub fn new(pool: SqlitePool) -> Self {
         Self {
             pool,
-            domain: String::new(),
             nonce_retain_secs: 86400, // 24 hours
         }
-    }
-
-    pub fn with_domain(mut self, domain: String) -> Self {
-        self.domain = domain;
-        self
     }
 
     /// Set nonce retention duration in seconds (for cleanup of expired/used nonces).
     pub fn with_nonce_retain_secs(mut self, secs: i64) -> Self {
         self.nonce_retain_secs = secs;
         self
-    }
-
-    pub fn domain(&self) -> &str {
-        &self.domain
     }
 
     /// Access the underlying database pool (used by tests for nonce setup).
@@ -163,7 +139,7 @@ impl MfrManager {
     fn validate_publish_authority(mfr: &Manufacturer) -> Result<(), MfrError> {
         if mfr.status != MfrStatus::Active {
             return Err(MfrError::InvalidStatus(format!(
-                "MFR '{}' is not active",
+                "Publisher '{}' is not active",
                 mfr.name
             )));
         }
@@ -196,147 +172,303 @@ impl MfrManager {
         // Create new nonce
         let nonce = PublishNonce::create(&self.pool, mfr.id).await?;
         platform::recording::info!(
-            "publish nonce issued for manufacturer '{}' (mfr_id={})",
+            "publish nonce issued for publisher '{}' (publisher_id={})",
             manufacturer,
             mfr.id
         );
         Ok(nonce)
     }
 
-    /// Step 1: Apply for manufacturer registration via GitHub identity.
-    /// The GitHub login (user or org) becomes the manufacturer name.
-    /// Returns a challenge token that the user must place in a public repo.
+    /// Step 1: apply for a canonical HTTPS publisher identity.
+    ///
+    /// The challenge must be placed in the publisher descriptor at
+    /// `https://<publisher>/.well-known/actr/publisher.json`.
     pub async fn apply(
         &self,
-        github_login: &str,
+        publisher: &str,
         contact: Option<&str>,
-    ) -> Result<(Manufacturer, GitHubRepoChallenge), MfrError> {
-        let login = github_login.to_ascii_lowercase();
-        reserved::validate_github_login(&login)?;
-        let mfr = Manufacturer::create(&self.pool, &login, contact).await?;
-        let challenge = GitHubRepoChallenge::create(&self.pool, mfr.id).await?;
-        platform::recording::info!("MFR application received: github_login={}", login,);
+    ) -> Result<(Manufacturer, PublisherChallenge), MfrError> {
+        let publisher = canonical_publisher_domain(publisher)?;
+        let mfr = Manufacturer::create(&self.pool, &publisher, contact).await?;
+        let challenge = PublisherChallenge::create(&self.pool, mfr.id).await?;
+        platform::recording::info!("Publisher application received: publisher={}", publisher);
         Ok((mfr, challenge))
     }
 
-    /// Step 2: Verify ownership by checking a public GitHub repo.
-    ///
-    /// Looks for `{mfr.name}/actr-mfr-verify/{domain}.txt` containing the challenge token.
-    ///
-    /// If `user_public_key` is Some, the user's own Ed25519 public key is used (uploaded mode).
-    /// If None, a new keypair is generated and the private key is returned once (generated mode).
-    pub async fn verify_github(
+    /// Step 2: verify domain ownership and bind the descriptor's signing key.
+    pub async fn verify_publisher_domain(
         &self,
         mfr_id: i64,
-        user_public_key: Option<&str>,
-    ) -> Result<ActivateResponse, MfrError> {
+    ) -> Result<PublisherVerificationResponse, MfrError> {
         let mut mfr = Manufacturer::get(&self.pool, mfr_id)
             .await?
             .ok_or(MfrError::NotFound)?;
 
-        if mfr.status != MfrStatus::Pending {
+        if !matches!(mfr.status, MfrStatus::Pending | MfrStatus::Active) {
             return Err(MfrError::InvalidStatus(format!(
-                "cannot verify MFR with status: {}",
+                "cannot verify publisher with status: {}",
                 mfr.status
             )));
         }
 
-        let mut challenge = GitHubRepoChallenge::get_active(&self.pool, mfr_id)
+        let challenge = PublisherChallenge::get_active(&self.pool, mfr_id)
             .await?
             .ok_or(MfrError::ChallengeNotFound)?;
 
-        let filename = github::verify_filename(&self.domain);
-        let verified = github::verify_repo(&mfr.name, &challenge.token, &self.domain).await?;
-        if !verified {
+        let (descriptor, descriptor_url) = fetch_publisher_descriptor(&mfr.name).await?;
+        descriptor.validate_for(&mfr.name, &challenge.token)?;
+        let computed_key_id = crypto::compute_key_id_from_b64(&descriptor.public_key)?;
+        if descriptor.key_id != computed_key_id {
             return Err(MfrError::VerificationFailed(format!(
-                "{filename} does not contain the expected challenge token"
+                "descriptor key_id '{}' does not match public key fingerprint '{}'",
+                descriptor.key_id, computed_key_id
             )));
         }
+        if mfr.status == MfrStatus::Active && descriptor.key_id == mfr.key_id {
+            return Err(MfrError::InvalidRequest(
+                "publisher rotation descriptor must present a new signing key".to_string(),
+            ));
+        }
 
-        let url = github::repo_url(&mfr.name);
-        challenge.mark_verified(&self.pool, &url).await?;
-
-        let response = self.activate_with_key(&mut mfr, user_public_key).await?;
+        let descriptor_json = serde_json::to_string(&descriptor)
+            .map_err(|error| MfrError::InvalidRequest(error.to_string()))?;
+        let response = self
+            .commit_verified_descriptor(
+                &mut mfr,
+                &descriptor.public_key,
+                &descriptor_json,
+                &challenge,
+                &descriptor_url,
+            )
+            .await?;
+        mfr.descriptor_json = descriptor_json;
         platform::recording::info!(
-            "MFR verified via GitHub repo: mfr_id={}, name={}, key_source={:?}",
+            "Publisher verified via HTTPS descriptor: publisher_id={}, name={}, key_id={}",
             mfr_id,
             mfr.name,
-            response.key_source
+            response.certificate.key_id
         );
         Ok(response)
     }
 
-    /// Admin: manually approve without GitHub verification (for private deployments).
+    /// Atomically bind the discovered key and descriptor, archive the previous
+    /// key when rotating, and consume the exact ownership challenge.
+    async fn commit_verified_descriptor(
+        &self,
+        mfr: &mut Manufacturer,
+        public_key: &str,
+        descriptor_json: &str,
+        challenge: &PublisherChallenge,
+        descriptor_url: &str,
+    ) -> Result<PublisherVerificationResponse, MfrError> {
+        crypto::validate_public_key(public_key)?;
+        let now = chrono::Utc::now().timestamp();
+        let new_key_id = crypto::compute_key_id_from_b64(public_key)?;
+
+        // Historical-key blacklist: a key_id that was ever archived (retired or
+        // revoked) must never be reinstated as the current key. Without this an
+        // attacker who briefly controlled key A could ride A -> B -> revoke(A) ->
+        // B -> A back into a trusted current-key slot. The check covers retired
+        // keys too, so normal forward rotation to a fresh key is unaffected while
+        // any backward move to a used key is refused.
+        if MfrKeyHistory::key_id_ever_used(&self.pool, mfr.id, &new_key_id).await? {
+            platform::recording::warn!(
+                "rejected reinstatement of previously used publisher key: \
+                 publisher_id={}, key_id={}",
+                mfr.id,
+                new_key_id
+            );
+            return Err(MfrError::InvalidRequest(
+                "a previously used publisher key must not be reinstated".to_string(),
+            ));
+        }
+
+        let key_expires_at = now + 365 * 24 * 3600;
+        let mut tx = self.pool.begin().await?;
+
+        let updated = match mfr.status {
+            MfrStatus::Pending => sqlx::query(
+                "UPDATE mfr
+                     SET status = 'active', public_key = ?, key_id = ?,
+                         verified_at = ?, updated_at = ?, key_expires_at = ?,
+                         descriptor_json = ?
+                     WHERE id = ? AND status = 'pending'",
+            )
+            .bind(public_key)
+            .bind(&new_key_id)
+            .bind(now)
+            .bind(now)
+            .bind(key_expires_at)
+            .bind(descriptor_json)
+            .bind(mfr.id)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected(),
+            MfrStatus::Active => {
+                if !mfr.public_key.is_empty() && !mfr.key_id.is_empty() {
+                    sqlx::query(
+                        "INSERT INTO mfr_key_history
+                         (mfr_id, key_id, public_key, status, created_at, retired_at)
+                         VALUES (?, ?, ?, 'retired', ?, ?)",
+                    )
+                    .bind(mfr.id)
+                    .bind(&mfr.key_id)
+                    .bind(&mfr.public_key)
+                    .bind(mfr.verified_at.unwrap_or(mfr.created_at))
+                    .bind(now)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+                sqlx::query(
+                    "UPDATE mfr
+                     SET public_key = ?, key_id = ?, key_expires_at = ?,
+                         updated_at = ?, descriptor_json = ?
+                     WHERE id = ? AND status = 'active' AND key_id = ?",
+                )
+                .bind(public_key)
+                .bind(&new_key_id)
+                .bind(key_expires_at)
+                .bind(now)
+                .bind(descriptor_json)
+                .bind(mfr.id)
+                .bind(&mfr.key_id)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected()
+            }
+            _ => {
+                return Err(MfrError::InvalidStatus(format!(
+                    "cannot verify publisher with status: {}",
+                    mfr.status
+                )));
+            }
+        };
+        if updated != 1 {
+            return Err(MfrError::InvalidStatus(
+                "publisher changed while domain verification was in progress".to_string(),
+            ));
+        }
+
+        let challenge_updated = sqlx::query(
+            "UPDATE mfr_challenge
+             SET verified_at = ?, verify_url = ?
+             WHERE id = ? AND mfr_id = ? AND verified_at IS NULL AND expires_at > ?",
+        )
+        .bind(now)
+        .bind(descriptor_url)
+        .bind(challenge.id)
+        .bind(mfr.id)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if challenge_updated != 1 {
+            return Err(MfrError::ChallengeNotFound);
+        }
+        tx.commit().await?;
+
+        mfr.status = MfrStatus::Active;
+        mfr.public_key = public_key.to_string();
+        mfr.key_id = new_key_id.clone();
+        mfr.verified_at.get_or_insert(now);
+        mfr.updated_at = Some(now);
+        mfr.key_expires_at = Some(key_expires_at);
+
+        Ok(PublisherVerificationResponse {
+            certificate: PublisherCertificate {
+                key_id: new_key_id,
+                publisher: mfr.name.clone(),
+                public_key: public_key.to_string(),
+                issued_at: now,
+                expires_at: key_expires_at,
+            },
+        })
+    }
+
+    /// Start a publisher-controlled key rotation. The new key is accepted only
+    /// after the active HTTPS descriptor presents this fresh challenge.
+    pub async fn begin_key_rotation(&self, mfr_id: i64) -> Result<PublisherChallenge, MfrError> {
+        let mfr = Manufacturer::get(&self.pool, mfr_id)
+            .await?
+            .ok_or(MfrError::NotFound)?;
+        if mfr.status != MfrStatus::Active {
+            return Err(MfrError::InvalidStatus(format!(
+                "cannot rotate publisher key from status: {}",
+                mfr.status
+            )));
+        }
+        PublisherChallenge::create(&self.pool, mfr_id).await
+    }
+
+    /// Test-only shortcut for provisioning publisher records without external
+    /// HTTPS discovery.
     ///
-    /// If `user_public_key` is Some, the user's own Ed25519 public key is used (uploaded mode).
-    /// If None, a new keypair is generated and the private key is returned once (generated mode).
+    /// If no public key is supplied, the helper creates a disposable test key
+    /// and immediately discards its private half. Production code cannot call
+    /// this path.
+    #[cfg(test)]
     pub async fn admin_approve(
         &self,
         mfr_id: i64,
         user_public_key: Option<&str>,
-    ) -> Result<ActivateResponse, MfrError> {
+    ) -> Result<PublisherVerificationResponse, MfrError> {
         let mut mfr = Manufacturer::get(&self.pool, mfr_id)
             .await?
             .ok_or(MfrError::NotFound)?;
 
-        let response = self.activate_with_key(&mut mfr, user_public_key).await?;
+        let generated_public_key;
+        let public_key = match user_public_key {
+            Some(public_key) => public_key,
+            None => {
+                generated_public_key = crypto::generate_keypair().1;
+                &generated_public_key
+            }
+        };
+        let response = self.activate_with_key(&mut mfr, public_key).await?;
         platform::recording::info!(
-            "MFR manually approved by admin: mfr_id={}, name={}, key_source={:?}",
+            "test publisher approved: publisher_id={}, name={}, key_id={}",
             mfr_id,
             mfr.name,
-            response.key_source
+            response.certificate.key_id
         );
         Ok(response)
     }
 
-    /// Common key provisioning logic for both verify_github and admin_approve.
-    ///
-    /// - `user_public_key = None` → generate a new Ed25519 keypair, return private key.
-    /// - `user_public_key = Some(b64)` → validate and use the provided public key, no private key returned.
+    /// Bind a publisher-supplied public key after ownership verification.
+    #[cfg(test)]
     async fn activate_with_key(
         &self,
         mfr: &mut Manufacturer,
-        user_public_key: Option<&str>,
-    ) -> Result<ActivateResponse, MfrError> {
-        let (key_source, private_key, public_key) = match user_public_key {
-            Some(pk) => {
-                crypto::validate_public_key(pk)?;
-                (KeySource::Uploaded, None, pk.to_string())
-            }
-            None => {
-                let (priv_key, pub_key) = crypto::generate_keypair();
-                (KeySource::Generated, Some(priv_key), pub_key)
-            }
-        };
+        public_key: &str,
+    ) -> Result<PublisherVerificationResponse, MfrError> {
+        crypto::validate_public_key(public_key)?;
 
-        mfr.activate(&self.pool, public_key).await?;
+        mfr.activate(&self.pool, public_key.to_string()).await?;
 
         let expires_at = mfr.key_expires_at.ok_or(MfrError::CertificateExpired)?;
-        Ok(ActivateResponse {
-            key_source,
-            private_key,
-            certificate: MfrCertificate {
+        Ok(PublisherVerificationResponse {
+            certificate: PublisherCertificate {
                 key_id: mfr.key_id.clone(),
-                mfr_name: mfr.name.clone(),
-                mfr_pubkey: mfr.public_key.clone(),
+                publisher: mfr.name.clone(),
+                public_key: mfr.public_key.clone(),
                 issued_at: mfr.verified_at.unwrap_or(mfr.created_at),
                 expires_at,
             },
         })
     }
 
-    /// Get the active (unexpired, unverified) challenge for a pending MFR.
-    pub async fn get_challenge(&self, mfr_id: i64) -> Result<GitHubRepoChallenge, MfrError> {
+    /// Get an active challenge for initial verification or key rotation.
+    pub async fn get_challenge(&self, mfr_id: i64) -> Result<PublisherChallenge, MfrError> {
         let mfr = Manufacturer::get(&self.pool, mfr_id)
             .await?
             .ok_or(MfrError::NotFound)?;
-        if mfr.status != MfrStatus::Pending {
+        if !matches!(mfr.status, MfrStatus::Pending | MfrStatus::Active) {
             return Err(MfrError::InvalidStatus(format!(
-                "MFR is not pending (status: {})",
+                "publisher cannot hold a verification challenge (status: {})",
                 mfr.status
             )));
         }
-        GitHubRepoChallenge::get_active(&self.pool, mfr_id)
+        PublisherChallenge::get_active(&self.pool, mfr_id)
             .await?
             .ok_or(MfrError::ChallengeNotFound)
     }
@@ -347,30 +479,32 @@ impl MfrManager {
             .ok_or(MfrError::NotFound)
     }
 
-    pub async fn resolve_by_name(&self, name: &str) -> Result<MfrPublicInfo, MfrError> {
+    pub async fn resolve_by_name(&self, name: &str) -> Result<PublisherPublicInfo, MfrError> {
         let mfr = Manufacturer::get_by_name(&self.pool, name)
             .await?
             .ok_or(MfrError::NotFound)?;
         if mfr.status != MfrStatus::Active {
             return Err(MfrError::InvalidStatus(format!(
-                "MFR '{}' is not active",
+                "Publisher '{}' is not active",
                 name
             )));
         }
         let expires_at = mfr.key_expires_at.ok_or(MfrError::CertificateExpired)?;
-        let cert = MfrCertificate {
+        let cert = PublisherCertificate {
             key_id: mfr.key_id.clone(),
-            mfr_name: mfr.name.clone(),
-            mfr_pubkey: mfr.public_key.clone(),
+            publisher: mfr.name.clone(),
+            public_key: mfr.public_key.clone(),
             issued_at: mfr.verified_at.unwrap_or(mfr.created_at),
             expires_at,
         };
-        Ok(MfrPublicInfo {
+        let descriptor = serde_json::from_str(&mfr.descriptor_json).ok();
+        Ok(PublisherPublicInfo {
             id: mfr.id,
             key_id: mfr.key_id.clone(),
             name: mfr.name,
             public_key: mfr.public_key,
             certificate: cert,
+            descriptor,
         })
     }
 
@@ -379,15 +513,28 @@ impl MfrManager {
         &self,
         name: &str,
         key_id: &str,
-    ) -> Result<MfrPublicInfo, MfrError> {
+    ) -> Result<PublisherPublicInfo, MfrError> {
         let mfr = Manufacturer::get_by_name(&self.pool, name)
             .await?
             .ok_or(MfrError::NotFound)?;
         if mfr.status != MfrStatus::Active {
             return Err(MfrError::InvalidStatus(format!(
-                "MFR '{}' is not active",
+                "Publisher '{}' is not active",
                 name
             )));
+        }
+
+        // Fail closed even on the current-key fast path: if this exact key_id
+        // carries a revoked history row, refuse to serve it before the
+        // short-circuit below could hand back the live public key.
+        if MfrKeyHistory::is_key_id_revoked(&self.pool, mfr.id, key_id).await? {
+            platform::recording::warn!(
+                "rejected resolution of revoked key on current-key path: \
+                 publisher_id={}, key_id={}",
+                mfr.id,
+                key_id
+            );
+            return Err(MfrError::KeyRevoked(key_id.to_string()));
         }
 
         // Is it the current key?
@@ -395,34 +542,35 @@ impl MfrManager {
             return self.resolve_by_name(name).await;
         }
 
-        use crate::model::key_history::MfrKeyHistory;
         let history = MfrKeyHistory::get_by_key_id(&self.pool, mfr.id, key_id)
             .await?
             .ok_or(MfrError::NotFound)?;
 
-        let cert = MfrCertificate {
+        let cert = PublisherCertificate {
             key_id: history.key_id.clone(),
-            mfr_name: mfr.name.clone(),
-            mfr_pubkey: history.public_key.clone(),
+            publisher: mfr.name.clone(),
+            public_key: history.public_key.clone(),
             issued_at: history.created_at,
             expires_at: history.retired_at, // Old keys technically "expired" at retirement time
         };
+        let descriptor = serde_json::from_str(&mfr.descriptor_json).ok();
 
-        Ok(MfrPublicInfo {
+        Ok(PublisherPublicInfo {
             id: mfr.id,
             key_id: history.key_id.clone(),
             name: mfr.name,
             public_key: history.public_key,
             certificate: cert,
+            descriptor,
         })
     }
 
-    /// Verify the MFR key that authenticated a published package.
+    /// Verify the Publisher key that authenticated a published package.
     ///
     /// Natural expiration and normal retirement do not invalidate an existing
     /// package. Explicitly revoked keys do. New packages store signing_key_id
     /// directly; legacy rows fall back to the signed manifest or, if needed,
-    /// cryptographic identification across the MFR's non-revoked keys.
+    /// cryptographic identification across the Publisher Registry's non-revoked keys.
     pub async fn verify_published_package_signing_key(
         &self,
         package: &ActrPackage,
@@ -432,12 +580,12 @@ impl MfrManager {
             .ok_or(MfrError::NotFound)?;
         if mfr.name != package.manufacturer {
             return Err(MfrError::InvalidRequest(
-                "package manufacturer does not match its MFR record".to_string(),
+                "package publisher does not match its registry record".to_string(),
             ));
         }
         if mfr.status != MfrStatus::Active {
             return Err(MfrError::InvalidStatus(format!(
-                "MFR '{}' is not active",
+                "Publisher '{}' is not active",
                 mfr.name
             )));
         }
@@ -509,46 +657,56 @@ impl MfrManager {
         Err(MfrError::InvalidSignature)
     }
 
-    /// Admin: Rotate the signing key for a manufacturer.
+    /// Admin: rotate the signing key to a publisher-supplied public key.
+    ///
+    /// Actrix never generates or handles publisher private keys in production.
     pub async fn renew_key(
         &self,
         mfr_id: i64,
-        user_public_key: Option<&str>,
-    ) -> Result<ActivateResponse, MfrError> {
+        user_public_key: &str,
+    ) -> Result<PublisherVerificationResponse, MfrError> {
         let mut mfr = Manufacturer::get(&self.pool, mfr_id)
             .await?
             .ok_or(MfrError::NotFound)?;
 
-        let (key_source, private_key, public_key) = match user_public_key {
-            Some(pk) => {
-                crypto::validate_public_key(pk)?;
-                (KeySource::Uploaded, None, pk.to_string())
-            }
-            None => {
-                let (priv_key, pub_key) = crypto::generate_keypair();
-                (KeySource::Generated, Some(priv_key), pub_key)
-            }
-        };
+        crypto::validate_public_key(user_public_key)?;
+        let public_key = user_public_key.to_string();
+
+        // Historical-key blacklist on the renew path too. Without this, renew
+        // could be abused to ride A -> B -> revoke(A) -> A back into the current
+        // key slot: rotating away archives the outgoing key, but nothing stopped
+        // a later renew from reinstating a previously retired or revoked key.
+        // Mirror the identical guard on the HTTPS verification path so any key_id
+        // ever archived (retired or revoked) is refused as an incoming key.
+        let incoming_key_id = crypto::compute_key_id_from_b64(&public_key)?;
+        if MfrKeyHistory::key_id_ever_used(&self.pool, mfr.id, &incoming_key_id).await? {
+            platform::recording::warn!(
+                "rejected reinstatement of previously used publisher key on renew: \
+                 publisher_id={}, key_id={}",
+                mfr.id,
+                incoming_key_id
+            );
+            return Err(MfrError::InvalidRequest(
+                "a previously used publisher key must not be reinstated".to_string(),
+            ));
+        }
 
         mfr.renew_key(&self.pool, public_key).await?;
 
         let expires_at = mfr.key_expires_at.ok_or(MfrError::CertificateExpired)?;
 
         platform::recording::info!(
-            "MFR key renewed: mfr_id={}, name={}, new_key_id={}, key_source={:?}",
+            "Publisher key renewed: publisher_id={}, name={}, new_key_id={}",
             mfr_id,
             mfr.name,
-            mfr.key_id,
-            key_source
+            mfr.key_id
         );
 
-        Ok(ActivateResponse {
-            key_source,
-            private_key,
-            certificate: MfrCertificate {
+        Ok(PublisherVerificationResponse {
+            certificate: PublisherCertificate {
                 key_id: mfr.key_id.clone(),
-                mfr_name: mfr.name.clone(),
-                mfr_pubkey: mfr.public_key.clone(),
+                publisher: mfr.name.clone(),
+                public_key: mfr.public_key.clone(),
                 issued_at: mfr.updated_at.unwrap_or(mfr.created_at),
                 expires_at,
             },
@@ -556,7 +714,7 @@ impl MfrManager {
     }
 
     pub async fn publish_package(&self, req: PublishRequest) -> Result<ActrPackage, MfrError> {
-        let mfr = Manufacturer::get_by_name(&self.pool, &req.manufacturer)
+        let mfr = Manufacturer::get_by_name(&self.pool, &req.publisher)
             .await?
             .ok_or(MfrError::NotFound)?;
         Self::validate_publish_authority(&mfr)?;
@@ -580,7 +738,7 @@ impl MfrManager {
                 // Ensure nonce was issued for this manufacturer
                 if entry.mfr_id != mfr.id {
                     platform::recording::warn!(
-                        "publish nonce mfr_id mismatch: nonce={}, request={}",
+                        "publish nonce publisher_id mismatch: nonce={}, request={}",
                         entry.mfr_id,
                         mfr.id
                     );
@@ -592,15 +750,14 @@ impl MfrManager {
                 let body_bytes = signable_publish_body_bytes(&req, nonce_b64)?;
                 let body_sha256 = hex::encode(Sha256::digest(&body_bytes));
                 let nonce_hex = hex::encode(&nonce_bytes);
-                let payload =
-                    build_publish_auth_payload(&req.manufacturer, &nonce_hex, &body_sha256);
+                let payload = build_publish_auth_payload(&req.publisher, &nonce_hex, &body_sha256);
 
                 let valid =
                     crypto::verify_signature(payload.as_bytes(), nonce_sig_b64, &mfr.public_key)?;
                 if !valid {
                     platform::recording::warn!(
-                        "publish nonce signature invalid: manufacturer={}",
-                        req.manufacturer
+                        "publish nonce signature invalid: publisher={}",
+                        req.publisher
                     );
                     return Err(MfrError::Unauthorized);
                 }
@@ -609,8 +766,8 @@ impl MfrManager {
             }
             _ => {
                 platform::recording::warn!(
-                    "publish request missing nonce/nonce_sig: manufacturer={}",
-                    req.manufacturer
+                    "publish request missing nonce/nonce_sig: publisher={}",
+                    req.publisher
                 );
                 return Err(MfrError::Unauthorized);
             }
@@ -626,25 +783,25 @@ impl MfrManager {
         // Step 4: Atomically consume nonce (only after both signatures verified)
         PublishNonce::consume(&self.pool, nonce_entry.id).await?;
         platform::recording::info!(
-            "publish nonce verified and consumed: manufacturer={}",
-            req.manufacturer
+            "publish nonce verified and consumed: publisher={}",
+            req.publisher
         );
 
         // Step 5: Verify outer fields match manifest content (parse as TOML)
         let manifest_toml: toml::Value = toml::from_str(&req.manifest)
             .map_err(|e| MfrError::InvalidRequest(format!("manifest is not valid TOML: {}", e)))?;
 
-        // Check manufacturer
+        // Check Publisher
         let m = manifest_toml
-            .get("manufacturer")
+            .get("publisher")
             .and_then(|v| v.as_str())
             .ok_or_else(|| {
-                MfrError::InvalidRequest("manifest missing required field 'manufacturer'".into())
+                MfrError::InvalidRequest("manifest missing required field 'publisher'".into())
             })?;
-        if m != req.manufacturer {
+        if m != req.publisher {
             return Err(MfrError::InvalidRequest(format!(
-                "manifest manufacturer '{}' != request '{}'",
-                m, req.manufacturer
+                "manifest publisher '{}' != request '{}'",
+                m, req.publisher
             )));
         }
 
@@ -685,7 +842,7 @@ impl MfrManager {
             && manifest_key_id != mfr.key_id
         {
             return Err(MfrError::InvalidRequest(format!(
-                "manifest signing_key_id '{}' != current MFR key '{}'",
+                "manifest signing_key_id '{}' != current Publisher key '{}'",
                 manifest_key_id, mfr.key_id
             )));
         }
@@ -711,7 +868,7 @@ impl MfrManager {
         let pkg = ActrPackage::publish(
             &self.pool,
             mfr.id,
-            &req.manufacturer,
+            &req.publisher,
             &req.name,
             &req.version,
             &req.target,
@@ -724,13 +881,13 @@ impl MfrManager {
 
         if req.proto_files.is_some() {
             platform::recording::info!(
-                "actor package published with proto filing: type_str={}, mfr_id={}",
+                "actor package published with proto filing: type_str={}, publisher_id={}",
                 pkg.type_str,
                 mfr.id
             );
         } else {
             platform::recording::info!(
-                "actor package published: type_str={}, mfr_id={}",
+                "actor package published: type_str={}, publisher_id={}",
                 pkg.type_str,
                 mfr.id
             );
@@ -746,9 +903,9 @@ impl MfrManager {
 
     pub async fn list_packages(
         &self,
-        mfr_name: Option<&str>,
+        publisher: Option<&str>,
     ) -> Result<Vec<ActrPackage>, MfrError> {
-        if let Some(name) = mfr_name {
+        if let Some(name) = publisher {
             let mfr = Manufacturer::get_by_name(&self.pool, name)
                 .await?
                 .ok_or(MfrError::NotFound)?;
@@ -789,7 +946,7 @@ impl MfrManager {
             .ok_or(MfrError::NotFound)?;
         mfr.suspend(&self.pool).await?;
         platform::recording::warn!(
-            "MFR suspended by admin: mfr_id={}, name={}",
+            "Publisher suspended by admin: publisher_id={}, name={}",
             mfr_id,
             mfr.name
         );
@@ -802,7 +959,7 @@ impl MfrManager {
             .ok_or(MfrError::NotFound)?;
         mfr.reinstate(&self.pool).await?;
         platform::recording::info!(
-            "MFR reinstated by admin: mfr_id={}, name={}",
+            "Publisher reinstated by admin: publisher_id={}, name={}",
             mfr_id,
             mfr.name
         );
@@ -813,7 +970,7 @@ impl MfrManager {
         &self,
         mfr_id: i64,
     ) -> Result<Vec<crate::model::key_history::MfrKeyHistory>, MfrError> {
-        // ensure MFR exists
+        // Ensure the Publisher exists.
         let _ = Manufacturer::get(&self.pool, mfr_id)
             .await?
             .ok_or(MfrError::NotFound)?;
@@ -822,13 +979,36 @@ impl MfrManager {
 
     pub async fn admin_revoke_historical_key(&self, history_id: i64) -> Result<(), MfrError> {
         crate::model::key_history::MfrKeyHistory::revoke(&self.pool, history_id).await?;
-        platform::recording::warn!("MFR historical key revoked: history_id={}", history_id);
+        platform::recording::warn!(
+            "Publisher historical key revoked: history_id={}",
+            history_id
+        );
+        Ok(())
+    }
+
+    /// Emergency-revoke a publisher's CURRENTLY ACTIVE signing key.
+    ///
+    /// `admin_revoke_historical_key` only covers keys already rotated away; this
+    /// handles a compromised live key. Afterwards the publisher holds no usable
+    /// key (publish and resolution fail closed) and must call `renew_key` to
+    /// rotate to a fresh key - the rollback blacklist prevents reinstating the
+    /// revoked one. See `Manufacturer::revoke_active_key` for the exact post-state.
+    pub async fn admin_revoke_active_key(&self, mfr_id: i64) -> Result<(), MfrError> {
+        let mut mfr = Manufacturer::get(&self.pool, mfr_id)
+            .await?
+            .ok_or(MfrError::NotFound)?;
+        mfr.revoke_active_key(&self.pool).await?;
+        platform::recording::warn!(
+            "Publisher active signing key revoked by admin: publisher_id={}, name={}",
+            mfr_id,
+            mfr.name
+        );
         Ok(())
     }
 
     pub async fn admin_delete(&self, mfr_id: i64) -> Result<(), MfrError> {
         Manufacturer::delete(&self.pool, mfr_id).await?;
-        platform::recording::warn!("MFR deleted by admin: mfr_id={}", mfr_id);
+        platform::recording::warn!("Publisher deleted by admin: publisher_id={}", mfr_id);
         Ok(())
     }
 }

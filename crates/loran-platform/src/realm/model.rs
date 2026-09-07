@@ -1,6 +1,6 @@
 //! Realm core data structures and database operations
 //!
-//! Defines the core data structures and database CRUD operations for the Realm entity.
+//! Defines the core data structures and database CRUD operations for the Realm entity
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,8 @@ pub enum RealmStatus {
     Suspended,
 }
 
-/// Realm is a virtual concept used to isolate resources of different applications.
+/// Realm is the administrative and cryptographic trust boundary of one Actrix
+/// production instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Realm {
     /// DB auto-increment primary key, starting at 2^25 = 33554432
@@ -73,10 +74,17 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Realm {
             _ => None,
         };
 
+        let status = RealmStatus::from_str(&status_str).map_err(|_| {
+            sqlx::Error::Decode(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("unknown realm status in database: {status_str}"),
+            )))
+        })?;
+
         Ok(Self {
             id: id as u32,
             name,
-            status: RealmStatus::from_str(&status_str).unwrap_or_default(),
+            status,
             enabled,
             expires_at: expires_at.map(|v| v as u64),
             created_at: created_at as u64,
@@ -93,8 +101,24 @@ impl Realm {
     /// `secret_hash` is the SHA256 hash of the realm secret (must be non-empty).
     /// Returns the Realm with its auto-generated `id`.
     pub async fn create(name: String, secret_hash: String) -> Result<Self, RealmError> {
+        if name.trim().is_empty() {
+            return Err(RealmError::ValidationError(
+                "realm name must not be empty".to_string(),
+            ));
+        }
+        if secret_hash.trim().is_empty() {
+            return Err(RealmError::ValidationError(
+                "realm secret hash must not be empty".to_string(),
+            ));
+        }
+
         let db = get_database();
         let pool = db.get_pool();
+        if !Self::get_all().await?.is_empty() {
+            return Err(RealmError::ValidationError(
+                "this Actrix instance already has its single realm".to_string(),
+            ));
+        }
         let now = Utc::now().timestamp();
 
         let result = sqlx::query(
@@ -145,6 +169,14 @@ impl Realm {
 
         let db = get_database();
         let pool = db.get_pool();
+        if let Some(existing) = Self::get_all().await?.first()
+            && existing.id != id
+        {
+            return Err(RealmError::ValidationError(format!(
+                "this Actrix instance is already bound to realm {}",
+                existing.id
+            )));
+        }
         let now = Utc::now().timestamp();
         let (prev_hash, prev_valid_until) = match &secret_previous {
             Some((hash, valid_until)) if !hash.trim().is_empty() => {
@@ -187,6 +219,15 @@ impl Realm {
 
     /// Save (UPDATE) an existing realm to the database.
     pub async fn save(&mut self) -> Result<(), RealmError> {
+        // Enforce the non-empty secret invariant here as well, so no code path
+        // can silently persist an empty secret. This mirrors the storage-layer
+        // CHECK constraint and the validation in `create` / `upsert_managed`.
+        if self.secret_current.trim().is_empty() {
+            return Err(RealmError::ValidationError(
+                "realm secret_current must not be empty".to_string(),
+            ));
+        }
+
         let db = get_database();
         let pool = db.get_pool();
         let now = Utc::now().timestamp();

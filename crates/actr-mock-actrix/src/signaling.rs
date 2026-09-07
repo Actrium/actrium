@@ -22,7 +22,9 @@ use actr_protocol::{
 };
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
+use axum::http::{HeaderMap, header::SEC_WEBSOCKET_PROTOCOL};
 use axum::response::IntoResponse;
+use base64::Engine as _;
 use bytes::Bytes;
 use ed25519_dalek::Signer;
 use futures_util::{SinkExt, StreamExt};
@@ -31,17 +33,11 @@ use tokio::sync::mpsc;
 
 use crate::state::{MockState, RegisteredActor};
 
-/// Query parameters the real actrix gate accepts (actor_id, key_id, claims,
-/// signature). The mock uses `actor_id` to tie incoming WebSocket connections
-/// back to a previously HTTP-registered actor so that route discovery works
-/// even when the actor never sends a `PeerToSignaling::RegisterRequest`.
+/// Legacy test-only query parameter. Production clients carry their actor
+/// identity in the `x-actr-id` upgrade header.
 #[derive(Debug, Default, Deserialize)]
-#[allow(dead_code)]
 pub struct WsQuery {
     actor_id: Option<String>,
-    key_id: Option<String>,
-    claims: Option<String>,
-    signature: Option<String>,
 }
 
 /// Axum handler: upgrades the request to a WebSocket and hands it to the
@@ -49,10 +45,30 @@ pub struct WsQuery {
 pub async fn ws_upgrade_handler(
     ws: WebSocketUpgrade,
     Query(params): Query<WsQuery>,
+    headers: HeaderMap,
     State(state): State<Arc<MockState>>,
 ) -> impl IntoResponse {
-    let actor_id_param = params.actor_id.clone();
-    ws.on_upgrade(move |socket| handle_connection(socket, state, actor_id_param))
+    let actor_id_param = headers
+        .get("x-actr-id")
+        .and_then(|value| value.to_str().ok())
+        .map(ToString::to_string)
+        .or_else(|| browser_actor_id(&headers))
+        .or(params.actor_id);
+    ws.protocols(["actr.v1"])
+        .on_upgrade(move |socket| handle_connection(socket, state, actor_id_param))
+}
+
+fn browser_actor_id(headers: &HeaderMap) -> Option<String> {
+    let encoded = headers
+        .get_all(SEC_WEBSOCKET_PROTOCOL)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(',').map(str::trim))
+        .find_map(|protocol| protocol.strip_prefix("actr.id."))?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded)
+        .ok()?;
+    String::from_utf8(bytes).ok()
 }
 
 async fn handle_connection(
@@ -74,9 +90,9 @@ async fn handle_connection(
         .await
         .insert(client_id.clone(), client_tx);
 
-    // If the peer connected with `?actor_id=...` (web/service-worker path
-    // after HTTP register, plus integration tests that pre-pick actor IDs),
-    // bind its registry entry to this WS client_id so relays can reach it.
+    // If the peer supplied an Actor ID through native upgrade headers or the
+    // browser subprotocol transport, bind its registry entry to this WS
+    // client_id so relays can reach it.
     //
     // If the actor was *not* previously HTTP-registered, lazily create a
     // registry stub. Production AIS bootstraps via HTTP first; integration
@@ -294,6 +310,10 @@ pub async fn build_register_ok(
     };
 
     let claims = actr_protocol::IdentityClaims {
+        protocol_version: 1,
+        issuer: format!("actr:realm:{}:authority", req.realm.realm_id),
+        provider: "actrix-official".to_string(),
+        audience: "actr.signaling".to_string(),
         realm_id: req.realm.realm_id,
         // Use the full ActrId string representation so WebSocketGate's
         // credential verifier can match it against the X-Actr-Source-ID header.
@@ -311,6 +331,10 @@ pub async fn build_register_ok(
     };
 
     let turn_credential = TurnCredential {
+        protocol_version: 1,
+        realm_id: req.realm.realm_id,
+        provider: "actrix-official".to_string(),
+        audience: "actr.turn".to_string(),
         username: format!("{}:{}", chrono::Utc::now().timestamp() + 86400, serial),
         password: format!("mock-turn-{serial:016x}"),
         expires_at: chrono::Utc::now().timestamp() as u64 + 86400,

@@ -4,7 +4,8 @@ use reqwest::StatusCode;
 use serde_json::Value;
 use signer::{
     GenerateSigningKeyRequest, GenerateSigningKeyResponse, SignerServiceConfig, create_router,
-    create_signer_state, types::SignRequest,
+    create_signer_state,
+    types::{SignRequest, sign_request_payload},
 };
 use tempfile::TempDir;
 use tokio::net::TcpListener;
@@ -26,7 +27,7 @@ async fn start_test_server(psk: &str) -> TestServer {
     let config = SignerServiceConfig::default();
     let state = create_signer_state(&config, MemoryStorage::new(), psk, temp_dir.path())
         .await
-        .expect("Failed to create KS state");
+        .expect("Failed to create Signer state");
     let app = create_router(state);
 
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -38,7 +39,7 @@ async fn start_test_server(psk: &str) -> TestServer {
     let handle = tokio::spawn(async move {
         axum::serve(listener, app)
             .await
-            .expect("KS test server exited unexpectedly");
+            .expect("Signer test server exited unexpectedly");
     });
 
     TestServer {
@@ -113,7 +114,7 @@ async fn test_http_health_and_key_lifecycle() {
 
     // test sign endpoint
     let message = b"hello, world";
-    let sign_payload = format!("sign:{}", generated.key_id);
+    let sign_payload = sign_request_payload(generated.key_id, message);
     let sign_cred = sign_request(psk, &sign_payload);
     let sign_req = SignRequest {
         key_id: generated.key_id,
@@ -215,17 +216,61 @@ async fn test_http_sign_rejects_invalid_signature() {
 }
 
 #[tokio::test]
+async fn test_http_sign_authentication_binds_exact_message_and_path_key() {
+    let psk = "test-ks-psk";
+    let server = start_test_server(psk).await;
+    let client = reqwest::Client::new();
+    let generated = generate_signing_key_via_http(&client, &server.base_url, psk).await;
+    let approved_message = b"approved";
+    let credential = sign_request(
+        psk,
+        &sign_request_payload(generated.key_id, approved_message),
+    );
+
+    let tampered = SignRequest {
+        key_id: generated.key_id,
+        message: b"tampered".to_vec(),
+        credential,
+    };
+    let response = client
+        .post(format!("{}/sign/{}", server.base_url, generated.key_id))
+        .json(&tampered)
+        .send()
+        .await
+        .expect("tampered request should complete");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let wrong_path_message = b"approved";
+    let wrong_path = SignRequest {
+        key_id: generated.key_id,
+        message: wrong_path_message.to_vec(),
+        credential: sign_request(
+            psk,
+            &sign_request_payload(generated.key_id, wrong_path_message),
+        ),
+    };
+    let response = client
+        .post(format!("{}/sign/{}", server.base_url, generated.key_id + 1))
+        .json(&wrong_path)
+        .send()
+        .await
+        .expect("path mismatch request should complete");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn test_http_sign_nonexistent_key_returns_not_found() {
     let psk = "test-ks-psk";
     let server = start_test_server(psk).await;
     let client = reqwest::Client::new();
 
     let missing_key_id = 99_999_u32;
-    let sign_payload = format!("sign:{missing_key_id}");
+    let message = b"test";
+    let sign_payload = sign_request_payload(missing_key_id, message);
     let sign_cred = sign_request(psk, &sign_payload);
     let sign_req = SignRequest {
         key_id: missing_key_id,
-        message: b"test".to_vec(),
+        message: message.to_vec(),
         credential: sign_cred,
     };
 

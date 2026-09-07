@@ -3,9 +3,9 @@ exports = ["protos/local/probe.proto"]
 
 [package]
 name = "SwiftTsWorkloadApp"
-manufacturer = "actrium"
+manufacturer = "e2e.actrium.test"
 version = "0.1.0"
 description = "Actrium SwiftTsWorkloadApp — iOS linked runtime"
 
 [dependencies]
-duplex_echo = { actr_type = "actrium:DuplexEchoService:1.0.0" }
+duplex_echo = { actr_type = "e2e.actrium.test:DuplexEchoService:1.0.0" }

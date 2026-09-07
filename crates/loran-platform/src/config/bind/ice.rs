@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// UDP network configuration for STUN and TURN services.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct IceBindConfig {
     /// Bind IP address
     ///

@@ -21,27 +21,28 @@ port = 3478
 [turn]
 relay_port_range = "49152-65535"
 realm = "actrix.local"
+turn_secret = "0123456789abcdef0123456789abcdef"
 
 [services.signer]
 [services.signer.storage]
 backend = "sqlite"
 key_ttl_seconds = 3600
 [services.signer.storage.sqlite]
-path = "ks.db"
 
 [services.ais]
 [services.ais.server]
+worker_id = 0
 token_ttl_secs = 3600
 # Development-only 32-byte renewal-token key.
 renewal_token_secret = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
-[services.mfr]
+[services.publisher_registry]
 
 [services.signaling]
 [services.signaling.server]
 ws_path = "/signaling"
 
 [control.admin_ui]
-password = "testpassword123"
+password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
 [recording]

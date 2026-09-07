@@ -11,7 +11,7 @@ async fn cache_returns_cached_key_without_http() {
 
     let mut server = mockito::Server::new_async().await;
     let mock = server
-        .mock("GET", "/mfr/test-mfr/verifying_key")
+        .mock("GET", "/registry/publishers/test-mfr/verifying-key")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(format!(r#"{{"public_key":"{key_b64}"}}"#))
@@ -35,7 +35,7 @@ async fn cache_returns_cached_key_without_http() {
 async fn fetch_fails_on_404() {
     let mut server = mockito::Server::new_async().await;
     let _mock = server
-        .mock("GET", "/mfr/unknown-mfr/verifying_key")
+        .mock("GET", "/registry/publishers/unknown-mfr/verifying-key")
         .with_status(404)
         .create_async()
         .await;
@@ -71,7 +71,7 @@ async fn get_or_fetch_with_key_id_hits_cache_on_second_call() {
 
     let mut server = mockito::Server::new_async().await;
     let mock = server
-        .mock("GET", "/mfr/m/verifying_key")
+        .mock("GET", "/registry/publishers/m/verifying-key")
         .match_query(mockito::Matcher::Any)
         .with_status(200)
         .with_header("content-type", "application/json")
@@ -91,7 +91,7 @@ async fn get_or_fetch_with_key_id_hits_cache_on_second_call() {
 async fn fetch_fails_on_malformed_json_body() {
     let mut server = mockito::Server::new_async().await;
     let _mock = server
-        .mock("GET", "/mfr/badjson/verifying_key")
+        .mock("GET", "/registry/publishers/badjson/verifying-key")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body("this is not json")
@@ -111,7 +111,7 @@ async fn fetch_fails_on_malformed_json_body() {
 async fn fetch_fails_on_invalid_base64_key() {
     let mut server = mockito::Server::new_async().await;
     let _mock = server
-        .mock("GET", "/mfr/badb64/verifying_key")
+        .mock("GET", "/registry/publishers/badb64/verifying-key")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(r#"{"public_key":"@@@not-valid-base64@@@"}"#)
@@ -132,7 +132,7 @@ async fn fetch_fails_on_wrong_key_length() {
     let short_b64 = base64::engine::general_purpose::STANDARD.encode([0u8; 16]);
     let mut server = mockito::Server::new_async().await;
     let _mock = server
-        .mock("GET", "/mfr/badlen/verifying_key")
+        .mock("GET", "/registry/publishers/badlen/verifying-key")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(format!(r#"{{"public_key":"{short_b64}"}}"#))

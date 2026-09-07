@@ -40,7 +40,7 @@ pub enum PkgCommand {
     Sign(PkgSignArgs),
     /// Verify a signed .actr package.
     Verify(PkgVerifyArgs),
-    /// Generate an Ed25519 MFR signing key pair.
+    /// Generate an Ed25519 Publisher signing key pair.
     Keygen(PkgKeygenArgs),
 }
 
@@ -79,7 +79,7 @@ pub struct PkgSignArgs {
     )]
     pub manifest_path: PathBuf,
 
-    /// Path to MFR signing key file (overrides config mfr.keychain)
+    /// Path to Publisher signing key file
     #[arg(long, short = 'k', value_name = "FILE")]
     pub key: Option<PathBuf>,
 
@@ -102,7 +102,7 @@ pub struct PkgVerifyArgs {
     #[arg(long, short = 'p', value_name = "FILE")]
     pub package: PathBuf,
 
-    /// Public key file (default: derive from config mfr.keychain)
+    /// Public key file (default: derive from the configured Publisher keychain)
     #[arg(long, value_name = "FILE")]
     pub pubkey: Option<PathBuf>,
 }

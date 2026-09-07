@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 /// Unified HTTP binding configuration. Configuring `cert` and `key` enables TLS (HTTPS),
 /// otherwise it is plain HTTP mode.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct HttpBindConfig {
     /// Domain name
     ///

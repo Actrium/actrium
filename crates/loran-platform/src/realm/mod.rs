@@ -1,6 +1,6 @@
-//! Realm management module
+//! Realm Management Module
 //!
-//! Provides multi-realm management functionality, including realm configuration, access control, data migration, etc.
+//! Provides single-instance Realm management capabilities, including configuration, access control, and data migration.
 
 // Submodules
 pub mod acl;

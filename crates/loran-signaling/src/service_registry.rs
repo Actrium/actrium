@@ -1677,8 +1677,14 @@ mod tests {
         assert_eq!(acme_only[0].actor_id.r#type.manufacturer, "acme");
     }
 
+    /// Disabled under the single-Realm v1 production profile: the `realm`
+    /// table carries a singleton unique index (`idx_realm_singleton`) and
+    /// `actoracl.realm_id` has a FK to `realm(id)`, so seeding three distinct
+    /// cross-realm rows is impossible. The cross-realm ACL *logic* in
+    /// `check_discovery_acl` is retained; re-enable when multi-realm returns.
     #[tokio::test]
     #[serial]
+    #[ignore = "single-Realm v1 schema forbids multi-realm seeding"]
     async fn test_check_discovery_acl_cross_realm_and_full_type() -> anyhow::Result<()> {
         setup_test_db().await?;
 

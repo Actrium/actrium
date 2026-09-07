@@ -437,7 +437,8 @@ fn sender_source_uses_caller_id() {
         .build()
         .unwrap();
     let caller =
-        actr_protocol::ActrId::from_string_repr("1a2b3c@101/acme:echo-service:1.0.0").unwrap();
+        actr_protocol::ActrId::from_string_repr("1a2b3c@101/apps.example.com/echo-service@1.0.0")
+            .unwrap();
     let with = spec.extract("p.P.Ping", Some(&caller), &[]);
     let without = spec.extract("p.P.Ping", None, &[]);
     match (&with, &without) {

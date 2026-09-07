@@ -1,7 +1,7 @@
 //! Realm secret management
 //!
-//! Used by Admin to assign and by AIS to verify realm secrets.
-//! Secret data is stored directly in the Realm table's secret_current / secret_previous fields.
+//! Used for Admin allocation and AIS validation of realm secrets.
+//! Secret data is stored directly in the secret_current / secret_previous fields of the Realm table.
 
 use super::{Realm, RealmError};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -9,16 +9,16 @@ use chrono::Utc;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 
-/// HTTP header for signaling -> AIS to pass the realm secret
+/// HTTP header for passing the realm secret from signaling to AIS
 pub const REALM_SECRET_HEADER: &str = "x-actrix-realm-secret";
 
-/// Default grace window for the previous secret (4 hours)
+/// Default grace window for the old secret (4 hours)
 pub const DEFAULT_REALM_SECRET_PREVIOUS_GRACE_SECS: u64 = 4 * 3600;
 
 /// Realm secret verification result
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RealmSecretCheck {
-    /// Realm has no secret configured (backward compatible with legacy realms)
+    /// Realm has no secret configured (backward compatibility with legacy realms)
     NotConfigured,
     /// Matches the current secret
     ValidCurrent,
@@ -45,7 +45,7 @@ pub struct RealmSecretState {
     pub previous_valid_until: Option<u64>,
 }
 
-/// Generate a secret for joining a realm (URL-safe, convenient for CLI / URL passthrough)
+/// Generate a secret for joining a realm (URL-safe, convenient for CLI / URL pass-through)
 pub fn generate_realm_secret() -> String {
     let mut bytes = [0u8; 24];
     rand::thread_rng().fill_bytes(&mut bytes);
@@ -59,9 +59,28 @@ pub fn hash_realm_secret(secret: &str) -> String {
     hex::encode(hasher.finalize())
 }
 
+/// Compare two secret hashes in constant time.
+///
+/// Both operands are fixed-length SHA-256 hex strings, so their lengths carry no
+/// secret information. The byte loop avoids the early-return short circuit of
+/// `==`, so total comparison time does not depend on how many leading bytes
+/// match, closing the timing side channel on hash verification.
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    let a = a.as_bytes();
+    let b = b.as_bytes();
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 /// Rotate the realm secret (the old secret enters the grace window)
 ///
-/// Load Realm -> current -> previous -> generate new hash -> save
+/// Load Realm → current→previous → generate new hash → save
 pub async fn rotate_realm_secret(
     realm_id: u32,
     previous_grace_secs: Option<u64>,
@@ -133,14 +152,14 @@ pub async fn verify_realm_secret(
     };
 
     let provided_hash = hash_realm_secret(provided);
-    if provided_hash == realm.secret_current {
+    if constant_time_eq(&provided_hash, &realm.secret_current) {
         return Ok(RealmSecretCheck::ValidCurrent);
     }
 
     // Check previous secret within grace window
     if let Some((prev_hash, valid_until)) = &realm.secret_previous {
         let now = Utc::now().timestamp() as u64;
-        if now <= *valid_until && provided_hash == *prev_hash {
+        if now <= *valid_until && constant_time_eq(&provided_hash, prev_hash) {
             return Ok(RealmSecretCheck::ValidPrevious);
         }
     }
@@ -197,14 +216,11 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn test_not_configured_secret() -> anyhow::Result<()> {
+    async fn test_realm_without_secret_is_rejected() -> anyhow::Result<()> {
         setup_test_db().await?;
 
-        // Create realm with empty secret
-        let realm = Realm::create("test-no-secret".to_string(), String::new()).await?;
-
-        let result = verify_realm_secret(realm.id, None).await?;
-        assert_eq!(result, RealmSecretCheck::NotConfigured);
+        let result = Realm::create("test-no-secret".to_string(), String::new()).await;
+        assert!(matches!(result, Err(RealmError::ValidationError(_))));
 
         Ok(())
     }

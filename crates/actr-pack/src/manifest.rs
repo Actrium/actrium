@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 /// Package manifest, parsed from manifest.toml inside .actr package.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageManifest {
+    #[serde(rename = "publisher")]
     pub manufacturer: String,
     pub name: String,
     pub version: String,
@@ -152,9 +153,9 @@ pub struct ManifestMetadata {
 }
 
 impl PackageManifest {
-    /// Full type string: manufacturer:name:version
+    /// Canonical program identity: publisher/program@version.
     pub fn actr_type_str(&self) -> String {
-        format!("{}:{}:{}", self.manufacturer, self.name, self.version)
+        format!("{}/{}@{}", self.manufacturer, self.name, self.version)
     }
 
     /// Parse from TOML string
@@ -166,5 +167,39 @@ impl PackageManifest {
     pub fn to_toml(&self) -> Result<String, crate::error::PackError> {
         toml::to_string_pretty(self)
             .map_err(|e| crate::error::PackError::ManifestParseError(e.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BinaryEntry, PackageManifest};
+
+    #[test]
+    fn package_manifest_uses_publisher_identity_contract() {
+        let manifest = PackageManifest {
+            manufacturer: "apps.example.com".to_string(),
+            name: "editor".to_string(),
+            version: "1.2.0".to_string(),
+            binary: BinaryEntry {
+                path: "bin/editor.wasm".to_string(),
+                target: "wasm32-wasip2".to_string(),
+                hash: "00".repeat(32),
+                size: None,
+                kind: None,
+            },
+            signature_algorithm: "ed25519".to_string(),
+            signing_key_id: None,
+            resources: Vec::new(),
+            proto_files: Vec::new(),
+            lock_file: None,
+            metadata: Default::default(),
+        };
+
+        let encoded = manifest.to_toml().unwrap();
+        assert!(encoded.contains("publisher = \"apps.example.com\""));
+        assert!(!encoded.contains("manufacturer"));
+        assert_eq!(manifest.actr_type_str(), "apps.example.com/editor@1.2.0");
+        let decoded = PackageManifest::from_toml(&encoded).unwrap();
+        assert_eq!(decoded.manufacturer, "apps.example.com");
     }
 }

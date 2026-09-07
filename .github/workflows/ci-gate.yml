@@ -193,6 +193,22 @@ jobs:
           --ignore RUSTSEC-2024-0437
           --ignore RUSTSEC-2023-0071
 
+  actrix_migration:
+    name: Actrix SQLite Migration
+    needs: determine
+    if: needs.determine.outputs.rust_core == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Test schema v1 migration
+        run: python -m unittest scripts/loran/tests/test_migrate_schema_v1.py -v
+
   rust:
     name: Rust
     needs: determine
@@ -1076,6 +1092,7 @@ jobs:
       - e2e_rust
       - e2e_package_runtime
       - audit
+      - actrix_migration
       - rust
       - typescript
       - typescript_workload
@@ -1096,6 +1113,7 @@ jobs:
       REASONS_JSON: ${{ needs.determine.outputs.reasons_json }}
       RUST_RESULT: ${{ needs.rust.result }}
       AUDIT_RESULT: ${{ needs.audit.result }}
+      ACTRIX_MIGRATION_RESULT: ${{ needs.actrix_migration.result }}
       TYPESCRIPT_RESULT: ${{ needs.typescript.result }}
       TYPESCRIPT_WORKLOAD_RESULT: ${{ needs.typescript_workload.result }}
       PYTHON_CODEGEN_RESULT: ${{ needs.python_codegen.result }}
@@ -1121,6 +1139,7 @@ jobs:
           results = {
               "identity": os.environ["IDENTITY_RESULT"],
               "audit": os.environ["AUDIT_RESULT"],
+              "actrix_migration": os.environ["ACTRIX_MIGRATION_RESULT"],
               "rust": os.environ["RUST_RESULT"],
               "typescript": os.environ["TYPESCRIPT_RESULT"],
               "typescript_workload": os.environ["TYPESCRIPT_WORKLOAD_RESULT"],

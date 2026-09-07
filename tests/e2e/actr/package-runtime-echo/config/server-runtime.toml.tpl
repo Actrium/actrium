@@ -38,4 +38,4 @@ turn_urls = ["turn:127.0.0.1:3478"]
 
 [[acl.rules]]
 permission = "allow"
-type = "actrium:pkg-runtime-echo-client-guest:0.1.0"
+type = "e2e-actrium-local:pkg-runtime-echo-client-guest:0.1.0"

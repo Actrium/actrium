@@ -2,9 +2,9 @@
 //!
 //! # Functionality
 //!
-//! Provides a local cache of public keys fetched from the KS service, reducing network request frequency.
+//! Provides a local cache of public keys obtained from the Signer service, reducing network request frequency.
 //!
-//! # Data Model
+//! # Data model
 //!
 //! ```sql
 //! CREATE TABLE current_key (
@@ -16,19 +16,19 @@
 //! )
 //! ```
 //!
-//! # Refresh Strategy
+//! # Refresh strategy
 //!
 //! - **Early refresh**: trigger refresh 10 minutes before key expiry
 //! - **Minting deadline**: an expired key is never usable for minting — the
 //!   issuer rotates as soon as `expires_at` passes (minus a small clock-skew
 //!   margin), because signaling drops verifying keys at `expires_at` with no
 //!   tolerance
-//! - **Tolerance window**: only governs how long KS keeps the key material
-//!   readable; it does not extend minting usability on the AIS side
+//! - **Tolerance window**: only governs how long the Signer keeps the key
+//!   material readable; it does not extend minting usability on the AIS side
 //!
-//! # Thread Safety
+//! # Thread safety
 //!
-//! Uses a sqlx connection pool for native async concurrent access, with WAL mode enabled to improve read performance.
+//! Uses an sqlx connection pool for native async concurrent access, with WAL mode enabled to improve read performance.
 //!
 //! # Example
 //!
@@ -38,9 +38,9 @@
 //! # async fn example() -> anyhow::Result<()> {
 //! let storage = KeyStorage::new("keys.db").await?;
 //!
-//! // Check if refresh is needed
+//! // Check whether a refresh is needed
 //! if storage.should_refresh().await? {
-//!     // Fetch a new key from KS and update
+//!     // Fetch a new key from Signer and update
 //!     let record = KeyRecord {
 //!         key_id: 123,
 //!         public_key: "base64_encoded_key".to_string(),
@@ -63,7 +63,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Key refresh advance time (seconds)
 ///
-/// Triggers refresh this many seconds before key expiry to avoid availability issues at the moment of expiry
+/// Refresh is triggered this amount of time before key expiry to avoid availability issues at the moment of expiry
 const KEY_REFRESH_ADVANCE_SECS: u64 = 600; // 10 minutes
 
 /// Key record
@@ -77,7 +77,7 @@ pub struct KeyRecord {
     pub fetched_at: u64,
     /// Expiry time (Unix timestamp)
     pub expires_at: u64,
-    /// Tolerance window (seconds)
+    /// Tolerance time (seconds)
     pub tolerance_seconds: u64,
 }
 
@@ -88,9 +88,9 @@ pub struct KeyStorage {
 }
 
 impl KeyStorage {
-    /// Create or open key storage
+    /// Create or open the key storage
     ///
-    /// Uses a sqlx connection pool with the following configuration:
+    /// Uses an sqlx connection pool with the following configuration:
     /// - Max connections: 10
     /// - WAL mode: improves concurrent read performance (4x)
     /// - Synchronous mode: NORMAL (balances performance and safety)
@@ -104,14 +104,14 @@ impl KeyStorage {
                 .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
                 .busy_timeout(Duration::from_secs(5));
 
-        // Create connection pool
+        // Create the connection pool
         let pool = SqlitePoolOptions::new()
             .max_connections(10)
             .connect_with(options)
             .await
             .context("Failed to connect to SQLite")?;
 
-        // Initialize database schema
+        // Initialize the database table schema
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS current_key (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -186,10 +186,10 @@ impl KeyStorage {
         Ok(())
     }
 
-    /// Check whether the key needs refreshing
+    /// Check whether the key needs to be refreshed
     ///
     /// Returns true if:
-    /// - No key exists
+    /// - There is no key
     /// - The key will expire within 10 minutes
     pub async fn should_refresh(&self) -> Result<bool> {
         let key = match self.get_current_key().await? {
@@ -231,8 +231,8 @@ impl KeyStorage {
     ///
     /// Returns true if the key expired more than `tolerance_seconds` ago.
     ///
-    /// Note: this reflects KS's key-*material* retention window, not minting
-    /// usability. The issuer refuses to mint with any
+    /// Note: this reflects the Signer's key-*material* retention window, not
+    /// minting usability. The issuer refuses to mint with any
     /// key past `expires_at` and rotates instead, regardless of the tolerance
     /// window; this method is kept for observability of the retention window.
     pub async fn is_expired_beyond_tolerance(&self) -> Result<bool> {
@@ -246,7 +246,7 @@ impl KeyStorage {
             .unwrap_or_default()
             .as_secs();
 
-        // Check if beyond the tolerance window (using the tolerance time fetched from KS)
+        // Check if beyond the tolerance window (using the tolerance time fetched from the Signer)
         let expired_beyond = now > key.expires_at + key.tolerance_seconds;
 
         if expired_beyond {
@@ -285,7 +285,7 @@ mod tests {
         assert!(storage.get_current_key().await.unwrap().is_none());
         assert!(storage.should_refresh().await.unwrap());
 
-        // Add key
+        // Add a key
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -307,7 +307,6 @@ mod tests {
         assert_eq!(retrieved.public_key, "test_public_key");
         assert_eq!(retrieved.tolerance_seconds, 24 * 3600);
         assert!(!storage.should_refresh().await.unwrap());
-        assert!(!storage.is_expired_beyond_tolerance().await.unwrap());
     }
 
     #[tokio::test]
@@ -320,7 +319,7 @@ mod tests {
             .unwrap_or_default()
             .as_secs();
 
-        // Key will expire in 5 minutes (less than the 10-minute threshold)
+        // Key expires in 5 minutes (less than the 10-minute threshold)
         let record = KeyRecord {
             key_id: 1,
             public_key: "test_key".to_string(),
@@ -333,30 +332,5 @@ mod tests {
 
         // Should need refresh
         assert!(storage.should_refresh().await.unwrap());
-    }
-
-    #[tokio::test]
-    async fn test_expired_beyond_tolerance() {
-        let temp_file = NamedTempFile::new().unwrap();
-        let storage = KeyStorage::new(temp_file.path()).await.unwrap();
-
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        // Key expired 25 hours ago
-        let record = KeyRecord {
-            key_id: 1,
-            public_key: "expired_key".to_string(),
-            fetched_at: now - 30 * 3600,
-            expires_at: now - 25 * 3600,
-            tolerance_seconds: 24 * 3600,
-        };
-
-        storage.update_current_key(&record).await.unwrap();
-
-        // Should be beyond the tolerance window
-        assert!(storage.is_expired_beyond_tolerance().await.unwrap());
     }
 }

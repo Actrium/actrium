@@ -1,13 +1,13 @@
 //! Signer storage module
 //!
-//! Provides multiple storage backend support: SQLite, PostgreSQL
+//! Provides multiple storage backends: SQLite, PostgreSQL
 //!
 //! # Design
 //!
-//! - `KeyStorageBackend` trait defines the unified async interface
-//! - `KeyStorage` enum encapsulates different backend implementations
-//! - `StorageConfig` configures and initializes the backend
-//! - Private keys never leave the storage backend; signing is performed internally
+//! - `KeyStorageBackend` trait defines a unified async interface
+//! - `KeyStorage` enum wraps different backend implementations
+//! - Selects and initializes the backend via `StorageConfig`
+//! - Private keys never leave the storage backend; signing is performed inside the backend
 
 use std::path::Path;
 
@@ -35,7 +35,7 @@ use postgres::PostgresBackend;
 /// Unified key storage interface
 ///
 /// Benefits of using an enum instead of a trait object:
-/// - Zero-cost abstraction (no virtual function calls)
+/// - Zero-cost abstraction (no virtual dispatch)
 /// - Can be Clone
 /// - Compile-time type checking
 #[derive(Clone, Debug)]
@@ -49,18 +49,18 @@ pub enum KeyStorage {
 }
 
 impl KeyStorage {
-    /// Create a storage instance from configuration
+    /// Create a storage instance from config
     ///
     /// # Arguments
-    /// * `config` - Storage configuration
-    /// * `encryptor` - Key encryptor
-    /// * `db_path` - Database file storage directory path (required when backend = "sqlite", from ActrixConfig.sqlite_path)
+    /// * `config` - storage config
+    /// * `encryptor` - key encryptor
+    /// * `db_path` - directory path for the database file (required when backend = "sqlite", from ActrixConfig.sqlite_path)
     ///
     /// # Returns
-    /// Initialized storage instance
+    /// The initialized storage instance
     ///
     /// # Errors
-    /// - Missing configuration for the corresponding backend
+    /// - Missing config for the corresponding backend
     /// - Backend initialization failed
     /// - Backend feature not enabled (feature flag)
     pub async fn from_config<P: AsRef<Path>>(
@@ -107,7 +107,7 @@ impl KeyStorage {
         }
     }
 
-    /// Query the verifying public key by key_id
+    /// Look up the verifying public key by key_id
     pub async fn get_public_key(&self, key_id: u32) -> SignerResult<Option<String>> {
         match self {
             Self::Sqlite(b) => b.get_public_key(key_id).await,
@@ -117,9 +117,9 @@ impl KeyStorage {
         }
     }
 
-    /// Sign a message with the specified key (Ed25519)
+    /// Sign a message with the specified key using Ed25519
     ///
-    /// Private key does not leave the storage backend; signing is performed internally
+    /// The private key never leaves the storage backend; signing is performed internally
     pub async fn sign(&self, key_id: u32, message: &[u8]) -> SignerResult<Vec<u8>> {
         match self {
             Self::Sqlite(b) => b.sign(key_id, message).await,
@@ -129,7 +129,7 @@ impl KeyStorage {
         }
     }
 
-    /// Get the complete key record
+    /// Get the full key record
     pub async fn get_key_record(&self, key_id: u32) -> SignerResult<Option<KeyRecord>> {
         match self {
             Self::Sqlite(b) => b.get_key_record(key_id).await,
@@ -149,7 +149,7 @@ impl KeyStorage {
         }
     }
 
-    /// Clean up expired keys (only delete keys beyond the tolerance period)
+    /// Clean up expired keys (only deletes those beyond the tolerance window)
     pub async fn cleanup_expired_keys(&self, tolerance_seconds: u64) -> SignerResult<u32> {
         match self {
             Self::Sqlite(b) => b.cleanup_expired_keys(tolerance_seconds).await,
@@ -181,7 +181,7 @@ mod tests {
         let config = StorageConfig {
             backend: StorageBackend::Sqlite,
             key_ttl_seconds: 3600,
-            sqlite: Some(SqliteConfig {}),
+            sqlite: Some(SqliteConfig::default()),
             postgres: None,
         };
 
@@ -207,7 +207,7 @@ mod tests {
         let config = StorageConfig {
             backend: StorageBackend::Sqlite,
             key_ttl_seconds: 3600,
-            sqlite: None, // missing configuration
+            sqlite: None, // missing config
             postgres: None,
         };
 

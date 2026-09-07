@@ -13,8 +13,8 @@ pub enum ServiceType {
     Turn,
     Signaling,
     Ais,
-    Ks,
-    Mfr,
+    Signer,
+    PublisherRegistry,
 }
 
 /// Convert ServiceType to ResourceType
@@ -25,8 +25,8 @@ impl From<ServiceType> for ResourceType {
             ServiceType::Turn => ResourceType::Turn,
             ServiceType::Signaling => ResourceType::Signaling,
             ServiceType::Ais => ResourceType::Ais,
-            ServiceType::Ks => ResourceType::Ks,
-            ServiceType::Mfr => ResourceType::Mfr,
+            ServiceType::Signer => ResourceType::Signer,
+            ServiceType::PublisherRegistry => ResourceType::PublisherRegistry,
         }
     }
 }

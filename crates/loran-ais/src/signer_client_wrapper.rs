@@ -1,6 +1,6 @@
 //! Signer client wrapper
 //!
-//! Provides a unified KS client interface, supporting gRPC clients (requires &mut self)
+//! Provides a unified Signer client interface, supporting gRPC clients (requires &mut self)
 
 use platform::aid::AidError;
 use signer::{GrpcClient, GrpcClientConfig};
@@ -24,15 +24,15 @@ impl SignerClientWrapper {
         }
     }
 
-    /// Run one KS RPC against the cached client, optionally rebuilding the
+    /// Run one Signer RPC against the cached client, optionally rebuilding the
     /// client once after a retryable transport failure.
     ///
-    /// A cached gRPC channel can go stale when KS restarts or the connection
+    /// A cached gRPC channel can go stale when the Signer restarts or the connection
     /// breaks; without a rebuild every later call keeps failing on the dead
     /// channel. Every wrapper method — not just `sign` — goes through this
     /// path so a broken channel can never permanently wedge key rotation.
     ///
-    /// Non-idempotent operations must disable replay. In particular, KS may
+    /// Non-idempotent operations must disable replay. In particular, the Signer may
     /// persist a generated key before its response is lost; replaying that
     /// request would create an orphaned key.
     ///
@@ -88,8 +88,8 @@ impl SignerClientWrapper {
         }
     }
 
-    /// Request a new Ed25519 signing key from KS; returns (key_id, verifying_key_bytes[32], expires_at, tolerance_secs).
-    /// The private key is retained on the KS server.
+    /// Request a new Ed25519 signing key from the Signer; returns (key_id, verifying_key_bytes[32], expires_at, tolerance_secs).
+    /// The private key is retained on the Signer server.
     pub async fn generate_signing_key(
         &self,
     ) -> Result<(u32, [u8; 32], u64, u64), signer::SignerError> {
@@ -99,8 +99,8 @@ impl SignerClientWrapper {
         .await
     }
 
-    /// Sign a message with the Ed25519 key in KS; returns a 64-byte signature.
-    /// The private key never leaves the KS service.
+    /// Sign a message with the Ed25519 key in the Signer; returns a 64-byte signature.
+    /// The private key never leaves the Signer service.
     pub async fn sign(&self, key_id: u32, message: &[u8]) -> Result<Vec<u8>, signer::SignerError> {
         // Each attempt owns its copy of the message so the retry closure
         // stays FnMut and the boxed future borrows nothing from the closure.
