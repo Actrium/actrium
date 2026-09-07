@@ -3936,6 +3936,38 @@ fn closed_answerer_wakes_stable_offerer_to_hard_recovery() {
 }
 
 #[test]
+fn late_answerer_retirement_starts_a_fresh_recovery_cycle() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_negotiating(&mut state);
+    drive_to_sendable(&mut state, generation);
+
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::NetworkUnavailable,
+        )),
+    );
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::NetworkAvailable,
+        )),
+    );
+    let cycle_before_retirement = state.recovery_cycle;
+    assert!(state.recovery_inflight);
+
+    reduce(&mut state, closed_tick(generation));
+
+    assert_eq!(
+        state.recovery_cycle,
+        cycle_before_retirement + 1,
+        "retiring the physical Answerer session starts a fresh end-to-end budget"
+    );
+    assert!(state.awaiting_offer);
+    assert_eq!(state.parked_signaling_generation, Some(generation));
+}
+
+#[test]
 fn hard_recovery_old_generation_events_ignored_after_pending() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let old_gen = drive_offerer_to_sendable(&mut state);

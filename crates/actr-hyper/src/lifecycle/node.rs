@@ -1386,8 +1386,16 @@ fn encode_delivery_uncertain_for_wire(err: &ActrError) -> String {
 /// payload, the previous record-separator payload, or the legacy Display
 /// string. Malformed input keeps the typed variant with a placeholder ID.
 fn parse_delivery_uncertain(message: &str) -> ActrError {
-    if let Some(error) = parse_length_prefixed_delivery_uncertain(message) {
-        return error;
+    // A message carrying the v1 prefix must be interpreted only as v1. If its
+    // length framing is malformed, falling through to the legacy separator
+    // format could fabricate an operation ID from attacker-controlled text.
+    if message.starts_with(DELIVERY_UNCERTAIN_WIRE_PREFIX) {
+        return parse_length_prefixed_delivery_uncertain(message).unwrap_or_else(|| {
+            ActrError::DeliveryUncertain {
+                operation_id: "unknown".to_string(),
+                cause: message.to_string(),
+            }
+        });
     }
 
     // Compatibility with the immediately previous typed encoding. It used a

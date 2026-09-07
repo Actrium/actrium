@@ -2407,10 +2407,13 @@ fn start_hard_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
 /// retired generation as signaling metadata; the single end-to-end recovery
 /// budget remains the backstop and performs the normal terminal cleanup.
 fn wait_for_offerer_offer(state: &mut RtcPeerState) {
+    let newly_parked_retired_session = !state.awaiting_offer
+        && state.active_generation.is_none()
+        && state.parked_signaling_generation.is_some();
     state.parked_signaling_generation = state
         .active_generation
         .or(state.parked_signaling_generation);
-    if !state.recovery_inflight {
+    if !state.recovery_inflight || newly_parked_retired_session {
         state.recovery_cycle = state.recovery_cycle.wrapping_add(1);
     }
     state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
@@ -2430,6 +2433,7 @@ fn wait_for_offerer_offer(state: &mut RtcPeerState) {
         recovery_cycle = state.recovery_cycle,
         recovery_epoch = state.recovery_epoch,
         generation = state.active_generation,
+        newly_parked_retired_session,
         "v0.20 answerer waiting for offerer to initiate recovery"
     );
 }

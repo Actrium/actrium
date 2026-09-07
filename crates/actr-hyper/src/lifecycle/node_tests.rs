@@ -2499,3 +2499,18 @@ fn delivery_uncertain_wire_code_rejects_ambiguous_legacy_separator_payload() {
             if operation_id == "unknown" && cause == "operation\u{001e}cause\u{001e}tail"
     ));
 }
+
+#[test]
+fn delivery_uncertain_wire_code_does_not_reinterpret_malformed_v1_payload() {
+    use super::*;
+    let malformed = wire_code_to_actr_error(
+        10012,
+        "delivery-uncertain-v1:3:3:ab\u{001e}tail".to_string(),
+    );
+    assert!(matches!(
+        &malformed,
+        ActrError::DeliveryUncertain { operation_id, cause }
+            if operation_id == "unknown"
+                && cause == "delivery-uncertain-v1:3:3:ab\u{001e}tail"
+    ));
+}

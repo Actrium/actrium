@@ -241,6 +241,7 @@ pub(crate) struct DestTransportRef {
 pub(crate) struct PeerSendAttempt<T> {
     pub(crate) result: NetworkResult<T>,
     pub(crate) progress: DeliveryProgress,
+    pub(crate) proven_pre_send: bool,
 }
 
 impl DestTransportRef {
@@ -352,10 +353,11 @@ impl PeerTransport {
         }
     }
 
-    /// Subscribe to destination lifecycle transitions. Every materialization
-    /// of a `DestTransport` (creation or fallback) bumps the generation; a
-    /// woken waiter re-runs its preflight and re-acquires the destination's
-    /// ready-set watch if the destination now exists.
+    /// Subscribe to destination materialization transitions. A Connected
+    /// `DestTransport` bumps this watch; flight insertion and cancellation or
+    /// removal bump `watch_transports_revision()` instead. Callers waiting for
+    /// a destination to become usable must subscribe to both watches and
+    /// re-run their lookup after either one changes.
     pub(crate) fn watch_dest_state(&self) -> watch::Receiver<u64> {
         self.dest_state_epoch.subscribe()
     }
@@ -741,6 +743,7 @@ impl PeerTransport {
                 return PeerSendAttempt {
                     result: Err(error),
                     progress: DeliveryProgress::NotAttempted,
+                    proven_pre_send: true,
                 };
             }
         };
@@ -757,6 +760,7 @@ impl PeerTransport {
             .send_with_progress(payload_type, data, progress_sink)
             .await;
         let progress = attempt.progress;
+        let proven_pre_send = attempt.proven_pre_send;
         match attempt.result {
             Ok(wire_identity) => {
                 let sent = DestTransportRef::new(&transport, wire_identity);
@@ -766,11 +770,13 @@ impl PeerTransport {
                 PeerSendAttempt {
                     result: Ok(sent),
                     progress,
+                    proven_pre_send: false,
                 }
             }
             Err(error) => PeerSendAttempt {
                 result: Err(error),
                 progress,
+                proven_pre_send,
             },
         }
     }
@@ -811,12 +817,14 @@ impl PeerTransport {
                 return PeerSendAttempt {
                     result: Ok(None),
                     progress: DeliveryProgress::NotAttempted,
+                    proven_pre_send: false,
                 };
             }
             Err(error) => {
                 return PeerSendAttempt {
                     result: Err(error),
                     progress: DeliveryProgress::NotAttempted,
+                    proven_pre_send: true,
                 };
             }
         };
@@ -831,6 +839,7 @@ impl PeerTransport {
             .send_with_progress(payload_type, data, progress_sink)
             .await;
         let progress = attempt.progress;
+        let proven_pre_send = attempt.proven_pre_send;
         match attempt.result {
             Ok(wire_identity) => {
                 let sent = DestTransportRef::new(&transport, wire_identity);
@@ -840,11 +849,13 @@ impl PeerTransport {
                 PeerSendAttempt {
                     result: Ok(Some(sent)),
                     progress,
+                    proven_pre_send: false,
                 }
             }
             Err(error) => PeerSendAttempt {
                 result: Err(error),
                 progress,
+                proven_pre_send,
             },
         }
     }

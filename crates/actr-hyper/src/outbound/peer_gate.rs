@@ -91,11 +91,9 @@ enum SendAdmission {
 struct GateSendAttempt {
     result: ActorResult<Option<DestTransportRef>>,
     progress: DeliveryProgress,
-    /// Framework-verified proof that the failing error belongs to the closed
-    /// pre-send variant set (`NetworkError::is_proven_pre_send`), computed at
-    /// the transport boundary before the error collapses into `ActrError`.
-    /// The one-shot safe reattempt requires it, so a lane adapter that
-    /// misclassifies a post-write failure as `NotAttempted` fails closed.
+    /// Adapter-provided proof that no byte could have reached the transport.
+    /// This is independent of `DeliveryProgress::NotAttempted`, so a lane
+    /// adapter that misclassifies a post-write failure fails closed.
     proven_pre_send: bool,
 }
 
@@ -1265,14 +1263,14 @@ impl PeerGate {
     ) -> GateSendAttempt {
         match admission {
             SendAdmission::Normal => {
-                let PeerSendAttempt { result, progress } = self
+                let PeerSendAttempt {
+                    result,
+                    progress,
+                    proven_pre_send,
+                } = self
                     .transport_manager
                     .send_with_progress(dest, payload_type, data, record, progress_sink)
                     .await;
-                let proven_pre_send = result
-                    .as_ref()
-                    .err()
-                    .is_some_and(crate::transport::NetworkError::is_proven_pre_send);
                 GateSendAttempt {
                     result: result.map(Some).map_err(ActrError::from),
                     progress,
@@ -1284,15 +1282,10 @@ impl PeerGate {
                     .transport_manager
                     .send_existing_with_progress(dest, payload_type, data, record, progress_sink)
                     .await;
-                let proven_pre_send = attempt
-                    .result
-                    .as_ref()
-                    .err()
-                    .is_some_and(crate::transport::NetworkError::is_proven_pre_send);
                 GateSendAttempt {
                     result: attempt.result.map_err(ActrError::from),
                     progress: attempt.progress,
-                    proven_pre_send,
+                    proven_pre_send: attempt.proven_pre_send,
                 }
             }
         }
@@ -4110,10 +4103,9 @@ mod tests {
         let outcomes = VecDeque::from(vec![
             // First write: proven pre-send closure — eligible for the single
             // bounded reattempt.
-            SendAttemptResult::failed(
-                NetworkError::DataChannelClosed("closed before write".into()),
-                DeliveryProgress::NotAttempted,
-            ),
+            SendAttemptResult::failed_pre_send(NetworkError::DataChannelClosed(
+                "closed before write".into(),
+            )),
             // Second write: an ambiguous failure. Any further write here
             // would be an unsafe replay.
             SendAttemptResult::failed(
