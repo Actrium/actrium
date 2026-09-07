@@ -199,11 +199,12 @@ pub(crate) struct RtcPeerState {
     pub(crate) app_foreground: bool,
     pub(crate) signaling_generation: Option<u64>,
 
-    /// S5-2/S5-5: set when `LocalAddressChanged` (or `ForceReconnect`) was
-    /// received. Forces Hard Recovery (PC generation + 1) instead of Soft
-    /// (ICE restart) on the next recovery attempt, because the current
-    /// PeerConnection's ICE candidates are no longer valid. Cleared when the
-    /// connection reaches `Sendable` again (recovery succeeded).
+    /// S5-5: set by an explicit `ForceReconnect` or long-background policy.
+    /// It forces Hard Recovery (PC generation + 1) instead of Soft Recovery.
+    /// A `LocalAddressChanged` fact itself starts Soft Recovery on the current
+    /// PeerConnection; a failed restart can still escalate through the normal
+    /// hard-recovery paths. Cleared when the connection reaches `Sendable`
+    /// again (recovery succeeded).
     pub(crate) address_changed: bool,
 
     /// S5-4: make-before-break pending session readiness facts. During Hard

@@ -859,9 +859,10 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                     // remains the overall 60-second bound, while this new
                     // attempt epoch gives the controller a fresh six-second
                     // attempt timer.
-                    // Hard Recovery is reserved for an address change, an
-                    // unusable/closed Session, or another explicit hard-failure
-                    // fact instead of being the first timeout response.
+                    // Hard Recovery is reserved for an unusable/closed
+                    // Session, the long-background lifecycle policy, or
+                    // another explicit hard-failure fact instead of being the
+                    // first timeout response.
                     //
                     // The Answerer follows the same stable recovery-cycle
                     // budget while it still has a live physical Session: it
@@ -1840,21 +1841,21 @@ fn restart_initial_as_offerer(state: &mut RtcPeerState, effects: &mut Vec<RtcPee
 ///
 /// * `NetworkUnavailable`: mark recovering (don't restart yet — wait for
 ///   availability to return).
-/// * `NetworkAvailable`: if recovering and the address hasn't changed, start
-///   Soft Recovery (ICE restart). If `address_changed`, start Hard Recovery
-///   (the current PeerConnection's ICE candidates are stale).
-/// * `LocalAddressChanged`: set `address_changed = true`; the Offerer starts
-///   Hard Recovery once the lifecycle supervisor has committed a usable
-///   signaling generation. An Answerer waits for the Offerer to send the next
-///   Offer (RFC §"Hard Recovery is suitable for: local interface or IP
-///   changes").
+/// * `NetworkAvailable`: if recovering and no explicit hard-recovery request is
+///   pending, start Soft Recovery (ICE restart). If `address_changed` was set
+///   by an explicit force-reconnect or long-background policy, start Hard
+///   Recovery instead.
+/// * `LocalAddressChanged`: start Soft Recovery on the existing
+///   PeerConnection. v0.20.3 rebinds ICE transports and refreshes local
+///   candidates when the ICE generation restarts; a failed restart still
+///   escalates through the normal Hard Recovery failure paths.
 /// * `AppBackground`: if the peer is `Sendable`, enter `Recovering`
 ///   (sendable=false) because the platform may suspend the process and the
 ///   connection must be re-established on foreground. No restart is issued
 ///   yet — recovery resumes on `AppForeground`.
-/// * `AppForeground`: if recovering and address hasn't changed, start Soft
-///   Recovery. If `address_changed`, the Offerer starts Hard Recovery and the
-///   Answerer waits for its next Offer.
+/// * `AppForeground`: if recovering and no explicit hard-recovery request is
+///   pending, start Soft Recovery. If `address_changed`, the Offerer starts
+///   Hard Recovery and the Answerer waits for its next Offer.
 /// * `ForceReconnect`: set `address_changed = true` (force Hard for the
 ///   Offerer) and wait for the supervisor-owned signaling recovery gate before
 ///   rebuilding.
@@ -1877,7 +1878,7 @@ fn defer_recovery_until_gate(state: &mut RtcPeerState, hard: bool) {
         state.pc_connected = false; // S5-5: sendable still expires while gated
         state.phase = RtcPeerPhase::Recovering;
         if hard {
-            // A genuine address change must still steer the *next* round hard.
+            // An explicit hard-recovery request must still steer the *next* round hard.
             state.address_changed = true;
         }
         state.bump_revision();
@@ -1933,8 +1934,8 @@ fn reduce_network_event(
         RtcNetworkEvent::NetworkUnavailable => {
             state.network_available = false;
             if state.phase == RtcPeerPhase::Sendable || state.recovery_inflight {
-                // Only a genuine address change escalates to Hard. A soft
-                // restart's own negotiation sets `building_generation`/
+                // Only an explicit hard-recovery request escalates to Hard. A
+                // soft restart's own negotiation sets `building_generation`/
                 // `pending_generation` while the BuildSession is in flight;
                 // reading those as "must rebuild" converted every temporary
                 // loss that overlapped an in-flight restart exchange into a
@@ -1949,18 +1950,22 @@ fn reduce_network_event(
             maybe_start_deferred_recovery(state, effects);
         }
         RtcNetworkEvent::LocalAddressChanged => {
-            state.address_changed = true;
+            // The v0.20.3 backend rebinds ICE transports and re-gathers local
+            // candidates during ICE restart. Treat an address snapshot change
+            // as an in-place recovery opportunity; an explicit ForceReconnect
+            // or long-background policy still sets `address_changed` and keeps
+            // the Hard Recovery path below.
             if state.active_generation.is_some() {
                 if recovery_gate_open(state) {
-                    start_hard_recovery(state, effects);
+                    start_soft_recovery(state, effects);
                 } else {
-                    defer_recovery_until_gate(state, true);
+                    defer_recovery_until_gate(state, false);
                 }
             } else if state.phase == RtcPeerPhase::Sendable
                 || state.recovery_inflight
                 || state.building_generation.is_some()
             {
-                defer_recovery_until_gate(state, true);
+                defer_recovery_until_gate(state, false);
             }
         }
         RtcNetworkEvent::AppBackground => {
@@ -2310,8 +2315,8 @@ fn terminate_transport_attempt(
 /// local Offer to negotiate a replacement, so it is parked by
 /// `wait_for_offerer_offer` instead.
 ///
-/// Offerer triggers: local address change, irrecoverable Soft Recovery failure,
-/// mailbox overflow, `ForceReconnect`, driver exit, non-converging status,
+/// Offerer triggers: irrecoverable Soft Recovery failure, mailbox overflow,
+/// `ForceReconnect`, driver exit, non-converging status,
 /// socket/bind plan unusable, or app lifecycle policy (RFC §"Hard Recovery is
 /// suitable for"). The same physical failures on an Answerer park the logical
 /// attempt and wait for an Offerer-created Offer.
@@ -2660,14 +2665,15 @@ fn reduce_state_tick(
                 if !state.address_changed {
                     start_soft_recovery(state, effects);
                 } else {
-                    // S5-3: address changed → Offerer Hard Recovery.
+                    // S5-3: an explicit hard-recovery request → Offerer Hard
+                    // Recovery.
                     start_hard_recovery(state, effects);
                 }
             } else if state.address_changed {
-                // S5-3: Soft Recovery was in flight but the address changed —
-                // escalate the Offerer to Hard Recovery (the current
-                // PeerConnection's candidates are stale). An Answerer remains
-                // parked until the Offerer sends a fresh Offer.
+                // S5-3: Soft Recovery was in flight but an explicit
+                // hard-recovery request arrived — escalate the Offerer to
+                // Hard Recovery. An Answerer remains parked until the
+                // Offerer sends a fresh Offer.
                 start_hard_recovery(state, effects);
             }
         } else {
@@ -2687,8 +2693,8 @@ fn reduce_state_tick(
                 // S5-2: temporary network loss starts Soft Recovery.
                 start_soft_recovery(state, effects);
             } else {
-                // S5-3: address changed → Offerer Hard Recovery; an Answerer
-                // waits for the Offerer to initiate a new Offer.
+                // S5-3: explicit hard recovery → Offerer Hard Recovery; an
+                // Answerer waits for the Offerer to initiate a new Offer.
                 start_hard_recovery(state, effects);
             }
         }

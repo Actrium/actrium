@@ -1219,7 +1219,7 @@ fn old_active_candidate_cannot_enter_replacement_signaling_exchange() {
     reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
-            RtcNetworkEvent::LocalAddressChanged,
+            RtcNetworkEvent::ForceReconnect,
         )),
     );
     assert_eq!(state.building_generation, Some(old_generation + 1));
@@ -1267,7 +1267,7 @@ fn hard_recovery_rejects_inflight_sdp_completion_from_old_active_generation() {
     reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
-            RtcNetworkEvent::LocalAddressChanged,
+            RtcNetworkEvent::ForceReconnect,
         )),
     );
     assert_eq!(state.building_generation, Some(old_generation + 1));
@@ -1382,7 +1382,7 @@ fn pending_replacement_negotiation_failure_retries_hard_on_attempt_deadline() {
     reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
-            RtcNetworkEvent::LocalAddressChanged,
+            RtcNetworkEvent::ForceReconnect,
         )),
     );
     let replacement = old_generation + 1;
@@ -1932,7 +1932,7 @@ fn mailbox_overflow_on_pending_generation_replaces_only_pending() {
     reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
-            RtcNetworkEvent::LocalAddressChanged,
+            RtcNetworkEvent::ForceReconnect,
         )),
     );
     let pending_generation = old_generation + 1;
@@ -1964,7 +1964,7 @@ fn mailbox_overflow_on_building_generation_abandons_and_rebuilds_it() {
     reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
-            RtcNetworkEvent::LocalAddressChanged,
+            RtcNetworkEvent::ForceReconnect,
         )),
     );
     let building_generation = old_generation + 1;
@@ -2574,38 +2574,34 @@ fn soft_recovery_does_not_double_restart_on_repeated_failure() {
 }
 
 #[test]
-fn local_address_changed_triggers_hard_recovery() {
+fn local_address_changed_triggers_soft_recovery() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let generation = drive_offerer_to_sendable(&mut state);
     let ice_before = state.ice_generation;
 
-    // S5-3/S5-4: address changed while active → immediate Hard Recovery.
-    // Make-before-break: old session stays alive (active), new is building.
+    // A local address change starts an in-place ICE restart. The current
+    // PeerConnection remains active and no replacement generation is built.
     let effects = reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
             crate::wire::webrtc::v020::recovery::RtcNetworkEvent::LocalAddressChanged,
         )),
     );
-    assert!(!state.address_changed, "flag consumed by Hard Recovery");
-    assert_eq!(state.phase, RtcPeerPhase::Building);
     assert!(
-        !has_close_session(&effects, generation),
-        "old NOT closed yet (make-before-break)"
+        !state.address_changed,
+        "local address changes do not request Hard Recovery"
     );
-    assert!(
-        has_build_session(&effects, generation + 1),
-        "new gen building"
-    );
+    assert_eq!(state.phase, RtcPeerPhase::Recovering);
+    assert!(!has_build_session(&effects, generation + 1));
+    assert!(has_restart_ice(&effects, generation));
     assert_eq!(
         state.active_generation,
         Some(generation),
-        "old session kept alive"
+        "Soft Recovery keeps the current session"
     );
-    assert_eq!(state.building_generation, Some(generation + 1));
-    assert_eq!(state.ice_generation, 0, "ICE gen reset for new PC");
-    assert!(!has_restart_ice(&effects, generation));
-    let _ = ice_before;
+    assert_eq!(state.building_generation, None);
+    assert_eq!(state.pending_generation, None);
+    assert_eq!(state.ice_generation, ice_before + 1);
 }
 
 #[test]
@@ -3544,7 +3540,7 @@ fn stale_total_recovery_budget_cannot_exhaust_newer_cycle() {
 }
 
 #[test]
-fn address_change_while_offline_waits_for_network_before_hard_recovery() {
+fn address_change_while_offline_waits_for_network_before_soft_recovery() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let generation = drive_offerer_to_sendable(&mut state);
 
@@ -3569,42 +3565,40 @@ fn address_change_while_offline_waits_for_network_before_hard_recovery() {
             crate::wire::webrtc::v020::recovery::RtcNetworkEvent::NetworkAvailable,
         )),
     );
-    assert_eq!(state.phase, RtcPeerPhase::Building);
-    assert!(has_build_session(&effects, generation + 1));
+    assert_eq!(state.phase, RtcPeerPhase::Recovering);
+    assert_eq!(state.active_generation, Some(generation));
+    assert!(has_restart_ice(&effects, generation));
+    assert!(!has_build_session(&effects, generation + 1));
 }
 
 #[test]
-fn disconnected_with_address_changed_starts_hard_recovery() {
+fn address_change_during_soft_recovery_is_coalesced() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let generation = drive_offerer_to_sendable(&mut state);
 
-    // Set address_changed via ForceReconnect, which triggers Hard immediately.
-    // To test the disconnected path specifically, set the flag without an
-    // active generation... but Sendable implies active. So: address_changed
-    // + Sendable + disconnected tick → Hard Recovery.
-    // Since LocalAddressChanged triggers Hard immediately when active, we
-    // can't have address_changed=true while still Sendable.
-    // Instead, test: Soft Recovery starts, then address changes, then
-    // disconnected tick escalates to Hard.
+    // Soft Recovery starts first. A later address snapshot fact is coalesced
+    // into the same in-place recovery attempt; it must not allocate a second
+    // PeerConnection generation.
     let _ = reduce(&mut state, disconnected_tick(generation));
     assert_eq!(state.phase, RtcPeerPhase::Recovering);
     // Soft Recovery started (no address change yet).
     assert!(state.ice_generation > 0);
 
-    // Now address changes while Soft Recovery is in flight.
-    reduce(
+    let effects = reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
             crate::wire::webrtc::v020::recovery::RtcNetworkEvent::LocalAddressChanged,
         )),
     );
-    // Hard Recovery triggered (active was still Some during Soft).
-    assert_eq!(state.phase, RtcPeerPhase::Building);
-    assert_eq!(state.building_generation, Some(generation + 1));
+    assert!(effects.is_empty());
+    assert_eq!(state.phase, RtcPeerPhase::Recovering);
+    assert_eq!(state.active_generation, Some(generation));
+    assert_eq!(state.building_generation, None);
+    assert_eq!(state.pending_generation, None);
 }
 
 #[test]
-fn network_available_with_address_changed_waits_for_signaling() {
+fn network_available_with_address_change_waits_for_signaling() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let generation = drive_offerer_to_sendable(&mut state);
 
@@ -3648,13 +3642,10 @@ fn network_available_with_address_changed_waits_for_signaling() {
             },
         )),
     );
-    assert_eq!(state.phase, RtcPeerPhase::Building);
-    assert_eq!(state.building_generation, Some(generation + 1));
-    assert!(has_build_session(&signaling_ready, generation + 1));
-    assert!(!has_close_session(
-        &reduce(&mut state, RtcPeerInput::Command(RtcPeerCommand::Connect)),
-        generation
-    )); // Connect is no-op in Building; just a sanity check
+    assert_eq!(state.phase, RtcPeerPhase::Recovering);
+    assert_eq!(state.active_generation, Some(generation));
+    assert!(has_restart_ice(&signaling_ready, generation));
+    assert!(!has_build_session(&signaling_ready, generation + 1));
 }
 
 #[test]
@@ -3663,11 +3654,11 @@ fn hard_recovery_new_generation_negotiates_as_offerer() {
     let old_gen = drive_offerer_to_sendable(&mut state);
     assert_eq!(state.role, Role::Offerer);
 
-    // Trigger Hard Recovery via LocalAddressChanged.
+    // Trigger explicit Hard Recovery via ForceReconnect.
     let _ = reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
-            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::LocalAddressChanged,
+            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::ForceReconnect,
         )),
     );
     assert_eq!(state.phase, RtcPeerPhase::Building);
@@ -3697,7 +3688,7 @@ fn answerer_waits_for_offerer_offer_instead_of_hard_recovery() {
     let effects = reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
-            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::LocalAddressChanged,
+            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::ForceReconnect,
         )),
     );
     assert!(!has_build_session(&effects, old_gen + 1));
@@ -3767,6 +3758,32 @@ fn answerer_waits_for_offerer_offer_instead_of_hard_recovery() {
     assert_eq!(state.building_generation, Some(old_gen + 1));
     assert!(!state.recovery_inflight);
     assert_eq!(state.transport_epoch, old_transport_epoch + 1);
+}
+
+#[test]
+fn answerer_local_address_change_starts_soft_recovery() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_negotiating(&mut state);
+    drive_to_sendable(&mut state, generation);
+    let ice_before = state.ice_generation;
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::LocalAddressChanged,
+        )),
+    );
+
+    assert!(!has_build_session(&effects, generation + 1));
+    assert!(!has_restart_ice(&effects, generation));
+    assert!(has_restart_request(&effects, 1));
+    assert_eq!(state.active_generation, Some(generation));
+    assert_eq!(state.building_generation, None);
+    assert_eq!(state.pending_generation, None);
+    assert_eq!(state.ice_generation, ice_before + 1);
+    assert!(state.recovery_inflight);
+    assert!(state.recovery_attempt_started);
+    assert!(!state.awaiting_offer);
 }
 
 #[test]
@@ -3976,7 +3993,7 @@ fn hard_recovery_old_generation_events_ignored_after_pending() {
     let _ = reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
-            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::LocalAddressChanged,
+            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::ForceReconnect,
         )),
     );
 
@@ -4009,7 +4026,7 @@ fn hard_recovery_closes_terminal_old_generation_without_replacing_pending() {
     reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
-            RtcNetworkEvent::LocalAddressChanged,
+            RtcNetworkEvent::ForceReconnect,
         )),
     );
     let replacement = old_generation + 1;
@@ -4050,7 +4067,7 @@ fn hard_recovery_clears_old_ufrags_and_candidates() {
     let _ = reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
-            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::LocalAddressChanged,
+            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::ForceReconnect,
         )),
     );
 
@@ -4072,11 +4089,11 @@ fn hard_recovery_consumes_address_changed_flag() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let _gen = drive_offerer_to_sendable(&mut state);
 
-    // Trigger Hard Recovery via LocalAddressChanged.
+    // Trigger Hard Recovery via ForceReconnect.
     let _ = reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
-            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::LocalAddressChanged,
+            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::ForceReconnect,
         )),
     );
     assert!(
@@ -4117,11 +4134,12 @@ fn hard_recovery_during_soft_recovery_escalates() {
     let ice_after_soft = state.ice_generation;
     let (operation_id, ice_generation) = restart_identity(&restart, generation);
 
-    // Address changes while Soft Recovery is in flight → escalate to Hard.
+    // An explicit ForceReconnect while Soft Recovery is in flight escalates
+    // to Hard Recovery.
     let effects = reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
-            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::LocalAddressChanged,
+            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::ForceReconnect,
         )),
     );
     assert_eq!(state.phase, RtcPeerPhase::Building);
@@ -4155,11 +4173,11 @@ fn make_before_break_atomic_switch_on_pending_ready() {
     let old_gen = drive_offerer_to_sendable(&mut state);
     assert!(state.sendable());
 
-    // Trigger Hard Recovery (make-before-break: old stays active).
+    // Trigger explicit Hard Recovery (make-before-break: old stays active).
     let _ = reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
-            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::LocalAddressChanged,
+            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::ForceReconnect,
         )),
     );
     assert_eq!(state.active_generation, Some(old_gen));
@@ -4200,7 +4218,7 @@ fn make_before_break_old_session_ignored_during_switch() {
     let _ = reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
-            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::LocalAddressChanged,
+            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::ForceReconnect,
         )),
     );
     // Build completes → pending.
@@ -4240,7 +4258,7 @@ fn make_before_break_build_failure_retires_old_and_recovers() {
     let _ = reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
-            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::LocalAddressChanged,
+            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::ForceReconnect,
         )),
     );
 
@@ -4481,7 +4499,7 @@ fn answerer_parked_restart_reuses_open_lane_without_second_on_open() {
     let effects = reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
-            RtcNetworkEvent::LocalAddressChanged,
+            RtcNetworkEvent::ForceReconnect,
         )),
     );
     assert!(!has_build_session(&effects, generation + 1));

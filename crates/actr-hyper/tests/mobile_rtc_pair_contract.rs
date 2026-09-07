@@ -10,7 +10,7 @@ use actr_hyper::lifecycle::{CleanupReason, NetworkAvailability, NetworkTransport
 use actr_hyper::test_support::{
     ConnectionInitiator, LinkDirection, MobileRtcPairHarness, PacketRule, PairEndpoint,
     PairSnapshot, SignalingFaultRule, SignalingMessageClass, TestRtcRole, WebRtcFragmentSendEvent,
-    WebRtcFragmentSendHook, install_webrtc_fragment_send_hook_for_test,
+    WebRtcFragmentSendHook, bindable_non_loopback_ipv4, install_webrtc_fragment_send_hook_for_test,
 };
 use actr_protocol::prost::Message as _;
 use actr_protocol::{ActrError, DataChunk, PayloadType};
@@ -357,10 +357,28 @@ async fn p04_a_only_offline_online_with_real_link_loss_soft_recovers_both_ends()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn p05_a_address_provider_change_hard_rebuilds_without_mirroring_platform_fact_to_b() {
+async fn p05_a_address_provider_change_soft_recovers_after_transient_path_loss_without_mirroring_platform_fact_to_b()
+ {
     let mut pair = MobileRtcPairHarness::new(51_062, 51_061).await;
     pair.establish(ConnectionInitiator::A).await;
     let initial = pair.wait_pair_ready(WAIT).await;
+    let changed_address = bindable_non_loopback_ipv4();
+    let initial_a_bound = pair.rtc_bound_addresses(PairEndpoint::A).await;
+    let initial_b_bound = pair.rtc_bound_addresses(PairEndpoint::B).await;
+    let initial_a_ice_generation = pair
+        .harness()
+        .peer(pair.serial(PairEndpoint::A))
+        .rtc
+        .ice_generation(&pair.id(PairEndpoint::B))
+        .await
+        .expect("initial A ICE generation");
+    let initial_b_ice_generation = pair
+        .harness()
+        .peer(pair.serial(PairEndpoint::B))
+        .rtc
+        .ice_generation(&pair.id(PairEndpoint::A))
+        .await
+        .expect("initial B ICE generation");
     assert_bind_ip(
         &pair.rtc_bind_addresses(PairEndpoint::A).await,
         Ipv4Addr::LOCALHOST,
@@ -371,10 +389,8 @@ async fn p05_a_address_provider_change_hard_rebuilds_without_mirroring_platform_
         .await;
     pair.wait_rtc_fault_hit(Duration::from_secs(10)).await;
 
-    pair.harness().set_local_addresses(
-        pair.serial(PairEndpoint::A),
-        vec![IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2))],
-    );
+    pair.harness()
+        .set_local_addresses(pair.serial(PairEndpoint::A), vec![changed_address]);
     pair.network_path(
         PairEndpoint::A,
         2,
@@ -384,40 +400,78 @@ async fn p05_a_address_provider_change_hard_rebuilds_without_mirroring_platform_
     .await;
     pair.wait_not_sendable(PairEndpoint::A, WAIT).await;
     pair.wait_not_sendable(PairEndpoint::B, WAIT).await;
-    pair.harness()
+    let a_id = pair.id(PairEndpoint::A);
+    let b_id = pair.id(PairEndpoint::B);
+    let a_ice_generation = pair
+        .harness()
         .peer(pair.serial(PairEndpoint::A))
         .rtc
-        .wait_state(&pair.id(PairEndpoint::B), WAIT, |state| {
-            state.sendable && state.pc_generation > initial.a_to_b.pc_generation
-        })
+        .wait_ice_generation(&b_id, initial_a_ice_generation, WAIT)
         .await
-        .expect("A must rebuild from the changed address provider");
-    pair.harness()
+        .expect("A must attempt same-generation ICE recovery first");
+    assert!(a_ice_generation > initial_a_ice_generation);
+    let a_rebound_address = pair
+        .wait_rtc_bound_address(
+            PairEndpoint::A,
+            initial_a_bound.len(),
+            changed_address,
+            WAIT,
+        )
+        .await;
+    let a_rebound_address =
+        a_rebound_address.expect("A ICE restart must bind a socket on the changed address");
+    assert_eq!(a_rebound_address.ip(), changed_address);
+    pair.heal_rtc_faults().await;
+    let b_ice_generation = pair
+        .harness()
         .peer(pair.serial(PairEndpoint::B))
         .rtc
-        .wait_state(&pair.id(PairEndpoint::A), WAIT, |state| {
-            state.sendable && state.pc_generation > initial.b_to_a.pc_generation
-        })
+        .wait_ice_generation(&a_id, initial_b_ice_generation, WAIT)
         .await
-        .expect("B must switch to A's replacement generation");
-    let rebuilt = pair.wait_pair_ready(WAIT).await;
+        .expect("B must apply the same-generation ICE restart");
+    let b_rebound_address = pair
+        .wait_rtc_bound_address(
+            PairEndpoint::B,
+            initial_b_bound.len(),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            WAIT,
+        )
+        .await
+        .expect("B ICE restart must bind a socket on its current address");
+    assert_eq!(b_rebound_address.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
+    let recovered = pair.wait_pair_ready(WAIT).await;
 
-    assert!(rebuilt.a_to_b.pc_generation > initial.a_to_b.pc_generation);
-    assert!(rebuilt.b_to_a.pc_generation > initial.b_to_a.pc_generation);
-    assert_bind_ip(
-        &pair.rtc_bind_addresses(PairEndpoint::A).await,
-        Ipv4Addr::new(127, 0, 0, 2),
-    );
+    assert_eq!(recovered.a_to_b.pc_generation, initial.a_to_b.pc_generation);
+    assert_eq!(recovered.b_to_a.pc_generation, initial.b_to_a.pc_generation);
+    assert!(b_ice_generation > initial_b_ice_generation);
     assert_eq!(pair.rtc_fault_scope_count(), 2);
-    pair.assert_rpc_both_directions("p05_address_change").await;
+    pair.assert_rpc_both_directions("p05_address_change_soft")
+        .await;
     pair.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn p06_available_to_available_address_change_does_not_require_offline_callback() {
+async fn p06_available_to_available_address_change_soft_recovers_without_offline_callback() {
     let mut pair = MobileRtcPairHarness::new(51_064, 51_063).await;
     pair.establish(ConnectionInitiator::A).await;
     let initial = pair.wait_pair_ready(WAIT).await;
+    let changed_address = bindable_non_loopback_ipv4();
+    let initial_a_bound = pair.rtc_bound_addresses(PairEndpoint::A).await;
+    let initial_b_bound = pair.rtc_bound_addresses(PairEndpoint::B).await;
+    let initial_a_ice_generation = pair
+        .harness()
+        .peer(pair.serial(PairEndpoint::A))
+        .rtc
+        .ice_generation(&pair.id(PairEndpoint::B))
+        .await
+        .expect("initial A ICE generation");
+    let initial_b_ice_generation = pair
+        .harness()
+        .peer(pair.serial(PairEndpoint::B))
+        .rtc
+        .ice_generation(&pair.id(PairEndpoint::A))
+        .await
+        .expect("initial B ICE generation");
 
     pair.network_path(
         PairEndpoint::A,
@@ -426,32 +480,65 @@ async fn p06_available_to_available_address_change_does_not_require_offline_call
         cellular(),
     )
     .await;
-    pair.harness().set_local_addresses(
-        pair.serial(PairEndpoint::A),
-        vec![IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3))],
-    );
+    pair.harness()
+        .set_local_addresses(pair.serial(PairEndpoint::A), vec![changed_address]);
     pair.network_path(PairEndpoint::A, 2, NetworkAvailability::Available, wifi())
         .await;
     pair.wait_not_sendable(PairEndpoint::A, WAIT).await;
     pair.wait_not_sendable(PairEndpoint::B, WAIT).await;
-    pair.harness()
-        .peer(pair.serial(PairEndpoint::A))
-        .rtc
-        .wait_state(&pair.id(PairEndpoint::B), WAIT, |state| {
-            state.sendable && state.pc_generation > initial.a_to_b.pc_generation
-        })
-        .await
-        .expect("A must detect its new address without an offline callback");
-    let rebuilt = pair.wait_pair_ready(WAIT).await;
-
-    assert!(rebuilt.a_to_b.pc_generation > initial.a_to_b.pc_generation);
-    assert!(rebuilt.b_to_a.pc_generation > initial.b_to_a.pc_generation);
-    assert_bind_ip(
-        &pair.rtc_bind_addresses(PairEndpoint::A).await,
-        Ipv4Addr::new(127, 0, 0, 3),
+    let a_id = pair.id(PairEndpoint::A);
+    let b_id = pair.id(PairEndpoint::B);
+    let (a_ice_generation, b_ice_generation) = tokio::join!(
+        pair.harness()
+            .peer(pair.serial(PairEndpoint::A))
+            .rtc
+            .wait_ice_generation(&b_id, initial_a_ice_generation, WAIT),
+        pair.harness()
+            .peer(pair.serial(PairEndpoint::B))
+            .rtc
+            .wait_ice_generation(&a_id, initial_b_ice_generation, WAIT),
     );
-    pair.assert_rpc_both_directions("p06_available_handoff")
-        .await;
+    assert!(
+        a_ice_generation.is_some(),
+        "A must detect its new address without an offline callback"
+    );
+    assert!(
+        b_ice_generation.is_some(),
+        "B must complete the same-generation ICE restart"
+    );
+    let (a_rebound_address, b_rebound_address) = tokio::join!(
+        pair.wait_rtc_bound_address(
+            PairEndpoint::A,
+            initial_a_bound.len(),
+            changed_address,
+            WAIT,
+        ),
+        pair.wait_rtc_bound_address(
+            PairEndpoint::B,
+            initial_b_bound.len(),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            WAIT,
+        ),
+    );
+    assert_eq!(
+        a_rebound_address
+            .expect("A ICE restart must bind the changed address")
+            .ip(),
+        changed_address
+    );
+    assert_eq!(
+        b_rebound_address
+            .expect("B ICE restart must bind its current address")
+            .ip(),
+        IpAddr::V4(Ipv4Addr::LOCALHOST)
+    );
+    let recovered = pair.wait_pair_ready(WAIT).await;
+
+    assert_eq!(recovered.a_to_b.pc_generation, initial.a_to_b.pc_generation);
+    assert_eq!(recovered.b_to_a.pc_generation, initial.b_to_a.pc_generation);
+    assert!(a_ice_generation.expect("A ICE generation") > initial_a_ice_generation);
+    assert!(b_ice_generation.expect("B ICE generation") > initial_b_ice_generation);
+    pair.assert_rpc_both_directions("p06_available_soft").await;
     pair.shutdown().await;
 }
 

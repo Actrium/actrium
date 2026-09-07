@@ -1,22 +1,25 @@
 //! Local address provider abstraction (RFC §"Local addresses and sockets").
 //!
-//! webrtc-rs v0.20 gathers **one host candidate per explicitly bound socket**
-//! and uses the bound address literally — it never enumerates interfaces and
-//! never expands an unspecified `0.0.0.0` into real addresses (verified against
-//! `stun_gatherer.rs::gather_host_candidates`; see
-//! `docs/webrtc-v020-capability-matrix.md`). This is a hard behavioural
-//! difference from 0.14, which auto-gathered host candidates on every local
-//! interface. Actr must therefore supply real interface addresses to bind, which
-//! is exactly the responsibility of [`LocalAddressProvider`].
+//! webrtc-rs v0.20 gathers **one host candidate per explicitly bound socket**.
+//! Its ICE-restart rebind resolves the configured `ToSocketAddrs` values again,
+//! but a concrete address captured at the first build remains concrete. Actr
+//! therefore supplies a provider-backed resolver so a same-generation rebind
+//! sees the current interface-address set rather than a stale build snapshot.
 //!
 //! The RFC requires the provider to use platform interface information, support
 //! change notification, avoid the "probe a port, close the socket, then let the
 //! builder bind" race, and fail fast on unsatisfiable bind configuration. The
-//! provider's watch feed is bridged into Hard Recovery by the node-owned address
+//! provider's watch feed is bridged into RTC recovery by the node-owned address
 //! monitor. Desktop native enumeration is polled for changes; mobile/platform
-//! providers may additionally publish live interface snapshots.
+//! providers may additionally publish live interface snapshots. The controller
+//! first attempts an in-place ICE restart; a failed restart can still escalate
+//! to Hard Recovery.
 
-use std::net::{IpAddr, Ipv4Addr};
+use std::{
+    io,
+    net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
+    sync::Arc,
+};
 
 use async_trait::async_trait;
 use tokio::sync::watch;
@@ -61,10 +64,45 @@ pub(crate) trait LocalAddressProvider: Send + Sync {
     /// address, ephemeral port).
     async fn current_addresses(&self) -> Result<Vec<IpAddr>, LocalAddressError>;
 
+    /// Synchronous snapshot used by webrtc-rs when it re-resolves
+    /// `ToSocketAddrs` during an ICE-restart rebind. Implementations must read
+    /// the same source as [`Self::current_addresses`], without awaiting.
+    fn current_addresses_sync(&self) -> Result<Vec<IpAddr>, LocalAddressError>;
+
     /// Subscribe to address changes. The receiver immediately exposes the latest
     /// snapshot; platform providers publish a newer revision whenever their
     /// usable interface-address set changes.
     fn subscribe_changes(&self) -> watch::Receiver<LocalAddressSnapshot>;
+}
+
+/// A `ToSocketAddrs` value that resolves the provider's current address set on
+/// every bind. The v0.20 driver retains this value inside the PeerConnection
+/// and invokes it again when an ICE restart replaces local sockets.
+#[derive(Clone)]
+pub(crate) struct LocalAddressResolver {
+    provider: Arc<dyn LocalAddressProvider>,
+}
+
+impl LocalAddressResolver {
+    pub(crate) fn new(provider: Arc<dyn LocalAddressProvider>) -> Self {
+        Self { provider }
+    }
+}
+
+impl ToSocketAddrs for LocalAddressResolver {
+    type Iter = std::vec::IntoIter<SocketAddr>;
+
+    fn to_socket_addrs(&self) -> io::Result<Self::Iter> {
+        let addresses = self
+            .provider
+            .current_addresses_sync()
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        Ok(addresses
+            .into_iter()
+            .map(|address| SocketAddr::new(address, 0))
+            .collect::<Vec<_>>()
+            .into_iter())
+    }
 }
 
 /// Default desktop [`LocalAddressProvider`].
@@ -77,7 +115,7 @@ pub(crate) trait LocalAddressProvider: Send + Sync {
 /// development, while unspecified and multicast addresses are rejected.
 /// Change detection is performed by the node-owned address monitor, which
 /// combines provider notifications with a polling fallback so desktop and
-/// mobile interface changes both trigger Hard Recovery.
+/// mobile interface changes both trigger RTC recovery.
 pub(crate) struct DesktopLocalAddressProvider {
     /// Optional explicit override (used by tests to pin deterministic addresses).
     /// When empty, addresses are auto-detected as described above.
@@ -144,6 +182,13 @@ impl LocalAddressProvider for DesktopLocalAddressProvider {
         Self::detect()
     }
 
+    fn current_addresses_sync(&self) -> Result<Vec<IpAddr>, LocalAddressError> {
+        if !self.override_addresses.is_empty() {
+            return Ok(self.override_addresses.clone());
+        }
+        Self::detect()
+    }
+
     fn subscribe_changes(&self) -> watch::Receiver<LocalAddressSnapshot> {
         self.change_tx.subscribe()
     }
@@ -156,8 +201,9 @@ impl Default for DesktopLocalAddressProvider {
 }
 
 /// Mutable address provider for production-factory integration tests. Each
-/// update changes the exact address set consumed by the next v0.20 PC build;
-/// publishing a lifecycle fact alone is intentionally insufficient.
+/// update changes the exact address set consumed by the next v0.20 PC build or
+/// same-generation ICE-restart rebind; publishing a lifecycle fact alone is
+/// intentionally insufficient.
 #[cfg(feature = "test-utils")]
 pub struct TestLocalAddressProvider {
     current: std::sync::RwLock<LocalAddressSnapshot>,
@@ -194,6 +240,20 @@ impl TestLocalAddressProvider {
 #[async_trait]
 impl LocalAddressProvider for TestLocalAddressProvider {
     async fn current_addresses(&self) -> Result<Vec<IpAddr>, LocalAddressError> {
+        let addresses = self
+            .current
+            .read()
+            .expect("address test lock poisoned")
+            .addresses
+            .clone();
+        if addresses.is_empty() {
+            Err(LocalAddressError::NoUsableAddress)
+        } else {
+            Ok(addresses)
+        }
+    }
+
+    fn current_addresses_sync(&self) -> Result<Vec<IpAddr>, LocalAddressError> {
         let addresses = self
             .current
             .read()

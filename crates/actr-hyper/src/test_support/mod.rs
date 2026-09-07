@@ -13,6 +13,7 @@ use crate::{HostAbiFn, InvocationContext};
 use actr_framework::guest::dynclib_abi::InitPayloadV1;
 use actr_pack::PackageManifest;
 use actr_protocol::{AIdCredential, ActrId};
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 mod actrix_services;
@@ -51,6 +52,32 @@ pub use vnet::{VNetPair, create_vnet_pair};
 /// Install the rustls provider used by integration-test WebSocket clients.
 pub fn install_test_crypto_provider() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
+
+/// Return a currently assigned, bindable IPv4 address that is distinct from
+/// loopback. Address-change integration tests use it as the replacement
+/// interface so the Runtime seam can observe the actual soft-rebind socket.
+pub fn bindable_non_loopback_ipv4() -> IpAddr {
+    if_addrs::get_if_addrs()
+        .expect("test requires local interface enumeration")
+        .into_iter()
+        .filter_map(|interface| match interface.ip() {
+            IpAddr::V4(address)
+                if !address.is_loopback()
+                    && !address.is_unspecified()
+                    && !address.is_multicast()
+                    && !address.is_link_local() =>
+            {
+                Some(address)
+            }
+            _ => None,
+        })
+        .find_map(|address| {
+            std::net::UdpSocket::bind(SocketAddr::new(IpAddr::V4(address), 0))
+                .ok()
+                .map(|_| IpAddr::V4(address))
+        })
+        .unwrap_or_else(|| panic!("test requires a bindable non-loopback IPv4 address"))
 }
 
 /// Create a credential state backed by the supplied test credential.

@@ -143,6 +143,12 @@ impl LocalAddressProvider for StubAddressProvider {
         Ok(self.current.lock().unwrap().clone())
     }
 
+    fn current_addresses_sync(
+        &self,
+    ) -> Result<Vec<IpAddr>, crate::wire::webrtc::v020::address::LocalAddressError> {
+        Ok(self.current.lock().unwrap().clone())
+    }
+
     fn subscribe_changes(&self) -> watch::Receiver<LocalAddressSnapshot> {
         self.tx.subscribe()
     }
