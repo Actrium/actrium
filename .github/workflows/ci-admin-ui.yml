@@ -9,11 +9,13 @@ on:
     paths:
       - "crates/loran-server/admin/web/**"
       - ".github/workflows/ci-admin-ui.yml"
+      - ".github/workflows/_loran-release.yml"
   pull_request:
     branches: [main]
     paths:
       - "crates/loran-server/admin/web/**"
       - ".github/workflows/ci-admin-ui.yml"
+      - ".github/workflows/_loran-release.yml"
 
 permissions:
   contents: read
@@ -44,8 +46,14 @@ jobs:
           corepack enable
           corepack prepare pnpm@9.15.9 --activate
 
+      # --ignore-workspace is required: admin/web is not a member of the root
+      # pnpm workspace. Without it pnpm resolves the workspace root and installs
+      # all 6 workspace projects (running unrelated lifecycle hooks that need
+      # Bun) while leaving this directory without node_modules, so the build
+      # cannot find vite/tsc. Keep in sync with the Build Admin UI step in
+      # _loran-release.yml; changes there also trigger this workflow.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm --ignore-workspace install --frozen-lockfile
 
       # `build` runs `tsc -b && vite build`, i.e. TypeScript type-check + bundle.
       - name: Type-check and build
