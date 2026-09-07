@@ -840,7 +840,8 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                         peer = %state.peer_id.to_string_repr(),
                         recovery_cycle = state.recovery_cycle,
                         attempt = state.local_restart_request_attempt + 1,
-                        "answerer still parked awaiting offerer; retransmitting restart request"
+                        parked = false,
+                        "answerer recovery attempt elapsed; retransmitting restart request"
                     );
                     send_answerer_restart_request(state, &mut effects);
                 } else if state.role == Role::Offerer
@@ -887,6 +888,13 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                     // threshold.
                     state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
                     state.recovery_attempt_started = false;
+                    tracing::warn!(
+                        peer = %state.peer_id.to_string_repr(),
+                        recovery_cycle = state.recovery_cycle,
+                        attempt = state.local_restart_request_attempt + 1,
+                        parked = true,
+                        "answerer parked awaiting offerer; retransmitting restart request"
+                    );
                     send_answerer_restart_request(state, &mut effects);
                 } else {
                     start_hard_recovery(state, &mut effects);
@@ -1141,6 +1149,7 @@ fn become_answerer(
     state.pending_remote_sdp_exchange_id = exchange_id;
     state.role = Role::Answerer;
     state.awaiting_offer = false;
+    state.parked_signaling_generation = None;
     state.role_negotiation_inflight = false;
     state.phase = RtcPeerPhase::Building;
     state.unavailable_reason = None;
@@ -2126,7 +2135,10 @@ fn start_soft_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
 }
 
 fn send_answerer_restart_request(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect>) {
-    let Some(generation) = state.active_generation else {
+    let Some(generation) = state
+        .active_generation
+        .or(state.parked_signaling_generation)
+    else {
         return;
     };
     if state.local_restart_request_id.is_none() {
@@ -2164,6 +2176,9 @@ fn retire_generation(state: &mut RtcPeerState, generation: u64, effects: &mut Ve
     let mut has_session = false;
     let mut changed = false;
     if state.active_generation == Some(generation) {
+        if state.role == Role::Answerer {
+            state.parked_signaling_generation = Some(generation);
+        }
         state.active_generation = None;
         has_session = true;
         changed = true;
@@ -2236,6 +2251,7 @@ fn clear_transport_attempt_cache(state: &mut RtcPeerState) {
     state.local_restart_request_id = None;
     state.local_restart_request_attempt = 0;
     state.last_remote_restart_request = None;
+    state.parked_signaling_generation = None;
     state.renegotiation_inflight = false;
     state.renegotiation_pending = false;
     state.local_ufrag = None;
@@ -2387,9 +2403,13 @@ fn start_hard_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
 /// An Answerer cannot create a useful replacement PeerConnection: it has no
 /// local Offer to negotiate against. Keep the logical recovery cycle alive and
 /// wait for the stable Offerer to initiate the next physical connection. The
-/// six-second attempt timer is disarmed; the single end-to-end recovery budget
-/// remains the backstop and performs the normal terminal cleanup.
+/// six-second attempt timer retransmits a correlated wake, using the active or
+/// retired generation as signaling metadata; the single end-to-end recovery
+/// budget remains the backstop and performs the normal terminal cleanup.
 fn wait_for_offerer_offer(state: &mut RtcPeerState) {
+    state.parked_signaling_generation = state
+        .active_generation
+        .or(state.parked_signaling_generation);
     if !state.recovery_inflight {
         state.recovery_cycle = state.recovery_cycle.wrapping_add(1);
     }
@@ -2592,6 +2612,7 @@ fn reduce_state_tick(
             state.recovery_attempt_started = false;
             state.local_restart_request_id = None;
             state.local_restart_request_attempt = 0;
+            state.parked_signaling_generation = None;
             state.address_changed = false; // recovery succeeded
         }
         if !was_connected || state.phase == RtcPeerPhase::Sendable {
@@ -2816,6 +2837,7 @@ fn reduce_lane_event(state: &mut RtcPeerState, event: LaneEvent, effects: &mut V
                     state.recovery_attempt_started = false;
                     state.local_restart_request_id = None;
                     state.local_restart_request_attempt = 0;
+                    state.parked_signaling_generation = None;
                 }
                 state.bump_revision();
             }
@@ -2893,6 +2915,7 @@ fn atomic_switch(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect>) {
     state.recovery_attempt_started = false;
     state.local_restart_request_id = None;
     state.local_restart_request_attempt = 0;
+    state.parked_signaling_generation = None;
     state.phase = RtcPeerPhase::Sendable;
     state.bump_revision();
     tracing::info!(

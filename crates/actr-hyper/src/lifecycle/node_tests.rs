@@ -2439,10 +2439,11 @@ async fn claimed_scope_reaches_guest_and_bounds_child_deadlines() {
 fn delivery_uncertain_wire_code_round_trips_typed_fields() {
     use super::*;
     let original = ActrError::DeliveryUncertain {
-        // The operation id contains the legacy delimiter; the typed encoding
-        // must preserve both fields verbatim.
-        operation_id: "upload: part 3".to_string(),
-        cause: "ambiguous partial write: stream stalled".to_string(),
+        // Both fields contain the legacy delimiter and the previous typed
+        // encoding's record separator; the length-prefixed encoding must
+        // preserve them verbatim.
+        operation_id: "upload: \u{001e}part 3".to_string(),
+        cause: "ambiguous partial write: \u{001e}stream stalled".to_string(),
     };
     let code = protocol_error_to_code(&original);
     assert_eq!(code, 10012, "DeliveryUncertain owns a dedicated wire code");
@@ -2452,8 +2453,8 @@ fn delivery_uncertain_wire_code_round_trips_typed_fields() {
         matches!(
             &round_tripped,
             ActrError::DeliveryUncertain { operation_id, cause }
-                if operation_id == "upload: part 3"
-                    && cause == "ambiguous partial write: stream stalled"
+                if operation_id == "upload: \u{001e}part 3"
+                    && cause == "ambiguous partial write: \u{001e}stream stalled"
         ),
         "the typed encoding must round-trip ids and causes containing ': ': {round_tripped:?}"
     );
@@ -2484,5 +2485,17 @@ fn delivery_uncertain_wire_code_legacy_display_falls_back() {
     assert!(matches!(
         wire_code_to_actr_error(10010, "bug".to_string()),
         ActrError::Internal(_)
+    ));
+}
+
+#[test]
+fn delivery_uncertain_wire_code_rejects_ambiguous_legacy_separator_payload() {
+    use super::*;
+    let malformed =
+        wire_code_to_actr_error(10012, "operation\u{001e}cause\u{001e}tail".to_string());
+    assert!(matches!(
+        &malformed,
+        ActrError::DeliveryUncertain { operation_id, cause }
+            if operation_id == "unknown" && cause == "operation\u{001e}cause\u{001e}tail"
     ));
 }

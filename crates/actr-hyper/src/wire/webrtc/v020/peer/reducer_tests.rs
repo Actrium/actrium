@@ -3829,6 +3829,113 @@ fn answerer_physical_failure_waits_without_restart_or_rebuild() {
 }
 
 #[test]
+fn closed_answerer_retains_retired_generation_for_offer_wake() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_negotiating(&mut state);
+    drive_to_sendable(&mut state, generation);
+
+    let close_effects = reduce(&mut state, closed_tick(generation));
+
+    assert!(has_close_session(&close_effects, generation));
+    assert_eq!(state.active_generation, None);
+    assert_eq!(state.parked_signaling_generation, Some(generation));
+    assert!(!state.is_live_generation(generation));
+    assert!(state.awaiting_offer);
+
+    let recovery_epoch = state.recovery_epoch;
+    let wake_effects = reduce(
+        &mut state,
+        RtcPeerInput::RecoveryDeadlineElapsed { recovery_epoch },
+    );
+    assert!(
+        wake_effects.iter().any(|effect| matches!(
+            effect,
+            RtcPeerEffect::SendSignaling {
+                generation: actual,
+                message: SignalingMessage::IceRestartRequest { attempt: 1, .. },
+            } if *actual == generation
+        )),
+        "a closed Answerer must wake the healthy Offerer using the retired generation identity"
+    );
+}
+
+#[test]
+fn driver_exit_answerer_retains_retired_generation_for_offer_wake() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_negotiating(&mut state);
+    drive_to_sendable(&mut state, generation);
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::DriverEvent(PeerDriverEvent::DriverExited {
+            generation,
+            error: Some(webrtc::error::Error::Other("driver stopped".into())),
+        }),
+    );
+
+    assert!(has_close_session(&effects, generation));
+    assert_eq!(state.active_generation, None);
+    assert_eq!(state.parked_signaling_generation, Some(generation));
+    assert!(state.awaiting_offer);
+}
+
+#[test]
+fn closed_answerer_wakes_stable_offerer_to_hard_recovery() {
+    let mut answerer = RtcPeerState::new(test_actor_id(2));
+    let answerer_generation = drive_answerer_to_negotiating(&mut answerer);
+    drive_to_sendable(&mut answerer, answerer_generation);
+    reduce(&mut answerer, closed_tick(answerer_generation));
+
+    let mut offerer = RtcPeerState::new(test_actor_id(1));
+    let offerer_generation = drive_offerer_to_sendable(&mut offerer);
+    let mut request_id = None;
+
+    for expected_attempt in 1..=4 {
+        let recovery_epoch = answerer.recovery_epoch;
+        let wake_effects = reduce(
+            &mut answerer,
+            RtcPeerInput::RecoveryDeadlineElapsed { recovery_epoch },
+        );
+        let (actual_request_id, actual_attempt) = wake_effects
+            .iter()
+            .find_map(|effect| match effect {
+                RtcPeerEffect::SendSignaling {
+                    generation,
+                    message:
+                        SignalingMessage::IceRestartRequest {
+                            request_id,
+                            attempt,
+                        },
+                } => {
+                    assert_eq!(*generation, answerer_generation);
+                    Some((request_id.clone(), *attempt))
+                }
+                _ => None,
+            })
+            .expect("parked Answerer must keep waking the Offerer");
+        assert_eq!(actual_attempt, expected_attempt);
+        if let Some(previous) = &request_id {
+            assert_eq!(previous, &actual_request_id);
+        } else {
+            request_id = Some(actual_request_id.clone());
+        }
+
+        let offerer_effects = reduce(
+            &mut offerer,
+            RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequest {
+                request_id: actual_request_id,
+                attempt: actual_attempt,
+            }),
+        );
+        if expected_attempt < 4 {
+            assert!(has_restart_ice(&offerer_effects, offerer_generation));
+        } else {
+            assert!(has_build_session(&offerer_effects, offerer_generation + 1));
+        }
+    }
+}
+
+#[test]
 fn hard_recovery_old_generation_events_ignored_after_pending() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let old_gen = drive_offerer_to_sendable(&mut state);

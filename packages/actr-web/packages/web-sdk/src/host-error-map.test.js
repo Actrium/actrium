@@ -31,6 +31,11 @@ function hostErrorMapFunctionRegion(sourceUrl) {
   const source = readFileSync(sourceUrl, 'utf8');
   const start = source.indexOf('function mapHostErrorToActr');
   const endMarker = source.indexOf('// @host-error-map end');
+  expect(start, `${sourceUrl} must contain mapHostErrorToActr`).toBeGreaterThan(-1);
+  expect(
+    endMarker,
+    `${sourceUrl} must contain an end marker after mapHostErrorToActr`
+  ).toBeGreaterThan(start);
   const nextDeclaration = source.indexOf('\nfunction ', start + 1);
   const end = nextDeclaration === -1 || nextDeclaration > endMarker ? endMarker : nextDeclaration;
   return source.slice(start, end);
@@ -42,11 +47,10 @@ const cliCopySource = new URL(
   '../../../../../crates/actr-cli/assets/web-runtime/actor.sw.js',
   import.meta.url
 );
-// The package publishes the built worker; CI builds before testing, so the
-// published dist bytes must exist and match the sources (a stale or
-// diverging build cannot ship an old error mapping behind a green
-// source-level test). When dist is absent (pre-build local run), the
-// source-level assertions below still gate the mapping.
+// The package publishes the built worker; every test run must build before
+// testing, so the published dist bytes must exist and match the sources. A
+// stale or diverging build cannot ship an old error mapping behind a green
+// source-level test.
 const swDistSource = new URL('../dist/actor.sw.js', import.meta.url);
 const swDistExists = existsSync(swDistSource);
 
@@ -106,13 +110,9 @@ describe('mapHostErrorToActr (actor.sw.js)', () => {
 
   it('publishes the same mapping through the built dist service worker', () => {
     if (!swDistExists) {
-      // Source-level coverage still ran above. Under CI the SDK is always
-      // built first, so a missing dist there means the build failed to copy
-      // the worker — fail instead of silently skipping the dist gate.
-      if (process.env.CI) {
-        throw new Error('CI must build the web-sdk before running this suite');
-      }
-      return;
+      throw new Error(
+        'web-sdk dist/actor.sw.js is missing; run pnpm --filter @actrium/actr-web run build first'
+      );
     }
     const distFn = hostErrorMapFunctionRegion(swDistSource);
     const srcFn = hostErrorMapFunctionRegion(swSource);

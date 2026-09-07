@@ -1074,6 +1074,66 @@ async fn manual_policy_clock_retries_answerer_request_until_budget_without_pc_ch
 }
 
 #[tokio::test]
+async fn manual_policy_clock_wakes_closed_answerer_after_generation_retirement() {
+    let mut h = ControllerTestHarness::spawn(710);
+    drive_answerer_to_sendable(&mut h).await;
+
+    // A physical close retires the old session before the passive Answerer can
+    // ask the Offerer for a replacement Offer.
+    h.facts.driver(PeerDriverEvent::PeerConnectionStateChanged {
+        generation: 1,
+        state: RTCPeerConnectionState::Closed,
+    });
+    await_snapshot(
+        &h.handle,
+        "closed Answerer enters parked recovery",
+        |snapshot| {
+            snapshot.status == actr_framework::WebRtcPeerStatus::Recovering
+                && snapshot.pc_generation == 0
+                && !snapshot.sendable
+        },
+    )
+    .await;
+
+    let close = h.next_effect().await;
+    assert!(matches!(
+        close.effect,
+        RtcPeerEffect::CloseSession { generation: 1, .. }
+    ));
+    h.effects
+        .complete(EffectCompletion::CloseSession {
+            generation: close.identity.pc_generation,
+            operation_id: close.identity.operation_id,
+            result: Ok(()),
+        })
+        .await
+        .expect("complete closed Answerer session");
+
+    // The parked Answerer keeps a six-second attempt timer even though the
+    // physical generation is no longer live. Its wake must carry the retired
+    // generation only as signaling metadata and must not rebuild locally.
+    tokio::task::yield_now().await;
+    h.clock.advance(Duration::from_secs(6));
+    let wake = timeout(WAIT, h.signaling_rx.recv())
+        .await
+        .expect("closed Answerer wake timeout")
+        .expect("signaling channel closed");
+    assert!(matches!(
+        wake.message,
+        SignalingMessage::IceRestartRequest { attempt: 1, .. }
+    ));
+    assert_eq!(
+        wake.attempt
+            .expect("restart request carries relay identity")
+            .pc_generation,
+        1,
+        "the retired generation is retained only to route the signaling wake"
+    );
+
+    h.shutdown().await;
+}
+
+#[tokio::test]
 async fn fresh_remote_offer_replaces_recovery_with_a_bounded_initial_attempt() {
     let mut h = ControllerTestHarness::spawn(707);
     drive_answerer_to_sendable(&mut h).await;

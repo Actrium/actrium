@@ -420,9 +420,10 @@ impl PeerGate {
             // workload hook: the caller still receives the terminal error,
             // but the mirror event is dropped — surface that so the missing
             // wiring is diagnosable instead of silent.
-            tracing::debug!(
+            tracing::warn!(
                 operation_id,
-                "DeliveryUncertain returned without a workload hook callback installed",
+                cause,
+                "DeliveryUncertain returned without a workload hook callback installed; mirror event dropped",
             );
             return;
         };

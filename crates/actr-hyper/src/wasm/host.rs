@@ -626,7 +626,7 @@ impl WasmHost {
 /// with an actionable rebuild hint. Older packages must be rebuilt with the
 /// current SDK, which emits only the 0.7.0 async-world ABI.
 fn probe_world(component: &Component, engine: &Engine) -> WasmResult<()> {
-    let mut saw_v6 = false;
+    let mut saw_v07 = false;
     let mut saw_v06 = false;
     let mut saw_v5 = false;
     let mut saw_v4 = false;
@@ -635,7 +635,7 @@ fn probe_world(component: &Component, engine: &Engine) -> WasmResult<()> {
     let mut saw_v1 = false;
     for (name, _item) in component.component_type().exports(engine) {
         if name.starts_with("actr:workload/workload@0.7.0") {
-            saw_v6 = true;
+            saw_v07 = true;
         } else if name.starts_with("actr:workload/workload@0.6.0") {
             saw_v06 = true;
         } else if name.starts_with("actr:workload/workload@0.5.0") {
@@ -656,8 +656,8 @@ fn probe_world(component: &Component, engine: &Engine) -> WasmResult<()> {
         + u8::from(saw_v4)
         + u8::from(saw_v5)
         + u8::from(saw_v06)
-        + u8::from(saw_v6);
-    if saw_v6 && recognized_worlds == 1 {
+        + u8::from(saw_v07);
+    if saw_v07 && recognized_worlds == 1 {
         return Ok(());
     }
     if recognized_worlds > 1 {
@@ -674,6 +674,13 @@ fn probe_world(component: &Component, engine: &Engine) -> WasmResult<()> {
              invocation context and host imports predate the EXPLICIT reply \
              boundary; rebuild the package with the current SDK, which emits \
              actr:workload@0.7.0"
+                .to_string(),
+        ));
+    }
+    if saw_v06 {
+        return Err(WasmError::LoadFailed(
+            "component exports the retired actr:workload@0.6.0 async world; rebuild the \
+             package with the current SDK, which emits actr:workload@0.7.0"
                 .to_string(),
         ));
     }
