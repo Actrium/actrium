@@ -121,6 +121,11 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
       - name: Setup pnpm
         run: |
           corepack enable
