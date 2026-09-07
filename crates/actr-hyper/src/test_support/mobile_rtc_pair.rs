@@ -249,6 +249,16 @@ impl MobileRtcPairHarness {
                 services.aid_credential(&b_id),
             )
             .await;
+        // `connect_to_with_identity()` returns after the WebSocket handshake,
+        // but the Actrix upgrade task registers the actor asynchronously.
+        // Wait for both Ping/Pong barriers before any RoleNegotiation can
+        // address the peer through actor_id_index.
+        harness
+            .wait_for_signaling_registration(a_serial, Duration::from_secs(5))
+            .await;
+        harness
+            .wait_for_signaling_registration(b_serial, Duration::from_secs(5))
+            .await;
 
         let a_mobile = Some(MobileEventDriver::spawn(&harness, a_serial));
         let b_mobile = Some(MobileEventDriver::spawn(&harness, b_serial));

@@ -15,7 +15,7 @@ use actr_hyper::lifecycle::{
     ReconnectReason, process_network_event_batch, select_network_recovery_action,
 };
 use actr_hyper::test_support::{
-    TestHarness, WebRtcFragmentSendEvent, WebRtcFragmentSendHook,
+    TestHarness, TestRtcRole, WebRtcFragmentSendEvent, WebRtcFragmentSendHook,
     install_webrtc_fragment_send_hook_for_test, spawn_network_event_supervisor,
 };
 use actr_protocol::prost::Message as _;
@@ -139,6 +139,15 @@ async fn setup_mobile_to_server_with_serials(
     // in both directions.
     harness.connect(100, 200).await;
     harness
+}
+
+/// Start a fresh physical connection from the stable Offerer. The Answerer is
+/// intentionally passive and only consumes the resulting ordinary Offer.
+async fn reconnect_from_offerer(harness: &TestHarness, offerer_serial: u64, answerer_serial: u64) {
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let answerer = harness.peer(answerer_serial).id.clone();
+    harness.peer(offerer_serial).rtc.close_peer(&answerer).await;
+    harness.peer(offerer_serial).rtc.connect(answerer).await;
 }
 
 fn spawn_large_request(
@@ -863,6 +872,18 @@ async fn mobile_event_storm_during_call_and_data_chunk_does_not_hang() {
     for case in ROLE_CASES {
         let harness =
             setup_mobile_to_server_with_serials(case.mobile_serial, case.server_serial).await;
+        let target = harness.peer(case.server_serial).id.clone();
+        let mobile_role = harness
+            .peer(case.mobile_serial)
+            .rtc
+            .role(&target)
+            .await
+            .expect("mobile controller role must be available after connect");
+        let (offerer_serial, answerer_serial) = if mobile_role == TestRtcRole::Offerer {
+            (case.mobile_serial, case.server_serial)
+        } else {
+            (case.server_serial, case.mobile_serial)
+        };
         let (data, hash) = generate_test_data(LARGE_PAYLOAD_SIZE);
         let processor: Arc<dyn NetworkEventProcessor> =
             harness.peer(case.mobile_serial).network_processor();
@@ -882,7 +903,6 @@ async fn mobile_event_storm_during_call_and_data_chunk_does_not_hang() {
             data.clone(),
             5_000,
         );
-        let target = harness.peer(case.server_serial).id.clone();
         let stream_id = format!("{}-mobile-event-storm-concurrent-stream", case.name);
         let stream = harness.peer(case.mobile_serial).gate.send_data_chunk(
             &target,
@@ -911,11 +931,7 @@ async fn mobile_event_storm_during_call_and_data_chunk_does_not_hang() {
         // not sendable. The legacy gate waited for dial-on-demand internally,
         // so adapt that boundary through the new controller API before keeping
         // the original single post-storm business retry assertion.
-        harness
-            .peer(case.mobile_serial)
-            .rtc
-            .connect(target.clone())
-            .await;
+        reconnect_from_offerer(&harness, offerer_serial, answerer_serial).await;
         harness
             .peer(case.mobile_serial)
             .rtc

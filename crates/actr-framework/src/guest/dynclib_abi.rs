@@ -840,6 +840,18 @@ mod tests {
             round_trip(ActrError::Internal("bug".into())),
             ActrError::Internal(message) if message == "bug"
         ));
+        // Tag 12: the terminal uncertain-delivery variant must round-trip
+        // both payload fields with distinct non-empty values, so a mapping,
+        // payload-conversion, or field-order regression in the C-ABI
+        // conversion cannot silently drop `operation_id` or `cause`.
+        assert!(matches!(
+            round_trip(ActrError::DeliveryUncertain {
+                operation_id: "stream-7#3".into(),
+                cause: "ambiguous partial write".into(),
+            }),
+            ActrError::DeliveryUncertain { operation_id, cause }
+                if operation_id == "stream-7#3" && cause == "ambiguous partial write"
+        ));
     }
 
     #[test]
