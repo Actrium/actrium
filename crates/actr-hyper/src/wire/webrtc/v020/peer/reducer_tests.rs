@@ -4468,6 +4468,156 @@ fn answerer_applies_new_ufrag_offer_as_soft_ice_restart() {
     );
 }
 
+#[test]
+fn answerer_parked_restart_reuses_open_lane_without_second_on_open() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_sendable_with_ufrag(&mut state, "remote-1");
+    assert!(state.sendable());
+
+    // A hard recovery request can park an Answerer while its active
+    // PeerConnection and RpcReliable DataChannel are still physically alive.
+    // The DataChannel will not emit another OnOpen for the same-generation ICE
+    // restart, so its readiness fact must survive the park.
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::LocalAddressChanged,
+        )),
+    );
+    assert!(!has_build_session(&effects, generation + 1));
+    assert_eq!(state.active_generation, Some(generation));
+    assert!(state.awaiting_offer);
+    assert!(state.rpc_reliable_open);
+    assert!(!state.sendable());
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOffer(Box::new(
+            sdp_with_ufrag(RTCSdpType::Offer, "remote-2"),
+        ))),
+    );
+    assert!(has_set_remote(&effects, generation));
+    assert!(!state.awaiting_offer);
+
+    let set_remote_operation = pending_operation(
+        &state,
+        PendingRtcOperationKind::SetRemoteDescription,
+        generation,
+    );
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::SetRemoteDescription {
+            generation,
+            operation_id: set_remote_operation,
+            result: Ok(()),
+        }),
+    );
+    assert!(has_create_answer(&effects, generation));
+
+    let create_answer_operation =
+        pending_operation(&state, PendingRtcOperationKind::CreateAnswer, generation);
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::CreateAnswer {
+            generation,
+            operation_id: create_answer_operation,
+            result: Ok(Box::new(sdp_with_ufrag(RTCSdpType::Answer, "local-2"))),
+        }),
+    );
+    assert!(has_set_local(&effects, generation));
+
+    let set_local_operation = pending_operation(
+        &state,
+        PendingRtcOperationKind::SetLocalDescription,
+        generation,
+    );
+    reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::SetLocalDescription {
+            generation,
+            operation_id: set_local_operation,
+            result: Ok(()),
+        }),
+    );
+    assert!(state.recovery_negotiated);
+
+    // No LaneEvent::Opened is injected here: the existing RpcReliable lane is
+    // the readiness anchor for this ICE restart.
+    reduce(&mut state, connected_tick(generation));
+    assert!(state.sendable());
+    assert_eq!(state.phase, RtcPeerPhase::Sendable);
+    assert!(!state.recovery_inflight);
+}
+
+#[test]
+fn answerer_parked_restart_does_not_restore_closed_lane() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_sendable_with_ufrag(&mut state, "remote-1");
+
+    // Closing the readiness anchor revokes the physical fact before the
+    // Answerer parks. A later ICE restart must not treat the old lane as open.
+    reduce(
+        &mut state,
+        RtcPeerInput::Lane(LaneEvent::Closed {
+            generation,
+            lane: LaneKind::READINESS_ANCHOR,
+        }),
+    );
+    assert!(!state.rpc_reliable_open);
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOffer(Box::new(
+            sdp_with_ufrag(RTCSdpType::Offer, "remote-2"),
+        ))),
+    );
+    assert!(has_set_remote(&effects, generation));
+
+    let set_remote_operation = pending_operation(
+        &state,
+        PendingRtcOperationKind::SetRemoteDescription,
+        generation,
+    );
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::SetRemoteDescription {
+            generation,
+            operation_id: set_remote_operation,
+            result: Ok(()),
+        }),
+    );
+    assert!(has_create_answer(&effects, generation));
+
+    let create_answer_operation =
+        pending_operation(&state, PendingRtcOperationKind::CreateAnswer, generation);
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::CreateAnswer {
+            generation,
+            operation_id: create_answer_operation,
+            result: Ok(Box::new(sdp_with_ufrag(RTCSdpType::Answer, "local-2"))),
+        }),
+    );
+    assert!(has_set_local(&effects, generation));
+
+    let set_local_operation = pending_operation(
+        &state,
+        PendingRtcOperationKind::SetLocalDescription,
+        generation,
+    );
+    reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::SetLocalDescription {
+            generation,
+            operation_id: set_local_operation,
+            result: Ok(()),
+        }),
+    );
+    reduce(&mut state, connected_tick(generation));
+    assert!(!state.sendable());
+    assert!(!state.rpc_reliable_open);
+}
+
 /// The answerer's own soft recovery is request-only: no local RestartIce
 /// effect is dispatched, and its local ICE restart happens implicitly when the
 /// offerer's restart offer is applied. A local restart_ice() racing that offer
