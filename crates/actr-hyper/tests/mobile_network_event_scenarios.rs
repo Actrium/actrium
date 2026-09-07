@@ -776,11 +776,17 @@ async fn expect_request_ok(
             }
             Ok(Ok(Err(err))) => {
                 let msg = err.to_string();
+                let delivery_uncertain = msg.to_ascii_lowercase().contains("delivery uncertain");
                 assert!(
                     msg.contains("connection not ready")
                         || (msg.contains("Request timeout") || msg.contains("timed out"))
                         || msg.contains("timed out")
-                        || msg.contains("Connection"),
+                        || msg.contains("Connection")
+                        // This helper retries with a fresh request ID. A
+                        // DeliveryUncertain result terminates only the
+                        // submitted attempt and is safe here for the
+                        // idempotent echo workload.
+                        || delivery_uncertain,
                     "unexpected retry error while waiting for recovery: {msg}"
                 );
                 msg
@@ -895,6 +901,11 @@ fn is_expected_bounded_send_error(message: &str) -> bool {
     .any(|needle| message.contains(needle))
 }
 
+fn is_expected_inflight_send_error(message: &str) -> bool {
+    is_expected_bounded_send_error(message)
+        || message.to_ascii_lowercase().contains("delivery uncertain")
+}
+
 async fn send_data_chunk_bounded(
     harness: &TestHarness,
     from_serial: u64,
@@ -927,7 +938,7 @@ async fn send_data_chunk_bounded(
     if let Err(err) = result {
         let msg = err.to_string();
         assert!(
-            is_expected_bounded_send_error(&msg),
+            is_expected_inflight_send_error(&msg),
             "{stream_id} DataChunk failed with unexpected error: {msg}"
         );
     }

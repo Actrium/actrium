@@ -80,7 +80,7 @@ fn probe_world_accepts_current_v6_component() {
     let src = r#"
         (component
           (instance $v6)
-          (export "actr:workload/workload@0.6.0" (instance $v6))
+          (export "actr:workload/workload@0.7.0" (instance $v6))
         )
     "#;
     probe_wat(src).expect("current workload ABI should be accepted");
@@ -98,7 +98,7 @@ fn probe_world_rejects_retired_v5_component_with_rebuild_hint() {
     assert!(matches!(err, WasmError::LoadFailed(_)));
     assert!(
         err.to_string().contains("EXPLICIT reply")
-            && err.to_string().contains("@0.6.0")
+            && err.to_string().contains("@0.7.0")
             && err
                 .to_string()
                 .contains("rebuild the package with the current SDK"),
@@ -118,7 +118,7 @@ fn probe_world_rejects_retired_v4_component_with_rebuild_hint() {
     assert!(matches!(err, WasmError::LoadFailed(_)));
     assert!(
         err.to_string().contains("on-webrtc-state-changed")
-            && err.to_string().contains("@0.6.0")
+            && err.to_string().contains("@0.7.0")
             && err
                 .to_string()
                 .contains("rebuild the package with the current SDK"),
@@ -138,7 +138,7 @@ fn probe_world_rejects_retired_v3_component_with_rebuild_hint() {
     assert!(matches!(err, WasmError::LoadFailed(_)));
     assert!(
         err.to_string().contains("payload-type lane")
-            && err.to_string().contains("@0.6.0")
+            && err.to_string().contains("@0.7.0")
             && err
                 .to_string()
                 .contains("rebuild the package with the current SDK"),
@@ -157,7 +157,7 @@ fn probe_world_rejects_retired_v2_component_with_rebuild_hint() {
     let err = probe_wat(src).unwrap_err();
     assert!(matches!(err, WasmError::LoadFailed(_)));
     assert!(
-        err.to_string().contains("caller-selected timeout") && err.to_string().contains("@0.6.0"),
+        err.to_string().contains("caller-selected timeout") && err.to_string().contains("@0.7.0"),
         "unexpected message: {err}"
     );
 }

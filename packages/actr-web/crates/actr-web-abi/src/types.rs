@@ -71,6 +71,14 @@ pub struct DataChunk {
     pub timestamp_ms: Option<i64>,
 }
 
+/// Lowered from WIT `record delivery-uncertain-payload`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryUncertainPayload {
+    #[serde(rename = "operation-id")]
+    pub operation_id: String,
+    pub cause: String,
+}
+
 /// Lowered from WIT `record dependency-not-found-payload`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DependencyNotFoundPayload {
@@ -154,6 +162,8 @@ pub enum ActrError {
     NotImplemented(String),
     #[serde(rename = "internal")]
     Internal(String),
+    #[serde(rename = "delivery-uncertain")]
+    DeliveryUncertain(DeliveryUncertainPayload),
 }
 
 /// Lowered from WIT `variant dest`.

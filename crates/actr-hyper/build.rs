@@ -39,7 +39,7 @@ fn main() {
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR set by cargo"));
     let guest_dir = manifest_dir.join("tests/wasm_actor_fixture");
     // The fixture guest SDK targets the 0.6.0 async world (wit-v2); the
-    // built artifact is an actr:workload@0.6.0 component. Track the v2 WIT so
+    // built artifact is an actr:workload@0.7.0 component. Track the v2 WIT so
     // an edit there re-runs the fixture build.
     let wit = manifest_dir.join("../framework/wit-v2/actr-workload.wit");
 

@@ -254,14 +254,17 @@ monitor.startMonitoring()
 // Query error properties
 when {
     ex.isTimeout -> println("Timed out")
-    ex.isRecoverable -> println("Transient — retry")
+    ex.isRecoverable -> println("Transient — retry only when this operation is explicitly idempotent")
     ex.requiresDlq -> println("Route to dead-letter queue")
 }
 println(ex.userMessage)
 
-// Retry with exponential backoff
-val result = withRetry(maxAttempts = 5) {
-    ref.call("echo.EchoService.Echo", payload)
+// Ordinary Call/Tell/StreamReliable operations already wait for route
+// readiness and apply their framework retry budget. Do not wrap them in a
+// second retry loop. Use withRetry only for an explicitly idempotent operation
+// outside the ACTR transport, with an explicit predicate:
+val result = withRetry(shouldRetry = { it is java.io.IOException }) {
+    fetchFromAnExternalService()
 }
 
 // Scoped actor lifecycle (auto-shutdown)
@@ -316,7 +319,7 @@ val echoType = manifest.resolveDependency("EchoService")
 | `DynamicWorkload` | Composite workload with lifecycle + optional observers |
 | `NetworkEventHandle` | Platform network/lifecycle event callbacks |
 | `PayloadType` | RPC/stream/media routing: RPC_RELIABLE, RPC_SIGNAL, STREAM_RELIABLE, etc. |
-| `ActrException` | 11 error variants: Unavailable, TimedOut, NotFound, etc. |
+| `ActrException` | 12 protocol/error variants including non-retryable `DeliveryUncertain`, plus binding-local errors |
 
 ## License
 

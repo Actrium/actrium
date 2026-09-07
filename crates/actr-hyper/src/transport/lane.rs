@@ -536,35 +536,63 @@ impl SendAttemptResult {
     }
 }
 
+/// The progress recorded for one outbound operation, kept separately from
+/// the in-flight flag so a lane write in progress never overwrites the last
+/// authoritative classification of a completed attempt.
+#[derive(Default)]
+pub(crate) struct RecordedDeliveryProgress {
+    /// Progress of the most recent completed lane attempt (`None` = no
+    /// attempt ever completed).
+    completed: Option<DeliveryProgress>,
+    /// True between "a lane write is about to start" and "that write
+    /// resolved". A cancellation inside this window cannot be classified
+    /// any other way than `Unknown`.
+    write_in_flight: bool,
+}
+
 /// Shared sink receiving the delivery progress of one in-flight operation.
 ///
-/// The transport writes the fact *as soon as it exists*: tentatively
-/// `Unknown` immediately before a lane write (a cancellation landing inside
-/// the write cannot be classified any other way), then authoritatively once
-/// the lane resolves. A deadline wrapper that cancels the send future can
-/// therefore still distinguish "never reached a transport" (retryable) from
-/// "may have entered a transport" (uncertain).
-pub(crate) type DeliveryProgressCell = Arc<std::sync::Mutex<Option<DeliveryProgress>>>;
+/// The transport marks the write in flight immediately before each lane
+/// write and records the authoritative classification when the lane
+/// resolves. A deadline wrapper that cancels the send future can therefore
+/// still distinguish "never reached a transport" (retryable) from "may have
+/// entered a transport" (uncertain) — and a quick proven-pre-send failure is
+/// never misread as ambiguity.
+pub(crate) type DeliveryProgressCell = Arc<std::sync::Mutex<RecordedDeliveryProgress>>;
 
 /// Create an empty progress cell for one outbound operation.
 pub(crate) fn new_delivery_progress_cell() -> DeliveryProgressCell {
-    Arc::new(std::sync::Mutex::new(None))
+    Arc::new(std::sync::Mutex::new(RecordedDeliveryProgress::default()))
 }
 
-/// Record the latest observed progress. Last write wins: a tentative
-/// `Unknown` immediately precedes each lane write and the authoritative lane
-/// result immediately follows it, so the cell always reflects the current
-/// point of cancellation.
-pub(crate) fn record_delivery_progress(cell: &DeliveryProgressCell, progress: DeliveryProgress) {
+/// Mark that a lane write is about to start. A cancellation observed while
+/// this flag is set conservatively classifies as `Unknown`, regardless of
+/// any earlier completed attempt.
+pub(crate) fn mark_delivery_write_in_flight(cell: &DeliveryProgressCell) {
     if let Ok(mut guard) = cell.lock() {
-        *guard = Some(progress);
+        guard.write_in_flight = true;
     }
 }
 
-/// Read the progress recorded so far (`None` = no lane write was ever
-/// approached, so a cancellation is provably pre-send).
+/// Record the authoritative classification of a completed lane attempt.
+pub(crate) fn record_delivery_progress(cell: &DeliveryProgressCell, progress: DeliveryProgress) {
+    if let Ok(mut guard) = cell.lock() {
+        guard.completed = Some(progress);
+        guard.write_in_flight = false;
+    }
+}
+
+/// Read the progress recorded so far. `None` means no lane write was ever
+/// approached, so a cancellation is provably pre-send; a write still in
+/// flight classifies conservatively as `Unknown`.
 pub(crate) fn observed_delivery_progress(cell: &DeliveryProgressCell) -> Option<DeliveryProgress> {
-    cell.lock().ok().and_then(|guard| *guard)
+    cell.lock().ok().and_then(|guard| {
+        if guard.write_in_flight {
+            Some(DeliveryProgress::Unknown)
+        } else {
+            guard.completed
+        }
+    })
 }
 
 /// DataLane - Data transport channel trait
@@ -616,7 +644,18 @@ pub trait DataLane: Send + Sync + std::fmt::Debug {
         match self.send(data).await {
             Ok(()) => SendAttemptResult::submitted(),
             Err(error) => {
-                let progress = if matches!(error, NetworkError::SecureChannelNotReady(_)) {
+                // Known non-retryable pre-send client errors (argument and
+                // operation validation) cannot have reached the wire by
+                // construction, so they stay ordinary retryable-refusing
+                // errors; the secure-readiness gate is likewise provably
+                // pre-send. Everything else keeps the fail-safe `Unknown` —
+                // an unknown error may have partially entered a transport.
+                let progress = if matches!(
+                    error,
+                    NetworkError::SecureChannelNotReady(_)
+                        | NetworkError::InvalidArgument(_)
+                        | NetworkError::InvalidOperation(_)
+                ) {
                     DeliveryProgress::NotAttempted
                 } else {
                     DeliveryProgress::Unknown

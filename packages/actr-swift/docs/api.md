@@ -248,9 +248,10 @@ let observers = runtimeObservers(webrtc: RTCObserver())
 
 `SignalingObserver.onConnected` means the runtime is connected to the
 signaling service. It does **not** mean a target actor is send-ready.
-`WebRTCObserver.onConnected(ctx:event:)` is the target-scoped readiness
-signal for the peer in `event.peer`; retry saved user intent only by issuing a
-fresh `call`/`tell` after that peer-specific callback.
+`WebRTCObserver.onConnected(ctx:event:)` is an observational status signal for
+the peer in `event.peer`; it is not a send permit and must not be used to replay
+saved user intent. Call, Tell, and StreamReliable operations wait for a usable
+route inside the framework and consume one operation deadline.
 
 ### Data Types
 
@@ -337,8 +338,10 @@ public struct Realm: Equatable, Hashable {
 
 #### `ActrError`
 
-Error type for ACTR operations. Mirrors `actr_protocol::ActrError` 1:1, with
-one binding-local variant (`Config`) for pre-protocol configuration failures.
+Error type for ACTR operations. It mirrors the generated
+`actr_protocol::ActrError` cases, with one binding-local variant (`Config`) for
+pre-protocol configuration failures. `DeliveryUncertain` is non-retryable and
+retains the operation ID and cause for caller policy and diagnostics.
 
 ```swift
 public enum ActrError: Swift.Error, Equatable, Hashable {
@@ -361,17 +364,22 @@ public enum ActrError: Swift.Error, Equatable, Hashable {
     case NotImplemented(msg: String)
     case Internal(msg: String)
 
+    // The send may have entered the transport; do not retry automatically
+    case DeliveryUncertain(operationId: String, cause: String)
+
     // Binding-local (pre-protocol)
     case Config(msg: String)
 }
 ```
 
-`ConnectionNotReady` is returned when runtime preflight rejects a send before it
-enters any transport queue. The message was not sent and was not queued by
-ACTR. UI/business code should retain the user intent and issue a fresh send
-after `WebRTCObserver.onConnected(ctx:event:)` fires for the same target.
-`ConnectionNotReadyInfo.retryAfterMs` is a fallback probe delay, not an
-authoritative readiness signal.
+`ConnectionNotReady` remains available for terminal, stale-context, and
+fail-fast paths. For ordinary Call, Tell, and StreamReliable operations, the
+framework waits for a usable route within the operation deadline, so application
+code should not retain a payload for a Hook callback or arm a fallback timer.
+`ConnectionNotReadyInfo.retryAfterMs` is a legacy probe hint, not an
+authoritative readiness signal. If the framework cannot prove whether bytes
+entered the transport, it reports an uncertain-delivery result; callers must
+not automatically replay that operation.
 
 Classification helpers (free functions, not methods — UniFFI limitation):
 

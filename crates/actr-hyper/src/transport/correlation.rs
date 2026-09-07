@@ -16,6 +16,8 @@ use actr_framework::Bytes;
 use actr_protocol::{ActorResult, ActrError, ActrId, ErrorResponse, RpcEnvelope};
 use tokio::sync::oneshot;
 
+use super::wire_handle::WireIdentity;
+
 type PendingMap<M> = Arc<Mutex<HashMap<String, Entry<M>>>>;
 
 /// The shared peer-RPC pending map: `request_id` → target `ActrId` + response
@@ -38,6 +40,32 @@ pub(crate) struct RpcCorrelation<M> {
 struct Entry<M> {
     meta: M,
     tx: oneshot::Sender<ActorResult<Bytes>>,
+    delivery: PendingDeliveryState,
+}
+
+/// Delivery phase recorded for a pending outbound operation.
+///
+/// A pending response is registered before the physical send so a fast response
+/// cannot race registration.  Recovery cleanup must therefore distinguish an
+/// operation that is still waiting for a route from one whose bytes were
+/// accepted by a concrete wire.  The map mutex serializes these transitions
+/// with cleanup and response completion; no operation may be failed merely
+/// because a route generation changed before submission.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum PendingDelivery {
+    /// No concrete wire has accepted the operation yet.  The send path may
+    /// continue on a replacement route under the same logical request ID.
+    #[default]
+    AwaitingSend,
+    /// The local wire accepted the operation.  A matching route replacement
+    /// may surface an uncertain-delivery result, but must not replay it.
+    Submitted,
+}
+
+#[derive(Default)]
+struct PendingDeliveryState {
+    phase: PendingDelivery,
+    wire_identity: Option<WireIdentity>,
 }
 
 /// Result of attempting to complete a pending request.
@@ -74,7 +102,14 @@ impl<M> RpcCorrelation<M> {
         let request_id = request_id.into();
         let (tx, rx) = oneshot::channel();
         let previous = lock_ignore_poison(&self.inner)
-            .insert(request_id.clone(), Entry { meta, tx })
+            .insert(
+                request_id.clone(),
+                Entry {
+                    meta,
+                    tx,
+                    delivery: PendingDeliveryState::default(),
+                },
+            )
             .is_some();
         if previous {
             tracing::warn!(
@@ -87,6 +122,63 @@ impl<M> RpcCorrelation<M> {
             request_id,
             rx: Some(rx),
         }
+    }
+
+    /// Mark a pending operation as locally submitted on the selected wire.
+    ///
+    /// Returns `false` when the entry was already completed/failed/removed or
+    /// when it had already been marked submitted.  The operation owner may
+    /// still await its response in the latter cases; the return value is only
+    /// an observation of the race with cleanup.
+    pub(crate) fn mark_submitted(
+        &self,
+        request_id: &str,
+        wire_identity: Option<WireIdentity>,
+    ) -> bool {
+        let mut map = lock_ignore_poison(&self.inner);
+        let Some(entry) = map.get_mut(request_id) else {
+            return false;
+        };
+        if entry.delivery.phase != PendingDelivery::AwaitingSend {
+            return false;
+        }
+        entry.delivery.phase = PendingDelivery::Submitted;
+        entry.delivery.wire_identity = wire_identity;
+        true
+    }
+
+    /// Remove only submitted entries whose route identity matches `route_pred`.
+    ///
+    /// Recovery events may race with an operation's first physical send.  An
+    /// `AwaitingSend` entry is intentionally left in the map so its send task
+    /// can join the replacement route.  The error factory receives the
+    /// operation ID and selected route identity so callers can surface an
+    /// explicit uncertain-delivery result instead of a retryable
+    /// `ConnectionNotReady`.
+    pub(crate) fn fail_submitted_where(
+        &self,
+        mut pred: impl FnMut(&M) -> bool,
+        mut route_pred: impl FnMut(Option<&WireIdentity>) -> bool,
+        mut err: impl FnMut(&str, Option<&WireIdentity>) -> ActrError,
+    ) -> usize {
+        let mut map = lock_ignore_poison(&self.inner);
+        let matching: Vec<String> = map
+            .iter()
+            .filter(|(_, entry)| {
+                entry.delivery.phase == PendingDelivery::Submitted
+                    && pred(&entry.meta)
+                    && route_pred(entry.delivery.wire_identity.as_ref())
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        for request_id in &matching {
+            if let Some(entry) = map.remove(request_id) {
+                let identity = entry.delivery.wire_identity.as_ref();
+                let _ = entry.tx.send(Err(err(request_id, identity)));
+            }
+        }
+        matching.len()
     }
 
     /// Wake the waiting caller with `result`. Returns `Orphan` when no entry
@@ -326,6 +418,38 @@ mod tests {
         // for uuid v4 ids and observable via the overwrite warn.
         assert_eq!(correlation.len(), 0);
         drop(second);
+    }
+
+    #[tokio::test]
+    async fn fail_submitted_where_keeps_awaiting_send_entries() {
+        let correlation: RpcCorrelation<u8> = RpcCorrelation::new();
+        let awaiting = correlation.register("awaiting", 1);
+        let submitted = correlation.register("submitted", 1);
+
+        assert!(correlation.mark_submitted("submitted", None));
+        assert!(!correlation.mark_submitted("missing", None));
+
+        let removed = correlation.fail_submitted_where(
+            |meta| *meta == 1,
+            |_| true,
+            |request_id, _| ActrError::DeliveryUncertain {
+                operation_id: request_id.to_string(),
+                cause: "route replaced".to_string(),
+            },
+        );
+        assert_eq!(removed, 1);
+        assert_eq!(correlation.len(), 1);
+
+        let error = submitted.recv().await.unwrap_err();
+        assert!(matches!(
+            error,
+            ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "submitted"
+        ));
+
+        // The pre-submit operation remains eligible to finish on a replacement
+        // route and is still reclaimed by its normal RAII drop path.
+        drop(awaiting);
+        assert_eq!(correlation.len(), 0);
     }
 
     #[tokio::test]

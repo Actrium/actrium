@@ -148,17 +148,41 @@ mod tests {
         // variant — including buffer-full and message-too-large, which are
         // detected before fragmentation hands bytes to the channel — must
         // classify as a proven pre-send failure so route recovery may replay.
-        for error in [
-            RtcSendError::ConnectionNotReady,
-            RtcSendError::DataChannelClosed,
-            RtcSendError::DataChannelBufferFull,
-            RtcSendError::MessageTooLarge,
-        ] {
-            assert_eq!(
-                RtcSendAttempt::from_result(Err(error)).progress,
-                DeliveryProgress::NotAttempted,
-                "{error:?} must remain a proven pre-send failure"
-            );
+        //
+        // The match below is exhaustiveness-checked on purpose (same-crate
+        // enum, no wildcard arm): adding a new `RtcSendError` variant breaks
+        // this function's compilation, forcing an explicit classification
+        // decision instead of silently omitting the variant from a
+        // hand-maintained list.
+        fn classify(error: RtcSendError) -> DeliveryProgress {
+            let attempt = RtcSendAttempt::from_result(Err(error));
+            match error {
+                RtcSendError::ConnectionNotReady
+                | RtcSendError::DataChannelClosed
+                | RtcSendError::DataChannelBufferFull
+                | RtcSendError::MessageTooLarge => {
+                    assert_eq!(
+                        attempt.progress,
+                        DeliveryProgress::NotAttempted,
+                        "{error:?} must remain a proven pre-send failure"
+                    );
+                    DeliveryProgress::NotAttempted
+                }
+                RtcSendError::DataChunkDeliveryUncertain => {
+                    assert_eq!(
+                        attempt.progress,
+                        DeliveryProgress::Unknown,
+                        "{error:?} must stay the only ambiguous outcome"
+                    );
+                    DeliveryProgress::Unknown
+                }
+            }
         }
+
+        classify(RtcSendError::ConnectionNotReady);
+        classify(RtcSendError::DataChannelClosed);
+        classify(RtcSendError::DataChannelBufferFull);
+        classify(RtcSendError::MessageTooLarge);
+        classify(RtcSendError::DataChunkDeliveryUncertain);
     }
 }

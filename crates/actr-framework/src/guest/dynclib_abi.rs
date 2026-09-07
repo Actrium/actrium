@@ -170,7 +170,10 @@ pub struct AbiReply {
 /// Structured guest-visible error carried by an [`AbiReply`].
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct ActrErrorV1 {
-    #[prost(oneof = "ActrErrorKindV1", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11")]
+    #[prost(
+        oneof = "ActrErrorKindV1",
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12"
+    )]
     pub kind: Option<ActrErrorKindV1>,
 }
 
@@ -199,6 +202,10 @@ pub enum ActrErrorKindV1 {
     NotImplemented(String),
     #[prost(string, tag = "11")]
     Internal(String),
+    /// RFC-0507: appended after the established tags so existing oneof
+    /// discriminants stay stable across the wire.
+    #[prost(message, tag = "12")]
+    DeliveryUncertain(DeliveryUncertainV1),
 }
 
 /// Empty payload for the unit-like [`ActrError::TimedOut`] variant.
@@ -222,6 +229,15 @@ pub struct DependencyNotFoundV1 {
     pub service_name: String,
     #[prost(string, tag = "2")]
     pub message: String,
+}
+
+/// Structured payload for [`ActrError::DeliveryUncertain`].
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct DeliveryUncertainV1 {
+    #[prost(string, tag = "1")]
+    pub operation_id: String,
+    #[prost(string, tag = "2")]
+    pub cause: String,
 }
 
 impl From<ActrError> for ActrErrorV1 {
@@ -248,6 +264,13 @@ impl From<ActrError> for ActrErrorV1 {
             ActrError::DecodeFailure(message) => ActrErrorKindV1::DecodeFailure(message),
             ActrError::NotImplemented(message) => ActrErrorKindV1::NotImplemented(message),
             ActrError::Internal(message) => ActrErrorKindV1::Internal(message),
+            ActrError::DeliveryUncertain {
+                operation_id,
+                cause,
+            } => ActrErrorKindV1::DeliveryUncertain(DeliveryUncertainV1 {
+                operation_id,
+                cause,
+            }),
             // `ActrError` is `#[non_exhaustive]`: future variants are mapped to
             // a generic internal error so they survive the V1 wire boundary
             // rather than being lost or panicking at the FFI seam.
@@ -280,6 +303,10 @@ impl TryFrom<ActrErrorV1> for ActrError {
             Some(ActrErrorKindV1::DecodeFailure(message)) => Ok(Self::DecodeFailure(message)),
             Some(ActrErrorKindV1::NotImplemented(message)) => Ok(Self::NotImplemented(message)),
             Some(ActrErrorKindV1::Internal(message)) => Ok(Self::Internal(message)),
+            Some(ActrErrorKindV1::DeliveryUncertain(payload)) => Ok(Self::DeliveryUncertain {
+                operation_id: payload.operation_id,
+                cause: payload.cause,
+            }),
             None => Err(code::PROTOCOL_ERROR),
         }
     }

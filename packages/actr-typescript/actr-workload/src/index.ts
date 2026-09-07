@@ -10,7 +10,7 @@ import {
   sendDataChunk as hostSendDataChunk,
   tell as hostTell,
   unregisterStream as hostUnregisterStream,
-} from 'actr:workload/host@0.6.0';
+} from 'actr:workload/host@0.7.0';
 
 export type PayloadBytes = Uint8Array | ArrayBuffer | ArrayLike<number>;
 
@@ -123,7 +123,8 @@ export type ActrError =
     }
   | { tag: 'decode-failure'; val: string }
   | { tag: 'not-implemented'; val: string }
-  | { tag: 'internal'; val: string };
+  | { tag: 'internal'; val: string }
+  | { tag: 'delivery-uncertain'; val: { operationId: string; cause: string } };
 
 type WitActrId = Omit<ActrId, 'serialNumber'> & {
   serialNumber: bigint;

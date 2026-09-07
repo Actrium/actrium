@@ -941,6 +941,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_actr_checksum_func_actr_error_requires_dlq(
     ): Short
+    external fun uniffi_actr_checksum_func_actr_error_throw_for_test(
+    ): Short
     external fun uniffi_actr_checksum_func_set_log_callback(
     ): Short
     external fun uniffi_actr_checksum_func_resolve_manifest_dependency(
@@ -1253,9 +1255,11 @@ external fun uniffi_actr_fn_func_actr_error_is_retryable(`err`: RustBuffer.ByVal
 ): Byte
 external fun uniffi_actr_fn_func_actr_error_kind(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_actr_fn_func_actr_error_requires_dlq(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_func_actr_error_requires_dlq(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Byte
-external fun uniffi_actr_fn_func_set_log_callback(`callback`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_actr_fn_func_actr_error_throw_for_test(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Unit
+external fun uniffi_actr_fn_func_set_log_callback(`callback`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 external fun uniffi_actr_fn_func_resolve_manifest_dependency(`manifestPath`: RustBuffer.ByValue,`dependencyAlias`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1389,6 +1393,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_func_actr_error_requires_dlq() != 62057.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actr_checksum_func_actr_error_throw_for_test() != 53545.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_func_set_log_callback() != 22627.toShort()) {
@@ -9135,12 +9142,25 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
             return FfiConverterBoolean.lift(
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_actr_fn_func_actr_error_requires_dlq(
-    
+
         FfiConverterTypeActrError.lower(`err`),_status)
 }
     )
     }
-    
+
+
+        /**
+         * Test hook: fail with `err` so the error-buffer reader is exercised
+         * against the real Rust UniFFI writer — the discriminant, field order,
+         * and integer widths crossing the boundary are exactly the ones a
+         * production throw produces.
+         */ @Throws(ActrException::class) fun `actrErrorThrowForTest`(`err`: ActrException)
+        =
+    uniffiRustCallWithError(ActrException) { _status ->
+    UniffiLib.uniffi_actr_fn_func_actr_error_throw_for_test(
+
+        FfiConverterTypeActrError.lower(`err`),_status)
+}
 
         /**
          * Set or clear the global log callback.
