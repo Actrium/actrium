@@ -44,8 +44,12 @@ jobs:
           corepack enable
           corepack prepare pnpm@9.15.9 --activate
 
+      # --ignore-workspace is required: admin/web is not a member of the root
+      # pnpm workspace. Without it pnpm resolves the workspace root and installs
+      # all workspace projects (running unrelated lifecycle hooks that need
+      # Bun) while leaving this directory without node_modules.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm --ignore-workspace install --frozen-lockfile
 
       - name: Audit dependencies
         run: pnpm run audit:dependencies
