@@ -1488,6 +1488,11 @@ fn reduce_command(
                     state.recovery_cycle = state.recovery_cycle.wrapping_add(1);
                     state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
                 }
+                // A parked Answerer may still be reusing the active
+                // PeerConnection. Receiving the correlated restart Offer is
+                // the point at which it rejoins the current recovery attempt;
+                // it must no longer be treated as waiting for a first Offer.
+                state.awaiting_offer = false;
                 state.phase = RtcPeerPhase::Recovering;
                 state.recovery_inflight = true;
                 state.recovery_attempt_started = true;
@@ -2407,6 +2412,14 @@ fn start_hard_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
 /// retired generation as signaling metadata; the single end-to-end recovery
 /// budget remains the backstop and performs the normal terminal cleanup.
 fn wait_for_offerer_offer(state: &mut RtcPeerState) {
+    // Hard recovery can be requested because the local address or lifecycle
+    // changed while the active PeerConnection was still physically connected.
+    // In that case the existing RpcReliable DataChannel remains the readiness
+    // anchor for a same-generation ICE restart and will not emit another
+    // `OnOpen`. A terminal/failed Session revokes this fact before calling this
+    // helper; an active generation therefore tells us that the retained fact is
+    // still eligible for reuse.
+    let retain_active_lane = state.active_generation.is_some();
     let newly_parked_retired_session = !state.awaiting_offer
         && state.active_generation.is_none()
         && state.parked_signaling_generation.is_some();
@@ -2423,7 +2436,9 @@ fn wait_for_offerer_offer(state: &mut RtcPeerState) {
     state.recovery_negotiated = false;
     state.address_changed = false;
     state.pc_connected = false;
-    state.rpc_reliable_open = false;
+    if !retain_active_lane {
+        state.rpc_reliable_open = false;
+    }
     state.awaiting_offer = true;
     state.phase = RtcPeerPhase::Recovering;
     state.bump_revision();
@@ -2634,6 +2649,11 @@ fn reduce_state_tick(
             // failed cannot restart it locally; it waits for the Offerer to
             // initiate a new Offer.
             if state.role == Role::Answerer {
+                // The physical Session has failed, so any readiness fact from
+                // its DataChannel is stale. Logical parking caused by a
+                // lifecycle/address event preserves the lane below, but this
+                // terminal driver fact must revoke it first.
+                state.rpc_reliable_open = false;
                 wait_for_offerer_offer(state);
             } else if !state.recovery_inflight {
                 state.phase = RtcPeerPhase::Recovering;
