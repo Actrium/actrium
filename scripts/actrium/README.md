@@ -31,8 +31,12 @@ the script is used across multiple top-level areas.
   have README files, `internal/` remains git-ignored, and temporary import
   trees under `.import/actro/` are absent.
 - `check-retired-protocol-names.sh` rejects identifiers from the superseded
-  package split in the current tree, retained history, and local Git object
-  database. CI checks out the full history before invoking it.
+  package split in the current tree and history reachable from `HEAD`. CI
+  checks out the full history before invoking it, but unrelated branches and
+  unreachable objects do not affect the result. The audit checks text blobs,
+  tree entry names, and commit messages, and reports object IDs and locations.
+  Binary blobs and raw tree object IDs are excluded. Use `--all-refs` to audit
+  history reachable from every local ref during an explicit repository audit.
 - `rewrite-retired-protocol-history.sh` performs the corresponding one-time,
   confirmation-gated rewrite after an external backup has been created.
 - `check-generated-contracts.sh` regenerates the lightweight Rust-owned

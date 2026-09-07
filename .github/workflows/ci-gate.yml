@@ -1100,7 +1100,9 @@ jobs:
       - name: Check default-language content and portable paths
         run: python .github/scripts/check_cjk.py
       - name: Reject retired package protocol identifiers
-        run: scripts/actrium/check-retired-protocol-names.sh
+        run: |
+          python3 scripts/actrium/check_retired_protocol_names_test.py
+          scripts/actrium/check-retired-protocol-names.sh
 
   csharp:
     name: C#
