@@ -794,7 +794,6 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                 ) && (state.pending_generation.is_some() || state.ice_generation == 0)
                     && !(state.role == Role::Answerer
                         && state.active_generation.is_some()
-                        && state.recovery_inflight
                         && !state.awaiting_offer
                         && !state.address_changed)
                 {
@@ -851,14 +850,16 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                     send_answerer_restart_request(state, &mut effects);
                 } else if state.role == Role::Answerer
                     && state.active_generation.is_some()
-                    && state.recovery_inflight
+                    && state.recovery_negotiated
                     && state.recovery_attempt_started
                     && !state.awaiting_offer
                     && !state.address_changed
                 {
-                    // A restart Offer/Answer may have completed while the
-                    // physical readiness anchor is still unavailable. This
-                    // is a failed or otherwise non-sendable Answerer session,
+                    // A restart Offer/Answer has completed while the physical
+                    // readiness anchor is still unavailable. Requiring
+                    // `recovery_negotiated` keeps this branch out of the
+                    // pre-SDP/ICE timeout path. This is a failed or otherwise
+                    // non-sendable Answerer session,
                     // not a successful recovery: keep the same request
                     // identity and ask the Offerer for the next attempt. Do
                     // not park through `start_hard_recovery`, because that
@@ -869,6 +870,8 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                     tracing::warn!(
                         peer = %state.peer_id.to_string_repr(),
                         recovery_cycle = state.recovery_cycle,
+                        generation = state.active_generation,
+                        recovery_epoch = state.recovery_epoch,
                         attempt = state.local_restart_request_attempt + 1,
                         parked = false,
                         "answerer recovery negotiated without readiness; retransmitting restart request"
