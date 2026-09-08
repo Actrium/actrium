@@ -4935,6 +4935,34 @@ fn answerer_rejects_restart_offer_when_controller_has_no_active_session() {
     assert_eq!(state.active_generation, None);
 }
 
+#[test]
+fn undetermined_controller_rejects_restart_offer_without_session() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let exchange_id = "restart-after-budget-exhaustion".to_string();
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
+            desc: Box::new(sdp_with_ufrag(RTCSdpType::Offer, "remote-1")),
+            exchange_id: Some(exchange_id.clone()),
+        }),
+    );
+
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        RtcPeerEffect::SendSignaling {
+            generation: 0,
+            message: SignalingMessage::IceRestartRejected {
+                exchange_id: actual_exchange,
+                reason,
+            },
+        } if actual_exchange == &exchange_id
+            && *reason == actr_protocol::ice_restart_rejected::Reason::NoActiveSession as i32
+    )));
+    assert!(!has_build_session(&effects, 1));
+    assert_eq!(state.role, Role::Undetermined);
+    assert_eq!(state.active_generation, None);
+}
+
 /// Offerer-side `NegotiationNeeded` (local track add/remove mid-connection)
 /// drives a serialized re-offer.
 #[test]

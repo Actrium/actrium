@@ -1504,7 +1504,7 @@ fn reduce_command(
                 state.stale_events += 1;
                 return;
             }
-            if state.role == Role::Answerer
+            if state.role != Role::Offerer
                 && state.active_generation.is_none()
                 && state.pending_generation.is_none()
                 && state.building_generation.is_none()
@@ -1515,6 +1515,10 @@ fn reduce_command(
                 // first ordinary Offer. Reply on the signaling path using the
                 // retired generation identity when available so the response
                 // remains fenced by this Controller's lifecycle.
+                // An Offerer receiving this message is a glare/stale input and
+                // remains on the existing stale-offer path; only Answerer and
+                // Undetermined roles can be the passive receiver that needs
+                // the explicit NoActiveSession response.
                 if let Some(exchange_id) = exchange_id {
                     let generation = state
                         .parked_signaling_generation
