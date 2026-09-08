@@ -457,7 +457,7 @@ enum PacketRule {
 | N08 | Offer/Answer/Candidate drop/duplicate/delay | T1/T2/T3 signaling | 单 attempt 覆盖 role/build/SDP/ICE/readiness deadline；失败后 WirePool 重试使用新 transport epoch 和新 PC generation；Answerer 发起重试时，被动 Offerer 根据新的 Offerer assignment 立即替换未就绪 PC 并重发 Offer；glare/stale/ufrag 规则不被破坏 | 已覆盖精确 deadline、发送方分别为 Offerer/Answerer 时前两次 build 失败、双方 generation 1→2→3、第三次真实 PC 成功及消息单次投递；完整组合矩阵进入 nightly |
 | N09 | 短时离线后原连接恢复 | T3 | 优先 Soft；generation 不变；原请求语义明确 | 已覆盖，存在 flaky，需拆分稳定化 |
 | N10 | 长时离线导致重建 | T3 | 恢复预算耗尽后 Hard；generation 增长一次 | 已覆盖，补精确计数 |
-| N11 | 地址变化/Wi-Fi↔蜂窝 | T1 + T4/T5 | 立即失去 sendable；Hard rebuild；新地址生效 | 策略有覆盖，真实系统缺失 |
+| N11 | 地址变化/Wi-Fi↔蜂窝 | T1 + T4/T5 | 立即失去 sendable；优先同代 ICE restart，失败再 Hard；新地址生效 | 策略有覆盖，真实系统缺失 |
 | N12 | NAT mapping 失效/rebinding | T4 netns/NAT | 新 candidate/path；旧五元组失效；业务恢复 | 缺失 |
 | N13 | TURN relay-only 初连 | T3/T4 Actrix TURN | `network_path=Relayed`；业务正常 | 已有 Actrix TURN 集成，纳入 nightly |
 | N14 | TURN 凭据轮换 | T3/T4 | `set_configuration` 成功不误断；失败转 Hard | 已覆盖，补系统级过期验证 |

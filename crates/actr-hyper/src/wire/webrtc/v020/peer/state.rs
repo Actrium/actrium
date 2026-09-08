@@ -148,6 +148,20 @@ pub(crate) struct RtcPeerState {
     /// the same restart repeatedly; this latch is cleared only on convergence
     /// or a terminal attempt failure.
     pub(crate) recovery_attempt_started: bool,
+    /// Offerer-side count of deadline-driven Soft retries within the current
+    /// recovery cycle. Retries that keep failing to converge prove the
+    /// restart is not repairing the transport (e.g. the restart rebind
+    /// silently kept a dead interface), so the ladder escalates to a checked
+    /// Hard rebuild at the threshold instead of spinning until the cycle
+    /// budget terminates the attempt.
+    pub(crate) soft_recovery_attempts: u32,
+    /// A `LocalAddressChanged` edge arrived while a soft round was already in
+    /// flight and was coalesced by the attempt latch. When the in-flight
+    /// round converges (on the pre-edge address set), one more restart is
+    /// published so the link moves onto the current set instead of stranding
+    /// on the superseded interface. Cleared when a new soft round launches
+    /// (its rebind resolves the current set) and on Hard rebuild/terminate.
+    pub(crate) address_edge_pending: bool,
     pub(crate) ever_connected: bool,
 
     // Close/lifecycle.
@@ -199,11 +213,12 @@ pub(crate) struct RtcPeerState {
     pub(crate) app_foreground: bool,
     pub(crate) signaling_generation: Option<u64>,
 
-    /// S5-2/S5-5: set when `LocalAddressChanged` (or `ForceReconnect`) was
-    /// received. Forces Hard Recovery (PC generation + 1) instead of Soft
-    /// (ICE restart) on the next recovery attempt, because the current
-    /// PeerConnection's ICE candidates are no longer valid. Cleared when the
-    /// connection reaches `Sendable` again (recovery succeeded).
+    /// S5-5: set by an explicit `ForceReconnect` or long-background policy.
+    /// It forces Hard Recovery (PC generation + 1) instead of Soft Recovery.
+    /// A `LocalAddressChanged` fact itself starts Soft Recovery on the current
+    /// PeerConnection; a failed restart can still escalate through the normal
+    /// hard-recovery paths. Cleared when the connection reaches `Sendable`
+    /// again (recovery succeeded).
     pub(crate) address_changed: bool,
 
     /// S5-4: make-before-break pending session readiness facts. During Hard
@@ -343,6 +358,8 @@ impl RtcPeerState {
             recovery_epoch: 0,
             recovery_cycle: 0,
             recovery_attempt_started: false,
+            soft_recovery_attempts: 0,
+            address_edge_pending: false,
             ever_connected: false,
             close_requested: false,
             terminal_close_done: false,

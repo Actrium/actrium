@@ -1,6 +1,6 @@
 //! Production-equivalent two-endpoint mobile RTC integration harness.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use actr_protocol::{ActrId, DataChunk, PayloadType, RpcEnvelope};
@@ -850,6 +850,64 @@ impl MobileRtcPairHarness {
             .handle(&local, &remote, generation)
             .expect("active generation fault handle")
             .bind_addresses()
+    }
+
+    /// Actual local socket addresses observed at the Runtime boundary for the
+    /// endpoint's current generation. Includes same-generation ICE-restart
+    /// rebinds, unlike [`Self::rtc_bind_addresses`].
+    pub async fn rtc_bound_addresses(&self, endpoint: PairEndpoint) -> Vec<SocketAddr> {
+        let snapshot = self
+            .snapshot()
+            .await
+            .expect("bound-address evidence requires an established pair");
+        let (local, remote, generation) = match endpoint {
+            PairEndpoint::A => (
+                self.id(PairEndpoint::A),
+                self.id(PairEndpoint::B),
+                snapshot.a_to_b.pc_generation,
+            ),
+            PairEndpoint::B => (
+                self.id(PairEndpoint::B),
+                self.id(PairEndpoint::A),
+                snapshot.b_to_a.pc_generation,
+            ),
+        };
+        self.harness
+            .rtc_faults
+            .handle(&local, &remote, generation)
+            .expect("active generation fault handle")
+            .bound_socket_addresses()
+    }
+
+    pub async fn wait_rtc_bound_address(
+        &self,
+        endpoint: PairEndpoint,
+        baseline: usize,
+        expected_ip: IpAddr,
+        timeout: Duration,
+    ) -> Option<SocketAddr> {
+        let snapshot = self
+            .snapshot()
+            .await
+            .expect("bound-address evidence requires an established pair");
+        let (local, remote, generation) = match endpoint {
+            PairEndpoint::A => (
+                self.id(PairEndpoint::A),
+                self.id(PairEndpoint::B),
+                snapshot.a_to_b.pc_generation,
+            ),
+            PairEndpoint::B => (
+                self.id(PairEndpoint::B),
+                self.id(PairEndpoint::A),
+                snapshot.b_to_a.pc_generation,
+            ),
+        };
+        self.harness
+            .rtc_faults
+            .handle(&local, &remote, generation)
+            .expect("active generation fault handle")
+            .wait_for_bound_address(baseline, expected_ip, timeout)
+            .await
     }
 
     pub fn rtc_fault_scope_count(&self) -> usize {

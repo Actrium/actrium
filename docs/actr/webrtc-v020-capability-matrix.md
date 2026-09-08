@@ -92,7 +92,7 @@ drop the requirement).
 | **TURN/TCP** (`turn:…?transport=tcp`) | TURN over TCP | **Unsupported.** Relayer logs `Skipping unsupported non-UDP TURN url` and skips it (does **not** error). Tracking issue #848 **open**. | **blocked** | `turn_relayer.rs:261`; issue #848 |
 | **TURN/TLS** (`turns:…`) | TURN over TLS | **Unsupported.** Relayer logs `Skipping unsupported secure TURN url` and skips it. | **blocked** | `turn_relayer.rs:256`; issue #848 |
 | **IPv4 / IPv6** | `set_network_types` | Supported with explicit real interface addresses from `LocalAddressProvider`; unspecified `[::]`/`0.0.0.0` addresses are not expanded into candidate addresses. | supported | `setting_engine.rs:610`; `address.rs`; `factory.rs` |
-| **Host-candidate interface enumeration** | ICE agent auto-gathers host candidates on **all** local interfaces | v0.20 does not enumerate interfaces. Actr replaces that behavior with `DesktopLocalAddressProvider` (`if_addrs`) plus a push/poll address monitor that triggers Hard Recovery. | **supported by Actr replacement** | `address.rs`; `recovery.rs`; `stun_gatherer.rs:132-153` |
+| **Host-candidate interface enumeration** | ICE agent auto-gathers host candidates on **all** local interfaces | v0.20 does not enumerate interfaces. Actr replaces that behavior with `DesktopLocalAddressProvider` (`if_addrs`) plus a push/poll address monitor that triggers same-generation ICE recovery; a failed restart can still escalate to Hard Recovery. | **supported by Actr replacement** | `address.rs`; `recovery.rs`; `stun_gatherer.rs:132-153` |
 | **VNet / fault-injection test net** (`set_vnet`, test-utils) | `SettingEngine::set_vnet(Net)` | v0.20 has no VNet and `runtime-mock` supplies virtual time only. Actr uses T1 manual policy time, T2 `RuntimeFaultProbe`/deterministic signaling, and T3 real system/mobile network harnesses instead of pretending the mock Runtime is a network. | **upstream absent; replaced test strategy** | `fault.rs`; `policy_clock.rs`; `docs/webrtc-v020-test-contract.md` |
 | **DataChannel send buffer limit** | (none in 0.14) | Supported (new). `with_data_channel_send_buffer_limit` + `try_send`/`writable`/`outstanding_bytes`. | supported | `peer_connection/mod.rs:402` |
 | **SCTP receive window** | (fixed) | Supported. `with_sctp_receive_buffer_size`, default 1 MiB. | supported | `peer_connection/mod.rs:259` |
@@ -123,7 +123,8 @@ startup rejection; none may silently downgrade to ephemeral/UDP behavior.
    Android/iOS test responsibility.
 5. **Host-candidate source change — implemented.** Native interface
    enumeration supplies explicit addresses, and the node-owned address monitor
-   triggers Hard Recovery when that set changes.
+   triggers same-generation ICE recovery when that set changes; a failed restart
+   can still escalate to Hard Recovery.
 
 ---
 
