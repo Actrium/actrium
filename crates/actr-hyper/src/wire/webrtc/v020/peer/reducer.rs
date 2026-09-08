@@ -512,6 +512,22 @@ pub(crate) enum SignalingMessage {
     },
 }
 
+impl SignalingMessage {
+    /// Stable traffic-class label for dispatch diagnostics.
+    pub(crate) fn kind_name(&self) -> &'static str {
+        match self {
+            Self::Offer { .. } => "offer",
+            Self::IceRestartOffer { .. } => "ice_restart_offer",
+            Self::IceRestartRequest { .. } => "ice_restart_request",
+            Self::Answer { .. } => "answer",
+            Self::Candidate(_) => "candidate",
+            Self::RoleNegotiation => "role_negotiation",
+            Self::RoleAssignment { .. } => "role_assignment",
+            Self::IceRestartRejected { .. } => "ice_restart_rejected",
+        }
+    }
+}
+
 /// The outcome of a blocking effect, fed back into the controller. Every
 /// variant carries the `pc_generation` (and `operation_id` where relevant) the
 /// effect was issued with, so the reducer can re-validate identity.
@@ -1538,6 +1554,52 @@ fn reduce_command(
             if desc.sdp_type != RTCSdpType::Offer || state.close_requested {
                 state.stale_events += 1;
                 return;
+            }
+            if state.role != Role::Offerer
+                && state.active_generation.is_none()
+                && state.pending_generation.is_none()
+                && state.building_generation.is_none()
+            {
+                // A restart offer is scoped to an existing physical Session.
+                // A logical Controller may survive cleanup while that Session
+                // is already gone; do not reinterpret the restart SDP as a
+                // first ordinary Offer. Reply on the signaling path using the
+                // retired generation identity when available so the response
+                // remains fenced by this Controller's lifecycle.
+                // An Offerer receiving this message is a glare/stale input and
+                // remains on the existing stale-offer path; only Answerer and
+                // Undetermined roles can be the passive receiver that needs
+                // the explicit NoActiveSession response.
+                //
+                // The rejection is scoped to correlated offers: a legacy
+                // uncorrelated restart offer (a pre-correlation peer in a
+                // rolling upgrade) has no exchange id to fence a rejection
+                // with — and a peer that old may not understand
+                // `IceRestartRejected` at all. A controller whose session was
+                // retired keeps the pre-existing fallthrough to
+                // ordinary-offer handling below, which builds the replacement
+                // both ends need; a controller that never had a session drops
+                // the offer as stale, since there is nothing to rebuild from
+                // and the peer's restart premise is simply wrong.
+                if let Some(exchange_id) = exchange_id {
+                    let generation = state
+                        .parked_signaling_generation
+                        .unwrap_or_else(|| state.next_pc_generation.saturating_sub(1));
+                    effects.push(RtcPeerEffect::SendSignaling {
+                        generation,
+                        message: SignalingMessage::IceRestartRejected {
+                            exchange_id,
+                            reason: actr_protocol::ice_restart_rejected::Reason::NoActiveSession
+                                as i32,
+                        },
+                    });
+                    state.stale_events = state.stale_events.saturating_add(1);
+                    return;
+                }
+                if !state.ever_connected && state.parked_signaling_generation.is_none() {
+                    state.stale_events = state.stale_events.saturating_add(1);
+                    return;
+                }
             }
             if state.role == Role::Answerer
                 && state.active_generation.is_some()

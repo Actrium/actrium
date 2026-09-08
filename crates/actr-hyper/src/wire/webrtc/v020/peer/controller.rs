@@ -1443,6 +1443,7 @@ impl RtcPeerController {
                 // other controllers. Non-blocking try_send; a full queue drops the
                 // message and counts it (observable `signaling_dropped` metric).
                 let is_candidate = matches!(message, SignalingMessage::Candidate(_));
+                let message_kind = message.kind_name();
                 let dispatch = SignalingDispatch::tracked(
                     self.state.peer_id.clone(),
                     self.deps.controller_lifecycle_id,
@@ -1459,7 +1460,8 @@ impl RtcPeerController {
                             tracing::debug!(
                                 peer = %self.state.peer_id.to_string_repr(),
                                 generation,
-                                "v0.20 SDP/role signaling dispatched to the router queue"
+                                message_kind,
+                                "v0.20 signaling dispatched to the router queue"
                             );
                         }
                     }
