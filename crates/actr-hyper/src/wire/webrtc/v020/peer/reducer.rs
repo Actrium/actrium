@@ -1554,6 +1554,17 @@ fn reduce_command(
                 // remains on the existing stale-offer path; only Answerer and
                 // Undetermined roles can be the passive receiver that needs
                 // the explicit NoActiveSession response.
+                //
+                // The rejection is scoped to correlated offers: a legacy
+                // uncorrelated restart offer (a pre-correlation peer in a
+                // rolling upgrade) has no exchange id to fence a rejection
+                // with — and a peer that old may not understand
+                // `IceRestartRejected` at all. A controller whose session was
+                // retired keeps the pre-existing fallthrough to
+                // ordinary-offer handling below, which builds the replacement
+                // both ends need; a controller that never had a session drops
+                // the offer as stale, since there is nothing to rebuild from
+                // and the peer's restart premise is simply wrong.
                 if let Some(exchange_id) = exchange_id {
                     let generation = state
                         .parked_signaling_generation
@@ -1566,9 +1577,13 @@ fn reduce_command(
                                 as i32,
                         },
                     });
+                    state.stale_events = state.stale_events.saturating_add(1);
+                    return;
                 }
-                state.stale_events = state.stale_events.saturating_add(1);
-                return;
+                if !state.ever_connected && state.parked_signaling_generation.is_none() {
+                    state.stale_events = state.stale_events.saturating_add(1);
+                    return;
+                }
             }
             if state.role == Role::Answerer
                 && state.active_generation.is_some()

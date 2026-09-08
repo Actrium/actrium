@@ -5110,6 +5110,40 @@ fn answerer_rejects_restart_offer_when_controller_has_no_active_session() {
 }
 
 #[test]
+fn uncorrelated_restart_offer_without_session_falls_through_to_ordinary_offer() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_sendable_with_ufrag(&mut state, "remote-1");
+    reduce(&mut state, closed_tick(generation));
+    assert_eq!(state.active_generation, None);
+
+    // A legacy uncorrelated restart offer (a pre-correlation peer in a
+    // rolling upgrade) has no exchange id to fence a rejection with — and a
+    // peer that old may not understand IceRestartRejected at all — so it
+    // keeps the ordinary-offer fallthrough that builds the replacement.
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
+            desc: Box::new(sdp_with_ufrag(RTCSdpType::Offer, "remote-2")),
+            exchange_id: None,
+        }),
+    );
+    assert!(
+        !effects.iter().any(|effect| matches!(
+            effect,
+            RtcPeerEffect::SendSignaling {
+                message: SignalingMessage::IceRestartRejected { .. },
+                ..
+            }
+        )),
+        "an uncorrelated offer must not be rejected"
+    );
+    assert!(
+        has_build_session(&effects, generation + 1),
+        "the ordinary-offer fallthrough builds the replacement session"
+    );
+}
+
+#[test]
 fn undetermined_controller_rejects_restart_offer_without_session() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let exchange_id = "restart-after-budget-exhaustion".to_string();
