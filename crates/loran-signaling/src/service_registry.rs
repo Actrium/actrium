@@ -686,7 +686,7 @@ impl ServiceRegistry {
         let service_names: Vec<String> = self
             .actor_index
             .get(actor_id)
-            .map(|names| names.iter().cloned().collect())
+            .map(|names| names.to_vec())
             .unwrap_or_default();
         if let Some(storage) = self.storage.clone() {
             for service_name in &service_names {
