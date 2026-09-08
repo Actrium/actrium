@@ -26,6 +26,15 @@ use webrtc::peer_connection::{
 /// times; stats never gate sendability or recovery.
 pub(super) const MAX_STATS_SAMPLE_ATTEMPTS: u8 = 3;
 
+/// Deadline-driven Soft retries an Offerer may launch within one recovery
+/// cycle before persistent failure to converge is treated as proof the
+/// restart cannot repair the transport (e.g. the restart rebind silently
+/// kept a dead interface, or the driver died rebinding). The same policy the
+/// answerer-side retransmission threshold (`ANSWERER_HARD_ESCALATION_ATTEMPT`)
+/// applies: escalate to a checked Hard rebuild rather than spin until the
+/// cycle budget terminates the attempt.
+pub(super) const SOFT_HARD_ESCALATION_ATTEMPT: u32 = 4;
+
 use crate::wire::webrtc::v020::events::{PeerDriverEvent, PeerStateTick};
 use crate::wire::webrtc::v020::status::{LaneKind, RtcUnavailableReason};
 
@@ -893,9 +902,10 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                     // remains the overall 60-second bound, while this new
                     // attempt epoch gives the controller a fresh six-second
                     // attempt timer.
-                    // Hard Recovery is reserved for an address change, an
-                    // unusable/closed Session, or another explicit hard-failure
-                    // fact instead of being the first timeout response.
+                    // Hard Recovery is reserved for an unusable/closed
+                    // Session, the long-background lifecycle policy, or
+                    // another explicit hard-failure fact instead of being the
+                    // first timeout response.
                     //
                     // The Answerer follows the same stable recovery-cycle
                     // budget while it still has a live physical Session: it
@@ -903,9 +913,34 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                     // 60-second budget expires. Once it must replace that
                     // Session, it parks and waits for the Offerer instead of
                     // creating a local Hard-Recovery generation.
+                    //
+                    // The soft ladder is bounded: retries that keep failing
+                    // to converge prove the restart is not repairing the
+                    // transport (e.g. the restart rebind silently kept a dead
+                    // interface, or the driver died rebinding and every
+                    // further restart_ice is a no-op). Escalate to a checked
+                    // Hard rebuild — the build-time address validation and
+                    // fresh gather are exactly the repair a wedged generation
+                    // needs — rather than spin until the cycle budget
+                    // terminates the attempt.
+                    //
+                    // Escalating ends the old generation's restart cadence:
+                    // make-before-break keeps it as a passive fallback, but
+                    // no further restart_ice is issued on it while the
+                    // replacement builds. That break is intentional — two
+                    // concurrent restart/offer flights corrupt the v0.20
+                    // signaling state machine, and a generation that failed
+                    // the ladder has already had its soft chances; the
+                    // remaining budget is better spent on the strictly
+                    // stronger rebuild.
                     state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
                     state.recovery_attempt_started = false;
-                    start_soft_recovery(state, &mut effects);
+                    state.soft_recovery_attempts = state.soft_recovery_attempts.saturating_add(1);
+                    if state.soft_recovery_attempts >= SOFT_HARD_ESCALATION_ATTEMPT {
+                        start_hard_recovery(state, &mut effects);
+                    } else {
+                        start_soft_recovery(state, &mut effects);
+                    }
                 } else if state.role == Role::Answerer && state.awaiting_offer {
                     // The Answerer has no local SDP with which to create a
                     // replacement. Its recovery is deliberately parked until
@@ -1874,21 +1909,25 @@ fn restart_initial_as_offerer(state: &mut RtcPeerState, effects: &mut Vec<RtcPee
 ///
 /// * `NetworkUnavailable`: mark recovering (don't restart yet — wait for
 ///   availability to return).
-/// * `NetworkAvailable`: if recovering and the address hasn't changed, start
-///   Soft Recovery (ICE restart). If `address_changed`, start Hard Recovery
-///   (the current PeerConnection's ICE candidates are stale).
-/// * `LocalAddressChanged`: set `address_changed = true`; the Offerer starts
-///   Hard Recovery once the lifecycle supervisor has committed a usable
-///   signaling generation. An Answerer waits for the Offerer to send the next
-///   Offer (RFC §"Hard Recovery is suitable for: local interface or IP
-///   changes").
+/// * `NetworkAvailable`: if recovering and no explicit hard-recovery request is
+///   pending, start Soft Recovery (ICE restart). If `address_changed` was set
+///   by an explicit force-reconnect or long-background policy, start Hard
+///   Recovery instead.
+/// * `LocalAddressChanged`: start Soft Recovery on the existing
+///   PeerConnection. v0.20.3 rebinds ICE transports and refreshes local
+///   candidates when the ICE generation restarts. The soft ladder is
+///   bounded: a restart whose rebind fails (the driver dies, so the next
+///   `restart_ice` errors) escalates to Hard Recovery immediately, and
+///   retries that keep failing to converge escalate at
+///   `SOFT_HARD_ESCALATION_ATTEMPT`. A build still holding the pre-change
+///   address snapshot is superseded by a fresh build instead.
 /// * `AppBackground`: if the peer is `Sendable`, enter `Recovering`
 ///   (sendable=false) because the platform may suspend the process and the
 ///   connection must be re-established on foreground. No restart is issued
 ///   yet — recovery resumes on `AppForeground`.
-/// * `AppForeground`: if recovering and address hasn't changed, start Soft
-///   Recovery. If `address_changed`, the Offerer starts Hard Recovery and the
-///   Answerer waits for its next Offer.
+/// * `AppForeground`: if recovering and no explicit hard-recovery request is
+///   pending, start Soft Recovery. If `address_changed`, the Offerer starts
+///   Hard Recovery and the Answerer waits for its next Offer.
 /// * `ForceReconnect`: set `address_changed = true` (force Hard for the
 ///   Offerer) and wait for the supervisor-owned signaling recovery gate before
 ///   rebuilding.
@@ -1911,7 +1950,7 @@ fn defer_recovery_until_gate(state: &mut RtcPeerState, hard: bool) {
         state.pc_connected = false; // S5-5: sendable still expires while gated
         state.phase = RtcPeerPhase::Recovering;
         if hard {
-            // A genuine address change must still steer the *next* round hard.
+            // An explicit hard-recovery request must still steer the *next* round hard.
             state.address_changed = true;
         }
         state.bump_revision();
@@ -1925,6 +1964,7 @@ fn defer_recovery_until_gate(state: &mut RtcPeerState, hard: bool) {
         );
         state.recovery_cycle = state.recovery_cycle.wrapping_add(1);
         state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
+        state.soft_recovery_attempts = 0;
     }
     clear_negotiation_for_recovery(state);
     state.recovery_inflight = true;
@@ -1967,8 +2007,8 @@ fn reduce_network_event(
         RtcNetworkEvent::NetworkUnavailable => {
             state.network_available = false;
             if state.phase == RtcPeerPhase::Sendable || state.recovery_inflight {
-                // Only a genuine address change escalates to Hard. A soft
-                // restart's own negotiation sets `building_generation`/
+                // Only an explicit hard-recovery request escalates to Hard. A
+                // soft restart's own negotiation sets `building_generation`/
                 // `pending_generation` while the BuildSession is in flight;
                 // reading those as "must rebuild" converted every temporary
                 // loss that overlapped an in-flight restart exchange into a
@@ -1983,19 +2023,40 @@ fn reduce_network_event(
             maybe_start_deferred_recovery(state, effects);
         }
         RtcNetworkEvent::LocalAddressChanged => {
-            state.address_changed = true;
-            if state.active_generation.is_some() {
+            // The v0.20.3 backend rebinds ICE transports and re-gathers local
+            // candidates during ICE restart. Treat an address snapshot change
+            // as an in-place recovery opportunity; an explicit ForceReconnect
+            // or long-background policy still sets `address_changed` and keeps
+            // the Hard Recovery path below.
+            if state.active_generation.is_some() && state.recovery_attempt_started {
+                // A recovery round is already converging on the pre-edge
+                // address set, and the attempt latch would coalesce this edge
+                // away. Remember it so the convergence publishes one more
+                // restart onto the current set instead of stranding the link
+                // on the superseded interface.
+                state.address_edge_pending = true;
+            } else if state.active_generation.is_some() {
+                if recovery_gate_open(state) {
+                    start_soft_recovery(state, effects);
+                } else {
+                    defer_recovery_until_gate(state, false);
+                }
+            } else if state.building_generation.is_some() {
+                // The build in flight is consuming the pre-change address
+                // snapshot, and a same-generation ICE restart cannot repair a
+                // Session that has not been born yet. Supersede the build so
+                // the replacement resolves the provider's current set.
+                state.recovery_attempt_started = false;
                 if recovery_gate_open(state) {
                     start_hard_recovery(state, effects);
                 } else {
                     defer_recovery_until_gate(state, true);
                 }
-            } else if state.phase == RtcPeerPhase::Sendable
-                || state.recovery_inflight
-                || state.building_generation.is_some()
-            {
-                defer_recovery_until_gate(state, true);
+            } else if state.phase == RtcPeerPhase::Sendable || state.recovery_inflight {
+                defer_recovery_until_gate(state, false);
             }
+            // With no generation at all the edge needs no recording: the
+            // eventual initial build resolves the provider's current set.
         }
         RtcNetworkEvent::AppBackground => {
             state.app_foreground = false;
@@ -2128,8 +2189,12 @@ fn start_soft_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
         state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
         state.local_restart_request_id = None;
         state.local_restart_request_attempt = 0;
+        state.soft_recovery_attempts = 0;
     }
     state.recovery_attempt_started = true;
+    // This round's rebind resolves the current address set, consuming any
+    // remembered edge.
+    state.address_edge_pending = false;
     state.ice_generation += 1;
     state.recovery_inflight = true;
     state.recovery_negotiated = false;
@@ -2277,6 +2342,7 @@ fn clear_transport_attempt_cache(state: &mut RtcPeerState) {
     state.network_path = crate::wire::webrtc::v020::status::NetworkPath::Unknown;
     state.stats_sample_attempts = 0;
     state.address_changed = false;
+    state.address_edge_pending = false;
     state.pending_remote_offer = None;
     state.pending_remote_description_operation = None;
     state.queued_remote_description = None;
@@ -2344,8 +2410,8 @@ fn terminate_transport_attempt(
 /// local Offer to negotiate a replacement, so it is parked by
 /// `wait_for_offerer_offer` instead.
 ///
-/// Offerer triggers: local address change, irrecoverable Soft Recovery failure,
-/// mailbox overflow, `ForceReconnect`, driver exit, non-converging status,
+/// Offerer triggers: irrecoverable Soft Recovery failure, mailbox overflow,
+/// `ForceReconnect`, driver exit, non-converging status,
 /// socket/bind plan unusable, or app lifecycle policy (RFC §"Hard Recovery is
 /// suitable for"). The same physical failures on an Answerer park the logical
 /// attempt and wait for an Offerer-created Offer.
@@ -2375,6 +2441,7 @@ fn start_hard_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
     // The address-changed flag is consumed: Hard Recovery is in progress and
     // the new session will use the current local address.
     state.address_changed = false;
+    state.address_edge_pending = false;
 
     // The old active generation can remain physically alive during
     // make-before-break, but its in-flight negotiation state no longer owns
@@ -2407,6 +2474,9 @@ fn start_hard_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
     let new_generation = state.alloc_generation();
     state.building_generation = Some(new_generation);
     state.ice_generation = 0; // new PC, fresh ICE generation epoch
+    // Leaving the soft ladder: a later soft round after this rebuild starts
+    // a fresh attempt count.
+    state.soft_recovery_attempts = 0;
     state.phase = RtcPeerPhase::Building;
     state.unavailable_reason = None;
 
@@ -2665,8 +2735,16 @@ fn reduce_state_tick(
             state.recovery_attempt_started = false;
             state.local_restart_request_id = None;
             state.local_restart_request_attempt = 0;
+            state.soft_recovery_attempts = 0;
             state.parked_signaling_generation = None;
             state.address_changed = false; // recovery succeeded
+            if state.address_edge_pending {
+                // An address edge was coalesced while this round was in
+                // flight; the round converged on the pre-edge set. Publish
+                // one more restart so the link moves onto the current set
+                // instead of stranding on the superseded interface.
+                start_soft_recovery(state, effects);
+            }
         }
         if !was_connected || state.phase == RtcPeerPhase::Sendable {
             state.bump_revision();
@@ -2694,14 +2772,15 @@ fn reduce_state_tick(
                 if !state.address_changed {
                     start_soft_recovery(state, effects);
                 } else {
-                    // S5-3: address changed → Offerer Hard Recovery.
+                    // S5-3: an explicit hard-recovery request → Offerer Hard
+                    // Recovery.
                     start_hard_recovery(state, effects);
                 }
             } else if state.address_changed {
-                // S5-3: Soft Recovery was in flight but the address changed —
-                // escalate the Offerer to Hard Recovery (the current
-                // PeerConnection's candidates are stale). An Answerer remains
-                // parked until the Offerer sends a fresh Offer.
+                // S5-3: Soft Recovery was in flight but an explicit
+                // hard-recovery request arrived — escalate the Offerer to
+                // Hard Recovery. An Answerer remains parked until the
+                // Offerer sends a fresh Offer.
                 start_hard_recovery(state, effects);
             }
         } else {
@@ -2721,8 +2800,8 @@ fn reduce_state_tick(
                 // S5-2: temporary network loss starts Soft Recovery.
                 start_soft_recovery(state, effects);
             } else {
-                // S5-3: address changed → Offerer Hard Recovery; an Answerer
-                // waits for the Offerer to initiate a new Offer.
+                // S5-3: explicit hard recovery → Offerer Hard Recovery; an
+                // Answerer waits for the Offerer to initiate a new Offer.
                 start_hard_recovery(state, effects);
             }
         }
@@ -2895,6 +2974,7 @@ fn reduce_lane_event(state: &mut RtcPeerState, event: LaneEvent, effects: &mut V
                     state.recovery_attempt_started = false;
                     state.local_restart_request_id = None;
                     state.local_restart_request_attempt = 0;
+                    state.soft_recovery_attempts = 0;
                     state.parked_signaling_generation = None;
                 }
                 state.bump_revision();
