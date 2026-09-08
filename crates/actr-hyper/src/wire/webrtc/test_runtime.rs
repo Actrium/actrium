@@ -57,6 +57,8 @@ struct ScopedFaultState {
     incoming_hits: AtomicUsize,
     hit_notify: Notify,
     bind_addresses: Mutex<Vec<SocketAddr>>,
+    bound_socket_addresses: Mutex<Vec<SocketAddr>>,
+    bind_notify: Notify,
     send_delay_until: Mutex<Option<std::time::Instant>>,
     recv_delay_until: Mutex<Option<std::time::Instant>>,
 }
@@ -72,6 +74,8 @@ impl Default for ScopedFaultState {
             incoming_hits: AtomicUsize::new(0),
             hit_notify: Notify::new(),
             bind_addresses: Mutex::new(Vec::new()),
+            bound_socket_addresses: Mutex::new(Vec::new()),
+            bind_notify: Notify::new(),
             send_delay_until: Mutex::new(None),
             recv_delay_until: Mutex::new(None),
         }
@@ -133,6 +137,43 @@ impl DirectedRtcFaultHandle {
             .lock()
             .expect("RTC bind-address lock poisoned")
             .clone()
+    }
+
+    /// Actual local socket addresses observed at the Runtime boundary. Unlike
+    /// [`Self::bind_addresses`], this includes sockets created by a
+    /// same-generation ICE-restart rebind.
+    pub fn bound_socket_addresses(&self) -> Vec<SocketAddr> {
+        self.state
+            .bound_socket_addresses
+            .lock()
+            .expect("RTC bound-address lock poisoned")
+            .clone()
+    }
+
+    /// Wait for a socket created after `baseline` to bind on `expected_ip`.
+    /// This observes the actual `UdpSocket::local_addr()` passed through the
+    /// Runtime wrapper, not a controller counter or an SDP-only projection.
+    pub async fn wait_for_bound_address(
+        &self,
+        baseline: usize,
+        expected_ip: std::net::IpAddr,
+        timeout: Duration,
+    ) -> Option<SocketAddr> {
+        crate::timer::timeout(crate::timer::ids::WEBRTC_PEER_SENDABLE, timeout, async {
+            loop {
+                if let Some(address) = self
+                    .bound_socket_addresses()
+                    .into_iter()
+                    .skip(baseline)
+                    .find(|address| address.ip() == expected_ip)
+                {
+                    return address;
+                }
+                self.state.bind_notify.notified().await;
+            }
+        })
+        .await
+        .ok()
     }
 
     /// Wait for this generation's Runtime wrapper to apply at least one fault
@@ -302,8 +343,11 @@ impl Runtime for ScopedFaultRuntime {
     }
 
     fn wrap_udp_socket(&self, socket: std::net::UdpSocket) -> io::Result<Arc<dyn AsyncUdpSocket>> {
+        let local_addr = socket.local_addr()?;
+        let inner = self.inner.wrap_udp_socket(socket)?;
+        self.state.record_bound_socket(local_addr);
         Ok(Arc::new(ScopedFaultUdpSocket {
-            inner: self.inner.wrap_udp_socket(socket)?,
+            inner,
             state: self.state.clone(),
         }))
     }
@@ -374,6 +418,14 @@ impl ScopedFaultState {
     fn record_incoming_hit(&self) {
         self.incoming_hits.fetch_add(1, Ordering::Release);
         self.hit_notify.notify_one();
+    }
+
+    fn record_bound_socket(&self, address: SocketAddr) {
+        self.bound_socket_addresses
+            .lock()
+            .expect("RTC bound-address lock poisoned")
+            .push(address);
+        self.bind_notify.notify_one();
     }
 }
 
