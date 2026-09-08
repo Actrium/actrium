@@ -54,8 +54,11 @@ pub(crate) enum RtcNetworkEvent {
     /// Network connectivity is restored (at least one usable interface).
     NetworkAvailable,
     /// The set of local interface addresses changed (interface up/down or
-    /// Wi-Fi ↔ cellular switch). Triggers Hard Recovery because the current
-    /// PeerConnection's ICE candidates are no longer valid.
+    /// Wi-Fi ↔ cellular switch). Starts Soft Recovery so v0.20.3 can rebind
+    /// ICE transports and re-gather candidates on the existing connection.
+    /// A failed restart still follows the controller's Hard Recovery fallback;
+    /// the separate long-background and explicit force-reconnect policies keep
+    /// their own Hard Recovery triggers.
     LocalAddressChanged,
     /// The app moved to the background (mobile lifecycle). The controller may
     /// pause non-essential work; it MUST NOT claim `sendable` while backgrounded
@@ -401,9 +404,9 @@ impl std::fmt::Debug for RtcRecoverySupervisor {
 
 /// Spawn a background task that bridges a `LocalAddressProvider` to the
 /// `RtcRecoverySupervisor`: watches the address snapshot and broadcasts
-/// `LocalAddressChanged` whenever the set of local IPs changes (RFC §"Local
-/// addresses and sockets": "Trigger Hard Recovery when the interface address
-/// changes").
+/// `LocalAddressChanged` whenever the set of local IPs changes. Controllers
+/// first attempt same-generation ICE recovery; a failed restart can still
+/// escalate to Hard Recovery.
 ///
 /// The task lives for as long as the supervisor and provider are alive. It is
 /// the *only* writer of `LocalAddressChanged` events — platform code should

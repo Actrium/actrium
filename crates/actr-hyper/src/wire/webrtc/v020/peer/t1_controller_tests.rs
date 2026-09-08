@@ -1225,7 +1225,7 @@ async fn failed_hard_replacement_retries_on_the_attempt_deadline() {
     let mut h = ControllerTestHarness::spawn(708);
     drive_offerer_to_sendable(&mut h).await;
 
-    h.supervisor.publish(RtcNetworkEvent::LocalAddressChanged);
+    h.supervisor.publish(RtcNetworkEvent::ForceReconnect);
     let failed_replacement = h.next_effect().await;
     assert!(matches!(
         failed_replacement.effect,
@@ -1277,17 +1277,15 @@ async fn failed_hard_replacement_retries_on_the_attempt_deadline() {
 }
 
 #[tokio::test]
-async fn soft_recovery_attempt_timeout_retries_on_the_same_pc_generation() {
+async fn local_address_change_soft_recovery_retries_on_the_same_pc_generation() {
     let mut h = ControllerTestHarness::spawn(710);
     drive_offerer_to_sendable(&mut h).await;
 
-    h.supervisor.publish(RtcNetworkEvent::NetworkUnavailable);
+    h.supervisor.publish(RtcNetworkEvent::LocalAddressChanged);
     await_snapshot(&h.handle, "T1 soft recovery entry", |snapshot| {
         snapshot.status == actr_framework::WebRtcPeerStatus::Recovering && !snapshot.sendable
     })
     .await;
-    h.supervisor.publish(RtcNetworkEvent::NetworkAvailable);
-
     let first = h.next_effect().await;
     assert!(matches!(
         first.effect,
@@ -1335,7 +1333,7 @@ async fn hung_hard_replacement_negotiation_is_retired_and_retried() {
     let mut h = ControllerTestHarness::spawn(709);
     drive_offerer_to_sendable(&mut h).await;
 
-    h.supervisor.publish(RtcNetworkEvent::LocalAddressChanged);
+    h.supervisor.publish(RtcNetworkEvent::ForceReconnect);
     let build = h.next_effect().await;
     assert!(matches!(
         build.effect,
