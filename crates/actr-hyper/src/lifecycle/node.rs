@@ -3206,9 +3206,11 @@ impl Inner {
                     task_handles.push(turn_refresh_handle);
                 }
                 // S7A-3 (P1): bridge local-address changes into the recovery
-                // supervisor so interface switches trigger Hard Recovery in
-                // production. Native desktop enumeration is refreshed by the
-                // monitor; mobile providers can additionally push change edges.
+                // supervisor so interface switches trigger same-generation ICE
+                // recovery in production. A failed restart can still escalate
+                // to Hard Recovery. Native desktop enumeration is refreshed by
+                // the monitor; mobile providers can additionally push change
+                // edges.
                 let address_monitor = v020::recovery::spawn_address_monitor(
                     address_provider,
                     v020_manager.supervisor().clone(),

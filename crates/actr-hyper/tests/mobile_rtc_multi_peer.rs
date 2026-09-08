@@ -2,13 +2,13 @@
 //! feed, and independent v0.20 controllers.
 
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
 
 use actr_hyper::lifecycle::{NetworkAvailability, NetworkTransportFlags};
 use actr_hyper::test_support::{
     ActrixTestServices, LinkDirection, MobileEventDriver, PacketRule, SignalingFaultRule,
-    SignalingMessageClass, TestEvidenceFailureGuard, TestHarness, make_actor_id,
+    SignalingMessageClass, TestEvidenceFailureGuard, TestHarness, bindable_non_loopback_ipv4,
+    make_actor_id,
 };
 use actr_protocol::RpcEnvelope;
 
@@ -136,6 +136,31 @@ impl MultiPeerTopology {
                     .generation(&self.peer_id(A))
                     .await
                     .expect("remote controller generation"),
+            );
+        }
+        generations
+    }
+
+    async fn ice_generations(&self) -> HashMap<(u64, u64), u64> {
+        let mut generations = HashMap::new();
+        for remote in REMOTES {
+            generations.insert(
+                (A, remote),
+                self.harness
+                    .peer(A)
+                    .rtc
+                    .ice_generation(&self.peer_id(remote))
+                    .await
+                    .expect("A controller ICE generation"),
+            );
+            generations.insert(
+                (remote, A),
+                self.harness
+                    .peer(remote)
+                    .rtc
+                    .ice_generation(&self.peer_id(A))
+                    .await
+                    .expect("remote controller ICE generation"),
             );
         }
         generations
@@ -401,96 +426,169 @@ async fn mp01_one_link_fault_does_not_change_or_block_other_peer_connections() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
-async fn mp02_a_address_change_replaces_each_link_without_cross_peer_state() {
+async fn mp02_a_address_change_soft_recovers_each_link_without_cross_peer_state() {
+    let Some(changed_address) = bindable_non_loopback_ipv4() else {
+        eprintln!("mp02: skipping — no bindable non-loopback IPv4 interface on this host");
+        return;
+    };
     let topology = MultiPeerTopology::new().await;
     let initial = topology.generations().await;
+    let initial_ice = topology.ice_generations().await;
+    let a_id = topology.peer_id(A);
+    let initial_a_bound: HashMap<u64, usize> = REMOTES
+        .iter()
+        .map(|&remote| {
+            let bound = topology
+                .harness
+                .rtc_faults
+                .handle(&a_id, &topology.peer_id(remote), initial[&(A, remote)])
+                .expect("A active generation fault handle")
+                .bound_socket_addresses();
+            (remote, bound.len())
+        })
+        .collect();
     topology
         .harness
-        .set_local_addresses(A, vec![IpAddr::V4(Ipv4Addr::new(127, 0, 0, 4))]);
+        .set_local_addresses(A, vec![changed_address]);
 
     for remote in REMOTES {
         topology
             .harness
             .peer(A)
             .rtc
+            .wait_ice_generation(&topology.peer_id(remote), initial_ice[&(A, remote)], WAIT)
+            .await
+            .unwrap_or_else(|| panic!("A-{remote} must advance its ICE generation"));
+        topology
+            .harness
+            .rtc_faults
+            .handle(&a_id, &topology.peer_id(remote), initial[&(A, remote)])
+            .expect("A active generation fault handle")
+            .wait_for_bound_address(initial_a_bound[&remote], changed_address, WAIT)
+            .await
+            .unwrap_or_else(|| panic!("A-{remote} ICE restart must bind the changed address"));
+        topology
+            .harness
+            .peer(A)
+            .rtc
             .wait_state(&topology.peer_id(remote), WAIT, |state| {
-                state.sendable && state.pc_generation > initial[&(A, remote)]
+                state.sendable && state.pc_generation == initial[&(A, remote)]
             })
             .await
-            .unwrap_or_else(|| panic!("A-{remote} must use a replacement PC"));
+            .unwrap_or_else(|| panic!("A-{remote} must complete same-generation ICE recovery"));
+        topology
+            .harness
+            .peer(remote)
+            .rtc
+            .wait_ice_generation(&topology.peer_id(A), initial_ice[&(remote, A)], WAIT)
+            .await
+            .unwrap_or_else(|| panic!("{remote}-A must advance its ICE generation"));
         topology
             .harness
             .peer(remote)
             .rtc
             .wait_state(&topology.peer_id(A), WAIT, |state| {
-                state.sendable && state.pc_generation > initial[&(remote, A)]
+                state.sendable && state.pc_generation == initial[&(remote, A)]
             })
             .await
-            .unwrap_or_else(|| panic!("{remote}-A must switch to the replacement PC"));
+            .unwrap_or_else(|| panic!("{remote}-A must complete same-generation ICE recovery"));
     }
-    topology.assert_all_links("mp02_replaced").await;
+    topology.assert_all_links("mp02_soft_recovered").await;
+    let recovered_ice = topology.ice_generations().await;
     for remote in REMOTES {
-        let generation = topology
+        let state = topology
             .harness
             .peer(A)
             .rtc
-            .generation(&topology.peer_id(remote))
+            .state(&topology.peer_id(remote))
             .await
-            .expect("A replacement generation");
-        let addresses = topology
-            .harness
-            .rtc_faults
-            .handle(&topology.peer_id(A), &topology.peer_id(remote), generation)
-            .expect("A replacement Runtime scope")
-            .bind_addresses();
-        assert!(
-            !addresses.is_empty()
-                && addresses
-                    .iter()
-                    .all(|address| address.ip() == IpAddr::V4(Ipv4Addr::new(127, 0, 0, 4))),
-            "A-{remote} replacement did not use the new v0.20 bind plan: {addresses:?}"
-        );
+            .expect("A recovered state");
+        assert_eq!(state.pc_generation, initial[&(A, remote)]);
+        assert!(recovered_ice[&(A, remote)] > initial_ice[&(A, remote)]);
     }
     assert_eq!(topology.harness.peer(A).rtc.peer_count().await, 3);
     topology.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
-async fn mp03_one_node_event_recovers_three_controllers_independently_within_one_deadline() {
+async fn mp03_one_node_event_soft_recovers_three_controllers_independently_within_one_deadline() {
+    let Some(changed_address) = bindable_non_loopback_ipv4() else {
+        eprintln!("mp03: skipping — no bindable non-loopback IPv4 interface on this host");
+        return;
+    };
     let topology = MultiPeerTopology::new().await;
     let initial = topology.generations().await;
+    let initial_ice = topology.ice_generations().await;
+    let a_id = topology.peer_id(A);
+    let initial_a_bound: HashMap<u64, usize> = REMOTES
+        .iter()
+        .map(|&remote| {
+            let bound = topology
+                .harness
+                .rtc_faults
+                .handle(&a_id, &topology.peer_id(remote), initial[&(A, remote)])
+                .expect("A active generation fault handle")
+                .bound_socket_addresses();
+            (remote, bound.len())
+        })
+        .collect();
     topology
         .harness
-        .set_local_addresses(A, vec![IpAddr::V4(Ipv4Addr::new(127, 0, 0, 5))]);
+        .set_local_addresses(A, vec![changed_address]);
     tokio::time::timeout(WAIT, async {
         for remote in REMOTES {
             topology
                 .harness
                 .peer(A)
                 .rtc
+                .wait_ice_generation(&topology.peer_id(remote), initial_ice[&(A, remote)], WAIT)
+                .await
+                .expect("A controller must advance its ICE generation");
+            topology
+                .harness
+                .rtc_faults
+                .handle(&a_id, &topology.peer_id(remote), initial[&(A, remote)])
+                .expect("A active generation fault handle")
+                .wait_for_bound_address(initial_a_bound[&remote], changed_address, WAIT)
+                .await
+                .expect("A controller's ICE restart must bind the changed address");
+            topology
+                .harness
+                .peer(A)
+                .rtc
                 .wait_state(&topology.peer_id(remote), WAIT, |state| {
-                    state.sendable && state.pc_generation > initial[&(A, remote)]
+                    state.sendable && state.pc_generation == initial[&(A, remote)]
                 })
                 .await
-                .expect("A controller must publish its replacement generation");
+                .expect("A controller must publish its recovered ICE generation");
+            topology
+                .harness
+                .peer(remote)
+                .rtc
+                .wait_ice_generation(&topology.peer_id(A), initial_ice[&(remote, A)], WAIT)
+                .await
+                .expect("remote controller must advance its ICE generation");
             topology
                 .harness
                 .peer(remote)
                 .rtc
                 .wait_state(&topology.peer_id(A), WAIT, |state| {
-                    state.sendable && state.pc_generation > initial[&(remote, A)]
+                    state.sendable && state.pc_generation == initial[&(remote, A)]
                 })
                 .await
-                .expect("remote controller must publish its replacement generation");
+                .expect("remote controller must publish its recovered ICE generation");
         }
         topology.assert_all_links("mp03_restored").await;
     })
     .await
     .expect("all three controllers must recover within one topology deadline");
     let restored = topology.generations().await;
+    let restored_ice = topology.ice_generations().await;
     for remote in REMOTES {
-        assert!(restored[&(A, remote)] > initial[&(A, remote)]);
-        assert!(restored[&(remote, A)] > initial[&(remote, A)]);
+        assert_eq!(restored[&(A, remote)], initial[&(A, remote)]);
+        assert_eq!(restored[&(remote, A)], initial[&(remote, A)]);
+        assert!(restored_ice[&(A, remote)] > initial_ice[&(A, remote)]);
+        assert!(restored_ice[&(remote, A)] > initial_ice[&(remote, A)]);
     }
     topology.shutdown().await;
 }
