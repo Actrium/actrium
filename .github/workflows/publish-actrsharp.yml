@@ -212,11 +212,13 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          PACKAGE_EXISTS: ${{ steps.package.outputs.exists }}
         run: |
           $PSNativeCommandUseErrorActionPreference = $false
           $tag = "v$env:ACTR_VERSION"
           $assetName = "ActrSharp.$env:ACTR_VERSION.snupkg"
           $localAsset = "artifacts/$assetName"
+          $packageAlreadyExists = $env:PACKAGE_EXISTS -eq "true"
           $release = $null
           for ($i = 0; $i -lt 30; $i++) {
             $releaseJson = gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets 2>$null
@@ -231,6 +233,17 @@ jobs:
           $existing = @($release.assets | Where-Object { $_.name -eq $assetName })
           if ($existing.Count -eq 0) {
             "exists=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            exit 0
+          }
+
+          if ($packageAlreadyExists) {
+            # NuGet symbol packages are not byte-for-byte reproducible across
+            # build environments. The package version and release tag have
+            # already been validated, so an existing symbol asset is enough
+            # to make this recovery run idempotent; do not compare hashes from
+            # a fresh rebuild with the previously uploaded asset.
+            "exists=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Write-Host "Existing $assetName found for an already published package; reusing it."
             exit 0
           }
 
