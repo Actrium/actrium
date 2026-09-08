@@ -356,6 +356,27 @@ async fn answerer_without_active_session_rejects_restart_before_new_connection()
         rejection.is_some(),
         "no-active Session must explicitly reject ICE restart; trace={evidence:?}"
     );
+    let rejected = evidence
+        .iter()
+        .find(|event| event.class == SignalingMessageClass::IceRestartRejected)
+        .expect("rejection event in the trace");
+    let delivered_exchanges: Vec<&str> = evidence
+        .iter()
+        .filter(|event| {
+            event.class == SignalingMessageClass::IceRestartOffer
+                && event.rule == SignalingFaultRule::Deliver
+        })
+        .filter_map(|event| event.exchange_id.as_deref())
+        .collect();
+    assert!(
+        delivered_exchanges.contains(&rejected.exchange_id.as_deref().unwrap_or("")),
+        "the rejection must answer a delivered restart exchange; trace={evidence:?}"
+    );
+    assert_eq!(
+        rejected.reject_reason,
+        Some(actr_protocol::ice_restart_rejected::Reason::NoActiveSession as i32),
+        "the rejection must carry the NoActiveSession reason; trace={evidence:?}"
+    );
 }
 
 fn live_lanes(

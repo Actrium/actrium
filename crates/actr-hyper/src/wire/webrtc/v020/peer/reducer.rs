@@ -512,6 +512,22 @@ pub(crate) enum SignalingMessage {
     },
 }
 
+impl SignalingMessage {
+    /// Stable traffic-class label for dispatch diagnostics.
+    pub(crate) fn kind_name(&self) -> &'static str {
+        match self {
+            Self::Offer { .. } => "offer",
+            Self::IceRestartOffer { .. } => "ice_restart_offer",
+            Self::IceRestartRequest { .. } => "ice_restart_request",
+            Self::Answer { .. } => "answer",
+            Self::Candidate(_) => "candidate",
+            Self::RoleNegotiation => "role_negotiation",
+            Self::RoleAssignment { .. } => "role_assignment",
+            Self::IceRestartRejected { .. } => "ice_restart_rejected",
+        }
+    }
+}
+
 /// The outcome of a blocking effect, fed back into the controller. Every
 /// variant carries the `pc_generation` (and `operation_id` where relevant) the
 /// effect was issued with, so the reducer can re-validate identity.

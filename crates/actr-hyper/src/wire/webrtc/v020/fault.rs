@@ -487,6 +487,8 @@ pub struct SignalingTraceEvent {
     /// Restart exchange/request identity when the protocol message carries it.
     pub exchange_id: Option<String>,
     pub attempt: Option<u32>,
+    /// `IceRestartRejected` reason code when the message carries one.
+    pub reject_reason: Option<i32>,
     pub observed_at: SystemTime,
     pub observed_after: Duration,
 }
@@ -893,7 +895,7 @@ impl DirectedSignalingFaultRegistry {
             to: to.clone(),
             class: SignalingMessageClass::Any,
         };
-        let (exchange_id, attempt) = signaling_identity(message);
+        let (exchange_id, attempt, reject_reason) = signaling_identity(message);
 
         let mut observed = self
             .state
@@ -973,6 +975,7 @@ impl DirectedSignalingFaultRegistry {
             ordinal,
             exchange_id: exchange_id.clone(),
             attempt,
+            reject_reason,
             observed_at: SystemTime::now(),
             observed_after: self.state.started_at.elapsed(),
         });
@@ -996,17 +999,20 @@ struct SignalingDecision {
     attempt: Option<u32>,
 }
 
-fn signaling_identity(message: &SignalingMessage) -> (Option<String>, Option<u32>) {
+fn signaling_identity(message: &SignalingMessage) -> (Option<String>, Option<u32>, Option<i32>) {
     match message {
-        SignalingMessage::IceRestartOffer { exchange_id, .. }
-        | SignalingMessage::IceRestartRejected { exchange_id, .. } => {
-            (Some(exchange_id.clone()), None)
+        SignalingMessage::IceRestartOffer { exchange_id, .. } => {
+            (Some(exchange_id.clone()), None, None)
         }
+        SignalingMessage::IceRestartRejected {
+            exchange_id,
+            reason,
+        } => (Some(exchange_id.clone()), None, Some(*reason)),
         SignalingMessage::IceRestartRequest {
             request_id,
             attempt,
-        } => (Some(request_id.clone()), Some(*attempt)),
-        _ => (None, None),
+        } => (Some(request_id.clone()), Some(*attempt), None),
+        _ => (None, None, None),
     }
 }
 
