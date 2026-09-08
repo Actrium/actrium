@@ -5110,6 +5110,35 @@ fn answerer_rejects_restart_offer_when_controller_has_no_active_session() {
 }
 
 #[test]
+fn offerer_without_session_ignores_correlated_restart_offer_without_rejection() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    state.role = Role::Offerer;
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
+            desc: Box::new(sdp_with_ufrag(RTCSdpType::Offer, "remote-1")),
+            exchange_id: Some("glare-restart".to_string()),
+        }),
+    );
+    assert!(
+        !effects.iter().any(|effect| matches!(
+            effect,
+            RtcPeerEffect::SendSignaling {
+                message: SignalingMessage::IceRestartRejected { .. },
+                ..
+            }
+        )),
+        "an Offerer stays on the stale-offer path; no rejection"
+    );
+    assert!(
+        !has_build_session(&effects, 1),
+        "the stale competing offer builds nothing"
+    );
+    assert_eq!(state.stale_events, 1);
+}
+
+#[test]
 fn uncorrelated_restart_offer_without_session_falls_through_to_ordinary_offer() {
     let mut state = RtcPeerState::new(test_actor_id(2));
     let generation = drive_answerer_to_sendable_with_ufrag(&mut state, "remote-1");

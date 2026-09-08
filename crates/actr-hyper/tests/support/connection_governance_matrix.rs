@@ -350,6 +350,17 @@ async fn answerer_without_active_session_rejects_restart_before_new_connection()
             Duration::from_secs(15),
         )
         .await;
+    let a_state = pair
+        .harness()
+        .peer(pair.serial(PairEndpoint::A))
+        .rtc
+        .state(&b)
+        .await
+        .expect("A controller state after the rejection");
+    assert_eq!(
+        a_state.pc_generation, 0,
+        "the rejection must not build a replacement session on the answerer"
+    );
     let evidence = pair.signaling_trace();
     pair.shutdown().await;
     assert!(
