@@ -788,14 +788,15 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
         }
         RtcPeerInput::RecoveryDeadlineElapsed { recovery_epoch } => {
             if state.recovery_inflight && state.recovery_epoch == recovery_epoch {
-                if matches!(
-                    state.phase,
-                    RtcPeerPhase::Negotiating | RtcPeerPhase::TransportReady
-                ) && (state.pending_generation.is_some() || state.ice_generation == 0)
-                    && !(state.role == Role::Answerer
-                        && state.active_generation.is_some()
-                        && !state.awaiting_offer
-                        && !state.address_changed)
+                if (state.address_changed
+                    || state.awaiting_offer
+                    || state.active_generation.is_none()
+                    || state.role != Role::Answerer)
+                    && (state.pending_generation.is_some() || state.ice_generation == 0)
+                    && matches!(
+                        state.phase,
+                        RtcPeerPhase::Negotiating | RtcPeerPhase::TransportReady
+                    )
                 {
                     // Negotiating/TransportReady are shared by Soft and Hard
                     // recovery. A pending generation, or generation-local ICE
