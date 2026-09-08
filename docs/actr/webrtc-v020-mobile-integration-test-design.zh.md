@@ -11,6 +11,7 @@
 关联文档：
 
 - [v0.20 分层测试与网络验证方案](webrtc-v020-test-plan.zh.md)
+- [main 分支连接治理补充测试与问题记录](../actr-connection-governance-test-supplement.main.zh.md)
 - [v0.20 架构 RFC](../../rfcs/actr/0504-webrtc-v020-rtc-controller-architecture.md)
 - [恢复测试与发布门禁](webrtc-v020-recovery-test-plan.md)
 - [T1/T2/T3 测试契约](webrtc-v020-test-contract.md)

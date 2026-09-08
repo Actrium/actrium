@@ -36,6 +36,12 @@ slow-timeout = { period = "60s", terminate-after = 5 }
 filter = 'binary(mobile_rtc_pair_contract) | binary(mobile_rtc_multi_peer)'
 retries = 0
 
+# Governance tests keep protocol failures and autonomous-recovery contract
+# gaps visible. Do not hide their first outcome behind automatic retries.
+[[profile.default.overrides]]
+filter = 'binary(connection_governance_matrix) | binary(connection_governance_production) | binary(connection_governance_inflight)'
+retries = 0
+
 # The v0.20 validation/interop/wiring suites live in the lib target but build
 # REAL PeerConnections (ICE + DTLS handshakes over loopback), so they are not
 # the deterministic unit tests the kind(lib) retry-free assumption describes.

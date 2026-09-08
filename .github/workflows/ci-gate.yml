@@ -335,6 +335,9 @@ jobs:
       REALTIME_BINARIES: >-
         binary(mobile_rtc_pair_contract)
         | binary(mobile_rtc_multi_peer)
+        | binary(connection_governance_matrix)
+        | binary(connection_governance_production)
+        | binary(connection_governance_inflight)
         | binary(webrtc_large_mobile_recovery)
         | binary(mobile_full_disconnect_recovery)
         | binary(mobile_network_event_scenarios)

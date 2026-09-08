@@ -300,6 +300,24 @@ pub fn attached_node_has_hook_observer(node: &crate::Node<crate::Attached>) -> b
         .is_some()
 }
 
+/// Start the production node with a fixture registration result. Only the AIS
+/// issuance step is supplied by the test; startup, credentials, lifecycle,
+/// PeerGate, Mailbox, workload dispatch and response delivery remain real.
+pub async fn start_node_with_fixture_registration(
+    mut node: crate::Node<crate::Attached>,
+    registration: actr_protocol::register_response::RegisterOk,
+) -> actr_protocol::ActorResult<crate::ActrRef> {
+    let mut attachment = node.attachment.take().expect("attached fixture node");
+    attachment.node.set_preregistered_credential(registration);
+    let signaling = attachment.node.signaling_client.clone();
+    let node = attachment.node.start().await?;
+    signaling
+        .probe_alive(std::time::Duration::from_secs(5))
+        .await
+        .map_err(actr_protocol::ActrError::from)?;
+    Ok(node)
+}
+
 /// Build a lightweight [`RuntimeContext`] backed by an in-process
 /// [`HostTransport`] for integration tests that need guest host-calls to
 /// complete without starting a full node.
