@@ -422,7 +422,7 @@ impl TestRtcHookRecorder {
 
 impl TestRtcControl {
     /// Observe and fault the manager of a fully started production Node.
-    pub fn for_node(node: &crate::ActrRef) -> Self {
+    pub(crate) fn for_node(node: &crate::ActrRef) -> Self {
         Self {
             manager: node
                 .shared
@@ -434,7 +434,7 @@ impl TestRtcControl {
 
     /// Hold the concrete channel so tests can prove reuse rather than merely
     /// comparing lane counts. This does not change readiness or controller state.
-    pub async fn lane_probe(&self, peer: &ActrId, payload: PayloadType) -> TestLaneProbe {
+    pub(crate) async fn lane_probe(&self, peer: &ActrId, payload: PayloadType) -> TestLaneProbe {
         let controller = self
             .manager
             .get_controller(peer)
@@ -455,7 +455,7 @@ impl TestRtcControl {
     /// Close physical resources without removing their logical Controller,
     /// then deliver its terminal driver fact. This models S4 explicitly;
     /// it does not pretend the test merely changed a network interface.
-    pub async fn retire_physical_session(&self, peer: &ActrId) -> u64 {
+    pub(crate) async fn retire_physical_session(&self, peer: &ActrId) -> u64 {
         let handle = self
             .manager
             .get_controller(peer)
@@ -733,17 +733,17 @@ impl TestRtcControl {
 }
 
 /// A physical-channel observation token; holding it never grants sendability.
-pub struct TestLaneProbe {
-    pub generation: u64,
+pub(crate) struct TestLaneProbe {
+    pub(crate) generation: u64,
     channel: Arc<dyn webrtc::data_channel::DataChannel>,
 }
 
 impl TestLaneProbe {
-    pub fn same_channel(&self, other: &Self) -> bool {
+    pub(crate) fn same_channel(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.channel, &other.channel)
     }
 
-    pub async fn is_open(&self) -> bool {
+    pub(crate) async fn is_open(&self) -> bool {
         matches!(
             self.channel.ready_state().await,
             Ok(webrtc::data_channel::RTCDataChannelState::Open)

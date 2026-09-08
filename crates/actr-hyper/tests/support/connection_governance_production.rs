@@ -1,5 +1,5 @@
 //! Production Node/Context/Mailbox/Workload/response path, real Actrix signaling.
-#[path = "support/governance.rs"]
+#[path = "governance.rs"]
 mod support;
 
 use actr_framework::Bytes;

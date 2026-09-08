@@ -7,17 +7,32 @@ use std::time::Duration;
 
 use actr_framework::{Bytes, Context, MessageDispatcher, Workload};
 use actr_hyper::lifecycle::{AppLifecycleState, NetworkEventHandle};
-use actr_hyper::test_support::{
-    ActrixTestServices, TestRtcControl, TestRtcRole, make_actor_id,
-    start_node_with_fixture_registration,
-};
-use actr_hyper::{ActrRef, Hyper, HyperConfig, Node, StaticTrust};
+use actr_hyper::test_support::{ActrixTestServices, TestRtcControl, TestRtcRole, make_actor_id};
+use actr_hyper::{ActrRef, Attached, Hyper, HyperConfig, Node, StaticTrust};
 use actr_protocol::{ActorResult, DataChunk, PayloadType, RpcEnvelope, register_response};
 use async_trait::async_trait;
 use tempfile::TempDir;
 use tokio::sync::{Notify, Semaphore};
 
 pub const WAIT: Duration = Duration::from_secs(20);
+
+/// Start the production node with a fixture registration result. Only the AIS
+/// issuance step is supplied by the test; startup, credentials, lifecycle,
+/// PeerGate, Mailbox, workload dispatch and response delivery remain real.
+async fn start_node_with_fixture_registration(
+    mut node: Node<Attached>,
+    registration: register_response::RegisterOk,
+) -> ActorResult<ActrRef> {
+    let mut attachment = node.attachment.take().expect("attached fixture node");
+    attachment.node.set_preregistered_credential(registration);
+    let signaling = attachment.node.signaling_client.clone();
+    let node = attachment.node.start().await?;
+    signaling
+        .probe_alive(Duration::from_secs(5))
+        .await
+        .map_err(actr_protocol::ActrError::from)?;
+    Ok(node)
+}
 
 pub struct Journal {
     entries: Mutex<Vec<(String, Bytes)>>,

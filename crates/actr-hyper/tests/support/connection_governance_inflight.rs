@@ -1,5 +1,5 @@
 //! Fault at a verified first-fragment boundary through real production Contexts.
-#[path = "support/governance.rs"]
+#[path = "governance.rs"]
 mod support;
 use actr_framework::Bytes;
 use actr_hyper::test_support::{
