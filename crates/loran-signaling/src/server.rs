@@ -1201,11 +1201,35 @@ async fn handle_unregister(
         req.reason.as_deref().unwrap_or("not provided")
     );
 
-    // Send UnregisterResponse
-    let response = actr_protocol::UnregisterResponse {
-        result: Some(actr_protocol::unregister_response::Result::Success(
-            actr_protocol::unregister_response::UnregisterOk {},
-        )),
+    // The storage DELETE must complete before Success is acknowledged: the
+    // peer treats UnregisterOk as "the removal survives a server restart".
+    let durable = server
+        .service_registry
+        .write()
+        .await
+        .unregister_actor_durable(&source)
+        .await;
+
+    let response = match durable {
+        Ok(()) => actr_protocol::UnregisterResponse {
+            result: Some(actr_protocol::unregister_response::Result::Success(
+                actr_protocol::unregister_response::UnregisterOk {},
+            )),
+        },
+        Err(error) => {
+            platform::recording::error!(
+                "durable unregister failed for Actor {}: {error}",
+                source.to_string_repr()
+            );
+            actr_protocol::UnregisterResponse {
+                result: Some(actr_protocol::unregister_response::Result::Error(
+                    actr_protocol::ErrorResponse {
+                        code: 500,
+                        message: error,
+                    },
+                )),
+            }
+        }
     };
 
     let flow = signaling_envelope::Flow::ServerToActr(SignalingToActr {
