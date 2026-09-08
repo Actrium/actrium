@@ -889,6 +889,16 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                     // fresh gather are exactly the repair a wedged generation
                     // needs — rather than spin until the cycle budget
                     // terminates the attempt.
+                    //
+                    // Escalating ends the old generation's restart cadence:
+                    // make-before-break keeps it as a passive fallback, but
+                    // no further restart_ice is issued on it while the
+                    // replacement builds. That break is intentional — two
+                    // concurrent restart/offer flights corrupt the v0.20
+                    // signaling state machine, and a generation that failed
+                    // the ladder has already had its soft chances; the
+                    // remaining budget is better spent on the strictly
+                    // stronger rebuild.
                     state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
                     state.recovery_attempt_started = false;
                     state.soft_recovery_attempts = state.soft_recovery_attempts.saturating_add(1);
@@ -1984,7 +1994,14 @@ fn reduce_network_event(
             // as an in-place recovery opportunity; an explicit ForceReconnect
             // or long-background policy still sets `address_changed` and keeps
             // the Hard Recovery path below.
-            if state.active_generation.is_some() {
+            if state.active_generation.is_some() && state.recovery_attempt_started {
+                // A recovery round is already converging on the pre-edge
+                // address set, and the attempt latch would coalesce this edge
+                // away. Remember it so the convergence publishes one more
+                // restart onto the current set instead of stranding the link
+                // on the superseded interface.
+                state.address_edge_pending = true;
+            } else if state.active_generation.is_some() {
                 if recovery_gate_open(state) {
                     start_soft_recovery(state, effects);
                 } else {
@@ -2141,6 +2158,9 @@ fn start_soft_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
         state.soft_recovery_attempts = 0;
     }
     state.recovery_attempt_started = true;
+    // This round's rebind resolves the current address set, consuming any
+    // remembered edge.
+    state.address_edge_pending = false;
     state.ice_generation += 1;
     state.recovery_inflight = true;
     state.recovery_negotiated = false;
@@ -2288,6 +2308,7 @@ fn clear_transport_attempt_cache(state: &mut RtcPeerState) {
     state.network_path = crate::wire::webrtc::v020::status::NetworkPath::Unknown;
     state.stats_sample_attempts = 0;
     state.address_changed = false;
+    state.address_edge_pending = false;
     state.pending_remote_offer = None;
     state.pending_remote_description_operation = None;
     state.queued_remote_description = None;
@@ -2386,6 +2407,7 @@ fn start_hard_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
     // The address-changed flag is consumed: Hard Recovery is in progress and
     // the new session will use the current local address.
     state.address_changed = false;
+    state.address_edge_pending = false;
 
     // The old active generation can remain physically alive during
     // make-before-break, but its in-flight negotiation state no longer owns
@@ -2682,6 +2704,13 @@ fn reduce_state_tick(
             state.soft_recovery_attempts = 0;
             state.parked_signaling_generation = None;
             state.address_changed = false; // recovery succeeded
+            if state.address_edge_pending {
+                // An address edge was coalesced while this round was in
+                // flight; the round converged on the pre-edge set. Publish
+                // one more restart so the link moves onto the current set
+                // instead of stranding on the superseded interface.
+                start_soft_recovery(state, effects);
+            }
         }
         if !was_connected || state.phase == RtcPeerPhase::Sendable {
             state.bump_revision();
@@ -2911,6 +2940,7 @@ fn reduce_lane_event(state: &mut RtcPeerState, event: LaneEvent, effects: &mut V
                     state.recovery_attempt_started = false;
                     state.local_restart_request_id = None;
                     state.local_restart_request_attempt = 0;
+                    state.soft_recovery_attempts = 0;
                     state.parked_signaling_generation = None;
                 }
                 state.bump_revision();

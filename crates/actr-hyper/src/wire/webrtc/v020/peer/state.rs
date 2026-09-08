@@ -155,6 +155,13 @@ pub(crate) struct RtcPeerState {
     /// Hard rebuild at the threshold instead of spinning until the cycle
     /// budget terminates the attempt.
     pub(crate) soft_recovery_attempts: u32,
+    /// A `LocalAddressChanged` edge arrived while a soft round was already in
+    /// flight and was coalesced by the attempt latch. When the in-flight
+    /// round converges (on the pre-edge address set), one more restart is
+    /// published so the link moves onto the current set instead of stranding
+    /// on the superseded interface. Cleared when a new soft round launches
+    /// (its rebind resolves the current set) and on Hard rebuild/terminate.
+    pub(crate) address_edge_pending: bool,
     pub(crate) ever_connected: bool,
 
     // Close/lifecycle.
@@ -352,6 +359,7 @@ impl RtcPeerState {
             recovery_cycle: 0,
             recovery_attempt_started: false,
             soft_recovery_attempts: 0,
+            address_edge_pending: false,
             ever_connected: false,
             close_requested: false,
             terminal_close_done: false,

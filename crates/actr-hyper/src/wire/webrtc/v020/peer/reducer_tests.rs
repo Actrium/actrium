@@ -2639,6 +2639,55 @@ fn local_address_changed_supersedes_build_holding_pre_change_snapshot() {
 }
 
 #[test]
+fn address_edge_coalesced_mid_soft_round_republishes_on_convergence() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+
+    // A temporary loss starts a soft round on the pre-edge address set.
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkUnavailable,
+        )),
+    );
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkAvailable,
+        )),
+    );
+    assert!(state.recovery_attempt_started);
+    let ice_after_first = state.ice_generation;
+
+    // An address edge mid-flight is remembered, not dropped: the in-flight
+    // round keeps its exchange identity.
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::LocalAddressChanged,
+        )),
+    );
+    assert!(
+        !has_restart_ice(&effects, generation),
+        "the in-flight round is not restarted"
+    );
+    assert!(state.address_edge_pending);
+
+    // The round converges on the pre-edge set; convergence re-publishes one
+    // restart so the link moves onto the current address set. (The anchor
+    // lane stays open across a soft restart, so convergence arrives as the
+    // reconnect tick.)
+    state.recovery_negotiated = true;
+    let effects = reduce(&mut state, connected_tick(generation));
+    assert!(
+        has_restart_ice(&effects, generation),
+        "convergence must re-publish one soft restart"
+    );
+    assert_eq!(state.ice_generation, ice_after_first + 1);
+    assert!(!state.address_edge_pending);
+}
+
+#[test]
 fn restart_ice_completion_offerer_creates_restart_offer() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let generation = drive_offerer_to_sendable(&mut state);
