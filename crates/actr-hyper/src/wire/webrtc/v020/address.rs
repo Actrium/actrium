@@ -296,3 +296,52 @@ impl LocalAddressProvider for TestLocalAddressProvider {
         self.change_tx.subscribe()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sync_snapshot_serves_the_seed_before_any_refresh() {
+        let provider =
+            DesktopLocalAddressProvider::with_override(vec![IpAddr::V4(Ipv4Addr::LOCALHOST)]);
+        assert_eq!(
+            provider
+                .current_addresses_sync()
+                .expect("seeded sync snapshot"),
+            vec![IpAddr::V4(Ipv4Addr::LOCALHOST)]
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_snapshot_reflects_the_latest_async_refresh() {
+        let provider = DesktopLocalAddressProvider::with_override(vec![IpAddr::V4(Ipv4Addr::new(
+            127, 0, 0, 2,
+        ))]);
+        let refreshed = provider.current_addresses().await.expect("async refresh");
+        // The rebind path resolves the sync snapshot; it must observe the
+        // set the monitor's poll just refreshed (refresh-before-publish).
+        assert_eq!(
+            provider
+                .current_addresses_sync()
+                .expect("refreshed sync snapshot"),
+            refreshed
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_snapshot_matches_detected_set_after_async_refresh() {
+        let provider = DesktopLocalAddressProvider::new();
+        let refreshed = provider
+            .current_addresses()
+            .await
+            .expect("detect must succeed on a host with a usable interface");
+        assert!(!refreshed.is_empty());
+        assert_eq!(
+            provider
+                .current_addresses_sync()
+                .expect("detected sync snapshot"),
+            refreshed
+        );
+    }
+}

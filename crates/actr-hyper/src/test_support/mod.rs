@@ -63,8 +63,12 @@ pub fn install_test_crypto_provider() {
 /// The bind probe is only a pre-filter: the interface can still disappear
 /// before the driver binds, so the loop-based runtime observation
 /// (`wait_rtc_bound_address`) is the evidence — this probe never is.
+///
+/// `ACTR_REQUIRE_NON_LOOPBACK_IPV4` turns an empty probe into a panic: CI
+/// sets it so a runner without a routable interface fails loudly instead of
+/// silently skipping the rebind-evidence tests.
 pub fn bindable_non_loopback_ipv4() -> Option<IpAddr> {
-    if_addrs::get_if_addrs()
+    let found = if_addrs::get_if_addrs()
         .expect("test requires local interface enumeration")
         .into_iter()
         .filter_map(|interface| match interface.ip() {
@@ -82,7 +86,14 @@ pub fn bindable_non_loopback_ipv4() -> Option<IpAddr> {
             std::net::UdpSocket::bind(SocketAddr::new(IpAddr::V4(address), 0))
                 .ok()
                 .map(|_| IpAddr::V4(address))
-        })
+        });
+    if found.is_none() && std::env::var_os("ACTR_REQUIRE_NON_LOOPBACK_IPV4").is_some() {
+        panic!(
+            "ACTR_REQUIRE_NON_LOOPBACK_IPV4 is set but this host has no bindable \
+             non-loopback IPv4 interface"
+        );
+    }
+    found
 }
 
 /// Create a credential state backed by the supplied test credential.
