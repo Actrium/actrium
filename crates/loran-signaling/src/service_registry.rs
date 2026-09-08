@@ -676,6 +676,32 @@ impl ServiceRegistry {
         }
     }
 
+    /// Unregister all services for an Actor, awaiting the storage deletes so
+    /// completion means the removal is durable across restart.
+    ///
+    /// Unlike [`Self::unregister_actor`], the SQLite DELETEs run inline instead
+    /// of on a detached task; callers may only acknowledge an unregistration
+    /// with `UnregisterOk` after this returns `Ok`.
+    pub async fn unregister_actor_durable(&mut self, actor_id: &ActrId) -> Result<(), String> {
+        let service_names: Vec<String> = self
+            .actor_index
+            .get(actor_id)
+            .map(|names| names.iter().cloned().collect())
+            .unwrap_or_default();
+        if let Some(storage) = self.storage.clone() {
+            for service_name in &service_names {
+                storage
+                    .delete_service(actor_id, service_name)
+                    .await
+                    .map_err(|e| {
+                        format!("failed to delete service {service_name} from cache: {e}")
+                    })?;
+            }
+        }
+        self.unregister_actor_memory_only(actor_id);
+        Ok(())
+    }
+
     /// Unregister all services for an Actor from memory only, without deleting the database cache.
     ///
     /// Used for transient offline scenarios such as WebSocket disconnection. Database data is
