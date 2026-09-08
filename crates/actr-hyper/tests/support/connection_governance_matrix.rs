@@ -287,7 +287,6 @@ async fn answerer_natural_recovery_budget_retires_transport_without_business_tra
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "active regression tracked by Actrium/actrium#209; enabled in the CG-002 fix PR"]
 async fn answerer_without_active_session_rejects_restart_before_new_connection() {
     use actr_hyper::test_support::{LinkDirection, SignalingFaultRule};
     let mut pair = MobileRtcPairHarness::new(52_901, 52_902).await;
@@ -351,11 +350,43 @@ async fn answerer_without_active_session_rejects_restart_before_new_connection()
             Duration::from_secs(15),
         )
         .await;
+    let a_state = pair
+        .harness()
+        .peer(pair.serial(PairEndpoint::A))
+        .rtc
+        .state(&b)
+        .await
+        .expect("A controller state after the rejection");
+    assert_eq!(
+        a_state.pc_generation, 0,
+        "the rejection must not build a replacement session on the answerer"
+    );
     let evidence = pair.signaling_trace();
     pair.shutdown().await;
     assert!(
         rejection.is_some(),
         "no-active Session must explicitly reject ICE restart; trace={evidence:?}"
+    );
+    let rejected = evidence
+        .iter()
+        .find(|event| event.class == SignalingMessageClass::IceRestartRejected)
+        .expect("rejection event in the trace");
+    let delivered_exchanges: Vec<&str> = evidence
+        .iter()
+        .filter(|event| {
+            event.class == SignalingMessageClass::IceRestartOffer
+                && event.rule == SignalingFaultRule::Deliver
+        })
+        .filter_map(|event| event.exchange_id.as_deref())
+        .collect();
+    assert!(
+        delivered_exchanges.contains(&rejected.exchange_id.as_deref().unwrap_or("")),
+        "the rejection must answer a delivered restart exchange; trace={evidence:?}"
+    );
+    assert_eq!(
+        rejected.reject_reason,
+        Some(actr_protocol::ice_restart_rejected::Reason::NoActiveSession as i32),
+        "the rejection must carry the NoActiveSession reason; trace={evidence:?}"
     );
 }
 
