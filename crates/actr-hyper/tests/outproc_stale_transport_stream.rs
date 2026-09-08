@@ -88,6 +88,10 @@ fn is_expected_recovery_error(message: &str) -> bool {
     ]
     .iter()
     .any(|needle| message.contains(needle))
+        // Anchored to the exact `ActrError::DeliveryUncertain` Display
+        // prefix rather than a bare substring, so an unrelated composed
+        // message cannot satisfy this check.
+        || message.starts_with("delivery uncertain for operation")
 }
 
 async fn expect_request_eventually_ok(harness: &TestHarness, request_id: &str, deadline: Duration) {

@@ -78,23 +78,34 @@ pub(crate) enum RtcSendError {
     MessageTooLarge,
 }
 
-/// One RTC send result with the delivery fact observed by the controller.
-/// `DataChunkDeliveryUncertain` is the only current outcome that may have
-/// entered the channel; all other errors are proven pre-send failures.
+/// One RTC send result with the delivery fact and adapter-level pre-send proof
+/// observed by the controller. `DataChunkDeliveryUncertain` is the only
+/// current outcome that may have entered the channel; all other errors are
+/// proven pre-send failures.
 #[derive(Debug)]
 pub(crate) struct RtcSendAttempt {
     pub(crate) result: Result<(), RtcSendError>,
     pub(crate) progress: DeliveryProgress,
+    pub(crate) proven_pre_send: bool,
 }
 
 impl RtcSendAttempt {
     pub(crate) fn from_result(result: Result<(), RtcSendError>) -> Self {
-        let progress = match &result {
-            Ok(()) => DeliveryProgress::SubmittedLocally,
-            Err(RtcSendError::DataChunkDeliveryUncertain) => DeliveryProgress::Unknown,
-            Err(_) => DeliveryProgress::NotAttempted,
+        let (progress, proven_pre_send) = match &result {
+            Ok(()) => (DeliveryProgress::SubmittedLocally, false),
+            Err(RtcSendError::DataChunkDeliveryUncertain) => (DeliveryProgress::Unknown, false),
+            Err(
+                RtcSendError::ConnectionNotReady
+                | RtcSendError::DataChannelClosed
+                | RtcSendError::DataChannelBufferFull
+                | RtcSendError::MessageTooLarge,
+            ) => (DeliveryProgress::NotAttempted, true),
         };
-        Self { result, progress }
+        Self {
+            result,
+            progress,
+            proven_pre_send,
+        }
     }
 }
 
@@ -139,6 +150,11 @@ mod tests {
             RtcSendAttempt::from_result(Err(RtcSendError::DataChunkDeliveryUncertain)).progress,
             DeliveryProgress::Unknown
         );
+        assert!(RtcSendAttempt::from_result(Err(RtcSendError::ConnectionNotReady)).proven_pre_send);
+        assert!(
+            !RtcSendAttempt::from_result(Err(RtcSendError::DataChunkDeliveryUncertain))
+                .proven_pre_send
+        );
     }
 
     #[test]
@@ -165,6 +181,10 @@ mod tests {
                         attempt.progress,
                         DeliveryProgress::NotAttempted,
                         "{error:?} must remain a proven pre-send failure"
+                    );
+                    assert!(
+                        attempt.proven_pre_send,
+                        "{error:?} must carry adapter-level pre-send proof"
                     );
                     DeliveryProgress::NotAttempted
                 }

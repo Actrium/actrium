@@ -119,6 +119,11 @@ pub(crate) struct RtcPeerState {
     /// Generation of a pending (hard-recovery) session (Stage 5; declared for
     /// the one-active-generation invariant).
     pub(crate) pending_generation: Option<u64>,
+    /// A retired physical generation that an Answerer may still name on a
+    /// recovery wake while waiting for the Offerer to create a replacement.
+    /// This is a signaling identity only; it is never considered live by
+    /// `is_live_generation` and cannot receive RTC events or data-plane work.
+    pub(crate) parked_signaling_generation: Option<u64>,
     /// Current ICE generation within the active PC generation.
     pub(crate) ice_generation: u64,
 
@@ -329,6 +334,7 @@ impl RtcPeerState {
             building_generation: None,
             active_generation: None,
             pending_generation: None,
+            parked_signaling_generation: None,
             ice_generation: 0,
             pc_connected: false,
             rpc_reliable_open: false,
@@ -448,6 +454,7 @@ impl RtcPeerState {
         self.initial_connection_inflight = true;
         self.ever_connected = false;
         self.unavailable_reason = None;
+        self.parked_signaling_generation = None;
     }
 
     /// Whether the current attempt has converged to terminal unavailable

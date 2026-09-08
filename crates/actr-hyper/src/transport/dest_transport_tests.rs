@@ -34,7 +34,11 @@ impl DataLane for FakeLane {
             DeliveryProgress::SubmittedLocally
         };
         let result = self.send(data).await;
-        SendAttemptResult { result, progress }
+        SendAttemptResult {
+            result,
+            progress,
+            proven_pre_send: self.send_closed,
+        }
     }
 
     fn lane_type(&self) -> &'static str {
@@ -439,7 +443,11 @@ impl DataLane for RekeyRecoveryLane {
             DeliveryProgress::SubmittedLocally
         };
         let result = self.send(data).await;
-        SendAttemptResult { result, progress }
+        SendAttemptResult {
+            result,
+            progress,
+            proven_pre_send: first,
+        }
     }
 
     fn lane_type(&self) -> &'static str {
@@ -597,6 +605,7 @@ impl DataLane for MisclassifiedSecureLane {
             // Intentionally model an adapter that failed to classify the
             // secure gate before the write.
             progress: DeliveryProgress::Unknown,
+            proven_pre_send: false,
         }
     }
 
@@ -679,10 +688,9 @@ impl DataLane for ClosedLikePreSendLane {
 
     async fn send_with_progress(&self, _data: bytes::Bytes) -> SendAttemptResult {
         self.send_count.fetch_add(1, Ordering::Relaxed);
-        SendAttemptResult::failed(
-            NetworkError::DataChannelClosed("proven pre-send closure".into()),
-            DeliveryProgress::NotAttempted,
-        )
+        SendAttemptResult::failed_pre_send(NetworkError::DataChannelClosed(
+            "proven pre-send closure".into(),
+        ))
     }
 
     fn lane_type(&self) -> &'static str {

@@ -776,7 +776,9 @@ async fn expect_request_ok(
             }
             Ok(Ok(Err(err))) => {
                 let msg = err.to_string();
-                let delivery_uncertain = msg.to_ascii_lowercase().contains("delivery uncertain");
+                // Anchored to the exact variant Display prefix, not a bare
+                // substring.
+                let delivery_uncertain = msg.starts_with("delivery uncertain for operation");
                 assert!(
                     msg.contains("connection not ready")
                         || (msg.contains("Request timeout") || msg.contains("timed out"))
@@ -903,7 +905,7 @@ fn is_expected_bounded_send_error(message: &str) -> bool {
 
 fn is_expected_inflight_send_error(message: &str) -> bool {
     is_expected_bounded_send_error(message)
-        || message.to_ascii_lowercase().contains("delivery uncertain")
+        || message.starts_with("delivery uncertain for operation")
 }
 
 async fn send_data_chunk_bounded(

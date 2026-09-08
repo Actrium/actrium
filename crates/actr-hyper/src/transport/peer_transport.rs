@@ -241,6 +241,7 @@ pub(crate) struct DestTransportRef {
 pub(crate) struct PeerSendAttempt<T> {
     pub(crate) result: NetworkResult<T>,
     pub(crate) progress: DeliveryProgress,
+    pub(crate) proven_pre_send: bool,
 }
 
 impl DestTransportRef {
@@ -297,6 +298,7 @@ pub struct PeerTransport {
     /// destination did not exist when they parked) subscribe to this so a
     /// fallback that becomes ready wakes them instead of parking until the
     /// operation deadline.
+    dest_state_epoch: watch::Sender<u64>,
 
     #[allow(unused)]
     /// todo: Set of peers currently being closed (to reject new connection attempts) ,closed requests will be cleaned up in event listener
@@ -341,6 +343,7 @@ impl PeerTransport {
             local_id,
             transports: Arc::new(RwLock::new(HashMap::new())),
             conn_factory,
+            dest_state_epoch: watch::channel(0).0,
             closing_peers: Arc::new(RwLock::new(HashSet::new())),
             transports_revision: watch::channel(0).0,
             #[cfg(test)]
@@ -348,6 +351,21 @@ impl PeerTransport {
             #[cfg(test)]
             final_commit_barrier: OnceLock::new(),
         }
+    }
+
+    /// Subscribe to destination materialization transitions. A Connected
+    /// `DestTransport` bumps this watch; flight insertion and cancellation or
+    /// removal bump `watch_transports_revision()` instead. Callers waiting for
+    /// a destination to become usable must subscribe to both watches and
+    /// re-run their lookup after either one changes.
+    pub(crate) fn watch_dest_state(&self) -> watch::Receiver<u64> {
+        self.dest_state_epoch.subscribe()
+    }
+
+    /// Announce that `dest` has become `Connected`.
+    fn announce_dest_connected(&self) {
+        self.dest_state_epoch
+            .send_modify(|generation| *generation += 1);
     }
 
     #[cfg(test)]
@@ -652,6 +670,7 @@ impl PeerTransport {
                     transports.insert(dest.clone(), DestState::Connected(Arc::clone(&transport)));
                     self.bump_transports_revision();
                     drop(transports);
+                    self.announce_dest_connected();
                     self.spawn_ready_monitor(dest.clone(), Arc::clone(&transport));
                     transport_guard.disarm();
                     creator_guard.disarm();
@@ -724,6 +743,7 @@ impl PeerTransport {
                 return PeerSendAttempt {
                     result: Err(error),
                     progress: DeliveryProgress::NotAttempted,
+                    proven_pre_send: true,
                 };
             }
         };
@@ -740,6 +760,7 @@ impl PeerTransport {
             .send_with_progress(payload_type, data, progress_sink)
             .await;
         let progress = attempt.progress;
+        let proven_pre_send = attempt.proven_pre_send;
         match attempt.result {
             Ok(wire_identity) => {
                 let sent = DestTransportRef::new(&transport, wire_identity);
@@ -749,11 +770,13 @@ impl PeerTransport {
                 PeerSendAttempt {
                     result: Ok(sent),
                     progress,
+                    proven_pre_send: false,
                 }
             }
             Err(error) => PeerSendAttempt {
                 result: Err(error),
                 progress,
+                proven_pre_send,
             },
         }
     }
@@ -794,12 +817,14 @@ impl PeerTransport {
                 return PeerSendAttempt {
                     result: Ok(None),
                     progress: DeliveryProgress::NotAttempted,
+                    proven_pre_send: false,
                 };
             }
             Err(error) => {
                 return PeerSendAttempt {
                     result: Err(error),
                     progress: DeliveryProgress::NotAttempted,
+                    proven_pre_send: true,
                 };
             }
         };
@@ -814,6 +839,7 @@ impl PeerTransport {
             .send_with_progress(payload_type, data, progress_sink)
             .await;
         let progress = attempt.progress;
+        let proven_pre_send = attempt.proven_pre_send;
         match attempt.result {
             Ok(wire_identity) => {
                 let sent = DestTransportRef::new(&transport, wire_identity);
@@ -823,11 +849,13 @@ impl PeerTransport {
                 PeerSendAttempt {
                     result: Ok(Some(sent)),
                     progress,
+                    proven_pre_send: false,
                 }
             }
             Err(error) => PeerSendAttempt {
                 result: Err(error),
                 progress,
+                proven_pre_send,
             },
         }
     }
@@ -954,6 +982,7 @@ impl PeerTransport {
                 transports.insert(dest.clone(), DestState::Connected(Arc::clone(&transport)));
                 self.bump_transports_revision();
                 drop(transports);
+                self.announce_dest_connected();
                 self.spawn_ready_monitor(dest.clone(), Arc::clone(&transport));
                 transport_guard.disarm();
                 creator_guard.disarm();
