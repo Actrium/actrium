@@ -10,6 +10,7 @@ async fn websocket_without_a_sink_is_proven_not_attempted() {
         .send_with_progress(Bytes::from_static(b"payload"))
         .await;
     assert_eq!(attempt.progress, DeliveryProgress::NotAttempted);
+    assert!(attempt.proven_pre_send);
     assert!(matches!(
         attempt.result,
         Err(NetworkError::WebSocketClosed(_))
@@ -43,6 +44,7 @@ struct DefaultProgressLane {
 #[derive(Debug, Clone, Copy)]
 enum DefaultProgressMode {
     ClosedLike,
+    ChannelClosed,
     SecureNotReady,
     Generic,
     Ok,
@@ -55,6 +57,9 @@ impl DataLane for DefaultProgressLane {
             DefaultProgressMode::ClosedLike => Err(NetworkError::DataChannelClosed(
                 "closed before write".into(),
             )),
+            DefaultProgressMode::ChannelClosed => {
+                Err(NetworkError::ChannelClosed("channel closed".into()))
+            }
             DefaultProgressMode::SecureNotReady => Err(NetworkError::SecureChannelNotReady(
                 "secure gate not ready before write".into(),
             )),
@@ -83,6 +88,10 @@ async fn default_send_with_progress_classifies_by_error_shape() {
     for (mode, expected) in [
         (DefaultProgressMode::ClosedLike, DeliveryProgress::Unknown),
         (
+            DefaultProgressMode::ChannelClosed,
+            DeliveryProgress::Unknown,
+        ),
+        (
             DefaultProgressMode::SecureNotReady,
             DeliveryProgress::NotAttempted,
         ),
@@ -99,6 +108,11 @@ async fn default_send_with_progress_classifies_by_error_shape() {
         assert_eq!(
             attempt.progress, expected,
             "{mode:?} must classify as {expected:?} under the default contract"
+        );
+        assert_eq!(
+            attempt.proven_pre_send,
+            matches!(mode, DefaultProgressMode::SecureNotReady),
+            "{mode:?} must carry proof only for structural pre-send failures"
         );
     }
 

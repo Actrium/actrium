@@ -9,11 +9,13 @@ on:
     paths:
       - "crates/loran-server/admin/web/**"
       - ".github/workflows/ci-admin-ui.yml"
+      - ".github/workflows/_loran-release.yml"
   pull_request:
     branches: [main]
     paths:
       - "crates/loran-server/admin/web/**"
       - ".github/workflows/ci-admin-ui.yml"
+      - ".github/workflows/_loran-release.yml"
 
 permissions:
   contents: read
@@ -46,8 +48,10 @@ jobs:
 
       # --ignore-workspace is required: admin/web is not a member of the root
       # pnpm workspace. Without it pnpm resolves the workspace root and installs
-      # all workspace projects (running unrelated lifecycle hooks that need
-      # Bun) while leaving this directory without node_modules.
+      # all 6 workspace projects (running unrelated lifecycle hooks that need
+      # Bun) while leaving this directory without node_modules, so the build
+      # cannot find vite/tsc. Keep in sync with the Build Admin UI step in
+      # _loran-release.yml; changes there also trigger this workflow.
       - name: Install dependencies
         run: pnpm --ignore-workspace install --frozen-lockfile
 

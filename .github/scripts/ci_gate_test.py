@@ -696,7 +696,14 @@ def test_swift_e2e_delegates_recovery_to_framework() -> None:
     )
 
     assert "func sendEcho(_ input: String)" in service
-    assert "sendEchoWhenReady" not in service
+    # The removed retry helper must not be CALLED. A regex tolerates
+    # whitespace/comments between the identifier and its argument list, so
+    # formatting or line wrapping cannot produce a false pass/fail.
+    import re
+
+    assert not re.search(r"sendEchoWhenReady\s*\(", service), (
+        "application-side readiness retry leaked"
+    )
     assert "Call owns route readiness and transport retry" in content_view
     assert "ACTR_E2E_RETRY:ConnectionNotReady" not in service
 

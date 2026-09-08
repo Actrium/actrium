@@ -1427,6 +1427,22 @@ impl TestHarness {
         self.peer(to).rtc.wait_sendable(&source, timeout).await;
     }
 
+    /// Wait until the production signaling handler has completed the
+    /// actor-registration phase for this peer. The WebSocket client reports
+    /// connected after the handshake, while the server registers the
+    /// `actor_id -> client_id` index inside its upgrade task. A Ping/Pong is
+    /// processed only after that registration code, so it provides an
+    /// event-driven readiness barrier for pair tests.
+    pub async fn wait_for_signaling_registration(&self, serial: u64, timeout: Duration) {
+        self.peer(serial)
+            .signaling_client
+            .probe_alive(timeout)
+            .await
+            .unwrap_or_else(|error| {
+                panic!("peer {serial} signaling registration did not become ready: {error}")
+            });
+    }
+
     pub fn simulate_disconnect(&self) {
         let vnet = self.vnet.as_ref().expect("with_vnet harness required");
         vnet.block_network();
