@@ -487,7 +487,6 @@ async fn answerer_parked_open_lane_rejoins_without_manual_reconnect() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "active regression tracked by Actrium/actrium#208; enabled in the CG-001 fix PR"]
 async fn answerer_failed_session_recovers_through_offerer_without_manual_reconnect() {
     // Regression for request identity reset while an Answerer cannot regain
     // its revoked anchor. The synthetic Failed fact tests the recovery state

@@ -4723,6 +4723,78 @@ fn answerer_does_not_reemit_request_after_applying_restart_offer() {
     assert!(has_create_answer(&answer_effects, generation));
 }
 
+/// A restart Offer can complete its SDP exchange while a failed Answerer still
+/// has no usable RpcReliable readiness anchor. The next deadline must continue
+/// the existing request identity instead of parking through
+/// `clear_negotiation_for_recovery`, which would reset the attempt to one.
+#[test]
+fn answerer_failed_restart_offer_retries_same_request_identity() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_sendable_with_ufrag(&mut state, "remote-1");
+
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkUnavailable,
+        )),
+    );
+    let start = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkAvailable,
+        )),
+    );
+    let request_id = start
+        .iter()
+        .find_map(|effect| match effect {
+            RtcPeerEffect::SendSignaling {
+                message:
+                    SignalingMessage::IceRestartRequest {
+                        request_id,
+                        attempt: 1,
+                    },
+                ..
+            } => Some(request_id.clone()),
+            _ => None,
+        })
+        .expect("initial Answerer recovery request");
+    let epoch = state.recovery_epoch;
+
+    // Model the post-Offer/Answer state observed by CG-001: SDP/ICE
+    // negotiation completed, but the physical anchor was revoked by Failed.
+    state.phase = RtcPeerPhase::TransportReady;
+    state.recovery_negotiated = true;
+    state.recovery_attempt_started = true;
+    state.rpc_reliable_open = false;
+    state.awaiting_offer = false;
+    assert_eq!(state.active_generation, Some(generation));
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::RecoveryDeadlineElapsed {
+            recovery_epoch: epoch,
+        },
+    );
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        RtcPeerEffect::SendSignaling {
+            message: SignalingMessage::IceRestartRequest {
+                request_id: actual,
+                attempt: 2,
+            },
+            ..
+        } if actual == &request_id
+    )));
+    assert!(!has_build_session(&effects, generation + 1));
+    assert!(!state.awaiting_offer);
+    assert!(!state.recovery_negotiated);
+    assert_eq!(
+        state.local_restart_request_id.as_deref(),
+        Some(request_id.as_str())
+    );
+    assert_eq!(state.local_restart_request_attempt, 2);
+}
+
 /// A normal (non-restart-tagged) offer with fresh ICE credentials comes from
 /// a replacement physical PeerConnection. The established answerer must retire
 /// its old generation and build a fresh Session instead of applying that SDP to
