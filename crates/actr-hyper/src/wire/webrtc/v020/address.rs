@@ -345,3 +345,94 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod resolver_tests {
+    use super::*;
+
+    /// Provider with a mutable set, optionally erroring on empty like the
+    /// production providers do.
+    struct MutableStubProvider {
+        addresses: RwLock<Vec<IpAddr>>,
+        error_when_empty: bool,
+        change_tx: watch::Sender<LocalAddressSnapshot>,
+    }
+
+    impl MutableStubProvider {
+        fn new(addresses: Vec<IpAddr>, error_when_empty: bool) -> Self {
+            let (change_tx, _) = watch::channel(LocalAddressSnapshot::new(addresses.clone()));
+            Self {
+                addresses: RwLock::new(addresses),
+                error_when_empty,
+                change_tx,
+            }
+        }
+
+        fn set(&self, addresses: Vec<IpAddr>) {
+            *self.addresses.write().expect("stub lock poisoned") = addresses;
+        }
+    }
+
+    #[async_trait]
+    impl LocalAddressProvider for MutableStubProvider {
+        async fn current_addresses(&self) -> Result<Vec<IpAddr>, LocalAddressError> {
+            self.current_addresses_sync()
+        }
+
+        fn current_addresses_sync(&self) -> Result<Vec<IpAddr>, LocalAddressError> {
+            let addresses = self.addresses.read().expect("stub lock poisoned").clone();
+            if addresses.is_empty() && self.error_when_empty {
+                Err(LocalAddressError::NoUsableAddress)
+            } else {
+                Ok(addresses)
+            }
+        }
+
+        fn subscribe_changes(&self) -> watch::Receiver<LocalAddressSnapshot> {
+            self.change_tx.subscribe()
+        }
+    }
+
+    #[test]
+    fn resolver_propagates_sync_errors() {
+        let resolver =
+            LocalAddressResolver::new(Arc::new(MutableStubProvider::new(Vec::new(), true)));
+        let error = resolver
+            .to_socket_addrs()
+            .expect_err("a sync snapshot error must fail the resolve");
+        assert!(error.to_string().contains("no usable local interface"));
+    }
+
+    #[test]
+    fn resolver_fails_loudly_on_empty_ok_snapshot() {
+        // A provider violating the contract with Ok(empty) must still not
+        // hand the driver an empty bind plan.
+        let resolver =
+            LocalAddressResolver::new(Arc::new(MutableStubProvider::new(Vec::new(), false)));
+        let error = resolver
+            .to_socket_addrs()
+            .expect_err("an empty provider set must fail the resolve loudly");
+        assert!(error.to_string().contains("no bindable addresses"));
+    }
+
+    #[test]
+    fn resolver_fails_loudly_when_provider_empties_after_build() {
+        let provider = Arc::new(MutableStubProvider::new(
+            vec![IpAddr::V4(Ipv4Addr::LOCALHOST)],
+            true,
+        ));
+        let resolver = LocalAddressResolver::new(provider.clone());
+        assert_eq!(
+            resolver.to_socket_addrs().expect("initial resolve").count(),
+            1
+        );
+
+        // The runtime case that matters: the provider goes empty after the
+        // initial build; the restart-rebind resolve must fail loudly rather
+        // than let the driver idle on zero sockets.
+        provider.set(Vec::new());
+        resolver
+            .to_socket_addrs()
+            .expect_err("a provider that went empty must fail the rebind resolve");
+    }
+}
