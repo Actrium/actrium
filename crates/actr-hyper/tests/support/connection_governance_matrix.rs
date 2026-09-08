@@ -287,7 +287,6 @@ async fn answerer_natural_recovery_budget_retires_transport_without_business_tra
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "active regression tracked by Actrium/actrium#209; enabled in the CG-002 fix PR"]
 async fn answerer_without_active_session_rejects_restart_before_new_connection() {
     use actr_hyper::test_support::{LinkDirection, SignalingFaultRule};
     let mut pair = MobileRtcPairHarness::new(52_901, 52_902).await;

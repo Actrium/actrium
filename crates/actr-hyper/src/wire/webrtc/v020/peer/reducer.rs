@@ -1505,6 +1505,33 @@ fn reduce_command(
                 return;
             }
             if state.role == Role::Answerer
+                && state.active_generation.is_none()
+                && state.pending_generation.is_none()
+                && state.building_generation.is_none()
+            {
+                // A restart offer is scoped to an existing physical Session.
+                // A logical Controller may survive cleanup while that Session
+                // is already gone; do not reinterpret the restart SDP as a
+                // first ordinary Offer. Reply on the signaling path using the
+                // retired generation identity when available so the response
+                // remains fenced by this Controller's lifecycle.
+                if let Some(exchange_id) = exchange_id {
+                    let generation = state
+                        .parked_signaling_generation
+                        .unwrap_or_else(|| state.next_pc_generation.saturating_sub(1));
+                    effects.push(RtcPeerEffect::SendSignaling {
+                        generation,
+                        message: SignalingMessage::IceRestartRejected {
+                            exchange_id,
+                            reason: actr_protocol::ice_restart_rejected::Reason::NoActiveSession
+                                as i32,
+                        },
+                    });
+                }
+                state.stale_events = state.stale_events.saturating_add(1);
+                return;
+            }
+            if state.role == Role::Answerer
                 && state.active_generation.is_some()
                 && state.building_generation.is_none()
             {
