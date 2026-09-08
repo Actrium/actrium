@@ -4919,8 +4919,13 @@ fn answerer_rejects_restart_offer_when_controller_has_no_active_session() {
             exchange_id: Some(exchange_id.clone()),
         }),
     );
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
+    assert_eq!(
+        effects.len(),
+        1,
+        "a rejected restart must emit exactly one effect"
+    );
+    assert!(matches!(
+        &effects[0],
         RtcPeerEffect::SendSignaling {
             generation: actual_generation,
             message: SignalingMessage::IceRestartRejected {
@@ -4930,8 +4935,14 @@ fn answerer_rejects_restart_offer_when_controller_has_no_active_session() {
         } if *actual_generation == generation
             && actual_exchange == &exchange_id
             && *reason == actr_protocol::ice_restart_rejected::Reason::NoActiveSession as i32
-    )));
-    assert!(!has_build_session(&effects, generation + 1));
+    ));
+    assert!(
+        effects
+            .iter()
+            .all(|effect| !matches!(effect, RtcPeerEffect::BuildSession { .. })),
+        "a rejected restart must not build an ordinary replacement session"
+    );
+    assert_eq!(state.stale_events, 1);
     assert_eq!(state.active_generation, None);
 }
 
@@ -4947,8 +4958,13 @@ fn undetermined_controller_rejects_restart_offer_without_session() {
         }),
     );
 
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
+    assert_eq!(
+        effects.len(),
+        1,
+        "a rejected restart must emit exactly one effect"
+    );
+    assert!(matches!(
+        &effects[0],
         RtcPeerEffect::SendSignaling {
             generation: 0,
             message: SignalingMessage::IceRestartRejected {
@@ -4957,8 +4973,31 @@ fn undetermined_controller_rejects_restart_offer_without_session() {
             },
         } if actual_exchange == &exchange_id
             && *reason == actr_protocol::ice_restart_rejected::Reason::NoActiveSession as i32
-    )));
-    assert!(!has_build_session(&effects, 1));
+    ));
+    assert!(
+        effects
+            .iter()
+            .all(|effect| !matches!(effect, RtcPeerEffect::BuildSession { .. })),
+        "an undetermined controller must not build an ordinary replacement session"
+    );
+    assert_eq!(state.stale_events, 1);
+    assert_eq!(state.role, Role::Undetermined);
+    assert_eq!(state.active_generation, None);
+}
+
+#[test]
+fn undetermined_controller_drops_legacy_restart_offer_without_session() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let stale_before = state.stale_events;
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOffer(Box::new(
+            sdp_with_ufrag(RTCSdpType::Offer, "remote-legacy"),
+        ))),
+    );
+
+    assert!(effects.is_empty());
+    assert_eq!(state.stale_events, stale_before + 1);
     assert_eq!(state.role, Role::Undetermined);
     assert_eq!(state.active_generation, None);
 }
