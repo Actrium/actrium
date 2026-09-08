@@ -212,6 +212,11 @@ impl PeerConnectionFactory {
                 "local address provider returned no bindable addresses".to_string(),
             ));
         }
+        // The driver resolves every bind through the resolver below, so this
+        // snapshot is only the fault seam's build-time record of the provider
+        // read above; the runtime-boundary observation
+        // (`bound_socket_addresses`) is the authoritative evidence of what
+        // actually got bound.
         let udp_addrs: Vec<SocketAddr> = bind_ips
             .into_iter()
             .map(|ip| SocketAddr::new(ip, 0))

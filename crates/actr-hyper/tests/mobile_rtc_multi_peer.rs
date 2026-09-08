@@ -427,12 +427,29 @@ async fn mp01_one_link_fault_does_not_change_or_block_other_peer_connections() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn mp02_a_address_change_soft_recovers_each_link_without_cross_peer_state() {
+    let Some(changed_address) = bindable_non_loopback_ipv4() else {
+        eprintln!("mp02: skipping — no bindable non-loopback IPv4 interface on this host");
+        return;
+    };
     let topology = MultiPeerTopology::new().await;
     let initial = topology.generations().await;
     let initial_ice = topology.ice_generations().await;
+    let a_id = topology.peer_id(A);
+    let initial_a_bound: HashMap<u64, usize> = REMOTES
+        .iter()
+        .map(|&remote| {
+            let bound = topology
+                .harness
+                .rtc_faults
+                .handle(&a_id, &topology.peer_id(remote), initial[&(A, remote)])
+                .expect("A active generation fault handle")
+                .bound_socket_addresses();
+            (remote, bound.len())
+        })
+        .collect();
     topology
         .harness
-        .set_local_addresses(A, vec![bindable_non_loopback_ipv4()]);
+        .set_local_addresses(A, vec![changed_address]);
 
     for remote in REMOTES {
         topology
@@ -442,6 +459,14 @@ async fn mp02_a_address_change_soft_recovers_each_link_without_cross_peer_state(
             .wait_ice_generation(&topology.peer_id(remote), initial_ice[&(A, remote)], WAIT)
             .await
             .unwrap_or_else(|| panic!("A-{remote} must advance its ICE generation"));
+        topology
+            .harness
+            .rtc_faults
+            .handle(&a_id, &topology.peer_id(remote), initial[&(A, remote)])
+            .expect("A active generation fault handle")
+            .wait_for_bound_address(initial_a_bound[&remote], changed_address, WAIT)
+            .await
+            .unwrap_or_else(|| panic!("A-{remote} ICE restart must bind the changed address"));
         topology
             .harness
             .peer(A)
@@ -487,12 +512,29 @@ async fn mp02_a_address_change_soft_recovers_each_link_without_cross_peer_state(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn mp03_one_node_event_soft_recovers_three_controllers_independently_within_one_deadline() {
+    let Some(changed_address) = bindable_non_loopback_ipv4() else {
+        eprintln!("mp03: skipping — no bindable non-loopback IPv4 interface on this host");
+        return;
+    };
     let topology = MultiPeerTopology::new().await;
     let initial = topology.generations().await;
     let initial_ice = topology.ice_generations().await;
+    let a_id = topology.peer_id(A);
+    let initial_a_bound: HashMap<u64, usize> = REMOTES
+        .iter()
+        .map(|&remote| {
+            let bound = topology
+                .harness
+                .rtc_faults
+                .handle(&a_id, &topology.peer_id(remote), initial[&(A, remote)])
+                .expect("A active generation fault handle")
+                .bound_socket_addresses();
+            (remote, bound.len())
+        })
+        .collect();
     topology
         .harness
-        .set_local_addresses(A, vec![bindable_non_loopback_ipv4()]);
+        .set_local_addresses(A, vec![changed_address]);
     tokio::time::timeout(WAIT, async {
         for remote in REMOTES {
             topology
@@ -502,6 +544,14 @@ async fn mp03_one_node_event_soft_recovers_three_controllers_independently_withi
                 .wait_ice_generation(&topology.peer_id(remote), initial_ice[&(A, remote)], WAIT)
                 .await
                 .expect("A controller must advance its ICE generation");
+            topology
+                .harness
+                .rtc_faults
+                .handle(&a_id, &topology.peer_id(remote), initial[&(A, remote)])
+                .expect("A active generation fault handle")
+                .wait_for_bound_address(initial_a_bound[&remote], changed_address, WAIT)
+                .await
+                .expect("A controller's ICE restart must bind the changed address");
             topology
                 .harness
                 .peer(A)

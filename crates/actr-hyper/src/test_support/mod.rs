@@ -57,7 +57,13 @@ pub fn install_test_crypto_provider() {
 /// Return a currently assigned, bindable IPv4 address that is distinct from
 /// loopback. Address-change integration tests use it as the replacement
 /// interface so the Runtime seam can observe the actual soft-rebind socket.
-pub fn bindable_non_loopback_ipv4() -> IpAddr {
+/// Pick a currently bindable non-loopback IPv4 interface address, or `None`
+/// on hosts without one (loopback-only CI runners) so tests can skip.
+///
+/// The bind probe is only a pre-filter: the interface can still disappear
+/// before the driver binds, so the loop-based runtime observation
+/// (`wait_rtc_bound_address`) is the evidence — this probe never is.
+pub fn bindable_non_loopback_ipv4() -> Option<IpAddr> {
     if_addrs::get_if_addrs()
         .expect("test requires local interface enumeration")
         .into_iter()
@@ -77,7 +83,6 @@ pub fn bindable_non_loopback_ipv4() -> IpAddr {
                 .ok()
                 .map(|_| IpAddr::V4(address))
         })
-        .unwrap_or_else(|| panic!("test requires a bindable non-loopback IPv4 address"))
 }
 
 /// Create a credential state backed by the supplied test credential.

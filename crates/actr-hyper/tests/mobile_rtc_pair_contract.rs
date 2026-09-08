@@ -359,10 +359,13 @@ async fn p04_a_only_offline_online_with_real_link_loss_soft_recovers_both_ends()
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p05_a_address_provider_change_soft_recovers_after_transient_path_loss_without_mirroring_platform_fact_to_b()
  {
+    let Some(changed_address) = bindable_non_loopback_ipv4() else {
+        eprintln!("p05: skipping — no bindable non-loopback IPv4 interface on this host");
+        return;
+    };
     let mut pair = MobileRtcPairHarness::new(51_062, 51_061).await;
     pair.establish(ConnectionInitiator::A).await;
     let initial = pair.wait_pair_ready(WAIT).await;
-    let changed_address = bindable_non_loopback_ipv4();
     let initial_a_bound = pair.rtc_bound_addresses(PairEndpoint::A).await;
     let initial_b_bound = pair.rtc_bound_addresses(PairEndpoint::B).await;
     let initial_a_ice_generation = pair
@@ -410,6 +413,7 @@ async fn p05_a_address_provider_change_soft_recovers_after_transient_path_loss_w
         .await
         .expect("A must attempt same-generation ICE recovery first");
     assert!(a_ice_generation > initial_a_ice_generation);
+    pair.heal_rtc_faults().await;
     let a_rebound_address = pair
         .wait_rtc_bound_address(
             PairEndpoint::A,
@@ -421,7 +425,6 @@ async fn p05_a_address_provider_change_soft_recovers_after_transient_path_loss_w
     let a_rebound_address =
         a_rebound_address.expect("A ICE restart must bind a socket on the changed address");
     assert_eq!(a_rebound_address.ip(), changed_address);
-    pair.heal_rtc_faults().await;
     let b_ice_generation = pair
         .harness()
         .peer(pair.serial(PairEndpoint::B))
@@ -452,10 +455,13 @@ async fn p05_a_address_provider_change_soft_recovers_after_transient_path_loss_w
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p06_available_to_available_address_change_soft_recovers_without_offline_callback() {
+    let Some(changed_address) = bindable_non_loopback_ipv4() else {
+        eprintln!("p06: skipping — no bindable non-loopback IPv4 interface on this host");
+        return;
+    };
     let mut pair = MobileRtcPairHarness::new(51_064, 51_063).await;
     pair.establish(ConnectionInitiator::A).await;
     let initial = pair.wait_pair_ready(WAIT).await;
-    let changed_address = bindable_non_loopback_ipv4();
     let initial_a_bound = pair.rtc_bound_addresses(PairEndpoint::A).await;
     let initial_b_bound = pair.rtc_bound_addresses(PairEndpoint::B).await;
     let initial_a_ice_generation = pair

@@ -18,7 +18,7 @@
 use std::{
     io,
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
-    sync::Arc,
+    sync::{Arc, RwLock},
 };
 
 use async_trait::async_trait;
@@ -65,8 +65,11 @@ pub(crate) trait LocalAddressProvider: Send + Sync {
     async fn current_addresses(&self) -> Result<Vec<IpAddr>, LocalAddressError>;
 
     /// Synchronous snapshot used by webrtc-rs when it re-resolves
-    /// `ToSocketAddrs` during an ICE-restart rebind. Implementations must read
-    /// the same source as [`Self::current_addresses`], without awaiting.
+    /// `ToSocketAddrs` during an ICE-restart rebind. The rebind resolves
+    /// inside the driver's sync bind step, which must never wait on OS
+    /// interface APIs: implementations serve the latest snapshot produced by
+    /// [`Self::current_addresses`] (or a platform push) from local state
+    /// instead of re-querying the interface table here.
     fn current_addresses_sync(&self) -> Result<Vec<IpAddr>, LocalAddressError>;
 
     /// Subscribe to address changes. The receiver immediately exposes the latest
@@ -97,6 +100,15 @@ impl ToSocketAddrs for LocalAddressResolver {
             .provider
             .current_addresses_sync()
             .map_err(|error| io::Error::other(error.to_string()))?;
+        if addresses.is_empty() {
+            // An empty resolve must fail loudly: at startup it surfaces as a
+            // build error; at an ICE-restart rebind it fails the driver's
+            // rebind, and the recovery path escalates to a checked Hard
+            // rebuild instead of idling on a silently dead transport.
+            return Err(io::Error::other(
+                "local address provider returned no bindable addresses",
+            ));
+        }
         Ok(addresses
             .into_iter()
             .map(|address| SocketAddr::new(address, 0))
@@ -120,6 +132,12 @@ pub(crate) struct DesktopLocalAddressProvider {
     /// Optional explicit override (used by tests to pin deterministic addresses).
     /// When empty, addresses are auto-detected as described above.
     override_addresses: Vec<IpAddr>,
+    /// Latest set produced by a successful `current_addresses()` call.
+    /// `current_addresses_sync` serves this cache so the driver's sync rebind
+    /// path never queries OS interface APIs; the address monitor's poll
+    /// refreshes the cache before it publishes `LocalAddressChanged`, so a
+    /// monitor-triggered restart rebind resolves the same fresh set.
+    current: RwLock<Vec<IpAddr>>,
     change_tx: watch::Sender<LocalAddressSnapshot>,
 }
 
@@ -143,9 +161,10 @@ impl DesktopLocalAddressProvider {
             },
             revision: 0,
         };
-        let (change_tx, _) = watch::channel(initial);
+        let (change_tx, _) = watch::channel(initial.clone());
         Self {
             override_addresses,
+            current: RwLock::new(initial.addresses),
             change_tx,
         }
     }
@@ -176,17 +195,23 @@ impl DesktopLocalAddressProvider {
 #[async_trait]
 impl LocalAddressProvider for DesktopLocalAddressProvider {
     async fn current_addresses(&self) -> Result<Vec<IpAddr>, LocalAddressError> {
-        if !self.override_addresses.is_empty() {
-            return Ok(self.override_addresses.clone());
-        }
-        Self::detect()
+        let addresses = if !self.override_addresses.is_empty() {
+            self.override_addresses.clone()
+        } else {
+            Self::detect()?
+        };
+        // Refresh only on success: a failed enumeration keeps the last good
+        // set available to the sync rebind path.
+        *self.current.write().expect("address cache lock poisoned") = addresses.clone();
+        Ok(addresses)
     }
 
     fn current_addresses_sync(&self) -> Result<Vec<IpAddr>, LocalAddressError> {
-        if !self.override_addresses.is_empty() {
-            return Ok(self.override_addresses.clone());
-        }
-        Self::detect()
+        Ok(self
+            .current
+            .read()
+            .expect("address cache lock poisoned")
+            .clone())
     }
 
     fn subscribe_changes(&self) -> watch::Receiver<LocalAddressSnapshot> {

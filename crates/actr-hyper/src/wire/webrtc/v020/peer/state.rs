@@ -148,6 +148,13 @@ pub(crate) struct RtcPeerState {
     /// the same restart repeatedly; this latch is cleared only on convergence
     /// or a terminal attempt failure.
     pub(crate) recovery_attempt_started: bool,
+    /// Offerer-side count of deadline-driven Soft retries within the current
+    /// recovery cycle. Retries that keep failing to converge prove the
+    /// restart is not repairing the transport (e.g. the restart rebind
+    /// silently kept a dead interface), so the ladder escalates to a checked
+    /// Hard rebuild at the threshold instead of spinning until the cycle
+    /// budget terminates the attempt.
+    pub(crate) soft_recovery_attempts: u32,
     pub(crate) ever_connected: bool,
 
     // Close/lifecycle.
@@ -344,6 +351,7 @@ impl RtcPeerState {
             recovery_epoch: 0,
             recovery_cycle: 0,
             recovery_attempt_started: false,
+            soft_recovery_attempts: 0,
             ever_connected: false,
             close_requested: false,
             terminal_close_done: false,

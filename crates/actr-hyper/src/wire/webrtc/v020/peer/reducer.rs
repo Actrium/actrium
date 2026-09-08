@@ -26,6 +26,15 @@ use webrtc::peer_connection::{
 /// times; stats never gate sendability or recovery.
 pub(super) const MAX_STATS_SAMPLE_ATTEMPTS: u8 = 3;
 
+/// Deadline-driven Soft retries an Offerer may launch within one recovery
+/// cycle before persistent failure to converge is treated as proof the
+/// restart cannot repair the transport (e.g. the restart rebind silently
+/// kept a dead interface, or the driver died rebinding). The same policy the
+/// answerer-side retransmission threshold (`ANSWERER_HARD_ESCALATION_ATTEMPT`)
+/// applies: escalate to a checked Hard rebuild rather than spin until the
+/// cycle budget terminates the attempt.
+pub(super) const SOFT_HARD_ESCALATION_ATTEMPT: u32 = 4;
+
 use crate::wire::webrtc::v020::events::{PeerDriverEvent, PeerStateTick};
 use crate::wire::webrtc::v020::status::{LaneKind, RtcUnavailableReason};
 
@@ -870,9 +879,24 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                     // 60-second budget expires. Once it must replace that
                     // Session, it parks and waits for the Offerer instead of
                     // creating a local Hard-Recovery generation.
+                    //
+                    // The soft ladder is bounded: retries that keep failing
+                    // to converge prove the restart is not repairing the
+                    // transport (e.g. the restart rebind silently kept a dead
+                    // interface, or the driver died rebinding and every
+                    // further restart_ice is a no-op). Escalate to a checked
+                    // Hard rebuild — the build-time address validation and
+                    // fresh gather are exactly the repair a wedged generation
+                    // needs — rather than spin until the cycle budget
+                    // terminates the attempt.
                     state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
                     state.recovery_attempt_started = false;
-                    start_soft_recovery(state, &mut effects);
+                    state.soft_recovery_attempts = state.soft_recovery_attempts.saturating_add(1);
+                    if state.soft_recovery_attempts >= SOFT_HARD_ESCALATION_ATTEMPT {
+                        start_hard_recovery(state, &mut effects);
+                    } else {
+                        start_soft_recovery(state, &mut effects);
+                    }
                 } else if state.role == Role::Answerer && state.awaiting_offer {
                     // The Answerer has no local SDP with which to create a
                     // replacement. Its recovery is deliberately parked until
@@ -1847,8 +1871,12 @@ fn restart_initial_as_offerer(state: &mut RtcPeerState, effects: &mut Vec<RtcPee
 ///   Recovery instead.
 /// * `LocalAddressChanged`: start Soft Recovery on the existing
 ///   PeerConnection. v0.20.3 rebinds ICE transports and refreshes local
-///   candidates when the ICE generation restarts; a failed restart still
-///   escalates through the normal Hard Recovery failure paths.
+///   candidates when the ICE generation restarts. The soft ladder is
+///   bounded: a restart whose rebind fails (the driver dies, so the next
+///   `restart_ice` errors) escalates to Hard Recovery immediately, and
+///   retries that keep failing to converge escalate at
+///   `SOFT_HARD_ESCALATION_ATTEMPT`. A build still holding the pre-change
+///   address snapshot is superseded by a fresh build instead.
 /// * `AppBackground`: if the peer is `Sendable`, enter `Recovering`
 ///   (sendable=false) because the platform may suspend the process and the
 ///   connection must be re-established on foreground. No restart is issued
@@ -1892,6 +1920,7 @@ fn defer_recovery_until_gate(state: &mut RtcPeerState, hard: bool) {
         );
         state.recovery_cycle = state.recovery_cycle.wrapping_add(1);
         state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
+        state.soft_recovery_attempts = 0;
     }
     clear_negotiation_for_recovery(state);
     state.recovery_inflight = true;
@@ -1961,12 +1990,22 @@ fn reduce_network_event(
                 } else {
                     defer_recovery_until_gate(state, false);
                 }
-            } else if state.phase == RtcPeerPhase::Sendable
-                || state.recovery_inflight
-                || state.building_generation.is_some()
-            {
+            } else if state.building_generation.is_some() {
+                // The build in flight is consuming the pre-change address
+                // snapshot, and a same-generation ICE restart cannot repair a
+                // Session that has not been born yet. Supersede the build so
+                // the replacement resolves the provider's current set.
+                state.recovery_attempt_started = false;
+                if recovery_gate_open(state) {
+                    start_hard_recovery(state, effects);
+                } else {
+                    defer_recovery_until_gate(state, true);
+                }
+            } else if state.phase == RtcPeerPhase::Sendable || state.recovery_inflight {
                 defer_recovery_until_gate(state, false);
             }
+            // With no generation at all the edge needs no recording: the
+            // eventual initial build resolves the provider's current set.
         }
         RtcNetworkEvent::AppBackground => {
             state.app_foreground = false;
@@ -2099,6 +2138,7 @@ fn start_soft_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
         state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
         state.local_restart_request_id = None;
         state.local_restart_request_attempt = 0;
+        state.soft_recovery_attempts = 0;
     }
     state.recovery_attempt_started = true;
     state.ice_generation += 1;
@@ -2378,6 +2418,9 @@ fn start_hard_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
     let new_generation = state.alloc_generation();
     state.building_generation = Some(new_generation);
     state.ice_generation = 0; // new PC, fresh ICE generation epoch
+    // Leaving the soft ladder: a later soft round after this rebuild starts
+    // a fresh attempt count.
+    state.soft_recovery_attempts = 0;
     state.phase = RtcPeerPhase::Building;
     state.unavailable_reason = None;
 
@@ -2636,6 +2679,7 @@ fn reduce_state_tick(
             state.recovery_attempt_started = false;
             state.local_restart_request_id = None;
             state.local_restart_request_attempt = 0;
+            state.soft_recovery_attempts = 0;
             state.parked_signaling_generation = None;
             state.address_changed = false; // recovery succeeded
         }

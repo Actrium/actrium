@@ -6,8 +6,8 @@
 //! late failure), the close barrier, and O1 mailbox-overflow hard recovery.
 
 use super::reducer::{
-    EffectCompletion, LaneEvent, RtcPeerCommand, RtcPeerEffect, RtcPeerInput, SignalingMessage,
-    reduce,
+    EffectCompletion, LaneEvent, RtcPeerCommand, RtcPeerEffect, RtcPeerInput,
+    SOFT_HARD_ESCALATION_ATTEMPT, SignalingMessage, reduce,
 };
 use super::state::{PendingRtcOperationKind, Role, RtcPeerPhase, RtcPeerState};
 use crate::wire::webrtc::v020::events::{PeerDriverEvent, PeerStateTick};
@@ -2605,6 +2605,40 @@ fn local_address_changed_triggers_soft_recovery() {
 }
 
 #[test]
+fn local_address_changed_supersedes_build_holding_pre_change_snapshot() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+
+    // Initial connect: the role assignment starts a build, which resolves the
+    // provider's address set at build time.
+    reduce(&mut state, RtcPeerInput::Command(RtcPeerCommand::Connect));
+    let effects = reduce(&mut state, role_assignment(true));
+    assert!(has_build_session(&effects, 1));
+    assert_eq!(state.building_generation, Some(1));
+    assert_eq!(state.active_generation, None);
+
+    // The local address set changes while the build is in flight: the build
+    // is consuming the pre-change snapshot, and a same-generation ICE restart
+    // cannot repair a Session that has not been born yet — supersede it with
+    // a build that resolves the provider's current set.
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::LocalAddressChanged,
+        )),
+    );
+    assert!(
+        has_build_session(&effects, 2),
+        "the superseding build resolves the provider's current address set"
+    );
+    assert!(
+        !has_restart_ice(&effects, 1),
+        "no soft restart: there is no live generation to restart"
+    );
+    assert_eq!(state.building_generation, Some(2));
+    assert_eq!(state.active_generation, None);
+}
+
+#[test]
 fn restart_ice_completion_offerer_creates_restart_offer() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let generation = drive_offerer_to_sendable(&mut state);
@@ -2933,6 +2967,68 @@ fn exact_soft_recovery_deadline_retries_same_pc_without_duplicate_fact_extension
         state.recovery_epoch > epoch,
         "the next soft attempt owns a new epoch"
     );
+}
+
+#[test]
+fn offerer_soft_retry_ladder_escalates_to_hard_after_threshold() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+
+    // A temporary loss starts Soft Recovery on the live generation.
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkUnavailable,
+        )),
+    );
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkAvailable,
+        )),
+    );
+    assert_eq!(state.phase, RtcPeerPhase::Recovering);
+    assert_eq!(state.soft_recovery_attempts, 0);
+
+    // Below the threshold every deadline-driven retry stays on the soft
+    // ladder: same PC, no replacement build.
+    for attempt in 1..SOFT_HARD_ESCALATION_ATTEMPT {
+        let recovery_epoch = state.recovery_epoch;
+        let effects = reduce(
+            &mut state,
+            RtcPeerInput::RecoveryDeadlineElapsed { recovery_epoch },
+        );
+        assert!(
+            has_restart_ice(&effects, generation),
+            "attempt {attempt} stays on the soft ladder"
+        );
+        assert!(!has_build_session(&effects, generation + 1));
+        assert_eq!(state.soft_recovery_attempts, attempt);
+        assert_eq!(state.active_generation, Some(generation));
+    }
+
+    // The threshold-th failure to converge proves the restart is not
+    // repairing the transport; escalate to a checked Hard rebuild.
+    let recovery_epoch = state.recovery_epoch;
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::RecoveryDeadlineElapsed { recovery_epoch },
+    );
+    assert!(
+        !has_restart_ice(&effects, generation),
+        "the threshold-th failure leaves the soft ladder"
+    );
+    assert!(
+        has_build_session(&effects, generation + 1),
+        "persistent soft failure escalates to a checked Hard rebuild"
+    );
+    assert_eq!(state.building_generation, Some(generation + 1));
+    assert_eq!(
+        state.active_generation,
+        Some(generation),
+        "make-before-break keeps the old session alive"
+    );
+    assert_eq!(state.soft_recovery_attempts, 0);
 }
 
 #[test]
