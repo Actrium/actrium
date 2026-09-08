@@ -713,8 +713,13 @@ impl RtcPeerController {
                             // consuming the retained tail of the broadcast
                             // queue. The next retained NetworkAvailable /
                             // AppForeground fact can then start Soft Recovery;
-                            // a retained address-change / force-reconnect fact
-                            // still escalates to Hard Recovery. Silently
+                            // a retained LocalAddressChanged fact starts Soft
+                            // Recovery on a live generation (a build still
+                            // holding the pre-change snapshot is superseded,
+                            // and an edge coalesced mid-flight re-publishes
+                            // one restart on convergence); an explicit
+                            // force-reconnect fact still escalates to Hard
+                            // Recovery. Silently
                             // skipping here can leave a Sendable controller on
                             // a stale transport when the evicted edge was
                             // NetworkUnavailable.

@@ -562,6 +562,43 @@ impl TestRtcControl {
         self.state(peer).await.map(|state| state.pc_generation)
     }
 
+    pub async fn ice_generation(&self, peer: &ActrId) -> Option<u64> {
+        self.manager
+            .get_snapshot(peer)
+            .await
+            .map(|state| state.ice_generation)
+    }
+
+    pub async fn wait_ice_generation(
+        &self,
+        peer: &ActrId,
+        exclusive_minimum: u64,
+        timeout: Duration,
+    ) -> Option<u64> {
+        crate::timer::timeout(crate::timer::ids::WEBRTC_PEER_SENDABLE, timeout, async {
+            let mut peer_set = self.manager.subscribe_peers();
+            loop {
+                if let Some(mut rx) = self.manager.subscribe(peer).await {
+                    loop {
+                        let state = rx.borrow().clone();
+                        if state.ice_generation > exclusive_minimum {
+                            return state.ice_generation;
+                        }
+                        if rx.changed().await.is_err() {
+                            break;
+                        }
+                    }
+                }
+                peer_set
+                    .changed()
+                    .await
+                    .expect("manager peer registry watch closed");
+            }
+        })
+        .await
+        .ok()
+    }
+
     pub async fn is_sendable(&self, peer: &ActrId) -> bool {
         self.state(peer).await.is_some_and(|state| state.sendable)
     }
