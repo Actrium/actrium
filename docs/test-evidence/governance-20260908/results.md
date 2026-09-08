@@ -1,3 +1,5 @@
+<!-- language-allow-file: Chinese execution evidence -->
+
 # 连接治理补测结果索引
 
 ## 最新 main 批次

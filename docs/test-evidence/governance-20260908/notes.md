@@ -1,3 +1,5 @@
+<!-- language-allow-file: Chinese execution evidence -->
+
 # 2026-09-08 补测执行记录
 
 基线 `00138ee5`。新增生产 Node fixture 使用真实 Actrix Signaling 与生产 Node、Mailbox、Workload、response_send，仅注册凭证由 test fixture 提供。AIS 续期测试尚不能由这个 fixture 证明。
