@@ -2158,6 +2158,10 @@ mod tests;
 extern crate self as actr_hyper;
 
 #[cfg(all(not(target_arch = "wasm32"), test, feature = "test-utils"))]
+#[path = "../tests/support/governance.rs"]
+mod connection_governance_support;
+
+#[cfg(all(not(target_arch = "wasm32"), test, feature = "test-utils"))]
 #[path = "../tests/support/connection_governance_matrix.rs"]
 mod connection_governance_matrix;
 

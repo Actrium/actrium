@@ -1,6 +1,5 @@
 //! Production Node/Context/Mailbox/Workload/response path, real Actrix signaling.
-#[path = "governance.rs"]
-mod support;
+use crate::connection_governance_support as support;
 
 use actr_framework::Bytes;
 use actr_hyper::test_support::TestRtcRole;

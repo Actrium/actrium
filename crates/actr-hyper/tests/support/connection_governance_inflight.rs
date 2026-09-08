@@ -1,6 +1,5 @@
 //! Fault at a verified first-fragment boundary through real production Contexts.
-#[path = "governance.rs"]
-mod support;
+use crate::connection_governance_support as support;
 use actr_framework::Bytes;
 use actr_hyper::test_support::{
     TestRtcRole, WebRtcFragmentSendHook, install_webrtc_fragment_send_hook_for_test,
