@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
@@ -297,8 +297,58 @@ pub(crate) struct LanePlumbing {
     pub(crate) peer_id: ActrId,
     pub(crate) lane_tx: mpsc::Sender<LaneEvent>,
     pub(crate) inbound: Arc<InboundRouter>,
+    /// Only the Controller's exact sendable generation may dispatch inbound
+    /// business traffic. A retired/recovering generation may still deliver a
+    /// late DataChannel event while its asynchronous close is draining.
+    pub(crate) inbound_generation: Arc<InboundGenerationGate>,
     pub(crate) reassembly_limits: crate::transport::ReassemblyLimits,
 }
+
+/// Generation-scoped admission for the inbound data plane.
+///
+/// `None` means that no generation is currently allowed to dispatch business
+/// messages. A concrete generation is admitted only after its Controller has
+/// published `sendable=true`. The watch channel lets a pump briefly wait for a
+/// transient recovery to converge while still fencing a retired generation
+/// from a later replacement.
+#[derive(Clone)]
+pub(crate) struct InboundGenerationGate {
+    admitted: watch::Sender<Option<u64>>,
+}
+
+impl InboundGenerationGate {
+    pub(crate) fn new() -> Self {
+        let (admitted, _) = watch::channel(None);
+        Self { admitted }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_generation(generation: u64) -> Self {
+        let gate = Self::new();
+        gate.set(Some(generation));
+        gate
+    }
+
+    pub(crate) fn set(&self, generation: Option<u64>) {
+        self.admitted.send_if_modified(|current| {
+            if *current == generation {
+                false
+            } else {
+                *current = generation;
+                true
+            }
+        });
+    }
+
+    fn subscribe(&self) -> watch::Receiver<Option<u64>> {
+        self.admitted.subscribe()
+    }
+}
+
+/// Do not hold a lane pump on a stale inbound message indefinitely. A healthy
+/// same-generation recovery can still release it; a failed/retired generation
+/// is discarded once the replacement generation wins the gate.
+const INBOUND_ADMISSION_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Poll a data channel as its single `poll()` consumer (RFC §"DataChannel
 /// model": "There MUST be only one `DataChannel::poll()` consumer per
@@ -327,6 +377,7 @@ pub(crate) async fn lane_pump(
         peer_id,
         lane_tx,
         inbound,
+        inbound_generation,
         reassembly_limits,
     } = plumbing;
     use crate::transport::{ReassemblyBuffer, decode_fragment_header};
@@ -343,6 +394,7 @@ pub(crate) async fn lane_pump(
             generation,
         ),
     );
+    let mut admission = inbound_generation.subscribe();
 
     while let Some(event) = channel.poll().await {
         match event {
@@ -362,6 +414,38 @@ pub(crate) async fn lane_pump(
                 }
             }
             E::OnMessage(message) => {
+                let admitted = crate::timer::timeout(
+                    crate::timer::ids::WEBRTC_PEER_SENDABLE,
+                    INBOUND_ADMISSION_WAIT,
+                    async {
+                        loop {
+                            let current = *admission.borrow();
+                            match current {
+                                Some(admitted) if admitted == generation => return true,
+                                Some(_) => return false,
+                                None => {
+                                    if admission.changed().await.is_err() {
+                                        return false;
+                                    }
+                                }
+                            }
+                        }
+                    },
+                )
+                .await
+                .unwrap_or(false);
+                if !admitted {
+                    inbound.record_drop();
+                    let admitted_generation = *admission.borrow();
+                    tracing::debug!(
+                        peer = %peer_id.to_string_repr(),
+                        generation,
+                        ?admitted_generation,
+                        ?lane,
+                        "v0.20 inbound message rejected: generation is not sendable"
+                    );
+                    continue;
+                }
                 // Strip the 8-byte fragment header (wire-compatible with 0.14)
                 // and reassemble multi-fragment messages before dispatch.
                 let raw = message.data.freeze();

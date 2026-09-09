@@ -225,11 +225,12 @@ pub(crate) struct RtcConnectionManager {
     /// Explicit teardown edge consumed by transport/request owners. The PC
     /// generation makes delayed cleanup safe against a replacement transport.
     peer_closing: tokio::sync::broadcast::Sender<(ActrId, u64)>,
-    /// Controller-owned hard-recovery edge. Already-sent requests must not
-    /// retain their full RPC deadline after the generation that carried them
-    /// has been superseded by a replacement build. Soft recovery deliberately
-    /// emits no edge: committed reliable work keeps the v0.14 behavior and may
-    /// complete when the same Session becomes usable again.
+    /// Controller-owned generation-invalidation edge. Already-sent requests
+    /// must not retain their full RPC deadline after the generation that
+    /// carried them has been retired or superseded. Healthy same-generation
+    /// Soft Recovery deliberately emits no edge: committed reliable work keeps
+    /// the v0.14 behavior and may complete when that Session becomes usable
+    /// again.
     peer_generation_invalidated: tokio::sync::broadcast::Sender<(ActrId, u64)>,
     /// Every Controller-owned sendability edge. PeerGate uses the paired
     /// falling/rising events to bound response waits after a remote-side
@@ -420,9 +421,10 @@ impl RtcConnectionManager {
         self.peer_generation_invalidated.subscribe()
     }
 
-    /// Test-only seam for exercising pending-request cleanup when a hard
+    /// Test-only seam for exercising pending-request cleanup when Controller
     /// recovery invalidates a WebRTC generation. Production callers publish
-    /// the same event from the Controller after the replacement build starts.
+    /// the same event from the Controller when a generation is retired or
+    /// replaced.
     #[cfg(test)]
     pub(crate) fn publish_peer_generation_invalidated_for_test(
         &self,

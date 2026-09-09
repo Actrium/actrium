@@ -32,7 +32,9 @@ use crate::wire::webrtc::v020::status::LaneKind;
 use super::effects::{SessionFactory, SessionOps};
 use super::lane_handle::LaneHandle;
 use super::reducer::{EffectCompletion, LaneEvent, RtcPeerEffect};
-use super::session::{PeerConnectionSession, SessionResourceId, SessionResourceRegistry};
+use super::session::{
+    InboundGenerationGate, PeerConnectionSession, SessionResourceId, SessionResourceRegistry,
+};
 
 pub(crate) enum ResourceRegistration<T> {
     Registered(T),
@@ -399,6 +401,10 @@ pub(crate) struct WebRtcEffectRunner {
     factory: Arc<dyn SessionFactory>,
     event_mailbox: PeerEventMailbox,
     lane_tx: mpsc::Sender<LaneEvent>,
+    /// Shared admission fence for generation-scoped inbound data pumps. The
+    /// Controller stores the exact sendable generation here; retired or
+    /// recovering generations are rejected before reaching business code.
+    inbound_generation: Arc<InboundGenerationGate>,
     /// Node-level shared dependencies (inbound router,
     /// media registry).
     deps: super::controller::SharedNodeDeps,
@@ -411,6 +417,7 @@ impl WebRtcEffectRunner {
         event_mailbox: PeerEventMailbox,
         lane_tx: mpsc::Sender<LaneEvent>,
         deps: super::controller::SharedNodeDeps,
+        inbound_generation: Arc<InboundGenerationGate>,
     ) -> Self {
         Self {
             peer_id,
@@ -421,6 +428,7 @@ impl WebRtcEffectRunner {
             factory,
             event_mailbox,
             lane_tx,
+            inbound_generation,
             deps,
         }
     }
@@ -460,6 +468,7 @@ impl WebRtcEffectRunner {
                         peer_id: self.peer_id.clone(),
                         lane_tx: self.lane_tx.clone(),
                         inbound: self.deps.inbound.clone(),
+                        inbound_generation: self.inbound_generation.clone(),
                         reassembly_limits: crate::transport::ReassemblyLimits::from_buffer_config(
                             &self.deps.buffer_config,
                         ),
@@ -507,6 +516,7 @@ impl WebRtcEffectRunner {
                 peer_id: self.peer_id.clone(),
                 lane_tx: self.lane_tx.clone(),
                 inbound: self.deps.inbound.clone(),
+                inbound_generation: self.inbound_generation.clone(),
                 reassembly_limits: crate::transport::ReassemblyLimits::from_buffer_config(
                     &self.deps.buffer_config,
                 ),

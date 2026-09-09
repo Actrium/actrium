@@ -764,6 +764,7 @@ async fn lane_pump_routes_all_events_to_inbound() {
             peer_id: peer.clone(),
             lane_tx,
             inbound,
+            inbound_generation: Arc::new(super::session::InboundGenerationGate::with_generation(1)),
             reassembly_limits: crate::transport::ReassemblyLimits::default(),
         },
     ));
@@ -804,6 +805,78 @@ async fn lane_pump_routes_all_events_to_inbound() {
     assert_eq!(got[0].lane, LaneKind::RpcReliable);
     assert_eq!(got[0].payload.as_ref(), b"hello");
     assert_eq!(got[1].payload.as_ref(), &[0x01, 0x02]);
+}
+
+/// A late message from a recovering/retired generation must not reach the
+/// workload just because its DataChannel pump is still draining. The gate is
+/// set to a different generation to model an atomic replacement already being
+/// authoritative.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lane_pump_rejects_message_from_non_sendable_generation() {
+    use super::effects::test_support::scripted_data_channel;
+    use crate::wire::webrtc::v020::inbound::{InboundMessage, InboundRouter};
+    use std::sync::Mutex as StdMutex;
+    use webrtc::data_channel::{DataChannelEvent, RTCDataChannelMessage};
+
+    let peer = test_actor_id(1);
+    let received: std::sync::Arc<StdMutex<Vec<InboundMessage>>> =
+        std::sync::Arc::new(StdMutex::new(Vec::new()));
+    let received2 = received.clone();
+    let inbound = std::sync::Arc::new(InboundRouter::new(std::sync::Arc::new(
+        move |msg, _lease| {
+            received2.lock().unwrap().push(msg);
+        },
+    )));
+    let inbound_for_pump = inbound.clone();
+    let (lane_tx, mut lane_rx) = mpsc::channel(4);
+    let inbound_generation =
+        std::sync::Arc::new(super::session::InboundGenerationGate::with_generation(2));
+    let mut framed = Vec::new();
+    crate::transport::encode_fragment_header(&mut framed, 7, 0, 1);
+    framed.extend_from_slice(b"stale");
+    let channel = scripted_data_channel(
+        "RPC_RELIABLE",
+        vec![
+            DataChannelEvent::OnMessage(RTCDataChannelMessage {
+                is_string: false,
+                data: bytes::BytesMut::from(&framed[..]),
+            }),
+            DataChannelEvent::OnClose,
+        ],
+    );
+
+    let pump = tokio::spawn(super::session::lane_pump(
+        1,
+        LaneKind::RpcReliable,
+        channel,
+        super::session::LanePlumbing {
+            peer_id: peer,
+            lane_tx,
+            inbound: inbound_for_pump,
+            inbound_generation,
+            reassembly_limits: crate::transport::ReassemblyLimits::default(),
+        },
+    ));
+
+    assert!(matches!(
+        timeout(WAIT, lane_rx.recv())
+            .await
+            .expect("lane close event")
+            .expect("lane close event present"),
+        LaneEvent::Closed {
+            generation: 1,
+            lane: LaneKind::RpcReliable
+        }
+    ));
+    timeout(WAIT, pump)
+        .await
+        .expect("pump should exit on close")
+        .expect("pump panicked");
+    assert!(
+        received.lock().unwrap().is_empty(),
+        "stale generation message must not reach the workload"
+    );
+    assert_eq!(inbound.dropped_messages(), 1);
 }
 
 /// R7/item 11: `session.close()` explicitly calls each owned
@@ -848,6 +921,7 @@ async fn session_close_explicitly_closes_owned_channels_and_cancels_pumps() {
             peer_id: peer.clone(),
             lane_tx: lane_tx.clone(),
             inbound: inbound.clone(),
+            inbound_generation: Arc::new(super::session::InboundGenerationGate::with_generation(1)),
             reassembly_limits: crate::transport::ReassemblyLimits::default(),
         },
     );
@@ -858,6 +932,7 @@ async fn session_close_explicitly_closes_owned_channels_and_cancels_pumps() {
             peer_id: peer.clone(),
             lane_tx,
             inbound,
+            inbound_generation: Arc::new(super::session::InboundGenerationGate::with_generation(1)),
             reassembly_limits: crate::transport::ReassemblyLimits::default(),
         },
     );

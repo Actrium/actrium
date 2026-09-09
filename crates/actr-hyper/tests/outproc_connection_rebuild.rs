@@ -68,6 +68,12 @@ async fn test_connection_rebuild_after_failure() {
         harness.peer(100).rtc.fail_peer(&target).await.unwrap(),
         old_generation
     );
+    harness
+        .peer(100)
+        .rtc
+        .wait_state(&target, Duration::from_secs(5), |state| !state.sendable)
+        .await
+        .expect("failed callback must invalidate the old sendable snapshot");
     harness.peer(100).retry_failed().await;
     harness
         .wait_for_ice_restart_count(1, Duration::from_secs(20))
@@ -85,7 +91,7 @@ async fn test_connection_rebuild_after_failure() {
         .await;
     assert_eq!(
         recovered.pc_generation, old_generation,
-        "Failed without an address change uses same-generation soft recovery"
+        "an Offerer soft recovery should keep the existing PeerConnection generation"
     );
     rpc(&harness, "rebuild-probe").await;
     harness.shutdown().await;

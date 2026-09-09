@@ -4040,28 +4040,30 @@ fn answerer_local_address_change_starts_soft_recovery() {
 }
 
 #[test]
-fn answerer_physical_failure_waits_without_restart_or_rebuild() {
+fn answerer_physical_failure_retires_before_parking() {
     let mut state = RtcPeerState::new(test_actor_id(2));
     let generation = drive_answerer_to_negotiating(&mut state);
     drive_to_sendable(&mut state, generation);
 
     let effects = reduce(&mut state, failed_tick(generation));
 
+    assert!(has_close_session(&effects, generation));
     assert!(!has_restart_ice(&effects, generation));
-    assert!(!has_restart_request(&effects, 1));
+    assert!(has_restart_request(&effects, 1));
     assert!(!has_build_session(&effects, generation + 1));
     assert!(!has_role_negotiation(&effects));
     assert_eq!(state.phase, RtcPeerPhase::Recovering);
     assert!(state.recovery_inflight);
-    assert!(!state.recovery_attempt_started);
+    assert!(state.recovery_attempt_started);
     assert!(state.awaiting_offer);
-    assert_eq!(state.active_generation, Some(generation));
+    assert_eq!(state.active_generation, None);
+    assert_eq!(state.parked_signaling_generation, Some(generation));
 
     // A per-attempt deadline does not create a local replacement (no build),
-    // but it is no longer silent: it sends/retransmits the correlated
-    // restart request so a healthy offerer wakes toward hard recovery. The
-    // single recovery budget still performs the terminal cleanup if no Offer
-    // arrives.
+    // but it retransmits the correlated restart request so a healthy Offerer
+    // wakes toward hard recovery. The physical close was already scheduled by
+    // the Failed fact; the single recovery budget still performs terminal
+    // logical cleanup if no Offer arrives.
     let recovery_epoch = state.recovery_epoch;
     let deadline_effects = reduce(
         &mut state,
@@ -4088,7 +4090,11 @@ fn answerer_physical_failure_waits_without_restart_or_rebuild() {
         &mut state,
         RtcPeerInput::RecoveryBudgetElapsed { recovery_cycle },
     );
-    assert!(has_close_session(&budget_effects, generation));
+    assert!(
+        !budget_effects
+            .iter()
+            .any(|effect| matches!(effect, RtcPeerEffect::BuildSession { .. }))
+    );
     assert_eq!(state.phase, RtcPeerPhase::Idle);
     assert_eq!(
         state.unavailable_reason,
@@ -4887,6 +4893,39 @@ fn answerer_parked_restart_does_not_restore_closed_lane() {
     reduce(&mut state, connected_tick(generation));
     assert!(!state.sendable());
     assert!(!state.rpc_reliable_open);
+}
+
+#[test]
+fn answerer_failed_session_retires_generation_before_parking() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_sendable_with_ufrag(&mut state, "remote-1");
+
+    let effects = reduce(&mut state, failed_tick(generation));
+
+    assert!(has_close_session(&effects, generation));
+    assert_eq!(state.active_generation, None);
+    assert_eq!(state.parked_signaling_generation, Some(generation));
+    assert!(!state.pc_connected);
+    assert!(!state.rpc_reliable_open);
+    assert!(!state.sendable());
+    assert!(state.awaiting_offer);
+
+    let restart = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
+            desc: Box::new(sdp_with_ufrag(RTCSdpType::Offer, "remote-2")),
+            exchange_id: Some("v020-restart-1".to_string()),
+        }),
+    );
+    assert!(restart.iter().any(|effect| matches!(
+        effect,
+        RtcPeerEffect::SendSignaling {
+            message: SignalingMessage::IceRestartRejected { exchange_id, reason },
+            ..
+        } if exchange_id == "v020-restart-1"
+            && *reason == actr_protocol::ice_restart_rejected::Reason::NoActiveSession as i32
+    )));
+    assert!(!has_set_remote(&restart, generation));
 }
 
 /// The answerer's own soft recovery is request-only: no local RestartIce

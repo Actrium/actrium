@@ -627,8 +627,8 @@ impl PeerGate {
         });
     }
 
-    /// Release response waits when the Controller starts replacing the Session
-    /// that carried them. Unlike explicit close cleanup, this deliberately
+    /// Release response waits when the Controller retires or replaces the
+    /// Session that carried them. Unlike explicit close cleanup, this normally
     /// keeps the DestTransport: hard recovery replaces its generation in place
     /// and the generation-aware v0.20 lanes become usable after convergence.
     /// A request that has not reached a concrete lane yet must remain eligible
