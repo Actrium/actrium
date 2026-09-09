@@ -5066,6 +5066,168 @@ fn answerer_drops_same_ufrag_offer_without_session() {
     assert!(effects.is_empty());
 }
 
+#[test]
+fn answerer_rejects_restart_offer_when_controller_has_no_active_session() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_sendable_with_ufrag(&mut state, "remote-1");
+    reduce(&mut state, closed_tick(generation));
+    assert_eq!(state.active_generation, None);
+    assert_eq!(state.parked_signaling_generation, Some(generation));
+
+    let exchange_id = "restart-without-active-session".to_string();
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
+            desc: Box::new(sdp_with_ufrag(RTCSdpType::Offer, "remote-2")),
+            exchange_id: Some(exchange_id.clone()),
+        }),
+    );
+    assert_eq!(
+        effects.len(),
+        1,
+        "a rejected restart must emit exactly one effect"
+    );
+    assert!(matches!(
+        &effects[0],
+        RtcPeerEffect::SendSignaling {
+            generation: actual_generation,
+            message: SignalingMessage::IceRestartRejected {
+                exchange_id: actual_exchange,
+                reason,
+            },
+        } if *actual_generation == generation
+            && actual_exchange == &exchange_id
+            && *reason == actr_protocol::ice_restart_rejected::Reason::NoActiveSession as i32
+    ));
+    assert!(
+        effects
+            .iter()
+            .all(|effect| !matches!(effect, RtcPeerEffect::BuildSession { .. })),
+        "a rejected restart must not build an ordinary replacement session"
+    );
+    assert_eq!(state.stale_events, 1);
+    assert_eq!(state.active_generation, None);
+}
+
+#[test]
+fn offerer_without_session_ignores_correlated_restart_offer_without_rejection() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    state.role = Role::Offerer;
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
+            desc: Box::new(sdp_with_ufrag(RTCSdpType::Offer, "remote-1")),
+            exchange_id: Some("glare-restart".to_string()),
+        }),
+    );
+    assert!(
+        !effects.iter().any(|effect| matches!(
+            effect,
+            RtcPeerEffect::SendSignaling {
+                message: SignalingMessage::IceRestartRejected { .. },
+                ..
+            }
+        )),
+        "an Offerer stays on the stale-offer path; no rejection"
+    );
+    assert!(
+        !has_build_session(&effects, 1),
+        "the stale competing offer builds nothing"
+    );
+    assert_eq!(state.stale_events, 1);
+}
+
+#[test]
+fn uncorrelated_restart_offer_without_session_falls_through_to_ordinary_offer() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_sendable_with_ufrag(&mut state, "remote-1");
+    reduce(&mut state, closed_tick(generation));
+    assert_eq!(state.active_generation, None);
+
+    // A legacy uncorrelated restart offer (a pre-correlation peer in a
+    // rolling upgrade) has no exchange id to fence a rejection with — and a
+    // peer that old may not understand IceRestartRejected at all — so it
+    // keeps the ordinary-offer fallthrough that builds the replacement.
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
+            desc: Box::new(sdp_with_ufrag(RTCSdpType::Offer, "remote-2")),
+            exchange_id: None,
+        }),
+    );
+    assert!(
+        !effects.iter().any(|effect| matches!(
+            effect,
+            RtcPeerEffect::SendSignaling {
+                message: SignalingMessage::IceRestartRejected { .. },
+                ..
+            }
+        )),
+        "an uncorrelated offer must not be rejected"
+    );
+    assert!(
+        has_build_session(&effects, generation + 1),
+        "the ordinary-offer fallthrough builds the replacement session"
+    );
+}
+
+#[test]
+fn undetermined_controller_rejects_restart_offer_without_session() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let exchange_id = "restart-after-budget-exhaustion".to_string();
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
+            desc: Box::new(sdp_with_ufrag(RTCSdpType::Offer, "remote-1")),
+            exchange_id: Some(exchange_id.clone()),
+        }),
+    );
+
+    assert_eq!(
+        effects.len(),
+        1,
+        "a rejected restart must emit exactly one effect"
+    );
+    assert!(matches!(
+        &effects[0],
+        RtcPeerEffect::SendSignaling {
+            generation: 0,
+            message: SignalingMessage::IceRestartRejected {
+                exchange_id: actual_exchange,
+                reason,
+            },
+        } if actual_exchange == &exchange_id
+            && *reason == actr_protocol::ice_restart_rejected::Reason::NoActiveSession as i32
+    ));
+    assert!(
+        effects
+            .iter()
+            .all(|effect| !matches!(effect, RtcPeerEffect::BuildSession { .. })),
+        "an undetermined controller must not build an ordinary replacement session"
+    );
+    assert_eq!(state.stale_events, 1);
+    assert_eq!(state.role, Role::Undetermined);
+    assert_eq!(state.active_generation, None);
+}
+
+#[test]
+fn undetermined_controller_drops_legacy_restart_offer_without_session() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let stale_before = state.stale_events;
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOffer(Box::new(
+            sdp_with_ufrag(RTCSdpType::Offer, "remote-legacy"),
+        ))),
+    );
+
+    assert!(effects.is_empty());
+    assert_eq!(state.stale_events, stale_before + 1);
+    assert_eq!(state.role, Role::Undetermined);
+    assert_eq!(state.active_generation, None);
+}
+
 /// Offerer-side `NegotiationNeeded` (local track add/remove mid-connection)
 /// drives a serialized re-offer.
 #[test]
