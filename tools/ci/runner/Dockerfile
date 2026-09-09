@@ -221,9 +221,9 @@ RUN set -eux; \
         c09f971ecaed9a2efc80fdcea7a00ef6b53c7fadc8c57d1f61b53a6aa66b668a; \
     install_binary wasm-component-ld \
         "https://github.com/bytecodealliance/wasm-component-ld/releases/download/v0.5.30/wasm-component-ld-v0.5.30-${ld_arch}.tar.gz" \
-        fb07d7022859c3892a924353991074a7c00870ba7abbfb69f22aaddc800f398; \
+        fb07d7022859c3892a9243539910747a9c00870ba7abbfb69f22aaddc800f398; \
     install_binary wasm-tools \
-        "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.253.0/wasm-tools-1.253.0-${tools_arch}.tar.gz" \
+        "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.258.0/wasm-tools-1.258.0-${tools_arch}.tar.gz" \
         b52d14eb74a4852cc249369bd4480c2b2fdd876145f41db51ff52269ded240ce; \
     install_binary sccache \
         "https://github.com/mozilla/sccache/releases/download/v0.10.0/sccache-v0.10.0-x86_64-unknown-linux-musl.tar.gz" \
