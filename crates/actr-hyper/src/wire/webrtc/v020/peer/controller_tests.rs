@@ -767,6 +767,7 @@ async fn lane_pump_routes_all_events_to_inbound() {
             inbound_generation: Arc::new(super::session::InboundGenerationGate::with_generation(1)),
             reassembly_limits: crate::transport::ReassemblyLimits::default(),
         },
+        tokio_util::sync::CancellationToken::new(),
     ));
 
     // The lane becomes Open, then Closed as the script plays out.
@@ -856,6 +857,7 @@ async fn lane_pump_rejects_message_from_non_sendable_generation() {
             inbound_generation,
             reassembly_limits: crate::transport::ReassemblyLimits::default(),
         },
+        tokio_util::sync::CancellationToken::new(),
     ));
 
     assert!(matches!(
@@ -877,6 +879,139 @@ async fn lane_pump_rejects_message_from_non_sendable_generation() {
         "stale generation message must not reach the workload"
     );
     assert_eq!(inbound.dropped_messages(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lane_pump_releases_message_when_same_generation_becomes_sendable() {
+    use super::effects::test_support::scripted_data_channel;
+    use crate::wire::webrtc::v020::inbound::{InboundMessage, InboundRouter};
+    use std::sync::Mutex as StdMutex;
+    use webrtc::data_channel::{DataChannelEvent, RTCDataChannelMessage};
+
+    let peer = test_actor_id(1);
+    let received: std::sync::Arc<StdMutex<Vec<InboundMessage>>> =
+        std::sync::Arc::new(StdMutex::new(Vec::new()));
+    let received2 = received.clone();
+    let inbound = std::sync::Arc::new(InboundRouter::new(std::sync::Arc::new(
+        move |msg, _lease| {
+            received2.lock().unwrap().push(msg);
+        },
+    )));
+    let gate = std::sync::Arc::new(super::session::InboundGenerationGate::new());
+    let (lane_tx, mut lane_rx) = mpsc::channel(4);
+    let mut framed = Vec::new();
+    crate::transport::encode_fragment_header(&mut framed, 8, 0, 1);
+    framed.extend_from_slice(b"recovering");
+    let channel = scripted_data_channel(
+        "RPC_RELIABLE",
+        vec![
+            DataChannelEvent::OnMessage(RTCDataChannelMessage {
+                is_string: false,
+                data: bytes::BytesMut::from(&framed[..]),
+            }),
+            DataChannelEvent::OnClose,
+        ],
+    );
+    let cancellation = tokio_util::sync::CancellationToken::new();
+
+    let pump = tokio::spawn(super::session::lane_pump(
+        1,
+        LaneKind::RpcReliable,
+        channel,
+        super::session::LanePlumbing {
+            peer_id: peer,
+            lane_tx,
+            inbound,
+            inbound_generation: gate.clone(),
+            reassembly_limits: crate::transport::ReassemblyLimits::default(),
+        },
+        cancellation,
+    ));
+
+    // Let the pump consume the message and enter the admission wait before
+    // publishing the matching sendable generation.
+    tokio::task::yield_now().await;
+    gate.set(Some(1));
+
+    assert!(matches!(
+        timeout(WAIT, lane_rx.recv())
+            .await
+            .expect("lane close event")
+            .expect("lane close event present"),
+        LaneEvent::Closed {
+            generation: 1,
+            lane: LaneKind::RpcReliable
+        }
+    ));
+    timeout(WAIT, pump)
+        .await
+        .expect("pump should exit on close")
+        .expect("pump panicked");
+    assert_eq!(received.lock().unwrap().len(), 1);
+    assert_eq!(received.lock().unwrap()[0].payload.as_ref(), b"recovering");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn lane_pump_admission_deadline_is_shared_across_stale_messages() {
+    use super::effects::test_support::scripted_data_channel;
+    use crate::wire::webrtc::v020::inbound::InboundRouter;
+    use webrtc::data_channel::{DataChannelEvent, RTCDataChannelMessage};
+
+    tokio::time::pause();
+    let peer = test_actor_id(1);
+    let inbound = std::sync::Arc::new(InboundRouter::discard());
+    let gate = std::sync::Arc::new(super::session::InboundGenerationGate::new());
+    let (lane_tx, mut lane_rx) = mpsc::channel(4);
+
+    fn stale_frame(msg_id: u32) -> RTCDataChannelMessage {
+        let mut framed = Vec::new();
+        crate::transport::encode_fragment_header(&mut framed, msg_id, 0, 1);
+        framed.extend_from_slice(b"stale");
+        RTCDataChannelMessage {
+            is_string: false,
+            data: bytes::BytesMut::from(&framed[..]),
+        }
+    }
+
+    let channel = scripted_data_channel(
+        "RPC_RELIABLE",
+        vec![
+            DataChannelEvent::OnMessage(stale_frame(9)),
+            DataChannelEvent::OnMessage(stale_frame(10)),
+            DataChannelEvent::OnClose,
+        ],
+    );
+    let pump = tokio::spawn(super::session::lane_pump(
+        1,
+        LaneKind::RpcReliable,
+        channel,
+        super::session::LanePlumbing {
+            peer_id: peer,
+            lane_tx,
+            inbound: inbound.clone(),
+            inbound_generation: gate,
+            reassembly_limits: crate::transport::ReassemblyLimits::default(),
+        },
+        tokio_util::sync::CancellationToken::new(),
+    ));
+
+    // The first stale message arms the one 10-second lane/generation window.
+    // After it expires, the second message must be rejected immediately so
+    // the queued close event is not held behind another 10-second wait.
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(10) + Duration::from_millis(1)).await;
+    for _ in 0..4 {
+        tokio::task::yield_now().await;
+    }
+    assert!(matches!(
+        lane_rx.try_recv(),
+        Ok(LaneEvent::Closed {
+            generation: 1,
+            lane: LaneKind::RpcReliable
+        })
+    ));
+    pump.await.expect("pump panicked");
+    assert_eq!(inbound.dropped_messages(), 2);
 }
 
 /// R7/item 11: `session.close()` explicitly calls each owned

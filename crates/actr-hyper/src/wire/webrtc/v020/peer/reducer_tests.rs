@@ -4105,6 +4105,82 @@ fn answerer_physical_failure_retires_before_parking() {
 }
 
 #[test]
+fn answerer_failure_mid_soft_recovery_preserves_request_and_rearms_deadline() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_sendable_with_ufrag(&mut state, "remote-1");
+
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkUnavailable,
+        )),
+    );
+    let start = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkAvailable,
+        )),
+    );
+    let request_id = start
+        .iter()
+        .find_map(|effect| match effect {
+            RtcPeerEffect::SendSignaling {
+                message:
+                    SignalingMessage::IceRestartRequest {
+                        request_id,
+                        attempt: 1,
+                    },
+                ..
+            } => Some(request_id.clone()),
+            _ => None,
+        })
+        .expect("soft recovery must emit the first Answerer wake");
+    let first_epoch = state.recovery_epoch;
+    let recovery_cycle = state.recovery_cycle;
+
+    let failure = reduce(&mut state, failed_tick(generation));
+    assert!(has_close_session(&failure, generation));
+    assert!(
+        !failure.iter().any(|effect| matches!(
+            effect,
+            RtcPeerEffect::SendSignaling {
+                message: SignalingMessage::IceRestartRequest { .. },
+                ..
+            }
+        )),
+        "an already-sent wake must not be duplicated by the failure fact"
+    );
+    assert_eq!(
+        state.local_restart_request_id.as_deref(),
+        Some(request_id.as_str())
+    );
+    assert_eq!(state.local_restart_request_attempt, 1);
+    assert_eq!(state.recovery_cycle, recovery_cycle);
+    assert!(state.recovery_epoch != first_epoch);
+    assert!(state.awaiting_offer);
+    assert_eq!(state.active_generation, None);
+    assert_eq!(state.parked_signaling_generation, Some(generation));
+
+    let retry_epoch = state.recovery_epoch;
+    let retry = reduce(
+        &mut state,
+        RtcPeerInput::RecoveryDeadlineElapsed {
+            recovery_epoch: retry_epoch,
+        },
+    );
+    assert!(retry.iter().any(|effect| matches!(
+        effect,
+        RtcPeerEffect::SendSignaling {
+            generation: actual_generation,
+            message: SignalingMessage::IceRestartRequest {
+                request_id: actual_id,
+                attempt: 2,
+            },
+        } if *actual_generation == generation && actual_id == &request_id
+    )));
+}
+
+#[test]
 fn closed_answerer_retains_retired_generation_for_offer_wake() {
     let mut state = RtcPeerState::new(test_actor_id(2));
     let generation = drive_answerer_to_negotiating(&mut state);

@@ -572,6 +572,43 @@ async fn answerer_failed_session_recovers_through_offerer_without_manual_reconne
         )
         .await
         .expect("failed Answerer must wake the Offerer");
+    let requests = pair
+        .signaling_trace()
+        .into_iter()
+        .filter(|event| {
+            event.from == answerer
+                && event.to == offerer
+                && event.class == SignalingMessageClass::IceRestartRequest
+                && event.ordinal > request_baseline
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        !requests.is_empty(),
+        "the recovery cycle must expose a request"
+    );
+    assert_eq!(
+        requests.first().and_then(|event| event.attempt),
+        Some(1),
+        "the first recovery wake must start at attempt 1"
+    );
+    let request_ids = requests
+        .iter()
+        .map(|event| event.exchange_id.clone())
+        .collect::<Vec<_>>();
+    assert!(
+        request_ids.windows(2).all(|ids| ids[0] == ids[1]),
+        "one recovery cycle must keep one request identity: {request_ids:?}"
+    );
+    let attempts = requests
+        .iter()
+        .filter_map(|event| event.attempt)
+        .collect::<Vec<_>>();
+    assert!(
+        attempts
+            .windows(2)
+            .all(|attempts| attempts[0] < attempts[1]),
+        "Answerer recovery attempts must increase monotonically: {attempts:?}"
+    );
     pair.harness()
         .signaling_faults
         .wait_for_hits_after(

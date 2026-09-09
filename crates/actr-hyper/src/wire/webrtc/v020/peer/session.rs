@@ -21,6 +21,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use webrtc::data_channel::DataChannel;
@@ -345,6 +346,137 @@ impl InboundGenerationGate {
     }
 }
 
+#[derive(Clone, Copy)]
+struct MessageAdmission {
+    admitted: bool,
+    first_seen: Instant,
+}
+
+/// Remembers the admission decision for fragmented messages so every
+/// fragment follows the decision made for the first observed fragment. The
+/// cache is bounded by the reassembly message budget and uses the same TTL as
+/// the fragment buffer, so rejected or abandoned messages cannot grow it
+/// without limit.
+struct InboundAdmissionCache {
+    entries: HashMap<u32, MessageAdmission>,
+    max_entries: usize,
+}
+
+impl InboundAdmissionCache {
+    fn new(max_entries: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            max_entries: max_entries.max(1),
+        }
+    }
+
+    fn get(&mut self, msg_id: u32) -> Option<bool> {
+        self.evict_stale();
+        self.entries.get(&msg_id).map(|entry| entry.admitted)
+    }
+
+    fn insert(&mut self, msg_id: u32, admitted: bool) {
+        self.evict_stale();
+        if !self.entries.contains_key(&msg_id) && self.entries.len() >= self.max_entries {
+            let oldest = self
+                .entries
+                .iter()
+                .min_by_key(|(_, entry)| entry.first_seen)
+                .map(|(msg_id, _)| *msg_id);
+            if let Some(oldest) = oldest {
+                self.entries.remove(&oldest);
+            }
+        }
+        self.entries.insert(
+            msg_id,
+            MessageAdmission {
+                admitted,
+                first_seen: Instant::now(),
+            },
+        );
+    }
+
+    fn remove(&mut self, msg_id: u32) {
+        self.entries.remove(&msg_id);
+    }
+
+    fn evict_stale(&mut self) {
+        let now = Instant::now();
+        self.entries.retain(|_, entry| {
+            now.duration_since(entry.first_seen) <= crate::transport::REASSEMBLY_TTL
+        });
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum InboundAdmission {
+    Admitted,
+    Rejected,
+    Closed,
+}
+
+/// Wait for the current generation to become sendable at most once for the
+/// lane. The deadline is shared by all messages handled while the gate is
+/// `None`, preventing a stale message burst from extending the pump stall by
+/// another full grace period for every frame. Session cancellation always
+/// interrupts the wait immediately.
+async fn await_inbound_admission(
+    generation: u64,
+    admission: &mut watch::Receiver<Option<u64>>,
+    cancellation: &CancellationToken,
+    deadline: &mut Option<Instant>,
+) -> InboundAdmission {
+    match *admission.borrow() {
+        Some(admitted) if admitted == generation => {
+            *deadline = None;
+            return InboundAdmission::Admitted;
+        }
+        Some(_) => {
+            *deadline = None;
+            return InboundAdmission::Rejected;
+        }
+        None => {}
+    }
+
+    let wait_deadline = *deadline.get_or_insert_with(|| Instant::now() + INBOUND_ADMISSION_WAIT);
+    let result = crate::timer::timeout_at(
+        crate::timer::ids::WEBRTC_PEER_INBOUND_ADMISSION,
+        wait_deadline,
+        async {
+            loop {
+                let current = *admission.borrow();
+                match current {
+                    Some(admitted) if admitted == generation => {
+                        return InboundAdmission::Admitted;
+                    }
+                    Some(_) => return InboundAdmission::Rejected,
+                    None => {
+                        tokio::select! {
+                            _ = cancellation.cancelled() => return InboundAdmission::Closed,
+                            changed = admission.changed() => {
+                                if changed.is_err() {
+                                    return InboundAdmission::Closed;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    )
+    .await;
+
+    match result {
+        Ok(admission_result) => {
+            if !matches!(admission_result, InboundAdmission::Closed) {
+                *deadline = None;
+            }
+            admission_result
+        }
+        Err(_) => InboundAdmission::Rejected,
+    }
+}
+
 /// Do not hold a lane pump on a stale inbound message indefinitely. A healthy
 /// same-generation recovery can still release it; a failed/retired generation
 /// is discarded once the replacement generation wins the gate.
@@ -372,6 +504,7 @@ pub(crate) async fn lane_pump(
     lane: LaneKind,
     channel: Arc<dyn DataChannel>,
     plumbing: LanePlumbing,
+    cancellation: CancellationToken,
 ) {
     let LanePlumbing {
         peer_id,
@@ -395,6 +528,8 @@ pub(crate) async fn lane_pump(
         ),
     );
     let mut admission = inbound_generation.subscribe();
+    let mut admission_deadline = None;
+    let mut message_admissions = InboundAdmissionCache::new(reassembly_limits.max_messages);
 
     while let Some(event) = channel.poll().await {
         match event {
@@ -414,43 +549,55 @@ pub(crate) async fn lane_pump(
                 }
             }
             E::OnMessage(message) => {
-                let admitted = crate::timer::timeout(
-                    crate::timer::ids::WEBRTC_PEER_SENDABLE,
-                    INBOUND_ADMISSION_WAIT,
-                    async {
-                        loop {
-                            let current = *admission.borrow();
-                            match current {
-                                Some(admitted) if admitted == generation => return true,
-                                Some(_) => return false,
-                                None => {
-                                    if admission.changed().await.is_err() {
-                                        return false;
-                                    }
-                                }
-                            }
-                        }
-                    },
-                )
-                .await
-                .unwrap_or(false);
-                if !admitted {
-                    inbound.record_drop();
-                    let admitted_generation = *admission.borrow();
-                    tracing::debug!(
-                        peer = %peer_id.to_string_repr(),
-                        generation,
-                        ?admitted_generation,
-                        ?lane,
-                        "v0.20 inbound message rejected: generation is not sendable"
-                    );
-                    continue;
-                }
                 // Strip the 8-byte fragment header (wire-compatible with 0.14)
                 // and reassemble multi-fragment messages before dispatch.
                 let raw = message.data.freeze();
-                match decode_fragment_header(raw) {
-                    Ok((msg_id, frag_index, total_frags, payload)) => {
+                let (msg_id, frag_index, total_frags, payload) = match decode_fragment_header(raw) {
+                    Ok(fragment) => fragment,
+                    Err(e) => {
+                        tracing::warn!(
+                            peer = %peer_id.to_string_repr(),
+                            generation,
+                            ?lane,
+                            error = %e,
+                            "v0.20 inbound: failed to decode fragment header, dropping message"
+                        );
+                        continue;
+                    }
+                };
+
+                let admitted = if total_frags == 1 {
+                    await_inbound_admission(
+                        generation,
+                        &mut admission,
+                        &cancellation,
+                        &mut admission_deadline,
+                    )
+                    .await
+                } else if let Some(admitted) = message_admissions.get(msg_id) {
+                    if admitted {
+                        InboundAdmission::Admitted
+                    } else {
+                        InboundAdmission::Rejected
+                    }
+                } else {
+                    let result = await_inbound_admission(
+                        generation,
+                        &mut admission,
+                        &cancellation,
+                        &mut admission_deadline,
+                    )
+                    .await;
+                    match result {
+                        InboundAdmission::Admitted => message_admissions.insert(msg_id, true),
+                        InboundAdmission::Rejected => message_admissions.insert(msg_id, false),
+                        InboundAdmission::Closed => {}
+                    }
+                    result
+                };
+
+                match admitted {
+                    InboundAdmission::Admitted => {
                         if total_frags == 1 {
                             if !inbound.route(InboundMessage {
                                 peer: peer_id.clone(),
@@ -468,6 +615,7 @@ pub(crate) async fn lane_pump(
                         } else {
                             match reassembly.try_insert(msg_id, frag_index, total_frags, payload) {
                                 Ok(Some(complete)) => {
+                                    message_admissions.remove(msg_id);
                                     tracing::debug!(
                                         peer = %peer_id.to_string_repr(),
                                         generation,
@@ -492,6 +640,7 @@ pub(crate) async fn lane_pump(
                                 }
                                 Ok(None) => {}
                                 Err(error) => {
+                                    message_admissions.remove(msg_id);
                                     inbound.record_drop();
                                     tracing::warn!(
                                         peer = %peer_id.to_string_repr(),
@@ -506,14 +655,22 @@ pub(crate) async fn lane_pump(
                         }
                         // else: fragment stored, waiting for the rest
                     }
-                    Err(e) => {
-                        tracing::warn!(
+                    InboundAdmission::Rejected => {
+                        inbound.record_drop();
+                        let admitted_generation = *admission.borrow();
+                        tracing::debug!(
                             peer = %peer_id.to_string_repr(),
                             generation,
+                            ?admitted_generation,
                             ?lane,
-                            error = %e,
-                            "v0.20 inbound: failed to decode fragment header, dropping message"
+                            msg_id,
+                            total_frags,
+                            frag_index,
+                            "v0.20 inbound message rejected: generation is not sendable"
                         );
+                    }
+                    InboundAdmission::Closed => {
+                        return;
                     }
                 }
             }
@@ -630,8 +787,13 @@ impl PeerConnectionSession {
     ) -> LaneHandle {
         let handle = LaneHandle::new(self.generation, lane, channel.clone(), self.cancellation());
         // Spawn the pump as a session-owned task (cancelled on close).
-        self.tasks
-            .spawn(lane_pump(self.generation, lane, channel.clone(), plumbing));
+        self.tasks.spawn(lane_pump(
+            self.generation,
+            lane,
+            channel.clone(),
+            plumbing,
+            self.cancellation(),
+        ));
         self.channels.insert(lane, channel);
         handle
     }
