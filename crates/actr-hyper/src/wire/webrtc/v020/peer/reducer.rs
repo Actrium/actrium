@@ -1392,25 +1392,26 @@ fn reduce_command(
             }
         }
         RtcPeerCommand::ApplyRoleAssignment { is_offerer } => {
-            if is_offerer
-                && state.initial_connection_inflight
+            let supersedes_inflight_attempt = is_offerer
                 && !state.close_requested
-                && (state.building_generation.is_some()
-                    || state.active_generation.is_some()
-                    || state.pending_generation.is_some())
-            {
+                && (state.recovery_inflight
+                    || (state.initial_connection_inflight
+                        && (state.building_generation.is_some()
+                            || state.active_generation.is_some()
+                            || state.pending_generation.is_some())));
+            if supersedes_inflight_attempt {
                 // Restore the pre-v0.20 Coordinator contract: a fresh role
-                // negotiation that assigns this side as Offerer supersedes any
-                // never-sendable initial PC immediately. This is especially
-                // important when the dialing side was Answerer and its build
-                // failed — its WirePool retry requests the passive Offerer to send
-                // a new Offer, and reusing the old PC would strand that retry.
+                // assignment that makes this side the Offerer supersedes the
+                // current initial or recovery attempt immediately. This is
+                // especially important when the dialing side was Answerer and
+                // its controller is waiting for a new Offer; reusing the old
+                // recovery PC would strand that retry.
                 //
                 // RoleAssignment itself is the authoritative rebuild command.
                 // Repeated assignments deliberately allocate repeated fresh
                 // generations; generation/operation fencing makes every late
                 // callback from an abandoned attempt harmless.
-                restart_initial_as_offerer(state, effects);
+                restart_as_offerer_after_role_assignment(state, effects);
             } else if state.role_negotiation_inflight {
                 // The awaited arbitration: start the assigned role's flow.
                 state.role_negotiation_inflight = false;
@@ -1935,11 +1936,23 @@ fn reduce_command(
     }
 }
 
-/// Supersede a never-sendable initial connection after a new Offerer role
+/// Supersede an initial or recovery attempt after a new Offerer role
 /// assignment. Existing Sessions close asynchronously while the replacement
 /// build starts immediately; waiting for close would let a stalled PC block the
 /// retry that is intended to replace it.
-fn restart_initial_as_offerer(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect>) {
+fn restart_as_offerer_after_role_assignment(
+    state: &mut RtcPeerState,
+    effects: &mut Vec<RtcPeerEffect>,
+) {
+    tracing::info!(
+        peer = %state.peer_id.to_string_repr(),
+        transport_epoch = state.transport_epoch,
+        recovery_cycle = state.recovery_cycle,
+        recovery_epoch = state.recovery_epoch,
+        role = ?state.role,
+        recovery_inflight = state.recovery_inflight,
+        "v0.20 RoleAssignment supersedes current attempt; rebuilding as Offerer"
+    );
     clear_transport_attempt_cache(state);
     state.role_probe_undelivered = false;
     state.building_generation = None;

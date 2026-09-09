@@ -3714,6 +3714,121 @@ fn total_recovery_budget_survives_same_pc_soft_retry() {
 }
 
 #[test]
+fn offerer_role_assignment_cancels_soft_recovery_and_starts_fresh_attempt() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+
+    // Start a same-PC Soft Recovery and retain the exact RestartIce identity
+    // so the test can prove that the role assignment retires its operation.
+    let restart = reduce(&mut state, failed_tick(generation));
+    assert_eq!(state.phase, RtcPeerPhase::Recovering);
+    assert!(state.recovery_inflight);
+    let (restart_operation_id, ice_generation) = restart_identity(&restart, generation);
+    let old_transport_epoch = state.transport_epoch;
+    let old_recovery_cycle = state.recovery_cycle;
+
+    // The Offerer assignment is authoritative: abandon the recovery attempt,
+    // close the old generation, and start a fresh initial Offerer attempt.
+    let effects = reduce(&mut state, role_assignment(true));
+    let replacement = generation + 1;
+    assert_eq!(state.role, Role::Offerer);
+    assert_eq!(state.phase, RtcPeerPhase::Building);
+    assert!(!state.recovery_inflight);
+    assert!(state.initial_connection_inflight);
+    assert_eq!(state.active_generation, None);
+    assert_eq!(state.building_generation, Some(replacement));
+    assert_eq!(state.transport_epoch, old_transport_epoch + 1);
+    assert_eq!(state.recovery_cycle, old_recovery_cycle);
+    assert!(has_close_session(&effects, generation));
+    assert!(has_build_session(&effects, replacement));
+
+    // The old recovery budget and its RestartIce completion are stale after
+    // the fresh transport attempt takes ownership.
+    let stale_budget = reduce(
+        &mut state,
+        RtcPeerInput::RecoveryBudgetElapsed {
+            recovery_cycle: old_recovery_cycle,
+        },
+    );
+    assert!(stale_budget.is_empty());
+    assert_eq!(state.phase, RtcPeerPhase::Building);
+    let stale_before = state.stale_completions;
+    let stale_restart = reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::RestartIce {
+            generation,
+            operation_id: restart_operation_id,
+            ice_generation,
+            result: Ok(()),
+        }),
+    );
+    assert!(stale_restart.is_empty());
+    assert_eq!(state.stale_completions, stale_before + 1);
+    assert_eq!(state.building_generation, Some(replacement));
+}
+
+#[test]
+fn offerer_role_assignment_retires_pending_hard_recovery_replacement() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let old_generation = drive_offerer_to_sendable(&mut state);
+
+    // Hard Recovery leaves the old generation active while the replacement is
+    // built. Complete the build so both active and pending generations must be
+    // retired by the RoleAssignment path.
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::ForceReconnect,
+        )),
+    );
+    let pending_generation = old_generation + 1;
+    assert!(state.recovery_inflight);
+    assert!(has_build_session(&effects, pending_generation));
+    let build_operation_id = pending_operation(
+        &state,
+        PendingRtcOperationKind::BuildSession,
+        pending_generation,
+    );
+    reduce(&mut state, build_ok(pending_generation, build_operation_id));
+    assert_eq!(state.active_generation, Some(old_generation));
+    assert_eq!(state.pending_generation, Some(pending_generation));
+
+    let effects = reduce(&mut state, role_assignment(true));
+    let replacement = pending_generation + 1;
+    assert_eq!(state.phase, RtcPeerPhase::Building);
+    assert!(!state.recovery_inflight);
+    assert_eq!(state.active_generation, None);
+    assert_eq!(state.pending_generation, None);
+    assert_eq!(state.building_generation, Some(replacement));
+    assert!(has_close_session(&effects, old_generation));
+    assert!(has_close_session(&effects, pending_generation));
+    assert!(has_build_session(&effects, replacement));
+}
+
+#[test]
+fn answerer_role_assignment_does_not_cancel_inflight_recovery() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_negotiating(&mut state);
+    drive_to_sendable(&mut state, generation);
+
+    reduce(&mut state, failed_tick(generation));
+    let recovery_epoch = state.recovery_epoch;
+    assert_eq!(state.role, Role::Answerer);
+    assert!(state.recovery_inflight);
+
+    // The old Coordinator only replaced an existing session for an Offerer
+    // assignment. An Answerer continues request-only recovery and waits for a
+    // fresh remote Offer.
+    let effects = reduce(&mut state, role_assignment(false));
+    assert!(effects.is_empty());
+    assert_eq!(state.role, Role::Answerer);
+    assert_eq!(state.phase, RtcPeerPhase::Recovering);
+    assert!(state.recovery_inflight);
+    assert_eq!(state.recovery_epoch, recovery_epoch);
+    assert_eq!(state.active_generation, Some(generation));
+}
+
+#[test]
 fn recovery_exhaustion_closes_late_successful_build_as_orphan() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let active = drive_offerer_to_sendable(&mut state);
