@@ -40,7 +40,7 @@ use super::reducer::{
     LaneEvent, RtcConfigurationRefreshError, RtcPeerCommand, RtcPeerEffect, RtcPeerInput,
     SignalingMessage, reduce,
 };
-use super::session::SessionResourceId;
+use super::session::{InboundGenerationGate, SessionResourceId};
 use super::state::{PendingRtcOperationKind, RtcPeerState};
 
 #[cfg(feature = "test-utils")]
@@ -100,6 +100,9 @@ enum PendingDiscoveredResource {
 /// The controller's single-writer control task.
 pub(crate) struct RtcPeerController {
     state: RtcPeerState,
+    /// Generation admitted to the inbound data plane. `None` closes ingress;
+    /// only the exact sendable generation may dispatch business messages.
+    inbound_generation: Arc<InboundGenerationGate>,
     /// The effect port: owns the session registry and executes blocking effects.
     /// The controller submits effects and receives completions; it never holds
     /// sessions or WebRTC implementation objects directly.
@@ -193,9 +196,10 @@ pub(crate) struct SharedNodeDeps {
     pub(crate) driver_event_observer: Option<NodeDriverEventObserver>,
     /// Stable identity of this Controller lifetime within its Manager.
     pub(crate) controller_lifecycle_id: u64,
-    /// Manager-owned hard-recovery sink used to release business work that was
-    /// committed to the generation being superseded. Soft recovery keeps the
-    /// same Session and therefore emits no edge.
+    /// Manager-owned generation-invalidation sink used to release business
+    /// work committed to a generation that is being retired or superseded.
+    /// Healthy same-generation Soft Recovery keeps the Session and therefore
+    /// emits no edge.
     pub(crate) peer_generation_invalidated: Option<tokio::sync::broadcast::Sender<(ActrId, u64)>>,
     /// Manager-owned sink for every authoritative sendability edge. PeerGate
     /// pairs falling and rising edges to apply recovery hysteresis to pending
@@ -303,13 +307,14 @@ impl RtcPeerController {
             signaling_generation_rx,
             deps,
             policy_clock,
-            move |peer_id, event_mailbox, lane_tx, deps| {
+            move |peer_id, event_mailbox, lane_tx, deps, inbound_generation| {
                 Arc::new(WebRtcEffectRunner::new(
                     peer_id,
                     factory_for_port,
                     event_mailbox,
                     lane_tx,
                     deps,
+                    inbound_generation,
                 ))
             },
         );
@@ -330,6 +335,7 @@ impl RtcPeerController {
             crate::wire::webrtc::v020::events::PeerEventMailbox,
             mpsc::Sender<LaneEvent>,
             SharedNodeDeps,
+            Arc<InboundGenerationGate>,
         ) -> Arc<dyn RtcPeerEffectPort>,
     ) -> (
         RtcPeerControllerHandle,
@@ -366,16 +372,19 @@ impl RtcPeerController {
         let (lane_tx, lane_rx) = mpsc::channel(LANE_CAPACITY);
         let (signaling_retry_wake_tx, signaling_retry_wake_rx) = mpsc::unbounded_channel();
         let lanes = crate::wire::webrtc::v020::peer::lane_handle::ActiveLaneRegistry::new();
+        let inbound_generation = Arc::new(InboundGenerationGate::new());
 
         let effect_port = make_effect_port(
             peer_id.clone(),
             event_mailbox.clone(),
             lane_tx.clone(),
             deps.clone(),
+            inbound_generation.clone(),
         );
 
         let controller = Self {
             state,
+            inbound_generation,
             effect_port: effect_port.clone(),
             lanes: lanes.clone(),
             inbound: deps.inbound.clone(),
@@ -447,7 +456,7 @@ impl RtcPeerController {
             signaling_generation_rx,
             deps,
             policy_clock,
-            move |_, _, _, _| effect_port,
+            move |_, _, _, _, _| effect_port,
         )
     }
 
@@ -856,6 +865,7 @@ impl RtcPeerController {
 
         // Final teardown: close every remaining session via the effect port
         // (invariant #12: every PeerConnection is closed by its session).
+        self.inbound_generation.set(None);
         for (_, (_, respond)) in self.pending_configuration_refreshes.drain() {
             let _ = respond.send(Err(RtcConfigurationRefreshError::Closed));
         }
@@ -1026,6 +1036,11 @@ impl RtcPeerController {
         let active_generation_before = self.state.active_generation;
         let effects = reduce(&mut self.state, input);
         let is_sendable = self.state.sendable();
+        self.inbound_generation.set(
+            is_sendable
+                .then_some(self.state.active_generation.unwrap_or_default())
+                .filter(|generation| *generation != 0),
+        );
         if self.state.phase != phase_before {
             tracing::debug!(
                 peer = %self.state.peer_id.to_string_repr(),
@@ -1039,10 +1054,15 @@ impl RtcPeerController {
         let builds_session = effects
             .iter()
             .any(|effect| matches!(effect, RtcPeerEffect::BuildSession { .. }));
-        let invalidates_active_generation = builds_session
-            && active_generation_before.is_some()
-            && (self.state.recovery_inflight
-                || self.state.active_generation != active_generation_before);
+        let active_generation_retired = active_generation_before.is_some()
+            && self.state.active_generation != active_generation_before;
+        // A hard replacement invalidates the old generation before the new
+        // one becomes active. A physical Answerer failure can instead retire
+        // the failed generation and park while waiting for the Offerer; that
+        // path has no BuildSession effect, but submitted requests still must be
+        // released before the old close completes.
+        let invalidates_active_generation =
+            active_generation_retired && (builds_session || self.state.recovery_inflight);
         if let Some(respond) = refresh_respond {
             if let Some((generation, operation_id)) = effects.iter().find_map(|effect| match effect
             {

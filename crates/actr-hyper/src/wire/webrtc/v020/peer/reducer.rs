@@ -1392,25 +1392,26 @@ fn reduce_command(
             }
         }
         RtcPeerCommand::ApplyRoleAssignment { is_offerer } => {
-            if is_offerer
-                && state.initial_connection_inflight
+            let supersedes_inflight_attempt = is_offerer
                 && !state.close_requested
-                && (state.building_generation.is_some()
-                    || state.active_generation.is_some()
-                    || state.pending_generation.is_some())
-            {
+                && (state.recovery_inflight
+                    || (state.initial_connection_inflight
+                        && (state.building_generation.is_some()
+                            || state.active_generation.is_some()
+                            || state.pending_generation.is_some())));
+            if supersedes_inflight_attempt {
                 // Restore the pre-v0.20 Coordinator contract: a fresh role
-                // negotiation that assigns this side as Offerer supersedes any
-                // never-sendable initial PC immediately. This is especially
-                // important when the dialing side was Answerer and its build
-                // failed — its WirePool retry requests the passive Offerer to send
-                // a new Offer, and reusing the old PC would strand that retry.
+                // assignment that makes this side the Offerer supersedes the
+                // current initial or recovery attempt immediately. This is
+                // especially important when the dialing side was Answerer and
+                // its controller is waiting for a new Offer; reusing the old
+                // recovery PC would strand that retry.
                 //
                 // RoleAssignment itself is the authoritative rebuild command.
                 // Repeated assignments deliberately allocate repeated fresh
                 // generations; generation/operation fencing makes every late
                 // callback from an abandoned attempt harmless.
-                restart_initial_as_offerer(state, effects);
+                restart_as_offerer_after_role_assignment(state, effects);
             } else if state.role_negotiation_inflight {
                 // The awaited arbitration: start the assigned role's flow.
                 state.role_negotiation_inflight = false;
@@ -1935,11 +1936,23 @@ fn reduce_command(
     }
 }
 
-/// Supersede a never-sendable initial connection after a new Offerer role
+/// Supersede an initial or recovery attempt after a new Offerer role
 /// assignment. Existing Sessions close asynchronously while the replacement
 /// build starts immediately; waiting for close would let a stalled PC block the
 /// retry that is intended to replace it.
-fn restart_initial_as_offerer(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect>) {
+fn restart_as_offerer_after_role_assignment(
+    state: &mut RtcPeerState,
+    effects: &mut Vec<RtcPeerEffect>,
+) {
+    tracing::info!(
+        peer = %state.peer_id.to_string_repr(),
+        transport_epoch = state.transport_epoch,
+        recovery_cycle = state.recovery_cycle,
+        recovery_epoch = state.recovery_epoch,
+        role = ?state.role,
+        recovery_inflight = state.recovery_inflight,
+        "v0.20 RoleAssignment supersedes current attempt; rebuilding as Offerer"
+    );
     clear_transport_attempt_cache(state);
     state.role_probe_undelivered = false;
     state.building_generation = None;
@@ -2669,33 +2682,6 @@ fn wait_for_offerer_offer(state: &mut RtcPeerState) {
     park_answerer_recovery(state, false);
 }
 
-/// Enter the passive Answerer recovery state after a terminal physical failure
-/// and make the first Offerer wake immediate. The Answerer still cannot create
-/// a replacement PeerConnection or a restart Offer locally, but it should not
-/// wait for the six-second attempt timer before telling a healthy Offerer that
-/// its physical session is gone.
-///
-/// A prior request may already be in flight from `Disconnected` or an address
-/// edge. Preserve that request identity and attempt counter when parking; a
-/// repeated `Failed` callback must not reset the recovery exchange.
-fn park_answerer_after_failed_and_request(
-    state: &mut RtcPeerState,
-    effects: &mut Vec<RtcPeerEffect>,
-) {
-    let already_parked = state.awaiting_offer && state.recovery_inflight;
-    park_answerer_recovery(state, true);
-
-    // A Failed callback is the terminal physical edge for this attempt. If a
-    // request was already sent by Disconnected/address recovery, immediately
-    // retransmit it with the same identity and the next attempt number so the
-    // Offerer is woken now rather than after another six-second timer. Further
-    // duplicate Failed callbacks arrive while already parked and must remain
-    // idempotent; the timer owns those later retransmissions.
-    if !already_parked || state.local_restart_request_id.is_none() {
-        send_answerer_restart_request(state, effects);
-    }
-}
-
 /// Exhaust one complete recovery cycle without terminating the Controller.
 /// Every existing Session is retired, an in-flight build is orphaned (its late
 /// successful completion is explicitly closed by `reduce_build_session`), and
@@ -2901,11 +2887,54 @@ fn reduce_state_tick(
             // request-only recovery effect and then waits for the Offer.
             if state.role == Role::Answerer {
                 // The physical Session has failed, so any readiness fact from
-                // its DataChannel is stale. Logical parking caused by a
-                // lifecycle/address event preserves the lane below, but this
-                // terminal driver fact must revoke it first.
+                // its DataChannel is stale. Retire the failed generation before
+                // parking: keeping it live lets the data-plane pump continue
+                // accepting requests while the response path correctly refuses
+                // to send on the same non-sendable generation.
+                tracing::warn!(
+                    peer = %state.peer_id.to_string_repr(),
+                    generation = tick.generation,
+                    phase = ?state.phase,
+                    pc_connected = state.pc_connected,
+                    rpc_reliable_open = state.rpc_reliable_open,
+                    recovery_inflight = state.recovery_inflight,
+                    "v0.20 Answerer physical session failed; retiring generation before recovery park"
+                );
+                let recovery_cycle_before_failure = state.recovery_cycle;
+                let recovery_was_inflight = state.recovery_inflight;
+                let recovery_wake_was_sent = state.recovery_attempt_started
+                    && state.local_restart_request_id.is_some()
+                    && state.local_restart_request_attempt > 0;
+                let was_already_parked = state.awaiting_offer && state.recovery_inflight;
+                let preserved_request_id = state.local_restart_request_id.clone();
+                let preserved_attempt = state.local_restart_request_attempt;
                 state.rpc_reliable_open = false;
-                park_answerer_after_failed_and_request(state, effects);
+                retire_generation(state, tick.generation, effects);
+                wait_for_offerer_offer(state);
+                // Retiring a dead Session changes the physical generation, not
+                // the logical recovery budget. If a soft recovery was already
+                // in flight, keep its original cycle so this failure cannot
+                // extend the end-to-end deadline while the Answerer is parked.
+                if recovery_was_inflight {
+                    state.recovery_cycle = recovery_cycle_before_failure;
+                }
+                // A Failed fact can be the first recovery signal, so the
+                // passive side must still wake the Offerer. If a recovery wake
+                // was already in flight, retain its identity and advance the
+                // attempt rather than creating a second logical recovery.
+                if let Some(request_id) = preserved_request_id {
+                    state.local_restart_request_id = Some(request_id);
+                    state.local_restart_request_attempt = preserved_attempt;
+                }
+                state.recovery_attempt_started = recovery_wake_was_sent;
+                // A Failed edge arriving during an unparked soft recovery is
+                // a new immediate wake and advances the existing request. A
+                // duplicate Failed edge after parking remains idempotent; the
+                // attempt timer owns later retransmissions.
+                if !recovery_wake_was_sent || !was_already_parked {
+                    state.recovery_attempt_started = true;
+                    send_answerer_restart_request(state, effects);
+                }
             } else if !state.recovery_inflight {
                 state.phase = RtcPeerPhase::Recovering;
                 if !state.address_changed {
