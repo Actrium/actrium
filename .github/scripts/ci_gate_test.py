@@ -410,7 +410,7 @@ def test_e2e_actrix_uses_in_tree_install_instead_of_artifact_download() -> None:
     assert "Actrium/actrix" not in workflow
     assert "actions: read" not in workflow
 
-    assert "runs-on: ubuntu-latest-m" in pkg_job
+    assert "runs-on: [self-hosted, Linux, X64, high]" in pkg_job
     assert "runs-on: macos-arm64-larger" in swift_job
 
 
