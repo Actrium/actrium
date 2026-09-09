@@ -1365,6 +1365,71 @@ fn v020_material_path_change_emits_local_address_edge() {
 
 #[cfg(feature = "webrtc-v020")]
 #[test]
+fn v020_offline_online_restore_does_not_emit_duplicate_local_address_edge() {
+    use crate::wire::webrtc::v020::recovery::{RtcNetworkEvent, RtcRecoverySupervisor};
+
+    let supervisor = RtcRecoverySupervisor::new();
+    let mut events = supervisor.subscribe();
+    let mut previous_path = None;
+    let mut path_change_pending = false;
+
+    let online = online_route_snapshot_with_cost(1, true, false);
+    super::publish_v020_network_fact(
+        &supervisor,
+        &NetworkEvent::NetworkPathChanged {
+            snapshot: online.clone(),
+        },
+        previous_path,
+        &mut path_change_pending,
+        &mut previous_path,
+    );
+    assert_eq!(
+        events.try_recv().expect("initial availability fact"),
+        RtcNetworkEvent::NetworkAvailable
+    );
+    assert!(events.try_recv().is_err());
+
+    let mut offline = online.clone();
+    offline.sequence = 2;
+    offline.availability = NetworkAvailability::Unavailable;
+    super::publish_v020_network_fact(
+        &supervisor,
+        &NetworkEvent::NetworkPathChanged { snapshot: offline },
+        previous_path,
+        &mut path_change_pending,
+        &mut previous_path,
+    );
+    assert_eq!(
+        events.try_recv().expect("offline availability fact"),
+        RtcNetworkEvent::NetworkUnavailable
+    );
+    assert!(
+        events.try_recv().is_err(),
+        "Offline must not emit a local-address edge"
+    );
+    assert!(!path_change_pending, "Offline clears pending path edges");
+
+    let mut restored = online;
+    restored.sequence = 3;
+    super::publish_v020_network_fact(
+        &supervisor,
+        &NetworkEvent::NetworkPathChanged { snapshot: restored },
+        previous_path,
+        &mut path_change_pending,
+        &mut previous_path,
+    );
+    assert_eq!(
+        events.try_recv().expect("restore availability fact"),
+        RtcNetworkEvent::NetworkAvailable
+    );
+    assert!(
+        events.try_recv().is_err(),
+        "Offline -> Online restore must not duplicate LocalAddressChanged"
+    );
+}
+
+#[cfg(feature = "webrtc-v020")]
+#[test]
 fn v020_path_change_survives_android_unknown_intermediate_state() {
     use crate::wire::webrtc::v020::recovery::{RtcNetworkEvent, RtcRecoverySupervisor};
 

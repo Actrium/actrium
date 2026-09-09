@@ -622,9 +622,9 @@ impl SignalingRouter {
                     // let server role arbitration recreate the Offerer side.
                     // Subsequent requests will find the controller and be
                     // handled by the normal attempt/identity reducer.
-                    tracing::warn!(
+                    tracing::debug!(
                         peer = %from.to_string_repr(),
-                        "bootstrapping controller for ICE restart request from unknown peer"
+                        "received ICE restart request for unknown peer; attempting inbound recovery wake"
                     );
                     self.manager.connect_from_inbound_recovery(from).await;
                 }

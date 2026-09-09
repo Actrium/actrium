@@ -313,6 +313,10 @@ private final class NetworkEventMonitor: @unchecked Sendable {
             wifi: path.usesInterfaceType(.wifi),
             cellular: path.usesInterfaceType(.cellular),
             ethernet: path.usesInterfaceType(.wiredEthernet),
+            // Network.framework has no dedicated VPN interface type. Keep the
+            // value false rather than conflating `.other` (which also covers
+            // loopback/unknown interfaces) with VPN. Rust consumers should
+            // treat iOS VPN reporting as a documented platform limitation.
             vpn: false,
             other: path.usesInterfaceType(.other) || path.usesInterfaceType(.loopback)
         )

@@ -347,13 +347,52 @@ impl super::peer::effects::SessionFactory for PeerConnectionFactory {
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
+    use std::sync::Arc;
+    use std::time::Duration;
 
     use actr_protocol::{AIdCredential, TurnCredential};
-    use webrtc::peer_connection::{RTCConfigurationBuilder, RTCIceServer, RTCIceTransportPolicy};
+    use tokio::time::timeout;
+    use webrtc::data_channel::RTCDataChannelInit;
+    use webrtc::peer_connection::{
+        RTCConfigurationBuilder, RTCIceGatheringState, RTCIceServer, RTCIceTransportPolicy,
+    };
 
     use super::*;
     use crate::lifecycle::CredentialState;
     use crate::wire::webrtc::v020::address::DesktopLocalAddressProvider;
+    use crate::wire::webrtc::v020::event_handler::WebRtcEventHandler;
+    use crate::wire::webrtc::v020::events::peer_event_mailbox;
+
+    fn test_actor_id(serial_number: u64) -> actr_protocol::ActrId {
+        actr_protocol::ActrId {
+            realm: actr_protocol::Realm { realm_id: 1 },
+            serial_number,
+            r#type: actr_protocol::ActrType {
+                manufacturer: "acme".to_string(),
+                name: "node".to_string(),
+                version: "1.0.0".to_string(),
+            },
+        }
+    }
+
+    async fn wait_for_gathering_complete(
+        events: &crate::wire::webrtc::v020::events::PeerEventMailboxReceiver,
+        previous_seq: u64,
+    ) {
+        timeout(Duration::from_secs(10), async {
+            loop {
+                let tick = events.latest_state();
+                if tick.seq > previous_seq
+                    && tick.gathering_state == Some(RTCIceGatheringState::Complete)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("ICE gathering did not complete");
+    }
 
     fn relay_configuration() -> RTCConfiguration {
         RTCConfigurationBuilder::default()
@@ -418,5 +457,56 @@ mod tests {
         let renewed = factory.current_configuration().await.unwrap();
         assert_eq!(renewed.ice_servers()[0].username, "renewed-user");
         assert_eq!(renewed.ice_servers()[0].credential, "renewed-password");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn wildcard_factory_builds_and_rebinds_on_ice_restart() {
+        let factory = PeerConnectionFactory::new_with_configuration_and_wildcard_bind(
+            RtcRuntimeConfig::desktop_default(),
+            RTCConfigurationBuilder::default().build(),
+        );
+        let (mailbox, events) = peer_event_mailbox();
+        let handler = Arc::new(WebRtcEventHandler::new(test_actor_id(3), 1, mailbox));
+        let pc = factory.build(handler).await.expect("build wildcard PC");
+        pc.create_data_channel("wildcard", Some(RTCDataChannelInit::default()))
+            .await
+            .expect("create channel to trigger host gathering");
+
+        let first_offer = pc.create_offer(None).await.expect("create first offer");
+        pc.set_local_description(first_offer)
+            .await
+            .expect("set first wildcard offer");
+        wait_for_gathering_complete(&events, 0).await;
+        let first_sdp = pc
+            .local_description()
+            .await
+            .expect("first local description")
+            .sdp;
+        assert!(
+            first_sdp.contains("a=candidate:"),
+            "wildcard bind must gather host candidates"
+        );
+
+        let restart_state_seq = events.latest_state().seq;
+        pc.restart_ice().await.expect("arm ICE restart");
+        let restart_offer = pc.create_offer(None).await.expect("create restart offer");
+        pc.set_local_description(restart_offer)
+            .await
+            .expect("wildcard ICE restart rebind must succeed");
+        wait_for_gathering_complete(&events, restart_state_seq).await;
+        let second_sdp = pc
+            .local_description()
+            .await
+            .expect("restart local description")
+            .sdp;
+        assert!(
+            second_sdp.contains("a=candidate:"),
+            "wildcard rebind must gather fresh host candidates"
+        );
+        assert_ne!(
+            first_sdp, second_sdp,
+            "ICE restart must produce a new offer"
+        );
+        pc.close().await.expect("close wildcard PC");
     }
 }

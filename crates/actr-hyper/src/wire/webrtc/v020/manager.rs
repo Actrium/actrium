@@ -165,6 +165,10 @@ enum ControllerAdmission {
     Local,
     /// Inbound signaling must respect the node-wide close tombstone.
     Inbound,
+    /// A request-only recovery wake must also respect the narrower per-peer
+    /// close fence. Unlike an ordinary Offer, a stale restart request is not
+    /// sufficient evidence that the application still owns this peer.
+    InboundRecovery,
 }
 
 pub(crate) struct RtcConnectionManager {
@@ -257,8 +261,9 @@ pub(crate) struct RtcConnectionManager {
     /// Combined with the Controller's transport epoch, it protects terminal
     /// cache cleanup from delayed events after controller recreation.
     next_controller_lifecycle_id: AtomicU64,
-    /// Deterministic pre-publication rendezvous used by integration tests to
-    /// place a creator on the exact side of the close-all epoch boundary.
+    /// Deterministic admission/publication rendezvous used by integration
+    /// tests to place a creator or recovery wake on the exact side of a close
+    /// boundary.
     #[cfg(feature = "test-utils")]
     peer_publish_barriers: std::sync::Mutex<HashMap<ActrId, Arc<tokio::sync::Barrier>>>,
     peers: RwLock<HashMap<ActrId, PeerSlot>>,
@@ -481,11 +486,31 @@ impl RtcConnectionManager {
         expected_epoch: u64,
         admission: ControllerAdmission,
     ) -> Option<RtcPeerControllerHandle> {
+        let inbound_admission = matches!(
+            admission,
+            ControllerAdmission::Inbound | ControllerAdmission::InboundRecovery
+        );
         loop {
             if self.lifecycle_epoch.load(Ordering::Acquire) != expected_epoch {
                 return None;
             }
-            if admission == ControllerAdmission::Inbound
+            // A recovery wake may race with close_peer while the Closing
+            // tombstone is converging. Re-check on every loop so a wake that
+            // waited for the marker cannot recreate a deliberately closed
+            // peer after the marker is released.
+            if admission == ControllerAdmission::InboundRecovery
+                && self.is_restart_request_suppressed(&peer)
+            {
+                return None;
+            }
+            #[cfg(feature = "test-utils")]
+            if admission == ControllerAdmission::InboundRecovery {
+                // Deterministic seam for the close-vs-recovery race. The
+                // barrier is after the first fence check and before registry
+                // lookup, so tests can install Closing plus the fence here.
+                self.wait_at_peer_publish_barrier_for_test(&peer).await;
+            }
+            if inbound_admission
                 && self
                     .inbound_suppressed_peers
                     .lock()
@@ -525,13 +550,21 @@ impl RtcConnectionManager {
             // write lock is held. If close-all marks the peer first, this path
             // cannot recreate it; if publication wins, close-all subsequently
             // observes and removes the newly published controller.
-            if admission == ControllerAdmission::Inbound
+            if inbound_admission
                 && self
                     .inbound_suppressed_peers
                     .lock()
                     .expect("RTC inbound-admission lock poisoned")
                     .contains(&peer)
             {
+                return None;
+            }
+            if admission == ControllerAdmission::InboundRecovery
+                && self.is_restart_request_suppressed(&peer)
+            {
+                // close_peer publishes this fence while holding the same
+                // registry write lock. This final check linearizes recovery
+                // admission against the close edge before publication.
                 return None;
             }
             match peers.get(&peer) {
@@ -595,7 +628,7 @@ impl RtcConnectionManager {
                 peer = %peer.to_string_repr(),
                 controller_lifecycle_id,
                 pc_generation_floor = next_pc_generation,
-                inbound = admission == ControllerAdmission::Inbound,
+                inbound = inbound_admission,
                 "v0.20 created peer controller"
             );
             peers.insert(
@@ -780,6 +813,13 @@ impl RtcConnectionManager {
             .remove(peer);
     }
 
+    fn is_restart_request_suppressed(&self, peer: &ActrId) -> bool {
+        self.restart_request_suppressed_peers
+            .lock()
+            .expect("RTC restart-request admission lock poisoned")
+            .contains(peer)
+    }
+
     /// Re-open passive controller creation after node-wide cleanup has fenced
     /// and drained the old signaling generation. The lifecycle owner calls
     /// this before installing a fresh signaling generation, so messages from
@@ -802,21 +842,13 @@ impl RtcConnectionManager {
     /// cleanup admission and cannot reopen a peer explicitly closed by the
     /// node/application.
     pub(crate) async fn connect_from_inbound_recovery(&self, peer: ActrId) {
-        if self
-            .restart_request_suppressed_peers
-            .lock()
-            .expect("RTC restart-request admission lock poisoned")
-            .contains(&peer)
-        {
-            tracing::debug!(
-                peer = %peer.to_string_repr(),
-                "ignoring stale inbound recovery wake for explicitly closed RTC peer"
-            );
-            return;
-        }
         let expected_epoch = self.lifecycle_epoch.load(Ordering::Acquire);
         let Some(handle) = self
-            .ensure_controller_for_epoch(peer.clone(), expected_epoch, ControllerAdmission::Inbound)
+            .ensure_controller_for_epoch(
+                peer.clone(),
+                expected_epoch,
+                ControllerAdmission::InboundRecovery,
+            )
             .await
         else {
             tracing::debug!(
@@ -1117,7 +1149,7 @@ impl RtcConnectionManager {
 
         let action = {
             let mut peers = self.peers.write().await;
-            match peers.remove(peer) {
+            let action = match peers.remove(peer) {
                 Some(PeerSlot::Active(entry)) => {
                     let next = entry.snapshot_generation_floor();
                     self.next_pc_generations
@@ -1142,14 +1174,18 @@ impl RtcConnectionManager {
                     CloseAction::Wait(marker)
                 }
                 None => CloseAction::Missing,
+            };
+            if !matches!(&action, CloseAction::Missing) {
+                // Keep the request-only recovery fence publication in the
+                // registry's critical section. Recovery admission observes
+                // this edge before it can pass the same registry boundary.
+                self.restart_request_suppressed_peers
+                    .lock()
+                    .expect("RTC restart-request admission lock poisoned")
+                    .insert(peer.clone());
             }
+            action
         };
-        if !matches!(&action, CloseAction::Missing) {
-            self.restart_request_suppressed_peers
-                .lock()
-                .expect("RTC restart-request admission lock poisoned")
-                .insert(peer.clone());
-        }
         // Router-side dispatch entry for this peer is releasable now that the
         // controller is leaving the registry; an in-flight dispatch keeps its
         // lock until a later teardown observes it idle.
