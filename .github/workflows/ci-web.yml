@@ -18,7 +18,7 @@ concurrency:
 jobs:
   format-and-check:
     name: Web Format And Check
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v5
 
@@ -80,7 +80,7 @@ jobs:
 
   browser-e2e:
     name: Web Browser E2E (Puppeteer)
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64, high]
     timeout-minutes: 45
     permissions:
       contents: read
