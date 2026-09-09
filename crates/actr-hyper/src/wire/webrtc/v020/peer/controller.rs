@@ -1280,6 +1280,7 @@ impl RtcPeerController {
             );
             return;
         }
+        let message_kind = retained.message.kind_name();
         let dispatch = SignalingDispatch::tracked(
             self.state.peer_id.clone(),
             self.deps.controller_lifecycle_id,
@@ -1292,7 +1293,8 @@ impl RtcPeerController {
             Ok(()) => {
                 tracing::info!(
                     peer = %self.state.peer_id.to_string_repr(),
-                    "retried retained SDP through the signaling queue"
+                    message_kind,
+                    "retried retained critical signaling through the signaling queue"
                 );
             }
             Err(tokio::sync::mpsc::error::TrySendError::Full(dispatch)) => {
@@ -1435,7 +1437,7 @@ impl RtcPeerController {
                 message,
             } => {
                 let is_candidate = matches!(&message, SignalingMessage::Candidate(_));
-                let is_role_probe = generation == 0;
+                let is_role_probe = matches!(&message, SignalingMessage::RoleNegotiation);
                 // The lifecycle supervisor is the sole signaling connection
                 // owner. Do not let a queued RTC completion publish SDP/ICE
                 // after that supervisor has withdrawn the committed

@@ -1275,6 +1275,14 @@ impl NetworkEventProcessor for ControlledRecoveryProcessor {
 }
 
 fn online_route_snapshot(sequence: u64, wifi: bool) -> NetworkSnapshot {
+    online_route_snapshot_with_cost(sequence, wifi, !wifi)
+}
+
+fn online_route_snapshot_with_cost(
+    sequence: u64,
+    wifi: bool,
+    is_expensive: bool,
+) -> NetworkSnapshot {
     NetworkSnapshot {
         sequence,
         availability: NetworkAvailability::Available,
@@ -1283,7 +1291,7 @@ fn online_route_snapshot(sequence: u64, wifi: bool) -> NetworkSnapshot {
             cellular: !wifi,
             ..NetworkTransportFlags::default()
         },
-        is_expensive: !wifi,
+        is_expensive,
         is_constrained: false,
     }
 }
@@ -1298,7 +1306,7 @@ fn v020_material_path_change_emits_local_address_edge() {
     let mut previous_path = None;
     let mut path_change_pending = false;
 
-    let wifi = online_route_snapshot(1, true);
+    let wifi = online_route_snapshot_with_cost(1, true, false);
     super::publish_v020_network_fact(
         &supervisor,
         &NetworkEvent::NetworkPathChanged {
@@ -1317,7 +1325,27 @@ fn v020_material_path_change_emits_local_address_edge() {
         "initial path must not restart ICE"
     );
 
-    let cellular = online_route_snapshot(2, false);
+    // A billing/data-saver-only change is not a local transport change and
+    // must not trigger an ICE rebind.
+    super::publish_v020_network_fact(
+        &supervisor,
+        &NetworkEvent::NetworkPathChanged {
+            snapshot: online_route_snapshot_with_cost(2, true, true),
+        },
+        previous_path,
+        &mut path_change_pending,
+        &mut previous_path,
+    );
+    assert_eq!(
+        events.try_recv().expect("cost-only availability fact"),
+        RtcNetworkEvent::NetworkAvailable
+    );
+    assert!(
+        events.try_recv().is_err(),
+        "cost-only changes must not restart ICE"
+    );
+
+    let cellular = online_route_snapshot_with_cost(3, false, true);
     super::publish_v020_network_fact(
         &supervisor,
         &NetworkEvent::NetworkPathChanged { snapshot: cellular },

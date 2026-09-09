@@ -1900,10 +1900,10 @@ struct ReconcilerConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct V020PathObservation {
     semantic_path: tp::SemanticPath,
-    /// Only transport identity belongs in the RTC path fingerprint. Billing
-    /// and data-saver properties can change without requiring an ICE rebind;
-    /// the lifecycle policy keeps those fields in its own signaling probe
-    /// fingerprint.
+    /// Transport identity includes VPN because entering/leaving a VPN changes
+    /// the effective route/interface class. Billing and data-saver properties
+    /// can change without requiring an ICE rebind; the lifecycle policy keeps
+    /// those fields in its own signaling probe fingerprint.
     transport_fingerprint: u8,
 }
 

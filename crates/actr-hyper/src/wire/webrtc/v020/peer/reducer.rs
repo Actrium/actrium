@@ -2682,9 +2682,16 @@ fn park_answerer_after_failed_and_request(
     state: &mut RtcPeerState,
     effects: &mut Vec<RtcPeerEffect>,
 ) {
+    let already_parked = state.awaiting_offer && state.recovery_inflight;
     park_answerer_recovery(state, true);
 
-    if state.local_restart_request_id.is_none() {
+    // A Failed callback is the terminal physical edge for this attempt. If a
+    // request was already sent by Disconnected/address recovery, immediately
+    // retransmit it with the same identity and the next attempt number so the
+    // Offerer is woken now rather than after another six-second timer. Further
+    // duplicate Failed callbacks arrive while already parked and must remain
+    // idempotent; the timer owns those later retransmissions.
+    if !already_parked || state.local_restart_request_id.is_none() {
         send_answerer_restart_request(state, effects);
     }
 }

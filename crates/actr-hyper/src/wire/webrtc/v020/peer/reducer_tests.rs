@@ -4149,13 +4149,28 @@ fn answerer_failed_after_request_preserves_request_identity() {
     // correlated request instead of resetting the exchange to attempt 1.
     let failed_effects = reduce(&mut state, failed_tick(generation));
     assert!(!has_restart_ice(&failed_effects, generation));
+    assert!(has_restart_request(&failed_effects, 2));
     assert!(!has_build_session(&failed_effects, generation + 1));
     assert!(state.awaiting_offer);
     assert_eq!(
         state.local_restart_request_id.as_deref(),
         Some(request_id.as_str())
     );
-    assert_eq!(state.local_restart_request_attempt, request_attempt);
+    assert_eq!(state.local_restart_request_attempt, request_attempt + 1);
+    assert_eq!(state.recovery_epoch, request_epoch);
+
+    let duplicate_effects = reduce(&mut state, failed_tick(generation));
+    assert!(
+        !duplicate_effects.iter().any(|effect| matches!(
+            effect,
+            RtcPeerEffect::SendSignaling {
+                message: SignalingMessage::IceRestartRequest { .. },
+                ..
+            }
+        )),
+        "repeated Failed callbacks after parking must not create a request storm"
+    );
+    assert_eq!(state.local_restart_request_attempt, request_attempt + 1);
     assert_eq!(state.recovery_epoch, request_epoch);
 }
 
