@@ -497,7 +497,7 @@ RUN set -eux; \
     # Gradle distribution and KtLint dependency metadata are pre-seeded;
     # otherwise the job re-downloads them on every ephemeral pod.
     test -x "$GRADLE_USER_HOME/wrapper/dists/gradle-${GRADLE_VERSION}-bin/${GRADLE_DIST_MD5}/gradle-${GRADLE_VERSION}/bin/gradle"; \
-    test -f "$GRADLE_USER_HOME/wrapper/dists/gradle-${GRADLE_VERSION}-bin/${GRADLE_DIST_MD5}/gradle-${GRADLE_VERSION}-bin.ok"; \
+    test -f "$GRADLE_USER_HOME/wrapper/dists/gradle-${GRADLE_VERSION}-bin/${GRADLE_DIST_MD5}/gradle-${GRADLE_VERSION}-bin.zip.ok"; \
     test -d "$GRADLE_USER_HOME/caches/modules-2/files-2.1/com.pinterest.ktlint/ktlint-cli/${KTLINT_VERSION}"; \
     test -d "$GRADLE_USER_HOME/caches/modules-2/files-2.1/org.jlleitschuh.gradle/ktlint-gradle/${KTLINT_GRADLE_VERSION}"
 
