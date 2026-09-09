@@ -338,6 +338,10 @@ jobs:
       # (missing wasm32-wasip2 / wasm-component-ld) rather than silently
       # compiling the fixture tests out.
       ACTR_REQUIRE_WASM_FIXTURE: "1"
+      # Fail the bindable-address probe instead of skipping: the mobile
+      # recovery tests must not go green on a runner where their rebind
+      # evidence never executed.
+      ACTR_REQUIRE_NON_LOOPBACK_IPV4: "1"
       # ~2.7k test binaries with debug info blow the runner's ~14 GB SSD and
       # slow linking; CI failures do not need local-variable debug info.
       CARGO_PROFILE_TEST_DEBUG: "0"
@@ -346,11 +350,15 @@ jobs:
       # workspace size. Covers rustc invocations across shards/jobs.
       RUSTC_WRAPPER: sccache
       SCCACHE_GHA_ENABLED: "true"
-      # nextest filterset selecting the realtime shard's binaries; the rest
-      # shard runs `not(...)`. Keep in sync with the shard rationale above.
+      # nextest filterset selecting the realtime shard's binaries and the
+      # in-crate connection-governance suites; the rest shard runs `not(...)`.
+      # Keep in sync with the shard rationale above.
       REALTIME_BINARIES: >-
         binary(mobile_rtc_pair_contract)
         | binary(mobile_rtc_multi_peer)
+        | (package(actr-hyper) and test(/^connection_governance_matrix::/))
+        | (package(actr-hyper) and test(/^connection_governance_production::/))
+        | (package(actr-hyper) and test(/^connection_governance_inflight::/))
         | binary(webrtc_large_mobile_recovery)
         | binary(mobile_full_disconnect_recovery)
         | binary(mobile_network_event_scenarios)

@@ -26,7 +26,7 @@ use webrtc::peer_connection::{
     RTCConfigurationBuilder, RTCIceServer, RTCRtcpMuxPolicy, SettingEngine,
 };
 
-use super::address::LocalAddressProvider;
+use super::address::{LocalAddressProvider, LocalAddressResolver};
 use super::event_handler::WebRtcEventHandler;
 use super::runtime::RtcRuntimeConfig;
 
@@ -212,10 +212,16 @@ impl PeerConnectionFactory {
                 "local address provider returned no bindable addresses".to_string(),
             ));
         }
+        // The driver resolves every bind through the resolver below, so this
+        // snapshot is only the fault seam's build-time record of the provider
+        // read above; the runtime-boundary observation
+        // (`bound_socket_addresses`) is the authoritative evidence of what
+        // actually got bound.
         let udp_addrs: Vec<SocketAddr> = bind_ips
             .into_iter()
             .map(|ip| SocketAddr::new(ip, 0))
             .collect();
+        let address_resolver = LocalAddressResolver::new(self.address_provider.clone());
 
         let configuration = self.current_configuration().await?;
 
@@ -248,19 +254,19 @@ impl PeerConnectionFactory {
         };
         // Enable upstream webrtc-rs/webrtc#868 ICE-restart rebind for every
         // fresh v0.20 generation: after a mobile network handover, ICE restart
-        // discards the stale local candidates and re-binds fresh sockets on the
-        // live interfaces instead of wedging on the dead one. 0.20.3 keeps this
-        // opt-in (off by default); v0.20 enables it uniformly here so production
-        // and test harnesses share one behavior. The concrete per-interface bind
-        // model is kept — the rebind re-resolves and re-binds those addresses on
-        // each restart rather than switching to a wildcard bind.
+        // discards stale local candidates and re-binds fresh sockets instead of
+        // wedging on the dead transport. 0.20.3 keeps this opt-in (off by
+        // default); v0.20 enables it uniformly here so production and test
+        // harnesses share one behavior. Keep the provider-backed resolver in
+        // the builder: the driver invokes it again on every restart rebind, so
+        // the current address set—not the build-time snapshot—is consumed.
         let mut setting_engine = self.setting_engine.clone();
         setting_engine.set_discard_local_candidates_during_ice_restart(true);
-        let builder = PeerConnectionBuilder::<SocketAddr>::new()
+        let builder = PeerConnectionBuilder::<LocalAddressResolver>::new()
             .with_configuration(configuration)
             .with_runtime(runtime)
             .with_handler(handler)
-            .with_udp_addrs(udp_addrs)
+            .with_udp_addrs(vec![address_resolver])
             .with_setting_engine(setting_engine)
             .with_sctp_receive_buffer_size(self.runtime_config.sctp_receive_buffer_size())
             .with_data_channel_send_buffer_limit(
