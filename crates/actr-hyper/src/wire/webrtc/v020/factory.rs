@@ -190,11 +190,12 @@ impl PeerConnectionFactory {
 
     /// Build a fresh v0.20 `PeerConnection` with `handler` pre-injected.
     ///
-    /// One UDP socket is bound per address from the `LocalAddressProvider`
-    /// (ephemeral port); each bound socket yields exactly one host candidate, so
-    /// the provider's addresses are what make the connection reachable. An
-    /// unsatisfiable bind surfaces here as an error (fail-fast), not a silent
-    /// fallback.
+    /// The provider supplies bind descriptors for the v0.20 driver. Production
+    /// uses dual-stack wildcards; webrtc-rs expands them against the live
+    /// interfaces at each initial bind and ICE-restart rebind. This factory
+    /// rejects an invalid/empty bind plan, but it does not assert system-network
+    /// availability or end-to-end ICE reachability; those are established by
+    /// the driver and the recovery state machine.
     pub(crate) async fn build(
         &self,
         handler: Arc<WebRtcEventHandler>,
@@ -202,22 +203,22 @@ impl PeerConnectionFactory {
         self.runtime_config.validate().map_err(|error| {
             RtcError::Other(format!("invalid RTC resource configuration: {error}"))
         })?;
-        let bind_ips = self
+        let bind_inputs = self
             .address_provider
-            .current_addresses()
-            .await
+            .current_addresses_sync()
             .map_err(|e| RtcError::Other(format!("local address provider failed: {e}")))?;
-        if bind_ips.is_empty() {
+        if bind_inputs.is_empty() {
             return Err(RtcError::Other(
-                "local address provider returned no bindable addresses".to_string(),
+                "local address provider returned no bind descriptors".to_string(),
             ));
         }
-        // The driver resolves every bind through the resolver below, so this
-        // snapshot is only the fault seam's build-time record of the provider
-        // read above; the runtime-boundary observation
+        // Production supplies dual-stack wildcards, not a cached interface
+        // list. Upstream expands them on every bind/rebind. Explicit test
+        // providers still pin concrete addresses. The runtime observation
         // (`bound_socket_addresses`) is the authoritative evidence of what
-        // actually got bound.
-        let udp_addrs: Vec<SocketAddr> = bind_ips
+        // actually got bound; it is also the only point at which a socket-bind
+        // failure is known.
+        let udp_addrs: Vec<SocketAddr> = bind_inputs
             .into_iter()
             .map(|ip| SocketAddr::new(ip, 0))
             .collect();
