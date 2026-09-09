@@ -39,7 +39,7 @@ function IssuanceDiagram() {
       viewBox={`0 0 900 ${totalH}`}
       role="img"
       aria-label="Credential Issuance Flow"
-      className="block h-auto w-full"
+      className="mx-auto block h-auto w-full max-w-[900px]"
       preserveAspectRatio="xMidYMin meet"
       xmlns="http://www.w3.org/2000/svg"
     >
@@ -69,18 +69,6 @@ function IssuanceDiagram() {
           <path d="M0,0 L7,2.5 L0,5" fill="#3b82f6" />
         </marker>
       </defs>
-      <style>{`
-        text { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-        .sgn-muted { fill: #64748b; font-size: 11.5px; }
-        .sgn-chip-title { font-size: 10.5px; font-weight: 700; }
-        .sgn-chip-caption, .sgn-arrow-label { font-size: 9.4px; }
-        .sgn-chip-caption { fill: #64748b; }
-        .sgn-node-title { font-size: 12.5px; font-weight: 700; }
-        .sgn-node-subtitle { font-size: 9px; }
-        .sgn-detail-text { font-size: 9px; }
-        .sgn-panel { fill: #ffffff; stroke-width: 1.15px; }
-        .sgn-label-chip { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1; }
-      `}</style>
 
       {/* ── Sub-panel A: Key Lifecycle ── */}
       <rect x={panelX} y="10" width={panelW} height={aPanelH} rx="16" className="sgn-panel" stroke="#c7d2fe" />
@@ -189,7 +177,7 @@ function VerificationDiagram() {
       viewBox={`0 0 900 ${totalH}`}
       role="img"
       aria-label="Runtime Verification Flow"
-      className="block h-auto w-full"
+      className="mx-auto block h-auto w-full max-w-[900px]"
       preserveAspectRatio="xMidYMin meet"
       xmlns="http://www.w3.org/2000/svg"
     >
@@ -210,17 +198,6 @@ function VerificationDiagram() {
           <path d="M0,0 L7,2.5 L0,5" fill="#22c55e" />
         </marker>
       </defs>
-      <style>{`
-        text { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-        .sgn-muted { fill: #64748b; font-size: 11.5px; }
-        .sgn-chip-title { font-size: 10.5px; font-weight: 700; }
-        .sgn-chip-caption, .sgn-arrow-label { font-size: 9.4px; }
-        .sgn-chip-caption { fill: #64748b; }
-        .sgn-node-title { font-size: 12.5px; font-weight: 700; }
-        .sgn-node-subtitle { font-size: 9px; }
-        .sgn-panel { fill: #ffffff; stroke-width: 1.15px; }
-        .sgn-label-chip { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1; }
-      `}</style>
 
       {/* ── Sub-panel C: Signaling path ── */}
       <rect x={panelX} y={cPanelY} width={panelW} height={cPanelH} rx="16" className="sgn-panel" stroke="#c4b5fd" />
