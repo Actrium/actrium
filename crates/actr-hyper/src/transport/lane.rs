@@ -63,7 +63,7 @@ pub(crate) const FRAGMENT_HEADER_SIZE: usize = 8;
 /// entry that consumes budget until its own TTL expires (bounded, self-healing
 /// churn). The previous integration TTL was six hours; 30 s trades rare
 /// very-slow senders for prompt reclamation of reassembly budget.
-const REASSEMBLY_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+pub(crate) const REASSEMBLY_TTL: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Maximum payload bytes that fit in one DataChannel message after the header.
 pub(crate) const DC_MAX_PAYLOAD_SIZE: usize = DC_MAX_MESSAGE_SIZE - FRAGMENT_HEADER_SIZE;

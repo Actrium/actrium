@@ -2853,11 +2853,49 @@ fn reduce_state_tick(
             // initiate a new Offer.
             if state.role == Role::Answerer {
                 // The physical Session has failed, so any readiness fact from
-                // its DataChannel is stale. Logical parking caused by a
-                // lifecycle/address event preserves the lane below, but this
-                // terminal driver fact must revoke it first.
+                // its DataChannel is stale. Retire the failed generation before
+                // parking: keeping it live lets the data-plane pump continue
+                // accepting requests while the response path correctly refuses
+                // to send on the same non-sendable generation.
+                tracing::warn!(
+                    peer = %state.peer_id.to_string_repr(),
+                    generation = tick.generation,
+                    phase = ?state.phase,
+                    pc_connected = state.pc_connected,
+                    rpc_reliable_open = state.rpc_reliable_open,
+                    recovery_inflight = state.recovery_inflight,
+                    "v0.20 Answerer physical session failed; retiring generation before recovery park"
+                );
+                let recovery_cycle_before_failure = state.recovery_cycle;
+                let recovery_was_inflight = state.recovery_inflight;
+                let recovery_wake_was_sent = state.recovery_attempt_started
+                    && state.local_restart_request_id.is_some()
+                    && state.local_restart_request_attempt > 0;
+                let preserved_request_id = state.local_restart_request_id.clone();
+                let preserved_attempt = state.local_restart_request_attempt;
                 state.rpc_reliable_open = false;
+                retire_generation(state, tick.generation, effects);
                 wait_for_offerer_offer(state);
+                // Retiring a dead Session changes the physical generation, not
+                // the logical recovery budget. If a soft recovery was already
+                // in flight, keep its original cycle so this failure cannot
+                // extend the end-to-end deadline while the Answerer is parked.
+                if recovery_was_inflight {
+                    state.recovery_cycle = recovery_cycle_before_failure;
+                }
+                // A Failed fact can be the first recovery signal, so the
+                // passive side must still wake the Offerer. If a recovery wake
+                // was already in flight, retain its identity and advance the
+                // attempt rather than creating a second logical recovery.
+                if let Some(request_id) = preserved_request_id {
+                    state.local_restart_request_id = Some(request_id);
+                    state.local_restart_request_attempt = preserved_attempt;
+                }
+                state.recovery_attempt_started = recovery_wake_was_sent;
+                if !recovery_wake_was_sent {
+                    state.recovery_attempt_started = true;
+                    send_answerer_restart_request(state, effects);
+                }
             } else if !state.recovery_inflight {
                 state.phase = RtcPeerPhase::Recovering;
                 if !state.address_changed {
