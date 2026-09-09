@@ -384,6 +384,13 @@ timer_inventory! {
         success: "state event plus authoritative ready check", interrupt: "event stream close",
         expiry: "return no sendable session", reset: "new send wait only", external: false
     },
+    WEBRTC_PEER_INBOUND_ADMISSION => {
+        id: "webrtc.coordinator.peer_inbound_admission", owner: "webrtc_coordinator", category: FailureDeadline,
+        duration: "INBOUND_ADMISSION_WAIT (one lane/generation grace window)",
+        arm: "first inbound message from a generation sees no admitted sendable generation",
+        success: "exact generation becomes sendable", interrupt: "session cancellation or gate stream close",
+        expiry: "drop the inbound message and release the lane pump", reset: "new lane/generation admission window", external: false
+    },
     WEBRTC_PEER_RECOVERY_DEADLINE => {
         id: "webrtc.coordinator.peer_recovery_deadline", owner: "peer_recovery", category: FailureDeadline,
         duration: "NETWORK_RECOVERY_TIMEOUT (the authoritative total recovery budget)", arm: "an exact peer session enters Recovering",
