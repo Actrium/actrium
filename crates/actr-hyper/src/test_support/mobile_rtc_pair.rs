@@ -225,6 +225,21 @@ pub struct MobileRtcPairHarness {
 
 impl MobileRtcPairHarness {
     pub async fn new(a_serial: u64, b_serial: u64) -> Self {
+        Self::new_with_address_mode(a_serial, b_serial, false).await
+    }
+
+    /// Build a pair whose first bind is deterministic and whose next address
+    /// change makes the test provider return dual-stack wildcards. The real
+    /// webrtc-rs driver then expands those wildcards during ICE-restart rebind.
+    pub async fn new_with_wildcard_rebind(a_serial: u64, b_serial: u64) -> Self {
+        Self::new_with_address_mode(a_serial, b_serial, true).await
+    }
+
+    async fn new_with_address_mode(
+        a_serial: u64,
+        b_serial: u64,
+        wildcard_rebind_addresses: bool,
+    ) -> Self {
         assert_ne!(
             a_serial, b_serial,
             "pair endpoints require distinct identities"
@@ -232,7 +247,11 @@ impl MobileRtcPairHarness {
         let services = ActrixTestServices::start()
             .await
             .expect("Actrix Signaling/STUN/TURN services must start");
-        let mut harness = TestHarness::with_external_signaling(services.signaling_url()).await;
+        let mut harness = if wildcard_rebind_addresses {
+            TestHarness::with_external_signaling_and_wildcard_rebind(services.signaling_url()).await
+        } else {
+            TestHarness::with_external_signaling(services.signaling_url()).await
+        };
         let a_id = make_actor_id(a_serial);
         let b_id = make_actor_id(b_serial);
         harness

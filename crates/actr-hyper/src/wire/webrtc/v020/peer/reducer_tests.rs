@@ -2688,6 +2688,114 @@ fn address_edge_coalesced_mid_soft_round_republishes_on_convergence() {
 }
 
 #[test]
+fn address_edge_after_negotiation_restarts_immediately_before_attempt_deadline() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkUnavailable,
+        )),
+    );
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkAvailable,
+        )),
+    );
+    let first_epoch = state.recovery_epoch;
+    let first_ice_generation = state.ice_generation;
+
+    // Model the mobile handover edge observed after the first Offer/Answer
+    // completed but before the physical ICE path became ready.
+    state.recovery_negotiated = true;
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::LocalAddressChanged,
+        )),
+    );
+
+    assert!(
+        has_restart_ice(&effects, generation),
+        "a post-negotiation address edge must start the fresh rebind immediately"
+    );
+    assert!(state.recovery_epoch > first_epoch);
+    assert!(state.ice_generation > first_ice_generation);
+    assert!(state.recovery_attempt_started);
+    assert!(!state.address_edge_pending);
+}
+
+#[test]
+fn answerer_defers_address_edge_without_suppressing_request_retry() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_sendable_with_ufrag(&mut state, "remote-1");
+
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkUnavailable,
+        )),
+    );
+    let start = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkAvailable,
+        )),
+    );
+    assert!(has_restart_request(&start, 1));
+    let request_id = state
+        .local_restart_request_id
+        .clone()
+        .expect("answerer recovery request identity");
+    let epoch = state.recovery_epoch;
+    let ice_generation = state.ice_generation;
+
+    // The current restart Offer/Answer has completed, but the physical path
+    // is still unavailable. An address edge must not create another request
+    // while the Offerer may still be executing this same ICE restart.
+    state.phase = RtcPeerPhase::TransportReady;
+    state.recovery_negotiated = true;
+    state.recovery_attempt_started = true;
+    state.rpc_reliable_open = false;
+    state.pc_connected = false;
+    state.awaiting_offer = false;
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::LocalAddressChanged,
+        )),
+    );
+
+    assert!(effects.is_empty());
+    assert_eq!(state.recovery_epoch, epoch);
+    assert_eq!(state.ice_generation, ice_generation);
+    assert!(state.recovery_attempt_started);
+    assert!(state.address_edge_pending);
+
+    // Deferring the edge does not remove the Answerer's wake-up path. The
+    // existing attempt deadline still emits the next attempt with the same
+    // request identity after the current exchange has had its full window.
+    let retry = reduce(
+        &mut state,
+        RtcPeerInput::RecoveryDeadlineElapsed {
+            recovery_epoch: epoch,
+        },
+    );
+    assert!(retry.iter().any(|effect| matches!(
+        effect,
+        RtcPeerEffect::SendSignaling {
+            message: SignalingMessage::IceRestartRequest {
+                request_id: actual,
+                attempt: 2,
+            },
+            generation: actual_generation,
+        } if actual == &request_id && *actual_generation == generation
+    )));
+}
+
+#[test]
 fn restart_ice_completion_offerer_creates_restart_offer() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let generation = drive_offerer_to_sendable(&mut state);
@@ -4843,6 +4951,7 @@ fn answerer_does_not_reemit_request_after_applying_restart_offer() {
         )),
     );
     assert!(has_restart_request(&start, 1));
+    let request_attempt_epoch = state.recovery_epoch;
 
     // The offerer's restart offer lands: the answerer applies it (implicit
     // local restart inside set_remote_description) and must produce only the
@@ -4867,6 +4976,20 @@ fn answerer_does_not_reemit_request_after_applying_restart_offer() {
             }
         )),
         "applying the restart offer must not re-emit the restart request"
+    );
+    assert_ne!(
+        state.recovery_epoch, request_attempt_epoch,
+        "the accepted restart offer must supersede the request-only deadline"
+    );
+    let stale_deadline = reduce(
+        &mut state,
+        RtcPeerInput::RecoveryDeadlineElapsed {
+            recovery_epoch: request_attempt_epoch,
+        },
+    );
+    assert!(
+        stale_deadline.is_empty(),
+        "the request deadline must be stale once the restart offer is accepted"
     );
 
     // The answer path follows the remote description completion.

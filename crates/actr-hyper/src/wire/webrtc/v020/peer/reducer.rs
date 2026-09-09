@@ -1617,8 +1617,14 @@ fn reduce_command(
                 }
                 if !state.recovery_inflight {
                     state.recovery_cycle = state.recovery_cycle.wrapping_add(1);
-                    state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
                 }
+                // Receiving a restart Offer is protocol progress for the
+                // current Answerer recovery. Supersede the request-only
+                // attempt deadline even when recovery is already in flight;
+                // otherwise the timer armed when the request was sent can
+                // fire while this Offer/Answer exchange is still converging
+                // and emit a duplicate recovery request.
+                state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
                 // A parked Answerer may still be reusing the active
                 // PeerConnection. Receiving the correlated restart Offer is
                 // the point at which it rejoins the current recovery attempt;
@@ -2091,12 +2097,35 @@ fn reduce_network_event(
             // or long-background policy still sets `address_changed` and keeps
             // the Hard Recovery path below.
             if state.active_generation.is_some() && state.recovery_attempt_started {
-                // A recovery round is already converging on the pre-edge
-                // address set, and the attempt latch would coalesce this edge
-                // away. Remember it so the convergence publishes one more
-                // restart onto the current set instead of stranding the link
-                // on the superseded interface.
-                state.address_edge_pending = true;
+                if state.recovery_negotiated {
+                    if state.role == Role::Answerer {
+                        // The Answerer must keep its request path alive so an
+                        // Offerer that has not noticed the handover can still
+                        // be woken. However, an attempt that already has an
+                        // Offer/Answer must not emit a new request merely
+                        // because its address edge arrived: the Offerer may
+                        // still be executing the same ICE restart. Preserve
+                        // the current attempt and let its deadline or the
+                        // pending-edge convergence path send the next request.
+                        state.address_edge_pending = true;
+                    } else {
+                        // SDP/ICE negotiation for the current attempt has
+                        // already completed, but the physical path is not
+                        // ready yet. A newly observed interface set must
+                        // supersede that attempt immediately; waiting for its
+                        // six-second timer leaves the PeerConnection bound to
+                        // the old interface set during a mobile handover.
+                        state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
+                        state.recovery_attempt_started = false;
+                        state.address_edge_pending = false;
+                        start_soft_recovery(state, effects);
+                    }
+                } else {
+                    // The SDP/ICE exchange is still in flight. Keep the
+                    // current exchange serialized, then publish one more
+                    // restart when it reaches a physical ready state.
+                    state.address_edge_pending = true;
+                }
             } else if state.active_generation.is_some() {
                 if recovery_gate_open(state) {
                     start_soft_recovery(state, effects);
