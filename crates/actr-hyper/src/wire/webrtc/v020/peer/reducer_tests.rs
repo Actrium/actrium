@@ -4886,6 +4886,78 @@ fn answerer_does_not_reemit_request_after_applying_restart_offer() {
     assert!(has_create_answer(&answer_effects, generation));
 }
 
+/// A restart Offer can complete its SDP exchange while a failed Answerer still
+/// has no usable RpcReliable readiness anchor. The next deadline must continue
+/// the existing request identity instead of parking through
+/// `clear_negotiation_for_recovery`, which would reset the attempt to one.
+#[test]
+fn answerer_failed_restart_offer_retries_same_request_identity() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_sendable_with_ufrag(&mut state, "remote-1");
+
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkUnavailable,
+        )),
+    );
+    let start = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkAvailable,
+        )),
+    );
+    let request_id = start
+        .iter()
+        .find_map(|effect| match effect {
+            RtcPeerEffect::SendSignaling {
+                message:
+                    SignalingMessage::IceRestartRequest {
+                        request_id,
+                        attempt: 1,
+                    },
+                ..
+            } => Some(request_id.clone()),
+            _ => None,
+        })
+        .expect("initial Answerer recovery request");
+    let epoch = state.recovery_epoch;
+
+    // Model the post-Offer/Answer state observed by CG-001: SDP/ICE
+    // negotiation completed, but the physical anchor was revoked by Failed.
+    state.phase = RtcPeerPhase::TransportReady;
+    state.recovery_negotiated = true;
+    state.recovery_attempt_started = true;
+    state.rpc_reliable_open = false;
+    state.awaiting_offer = false;
+    assert_eq!(state.active_generation, Some(generation));
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::RecoveryDeadlineElapsed {
+            recovery_epoch: epoch,
+        },
+    );
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        RtcPeerEffect::SendSignaling {
+            message: SignalingMessage::IceRestartRequest {
+                request_id: actual,
+                attempt: 2,
+            },
+            ..
+        } if actual == &request_id
+    )));
+    assert!(!has_build_session(&effects, generation + 1));
+    assert!(!state.awaiting_offer);
+    assert!(!state.recovery_negotiated);
+    assert_eq!(
+        state.local_restart_request_id.as_deref(),
+        Some(request_id.as_str())
+    );
+    assert_eq!(state.local_restart_request_attempt, 2);
+}
+
 /// A normal (non-restart-tagged) offer with fresh ICE credentials comes from
 /// a replacement physical PeerConnection. The established answerer must retire
 /// its old generation and build a fresh Session instead of applying that SDP to
@@ -4992,6 +5064,168 @@ fn answerer_drops_same_ufrag_offer_without_session() {
     let _ = generation;
     assert_eq!(state.stale_events, stale_before + 1);
     assert!(effects.is_empty());
+}
+
+#[test]
+fn answerer_rejects_restart_offer_when_controller_has_no_active_session() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_sendable_with_ufrag(&mut state, "remote-1");
+    reduce(&mut state, closed_tick(generation));
+    assert_eq!(state.active_generation, None);
+    assert_eq!(state.parked_signaling_generation, Some(generation));
+
+    let exchange_id = "restart-without-active-session".to_string();
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
+            desc: Box::new(sdp_with_ufrag(RTCSdpType::Offer, "remote-2")),
+            exchange_id: Some(exchange_id.clone()),
+        }),
+    );
+    assert_eq!(
+        effects.len(),
+        1,
+        "a rejected restart must emit exactly one effect"
+    );
+    assert!(matches!(
+        &effects[0],
+        RtcPeerEffect::SendSignaling {
+            generation: actual_generation,
+            message: SignalingMessage::IceRestartRejected {
+                exchange_id: actual_exchange,
+                reason,
+            },
+        } if *actual_generation == generation
+            && actual_exchange == &exchange_id
+            && *reason == actr_protocol::ice_restart_rejected::Reason::NoActiveSession as i32
+    ));
+    assert!(
+        effects
+            .iter()
+            .all(|effect| !matches!(effect, RtcPeerEffect::BuildSession { .. })),
+        "a rejected restart must not build an ordinary replacement session"
+    );
+    assert_eq!(state.stale_events, 1);
+    assert_eq!(state.active_generation, None);
+}
+
+#[test]
+fn offerer_without_session_ignores_correlated_restart_offer_without_rejection() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    state.role = Role::Offerer;
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
+            desc: Box::new(sdp_with_ufrag(RTCSdpType::Offer, "remote-1")),
+            exchange_id: Some("glare-restart".to_string()),
+        }),
+    );
+    assert!(
+        !effects.iter().any(|effect| matches!(
+            effect,
+            RtcPeerEffect::SendSignaling {
+                message: SignalingMessage::IceRestartRejected { .. },
+                ..
+            }
+        )),
+        "an Offerer stays on the stale-offer path; no rejection"
+    );
+    assert!(
+        !has_build_session(&effects, 1),
+        "the stale competing offer builds nothing"
+    );
+    assert_eq!(state.stale_events, 1);
+}
+
+#[test]
+fn uncorrelated_restart_offer_without_session_falls_through_to_ordinary_offer() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_sendable_with_ufrag(&mut state, "remote-1");
+    reduce(&mut state, closed_tick(generation));
+    assert_eq!(state.active_generation, None);
+
+    // A legacy uncorrelated restart offer (a pre-correlation peer in a
+    // rolling upgrade) has no exchange id to fence a rejection with — and a
+    // peer that old may not understand IceRestartRejected at all — so it
+    // keeps the ordinary-offer fallthrough that builds the replacement.
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
+            desc: Box::new(sdp_with_ufrag(RTCSdpType::Offer, "remote-2")),
+            exchange_id: None,
+        }),
+    );
+    assert!(
+        !effects.iter().any(|effect| matches!(
+            effect,
+            RtcPeerEffect::SendSignaling {
+                message: SignalingMessage::IceRestartRejected { .. },
+                ..
+            }
+        )),
+        "an uncorrelated offer must not be rejected"
+    );
+    assert!(
+        has_build_session(&effects, generation + 1),
+        "the ordinary-offer fallthrough builds the replacement session"
+    );
+}
+
+#[test]
+fn undetermined_controller_rejects_restart_offer_without_session() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let exchange_id = "restart-after-budget-exhaustion".to_string();
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
+            desc: Box::new(sdp_with_ufrag(RTCSdpType::Offer, "remote-1")),
+            exchange_id: Some(exchange_id.clone()),
+        }),
+    );
+
+    assert_eq!(
+        effects.len(),
+        1,
+        "a rejected restart must emit exactly one effect"
+    );
+    assert!(matches!(
+        &effects[0],
+        RtcPeerEffect::SendSignaling {
+            generation: 0,
+            message: SignalingMessage::IceRestartRejected {
+                exchange_id: actual_exchange,
+                reason,
+            },
+        } if actual_exchange == &exchange_id
+            && *reason == actr_protocol::ice_restart_rejected::Reason::NoActiveSession as i32
+    ));
+    assert!(
+        effects
+            .iter()
+            .all(|effect| !matches!(effect, RtcPeerEffect::BuildSession { .. })),
+        "an undetermined controller must not build an ordinary replacement session"
+    );
+    assert_eq!(state.stale_events, 1);
+    assert_eq!(state.role, Role::Undetermined);
+    assert_eq!(state.active_generation, None);
+}
+
+#[test]
+fn undetermined_controller_drops_legacy_restart_offer_without_session() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let stale_before = state.stale_events;
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOffer(Box::new(
+            sdp_with_ufrag(RTCSdpType::Offer, "remote-legacy"),
+        ))),
+    );
+
+    assert!(effects.is_empty());
+    assert_eq!(state.stale_events, stale_before + 1);
+    assert_eq!(state.role, Role::Undetermined);
+    assert_eq!(state.active_generation, None);
 }
 
 /// Offerer-side `NegotiationNeeded` (local track add/remove mid-connection)

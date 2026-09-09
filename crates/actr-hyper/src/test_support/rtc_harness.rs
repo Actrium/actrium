@@ -421,6 +421,56 @@ impl TestRtcHookRecorder {
 }
 
 impl TestRtcControl {
+    /// Observe and fault the manager of a fully started production Node.
+    #[cfg(test)]
+    pub(crate) fn for_node(node: &crate::ActrRef) -> Self {
+        Self {
+            manager: node
+                .shared
+                .v020_manager
+                .clone()
+                .expect("RTC-enabled fixture node"),
+        }
+    }
+
+    /// Hold the concrete channel so tests can prove reuse rather than merely
+    /// comparing lane counts. This does not change readiness or controller state.
+    #[cfg(test)]
+    pub(crate) async fn lane_probe(&self, peer: &ActrId, payload: PayloadType) -> TestLaneProbe {
+        let controller = self
+            .manager
+            .get_controller(peer)
+            .await
+            .expect("fixture controller");
+        let generation = controller.snapshot().pc_generation;
+        let lane = crate::wire::webrtc::v020::status::LaneKind::from_payload_type(payload)
+            .expect("DataChannel payload");
+        let handle = controller
+            .lane_handle(generation, lane)
+            .expect("fixture lane");
+        TestLaneProbe {
+            channel: handle.channel().clone(),
+        }
+    }
+
+    /// Close physical resources without removing their logical Controller,
+    /// then deliver its terminal driver fact. This models S4 explicitly;
+    /// it does not pretend the test merely changed a network interface.
+    #[cfg(test)]
+    pub(crate) async fn retire_physical_session(&self, peer: &ActrId) -> u64 {
+        let handle = self
+            .manager
+            .get_controller(peer)
+            .await
+            .expect("fixture controller");
+        let generation = handle.snapshot().pc_generation;
+        handle.force_close_sessions().await;
+        handle.inject_peer_connection_state_for_test(
+            webrtc::peer_connection::RTCPeerConnectionState::Closed,
+        );
+        generation
+    }
+
     fn new(manager: Arc<RtcConnectionManager>) -> Self {
         Self { manager }
     }
@@ -718,6 +768,26 @@ impl TestRtcControl {
         &self,
     ) -> Arc<crate::wire::webrtc::v020::recovery::RtcRecoverySupervisor> {
         self.manager.supervisor().clone()
+    }
+}
+
+/// A physical-channel observation token; holding it never grants sendability.
+#[cfg(test)]
+pub(crate) struct TestLaneProbe {
+    channel: Arc<dyn webrtc::data_channel::DataChannel>,
+}
+
+#[cfg(test)]
+impl TestLaneProbe {
+    pub(crate) fn same_channel(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.channel, &other.channel)
+    }
+
+    pub(crate) async fn is_open(&self) -> bool {
+        matches!(
+            self.channel.ready_state().await,
+            Ok(webrtc::data_channel::RTCDataChannelState::Open)
+        )
     }
 }
 
