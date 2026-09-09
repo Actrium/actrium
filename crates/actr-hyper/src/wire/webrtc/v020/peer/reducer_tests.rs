@@ -3825,7 +3825,8 @@ fn answerer_role_assignment_does_not_cancel_inflight_recovery() {
     assert_eq!(state.phase, RtcPeerPhase::Recovering);
     assert!(state.recovery_inflight);
     assert_eq!(state.recovery_epoch, recovery_epoch);
-    assert_eq!(state.active_generation, Some(generation));
+    assert_eq!(state.active_generation, None);
+    assert_eq!(state.parked_signaling_generation, Some(generation));
 }
 
 #[test]
