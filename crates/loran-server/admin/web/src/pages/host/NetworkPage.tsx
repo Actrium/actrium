@@ -330,12 +330,6 @@ export function NetworkPage() {
 
       <div className="flex flex-col items-center overflow-x-auto">
         <svg viewBox={`0 -40 ${SVG_W} ${SVG_H + 40}`} className="max-w-3xl mx-auto select-none">
-          <defs>
-            <style>{`
-              @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }
-              .testing { animation: pulse 1.2s ease-in-out infinite; }
-            `}</style>
-          </defs>
           {/* ── Network boundary zone ── */}
           {(() => {
             const zoneW = 70;
