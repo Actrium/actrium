@@ -22,7 +22,11 @@
 
 ARG UBUNTU_VERSION=22.04
 ARG RUNNER_VERSION=2.336.0
-ARG RUST_VERSION=stable
+# Pinned to the CI toolchain per #199 (repo-wide @1.98.0 pinning). Preinstalling
+# the exact version means `dtolnay/rust-toolchain@1.98.0` resolves locally on
+# runner pods with no toolchain download; bump this together with the workflow
+# pins when the CI toolchain moves.
+ARG RUST_VERSION=1.98.0
 ARG PROTOC_VERSION=29.3
 # Optional apt mirror override for builds behind a slow link to
 # archive.ubuntu.com (e.g. `--build-arg APT_MIRROR=mirrors.aliyun.com`).
@@ -151,16 +155,19 @@ ARG RUSTUP_UPDATE_ROOT=
 USER runner
 WORKDIR /home/runner
 
-# Rust toolchain. Default = stable (latest), which satisfies the workspace
-# MSRV (Cargo.toml rust-version = "1.95") and matches the `@stable` jobs that
-# make up most of the CI. `rust_msrv` jobs still pin @1.95.0 via dtolnay
-# (historical toolchain, not preinstalled). Nightly is preinstalled for the
-# coverage-web-wasm `@nightly` job. Components: clippy + rustfmt + rust-src
-# (cargo doc/doctests) + llvm-tools-preview (coverage, ci-coverage.yml).
+# Rust toolchains. The default is the exact CI pin (1.98.0, see #199) so the
+# `dtolnay/rust-toolchain@1.98.0` Setup Rust steps on ARC resolve locally.
+# The MSRV toolchain (1.95.0) is preinstalled for the `rust_msrv` job; nightly
+# for the coverage-web-wasm `@nightly` job. Components: clippy + rustfmt +
+# rust-src (cargo doc/doctests) + llvm-tools-preview (coverage, ci-coverage.yml).
 # Targets: wasm32-unknown-unknown + wasm32-wasip2 (wasm jobs). The Android
 # Rust targets are deliberately absent: kotlin-echo-app-e2e needs the full
 # JDK/Android SDK/KVM stack and stays on GitHub-hosted runners.
-# RUSTUP_DIST_SERVER / RUSTUP_UPDATE_ROOT redirect to a mirror when set.
+# RUSTUP_DIST_SERVER / RUSTUP_UPDATE_ROOT redirect rustup's channel-manifest
+# sync to a mirror. The mirror URL is deliberately NOT hardcoded here: the
+# ARGs pass through to ENV, and the deployment injects the value at build
+# time (--build-arg, e.g. the incremental build on the image-build machine),
+# so runner pods need no per-job env while this file stays neutral.
 RUN set -eux; \
     if [ -n "${RUSTUP_DIST_SERVER}" ]; then export RUSTUP_DIST_SERVER; fi; \
     if [ -n "${RUSTUP_UPDATE_ROOT}" ]; then export RUSTUP_UPDATE_ROOT; fi; \
@@ -173,18 +180,23 @@ RUN set -eux; \
     rustup target add wasm32-unknown-unknown wasm32-wasip2; \
     rustup toolchain install nightly --profile minimal \
         --component llvm-tools-preview; \
-    rustup +nightly target add wasm32-unknown-unknown wasm32-wasip2
+    rustup +nightly target add wasm32-unknown-unknown wasm32-wasip2; \
+    rustup toolchain install 1.95.0 --profile minimal \
+        --component clippy --component rustfmt; \
+    rustup +1.95.0 target add wasm32-unknown-unknown wasm32-wasip2
 
 ENV PATH="/home/runner/.cargo/bin:${PATH}" \
     CARGO_HOME=/home/runner/.cargo \
-    RUSTUP_HOME=/home/runner/.rustup
+    RUSTUP_HOME=/home/runner/.rustup \
+    RUSTUP_DIST_SERVER=${RUSTUP_DIST_SERVER} \
+    RUSTUP_UPDATE_ROOT=${RUSTUP_UPDATE_ROOT}
 
 # Pre-built wasm tools the CI downloads every run today (ci-gate.yml
 # "Install prebuilt WebAssembly tools"). Pin them by sha256 so a
 # tampered upstream release fails the build loudly.
 #   wasm-pack        v0.15.0
-#   wasm-component-ld v0.5.26
-#   wasm-tools       v1.253.0
+#   wasm-component-ld v0.5.30
+#   wasm-tools       v1.258.0
 # GITHUB_PROXY can prefix the github.com URLs in regions where release
 # downloads are slow.
 RUN set -eux; \
@@ -208,11 +220,11 @@ RUN set -eux; \
         "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-${wasm_arch}.tar.gz" \
         c09f971ecaed9a2efc80fdcea7a00ef6b53c7fadc8c57d1f61b53a6aa66b668a; \
     install_binary wasm-component-ld \
-        "https://github.com/bytecodealliance/wasm-component-ld/releases/download/v0.5.26/wasm-component-ld-v0.5.26-${ld_arch}.tar.gz" \
-        e5cee677052c0eb6b5d0605f85e3bbc46d076050cd3403406f49b3503f22622c; \
+        "https://github.com/bytecodealliance/wasm-component-ld/releases/download/v0.5.30/wasm-component-ld-v0.5.30-${ld_arch}.tar.gz" \
+        fb07d7022859c3892a9243539910747a9c00870ba7abbfb69f22aaddc800f398; \
     install_binary wasm-tools \
-        "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.253.0/wasm-tools-1.253.0-${tools_arch}.tar.gz" \
-        4e2898f7ca3bd0536218ed9b7b36ff7b86954c57ae0e6272fde69728cbe01088; \
+        "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.258.0/wasm-tools-1.258.0-${tools_arch}.tar.gz" \
+        b52d14eb74a4852cc249369bd4480c2b2fdd876145f41db51ff52269ded240ce; \
     install_binary sccache \
         "https://github.com/mozilla/sccache/releases/download/v0.10.0/sccache-v0.10.0-x86_64-unknown-linux-musl.tar.gz" \
         1fbb35e135660d04a2d5e42b59c7874d39b3deb17de56330b25b713ec59f849b; \
@@ -397,7 +409,13 @@ RUN set -eux; \
     curl -fsSL --retry 3 --retry-all-errors -o /tmp/gradle-dist/gradle.zip "$dist_url"; \
     echo "${GRADLE_DIST_SHA256}  /tmp/gradle-dist/gradle.zip" | sha256sum --check --status; \
     unzip -q /tmp/gradle-dist/gradle.zip -d "$dist_dir"; \
-    touch "$dist_dir/gradle-${GRADLE_VERSION}-bin.ok" "$dist_dir/gradle-${GRADLE_VERSION}-bin.lck"; \
+    # Marker name matters byte-for-byte: this wrapper version derives it from
+    # the local zip name, i.e. "gradle-<ver>-bin.zip.ok" (presence check only,
+    # content is ignored — verified with a local wrapper experiment). A marker
+    # without the .zip infix, or one holding the sha256, is never recognized
+    # and every job re-downloads the 200 MB dist. The lock file is created by
+    # the wrapper itself; do not pre-create it.
+    touch "$dist_dir/gradle-${GRADLE_VERSION}-bin.zip.ok"; \
     rm -rf /tmp/gradle-dist; \
     export JAVA_HOME="$RUNNER_TOOL_CACHE/Java_Temurin-Hotspot_jdk/${JDK_VERSION}/x64"; \
     "$dist_dir/gradle-${GRADLE_VERSION}/bin/gradle" --version; \
@@ -479,7 +497,7 @@ RUN set -eux; \
     # Gradle distribution and KtLint dependency metadata are pre-seeded;
     # otherwise the job re-downloads them on every ephemeral pod.
     test -x "$GRADLE_USER_HOME/wrapper/dists/gradle-${GRADLE_VERSION}-bin/${GRADLE_DIST_MD5}/gradle-${GRADLE_VERSION}/bin/gradle"; \
-    test -f "$GRADLE_USER_HOME/wrapper/dists/gradle-${GRADLE_VERSION}-bin/${GRADLE_DIST_MD5}/gradle-${GRADLE_VERSION}-bin.ok"; \
+    test -f "$GRADLE_USER_HOME/wrapper/dists/gradle-${GRADLE_VERSION}-bin/${GRADLE_DIST_MD5}/gradle-${GRADLE_VERSION}-bin.zip.ok"; \
     test -d "$GRADLE_USER_HOME/caches/modules-2/files-2.1/com.pinterest.ktlint/ktlint-cli/${KTLINT_VERSION}"; \
     test -d "$GRADLE_USER_HOME/caches/modules-2/files-2.1/org.jlleitschuh.gradle/ktlint-gradle/${KTLINT_GRADLE_VERSION}"
 

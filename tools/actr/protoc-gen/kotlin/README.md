@@ -1,7 +1,7 @@
 # framework-codegen-kotlin
 
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9.22-blue.svg)](https://kotlinlang.org/)
-[![Gradle](https://img.shields.io/badge/Gradle-8.5-green.svg)](https://gradle.org/)
+[![Gradle](https://img.shields.io/badge/Gradle-9.2.1-green.svg)](https://gradle.org/)
 [![Protobuf](https://img.shields.io/badge/Protobuf-3.25.1-orange.svg)](https://protobuf.dev/)
 
 A Kotlin protoc plugin for generating ACTR framework code from Protocol Buffer service definitions.
@@ -105,7 +105,7 @@ actr gen --input=proto/ --output=src/main/java/com/example/generated --language=
 ### Prerequisites
 
 - JDK 17 or higher
-- Gradle 8.5 or higher
+- Gradle 9.2.1 (the Gradle Wrapper downloads this version automatically)
 
 ### Build Commands
 

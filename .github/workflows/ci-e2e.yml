@@ -17,7 +17,7 @@ concurrency:
 jobs:
   package-runtime-echo-e2e:
     name: Package Runtime Echo E2E
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64, high]
     timeout-minutes: 120
     permissions:
       contents: read
@@ -59,7 +59,7 @@ jobs:
     # the in-tree mock-actrix. One job runs the whole matrix sequentially so the
     # slow setup (mock-actrix + actr CLI + service build) is amortised across
     # every scenario.
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64, high]
     timeout-minutes: 90
     permissions:
       contents: read
@@ -189,7 +189,7 @@ jobs:
     # this runtime E2E under #431 when the guarded componentization smoke test is
     # green (upstream ComponentizeJS#335, local tracking #427).
     if: ${{ false }}
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64, high]
     timeout-minutes: 90
     permissions:
       contents: read
@@ -230,7 +230,7 @@ jobs:
     # tests/e2e/actr/web-browser/run.sh packages the same currently-unbuildable V2
     # TypeScript workload as typescript-e2e. Re-enable under #431 after #427.
     if: ${{ false }}
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64, high]
     timeout-minutes: 90
     permissions:
       contents: read
@@ -542,7 +542,9 @@ jobs:
 
   python-web-e2e:
     name: Python Web E2E
-    runs-on: ubuntu-latest-m
+    # Hosted on purpose: drives a real Chrome (PUPPETEER_SKIP_DOWNLOAD +
+    # system google-chrome); the ARC image ships no browser.
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
       contents: read
@@ -605,7 +607,10 @@ jobs:
     # .so files are gitignored), publishes the AAR to mavenLocal, bootstraps a
     # local actrix + Rust EchoService, scaffolds a Kotlin client (linked mode),
     # and verifies via `./gradlew connectedDebugAndroidTest` on an x86_64 emulator.
-    runs-on: ubuntu-latest-m
+    # Hosted on purpose: connectedDebugAndroidTest needs a real x86_64
+    # emulator with KVM (/dev/kvm) and udev - not available in ARC pods.
+    # Revisit once the fleet exposes device mappings.
+    runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
       contents: read
