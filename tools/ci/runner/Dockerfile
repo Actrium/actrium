@@ -409,7 +409,13 @@ RUN set -eux; \
     curl -fsSL --retry 3 --retry-all-errors -o /tmp/gradle-dist/gradle.zip "$dist_url"; \
     echo "${GRADLE_DIST_SHA256}  /tmp/gradle-dist/gradle.zip" | sha256sum --check --status; \
     unzip -q /tmp/gradle-dist/gradle.zip -d "$dist_dir"; \
-    touch "$dist_dir/gradle-${GRADLE_VERSION}-bin.ok" "$dist_dir/gradle-${GRADLE_VERSION}-bin.lck"; \
+    # The .ok marker is not a flag: when the wrapper's properties set
+    # distributionSha256Sum, the wrapper compares the marker's CONTENT against
+    # that hash. An empty marker never matches and forces a re-download at job
+    # time. Write the verified sha256 into the marker (observed on ARC:
+    # empty marker -> per-job 200 MB re-download despite the staged dist).
+    echo "${GRADLE_DIST_SHA256}" > "$dist_dir/gradle-${GRADLE_VERSION}-bin.ok"; \
+    touch "$dist_dir/gradle-${GRADLE_VERSION}-bin.lck"; \
     rm -rf /tmp/gradle-dist; \
     export JAVA_HOME="$RUNNER_TOOL_CACHE/Java_Temurin-Hotspot_jdk/${JDK_VERSION}/x64"; \
     "$dist_dir/gradle-${GRADLE_VERSION}/bin/gradle" --version; \
