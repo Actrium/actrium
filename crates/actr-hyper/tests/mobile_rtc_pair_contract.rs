@@ -357,7 +357,7 @@ async fn p04_a_only_offline_online_with_real_link_loss_soft_recovers_both_ends()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn p05_a_address_provider_change_soft_recovers_after_transient_path_loss_without_mirroring_platform_fact_to_b()
+async fn p05_a_native_path_change_soft_recovers_after_transient_path_loss_without_mirroring_platform_fact_to_b()
  {
     let Some(changed_address) = bindable_non_loopback_ipv4() else {
         eprintln!("p05: skipping — no bindable non-loopback IPv4 interface on this host");

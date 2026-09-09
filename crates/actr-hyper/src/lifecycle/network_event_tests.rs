@@ -1288,6 +1288,118 @@ fn online_route_snapshot(sequence: u64, wifi: bool) -> NetworkSnapshot {
     }
 }
 
+#[cfg(feature = "webrtc-v020")]
+#[test]
+fn v020_material_path_change_emits_local_address_edge() {
+    use crate::wire::webrtc::v020::recovery::{RtcNetworkEvent, RtcRecoverySupervisor};
+
+    let supervisor = RtcRecoverySupervisor::new();
+    let mut events = supervisor.subscribe();
+    let mut previous_path = None;
+    let mut path_change_pending = false;
+
+    let wifi = online_route_snapshot(1, true);
+    super::publish_v020_network_fact(
+        &supervisor,
+        &NetworkEvent::NetworkPathChanged {
+            snapshot: wifi.clone(),
+        },
+        previous_path,
+        &mut path_change_pending,
+        &mut previous_path,
+    );
+    assert_eq!(
+        events.try_recv().expect("initial availability fact"),
+        RtcNetworkEvent::NetworkAvailable
+    );
+    assert!(
+        events.try_recv().is_err(),
+        "initial path must not restart ICE"
+    );
+
+    let cellular = online_route_snapshot(2, false);
+    super::publish_v020_network_fact(
+        &supervisor,
+        &NetworkEvent::NetworkPathChanged { snapshot: cellular },
+        previous_path,
+        &mut path_change_pending,
+        &mut previous_path,
+    );
+    assert_eq!(
+        events.try_recv().expect("availability fact"),
+        RtcNetworkEvent::NetworkAvailable
+    );
+    assert_eq!(
+        events.try_recv().expect("material path change fact"),
+        RtcNetworkEvent::LocalAddressChanged
+    );
+}
+
+#[cfg(feature = "webrtc-v020")]
+#[test]
+fn v020_path_change_survives_android_unknown_intermediate_state() {
+    use crate::wire::webrtc::v020::recovery::{RtcNetworkEvent, RtcRecoverySupervisor};
+
+    let supervisor = RtcRecoverySupervisor::new();
+    let mut events = supervisor.subscribe();
+    let mut previous_path = None;
+    let mut path_change_pending = false;
+
+    super::publish_v020_network_fact(
+        &supervisor,
+        &NetworkEvent::NetworkPathChanged {
+            snapshot: online_route_snapshot(1, true),
+        },
+        previous_path,
+        &mut path_change_pending,
+        &mut previous_path,
+    );
+    assert_eq!(
+        events.try_recv().expect("initial availability fact"),
+        RtcNetworkEvent::NetworkAvailable
+    );
+
+    super::publish_v020_network_fact(
+        &supervisor,
+        &NetworkEvent::NetworkPathChanged {
+            snapshot: NetworkSnapshot {
+                sequence: 2,
+                availability: NetworkAvailability::Unknown,
+                transport: NetworkTransportFlags::default(),
+                is_expensive: false,
+                is_constrained: false,
+            },
+        },
+        previous_path,
+        &mut path_change_pending,
+        &mut previous_path,
+    );
+    assert!(
+        events.try_recv().is_err(),
+        "Unknown is held as a pending edge"
+    );
+    assert!(path_change_pending);
+
+    super::publish_v020_network_fact(
+        &supervisor,
+        &NetworkEvent::NetworkPathChanged {
+            snapshot: online_route_snapshot(3, false),
+        },
+        previous_path,
+        &mut path_change_pending,
+        &mut previous_path,
+    );
+    assert_eq!(
+        events.try_recv().expect("availability fact"),
+        RtcNetworkEvent::NetworkAvailable
+    );
+    assert_eq!(
+        events.try_recv().expect("pending path change fact"),
+        RtcNetworkEvent::LocalAddressChanged
+    );
+    assert!(!path_change_pending);
+}
+
 #[tokio::test]
 async fn gated_reconciler_waits_for_authoritative_foreground() {
     let (started_tx, mut started_rx) = mpsc::unbounded_channel();

@@ -4040,7 +4040,7 @@ fn answerer_local_address_change_starts_soft_recovery() {
 }
 
 #[test]
-fn answerer_physical_failure_waits_without_restart_or_rebuild() {
+fn answerer_physical_failure_wakes_offerer_without_local_restart_or_rebuild() {
     let mut state = RtcPeerState::new(test_actor_id(2));
     let generation = drive_answerer_to_negotiating(&mut state);
     drive_to_sendable(&mut state, generation);
@@ -4048,7 +4048,7 @@ fn answerer_physical_failure_waits_without_restart_or_rebuild() {
     let effects = reduce(&mut state, failed_tick(generation));
 
     assert!(!has_restart_ice(&effects, generation));
-    assert!(!has_restart_request(&effects, 1));
+    assert!(has_restart_request(&effects, 1));
     assert!(!has_build_session(&effects, generation + 1));
     assert!(!has_role_negotiation(&effects));
     assert_eq!(state.phase, RtcPeerPhase::Recovering);
@@ -4056,13 +4056,36 @@ fn answerer_physical_failure_waits_without_restart_or_rebuild() {
     assert!(!state.recovery_attempt_started);
     assert!(state.awaiting_offer);
     assert_eq!(state.active_generation, Some(generation));
+    assert_eq!(state.local_restart_request_attempt, 1);
 
-    // A per-attempt deadline does not create a local replacement (no build),
-    // but it is no longer silent: it sends/retransmits the correlated
-    // restart request so a healthy offerer wakes toward hard recovery. The
+    let request_id = state
+        .local_restart_request_id
+        .clone()
+        .expect("failed Answerer must create a restart request identity");
+    let recovery_epoch = state.recovery_epoch;
+    let duplicate_effects = reduce(&mut state, failed_tick(generation));
+    assert!(
+        !duplicate_effects.iter().any(|effect| matches!(
+            effect,
+            RtcPeerEffect::SendSignaling {
+                message: SignalingMessage::IceRestartRequest { .. },
+                ..
+            }
+        )),
+        "duplicate Failed callbacks must not emit a second immediate request"
+    );
+    assert_eq!(
+        state.local_restart_request_id.as_deref(),
+        Some(request_id.as_str())
+    );
+    assert_eq!(state.local_restart_request_attempt, 1);
+    assert_eq!(state.recovery_epoch, recovery_epoch);
+
+    // The first request is emitted at the failure edge. A per-attempt deadline
+    // does not create a local replacement (no build), but retransmits the same
+    // correlated request so a healthy offerer wakes toward hard recovery. The
     // single recovery budget still performs the terminal cleanup if no Offer
     // arrives.
-    let recovery_epoch = state.recovery_epoch;
     let deadline_effects = reduce(
         &mut state,
         RtcPeerInput::RecoveryDeadlineElapsed { recovery_epoch },
@@ -4071,9 +4094,12 @@ fn answerer_physical_failure_waits_without_restart_or_rebuild() {
         deadline_effects.iter().any(|e| matches!(
             e,
             RtcPeerEffect::SendSignaling {
-                message: SignalingMessage::IceRestartRequest { .. },
+                message: SignalingMessage::IceRestartRequest {
+                    request_id: actual,
+                    attempt: 2,
+                },
                 ..
-            }
+            } if actual == &request_id
         )),
         "the parked deadline must drive the offerer wake"
     );
@@ -4096,6 +4122,41 @@ fn answerer_physical_failure_waits_without_restart_or_rebuild() {
     );
     assert_eq!(state.active_generation, None);
     assert!(!state.awaiting_offer);
+}
+
+#[test]
+fn answerer_failed_after_request_preserves_request_identity() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_negotiating(&mut state);
+    drive_to_sendable(&mut state, generation);
+
+    let initial_effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::LocalAddressChanged,
+        )),
+    );
+    assert!(has_restart_request(&initial_effects, 1));
+    let request_id = state
+        .local_restart_request_id
+        .clone()
+        .expect("the initial Answerer recovery must create a request identity");
+    let request_attempt = state.local_restart_request_attempt;
+    let request_epoch = state.recovery_epoch;
+
+    // A terminal state callback can arrive after the request-only recovery has
+    // already started. Parking the physical failure must keep the same
+    // correlated request instead of resetting the exchange to attempt 1.
+    let failed_effects = reduce(&mut state, failed_tick(generation));
+    assert!(!has_restart_ice(&failed_effects, generation));
+    assert!(!has_build_session(&failed_effects, generation + 1));
+    assert!(state.awaiting_offer);
+    assert_eq!(
+        state.local_restart_request_id.as_deref(),
+        Some(request_id.as_str())
+    );
+    assert_eq!(state.local_restart_request_attempt, request_attempt);
+    assert_eq!(state.recovery_epoch, request_epoch);
 }
 
 #[test]

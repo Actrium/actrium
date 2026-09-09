@@ -1524,13 +1524,6 @@ impl TestHarness {
             .set_addresses(addresses)
     }
 
-    pub(crate) fn address_provider(&self, serial: u64) -> Arc<TestLocalAddressProvider> {
-        self.address_providers
-            .get(&serial)
-            .unwrap_or_else(|| panic!("peer {serial} address provider not found"))
-            .clone()
-    }
-
     /// Remove and fully shut down one independent endpoint while leaving the
     /// other endpoints and the externally owned Actrix services alive. This is
     /// the process-restart seam used by the mobile pair contract.
