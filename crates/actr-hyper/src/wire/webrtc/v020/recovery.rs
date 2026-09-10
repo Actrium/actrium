@@ -48,8 +48,10 @@ pub(crate) const NETWORK_RECOVERY_TIMEOUT: std::time::Duration = std::time::Dura
 /// Per-attempt ICE restart readiness budget during network recovery. The
 /// controller re-arms this for each recovery epoch while the total cycle stays
 /// bounded by [`NETWORK_RECOVERY_TIMEOUT`].
-pub(crate) const ICE_RESTART_ATTEMPT_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(10);
+///
+/// Public so `test_support` can re-export it: integration tests must derive
+/// their timing guards from this window instead of re-hardcoding seconds.
+pub const ICE_RESTART_ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Network/App lifecycle facts broadcast by the recovery supervisor
 /// (RFC §"RecoverySupervisor"). The supervisor only broadcasts these facts;
