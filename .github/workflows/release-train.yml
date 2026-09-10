@@ -260,18 +260,24 @@ jobs:
           DRY_RUN: ${{ needs.context.outputs.dry_run }}
           PRE_RELEASE: ${{ needs.context.outputs.pre_release }}
           MAINTENANCE_RELEASE: ${{ needs.context.outputs.maintenance_release }}
+          RELEASE_BRANCH: ${{ needs.context.outputs.target_branch }}
         run: |
           set -euo pipefail
           VERSION="${TAG#v}"
           NOTES_FILE=$(mktemp)
+          if [[ "$DRY_RUN" == "true" ]]; then
+            # A rehearsal can start from a commit without reviewed release notes.
+            python3 scripts/actr/generate-changelog.py \
+              --version "$VERSION" --to-ref HEAD --branch "$RELEASE_BRANCH" \
+              --header .github/release-notes-header.md --output "$NOTES_FILE"
+            echo "[dry-run] Generated release notes for $TAG without publishing"
+            exit 0
+          fi
+
           python3 scripts/actr/generate-changelog.py \
             --version "$VERSION" --to-ref HEAD --from-release-commit \
             --header .github/release-notes-header.md --output "$NOTES_FILE"
 
-          if [[ "$DRY_RUN" == "true" ]]; then
-            echo "[dry-run] Generated release notes for $TAG without publishing"
-            exit 0
-          fi
           args=(
             --repo "$GITHUB_REPOSITORY"
             --title "$TAG"
