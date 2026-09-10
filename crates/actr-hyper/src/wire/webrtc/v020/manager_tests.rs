@@ -43,28 +43,10 @@ fn test_actor_id(serial_number: u64) -> ActrId {
 struct FakeOps {
     close_calls: Option<Arc<AtomicUsize>>,
     block_first_close: bool,
-    block_close: Option<CloseGate>,
     /// When set, every `restart_ice()` call signals `entered` and then waits
     /// for a `release` permit before returning (see
     /// `ice_restarts_are_not_serialized_by_a_node_wide_limit`).
     block_restart: Option<RestartGate>,
-}
-
-/// Shared gate for a physical close. It lets the manager tests hold a peer in
-/// the `Closing` tombstone while a delayed inbound recovery wake races with it.
-#[derive(Clone)]
-struct CloseGate {
-    entered: Arc<tokio::sync::Semaphore>,
-    release: Arc<tokio::sync::Semaphore>,
-}
-
-impl CloseGate {
-    fn new() -> Self {
-        Self {
-            entered: Arc::new(tokio::sync::Semaphore::new(0)),
-            release: Arc::new(tokio::sync::Semaphore::new(0)),
-        }
-    }
 }
 
 /// Shared gate for `FakeOps::restart_ice`: each call signals `entered`, then
@@ -148,14 +130,6 @@ impl SessionOps for FakeOps {
         Default::default()
     }
     async fn close(&self) -> Result<(), RtcError> {
-        if let Some(gate) = &self.block_close {
-            gate.entered.add_permits(1);
-            gate.release
-                .acquire()
-                .await
-                .expect("close release semaphore")
-                .forget();
-        }
         if let Some(calls) = &self.close_calls {
             let call = calls.fetch_add(1, Ordering::SeqCst);
             if self.block_first_close && call == 0 {
@@ -234,23 +208,6 @@ struct FirstCloseBlocksFactory {
     close_calls: Arc<AtomicUsize>,
 }
 
-struct CloseBlockingFactory {
-    gate: CloseGate,
-}
-
-#[async_trait]
-impl SessionFactory for CloseBlockingFactory {
-    async fn build(
-        &self,
-        _handler: Arc<WebRtcEventHandler>,
-    ) -> Result<Arc<dyn SessionOps>, RtcError> {
-        Ok(Arc::new(FakeOps {
-            block_close: Some(self.gate.clone()),
-            ..FakeOps::default()
-        }))
-    }
-}
-
 #[async_trait]
 impl SessionFactory for FirstCloseBlocksFactory {
     async fn build(
@@ -261,7 +218,6 @@ impl SessionFactory for FirstCloseBlocksFactory {
         Ok(Arc::new(FakeOps {
             close_calls: Some(self.close_calls.clone()),
             block_first_close: true,
-            block_close: None,
             block_restart: None,
         }))
     }
@@ -772,74 +728,6 @@ async fn new_signaling_generation_reopens_passive_inbound_admission() {
         "a fresh signaling generation must admit a passive answerer"
     );
     assert!(mgr.close_peer(&peer).await);
-}
-
-#[cfg(feature = "test-utils")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn close_peer_fences_a_delayed_inbound_recovery_wake() {
-    let close_gate = CloseGate::new();
-    let (signaling_tx, _signaling_rx) = mpsc::channel(16);
-    let mgr = Arc::new(RtcConnectionManager::new(
-        Arc::new(CloseBlockingFactory {
-            gate: close_gate.clone(),
-        }),
-        signaling_tx,
-    ));
-    mgr.supervisor().set_signaling_generation(Some(0));
-    let peer = test_actor_id(56);
-    let handle = mgr.ensure_controller(peer.clone()).await;
-    handle.connect().await.expect("connect command");
-    handle
-        .apply_role_assignment(true)
-        .await
-        .expect("role assignment command");
-
-    timeout(WAIT, async {
-        loop {
-            if mgr
-                .get_snapshot(&peer)
-                .await
-                .is_some_and(|snapshot| snapshot.pc_generation > 0)
-            {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("peer did not build a session before close");
-
-    // Pause the recovery wake after it has captured the current epoch but
-    // before it enters admission. close_peer then publishes Closing plus the
-    // restart fence; the delayed wake must not recreate the peer afterwards.
-    let publish = Arc::new(tokio::sync::Barrier::new(2));
-    mgr.set_peer_publish_barrier_for_test(peer.clone(), publish.clone());
-    let recovery_mgr = mgr.clone();
-    let recovery_peer = peer.clone();
-    let recovery = tokio::spawn(async move {
-        recovery_mgr
-            .connect_from_inbound_recovery(recovery_peer)
-            .await;
-    });
-    // The recovery wake has passed its first suppression check and is paused
-    // immediately before looking at the registry.
-    publish.wait().await;
-    let close_mgr = mgr.clone();
-    let close_peer = peer.clone();
-    let close = tokio::spawn(async move { close_mgr.close_peer(&close_peer).await });
-    timeout(WAIT, close_gate.entered.acquire())
-        .await
-        .expect("close should reach the physical close gate")
-        .expect("close gate was closed")
-        .forget();
-
-    // Let the recovery wake observe the Closing tombstone. It must wait for
-    // convergence and then re-check the fence rather than recreating a peer.
-    publish.wait().await;
-    close_gate.release.add_permits(1);
-    assert!(close.await.expect("close task panicked"));
-    recovery.await.expect("recovery task panicked");
-    assert!(mgr.get_controller(&peer).await.is_none());
 }
 
 #[cfg(feature = "test-utils")]

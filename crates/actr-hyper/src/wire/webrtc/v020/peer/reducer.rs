@@ -86,6 +86,22 @@ pub(crate) enum RtcPeerCommand {
     /// Correlated answerer request asking the offerer to start/retry the ICE
     /// restart offer flow.
     ApplyIceRestartRequest { request_id: String, attempt: u32 },
+    /// The same request, with a response carrying the outcome committed by
+    /// this controller's reducer. The signaling router uses this variant so
+    /// it never classifies the request from a stale snapshot.
+    ApplyIceRestartRequestCommitted {
+        request_id: String,
+        attempt: u32,
+        respond: tokio::sync::oneshot::Sender<i32>,
+    },
+    /// Acknowledgement for a correlated answerer restart request. A negative
+    /// outcome means the requester's current recovery attempt must start a
+    /// fresh role negotiation instead of waiting forever for an Offer.
+    ApplyIceRestartRequestAck {
+        request_id: String,
+        attempt: u32,
+        outcome: i32,
+    },
     /// A remote ICE candidate arrived.
     ApplyRemoteCandidate(RTCIceCandidateInit),
     /// The signaling router failed to commit critical SDP for one
@@ -175,6 +191,25 @@ impl std::fmt::Debug for RtcPeerCommand {
                 .debug_struct("ApplyIceRestartRequest")
                 .field("request_id", request_id)
                 .field("attempt", attempt)
+                .finish(),
+            Self::ApplyIceRestartRequestCommitted {
+                request_id,
+                attempt,
+                ..
+            } => f
+                .debug_struct("ApplyIceRestartRequestCommitted")
+                .field("request_id", request_id)
+                .field("attempt", attempt)
+                .finish(),
+            Self::ApplyIceRestartRequestAck {
+                request_id,
+                attempt,
+                outcome,
+            } => f
+                .debug_struct("ApplyIceRestartRequestAck")
+                .field("request_id", request_id)
+                .field("attempt", attempt)
+                .field("outcome", outcome)
                 .finish(),
             Self::ApplyRemoteCandidate(_) => f.write_str("ApplyRemoteCandidate(..)"),
             Self::SignalingDeliveryFailed {
@@ -494,6 +529,13 @@ pub(crate) enum SignalingMessage {
         request_id: String,
         attempt: u32,
     },
+    /// Receiver-side acknowledgement for an `IceRestartRequest`. This keeps
+    /// the v0.20 wire contract aligned with the pre-542 Coordinator path.
+    IceRestartRequestAck {
+        request_id: String,
+        attempt: u32,
+        outcome: i32,
+    },
     Answer {
         desc: Box<RTCSessionDescription>,
         exchange_id: Option<String>,
@@ -519,6 +561,7 @@ impl SignalingMessage {
             Self::Offer { .. } => "offer",
             Self::IceRestartOffer { .. } => "ice_restart_offer",
             Self::IceRestartRequest { .. } => "ice_restart_request",
+            Self::IceRestartRequestAck { .. } => "ice_restart_request_ack",
             Self::Answer { .. } => "answer",
             Self::Candidate(_) => "candidate",
             Self::RoleNegotiation => "role_negotiation",
@@ -1362,6 +1405,92 @@ fn start_role_negotiation(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEff
     });
 }
 
+/// Apply an Answerer's restart request and return the outcome committed by the
+/// same reducer turn. The router uses this result for its Ack, rather than
+/// classifying the request from a snapshot observed before the command ran.
+fn reduce_ice_restart_request(
+    state: &mut RtcPeerState,
+    effects: &mut Vec<RtcPeerEffect>,
+    request_id: String,
+    attempt: u32,
+) -> i32 {
+    use actr_protocol::ice_restart_request_ack::Outcome;
+
+    let outcome = if state.role != Role::Offerer {
+        Outcome::WrongRole
+    } else if state.close_requested
+        || state.active_generation.is_none()
+            && state.building_generation.is_none()
+            && state.pending_generation.is_none()
+    {
+        Outcome::NoActiveSession
+    } else {
+        Outcome::Accepted
+    };
+
+    if outcome != Outcome::Accepted {
+        return outcome as i32;
+    }
+
+    // Do not consume the remote retry identity until this Controller is
+    // actually able to act on it. A request can overtake role/build
+    // publication; remembering it while ineligible would make the answerer's
+    // retransmission look like a duplicate after the local Session becomes
+    // ready.
+    if state.active_generation.is_none()
+        || state.building_generation.is_some()
+        || state.pending_generation.is_some()
+    {
+        return Outcome::Accepted as i32;
+    }
+    let duplicate = matches!(
+        state.last_remote_restart_request.as_ref(),
+        Some((seen_id, seen_attempt)) if seen_id == &request_id && *seen_attempt >= attempt
+    );
+    if duplicate {
+        return Outcome::Accepted as i32;
+    }
+    state.last_remote_restart_request = Some((request_id, attempt));
+
+    // Both endpoints normally receive NetworkAvailable. The offerer may
+    // therefore have already started the same soft-recovery round before the
+    // answerer's first correlated wake arrives. Starting a second
+    // restart_ice/offer concurrently corrupts the v0.20 signaling state
+    // machine. A later attempt remains an explicit retransmission wake and is
+    // allowed to restart the round.
+    if attempt == 1 && state.recovery_inflight && state.recovery_attempt_started {
+        return Outcome::Accepted as i32;
+    }
+
+    // Attempts below the escalation threshold drive the ordinary soft path:
+    // both endpoints normally recover from a shared network blip with an ICE
+    // restart on the live generation, and the answerer's live session can
+    // accept the restart offer.
+    //
+    // Persistent retransmission is proof soft recovery cannot repair the
+    // answerer — its physical session is dead (an answerer retransmits
+    // indefinitely while parked awaiting an offer it can never receive on a
+    // dead generation). Escalate to Hard Recovery: the replacement Session
+    // allocates a fresh generation and produces the replacement Offer the
+    // passive answerer needs, instead of letting it exhaust to Idle with
+    // transport down. A request that overtakes a soft round already in flight
+    // was returned above, so this cannot corrupt an in-progress restart; a
+    // newer attempt while a replacement is already building is a no-op inside
+    // start_hard_recovery.
+    const ANSWERER_HARD_ESCALATION_ATTEMPT: u32 = 4;
+    if attempt >= ANSWERER_HARD_ESCALATION_ATTEMPT {
+        start_hard_recovery(state, effects);
+    } else {
+        if state.recovery_inflight {
+            state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
+            state.recovery_attempt_started = false;
+        }
+        start_soft_recovery(state, effects);
+    }
+
+    Outcome::Accepted as i32
+}
+
 fn reduce_command(
     state: &mut RtcPeerState,
     command: RtcPeerCommand,
@@ -1654,63 +1783,52 @@ fn reduce_command(
             request_id,
             attempt,
         } => {
-            // Do not consume the remote retry identity until this Controller is
-            // actually able to act on it. A request can overtake role/build
-            // publication; remembering it while ineligible would make the
-            // answerer's retransmission look like a duplicate after the local
-            // Session becomes ready.
-            if state.role != Role::Offerer
-                || state.active_generation.is_none()
+            let _ = reduce_ice_restart_request(state, effects, request_id, attempt);
+        }
+        RtcPeerCommand::ApplyIceRestartRequestCommitted {
+            request_id,
+            attempt,
+            respond,
+        } => {
+            let outcome = reduce_ice_restart_request(state, effects, request_id, attempt);
+            let _ = respond.send(outcome);
+        }
+        RtcPeerCommand::ApplyIceRestartRequestAck {
+            request_id,
+            attempt,
+            outcome,
+        } => {
+            // Only the Answerer owns the request flight. An Ack for an older
+            // request/attempt must not restart a newer recovery attempt.
+            if state.role != Role::Answerer
                 || state.close_requested
-                || state.building_generation.is_some()
-                || state.pending_generation.is_some()
+                || state.local_restart_request_id.as_deref() != Some(request_id.as_str())
+                || state.local_restart_request_attempt != attempt
             {
-                return;
-            }
-            let duplicate = matches!(
-                state.last_remote_restart_request.as_ref(),
-                Some((seen_id, seen_attempt)) if seen_id == &request_id && *seen_attempt >= attempt
-            );
-            if duplicate {
-                return;
-            }
-            state.last_remote_restart_request = Some((request_id, attempt));
-
-            // Both endpoints normally receive NetworkAvailable. The offerer
-            // may therefore have already started the same soft-recovery round
-            // before the answerer's first correlated wake arrives. Starting a
-            // second restart_ice/offer concurrently corrupts the v0.20
-            // signaling state machine. A later attempt remains an explicit
-            // retransmission wake and is allowed to restart the round.
-            if attempt == 1 && state.recovery_inflight && state.recovery_attempt_started {
+                state.stale_events = state.stale_events.saturating_add(1);
                 return;
             }
 
-            // Attempts below the escalation threshold drive the ordinary
-            // soft path: both endpoints normally recover from a shared
-            // network blip with an ICE restart on the live generation, and
-            // the answerer's live session can accept the restart offer.
-            //
-            // Persistent retransmission is proof soft recovery cannot
-            // repair the answerer — its physical session is dead (an
-            // answerer retransmits indefinitely while parked awaiting an
-            // offer it can never receive on a dead generation). Escalate to
-            // Hard Recovery: the replacement Session allocates a fresh
-            // generation and produces the replacement Offer the passive
-            // answerer needs, instead of letting it exhaust to Idle with
-            // transport down. A request that overtakes a soft round already
-            // in flight was returned above, so this cannot corrupt an
-            // in-progress restart; a newer attempt while a replacement is
-            // already building is a no-op inside start_hard_recovery.
-            const ANSWERER_HARD_ESCALATION_ATTEMPT: u32 = 4;
-            if attempt >= ANSWERER_HARD_ESCALATION_ATTEMPT {
-                start_hard_recovery(state, effects);
-            } else {
-                if state.recovery_inflight {
-                    state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
-                    state.recovery_attempt_started = false;
+            match actr_protocol::ice_restart_request_ack::Outcome::try_from(outcome) {
+                Ok(actr_protocol::ice_restart_request_ack::Outcome::Accepted) => {
+                    // Acceptance only confirms that the Offerer owns the
+                    // request. The Answerer still waits for the correlated
+                    // ICE-restart Offer and its existing deadline remains the
+                    // retransmission backstop.
                 }
-                start_soft_recovery(state, effects);
+                Ok(
+                    actr_protocol::ice_restart_request_ack::Outcome::NoActiveSession
+                    | actr_protocol::ice_restart_request_ack::Outcome::WrongRole,
+                ) => {
+                    // The remote endpoint cannot continue the current
+                    // request-only exchange. Rebase this Controller into a
+                    // fresh role-negotiated connection, matching the legacy
+                    // Coordinator's Ack failure path.
+                    restart_after_request_ack(state, effects, outcome);
+                }
+                Err(_) => {
+                    state.stale_events = state.stale_events.saturating_add(1);
+                }
             }
         }
         RtcPeerCommand::ApplyRemoteDescription(desc) => {
@@ -1983,6 +2101,27 @@ fn restart_as_offerer_after_role_assignment(
         generation,
         operation_id,
     });
+}
+
+/// Recreate the logical connection after the remote endpoint reports that it
+/// cannot continue the current Answerer restart request. This is the v0.20
+/// equivalent of the legacy `IceRestartRequestAck(NoActiveSession)` path:
+/// retire the current physical attempt, then let server role arbitration choose
+/// the next Offerer instead of waiting for an Offer that cannot arrive.
+fn restart_after_request_ack(
+    state: &mut RtcPeerState,
+    effects: &mut Vec<RtcPeerEffect>,
+    outcome: i32,
+) {
+    tracing::info!(
+        peer = %state.peer_id.to_string_repr(),
+        outcome,
+        recovery_cycle = state.recovery_cycle,
+        "v0.20 restart request acknowledgement requires fresh role negotiation"
+    );
+    terminate_transport_attempt(state, RtcUnavailableReason::NegotiationFailed, effects);
+    state.begin_transport_attempt();
+    start_role_negotiation(state, effects);
 }
 
 /// S5-2/S5-3/S5-5: the supervisor broadcasts facts; the controller's reducer
