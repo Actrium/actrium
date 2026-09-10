@@ -312,6 +312,17 @@ pub trait SignalingClient: Send + Sync {
     /// Receivesignalingsignal seal
     async fn receive_envelope(&self) -> NetworkResult<Option<SignalingEnvelope>>;
 
+    /// Receive an envelope together with its library-only receive span. Legacy
+    /// implementations inherit a current-span fallback; the WebSocket client
+    /// preserves the span created by its bounded receive queue.
+    async fn receive_envelope_with_span(
+        &self,
+    ) -> NetworkResult<Option<(SignalingEnvelope, tracing::Span)>> {
+        self.receive_envelope()
+            .await
+            .map(|envelope| envelope.map(|envelope| (envelope, tracing::Span::current())))
+    }
+
     /// Check connection status
     fn is_connected(&self) -> bool;
 
@@ -661,6 +672,7 @@ enum InboundEnqueueError {
 /// envelope, or when the queue is drained/reset without delivery.
 struct QueuedInbound {
     envelope: SignalingEnvelope,
+    span: tracing::Span,
     _permit: tokio::sync::OwnedSemaphorePermit,
 }
 
@@ -696,10 +708,21 @@ impl InboundEgress {
     ///
     /// Returns `Saturated` if capacity is not granted within
     /// `backpressure_timeout`; `Closed` if the channel went away.
+    #[cfg(test)]
     async fn send(
         &self,
         envelope: SignalingEnvelope,
         byte_len: usize,
+    ) -> Result<(), InboundEnqueueError> {
+        self.send_with_span(envelope, byte_len, tracing::Span::current())
+            .await
+    }
+
+    async fn send_with_span(
+        &self,
+        envelope: SignalingEnvelope,
+        byte_len: usize,
+        span: tracing::Span,
     ) -> Result<(), InboundEnqueueError> {
         let reserve = async {
             // `byte_len` is bounded by `max_frame_bytes` (checked before decode),
@@ -714,6 +737,7 @@ impl InboundEgress {
             self.tx
                 .send(QueuedInbound {
                     envelope,
+                    span,
                     _permit: permit,
                 })
                 .await
@@ -1667,7 +1691,12 @@ impl WebSocketSignalingClient {
     /// Send envelope and wait for response with timeout and error handling.
     #[cfg_attr(
         feature = "opentelemetry",
-        tracing::instrument(skip_all, fields(envelope_id = %envelope.envelope_id))
+        tracing::instrument(
+            name = "signaling.request",
+            level = "debug",
+            skip_all,
+            fields(envelope_id = %envelope.envelope_id)
+        )
     )]
     async fn send_envelope_and_wait_response(
         &self,
@@ -1805,9 +1834,9 @@ impl WebSocketSignalingClient {
                         let frame_len = data.len();
                         match SignalingEnvelope::decode(&data[..]) {
                             Ok(envelope) => {
-                                #[cfg(feature = "opentelemetry")]
                                 let span = {
                                     let span = tracing::info_span!("signaling.receive_envelope", envelope_id = %envelope.envelope_id);
+                                    #[cfg(feature = "opentelemetry")]
                                     let _ = span.set_parent(extract_trace_context(&envelope));
                                     span
                                 };
@@ -1822,9 +1851,7 @@ impl WebSocketSignalingClient {
                                 );
                                 if let Some(reply_for) = envelope.reply_for.clone() {
                                     if let Some(sender) = pending.lock().await.remove(&reply_for) {
-                                        #[cfg(feature = "opentelemetry")]
-                                        let _ = span.enter();
-                                        if let Err(e) = sender.send(envelope) {
+                                        if let Err(e) = span.in_scope(|| sender.send(envelope)) {
                                             stats.errors.fetch_add(1, Ordering::Relaxed);
                                             tracing::warn!(
                                                 "Failed to send reply envelope to waiter: {e:?}",
@@ -1841,7 +1868,10 @@ impl WebSocketSignalingClient {
                                 // TCP/WebSocket backpressure by awaiting capacity, then
                                 // fails closed (reconnect) rather than dropping the
                                 // signaling message (issue #351).
-                                match inbound_egress.send(envelope, frame_len).await {
+                                match inbound_egress
+                                    .send_with_span(envelope, frame_len, span)
+                                    .await
+                                {
                                     Ok(()) => {}
                                     Err(InboundEnqueueError::Saturated) => {
                                         stats
@@ -2764,7 +2794,10 @@ impl SignalingClient for WebSocketSignalingClient {
         }
     }
 
-    #[cfg_attr(feature = "opentelemetry", tracing::instrument(skip_all))]
+    #[cfg_attr(
+        feature = "opentelemetry",
+        tracing::instrument(name = "signaling.register", skip_all)
+    )]
     async fn send_register_request(
         &self,
         request: RegisterRequest,
@@ -2793,7 +2826,11 @@ impl SignalingClient for WebSocketSignalingClient {
 
     #[cfg_attr(
         feature = "opentelemetry",
-        tracing::instrument(skip_all, fields(actor_id = %actor_id))
+        tracing::instrument(
+            name = "signaling.unregister",
+            skip_all,
+            fields(actor_id = %actor_id)
+        )
     )]
     async fn send_unregister_request(
         &self,
@@ -2831,7 +2868,12 @@ impl SignalingClient for WebSocketSignalingClient {
 
     #[cfg_attr(
         feature = "opentelemetry",
-        tracing::instrument(level = "debug", skip_all, fields(actor_id = %actor_id))
+        tracing::instrument(
+            name = "signaling.heartbeat",
+            level = "debug",
+            skip_all,
+            fields(actor_id = %actor_id)
+        )
     )]
     async fn send_heartbeat(
         &self,
@@ -2916,7 +2958,10 @@ impl SignalingClient for WebSocketSignalingClient {
         ))
     }
 
-    #[cfg_attr(feature = "opentelemetry", tracing::instrument(skip_all))]
+    #[cfg_attr(
+        feature = "opentelemetry",
+        tracing::instrument(name = "signaling.route_candidates", skip_all)
+    )]
     async fn send_route_candidates_request(
         &self,
         actor_id: ActrId,
@@ -3008,7 +3053,12 @@ impl SignalingClient for WebSocketSignalingClient {
 
     #[cfg_attr(
         feature = "opentelemetry",
-        tracing::instrument(level = "debug", skip_all, fields(envelope_id = %envelope.envelope_id))
+        tracing::instrument(
+            name = "signaling.send",
+            level = "debug",
+            skip_all,
+            fields(envelope_id = %envelope.envelope_id)
+        )
     )]
     async fn send_envelope(&self, envelope: SignalingEnvelope) -> NetworkResult<()> {
         #[cfg(feature = "opentelemetry")]
@@ -3090,14 +3140,22 @@ impl SignalingClient for WebSocketSignalingClient {
     }
 
     async fn receive_envelope(&self) -> NetworkResult<Option<SignalingEnvelope>> {
+        self.receive_envelope_with_span()
+            .await
+            .map(|envelope| envelope.map(|(envelope, _span)| envelope))
+    }
+
+    async fn receive_envelope_with_span(
+        &self,
+    ) -> NetworkResult<Option<(SignalingEnvelope, tracing::Span)>> {
         let mut rx = self.inbound_rx.lock().await;
         match rx.recv().await {
             Some(queued) => {
                 // Destructuring drops the byte-budget permit here, returning the
                 // reserved bytes to the budget now that the envelope is handed
                 // to the consumer.
-                let QueuedInbound { envelope, .. } = queued;
-                Ok(Some(envelope))
+                let QueuedInbound { envelope, span, .. } = queued;
+                Ok(Some((envelope, span)))
             }
             None => {
                 tracing::error!("Inbound channel closed");

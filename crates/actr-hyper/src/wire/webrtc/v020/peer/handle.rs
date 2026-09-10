@@ -16,7 +16,7 @@ use webrtc::peer_connection::{RTCIceCandidateInit, RTCSessionDescription};
 
 use crate::wire::webrtc::v020::media::OutboundTrackWriter;
 use crate::wire::webrtc::v020::peer::lane_handle::{ActiveLaneRegistry, LaneHandle};
-use crate::wire::webrtc::v020::peer::reducer::RtcPeerCommand;
+use crate::wire::webrtc::v020::peer::reducer::{RtcPeerCommand, SignalingMessage};
 use crate::wire::webrtc::v020::peer::send::{RtcSendAttempt, RtcSendError};
 use crate::wire::webrtc::v020::status::{LaneKind, RtcPeerSnapshot};
 
@@ -517,9 +517,64 @@ impl RtcPeerControllerHandle {
     /// snapshot published, rather than merely acknowledging mailbox enqueue.
     pub(crate) async fn connect(&self) -> Result<u64, ControllerGone> {
         let (respond, committed) = tokio::sync::oneshot::channel();
-        self.send_command(RtcPeerCommand::ConnectCommitted { respond })
-            .await?;
+        self.send_command_with_span(
+            RtcPeerCommand::ConnectCommitted { respond },
+            tracing::Span::current(),
+            false,
+        )
+        .await?;
         committed.await.map_err(|_| ControllerGone::Gone)
+    }
+
+    /// Deliver one signaling message while preserving the receive-side span
+    /// across the controller mailbox. The span is library metadata only; the
+    /// reducer still receives the same business command as before.
+    pub(crate) async fn apply_signaling_message_with_span(
+        &self,
+        message: SignalingMessage,
+        span: tracing::Span,
+    ) -> Result<(), ControllerGone> {
+        let command = match message {
+            SignalingMessage::Offer { desc, exchange_id } => {
+                RtcPeerCommand::ApplyRemoteDescriptionCorrelated { desc, exchange_id }
+            }
+            SignalingMessage::Answer { desc, exchange_id } => {
+                RtcPeerCommand::ApplyRemoteDescriptionCorrelated { desc, exchange_id }
+            }
+            SignalingMessage::IceRestartOffer { desc, exchange_id } => {
+                RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
+                    desc,
+                    exchange_id: Some(exchange_id),
+                }
+            }
+            SignalingMessage::IceRestartRequest {
+                request_id,
+                attempt,
+            } => RtcPeerCommand::ApplyIceRestartRequest {
+                request_id,
+                attempt,
+            },
+            SignalingMessage::Candidate(candidate) => {
+                RtcPeerCommand::ApplyRemoteCandidate(candidate)
+            }
+            SignalingMessage::RoleAssignment { is_offerer } => {
+                RtcPeerCommand::ApplyRoleAssignment { is_offerer }
+            }
+            SignalingMessage::IceRestartRejected { .. } => RtcPeerCommand::NetworkEvent(
+                crate::wire::webrtc::v020::recovery::RtcNetworkEvent::ForceReconnect,
+            ),
+            SignalingMessage::IceRestartRequestAck {
+                request_id,
+                attempt,
+                outcome,
+            } => RtcPeerCommand::ApplyIceRestartRequestAck {
+                request_id,
+                attempt,
+                outcome,
+            },
+            SignalingMessage::RoleNegotiation => return Ok(()),
+        };
+        self.send_command_with_span(command, span, true).await
     }
 
     /// Terminate only the initial attempt observed by a timed-out caller.
@@ -717,11 +772,15 @@ impl RtcPeerControllerHandle {
         attempt: u32,
     ) -> Result<i32, ControllerGone> {
         let (respond, outcome) = oneshot::channel();
-        self.send_command(RtcPeerCommand::ApplyIceRestartRequestCommitted {
-            request_id,
-            attempt,
-            respond,
-        })
+        self.send_command_with_span(
+            RtcPeerCommand::ApplyIceRestartRequestCommitted {
+                request_id,
+                attempt,
+                respond,
+            },
+            tracing::Span::current(),
+            true,
+        )
         .await?;
         outcome.await.map_err(|_| ControllerGone::Gone)
     }
@@ -801,5 +860,19 @@ impl RtcPeerControllerHandle {
             .send(command)
             .await
             .map_err(|_| ControllerGone::Gone)
+    }
+
+    async fn send_command_with_span(
+        &self,
+        command: RtcPeerCommand,
+        span: tracing::Span,
+        remote: bool,
+    ) -> Result<(), ControllerGone> {
+        self.send_command(RtcPeerCommand::Traced {
+            span,
+            remote,
+            command: Box::new(command),
+        })
+        .await
     }
 }

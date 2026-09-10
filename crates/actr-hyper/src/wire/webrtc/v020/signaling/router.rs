@@ -19,6 +19,9 @@ use std::sync::Arc;
 use actr_protocol::ActrId;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
+use tracing::Instrument;
+#[cfg(feature = "opentelemetry")]
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::wire::webrtc::v020::manager::RtcConnectionManager;
 use crate::wire::webrtc::v020::peer::reducer::SignalingMessage;
@@ -65,7 +68,11 @@ pub(crate) trait SignalingTransport: Send + Sync {
     async fn recv_event(&self) -> Option<SignalingInbound> {
         self.recv()
             .await
-            .map(|(from, message)| SignalingInbound::PeerMessage { from, message })
+            .map(|(from, message)| SignalingInbound::PeerMessage {
+                from,
+                message,
+                span: tracing::Span::current(),
+            })
     }
 }
 
@@ -407,7 +414,12 @@ impl SignalingRouter {
                                     | SignalingMessage::IceRestartOffer { .. }
                             )
                             .then(|| dispatch.message.clone());
-                            if let Err(error) = transport.send_dispatch(dispatch).await {
+                            let dispatch_span = dispatch.span.clone();
+                            if let Err(error) = transport
+                                .send_dispatch(dispatch)
+                                .instrument(dispatch_span)
+                                .await
+                            {
                                 tracing::warn!(
                                     peer = %peer.to_string_repr(),
                                     generation = attempt.map(|a| a.pc_generation).unwrap_or(0),
@@ -438,7 +450,11 @@ impl SignalingRouter {
                 }
                 inbound = transport.recv_event() => {
                     match inbound {
-                        Some(SignalingInbound::PeerMessage { from, message }) => {
+                        Some(SignalingInbound::PeerMessage {
+                            from,
+                            message,
+                            span,
+                        }) => {
                             while inbound_tasks.try_join_next().is_some() {}
                             // Reap finished escalations every iteration so a
                             // sustained multi-identity flood cannot grow the
@@ -555,7 +571,13 @@ impl SignalingRouter {
                                                 gate.notified().await;
                                             }
                                             routing_started.store(true, std::sync::atomic::Ordering::Release);
-                                            router.route_inbound(from.clone(), message).await;
+                                            router
+                                                .route_inbound_with_span(
+                                                    from.clone(),
+                                                    message,
+                                                    span.clone(),
+                                                )
+                                                .await;
                                         },
                                     )
                                     .await
@@ -626,6 +648,31 @@ impl SignalingRouter {
 
     /// Dispatch one inbound message to the right controller by remote `ActrId`.
     pub(crate) async fn route_inbound(&self, from: ActrId, message: SignalingMessage) {
+        self.route_inbound_with_span(from, message, tracing::Span::current())
+            .await;
+    }
+
+    pub(crate) async fn route_inbound_with_span(
+        &self,
+        from: ActrId,
+        message: SignalingMessage,
+        parent_span: tracing::Span,
+    ) {
+        let receive_span = tracing::info_span!(
+            "signaling.receive",
+            peer = %from.to_string_repr(),
+            message_kind = message.kind_name(),
+        );
+        #[cfg(feature = "opentelemetry")]
+        let _ = receive_span.set_parent(parent_span.context());
+        #[cfg(not(feature = "opentelemetry"))]
+        let _ = &parent_span;
+        self.route_inbound_inner(from, message)
+            .instrument(receive_span)
+            .await;
+    }
+
+    async fn route_inbound_inner(&self, from: ActrId, message: SignalingMessage) {
         match message {
             SignalingMessage::Offer { desc, exchange_id } => {
                 // An offer from an unknown peer creates an answerer controller
@@ -637,7 +684,10 @@ impl SignalingRouter {
             SignalingMessage::IceRestartOffer { desc, exchange_id } => {
                 if let Some(handle) = self.manager.get_controller(&from).await {
                     let _ = handle
-                        .apply_remote_ice_restart_offer_correlated(*desc, Some(exchange_id.clone()))
+                        .apply_signaling_message_with_span(
+                            SignalingMessage::IceRestartOffer { desc, exchange_id },
+                            tracing::Span::current(),
+                        )
                         .await;
                 } else {
                     // Preserve the existing wire contract: a restart offer is
@@ -703,7 +753,10 @@ impl SignalingRouter {
             SignalingMessage::Answer { desc, exchange_id } => {
                 if let Some(handle) = self.manager.get_controller(&from).await {
                     let _ = handle
-                        .apply_remote_description_correlated(*desc, exchange_id)
+                        .apply_signaling_message_with_span(
+                            SignalingMessage::Answer { desc, exchange_id },
+                            tracing::Span::current(),
+                        )
                         .await;
                 } else {
                     tracing::warn!(
@@ -714,7 +767,12 @@ impl SignalingRouter {
             }
             SignalingMessage::Candidate(candidate) => {
                 if let Some(handle) = self.manager.get_controller(&from).await {
-                    let _ = handle.apply_remote_candidate(candidate).await;
+                    let _ = handle
+                        .apply_signaling_message_with_span(
+                            SignalingMessage::Candidate(candidate),
+                            tracing::Span::current(),
+                        )
+                        .await;
                 } else {
                     tracing::debug!(
                         peer = %from.to_string_repr(),
@@ -748,7 +806,15 @@ impl SignalingRouter {
                     "remote rejected ICE restart; escalating to Hard Recovery"
                 );
                 if let Some(handle) = self.manager.get_controller(&from).await {
-                    let _ = handle.force_reconnect().await;
+                    let _ = handle
+                        .apply_signaling_message_with_span(
+                            SignalingMessage::IceRestartRejected {
+                                exchange_id,
+                                reason,
+                            },
+                            tracing::Span::current(),
+                        )
+                        .await;
                 }
             }
             SignalingMessage::IceRestartRequestAck {
@@ -758,7 +824,14 @@ impl SignalingRouter {
             } => {
                 if let Some(handle) = self.manager.get_controller(&from).await {
                     let _ = handle
-                        .apply_ice_restart_request_ack(request_id, attempt, outcome)
+                        .apply_signaling_message_with_span(
+                            SignalingMessage::IceRestartRequestAck {
+                                request_id,
+                                attempt,
+                                outcome,
+                            },
+                            tracing::Span::current(),
+                        )
                         .await;
                 } else {
                     tracing::debug!(

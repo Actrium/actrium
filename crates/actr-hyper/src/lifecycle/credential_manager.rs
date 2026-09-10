@@ -29,6 +29,7 @@ use actr_protocol::{
     renew_credential_response,
 };
 use tokio::sync::Mutex;
+use tracing::Instrument;
 
 use crate::ais_client::{AisClient, ReissueError, RenewError, new_control_attempt_id};
 use crate::transport::PeerTransport;
@@ -220,6 +221,10 @@ impl CredentialManager {
     /// Runtime hard rebind is credential-only against the stable on-disk node
     /// AID. AIS authenticates the saved registration context but reissues for
     /// the explicitly supplied existing identity.
+    #[cfg_attr(
+        feature = "opentelemetry",
+        tracing::instrument(name = "credential.reacquire", skip_all)
+    )]
     pub(crate) async fn reacquire(&self) -> ReacquireOutcome {
         let handles = self.hard_rebind_handles.lock().await.clone();
         let hook_callback = self.hook_callback.lock().await.clone();
@@ -255,6 +260,7 @@ impl CredentialManager {
         let pending_control_attempts = self.pending_control_attempts.clone();
 
         // Spawn the actual work so the caller isn't blocked.
+        let renewal_span = tracing::info_span!("credential.renew");
         let handle = tokio::spawn(async move {
             let handles = hard_rebind_handles.lock().await.clone();
             let hook_callback = hook_callback.lock().await.clone();
@@ -287,7 +293,8 @@ impl CredentialManager {
                 },
             }
             renewing.store(false, Ordering::Release);
-        });
+        }
+        .instrument(renewal_span));
 
         // Store the handle for potential cancellation during shutdown.
         let inflight = self.inflight.clone();

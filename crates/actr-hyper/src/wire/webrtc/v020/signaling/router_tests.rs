@@ -478,7 +478,9 @@ impl SignalingTransport for InboundEventTransport {
     async fn recv(&self) -> Option<(ActrId, SignalingMessage)> {
         loop {
             match self.inbound_rx.lock().await.recv().await? {
-                SignalingInbound::PeerMessage { from, message } => return Some((from, message)),
+                SignalingInbound::PeerMessage { from, message, .. } => {
+                    return Some((from, message));
+                }
                 SignalingInbound::TargetUnavailable { .. } => continue,
             }
         }

@@ -24,6 +24,7 @@ use actr_protocol::ActrId;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
+use tracing::{Instrument, Span};
 
 use crate::wire::webrtc::v020::event_handler::WebRtcEventHandler;
 use crate::wire::webrtc::v020::events::PeerEventMailbox;
@@ -60,10 +61,21 @@ pub(crate) struct RtcEffectIdentity {
 pub(crate) struct TaggedRtcPeerEffect {
     pub(crate) identity: RtcEffectIdentity,
     pub(crate) effect: RtcPeerEffect,
+    /// Business-operation span carried across the effect task boundary.
+    /// This is internal metadata and never enters the reducer or wire format.
+    pub(crate) span: Span,
 }
 
 impl TaggedRtcPeerEffect {
     pub(crate) fn new(peer_id: ActrId, effect: RtcPeerEffect) -> Result<Self, RtcEffectPortError> {
+        Self::new_with_span(peer_id, effect, Span::current())
+    }
+
+    pub(crate) fn new_with_span(
+        peer_id: ActrId,
+        effect: RtcPeerEffect,
+        span: Span,
+    ) -> Result<Self, RtcEffectPortError> {
         let Some((pc_generation, operation_id, ice_generation, _)) = effect.pending_identity()
         else {
             return Err(RtcEffectPortError::NotBlocking);
@@ -76,6 +88,7 @@ impl TaggedRtcPeerEffect {
                 ice_generation,
             },
             effect,
+            span,
         })
     }
 }
@@ -95,16 +108,19 @@ impl fmt::Debug for TaggedRtcPeerEffect {
 pub(crate) struct TaggedRtcEffectCompletion {
     pub(crate) identity: RtcEffectIdentity,
     pub(crate) completion: EffectCompletion,
+    /// The exact attempt context that submitted the operation.
+    pub(crate) span: Span,
 }
 
 impl TaggedRtcEffectCompletion {
-    fn new(identity: RtcEffectIdentity, completion: EffectCompletion) -> Self {
+    fn new(identity: RtcEffectIdentity, completion: EffectCompletion, span: Span) -> Self {
         debug_assert_eq!(identity.pc_generation, completion.generation());
         debug_assert_eq!(identity.operation_id, completion.operation_id());
         debug_assert_eq!(identity.ice_generation, completion.ice_generation());
         Self {
             identity,
             completion,
+            span,
         }
     }
 
@@ -112,7 +128,7 @@ impl TaggedRtcEffectCompletion {
     pub(crate) fn into_completion_for(
         self,
         peer_id: &ActrId,
-    ) -> Result<EffectCompletion, RtcEffectPortError> {
+    ) -> Result<(EffectCompletion, Span), RtcEffectPortError> {
         if &self.identity.peer_id != peer_id {
             return Err(RtcEffectPortError::WrongPeer);
         }
@@ -122,7 +138,7 @@ impl TaggedRtcEffectCompletion {
         {
             return Err(RtcEffectPortError::IdentityMismatch);
         }
-        Ok(self.completion)
+        Ok((self.completion, self.span))
     }
 }
 
@@ -234,7 +250,7 @@ pub(crate) struct TestEffectSink {
     peer_id: ActrId,
     effects_tx: mpsc::UnboundedSender<TaggedRtcPeerEffect>,
     effects_rx: tokio::sync::Mutex<mpsc::UnboundedReceiver<TaggedRtcPeerEffect>>,
-    pending: Mutex<HashMap<u64, (RtcEffectIdentity, RtcEffectCompletionSender)>>,
+    pending: Mutex<HashMap<u64, (RtcEffectIdentity, Span, RtcEffectCompletionSender)>>,
     close_all_calls: std::sync::atomic::AtomicU64,
 }
 
@@ -262,7 +278,7 @@ impl TestEffectSink {
         completion: EffectCompletion,
     ) -> Result<(), RtcEffectPortError> {
         let operation_id = completion.operation_id();
-        let (identity, completion_tx) = self
+        let (identity, span, completion_tx) = self
             .pending
             .lock()
             .expect("test effect pending lock")
@@ -275,11 +291,11 @@ impl TestEffectSink {
             self.pending
                 .lock()
                 .expect("test effect pending lock")
-                .insert(operation_id, (identity, completion_tx));
+                .insert(operation_id, (identity, span, completion_tx));
             return Err(RtcEffectPortError::IdentityMismatch);
         }
         completion_tx
-            .send(TaggedRtcEffectCompletion::new(identity, completion))
+            .send(TaggedRtcEffectCompletion::new(identity, completion, span))
             .await
             .map_err(|_| RtcEffectPortError::TestSinkClosed)
     }
@@ -298,12 +314,13 @@ impl TestEffectSink {
             .expect("test effect pending lock")
             .values()
             .next()
-            .map(|(_, tx)| tx.clone())
+            .map(|(_, _, tx)| tx.clone())
             .ok_or(RtcEffectPortError::UnknownOperation)?;
         completion_tx
             .send(TaggedRtcEffectCompletion {
                 identity,
                 completion,
+                span: Span::current(),
             })
             .await
             .map_err(|_| RtcEffectPortError::TestSinkClosed)
@@ -720,6 +737,7 @@ impl WebRtcEffectRunner {
         &self,
         identity: RtcEffectIdentity,
         completion_tx: RtcEffectCompletionSender,
+        span: Span,
         f: F,
     ) -> Result<(), RtcEffectPortError>
     where
@@ -738,28 +756,37 @@ impl WebRtcEffectRunner {
                     ))
                 })
         };
-        self.spawn_effect(async move {
+        let completion_span = span.clone();
+        self.spawn_effect(span, async move {
             let completion = f(ops).await;
             let _ = completion_tx
-                .send(TaggedRtcEffectCompletion::new(identity, completion))
+                .send(TaggedRtcEffectCompletion::new(
+                    identity,
+                    completion,
+                    completion_span,
+                ))
                 .await;
         })
     }
 
-    fn spawn_effect<F>(&self, future: F) -> Result<(), RtcEffectPortError>
+    fn spawn_effect<F>(&self, span: Span, future: F) -> Result<(), RtcEffectPortError>
     where
         F: std::future::Future<Output = ()> + Send + 'static,
     {
         self.effect_tasks
             .lock()
             .expect("RTC effect task group lock")
-            .spawn(future)
+            .spawn(future.instrument(span))
     }
 
     /// Atomically perform synchronous registry setup and admit its effect
     /// task under the same runner lifecycle lock. Shutdown therefore cannot
     /// drain the registries between setup and task admission.
-    fn spawn_effect_with<F, Make>(&self, make_future: Make) -> Result<(), RtcEffectPortError>
+    fn spawn_effect_with<F, Make>(
+        &self,
+        span: Span,
+        make_future: Make,
+    ) -> Result<(), RtcEffectPortError>
     where
         F: std::future::Future<Output = ()> + Send + 'static,
         Make: FnOnce() -> F,
@@ -767,7 +794,7 @@ impl WebRtcEffectRunner {
         self.effect_tasks
             .lock()
             .expect("RTC effect task group lock")
-            .spawn_with(make_future)
+            .spawn_with(|| make_future().instrument(span))
     }
 }
 
@@ -781,7 +808,11 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
         if operation.identity.peer_id != self.peer_id {
             return Err(RtcEffectPortError::WrongPeer);
         }
-        let TaggedRtcPeerEffect { identity, effect } = operation;
+        let TaggedRtcPeerEffect {
+            identity,
+            effect,
+            span,
+        } = operation;
         match effect {
             RtcPeerEffect::BuildSession {
                 generation,
@@ -798,7 +829,8 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 let sessions = self.sessions.clone();
                 let resources = self.resources.clone();
                 let peer_id = self.peer_id.clone();
-                self.spawn_effect_with(move || {
+                let completion_span = span.clone();
+                self.spawn_effect_with(span, move || {
                     resources
                         .lock()
                         .expect("resource registries lock")
@@ -849,6 +881,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                                     operation_id,
                                     result: result.map(|_| ()),
                                 },
+                                completion_span,
                             ))
                             .await;
                     }
@@ -857,7 +890,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
             RtcPeerEffect::CreateOffer {
                 generation,
                 operation_id,
-            } => self.with_session_ops(identity, completion_tx, move |ops| async move {
+            } => self.with_session_ops(identity, completion_tx, span, move |ops| async move {
                 let result = match ops {
                     Ok(ops) => ops.create_offer().await.map(Box::new),
                     Err(error) => Err(error),
@@ -871,7 +904,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
             RtcPeerEffect::CreateAnswer {
                 generation,
                 operation_id,
-            } => self.with_session_ops(identity, completion_tx, move |ops| async move {
+            } => self.with_session_ops(identity, completion_tx, span, move |ops| async move {
                 let result = match ops {
                     Ok(ops) => ops.create_answer().await.map(Box::new),
                     Err(error) => Err(error),
@@ -886,7 +919,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 generation,
                 operation_id,
                 desc,
-            } => self.with_session_ops(identity, completion_tx, move |ops| async move {
+            } => self.with_session_ops(identity, completion_tx, span, move |ops| async move {
                 let result = match ops {
                     Ok(ops) => ops.set_local_description(*desc).await,
                     Err(error) => Err(error),
@@ -901,7 +934,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 generation,
                 operation_id,
                 desc,
-            } => self.with_session_ops(identity, completion_tx, move |ops| async move {
+            } => self.with_session_ops(identity, completion_tx, span, move |ops| async move {
                 let result = match ops {
                     Ok(ops) => ops.set_remote_description(*desc).await,
                     Err(error) => Err(error),
@@ -917,7 +950,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 operation_id,
                 ice_generation,
                 candidate,
-            } => self.with_session_ops(identity, completion_tx, move |ops| async move {
+            } => self.with_session_ops(identity, completion_tx, span, move |ops| async move {
                 let result = match ops {
                     Ok(ops) => ops.add_ice_candidate(candidate).await,
                     Err(error) => Err(error),
@@ -933,7 +966,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 generation,
                 operation_id,
                 ice_generation,
-            } => self.with_session_ops(identity, completion_tx, move |ops| async move {
+            } => self.with_session_ops(identity, completion_tx, span, move |ops| async move {
                 let result = match ops {
                     Ok(ops) => ops.restart_ice().await,
                     Err(error) => Err(error),
@@ -951,7 +984,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 config,
             } => {
                 let peer_id = self.peer_id.clone();
-                self.with_session_ops(identity, completion_tx, move |ops| async move {
+                self.with_session_ops(identity, completion_tx, span, move |ops| async move {
                     let result = match ops {
                         Ok(ops) => ops.set_configuration(*config).await,
                         Err(error) => Err(error),
@@ -976,7 +1009,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
             RtcPeerEffect::GetStats {
                 generation,
                 operation_id,
-            } => self.with_session_ops(identity, completion_tx, move |ops| async move {
+            } => self.with_session_ops(identity, completion_tx, span, move |ops| async move {
                 let report = match ops {
                     Ok(ops) => ops.get_stats().await,
                     Err(_) => Default::default(),
@@ -994,7 +1027,8 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 let sessions = self.sessions.clone();
                 let closing_sessions = self.closing_sessions.clone();
                 let resources = self.resources.clone();
-                self.spawn_effect_with(move || {
+                let completion_span = span.clone();
+                self.spawn_effect_with(span, move || {
                     // Move an active Session to the retiring registry before
                     // asynchronous close starts. The transition and task
                     // admission are atomic with respect to runner shutdown.
@@ -1042,6 +1076,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                                     operation_id,
                                     result,
                                 },
+                                completion_span,
                             ))
                             .await;
                     }
@@ -1120,7 +1155,14 @@ impl RtcPeerEffectPort for TestEffectSink {
         self.pending
             .lock()
             .expect("test effect pending lock")
-            .insert(operation_id, (operation.identity.clone(), completion_tx));
+            .insert(
+                operation_id,
+                (
+                    operation.identity.clone(),
+                    operation.span.clone(),
+                    completion_tx,
+                ),
+            );
         if self.effects_tx.send(operation).is_err() {
             self.pending
                 .lock()
