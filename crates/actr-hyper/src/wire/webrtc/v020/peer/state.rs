@@ -155,9 +155,11 @@ pub(crate) struct RtcPeerState {
     /// opposed to a driver-side fact (the peer's PC death). Only in the former
     /// case may the answerer's first correlated restart wake (attempt=1) be
     /// de-duped: the offerer is already running the same round, so the wake is
-    /// redundant. When the round came from the peer's death (a one-sided
-    /// outage), the wake is the offerer's only signal that the answerer is
-    /// back and must resend the offer immediately (issue #227).
+    /// redundant. The reducer also de-dupes while a local restart/SDP effect
+    /// is pending, regardless of how the round started. When the round came
+    /// from the peer's death (a one-sided outage) and the local Offer has
+    /// already been announced, the wake is the offerer's only signal that the
+    /// answerer is back and must resend the offer immediately (issue #227).
     pub(crate) recovery_from_network_available: bool,
     /// Offerer-side count of deadline-driven Soft retries within the current
     /// recovery cycle. Retries that keep failing to converge prove the

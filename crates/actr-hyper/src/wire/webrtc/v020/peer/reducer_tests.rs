@@ -2977,6 +2977,35 @@ fn attempt1_restart_request_wakes_offerer_round_in_flight() {
 }
 
 #[test]
+fn attempt1_restart_request_is_deduped_while_local_restart_is_inflight() {
+    // A peer request can race the Offerer's own driver-side recovery. If the
+    // local RestartIce/CreateOffer chain is still pending, the request is a
+    // duplicate of that active negotiation and must not create a second offer
+    // (the p08 remote-first recovery contract).
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let ice_before = state.ice_generation;
+
+    let local_recovery = reduce(&mut state, failed_tick(generation));
+    assert!(has_restart_ice(&local_recovery, generation));
+    assert!(!state.recovery_from_network_available);
+
+    let raced_wake = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequest {
+            request_id: "raced-wake".to_string(),
+            attempt: 1,
+        }),
+    );
+
+    assert!(
+        raced_wake.is_empty(),
+        "attempt=1 must not start a second offer while local restart negotiation is pending"
+    );
+    assert_eq!(state.ice_generation, ice_before + 1);
+}
+
+#[test]
 fn attempt2_restart_request_wakes_offerer_into_fresh_round() {
     // The explicit retransmission wake: a LATER attempt (>=2) is allowed to
     // restart the round even while one is in flight — it resets the started

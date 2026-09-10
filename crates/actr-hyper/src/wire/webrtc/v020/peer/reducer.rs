@@ -1676,21 +1676,21 @@ fn reduce_command(
             }
             state.last_remote_restart_request = Some((request_id, attempt));
 
-            // De-dupe the answerer's first correlated wake ONLY when this
-            // offerer started the current round off its own recovery signal
-            // (NetworkAvailable / AppForeground / SignalingGenerationChanged):
-            // then both endpoints are already running the same round and a
-            // second restart_ice/offer would race it. When the round came
-            // from the peer's death (a one-sided outage — only the answerer
-            // lost the network), the wake is the offerer's ONLY signal that
-            // the answerer is back and waiting: de-duping it would stall the
-            // pair for a full attempt-deadline cadence (issue #227). A later
-            // attempt remains an explicit retransmission wake and is allowed
-            // to restart the round.
+            // De-dupe the answerer's first correlated wake when either the
+            // offerer's own recovery signal already owns this round, or the
+            // local RestartIce/CreateOffer chain is still in flight. In both
+            // cases a second restart_ice/offer would race the active
+            // negotiation. Once the local Offer has already been announced
+            // and no SDP operation is pending, an attempt-1 wake is the only
+            // signal that a one-sided-outage Answerer is back and waiting;
+            // de-duping it would stall the pair for a full attempt-deadline
+            // cadence (issue #227). A later attempt remains an explicit
+            // retransmission wake and is allowed to restart the round.
             if attempt == 1
                 && state.recovery_inflight
                 && state.recovery_attempt_started
-                && state.recovery_from_network_available
+                && (state.recovery_from_network_available
+                    || offerer_restart_negotiation_inflight(state))
             {
                 return;
             }
@@ -2287,6 +2287,29 @@ fn clear_negotiation_for_recovery(state: &mut RtcPeerState) {
 /// churn: a parked answerer must never issue RestartIce/BuildSession.
 fn answerer_parked(state: &RtcPeerState) -> bool {
     state.role == Role::Answerer && state.recovery_inflight && state.awaiting_offer
+}
+
+/// Whether the Offerer's current Soft Recovery still has a local restart
+/// negotiation operation in flight. A first Answerer wake that races one of
+/// these operations is a duplicate and must not issue a second
+/// `restart_ice()`/Offer. Once the local Offer has already been announced and
+/// no SDP operation is pending, an attempt-1 wake is allowed to restart the
+/// round: the previous Offer may have been lost while the Answerer was
+/// unreachable (issue #227).
+fn offerer_restart_negotiation_inflight(state: &RtcPeerState) -> bool {
+    let Some(generation) = state.active_generation else {
+        return false;
+    };
+    state.pending_operations.values().any(|operation| {
+        operation.pc_generation == generation
+            && matches!(
+                operation.kind,
+                PendingRtcOperationKind::RestartIce
+                    | PendingRtcOperationKind::CreateOffer
+                    | PendingRtcOperationKind::SetLocalDescription
+                    | PendingRtcOperationKind::SetRemoteDescription
+            )
+    })
 }
 
 fn start_soft_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect>) {
