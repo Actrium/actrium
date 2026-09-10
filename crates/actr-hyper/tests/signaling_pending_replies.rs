@@ -2,8 +2,8 @@
 
 use actr_hyper::test_support::{dummy_credential, make_actor_id};
 use actr_hyper::wire::webrtc::{
-    InboundQueueConfig, ReconnectConfig, SignalingClient, SignalingConfig, SignalingEvent,
-    WebSocketSignalingClient,
+    DisconnectReason, InboundQueueConfig, ReconnectConfig, SignalingClient, SignalingConfig,
+    SignalingEvent, WebSocketSignalingClient,
 };
 use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{
@@ -781,4 +781,136 @@ async fn pending_route_candidates_waiter_fails_promptly_on_disconnect() {
     );
 
     server_task.abort();
+}
+
+/// A server that completes the handshake but never reads the socket again
+/// must trip the client's pong watchdog — an automatic loss with no local
+/// lifecycle command and no stream end. The in-flight RouteCandidates waiter
+/// is dropped promptly with the retryable typed error and replays once on
+/// the replacement connection.
+///
+/// The watchdog tolerates one full ping interval of scheduling slack, so this
+/// test waits out the real silence window (ping ticks at 5s, pong timeout at
+/// 10s: the loss publishes on the third tick, ~15s in).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pending_request_replays_after_pong_watchdog_loss() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind watchdog signaling server");
+    let server_url = format!(
+        "ws://{}",
+        listener.local_addr().expect("watchdog server address")
+    );
+    let (second_message_tx, second_message_rx) = oneshot::channel();
+
+    let server_task = tokio::spawn(async move {
+        // First connection: complete the handshake, then never read again.
+        // The route request frame is simply left in the kernel buffer, and
+        // tokio-tungstenite only answers pings while reading, so the client
+        // observes total silence: the pong watchdog is the path that fires,
+        // not the stream-end receiver.
+        let (first_stream, _) = listener
+            .accept()
+            .await
+            .expect("server should accept first connection");
+        let first_websocket = accept_async(first_stream)
+            .await
+            .expect("server should complete first websocket handshake");
+        tokio::spawn(async move {
+            let _held = first_websocket;
+            std::future::pending::<()>().await;
+        });
+
+        let (second_stream, _) = listener
+            .accept()
+            .await
+            .expect("server should accept replacement connection");
+        let mut second_websocket = accept_async(second_stream)
+            .await
+            .expect("server should complete replacement websocket handshake");
+        let second_envelope = receive_binary_envelope(&mut second_websocket).await;
+        let response = route_candidates_success_response(second_envelope.envelope_id.clone());
+        second_message_tx
+            .send(second_envelope)
+            .expect("test should receive retried route request");
+        second_websocket
+            .send(Message::Binary(response.encode_to_vec().into()))
+            .await
+            .expect("server should send retried route response");
+    });
+
+    let client = Arc::new(WebSocketSignalingClient::new(test_signaling_config(
+        &server_url,
+    )));
+    client.connect().await.expect("connect signaling client");
+    let silence_started = Instant::now();
+
+    // Send the request late in the silence window: the waiter's own
+    // five-second response budget must still be running when the watchdog
+    // publishes the loss (~15s in), otherwise the attempt ends in a plain
+    // response timeout and the replay path never engages. The server never
+    // reads this frame; its arrival is implied by the retried envelope.
+    tokio::time::sleep(Duration::from_secs(13)).await;
+    let request_task = {
+        let client = Arc::clone(&client);
+        tokio::spawn(async move {
+            client
+                .send_route_candidates_request(
+                    make_actor_id(43),
+                    dummy_credential(),
+                    route_candidates_request(),
+                )
+                .await
+        })
+    };
+
+    let mut events = client.subscribe_events();
+    let reason = loop {
+        match tokio::time::timeout(Duration::from_secs(25), events.recv())
+            .await
+            .expect("watchdog should publish its disconnect transition")
+        {
+            Ok(SignalingEvent::Disconnected { reason }) => break reason,
+            Ok(_) => continue,
+            Err(_) => continue,
+        }
+    };
+    assert!(
+        matches!(reason, DisconnectReason::PongTimeout),
+        "the silent server must trip the pong watchdog, got {reason:?}"
+    );
+    let silent_for = silence_started.elapsed();
+    assert!(
+        silent_for >= Duration::from_secs(10),
+        "the watchdog must wait out the pong-timeout silence window, fired after {silent_for:?}"
+    );
+    assert!(
+        silent_for < Duration::from_secs(24),
+        "the watchdog fired too late: {silent_for:?}"
+    );
+
+    client
+        .connect()
+        .await
+        .expect("replacement signaling connection should succeed");
+
+    tokio::time::timeout(Duration::from_secs(2), second_message_rx)
+        .await
+        .expect("server should receive the retried route request")
+        .expect("retried route request channel should remain open");
+
+    let response = tokio::time::timeout(Duration::from_secs(2), request_task)
+        .await
+        .expect("retried route request should complete")
+        .expect("route request task should not panic")
+        .expect("route request should succeed after the watchdog loss");
+    match response.result {
+        Some(route_candidates_response::Result::Success(success)) => {
+            assert_eq!(success.candidates, vec![make_actor_id(99)]);
+        }
+        other => panic!("expected successful retried route response, got {other:?}"),
+    }
+
+    client.disconnect().await.expect("disconnect test client");
+    server_task.await.expect("watchdog server should not panic");
 }

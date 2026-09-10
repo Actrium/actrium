@@ -1000,27 +1000,54 @@ impl WebSocketSignalingClient {
 
     /// Invalidate an unusable signaling socket after an envelope send failure.
     ///
+    /// `generation` is the connection generation observed when the send began;
+    /// by the time the failure is processed here, a recovery may already have
+    /// invalidated that generation and committed a replacement, so every
+    /// destructive step is fenced on the failed generation still being the
+    /// published `Connected` state.
+    ///
     /// The envelope outcome is indeterminate once the send has failed or timed
     /// out, so callers must not retry it in place. Stop the old socket tasks,
     /// publish one disconnected transition, and let the supervisor derive the
     /// one recovery obligation for that generation.
-    async fn handle_envelope_send_failure(&self, reason: DisconnectReason) {
+    async fn handle_envelope_send_failure(&self, generation: u64, reason: DisconnectReason) {
         self.stats.errors.fetch_add(1, Ordering::Relaxed);
 
-        let generation = self.connection_generation.load(Ordering::Acquire);
+        // Invalidate the failed socket only while its generation is still the
+        // published `Connected` state. A recovery that already invalidated
+        // this generation or committed a replacement owns the socket; swapping
+        // the shared liveness flag or overwriting the state then would tear
+        // down the replacement connection instead.
         let was_connected = {
             let _commit_guard = self.lock_connection_commit();
-            let was_connected = self.connected.swap(false, Ordering::AcqRel);
-            if was_connected {
-                *self
+            let still_live = {
+                let state = &*self
                     .socket_state
                     .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-                    SignalingSocketState::Disconnected {
-                        last_generation: Some(generation),
-                    };
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                matches!(
+                    state,
+                    SignalingSocketState::Connected {
+                        generation: live,
+                        ..
+                    } if *live == generation
+                )
+            };
+            if !still_live {
+                false
+            } else {
+                let was_connected = self.connected.swap(false, Ordering::AcqRel);
+                if was_connected {
+                    *self
+                        .socket_state
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                        SignalingSocketState::Disconnected {
+                            last_generation: Some(generation),
+                        };
+                }
+                was_connected
             }
-            was_connected
         };
         if !was_connected {
             return;
@@ -1032,31 +1059,29 @@ impl WebSocketSignalingClient {
         self.mark_idempotent_retryable();
 
         // The envelope send failed on a previously live socket; its generation
-        // is lost. Report it before the local teardown proceeds.
+        // is lost. Report it before the local teardown proceeds. A recovery
+        // that already superseded this generation rejects the stale fact and
+        // stays on its own path.
         self.emit_signaling_lost(generation, SignalingFactLostCause::RemoteReset);
 
-        // Prevent tasks belonging to the failed socket from observing a later
-        // reconnect and mutating the new connection's shared state.
-        if let Some(handle) = self.ping_task.lock().await.take() {
-            handle.abort();
-        }
-        if let Some(handle) = self.receiver_task.lock().await.take() {
-            handle.abort();
-        }
-
-        // The timed-out operation has normally released the sink lock already.
-        // Avoid extending the public five-second send bound if another operation
-        // still owns it; the next successful connect will replace the old sink.
-        if let Ok(mut sink_guard) = self.ws_sink.try_lock() {
-            sink_guard.take();
-        }
-
-        self.drop_pending_replies("signaling envelope send failure")
-            .await;
-        self.drop_pending_pongs("signaling envelope send failure")
-            .await;
+        // Generation-fenced teardown: only complete the old socket's cleanup
+        // (task aborts, sink, pending waiters) while this path still owns the
+        // `Disconnected` publication. A recovery that already invalidated the
+        // generation or committed a replacement owns the teardown, and
+        // publishing another Disconnected transition would spuriously fail
+        // waiters parked on the replacement.
+        let owns_teardown = self.teardown_failed_generation_slots(generation).await;
 
         self.stats.disconnections.fetch_add(1, Ordering::Relaxed);
+        if !owns_teardown {
+            tracing::debug!(
+                generation,
+                ?reason,
+                "Signaling send-failure teardown skipped: a newer teardown already owns this socket"
+            );
+            return;
+        }
+
         let _ = self.event_tx.send(SignalingEvent::Disconnected { reason });
         // send_envelope() may be called while a peer signaling commit gate is
         // held. Run the externally supplied hook after this method returns so
@@ -1066,6 +1091,105 @@ impl WebSocketSignalingClient {
                 cb(HookEvent::SignalingDisconnected).await;
             });
         }
+    }
+
+    /// Complete the failed generation's slot teardown while its `Disconnected`
+    /// publication is still the live socket state.
+    ///
+    /// A replacement connection publishes `Connected` under the commit gate
+    /// before storing task handles or serving sends from its sink, and a
+    /// recovery disconnect overwrites the state before finishing its own
+    /// teardown, so while our `Disconnected` publication is live every handle,
+    /// sink byte, and pending waiter still registered belongs to the failed
+    /// generation. Once any other writer replaces the state, that path owns
+    /// this socket's cleanup; touching the slots then could abort the
+    /// replacement's live tasks or drop its waiters. Returns whether this
+    /// call kept ownership and therefore owns the disconnect publication.
+    async fn teardown_failed_generation_slots(&self, generation: u64) -> bool {
+        // Slot locks are taken without awaiting: no `.await` may run while
+        // the commit gate is held. Every legitimate holder performs only
+        // synchronous work, so a few yield-and-revalidate retries absorb
+        // transient contention. Persistent contention (for example a stalled
+        // send holding the sink for its bounded timeout) leaves the old tasks
+        // to self-terminate on the next failed ping or stream end, and the
+        // recovery disconnect finishes the teardown.
+        for _ in 0..4 {
+            let uncontended = {
+                let _commit_guard = self.lock_connection_commit();
+                let state = &*self
+                    .socket_state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if !matches!(
+                    state,
+                    SignalingSocketState::Disconnected {
+                        last_generation: Some(published)
+                    } if *published == generation
+                ) {
+                    return false;
+                }
+
+                let mut uncontended = true;
+
+                if let Ok(mut task_guard) = self.ping_task.try_lock() {
+                    if let Some(handle) = task_guard.take() {
+                        handle.abort();
+                    }
+                } else {
+                    uncontended = false;
+                }
+                if let Ok(mut task_guard) = self.receiver_task.try_lock() {
+                    if let Some(handle) = task_guard.take() {
+                        handle.abort();
+                    }
+                } else {
+                    uncontended = false;
+                }
+
+                // The timed-out operation has normally released the sink lock
+                // already. Avoid extending the public five-second send bound
+                // if another operation still owns it; the next successful
+                // connect will replace the old sink.
+                if let Ok(mut sink_guard) = self.ws_sink.try_lock() {
+                    sink_guard.take();
+                } else {
+                    uncontended = false;
+                }
+
+                if let Ok(mut pending) = self.pending_replies.try_lock() {
+                    let dropped = pending.len();
+                    pending.clear();
+                    if dropped > 0 {
+                        self.stats
+                            .reply_waiters_dropped
+                            .fetch_add(dropped as u64, Ordering::Relaxed);
+                        tracing::debug!(
+                            dropped,
+                            "Dropping pending signaling reply waiters after send failure"
+                        );
+                    }
+                } else {
+                    uncontended = false;
+                }
+                if let Ok(mut pongs) = self.pending_pongs.try_lock() {
+                    pongs.clear();
+                } else {
+                    uncontended = false;
+                }
+
+                uncontended
+            };
+            if uncontended {
+                return true;
+            }
+            tokio::task::yield_now().await;
+        }
+        tracing::warn!(
+            generation,
+            "Signaling send-failure teardown deferred: slot locks stayed contended; \
+             old tasks self-terminate and recovery finishes the cleanup"
+        );
+        true
     }
 
     /// Handle a reconnect error against the membership authority.
@@ -2902,6 +3026,13 @@ impl SignalingClient for WebSocketSignalingClient {
             ));
         }
 
+        // Snapshot the generation the send runs on: a recovery that rebuilds
+        // signaling while this send is failing must keep its replacement, so
+        // the send-failure teardown is fenced to the generation observed
+        // here rather than to whichever generation is live when the failure
+        // is finally processed.
+        let socket_generation = self.connection_generation.load(Ordering::Acquire);
+
         // Bound the complete commit, including contention on the shared sink
         // mutex. Timing out only `sink.send()` still permits an unbounded wait
         // before the send future is ever created.
@@ -2940,7 +3071,7 @@ impl SignalingClient for WebSocketSignalingClient {
             }
             Ok(Err(err)) => {
                 tracing::warn!("Signaling envelope send failed: {err}");
-                self.handle_envelope_send_failure(DisconnectReason::SendFailed)
+                self.handle_envelope_send_failure(socket_generation, DisconnectReason::SendFailed)
                     .await;
                 Err(err)
             }
@@ -2949,7 +3080,7 @@ impl SignalingClient for WebSocketSignalingClient {
                     "Signaling WebSocket sink lock/send timed out after {}s",
                     SIGNALING_SEND_TIMEOUT_SECS
                 );
-                self.handle_envelope_send_failure(DisconnectReason::SendTimeout)
+                self.handle_envelope_send_failure(socket_generation, DisconnectReason::SendTimeout)
                     .await;
                 Err(NetworkError::ConnectionError(
                     "Signaling WebSocket sink lock/send timed out".to_string(),

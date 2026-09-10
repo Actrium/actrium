@@ -19,6 +19,7 @@ struct ForceReconnectFakeSignalingClient {
     connected: AtomicBool,
     connect_should_fail: bool,
     disconnect_calls: AtomicUsize,
+    recovery_disconnect_calls: AtomicUsize,
     connect_calls: AtomicUsize,
     auto_reconnect_suppressed: AtomicBool,
     invalidate_generation_calls: AtomicUsize,
@@ -38,6 +39,7 @@ impl ForceReconnectFakeSignalingClient {
             connected: AtomicBool::new(false),
             connect_should_fail,
             disconnect_calls: AtomicUsize::new(0),
+            recovery_disconnect_calls: AtomicUsize::new(0),
             connect_calls: AtomicUsize::new(0),
             auto_reconnect_suppressed: AtomicBool::new(false),
             invalidate_generation_calls: AtomicUsize::new(0),
@@ -76,6 +78,19 @@ impl SignalingClient for ForceReconnectFakeSignalingClient {
             self.disconnect_release.notified().await;
         }
         self.disconnect_calls.fetch_add(1, AtomicOrdering::SeqCst);
+        self.auto_reconnect_suppressed
+            .store(true, AtomicOrdering::SeqCst);
+        self.connected.store(false, AtomicOrdering::SeqCst);
+        Ok(())
+    }
+
+    async fn disconnect_for_recovery(&self) -> NetworkResult<()> {
+        if self.block_disconnect.load(AtomicOrdering::SeqCst) {
+            self.disconnect_entered.notify_one();
+            self.disconnect_release.notified().await;
+        }
+        self.recovery_disconnect_calls
+            .fetch_add(1, AtomicOrdering::SeqCst);
         self.auto_reconnect_suppressed
             .store(true, AtomicOrdering::SeqCst);
         self.connected.store(false, AtomicOrdering::SeqCst);
@@ -686,13 +701,48 @@ async fn force_reconnect_failure_reports_without_scheduling_local_retry() {
     assert!(result.is_err());
     assert_eq!(
         signaling.disconnect_calls.load(AtomicOrdering::SeqCst),
-        1,
-        "ForceReconnect cleanup should disconnect signaling once"
+        0,
+        "ForceReconnect must route every signaling teardown through the recovery contract"
+    );
+    assert!(
+        signaling
+            .recovery_disconnect_calls
+            .load(AtomicOrdering::SeqCst)
+            >= 1,
+        "ForceReconnect cleanup must drop idempotent waiters through the recovery teardown"
     );
     assert_eq!(
         signaling.connect_calls.load(AtomicOrdering::SeqCst),
         1,
         "ForceReconnect restore should make one quick connect attempt"
+    );
+}
+
+/// The ForceReconnect teardown must be recovery-aware: an in-flight
+/// RouteCandidates/GetSigningKey waiter dropped by the automatic rebuild
+/// replays once on the replacement connection instead of failing fast the
+/// way a manual teardown does.
+#[tokio::test]
+async fn force_reconnect_cleanup_uses_recovery_aware_signaling_teardown() {
+    let signaling = Arc::new(ForceReconnectFakeSignalingClient::new(false));
+    let processor = DefaultNetworkEventProcessor::new(signaling.clone());
+
+    processor
+        .force_reconnect()
+        .await
+        .expect("ForceReconnect should restore signaling");
+
+    assert_eq!(
+        signaling.disconnect_calls.load(AtomicOrdering::SeqCst),
+        0,
+        "no manual fail-fast signaling teardown may run during a ForceReconnect"
+    );
+    assert!(
+        signaling
+            .recovery_disconnect_calls
+            .load(AtomicOrdering::SeqCst)
+            >= 1,
+        "the rebuild cleanup itself must use disconnect_for_recovery"
     );
 }
 
