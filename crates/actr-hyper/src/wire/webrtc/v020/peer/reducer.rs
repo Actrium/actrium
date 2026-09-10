@@ -55,6 +55,11 @@ const MAX_BUFFERED_ICE_CANDIDATES: usize = 256;
 pub(crate) enum RtcPeerCommand {
     /// Ensure the peer is connected; initiates the offerer flow from `Idle`.
     Connect,
+    /// Business demand for an existing recovering connection; never carries payloads.
+    RecoveryHint {
+        transport_epoch: u64,
+        pc_generation: u64,
+    },
     /// Ensure the peer is connected and acknowledge the transport epoch after
     /// the Controller has reduced the command and published its snapshot.
     /// Transport callers use this boundary so the previous attempt's terminal
@@ -170,6 +175,7 @@ impl std::fmt::Debug for RtcPeerCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Connect => f.write_str("Connect"),
+            Self::RecoveryHint { .. } => f.write_str("RecoveryHint"),
             Self::ConnectCommitted { .. } => f.write_str("ConnectCommitted(..)"),
             Self::AbortTransportAttempt { transport_epoch } => f
                 .debug_struct("AbortTransportAttempt")
@@ -1566,6 +1572,47 @@ fn reduce_command(
     effects: &mut Vec<RtcPeerEffect>,
 ) {
     match command {
+        RtcPeerCommand::RecoveryHint {
+            transport_epoch,
+            pc_generation,
+        } => {
+            if state.transport_epoch != transport_epoch
+                || state.to_snapshot().pc_generation != pc_generation
+                || state.close_requested
+                || !state.recovery_inflight
+                || !recovery_gate_open(state)
+            {
+                return;
+            }
+            tracing::debug!(peer = %state.peer_id.to_string_repr(),
+                recovery_cycle = state.recovery_cycle, recovery_epoch = state.recovery_epoch,
+                phase = ?state.phase, role = ?state.role,
+                pending_sdp = ?state.pending_remote_description_operation,
+                negotiated = state.recovery_negotiated, "business recovery hint received");
+            if !state.recovery_attempt_started {
+                maybe_start_deferred_recovery(state, effects);
+                if state.recovery_attempt_started {
+                    state.business_hint_cycle = Some(state.recovery_cycle);
+                }
+            } else if state.role == Role::Answerer
+                && !state.recovery_negotiated
+                && state.pending_remote_description_operation.is_none()
+                && !state.pending_operations.values().any(|op| {
+                    matches!(
+                        op.kind,
+                        PendingRtcOperationKind::CreateAnswer
+                            | PendingRtcOperationKind::SetLocalDescription
+                    )
+                })
+                && state.business_hint_cycle != Some(state.recovery_cycle)
+            {
+                // One demand-driven wake per cycle, shared by all concurrent callers.
+                state.business_hint_cycle = Some(state.recovery_cycle);
+                state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
+                send_answerer_restart_request(state, effects);
+                state.bump_revision();
+            }
+        }
         RtcPeerCommand::Connect | RtcPeerCommand::ConnectCommitted { .. } => {
             // Role is server-arbitrated (RFC §"Role and glare handling"; 0.14
             // semantics): ask the signaling server to assign this pair's role
@@ -1817,13 +1864,14 @@ fn reduce_command(
                 if !state.recovery_inflight {
                     state.recovery_cycle = state.recovery_cycle.wrapping_add(1);
                 }
-                // Receiving a restart Offer is protocol progress for the
-                // current Answerer recovery. Supersede the request-only
-                // attempt deadline even when recovery is already in flight;
-                // otherwise the timer armed when the request was sent can
-                // fire while this Offer/Answer exchange is still converging
-                // and emit a duplicate recovery request.
-                state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
+                // Give the first Offer a full negotiation window, but do not
+                // let repeated remote Offers postpone recovery indefinitely.
+                // Retransmission deadlines still advance their own epoch.
+                let offer_deadline = (state.recovery_cycle, generation);
+                if state.answerer_offer_deadline != Some(offer_deadline) {
+                    state.answerer_offer_deadline = Some(offer_deadline);
+                    state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
+                }
                 // A parked Answerer may still be reusing the active
                 // PeerConnection. Receiving the correlated restart Offer is
                 // the point at which it rejoins the current recovery attempt;
@@ -3653,7 +3701,7 @@ fn reduce_completion(
                 }
                 Err(_) => {
                     state.pending_local_restart_exchange_id = None;
-                    negotiation_failed(state, effects);
+                    sdp_failed(state, generation, "create_offer", effects);
                 }
             }
         }
@@ -3677,7 +3725,7 @@ fn reduce_completion(
                         desc,
                     });
                 }
-                Err(_) => negotiation_failed(state, effects),
+                Err(_) => sdp_failed(state, generation, "create_answer", effects),
             }
         }
         EffectCompletion::SetLocalDescription {
@@ -3770,7 +3818,7 @@ fn reduce_completion(
                     state.announced_local_description_generation = None;
                     state.pending_local_sdp_exchange_id = None;
                     state.pending_local_restart_exchange_id = None;
-                    negotiation_failed(state, effects);
+                    sdp_failed(state, generation, "set_local_description", effects);
                 }
             }
         }
@@ -3828,7 +3876,7 @@ fn reduce_completion(
                 }
                 Err(_) => {
                     state.queued_remote_description = None;
-                    negotiation_failed(state, effects);
+                    sdp_failed(state, generation, "set_remote_description", effects);
                 }
             }
         }
@@ -4168,6 +4216,34 @@ fn completion_applies(state: &mut RtcPeerState, generation: u64) -> bool {
 
 /// A negotiation-step failure: a previously-connected peer recovers, an initial
 /// attempt reports `Idle` + unavailable reason.
+fn sdp_failed(
+    state: &mut RtcPeerState,
+    generation: u64,
+    stage: &'static str,
+    effects: &mut Vec<RtcPeerEffect>,
+) {
+    // A completed failed SDP operation cannot converge by waiting for ICE.
+    // Wake the stable Offerer without creating an Offer on the Answerer or
+    // replaying business payloads. Keep the existing bounded recovery cycle.
+    let wake_answerer = state.ever_connected
+        && state.recovery_inflight
+        && state.role == Role::Answerer
+        && state.active_generation == Some(generation)
+        && state.pending_generation.is_none()
+        && state.building_generation.is_none()
+        && recovery_gate_open(state);
+    tracing::debug!(peer = %state.peer_id.to_string_repr(), generation, stage,
+        recovery_cycle = state.recovery_cycle, recovery_epoch = state.recovery_epoch,
+        wake_answerer, "SDP failure advancing recovery");
+    negotiation_failed(state, effects);
+    if wake_answerer {
+        state.recovery_negotiated = false;
+        state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
+        send_answerer_restart_request(state, effects);
+        state.bump_revision();
+    }
+}
+
 fn negotiation_failed(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect>) {
     if !state.ever_connected {
         terminate_transport_attempt(state, RtcUnavailableReason::NegotiationFailed, effects);

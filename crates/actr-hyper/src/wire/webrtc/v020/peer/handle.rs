@@ -182,6 +182,16 @@ impl RtcPeerControllerHandle {
         self.snapshot_rx.borrow().clone()
     }
 
+    pub(crate) fn try_recovery_hint(&self) -> bool {
+        let snapshot = self.snapshot();
+        self.command_tx
+            .try_send(RtcPeerCommand::RecoveryHint {
+                transport_epoch: snapshot.transport_epoch,
+                pc_generation: snapshot.pc_generation,
+            })
+            .is_ok()
+    }
+
     /// Subscribe to snapshot updates; the receiver sees the latest immediately.
     pub(crate) fn subscribe(&self) -> watch::Receiver<RtcPeerSnapshot> {
         self.snapshot_rx.clone()

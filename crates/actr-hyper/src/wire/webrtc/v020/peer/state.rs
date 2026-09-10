@@ -172,6 +172,10 @@ pub(crate) struct RtcPeerState {
     /// this advances only when entering a new logical recovery cycle; Soft
     /// retries and Hard escalation cannot extend its deadline.
     pub(crate) recovery_cycle: u64,
+    /// Coalesce business-driven wakes across concurrent callers within a cycle.
+    pub(crate) business_hint_cycle: Option<u64>,
+    /// First remote Offer window for a logical cycle and physical generation.
+    pub(crate) answerer_offer_deadline: Option<(u64, u64)>,
     /// A Soft/Hard recovery operation has been launched for the current
     /// recovering epoch. Network-event storms are facts, not a request to run
     /// the same restart repeatedly; this latch is cleared only on convergence
@@ -405,6 +409,8 @@ impl RtcPeerState {
             recovery_negotiated: true,
             recovery_epoch: 0,
             recovery_cycle: 0,
+            business_hint_cycle: None,
+            answerer_offer_deadline: None,
             recovery_attempt_started: false,
             recovery_origin: None,
             recovery_started_by_remote_request: false,
