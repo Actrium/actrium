@@ -5350,6 +5350,201 @@ fn answerer_soft_recovery_sends_request_without_local_restart_ice() {
     assert_eq!(state.phase, RtcPeerPhase::Recovering);
 }
 
+#[test]
+fn offerer_restart_request_ack_outcome_is_committed_with_the_request() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let (respond, mut outcome) = tokio::sync::oneshot::channel();
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequestCommitted {
+            request_id: "committed-request".to_string(),
+            attempt: 1,
+            respond,
+        }),
+    );
+
+    assert_eq!(
+        outcome.try_recv().expect("committed request outcome"),
+        actr_protocol::ice_restart_request_ack::Outcome::Accepted as i32
+    );
+    assert!(has_restart_ice(&effects, generation));
+}
+
+#[test]
+fn restart_request_committed_outcome_distinguishes_role_and_session() {
+    let mut answerer = RtcPeerState::new(test_actor_id(2));
+    let (respond, mut outcome) = tokio::sync::oneshot::channel();
+    reduce(
+        &mut answerer,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequestCommitted {
+            request_id: "wrong-role".to_string(),
+            attempt: 1,
+            respond,
+        }),
+    );
+    assert_eq!(
+        outcome.try_recv().expect("wrong-role outcome"),
+        actr_protocol::ice_restart_request_ack::Outcome::WrongRole as i32
+    );
+
+    let mut offerer_without_session = RtcPeerState::new(test_actor_id(3));
+    offerer_without_session.role = Role::Offerer;
+    let (respond, mut outcome) = tokio::sync::oneshot::channel();
+    reduce(
+        &mut offerer_without_session,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequestCommitted {
+            request_id: "no-session".to_string(),
+            attempt: 1,
+            respond,
+        }),
+    );
+    assert_eq!(
+        outcome.try_recv().expect("no-session outcome"),
+        actr_protocol::ice_restart_request_ack::Outcome::NoActiveSession as i32
+    );
+}
+
+#[test]
+fn answerer_no_active_session_ack_starts_fresh_role_negotiation() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_negotiating(&mut state);
+    drive_to_sendable(&mut state, generation);
+
+    let request = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::LocalAddressChanged,
+        )),
+    );
+    assert!(has_restart_request(&request, 1));
+    let request_id = state
+        .local_restart_request_id
+        .clone()
+        .expect("answerer request identity");
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequestAck {
+            request_id,
+            attempt: 1,
+            outcome: actr_protocol::ice_restart_request_ack::Outcome::NoActiveSession as i32,
+        }),
+    );
+
+    assert!(has_close_session(&effects, generation));
+    assert!(has_role_negotiation(&effects));
+    assert_eq!(state.role, Role::Undetermined);
+    assert!(state.role_negotiation_inflight);
+    assert!(state.initial_connection_inflight);
+    assert_eq!(state.active_generation, None);
+    assert_eq!(state.phase, RtcPeerPhase::Building);
+}
+
+#[test]
+fn answerer_accepted_ack_keeps_the_current_request_flight() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_negotiating(&mut state);
+    drive_to_sendable(&mut state, generation);
+    let request = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::LocalAddressChanged,
+        )),
+    );
+    assert!(has_restart_request(&request, 1));
+    let request_id = state
+        .local_restart_request_id
+        .clone()
+        .expect("answerer request identity");
+    let stale_events = state.stale_events;
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequestAck {
+            request_id: request_id.clone(),
+            attempt: 1,
+            outcome: actr_protocol::ice_restart_request_ack::Outcome::Accepted as i32,
+        }),
+    );
+    assert!(effects.is_empty());
+    assert_eq!(state.stale_events, stale_events);
+    assert_eq!(
+        state.local_restart_request_id.as_deref(),
+        Some(request_id.as_str())
+    );
+    assert_eq!(state.phase, RtcPeerPhase::Recovering);
+
+    // A duplicate Accepted Ack is idempotent and must not restart the
+    // Answerer or retire its generation.
+    let duplicate = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequestAck {
+            request_id,
+            attempt: 1,
+            outcome: actr_protocol::ice_restart_request_ack::Outcome::Accepted as i32,
+        }),
+    );
+    assert!(duplicate.is_empty());
+    assert_eq!(state.stale_events, stale_events);
+}
+
+#[test]
+fn answerer_restart_request_ack_rejects_stale_and_unknown_outcomes() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_negotiating(&mut state);
+    drive_to_sendable(&mut state, generation);
+    let request = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::LocalAddressChanged,
+        )),
+    );
+    assert!(has_restart_request(&request, 1));
+    let request_id = state
+        .local_restart_request_id
+        .clone()
+        .expect("answerer request identity");
+
+    let stale_id = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequestAck {
+            request_id: "stale-request".to_string(),
+            attempt: 1,
+            outcome: actr_protocol::ice_restart_request_ack::Outcome::NoActiveSession as i32,
+        }),
+    );
+    assert!(stale_id.is_empty());
+    assert_eq!(state.stale_events, 1);
+    assert_eq!(
+        state.local_restart_request_id.as_deref(),
+        Some(request_id.as_str())
+    );
+
+    let stale_attempt = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequestAck {
+            request_id: request_id.clone(),
+            attempt: 2,
+            outcome: actr_protocol::ice_restart_request_ack::Outcome::WrongRole as i32,
+        }),
+    );
+    assert!(stale_attempt.is_empty());
+    assert_eq!(state.stale_events, 2);
+
+    let unknown_outcome = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequestAck {
+            request_id,
+            attempt: 1,
+            outcome: 99,
+        }),
+    );
+    assert!(unknown_outcome.is_empty());
+    assert_eq!(state.stale_events, 3);
+}
+
 /// Once the answerer joins the offerer's recovery round by applying the
 /// restart offer, its already-sent request is complete: the answer path must
 /// not re-emit another restart request (a late duplicate would race the
