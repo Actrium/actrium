@@ -174,8 +174,11 @@ pub(crate) struct RtcPeerState {
     pub(crate) recovery_cycle: u64,
     /// Coalesce business-driven wakes across concurrent callers within a cycle.
     pub(crate) business_hint_cycle: Option<u64>,
-    /// First remote Offer window for a logical cycle and physical generation.
-    pub(crate) answerer_offer_deadline: Option<(u64, u64)>,
+    /// First remote Offer window for each ICE generation in a logical cycle
+    /// and physical generation. Duplicate Offers for the same ICE generation
+    /// must not extend the recovery deadline, while a fresh restart Offer may
+    /// re-arm it for the new ICE exchange.
+    pub(crate) answerer_offer_deadline: Option<(u64, u64, u64)>,
     /// A Soft/Hard recovery operation has been launched for the current
     /// recovering epoch. Network-event storms are facts, not a request to run
     /// the same restart repeatedly; this latch is cleared only on convergence

@@ -858,7 +858,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 generation,
                 operation_id,
             } => self.with_session_ops(identity, completion_tx, move |ops| async move {
-                let started = std::time::Instant::now();
+                let started = tokio::time::Instant::now();
                 tracing::debug!(
                     generation,
                     operation_id,
@@ -888,7 +888,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 generation,
                 operation_id,
             } => self.with_session_ops(identity, completion_tx, move |ops| async move {
-                let started = std::time::Instant::now();
+                let started = tokio::time::Instant::now();
                 tracing::debug!(
                     generation,
                     operation_id,
@@ -919,7 +919,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 operation_id,
                 desc,
             } => self.with_session_ops(identity, completion_tx, move |ops| async move {
-                let started = std::time::Instant::now();
+                let started = tokio::time::Instant::now();
                 tracing::debug!(
                     generation,
                     operation_id,
@@ -950,7 +950,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 operation_id,
                 desc,
             } => self.with_session_ops(identity, completion_tx, move |ops| async move {
-                let started = std::time::Instant::now();
+                let started = tokio::time::Instant::now();
                 tracing::debug!(
                     generation,
                     operation_id,
