@@ -15,14 +15,17 @@ use std::time::Duration;
 
 use actr_hyper::lifecycle::{NetworkAvailability, NetworkTransportFlags};
 use actr_hyper::test_support::{
-    ConnectionInitiator, MobileRtcPairHarness, PairEndpoint, SignalingFaultRule,
-    SignalingMessageClass, TestRtcRole, install_test_crypto_provider,
+    ConnectionInitiator, ICE_RESTART_ATTEMPT_TIMEOUT, MobileRtcPairHarness, PairEndpoint,
+    REMOTE_REQUEST_WAKE_GRACE, SignalingFaultRule, SignalingMessageClass, TestRtcRole,
+    install_test_crypto_provider,
 };
 
 const SETUP_TIMEOUT: Duration = Duration::from_secs(10);
-/// Must be shorter than the normal per-attempt deadline while still leaving
-/// enough time for the real local Actrix/RTC event path.
-const WAKE_WINDOW: Duration = Duration::from_secs(2);
+/// Keep the assertion derived from the audited ten-second attempt timeout; it
+/// must remain shorter than a normal retry while leaving enough time for the
+/// real local Actrix/RTC event path.
+const WAKE_WINDOW: Duration =
+    Duration::from_millis((ICE_RESTART_ATTEMPT_TIMEOUT.as_millis() / 5) as u64);
 
 fn wifi() -> NetworkTransportFlags {
     NetworkTransportFlags {
@@ -132,13 +135,13 @@ async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
     // produce the next offer within the short grace/retry window. This offer
     // is delivered, so the assertion below can cover the complete recovery.
     let wake_offer = tokio::time::timeout(
-        WAKE_WINDOW,
+        REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW,
         pair.harness().signaling_faults.wait_for_hits_after(
             &offerer,
             &answerer,
             SignalingMessageClass::IceRestartOffer,
             offers_before_wake,
-            WAKE_WINDOW,
+            REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW,
         ),
     )
     .await;
@@ -248,13 +251,13 @@ async fn local_network_recovery_retries_lost_offer_on_attempt1_wake() {
         .expect("the returning Answerer must send attempt-1 restart request");
 
     let wake_offer = tokio::time::timeout(
-        WAKE_WINDOW,
+        REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW,
         pair.harness().signaling_faults.wait_for_hits_after(
             &offerer,
             &answerer,
             SignalingMessageClass::IceRestartOffer,
             offers_before_wake,
-            WAKE_WINDOW,
+            REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW,
         ),
     )
     .await

@@ -1065,6 +1065,15 @@ impl PeerGate {
                     }
                     deadline.ensure_remaining()?;
 
+                    #[cfg(feature = "webrtc-v020")]
+                    if *projection.borrow() == SendProjection::Normal {
+                        if let Some(handle) = self.v020_manager.get_controller(target).await {
+                            // Controller owns coalescing and lifecycle eligibility.
+                            // Queue saturation never blocks business readiness waits.
+                            let _ = handle.try_business_recovery_hint();
+                        }
+                    }
+
                     // A destination can be materialized while this waiter is
                     // asleep. Discover its ready-set before choosing the next
                     // wake source so a WebSocket fallback is not missed.
