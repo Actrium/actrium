@@ -2688,6 +2688,114 @@ fn address_edge_coalesced_mid_soft_round_republishes_on_convergence() {
 }
 
 #[test]
+fn address_edge_after_negotiation_restarts_immediately_before_attempt_deadline() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkUnavailable,
+        )),
+    );
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkAvailable,
+        )),
+    );
+    let first_epoch = state.recovery_epoch;
+    let first_ice_generation = state.ice_generation;
+
+    // Model the mobile handover edge observed after the first Offer/Answer
+    // completed but before the physical ICE path became ready.
+    state.recovery_negotiated = true;
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::LocalAddressChanged,
+        )),
+    );
+
+    assert!(
+        has_restart_ice(&effects, generation),
+        "a post-negotiation address edge must start the fresh rebind immediately"
+    );
+    assert!(state.recovery_epoch > first_epoch);
+    assert!(state.ice_generation > first_ice_generation);
+    assert!(state.recovery_attempt_started);
+    assert!(!state.address_edge_pending);
+}
+
+#[test]
+fn answerer_defers_address_edge_without_suppressing_request_retry() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_sendable_with_ufrag(&mut state, "remote-1");
+
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkUnavailable,
+        )),
+    );
+    let start = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkAvailable,
+        )),
+    );
+    assert!(has_restart_request(&start, 1));
+    let request_id = state
+        .local_restart_request_id
+        .clone()
+        .expect("answerer recovery request identity");
+    let epoch = state.recovery_epoch;
+    let ice_generation = state.ice_generation;
+
+    // The current restart Offer/Answer has completed, but the physical path
+    // is still unavailable. An address edge must not create another request
+    // while the Offerer may still be executing this same ICE restart.
+    state.phase = RtcPeerPhase::TransportReady;
+    state.recovery_negotiated = true;
+    state.recovery_attempt_started = true;
+    state.rpc_reliable_open = false;
+    state.pc_connected = false;
+    state.awaiting_offer = false;
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::LocalAddressChanged,
+        )),
+    );
+
+    assert!(effects.is_empty());
+    assert_eq!(state.recovery_epoch, epoch);
+    assert_eq!(state.ice_generation, ice_generation);
+    assert!(state.recovery_attempt_started);
+    assert!(state.address_edge_pending);
+
+    // Deferring the edge does not remove the Answerer's wake-up path. The
+    // existing attempt deadline still emits the next attempt with the same
+    // request identity after the current exchange has had its full window.
+    let retry = reduce(
+        &mut state,
+        RtcPeerInput::RecoveryDeadlineElapsed {
+            recovery_epoch: epoch,
+        },
+    );
+    assert!(retry.iter().any(|effect| matches!(
+        effect,
+        RtcPeerEffect::SendSignaling {
+            message: SignalingMessage::IceRestartRequest {
+                request_id: actual,
+                attempt: 2,
+            },
+            generation: actual_generation,
+        } if actual == &request_id && *actual_generation == generation
+    )));
+}
+
+#[test]
 fn restart_ice_completion_offerer_creates_restart_offer() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let generation = drive_offerer_to_sendable(&mut state);
@@ -3606,6 +3714,122 @@ fn total_recovery_budget_survives_same_pc_soft_retry() {
 }
 
 #[test]
+fn offerer_role_assignment_cancels_soft_recovery_and_starts_fresh_attempt() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+
+    // Start a same-PC Soft Recovery and retain the exact RestartIce identity
+    // so the test can prove that the role assignment retires its operation.
+    let restart = reduce(&mut state, failed_tick(generation));
+    assert_eq!(state.phase, RtcPeerPhase::Recovering);
+    assert!(state.recovery_inflight);
+    let (restart_operation_id, ice_generation) = restart_identity(&restart, generation);
+    let old_transport_epoch = state.transport_epoch;
+    let old_recovery_cycle = state.recovery_cycle;
+
+    // The Offerer assignment is authoritative: abandon the recovery attempt,
+    // close the old generation, and start a fresh initial Offerer attempt.
+    let effects = reduce(&mut state, role_assignment(true));
+    let replacement = generation + 1;
+    assert_eq!(state.role, Role::Offerer);
+    assert_eq!(state.phase, RtcPeerPhase::Building);
+    assert!(!state.recovery_inflight);
+    assert!(state.initial_connection_inflight);
+    assert_eq!(state.active_generation, None);
+    assert_eq!(state.building_generation, Some(replacement));
+    assert_eq!(state.transport_epoch, old_transport_epoch + 1);
+    assert_eq!(state.recovery_cycle, old_recovery_cycle);
+    assert!(has_close_session(&effects, generation));
+    assert!(has_build_session(&effects, replacement));
+
+    // The old recovery budget and its RestartIce completion are stale after
+    // the fresh transport attempt takes ownership.
+    let stale_budget = reduce(
+        &mut state,
+        RtcPeerInput::RecoveryBudgetElapsed {
+            recovery_cycle: old_recovery_cycle,
+        },
+    );
+    assert!(stale_budget.is_empty());
+    assert_eq!(state.phase, RtcPeerPhase::Building);
+    let stale_before = state.stale_completions;
+    let stale_restart = reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::RestartIce {
+            generation,
+            operation_id: restart_operation_id,
+            ice_generation,
+            result: Ok(()),
+        }),
+    );
+    assert!(stale_restart.is_empty());
+    assert_eq!(state.stale_completions, stale_before + 1);
+    assert_eq!(state.building_generation, Some(replacement));
+}
+
+#[test]
+fn offerer_role_assignment_retires_pending_hard_recovery_replacement() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let old_generation = drive_offerer_to_sendable(&mut state);
+
+    // Hard Recovery leaves the old generation active while the replacement is
+    // built. Complete the build so both active and pending generations must be
+    // retired by the RoleAssignment path.
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::ForceReconnect,
+        )),
+    );
+    let pending_generation = old_generation + 1;
+    assert!(state.recovery_inflight);
+    assert!(has_build_session(&effects, pending_generation));
+    let build_operation_id = pending_operation(
+        &state,
+        PendingRtcOperationKind::BuildSession,
+        pending_generation,
+    );
+    reduce(&mut state, build_ok(pending_generation, build_operation_id));
+    assert_eq!(state.active_generation, Some(old_generation));
+    assert_eq!(state.pending_generation, Some(pending_generation));
+
+    let effects = reduce(&mut state, role_assignment(true));
+    let replacement = pending_generation + 1;
+    assert_eq!(state.phase, RtcPeerPhase::Building);
+    assert!(!state.recovery_inflight);
+    assert_eq!(state.active_generation, None);
+    assert_eq!(state.pending_generation, None);
+    assert_eq!(state.building_generation, Some(replacement));
+    assert!(has_close_session(&effects, old_generation));
+    assert!(has_close_session(&effects, pending_generation));
+    assert!(has_build_session(&effects, replacement));
+}
+
+#[test]
+fn answerer_role_assignment_does_not_cancel_inflight_recovery() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_negotiating(&mut state);
+    drive_to_sendable(&mut state, generation);
+
+    reduce(&mut state, failed_tick(generation));
+    let recovery_epoch = state.recovery_epoch;
+    assert_eq!(state.role, Role::Answerer);
+    assert!(state.recovery_inflight);
+
+    // The old Coordinator only replaced an existing session for an Offerer
+    // assignment. An Answerer continues request-only recovery and waits for a
+    // fresh remote Offer.
+    let effects = reduce(&mut state, role_assignment(false));
+    assert!(effects.is_empty());
+    assert_eq!(state.role, Role::Answerer);
+    assert_eq!(state.phase, RtcPeerPhase::Recovering);
+    assert!(state.recovery_inflight);
+    assert_eq!(state.recovery_epoch, recovery_epoch);
+    assert_eq!(state.active_generation, None);
+    assert_eq!(state.parked_signaling_generation, Some(generation));
+}
+
+#[test]
 fn recovery_exhaustion_closes_late_successful_build_as_orphan() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let active = drive_offerer_to_sendable(&mut state);
@@ -3932,28 +4156,53 @@ fn answerer_local_address_change_starts_soft_recovery() {
 }
 
 #[test]
-fn answerer_physical_failure_waits_without_restart_or_rebuild() {
+fn answerer_physical_failure_retires_before_parking() {
     let mut state = RtcPeerState::new(test_actor_id(2));
     let generation = drive_answerer_to_negotiating(&mut state);
     drive_to_sendable(&mut state, generation);
 
     let effects = reduce(&mut state, failed_tick(generation));
 
+    assert!(has_close_session(&effects, generation));
     assert!(!has_restart_ice(&effects, generation));
-    assert!(!has_restart_request(&effects, 1));
+    assert!(has_restart_request(&effects, 1));
     assert!(!has_build_session(&effects, generation + 1));
     assert!(!has_role_negotiation(&effects));
     assert_eq!(state.phase, RtcPeerPhase::Recovering);
     assert!(state.recovery_inflight);
-    assert!(!state.recovery_attempt_started);
+    assert!(state.recovery_attempt_started);
     assert!(state.awaiting_offer);
-    assert_eq!(state.active_generation, Some(generation));
+    assert_eq!(state.active_generation, None);
+    assert_eq!(state.parked_signaling_generation, Some(generation));
+    assert_eq!(state.local_restart_request_attempt, 1);
+    let request_id = state
+        .local_restart_request_id
+        .clone()
+        .expect("failed Answerer must create a restart request identity");
 
+    // The retired generation cannot process a duplicate terminal callback;
+    // the first wake remains the only immediate request for this parked round.
+    let duplicate_effects = reduce(&mut state, failed_tick(generation));
+    assert!(
+        !duplicate_effects.iter().any(|effect| matches!(
+            effect,
+            RtcPeerEffect::SendSignaling {
+                message: SignalingMessage::IceRestartRequest { .. },
+                ..
+            }
+        )),
+        "duplicate Failed callbacks must not emit a second immediate request"
+    );
+    assert_eq!(
+        state.local_restart_request_id.as_deref(),
+        Some(request_id.as_str())
+    );
+    assert_eq!(state.local_restart_request_attempt, 1);
     // A per-attempt deadline does not create a local replacement (no build),
-    // but it is no longer silent: it sends/retransmits the correlated
-    // restart request so a healthy offerer wakes toward hard recovery. The
-    // single recovery budget still performs the terminal cleanup if no Offer
-    // arrives.
+    // but retransmits the correlated restart request so a healthy Offerer
+    // wakes toward hard recovery. The physical close was already scheduled by
+    // the Failed fact; the single recovery budget still performs terminal
+    // logical cleanup if no Offer arrives.
     let recovery_epoch = state.recovery_epoch;
     let deadline_effects = reduce(
         &mut state,
@@ -3963,9 +4212,12 @@ fn answerer_physical_failure_waits_without_restart_or_rebuild() {
         deadline_effects.iter().any(|e| matches!(
             e,
             RtcPeerEffect::SendSignaling {
-                message: SignalingMessage::IceRestartRequest { .. },
+                message: SignalingMessage::IceRestartRequest {
+                    request_id: actual,
+                    attempt: 2,
+                },
                 ..
-            }
+            } if actual == &request_id
         )),
         "the parked deadline must drive the offerer wake"
     );
@@ -3980,7 +4232,11 @@ fn answerer_physical_failure_waits_without_restart_or_rebuild() {
         &mut state,
         RtcPeerInput::RecoveryBudgetElapsed { recovery_cycle },
     );
-    assert!(has_close_session(&budget_effects, generation));
+    assert!(
+        !budget_effects
+            .iter()
+            .any(|effect| matches!(effect, RtcPeerEffect::BuildSession { .. }))
+    );
     assert_eq!(state.phase, RtcPeerPhase::Idle);
     assert_eq!(
         state.unavailable_reason,
@@ -3988,6 +4244,75 @@ fn answerer_physical_failure_waits_without_restart_or_rebuild() {
     );
     assert_eq!(state.active_generation, None);
     assert!(!state.awaiting_offer);
+}
+
+#[test]
+fn answerer_failed_after_request_preserves_request_identity() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_negotiating(&mut state);
+    drive_to_sendable(&mut state, generation);
+
+    let initial_effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::LocalAddressChanged,
+        )),
+    );
+    assert!(has_restart_request(&initial_effects, 1));
+    let request_id = state
+        .local_restart_request_id
+        .clone()
+        .expect("the initial Answerer recovery must create a request identity");
+    let request_attempt = state.local_restart_request_attempt;
+    let request_epoch = state.recovery_epoch;
+
+    // A terminal state callback can arrive after the request-only recovery has
+    // already started. Parking the physical failure must keep the same
+    // correlated request instead of resetting the exchange to attempt 1.
+    let failed_effects = reduce(&mut state, failed_tick(generation));
+    assert!(!has_restart_ice(&failed_effects, generation));
+    assert!(has_restart_request(&failed_effects, 2));
+    assert!(!has_build_session(&failed_effects, generation + 1));
+    assert!(state.awaiting_offer);
+    assert_eq!(
+        state.local_restart_request_id.as_deref(),
+        Some(request_id.as_str())
+    );
+    assert_eq!(state.local_restart_request_attempt, request_attempt + 1);
+    assert!(state.recovery_epoch > request_epoch);
+    assert_eq!(state.active_generation, None);
+    assert_eq!(state.parked_signaling_generation, Some(generation));
+
+    let duplicate_effects = reduce(&mut state, failed_tick(generation));
+    assert!(
+        !duplicate_effects.iter().any(|effect| matches!(
+            effect,
+            RtcPeerEffect::SendSignaling {
+                message: SignalingMessage::IceRestartRequest { .. },
+                ..
+            }
+        )),
+        "repeated Failed callbacks after parking must not create a request storm"
+    );
+    assert_eq!(state.local_restart_request_attempt, request_attempt + 1);
+
+    let retry_epoch = state.recovery_epoch;
+    let retry = reduce(
+        &mut state,
+        RtcPeerInput::RecoveryDeadlineElapsed {
+            recovery_epoch: retry_epoch,
+        },
+    );
+    assert!(retry.iter().any(|effect| matches!(
+        effect,
+        RtcPeerEffect::SendSignaling {
+            generation: actual_generation,
+            message: SignalingMessage::IceRestartRequest {
+                request_id: actual_id,
+                attempt: 3,
+            },
+        } if *actual_generation == generation && actual_id == &request_id
+    )));
 }
 
 #[test]
@@ -4781,6 +5106,39 @@ fn answerer_parked_restart_does_not_restore_closed_lane() {
     assert!(!state.rpc_reliable_open);
 }
 
+#[test]
+fn answerer_failed_session_retires_generation_before_parking() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_sendable_with_ufrag(&mut state, "remote-1");
+
+    let effects = reduce(&mut state, failed_tick(generation));
+
+    assert!(has_close_session(&effects, generation));
+    assert_eq!(state.active_generation, None);
+    assert_eq!(state.parked_signaling_generation, Some(generation));
+    assert!(!state.pc_connected);
+    assert!(!state.rpc_reliable_open);
+    assert!(!state.sendable());
+    assert!(state.awaiting_offer);
+
+    let restart = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
+            desc: Box::new(sdp_with_ufrag(RTCSdpType::Offer, "remote-2")),
+            exchange_id: Some("v020-restart-1".to_string()),
+        }),
+    );
+    assert!(restart.iter().any(|effect| matches!(
+        effect,
+        RtcPeerEffect::SendSignaling {
+            message: SignalingMessage::IceRestartRejected { exchange_id, reason },
+            ..
+        } if exchange_id == "v020-restart-1"
+            && *reason == actr_protocol::ice_restart_rejected::Reason::NoActiveSession as i32
+    )));
+    assert!(!has_set_remote(&restart, generation));
+}
+
 /// The answerer's own soft recovery is request-only: no local RestartIce
 /// effect is dispatched, and its local ICE restart happens implicitly when the
 /// offerer's restart offer is applied. A local restart_ice() racing that offer
@@ -4843,6 +5201,7 @@ fn answerer_does_not_reemit_request_after_applying_restart_offer() {
         )),
     );
     assert!(has_restart_request(&start, 1));
+    let request_attempt_epoch = state.recovery_epoch;
 
     // The offerer's restart offer lands: the answerer applies it (implicit
     // local restart inside set_remote_description) and must produce only the
@@ -4867,6 +5226,20 @@ fn answerer_does_not_reemit_request_after_applying_restart_offer() {
             }
         )),
         "applying the restart offer must not re-emit the restart request"
+    );
+    assert_ne!(
+        state.recovery_epoch, request_attempt_epoch,
+        "the accepted restart offer must supersede the request-only deadline"
+    );
+    let stale_deadline = reduce(
+        &mut state,
+        RtcPeerInput::RecoveryDeadlineElapsed {
+            recovery_epoch: request_attempt_epoch,
+        },
+    );
+    assert!(
+        stale_deadline.is_empty(),
+        "the request deadline must be stale once the restart offer is accepted"
     );
 
     // The answer path follows the remote description completion.

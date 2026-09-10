@@ -399,7 +399,8 @@ def test_release_train_supports_generic_maintenance_branches() -> None:
     assert "ref: main" not in workflow
     assert "--branch main" not in workflow
     assert "--latest=false" in workflow
-    assert "--notes-start-tag" in workflow
+    assert '--from-release-commit' in workflow
+    assert 'scripts/actr/generate-changelog.py' in workflow
     assert "needs.context.result == 'success'" in workflow
 
     assert "^release-([0-9]+)\\.([0-9]+)$" in release_script
@@ -426,7 +427,7 @@ def test_e2e_actrix_uses_in_tree_install_instead_of_artifact_download() -> None:
     assert "Actrium/actrix" not in workflow
     assert "actions: read" not in workflow
 
-    assert "runs-on: ubuntu-latest-m" in pkg_job
+    assert "runs-on: [self-hosted, Linux, X64, high]" in pkg_job
     assert "runs-on: macos-arm64-larger" in swift_job
 
 

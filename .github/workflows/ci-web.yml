@@ -18,7 +18,7 @@ concurrency:
 jobs:
   format-and-check:
     name: Web Format And Check
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v5
 
@@ -80,7 +80,10 @@ jobs:
 
   browser-e2e:
     name: Web Browser E2E (Puppeteer)
-    runs-on: ubuntu-latest-m
+    # Hosted on purpose: the job drives a real Chrome that the GitHub runner
+    # images ship; the ARC runner image has no browser and containerizing one
+    # (with its sandbox deps) is a separate follow-up.
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
       contents: read

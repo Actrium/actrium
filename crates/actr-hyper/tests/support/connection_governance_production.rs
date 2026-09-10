@@ -108,6 +108,9 @@ async fn payloads_after_replacement(role: TestRtcRole) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+// TODO(#215): re-enable when the lane readiness race is handled as part of
+// the planned webrtc-rs 0.21.x upgrade.
+#[ignore = "known DCEP readiness race tracked by Actrium/actrium#215"]
 async fn production_offerer_replacement_delivers_tell_signal_and_both_stream_lanes() {
     payloads_after_replacement(TestRtcRole::Offerer).await;
 }

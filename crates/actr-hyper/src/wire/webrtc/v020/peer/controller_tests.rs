@@ -703,6 +703,81 @@ async fn full_queue_retains_critical_sdp_and_retries_once_drained() {
     h.handle.close().await.expect("send close");
 }
 
+/// A terminal Answerer failure must wake the Offerer even when the lifecycle
+/// supervisor has temporarily withdrawn signaling. The request is critical
+/// signaling and must remain queued until a committed generation is available.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn gate_closed_retains_answerer_restart_request_until_signaling_returns() {
+    let mut h = spawn_harness(711);
+    h.handle
+        .apply_remote_description(desc(RTCSdpType::Offer))
+        .await
+        .expect("send incoming offer");
+    let build = next_build(&mut h).await;
+    let handler = build.handler.clone();
+    succeed_build(build);
+
+    let answer = timeout(WAIT, h.signaling_rx.recv())
+        .await
+        .expect("timed out waiting for answer")
+        .expect("signaling closed");
+    assert!(matches!(&answer.message, SignalingMessage::Answer { .. }));
+    handler
+        .mailbox()
+        .try_publish(PeerDriverEvent::PeerConnectionStateChanged {
+            generation: 1,
+            state: RTCPeerConnectionState::Connected,
+        });
+    h.lane_tx
+        .send(LaneEvent::Opened {
+            generation: 1,
+            lane: LaneKind::RpcReliable,
+        })
+        .await
+        .expect("send lane open");
+    await_snapshot(&h, "answerer sendable", |snapshot| snapshot.sendable).await;
+
+    h._supervisor.set_signaling_generation(None);
+    // Network event handling reconciles the signaling watch before reducing
+    // the event itself, so this accepted loss edge proves the controller has
+    // observed the closed gate without exposing internal gate state in the
+    // public snapshot.
+    h._supervisor
+        .publish(crate::wire::webrtc::v020::recovery::RtcNetworkEvent::NetworkUnavailable);
+    let gated = await_snapshot(&h, "signaling-gated recovery", |snapshot| {
+        snapshot.status == actr_framework::WebRtcPeerStatus::Recovering && !snapshot.sendable
+    })
+    .await;
+
+    handler
+        .mailbox()
+        .try_publish(PeerDriverEvent::PeerConnectionStateChanged {
+            generation: 1,
+            state: RTCPeerConnectionState::Failed,
+        });
+    await_snapshot(&h, "failed answerer parked", |snapshot| {
+        snapshot.revision > gated.revision
+            && snapshot.status == actr_framework::WebRtcPeerStatus::Recovering
+            && !snapshot.sendable
+    })
+    .await;
+    assert!(
+        h.signaling_rx.try_recv().is_err(),
+        "restart request must wait behind the closed signaling gate"
+    );
+
+    h._supervisor.set_signaling_generation(Some(1));
+    let request = timeout(WAIT, h.signaling_rx.recv())
+        .await
+        .expect("timed out waiting for retained restart request")
+        .expect("signaling closed");
+    assert!(matches!(
+        &request.message,
+        SignalingMessage::IceRestartRequest { attempt: 1, .. }
+    ));
+    h.handle.close().await.expect("close answerer controller");
+}
+
 /// Stage 4B/4C: the lane pump is the single poll() consumer, covering every
 /// DataChannelEvent — OnOpen/OnClose to the controller as LaneEvents, OnMessage
 /// payloads to the InboundRouter (data plane); buffered-amount events are
@@ -764,8 +839,10 @@ async fn lane_pump_routes_all_events_to_inbound() {
             peer_id: peer.clone(),
             lane_tx,
             inbound,
+            inbound_generation: Arc::new(super::session::InboundGenerationGate::with_generation(1)),
             reassembly_limits: crate::transport::ReassemblyLimits::default(),
         },
+        tokio_util::sync::CancellationToken::new(),
     ));
 
     // The lane becomes Open, then Closed as the script plays out.
@@ -804,6 +881,212 @@ async fn lane_pump_routes_all_events_to_inbound() {
     assert_eq!(got[0].lane, LaneKind::RpcReliable);
     assert_eq!(got[0].payload.as_ref(), b"hello");
     assert_eq!(got[1].payload.as_ref(), &[0x01, 0x02]);
+}
+
+/// A late message from a recovering/retired generation must not reach the
+/// workload just because its DataChannel pump is still draining. The gate is
+/// set to a different generation to model an atomic replacement already being
+/// authoritative.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lane_pump_rejects_message_from_non_sendable_generation() {
+    use super::effects::test_support::scripted_data_channel;
+    use crate::wire::webrtc::v020::inbound::{InboundMessage, InboundRouter};
+    use std::sync::Mutex as StdMutex;
+    use webrtc::data_channel::{DataChannelEvent, RTCDataChannelMessage};
+
+    let peer = test_actor_id(1);
+    let received: std::sync::Arc<StdMutex<Vec<InboundMessage>>> =
+        std::sync::Arc::new(StdMutex::new(Vec::new()));
+    let received2 = received.clone();
+    let inbound = std::sync::Arc::new(InboundRouter::new(std::sync::Arc::new(
+        move |msg, _lease| {
+            received2.lock().unwrap().push(msg);
+        },
+    )));
+    let inbound_for_pump = inbound.clone();
+    let (lane_tx, mut lane_rx) = mpsc::channel(4);
+    let inbound_generation =
+        std::sync::Arc::new(super::session::InboundGenerationGate::with_generation(2));
+    let mut framed = Vec::new();
+    crate::transport::encode_fragment_header(&mut framed, 7, 0, 1);
+    framed.extend_from_slice(b"stale");
+    let channel = scripted_data_channel(
+        "RPC_RELIABLE",
+        vec![
+            DataChannelEvent::OnMessage(RTCDataChannelMessage {
+                is_string: false,
+                data: bytes::BytesMut::from(&framed[..]),
+            }),
+            DataChannelEvent::OnClose,
+        ],
+    );
+
+    let pump = tokio::spawn(super::session::lane_pump(
+        1,
+        LaneKind::RpcReliable,
+        channel,
+        super::session::LanePlumbing {
+            peer_id: peer,
+            lane_tx,
+            inbound: inbound_for_pump,
+            inbound_generation,
+            reassembly_limits: crate::transport::ReassemblyLimits::default(),
+        },
+        tokio_util::sync::CancellationToken::new(),
+    ));
+
+    assert!(matches!(
+        timeout(WAIT, lane_rx.recv())
+            .await
+            .expect("lane close event")
+            .expect("lane close event present"),
+        LaneEvent::Closed {
+            generation: 1,
+            lane: LaneKind::RpcReliable
+        }
+    ));
+    timeout(WAIT, pump)
+        .await
+        .expect("pump should exit on close")
+        .expect("pump panicked");
+    assert!(
+        received.lock().unwrap().is_empty(),
+        "stale generation message must not reach the workload"
+    );
+    assert_eq!(inbound.dropped_messages(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lane_pump_releases_message_when_same_generation_becomes_sendable() {
+    use super::effects::test_support::scripted_data_channel;
+    use crate::wire::webrtc::v020::inbound::{InboundMessage, InboundRouter};
+    use std::sync::Mutex as StdMutex;
+    use webrtc::data_channel::{DataChannelEvent, RTCDataChannelMessage};
+
+    let peer = test_actor_id(1);
+    let received: std::sync::Arc<StdMutex<Vec<InboundMessage>>> =
+        std::sync::Arc::new(StdMutex::new(Vec::new()));
+    let received2 = received.clone();
+    let inbound = std::sync::Arc::new(InboundRouter::new(std::sync::Arc::new(
+        move |msg, _lease| {
+            received2.lock().unwrap().push(msg);
+        },
+    )));
+    let gate = std::sync::Arc::new(super::session::InboundGenerationGate::new());
+    let (lane_tx, mut lane_rx) = mpsc::channel(4);
+    let mut framed = Vec::new();
+    crate::transport::encode_fragment_header(&mut framed, 8, 0, 1);
+    framed.extend_from_slice(b"recovering");
+    let channel = scripted_data_channel(
+        "RPC_RELIABLE",
+        vec![
+            DataChannelEvent::OnMessage(RTCDataChannelMessage {
+                is_string: false,
+                data: bytes::BytesMut::from(&framed[..]),
+            }),
+            DataChannelEvent::OnClose,
+        ],
+    );
+    let cancellation = tokio_util::sync::CancellationToken::new();
+
+    let pump = tokio::spawn(super::session::lane_pump(
+        1,
+        LaneKind::RpcReliable,
+        channel,
+        super::session::LanePlumbing {
+            peer_id: peer,
+            lane_tx,
+            inbound,
+            inbound_generation: gate.clone(),
+            reassembly_limits: crate::transport::ReassemblyLimits::default(),
+        },
+        cancellation,
+    ));
+
+    // Let the pump consume the message and enter the admission wait before
+    // publishing the matching sendable generation.
+    tokio::task::yield_now().await;
+    gate.set(Some(1));
+
+    assert!(matches!(
+        timeout(WAIT, lane_rx.recv())
+            .await
+            .expect("lane close event")
+            .expect("lane close event present"),
+        LaneEvent::Closed {
+            generation: 1,
+            lane: LaneKind::RpcReliable
+        }
+    ));
+    timeout(WAIT, pump)
+        .await
+        .expect("pump should exit on close")
+        .expect("pump panicked");
+    assert_eq!(received.lock().unwrap().len(), 1);
+    assert_eq!(received.lock().unwrap()[0].payload.as_ref(), b"recovering");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn lane_pump_admission_deadline_is_shared_across_stale_messages() {
+    use super::effects::test_support::scripted_data_channel;
+    use crate::wire::webrtc::v020::inbound::InboundRouter;
+    use webrtc::data_channel::{DataChannelEvent, RTCDataChannelMessage};
+
+    tokio::time::pause();
+    let peer = test_actor_id(1);
+    let inbound = std::sync::Arc::new(InboundRouter::discard());
+    let gate = std::sync::Arc::new(super::session::InboundGenerationGate::new());
+    let (lane_tx, mut lane_rx) = mpsc::channel(4);
+
+    fn stale_frame(msg_id: u32) -> RTCDataChannelMessage {
+        let mut framed = Vec::new();
+        crate::transport::encode_fragment_header(&mut framed, msg_id, 0, 1);
+        framed.extend_from_slice(b"stale");
+        RTCDataChannelMessage {
+            is_string: false,
+            data: bytes::BytesMut::from(&framed[..]),
+        }
+    }
+
+    let channel = scripted_data_channel(
+        "RPC_RELIABLE",
+        vec![
+            DataChannelEvent::OnMessage(stale_frame(9)),
+            DataChannelEvent::OnMessage(stale_frame(10)),
+            DataChannelEvent::OnClose,
+        ],
+    );
+    let pump = tokio::spawn(super::session::lane_pump(
+        1,
+        LaneKind::RpcReliable,
+        channel,
+        super::session::LanePlumbing {
+            peer_id: peer,
+            lane_tx,
+            inbound: inbound.clone(),
+            inbound_generation: gate,
+            reassembly_limits: crate::transport::ReassemblyLimits::default(),
+        },
+        tokio_util::sync::CancellationToken::new(),
+    ));
+
+    // The first stale message arms the one 10-second lane/generation window.
+    // After it expires, the second message must be rejected immediately so
+    // the queued close event is not held behind another 10-second wait.
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(10) + Duration::from_millis(1)).await;
+    for _ in 0..4 {
+        tokio::task::yield_now().await;
+    }
+    assert!(matches!(
+        lane_rx.try_recv(),
+        Ok(LaneEvent::Closed {
+            generation: 1,
+            lane: LaneKind::RpcReliable
+        })
+    ));
+    pump.await.expect("pump panicked");
+    assert_eq!(inbound.dropped_messages(), 2);
 }
 
 /// R7/item 11: `session.close()` explicitly calls each owned
@@ -848,6 +1131,7 @@ async fn session_close_explicitly_closes_owned_channels_and_cancels_pumps() {
             peer_id: peer.clone(),
             lane_tx: lane_tx.clone(),
             inbound: inbound.clone(),
+            inbound_generation: Arc::new(super::session::InboundGenerationGate::with_generation(1)),
             reassembly_limits: crate::transport::ReassemblyLimits::default(),
         },
     );
@@ -858,6 +1142,7 @@ async fn session_close_explicitly_closes_owned_channels_and_cancels_pumps() {
             peer_id: peer.clone(),
             lane_tx,
             inbound,
+            inbound_generation: Arc::new(super::session::InboundGenerationGate::with_generation(1)),
             reassembly_limits: crate::transport::ReassemblyLimits::default(),
         },
     );
