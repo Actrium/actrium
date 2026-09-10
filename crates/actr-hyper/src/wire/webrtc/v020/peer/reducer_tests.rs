@@ -3049,13 +3049,18 @@ fn attempt1_restart_request_is_deduped_while_local_restart_is_inflight() {
 }
 
 #[test]
-fn attempt1_restart_request_graces_an_announced_offer_then_retries() {
+fn attempt1_restart_request_graces_local_network_announced_offer_then_retries() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let generation = drive_offerer_to_sendable(&mut state);
     let epoch_before = state.recovery_epoch;
 
     state.recovery_inflight = true;
     state.recovery_attempt_started = true;
+    // A local NetworkAvailable/AddressChanged round must get the same lost-
+    // Offer retry treatment once its SDP operation has completed. The origin
+    // is intentionally set here because the old guard used it as an
+    // unconditional de-duplication signal and skipped the grace timer.
+    state.recovery_origin = Some(RecoveryOrigin::LocalNetwork);
     state.recovery_negotiated = false;
     state.pending_local_sdp_exchange_id = Some("v020-1-1-10".to_string());
     state.phase = RtcPeerPhase::Recovering;

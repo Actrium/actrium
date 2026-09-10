@@ -1453,19 +1453,17 @@ fn reduce_ice_restart_request(
     }
     state.last_remote_restart_request = Some((request_id, attempt));
 
-    // De-dupe the answerer's first correlated wake when either the offerer's
-    // own recovery signal already owns this round, or a local RestartIce/
-    // CreateOffer chain is still in flight. In both cases a second
-    // restart_ice/offer would race the active negotiation. Once the local
-    // Offer has been announced and no SDP operation is pending, the attempt-1
-    // wake is the only signal that a one-sided-outage Answerer is back and
-    // waiting; give the in-flight Offer a short grace window before retrying
-    // it (issue #227).
+    // De-dupe the answerer's first correlated wake while a local RestartIce /
+    // CreateOffer / SDP application chain is still in flight. A second offer
+    // at that point would race the active negotiation. The recovery origin
+    // alone is not enough to classify the request: a LocalNetwork round may
+    // have already announced an Offer that was lost by signaling, so once no
+    // SDP operation remains the request must reach the short grace/retry path
+    // below (issue #227).
     if attempt == 1
         && state.recovery_inflight
         && state.recovery_attempt_started
-        && (state.recovery_origin == Some(RecoveryOrigin::LocalNetwork)
-            || offerer_restart_negotiation_inflight(state))
+        && offerer_restart_negotiation_inflight(state)
     {
         // Even when the offerer's own recovery already owns the round, the
         // request is meaningful: it confirms that the answerer is waiting for
