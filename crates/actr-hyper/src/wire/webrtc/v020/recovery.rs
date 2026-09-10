@@ -19,13 +19,18 @@
 //! consuming the retained tail, so an evicted connectivity-loss edge cannot
 //! leave a stale transport advertised as sendable.
 
+#[cfg(test)]
 use std::net::IpAddr;
 
 use tokio::sync::{broadcast, watch};
+#[cfg(test)]
 use tokio_util::sync::CancellationToken;
 
-// S7A-3 (P2): the address-provider abstraction lives in `address.rs`; re-export
-// it here so the recovery seams (monitor, tests) keep their existing paths.
+// The address-provider abstraction lives in `address.rs`; keep the re-export
+// and monitor bridge test-only. Production recovery is driven by native
+// NetworkPathChanged facts and PeerConnection state callbacks, not by a
+// background address poller.
+#[cfg(test)]
 pub(crate) use super::address::LocalAddressProvider;
 
 /// Default broadcast capacity for network events. Network transitions are
@@ -402,15 +407,14 @@ impl std::fmt::Debug for RtcRecoverySupervisor {
     }
 }
 
-/// Spawn a background task that bridges a `LocalAddressProvider` to the
-/// `RtcRecoverySupervisor`: watches the address snapshot and broadcasts
-/// `LocalAddressChanged` whenever the set of local IPs changes. Controllers
-/// first attempt same-generation ICE recovery; a failed restart can still
-/// escalate to Hard Recovery.
+/// Test-only bridge that watches a `LocalAddressProvider` and broadcasts
+/// `LocalAddressChanged` whenever the set of local IPs changes. Production
+/// recovery receives native network-path facts and peer-state callbacks;
+/// keeping this seam in tests verifies the legacy provider contract without
+/// reintroducing a desktop polling task.
 ///
-/// The task lives for as long as the supervisor and provider are alive. It is
-/// the *only* writer of `LocalAddressChanged` events — platform code should
-/// not publish that variant directly.
+/// The task lives for as long as the supervisor and provider are alive.
+#[cfg(test)]
 pub(crate) fn spawn_address_monitor(
     provider: std::sync::Arc<dyn LocalAddressProvider>,
     supervisor: std::sync::Arc<RtcRecoverySupervisor>,
@@ -476,6 +480,7 @@ pub(crate) fn spawn_address_monitor(
 }
 
 /// Compare two address sets ignoring order and duplicates.
+#[cfg(test)]
 pub(crate) fn same_address_set(a: &[IpAddr], b: &[IpAddr]) -> bool {
     let mut a_sorted = a.to_vec();
     let mut b_sorted = b.to_vec();

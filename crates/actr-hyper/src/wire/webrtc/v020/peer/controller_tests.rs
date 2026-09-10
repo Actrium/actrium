@@ -703,6 +703,81 @@ async fn full_queue_retains_critical_sdp_and_retries_once_drained() {
     h.handle.close().await.expect("send close");
 }
 
+/// A terminal Answerer failure must wake the Offerer even when the lifecycle
+/// supervisor has temporarily withdrawn signaling. The request is critical
+/// signaling and must remain queued until a committed generation is available.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn gate_closed_retains_answerer_restart_request_until_signaling_returns() {
+    let mut h = spawn_harness(711);
+    h.handle
+        .apply_remote_description(desc(RTCSdpType::Offer))
+        .await
+        .expect("send incoming offer");
+    let build = next_build(&mut h).await;
+    let handler = build.handler.clone();
+    succeed_build(build);
+
+    let answer = timeout(WAIT, h.signaling_rx.recv())
+        .await
+        .expect("timed out waiting for answer")
+        .expect("signaling closed");
+    assert!(matches!(&answer.message, SignalingMessage::Answer { .. }));
+    handler
+        .mailbox()
+        .try_publish(PeerDriverEvent::PeerConnectionStateChanged {
+            generation: 1,
+            state: RTCPeerConnectionState::Connected,
+        });
+    h.lane_tx
+        .send(LaneEvent::Opened {
+            generation: 1,
+            lane: LaneKind::RpcReliable,
+        })
+        .await
+        .expect("send lane open");
+    await_snapshot(&h, "answerer sendable", |snapshot| snapshot.sendable).await;
+
+    h._supervisor.set_signaling_generation(None);
+    // Network event handling reconciles the signaling watch before reducing
+    // the event itself, so this accepted loss edge proves the controller has
+    // observed the closed gate without exposing internal gate state in the
+    // public snapshot.
+    h._supervisor
+        .publish(crate::wire::webrtc::v020::recovery::RtcNetworkEvent::NetworkUnavailable);
+    let gated = await_snapshot(&h, "signaling-gated recovery", |snapshot| {
+        snapshot.status == actr_framework::WebRtcPeerStatus::Recovering && !snapshot.sendable
+    })
+    .await;
+
+    handler
+        .mailbox()
+        .try_publish(PeerDriverEvent::PeerConnectionStateChanged {
+            generation: 1,
+            state: RTCPeerConnectionState::Failed,
+        });
+    await_snapshot(&h, "failed answerer parked", |snapshot| {
+        snapshot.revision > gated.revision
+            && snapshot.status == actr_framework::WebRtcPeerStatus::Recovering
+            && !snapshot.sendable
+    })
+    .await;
+    assert!(
+        h.signaling_rx.try_recv().is_err(),
+        "restart request must wait behind the closed signaling gate"
+    );
+
+    h._supervisor.set_signaling_generation(Some(1));
+    let request = timeout(WAIT, h.signaling_rx.recv())
+        .await
+        .expect("timed out waiting for retained restart request")
+        .expect("signaling closed");
+    assert!(matches!(
+        &request.message,
+        SignalingMessage::IceRestartRequest { attempt: 1, .. }
+    ));
+    h.handle.close().await.expect("close answerer controller");
+}
+
 /// Stage 4B/4C: the lane pump is the single poll() consumer, covering every
 /// DataChannelEvent — OnOpen/OnClose to the controller as LaneEvents, OnMessage
 /// payloads to the InboundRouter (data plane); buffered-amount events are

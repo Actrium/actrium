@@ -615,10 +615,18 @@ impl SignalingRouter {
                 if let Some(handle) = self.manager.get_controller(&from).await {
                     let _ = handle.apply_ice_restart_request(request_id, attempt).await;
                 } else {
-                    tracing::warn!(
+                    // A same-identity remote endpoint may have restarted and
+                    // therefore lost its controller before this request
+                    // arrived. The request is the recovery wake in exactly
+                    // that situation: bootstrap a fresh local controller and
+                    // let server role arbitration recreate the Offerer side.
+                    // Subsequent requests will find the controller and be
+                    // handled by the normal attempt/identity reducer.
+                    tracing::debug!(
                         peer = %from.to_string_repr(),
-                        "dropping ICE restart request for unknown peer"
+                        "received ICE restart request for unknown peer; attempting inbound recovery wake"
                     );
+                    self.manager.connect_from_inbound_recovery(from).await;
                 }
             }
             SignalingMessage::Answer { desc, exchange_id } => {
