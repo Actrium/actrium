@@ -778,6 +778,88 @@ async fn gate_closed_retains_answerer_restart_request_until_signaling_returns() 
     h.handle.close().await.expect("close answerer controller");
 }
 
+/// Regression for issue #234: an Answerer may receive the Offer that repairs a
+/// recovery attempt while the lifecycle supervisor has temporarily withdrawn
+/// the signaling generation. The Answer is critical signaling and must remain
+/// queued until the gate opens; losing it makes the Offerer wait for its next
+/// six-second recovery-attempt deadline.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn gate_closed_retains_recovery_answer_until_signaling_returns() {
+    let mut h = spawn_harness(712);
+    h.handle
+        .apply_remote_description(desc(RTCSdpType::Offer))
+        .await
+        .expect("send initial offer");
+    let build = next_build(&mut h).await;
+    let handler = build.handler.clone();
+    succeed_build(build);
+
+    let initial_answer = timeout(WAIT, h.signaling_rx.recv())
+        .await
+        .expect("timed out waiting for initial answer")
+        .expect("signaling closed");
+    assert!(matches!(
+        initial_answer.message,
+        SignalingMessage::Answer { .. }
+    ));
+    handler
+        .mailbox()
+        .try_publish(PeerDriverEvent::PeerConnectionStateChanged {
+            generation: 1,
+            state: RTCPeerConnectionState::Connected,
+        });
+    h.lane_tx
+        .send(LaneEvent::Opened {
+            generation: 1,
+            lane: LaneKind::RpcReliable,
+        })
+        .await
+        .expect("send lane open");
+    await_snapshot(&h, "initial answerer sendable", |snapshot| {
+        snapshot.sendable
+    })
+    .await;
+
+    h._supervisor.set_signaling_generation(None);
+    h._supervisor
+        .publish(crate::wire::webrtc::v020::recovery::RtcNetworkEvent::NetworkUnavailable);
+    await_snapshot(&h, "recovery with signaling gate closed", |snapshot| {
+        snapshot.status == actr_framework::WebRtcPeerStatus::Recovering && !snapshot.sendable
+    })
+    .await;
+
+    // This is the Offerer wake that was visible in the iOS log. It arrives
+    // while the Answerer's signaling generation is still unavailable.
+    h.handle
+        .apply_remote_ice_restart_offer_correlated(
+            desc(RTCSdpType::Offer),
+            Some("issue-234-recovery-offer".to_string()),
+        )
+        .await
+        .expect("send recovery offer");
+
+    // The Answer is generated locally, but must not be published while the
+    // signaling gate is closed.
+    assert!(
+        h.signaling_rx.try_recv().is_err(),
+        "recovery Answer must wait behind the closed signaling gate"
+    );
+
+    h._supervisor.set_signaling_generation(Some(2));
+    let retained_answer = timeout(WAIT, h.signaling_rx.recv())
+        .await
+        .expect("timed out waiting for retained recovery Answer")
+        .expect("signaling closed");
+    match retained_answer.message {
+        SignalingMessage::Answer { exchange_id, .. } => {
+            assert_eq!(exchange_id.as_deref(), Some("issue-234-recovery-offer"));
+        }
+        other => panic!("expected retained recovery Answer, got {other:?}"),
+    }
+
+    h.handle.close().await.expect("close answerer controller");
+}
+
 /// Stage 4B/4C: the lane pump is the single poll() consumer, covering every
 /// DataChannelEvent — OnOpen/OnClose to the controller as LaneEvents, OnMessage
 /// payloads to the InboundRouter (data plane); buffered-amount events are
