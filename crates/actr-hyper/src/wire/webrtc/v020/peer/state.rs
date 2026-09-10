@@ -36,6 +36,22 @@ pub(crate) enum Role {
     Answerer,
 }
 
+/// Initiating fact for the current logical recovery cycle.
+///
+/// This identity is deliberately scoped to `recovery_cycle`, not to one
+/// restart attempt: gate deferral and deadline retries must preserve the
+/// original cause so a remote attempt-1 wake is only coalesced when the local
+/// endpoint actually owns the recovery round.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RecoveryOrigin {
+    /// A local WebRTC/driver failure started the recovery.
+    PeerFailure,
+    /// A local network or lifecycle fact started (or deferred) the recovery.
+    LocalNetwork,
+    /// The remote Answerer explicitly requested the recovery.
+    RemoteRequest,
+}
+
 /// Stable identity of one blocking RTC effect.  The reducer records this when
 /// it emits an effect and consumes it only after an exact completion match.
 /// This prevents two operations on the same PC generation from authenticating
@@ -149,19 +165,12 @@ pub(crate) struct RtcPeerState {
     /// the same restart repeatedly; this latch is cleared only on convergence
     /// or a terminal attempt failure.
     pub(crate) recovery_attempt_started: bool,
-    /// The current soft round was started by a local recovery signal the
-    /// offerer observed itself (NetworkAvailable / AppForeground /
-    /// SignalingGenerationChanged through `maybe_start_deferred_recovery`), as
-    /// opposed to a driver-side fact (the peer's PC death). Only in the former
-    /// case may the answerer's first correlated restart wake (attempt=1) be
-    /// de-duped: the offerer is already running the same round, so the wake is
-    /// redundant. The reducer also de-dupes while a local restart/SDP effect
-    /// is pending, regardless of how the round started. When the round came
-    /// from the peer's death (a one-sided outage) and the local Offer has
-    /// already been announced, the wake either coalesces with that exchange or
-    /// triggers the bounded retry grace path when the Offer was lost (issue
-    /// #227).
-    pub(crate) recovery_from_network_available: bool,
+    /// Initiating fact for the current logical recovery cycle. This is set
+    /// when the cycle is first started and survives signaling-gate deferral,
+    /// soft retries, and hard escalation. Only `LocalNetwork` means the
+    /// offerer already owns the same local recovery round for attempt-1 wake
+    /// de-duplication; `PeerFailure` must remain wakeable for issue #227.
+    pub(crate) recovery_origin: Option<RecoveryOrigin>,
     /// The current recovery round has been confirmed by a remote
     /// `IceRestartRequest`. Late local lifecycle/address facts must coalesce
     /// into that request-driven exchange instead of launching a second offer.
@@ -380,7 +389,7 @@ impl RtcPeerState {
             recovery_epoch: 0,
             recovery_cycle: 0,
             recovery_attempt_started: false,
-            recovery_from_network_available: false,
+            recovery_origin: None,
             recovery_started_by_remote_request: false,
             remote_request_wake_pending: false,
             soft_recovery_attempts: 0,

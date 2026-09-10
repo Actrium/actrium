@@ -9,7 +9,7 @@ use super::reducer::{
     EffectCompletion, LaneEvent, RtcPeerCommand, RtcPeerEffect, RtcPeerInput,
     SOFT_HARD_ESCALATION_ATTEMPT, SignalingMessage, reduce,
 };
-use super::state::{PendingRtcOperationKind, Role, RtcPeerPhase, RtcPeerState};
+use super::state::{PendingRtcOperationKind, RecoveryOrigin, Role, RtcPeerPhase, RtcPeerState};
 use crate::wire::webrtc::v020::events::{PeerDriverEvent, PeerStateTick};
 use crate::wire::webrtc::v020::recovery::RtcNetworkEvent;
 use crate::wire::webrtc::v020::status::{LaneKind, NetworkPath, RtcUnavailableReason};
@@ -2412,6 +2412,48 @@ fn network_recovery_waits_for_committed_signaling_generation() {
 }
 
 #[test]
+fn recovery_origin_survives_gate_deferral_and_soft_retry() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+
+    // A peer failure while signaling is gated must remain a PeerFailure after
+    // the gate opens; NetworkAvailable/SignalingGenerationChanged are merely
+    // the facts that release the deferred cycle.
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::SignalingGenerationChanged { generation: None },
+        )),
+    );
+    let deferred = reduce(&mut state, failed_tick(generation));
+    assert!(!has_restart_ice(&deferred, generation));
+    assert_eq!(state.recovery_origin, Some(RecoveryOrigin::PeerFailure));
+    assert!(state.recovery_inflight);
+    assert!(!state.recovery_attempt_started);
+
+    let resumed = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::SignalingGenerationChanged {
+                generation: Some(7),
+            },
+        )),
+    );
+    assert!(has_restart_ice(&resumed, generation));
+    assert_eq!(state.recovery_origin, Some(RecoveryOrigin::PeerFailure));
+
+    let retry_epoch = state.recovery_epoch;
+    let retry = reduce(
+        &mut state,
+        RtcPeerInput::RecoveryDeadlineElapsed {
+            recovery_epoch: retry_epoch,
+        },
+    );
+    assert!(has_restart_ice(&retry, generation));
+    assert_eq!(state.recovery_origin, Some(RecoveryOrigin::PeerFailure));
+}
+
+#[test]
 fn gate_opening_re_drives_deferred_role_negotiation_probe() {
     // Connect while no signaling generation is committed: the probe this
     // reduction emits is dropped by the controller's generation gate, and
@@ -2988,7 +3030,7 @@ fn attempt1_restart_request_is_deduped_while_local_restart_is_inflight() {
 
     let local_recovery = reduce(&mut state, failed_tick(generation));
     assert!(has_restart_ice(&local_recovery, generation));
-    assert!(!state.recovery_from_network_available);
+    assert_eq!(state.recovery_origin, Some(RecoveryOrigin::PeerFailure));
 
     let raced_wake = reduce(
         &mut state,
@@ -3156,6 +3198,7 @@ fn offerer_does_not_double_restart_when_first_answerer_wake_races_network_availa
         )),
     );
     assert!(has_restart_ice(&first, generation));
+    assert_eq!(state.recovery_origin, Some(RecoveryOrigin::LocalNetwork));
     let ice_generation = state.ice_generation;
 
     let raced_wake = reduce(

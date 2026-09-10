@@ -39,7 +39,7 @@ use crate::wire::webrtc::v020::events::{PeerDriverEvent, PeerStateTick};
 use crate::wire::webrtc::v020::status::{LaneKind, RtcUnavailableReason};
 
 use super::state::{
-    PendingRtcOperation, PendingRtcOperationKind, Role, RtcPeerPhase, RtcPeerState,
+    PendingRtcOperation, PendingRtcOperationKind, RecoveryOrigin, Role, RtcPeerPhase, RtcPeerState,
 };
 
 /// Candidates are naturally a small set, but both signaling and driver input
@@ -998,7 +998,8 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                     if state.soft_recovery_attempts >= SOFT_HARD_ESCALATION_ATTEMPT {
                         start_hard_recovery(state, &mut effects);
                     } else {
-                        start_soft_recovery(state, &mut effects);
+                        let origin = state.recovery_origin.unwrap_or(RecoveryOrigin::PeerFailure);
+                        start_soft_recovery(state, &mut effects, origin);
                     }
                 } else if state.role == Role::Answerer && state.awaiting_offer {
                     // The Answerer has no local SDP with which to create a
@@ -1463,7 +1464,8 @@ fn reduce_ice_restart_request(
     if attempt == 1
         && state.recovery_inflight
         && state.recovery_attempt_started
-        && (state.recovery_from_network_available || offerer_restart_negotiation_inflight(state))
+        && (state.recovery_origin == Some(RecoveryOrigin::LocalNetwork)
+            || offerer_restart_negotiation_inflight(state))
     {
         // Even when the offerer's own recovery already owns the round, the
         // request is meaningful: it confirms that the answerer is waiting for
@@ -1510,13 +1512,16 @@ fn reduce_ice_restart_request(
     // start_hard_recovery.
     const ANSWERER_HARD_ESCALATION_ATTEMPT: u32 = 4;
     if attempt >= ANSWERER_HARD_ESCALATION_ATTEMPT {
+        if state.recovery_origin.is_none() {
+            state.recovery_origin = Some(RecoveryOrigin::RemoteRequest);
+        }
         start_hard_recovery(state, effects);
     } else {
         if state.recovery_inflight {
             state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
             state.recovery_attempt_started = false;
         }
-        start_soft_recovery(state, effects);
+        start_soft_recovery(state, effects, RecoveryOrigin::RemoteRequest);
     }
 
     if state.recovery_attempt_started {
@@ -2193,7 +2198,14 @@ fn recovery_gate_open(state: &RtcPeerState) -> bool {
         && !state.close_requested
 }
 
-fn defer_recovery_until_gate(state: &mut RtcPeerState, hard: bool) {
+fn defer_recovery_until_gate(state: &mut RtcPeerState, hard: bool, origin: RecoveryOrigin) {
+    // A deferred recovery still belongs to the logical cycle that caused it.
+    // Record the origin only when this cycle has not already been labeled;
+    // later gate/lifecycle facts must not relabel a peer-failure recovery as a
+    // local-network recovery.
+    if state.recovery_origin.is_none() {
+        state.recovery_origin = Some(origin);
+    }
     // Existing-recovery semantics (main 0.14's `BeginRecoveryOutcome::Existing`):
     // a recovery round already in flight keeps its exchange identity, its
     // deadline, and its negotiation state. Late lifecycle/platform edges
@@ -2241,15 +2253,17 @@ fn maybe_start_deferred_recovery(state: &mut RtcPeerState, effects: &mut Vec<Rtc
     if state.role == Role::Answerer && state.awaiting_offer {
         return;
     }
+    let origin = state
+        .recovery_origin
+        .unwrap_or(RecoveryOrigin::LocalNetwork);
     if state.address_changed {
+        if state.recovery_origin.is_none() {
+            state.recovery_origin = Some(origin);
+        }
         start_hard_recovery(state, effects);
     } else {
-        start_soft_recovery(state, effects);
+        start_soft_recovery(state, effects, origin);
     }
-    // This round was started by the offerer's own recovery signal
-    // (NetworkAvailable / AppForeground / SignalingGenerationChanged) — the
-    // attempt-1 de-dupe guard applies to it.
-    state.recovery_from_network_available = true;
 }
 
 fn reduce_network_event(
@@ -2274,7 +2288,11 @@ fn reduce_network_event(
                 // hard rebuild (pc_generation bump) — the pair-contract
                 // "temporary loss uses soft ICE recovery" contract and the
                 // rapid-restart dedup both regress on that.
-                defer_recovery_until_gate(state, state.address_changed);
+                defer_recovery_until_gate(
+                    state,
+                    state.address_changed,
+                    RecoveryOrigin::LocalNetwork,
+                );
             }
         }
         RtcNetworkEvent::NetworkAvailable => {
@@ -2317,7 +2335,7 @@ fn reduce_network_event(
                         state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
                         state.recovery_attempt_started = false;
                         state.address_edge_pending = false;
-                        start_soft_recovery(state, effects);
+                        start_soft_recovery(state, effects, RecoveryOrigin::LocalNetwork);
                     }
                 } else {
                     // The SDP/ICE exchange is still in flight. Keep the
@@ -2327,9 +2345,9 @@ fn reduce_network_event(
                 }
             } else if state.active_generation.is_some() {
                 if recovery_gate_open(state) {
-                    start_soft_recovery(state, effects);
+                    start_soft_recovery(state, effects, RecoveryOrigin::LocalNetwork);
                 } else {
-                    defer_recovery_until_gate(state, false);
+                    defer_recovery_until_gate(state, false, RecoveryOrigin::LocalNetwork);
                 }
             } else if state.building_generation.is_some() {
                 // The build in flight is consuming the pre-change address
@@ -2338,12 +2356,15 @@ fn reduce_network_event(
                 // the replacement resolves the provider's current set.
                 state.recovery_attempt_started = false;
                 if recovery_gate_open(state) {
+                    if state.recovery_origin.is_none() {
+                        state.recovery_origin = Some(RecoveryOrigin::LocalNetwork);
+                    }
                     start_hard_recovery(state, effects);
                 } else {
-                    defer_recovery_until_gate(state, true);
+                    defer_recovery_until_gate(state, true, RecoveryOrigin::LocalNetwork);
                 }
             } else if state.phase == RtcPeerPhase::Sendable || state.recovery_inflight {
-                defer_recovery_until_gate(state, false);
+                defer_recovery_until_gate(state, false, RecoveryOrigin::LocalNetwork);
             }
             // With no generation at all the edge needs no recording: the
             // eventual initial build resolves the provider's current set.
@@ -2357,7 +2378,11 @@ fn reduce_network_event(
             if state.phase == RtcPeerPhase::Sendable || state.recovery_inflight {
                 // See NetworkUnavailable: in-flight soft-restart negotiation
                 // must not read as an address change.
-                defer_recovery_until_gate(state, state.address_changed);
+                defer_recovery_until_gate(
+                    state,
+                    state.address_changed,
+                    RecoveryOrigin::LocalNetwork,
+                );
             }
         }
         RtcNetworkEvent::AppForeground {
@@ -2374,15 +2399,18 @@ fn reduce_network_event(
             }
         }
         RtcNetworkEvent::ForceReconnect => {
+            if state.recovery_origin.is_none() {
+                state.recovery_origin = Some(RecoveryOrigin::LocalNetwork);
+            }
             state.address_changed = true;
             if state.active_generation.is_some() {
                 if recovery_gate_open(state) {
                     start_hard_recovery(state, effects);
                 } else {
-                    defer_recovery_until_gate(state, true);
+                    defer_recovery_until_gate(state, true, RecoveryOrigin::LocalNetwork);
                 }
             } else if state.recovery_inflight || state.building_generation.is_some() {
-                defer_recovery_until_gate(state, true);
+                defer_recovery_until_gate(state, true, RecoveryOrigin::LocalNetwork);
             } else if state.phase != RtcPeerPhase::Idle {
                 // No active session yet; steer any subsequent failure to Hard.
                 state.phase = RtcPeerPhase::Recovering;
@@ -2406,7 +2434,11 @@ fn reduce_network_event(
             if generation.is_none() && state.recovery_inflight {
                 // See NetworkUnavailable: in-flight soft-restart negotiation
                 // must not read as an address change.
-                defer_recovery_until_gate(state, state.address_changed);
+                defer_recovery_until_gate(
+                    state,
+                    state.address_changed,
+                    RecoveryOrigin::LocalNetwork,
+                );
             } else if generation.is_some() {
                 maybe_start_deferred_recovery(state, effects);
                 if gate_opening
@@ -2485,21 +2517,26 @@ fn offerer_restart_negotiation_inflight(state: &RtcPeerState) -> bool {
     })
 }
 
-fn start_soft_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect>) {
+fn start_soft_recovery(
+    state: &mut RtcPeerState,
+    effects: &mut Vec<RtcPeerEffect>,
+    origin: RecoveryOrigin,
+) {
     if state.recovery_attempt_started {
         return;
     }
     if answerer_parked(state) {
         return;
     }
+    if state.recovery_origin.is_none() {
+        state.recovery_origin = Some(origin);
+    }
     if !recovery_gate_open(state) {
-        defer_recovery_until_gate(state, false);
+        defer_recovery_until_gate(state, false, origin);
         return;
     }
-    // A driver-side fact (e.g. the peer's PC death) starts this round, not the
-    // offerer's own network-recovery signal — see the attempt-1 de-dupe guard.
-    state.recovery_from_network_available = false;
-    state.recovery_started_by_remote_request = false;
+    // The recovery origin is scoped to the logical cycle and intentionally is
+    // not rewritten for soft retries or gate re-opening.
     state.remote_request_wake_pending = false;
     clear_negotiation_for_recovery(state);
     if !state.recovery_inflight {
@@ -2651,6 +2688,7 @@ fn clear_transport_attempt_cache(state: &mut RtcPeerState) {
     state.initial_connection_inflight = false;
     state.ice_generation = 0;
     state.recovery_inflight = false;
+    state.recovery_origin = None;
     state.recovery_started_by_remote_request = false;
     state.remote_request_wake_pending = false;
     state.recovery_negotiated = false;
@@ -2745,8 +2783,12 @@ fn start_hard_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
         wait_for_offerer_offer(state);
         return;
     }
+    if state.recovery_origin.is_none() {
+        state.recovery_origin = Some(RecoveryOrigin::PeerFailure);
+    }
     if !recovery_gate_open(state) {
-        defer_recovery_until_gate(state, true);
+        let origin = state.recovery_origin.unwrap_or(RecoveryOrigin::PeerFailure);
+        defer_recovery_until_gate(state, true, origin);
         return;
     }
     state.recovery_started_by_remote_request = false;
@@ -3074,6 +3116,7 @@ fn reduce_state_tick(
         if state.phase == RtcPeerPhase::TransportReady && state.rpc_reliable_open {
             state.phase = RtcPeerPhase::Sendable;
             state.recovery_inflight = false;
+            state.recovery_origin = None;
             state.recovery_started_by_remote_request = false;
             state.remote_request_wake_pending = false;
             state.recovery_negotiated = true;
@@ -3088,7 +3131,7 @@ fn reduce_state_tick(
                 // flight; the round converged on the pre-edge set. Publish
                 // one more restart so the link moves onto the current set
                 // instead of stranding on the superseded interface.
-                start_soft_recovery(state, effects);
+                start_soft_recovery(state, effects, RecoveryOrigin::LocalNetwork);
             }
         }
         if !was_connected || state.phase == RtcPeerPhase::Sendable {
@@ -3158,7 +3201,7 @@ fn reduce_state_tick(
             } else if !state.recovery_inflight {
                 state.phase = RtcPeerPhase::Recovering;
                 if !state.address_changed {
-                    start_soft_recovery(state, effects);
+                    start_soft_recovery(state, effects, RecoveryOrigin::PeerFailure);
                 } else {
                     // S5-3: an explicit hard-recovery request → Offerer Hard
                     // Recovery.
@@ -3186,7 +3229,7 @@ fn reduce_state_tick(
             state.phase = RtcPeerPhase::Recovering;
             if !state.address_changed {
                 // S5-2: temporary network loss starts Soft Recovery.
-                start_soft_recovery(state, effects);
+                start_soft_recovery(state, effects, RecoveryOrigin::PeerFailure);
             } else {
                 // S5-3: explicit hard recovery → Offerer Hard Recovery; an
                 // Answerer waits for the Offerer to initiate a new Offer.
@@ -3358,6 +3401,7 @@ fn reduce_lane_event(state: &mut RtcPeerState, event: LaneEvent, effects: &mut V
                 if state.phase == RtcPeerPhase::TransportReady && state.pc_connected {
                     state.phase = RtcPeerPhase::Sendable;
                     state.recovery_inflight = false;
+                    state.recovery_origin = None;
                     state.recovery_started_by_remote_request = false;
                     state.remote_request_wake_pending = false;
                     state.recovery_negotiated = true;
@@ -3439,6 +3483,7 @@ fn atomic_switch(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect>) {
     state.pending_rpc_reliable_open = false;
     // RFC step 8: publish Connected.
     state.recovery_inflight = false;
+    state.recovery_origin = None;
     state.recovery_started_by_remote_request = false;
     state.remote_request_wake_pending = false;
     state.recovery_negotiated = true;
@@ -4083,7 +4128,7 @@ fn negotiation_failed(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect>
         // leaving the peer non-sendable until the 60-second total budget.
         state.phase = RtcPeerPhase::Recovering;
         state.recovery_attempt_started = false;
-        start_soft_recovery(state, effects);
+        start_soft_recovery(state, effects, RecoveryOrigin::PeerFailure);
         return;
     }
 

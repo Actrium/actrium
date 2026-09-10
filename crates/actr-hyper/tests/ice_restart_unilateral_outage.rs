@@ -100,6 +100,13 @@ async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
 
     // Restore the answerer's platform gate. Its request is the material fact
     // that tells the offerer the peer is back and waiting for a fresh offer.
+    // Capture this baseline before restoring the gate so the request-triggered
+    // Offer cannot race ahead of the counter used by the wake assertion.
+    let offers_before_wake = pair.signaling_hits(
+        PairEndpoint::B,
+        PairEndpoint::A,
+        SignalingMessageClass::IceRestartOffer,
+    );
     let request_baseline = pair.signaling_hits(
         PairEndpoint::A,
         PairEndpoint::B,
@@ -123,11 +130,6 @@ async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
     // produce the next offer immediately. The offer is still dropped so the
     // assertion observes the signaling action itself rather than a later
     // readiness transition.
-    let offers_before_wake = pair.signaling_hits(
-        PairEndpoint::B,
-        PairEndpoint::A,
-        SignalingMessageClass::IceRestartOffer,
-    );
     let wake_offer = tokio::time::timeout(
         WAKE_WINDOW,
         pair.harness().signaling_faults.wait_for_hits_after(
