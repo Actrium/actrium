@@ -45,6 +45,14 @@ pub(crate) const NETWORK_EVENT_CAPACITY: usize = 64;
 /// single non-extendable window.
 pub(crate) const NETWORK_RECOVERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// Per-attempt ICE restart readiness budget during network recovery. The
+/// controller re-arms this for each recovery epoch while the total cycle stays
+/// bounded by [`NETWORK_RECOVERY_TIMEOUT`].
+///
+/// Public so `test_support` can re-export it: integration tests must derive
+/// their timing guards from this window instead of re-hardcoding seconds.
+pub const ICE_RESTART_ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// Network/App lifecycle facts broadcast by the recovery supervisor
 /// (RFC §"RecoverySupervisor"). The supervisor only broadcasts these facts;
 /// each controller independently decides Soft Recovery, Hard Recovery, or

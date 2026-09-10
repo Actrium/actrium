@@ -959,8 +959,8 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                     // network loss gets multiple ICE-restart attempts on the
                     // existing PeerConnection. The stable recovery-cycle timer
                     // remains the overall 60-second bound, while this new
-                    // attempt epoch gives the controller a fresh six-second
-                    // attempt timer.
+                    // attempt epoch gives the controller a fresh per-attempt
+                    // restart timer.
                     // Hard Recovery is reserved for an unusable/closed
                     // Session, the long-background lifecycle policy, or
                     // another explicit hard-failure fact instead of being the
@@ -2330,8 +2330,8 @@ fn reduce_network_event(
                         // already completed, but the physical path is not
                         // ready yet. A newly observed interface set must
                         // supersede that attempt immediately; waiting for its
-                        // six-second timer leaves the PeerConnection bound to
-                        // the old interface set during a mobile handover.
+                        // restart timer leaves the PeerConnection bound to the
+                        // old interface set during a mobile handover.
                         state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
                         state.recovery_attempt_started = false;
                         state.address_edge_pending = false;
