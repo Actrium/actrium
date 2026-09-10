@@ -93,7 +93,10 @@ use super::recovery_supervisor::{
 use super::session_state::{SessionPhase, SessionState};
 
 const NETWORK_EVENT_RESULT_TIMEOUT: Duration = Duration::from_secs(5);
-const SIGNALING_PROBE_TIMEOUT: Duration = Duration::from_secs(1);
+// Mobile network handovers can delay the signaling Pong briefly. Keep the
+// probe bounded, but give the existing WebSocket time to survive the switch
+// before rebuilding it and dropping in-flight signaling requests.
+const SIGNALING_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 pub(crate) const LONG_BACKGROUND_RECONNECT_THRESHOLD_MS: u64 = 30_000;
 /// Upper bound accepted for `background_duration_ms` (30 days, in ms).
 ///
@@ -291,6 +294,7 @@ impl NetworkRecoveryError {
             | NetworkError::JsonError(_)
             | NetworkError::Other(_) => Self::InvariantViolation { detail },
             NetworkError::ConnectionError(_)
+            | NetworkError::SignalingReplyDropped
             | NetworkError::SignalingError(_)
             | NetworkError::WebRtcError(_)
             | NetworkError::NetworkUnreachableError(_)
@@ -509,6 +513,19 @@ pub trait NetworkEventProcessor: Send + Sync {
     /// - `Err(String)`: cleanup failed, contains error message
     async fn cleanup_connections(&self) -> Result<(), String>;
 
+    /// Recovery-aware cleanup for automatic rebuilds.
+    ///
+    /// [`NetworkRecoveryAction::ForceReconnect`] tears the stack down only to
+    /// rebuild it immediately. The runtime implementation routes the signaling
+    /// teardown through `disconnect_for_recovery()`, which arms the
+    /// idempotent-retry mark for the replacement generation: RouteCandidates
+    /// and GetSigningKey waiters dropped by the rebuild replay once after the
+    /// replacement commits instead of failing fast. Manual teardown keeps
+    /// [`Self::cleanup_connections`] and its fail-fast contract.
+    async fn cleanup_connections_for_recovery(&self) -> Result<(), String> {
+        self.cleanup_connections().await
+    }
+
     /// Probe existing connectivity without forcing cleanup.
     async fn probe_connectivity(&self) -> Result<(), String> {
         Ok(())
@@ -516,7 +533,7 @@ pub trait NetworkEventProcessor: Send + Sync {
 
     /// Proactively clean up and restore connections.
     async fn force_reconnect(&self) -> Result<(), String> {
-        self.cleanup_connections().await?;
+        self.cleanup_connections_for_recovery().await?;
         self.process_network_available().await
     }
 
@@ -664,6 +681,20 @@ pub struct DefaultNetworkEventProcessor {
     debounce_state: Option<Arc<DebounceState>>,
     recovery_state: Arc<SignalingRecoveryState>,
     session_state: Option<SessionState>,
+}
+
+/// Which signaling teardown contract a cleanup sequence uses.
+#[derive(Clone, Copy)]
+enum SignalingTeardown {
+    /// Ordinary disconnect: dropped idempotent waiters fail fast. Manual,
+    /// offline, and bounded teardown keep this contract.
+    Manual,
+    /// Recovery disconnect: dropped idempotent waiters replay once after the
+    /// replacement generation commits. Automatic rebuilds that are immediately
+    /// followed by a reconnect (ForceReconnect) use this, so an in-flight
+    /// RouteCandidates/GetSigningKey request survives the rebuild it
+    /// overlapped with.
+    Recovery,
 }
 
 impl DefaultNetworkEventProcessor {
@@ -844,7 +875,7 @@ impl DefaultNetworkEventProcessor {
                     e
                 );
 
-                if let Err(disconnect_err) = self.signaling_client.disconnect().await {
+                if let Err(disconnect_err) = self.signaling_client.disconnect_for_recovery().await {
                     tracing::warn!(
                         reason = reason,
                         "⚠️ Failed to disconnect unhealthy signaling before rebuild: {}",
@@ -945,7 +976,7 @@ impl DefaultNetworkEventProcessor {
                     "Connectivity probe failed; restoring connections: {}",
                     e
                 );
-                if let Err(disconnect_err) = self.signaling_client.disconnect().await {
+                if let Err(disconnect_err) = self.signaling_client.disconnect_for_recovery().await {
                     tracing::warn!(
                         reason = reason,
                         "Failed to disconnect unhealthy signaling before restore: {}",
@@ -1002,7 +1033,10 @@ impl DefaultNetworkEventProcessor {
         &self,
         action_id: Option<u64>,
     ) -> Result<(), NetworkRecoveryError> {
-        self.cleanup_connections()
+        // Recovery-aware cleanup: ForceReconnect always rebuilds signaling
+        // right after the teardown, so idempotent waiters dropped here must
+        // replay on the replacement instead of failing fast.
+        self.cleanup_connections_for_recovery()
             .await
             .map_err(|error| NetworkRecoveryError::from_opaque("ForceReconnect cleanup", error))?;
         // cleanup_connections disconnected signaling and drained the old
@@ -1043,7 +1077,10 @@ impl DefaultNetworkEventProcessor {
     /// step that leaves an error behind. The logical teardown goal — releasing
     /// local signaling, coordinator, and transport resources — is always
     /// attempted to completion; residuals are diagnostics, not early returns.
-    async fn cleanup_connections_collect(&self) -> Vec<String> {
+    async fn cleanup_connections_collect(
+        &self,
+        signaling_teardown: SignalingTeardown,
+    ) -> Vec<String> {
         let mut residuals: Vec<String> = Vec::new();
 
         tracing::info!("🧹 Cleaning up all connections (bounded)...");
@@ -1052,7 +1089,11 @@ impl DefaultNetworkEventProcessor {
         // lifecycle. Disconnect resets the inbound queue, so delayed Offer,
         // RoleAssignment, and ICE messages cannot repopulate state after drain.
         tracing::info!("🔌 Disconnecting WebSocket before peer cleanup...");
-        match self.signaling_client.disconnect().await {
+        let signaling_disconnect = match signaling_teardown {
+            SignalingTeardown::Manual => self.signaling_client.disconnect().await,
+            SignalingTeardown::Recovery => self.signaling_client.disconnect_for_recovery().await,
+        };
+        match signaling_disconnect {
             Ok(_) => tracing::info!("✅ WebSocket disconnected successfully"),
             Err(e) => {
                 let err_msg = format!("Failed to disconnect WebSocket before cleanup: {e}");
@@ -1105,7 +1146,7 @@ impl DefaultNetworkEventProcessor {
         match crate::timer::timeout(
             crate::timer::ids::RECOVERY_CLEANUP_TEARDOWN,
             budget,
-            self.cleanup_connections_collect(),
+            self.cleanup_connections_collect(SignalingTeardown::Manual),
         )
         .await
         {
@@ -1443,7 +1484,9 @@ impl NetworkEventProcessor for DefaultNetworkEventProcessor {
     /// - No debounce check (proactive calls always execute)
     /// - Intended for app lifecycle management, not network event response
     async fn cleanup_connections(&self) -> Result<(), String> {
-        let residuals = self.cleanup_connections_collect().await;
+        let residuals = self
+            .cleanup_connections_collect(SignalingTeardown::Manual)
+            .await;
         if let Some(err) = residuals.into_iter().next() {
             tracing::warn!(
                 error = %err,
@@ -1452,6 +1495,22 @@ impl NetworkEventProcessor for DefaultNetworkEventProcessor {
             Err(err)
         } else {
             tracing::info!("✅ Connection cleanup completed");
+            Ok(())
+        }
+    }
+
+    async fn cleanup_connections_for_recovery(&self) -> Result<(), String> {
+        let residuals = self
+            .cleanup_connections_collect(SignalingTeardown::Recovery)
+            .await;
+        if let Some(err) = residuals.into_iter().next() {
+            tracing::warn!(
+                error = %err,
+                "Recovery cleanup released remaining resources but did not fully quiesce"
+            );
+            Err(err)
+        } else {
+            tracing::info!("✅ Recovery cleanup completed");
             Ok(())
         }
     }
