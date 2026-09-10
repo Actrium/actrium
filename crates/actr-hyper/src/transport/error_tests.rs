@@ -16,6 +16,7 @@ fn transient_network_errors() {
         NetworkError::ResourceExhaustedError("x".into()),
         NetworkError::WebSocketError("x".into()),
         NetworkError::WebSocketClosed("x".into()),
+        NetworkError::SignalingReplyDropped,
         NetworkError::SignalingError("x".into()),
         NetworkError::WebRtcError("x".into()),
         NetworkError::NatTraversalError("x".into()),
@@ -91,6 +92,7 @@ fn closed_like_network_errors_are_structural() {
     let generic_with_closed_text = [
         NetworkError::ConnectionError("not actually closed".into()),
         NetworkError::WebRtcError("not actually closed".into()),
+        NetworkError::SignalingReplyDropped,
         NetworkError::DataChannelError("not actually closed".into()),
         NetworkError::WebSocketError("not actually closed".into()),
         NetworkError::SendError("not actually closed".into()),
@@ -144,6 +146,10 @@ fn category_covers_all_variants() {
     // serialization/deserialization bucket.
     let cases: Vec<(NetworkError, &str)> = vec![
         (NetworkError::ConnectionError("x".into()), "connection"),
+        (
+            NetworkError::SignalingReplyDropped,
+            "signaling_reply_dropped",
+        ),
         (NetworkError::SignalingError("x".into()), "signaling"),
         (NetworkError::WebRtcError("x".into()), "webrtc"),
         (NetworkError::ProtocolError("x".into()), "protocol"),
@@ -241,6 +247,7 @@ fn severity_is_within_1_to_10_for_all_variants() {
     // Exercises every severity arm and confirms the documented 1..=10 range.
     let all: Vec<NetworkError> = vec![
         NetworkError::ConnectionError("x".into()),
+        NetworkError::SignalingReplyDropped,
         NetworkError::SignalingError("x".into()),
         NetworkError::WebRtcError("x".into()),
         NetworkError::ProtocolError("x".into()),
