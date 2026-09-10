@@ -4174,9 +4174,32 @@ fn answerer_physical_failure_retires_before_parking() {
     assert!(state.awaiting_offer);
     assert_eq!(state.active_generation, None);
     assert_eq!(state.parked_signaling_generation, Some(generation));
+    assert_eq!(state.local_restart_request_attempt, 1);
+    let request_id = state
+        .local_restart_request_id
+        .clone()
+        .expect("failed Answerer must create a restart request identity");
 
+    // The retired generation cannot process a duplicate terminal callback;
+    // the first wake remains the only immediate request for this parked round.
+    let duplicate_effects = reduce(&mut state, failed_tick(generation));
+    assert!(
+        !duplicate_effects.iter().any(|effect| matches!(
+            effect,
+            RtcPeerEffect::SendSignaling {
+                message: SignalingMessage::IceRestartRequest { .. },
+                ..
+            }
+        )),
+        "duplicate Failed callbacks must not emit a second immediate request"
+    );
+    assert_eq!(
+        state.local_restart_request_id.as_deref(),
+        Some(request_id.as_str())
+    );
+    assert_eq!(state.local_restart_request_attempt, 1);
     // A per-attempt deadline does not create a local replacement (no build),
-    // but it retransmits the correlated restart request so a healthy Offerer
+    // but retransmits the correlated restart request so a healthy Offerer
     // wakes toward hard recovery. The physical close was already scheduled by
     // the Failed fact; the single recovery budget still performs terminal
     // logical cleanup if no Offer arrives.
@@ -4189,9 +4212,12 @@ fn answerer_physical_failure_retires_before_parking() {
         deadline_effects.iter().any(|e| matches!(
             e,
             RtcPeerEffect::SendSignaling {
-                message: SignalingMessage::IceRestartRequest { .. },
+                message: SignalingMessage::IceRestartRequest {
+                    request_id: actual,
+                    attempt: 2,
+                },
                 ..
-            }
+            } if actual == &request_id
         )),
         "the parked deadline must drive the offerer wake"
     );
@@ -4221,61 +4247,54 @@ fn answerer_physical_failure_retires_before_parking() {
 }
 
 #[test]
-fn answerer_failure_mid_soft_recovery_preserves_request_and_rearms_deadline() {
+fn answerer_failed_after_request_preserves_request_identity() {
     let mut state = RtcPeerState::new(test_actor_id(2));
-    let generation = drive_answerer_to_sendable_with_ufrag(&mut state, "remote-1");
+    let generation = drive_answerer_to_negotiating(&mut state);
+    drive_to_sendable(&mut state, generation);
 
-    reduce(
+    let initial_effects = reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
-            RtcNetworkEvent::NetworkUnavailable,
+            RtcNetworkEvent::LocalAddressChanged,
         )),
     );
-    let start = reduce(
-        &mut state,
-        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
-            RtcNetworkEvent::NetworkAvailable,
-        )),
-    );
-    let request_id = start
-        .iter()
-        .find_map(|effect| match effect {
-            RtcPeerEffect::SendSignaling {
-                message:
-                    SignalingMessage::IceRestartRequest {
-                        request_id,
-                        attempt: 1,
-                    },
-                ..
-            } => Some(request_id.clone()),
-            _ => None,
-        })
-        .expect("soft recovery must emit the first Answerer wake");
-    let first_epoch = state.recovery_epoch;
-    let recovery_cycle = state.recovery_cycle;
+    assert!(has_restart_request(&initial_effects, 1));
+    let request_id = state
+        .local_restart_request_id
+        .clone()
+        .expect("the initial Answerer recovery must create a request identity");
+    let request_attempt = state.local_restart_request_attempt;
+    let request_epoch = state.recovery_epoch;
 
-    let failure = reduce(&mut state, failed_tick(generation));
-    assert!(has_close_session(&failure, generation));
+    // A terminal state callback can arrive after the request-only recovery has
+    // already started. Parking the physical failure must keep the same
+    // correlated request instead of resetting the exchange to attempt 1.
+    let failed_effects = reduce(&mut state, failed_tick(generation));
+    assert!(!has_restart_ice(&failed_effects, generation));
+    assert!(has_restart_request(&failed_effects, 2));
+    assert!(!has_build_session(&failed_effects, generation + 1));
+    assert!(state.awaiting_offer);
+    assert_eq!(
+        state.local_restart_request_id.as_deref(),
+        Some(request_id.as_str())
+    );
+    assert_eq!(state.local_restart_request_attempt, request_attempt + 1);
+    assert!(state.recovery_epoch > request_epoch);
+    assert_eq!(state.active_generation, None);
+    assert_eq!(state.parked_signaling_generation, Some(generation));
+
+    let duplicate_effects = reduce(&mut state, failed_tick(generation));
     assert!(
-        !failure.iter().any(|effect| matches!(
+        !duplicate_effects.iter().any(|effect| matches!(
             effect,
             RtcPeerEffect::SendSignaling {
                 message: SignalingMessage::IceRestartRequest { .. },
                 ..
             }
         )),
-        "an already-sent wake must not be duplicated by the failure fact"
+        "repeated Failed callbacks after parking must not create a request storm"
     );
-    assert_eq!(
-        state.local_restart_request_id.as_deref(),
-        Some(request_id.as_str())
-    );
-    assert_eq!(state.local_restart_request_attempt, 1);
-    assert_eq!(state.recovery_cycle, recovery_cycle);
-    assert!(state.recovery_epoch != first_epoch);
-    assert!(state.awaiting_offer);
-    assert_eq!(state.active_generation, None);
-    assert_eq!(state.parked_signaling_generation, Some(generation));
+    assert_eq!(state.local_restart_request_attempt, request_attempt + 1);
 
     let retry_epoch = state.recovery_epoch;
     let retry = reduce(
@@ -4290,7 +4309,7 @@ fn answerer_failure_mid_soft_recovery_preserves_request_and_rearms_deadline() {
             generation: actual_generation,
             message: SignalingMessage::IceRestartRequest {
                 request_id: actual_id,
-                attempt: 2,
+                attempt: 3,
             },
         } if *actual_generation == generation && actual_id == &request_id
     )));
