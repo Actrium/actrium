@@ -1481,7 +1481,7 @@ fn reduce_ice_restart_request(
     // fenced grace window avoids a duplicate Offer when the Answerer sends
     // its failure wake concurrently. If the Offer was lost, the grace
     // deadline re-enters the normal soft retry path and publishes the fresh
-    // Offer without waiting for the six-second attempt cadence.
+    // Offer without waiting for the normal attempt cadence.
     if attempt == 1
         && state.recovery_inflight
         && state.recovery_attempt_started
