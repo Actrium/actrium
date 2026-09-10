@@ -130,6 +130,16 @@ jobs:
             exit 0
           fi
           ver=$(python3 -c "import tomllib;from pathlib import Path;d=tomllib.loads(Path('Cargo.toml').read_text());print(d['workspace']['package']['version'])")
+          # Retain the observed remote SHA to protect concurrent branch edits.
+          BRANCH="release-prepare/v${ver}"
+          BRANCH_REF="refs/heads/${BRANCH}"
+          REMOTE_BRANCH=$(git ls-remote --heads origin "$BRANCH_REF")
+          EXPECTED_BRANCH_SHA=""
+          if [ -n "$REMOTE_BRANCH" ]; then
+            git fetch origin "+${BRANCH_REF}:refs/remotes/origin/${BRANCH}"
+            EXPECTED_BRANCH_SHA=$(git rev-parse "refs/remotes/origin/${BRANCH}")
+          fi
+          echo "expected_branch_sha=$EXPECTED_BRANCH_SHA" >> "$GITHUB_OUTPUT"
           echo "version=$ver" >> "$GITHUB_OUTPUT"
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
@@ -149,11 +159,15 @@ jobs:
 
       - name: Push release branch
         if: steps.prepare.outputs.skip != 'true' && steps.freshness.outputs.stale != 'true'
+        env:
+          EXPECTED_BRANCH_SHA: ${{ steps.prepare.outputs.expected_branch_sha }}
         run: |
           set -euo pipefail
           BRANCH="release-prepare/v${{ steps.prepare.outputs.version }}"
           git checkout -b "$BRANCH"
-          git push origin "$BRANCH" --force
+          # An empty expected SHA requires the branch to still be absent.
+          git push origin "$BRANCH" \
+            --force-with-lease="refs/heads/${BRANCH}:${EXPECTED_BRANCH_SHA}"
 
       - name: Create or update Release PR
         if: steps.prepare.outputs.skip != 'true' && steps.freshness.outputs.stale != 'true'
@@ -165,23 +179,19 @@ jobs:
           BRANCH="release-prepare/v${VER}"
           TITLE="chore(release): basic train v${VER}"
 
-          LAST_TAG=$(git describe --tags --match "v[0-9]*" --match "release-train-v[0-9]*" --abbrev=0 2>/dev/null || echo "")
-          if [ -z "$LAST_TAG" ]; then
-            CHANGELOG="Initial release v${VER}"
-          else
-            CHANGELOG=$(git log "${LAST_TAG}..HEAD" --pretty=format:"- %s" --reverse)
-          fi
-
-          BODY="## Release v${VER}"$'\n'$'\n'"### Changes since ${LAST_TAG:-initial commit}"$'\n'$'\n'"${CHANGELOG}"$'\n'$'\n'"---"$'\n'"> Auto-created by release prepare workflow. Merge to publish."
+          BODY_FILE=$(mktemp)
+          python3 scripts/actr/generate-changelog.py \
+            --version "$VER" --to-ref HEAD --output "$BODY_FILE"
 
           EXISTING=$(gh pr list --head "$BRANCH" --json number -q '.[0].number' 2>/dev/null || echo "")
           if [ -n "$EXISTING" ]; then
             echo "Updating existing PR #${EXISTING}"
-            gh pr edit "$EXISTING" --title "$TITLE" --body "$BODY"
+            # Preserve reviewed release notes when the preparation branch refreshes.
+            gh pr edit "$EXISTING" --title "$TITLE"
             CURRENT_PR="$EXISTING"
           else
             echo "Creating new PR"
-            PR_URL=$(gh pr create --base main --head "$BRANCH" --title "$TITLE" --body "$BODY")
+            PR_URL=$(gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file "$BODY_FILE")
             CURRENT_PR="${PR_URL##*/}"
           fi
 
