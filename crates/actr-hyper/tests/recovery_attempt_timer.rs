@@ -18,6 +18,16 @@ fn wifi() -> NetworkTransportFlags {
     }
 }
 
+fn cellular() -> NetworkTransportFlags {
+    NetworkTransportFlags {
+        wifi: false,
+        cellular: true,
+        ethernet: false,
+        vpn: false,
+        other: false,
+    }
+}
+
 /// Reproduce the recovery timing seen in the mobile/service logs:
 ///
 /// 1. The Answerer sends an ICE-restart request to the Offerer.
@@ -314,6 +324,17 @@ async fn address_change_rebinds_wildcards_before_attempt_deadline_and_restores_e
     let address_change_started = Instant::now();
     pair.harness()
         .set_local_addresses(pair.serial(PairEndpoint::A), vec![new_address]);
+    // The production mobile path is event-driven: changing the deterministic
+    // test provider alone is not a network signal. Model the native Wi-Fi ->
+    // cellular handover so the reconciler emits LocalAddressChanged and the
+    // wildcard ICE rebind starts immediately.
+    pair.network_path(
+        PairEndpoint::A,
+        3,
+        NetworkAvailability::Available,
+        cellular(),
+    )
+    .await;
 
     // The wildcard rebind must happen promptly. With the pre-PR logic the
     // edge was merely remembered and this wait could not complete before the
@@ -351,8 +372,13 @@ async fn address_change_rebinds_wildcards_before_attempt_deadline_and_restores_e
 
     pair.heal_rtc_faults().await;
     pair.heal_signaling_faults();
-    pair.network_path(PairEndpoint::A, 3, NetworkAvailability::Available, wifi())
-        .await;
+    pair.network_path(
+        PairEndpoint::A,
+        4,
+        NetworkAvailability::Available,
+        cellular(),
+    )
+    .await;
     let recovered = pair.wait_pair_ready(WAIT).await;
     assert_eq!(recovered.a_to_b.pc_generation, initial.a_to_b.pc_generation);
     let recovered_ice_generation = pair

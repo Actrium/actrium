@@ -2613,13 +2613,15 @@ fn start_hard_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
     });
 }
 
-/// An Answerer cannot create a useful replacement PeerConnection: it has no
-/// local Offer to negotiate against. Keep the logical recovery cycle alive and
-/// wait for the stable Offerer to initiate the next physical connection. The
-/// six-second attempt timer retransmits a correlated wake, using the active or
-/// retired generation as signaling metadata; the single end-to-end recovery
-/// budget remains the backstop and performs the normal terminal cleanup.
-fn wait_for_offerer_offer(state: &mut RtcPeerState) {
+/// Park an Answerer while waiting for the stable Offerer to initiate the next
+/// physical connection.
+///
+/// `preserve_request` is used for a terminal `Failed` callback. A request may
+/// already have been emitted by `Disconnected` or an explicit path edge; in
+/// that case parking must not clear its identity or advance its recovery epoch.
+/// The regular Hard-Recovery path passes `false`, because it starts a fresh
+/// request exchange for the parked generation.
+fn park_answerer_recovery(state: &mut RtcPeerState, preserve_request: bool) {
     // Hard recovery can be requested because the local address or lifecycle
     // changed while the active PeerConnection was still physically connected.
     // In that case the existing RpcReliable DataChannel remains the readiness
@@ -2631,14 +2633,26 @@ fn wait_for_offerer_offer(state: &mut RtcPeerState) {
     let newly_parked_retired_session = !state.awaiting_offer
         && state.active_generation.is_none()
         && state.parked_signaling_generation.is_some();
+    let existing_request = state.local_restart_request_id.clone();
+    let existing_attempt = state.local_restart_request_attempt;
+    let preserve_exchange = preserve_request
+        && state.recovery_inflight
+        && !newly_parked_retired_session
+        && existing_request.is_some();
     state.parked_signaling_generation = state
         .active_generation
         .or(state.parked_signaling_generation);
     if !state.recovery_inflight || newly_parked_retired_session {
         state.recovery_cycle = state.recovery_cycle.wrapping_add(1);
     }
-    state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
+    if !preserve_exchange {
+        state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
+    }
     clear_negotiation_for_recovery(state);
+    if preserve_exchange {
+        state.local_restart_request_id = existing_request;
+        state.local_restart_request_attempt = existing_attempt;
+    }
     state.recovery_inflight = true;
     state.recovery_attempt_started = false;
     state.recovery_negotiated = false;
@@ -2659,6 +2673,13 @@ fn wait_for_offerer_offer(state: &mut RtcPeerState) {
         newly_parked_retired_session,
         "v0.20 answerer waiting for offerer to initiate recovery"
     );
+}
+
+/// Compatibility wrapper for paths that intentionally begin a new parked
+/// request exchange (Hard Recovery, failed replacement build, and a closed
+/// Answerer). The terminal `Failed` path uses the preserving variant below.
+fn wait_for_offerer_offer(state: &mut RtcPeerState) {
+    park_answerer_recovery(state, false);
 }
 
 /// Exhaust one complete recovery cycle without terminating the Controller.
@@ -2861,9 +2882,9 @@ fn reduce_state_tick(
         if state.ever_connected {
             // S5-2/S5-3: a previously-connected peer failing transitions to
             // Recovering. Only the Offerer can choose between Soft Recovery
-            // and a new Hard-Recovery PC. An Answerer whose physical PC has
-            // failed cannot restart it locally; it waits for the Offerer to
-            // initiate a new Offer.
+            // and a new Hard-Recovery PC. An Answerer cannot restart its
+            // physical PC locally, but it immediately wakes the Offerer with a
+            // request-only recovery effect and then waits for the Offer.
             if state.role == Role::Answerer {
                 // The physical Session has failed, so any readiness fact from
                 // its DataChannel is stale. Retire the failed generation before
@@ -2884,6 +2905,7 @@ fn reduce_state_tick(
                 let recovery_wake_was_sent = state.recovery_attempt_started
                     && state.local_restart_request_id.is_some()
                     && state.local_restart_request_attempt > 0;
+                let was_already_parked = state.awaiting_offer && state.recovery_inflight;
                 let preserved_request_id = state.local_restart_request_id.clone();
                 let preserved_attempt = state.local_restart_request_attempt;
                 state.rpc_reliable_open = false;
@@ -2905,7 +2927,11 @@ fn reduce_state_tick(
                     state.local_restart_request_attempt = preserved_attempt;
                 }
                 state.recovery_attempt_started = recovery_wake_was_sent;
-                if !recovery_wake_was_sent {
+                // A Failed edge arriving during an unparked soft recovery is
+                // a new immediate wake and advances the existing request. A
+                // duplicate Failed edge after parking remains idempotent; the
+                // attempt timer owns later retransmissions.
+                if !recovery_wake_was_sent || !was_already_parked {
                     state.recovery_attempt_started = true;
                     send_answerer_restart_request(state, effects);
                 }
