@@ -204,6 +204,12 @@ jobs:
         with:
           path: automation
           persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_ref }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           pattern: actr-cli-*
@@ -227,6 +233,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           RELEASE_SHA: ${{ needs.validate.outputs.source_sha }}
           ACTR_RELEASE_TAG: ${{ inputs.tag }}
+          ACTR_REPO_ROOT: ${{ github.workspace }}/source
         run: |
           set -euo pipefail
           args=(publish --tag "${{ inputs.tag }}" --assets "$GITHUB_WORKSPACE/artifacts" --state-file "$GITHUB_WORKSPACE/release-train-v${{ needs.validate.outputs.version }}.publish-cli-binaries.state.tsv")
