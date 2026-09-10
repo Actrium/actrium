@@ -64,7 +64,7 @@ jobs:
 
   payload-logging:
     name: OTel payload-logging guard
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
       actions: read

@@ -56,13 +56,13 @@ pub struct MobileEventDriver {
     shutdown: tokio_util::sync::CancellationToken,
     task: tokio::task::JoinHandle<()>,
     status: watch::Receiver<SupervisorStatus>,
-    address_shutdown: tokio_util::sync::CancellationToken,
-    address_task: tokio::task::JoinHandle<()>,
 }
 
 impl MobileEventDriver {
-    /// Attach the production gated lifecycle reconciler, v0.20 recovery feed,
-    /// and address monitor to one endpoint in any integration topology.
+    /// Attach the production gated lifecycle reconciler and v0.20 recovery
+    /// feed to one endpoint in any integration topology. Mobile tests submit
+    /// native network-path events explicitly; address polling is intentionally
+    /// not part of the mobile production path.
     pub fn spawn(harness: &TestHarness, serial: u64) -> Self {
         let peer = harness.peer(serial);
         let processor = peer.production_network_processor();
@@ -78,12 +78,6 @@ impl MobileEventDriver {
         peer.signaling_client
             .set_supervisor_fact_sink(facts.clone());
         facts.signaling_generation_committed(1, crate::lifecycle::SignalingFactOrigin::External);
-        let address_shutdown = tokio_util::sync::CancellationToken::new();
-        let address_task = crate::wire::webrtc::v020::recovery::spawn_address_monitor(
-            harness.address_provider(serial),
-            peer.rtc.recovery_supervisor(),
-            address_shutdown.clone(),
-        );
         Self {
             endpoint: peer.id.clone(),
             evidence: harness.evidence.clone(),
@@ -91,8 +85,6 @@ impl MobileEventDriver {
             shutdown,
             task,
             status,
-            address_shutdown,
-            address_task,
         }
     }
 
@@ -205,9 +197,7 @@ impl MobileEventDriver {
 
     pub async fn shutdown(self) {
         self.shutdown.cancel();
-        self.address_shutdown.cancel();
         let _ = self.task.await;
-        let _ = self.address_task.await;
     }
 }
 
@@ -225,6 +215,21 @@ pub struct MobileRtcPairHarness {
 
 impl MobileRtcPairHarness {
     pub async fn new(a_serial: u64, b_serial: u64) -> Self {
+        Self::new_with_address_mode(a_serial, b_serial, false).await
+    }
+
+    /// Build a pair whose first bind is deterministic and whose next address
+    /// change makes the test provider return dual-stack wildcards. The real
+    /// webrtc-rs driver then expands those wildcards during ICE-restart rebind.
+    pub async fn new_with_wildcard_rebind(a_serial: u64, b_serial: u64) -> Self {
+        Self::new_with_address_mode(a_serial, b_serial, true).await
+    }
+
+    async fn new_with_address_mode(
+        a_serial: u64,
+        b_serial: u64,
+        wildcard_rebind_addresses: bool,
+    ) -> Self {
         assert_ne!(
             a_serial, b_serial,
             "pair endpoints require distinct identities"
@@ -232,7 +237,11 @@ impl MobileRtcPairHarness {
         let services = ActrixTestServices::start()
             .await
             .expect("Actrix Signaling/STUN/TURN services must start");
-        let mut harness = TestHarness::with_external_signaling(services.signaling_url()).await;
+        let mut harness = if wildcard_rebind_addresses {
+            TestHarness::with_external_signaling_and_wildcard_rebind(services.signaling_url()).await
+        } else {
+            TestHarness::with_external_signaling(services.signaling_url()).await
+        };
         let a_id = make_actor_id(a_serial);
         let b_id = make_actor_id(b_serial);
         harness

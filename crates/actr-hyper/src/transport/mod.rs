@@ -55,7 +55,7 @@ pub use lane::{
 // within `lane.rs` and does not need the re-export.
 #[cfg(feature = "webrtc-v020")]
 pub(crate) use lane::{
-    DC_MAX_PAYLOAD_SIZE, FRAGMENT_HEADER_SIZE, ReassemblyBuffer, ReassemblyLimits,
+    DC_MAX_PAYLOAD_SIZE, FRAGMENT_HEADER_SIZE, REASSEMBLY_TTL, ReassemblyBuffer, ReassemblyLimits,
     decode_fragment_header, encode_fragment_header,
 };
 pub(crate) use route_table::{PayloadTypeExt, RetryPolicy};

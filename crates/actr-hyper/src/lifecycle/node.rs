@@ -3063,7 +3063,6 @@ impl Inner {
                 })?;
                 let runtime_config = v020::runtime::RtcRuntimeConfig::desktop_default()
                     .with_buffer_config(buffer_config.clone());
-                let address_provider = Arc::new(v020::address::DesktopLocalAddressProvider::new());
                 let ice_servers: Vec<webrtc::peer_connection::RTCIceServer> = self
                     .config
                     .webrtc
@@ -3115,9 +3114,8 @@ impl Inner {
                 // protocol-selection timers executed inside v0.20's ICE agent.
                 let _ = crate::timer::ids::EXTERNAL_ICE_CANDIDATE_SELECTION;
                 let factory = Arc::new(
-                    v020::factory::PeerConnectionFactory::new_with_configuration(
+                    v020::factory::PeerConnectionFactory::new_with_configuration_and_wildcard_bind(
                         runtime_config,
-                        address_provider.clone(),
                         rtc_configuration,
                     )
                     .with_turn_credential_provider(Arc::new(credential_state.clone()))
@@ -3205,19 +3203,6 @@ impl Inner {
                     });
                     task_handles.push(turn_refresh_handle);
                 }
-                // S7A-3 (P1): bridge local-address changes into the recovery
-                // supervisor so interface switches trigger same-generation ICE
-                // recovery in production. A failed restart can still escalate
-                // to Hard Recovery. Native desktop enumeration is refreshed by
-                // the monitor; mobile providers can additionally push change
-                // edges.
-                let address_monitor = v020::recovery::spawn_address_monitor(
-                    address_provider,
-                    v020_manager.supervisor().clone(),
-                    self.shutdown_token.child_token(),
-                );
-                task_handles.push(address_monitor);
-
                 let v020_local_id = v020::signaling::SharedLocalId::new(actor_id.clone());
                 let v020_transport = v020::signaling::ws_transport::V020SignalingTransport::new(
                     self.signaling_client.clone(),

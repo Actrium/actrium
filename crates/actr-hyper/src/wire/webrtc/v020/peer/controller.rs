@@ -40,7 +40,7 @@ use super::reducer::{
     LaneEvent, RtcConfigurationRefreshError, RtcPeerCommand, RtcPeerEffect, RtcPeerInput,
     SignalingMessage, reduce,
 };
-use super::session::SessionResourceId;
+use super::session::{InboundGenerationGate, SessionResourceId};
 use super::state::{PendingRtcOperationKind, RtcPeerState};
 
 #[cfg(feature = "test-utils")]
@@ -100,6 +100,9 @@ enum PendingDiscoveredResource {
 /// The controller's single-writer control task.
 pub(crate) struct RtcPeerController {
     state: RtcPeerState,
+    /// Generation admitted to the inbound data plane. `None` closes ingress;
+    /// only the exact sendable generation may dispatch business messages.
+    inbound_generation: Arc<InboundGenerationGate>,
     /// The effect port: owns the session registry and executes blocking effects.
     /// The controller submits effects and receives completions; it never holds
     /// sessions or WebRTC implementation objects directly.
@@ -126,13 +129,16 @@ pub(crate) struct RtcPeerController {
     /// async `apply()` while still letting a failed readiness lane stop the
     /// remaining effects from that reducer turn.
     internal_inputs: std::collections::VecDeque<RtcPeerInput>,
-    /// Critical signaling (role probe / offer / answer) retained when the
-    /// signaling queue was full, retried on every event-loop turn. The
-    /// reducer already marked the attempt announced, so dropping the message
-    /// would strand negotiation. The originating transport attempt fences a
-    /// retained message from leaking into a later WirePool retry. Only the
-    /// newest message is retained: a newer offer/answer supersedes any
-    /// retained one.
+    /// Critical signaling retained when the signaling queue is full. When the
+    /// signaling-generation gate is closed, only Offer, Answer, and
+    /// IceRestartRequest are retained; Candidate and RoleNegotiation are
+    /// dropped. Role probes use `role_probe_undelivered` and are re-driven when
+    /// the gate opens, so retaining them here would double-send the probe. The
+    /// reducer already marked the attempt announced, so dropping a retained
+    /// offer/answer/restart request would strand negotiation. The originating
+    /// transport attempt fences retained signaling from leaking into a later
+    /// WirePool retry. Only the newest message is retained: a newer
+    /// offer/answer supersedes any retained one.
     retry_signaling: Option<RetainedSignaling>,
     /// Wake channel: a drained signaling queue re-delivers a retained
     /// critical message without waiting for an unrelated event-loop turn
@@ -190,9 +196,10 @@ pub(crate) struct SharedNodeDeps {
     pub(crate) driver_event_observer: Option<NodeDriverEventObserver>,
     /// Stable identity of this Controller lifetime within its Manager.
     pub(crate) controller_lifecycle_id: u64,
-    /// Manager-owned hard-recovery sink used to release business work that was
-    /// committed to the generation being superseded. Soft recovery keeps the
-    /// same Session and therefore emits no edge.
+    /// Manager-owned generation-invalidation sink used to release business
+    /// work committed to a generation that is being retired or superseded.
+    /// Healthy same-generation Soft Recovery keeps the Session and therefore
+    /// emits no edge.
     pub(crate) peer_generation_invalidated: Option<tokio::sync::broadcast::Sender<(ActrId, u64)>>,
     /// Manager-owned sink for every authoritative sendability edge. PeerGate
     /// pairs falling and rising edges to apply recovery hysteresis to pending
@@ -300,13 +307,14 @@ impl RtcPeerController {
             signaling_generation_rx,
             deps,
             policy_clock,
-            move |peer_id, event_mailbox, lane_tx, deps| {
+            move |peer_id, event_mailbox, lane_tx, deps, inbound_generation| {
                 Arc::new(WebRtcEffectRunner::new(
                     peer_id,
                     factory_for_port,
                     event_mailbox,
                     lane_tx,
                     deps,
+                    inbound_generation,
                 ))
             },
         );
@@ -327,6 +335,7 @@ impl RtcPeerController {
             crate::wire::webrtc::v020::events::PeerEventMailbox,
             mpsc::Sender<LaneEvent>,
             SharedNodeDeps,
+            Arc<InboundGenerationGate>,
         ) -> Arc<dyn RtcPeerEffectPort>,
     ) -> (
         RtcPeerControllerHandle,
@@ -363,16 +372,19 @@ impl RtcPeerController {
         let (lane_tx, lane_rx) = mpsc::channel(LANE_CAPACITY);
         let (signaling_retry_wake_tx, signaling_retry_wake_rx) = mpsc::unbounded_channel();
         let lanes = crate::wire::webrtc::v020::peer::lane_handle::ActiveLaneRegistry::new();
+        let inbound_generation = Arc::new(InboundGenerationGate::new());
 
         let effect_port = make_effect_port(
             peer_id.clone(),
             event_mailbox.clone(),
             lane_tx.clone(),
             deps.clone(),
+            inbound_generation.clone(),
         );
 
         let controller = Self {
             state,
+            inbound_generation,
             effect_port: effect_port.clone(),
             lanes: lanes.clone(),
             inbound: deps.inbound.clone(),
@@ -444,7 +456,7 @@ impl RtcPeerController {
             signaling_generation_rx,
             deps,
             policy_clock,
-            move |_, _, _, _| effect_port,
+            move |_, _, _, _, _| effect_port,
         )
     }
 
@@ -853,6 +865,7 @@ impl RtcPeerController {
 
         // Final teardown: close every remaining session via the effect port
         // (invariant #12: every PeerConnection is closed by its session).
+        self.inbound_generation.set(None);
         for (_, (_, respond)) in self.pending_configuration_refreshes.drain() {
             let _ = respond.send(Err(RtcConfigurationRefreshError::Closed));
         }
@@ -1023,6 +1036,11 @@ impl RtcPeerController {
         let active_generation_before = self.state.active_generation;
         let effects = reduce(&mut self.state, input);
         let is_sendable = self.state.sendable();
+        self.inbound_generation.set(
+            is_sendable
+                .then_some(self.state.active_generation.unwrap_or_default())
+                .filter(|generation| *generation != 0),
+        );
         if self.state.phase != phase_before {
             tracing::debug!(
                 peer = %self.state.peer_id.to_string_repr(),
@@ -1036,10 +1054,15 @@ impl RtcPeerController {
         let builds_session = effects
             .iter()
             .any(|effect| matches!(effect, RtcPeerEffect::BuildSession { .. }));
-        let invalidates_active_generation = builds_session
-            && active_generation_before.is_some()
-            && (self.state.recovery_inflight
-                || self.state.active_generation != active_generation_before);
+        let active_generation_retired = active_generation_before.is_some()
+            && self.state.active_generation != active_generation_before;
+        // A hard replacement invalidates the old generation before the new
+        // one becomes active. A physical Answerer failure can instead retire
+        // the failed generation and park while waiting for the Offerer; that
+        // path has no BuildSession effect, but submitted requests still must be
+        // released before the old close completes.
+        let invalidates_active_generation =
+            active_generation_retired && (builds_session || self.state.recovery_inflight);
         if let Some(respond) = refresh_respond {
             if let Some((generation, operation_id)) = effects.iter().find_map(|effect| match effect
             {
@@ -1262,6 +1285,14 @@ impl RtcPeerController {
         let Some(retained) = self.retry_signaling.take() else {
             return;
         };
+        // A committed signaling generation is an execution prerequisite, not
+        // a best-effort hint. Keep the request/SDP queued while the lifecycle
+        // supervisor has withdrawn the generation; the watch edge will wake
+        // the controller and this method will retry after the gate reopens.
+        if self.signaling_generation_rx.borrow().is_none() {
+            self.retry_signaling = Some(retained);
+            return;
+        }
         if !self.retained_signaling_is_live(&retained) {
             tracing::debug!(
                 peer = %self.state.peer_id.to_string_repr(),
@@ -1271,6 +1302,7 @@ impl RtcPeerController {
             );
             return;
         }
+        let message_kind = retained.message.kind_name();
         let dispatch = SignalingDispatch::tracked(
             self.state.peer_id.clone(),
             self.deps.controller_lifecycle_id,
@@ -1283,7 +1315,8 @@ impl RtcPeerController {
             Ok(()) => {
                 tracing::info!(
                     peer = %self.state.peer_id.to_string_repr(),
-                    "retried retained SDP through the signaling queue"
+                    message_kind,
+                    "retried retained critical signaling through the signaling queue"
                 );
             }
             Err(tokio::sync::mpsc::error::TrySendError::Full(dispatch)) => {
@@ -1425,24 +1458,44 @@ impl RtcPeerController {
                 generation,
                 message,
             } => {
+                let is_candidate = matches!(&message, SignalingMessage::Candidate(_));
+                let is_role_probe = matches!(&message, SignalingMessage::RoleNegotiation);
                 // The lifecycle supervisor is the sole signaling connection
                 // owner. Do not let a queued RTC completion publish SDP/ICE
                 // after that supervisor has withdrawn the committed
-                // generation; the watch edge will leave the recovery intent
-                // pending until a new generation is committed.
+                // generation. Critical recovery signaling is retained until a
+                // new generation is committed; otherwise an Answerer's first
+                // IceRestartRequest could be lost exactly when the Offerer is
+                // needed to wake up.
                 if self.signaling_generation_rx.borrow().is_none() {
-                    tracing::debug!(
-                        peer = %self.state.peer_id.to_string_repr(),
-                        "no committed signaling generation; dropping RTC signaling effect \
-                         (the role-negotiation probe is re-driven when the gate opens)"
-                    );
+                    if is_candidate || is_role_probe {
+                        // Role probes have a dedicated gate-opening re-drive;
+                        // neither them nor trickle candidates belong in the
+                        // retained critical-signaling slot.
+                        tracing::debug!(
+                            peer = %self.state.peer_id.to_string_repr(),
+                            generation,
+                            "no committed signaling generation; dropping non-recovery signaling"
+                        );
+                    } else {
+                        self.retry_signaling = Some(RetainedSignaling {
+                            transport_epoch: self.state.transport_epoch,
+                            generation,
+                            negotiation_epoch: self.state.negotiation_epoch,
+                            message,
+                        });
+                        tracing::debug!(
+                            peer = %self.state.peer_id.to_string_repr(),
+                            generation,
+                            "no committed signaling generation; retaining critical RTC signaling"
+                        );
+                    }
                     return true;
                 }
                 // N2 backpressure: never block the event loop on a full signaling
                 // queue, or one peer's signaling storm would stall the node's
                 // other controllers. Non-blocking try_send; a full queue drops the
                 // message and counts it (observable `signaling_dropped` metric).
-                let is_candidate = matches!(message, SignalingMessage::Candidate(_));
                 let message_kind = message.kind_name();
                 let dispatch = SignalingDispatch::tracked(
                     self.state.peer_id.clone(),
@@ -1504,7 +1557,7 @@ impl RtcPeerController {
                             tracing::warn!(
                                 peer = %self.state.peer_id.to_string_repr(),
                                 signaling_dropped = self.state.signaling_dropped,
-                                "signaling queue full; retained SDP offer/answer for retry on the next event-loop turn"
+                                "signaling queue full; retained critical signaling for retry on the next event-loop turn"
                             );
                         }
                     }

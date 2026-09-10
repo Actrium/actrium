@@ -359,6 +359,7 @@ jobs:
         | (package(actr-hyper) and test(/^connection_governance_matrix::/))
         | (package(actr-hyper) and test(/^connection_governance_production::/))
         | (package(actr-hyper) and test(/^connection_governance_inflight::/))
+        | binary(recovery_attempt_timer)
         | binary(webrtc_large_mobile_recovery)
         | binary(mobile_full_disconnect_recovery)
         | binary(mobile_network_event_scenarios)

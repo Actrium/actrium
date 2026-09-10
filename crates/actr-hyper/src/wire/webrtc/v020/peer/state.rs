@@ -135,8 +135,9 @@ pub(crate) struct RtcPeerState {
     /// Connected callbacks from the pre-restart ICE state cannot restore
     /// sendability while this is false.
     pub(crate) recovery_negotiated: bool,
-    /// Monotone identity of the current recovery deadline. It advances only
-    /// when a new recovery epoch/session replacement begins, so duplicate
+    /// Monotone identity of the current recovery deadline. It advances when a
+    /// new recovery epoch/session replacement begins or when an accepted remote
+    /// restart Offer supersedes the request-only attempt deadline, so duplicate
     /// network facts cannot extend an in-flight deadline.
     pub(crate) recovery_epoch: u64,
     /// Identity of the end-to-end recovery budget. Unlike `recovery_epoch`,

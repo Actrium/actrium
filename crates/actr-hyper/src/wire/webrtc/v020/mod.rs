@@ -11,7 +11,7 @@
 //!
 //! * [`factory`] — `PeerConnectionFactory`
 //! * [`runtime`] — `RtcRuntimeConfig` (Runtime strategy)
-//! * [`address`] — `LocalAddressProvider`
+//! * [`address`] — test/platform address provider seams and production wildcard resolver
 //! * [`event_handler`] — `WebRtcEventHandler`
 //! * [`events`] — `PeerDriverEvent` + `PeerEventMailbox`
 

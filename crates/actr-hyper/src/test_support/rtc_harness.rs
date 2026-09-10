@@ -1091,6 +1091,7 @@ pub struct TestHarness {
     // its historical recovery cases retain their original Runtime, signaling,
     // address-provider, and scheduling path.
     v020_matrix_instrumentation: bool,
+    wildcard_rebind_addresses: bool,
     address_providers: HashMap<u64, Arc<TestLocalAddressProvider>>,
     peers: HashMap<u64, TestPeer>,
     bg_tasks: Vec<tokio::task::JoinHandle<()>>,
@@ -1118,6 +1119,7 @@ impl TestHarness {
             signaling_faults: Default::default(),
             evidence: Default::default(),
             v020_matrix_instrumentation: false,
+            wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
             bg_tasks: Vec::new(),
@@ -1136,6 +1138,7 @@ impl TestHarness {
             signaling_faults: Default::default(),
             evidence: Default::default(),
             v020_matrix_instrumentation: false,
+            wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
             bg_tasks: Vec::new(),
@@ -1155,6 +1158,7 @@ impl TestHarness {
             signaling_faults: Default::default(),
             evidence: Default::default(),
             v020_matrix_instrumentation: true,
+            wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
             bg_tasks: Vec::new(),
@@ -1173,10 +1177,23 @@ impl TestHarness {
             signaling_faults: Default::default(),
             evidence: Default::default(),
             v020_matrix_instrumentation: true,
+            wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
             bg_tasks: Vec::new(),
         }
+    }
+
+    /// External-signaling v0.20 fixture that switches the test provider to
+    /// wildcard bind inputs after its first synthetic address change. This
+    /// keeps the initial pair deterministic while exercising webrtc-rs's live
+    /// interface expansion on an ICE-restart rebind.
+    pub async fn with_external_signaling_and_wildcard_rebind(
+        signaling_url: impl Into<String>,
+    ) -> Self {
+        let mut harness = Self::with_external_signaling(signaling_url).await;
+        harness.wildcard_rebind_addresses = true;
+        harness
     }
 
     pub async fn add_peer(&mut self, serial: u64) {
@@ -1235,9 +1252,14 @@ impl TestHarness {
     ) {
         assert!(!self.peers.contains_key(&serial), "duplicate peer {serial}");
         let id = make_actor_id(serial);
-        let mutable_address_provider = Arc::new(TestLocalAddressProvider::new(vec![IpAddr::V4(
-            Ipv4Addr::LOCALHOST,
-        )]));
+        let initial_addresses = vec![IpAddr::V4(Ipv4Addr::LOCALHOST)];
+        let mutable_address_provider = if self.wildcard_rebind_addresses {
+            Arc::new(TestLocalAddressProvider::new_with_wildcard_rebind(
+                initial_addresses,
+            ))
+        } else {
+            Arc::new(TestLocalAddressProvider::new(initial_addresses))
+        };
         let address_provider: Arc<dyn LocalAddressProvider> = if self.v020_matrix_instrumentation {
             mutable_address_provider.clone()
         } else {
@@ -1500,13 +1522,6 @@ impl TestHarness {
             .get(&serial)
             .unwrap_or_else(|| panic!("peer {serial} address provider not found"))
             .set_addresses(addresses)
-    }
-
-    pub(crate) fn address_provider(&self, serial: u64) -> Arc<TestLocalAddressProvider> {
-        self.address_providers
-            .get(&serial)
-            .unwrap_or_else(|| panic!("peer {serial} address provider not found"))
-            .clone()
     }
 
     /// Remove and fully shut down one independent endpoint while leaving the
