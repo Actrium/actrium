@@ -15,14 +15,17 @@ use std::time::Duration;
 
 use actr_hyper::lifecycle::{NetworkAvailability, NetworkTransportFlags};
 use actr_hyper::test_support::{
-    ConnectionInitiator, LinkDirection, MobileRtcPairHarness, PairEndpoint, SignalingFaultRule,
-    SignalingMessageClass, TestRtcRole, install_test_crypto_provider,
+    ConnectionInitiator, ICE_RESTART_ATTEMPT_TIMEOUT, LinkDirection, MobileRtcPairHarness,
+    PairEndpoint, REMOTE_REQUEST_WAKE_GRACE, SignalingFaultRule, SignalingMessageClass,
+    TestRtcRole, install_test_crypto_provider,
 };
 
 const SETUP_TIMEOUT: Duration = Duration::from_secs(10);
-/// Must be shorter than the six-second attempt-deadline cadence while still
-/// leaving enough time for the real local Actrix/RTC event path.
-const WAKE_WINDOW: Duration = Duration::from_secs(2);
+/// Keep the assertion derived from the audited ten-second attempt timeout; it
+/// must remain shorter than a normal retry while leaving enough time for the
+/// real local Actrix/RTC event path.
+const WAKE_WINDOW: Duration =
+    Duration::from_millis((ICE_RESTART_ATTEMPT_TIMEOUT.as_millis() / 5) as u64);
 
 fn wifi() -> NetworkTransportFlags {
     NetworkTransportFlags {
@@ -131,13 +134,13 @@ async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
     // assertion observes the signaling action itself rather than a later
     // readiness transition.
     let wake_offer = tokio::time::timeout(
-        WAKE_WINDOW,
+        REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW,
         pair.harness().signaling_faults.wait_for_hits_after(
             &offerer,
             &answerer,
             SignalingMessageClass::IceRestartOffer,
             offers_before_wake,
-            WAKE_WINDOW,
+            REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW,
         ),
     )
     .await;
@@ -147,6 +150,7 @@ async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
 
     assert!(
         wake_offer.is_ok() && wake_offer.expect("wake wait result").is_some(),
-        "attempt-1 restart request must trigger a fresh offer within {WAKE_WINDOW:?}"
+        "attempt-1 restart request must trigger a fresh offer within {:?}",
+        REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW
     );
 }

@@ -26,7 +26,9 @@ use crate::wire::webrtc::v020::events::{
     DataChannelDescriptor, PEER_EVENT_MAILBOX_CAPACITY, PeerDriverEvent, TrackDescriptor,
     peer_event_mailbox_with_capacity_and_bytes,
 };
-use crate::wire::webrtc::v020::recovery::{ICE_RESTART_ATTEMPT_TIMEOUT, RtcNetworkEvent};
+use crate::wire::webrtc::v020::recovery::{
+    ICE_RESTART_ATTEMPT_TIMEOUT, REMOTE_REQUEST_WAKE_GRACE, RtcNetworkEvent,
+};
 use crate::wire::webrtc::v020::signaling::SignalingDispatch;
 use crate::wire::webrtc::v020::status::{LaneKind, PeerTransportRetirement, RtcPeerSnapshot};
 
@@ -52,10 +54,6 @@ const COMMAND_CAPACITY: usize = 64;
 const COMPLETION_CAPACITY: usize = 128;
 /// Bounded capacity of the per-peer lane-event channel.
 const LANE_CAPACITY: usize = 64;
-/// A remote attempt-1 wake that races an already-announced local Offer gets a
-/// short grace period for the in-flight Answer. If the Offer was lost, the
-/// same timer becomes the bounded immediate retry required by issue #227.
-const REMOTE_REQUEST_WAKE_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
 /// Server-arbitrated role negotiation keeps the historical short failure
 /// budget, distinct from the longer initial ICE/DataChannel readiness budget.
 const ROLE_NEGOTIATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);

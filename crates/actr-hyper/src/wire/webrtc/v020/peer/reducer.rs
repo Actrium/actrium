@@ -39,7 +39,8 @@ use crate::wire::webrtc::v020::events::{PeerDriverEvent, PeerStateTick};
 use crate::wire::webrtc::v020::status::{LaneKind, RtcUnavailableReason};
 
 use super::state::{
-    PendingRtcOperation, PendingRtcOperationKind, RecoveryOrigin, Role, RtcPeerPhase, RtcPeerState,
+    LegacyAnswerFence, PendingRtcOperation, PendingRtcOperationKind, RecoveryOrigin, Role,
+    RtcPeerPhase, RtcPeerState,
 };
 
 /// Candidates are naturally a small set, but both signaling and driver input
@@ -1449,9 +1450,15 @@ fn reduce_ice_restart_request(
         Some((seen_id, seen_attempt)) if seen_id == &request_id && *seen_attempt >= attempt
     );
     if duplicate {
+        tracing::debug!(
+            peer = %state.peer_id.to_string_repr(),
+            %request_id,
+            attempt,
+            "v0.20 duplicate ICE restart request ignored"
+        );
         return Outcome::Accepted as i32;
     }
-    state.last_remote_restart_request = Some((request_id, attempt));
+    state.last_remote_restart_request = Some((request_id.clone(), attempt));
 
     // De-dupe the answerer's first correlated wake when either the offerer's
     // own recovery signal already owns this round, or a local RestartIce/
@@ -1473,6 +1480,13 @@ fn reduce_ice_restart_request(
         // callbacks coalesce into this same round instead of launching a
         // second Offer.
         state.recovery_started_by_remote_request = true;
+        tracing::debug!(
+            peer = %state.peer_id.to_string_repr(),
+            %request_id,
+            attempt,
+            origin = ?state.recovery_origin,
+            "v0.20 ICE restart request coalesced with active recovery"
+        );
         return Outcome::Accepted as i32;
     }
 
@@ -1492,6 +1506,13 @@ fn reduce_ice_restart_request(
         state.recovery_started_by_remote_request = true;
         state.remote_request_wake_pending = true;
         state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
+        state.bump_revision();
+        tracing::debug!(
+            peer = %state.peer_id.to_string_repr(),
+            %request_id,
+            attempt,
+            "v0.20 ICE restart request entered Offer grace window"
+        );
         return Outcome::Accepted as i32;
     }
 
@@ -1511,7 +1532,8 @@ fn reduce_ice_restart_request(
     // newer attempt while a replacement is already building is a no-op inside
     // start_hard_recovery.
     const ANSWERER_HARD_ESCALATION_ATTEMPT: u32 = 4;
-    if attempt >= ANSWERER_HARD_ESCALATION_ATTEMPT {
+    let hard_recovery = attempt >= ANSWERER_HARD_ESCALATION_ATTEMPT;
+    if hard_recovery {
         if state.recovery_origin.is_none() {
             state.recovery_origin = Some(RecoveryOrigin::RemoteRequest);
         }
@@ -1527,6 +1549,13 @@ fn reduce_ice_restart_request(
     if state.recovery_attempt_started {
         state.recovery_started_by_remote_request = true;
     }
+    tracing::debug!(
+        peer = %state.peer_id.to_string_repr(),
+        %request_id,
+        attempt,
+        recovery = if hard_recovery { "hard" } else { "soft" },
+        "v0.20 ICE restart request started immediate recovery"
+    );
 
     Outcome::Accepted as i32
 }
@@ -1987,6 +2016,28 @@ fn reduce_command(
                         state.stale_events += 1;
                         return;
                     };
+                    if exchange_id.is_none() {
+                        if let Some(fence) = state.legacy_answer_fence.as_ref() {
+                            let answer_ufrag = super::state::session_ice_ufrag(&desc.sdp);
+                            let belongs_to_current_restart = matches!(
+                                (
+                                    fence.previous_remote_ufrag.as_deref(),
+                                    answer_ufrag.as_deref()
+                                ),
+                                (Some(previous), Some(received)) if previous != received
+                            );
+                            if !belongs_to_current_restart {
+                                state.stale_events += 1;
+                                tracing::warn!(
+                                    peer = %state.peer_id.to_string_repr(),
+                                    previous_remote_ufrag = ?fence.previous_remote_ufrag,
+                                    answer_ufrag = ?answer_ufrag,
+                                    "discarding legacy SDP answer across restart boundary"
+                                );
+                                return;
+                            }
+                        }
+                    }
                     match (
                         state.pending_local_sdp_exchange_id.as_deref(),
                         exchange_id.as_deref(),
@@ -2469,6 +2520,7 @@ fn reduce_network_event(
 /// generation.
 fn clear_negotiation_for_recovery(state: &mut RtcPeerState) {
     retain_lifecycle_operations(state);
+    fence_pending_legacy_answer(state);
     state.pending_remote_offer = None;
     state.pending_remote_description_operation = None;
     state.queued_remote_description = None;
@@ -2515,6 +2567,18 @@ fn offerer_restart_negotiation_inflight(state: &RtcPeerState) -> bool {
                     | PendingRtcOperationKind::SetRemoteDescription
             )
     })
+}
+
+/// Retain the evidence needed to fence a legacy Answer when a local Offer is
+/// superseded by a new recovery attempt. Correlated Answers carry their own
+/// exchange id; an uncorrelated legacy Answer can only be accepted safely if
+/// its remote ICE ufrag changed after the superseded Offer's peer state.
+fn fence_pending_legacy_answer(state: &mut RtcPeerState) {
+    if state.legacy_answer_fence.is_none() && state.pending_local_sdp_exchange_id.is_some() {
+        state.legacy_answer_fence = Some(LegacyAnswerFence {
+            previous_remote_ufrag: state.remote_ufrag.clone(),
+        });
+    }
 }
 
 fn start_soft_recovery(
@@ -2586,8 +2650,9 @@ fn start_soft_recovery(
             // atomically with an incoming restart offer, never out from under
             // an answer it just sent. A local restart_ice() racing that offer
             // would instead re-roll credentials after the answer, wedge the
-            // round (the offerer de-dupes the attempt-1 request), and escalate
-            // both ends to a Hard rebuild at the attempt deadline.
+            // round, and race the offerer's request coalescing/grace policy;
+            // the attempt deadline would then escalate both ends to a Hard
+            // rebuild.
             send_answerer_restart_request(state, effects);
         }
     }
@@ -2709,6 +2774,7 @@ fn clear_transport_attempt_cache(state: &mut RtcPeerState) {
     state.announced_local_description_generation = None;
     state.pending_local_candidates.clear();
     state.pending_local_sdp_exchange_id = None;
+    state.legacy_answer_fence = None;
     state.pending_remote_sdp_exchange_id = None;
     state.pending_local_restart_exchange_id = None;
     state.local_restart_request_id = None;
@@ -3117,6 +3183,7 @@ fn reduce_state_tick(
             state.phase = RtcPeerPhase::Sendable;
             state.recovery_inflight = false;
             state.recovery_origin = None;
+            state.legacy_answer_fence = None;
             state.recovery_started_by_remote_request = false;
             state.remote_request_wake_pending = false;
             state.recovery_negotiated = true;
@@ -3402,6 +3469,7 @@ fn reduce_lane_event(state: &mut RtcPeerState, event: LaneEvent, effects: &mut V
                     state.phase = RtcPeerPhase::Sendable;
                     state.recovery_inflight = false;
                     state.recovery_origin = None;
+                    state.legacy_answer_fence = None;
                     state.recovery_started_by_remote_request = false;
                     state.remote_request_wake_pending = false;
                     state.recovery_negotiated = true;
@@ -3484,6 +3552,7 @@ fn atomic_switch(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect>) {
     // RFC step 8: publish Connected.
     state.recovery_inflight = false;
     state.recovery_origin = None;
+    state.legacy_answer_fence = None;
     state.recovery_started_by_remote_request = false;
     state.remote_request_wake_pending = false;
     state.recovery_negotiated = true;
@@ -3726,6 +3795,7 @@ fn reduce_completion(
                         // subsequent Connected callback belongs to this
                         // recovery epoch and may restore sendability.
                         state.recovery_negotiated = true;
+                        state.legacy_answer_fence = None;
                         if state.remote_request_wake_pending {
                             state.remote_request_wake_pending = false;
                             state.recovery_epoch = state.recovery_epoch.wrapping_add(1);

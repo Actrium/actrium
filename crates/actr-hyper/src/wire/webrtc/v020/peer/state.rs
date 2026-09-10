@@ -52,6 +52,18 @@ pub(crate) enum RecoveryOrigin {
     RemoteRequest,
 }
 
+/// Compatibility fence for an uncorrelated legacy Answer.
+///
+/// Once a local Offer has been superseded by a retry, a legacy Answer has no
+/// exchange id and cannot identify which Offer it answers. A changed remote
+/// ICE ufrag is the only safe evidence that such an Answer belongs to the
+/// current restart; an absent or unchanged ufrag remains ambiguous and is
+/// rejected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LegacyAnswerFence {
+    pub(crate) previous_remote_ufrag: Option<String>,
+}
+
 /// Stable identity of one blocking RTC effect.  The reducer records this when
 /// it emits an effect and consumes it only after an exact completion match.
 /// This prevents two operations on the same PC generation from authenticating
@@ -298,6 +310,11 @@ pub(crate) struct RtcPeerState {
     /// type is `Answer`.
     pub(crate) pending_local_sdp_exchange_id: Option<String>,
 
+    /// Set when a local Offer with no Answer yet is superseded by a recovery
+    /// retry. Legacy Answers without an exchange id are then accepted only if
+    /// their remote ICE ufrag proves that they belong to the new restart.
+    pub(crate) legacy_answer_fence: Option<LegacyAnswerFence>,
+
     /// Correlation identity received with the latest accepted remote Offer.
     /// The answerer echoes it on the matching Answer after the serialized SDP
     /// chain completes.
@@ -424,6 +441,7 @@ impl RtcPeerState {
             announced_local_description_generation: None,
             pending_local_candidates: Vec::new(),
             pending_local_sdp_exchange_id: None,
+            legacy_answer_fence: None,
             pending_remote_sdp_exchange_id: None,
             pending_local_restart_exchange_id: None,
             local_restart_request_id: None,
