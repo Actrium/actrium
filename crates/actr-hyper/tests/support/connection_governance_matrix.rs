@@ -519,11 +519,11 @@ async fn answerer_parked_open_lane_rejoins_without_manual_reconnect() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn answerer_failed_session_recovers_through_offerer_without_manual_reconnect() {
-    // Regression for request identity reset while an Answerer cannot regain
-    // its revoked anchor. The synthetic Failed fact tests the recovery state
-    // handling; it does not physically terminate the underlying PC driver.
-    // A is the Answerer; inject its failed-session fact locally so B remains
-    // unaware of the failure until A's correlated recovery request arrives.
+    // A failed physical Answerer Session cannot be repaired by a same-generation
+    // ICE restart because its RpcReliable readiness anchor was revoked. Retire
+    // the failed generation, reject the stale restart Offer, and let the
+    // Offerer create a replacement PC. The synthetic Failed fact enters through
+    // the production controller mailbox; the test does not kill a real driver.
     let mut pair = MobileRtcPairHarness::new(52_101, 52_102).await;
     pair.establish(ConnectionInitiator::A).await;
     let initial = pair.wait_pair_ready(READY_WAIT).await;
@@ -539,6 +539,11 @@ async fn answerer_failed_session_recovers_through_offerer_without_manual_reconne
         PairEndpoint::B,
         PairEndpoint::A,
         SignalingMessageClass::Offer,
+    );
+    let rejected_baseline = pair.signaling_hits(
+        PairEndpoint::A,
+        PairEndpoint::B,
+        SignalingMessageClass::IceRestartRejected,
     );
 
     let failed_generation = pair
@@ -562,12 +567,11 @@ async fn answerer_failed_session_recovers_through_offerer_without_manual_reconne
             &answerer,
             &offerer,
             SignalingMessageClass::IceRestartRequest,
-            request_baseline + 3,
+            request_baseline,
             RECOVERY_WAIT,
         )
         .await
-        .expect("failed Answerer must send four correlated recovery wakes");
-
+        .expect("failed Answerer must wake the Offerer");
     let requests = pair
         .signaling_trace()
         .into_iter()
@@ -577,12 +581,15 @@ async fn answerer_failed_session_recovers_through_offerer_without_manual_reconne
                 && event.class == SignalingMessageClass::IceRestartRequest
                 && event.ordinal > request_baseline
         })
-        .take(4)
         .collect::<Vec<_>>();
+    assert!(
+        !requests.is_empty(),
+        "the recovery cycle must expose a request"
+    );
     assert_eq!(
-        requests.len(),
-        4,
-        "the recovery cycle must expose four attempts"
+        requests.first().and_then(|event| event.attempt),
+        Some(1),
+        "the first recovery wake must start at attempt 1"
     );
     let request_ids = requests
         .iter()
@@ -594,13 +601,25 @@ async fn answerer_failed_session_recovers_through_offerer_without_manual_reconne
     );
     let attempts = requests
         .iter()
-        .map(|event| event.attempt)
+        .filter_map(|event| event.attempt)
         .collect::<Vec<_>>();
-    assert_eq!(
-        attempts,
-        vec![Some(1), Some(2), Some(3), Some(4)],
-        "Answerer recovery attempts must advance monotonically"
+    assert!(
+        attempts
+            .windows(2)
+            .all(|attempts| attempts[0] < attempts[1]),
+        "Answerer recovery attempts must increase monotonically: {attempts:?}"
     );
+    pair.harness()
+        .signaling_faults
+        .wait_for_hits_after(
+            &answerer,
+            &offerer,
+            SignalingMessageClass::IceRestartRejected,
+            rejected_baseline,
+            RECOVERY_WAIT,
+        )
+        .await
+        .expect("failed Answerer must reject a restart for its retired Session");
     pair.harness()
         .signaling_faults
         .wait_for_hits_after(
