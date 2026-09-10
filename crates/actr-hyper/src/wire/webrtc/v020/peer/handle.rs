@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use actr_protocol::ActrId;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use webrtc::peer_connection::{RTCIceCandidateInit, RTCSessionDescription};
 
 use crate::wire::webrtc::v020::media::OutboundTrackWriter;
@@ -704,6 +704,40 @@ impl RtcPeerControllerHandle {
         self.send_command(RtcPeerCommand::ApplyIceRestartRequest {
             request_id,
             attempt,
+        })
+        .await
+    }
+
+    /// Apply a restart request and return the outcome committed by the
+    /// controller reducer. The signaling router uses this to avoid deriving
+    /// Ack state from a snapshot taken before the command was serialized.
+    pub(crate) async fn apply_ice_restart_request_with_outcome(
+        &self,
+        request_id: String,
+        attempt: u32,
+    ) -> Result<i32, ControllerGone> {
+        let (respond, outcome) = oneshot::channel();
+        self.send_command(RtcPeerCommand::ApplyIceRestartRequestCommitted {
+            request_id,
+            attempt,
+            respond,
+        })
+        .await?;
+        outcome.await.map_err(|_| ControllerGone::Gone)
+    }
+
+    /// Deliver the receiver's acknowledgement for this controller's current
+    /// Answerer-side restart request.
+    pub(crate) async fn apply_ice_restart_request_ack(
+        &self,
+        request_id: String,
+        attempt: u32,
+        outcome: i32,
+    ) -> Result<(), ControllerGone> {
+        self.send_command(RtcPeerCommand::ApplyIceRestartRequestAck {
+            request_id,
+            attempt,
+            outcome,
         })
         .await
     }
