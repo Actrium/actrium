@@ -383,7 +383,8 @@ def test_release_train_supports_generic_maintenance_branches() -> None:
     assert "ref: main" not in workflow
     assert "--branch main" not in workflow
     assert "--latest=false" in workflow
-    assert "--notes-start-tag" in workflow
+    assert '--from-release-commit' in workflow
+    assert 'scripts/actr/generate-changelog.py' in workflow
     assert "needs.context.result == 'success'" in workflow
 
     assert "^release-([0-9]+)\\.([0-9]+)$" in release_script
