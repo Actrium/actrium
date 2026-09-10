@@ -96,7 +96,7 @@ const NETWORK_EVENT_RESULT_TIMEOUT: Duration = Duration::from_secs(5);
 // Mobile network handovers can delay the signaling Pong briefly. Keep the
 // probe bounded, but give the existing WebSocket time to survive the switch
 // before rebuilding it and dropping in-flight signaling requests.
-const SIGNALING_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+const SIGNALING_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 pub(crate) const LONG_BACKGROUND_RECONNECT_THRESHOLD_MS: u64 = 30_000;
 /// Upper bound accepted for `background_duration_ms` (30 days, in ms).
 ///
