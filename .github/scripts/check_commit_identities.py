@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Reject newly introduced commits that expose non-anonymous email addresses."""
+"""Reject newly introduced commits that expose non-anonymous email addresses.
+
+Two layers are enforced:
+
+* Privacy: author, committer, and commit-message email addresses must be
+  GitHub noreply addresses (plus the fixed GitHub service committer).
+* Attribution: the GitHub login embedded in every `users.noreply` address
+  -- for the author, the committer, and each `Co-authored-by` trailer --
+  must be on the allowed identity list. The privacy regex alone accepts any
+  `<login>@users.noreply.github.com` string, so a tool that stamps its own
+  noreply-shaped address passes unnoticed; an OpenClaw-authored commit and
+  the matching squash trailer landed on main through exactly that gap in
+  #222.
+"""
 
 from __future__ import annotations
 
@@ -12,11 +25,37 @@ from pathlib import Path
 
 
 USER_NOREPLY_RE = re.compile(r"^[^@\s<>]+@users\.noreply\.github\.com$", re.IGNORECASE)
+# Captures the login of both noreply spellings: "login@..." and "42+login@...".
+NOREPLY_LOGIN_RE = re.compile(r"^(?:\d+\+)?([^+@\s]+)@users\.noreply\.github\.com$", re.IGNORECASE)
+CO_AUTHOR_EMAIL_RE = re.compile(r"^Co-authored-by:[^<\n]*<([^<>]*)>", re.IGNORECASE | re.MULTILINE)
 EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
 ANONYMOUS_ROOT_NAME = "root"
 GITHUB_SERVICE_COMMITTER_NAME = "GitHub"
 GITHUB_SERVICE_COMMITTER_EMAIL = "noreply@github.com"
 ZERO_SHA = "0" * 40
+
+# GitHub logins allowed to appear in noreply identities of new commits:
+# repository members observed in history plus the service bot GitHub
+# stamps on squash merges. Extend this set when a new member joins.
+ALLOWED_MEMBER_LOGINS = frozenset(
+    {
+        "kaito-harry",
+        "zhanghongjun",
+        "alinejun",
+        "kookyleo",
+        "mybee",
+        "g65537",
+        "harry",
+        "kaito",
+        "github-actions[bot]",
+    }
+)
+
+# Coding assistants whose attribution the team has explicitly accepted.
+# Trailers and commits signed by anything else (for example the OpenClaw
+# organization account) are rejected by the attribution layer. Keep this
+# list empty until the team decides which assistant logins to allow.
+ALLOWED_ASSISTANT_LOGINS: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -62,6 +101,17 @@ def is_allowed_committer(commit: CommitIdentity) -> bool:
         commit.committer_name == GITHUB_SERVICE_COMMITTER_NAME
         and commit.committer_email == GITHUB_SERVICE_COMMITTER_EMAIL
     )
+
+
+def noreply_login(email: str) -> str | None:
+    """Return the GitHub login of a users.noreply address, else None."""
+    match = NOREPLY_LOGIN_RE.fullmatch(email.strip())
+    return match.group(1) if match else None
+
+
+def co_author_emails(message: str) -> list[str]:
+    """Return the email of every Co-authored-by trailer that carries one."""
+    return CO_AUTHOR_EMAIL_RE.findall(message)
 
 
 def commit_range(repo: Path, base_sha: str, head_sha: str) -> list[str]:
@@ -125,7 +175,38 @@ def read_identity(repo: Path, sha: str) -> CommitIdentity:
     )
 
 
-def validate_identity(commit: CommitIdentity) -> list[str]:
+def attribution_errors(commit: CommitIdentity) -> list[str]:
+    """Reject noreply identities whose login is not on the allow lists."""
+    errors: list[str] = []
+    short_sha = commit.sha[:12]
+    members = {login.casefold() for login in ALLOWED_MEMBER_LOGINS}
+    trailers = members | {login.casefold() for login in ALLOWED_ASSISTANT_LOGINS}
+
+    for role, email in (
+        ("author", commit.author_email),
+        ("committer", commit.committer_email),
+    ):
+        login = noreply_login(email)
+        if login is not None and login.casefold() not in members:
+            errors.append(
+                f"{short_sha}: {role} noreply login '{login}' is not on the "
+                "allowed identity list; extend ALLOWED_MEMBER_LOGINS or commit "
+                "with a member identity"
+            )
+
+    for email in co_author_emails(commit.message):
+        login = noreply_login(email)
+        if login is not None and login.casefold() not in trailers:
+            errors.append(
+                f"{short_sha}: co-author noreply login '{login}' is not on "
+                "the allowed identity list; extend ALLOWED_MEMBER_LOGINS or "
+                "ALLOWED_ASSISTANT_LOGINS"
+            )
+
+    return errors
+
+
+def validate_identity(commit: CommitIdentity, check_attribution: bool = True) -> list[str]:
     errors: list[str] = []
     short_sha = commit.sha[:12]
 
@@ -149,6 +230,9 @@ def validate_identity(commit: CommitIdentity) -> list[str]:
             "the address is not printed to avoid repeating it in CI logs"
         )
 
+    if check_attribution:
+        errors.extend(attribution_errors(commit))
+
     return errors
 
 
@@ -157,6 +241,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     parser.add_argument("--base-sha", default="")
     parser.add_argument("--head-sha", default="HEAD")
+    parser.add_argument(
+        "--no-attribution",
+        action="store_true",
+        help="skip the noreply login attribution layer (privacy checks still run)",
+    )
     return parser.parse_args()
 
 
@@ -171,7 +260,10 @@ def main() -> int:
     errors = [
         error
         for sha in commits
-        for error in validate_identity(read_identity(args.repo, sha))
+        for error in validate_identity(
+            read_identity(args.repo, sha),
+            check_attribution=not args.no_attribution,
+        )
     ]
     if errors:
         for error in errors:
