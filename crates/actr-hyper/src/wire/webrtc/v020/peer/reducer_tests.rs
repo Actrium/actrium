@@ -3078,6 +3078,26 @@ fn response_recovery_hint_starts_missing_soft_recovery() {
 }
 
 #[test]
+fn response_recovery_hint_is_observational_when_sendable() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let transport_epoch = state.transport_epoch;
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            request_id: "response-hint-sendable".to_string(),
+            transport_epoch,
+            pc_generation: generation,
+        }),
+    );
+
+    assert!(effects.is_empty());
+    assert!(state.sendable());
+    assert_eq!(state.ice_generation, 0);
+    assert_eq!(state.stale_events, 0);
+}
+
+#[test]
 fn response_recovery_hint_does_not_restart_an_owned_recovery_attempt() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let generation = drive_offerer_to_sendable(&mut state);
@@ -3097,6 +3117,7 @@ fn response_recovery_hint_does_not_restart_an_owned_recovery_attempt() {
 
     assert!(hint.is_empty());
     assert_eq!(state.ice_generation, ice_generation);
+    assert_eq!(state.stale_events, 0);
 }
 
 #[test]
@@ -3104,6 +3125,14 @@ fn stale_response_recovery_hint_is_ignored() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let generation = drive_offerer_to_sendable(&mut state);
     let transport_epoch = state.transport_epoch;
+    // Keep the generation live but make the controller non-sendable. Without
+    // this setup the sendable fast path would hide a removed/inverted identity
+    // fence and the test could pass without proving the hint was rejected as
+    // stale.
+    state.phase = RtcPeerPhase::TransportReady;
+    state.pc_connected = false;
+    state.rpc_reliable_open = false;
+    let stale_before = state.stale_events;
     let stale = reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
@@ -3116,6 +3145,19 @@ fn stale_response_recovery_hint_is_ignored() {
     assert!(stale.is_empty());
     assert!(!state.recovery_inflight);
     assert_eq!(state.ice_generation, 0);
+    assert_eq!(state.stale_events, stale_before + 1);
+
+    let stale_generation = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            request_id: "response-hint-stale-generation".to_string(),
+            transport_epoch,
+            pc_generation: generation.saturating_sub(1),
+        }),
+    );
+    assert!(stale_generation.is_empty());
+    assert_eq!(state.ice_generation, 0);
+    assert_eq!(state.stale_events, stale_before + 2);
 }
 
 #[test]

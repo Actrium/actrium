@@ -2273,6 +2273,12 @@ fn reduce_recovery_hint(
     // A response can race the final readiness publication. If the controller
     // has already converged, the hint must be observational only.
     if state.sendable() {
+        tracing::debug!(
+            peer = %state.peer_id.to_string_repr(),
+            %request_id,
+            action = "noop_already_sendable",
+            "v0.20 response recovery hint resolved"
+        );
         return;
     }
 
@@ -2280,9 +2286,23 @@ fn reduce_recovery_hint(
     // cycle is deferred behind the lifecycle gate, use the normal gate-opening
     // decision; it will remain blocked while the gate is closed.
     if state.recovery_inflight {
+        let recovery_was_started = state.recovery_attempt_started;
         if !state.recovery_attempt_started {
             maybe_start_deferred_recovery(state, effects);
         }
+        let action = if recovery_was_started {
+            "coalesced_existing_recovery"
+        } else if effects.is_empty() {
+            "deferred_recovery_still_gated"
+        } else {
+            "resumed_deferred_recovery"
+        };
+        tracing::debug!(
+            peer = %state.peer_id.to_string_repr(),
+            %request_id,
+            action,
+            "v0.20 response recovery hint resolved"
+        );
         return;
     }
 
@@ -2291,13 +2311,31 @@ fn reduce_recovery_hint(
     // cycle, enter the ordinary recovery ladder once. Address changes retain
     // their stronger Hard-Recovery policy.
     if state.active_generation.is_none() {
+        tracing::debug!(
+            peer = %state.peer_id.to_string_repr(),
+            %request_id,
+            action = "noop_without_active_generation",
+            "v0.20 response recovery hint resolved"
+        );
         return;
     }
     state.phase = RtcPeerPhase::Recovering;
     if state.address_changed {
         start_hard_recovery(state, effects);
+        tracing::debug!(
+            peer = %state.peer_id.to_string_repr(),
+            %request_id,
+            action = "started_hard_recovery",
+            "v0.20 response recovery hint resolved"
+        );
     } else {
         start_soft_recovery(state, effects, RecoveryOrigin::PeerFailure);
+        tracing::debug!(
+            peer = %state.peer_id.to_string_repr(),
+            %request_id,
+            action = "started_soft_recovery",
+            "v0.20 response recovery hint resolved"
+        );
     }
 }
 

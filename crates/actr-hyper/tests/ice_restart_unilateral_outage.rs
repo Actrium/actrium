@@ -132,23 +132,21 @@ async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
         .expect("the returning answerer must send attempt-1 restart request");
 
     // The issue-227 fix makes this request reset the in-flight round and
-    // produce the next offer within the short grace/retry window. This offer
-    // is delivered, so the assertion below can cover the complete recovery.
-    let wake_offer = tokio::time::timeout(
-        REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW,
-        pair.harness().signaling_faults.wait_for_hits_after(
+    // produce the next offer within the short grace/retry window. The helper
+    // owns the only timeout so a timeout failure is distinguishable from a
+    // fresh Offer arriving with an unexpected count.
+    let wake_offer = pair
+        .harness()
+        .signaling_faults
+        .wait_for_hits_after(
             &offerer,
             &answerer,
             SignalingMessageClass::IceRestartOffer,
             offers_before_wake,
             REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW,
-        ),
-    )
-    .await;
-
-    let wake_offer = wake_offer
-        .expect("wake offer wait must not time out")
-        .expect("attempt-1 request must produce a fresh offer");
+        )
+        .await
+        .expect("attempt-1 request must produce a fresh Offer before the wake deadline");
 
     let recovered = pair.wait_pair_ready(SETUP_TIMEOUT).await;
     assert!(recovered.a_to_b.sendable);
@@ -159,7 +157,7 @@ async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
     pair.heal_signaling_faults();
     pair.shutdown().await;
 
-    assert!(wake_offer > offers_before_wake);
+    assert_eq!(wake_offer, offers_before_wake + 1);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -250,19 +248,18 @@ async fn local_network_recovery_retries_lost_offer_on_attempt1_wake() {
         .await
         .expect("the returning Answerer must send attempt-1 restart request");
 
-    let wake_offer = tokio::time::timeout(
-        REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW,
-        pair.harness().signaling_faults.wait_for_hits_after(
+    let wake_offer = pair
+        .harness()
+        .signaling_faults
+        .wait_for_hits_after(
             &offerer,
             &answerer,
             SignalingMessageClass::IceRestartOffer,
             offers_before_wake,
             REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW,
-        ),
-    )
-    .await
-    .expect("local-network attempt-1 wake must not wait for the 10s deadline")
-    .expect("attempt-1 request must produce a fresh Offer");
+        )
+        .await
+        .expect("local-network attempt-1 wake must produce a fresh Offer before the wake deadline");
 
     pair.heal_signaling_faults();
     pair.wait_pair_ready(SETUP_TIMEOUT).await;
@@ -270,5 +267,5 @@ async fn local_network_recovery_retries_lost_offer_on_attempt1_wake() {
         .await;
     pair.shutdown().await;
 
-    assert!(wake_offer > offers_before_wake);
+    assert_eq!(wake_offer, offers_before_wake + 1);
 }

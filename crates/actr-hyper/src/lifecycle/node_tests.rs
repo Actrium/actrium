@@ -1164,6 +1164,217 @@ fn build_response_envelope_pins_zero_timeout_per_contract() {
     assert!(err_env.error.is_some());
 }
 
+#[cfg(feature = "webrtc-v020")]
+struct ResponsePathSessionOps;
+
+#[cfg(feature = "webrtc-v020")]
+#[async_trait::async_trait]
+impl crate::wire::webrtc::v020::peer::effects::SessionOps for ResponsePathSessionOps {
+    async fn create_offer(
+        &self,
+    ) -> Result<webrtc::peer_connection::RTCSessionDescription, webrtc::error::Error> {
+        let mut description = webrtc::peer_connection::RTCSessionDescription::default();
+        description.sdp_type = webrtc::peer_connection::RTCSdpType::Offer;
+        Ok(description)
+    }
+
+    async fn create_answer(
+        &self,
+    ) -> Result<webrtc::peer_connection::RTCSessionDescription, webrtc::error::Error> {
+        let mut description = webrtc::peer_connection::RTCSessionDescription::default();
+        description.sdp_type = webrtc::peer_connection::RTCSdpType::Answer;
+        Ok(description)
+    }
+
+    async fn set_local_description(
+        &self,
+        _description: webrtc::peer_connection::RTCSessionDescription,
+    ) -> Result<(), webrtc::error::Error> {
+        Ok(())
+    }
+
+    async fn set_remote_description(
+        &self,
+        _description: webrtc::peer_connection::RTCSessionDescription,
+    ) -> Result<(), webrtc::error::Error> {
+        Ok(())
+    }
+
+    async fn add_ice_candidate(
+        &self,
+        _candidate: webrtc::peer_connection::RTCIceCandidateInit,
+    ) -> Result<(), webrtc::error::Error> {
+        Ok(())
+    }
+
+    async fn restart_ice(&self) -> Result<(), webrtc::error::Error> {
+        Ok(())
+    }
+
+    async fn set_configuration(
+        &self,
+        _config: webrtc::peer_connection::RTCConfiguration,
+    ) -> Result<(), webrtc::error::Error> {
+        Ok(())
+    }
+
+    async fn create_data_channel(
+        &self,
+        label: &str,
+        _init: webrtc::data_channel::RTCDataChannelInit,
+    ) -> Result<Arc<dyn webrtc::data_channel::DataChannel>, webrtc::error::Error> {
+        Ok(crate::wire::webrtc::v020::peer::effects::test_support::fake_data_channel(label))
+    }
+
+    async fn add_track(
+        &self,
+        _track: Arc<dyn webrtc::media_stream::track_local::TrackLocal>,
+    ) -> Result<Arc<dyn webrtc::rtp_transceiver::RtpSender>, webrtc::error::Error> {
+        Err(webrtc::error::Error::Other(
+            "response-path test has no media".into(),
+        ))
+    }
+
+    async fn remove_track(
+        &self,
+        _sender: &Arc<dyn webrtc::rtp_transceiver::RtpSender>,
+    ) -> Result<(), webrtc::error::Error> {
+        Ok(())
+    }
+
+    async fn get_senders(&self) -> Vec<Arc<dyn webrtc::rtp_transceiver::RtpSender>> {
+        Vec::new()
+    }
+
+    async fn get_stats(&self) -> webrtc::peer_connection::RTCStatsReport {
+        Default::default()
+    }
+
+    async fn close(&self) -> Result<(), webrtc::error::Error> {
+        Ok(())
+    }
+}
+
+#[cfg(feature = "webrtc-v020")]
+struct ResponsePathSessionFactory;
+
+#[cfg(feature = "webrtc-v020")]
+#[async_trait::async_trait]
+impl crate::wire::webrtc::v020::peer::effects::SessionFactory for ResponsePathSessionFactory {
+    async fn build(
+        &self,
+        _handler: Arc<crate::wire::webrtc::v020::event_handler::WebRtcEventHandler>,
+    ) -> Result<Arc<dyn crate::wire::webrtc::v020::peer::effects::SessionOps>, webrtc::error::Error>
+    {
+        Ok(Arc::new(ResponsePathSessionOps))
+    }
+}
+
+#[cfg(feature = "webrtc-v020")]
+#[tokio::test(start_paused = true)]
+async fn response_send_timeout_submits_recovery_hint_to_current_peer() {
+    use crate::wire::webrtc::v020::manager::RtcConnectionManager;
+
+    let (signaling_tx, mut signaling_rx) = tokio::sync::mpsc::channel(16);
+    let manager = Arc::new(
+        RtcConnectionManager::new(Arc::new(ResponsePathSessionFactory), signaling_tx)
+            .with_policy_clock_for_test(Arc::new(
+                crate::wire::webrtc::v020::peer::policy_clock::ManualPolicyClock::default(),
+            )),
+    );
+    manager.supervisor().set_signaling_generation(Some(0));
+
+    let caller = ActrId {
+        realm: actr_protocol::Realm { realm_id: 1 },
+        serial_number: 9001,
+        r#type: ActrType {
+            manufacturer: "test".to_string(),
+            name: "response-path".to_string(),
+            version: "1.0.0".to_string(),
+        },
+    };
+    let handle = manager.ensure_controller(caller.clone()).await;
+    handle.connect().await.expect("connect command");
+    handle
+        .apply_role_assignment(true)
+        .await
+        .expect("role assignment command");
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let dispatch = signaling_rx
+                .recv()
+                .await
+                .expect("controller signaling channel open");
+            if matches!(
+                dispatch.message,
+                crate::wire::webrtc::v020::peer::reducer::SignalingMessage::Offer { .. }
+            ) {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("response-path test session did not publish its Offer");
+
+    let mut snapshots = handle.subscribe();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if snapshots.borrow().pc_generation > 0 {
+                break;
+            }
+            snapshots
+                .changed()
+                .await
+                .expect("controller snapshot channel open");
+        }
+    })
+    .await
+    .expect("response-path test session did not build");
+    assert!(!handle.snapshot().sendable);
+
+    let route = Some(manager.clone());
+    let send = tokio::spawn(async move {
+        send_envelope_to_caller(
+            &None,
+            &route,
+            &caller,
+            RpcEnvelope {
+                request_id: "response-timeout-hint".to_string(),
+                route_key: "test.Response".to_string(),
+                ..Default::default()
+            },
+            "response-timeout-hint",
+            "test.Response",
+        )
+        .await;
+    });
+
+    // Let the production response path enter its sendability wait, then drive
+    // the audited ten-second deadline without making the unit test sleep.
+    tokio::task::yield_now().await;
+    tokio::time::advance(CALLER_SENDABLE_WAIT).await;
+    send.await.expect("response send task must not panic");
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let snapshot = handle.snapshot();
+            if snapshot.ice_generation > 0 {
+                break;
+            }
+            snapshots
+                .changed()
+                .await
+                .expect("controller snapshot channel open");
+        }
+    })
+    .await
+    .expect("response timeout must submit a recovery hint that starts Soft Recovery");
+
+    assert_eq!(handle.snapshot().ice_generation, 1);
+    manager.close_all().await;
+}
+
 // ── handle_incoming TELL dedup semantics ────────────────────────────────
 //
 // These tests build a real `Inner` (in-memory mailbox, unreachable
