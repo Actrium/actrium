@@ -7,14 +7,14 @@
 //!
 //! The RFC requires the provider to use platform interface information, support
 //! change notification, avoid the "probe a port, close the socket, then let the
-//! builder bind" race, and fail fast on an unsatisfiable bind configuration. A
+//! builder bind" race, and fail fast on unsatisfiable bind configuration. A
 //! wildcard is a valid bind descriptor; whether an interface can reach a peer
-//! is decided later by webrtc-rs and ICE, not by this provider. The provider's
-//! watch feed is bridged into RTC recovery by the node-owned address monitor.
-//! Desktop native enumeration is polled for changes; mobile/platform providers
-//! may additionally publish live interface snapshots. The controller first
-//! attempts an in-place ICE restart; a failed restart can still escalate to
-//! Hard Recovery.
+//! is decided later by webrtc-rs and ICE, not by this provider. The explicit
+//! provider implementation remains available for deterministic tests and
+//! platform integrations. Production uses v0.20's wildcard resolver directly:
+//! the upstream driver expands the live interface set at each initial bind and
+//! ICE-restart rebind, so a cached address list is not part of production
+//! recovery.
 
 use std::{
     io,
@@ -76,17 +76,33 @@ pub(crate) trait LocalAddressProvider: Send + Sync {
     fn subscribe_changes(&self) -> watch::Receiver<LocalAddressSnapshot>;
 }
 
-/// A `ToSocketAddrs` value that resolves the provider's current address set on
-/// every bind. The v0.20 driver retains this value inside the PeerConnection
-/// and invokes it again when an ICE restart replaces local sockets.
+/// A `ToSocketAddrs` value used by the v0.20 driver on every bind.
+///
+/// Test/platform providers resolve their current address set on each call. The
+/// production factory uses [`Self::wildcard`], which leaves interface
+/// expansion to webrtc-rs at the actual bind/rebind point.
 #[derive(Clone)]
 pub(crate) struct LocalAddressResolver {
-    provider: Arc<dyn LocalAddressProvider>,
+    source: LocalAddressResolverSource,
+}
+
+#[derive(Clone)]
+enum LocalAddressResolverSource {
+    Provider(Arc<dyn LocalAddressProvider>),
+    Wildcard,
 }
 
 impl LocalAddressResolver {
     pub(crate) fn new(provider: Arc<dyn LocalAddressProvider>) -> Self {
-        Self { provider }
+        Self {
+            source: LocalAddressResolverSource::Provider(provider),
+        }
+    }
+
+    pub(crate) fn wildcard() -> Self {
+        Self {
+            source: LocalAddressResolverSource::Wildcard,
+        }
     }
 }
 
@@ -94,14 +110,20 @@ impl ToSocketAddrs for LocalAddressResolver {
     type Iter = std::vec::IntoIter<SocketAddr>;
 
     fn to_socket_addrs(&self) -> io::Result<Self::Iter> {
-        let addresses = self
-            .provider
-            .current_addresses_sync()
-            .map_err(|error| io::Error::other(error.to_string()))?;
+        let addresses = match &self.source {
+            LocalAddressResolverSource::Provider(provider) => provider
+                .current_addresses_sync()
+                .map_err(|error| io::Error::other(error.to_string()))?,
+            LocalAddressResolverSource::Wildcard => vec![
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+            ],
+        };
         if addresses.is_empty() {
-            // An empty bind plan is malformed and must not be handed to the
-            // driver. This guard does not try to infer network reachability;
-            // wildcard bind inputs remain valid and are resolved by webrtc-rs.
+            // An empty provider resolve must fail loudly: at startup it
+            // surfaces as a build error; at an ICE-restart rebind it fails the
+            // driver's rebind, and the recovery path escalates to a checked
+            // Hard rebuild instead of idling on a silently dead transport.
             return Err(io::Error::other(
                 "local address provider returned no bind descriptors",
             ));
@@ -122,9 +144,10 @@ impl ToSocketAddrs for LocalAddressResolver {
 /// platform's native interface API (`getifaddrs` on Unix/Apple platforms and
 /// the corresponding adapter API on Windows). Loopback is retained for local
 /// development, while unspecified and multicast addresses are rejected.
-/// Change detection is performed by the node-owned address monitor, which
-/// combines provider notifications with a polling fallback so desktop and
-/// mobile interface changes both trigger RTC recovery.
+/// The production node does not instantiate this polling provider. It remains
+/// an explicit provider for tests and platform adapters that need a concrete
+/// address snapshot; production desktop binding uses dual-stack wildcards and
+/// desktop peer-state events as the recovery fallback.
 pub(crate) struct DesktopLocalAddressProvider {
     /// Optional explicit override (used by tests to pin deterministic addresses).
     /// When empty, addresses are auto-detected as described above.
@@ -365,6 +388,20 @@ mod tests {
 mod resolver_tests {
     use super::*;
     use std::sync::RwLock;
+
+    #[test]
+    fn wildcard_resolver_keeps_interface_expansion_in_webrtc_rs() {
+        let resolved = LocalAddressResolver::wildcard()
+            .to_socket_addrs()
+            .expect("wildcard bind plan");
+        assert_eq!(
+            resolved.collect::<Vec<_>>(),
+            vec![
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
+                SocketAddr::new(IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED), 0),
+            ]
+        );
+    }
 
     /// Provider with a mutable set, optionally erroring on empty like the
     /// production providers do.

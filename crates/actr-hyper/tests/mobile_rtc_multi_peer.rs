@@ -32,6 +32,16 @@ fn wifi() -> NetworkTransportFlags {
     }
 }
 
+fn cellular() -> NetworkTransportFlags {
+    NetworkTransportFlags {
+        wifi: false,
+        cellular: true,
+        ethernet: false,
+        vpn: false,
+        other: false,
+    }
+}
+
 async fn rpc(harness: &TestHarness, from: u64, to: u64, request_id: &str) {
     harness.evidence.record(
         Some(harness.peer(from).id.clone()),
@@ -109,6 +119,13 @@ impl MultiPeerTopology {
             _failure_evidence: failure_evidence,
         };
         topology.assert_all_links("baseline").await;
+        // Seed the active path observation through the same native event seam
+        // used by mobile platforms. Later address changes must be accompanied
+        // by a new path event; changing the test provider alone is not a
+        // production signal and must not drive recovery.
+        topology
+            .network_path(1, NetworkAvailability::Available, wifi())
+            .await;
         topology
     }
 
@@ -450,6 +467,9 @@ async fn mp02_a_address_change_soft_recovers_each_link_without_cross_peer_state(
     topology
         .harness
         .set_local_addresses(A, vec![changed_address]);
+    topology
+        .network_path(2, NetworkAvailability::Available, cellular())
+        .await;
 
     for remote in REMOTES {
         topology
@@ -535,6 +555,9 @@ async fn mp03_one_node_event_soft_recovers_three_controllers_independently_withi
     topology
         .harness
         .set_local_addresses(A, vec![changed_address]);
+    topology
+        .network_path(2, NetworkAvailability::Available, cellular())
+        .await;
     tokio::time::timeout(WAIT, async {
         for remote in REMOTES {
             topology

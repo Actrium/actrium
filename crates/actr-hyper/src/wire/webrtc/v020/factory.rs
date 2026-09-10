@@ -13,6 +13,7 @@
 //! registry on every build — webrtc 0.20 auto-registers neither, and media
 //! tracks cannot negotiate without them.
 
+#[cfg(feature = "test-utils")]
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -52,7 +53,11 @@ impl TurnCredentialProvider for crate::lifecycle::CredentialState {
 /// Builds independent v0.20 `PeerConnection`s sharing process-level policy.
 pub(crate) struct PeerConnectionFactory {
     runtime_config: RtcRuntimeConfig,
-    address_provider: Arc<dyn LocalAddressProvider>,
+    /// Concrete providers are retained for deterministic tests and platform
+    /// adapters. Production desktop construction leaves this unset and uses
+    /// dual-stack wildcard binds so webrtc-rs re-expands live interfaces on
+    /// every initial bind and ICE-restart rebind.
+    address_provider: Option<Arc<dyn LocalAddressProvider>>,
     ice_servers: Vec<RTCIceServer>,
     configuration: Option<RTCConfiguration>,
     turn_credential_provider: Option<Arc<dyn TurnCredentialProvider>>,
@@ -72,7 +77,7 @@ impl PeerConnectionFactory {
     ) -> Self {
         Self {
             runtime_config,
-            address_provider,
+            address_provider: Some(address_provider),
             ice_servers,
             configuration: None,
             turn_credential_provider: None,
@@ -92,7 +97,29 @@ impl PeerConnectionFactory {
     ) -> Self {
         Self {
             runtime_config,
-            address_provider,
+            address_provider: Some(address_provider),
+            ice_servers: Vec::new(),
+            configuration: Some(configuration),
+            turn_credential_provider: None,
+            setting_engine: SettingEngine::default(),
+            #[cfg(feature = "test-utils")]
+            directed_faults: None,
+        }
+    }
+
+    /// Build sessions with v0.20's dual-stack wildcard bind plan.
+    ///
+    /// The webrtc-rs driver expands wildcard addresses against the live
+    /// interface set at the point of each bind/rebind. This is the production
+    /// desktop path: no cached local-address provider or polling monitor is
+    /// needed to make an ICE restart see a newly selected interface.
+    pub(crate) fn new_with_configuration_and_wildcard_bind(
+        runtime_config: RtcRuntimeConfig,
+        configuration: RTCConfiguration,
+    ) -> Self {
+        Self {
+            runtime_config,
+            address_provider: None,
             ice_servers: Vec::new(),
             configuration: Some(configuration),
             turn_credential_provider: None,
@@ -190,12 +217,11 @@ impl PeerConnectionFactory {
 
     /// Build a fresh v0.20 `PeerConnection` with `handler` pre-injected.
     ///
-    /// The provider supplies bind descriptors for the v0.20 driver. Production
-    /// uses dual-stack wildcards; webrtc-rs expands them against the live
-    /// interfaces at each initial bind and ICE-restart rebind. This factory
-    /// rejects an invalid/empty bind plan, but it does not assert system-network
-    /// availability or end-to-end ICE reachability; those are established by
-    /// the driver and the recovery state machine.
+    /// Test/platform providers may request one UDP socket per concrete address
+    /// (ephemeral port). Production uses dual-stack wildcard inputs and lets
+    /// webrtc-rs expand them against the live interfaces at bind time. An
+    /// unsatisfiable concrete bind still surfaces here as an error (fail-fast),
+    /// not a silent fallback.
     pub(crate) async fn build(
         &self,
         handler: Arc<WebRtcEventHandler>,
@@ -203,26 +229,34 @@ impl PeerConnectionFactory {
         self.runtime_config.validate().map_err(|error| {
             RtcError::Other(format!("invalid RTC resource configuration: {error}"))
         })?;
-        let bind_inputs = self
-            .address_provider
-            .current_addresses_sync()
-            .map_err(|e| RtcError::Other(format!("local address provider failed: {e}")))?;
-        if bind_inputs.is_empty() {
+        let bind_ips = match &self.address_provider {
+            Some(provider) => provider
+                .current_addresses_sync()
+                .map_err(|e| RtcError::Other(format!("local address provider failed: {e}")))?,
+            None => vec![
+                std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+                std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+            ],
+        };
+        if bind_ips.is_empty() {
             return Err(RtcError::Other(
-                "local address provider returned no bind descriptors".to_string(),
+                "local address provider returned no bindable addresses".to_string(),
             ));
         }
         // Production supplies dual-stack wildcards, not a cached interface
         // list. Upstream expands them on every bind/rebind. Explicit test
         // providers still pin concrete addresses. The runtime observation
         // (`bound_socket_addresses`) is the authoritative evidence of what
-        // actually got bound; it is also the only point at which a socket-bind
-        // failure is known.
-        let udp_addrs: Vec<SocketAddr> = bind_inputs
+        // actually got bound.
+        #[cfg(feature = "test-utils")]
+        let udp_addrs: Vec<SocketAddr> = bind_ips
             .into_iter()
             .map(|ip| SocketAddr::new(ip, 0))
             .collect();
-        let address_resolver = LocalAddressResolver::new(self.address_provider.clone());
+        let address_resolver = match &self.address_provider {
+            Some(provider) => LocalAddressResolver::new(provider.clone()),
+            None => LocalAddressResolver::wildcard(),
+        };
 
         let configuration = self.current_configuration().await?;
 
@@ -258,9 +292,10 @@ impl PeerConnectionFactory {
         // discards stale local candidates and re-binds fresh sockets instead of
         // wedging on the dead transport. 0.20.3 keeps this opt-in (off by
         // default); v0.20 enables it uniformly here so production and test
-        // harnesses share one behavior. Keep the provider-backed resolver in
-        // the builder: the driver invokes it again on every restart rebind, so
-        // the current address set—not the build-time snapshot—is consumed.
+        // harnesses share one behavior. The driver invokes the resolver again
+        // on every restart rebind; production wildcard expansion therefore
+        // happens at the actual bind/rebind point, while concrete test
+        // providers are queried afresh.
         let mut setting_engine = self.setting_engine.clone();
         setting_engine.set_discard_local_candidates_during_ice_restart(true);
         let builder = PeerConnectionBuilder::<LocalAddressResolver>::new()
@@ -312,13 +347,52 @@ impl super::peer::effects::SessionFactory for PeerConnectionFactory {
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
+    use std::sync::Arc;
+    use std::time::Duration;
 
     use actr_protocol::{AIdCredential, TurnCredential};
-    use webrtc::peer_connection::{RTCConfigurationBuilder, RTCIceServer, RTCIceTransportPolicy};
+    use tokio::time::timeout;
+    use webrtc::data_channel::RTCDataChannelInit;
+    use webrtc::peer_connection::{
+        RTCConfigurationBuilder, RTCIceGatheringState, RTCIceServer, RTCIceTransportPolicy,
+    };
 
     use super::*;
     use crate::lifecycle::CredentialState;
     use crate::wire::webrtc::v020::address::DesktopLocalAddressProvider;
+    use crate::wire::webrtc::v020::event_handler::WebRtcEventHandler;
+    use crate::wire::webrtc::v020::events::peer_event_mailbox;
+
+    fn test_actor_id(serial_number: u64) -> actr_protocol::ActrId {
+        actr_protocol::ActrId {
+            realm: actr_protocol::Realm { realm_id: 1 },
+            serial_number,
+            r#type: actr_protocol::ActrType {
+                manufacturer: "acme".to_string(),
+                name: "node".to_string(),
+                version: "1.0.0".to_string(),
+            },
+        }
+    }
+
+    async fn wait_for_gathering_complete(
+        events: &crate::wire::webrtc::v020::events::PeerEventMailboxReceiver,
+        previous_seq: u64,
+    ) {
+        timeout(Duration::from_secs(10), async {
+            loop {
+                let tick = events.latest_state();
+                if tick.seq > previous_seq
+                    && tick.gathering_state == Some(RTCIceGatheringState::Complete)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("ICE gathering did not complete");
+    }
 
     fn relay_configuration() -> RTCConfiguration {
         RTCConfigurationBuilder::default()
@@ -383,5 +457,56 @@ mod tests {
         let renewed = factory.current_configuration().await.unwrap();
         assert_eq!(renewed.ice_servers()[0].username, "renewed-user");
         assert_eq!(renewed.ice_servers()[0].credential, "renewed-password");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn wildcard_factory_builds_and_rebinds_on_ice_restart() {
+        let factory = PeerConnectionFactory::new_with_configuration_and_wildcard_bind(
+            RtcRuntimeConfig::desktop_default(),
+            RTCConfigurationBuilder::default().build(),
+        );
+        let (mailbox, events) = peer_event_mailbox();
+        let handler = Arc::new(WebRtcEventHandler::new(test_actor_id(3), 1, mailbox));
+        let pc = factory.build(handler).await.expect("build wildcard PC");
+        pc.create_data_channel("wildcard", Some(RTCDataChannelInit::default()))
+            .await
+            .expect("create channel to trigger host gathering");
+
+        let first_offer = pc.create_offer(None).await.expect("create first offer");
+        pc.set_local_description(first_offer)
+            .await
+            .expect("set first wildcard offer");
+        wait_for_gathering_complete(&events, 0).await;
+        let first_sdp = pc
+            .local_description()
+            .await
+            .expect("first local description")
+            .sdp;
+        assert!(
+            first_sdp.contains("a=candidate:"),
+            "wildcard bind must gather host candidates"
+        );
+
+        let restart_state_seq = events.latest_state().seq;
+        pc.restart_ice().await.expect("arm ICE restart");
+        let restart_offer = pc.create_offer(None).await.expect("create restart offer");
+        pc.set_local_description(restart_offer)
+            .await
+            .expect("wildcard ICE restart rebind must succeed");
+        wait_for_gathering_complete(&events, restart_state_seq).await;
+        let second_sdp = pc
+            .local_description()
+            .await
+            .expect("restart local description")
+            .sdp;
+        assert!(
+            second_sdp.contains("a=candidate:"),
+            "wildcard rebind must gather fresh host candidates"
+        );
+        assert_ne!(
+            first_sdp, second_sdp,
+            "ICE restart must produce a new offer"
+        );
+        pc.close().await.expect("close wildcard PC");
     }
 }

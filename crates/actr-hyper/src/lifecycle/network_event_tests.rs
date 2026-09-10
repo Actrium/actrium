@@ -1275,6 +1275,14 @@ impl NetworkEventProcessor for ControlledRecoveryProcessor {
 }
 
 fn online_route_snapshot(sequence: u64, wifi: bool) -> NetworkSnapshot {
+    online_route_snapshot_with_cost(sequence, wifi, !wifi)
+}
+
+fn online_route_snapshot_with_cost(
+    sequence: u64,
+    wifi: bool,
+    is_expensive: bool,
+) -> NetworkSnapshot {
     NetworkSnapshot {
         sequence,
         availability: NetworkAvailability::Available,
@@ -1283,9 +1291,206 @@ fn online_route_snapshot(sequence: u64, wifi: bool) -> NetworkSnapshot {
             cellular: !wifi,
             ..NetworkTransportFlags::default()
         },
-        is_expensive: !wifi,
+        is_expensive,
         is_constrained: false,
     }
+}
+
+#[cfg(feature = "webrtc-v020")]
+#[test]
+fn v020_material_path_change_emits_local_address_edge() {
+    use crate::wire::webrtc::v020::recovery::{RtcNetworkEvent, RtcRecoverySupervisor};
+
+    let supervisor = RtcRecoverySupervisor::new();
+    let mut events = supervisor.subscribe();
+    let mut previous_path = None;
+    let mut path_change_pending = false;
+
+    let wifi = online_route_snapshot_with_cost(1, true, false);
+    super::publish_v020_network_fact(
+        &supervisor,
+        &NetworkEvent::NetworkPathChanged {
+            snapshot: wifi.clone(),
+        },
+        previous_path,
+        &mut path_change_pending,
+        &mut previous_path,
+    );
+    assert_eq!(
+        events.try_recv().expect("initial availability fact"),
+        RtcNetworkEvent::NetworkAvailable
+    );
+    assert!(
+        events.try_recv().is_err(),
+        "initial path must not restart ICE"
+    );
+
+    // A billing/data-saver-only change is not a local transport change and
+    // must not trigger an ICE rebind.
+    super::publish_v020_network_fact(
+        &supervisor,
+        &NetworkEvent::NetworkPathChanged {
+            snapshot: online_route_snapshot_with_cost(2, true, true),
+        },
+        previous_path,
+        &mut path_change_pending,
+        &mut previous_path,
+    );
+    assert_eq!(
+        events.try_recv().expect("cost-only availability fact"),
+        RtcNetworkEvent::NetworkAvailable
+    );
+    assert!(
+        events.try_recv().is_err(),
+        "cost-only changes must not restart ICE"
+    );
+
+    let cellular = online_route_snapshot_with_cost(3, false, true);
+    super::publish_v020_network_fact(
+        &supervisor,
+        &NetworkEvent::NetworkPathChanged { snapshot: cellular },
+        previous_path,
+        &mut path_change_pending,
+        &mut previous_path,
+    );
+    assert_eq!(
+        events.try_recv().expect("availability fact"),
+        RtcNetworkEvent::NetworkAvailable
+    );
+    assert_eq!(
+        events.try_recv().expect("material path change fact"),
+        RtcNetworkEvent::LocalAddressChanged
+    );
+}
+
+#[cfg(feature = "webrtc-v020")]
+#[test]
+fn v020_offline_online_restore_does_not_emit_duplicate_local_address_edge() {
+    use crate::wire::webrtc::v020::recovery::{RtcNetworkEvent, RtcRecoverySupervisor};
+
+    let supervisor = RtcRecoverySupervisor::new();
+    let mut events = supervisor.subscribe();
+    let mut previous_path = None;
+    let mut path_change_pending = false;
+
+    let online = online_route_snapshot_with_cost(1, true, false);
+    super::publish_v020_network_fact(
+        &supervisor,
+        &NetworkEvent::NetworkPathChanged {
+            snapshot: online.clone(),
+        },
+        previous_path,
+        &mut path_change_pending,
+        &mut previous_path,
+    );
+    assert_eq!(
+        events.try_recv().expect("initial availability fact"),
+        RtcNetworkEvent::NetworkAvailable
+    );
+    assert!(events.try_recv().is_err());
+
+    let mut offline = online.clone();
+    offline.sequence = 2;
+    offline.availability = NetworkAvailability::Unavailable;
+    super::publish_v020_network_fact(
+        &supervisor,
+        &NetworkEvent::NetworkPathChanged { snapshot: offline },
+        previous_path,
+        &mut path_change_pending,
+        &mut previous_path,
+    );
+    assert_eq!(
+        events.try_recv().expect("offline availability fact"),
+        RtcNetworkEvent::NetworkUnavailable
+    );
+    assert!(
+        events.try_recv().is_err(),
+        "Offline must not emit a local-address edge"
+    );
+    assert!(!path_change_pending, "Offline clears pending path edges");
+
+    let mut restored = online;
+    restored.sequence = 3;
+    super::publish_v020_network_fact(
+        &supervisor,
+        &NetworkEvent::NetworkPathChanged { snapshot: restored },
+        previous_path,
+        &mut path_change_pending,
+        &mut previous_path,
+    );
+    assert_eq!(
+        events.try_recv().expect("restore availability fact"),
+        RtcNetworkEvent::NetworkAvailable
+    );
+    assert!(
+        events.try_recv().is_err(),
+        "Offline -> Online restore must not duplicate LocalAddressChanged"
+    );
+}
+
+#[cfg(feature = "webrtc-v020")]
+#[test]
+fn v020_path_change_survives_android_unknown_intermediate_state() {
+    use crate::wire::webrtc::v020::recovery::{RtcNetworkEvent, RtcRecoverySupervisor};
+
+    let supervisor = RtcRecoverySupervisor::new();
+    let mut events = supervisor.subscribe();
+    let mut previous_path = None;
+    let mut path_change_pending = false;
+
+    super::publish_v020_network_fact(
+        &supervisor,
+        &NetworkEvent::NetworkPathChanged {
+            snapshot: online_route_snapshot(1, true),
+        },
+        previous_path,
+        &mut path_change_pending,
+        &mut previous_path,
+    );
+    assert_eq!(
+        events.try_recv().expect("initial availability fact"),
+        RtcNetworkEvent::NetworkAvailable
+    );
+
+    super::publish_v020_network_fact(
+        &supervisor,
+        &NetworkEvent::NetworkPathChanged {
+            snapshot: NetworkSnapshot {
+                sequence: 2,
+                availability: NetworkAvailability::Unknown,
+                transport: NetworkTransportFlags::default(),
+                is_expensive: false,
+                is_constrained: false,
+            },
+        },
+        previous_path,
+        &mut path_change_pending,
+        &mut previous_path,
+    );
+    assert!(
+        events.try_recv().is_err(),
+        "Unknown is held as a pending edge"
+    );
+    assert!(path_change_pending);
+
+    super::publish_v020_network_fact(
+        &supervisor,
+        &NetworkEvent::NetworkPathChanged {
+            snapshot: online_route_snapshot(3, false),
+        },
+        previous_path,
+        &mut path_change_pending,
+        &mut previous_path,
+    );
+    assert_eq!(
+        events.try_recv().expect("availability fact"),
+        RtcNetworkEvent::NetworkAvailable
+    );
+    assert_eq!(
+        events.try_recv().expect("pending path change fact"),
+        RtcNetworkEvent::LocalAddressChanged
+    );
+    assert!(!path_change_pending);
 }
 
 #[tokio::test]

@@ -357,8 +357,7 @@ async fn p04_a_only_offline_online_with_real_link_loss_soft_recovers_both_ends()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn p05_a_address_provider_change_soft_recovers_after_transient_path_loss_without_mirroring_platform_fact_to_b()
- {
+async fn p05_a_native_path_change_soft_recovers_and_rebinds_without_mirroring_platform_fact_to_b() {
     let Some(changed_address) = bindable_non_loopback_ipv4() else {
         eprintln!("p05: skipping — no bindable non-loopback IPv4 interface on this host");
         return;
@@ -388,9 +387,11 @@ async fn p05_a_address_provider_change_soft_recovers_after_transient_path_loss_w
     );
     pair.network_path(PairEndpoint::A, 1, NetworkAvailability::Available, wifi())
         .await;
-    pair.set_rtc_fault(LinkDirection::Both, PacketRule::Blackhole)
-        .await;
-    pair.wait_rtc_fault_hit(Duration::from_secs(10)).await;
+    let offer_baseline = pair.signaling_hits(
+        PairEndpoint::A,
+        PairEndpoint::B,
+        SignalingMessageClass::IceRestartOffer,
+    );
 
     pair.harness()
         .set_local_addresses(pair.serial(PairEndpoint::A), vec![changed_address]);
@@ -413,7 +414,14 @@ async fn p05_a_address_provider_change_soft_recovers_after_transient_path_loss_w
         .await
         .expect("A must attempt same-generation ICE recovery first");
     assert!(a_ice_generation > initial_a_ice_generation);
-    pair.heal_rtc_faults().await;
+    assert!(
+        pair.signaling_hits(
+            PairEndpoint::A,
+            PairEndpoint::B,
+            SignalingMessageClass::IceRestartOffer,
+        ) > offer_baseline,
+        "A's native path event must produce the recovery Offer"
+    );
     let a_rebound_address = pair
         .wait_rtc_bound_address(
             PairEndpoint::A,
@@ -447,7 +455,6 @@ async fn p05_a_address_provider_change_soft_recovers_after_transient_path_loss_w
     assert_eq!(recovered.a_to_b.pc_generation, initial.a_to_b.pc_generation);
     assert_eq!(recovered.b_to_a.pc_generation, initial.b_to_a.pc_generation);
     assert!(b_ice_generation > initial_b_ice_generation);
-    assert_eq!(pair.rtc_fault_scope_count(), 2);
     pair.assert_rpc_both_directions("p05_address_change_soft")
         .await;
     pair.shutdown().await;
