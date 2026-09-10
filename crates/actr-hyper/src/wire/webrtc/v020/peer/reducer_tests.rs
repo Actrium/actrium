@@ -3049,6 +3049,76 @@ fn attempt1_restart_request_is_deduped_while_local_restart_is_inflight() {
 }
 
 #[test]
+fn response_recovery_hint_starts_missing_soft_recovery() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let transport_epoch = state.transport_epoch;
+
+    // Model a live session whose response arrived through the lane, but whose
+    // controller has no recovery cycle despite being non-sendable.
+    state.phase = RtcPeerPhase::TransportReady;
+    state.pc_connected = false;
+    state.rpc_reliable_open = false;
+    state.recovery_inflight = false;
+    state.recovery_attempt_started = false;
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            request_id: "response-hint-1".to_string(),
+            transport_epoch,
+            pc_generation: generation,
+        }),
+    );
+
+    assert!(has_restart_ice(&effects, generation));
+    assert!(state.recovery_inflight);
+    assert!(state.recovery_attempt_started);
+    assert_eq!(state.recovery_origin, Some(RecoveryOrigin::PeerFailure));
+}
+
+#[test]
+fn response_recovery_hint_does_not_restart_an_owned_recovery_attempt() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let first = reduce(&mut state, failed_tick(generation));
+    assert!(has_restart_ice(&first, generation));
+    let ice_generation = state.ice_generation;
+    let transport_epoch = state.transport_epoch;
+
+    let hint = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            request_id: "response-hint-2".to_string(),
+            transport_epoch,
+            pc_generation: generation,
+        }),
+    );
+
+    assert!(hint.is_empty());
+    assert_eq!(state.ice_generation, ice_generation);
+}
+
+#[test]
+fn stale_response_recovery_hint_is_ignored() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let transport_epoch = state.transport_epoch;
+    let stale = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            request_id: "response-hint-stale".to_string(),
+            transport_epoch: transport_epoch.saturating_sub(1),
+            pc_generation: generation,
+        }),
+    );
+
+    assert!(stale.is_empty());
+    assert!(!state.recovery_inflight);
+    assert_eq!(state.ice_generation, 0);
+}
+
+#[test]
 fn attempt1_restart_request_graces_local_network_announced_offer_then_retries() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let generation = drive_offerer_to_sendable(&mut state);

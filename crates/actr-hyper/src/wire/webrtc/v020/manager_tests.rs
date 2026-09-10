@@ -943,6 +943,21 @@ async fn snapshots_and_subscribe_reflect_controllers() {
     assert_eq!(public_rx.borrow().revision, rx.borrow().revision);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn response_recovery_hint_is_submitted_to_the_current_controller() {
+    let (mgr, _rx) = manager();
+    let peer = test_actor_id(21);
+    mgr.ensure_controller(peer.clone()).await;
+
+    assert!(
+        mgr.submit_recovery_hint(&peer, "response-hint-manager")
+            .await,
+        "an existing controller should accept the best-effort hint"
+    );
+
+    assert!(mgr.close_peer(&peer).await);
+}
+
 /// S5-11: the unified observation facade aggregates recovery (snapshot),
 /// resource (lane count), and teardown (converged flag, registry absence)
 /// signals for the T2-T3 and system/platform harnesses.
