@@ -903,4 +903,26 @@ mod tests {
             }) if request_id == "request-ack-1" && actual_outcome == outcome
         ));
     }
+
+    #[test]
+    fn ice_restart_request_ack_defaults_legacy_optional_fields() {
+        assert!(matches!(
+            V020SignalingTransport::payload_to_message(
+                actr_relay::Payload::IceRestartRequestAck(
+                    actr_protocol::IceRestartRequestAck {
+                        request_id: "legacy-ack".to_string(),
+                        attempt: None,
+                        outcome: None,
+                    }
+                )
+            ),
+            Some(SignalingMessage::IceRestartRequestAck {
+                request_id,
+                attempt: 1,
+                outcome,
+            }) if request_id == "legacy-ack"
+                && outcome
+                    == actr_protocol::ice_restart_request_ack::Outcome::Accepted as i32
+        ));
+    }
 }

@@ -22,8 +22,6 @@ use tokio::sync::mpsc;
 
 use crate::wire::webrtc::v020::manager::RtcConnectionManager;
 use crate::wire::webrtc::v020::peer::reducer::SignalingMessage;
-use crate::wire::webrtc::v020::peer::state::Role;
-use crate::wire::webrtc::v020::status::RtcPeerSnapshot;
 
 use super::{SharedLocalId, SignalingDispatch, SignalingInbound};
 
@@ -82,18 +80,6 @@ fn message_strands_negotiation(message: &SignalingMessage) -> bool {
             | SignalingMessage::Answer { .. }
             | SignalingMessage::IceRestartOffer { .. }
     )
-}
-
-fn restart_request_ack_outcome(snapshot: &RtcPeerSnapshot) -> i32 {
-    use actr_protocol::ice_restart_request_ack::Outcome;
-
-    if snapshot.role != Role::Offerer {
-        Outcome::WrongRole as i32
-    } else if snapshot.pc_generation == 0 {
-        Outcome::NoActiveSession as i32
-    } else {
-        Outcome::Accepted as i32
-    }
 }
 
 /// Per-peer ordered dispatch chaining shared by the router (dispatch) and the
@@ -349,6 +335,34 @@ impl SignalingRouter {
             tracing::warn!(
                 peer = %peer.to_string_repr(),
                 "outbound signaling full; dropped ICE restart request acknowledgement"
+            );
+        }
+    }
+
+    async fn try_send_ice_restart_request_ack_for_controller(
+        &self,
+        peer: ActrId,
+        controller_lifecycle_id: u64,
+        request_id: String,
+        attempt: u32,
+        outcome: i32,
+    ) {
+        let sent = self
+            .manager
+            .try_send_signaling_for_controller(
+                peer.clone(),
+                controller_lifecycle_id,
+                SignalingMessage::IceRestartRequestAck {
+                    request_id,
+                    attempt,
+                    outcome,
+                },
+            )
+            .await;
+        if !sent {
+            tracing::debug!(
+                peer = %peer.to_string_repr(),
+                "skipping ICE restart request acknowledgement after Controller retirement or queue saturation"
             );
         }
     }
@@ -651,13 +665,27 @@ impl SignalingRouter {
                 attempt,
             } => {
                 if let Some(handle) = self.manager.get_controller(&from).await {
-                    let outcome = restart_request_ack_outcome(&handle.snapshot());
-                    let applied = handle
-                        .apply_ice_restart_request(request_id.clone(), attempt)
+                    let controller_lifecycle_id = handle.controller_lifecycle_id();
+                    match handle
+                        .apply_ice_restart_request_with_outcome(request_id.clone(), attempt)
                         .await
-                        .is_ok();
-                    if applied {
-                        self.try_send_ice_restart_request_ack(from, request_id, attempt, outcome);
+                    {
+                        Ok(outcome) => {
+                            self.try_send_ice_restart_request_ack_for_controller(
+                                from,
+                                controller_lifecycle_id,
+                                request_id,
+                                attempt,
+                                outcome,
+                            )
+                            .await;
+                        }
+                        Err(_) => {
+                            tracing::debug!(
+                                peer = %from.to_string_repr(),
+                                "dropping ICE restart request acknowledgement after Controller shutdown"
+                            );
+                        }
                     }
                 } else {
                     // Preserve the pre-542 Coordinator contract: a request

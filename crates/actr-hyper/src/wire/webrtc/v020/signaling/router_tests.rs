@@ -185,6 +185,111 @@ async fn unknown_restart_request_returns_no_active_session_ack() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn live_answerer_returns_wrong_role_restart_request_ack() {
+    let (manager, router, mut signaling_rx) = router();
+    let peer = test_actor_id(12);
+
+    router
+        .route_inbound(
+            peer.clone(),
+            SignalingMessage::RoleAssignment { is_offerer: false },
+        )
+        .await;
+    router
+        .route_inbound(
+            peer.clone(),
+            SignalingMessage::IceRestartRequest {
+                request_id: "request-answerer".to_string(),
+                attempt: 1,
+            },
+        )
+        .await;
+
+    assert!(manager.get_controller(&peer).await.is_some());
+    let dispatch = signaling_rx
+        .recv()
+        .await
+        .expect("WrongRole Ack should be emitted");
+    assert!(matches!(
+        dispatch.message,
+        SignalingMessage::IceRestartRequestAck {
+            request_id,
+            attempt: 1,
+            outcome,
+        } if request_id == "request-answerer"
+            && outcome == actr_protocol::ice_restart_request_ack::Outcome::WrongRole as i32
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn live_offerer_returns_committed_accepted_restart_request_ack() {
+    let (manager, router, mut signaling_rx) = router();
+    let peer = test_actor_id(13);
+    let handle = manager.ensure_controller(peer.clone()).await;
+    handle.connect().await.expect("connect command");
+    assert!(matches!(
+        signaling_rx
+            .recv()
+            .await
+            .expect("role negotiation probe")
+            .message,
+        SignalingMessage::RoleNegotiation
+    ));
+    handle
+        .apply_role_assignment(true)
+        .await
+        .expect("offerer role assignment");
+
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let snapshot = handle.snapshot();
+            if snapshot.role == Role::Offerer && snapshot.pc_generation > 0 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("offerer Controller did not commit a Session generation");
+
+    router
+        .route_inbound(
+            peer.clone(),
+            SignalingMessage::IceRestartRequest {
+                request_id: "request-offerer".to_string(),
+                attempt: 1,
+            },
+        )
+        .await;
+
+    let dispatch = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let dispatch = signaling_rx
+                .recv()
+                .await
+                .expect("Accepted Ack should be emitted");
+            if matches!(
+                dispatch.message,
+                SignalingMessage::IceRestartRequestAck { .. }
+            ) {
+                break dispatch;
+            }
+        }
+    })
+    .await
+    .expect("Accepted Ack should be emitted");
+    assert!(matches!(
+        dispatch.message,
+        SignalingMessage::IceRestartRequestAck {
+            request_id,
+            attempt: 1,
+            outcome,
+        } if request_id == "request-offerer"
+            && outcome == actr_protocol::ice_restart_request_ack::Outcome::Accepted as i32
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn answer_and_candidate_for_unknown_peer_are_dropped_safely() {
     let (manager, router, _rx) = router();
     let peer = test_actor_id(2);

@@ -254,8 +254,8 @@ pub(crate) struct RtcConnectionManager {
     /// cache cleanup from delayed events after controller recreation.
     next_controller_lifecycle_id: AtomicU64,
     /// Deterministic admission/publication rendezvous used by integration
-    /// tests to place a creator or recovery wake on the exact side of a close
-    /// boundary.
+    /// tests to place inbound Controller creation on the exact side of a
+    /// close boundary.
     #[cfg(feature = "test-utils")]
     peer_publish_barriers: std::sync::Mutex<HashMap<ActrId, Arc<tokio::sync::Barrier>>>,
     peers: RwLock<HashMap<ActrId, PeerSlot>>,
@@ -788,6 +788,30 @@ impl RtcConnectionManager {
         self.signaling_tx
             .try_send(SignalingDispatch::untracked(peer, message))
             .is_ok()
+    }
+
+    /// Send a protocol response only while the exact Controller that produced
+    /// it is still the active registry entry. The peers read lock orders this
+    /// check and the non-blocking queue send against `close_peer`: a close that
+    /// wins first suppresses the Ack, while an Ack that wins first is emitted
+    /// for the Controller's committed state before teardown can remove it.
+    pub(crate) async fn try_send_signaling_for_controller(
+        &self,
+        peer: ActrId,
+        controller_lifecycle_id: u64,
+        message: SignalingMessage,
+    ) -> bool {
+        let peers = self.peers.read().await;
+        let current = matches!(
+            peers.get(&peer),
+            Some(PeerSlot::Active(entry))
+                if entry.handle.controller_lifecycle_id() == controller_lifecycle_id
+        );
+        current
+            && self
+                .signaling_tx
+                .try_send(SignalingDispatch::untracked(peer, message))
+                .is_ok()
     }
 
     /// Apply an Actrix point-in-time fact that the exact target endpoint had no
