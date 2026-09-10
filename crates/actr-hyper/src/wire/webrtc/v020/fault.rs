@@ -444,6 +444,7 @@ pub enum SignalingMessageClass {
     Candidate,
     IceRestartOffer,
     IceRestartRequest,
+    IceRestartRequestAck,
     IceRestartRejected,
     RoleNegotiation,
     RoleAssignment,
@@ -457,6 +458,7 @@ impl SignalingMessageClass {
             SignalingMessage::Candidate(_) => Self::Candidate,
             SignalingMessage::IceRestartOffer { .. } => Self::IceRestartOffer,
             SignalingMessage::IceRestartRequest { .. } => Self::IceRestartRequest,
+            SignalingMessage::IceRestartRequestAck { .. } => Self::IceRestartRequestAck,
             SignalingMessage::IceRestartRejected { .. } => Self::IceRestartRejected,
             SignalingMessage::RoleNegotiation => Self::RoleNegotiation,
             SignalingMessage::RoleAssignment { .. } => Self::RoleAssignment,
@@ -1011,6 +1013,11 @@ fn signaling_identity(message: &SignalingMessage) -> (Option<String>, Option<u32
         SignalingMessage::IceRestartRequest {
             request_id,
             attempt,
+        } => (Some(request_id.clone()), Some(*attempt), None),
+        SignalingMessage::IceRestartRequestAck {
+            request_id,
+            attempt,
+            ..
         } => (Some(request_id.clone()), Some(*attempt), None),
         _ => (None, None, None),
     }

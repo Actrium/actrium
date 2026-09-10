@@ -404,6 +404,87 @@ async fn directed_signaling_exchange_rule_records_request_identity_and_attempt()
 }
 
 #[tokio::test]
+async fn directed_signaling_fault_can_drop_restart_request_ack() {
+    let hub = InMemorySignalingHub::new();
+    let (a, b) = (test_actor_id(39), test_actor_id(40));
+    let faults = DirectedSignalingFaultRegistry::default();
+    faults.set_rule(
+        a.clone(),
+        b.clone(),
+        SignalingMessageClass::IceRestartRequestAck,
+        SignalingFaultRule::Drop,
+    );
+    let transport_a = DirectedSignalingTransport::new(
+        Arc::new(hub.connect(a.clone())),
+        a.clone(),
+        faults.clone(),
+    );
+    let transport_b = hub.connect(b.clone());
+
+    transport_a
+        .send(
+            b,
+            SignalingMessage::IceRestartRequestAck {
+                request_id: "ack-drop".to_string(),
+                attempt: 1,
+                outcome: actr_protocol::ice_restart_request_ack::Outcome::NoActiveSession as i32,
+            },
+        )
+        .await
+        .expect("fault proxy accepts dropped Ack");
+    tokio::time::timeout(Duration::from_millis(100), transport_b.recv())
+        .await
+        .expect_err("dropped Ack must not reach the receiver");
+    assert_eq!(
+        faults.trace()[0].class,
+        SignalingMessageClass::IceRestartRequestAck
+    );
+}
+
+#[tokio::test]
+async fn directed_signaling_fault_can_duplicate_restart_request_ack() {
+    let hub = InMemorySignalingHub::new();
+    let (a, b) = (test_actor_id(41), test_actor_id(42));
+    let faults = DirectedSignalingFaultRegistry::default();
+    faults.set_rule(
+        a.clone(),
+        b.clone(),
+        SignalingMessageClass::IceRestartRequestAck,
+        SignalingFaultRule::Duplicate,
+    );
+    let transport_a =
+        DirectedSignalingTransport::new(Arc::new(hub.connect(a.clone())), a, faults.clone());
+    let transport_b = hub.connect(b.clone());
+
+    transport_a
+        .send(
+            b,
+            SignalingMessage::IceRestartRequestAck {
+                request_id: "ack-duplicate".to_string(),
+                attempt: 2,
+                outcome: actr_protocol::ice_restart_request_ack::Outcome::Accepted as i32,
+            },
+        )
+        .await
+        .expect("fault proxy accepts duplicated Ack");
+    for _ in 0..2 {
+        assert!(matches!(
+            tokio::time::timeout(WAIT, transport_b.recv())
+                .await
+                .expect("duplicated Ack timeout"),
+            Some((_, SignalingMessage::IceRestartRequestAck { .. }))
+        ));
+    }
+    tokio::time::timeout(Duration::from_millis(100), transport_b.recv())
+        .await
+        .expect_err("duplicate rule must emit exactly two Ack messages");
+    assert_eq!(
+        faults.trace()[0].class,
+        SignalingMessageClass::IceRestartRequestAck
+    );
+}
+
+#[tokio::test]
 async fn directed_signaling_reorder_allows_the_next_message_to_overtake() {
     let hub = InMemorySignalingHub::new();
     let (a, b) = (test_actor_id(37), test_actor_id(38));
