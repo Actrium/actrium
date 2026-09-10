@@ -1005,10 +1005,10 @@ async fn manual_policy_clock_retries_answerer_request_until_budget_without_pc_ch
         other => panic!("expected answerer restart request #1, got {other:?}"),
     };
 
-    // The six-second attempt timer only retransmits the same request. It must
+    // The ten-second attempt timer only retransmits the same request. It must
     // not create a hard-recovery generation after the old fixed request cap.
-    for expected_attempt in 2..=8 {
-        h.clock.advance(Duration::from_secs(6));
+    for expected_attempt in 2..=6 {
+        h.clock.advance(Duration::from_secs(10));
         let dispatch = timeout(WAIT, h.signaling_rx.recv())
             .await
             .expect("T1 answerer restart request timeout")
@@ -1030,7 +1030,7 @@ async fn manual_policy_clock_retries_answerer_request_until_budget_without_pc_ch
     }
 
     h.clock
-        .advance(NETWORK_RECOVERY_TIMEOUT - Duration::from_secs(7 * 6) - Duration::from_millis(1));
+        .advance(NETWORK_RECOVERY_TIMEOUT - Duration::from_secs(5 * 10) - Duration::from_millis(1));
     tokio::task::yield_now().await;
     assert_eq!(
         h.handle.snapshot().status,
@@ -1109,11 +1109,11 @@ async fn manual_policy_clock_wakes_closed_answerer_after_generation_retirement()
         .await
         .expect("complete closed Answerer session");
 
-    // The parked Answerer keeps a six-second attempt timer even though the
+    // The parked Answerer keeps a ten-second attempt timer even though the
     // physical generation is no longer live. Its wake must carry the retired
     // generation only as signaling metadata and must not rebuild locally.
     tokio::task::yield_now().await;
-    h.clock.advance(Duration::from_secs(6));
+    h.clock.advance(Duration::from_secs(10));
     let wake = timeout(WAIT, h.signaling_rx.recv())
         .await
         .expect("closed Answerer wake timeout")
@@ -1259,7 +1259,7 @@ async fn failed_hard_replacement_retries_on_the_attempt_deadline() {
     })
     .await;
 
-    h.clock.advance(Duration::from_secs(6));
+    h.clock.advance(Duration::from_secs(10));
     let retry = h.next_effect().await;
     assert!(matches!(
         retry.effect,
@@ -1296,7 +1296,7 @@ async fn local_address_change_soft_recovery_retries_on_the_same_pc_generation() 
         .ice_generation
         .expect("first soft attempt has an ICE generation");
 
-    h.clock.advance(Duration::from_secs(6));
+    h.clock.advance(Duration::from_secs(10));
     let retry = h.next_effect().await;
     assert!(matches!(
         retry.effect,
@@ -1353,7 +1353,7 @@ async fn hung_hard_replacement_negotiation_is_retired_and_retried() {
         RtcPeerEffect::CreateOffer { generation: 2, .. }
     ));
 
-    h.clock.advance(Duration::from_secs(6));
+    h.clock.advance(Duration::from_secs(10));
     let close = h.next_effect().await;
     let retry = h.next_effect().await;
     assert!(matches!(

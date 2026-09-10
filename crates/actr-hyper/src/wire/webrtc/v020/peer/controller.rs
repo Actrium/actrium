@@ -52,9 +52,9 @@ const COMMAND_CAPACITY: usize = 64;
 const COMPLETION_CAPACITY: usize = 128;
 /// Bounded capacity of the per-peer lane-event channel.
 const LANE_CAPACITY: usize = 64;
-/// Per-attempt ICE restart readiness budget, preserving the 0.14 policy. The
-/// reducer receives only the elapsed fact; it never reads wall-clock time.
-const ICE_RESTART_ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6);
+/// Per-attempt ICE restart readiness budget for network recovery. The reducer
+/// receives only the elapsed fact; it never reads wall-clock time.
+const ICE_RESTART_ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 /// Server-arbitrated role negotiation keeps the historical short failure
 /// budget, distinct from the longer initial ICE/DataChannel readiness budget.
 const ROLE_NEGOTIATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
