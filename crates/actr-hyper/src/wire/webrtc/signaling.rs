@@ -1851,12 +1851,14 @@ impl WebSocketSignalingClient {
                                 );
                                 if let Some(reply_for) = envelope.reply_for.clone() {
                                     if let Some(sender) = pending.lock().await.remove(&reply_for) {
-                                        if let Err(e) = span.in_scope(|| sender.send(envelope)) {
-                                            stats.errors.fetch_add(1, Ordering::Relaxed);
-                                            tracing::warn!(
-                                                "Failed to send reply envelope to waiter: {e:?}",
-                                            );
-                                        }
+                                        span.in_scope(|| {
+                                            if let Err(e) = sender.send(envelope) {
+                                                stats.errors.fetch_add(1, Ordering::Relaxed);
+                                                tracing::warn!(
+                                                    "Failed to send reply envelope to waiter: {e:?}",
+                                                );
+                                            }
+                                        });
                                         continue;
                                     }
                                 }
