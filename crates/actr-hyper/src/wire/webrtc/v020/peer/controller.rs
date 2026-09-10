@@ -55,6 +55,10 @@ const LANE_CAPACITY: usize = 64;
 /// Per-attempt ICE restart readiness budget, preserving the 0.14 policy. The
 /// reducer receives only the elapsed fact; it never reads wall-clock time.
 const ICE_RESTART_ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6);
+/// A remote attempt-1 wake that races an already-announced local Offer gets a
+/// short grace period for the in-flight Answer. If the Offer was lost, the
+/// same timer becomes the bounded immediate retry required by issue #227.
+const REMOTE_REQUEST_WAKE_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
 /// Server-arbitrated role negotiation keeps the historical short failure
 /// budget, distinct from the longer initial ICE/DataChannel readiness budget.
 const ROLE_NEGOTIATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -544,7 +548,11 @@ impl RtcPeerController {
                         epoch,
                         self.policy_clock.sleep(
                             crate::timer::ids::WEBRTC_ICE_RESTART_WAIT,
-                            ICE_RESTART_ATTEMPT_TIMEOUT,
+                            if self.state.remote_request_wake_pending {
+                                REMOTE_REQUEST_WAKE_GRACE
+                            } else {
+                                ICE_RESTART_ATTEMPT_TIMEOUT
+                            },
                         ),
                     ));
                 }

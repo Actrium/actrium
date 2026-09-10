@@ -3003,6 +3003,71 @@ fn attempt1_restart_request_is_deduped_while_local_restart_is_inflight() {
         "attempt=1 must not start a second offer while local restart negotiation is pending"
     );
     assert_eq!(state.ice_generation, ice_before + 1);
+    assert!(state.recovery_started_by_remote_request);
+}
+
+#[test]
+fn attempt1_restart_request_graces_an_announced_offer_then_retries() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let epoch_before = state.recovery_epoch;
+
+    state.recovery_inflight = true;
+    state.recovery_attempt_started = true;
+    state.recovery_negotiated = false;
+    state.pending_local_sdp_exchange_id = Some("v020-1-1-10".to_string());
+    state.phase = RtcPeerPhase::Recovering;
+
+    let wake = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequest {
+            request_id: "grace-1".to_string(),
+            attempt: 1,
+        }),
+    );
+
+    assert!(wake.is_empty());
+    assert!(state.remote_request_wake_pending);
+    assert!(state.recovery_started_by_remote_request);
+    assert!(state.recovery_epoch > epoch_before);
+
+    let retry_epoch = state.recovery_epoch;
+    let retry = reduce(
+        &mut state,
+        RtcPeerInput::RecoveryDeadlineElapsed {
+            recovery_epoch: retry_epoch,
+        },
+    );
+
+    assert!(has_restart_ice(&retry, generation));
+    assert!(!state.remote_request_wake_pending);
+}
+
+#[test]
+fn remote_request_recovery_coalesces_late_local_address_edge() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+
+    // A request-driven recovery is already negotiated, but its physical
+    // readiness has not converged. A late local address fact must not publish
+    // a second Offer for the same request-driven round.
+    state.recovery_inflight = true;
+    state.recovery_attempt_started = true;
+    state.recovery_negotiated = true;
+    state.recovery_started_by_remote_request = true;
+    state.phase = RtcPeerPhase::Recovering;
+    state.pc_connected = false;
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::LocalAddressChanged,
+        )),
+    );
+
+    assert!(effects.is_empty());
+    assert!(state.address_edge_pending);
+    assert_eq!(state.active_generation, Some(generation));
 }
 
 #[test]

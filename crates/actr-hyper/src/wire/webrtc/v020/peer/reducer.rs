@@ -1692,6 +1692,32 @@ fn reduce_command(
                 && (state.recovery_from_network_available
                     || offerer_restart_negotiation_inflight(state))
             {
+                // Even when the offerer's own recovery already owns the
+                // round, the request is meaningful: it confirms that the
+                // answerer is waiting for this exchange. Remember that fact
+                // so late local lifecycle/address callbacks coalesce into
+                // this same round instead of launching a second Offer.
+                state.recovery_started_by_remote_request = true;
+                return;
+            }
+
+            // A local restart Offer already announced on signaling is still
+            // the best repair if its Answer is about to arrive. Waiting for a
+            // short, separately fenced grace window avoids a duplicate Offer
+            // when the Answerer sends its failure wake concurrently. If the
+            // Offer was lost, the grace deadline re-enters the normal soft
+            // retry path and publishes the fresh Offer without waiting for
+            // the six-second attempt cadence.
+            if attempt == 1
+                && state.recovery_inflight
+                && state.recovery_attempt_started
+                && !state.recovery_negotiated
+                && state.pending_local_sdp_exchange_id.is_some()
+                && state.pending_remote_description_operation.is_none()
+            {
+                state.recovery_started_by_remote_request = true;
+                state.remote_request_wake_pending = true;
+                state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
                 return;
             }
 
@@ -1720,6 +1746,9 @@ fn reduce_command(
                     state.recovery_attempt_started = false;
                 }
                 start_soft_recovery(state, effects);
+            }
+            if state.recovery_attempt_started {
+                state.recovery_started_by_remote_request = true;
             }
         }
         RtcPeerCommand::ApplyRemoteDescription(desc) => {
@@ -2134,6 +2163,14 @@ fn reduce_network_event(
                         // the current attempt and let its deadline or the
                         // pending-edge convergence path send the next request.
                         state.address_edge_pending = true;
+                    } else if state.recovery_started_by_remote_request {
+                        // A late local platform/address fact can arrive after
+                        // an Answerer request has already woken the Offerer.
+                        // Keep that request-driven exchange serialized; the
+                        // next convergence edge or deadline owns any follow-up
+                        // restart. Starting another Offer here recreates the
+                        // duplicate-exchange race covered by p08.
+                        state.address_edge_pending = true;
                     } else {
                         // SDP/ICE negotiation for the current attempt has
                         // already completed, but the physical path is not
@@ -2326,6 +2363,8 @@ fn start_soft_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
     // A driver-side fact (e.g. the peer's PC death) starts this round, not the
     // offerer's own network-recovery signal — see the attempt-1 de-dupe guard.
     state.recovery_from_network_available = false;
+    state.recovery_started_by_remote_request = false;
+    state.remote_request_wake_pending = false;
     clear_negotiation_for_recovery(state);
     if !state.recovery_inflight {
         state.recovery_cycle = state.recovery_cycle.wrapping_add(1);
@@ -2476,6 +2515,8 @@ fn clear_transport_attempt_cache(state: &mut RtcPeerState) {
     state.initial_connection_inflight = false;
     state.ice_generation = 0;
     state.recovery_inflight = false;
+    state.recovery_started_by_remote_request = false;
+    state.remote_request_wake_pending = false;
     state.recovery_negotiated = false;
     state.recovery_attempt_started = false;
     state.pc_connected = false;
@@ -2572,6 +2613,8 @@ fn start_hard_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
         defer_recovery_until_gate(state, true);
         return;
     }
+    state.recovery_started_by_remote_request = false;
+    state.remote_request_wake_pending = false;
     if !state.recovery_inflight {
         state.recovery_cycle = state.recovery_cycle.wrapping_add(1);
     }
@@ -2895,6 +2938,8 @@ fn reduce_state_tick(
         if state.phase == RtcPeerPhase::TransportReady && state.rpc_reliable_open {
             state.phase = RtcPeerPhase::Sendable;
             state.recovery_inflight = false;
+            state.recovery_started_by_remote_request = false;
+            state.remote_request_wake_pending = false;
             state.recovery_negotiated = true;
             state.recovery_attempt_started = false;
             state.local_restart_request_id = None;
@@ -3177,6 +3222,8 @@ fn reduce_lane_event(state: &mut RtcPeerState, event: LaneEvent, effects: &mut V
                 if state.phase == RtcPeerPhase::TransportReady && state.pc_connected {
                     state.phase = RtcPeerPhase::Sendable;
                     state.recovery_inflight = false;
+                    state.recovery_started_by_remote_request = false;
+                    state.remote_request_wake_pending = false;
                     state.recovery_negotiated = true;
                     state.recovery_attempt_started = false;
                     state.local_restart_request_id = None;
@@ -3256,6 +3303,8 @@ fn atomic_switch(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect>) {
     state.pending_rpc_reliable_open = false;
     // RFC step 8: publish Connected.
     state.recovery_inflight = false;
+    state.recovery_started_by_remote_request = false;
+    state.remote_request_wake_pending = false;
     state.recovery_negotiated = true;
     state.recovery_attempt_started = false;
     state.local_restart_request_id = None;
@@ -3496,6 +3545,10 @@ fn reduce_completion(
                         // subsequent Connected callback belongs to this
                         // recovery epoch and may restore sendability.
                         state.recovery_negotiated = true;
+                        if state.remote_request_wake_pending {
+                            state.remote_request_wake_pending = false;
+                            state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
+                        }
                     }
                     // WebRTC now has a remote description for this generation;
                     // matching trickle candidates can safely be injected.

@@ -158,9 +158,18 @@ pub(crate) struct RtcPeerState {
     /// redundant. The reducer also de-dupes while a local restart/SDP effect
     /// is pending, regardless of how the round started. When the round came
     /// from the peer's death (a one-sided outage) and the local Offer has
-    /// already been announced, the wake is the offerer's only signal that the
-    /// answerer is back and must resend the offer immediately (issue #227).
+    /// already been announced, the wake either coalesces with that exchange or
+    /// triggers the bounded retry grace path when the Offer was lost (issue
+    /// #227).
     pub(crate) recovery_from_network_available: bool,
+    /// The current recovery round has been confirmed by a remote
+    /// `IceRestartRequest`. Late local lifecycle/address facts must coalesce
+    /// into that request-driven exchange instead of launching a second offer.
+    pub(crate) recovery_started_by_remote_request: bool,
+    /// An attempt-1 request arrived while this offerer's restart Offer is
+    /// still awaiting its Answer. Give that in-flight exchange a short grace
+    /// window; if no Answer arrives, the request wakes a fresh Offer.
+    pub(crate) remote_request_wake_pending: bool,
     /// Offerer-side count of deadline-driven Soft retries within the current
     /// recovery cycle. Retries that keep failing to converge prove the
     /// restart is not repairing the transport (e.g. the restart rebind
@@ -372,6 +381,8 @@ impl RtcPeerState {
             recovery_cycle: 0,
             recovery_attempt_started: false,
             recovery_from_network_available: false,
+            recovery_started_by_remote_request: false,
+            remote_request_wake_pending: false,
             soft_recovery_attempts: 0,
             address_edge_pending: false,
             ever_connected: false,
