@@ -10,6 +10,11 @@ use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering as AtomicOrdering};
 use tokio::sync::{Notify, Semaphore, broadcast, mpsc, watch};
 
+#[test]
+fn signaling_probe_budget_is_two_seconds() {
+    assert_eq!(SIGNALING_PROBE_TIMEOUT, std::time::Duration::from_secs(2));
+}
+
 struct ForceReconnectFakeSignalingClient {
     connected: AtomicBool,
     connect_should_fail: bool,

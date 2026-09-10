@@ -101,10 +101,13 @@ mod tests {
         let clock = ManualPolicyClock::default();
         let mut sleep = clock.sleep(
             crate::timer::ids::WEBRTC_ICE_RESTART_WAIT,
-            Duration::from_secs(10),
+            crate::wire::webrtc::v020::recovery::ICE_RESTART_ATTEMPT_TIMEOUT,
         );
 
-        clock.advance(Duration::from_secs(9));
+        clock.advance(
+            crate::wire::webrtc::v020::recovery::ICE_RESTART_ATTEMPT_TIMEOUT
+                - Duration::from_secs(1),
+        );
         let readiness =
             std::future::poll_fn(|cx| std::task::Poll::Ready(sleep.as_mut().poll(cx))).await;
         assert!(

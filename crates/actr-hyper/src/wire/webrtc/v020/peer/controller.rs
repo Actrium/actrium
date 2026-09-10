@@ -26,7 +26,7 @@ use crate::wire::webrtc::v020::events::{
     DataChannelDescriptor, PEER_EVENT_MAILBOX_CAPACITY, PeerDriverEvent, TrackDescriptor,
     peer_event_mailbox_with_capacity_and_bytes,
 };
-use crate::wire::webrtc::v020::recovery::RtcNetworkEvent;
+use crate::wire::webrtc::v020::recovery::{ICE_RESTART_ATTEMPT_TIMEOUT, RtcNetworkEvent};
 use crate::wire::webrtc::v020::signaling::SignalingDispatch;
 use crate::wire::webrtc::v020::status::{LaneKind, PeerTransportRetirement, RtcPeerSnapshot};
 
@@ -52,9 +52,6 @@ const COMMAND_CAPACITY: usize = 64;
 const COMPLETION_CAPACITY: usize = 128;
 /// Bounded capacity of the per-peer lane-event channel.
 const LANE_CAPACITY: usize = 64;
-/// Per-attempt ICE restart readiness budget for network recovery. The reducer
-/// receives only the elapsed fact; it never reads wall-clock time.
-const ICE_RESTART_ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 /// Server-arbitrated role negotiation keeps the historical short failure
 /// budget, distinct from the longer initial ICE/DataChannel readiness budget.
 const ROLE_NEGOTIATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);

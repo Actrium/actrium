@@ -35,7 +35,7 @@ fn cellular() -> NetworkTransportFlags {
 ///    the correlated answer.
 /// 3. The physical RTC path is still unavailable, so the readiness anchor
 ///    never opens.
-/// 4. The old six-second recovery-attempt timer would fire and send another
+/// 4. The old recovery-attempt timer would fire and send another
 ///    request before the physical connection becomes ready.
 ///
 /// The regression is that the timer must be restarted when the Offer is
@@ -69,7 +69,7 @@ async fn recovery_attempt_timer_restarts_after_offer_before_rtc_readiness() {
         SignalingMessageClass::Answer,
     );
 
-    // Keep the first restart offer inside the six-second attempt window, but
+    // Keep the first restart offer inside the ten-second attempt window, but
     // far enough away from the request to make the ordering deterministic.
     // The rule is scoped to the next offer only; retries are delivered.
     pair.harness().signaling_faults.set_nth_rule(
@@ -163,7 +163,7 @@ async fn recovery_attempt_timer_restarts_after_offer_before_rtc_readiness() {
     // The old timer was armed when request #1 was sent. If it is not
     // invalidated by the accepted Offer, it fires during this guard window
     // (roughly four seconds after the Answer) and emits attempt #2. The fixed
-    // controller starts a fresh six-second window at Offer acceptance, so no
+    // controller starts a fresh ten-second window at Offer acceptance, so no
     // new request is allowed here.
     let request_count_after_answer = pair.signaling_hits(
         PairEndpoint::A,
@@ -171,7 +171,10 @@ async fn recovery_attempt_timer_restarts_after_offer_before_rtc_readiness() {
         SignalingMessageClass::IceRestartRequest,
     );
     let guard_started = Instant::now();
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    // The old timer would fire about 8s after the Answer (10s from the
+    // original request minus the injected 2s Offer delay). Keep the guard open
+    // beyond that point while staying short of the newly re-anchored 10s timer.
+    tokio::time::sleep(Duration::from_secs(9)).await;
     let guard_elapsed = guard_started.elapsed();
     assert_eq!(
         pair.signaling_hits(
@@ -235,7 +238,7 @@ async fn recovery_attempt_timer_restarts_after_offer_before_rtc_readiness() {
 /// the first restart's SDP/ICE exchange is already negotiated, and the next
 /// same-generation ICE restart gives webrtc-rs wildcard bind inputs. The
 /// upstream driver must expand them to the new live interface before the old
-/// six-second attempt deadline, then the pair must become ready and serve RPC.
+/// ten-second attempt deadline, then the pair must become ready and serve RPC.
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn address_change_rebinds_wildcards_before_attempt_deadline_and_restores_echo() {
     let Some(new_address) = bindable_non_loopback_ipv4() else {
@@ -336,9 +339,9 @@ async fn address_change_rebinds_wildcards_before_attempt_deadline_and_restores_e
     )
     .await;
 
-    // The wildcard rebind must happen promptly. With the pre-PR logic the
-    // edge was merely remembered and this wait could not complete before the
-    // six-second recovery attempt timer fired.
+    // The wildcard rebind is independently required to remain prompt. Keep
+    // this guard below the ten-second recovery-attempt deadline so it does not
+    // depend on the retry timer to prove the address migration.
     let rebound = pair
         .wait_rtc_bound_address(
             PairEndpoint::A,
@@ -352,7 +355,7 @@ async fn address_change_rebinds_wildcards_before_attempt_deadline_and_restores_e
     assert_eq!(rebound.ip(), new_address);
     assert!(
         address_to_rebind < Duration::from_secs(5),
-        "wildcard rebind must precede the old six-second retry window: {address_to_rebind:?}"
+        "wildcard rebind must remain prompt during recovery: {address_to_rebind:?}"
     );
 
     // The address edge arrives after the first Offer/Answer. A second Offer

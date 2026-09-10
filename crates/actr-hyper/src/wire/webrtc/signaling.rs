@@ -66,6 +66,7 @@ const SIGNALING_SEND_TIMEOUT_SECS: u64 = 5;
 #[cfg(test)]
 const CONCURRENT_CONNECT_WAIT_TIMEOUT_SECS: u64 = 5;
 const DISCONNECT_LOCK_TIMEOUT_SECS: u64 = 5;
+const NO_ROUTE_CANDIDATES_RETRY_GENERATION: u64 = u64::MAX;
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // configurationType
@@ -233,6 +234,13 @@ pub trait SignalingClient: Send + Sync {
 
     /// DisconnectConnect
     async fn disconnect(&self) -> NetworkResult<()>;
+
+    /// Disconnect a stale signaling socket as part of an automatic recovery.
+    /// Implementations may preserve the fact that idempotent discovery
+    /// requests are eligible for one retry after the replacement connects.
+    async fn disconnect_for_recovery(&self) -> NetworkResult<()> {
+        self.disconnect().await
+    }
 
     /// Probe whether the existing signaling WebSocket is truly alive.
     ///
@@ -799,6 +807,9 @@ pub struct WebSocketSignalingClient {
     /// Incremented by lifecycle disconnects to invalidate every in-flight
     /// connection attempt, whether explicit or automatic.
     connection_generation: AtomicU64,
+    /// Connection generation whose pending RouteCandidates waiters may be
+    /// retried after an automatic recovery. Manual teardown clears this mark.
+    route_candidates_retry_generation: AtomicU64,
     /// Serializes the generation linearization point with connection state
     /// publication. No `.await` is allowed while this gate is held.
     connection_commit_gate: Arc<Mutex<()>>,
@@ -862,6 +873,7 @@ impl WebSocketSignalingClient {
             event_tx,
             liveness_generation: Arc::new(AtomicU64::new(0)),
             connection_generation: AtomicU64::new(0),
+            route_candidates_retry_generation: AtomicU64::new(NO_ROUTE_CANDIDATES_RETRY_GENERATION),
             connection_commit_gate: Arc::new(Mutex::new(())),
             connection_generation_notify: tokio::sync::Notify::new(),
             connection_attempt_notify: tokio::sync::Notify::new(),
@@ -904,6 +916,26 @@ impl WebSocketSignalingClient {
         if let Some(sink) = self.supervisor_fact_sink.get() {
             sink.signaling_generation_lost(generation, cause);
         }
+    }
+
+    fn mark_route_candidates_retryable(&self) {
+        self.route_candidates_retry_generation.store(
+            self.connection_generation.load(Ordering::Acquire),
+            Ordering::Release,
+        );
+    }
+
+    fn clear_route_candidates_retryable(&self) {
+        self.route_candidates_retry_generation
+            .store(NO_ROUTE_CANDIDATES_RETRY_GENERATION, Ordering::Release);
+    }
+
+    fn route_candidates_retry_allowed(&self) -> bool {
+        let generation = self.connection_generation.load(Ordering::Acquire);
+        self.route_candidates_retry_generation
+            .load(Ordering::Acquire)
+            == generation
+            && generation != NO_ROUTE_CANDIDATES_RETRY_GENERATION
     }
 
     /// Install the membership wiring. Idempotent; only the first call binds.
@@ -972,6 +1004,11 @@ impl WebSocketSignalingClient {
         if !was_connected {
             return;
         }
+
+        // This is an automatic transport failure rather than an explicit
+        // teardown. RouteCandidates is idempotent, so its dropped waiters may
+        // be replayed once after the replacement signaling generation commits.
+        self.mark_route_candidates_retryable();
 
         // The envelope send failed on a previously live socket; its generation
         // is lost. Report it before the local teardown proceeds.
@@ -1520,11 +1557,7 @@ impl WebSocketSignalingClient {
                     "Timed out waiting for signaling response".to_string(),
                 )
             })?
-            .map_err(|_| {
-                NetworkError::ConnectionError(
-                    "Receiver dropped while waiting for signaling response".to_string(),
-                )
-            })?;
+            .map_err(|_| NetworkError::SignalingReplyDropped)?;
 
         Ok(response_envelope)
     }
@@ -1870,6 +1903,15 @@ impl WebSocketSignalingClient {
     }
 
     async fn disconnect_internal(&self, invalidate_attempts: bool) -> NetworkResult<()> {
+        self.disconnect_internal_with_route_retry(invalidate_attempts, false)
+            .await
+    }
+
+    async fn disconnect_internal_with_route_retry(
+        &self,
+        invalidate_attempts: bool,
+        route_candidates_retryable: bool,
+    ) -> NetworkResult<()> {
         let teardown_deadline = tokio::time::Instant::now()
             + std::time::Duration::from_secs(DISCONNECT_LOCK_TIMEOUT_SECS);
         // Capture the live generation before invalidation bumps it, so the
@@ -1877,6 +1919,11 @@ impl WebSocketSignalingClient {
         let generation_before = self.connection_generation.load(Ordering::Acquire);
         if invalidate_attempts {
             self.invalidate_connection_attempts();
+        }
+        if route_candidates_retryable {
+            self.mark_route_candidates_retryable();
+        } else {
+            self.clear_route_candidates_retryable();
         }
 
         {
@@ -2250,6 +2297,52 @@ impl WebSocketSignalingClient {
             }
         }
     }
+
+    async fn wait_for_route_candidates_reconnect(
+        &self,
+        events: &mut broadcast::Receiver<SignalingEvent>,
+    ) -> NetworkResult<()> {
+        let wait = async {
+            loop {
+                if self.is_connected() {
+                    return Ok(());
+                }
+                if !self.route_candidates_retry_allowed() {
+                    return Err(NetworkError::SignalingReplyDropped);
+                }
+
+                match events.recv().await {
+                    Ok(SignalingEvent::Connected) => {
+                        if self.is_connected() {
+                            return Ok(());
+                        }
+                    }
+                    Ok(SignalingEvent::ConnectStart { .. })
+                    | Ok(SignalingEvent::Disconnected { .. }) => {}
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => {
+                        return Err(NetworkError::ConnectionClosed(
+                            "Signaling event channel closed while waiting for reconnect"
+                                .to_string(),
+                        ));
+                    }
+                }
+            }
+        };
+
+        crate::timer::timeout(
+            crate::timer::ids::SIGNALING_CONNECTED_WAIT,
+            Duration::from_secs(RESPONSE_TIMEOUT_SECS),
+            wait,
+        )
+        .await
+        .map_err(|_| {
+            NetworkError::TimeoutError(format!(
+                "Timed out waiting for signaling reconnect after {}s",
+                RESPONSE_TIMEOUT_SECS
+            ))
+        })?
+    }
 }
 
 #[async_trait]
@@ -2296,6 +2389,10 @@ impl SignalingClient for WebSocketSignalingClient {
 
     async fn disconnect(&self) -> NetworkResult<()> {
         self.disconnect_internal(true).await
+    }
+
+    async fn disconnect_for_recovery(&self) -> NetworkResult<()> {
+        self.disconnect_internal_with_route_retry(true, true).await
     }
 
     async fn probe_alive(&self, timeout: Duration) -> NetworkResult<()> {
@@ -2553,34 +2650,69 @@ impl SignalingClient for WebSocketSignalingClient {
         credential: AIdCredential,
         request: RouteCandidatesRequest,
     ) -> NetworkResult<RouteCandidatesResponse> {
-        let flow = signaling_envelope::Flow::ActrToServer(ActrToSignaling {
-            source: actor_id,
-            credential,
-            payload: Some(actr_to_signaling::Payload::RouteCandidatesRequest(request)),
-        });
+        // Subscribe before sending so the short disconnect/reconnect sequence
+        // in a mobile handover cannot race past the replacement Connected
+        // event while this request is waiting for its response.
+        let mut events = self.event_tx.subscribe();
+        let mut retried = false;
 
-        let envelope = self.create_envelope(flow).await;
-        let response_envelope = self.send_envelope_and_wait_response(envelope).await?;
+        loop {
+            let flow = signaling_envelope::Flow::ActrToServer(ActrToSignaling {
+                source: actor_id.clone(),
+                credential: credential.clone(),
+                // RouteCandidates is a read-only, idempotent query. Build a
+                // fresh envelope on retry so a late response for the old
+                // generation cannot satisfy the new request accidentally.
+                payload: Some(actr_to_signaling::Payload::RouteCandidatesRequest(
+                    request.clone(),
+                )),
+            });
 
-        if let Some(signaling_envelope::Flow::ServerToActr(server_to_actr)) = response_envelope.flow
-        {
-            match server_to_actr.payload {
-                Some(signaling_to_actr::Payload::RouteCandidatesResponse(response)) => {
-                    return Ok(response);
+            let envelope = self.create_envelope(flow).await;
+            let response_envelope = match self.send_envelope_and_wait_response(envelope).await {
+                Ok(response) => response,
+                Err(error)
+                    if !retried
+                        && matches!(error, NetworkError::SignalingReplyDropped)
+                        && self.route_candidates_retry_allowed() =>
+                {
+                    retried = true;
+                    tracing::warn!(
+                        retry_attempt = 1,
+                        "RouteCandidates response waiter dropped; waiting for signaling reconnect before retry"
+                    );
+                    self.wait_for_route_candidates_reconnect(&mut events)
+                        .await?;
+                    tracing::info!(
+                        retry_attempt = 1,
+                        "Retrying RouteCandidates after signaling reconnect"
+                    );
+                    continue;
                 }
-                Some(signaling_to_actr::Payload::Error(err)) => {
-                    return Err(NetworkError::ServiceDiscoveryError(format!(
-                        "{} ({})",
-                        err.message, err.code
-                    )));
+                Err(error) => return Err(error),
+            };
+
+            if let Some(signaling_envelope::Flow::ServerToActr(server_to_actr)) =
+                response_envelope.flow
+            {
+                match server_to_actr.payload {
+                    Some(signaling_to_actr::Payload::RouteCandidatesResponse(response)) => {
+                        return Ok(response);
+                    }
+                    Some(signaling_to_actr::Payload::Error(err)) => {
+                        return Err(NetworkError::ServiceDiscoveryError(format!(
+                            "{} ({})",
+                            err.message, err.code
+                        )));
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
-        }
 
-        Err(NetworkError::ConnectionError(
-            "Invalid route candidates response".to_string(),
-        ))
+            return Err(NetworkError::ConnectionError(
+                "Invalid route candidates response".to_string(),
+            ));
+        }
     }
 
     async fn get_signing_key(

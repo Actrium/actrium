@@ -294,6 +294,7 @@ impl NetworkRecoveryError {
             | NetworkError::JsonError(_)
             | NetworkError::Other(_) => Self::InvariantViolation { detail },
             NetworkError::ConnectionError(_)
+            | NetworkError::SignalingReplyDropped
             | NetworkError::SignalingError(_)
             | NetworkError::WebRtcError(_)
             | NetworkError::NetworkUnreachableError(_)
@@ -847,7 +848,7 @@ impl DefaultNetworkEventProcessor {
                     e
                 );
 
-                if let Err(disconnect_err) = self.signaling_client.disconnect().await {
+                if let Err(disconnect_err) = self.signaling_client.disconnect_for_recovery().await {
                     tracing::warn!(
                         reason = reason,
                         "⚠️ Failed to disconnect unhealthy signaling before rebuild: {}",
@@ -948,7 +949,7 @@ impl DefaultNetworkEventProcessor {
                     "Connectivity probe failed; restoring connections: {}",
                     e
                 );
-                if let Err(disconnect_err) = self.signaling_client.disconnect().await {
+                if let Err(disconnect_err) = self.signaling_client.disconnect_for_recovery().await {
                     tracing::warn!(
                         reason = reason,
                         "Failed to disconnect unhealthy signaling before restore: {}",
