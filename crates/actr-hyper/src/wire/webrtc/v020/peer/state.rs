@@ -149,6 +149,16 @@ pub(crate) struct RtcPeerState {
     /// the same restart repeatedly; this latch is cleared only on convergence
     /// or a terminal attempt failure.
     pub(crate) recovery_attempt_started: bool,
+    /// The current soft round was started by a local recovery signal the
+    /// offerer observed itself (NetworkAvailable / AppForeground /
+    /// SignalingGenerationChanged through `maybe_start_deferred_recovery`), as
+    /// opposed to a driver-side fact (the peer's PC death). Only in the former
+    /// case may the answerer's first correlated restart wake (attempt=1) be
+    /// de-duped: the offerer is already running the same round, so the wake is
+    /// redundant. When the round came from the peer's death (a one-sided
+    /// outage), the wake is the offerer's only signal that the answerer is
+    /// back and must resend the offer immediately (issue #227).
+    pub(crate) recovery_from_network_available: bool,
     /// Offerer-side count of deadline-driven Soft retries within the current
     /// recovery cycle. Retries that keep failing to converge prove the
     /// restart is not repairing the transport (e.g. the restart rebind
@@ -359,6 +369,7 @@ impl RtcPeerState {
             recovery_epoch: 0,
             recovery_cycle: 0,
             recovery_attempt_started: false,
+            recovery_from_network_available: false,
             soft_recovery_attempts: 0,
             address_edge_pending: false,
             ever_connected: false,

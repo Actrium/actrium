@@ -1676,13 +1676,22 @@ fn reduce_command(
             }
             state.last_remote_restart_request = Some((request_id, attempt));
 
-            // Both endpoints normally receive NetworkAvailable. The offerer
-            // may therefore have already started the same soft-recovery round
-            // before the answerer's first correlated wake arrives. Starting a
-            // second restart_ice/offer concurrently corrupts the v0.20
-            // signaling state machine. A later attempt remains an explicit
-            // retransmission wake and is allowed to restart the round.
-            if attempt == 1 && state.recovery_inflight && state.recovery_attempt_started {
+            // De-dupe the answerer's first correlated wake ONLY when this
+            // offerer started the current round off its own recovery signal
+            // (NetworkAvailable / AppForeground / SignalingGenerationChanged):
+            // then both endpoints are already running the same round and a
+            // second restart_ice/offer would race it. When the round came
+            // from the peer's death (a one-sided outage — only the answerer
+            // lost the network), the wake is the offerer's ONLY signal that
+            // the answerer is back and waiting: de-duping it would stall the
+            // pair for a full attempt-deadline cadence (issue #227). A later
+            // attempt remains an explicit retransmission wake and is allowed
+            // to restart the round.
+            if attempt == 1
+                && state.recovery_inflight
+                && state.recovery_attempt_started
+                && state.recovery_from_network_available
+            {
                 return;
             }
 
@@ -2072,6 +2081,10 @@ fn maybe_start_deferred_recovery(state: &mut RtcPeerState, effects: &mut Vec<Rtc
     } else {
         start_soft_recovery(state, effects);
     }
+    // This round was started by the offerer's own recovery signal
+    // (NetworkAvailable / AppForeground / SignalingGenerationChanged) — the
+    // attempt-1 de-dupe guard applies to it.
+    state.recovery_from_network_available = true;
 }
 
 fn reduce_network_event(
@@ -2287,6 +2300,9 @@ fn start_soft_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
         defer_recovery_until_gate(state, false);
         return;
     }
+    // A driver-side fact (e.g. the peer's PC death) starts this round, not the
+    // offerer's own network-recovery signal — see the attempt-1 de-dupe guard.
+    state.recovery_from_network_available = false;
     clear_negotiation_for_recovery(state);
     if !state.recovery_inflight {
         state.recovery_cycle = state.recovery_cycle.wrapping_add(1);

@@ -2936,6 +2936,84 @@ fn offerer_deduplicates_restart_request_but_retries_newer_attempt() {
 }
 
 #[test]
+fn attempt1_restart_request_wakes_offerer_round_in_flight() {
+    // Issue #227 (one-sided outage): only the ANSWERER side lost the network;
+    // the offerer's own Soft Recovery is already in flight. The answerer's
+    // first correlated wake (attempt=1) must restart the round immediately —
+    // same reset-then-restart path later retransmissions use — instead of
+    // being de-duped and stalling the pair for a full attempt-deadline
+    // cadence (iOS on-device echo was 5326ms before the fix).
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let ice_before = state.ice_generation;
+
+    // The offerer's own round is running (its PC also died, e.g. it detected
+    // the dead ICE).
+    state.recovery_inflight = true;
+    state.recovery_attempt_started = true;
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequest {
+            request_id: "wake-1".to_string(),
+            attempt: 1,
+        }),
+    );
+
+    assert!(
+        has_restart_ice(&effects, generation),
+        "attempt=1 must wake the offerer into an immediate RestartIce (fresh offer), not wait for the deadline"
+    );
+    assert_eq!(
+        state.ice_generation,
+        ice_before + 1,
+        "the woken round rolls the ICE generation"
+    );
+    assert_eq!(
+        state.last_remote_restart_request,
+        Some(("wake-1".to_string(), 1)),
+        "the wake is recorded as the latest remote request"
+    );
+}
+
+#[test]
+fn attempt2_restart_request_wakes_offerer_into_fresh_round() {
+    // The explicit retransmission wake: a LATER attempt (>=2) is allowed to
+    // restart the round even while one is in flight — it resets the started
+    // flag and drives a fresh Soft Recovery offer immediately, instead of
+    // waiting for the per-attempt deadline.
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let ice_before = state.ice_generation;
+
+    state.recovery_inflight = true;
+    state.recovery_attempt_started = true;
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequest {
+            request_id: "wake-1".to_string(),
+            attempt: 2,
+        }),
+    );
+
+    assert!(
+        has_restart_ice(&effects, generation),
+        "attempt=2 must wake the offerer into an immediate RestartIce (fresh offer), not wait for the deadline"
+    );
+    assert_eq!(
+        state.ice_generation,
+        ice_before + 1,
+        "the woken round rolls the ICE generation"
+    );
+    assert_eq!(
+        state.last_remote_restart_request,
+        Some(("wake-1".to_string(), 2)),
+        "the newer attempt is recorded as the latest remote request"
+    );
+}
+
+#[test]
 fn ineligible_restart_request_is_not_consumed_before_session_is_ready() {
     let mut state = RtcPeerState::new(test_actor_id(1));
 
