@@ -11,6 +11,7 @@
 //! * `Candidate(init)` → `IceCandidate { candidate, sdp_mid, ... }`
 //! * `RoleNegotiation` → `RoleNegotiation { from, to, realm_id }`
 //! * `RoleAssignment { is_offerer }` → `RoleAssignment { is_offerer, .. }`
+//! * `IceRestartRequestAck { .. }` → `IceRestartRequestAck { .. }`
 //!
 //! The reverse mapping applies on receive. Non-`ActrRelay` envelopes (heartbeat,
 //! registration, route candidates) are not forwarded to the v0.20 router — they
@@ -87,6 +88,15 @@ impl V020SignalingTransport {
                 reason: Some("v020_recovery".to_string()),
                 request_id: Some(request_id.clone()),
                 attempt: Some(*attempt),
+            }),
+            SignalingMessage::IceRestartRequestAck {
+                request_id,
+                attempt,
+                outcome,
+            } => actr_relay::Payload::IceRestartRequestAck(actr_protocol::IceRestartRequestAck {
+                request_id: request_id.clone(),
+                attempt: Some(*attempt),
+                outcome: Some(*outcome),
             }),
             SignalingMessage::Answer { desc, exchange_id } => {
                 actr_relay::Payload::SessionDescription(actr_protocol::SessionDescription {
@@ -179,13 +189,21 @@ impl V020SignalingTransport {
                     attempt: request.attempt.unwrap_or(1),
                 })
             }
+            actr_relay::Payload::IceRestartRequestAck(ack) => {
+                Some(SignalingMessage::IceRestartRequestAck {
+                    request_id: ack.request_id,
+                    attempt: ack.attempt.unwrap_or(1),
+                    outcome: ack.outcome.unwrap_or(
+                        actr_protocol::ice_restart_request_ack::Outcome::Accepted as i32,
+                    ),
+                })
+            }
             actr_relay::Payload::IceRestartRejected(rejection) => {
                 Some(SignalingMessage::IceRestartRejected {
                     exchange_id: rejection.sdp_exchange_id,
                     reason: rejection.reason.unwrap_or_default(),
                 })
             }
-            _ => None,
         }
     }
 }
@@ -855,6 +873,34 @@ mod tests {
             V020SignalingTransport::payload_to_message(payload),
             Some(SignalingMessage::IceRestartRequest { request_id, attempt })
                 if request_id == "request-1" && attempt == 2
+        ));
+    }
+
+    #[test]
+    fn ice_restart_request_ack_round_trips() {
+        let outcome = actr_protocol::ice_restart_request_ack::Outcome::NoActiveSession as i32;
+        let message = SignalingMessage::IceRestartRequestAck {
+            request_id: "request-ack-1".to_string(),
+            attempt: 3,
+            outcome,
+        };
+        let payload = conversion_only_transport().message_to_payload(&test_id(2), &message);
+        let actr_relay::Payload::IceRestartRequestAck(ack) = payload else {
+            panic!("expected IceRestartRequestAck payload");
+        };
+        assert_eq!(ack.request_id, "request-ack-1");
+        assert_eq!(ack.attempt, Some(3));
+        assert_eq!(ack.outcome, Some(outcome));
+
+        assert!(matches!(
+            V020SignalingTransport::payload_to_message(
+                actr_relay::Payload::IceRestartRequestAck(ack)
+            ),
+            Some(SignalingMessage::IceRestartRequestAck {
+                request_id,
+                attempt: 3,
+                outcome: actual_outcome,
+            }) if request_id == "request-ack-1" && actual_outcome == outcome
         ));
     }
 }

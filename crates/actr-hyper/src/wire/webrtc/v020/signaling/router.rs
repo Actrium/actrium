@@ -5,8 +5,9 @@
 //! stream (RFC: "the SignalingClient receive stream MUST have one consumer").
 //! Inbound Offer/Answer/Candidate/RoleAssignment are dispatched to the target
 //! peer's controller; an offer from an unknown peer requests the manager to create
-//! an answerer controller. Outbound messages from controllers are forwarded onto
-//! the transport.
+//! an answerer controller. A request acknowledgement is also routed back to the
+//! requester's Controller so a missing remote Session can start a fresh attempt.
+//! Outbound messages from controllers are forwarded onto the transport.
 //!
 //! The router is transport-agnostic: [`SignalingTransport`] abstracts the wire
 //! (the production WebSocket signaling client, or an in-memory bus in tests).
@@ -21,6 +22,8 @@ use tokio::sync::mpsc;
 
 use crate::wire::webrtc::v020::manager::RtcConnectionManager;
 use crate::wire::webrtc::v020::peer::reducer::SignalingMessage;
+use crate::wire::webrtc::v020::peer::state::Role;
+use crate::wire::webrtc::v020::status::RtcPeerSnapshot;
 
 use super::{SharedLocalId, SignalingDispatch, SignalingInbound};
 
@@ -79,6 +82,18 @@ fn message_strands_negotiation(message: &SignalingMessage) -> bool {
             | SignalingMessage::Answer { .. }
             | SignalingMessage::IceRestartOffer { .. }
     )
+}
+
+fn restart_request_ack_outcome(snapshot: &RtcPeerSnapshot) -> i32 {
+    use actr_protocol::ice_restart_request_ack::Outcome;
+
+    if snapshot.role != Role::Offerer {
+        Outcome::WrongRole as i32
+    } else if snapshot.pc_generation == 0 {
+        Outcome::NoActiveSession as i32
+    } else {
+        Outcome::Accepted as i32
+    }
 }
 
 /// Per-peer ordered dispatch chaining shared by the router (dispatch) and the
@@ -313,6 +328,29 @@ impl SignalingRouter {
     /// The per-peer dispatch chains, for the manager's teardown cleanup.
     pub(crate) fn dispatch_chains(&self) -> PeerDispatchChains {
         self.dispatch_chains.clone()
+    }
+
+    fn try_send_ice_restart_request_ack(
+        &self,
+        peer: ActrId,
+        request_id: String,
+        attempt: u32,
+        outcome: i32,
+    ) {
+        let sent = self.manager.try_send_signaling(
+            peer.clone(),
+            SignalingMessage::IceRestartRequestAck {
+                request_id,
+                attempt,
+                outcome,
+            },
+        );
+        if !sent {
+            tracing::warn!(
+                peer = %peer.to_string_repr(),
+                "outbound signaling full; dropped ICE restart request acknowledgement"
+            );
+        }
     }
 
     /// Run the routing loop: forward controller-originated messages onto the
@@ -613,20 +651,25 @@ impl SignalingRouter {
                 attempt,
             } => {
                 if let Some(handle) = self.manager.get_controller(&from).await {
-                    let _ = handle.apply_ice_restart_request(request_id, attempt).await;
+                    let outcome = restart_request_ack_outcome(&handle.snapshot());
+                    let applied = handle
+                        .apply_ice_restart_request(request_id.clone(), attempt)
+                        .await
+                        .is_ok();
+                    if applied {
+                        self.try_send_ice_restart_request_ack(from, request_id, attempt, outcome);
+                    }
                 } else {
-                    // A same-identity remote endpoint may have restarted and
-                    // therefore lost its controller before this request
-                    // arrived. The request is the recovery wake in exactly
-                    // that situation: bootstrap a fresh local controller and
-                    // let server role arbitration recreate the Offerer side.
-                    // Subsequent requests will find the controller and be
-                    // handled by the normal attempt/identity reducer.
-                    tracing::debug!(
-                        peer = %from.to_string_repr(),
-                        "received ICE restart request for unknown peer; attempting inbound recovery wake"
+                    // Preserve the pre-542 Coordinator contract: a request
+                    // cannot be applied without a local Controller/Session.
+                    // The Answerer consumes this negative acknowledgement and
+                    // starts a fresh role-negotiated connection attempt.
+                    self.try_send_ice_restart_request_ack(
+                        from,
+                        request_id,
+                        attempt,
+                        actr_protocol::ice_restart_request_ack::Outcome::NoActiveSession as i32,
                     );
-                    self.manager.connect_from_inbound_recovery(from).await;
                 }
             }
             SignalingMessage::Answer { desc, exchange_id } => {
@@ -678,6 +721,22 @@ impl SignalingRouter {
                 );
                 if let Some(handle) = self.manager.get_controller(&from).await {
                     let _ = handle.force_reconnect().await;
+                }
+            }
+            SignalingMessage::IceRestartRequestAck {
+                request_id,
+                attempt,
+                outcome,
+            } => {
+                if let Some(handle) = self.manager.get_controller(&from).await {
+                    let _ = handle
+                        .apply_ice_restart_request_ack(request_id, attempt, outcome)
+                        .await;
+                } else {
+                    tracing::debug!(
+                        peer = %from.to_string_repr(),
+                        "dropping ICE restart request acknowledgement for unknown peer"
+                    );
                 }
             }
         }

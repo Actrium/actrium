@@ -5178,6 +5178,42 @@ fn answerer_soft_recovery_sends_request_without_local_restart_ice() {
     assert_eq!(state.phase, RtcPeerPhase::Recovering);
 }
 
+#[test]
+fn answerer_no_active_session_ack_starts_fresh_role_negotiation() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_negotiating(&mut state);
+    drive_to_sendable(&mut state, generation);
+
+    let request = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::LocalAddressChanged,
+        )),
+    );
+    assert!(has_restart_request(&request, 1));
+    let request_id = state
+        .local_restart_request_id
+        .clone()
+        .expect("answerer request identity");
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequestAck {
+            request_id,
+            attempt: 1,
+            outcome: actr_protocol::ice_restart_request_ack::Outcome::NoActiveSession as i32,
+        }),
+    );
+
+    assert!(has_close_session(&effects, generation));
+    assert!(has_role_negotiation(&effects));
+    assert_eq!(state.role, Role::Undetermined);
+    assert!(state.role_negotiation_inflight);
+    assert!(state.initial_connection_inflight);
+    assert_eq!(state.active_generation, None);
+    assert_eq!(state.phase, RtcPeerPhase::Building);
+}
+
 /// Once the answerer joins the offerer's recovery round by applying the
 /// restart offer, its already-sent request is complete: the answer path must
 /// not re-emit another restart request (a late duplicate would race the

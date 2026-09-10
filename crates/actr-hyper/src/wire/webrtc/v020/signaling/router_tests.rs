@@ -1,5 +1,5 @@
 //! SignalingRouter tests: routing by remote ActrId, answerer creation on
-//! unknown offer, and role-assignment dispatch.
+//! unknown offers, restart-request acknowledgements, and role assignment.
 
 use std::sync::Arc;
 
@@ -145,6 +145,43 @@ async fn unknown_offer_creates_answerer_controller() {
         manager.get_controller(&peer).await.is_some(),
         "an unknown offer must create an answerer controller"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unknown_restart_request_returns_no_active_session_ack() {
+    let (manager, router, mut signaling_rx) = router();
+    let peer = test_actor_id(11);
+
+    router
+        .route_inbound(
+            peer.clone(),
+            SignalingMessage::IceRestartRequest {
+                request_id: "request-unknown-peer".to_string(),
+                attempt: 2,
+            },
+        )
+        .await;
+
+    assert!(
+        manager.get_controller(&peer).await.is_none(),
+        "a request without a Controller must not implicitly create one"
+    );
+    let dispatch = signaling_rx
+        .recv()
+        .await
+        .expect("NoActiveSession Ack should be emitted");
+    assert_eq!(dispatch.peer, peer);
+    assert!(dispatch.attempt.is_none(), "protocol Ack is untracked");
+    assert!(matches!(
+        dispatch.message,
+        SignalingMessage::IceRestartRequestAck {
+            request_id,
+            attempt: 2,
+            outcome,
+        } if request_id == "request-unknown-peer"
+            && outcome
+                == actr_protocol::ice_restart_request_ack::Outcome::NoActiveSession as i32
+    ));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -809,9 +846,9 @@ async fn run_drains_and_returns_when_transport_closes() {
     drop(manager);
 }
 
-/// Dispatches for peers that never obtain a controller (their messages are
-/// dropped by contract) must not leave chain entries behind; a peer whose
-/// Offer created a controller keeps its entry for teardown.
+/// Dispatches for peers that never obtain a controller must not leave chain
+/// entries behind; a peer whose Offer created a controller keeps its entry for
+/// teardown. Request-only messages may still emit a protocol Ack.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn unknown_peer_dispatches_leave_no_chain_entries() {
     let RunningRouter {
@@ -838,8 +875,8 @@ async fn unknown_peer_dispatches_leave_no_chain_entries() {
         .await
         .expect("feed offer");
 
-    // Every router-level message kind that can spawn an entry for a peer
-    // without creating a controller cleans up the same way.
+    // Every router-level message kind that does not create a controller must
+    // clean up its dispatch entry the same way.
     inbound_tx
         .send((
             stranger.clone(),

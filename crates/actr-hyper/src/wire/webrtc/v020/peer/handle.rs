@@ -708,6 +708,22 @@ impl RtcPeerControllerHandle {
         .await
     }
 
+    /// Deliver the receiver's acknowledgement for this controller's current
+    /// Answerer-side restart request.
+    pub(crate) async fn apply_ice_restart_request_ack(
+        &self,
+        request_id: String,
+        attempt: u32,
+        outcome: i32,
+    ) -> Result<(), ControllerGone> {
+        self.send_command(RtcPeerCommand::ApplyIceRestartRequestAck {
+            request_id,
+            attempt,
+            outcome,
+        })
+        .await
+    }
+
     /// Deliver a remote ICE candidate (from the signaling router).
     pub(crate) async fn apply_remote_candidate(
         &self,
