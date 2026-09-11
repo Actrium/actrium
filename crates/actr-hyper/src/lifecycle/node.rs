@@ -385,6 +385,28 @@ async fn send_envelope_to_caller(
                     }
                 }
             }
+            if waited.is_err() {
+                let submitted = manager.submit_recovery_hint(caller, request_id).await;
+                if submitted {
+                    tracing::warn!(
+                        target: "actr_response_send",
+                        request_id = %request_id,
+                        route_key = %route_key,
+                        target_actor = %caller,
+                        recovery_hint_submitted = true,
+                        "response sendability wait elapsed; recovery hint submitted"
+                    );
+                } else {
+                    tracing::warn!(
+                        target: "actr_response_send",
+                        request_id = %request_id,
+                        route_key = %route_key,
+                        target_actor = %caller,
+                        recovery_hint_submitted = false,
+                        "response sendability wait elapsed; recovery hint was not accepted"
+                    );
+                }
+            }
             tracing::error!(
                 severity = 7,
                 error_category = "transport_error",

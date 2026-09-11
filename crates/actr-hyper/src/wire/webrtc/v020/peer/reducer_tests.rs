@@ -2642,7 +2642,7 @@ fn business_recovery_hint_wakes_answerer_once_per_recovery_cycle() {
 
     let wake = reduce(
         &mut state,
-        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+        RtcPeerInput::Command(RtcPeerCommand::BusinessRecoveryHint {
             transport_epoch,
             pc_generation: generation,
         }),
@@ -2653,7 +2653,7 @@ fn business_recovery_hint_wakes_answerer_once_per_recovery_cycle() {
 
     let duplicate = reduce(
         &mut state,
-        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+        RtcPeerInput::Command(RtcPeerCommand::BusinessRecoveryHint {
             transport_epoch,
             pc_generation: generation,
         }),
@@ -2709,7 +2709,7 @@ fn business_recovery_hint_does_not_race_answerer_sdp() {
     let transport_epoch = state.transport_epoch;
     let hint = reduce(
         &mut state,
-        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+        RtcPeerInput::Command(RtcPeerCommand::BusinessRecoveryHint {
             transport_epoch,
             pc_generation: generation,
         }),
@@ -3156,14 +3156,238 @@ fn attempt1_restart_request_is_deduped_while_local_restart_is_inflight() {
 }
 
 #[test]
-fn attempt1_restart_request_graces_an_announced_offer_then_retries() {
+fn response_recovery_hint_starts_missing_soft_recovery() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let transport_epoch = state.transport_epoch;
+
+    // Model a live session whose response arrived through the lane, but whose
+    // controller has no recovery cycle despite being non-sendable.
+    state.phase = RtcPeerPhase::TransportReady;
+    state.pc_connected = false;
+    state.rpc_reliable_open = false;
+    state.recovery_inflight = false;
+    state.recovery_attempt_started = false;
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            request_id: "response-hint-1".to_string(),
+            transport_epoch,
+            pc_generation: generation,
+        }),
+    );
+
+    assert!(has_restart_ice(&effects, generation));
+    assert!(state.recovery_inflight);
+    assert!(state.recovery_attempt_started);
+    assert_eq!(state.recovery_origin, Some(RecoveryOrigin::PeerFailure));
+}
+
+#[test]
+fn response_recovery_hint_is_noop_without_active_generation() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let transport_epoch = state.transport_epoch;
+    let stale_before = state.stale_events;
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            request_id: "response-hint-no-generation".to_string(),
+            transport_epoch,
+            pc_generation: 0,
+        }),
+    );
+
+    assert!(effects.is_empty());
+    assert!(!state.recovery_inflight);
+    assert_eq!(state.stale_events, stale_before);
+}
+
+#[test]
+fn response_recovery_hint_starts_hard_recovery_after_address_change() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let transport_epoch = state.transport_epoch;
+    state.phase = RtcPeerPhase::TransportReady;
+    state.pc_connected = false;
+    state.rpc_reliable_open = false;
+    state.address_changed = true;
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            request_id: "response-hint-hard".to_string(),
+            transport_epoch,
+            pc_generation: generation,
+        }),
+    );
+
+    assert!(has_build_session(&effects, generation + 1));
+    assert!(state.recovery_inflight);
+    assert!(state.recovery_attempt_started);
+    assert_eq!(state.building_generation, Some(generation + 1));
+}
+
+#[test]
+fn response_recovery_hint_defers_until_recovery_gate_reopens() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let transport_epoch = state.transport_epoch;
+    state.phase = RtcPeerPhase::TransportReady;
+    state.pc_connected = false;
+    state.rpc_reliable_open = false;
+    state.signaling_generation = None;
+
+    let deferred = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            request_id: "response-hint-deferred".to_string(),
+            transport_epoch,
+            pc_generation: generation,
+        }),
+    );
+    assert!(deferred.is_empty());
+    assert!(state.recovery_inflight);
+    assert!(!state.recovery_attempt_started);
+
+    let resumed = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::SignalingGenerationChanged {
+                generation: Some(0),
+            },
+        )),
+    );
+    assert!(has_restart_ice(&resumed, generation));
+    assert!(state.recovery_attempt_started);
+}
+
+#[test]
+fn response_recovery_hint_is_rejected_after_close_requested() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let transport_epoch = state.transport_epoch;
+    state.close_requested = true;
+    let stale_before = state.stale_events;
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            request_id: "response-hint-closed".to_string(),
+            transport_epoch,
+            pc_generation: generation,
+        }),
+    );
+
+    assert!(effects.is_empty());
+    assert_eq!(state.stale_events, stale_before + 1);
+    assert!(!state.recovery_inflight);
+}
+
+#[test]
+fn response_recovery_hint_is_observational_when_sendable() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let transport_epoch = state.transport_epoch;
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            request_id: "response-hint-sendable".to_string(),
+            transport_epoch,
+            pc_generation: generation,
+        }),
+    );
+
+    assert!(effects.is_empty());
+    assert!(state.sendable());
+    assert_eq!(state.ice_generation, 0);
+    assert_eq!(state.stale_events, 0);
+}
+
+#[test]
+fn response_recovery_hint_does_not_restart_an_owned_recovery_attempt() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let first = reduce(&mut state, failed_tick(generation));
+    assert!(has_restart_ice(&first, generation));
+    let ice_generation = state.ice_generation;
+    let transport_epoch = state.transport_epoch;
+
+    let hint = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            request_id: "response-hint-2".to_string(),
+            transport_epoch,
+            pc_generation: generation,
+        }),
+    );
+
+    assert!(hint.is_empty());
+    assert_eq!(state.ice_generation, ice_generation);
+    assert_eq!(state.stale_events, 0);
+}
+
+#[test]
+fn stale_response_recovery_hint_is_ignored() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let transport_epoch = state.transport_epoch;
+    // Keep the generation live but make the controller non-sendable. Without
+    // this setup the sendable fast path would hide a removed/inverted identity
+    // fence and the test could pass without proving the hint was rejected as
+    // stale.
+    state.phase = RtcPeerPhase::TransportReady;
+    state.pc_connected = false;
+    state.rpc_reliable_open = false;
+    let stale_before = state.stale_events;
+    let stale = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            request_id: "response-hint-stale".to_string(),
+            transport_epoch: transport_epoch.saturating_sub(1),
+            pc_generation: generation,
+        }),
+    );
+
+    assert!(stale.is_empty());
+    assert!(!state.recovery_inflight);
+    assert_eq!(state.ice_generation, 0);
+    assert_eq!(state.stale_events, stale_before + 1);
+
+    let stale_generation = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            request_id: "response-hint-stale-generation".to_string(),
+            transport_epoch,
+            pc_generation: generation.saturating_sub(1),
+        }),
+    );
+    assert!(stale_generation.is_empty());
+    assert_eq!(state.ice_generation, 0);
+    assert_eq!(state.stale_events, stale_before + 2);
+}
+
+#[test]
+fn attempt1_restart_request_graces_local_network_announced_offer_then_retries() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let generation = drive_offerer_to_sendable(&mut state);
 
     // Build the announced Offer through the production reducer path so this
     // test exercises the same RestartIce -> CreateOffer -> SetLocalDescription
     // state that the controller uses before the request wake arrives.
-    let restart = reduce(&mut state, failed_tick(generation));
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkUnavailable,
+        )),
+    );
+    let restart = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkAvailable,
+        )),
+    );
+    assert_eq!(state.recovery_origin, Some(RecoveryOrigin::LocalNetwork));
     let (restart_operation_id, restart_ice_generation) = restart_identity(&restart, generation);
     let create_offer = reduce(
         &mut state,

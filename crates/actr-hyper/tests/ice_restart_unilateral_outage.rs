@@ -9,15 +9,15 @@
 //! Before the fix the offerer de-duplicated that request and did not emit
 //! another offer until the ten-second attempt deadline. The regression test
 //! requires the request itself to produce the next `IceRestartOffer` within a
-//! short wake window.
+//! short wake window and then verifies that the real pair becomes usable again.
 
 use std::time::Duration;
 
 use actr_hyper::lifecycle::{NetworkAvailability, NetworkTransportFlags};
 use actr_hyper::test_support::{
-    ConnectionInitiator, ICE_RESTART_ATTEMPT_TIMEOUT, LinkDirection, MobileRtcPairHarness,
-    PairEndpoint, REMOTE_REQUEST_WAKE_GRACE, SignalingFaultRule, SignalingMessageClass,
-    TestRtcRole, install_test_crypto_provider,
+    ConnectionInitiator, ICE_RESTART_ATTEMPT_TIMEOUT, MobileRtcPairHarness, PairEndpoint,
+    REMOTE_REQUEST_WAKE_GRACE, SignalingFaultRule, SignalingMessageClass, TestRtcRole,
+    install_test_crypto_provider,
 };
 
 const SETUP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -57,13 +57,15 @@ async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
         SignalingMessageClass::IceRestartOffer,
     );
 
-    // Keep signaling alive but drop the offerer's first restart offer. This
-    // makes the offerer's recovery round genuinely in-flight while the
-    // answerer is still unavailable, without allowing a successful answer to
-    // race the request wake under test.
-    pair.set_signaling_fault(
-        LinkDirection::BToA,
+    // Keep signaling alive but drop only the offerer's first restart offer.
+    // This makes the recovery round genuinely in-flight while the answerer is
+    // still unavailable, then lets the request-triggered offer complete the
+    // real Offer/Answer and data-channel recovery below.
+    pair.harness().signaling_faults.set_nth_rule(
+        offerer.clone(),
+        answerer.clone(),
         SignalingMessageClass::IceRestartOffer,
+        offer_baseline + 1,
         SignalingFaultRule::Drop,
     );
 
@@ -145,9 +147,9 @@ async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
     let request_observed_after = request.observed_after;
 
     // The issue-227 fix makes this request reset the in-flight round and
-    // produce the next offer within the short grace/retry window. The offer is
-    // still dropped so the assertion observes the signaling action itself
-    // rather than a later readiness transition.
+    // produce the next offer within the short grace/retry window. The helper
+    // owns the only timeout so a timeout failure is distinguishable from a
+    // fresh Offer arriving with an unexpected count.
     let wake_offer = pair
         .harness()
         .signaling_faults
@@ -158,6 +160,13 @@ async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
             offers_before_wake,
             REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW,
         )
+        .await
+        .expect("attempt-1 request must produce a fresh Offer before the wake deadline");
+
+    let recovered = pair.wait_pair_ready(SETUP_TIMEOUT).await;
+    assert!(recovered.a_to_b.sendable);
+    assert!(recovered.b_to_a.sendable);
+    pair.assert_rpc_both_directions("unilateral_outage_after_attempt1_wake")
         .await;
 
     let trace = pair.harness().signaling_faults.trace();
@@ -177,15 +186,178 @@ async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
     pair.heal_signaling_faults();
     pair.shutdown().await;
 
-    assert!(
-        wake_offer.is_some(),
-        "attempt-1 restart request must trigger a fresh offer within {:?}",
-        REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW
-    );
+    assert!(wake_offer > offers_before_wake);
+    let previous_offer_exchange = trace
+        .iter()
+        .rev()
+        .find(|event| {
+            event.from == offerer
+                && event.to == answerer
+                && event.class == SignalingMessageClass::IceRestartOffer
+                && event.ordinal <= offers_before_wake
+        })
+        .and_then(|event| event.exchange_id.as_deref());
+    let fresh_offer_exchange = trace
+        .iter()
+        .find(|event| {
+            event.from == offerer
+                && event.to == answerer
+                && event.class == SignalingMessageClass::IceRestartOffer
+                && event.ordinal > offers_before_wake
+        })
+        .and_then(|event| event.exchange_id.as_deref());
+    assert!(fresh_offer_exchange.is_some());
+    assert_ne!(fresh_offer_exchange, previous_offer_exchange);
     assert!(
         wake_elapsed <= REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW,
         "fresh Offer arrived {:?} after the observed attempt-1 request, beyond the {:?} wake window",
         wake_elapsed,
         REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn local_network_recovery_retries_lost_offer_on_attempt1_wake() {
+    install_test_crypto_provider();
+
+    let mut pair = MobileRtcPairHarness::new(52_211, 52_212).await;
+    pair.establish(ConnectionInitiator::B).await;
+    let initial = pair.wait_pair_ready(SETUP_TIMEOUT).await;
+    assert_eq!(initial.role_a, TestRtcRole::Answerer);
+    assert_eq!(initial.role_b, TestRtcRole::Offerer);
+
+    let answerer = pair.id(PairEndpoint::A);
+    let offerer = pair.id(PairEndpoint::B);
+    let offer_baseline = pair.signaling_hits(
+        PairEndpoint::B,
+        PairEndpoint::A,
+        SignalingMessageClass::IceRestartOffer,
+    );
+
+    // This time both endpoints report the network transition. B therefore
+    // owns a LocalNetwork recovery origin, which must not suppress the wake
+    // after its first Offer has already been announced and lost.
+    pair.harness().signaling_faults.set_nth_rule(
+        offerer.clone(),
+        answerer.clone(),
+        SignalingMessageClass::IceRestartOffer,
+        offer_baseline + 1,
+        SignalingFaultRule::Drop,
+    );
+    pair.network_path(
+        PairEndpoint::A,
+        1,
+        NetworkAvailability::Unavailable,
+        NetworkTransportFlags::default(),
+    )
+    .await;
+    pair.network_path(
+        PairEndpoint::B,
+        1,
+        NetworkAvailability::Unavailable,
+        NetworkTransportFlags::default(),
+    )
+    .await;
+    pair.wait_not_sendable(PairEndpoint::A, SETUP_TIMEOUT).await;
+    pair.wait_not_sendable(PairEndpoint::B, SETUP_TIMEOUT).await;
+
+    // Restore the Offerer first. Its local-network recovery publishes an
+    // Offer, but the first one is intentionally lost.
+    pair.network_path(PairEndpoint::B, 2, NetworkAvailability::Available, wifi())
+        .await;
+    pair.harness()
+        .signaling_faults
+        .wait_for_hits_after(
+            &offerer,
+            &answerer,
+            SignalingMessageClass::IceRestartOffer,
+            offer_baseline,
+            SETUP_TIMEOUT,
+        )
+        .await
+        .expect("the local-network recovery Offer must be observed and dropped");
+
+    // Restoring the Answerer sends attempt=1. Once the local Offer operation
+    // has finished, this request must use the same short retry/grace path as a
+    // peer-failure recovery instead of waiting for the normal 10s deadline.
+    let offers_before_wake = pair.signaling_hits(
+        PairEndpoint::B,
+        PairEndpoint::A,
+        SignalingMessageClass::IceRestartOffer,
+    );
+    let request_baseline = pair.signaling_hits(
+        PairEndpoint::A,
+        PairEndpoint::B,
+        SignalingMessageClass::IceRestartRequest,
+    );
+    pair.network_path(PairEndpoint::A, 2, NetworkAvailability::Available, wifi())
+        .await;
+    pair.harness()
+        .signaling_faults
+        .wait_for_hits_after(
+            &answerer,
+            &offerer,
+            SignalingMessageClass::IceRestartRequest,
+            request_baseline,
+            SETUP_TIMEOUT,
+        )
+        .await
+        .expect("the returning Answerer must send attempt-1 restart request");
+    let request = pair
+        .harness()
+        .signaling_faults
+        .trace()
+        .into_iter()
+        .rev()
+        .find(|event| {
+            event.from == answerer
+                && event.to == offerer
+                && event.class == SignalingMessageClass::IceRestartRequest
+                && event.ordinal > request_baseline
+        })
+        .expect("the returning Answerer request must be present in the signaling trace");
+    assert_eq!(request.attempt, Some(1));
+
+    let wake_offer = pair
+        .harness()
+        .signaling_faults
+        .wait_for_hits_after(
+            &offerer,
+            &answerer,
+            SignalingMessageClass::IceRestartOffer,
+            offers_before_wake,
+            REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW,
+        )
+        .await
+        .expect("local-network attempt-1 wake must produce a fresh Offer before the wake deadline");
+
+    pair.heal_signaling_faults();
+    pair.wait_pair_ready(SETUP_TIMEOUT).await;
+    pair.assert_rpc_both_directions("local_network_attempt1_wake")
+        .await;
+    let trace = pair.harness().signaling_faults.trace();
+    pair.shutdown().await;
+
+    assert!(wake_offer > offers_before_wake);
+    let previous_offer_exchange = trace
+        .iter()
+        .rev()
+        .find(|event| {
+            event.from == offerer
+                && event.to == answerer
+                && event.class == SignalingMessageClass::IceRestartOffer
+                && event.ordinal <= offers_before_wake
+        })
+        .and_then(|event| event.exchange_id.as_deref());
+    let fresh_offer_exchange = trace
+        .iter()
+        .find(|event| {
+            event.from == offerer
+                && event.to == answerer
+                && event.class == SignalingMessageClass::IceRestartOffer
+                && event.ordinal > offers_before_wake
+        })
+        .and_then(|event| event.exchange_id.as_deref());
+    assert!(fresh_offer_exchange.is_some());
+    assert_ne!(fresh_offer_exchange, previous_offer_exchange);
 }

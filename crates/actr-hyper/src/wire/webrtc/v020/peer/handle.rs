@@ -182,10 +182,10 @@ impl RtcPeerControllerHandle {
         self.snapshot_rx.borrow().clone()
     }
 
-    pub(crate) fn try_recovery_hint(&self) -> bool {
+    pub(crate) fn try_business_recovery_hint(&self) -> bool {
         let snapshot = self.snapshot();
         self.command_tx
-            .try_send(RtcPeerCommand::RecoveryHint {
+            .try_send(RtcPeerCommand::BusinessRecoveryHint {
                 transport_epoch: snapshot.transport_epoch,
                 pc_generation: snapshot.pc_generation,
             })
@@ -771,6 +771,20 @@ impl RtcPeerControllerHandle {
             pc_generation,
         })
         .await
+    }
+
+    /// Best-effort response-path prompt. The snapshot identity is captured at
+    /// submission so the reducer can discard a hint that races a replacement
+    /// Controller/PC attempt without blocking the caller on a full mailbox.
+    pub(crate) fn try_recovery_hint(&self, request_id: String) -> bool {
+        let snapshot = self.snapshot();
+        self.command_tx
+            .try_send(RtcPeerCommand::RecoveryHint {
+                request_id,
+                transport_epoch: snapshot.transport_epoch,
+                pc_generation: snapshot.pc_generation,
+            })
+            .is_ok()
     }
 
     /// Deliver the server's role assignment (from the signaling router).

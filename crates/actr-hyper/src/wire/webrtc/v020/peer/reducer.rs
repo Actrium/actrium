@@ -56,7 +56,7 @@ pub(crate) enum RtcPeerCommand {
     /// Ensure the peer is connected; initiates the offerer flow from `Idle`.
     Connect,
     /// Business demand for an existing recovering connection; never carries payloads.
-    RecoveryHint {
+    BusinessRecoveryHint {
         transport_epoch: u64,
         pc_generation: u64,
     },
@@ -118,6 +118,16 @@ pub(crate) enum RtcPeerCommand {
         transport_epoch: u64,
         pc_generation: u64,
     },
+    /// The response path waited for this peer's reliable lane but the
+    /// controller still reported it as non-sendable. This is a best-effort,
+    /// identity-fenced repair/diagnostic prompt: it may start a missing
+    /// recovery cycle, but it never resets an already-running attempt or its
+    /// deadline and therefore cannot create a duplicate restart.
+    RecoveryHint {
+        request_id: String,
+        transport_epoch: u64,
+        pc_generation: u64,
+    },
     /// The signaling server assigned this pair's role (`is_offerer`). Routed by
     /// the `SignalingRouter` from the server's `RoleAssignment` (RFC §"Role and
     /// glare handling").
@@ -175,7 +185,7 @@ impl std::fmt::Debug for RtcPeerCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Connect => f.write_str("Connect"),
-            Self::RecoveryHint { .. } => f.write_str("RecoveryHint"),
+            Self::BusinessRecoveryHint { .. } => f.write_str("BusinessRecoveryHint"),
             Self::ConnectCommitted { .. } => f.write_str("ConnectCommitted(..)"),
             Self::AbortTransportAttempt { transport_epoch } => f
                 .debug_struct("AbortTransportAttempt")
@@ -224,6 +234,16 @@ impl std::fmt::Debug for RtcPeerCommand {
                 pc_generation,
             } => f
                 .debug_struct("SignalingDeliveryFailed")
+                .field("transport_epoch", transport_epoch)
+                .field("pc_generation", pc_generation)
+                .finish(),
+            Self::RecoveryHint {
+                request_id,
+                transport_epoch,
+                pc_generation,
+            } => f
+                .debug_struct("RecoveryHint")
+                .field("request_id", request_id)
                 .field("transport_epoch", transport_epoch)
                 .field("pc_generation", pc_generation)
                 .finish(),
@@ -1466,19 +1486,17 @@ fn reduce_ice_restart_request(
     }
     state.last_remote_restart_request = Some((request_id.clone(), attempt));
 
-    // De-dupe the answerer's first correlated wake when either the offerer's
-    // own recovery signal already owns this round, or a local RestartIce/
-    // CreateOffer chain is still in flight. In both cases a second
-    // restart_ice/offer would race the active negotiation. Once the local
-    // Offer has been announced and no SDP operation is pending, the attempt-1
-    // wake is the only signal that a one-sided-outage Answerer is back and
-    // waiting; give the in-flight Offer a short grace window before retrying
-    // it (issue #227).
+    // De-dupe the answerer's first correlated wake while a local RestartIce /
+    // CreateOffer / SDP application chain is still in flight. A second offer
+    // at that point would race the active negotiation. The recovery origin
+    // alone is not enough to classify the request: a LocalNetwork round may
+    // have already announced an Offer that was lost by signaling, so once no
+    // SDP operation remains the request must reach the short grace/retry path
+    // below (issue #227).
     if attempt == 1
         && state.recovery_inflight
         && state.recovery_attempt_started
-        && (state.recovery_origin == Some(RecoveryOrigin::LocalNetwork)
-            || offerer_restart_negotiation_inflight(state))
+        && offerer_restart_negotiation_inflight(state)
     {
         // Even when the offerer's own recovery already owns the round, the
         // request is meaningful: it confirms that the answerer is waiting for
@@ -1572,7 +1590,7 @@ fn reduce_command(
     effects: &mut Vec<RtcPeerEffect>,
 ) {
     match command {
-        RtcPeerCommand::RecoveryHint {
+        RtcPeerCommand::BusinessRecoveryHint {
             transport_epoch,
             pc_generation,
         } => {
@@ -2161,6 +2179,11 @@ fn reduce_command(
                 negotiation_failed(state, effects);
             }
         }
+        RtcPeerCommand::RecoveryHint {
+            request_id,
+            transport_epoch,
+            pc_generation,
+        } => reduce_recovery_hint(state, effects, request_id, transport_epoch, pc_generation),
         RtcPeerCommand::EnsureLane(lane) => {
             // S5-4: during make-before-break, target the pending session (it
             // will become active after the switch). Otherwise target the
@@ -2197,6 +2220,140 @@ fn reduce_command(
         // driver event.
         RtcPeerCommand::AddTrack { .. } | RtcPeerCommand::RemoveTrack { .. } => {}
     }
+}
+
+/// Handle a response-path prompt after the peer stayed non-sendable for the
+/// bounded response wait. The prompt is not a second recovery authority:
+/// existing recovery owns its attempt/deadline, while a peer with an active
+/// but otherwise idle session gets one normal Soft/Hard recovery entry.
+fn reduce_recovery_hint(
+    state: &mut RtcPeerState,
+    effects: &mut Vec<RtcPeerEffect>,
+    request_id: String,
+    transport_epoch: u64,
+    pc_generation: u64,
+) {
+    let current_generation = state
+        .pending_generation
+        .or(state.building_generation)
+        .or(state.active_generation)
+        .unwrap_or(0);
+    if state.close_requested
+        || state.transport_epoch != transport_epoch
+        || current_generation != pc_generation
+    {
+        state.stale_events = state.stale_events.saturating_add(1);
+        tracing::debug!(
+            peer = %state.peer_id.to_string_repr(),
+            %request_id,
+            expected_transport_epoch = transport_epoch,
+            actual_transport_epoch = state.transport_epoch,
+            expected_pc_generation = pc_generation,
+            actual_pc_generation = current_generation,
+            "ignoring stale v0.20 response recovery hint"
+        );
+        return;
+    }
+
+    tracing::warn!(
+        target: "actr_response_send",
+        peer = %state.peer_id.to_string_repr(),
+        %request_id,
+        transport_epoch,
+        pc_generation,
+        ice_generation = state.ice_generation,
+        recovery_epoch = state.recovery_epoch,
+        recovery_cycle = state.recovery_cycle,
+        phase = ?state.phase,
+        pc_connected = state.pc_connected,
+        lane_open = state.rpc_reliable_open,
+        pending_pc_connected = state.pending_pc_connected,
+        pending_lane_open = state.pending_rpc_reliable_open,
+        awaiting_offer = state.awaiting_offer,
+        recovery_inflight = state.recovery_inflight,
+        recovery_attempt_started = state.recovery_attempt_started,
+        sendable = state.sendable(),
+        "v0.20 response path submitted a recovery hint"
+    );
+
+    // A response can race the final readiness publication. If the controller
+    // has already converged, the hint must be observational only.
+    if state.sendable() {
+        tracing::debug!(
+            peer = %state.peer_id.to_string_repr(),
+            %request_id,
+            action = "noop_already_sendable",
+            "v0.20 response recovery hint resolved"
+        );
+        return;
+    }
+
+    // Never reset an owned recovery attempt from a response waiter. If the
+    // cycle is deferred behind the lifecycle gate, use the normal gate-opening
+    // decision; it will remain blocked while the gate is closed.
+    if state.recovery_inflight {
+        let recovery_was_started = state.recovery_attempt_started;
+        let parked_answerer = state.role == Role::Answerer && state.awaiting_offer;
+        if !state.recovery_attempt_started {
+            maybe_start_deferred_recovery(state, effects);
+        }
+        let action = if recovery_was_started {
+            "coalesced_existing_recovery"
+        } else if parked_answerer {
+            "parked_answerer_awaiting_offer"
+        } else if effects.is_empty() {
+            "deferred_recovery_still_gated"
+        } else {
+            "resumed_deferred_recovery"
+        };
+        tracing::debug!(
+            peer = %state.peer_id.to_string_repr(),
+            %request_id,
+            action,
+            "v0.20 response recovery hint resolved"
+        );
+        return;
+    }
+
+    // A response could only have arrived through a live session. If its
+    // control-plane state is nevertheless non-sendable without a recovery
+    // cycle, enter the ordinary recovery ladder once. Address changes retain
+    // their stronger Hard-Recovery policy.
+    if state.active_generation.is_none() {
+        tracing::debug!(
+            peer = %state.peer_id.to_string_repr(),
+            %request_id,
+            action = "noop_without_active_generation",
+            "v0.20 response recovery hint resolved"
+        );
+        return;
+    }
+    state.phase = RtcPeerPhase::Recovering;
+    let address_changed = state.address_changed;
+    if state.address_changed {
+        start_hard_recovery(state, effects);
+    } else {
+        start_soft_recovery(state, effects, RecoveryOrigin::PeerFailure);
+    }
+    let action = if state.recovery_attempt_started {
+        if address_changed {
+            "started_hard_recovery"
+        } else {
+            "started_soft_recovery"
+        }
+    } else if state.role == Role::Answerer && state.awaiting_offer {
+        "parked_answerer_awaiting_offer"
+    } else if state.recovery_inflight {
+        "deferred_recovery_still_gated"
+    } else {
+        "recovery_hint_no_action"
+    };
+    tracing::debug!(
+        peer = %state.peer_id.to_string_repr(),
+        %request_id,
+        action,
+        "v0.20 response recovery hint resolved"
+    );
 }
 
 /// Supersede an initial or recovery attempt after a new Offerer role

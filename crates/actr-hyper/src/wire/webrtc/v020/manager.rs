@@ -874,6 +874,25 @@ impl RtcConnectionManager {
             .await;
     }
 
+    /// Submit one response-path recovery hint to the current Controller. The
+    /// hint is deliberately best effort: response delivery must not block on a
+    /// saturated Controller mailbox, and the Controller validates the snapshot
+    /// identity again when it reduces the command.
+    pub(crate) async fn submit_recovery_hint(&self, peer: &ActrId, request_id: &str) -> bool {
+        let Some(handle) = self.get_controller(peer).await else {
+            return false;
+        };
+        let submitted = handle.try_recovery_hint(request_id.to_owned());
+        if !submitted {
+            tracing::warn!(
+                peer = %peer.to_string_repr(),
+                request_id,
+                "v0.20 response recovery hint could not enter the Controller mailbox"
+            );
+        }
+        submitted
+    }
+
     /// The latest snapshot for a peer, if it has a controller.
     pub(crate) async fn get_snapshot(&self, peer: &ActrId) -> Option<RtcPeerSnapshot> {
         match self.peers.read().await.get(peer) {
