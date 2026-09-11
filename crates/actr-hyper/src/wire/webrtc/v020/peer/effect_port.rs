@@ -25,6 +25,8 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tracing::{Instrument, Span};
+#[cfg(feature = "opentelemetry")]
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::wire::webrtc::v020::event_handler::WebRtcEventHandler;
 use crate::wire::webrtc::v020::events::PeerEventMailbox;
@@ -61,8 +63,9 @@ pub(crate) struct RtcEffectIdentity {
 pub(crate) struct TaggedRtcPeerEffect {
     pub(crate) identity: RtcEffectIdentity,
     pub(crate) effect: RtcPeerEffect,
-    /// Business-operation span carried across the effect task boundary.
-    /// This is internal metadata and never enters the reducer or wire format.
+    /// Independent operation span carried across the effect task boundary.
+    /// Its OTel parent preserves causality without keeping the business span
+    /// alive when an operation outlasts the attempt that submitted it.
     pub(crate) span: Span,
 }
 
@@ -76,10 +79,25 @@ impl TaggedRtcPeerEffect {
         effect: RtcPeerEffect,
         span: Span,
     ) -> Result<Self, RtcEffectPortError> {
-        let Some((pc_generation, operation_id, ice_generation, _)) = effect.pending_identity()
+        let Some((pc_generation, operation_id, ice_generation, kind)) = effect.pending_identity()
         else {
             return Err(RtcEffectPortError::NotBlocking);
         };
+        // Never use a tracing parent here: the registry would keep the attempt
+        // alive until this operation and its completion have both been dropped.
+        // The OTel context carries the parent identity independently instead.
+        let operation_span = tracing::info_span!(
+            parent: None,
+            "webrtc.operation",
+            peer = %peer_id.to_string_repr(),
+            generation = pc_generation,
+            operation_id,
+            ice_generation,
+            operation = ?kind,
+        );
+        #[cfg(feature = "opentelemetry")]
+        let _ = operation_span.set_parent(span.context());
+        drop(span);
         Ok(Self {
             identity: RtcEffectIdentity {
                 peer_id,
@@ -88,7 +106,7 @@ impl TaggedRtcPeerEffect {
                 ice_generation,
             },
             effect,
-            span,
+            span: operation_span,
         })
     }
 }
@@ -108,7 +126,8 @@ impl fmt::Debug for TaggedRtcPeerEffect {
 pub(crate) struct TaggedRtcEffectCompletion {
     pub(crate) identity: RtcEffectIdentity,
     pub(crate) completion: EffectCompletion,
-    /// The exact attempt context that submitted the operation.
+    /// The independent operation span, preserving the exact submitting attempt
+    /// as its OTel parent even when the completion arrives after supersession.
     pub(crate) span: Span,
 }
 
@@ -1220,5 +1239,98 @@ impl RtcPeerEffectPort for TestEffectSink {
     async fn close_all_sessions(&self) {
         self.close_all_calls
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+mod tracing_lifetime_tests {
+    use super::*;
+    use tracing_subscriber::layer::{Context, SubscriberExt};
+    use tracing_subscriber::registry::LookupSpan;
+    use tracing_subscriber::{Layer, Registry};
+
+    #[derive(Clone)]
+    struct ClosedSpans(Arc<Mutex<Vec<&'static str>>>);
+
+    impl<S> Layer<S> for ClosedSpans
+    where
+        S: tracing::Subscriber + for<'lookup> LookupSpan<'lookup>,
+    {
+        fn on_close(&self, id: tracing::span::Id, context: Context<'_, S>) {
+            let span = context.span(&id).expect("closing span exists");
+            self.0.lock().unwrap().push(span.name());
+        }
+    }
+
+    #[test]
+    fn pending_operation_and_completion_do_not_keep_attempt_open() {
+        let closed = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = Registry::default().with(ClosedSpans(closed.clone()));
+        #[cfg(feature = "opentelemetry")]
+        let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder().build();
+        #[cfg(feature = "opentelemetry")]
+        let subscriber = {
+            use opentelemetry::trace::TracerProvider;
+            subscriber.with(tracing_opentelemetry::layer().with_tracer(provider.tracer("test")))
+        };
+        tracing::subscriber::with_default(subscriber, || {
+            let peer_id = ActrId {
+                realm: actr_protocol::Realm { realm_id: 1 },
+                serial_number: 1,
+                r#type: actr_protocol::ActrType {
+                    manufacturer: "test".into(),
+                    name: "node".into(),
+                    version: "1".into(),
+                },
+            };
+            let attempt = tracing::info_span!("webrtc.recover");
+            let operation = attempt.in_scope(|| {
+                TaggedRtcPeerEffect::new_with_span(
+                    peer_id.clone(),
+                    RtcPeerEffect::BuildSession {
+                        generation: 1,
+                        operation_id: 1,
+                    },
+                    attempt.clone(),
+                )
+                .unwrap()
+            });
+            #[cfg(feature = "opentelemetry")]
+            {
+                use opentelemetry::trace::TraceContextExt;
+                let parent = attempt.context();
+                let child = operation.span.context();
+                assert!(parent.span().span_context().is_valid());
+                assert_eq!(
+                    parent.span().span_context().trace_id(),
+                    child.span().span_context().trace_id()
+                );
+                assert_ne!(
+                    parent.span().span_context().span_id(),
+                    child.span().span_context().span_id()
+                );
+            }
+            // Model an attempt deadline while the operation is still pending.
+            drop(attempt);
+            assert_eq!(*closed.lock().unwrap(), vec!["webrtc.recover"]);
+            let completion = TaggedRtcEffectCompletion::new(
+                operation.identity.clone(),
+                EffectCompletion::BuildSession {
+                    generation: 1,
+                    operation_id: 1,
+                    result: Ok(()),
+                },
+                operation.span.clone(),
+            );
+            drop(operation);
+            assert_eq!(*closed.lock().unwrap(), vec!["webrtc.recover"]);
+            // A delayed completion retains operation identity, not the attempt.
+            let (_, span) = completion.into_completion_for(&peer_id).unwrap();
+            drop(span);
+            assert_eq!(
+                *closed.lock().unwrap(),
+                vec!["webrtc.recover", "webrtc.operation"]
+            );
+        });
     }
 }

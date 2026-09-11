@@ -610,18 +610,22 @@ impl RtcPeerController {
         };
         // A hard replacement owns the building/pending generation, not the
         // still-active fallback. Soft recovery instead reuses the active PC.
+        // A parked Answerer has no physical session, but its restart requests
+        // still belong to the current recovery on the parked generation.
         self.attempt_generation = self
             .state
             .building_generation
             .or(self.state.pending_generation)
             .or(self.attempt_generation)
-            .or(self.state.active_generation);
+            .or(self.state.active_generation)
+            .or(self.state.parked_signaling_generation);
         let Some(generation) = self.attempt_generation else {
             return;
         };
         if self.state.building_generation == Some(generation)
             || self.state.pending_generation == Some(generation)
             || self.state.active_generation == Some(generation)
+            || self.state.parked_signaling_generation == Some(generation)
         {
             self.generation_spans
                 .insert(generation, GenerationTrace { key, span });
@@ -1717,7 +1721,7 @@ impl RtcPeerController {
                     negotiation_epoch: retained.negotiation_epoch,
                     message: dispatch.message,
                     #[cfg(feature = "opentelemetry")]
-                    context: dispatch.span.context(),
+                    context: retained.context,
                 });
                 self.arm_signaling_retry_wake();
             }
