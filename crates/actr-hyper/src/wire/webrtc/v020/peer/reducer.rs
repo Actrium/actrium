@@ -1496,15 +1496,16 @@ fn reduce_ice_restart_request(
     }
     state.last_remote_restart_request = Some((request_id.clone(), attempt));
 
-    // De-dupe the answerer's first correlated wake while a local RestartIce /
+    // Coalesce every answerer wake while a local RestartIce /
     // CreateOffer / SDP application chain is still in flight. A second offer
     // at that point would race the active negotiation. The recovery origin
     // alone is not enough to classify the request: a LocalNetwork round may
     // have already announced an Offer that was lost by signaling, so once no
     // SDP operation remains the request must reach the short grace/retry path
     // below (issue #227).
-    if attempt == 1
-        && state.recovery_inflight
+    // Business demand can advance the remote attempt before our first
+    // operation completes; a higher attempt is not permission to overlap it.
+    if state.recovery_inflight
         && state.recovery_attempt_started
         && offerer_restart_negotiation_inflight(state)
     {
@@ -2158,6 +2159,15 @@ fn reduce_command(
                             state.pending_local_sdp_exchange_id = None;
                         }
                     }
+                    if state.remote_request_wake_pending {
+                        // Receipt of an accepted Answer ends the lost-Offer
+                        // grace. Applying SDP may outlive that short window;
+                        // fence its queued deadline and arm the normal attempt
+                        // timer without marking negotiation successful yet.
+                        state.remote_request_wake_pending = false;
+                        state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
+                        state.bump_revision();
+                    }
                     tracing::debug!(
                         peer = %state.peer_id.to_string_repr(),
                         generation,
@@ -2768,8 +2778,8 @@ fn answerer_parked(state: &RtcPeerState) -> bool {
 }
 
 /// Whether the Offerer's current Soft Recovery still has a local restart
-/// negotiation operation in flight. A first Answerer wake that races one of
-/// these operations is a duplicate and must not issue a second
+/// negotiation operation in flight. Any Answerer wake that races one of
+/// these operations is coalesced and must not issue a second
 /// `restart_ice()`/Offer. Once the local Offer has already been announced and
 /// no SDP operation is pending, an attempt-1 wake is allowed to restart the
 /// round: the previous Offer may have been lost while the Answerer was
@@ -4020,10 +4030,6 @@ fn reduce_completion(
                         // recovery epoch and may restore sendability.
                         state.recovery_negotiated = true;
                         state.legacy_answer_fence = None;
-                        if state.remote_request_wake_pending {
-                            state.remote_request_wake_pending = false;
-                            state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
-                        }
                     }
                     // WebRTC now has a remote description for this generation;
                     // matching trickle candidates can safely be injected.
