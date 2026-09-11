@@ -37,7 +37,9 @@ pub use crate::wire::webrtc::v020::fault::{
     DirectedSignalingFaultMetrics, DirectedSignalingFaultRegistry, SignalingFaultRule,
     SignalingMessageClass, SignalingTraceEvent,
 };
-pub use crate::wire::webrtc::v020::recovery::ICE_RESTART_ATTEMPT_TIMEOUT;
+pub use crate::wire::webrtc::v020::recovery::{
+    ICE_RESTART_ATTEMPT_TIMEOUT, REMOTE_REQUEST_WAKE_GRACE,
+};
 pub use actrix_services::ActrixTestServices;
 pub use mobile_rtc_pair::{
     ConnectionInitiator, MobileEventDriver, MobileRtcPairHarness, PairEndpoint, PairSnapshot,

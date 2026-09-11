@@ -349,6 +349,7 @@ jobs:
         | binary(mobile_network_event_scenarios)
         | binary(ice_restart)
         | binary(ice_restart_with_signaling_disruption)
+        | binary(ice_restart_unilateral_outage)
         | binary(webrtc_large_data_transfer)
         | binary(webrtc_initial_connection_timeout)
         | binary(media_loopback)

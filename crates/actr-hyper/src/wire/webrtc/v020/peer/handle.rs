@@ -8,6 +8,8 @@
 //! `LaneHandle`/`SendPermit`).
 
 use std::sync::Arc;
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use actr_protocol::ActrId;
@@ -55,6 +57,11 @@ pub(crate) struct RtcPeerControllerHandle {
     /// Shared across clones so every send gets a unique id. The pump's
     /// `ReassemblyBuffer` is per-lane, so cross-lane id reuse is safe.
     msg_id_counter: Arc<AtomicU32>,
+    /// Unit-test instrumentation for the outbound readiness wiring. This is
+    /// deliberately absent from production handles; it counts attempts at the
+    /// mailbox boundary, before the bounded `try_send` result is returned.
+    #[cfg(test)]
+    business_recovery_hint_attempts: Arc<AtomicUsize>,
     /// S6-10: outbound media writers by track id (the media data plane —
     /// writers bypass the controller after registration, like lane sends).
     media_writers:
@@ -98,6 +105,8 @@ impl RtcPeerControllerHandle {
             lanes,
             effect_port,
             msg_id_counter: Arc::new(AtomicU32::new(0)),
+            #[cfg(test)]
+            business_recovery_hint_attempts: Arc::new(AtomicUsize::new(0)),
             media_writers: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             secure: Arc::new(std::sync::Mutex::new(SecureGenerationCell {
                 pc_generation: initial_pc_generation,
@@ -180,6 +189,24 @@ impl RtcPeerControllerHandle {
     /// immediately").
     pub(crate) fn snapshot(&self) -> RtcPeerSnapshot {
         self.snapshot_rx.borrow().clone()
+    }
+
+    pub(crate) fn try_business_recovery_hint(&self) -> bool {
+        #[cfg(test)]
+        self.business_recovery_hint_attempts
+            .fetch_add(1, Ordering::Relaxed);
+        let snapshot = self.snapshot();
+        self.command_tx
+            .try_send(RtcPeerCommand::BusinessRecoveryHint {
+                transport_epoch: snapshot.transport_epoch,
+                pc_generation: snapshot.pc_generation,
+            })
+            .is_ok()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn business_recovery_hint_attempts(&self) -> usize {
+        self.business_recovery_hint_attempts.load(Ordering::Relaxed)
     }
 
     /// Subscribe to snapshot updates; the receiver sees the latest immediately.
@@ -759,6 +786,20 @@ impl RtcPeerControllerHandle {
             pc_generation,
         })
         .await
+    }
+
+    /// Best-effort response-path prompt. The snapshot identity is captured at
+    /// submission so the reducer can discard a hint that races a replacement
+    /// Controller/PC attempt without blocking the caller on a full mailbox.
+    pub(crate) fn try_recovery_hint(&self, request_id: String) -> bool {
+        let snapshot = self.snapshot();
+        self.command_tx
+            .try_send(RtcPeerCommand::RecoveryHint {
+                request_id,
+                transport_epoch: snapshot.transport_epoch,
+                pc_generation: snapshot.pc_generation,
+            })
+            .is_ok()
     }
 
     /// Deliver the server's role assignment (from the signaling router).
