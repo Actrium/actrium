@@ -1070,7 +1070,14 @@ impl PeerGate {
                         if let Some(handle) = self.v020_manager.get_controller(target).await {
                             // Controller owns coalescing and lifecycle eligibility.
                             // Queue saturation never blocks business readiness waits.
-                            let _ = handle.try_business_recovery_hint();
+                            if !handle.try_business_recovery_hint() {
+                                tracing::warn!(
+                                    target: "actr_recovery_hint",
+                                    peer = %target.to_string_repr(),
+                                    payload_type = ?payload_type,
+                                    "v0.20 business recovery hint was rejected by the controller mailbox"
+                                );
+                            }
                         }
                     }
 

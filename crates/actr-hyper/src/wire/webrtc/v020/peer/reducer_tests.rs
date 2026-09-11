@@ -3459,6 +3459,109 @@ fn attempt1_restart_request_graces_local_network_announced_offer_then_retries() 
 }
 
 #[test]
+fn attempt1_restart_request_accepts_answer_during_grace_window() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+
+    let restart = reduce(&mut state, failed_tick(generation));
+    let (restart_operation_id, restart_ice_generation) = restart_identity(&restart, generation);
+    let create_offer = reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::RestartIce {
+            generation,
+            operation_id: restart_operation_id,
+            ice_generation: restart_ice_generation,
+            result: Ok(()),
+        }),
+    );
+    assert!(has_create_offer(&create_offer, generation));
+    let create_offer_operation =
+        pending_operation(&state, PendingRtcOperationKind::CreateOffer, generation);
+    reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::CreateOffer {
+            generation,
+            operation_id: create_offer_operation,
+            result: Ok(Box::new(sdp_with_ufrag(RTCSdpType::Offer, "grace-offer"))),
+        }),
+    );
+    let set_local_operation = pending_operation(
+        &state,
+        PendingRtcOperationKind::SetLocalDescription,
+        generation,
+    );
+    let announced = reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::SetLocalDescription {
+            generation,
+            operation_id: set_local_operation,
+            result: Ok(()),
+        }),
+    );
+    assert!(announced.iter().any(|effect| matches!(
+        effect,
+        RtcPeerEffect::SendSignaling {
+            message: SignalingMessage::IceRestartOffer { .. },
+            ..
+        }
+    )));
+    let exchange_id = state
+        .pending_local_sdp_exchange_id
+        .clone()
+        .expect("announced restart offer exchange identity");
+
+    let wake = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequest {
+            request_id: "grace-answer".to_string(),
+            attempt: 1,
+        }),
+    );
+    assert!(wake.is_empty());
+    assert!(state.remote_request_wake_pending);
+    let grace_epoch = state.recovery_epoch;
+
+    // The matching Answer arrives before the short grace expires. It must be
+    // applied to the current restart exchange and cancel the grace timer rather
+    // than launching a second RestartIce.
+    let answer_effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteDescriptionCorrelated {
+            desc: Box::new(answer()),
+            exchange_id: Some(exchange_id),
+        }),
+    );
+    assert!(has_set_remote(&answer_effects, generation));
+    let set_remote_operation = pending_operation(
+        &state,
+        PendingRtcOperationKind::SetRemoteDescription,
+        generation,
+    );
+    let completed = reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::SetRemoteDescription {
+            generation,
+            operation_id: set_remote_operation,
+            result: Ok(()),
+        }),
+    );
+    assert!(completed.is_empty());
+    assert!(!state.remote_request_wake_pending);
+    assert!(state.recovery_negotiated);
+    assert!(state.recovery_epoch > grace_epoch);
+
+    let stale_grace = reduce(
+        &mut state,
+        RtcPeerInput::RecoveryDeadlineElapsed {
+            recovery_epoch: grace_epoch,
+        },
+    );
+    assert!(stale_grace.is_empty());
+    reduce(&mut state, connected_tick(generation));
+    assert!(state.sendable());
+}
+
+#[test]
 fn legacy_answer_cannot_cross_a_restart_retry_boundary() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let generation = drive_offerer_to_sendable(&mut state);

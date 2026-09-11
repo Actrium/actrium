@@ -1602,10 +1602,16 @@ fn reduce_command(
             {
                 return;
             }
+            let pending_operation_kinds = state
+                .pending_operations
+                .values()
+                .map(|operation| operation.kind)
+                .collect::<Vec<_>>();
             tracing::debug!(peer = %state.peer_id.to_string_repr(),
                 recovery_cycle = state.recovery_cycle, recovery_epoch = state.recovery_epoch,
                 phase = ?state.phase, role = ?state.role,
                 pending_sdp = ?state.pending_remote_description_operation,
+                pending_operation_kinds = ?pending_operation_kinds,
                 negotiated = state.recovery_negotiated, "business recovery hint received");
             if !state.recovery_attempt_started {
                 maybe_start_deferred_recovery(state, effects);

@@ -144,6 +144,7 @@ async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
         })
         .expect("the returning Answerer request must be present in the signaling trace");
     assert_eq!(request.attempt, Some(1));
+    let request_observed_after = request.observed_after;
 
     // The issue-227 fix makes this request reset the in-flight round and
     // produce the next offer within the short grace/retry window. The helper
@@ -168,8 +169,21 @@ async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
     pair.assert_rpc_both_directions("unilateral_outage_after_attempt1_wake")
         .await;
 
-    pair.heal_signaling_faults();
     let trace = pair.harness().signaling_faults.trace();
+    let fresh_offer = trace
+        .iter()
+        .find(|event| {
+            event.from == offerer
+                && event.to == answerer
+                && event.class == SignalingMessageClass::IceRestartOffer
+                && event.ordinal > offers_before_wake
+        })
+        .expect("the wake must produce a fresh restart Offer trace event");
+    let wake_elapsed = fresh_offer
+        .observed_after
+        .saturating_sub(request_observed_after);
+
+    pair.heal_signaling_faults();
     pair.shutdown().await;
 
     assert!(wake_offer > offers_before_wake);
@@ -194,6 +208,12 @@ async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
         .and_then(|event| event.exchange_id.as_deref());
     assert!(fresh_offer_exchange.is_some());
     assert_ne!(fresh_offer_exchange, previous_offer_exchange);
+    assert!(
+        wake_elapsed <= REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW,
+        "fresh Offer arrived {:?} after the observed attempt-1 request, beyond the {:?} wake window",
+        wake_elapsed,
+        REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
