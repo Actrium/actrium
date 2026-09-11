@@ -633,20 +633,34 @@ decided by the framework from current route state and the operation deadline.
 - ordinary Call/Tell/StreamReliable does not require application Hook
   subscription to recover.
 
+### Migration and baseline status
+
+The active monorepo already contains the implementation portions corresponding
+to historical PR-0507-2 through PR-0507-6 via [#187](https://github.com/Actrium/actrium/pull/187),
+[#189](https://github.com/Actrium/actrium/pull/189),
+[#190](https://github.com/Actrium/actrium/pull/190),
+[#191](https://github.com/Actrium/actrium/pull/191), and
+[#192](https://github.com/Actrium/actrium/pull/192). The `Do` and `Acceptance`
+sections below preserve the historical ownership and normative contracts; they
+do not ask the monorepo to replay those landed patches. Outstanding acceptance
+work is called out explicitly, including exact retry-free selectors and the
+live WebSocket sink follow-up in [#243](https://github.com/Actrium/actrium/issues/243).
+
 ## PR breakdown
 
-The following PRs can be reviewed and reverted independently. A later PR must
-not include extensions that are undefined by the earlier PR.
+The following PRs are logically stacked and must be applied in order. PR-0507-1
+is the only independently revertible baseline. PR-0507-2 is a prerequisite for
+PR-0507-3 and every later PR because it defines `DeliveryProgress` and the
+internal `send_once` seam; a later PR must not be reverted or merged without
+its ancestors.
 
 ```text
 PR-0507-1  deadline baseline
       └── PR-0507-2  delivery progress and route send seam
-      └── PR-0507-3  route recovery / retry boundary / stale lane
-PR-0507-1 + PR-0507-3
-      └── PR-0507-4  RpcReliable + StreamReliable readiness wait
+              └── PR-0507-3  route recovery / retry boundary / stale lane
+                      └── PR-0507-4  RpcReliable + StreamReliable readiness wait
                               └── PR-0507-5  simple bounded waiting and cancellation
-PR-0507-4/5
-      └── PR-0507-6  documentation, examples, and SDK retry cleanup
+                                      └── PR-0507-6  documentation, examples, and SDK retry cleanup
 ```
 
 ### PR-0507-1: Deadline baseline
@@ -693,15 +707,27 @@ error.
 
 **Acceptance**: partial fragments and ambiguous WebSocket writes produce
 `Unknown`; pre-send stale state produces `NotAttempted`; `Unknown` becomes the
-non-retryable `DeliveryUncertain`; the wire format is unchanged. The acceptance
-tests must include:
+non-retryable `DeliveryUncertain`; the wire format is unchanged. The current
+baseline coverage is split by responsibility:
 
-- `transport::lane::tests::websocket_interrupted_write_is_unknown_and_not_retryable`, which
-  models a sink error after a WebSocket write has started and asserts
-  `DeliveryProgress::Unknown`;
-- the PeerGate/transport mapping assertion that the same outcome becomes
-  `ActrError::DeliveryUncertain` with `is_retryable == false` and exactly one
-  physical submission.
+- `transport::lane::tests::websocket_interrupted_write_is_unknown_and_not_retryable`
+  is the pure adapter-classification test; it asserts `Unknown` but does not
+  claim to prove physical submission count;
+- `transport::dest_transport::tests::uncertain_first_lane_suppresses_fallback_replay`
+  drives `DestTransport::send_with_progress`, asserts `Unknown`, exactly one
+  WebRTC submission, and zero WebSocket fallback submissions;
+- `retry_core_mechanics::ambiguous_retryable_error_kinds_fail_closed_without_replay`
+  drives the operation owner and asserts that ambiguous retryable failures are
+  not replayed;
+- `outbound::peer_gate::tests::submitted_call_without_response_is_delivery_uncertain`
+  covers the submitted-Call/no-Response terminal result.
+
+A live failing-WebSocket-sink test that binds the adapter write to the route
+and operation owner is a follow-up deliverable tracked in
+[#243](https://github.com/Actrium/actrium/issues/243). Until that test lands,
+the RFC does not claim that the pure mapping test alone proves the physical
+submission invariant; the existing DestTransport and operation-owner tests are
+the named no-replay gates for this baseline.
 
 ### PR-0507-3: Route recovery, retry boundaries, and stale lanes
 
@@ -890,13 +916,21 @@ RFC-0507 must satisfy:
 - one failed peer cannot exhaust another peer's capacity;
 - caller future drop, shutdown, and peer removal do not leak.
 
-The test names used for these two safety-critical cases are
-`websocket_interrupted_write_is_unknown_and_not_retryable` and
-`submitted_call_without_response_is_delivery_uncertain`. They are merge-gate
-tests, not optional diagnostics. The serial-handler acceptance also includes
-an `M1 -> recovering peer B` / `M2 -> healthy peer C` case proving that M1's
-readiness wait retains the existing serial dispatch-slot behavior; it must not
-be implemented by implicit spawn or reentrancy.
+The named no-replay merge-gate tests are
+`transport::dest_transport::tests::uncertain_first_lane_suppresses_fallback_replay`
+and
+`retry_core_mechanics::ambiguous_retryable_error_kinds_fail_closed_without_replay`.
+The submitted-Call safety case is
+`outbound::peer_gate::tests::submitted_call_without_response_is_delivery_uncertain`.
+The pure WebSocket classification test
+`transport::lane::tests::websocket_interrupted_write_is_unknown_and_not_retryable`
+is unit coverage, not physical-submission proof. A live failing-sink gate is
+tracked separately in [#243](https://github.com/Actrium/actrium/issues/243).
+These named tests are merge-gate tests, not optional diagnostics. The
+serial-handler acceptance also includes an `M1 -> recovering peer B` /
+`M2 -> healthy peer C` case proving that M1's readiness wait retains the
+existing serial dispatch-slot behavior; it must not be implemented by implicit
+spawn or reentrancy.
 
 ### Load tests
 
@@ -927,13 +961,19 @@ have an explicit `retries = 2` override and run in the dedicated
 cargo nextest run --workspace --all-features --no-fail-fast -E "$REALTIME_BINARIES"
 ```
 
-Every RFC-0507 safety-critical acceptance test MUST have an explicit
-`retries = 0` override in `.config/nextest.toml`, placed before the broad
-`kind(test)` and WebRTC v0.20 overrides and matched by its exact nextest test
-ID. At minimum, the current in-crate safety tests use filters equivalent to:
+Before any RFC-0507 implementation is marked complete, every safety-critical
+acceptance test MUST have an explicit `retries = 0` override in
+`.config/nextest.toml`, placed before the broad `kind(test)` and WebRTC v0.20
+overrides and matched by its exact nextest test ID. The migration baseline does
+not claim that all of these exact overrides already exist; the implementation
+follow-up, including the live sink gate and its retry-free selectors, is
+tracked in [#243](https://github.com/Actrium/actrium/issues/243). The required
+filters include:
 
 ```text
 package(actr-hyper) and test(/^transport::lane::tests::websocket_interrupted_write_is_unknown_and_not_retryable$/)
+package(actr-hyper) and test(/^transport::dest_transport::tests::uncertain_first_lane_suppresses_fallback_replay$/)
+binary(retry_core_mechanics) and test(/^ambiguous_retryable_error_kinds_fail_closed_without_replay$/)
 package(actr-hyper) and test(/^outbound::peer_gate::tests::submitted_call_without_response_is_delivery_uncertain$/)
 ```
 
@@ -957,8 +997,10 @@ The gate policy is:
 - a hang, duplicate physical submission, unexpected retryable mapping, or
   payload/resource leak fails the gate even if a later business retry succeeds.
 
-The existing `#[ignore]` stale-transport diagnosis is informative only; the
-two safety-critical mapping tests above are active merge gates.
+The existing `#[ignore]` stale-transport diagnosis is informative only. The
+DestTransport and operation-owner tests above are the current no-replay gates;
+the live WebSocket sink gate and its exact retry-free CI wiring remain the
+follow-up in [#243](https://github.com/Actrium/actrium/issues/243).
 
 ## Observability
 
@@ -974,7 +1016,9 @@ RFC-0507 records only the necessary fields:
 Logs must not contain business payloads, credentials, tokens, cookies, or
 credential-bearing URLs.
 
-Observability acceptance checks are part of the gate:
+Observability acceptance checks are future implementation deliverables for
+PR-0507-6 and become part of the gate once landed; the migration baseline does
+not claim that these fixtures and record checks already exist:
 
 - every uncertain/safe-retry record carries the exact operation ID (or Call
   request ID), peer, payload type, progress, and route-identity summary;
