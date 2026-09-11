@@ -7,7 +7,7 @@
 //! the offerer's recovery round is already in flight.
 //!
 //! Before the fix the offerer de-duplicated that request and did not emit
-//! another offer until the six-second attempt deadline. The regression test
+//! another offer until the ten-second attempt deadline. The regression test
 //! requires the request itself to produce the next `IceRestartOffer` within a
 //! short wake window.
 
@@ -128,28 +128,42 @@ async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
         )
         .await
         .expect("the returning answerer must send attempt-1 restart request");
+    let request = pair
+        .harness()
+        .signaling_faults
+        .trace()
+        .into_iter()
+        .rev()
+        .find(|event| {
+            event.from == answerer
+                && event.to == offerer
+                && event.class == SignalingMessageClass::IceRestartRequest
+                && event.ordinal > request_baseline
+        })
+        .expect("the returning Answerer request must be present in the signaling trace");
+    assert_eq!(request.attempt, Some(1));
 
     // The issue-227 fix makes this request reset the in-flight round and
     // produce the next offer immediately. The offer is still dropped so the
     // assertion observes the signaling action itself rather than a later
     // readiness transition.
-    let wake_offer = tokio::time::timeout(
-        REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW,
-        pair.harness().signaling_faults.wait_for_hits_after(
+    let wake_offer = pair
+        .harness()
+        .signaling_faults
+        .wait_for_hits_after(
             &offerer,
             &answerer,
             SignalingMessageClass::IceRestartOffer,
             offers_before_wake,
             REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW,
-        ),
-    )
-    .await;
+        )
+        .await;
 
     pair.heal_signaling_faults();
     pair.shutdown().await;
 
     assert!(
-        wake_offer.is_ok() && wake_offer.expect("wake wait result").is_some(),
+        wake_offer.is_some(),
         "attempt-1 restart request must trigger a fresh offer within {:?}",
         REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW
     );

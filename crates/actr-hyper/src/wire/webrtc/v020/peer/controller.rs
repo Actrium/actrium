@@ -781,10 +781,16 @@ impl RtcPeerController {
                         .take()
                         .expect("guarded recovery timer")
                         .0;
+                    let timer_kind = if self.state.remote_request_wake_pending {
+                        "remote_request_wake_grace"
+                    } else {
+                        "ice_restart_attempt_timeout"
+                    };
                     tracing::warn!(
                         peer = %self.state.peer_id.to_string_repr(),
                         recovery_epoch,
-                        "v0.20 recovery attempt deadline elapsed; escalating the attempt"
+                        timer_kind,
+                        "v0.20 recovery timer elapsed; escalating the attempt"
                     );
                     if self
                         .apply(RtcPeerInput::RecoveryDeadlineElapsed { recovery_epoch })

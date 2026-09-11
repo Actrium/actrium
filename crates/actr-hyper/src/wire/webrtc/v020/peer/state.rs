@@ -186,9 +186,10 @@ pub(crate) struct RtcPeerState {
     pub(crate) recovery_attempt_started: bool,
     /// Initiating fact for the current logical recovery cycle. This is set
     /// when the cycle is first started and survives signaling-gate deferral,
-    /// soft retries, and hard escalation. Only `LocalNetwork` means the
-    /// offerer already owns the same local recovery round for attempt-1 wake
-    /// de-duplication; `PeerFailure` must remain wakeable for issue #227.
+    /// soft retries, and hard escalation. The origin is diagnostic context; it
+    /// must not by itself suppress an attempt-1 remote wake. Operation state
+    /// determines whether a local restart is still in flight, and a
+    /// `PeerFailure` recovery remains wakeable for issue #227.
     pub(crate) recovery_origin: Option<RecoveryOrigin>,
     /// The current recovery round has been confirmed by a remote
     /// `IceRestartRequest`. Late local lifecycle/address facts must coalesce
