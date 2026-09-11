@@ -29,12 +29,17 @@ preserved, guarded by the PR head SHA:
 python3 scripts/actr/merge-release-pr.py <pr-number> --merge
 ```
 
-The helper does not approve reviews or bypass branch protection. Keep the subject
-exactly `chore(release): basic train vX.Y.Z` so the publishing workflow triggers.
-The body must start with `## vX.Y.Z` and contain the reviewed release notes. When
-merging through another tool (including manual maintenance releases), explicitly
-supply that subject and the complete reviewed PR body as the commit body. Do not
-use an empty body or GitHub's generated list of individual commits.
+The helper does not approve reviews or bypass branch protection. You can also use
+GitHub's **Squash and merge** button: the publishing workflow accepts
+`chore(release): basic train vX.Y.Z` with an optional trailing ` (#123)` added by
+GitHub. Other suffixes are rejected, and malformed `chore(release):` subjects fail
+the workflow instead of silently skipping publication.
+
+The commit body must start with `## vX.Y.Z` and contain the reviewed release notes.
+When using the web UI or another tool (including manual maintenance releases),
+ensure the squash commit body contains the complete reviewed PR body. Do not use
+an empty body or GitHub's generated list of individual commits. The helper remains
+the way to carry the reviewed PR title and body into the commit verbatim.
 
 Publishing reads the pinned release commit body, adds the system requirements
 header, and uses it as the GitHub Release body. It fails if the release subject is
