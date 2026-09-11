@@ -1332,6 +1332,7 @@ async fn response_send_timeout_submits_recovery_hint_to_current_peer() {
     .await
     .expect("response-path test session did not build");
     assert!(!handle.snapshot().sendable);
+    assert_eq!(handle.snapshot().ice_generation, 0);
 
     let route = Some(manager.clone());
     let send = tokio::spawn(async move {

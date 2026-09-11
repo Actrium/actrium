@@ -2642,7 +2642,7 @@ fn business_recovery_hint_wakes_answerer_once_per_recovery_cycle() {
 
     let wake = reduce(
         &mut state,
-        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+        RtcPeerInput::Command(RtcPeerCommand::BusinessRecoveryHint {
             transport_epoch,
             pc_generation: generation,
         }),
@@ -2653,7 +2653,7 @@ fn business_recovery_hint_wakes_answerer_once_per_recovery_cycle() {
 
     let duplicate = reduce(
         &mut state,
-        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+        RtcPeerInput::Command(RtcPeerCommand::BusinessRecoveryHint {
             transport_epoch,
             pc_generation: generation,
         }),
@@ -2709,7 +2709,7 @@ fn business_recovery_hint_does_not_race_answerer_sdp() {
     let transport_epoch = state.transport_epoch;
     let hint = reduce(
         &mut state,
-        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+        RtcPeerInput::Command(RtcPeerCommand::BusinessRecoveryHint {
             transport_epoch,
             pc_generation: generation,
         }),
@@ -3182,6 +3182,106 @@ fn response_recovery_hint_starts_missing_soft_recovery() {
     assert!(state.recovery_inflight);
     assert!(state.recovery_attempt_started);
     assert_eq!(state.recovery_origin, Some(RecoveryOrigin::PeerFailure));
+}
+
+#[test]
+fn response_recovery_hint_is_noop_without_active_generation() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let transport_epoch = state.transport_epoch;
+    let stale_before = state.stale_events;
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            request_id: "response-hint-no-generation".to_string(),
+            transport_epoch,
+            pc_generation: 0,
+        }),
+    );
+
+    assert!(effects.is_empty());
+    assert!(!state.recovery_inflight);
+    assert_eq!(state.stale_events, stale_before);
+}
+
+#[test]
+fn response_recovery_hint_starts_hard_recovery_after_address_change() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let transport_epoch = state.transport_epoch;
+    state.phase = RtcPeerPhase::TransportReady;
+    state.pc_connected = false;
+    state.rpc_reliable_open = false;
+    state.address_changed = true;
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            request_id: "response-hint-hard".to_string(),
+            transport_epoch,
+            pc_generation: generation,
+        }),
+    );
+
+    assert!(has_build_session(&effects, generation + 1));
+    assert!(state.recovery_inflight);
+    assert!(state.recovery_attempt_started);
+    assert_eq!(state.building_generation, Some(generation + 1));
+}
+
+#[test]
+fn response_recovery_hint_defers_until_recovery_gate_reopens() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let transport_epoch = state.transport_epoch;
+    state.phase = RtcPeerPhase::TransportReady;
+    state.pc_connected = false;
+    state.rpc_reliable_open = false;
+    state.signaling_generation = None;
+
+    let deferred = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            request_id: "response-hint-deferred".to_string(),
+            transport_epoch,
+            pc_generation: generation,
+        }),
+    );
+    assert!(deferred.is_empty());
+    assert!(state.recovery_inflight);
+    assert!(!state.recovery_attempt_started);
+
+    let resumed = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::SignalingGenerationChanged {
+                generation: Some(0),
+            },
+        )),
+    );
+    assert!(has_restart_ice(&resumed, generation));
+    assert!(state.recovery_attempt_started);
+}
+
+#[test]
+fn response_recovery_hint_is_rejected_after_close_requested() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let transport_epoch = state.transport_epoch;
+    state.close_requested = true;
+    let stale_before = state.stale_events;
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            request_id: "response-hint-closed".to_string(),
+            transport_epoch,
+            pc_generation: generation,
+        }),
+    );
+
+    assert!(effects.is_empty());
+    assert_eq!(state.stale_events, stale_before + 1);
+    assert!(!state.recovery_inflight);
 }
 
 #[test]

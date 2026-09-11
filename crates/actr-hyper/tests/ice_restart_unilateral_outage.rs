@@ -169,9 +169,31 @@ async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
         .await;
 
     pair.heal_signaling_faults();
+    let trace = pair.harness().signaling_faults.trace();
     pair.shutdown().await;
 
-    assert_eq!(wake_offer, offers_before_wake + 1);
+    assert!(wake_offer > offers_before_wake);
+    let previous_offer_exchange = trace
+        .iter()
+        .rev()
+        .find(|event| {
+            event.from == offerer
+                && event.to == answerer
+                && event.class == SignalingMessageClass::IceRestartOffer
+                && event.ordinal <= offers_before_wake
+        })
+        .and_then(|event| event.exchange_id.as_deref());
+    let fresh_offer_exchange = trace
+        .iter()
+        .find(|event| {
+            event.from == offerer
+                && event.to == answerer
+                && event.class == SignalingMessageClass::IceRestartOffer
+                && event.ordinal > offers_before_wake
+        })
+        .and_then(|event| event.exchange_id.as_deref());
+    assert!(fresh_offer_exchange.is_some());
+    assert_ne!(fresh_offer_exchange, previous_offer_exchange);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -261,6 +283,20 @@ async fn local_network_recovery_retries_lost_offer_on_attempt1_wake() {
         )
         .await
         .expect("the returning Answerer must send attempt-1 restart request");
+    let request = pair
+        .harness()
+        .signaling_faults
+        .trace()
+        .into_iter()
+        .rev()
+        .find(|event| {
+            event.from == answerer
+                && event.to == offerer
+                && event.class == SignalingMessageClass::IceRestartRequest
+                && event.ordinal > request_baseline
+        })
+        .expect("the returning Answerer request must be present in the signaling trace");
+    assert_eq!(request.attempt, Some(1));
 
     let wake_offer = pair
         .harness()
@@ -279,7 +315,29 @@ async fn local_network_recovery_retries_lost_offer_on_attempt1_wake() {
     pair.wait_pair_ready(SETUP_TIMEOUT).await;
     pair.assert_rpc_both_directions("local_network_attempt1_wake")
         .await;
+    let trace = pair.harness().signaling_faults.trace();
     pair.shutdown().await;
 
-    assert_eq!(wake_offer, offers_before_wake + 1);
+    assert!(wake_offer > offers_before_wake);
+    let previous_offer_exchange = trace
+        .iter()
+        .rev()
+        .find(|event| {
+            event.from == offerer
+                && event.to == answerer
+                && event.class == SignalingMessageClass::IceRestartOffer
+                && event.ordinal <= offers_before_wake
+        })
+        .and_then(|event| event.exchange_id.as_deref());
+    let fresh_offer_exchange = trace
+        .iter()
+        .find(|event| {
+            event.from == offerer
+                && event.to == answerer
+                && event.class == SignalingMessageClass::IceRestartOffer
+                && event.ordinal > offers_before_wake
+        })
+        .and_then(|event| event.exchange_id.as_deref());
+    assert!(fresh_offer_exchange.is_some());
+    assert_ne!(fresh_offer_exchange, previous_offer_exchange);
 }

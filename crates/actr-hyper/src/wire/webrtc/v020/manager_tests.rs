@@ -958,6 +958,102 @@ async fn response_recovery_hint_is_submitted_to_the_current_controller() {
     assert!(mgr.close_peer(&peer).await);
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn response_recovery_hint_reports_full_controller_mailbox() {
+    let (mgr, _rx) = manager();
+    let peer = test_actor_id(22);
+    let handle = mgr.ensure_controller(peer.clone()).await;
+
+    // No controller turn can run on this current-thread runtime until this
+    // synchronous fill completes, so the fixed 64-slot command mailbox is
+    // deterministically saturated.
+    for index in 0..64 {
+        assert!(
+            handle.try_recovery_hint(format!("response-hint-fill-{index}")),
+            "controller mailbox should accept fill command {index}"
+        );
+    }
+    assert!(!handle.try_recovery_hint("response-hint-overflow".to_string()));
+    assert!(
+        !mgr.submit_recovery_hint(&peer, "response-hint-manager-overflow")
+            .await
+    );
+
+    mgr.close_all().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn response_recovery_hint_reports_closing_controller() {
+    let build_calls = Arc::new(AtomicUsize::new(0));
+    let close_calls = Arc::new(AtomicUsize::new(0));
+    let (signaling_tx, _signaling_rx) = mpsc::channel(16);
+    let mgr = Arc::new(RtcConnectionManager::new(
+        Arc::new(FirstCloseBlocksFactory {
+            build_calls: build_calls.clone(),
+            close_calls: close_calls.clone(),
+        }),
+        signaling_tx,
+    ));
+    let peer = test_actor_id(23);
+
+    let handle = mgr.ensure_controller(peer.clone()).await;
+    handle.connect().await.expect("connect command");
+    handle
+        .apply_role_assignment(true)
+        .await
+        .expect("role assignment command");
+    for _ in 0..8 {
+        if build_calls.load(Ordering::SeqCst) != 0 {
+            break;
+        }
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(1)).await;
+    }
+    assert_eq!(build_calls.load(Ordering::SeqCst), 1);
+    for _ in 0..8 {
+        tokio::task::yield_now().await;
+    }
+
+    let close_mgr = mgr.clone();
+    let close_peer = peer.clone();
+    let close = tokio::spawn(async move { close_mgr.close_peer(&close_peer).await });
+    for _ in 0..100 {
+        if close_calls.load(Ordering::SeqCst) == 1 {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(close_calls.load(Ordering::SeqCst), 1);
+    assert!(mgr.is_closing(&peer).await);
+    assert!(
+        !mgr.submit_recovery_hint(&peer, "response-hint-closing")
+            .await
+    );
+
+    tokio::time::advance(Duration::from_secs(11)).await;
+    for _ in 0..100 {
+        if close_calls.load(Ordering::SeqCst) == 2 {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(close_calls.load(Ordering::SeqCst), 2);
+    tokio::time::advance(Duration::from_secs(3)).await;
+    assert!(close.await.expect("close-peer task panicked"));
+    assert_eq!(mgr.peer_count().await, 0);
+}
+
+#[tokio::test]
+async fn response_recovery_hint_reports_missing_controller() {
+    let (mgr, _rx) = manager();
+    let peer = test_actor_id(24);
+
+    assert!(
+        !mgr.submit_recovery_hint(&peer, "response-hint-missing")
+            .await
+    );
+}
+
 /// S5-11: the unified observation facade aggregates recovery (snapshot),
 /// resource (lane count), and teardown (converged flag, registry absence)
 /// signals for the T2-T3 and system/platform harnesses.

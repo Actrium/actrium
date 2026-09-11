@@ -2287,11 +2287,14 @@ fn reduce_recovery_hint(
     // decision; it will remain blocked while the gate is closed.
     if state.recovery_inflight {
         let recovery_was_started = state.recovery_attempt_started;
+        let parked_answerer = state.role == Role::Answerer && state.awaiting_offer;
         if !state.recovery_attempt_started {
             maybe_start_deferred_recovery(state, effects);
         }
         let action = if recovery_was_started {
             "coalesced_existing_recovery"
+        } else if parked_answerer {
+            "parked_answerer_awaiting_offer"
         } else if effects.is_empty() {
             "deferred_recovery_still_gated"
         } else {
@@ -2320,23 +2323,31 @@ fn reduce_recovery_hint(
         return;
     }
     state.phase = RtcPeerPhase::Recovering;
+    let address_changed = state.address_changed;
     if state.address_changed {
         start_hard_recovery(state, effects);
-        tracing::debug!(
-            peer = %state.peer_id.to_string_repr(),
-            %request_id,
-            action = "started_hard_recovery",
-            "v0.20 response recovery hint resolved"
-        );
     } else {
         start_soft_recovery(state, effects, RecoveryOrigin::PeerFailure);
-        tracing::debug!(
-            peer = %state.peer_id.to_string_repr(),
-            %request_id,
-            action = "started_soft_recovery",
-            "v0.20 response recovery hint resolved"
-        );
     }
+    let action = if state.recovery_attempt_started {
+        if address_changed {
+            "started_hard_recovery"
+        } else {
+            "started_soft_recovery"
+        }
+    } else if state.role == Role::Answerer && state.awaiting_offer {
+        "parked_answerer_awaiting_offer"
+    } else if state.recovery_inflight {
+        "deferred_recovery_still_gated"
+    } else {
+        "recovery_hint_no_action"
+    };
+    tracing::debug!(
+        peer = %state.peer_id.to_string_repr(),
+        %request_id,
+        action,
+        "v0.20 response recovery hint resolved"
+    );
 }
 
 /// Supersede an initial or recovery attempt after a new Offerer role
