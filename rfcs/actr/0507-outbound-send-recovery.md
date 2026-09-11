@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-08-31
 - Baseline: `Actrium/actrium/main@e2ec26d7de6042fa432fef27b5cf2f460a2200c0`
-- RFC PR: [historical Actrium/actr#509](https://github.com/Actrium/actr/pull/509); the active monorepo PR is recorded after creation
+- RFC PR: [Actrium/actrium#241](https://github.com/Actrium/actrium/pull/241) (historical [Actrium/actr#509](https://github.com/Actrium/actr/pull/509))
 - Tracking issue: [Actrium/actrium#32](https://github.com/Actrium/actrium/issues/32) (historical [Actrium/actr#507](https://github.com/Actrium/actr/issues/507))
 - Related: [RFC-0504 / #505](https://github.com/Actrium/actr/pull/505),
   [#492](https://github.com/Actrium/actr/issues/492),
