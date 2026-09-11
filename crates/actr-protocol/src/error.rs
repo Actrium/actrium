@@ -90,16 +90,14 @@ pub enum ActrError {
 
     /// The framework cannot prove whether a send entered the transport.
     ///
-    /// This is intentionally terminal for generic automatic retry.  The
-    /// operation identifier and cause are retained for diagnostics and for a
-    /// caller that has its own idempotency policy.
+    /// The framework does not automatically replay this operation. The caller
+    /// decides whether to retry by invoking the API again when needed. This
+    /// error does not establish that the remote operation was not executed.
     ///
-    /// Folded into `ErrorKind::Internal` (not retryable) rather than given a
-    /// dedicated kind: like other `Internal` failures the framework has lost
-    /// the ability to reason about the outcome, so blanket retry is unsafe —
-    /// replaying bytes that may already be inside a transport could deliver
-    /// the payload twice. The classification is about retry ownership, not
-    /// about who is at fault.
+    /// The operation identifier and cause are retained for diagnostics. This
+    /// variant is classified as `ErrorKind::Internal`, so framework-level
+    /// automatic retry is disabled and retry ownership remains with the
+    /// caller.
     #[error("delivery uncertain for operation {operation_id}: {cause}")]
     DeliveryUncertain { operation_id: String, cause: String },
 
