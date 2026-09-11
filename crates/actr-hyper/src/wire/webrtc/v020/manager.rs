@@ -732,7 +732,13 @@ impl RtcConnectionManager {
             .await
         {
             let _ = handle
-                .apply_remote_description_correlated(offer, exchange_id)
+                .apply_signaling_message_with_span(
+                    SignalingMessage::Offer {
+                        desc: Box::new(offer),
+                        exchange_id,
+                    },
+                    tracing::Span::current(),
+                )
                 .await;
         } else {
             tracing::debug!(
@@ -753,7 +759,12 @@ impl RtcConnectionManager {
             .ensure_controller_for_epoch(peer.clone(), epoch, ControllerAdmission::Inbound)
             .await
         {
-            let _ = handle.apply_role_assignment(is_offerer).await;
+            let _ = handle
+                .apply_signaling_message_with_span(
+                    SignalingMessage::RoleAssignment { is_offerer },
+                    tracing::Span::current(),
+                )
+                .await;
         } else {
             tracing::debug!(
                 peer = %peer.to_string_repr(),

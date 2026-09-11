@@ -53,6 +53,13 @@ const MAX_BUFFERED_ICE_CANDIDATES: usize = 256;
 /// `Debug` is manual: the S6-2 media variants carry `Arc<dyn …>` trait objects
 /// that have no `Debug` impl.
 pub(crate) enum RtcPeerCommand {
+    /// Internal command wrapper used to carry a tracing span across the
+    /// controller mailbox without putting tracing metadata in reducer state.
+    Traced {
+        span: tracing::Span,
+        remote: bool,
+        command: Box<RtcPeerCommand>,
+    },
     /// Ensure the peer is connected; initiates the offerer flow from `Idle`.
     Connect,
     /// Business demand for an existing recovering connection; never carries payloads.
@@ -184,6 +191,9 @@ pub(crate) enum RtcPeerCommand {
 impl std::fmt::Debug for RtcPeerCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Traced { command, .. } => {
+                f.debug_struct("Traced").field("command", command).finish()
+            }
             Self::Connect => f.write_str("Connect"),
             Self::BusinessRecoveryHint { .. } => f.write_str("BusinessRecoveryHint"),
             Self::ConnectCommitted { .. } => f.write_str("ConnectCommitted(..)"),
@@ -1590,6 +1600,9 @@ fn reduce_command(
     effects: &mut Vec<RtcPeerEffect>,
 ) {
     match command {
+        RtcPeerCommand::Traced { .. } => {
+            unreachable!("traced controller commands must be unwrapped by the controller")
+        }
         RtcPeerCommand::BusinessRecoveryHint {
             transport_epoch,
             pc_generation,

@@ -30,6 +30,9 @@ use webrtc::peer_connection::{RTCIceCandidateInit, RTCSdpType, RTCSessionDescrip
 use crate::lifecycle::CredentialState;
 use crate::wire::webrtc::signaling::SignalingClient;
 use crate::wire::webrtc::v020::peer::reducer::SignalingMessage;
+use tracing::Instrument;
+#[cfg(feature = "opentelemetry")]
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use super::router::SignalingTransport;
 use super::{RelayAttemptIdentity, SharedLocalId, SignalingDispatch, SignalingInbound};
@@ -221,6 +224,7 @@ impl SignalingTransport for V020SignalingTransport {
             peer: to,
             message,
             attempt,
+            span: parent_span,
         } = dispatch;
         let target_repr = to.to_string_repr();
         let payload = self.message_to_payload(&to, &message);
@@ -248,7 +252,21 @@ impl SignalingTransport for V020SignalingTransport {
             tracestate: None,
             flow: Some(signaling_envelope::Flow::ActrRelay(relay)),
         };
-        match self.signaling_client.send_envelope(envelope).await {
+        let send_span = tracing::info_span!(
+            "signaling.transport_send",
+            peer = %target_repr,
+            message_kind = message.kind_name(),
+        );
+        #[cfg(feature = "opentelemetry")]
+        let _ = send_span.set_parent(parent_span.context());
+        #[cfg(not(feature = "opentelemetry"))]
+        let _ = &parent_span;
+        match self
+            .signaling_client
+            .send_envelope(envelope)
+            .instrument(send_span)
+            .await
+        {
             Ok(()) => Ok(()),
             Err(error) => {
                 tracing::warn!(
@@ -264,7 +282,7 @@ impl SignalingTransport for V020SignalingTransport {
 
     async fn recv(&self) -> Option<(ActrId, SignalingMessage)> {
         match self.recv_event().await {
-            Some(SignalingInbound::PeerMessage { from, message }) => Some((from, message)),
+            Some(SignalingInbound::PeerMessage { from, message, .. }) => Some((from, message)),
             Some(SignalingInbound::TargetUnavailable { .. }) | None => None,
         }
     }
@@ -278,7 +296,11 @@ impl SignalingTransport for V020SignalingTransport {
         // across signaling reconnects without burning a core.
         let mut retry_backoff = std::time::Duration::from_millis(50);
         loop {
-            let envelope = match self.signaling_client.receive_envelope().await {
+            let (envelope, receive_span) = match self
+                .signaling_client
+                .receive_envelope_with_span()
+                .await
+            {
                 Ok(Some(envelope)) => envelope,
                 Ok(None) | Err(_) => {
                     // `WebSocketSignalingClient::disconnect()` replaces its
@@ -302,6 +324,8 @@ impl SignalingTransport for V020SignalingTransport {
                 }
             };
             retry_backoff = std::time::Duration::from_millis(50);
+            #[cfg(not(feature = "opentelemetry"))]
+            let _ = &receive_span;
             let Some(flow) = envelope.flow else {
                 tracing::warn!(
                     target = "v020-signaling",
@@ -311,6 +335,15 @@ impl SignalingTransport for V020SignalingTransport {
             };
             match flow {
                 signaling_envelope::Flow::ActrRelay(relay) => {
+                    let receive_span = {
+                        let span = tracing::info_span!(
+                            "signaling.transport_receive",
+                            envelope_id = %envelope.envelope_id,
+                        );
+                        #[cfg(feature = "opentelemetry")]
+                        let _ = span.set_parent(receive_span.context());
+                        span
+                    };
                     let source = relay.source.clone();
                     let target = relay.target.clone();
                     if let Some(payload) = relay.payload
@@ -326,6 +359,7 @@ impl SignalingTransport for V020SignalingTransport {
                         return Some(SignalingInbound::PeerMessage {
                             from: peer,
                             message,
+                            span: receive_span,
                         });
                     }
                 }
