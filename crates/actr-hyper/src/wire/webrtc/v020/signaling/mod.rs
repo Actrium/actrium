@@ -5,6 +5,8 @@
 //! `ws_transport` adapts the production 0.14 WebSocket signaling client.
 
 use actr_protocol::ActrId;
+#[cfg(feature = "opentelemetry")]
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::wire::webrtc::v020::peer::reducer::SignalingMessage;
 
@@ -32,8 +34,8 @@ pub(crate) struct SignalingDispatch {
     pub(crate) peer: ActrId,
     pub(crate) message: SignalingMessage,
     pub(crate) attempt: Option<RelayAttemptIdentity>,
-    /// Library-only context for preserving the originating business span
-    /// across the router and transport queues. This never crosses the wire.
+    /// Independent dispatch span carried across the router and transport queues.
+    /// Its OTel parent preserves causality without retaining the business span.
     pub(crate) span: tracing::Span,
 }
 
@@ -66,6 +68,7 @@ impl SignalingDispatch {
         message: SignalingMessage,
         span: tracing::Span,
     ) -> Self {
+        let span = Self::dispatch_span(&peer, &message, span);
         Self {
             peer,
             message,
@@ -90,12 +93,32 @@ impl SignalingDispatch {
         message: SignalingMessage,
         span: tracing::Span,
     ) -> Self {
+        let span = Self::dispatch_span(&peer, &message, span);
         Self {
             peer,
             message,
             attempt: None,
             span,
         }
+    }
+
+    fn dispatch_span(
+        peer: &ActrId,
+        message: &SignalingMessage,
+        parent: tracing::Span,
+    ) -> tracing::Span {
+        // A tracing parent would keep the business span open while signaling
+        // waits in the queue or transport. Retain only its OTel identity.
+        let span = tracing::info_span!(
+            parent: None,
+            "signaling.dispatch",
+            peer = %peer.to_string_repr(),
+            message_kind = message.kind_name(),
+        );
+        #[cfg(feature = "opentelemetry")]
+        let _ = span.set_parent(parent.context());
+        drop(parent);
+        span
     }
 
     pub(crate) fn requests_delivery_result(&self) -> bool {
@@ -158,3 +181,107 @@ pub(crate) mod in_memory;
 #[cfg(test)]
 #[path = "router_tests.rs"]
 mod router_tests;
+
+#[cfg(test)]
+mod tracing_lifetime_tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+    #[cfg(feature = "opentelemetry")]
+    use tracing_opentelemetry::OpenTelemetrySpanExt;
+    use tracing_subscriber::layer::{Context, SubscriberExt};
+    use tracing_subscriber::registry::LookupSpan;
+    use tracing_subscriber::{Layer, Registry};
+
+    #[derive(Clone)]
+    struct ClosedSpans(Arc<Mutex<Vec<&'static str>>>);
+
+    impl<S> Layer<S> for ClosedSpans
+    where
+        S: tracing::Subscriber + for<'lookup> LookupSpan<'lookup>,
+    {
+        fn on_close(&self, id: tracing::span::Id, context: Context<'_, S>) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(context.span(&id).unwrap().name());
+        }
+    }
+
+    fn check_dispatch_lifetime(tracked: bool) {
+        let closed = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = Registry::default().with(ClosedSpans(closed.clone()));
+        #[cfg(feature = "opentelemetry")]
+        let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder().build();
+        #[cfg(feature = "opentelemetry")]
+        let subscriber = {
+            use opentelemetry::trace::TracerProvider;
+            subscriber.with(tracing_opentelemetry::layer().with_tracer(provider.tracer("test")))
+        };
+        let closed_names = || closed.lock().unwrap().clone();
+        tracing::subscriber::with_default(subscriber, || {
+            let peer = ActrId {
+                realm: actr_protocol::Realm { realm_id: 1 },
+                serial_number: 1,
+                r#type: actr_protocol::ActrType {
+                    manufacturer: "test".into(),
+                    name: "node".into(),
+                    version: "1".into(),
+                },
+            };
+            let attempt = tracing::info_span!("webrtc.recover");
+            let dispatch = attempt.in_scope(|| {
+                if tracked {
+                    SignalingDispatch::tracked(peer, 1, 2, 3, 4, SignalingMessage::RoleNegotiation)
+                } else {
+                    SignalingDispatch::untracked(peer, SignalingMessage::RoleNegotiation)
+                }
+            });
+            #[cfg(feature = "opentelemetry")]
+            {
+                use opentelemetry::trace::TraceContextExt;
+                let parent = attempt.context();
+                let child = dispatch.span.context();
+                assert!(parent.span().span_context().is_valid());
+                assert_eq!(
+                    parent.span().span_context().trace_id(),
+                    child.span().span_context().trace_id()
+                );
+                assert_ne!(
+                    parent.span().span_context().span_id(),
+                    child.span().span_context().span_id()
+                );
+            }
+            let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+            tx.try_send(dispatch).unwrap();
+            // An attempt must close even while its signaling is still queued.
+            drop(attempt);
+            assert_eq!(closed_names(), vec!["webrtc.recover"]);
+            let dispatch = rx.try_recv().unwrap();
+            // Model the transport's child span outliving the dispatch handle.
+            let transport = dispatch
+                .span
+                .in_scope(|| tracing::info_span!("signaling.transport_send"));
+            drop(dispatch);
+            assert_eq!(closed_names(), vec!["webrtc.recover"]);
+            drop(transport);
+            assert_eq!(
+                closed_names(),
+                vec![
+                    "webrtc.recover",
+                    "signaling.transport_send",
+                    "signaling.dispatch"
+                ]
+            );
+        });
+    }
+
+    #[test]
+    fn tracked_dispatch_does_not_keep_attempt_open() {
+        check_dispatch_lifetime(true);
+    }
+
+    #[test]
+    fn untracked_dispatch_does_not_keep_attempt_open() {
+        check_dispatch_lifetime(false);
+    }
+}
