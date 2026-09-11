@@ -81,7 +81,14 @@ struct RetainedSignaling {
     generation: u64,
     negotiation_epoch: u64,
     message: SignalingMessage,
-    span: Span,
+    /// Retains only the originating attempt's OTel parent state, never the
+    /// business span itself: `tracing-opentelemetry` exports a span when its
+    /// last handle drops, so parking a live `webrtc.connect`/`webrtc.recover`
+    /// span here would inflate its recorded duration by the whole retention
+    /// window (same invariant as `generation_contexts`). Flush re-materializes
+    /// a short-lived `signaling.retry_flush` span parented on this context.
+    #[cfg(feature = "opentelemetry")]
+    context: opentelemetry::Context,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1656,6 +1663,12 @@ impl RtcPeerController {
             return;
         }
         let message_kind = retained.message.kind_name();
+        // The retained slot carries only the originating attempt's OTel
+        // context (see `RetainedSignaling`), so re-materialize a short-lived
+        // flush span parented on it instead of reopening the business span.
+        let span = tracing::info_span!("signaling.retry_flush");
+        #[cfg(feature = "opentelemetry")]
+        let _ = span.set_parent(retained.context.clone());
         let dispatch = SignalingDispatch::tracked_with_span(
             self.state.peer_id.clone(),
             self.deps.controller_lifecycle_id,
@@ -1663,7 +1676,7 @@ impl RtcPeerController {
             retained.generation,
             retained.negotiation_epoch,
             retained.message,
-            retained.span.clone(),
+            span,
         );
         match self.signaling_tx.try_send(dispatch) {
             Ok(()) => {
@@ -1679,7 +1692,8 @@ impl RtcPeerController {
                     generation: retained.generation,
                     negotiation_epoch: retained.negotiation_epoch,
                     message: dispatch.message,
-                    span: dispatch.span,
+                    #[cfg(feature = "opentelemetry")]
+                    context: dispatch.span.context(),
                 });
                 self.arm_signaling_retry_wake();
             }
@@ -1834,12 +1848,15 @@ impl RtcPeerController {
                             "no committed signaling generation; dropping non-recovery signaling"
                         );
                     } else {
+                        #[cfg(feature = "opentelemetry")]
+                        let context = span.context();
                         self.retry_signaling = Some(RetainedSignaling {
                             transport_epoch: self.state.transport_epoch,
                             generation,
                             negotiation_epoch: self.state.negotiation_epoch,
                             message,
-                            span: span.clone(),
+                            #[cfg(feature = "opentelemetry")]
+                            context,
                         });
                         tracing::debug!(
                             peer = %self.state.peer_id.to_string_repr(),
@@ -1910,7 +1927,8 @@ impl RtcPeerController {
                                 generation,
                                 negotiation_epoch: self.state.negotiation_epoch,
                                 message,
-                                span: dispatch.span,
+                                #[cfg(feature = "opentelemetry")]
+                                context: dispatch.span.context(),
                             });
                             self.arm_signaling_retry_wake();
                             tracing::warn!(
