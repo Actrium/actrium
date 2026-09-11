@@ -1885,7 +1885,7 @@ fn reduce_command(
                 // Give the first Offer a full negotiation window, but do not
                 // let repeated remote Offers postpone recovery indefinitely.
                 // Retransmission deadlines still advance their own epoch.
-                let offer_deadline = (state.recovery_cycle, generation);
+                let offer_deadline = (state.recovery_cycle, generation, state.ice_generation);
                 if state.answerer_offer_deadline != Some(offer_deadline) {
                     state.answerer_offer_deadline = Some(offer_deadline);
                     state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
@@ -2952,6 +2952,8 @@ fn clear_transport_attempt_cache(state: &mut RtcPeerState) {
     state.remote_request_wake_pending = false;
     state.recovery_negotiated = false;
     state.recovery_attempt_started = false;
+    state.business_hint_cycle = None;
+    state.answerer_offer_deadline = None;
     state.pc_connected = false;
     state.rpc_reliable_open = false;
     state.pending_pc_connected = false;

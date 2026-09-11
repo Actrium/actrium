@@ -174,8 +174,11 @@ pub(crate) struct RtcPeerState {
     pub(crate) recovery_cycle: u64,
     /// Coalesce business-driven wakes across concurrent callers within a cycle.
     pub(crate) business_hint_cycle: Option<u64>,
-    /// First remote Offer window for a logical cycle and physical generation.
-    pub(crate) answerer_offer_deadline: Option<(u64, u64)>,
+    /// First remote Offer window for each ICE generation in a logical cycle
+    /// and physical generation. Duplicate Offers for the same ICE generation
+    /// must not extend the recovery deadline, while a fresh restart Offer may
+    /// re-arm it for the new ICE exchange.
+    pub(crate) answerer_offer_deadline: Option<(u64, u64, u64)>,
     /// A Soft/Hard recovery operation has been launched for the current
     /// recovering epoch. Network-event storms are facts, not a request to run
     /// the same restart repeatedly; this latch is cleared only on convergence
@@ -183,9 +186,10 @@ pub(crate) struct RtcPeerState {
     pub(crate) recovery_attempt_started: bool,
     /// Initiating fact for the current logical recovery cycle. This is set
     /// when the cycle is first started and survives signaling-gate deferral,
-    /// soft retries, and hard escalation. Only `LocalNetwork` means the
-    /// offerer already owns the same local recovery round for attempt-1 wake
-    /// de-duplication; `PeerFailure` must remain wakeable for issue #227.
+    /// soft retries, and hard escalation. The origin is diagnostic context; it
+    /// must not by itself suppress an attempt-1 remote wake. Operation state
+    /// determines whether a local restart is still in flight, and a
+    /// `PeerFailure` recovery remains wakeable for issue #227.
     pub(crate) recovery_origin: Option<RecoveryOrigin>,
     /// The current recovery round has been confirmed by a remote
     /// `IceRestartRequest`. Late local lifecycle/address facts must coalesce

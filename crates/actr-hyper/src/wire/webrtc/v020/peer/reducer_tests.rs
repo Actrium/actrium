@@ -2616,6 +2616,113 @@ fn soft_recovery_does_not_double_restart_on_repeated_failure() {
 }
 
 #[test]
+fn business_recovery_hint_wakes_answerer_once_per_recovery_cycle() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_sendable_with_ufrag(&mut state, "remote-1");
+
+    // The normal answerer recovery is request-only. A demand arriving after
+    // the first request must still wake the peer, but concurrent demands in
+    // the same logical cycle must share one request/epoch.
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkUnavailable,
+        )),
+    );
+    let start = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkAvailable,
+        )),
+    );
+    assert!(has_restart_request(&start, 1));
+    let cycle = state.recovery_cycle;
+    let transport_epoch = state.transport_epoch;
+    assert_eq!(state.business_hint_cycle, None);
+
+    let wake = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            transport_epoch,
+            pc_generation: generation,
+        }),
+    );
+    assert!(has_restart_request(&wake, 2));
+    assert_eq!(state.business_hint_cycle, Some(cycle));
+    assert_eq!(state.local_restart_request_attempt, 2);
+
+    let duplicate = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            transport_epoch,
+            pc_generation: generation,
+        }),
+    );
+    assert!(duplicate.is_empty());
+    assert_eq!(state.business_hint_cycle, Some(cycle));
+    assert_eq!(state.local_restart_request_attempt, 2);
+}
+
+#[test]
+fn business_recovery_hint_does_not_race_answerer_sdp() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_sendable_with_ufrag(&mut state, "remote-1");
+
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkUnavailable,
+        )),
+    );
+    let start = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkAvailable,
+        )),
+    );
+    assert!(has_restart_request(&start, 1));
+
+    let offer = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
+            desc: Box::new(sdp_with_ufrag(RTCSdpType::Offer, "remote-2")),
+            exchange_id: Some("business-hint-sdp-race".to_string()),
+        }),
+    );
+    assert!(has_set_remote(&offer, generation));
+    let set_remote_operation = pending_operation(
+        &state,
+        PendingRtcOperationKind::SetRemoteDescription,
+        generation,
+    );
+    let remote_completed = reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::SetRemoteDescription {
+            generation,
+            operation_id: set_remote_operation,
+            result: Ok(()),
+        }),
+    );
+    assert!(has_create_answer(&remote_completed, generation));
+
+    let request_attempt = state.local_restart_request_attempt;
+    let transport_epoch = state.transport_epoch;
+    let hint = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::RecoveryHint {
+            transport_epoch,
+            pc_generation: generation,
+        }),
+    );
+    assert!(hint.is_empty());
+    assert_eq!(
+        state.local_restart_request_attempt, request_attempt,
+        "a demand hint must not race an in-flight CreateAnswer"
+    );
+    assert_eq!(state.business_hint_cycle, None);
+}
+
+#[test]
 fn local_address_changed_triggers_soft_recovery() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let generation = drive_offerer_to_sendable(&mut state);
@@ -5435,6 +5542,187 @@ fn drive_answerer_to_sendable_with_ufrag(state: &mut RtcPeerState, ufrag: &str) 
     assert!(has_send_answer(&effects, 1));
     drive_to_sendable(state, 1);
     1
+}
+
+#[test]
+fn answerer_restart_offer_deadline_rearms_only_for_a_new_ice_generation() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_sendable_with_ufrag(&mut state, "remote-1");
+
+    let first = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
+            desc: Box::new(sdp_with_ufrag(RTCSdpType::Offer, "remote-2")),
+            exchange_id: Some("deadline-first".to_string()),
+        }),
+    );
+    assert!(has_set_remote(&first, generation));
+    let first_deadline = state.answerer_offer_deadline;
+    let first_epoch = state.recovery_epoch;
+    let first_ice_generation = state.ice_generation;
+
+    // A retransmitted Offer from the same ICE generation is queued behind the
+    // current SetRemoteDescription, but it must not refresh the attempt timer.
+    let duplicate = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
+            desc: Box::new(sdp_with_ufrag(RTCSdpType::Offer, "remote-2")),
+            exchange_id: Some("deadline-duplicate".to_string()),
+        }),
+    );
+    assert!(duplicate.is_empty());
+    assert_eq!(state.answerer_offer_deadline, first_deadline);
+    assert_eq!(state.recovery_epoch, first_epoch);
+    assert_eq!(state.ice_generation, first_ice_generation);
+    assert!(state.queued_remote_description.is_some());
+
+    // A changed remote ICE credential is a new exchange and is allowed to
+    // receive its own deadline window.
+    let changed = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
+            desc: Box::new(sdp_with_ufrag(RTCSdpType::Offer, "remote-3")),
+            exchange_id: Some("deadline-new-generation".to_string()),
+        }),
+    );
+    assert!(changed.is_empty());
+    assert_eq!(state.ice_generation, first_ice_generation + 1);
+    assert_ne!(state.answerer_offer_deadline, first_deadline);
+    assert!(state.recovery_epoch > first_epoch);
+}
+
+/// Start an answerer recovery request and apply the Offer that completes the
+/// request/Offer hand-off. The returned operation is the production
+/// SetRemoteDescription step used by the stage-specific failure tests below.
+fn prepare_answerer_restart_offer_for_sdp_failure(state: &mut RtcPeerState) -> (u64, u64) {
+    let generation = drive_answerer_to_sendable_with_ufrag(state, "remote-1");
+    reduce(
+        state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkUnavailable,
+        )),
+    );
+    let request = reduce(
+        state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkAvailable,
+        )),
+    );
+    assert!(has_restart_request(&request, 1));
+
+    let offer = reduce(
+        state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
+            desc: Box::new(sdp_with_ufrag(RTCSdpType::Offer, "remote-2")),
+            exchange_id: Some("sdp-failure-recovery-offer".to_string()),
+        }),
+    );
+    assert!(has_set_remote(&offer, generation));
+    let operation_id = pending_operation(
+        state,
+        PendingRtcOperationKind::SetRemoteDescription,
+        generation,
+    );
+    (generation, operation_id)
+}
+
+#[test]
+fn answerer_set_remote_description_failure_wakes_offerer() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let (generation, operation_id) = prepare_answerer_restart_offer_for_sdp_failure(&mut state);
+    let recovery_epoch = state.recovery_epoch;
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::SetRemoteDescription {
+            generation,
+            operation_id,
+            result: Err(webrtc::error::Error::Other("set remote failed".into())),
+        }),
+    );
+
+    assert!(has_restart_request(&effects, 2));
+    assert_eq!(state.local_restart_request_attempt, 2);
+    assert!(!state.recovery_negotiated);
+    assert!(state.recovery_epoch > recovery_epoch);
+}
+
+#[test]
+fn answerer_create_answer_failure_wakes_offerer() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let (generation, set_remote_operation) =
+        prepare_answerer_restart_offer_for_sdp_failure(&mut state);
+
+    let remote_completed = reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::SetRemoteDescription {
+            generation,
+            operation_id: set_remote_operation,
+            result: Ok(()),
+        }),
+    );
+    assert!(has_create_answer(&remote_completed, generation));
+    let create_answer_operation =
+        pending_operation(&state, PendingRtcOperationKind::CreateAnswer, generation);
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::CreateAnswer {
+            generation,
+            operation_id: create_answer_operation,
+            result: Err(webrtc::error::Error::Other("create answer failed".into())),
+        }),
+    );
+
+    assert!(has_restart_request(&effects, 2));
+    assert_eq!(state.local_restart_request_attempt, 2);
+    assert!(!state.recovery_negotiated);
+}
+
+#[test]
+fn answerer_set_local_description_failure_wakes_offerer() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let (generation, set_remote_operation) =
+        prepare_answerer_restart_offer_for_sdp_failure(&mut state);
+
+    let remote_completed = reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::SetRemoteDescription {
+            generation,
+            operation_id: set_remote_operation,
+            result: Ok(()),
+        }),
+    );
+    assert!(has_create_answer(&remote_completed, generation));
+    let create_answer_operation =
+        pending_operation(&state, PendingRtcOperationKind::CreateAnswer, generation);
+    let local = reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::CreateAnswer {
+            generation,
+            operation_id: create_answer_operation,
+            result: Ok(Box::new(answer())),
+        }),
+    );
+    assert!(has_set_local(&local, generation));
+    let set_local_operation = pending_operation(
+        &state,
+        PendingRtcOperationKind::SetLocalDescription,
+        generation,
+    );
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::SetLocalDescription {
+            generation,
+            operation_id: set_local_operation,
+            result: Err(webrtc::error::Error::Other("set local failed".into())),
+        }),
+    );
+
+    assert!(has_restart_request(&effects, 2));
+    assert_eq!(state.local_restart_request_attempt, 2);
+    assert!(!state.recovery_negotiated);
 }
 
 /// A same-ufrag offer on an established session is a renegotiation (media
