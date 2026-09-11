@@ -3695,12 +3695,30 @@ fn legacy_answer_cannot_cross_a_restart_retry_boundary() {
     assert!(stale_answer.is_empty());
     assert_eq!(state.stale_events, stale_before + 1);
 
-    // A current legacy Answer must carry the new remote ICE credentials.
-    let current_answer = reduce(
+    // A changed remote ICE ufrag still cannot prove which restart produced an
+    // uncorrelated Answer: a delayed Answer from an older restart can carry a
+    // different ufrag after a later restart has superseded it.
+    let stale_after_ufrag_change = reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteDescriptionCorrelated {
             desc: Box::new(sdp_with_ufrag(RTCSdpType::Answer, "remote-after-retry")),
             exchange_id: None,
+        }),
+    );
+    assert!(stale_after_ufrag_change.is_empty());
+    assert_eq!(state.stale_events, stale_before + 2);
+
+    // The current restart remains usable through the protocol-level exchange
+    // id, which is the only unambiguous correlation signal after the fence.
+    let current_exchange_id = state
+        .pending_local_sdp_exchange_id
+        .clone()
+        .expect("the current restart must retain its exchange id");
+    let current_answer = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteDescriptionCorrelated {
+            desc: Box::new(sdp_with_ufrag(RTCSdpType::Answer, "remote-after-retry")),
+            exchange_id: Some(current_exchange_id),
         }),
     );
     assert!(has_set_remote(&current_answer, generation));

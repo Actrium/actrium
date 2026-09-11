@@ -895,7 +895,7 @@ impl RtcConnectionManager {
         };
         let submitted = handle.try_recovery_hint(request_id.to_owned());
         if !submitted {
-            tracing::warn!(
+            tracing::debug!(
                 peer = %peer.to_string_repr(),
                 request_id,
                 "v0.20 response recovery hint could not enter the Controller mailbox"

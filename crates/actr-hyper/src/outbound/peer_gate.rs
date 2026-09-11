@@ -1033,6 +1033,13 @@ impl PeerGate {
         // until the operation deadline.
         let mut dest_state = self.transport_manager.watch_dest_state();
         let mut waiter = None;
+        // A single request must not enqueue the same best-effort business
+        // recovery hint on every readiness wake. The Controller also
+        // coalesces the reduced effect, but this latch prevents mailbox
+        // traffic from amplifying while the waiter observes unrelated wake
+        // sources. A later request gets a fresh latch and may submit again.
+        #[cfg(feature = "webrtc-v020")]
+        let mut business_hint_submitted = false;
 
         loop {
             match self.preflight_send(target, dest, payload_type).await {
@@ -1068,15 +1075,19 @@ impl PeerGate {
                     #[cfg(feature = "webrtc-v020")]
                     if *projection.borrow() == SendProjection::Normal {
                         if let Some(handle) = self.v020_manager.get_controller(target).await {
-                            // Controller owns coalescing and lifecycle eligibility.
-                            // Queue saturation never blocks business readiness waits.
-                            if !handle.try_business_recovery_hint() {
-                                tracing::warn!(
-                                    target: "actr_recovery_hint",
-                                    peer = %target.to_string_repr(),
-                                    payload_type = ?payload_type,
-                                    "v0.20 business recovery hint was rejected by the controller mailbox"
-                                );
+                            if !business_hint_submitted {
+                                business_hint_submitted = true;
+                                // Controller owns lifecycle eligibility and
+                                // reducer-side coalescing. Queue saturation
+                                // never blocks business readiness waits.
+                                if !handle.try_business_recovery_hint() {
+                                    tracing::warn!(
+                                        target: "actr_recovery_hint",
+                                        peer = %target.to_string_repr(),
+                                        payload_type = ?payload_type,
+                                        "v0.20 business recovery hint was rejected by the controller mailbox"
+                                    );
+                                }
                             }
                         }
                     }
@@ -2985,6 +2996,59 @@ mod tests {
             .expect("route waiter must not panic")
             .expect("normal projection should admit the route");
         assert_eq!(admission, SendAdmission::Normal);
+    }
+
+    #[cfg(feature = "test-utils")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn route_waiter_submits_one_business_recovery_hint_per_waiter() {
+        use crate::wire::webrtc::v020::manager::RtcConnectionManager;
+
+        let (signaling_tx, _signaling_rx) = tokio::sync::mpsc::channel(16);
+        let manager = Arc::new(RtcConnectionManager::new(
+            Arc::new(NoopSessionFactory),
+            signaling_tx,
+        ));
+        manager.supervisor().set_signaling_generation(Some(0));
+
+        let target = test_actor_id(3);
+        let handle = manager.ensure_controller(target.clone()).await;
+        handle.connect().await.expect("connect command");
+        tokio::task::yield_now().await;
+        assert_eq!(
+            handle.snapshot().status,
+            actr_framework::WebRtcPeerStatus::Connecting
+        );
+
+        let transport = Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(CountingSuccessfulWireBuilder {
+                builds: Arc::new(AtomicUsize::new(0)),
+                sends: Arc::new(AtomicUsize::new(0)),
+            }),
+        ));
+        let gate = PeerGate::with_v020_manager(
+            transport,
+            manager.clone(),
+            Arc::new(RpcCorrelation::new()),
+            None,
+        );
+        let dest = PeerGate::actr_id_to_dest(&target);
+        let deadline = RpcDeadline::from_duration(Duration::from_millis(100));
+
+        let result = gate
+            .wait_until_route_ready(&target, &dest, PayloadType::RpcReliable, deadline, 0)
+            .await;
+        assert!(
+            result.is_err(),
+            "the test waiter must remain blocked until its caller deadline"
+        );
+        assert_eq!(
+            handle.business_recovery_hint_attempts(),
+            1,
+            "unrelated readiness wakes must not amplify mailbox hints"
+        );
+
+        manager.close_all().await;
     }
 
     #[tokio::test]

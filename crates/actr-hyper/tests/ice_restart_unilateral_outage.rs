@@ -148,10 +148,9 @@ async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
 
     // The issue-227 fix makes this request reset the in-flight round and
     // produce the next offer within the short grace/retry window. The helper
-    // owns the only timeout so a timeout failure is distinguishable from a
-    // fresh Offer arriving with an unexpected count.
-    let wake_offer = pair
-        .harness()
+    // owns the only timeout; the signaling trace below verifies the fresh
+    // Offer's identity and observed latency.
+    pair.harness()
         .signaling_faults
         .wait_for_hits_after(
             &offerer,
@@ -186,7 +185,6 @@ async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
     pair.heal_signaling_faults();
     pair.shutdown().await;
 
-    assert!(wake_offer > offers_before_wake);
     let previous_offer_exchange = trace
         .iter()
         .rev()
@@ -318,8 +316,7 @@ async fn local_network_recovery_retries_lost_offer_on_attempt1_wake() {
         .expect("the returning Answerer request must be present in the signaling trace");
     assert_eq!(request.attempt, Some(1));
 
-    let wake_offer = pair
-        .harness()
+    pair.harness()
         .signaling_faults
         .wait_for_hits_after(
             &offerer,
@@ -336,9 +333,20 @@ async fn local_network_recovery_retries_lost_offer_on_attempt1_wake() {
     pair.assert_rpc_both_directions("local_network_attempt1_wake")
         .await;
     let trace = pair.harness().signaling_faults.trace();
+    let fresh_offer = trace
+        .iter()
+        .find(|event| {
+            event.from == offerer
+                && event.to == answerer
+                && event.class == SignalingMessageClass::IceRestartOffer
+                && event.ordinal > offers_before_wake
+        })
+        .expect("the local-network wake must produce a fresh restart Offer trace event");
+    let wake_elapsed = fresh_offer
+        .observed_after
+        .saturating_sub(request.observed_after);
     pair.shutdown().await;
 
-    assert!(wake_offer > offers_before_wake);
     let previous_offer_exchange = trace
         .iter()
         .rev()
@@ -360,4 +368,10 @@ async fn local_network_recovery_retries_lost_offer_on_attempt1_wake() {
         .and_then(|event| event.exchange_id.as_deref());
     assert!(fresh_offer_exchange.is_some());
     assert_ne!(fresh_offer_exchange, previous_offer_exchange);
+    assert!(
+        wake_elapsed <= REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW,
+        "fresh Offer arrived {:?} after the observed attempt-1 request, beyond the {:?} wake window",
+        wake_elapsed,
+        REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW
+    );
 }

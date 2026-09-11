@@ -337,7 +337,8 @@ async fn send_envelope_to_caller(
                 },
             )
             .await;
-            if waited.is_ok() && handle.snapshot().sendable {
+            let sendable = handle.snapshot().sendable;
+            if waited.is_ok() && sendable {
                 let mut buf = Vec::new();
                 match response_envelope.encode(&mut buf) {
                     Ok(()) => {
@@ -385,7 +386,7 @@ async fn send_envelope_to_caller(
                     }
                 }
             }
-            if waited.is_err() {
+            if waited.is_err() || !sendable {
                 let submitted = manager.submit_recovery_hint(caller, request_id).await;
                 if submitted {
                     tracing::warn!(
@@ -393,8 +394,10 @@ async fn send_envelope_to_caller(
                         request_id = %request_id,
                         route_key = %route_key,
                         target_actor = %caller,
+                        sendability_wait_elapsed = waited.is_err(),
+                        peer_sendable = sendable,
                         recovery_hint_submitted = true,
-                        "response sendability wait elapsed; recovery hint submitted"
+                        "response peer remained non-sendable; recovery hint submitted"
                     );
                 } else {
                     tracing::warn!(
@@ -402,8 +405,10 @@ async fn send_envelope_to_caller(
                         request_id = %request_id,
                         route_key = %route_key,
                         target_actor = %caller,
+                        sendability_wait_elapsed = waited.is_err(),
+                        peer_sendable = sendable,
                         recovery_hint_submitted = false,
-                        "response sendability wait elapsed; recovery hint was not accepted"
+                        "response peer remained non-sendable; recovery hint was not accepted"
                     );
                 }
             }

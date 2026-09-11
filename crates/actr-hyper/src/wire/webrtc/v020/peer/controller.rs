@@ -1104,12 +1104,24 @@ impl RtcPeerController {
                     let (recovery_epoch, timer_kind, _) = recovery_timer
                         .take()
                         .expect("guarded recovery timer");
-                    tracing::warn!(
-                        peer = %self.state.peer_id.to_string_repr(),
-                        recovery_epoch,
-                        timer_kind,
-                        "v0.20 recovery timer elapsed; escalating the attempt"
-                    );
+                    match timer_kind {
+                        "remote_request_wake_grace" => {
+                            tracing::warn!(
+                                peer = %self.state.peer_id.to_string_repr(),
+                                recovery_epoch,
+                                timer_kind,
+                                "v0.20 recovery grace elapsed; retrying same-generation ICE restart"
+                            );
+                        }
+                        _ => {
+                            tracing::warn!(
+                                peer = %self.state.peer_id.to_string_repr(),
+                                recovery_epoch,
+                                timer_kind,
+                                "v0.20 recovery attempt timeout elapsed; escalating the attempt"
+                            );
+                        }
+                    }
                     if self
                         .apply(RtcPeerInput::RecoveryDeadlineElapsed { recovery_epoch })
                         .await

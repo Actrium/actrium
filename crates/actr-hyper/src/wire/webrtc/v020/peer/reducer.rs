@@ -2103,24 +2103,21 @@ fn reduce_command(
                     };
                     if exchange_id.is_none() {
                         if let Some(fence) = state.legacy_answer_fence.as_ref() {
-                            let answer_ufrag = super::state::session_ice_ufrag(&desc.sdp);
-                            let belongs_to_current_restart = matches!(
-                                (
-                                    fence.previous_remote_ufrag.as_deref(),
-                                    answer_ufrag.as_deref()
-                                ),
-                                (Some(previous), Some(received)) if previous != received
+                            // Once a recovery retry supersedes an Offer, an
+                            // uncorrelated Answer cannot identify which Offer
+                            // it belongs to. An ICE-ufrag change is not enough:
+                            // a delayed Answer from an earlier restart can
+                            // arrive after a later restart has superseded it.
+                            // Require the protocol-level exchange id until a
+                            // successful SetRemoteDescription clears the
+                            // fence.
+                            state.stale_events += 1;
+                            tracing::warn!(
+                                peer = %state.peer_id.to_string_repr(),
+                                previous_remote_ufrag = ?fence.previous_remote_ufrag,
+                                "discarding uncorrelated legacy SDP answer across restart boundary"
                             );
-                            if !belongs_to_current_restart {
-                                state.stale_events += 1;
-                                tracing::warn!(
-                                    peer = %state.peer_id.to_string_repr(),
-                                    previous_remote_ufrag = ?fence.previous_remote_ufrag,
-                                    answer_ufrag = ?answer_ufrag,
-                                    "discarding legacy SDP answer across restart boundary"
-                                );
-                                return;
-                            }
+                            return;
                         }
                     }
                     match (
@@ -2795,8 +2792,9 @@ fn offerer_restart_negotiation_inflight(state: &RtcPeerState) -> bool {
 
 /// Retain the evidence needed to fence a legacy Answer when a local Offer is
 /// superseded by a new recovery attempt. Correlated Answers carry their own
-/// exchange id; an uncorrelated legacy Answer can only be accepted safely if
-/// its remote ICE ufrag changed after the superseded Offer's peer state.
+/// exchange id; an uncorrelated legacy Answer is rejected until the current
+/// correlated exchange completes. The previous ufrag is retained for
+/// diagnostics only and is not an acceptance signal.
 fn fence_pending_legacy_answer(state: &mut RtcPeerState) {
     if state.legacy_answer_fence.is_none() && state.pending_local_sdp_exchange_id.is_some() {
         state.legacy_answer_fence = Some(LegacyAnswerFence {

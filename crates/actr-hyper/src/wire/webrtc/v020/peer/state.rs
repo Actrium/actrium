@@ -55,10 +55,10 @@ pub(crate) enum RecoveryOrigin {
 /// Compatibility fence for an uncorrelated legacy Answer.
 ///
 /// Once a local Offer has been superseded by a retry, a legacy Answer has no
-/// exchange id and cannot identify which Offer it answers. A changed remote
-/// ICE ufrag is the only safe evidence that such an Answer belongs to the
-/// current restart; an absent or unchanged ufrag remains ambiguous and is
-/// rejected.
+/// exchange id and cannot identify which Offer it answers. ICE credentials do
+/// not provide a sufficient ordering or correlation signal, so every
+/// uncorrelated Answer is rejected until the current correlated exchange
+/// completes. The prior remote ufrag is retained for diagnostics only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LegacyAnswerFence {
     pub(crate) previous_remote_ufrag: Option<String>,
@@ -319,8 +319,9 @@ pub(crate) struct RtcPeerState {
     pub(crate) pending_local_sdp_exchange_id: Option<String>,
 
     /// Set when a local Offer with no Answer yet is superseded by a recovery
-    /// retry. Legacy Answers without an exchange id are then accepted only if
-    /// their remote ICE ufrag proves that they belong to the new restart.
+    /// retry. Legacy Answers without an exchange id are then rejected until
+    /// the current correlated exchange completes; the stored ufrag is only
+    /// diagnostic context.
     pub(crate) legacy_answer_fence: Option<LegacyAnswerFence>,
 
     /// Correlation identity received with the latest accepted remote Offer.
