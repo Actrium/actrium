@@ -10,7 +10,7 @@ private enum DispatchRouteCodingKeys: String, CodingKey {
 
 @main
 struct ActrFrameworkGenerator {
-    static let version = "0.10.0"
+    static let version = "0.10.1"
 
     // MARK: - DispatchSpec model
 
