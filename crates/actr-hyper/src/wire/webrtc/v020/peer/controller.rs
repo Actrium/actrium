@@ -468,7 +468,8 @@ impl RtcPeerController {
         let mut state_rx = self.event_rx.state();
         let mut last_state_seq = 0;
         let mut generation_overflow_counts = std::collections::HashMap::<u64, u64>::new();
-        let mut recovery_timer: Option<(u64, super::policy_clock::PolicySleep)> = None;
+        let mut recovery_timer: Option<(u64, &'static str, super::policy_clock::PolicySleep)> =
+            None;
         let mut recovery_budget_timer: Option<(u64, super::policy_clock::PolicySleep)> = None;
         let mut role_negotiation_timer: Option<(u64, super::policy_clock::PolicySleep)> = None;
         let mut initial_connection_timer: Option<(u64, super::policy_clock::PolicySleep)> = None;
@@ -535,20 +536,20 @@ impl RtcPeerController {
             .then_some(self.state.recovery_epoch);
             match (
                 recovery_attempt_epoch,
-                recovery_timer.as_ref().map(|(epoch, _)| *epoch),
+                recovery_timer.as_ref().map(|(epoch, _, _)| *epoch),
             ) {
                 (Some(epoch), Some(armed)) if epoch == armed => {}
                 (Some(epoch), _) => {
+                    let (timer_kind, duration) = if self.state.remote_request_wake_pending {
+                        ("remote_request_wake_grace", REMOTE_REQUEST_WAKE_GRACE)
+                    } else {
+                        ("ice_restart_attempt_timeout", ICE_RESTART_ATTEMPT_TIMEOUT)
+                    };
                     recovery_timer = Some((
                         epoch,
-                        self.policy_clock.sleep(
-                            crate::timer::ids::WEBRTC_ICE_RESTART_WAIT,
-                            if self.state.remote_request_wake_pending {
-                                REMOTE_REQUEST_WAKE_GRACE
-                            } else {
-                                ICE_RESTART_ATTEMPT_TIMEOUT
-                            },
-                        ),
+                        timer_kind,
+                        self.policy_clock
+                            .sleep(crate::timer::ids::WEBRTC_ICE_RESTART_WAIT, duration),
                     ));
                 }
                 (None, _) => recovery_timer = None,
@@ -773,19 +774,13 @@ impl RtcPeerController {
                 }
                 _ = async {
                     match recovery_timer.as_mut() {
-                        Some((_, timer)) => timer.as_mut().await,
+                        Some((_, _, timer)) => timer.as_mut().await,
                         None => std::future::pending::<()>().await,
                     }
                 } => {
-                    let recovery_epoch = recovery_timer
+                    let (recovery_epoch, timer_kind, _) = recovery_timer
                         .take()
-                        .expect("guarded recovery timer")
-                        .0;
-                    let timer_kind = if self.state.remote_request_wake_pending {
-                        "remote_request_wake_grace"
-                    } else {
-                        "ice_restart_attempt_timeout"
-                    };
+                        .expect("guarded recovery timer");
                     tracing::warn!(
                         peer = %self.state.peer_id.to_string_repr(),
                         recovery_epoch,

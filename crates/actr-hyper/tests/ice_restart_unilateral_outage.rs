@@ -142,11 +142,12 @@ async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
         })
         .expect("the returning Answerer request must be present in the signaling trace");
     assert_eq!(request.attempt, Some(1));
+    let request_observed_after = request.observed_after;
 
     // The issue-227 fix makes this request reset the in-flight round and
-    // produce the next offer immediately. The offer is still dropped so the
-    // assertion observes the signaling action itself rather than a later
-    // readiness transition.
+    // produce the next offer within the short grace/retry window. The offer is
+    // still dropped so the assertion observes the signaling action itself
+    // rather than a later readiness transition.
     let wake_offer = pair
         .harness()
         .signaling_faults
@@ -159,12 +160,32 @@ async fn unilateral_outage_offerer_resends_offer_on_attempt1_wake() {
         )
         .await;
 
+    let trace = pair.harness().signaling_faults.trace();
+    let fresh_offer = trace
+        .iter()
+        .find(|event| {
+            event.from == offerer
+                && event.to == answerer
+                && event.class == SignalingMessageClass::IceRestartOffer
+                && event.ordinal > offers_before_wake
+        })
+        .expect("the wake must produce a fresh restart Offer trace event");
+    let wake_elapsed = fresh_offer
+        .observed_after
+        .saturating_sub(request_observed_after);
+
     pair.heal_signaling_faults();
     pair.shutdown().await;
 
     assert!(
         wake_offer.is_some(),
         "attempt-1 restart request must trigger a fresh offer within {:?}",
+        REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW
+    );
+    assert!(
+        wake_elapsed <= REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW,
+        "fresh Offer arrived {:?} after the observed attempt-1 request, beyond the {:?} wake window",
+        wake_elapsed,
         REMOTE_REQUEST_WAKE_GRACE + WAKE_WINDOW
     );
 }
