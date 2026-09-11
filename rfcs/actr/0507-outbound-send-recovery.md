@@ -44,7 +44,7 @@ Tell waits for readiness and performs one payload submission by default.
 This RFC does not provide exactly-once delivery and does not transparently
 replay a DataStream that may already have entered the transport. A mid-stream
 DataStream disconnect continues to be reported through the existing
-`DataStreamDeliveryUncertain` observation path.
+`DataChunkDeliveryUncertain` observation path.
 
 ## Problem definition
 
@@ -193,7 +193,7 @@ explicit uncertain-delivery result:
   `ActrError::DeliveryUncertain { operation_id, cause }`;
 - the synchronous `StreamReliable` path returns the same error; if the
   disconnect is discovered only after the send future has completed, the
-  existing `DataStreamDeliveryUncertain` Hook is also emitted;
+  existing `DataChunkDeliveryUncertain` Hook is also emitted;
 - `DeliveryUncertain.is_retryable` must be `false`;
 - `Unknown` must not be mapped to `ConnectionNotReady`, `TimedOut`, or ordinary
   `Unavailable`, because those errors may be misinterpreted as retryable.
@@ -270,7 +270,7 @@ This RFC directly reuses the following existing components:
 | `WirePool::watch_ready()` | WebRTC/WebSocket ready-set wakeup hint |
 | `SendProjection` | Global recovery/teardown policy wakeup hint |
 | `RpcDeadline` | Monotonic clock and absolute deadline |
-| `DataStreamDeliveryUncertain` | Existing application observation path after a DataStream disconnect |
+| `DataChunkDeliveryUncertain` | Existing application observation path after a DataStream disconnect |
 
 These watches/broadcasts only wake an operation. After every wake, the
 operation must reread the latest authoritative state; absence of an event is
@@ -389,7 +389,7 @@ that point, existing route-level recovery must also stop:
 
 - do not enter generic automatic retry;
 - do not resend the same chunk automatically;
-- continue to use the existing `DataStreamDeliveryUncertain` event/Hook; its
+- continue to use the existing `DataChunkDeliveryUncertain` event/Hook; its
   error payload should be `DeliveryUncertain` while the event category remains
   compatible;
 - let the application decide based on ACK, checksum, an idempotency key, or
@@ -452,7 +452,7 @@ flowchart LR
         S0["DataStream chunk"] --> S1["DestTransport<br/>wait ready / select or reselect route"]
         S1 --> S2["RTC Handle / WebSocket<br/>permit + send_once"]
         S2 -->|"Pre-send proof<br/>NotAttempted"| S1
-        S2 -->|"Fragment submitted or result unknown"| S3["DeliveryUncertain<br/>DataStreamDeliveryUncertain<br/>stop replay"]
+        S2 -->|"Fragment submitted or result unknown"| S3["DeliveryUncertain<br/>DataChunkDeliveryUncertain<br/>stop replay"]
     end
 
     subgraph TELL["Tell: wait and submit once"]
@@ -614,7 +614,7 @@ of Call, Tell, or `send_data_chunk`.
 | Tell/DataStream is accepted by the local transport | Existing success result; local submission only |
 | Tell fails before sending (`NotAttempted`) | Return this send error; do not submit again; see [PR-0507-4](#pr-0507-4-rpcreliable-and-streamreliable-readiness-waiting) |
 | Call/Tell send progress is `Unknown` | `ActrError::DeliveryUncertain`; no generic retry |
-| DataStream send progress is `Unknown` | `ActrError::DeliveryUncertain` plus the existing `DataStreamDeliveryUncertain` observation path |
+| DataStream send progress is `Unknown` | `ActrError::DeliveryUncertain` plus the existing `DataChunkDeliveryUncertain` observation path |
 | Call was sent but no Response arrived | `ActrError::DeliveryUncertain`; no generic replay |
 | Explicit FailFast or a legacy API | May continue to return `ConnectionNotReady` |
 
@@ -626,7 +626,7 @@ decided by the framework from current route state and the operation deadline.
 ### Hook semantics
 
 - `on_webrtc_connecting/connected/disconnected`: observe connection state;
-- `on_error(DataStreamDeliveryUncertain)`: observe uncertain DataStream
+- `on_error(DataChunkDeliveryUncertain)`: observe uncertain DataStream
   delivery;
 - missed, duplicated, reordered, or delayed Hooks must not change send
   correctness;
@@ -696,7 +696,7 @@ error.
 non-retryable `DeliveryUncertain`; the wire format is unchanged. The acceptance
 tests must include:
 
-- `lane_tests::websocket_interrupted_write_is_unknown_and_not_retryable`, which
+- `transport::lane::tests::websocket_interrupted_write_is_unknown_and_not_retryable`, which
   models a sink error after a WebSocket write has started and asserts
   `DeliveryProgress::Unknown`;
 - the PeerGate/transport mapping assertion that the same outcome becomes
@@ -783,7 +783,7 @@ be released.
 
 - remove `pendingRetry`, connected-Hook replay, and fallback-timer examples for
   ordinary Call/Tell/StreamReliable;
-- retain the DataStream mid-disconnect `DataStreamDeliveryUncertain`
+- retain the DataStream mid-disconnect `DataChunkDeliveryUncertain`
   explanation;
 - state clearly that Hooks are observational only;
 - expose `DeliveryUncertain { operationId, cause }` through the UniFFI error
@@ -916,13 +916,32 @@ adaptive retry rate are not RFC-0507 merge gates.
 The merge gate is the Rust `test` job in
 `.github/workflows/ci-gate.yml`. Its `realtime` `REALTIME_BINARIES` filter
 must continue to include `webrtc_large_mobile_recovery`,
-`mobile_network_event_scenarios`, and `mobile_rtc_pair_contract`; the
-`retry_core_mechanics` and WebRTC v0.20 unit targets run on the same job's
-retry-free `rest` shard. The realtime command is:
+`mobile_network_event_scenarios`, and `mobile_rtc_pair_contract`.
+The `rest` shard is not globally retry-free: `retry_core_mechanics` is an
+integration target selected by that shard and inherits the `kind(test)`
+`retries = 2` override. The selected WebRTC v0.20 real-PC lib modules also
+have an explicit `retries = 2` override and run in the dedicated
+`webrtc_v020` job. The realtime command is:
 
 ```text
 cargo nextest run --workspace --all-features --no-fail-fast -E "$REALTIME_BINARIES"
 ```
+
+Every RFC-0507 safety-critical acceptance test MUST have an explicit
+`retries = 0` override in `.config/nextest.toml`, placed before the broad
+`kind(test)` and WebRTC v0.20 overrides and matched by its exact nextest test
+ID. At minimum, the current in-crate safety tests use filters equivalent to:
+
+```text
+package(actr-hyper) and test(/^transport::lane::tests::websocket_interrupted_write_is_unknown_and_not_retryable$/)
+package(actr-hyper) and test(/^outbound::peer_gate::tests::submitted_call_without_response_is_delivery_uncertain$/)
+```
+
+Any RFC-0507 acceptance test placed in an integration target such as
+`retry_core_mechanics`, and any real-PC WebRTC v0.20 acceptance test, must
+likewise be listed with an exact `binary(...) and test(...)` filter and
+`retries = 0`; no safety test may rely on the `rest` label, the default
+`kind(lib)` behavior, or a binary-wide retry policy.
 
 The gate policy is:
 
@@ -1075,7 +1094,7 @@ RFC-0507 is complete when:
 6. official documentation and examples no longer require Hook-driven retry for
    ordinary sends;
 7. WebSocket partial-write and submitted-Call/no-Response acceptance tests are
-   active in the Rust CI Gate (the realtime shard for integration tests and the
-   retry-free rest shard for unit tests);
+   active in the Rust CI Gate with explicit `retries = 0` nextest filters; they
+   must not inherit the `kind(test)` or real-PC `retries = 2` overrides;
 8. UniFFI SDK mappings preserve `DeliveryUncertain` fields and no default SDK
    retry helper replays it.
