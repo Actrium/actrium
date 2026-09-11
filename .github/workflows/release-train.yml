@@ -82,10 +82,15 @@ jobs:
           fi
           echo "target_branch=${target_branch}" >> "$GITHUB_OUTPUT"
 
+          subject="${HEAD_COMMIT_MESSAGE%%$'\n'*}"
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
-          elif printf '%s\n' "$HEAD_COMMIT_MESSAGE" | grep -qE '^chore\(release\): basic train v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+          elif printf '%s\n' "$subject" | grep -qE '^chore\(release\): basic train v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?( \(#[0-9]+\))?$'; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$subject" == 'chore(release):'* ]]; then
+            echo "::error::Malformed release commit subject; expected chore(release): basic train vX.Y.Z with an optional PR number suffix"
+            printf 'Actual subject: %s\n' "$subject"
+            exit 1
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
           fi
