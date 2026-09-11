@@ -53,6 +53,11 @@ pub(crate) const NETWORK_RECOVERY_TIMEOUT: std::time::Duration = std::time::Dura
 /// their timing guards from this window instead of re-hardcoding seconds.
 pub const ICE_RESTART_ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// Short grace period for an Answer that races an Answerer's attempt-1 wake
+/// after the Offer has already been announced. If it expires, the reducer
+/// starts a fresh same-generation ICE restart.
+pub const REMOTE_REQUEST_WAKE_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// Network/App lifecycle facts broadcast by the recovery supervisor
 /// (RFC §"RecoverySupervisor"). The supervisor only broadcasts these facts;
 /// each controller independently decides Soft Recovery, Hard Recovery, or
