@@ -68,7 +68,7 @@ type RemoteServiceMetadata = {
   methods: MethodMetadata[];
 };
 
-const VERSION = "0.10.2";
+const VERSION = "0.10.3";
 
 const plugin = createEcmaScriptPlugin<PluginParams>({
   name: "protoc-gen-actrframework-typescript",
