@@ -29,7 +29,9 @@ use crate::wire::webrtc::v020::events::{
     DataChannelDescriptor, PEER_EVENT_MAILBOX_CAPACITY, PeerDriverEvent, TrackDescriptor,
     peer_event_mailbox_with_capacity_and_bytes,
 };
-use crate::wire::webrtc::v020::recovery::{ICE_RESTART_ATTEMPT_TIMEOUT, RtcNetworkEvent};
+use crate::wire::webrtc::v020::recovery::{
+    ICE_RESTART_ATTEMPT_TIMEOUT, REMOTE_REQUEST_WAKE_GRACE, RtcNetworkEvent,
+};
 use crate::wire::webrtc::v020::signaling::SignalingDispatch;
 use crate::wire::webrtc::v020::status::{LaneKind, PeerTransportRetirement, RtcPeerSnapshot};
 
@@ -783,7 +785,8 @@ impl RtcPeerController {
         let mut state_rx = self.event_rx.state();
         let mut last_state_seq = 0;
         let mut generation_overflow_counts = std::collections::HashMap::<u64, u64>::new();
-        let mut recovery_timer: Option<(u64, super::policy_clock::PolicySleep)> = None;
+        let mut recovery_timer: Option<(u64, &'static str, super::policy_clock::PolicySleep)> =
+            None;
         let mut recovery_budget_timer: Option<(u64, super::policy_clock::PolicySleep)> = None;
         let mut role_negotiation_timer: Option<(u64, super::policy_clock::PolicySleep)> = None;
         let mut initial_connection_timer: Option<(u64, super::policy_clock::PolicySleep)> = None;
@@ -850,16 +853,20 @@ impl RtcPeerController {
             .then_some(self.state.recovery_epoch);
             match (
                 recovery_attempt_epoch,
-                recovery_timer.as_ref().map(|(epoch, _)| *epoch),
+                recovery_timer.as_ref().map(|(epoch, _, _)| *epoch),
             ) {
                 (Some(epoch), Some(armed)) if epoch == armed => {}
                 (Some(epoch), _) => {
+                    let (timer_kind, duration) = if self.state.remote_request_wake_pending {
+                        ("remote_request_wake_grace", REMOTE_REQUEST_WAKE_GRACE)
+                    } else {
+                        ("ice_restart_attempt_timeout", ICE_RESTART_ATTEMPT_TIMEOUT)
+                    };
                     recovery_timer = Some((
                         epoch,
-                        self.policy_clock.sleep(
-                            crate::timer::ids::WEBRTC_ICE_RESTART_WAIT,
-                            ICE_RESTART_ATTEMPT_TIMEOUT,
-                        ),
+                        timer_kind,
+                        self.policy_clock
+                            .sleep(crate::timer::ids::WEBRTC_ICE_RESTART_WAIT, duration),
                     ));
                 }
                 (None, _) => recovery_timer = None,
@@ -1090,19 +1097,31 @@ impl RtcPeerController {
                 }
                 _ = async {
                     match recovery_timer.as_mut() {
-                        Some((_, timer)) => timer.as_mut().await,
+                        Some((_, _, timer)) => timer.as_mut().await,
                         None => std::future::pending::<()>().await,
                     }
                 } => {
-                    let recovery_epoch = recovery_timer
+                    let (recovery_epoch, timer_kind, _) = recovery_timer
                         .take()
-                        .expect("guarded recovery timer")
-                        .0;
-                    tracing::warn!(
-                        peer = %self.state.peer_id.to_string_repr(),
-                        recovery_epoch,
-                        "v0.20 recovery attempt deadline elapsed; escalating the attempt"
-                    );
+                        .expect("guarded recovery timer");
+                    match timer_kind {
+                        "remote_request_wake_grace" => {
+                            tracing::warn!(
+                                peer = %self.state.peer_id.to_string_repr(),
+                                recovery_epoch,
+                                timer_kind,
+                                "v0.20 recovery grace elapsed; retrying same-generation ICE restart"
+                            );
+                        }
+                        _ => {
+                            tracing::warn!(
+                                peer = %self.state.peer_id.to_string_repr(),
+                                recovery_epoch,
+                                timer_kind,
+                                "v0.20 recovery attempt timeout elapsed; escalating the attempt"
+                            );
+                        }
+                    }
                     if self
                         .apply(RtcPeerInput::RecoveryDeadlineElapsed { recovery_epoch })
                         .await

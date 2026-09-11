@@ -910,10 +910,26 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 generation,
                 operation_id,
             } => self.with_session_ops(identity, completion_tx, span, move |ops| async move {
+                let started = tokio::time::Instant::now();
+                tracing::debug!(
+                    generation,
+                    operation_id,
+                    stage = "create_offer",
+                    "SDP operation started"
+                );
                 let result = match ops {
                     Ok(ops) => ops.create_offer().await.map(Box::new),
                     Err(error) => Err(error),
                 };
+                // Do not log SDP or opaque backend errors: they may contain ICE credentials.
+                tracing::debug!(
+                    generation,
+                    operation_id,
+                    stage = "create_offer",
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    success = result.is_ok(),
+                    "SDP operation completed"
+                );
                 EffectCompletion::CreateOffer {
                     generation,
                     operation_id,
@@ -924,10 +940,26 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 generation,
                 operation_id,
             } => self.with_session_ops(identity, completion_tx, span, move |ops| async move {
+                let started = tokio::time::Instant::now();
+                tracing::debug!(
+                    generation,
+                    operation_id,
+                    stage = "create_answer",
+                    "SDP operation started"
+                );
                 let result = match ops {
                     Ok(ops) => ops.create_answer().await.map(Box::new),
                     Err(error) => Err(error),
                 };
+                // Do not log SDP or opaque backend errors: they may contain ICE credentials.
+                tracing::debug!(
+                    generation,
+                    operation_id,
+                    stage = "create_answer",
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    success = result.is_ok(),
+                    "SDP operation completed"
+                );
                 EffectCompletion::CreateAnswer {
                     generation,
                     operation_id,
@@ -939,10 +971,26 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 operation_id,
                 desc,
             } => self.with_session_ops(identity, completion_tx, span, move |ops| async move {
+                let started = tokio::time::Instant::now();
+                tracing::debug!(
+                    generation,
+                    operation_id,
+                    stage = "set_local_description",
+                    "SDP operation started"
+                );
                 let result = match ops {
                     Ok(ops) => ops.set_local_description(*desc).await,
                     Err(error) => Err(error),
                 };
+                // Do not log SDP or opaque backend errors: they may contain ICE credentials.
+                tracing::debug!(
+                    generation,
+                    operation_id,
+                    stage = "set_local_description",
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    success = result.is_ok(),
+                    "SDP operation completed"
+                );
                 EffectCompletion::SetLocalDescription {
                     generation,
                     operation_id,
@@ -954,10 +1002,26 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 operation_id,
                 desc,
             } => self.with_session_ops(identity, completion_tx, span, move |ops| async move {
+                let started = tokio::time::Instant::now();
+                tracing::debug!(
+                    generation,
+                    operation_id,
+                    stage = "set_remote_description",
+                    "SDP operation started"
+                );
                 let result = match ops {
                     Ok(ops) => ops.set_remote_description(*desc).await,
                     Err(error) => Err(error),
                 };
+                // Do not log SDP or opaque backend errors: they may contain ICE credentials.
+                tracing::debug!(
+                    generation,
+                    operation_id,
+                    stage = "set_remote_description",
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    success = result.is_ok(),
+                    "SDP operation completed"
+                );
                 EffectCompletion::SetRemoteDescription {
                     generation,
                     operation_id,

@@ -207,6 +207,11 @@ async fn pending_request_fails_promptly_on_stream_end_and_retries_after_reconnec
         &server_url,
     )));
     client.connect().await.expect("connect signaling client");
+    // Subscribe before the server can close the first socket. The signaling
+    // event stream is a non-replaying broadcast channel; subscribing after
+    // the first request lets a fast receiver task publish `Disconnected`
+    // before this test starts waiting for it.
+    let mut events = client.subscribe_events();
 
     let request_task = {
         let client = Arc::clone(&client);
@@ -229,7 +234,6 @@ async fn pending_request_fails_promptly_on_stream_end_and_retries_after_reconnec
     // The server has already dropped its socket. Wait until the client
     // observes the stream end before reconnecting, so connect() cannot be
     // mistaken for a no-op on the stale connected flag.
-    let mut events = client.subscribe_events();
     let dropped_at = Instant::now();
     loop {
         match tokio::time::timeout(Duration::from_secs(2), events.recv())
@@ -843,6 +847,9 @@ async fn pending_request_replays_after_pong_watchdog_loss() {
         &server_url,
     )));
     client.connect().await.expect("connect signaling client");
+    // Arm the non-replaying event receiver before the long silence window so
+    // a delayed watchdog event cannot be published before this test subscribes.
+    let mut events = client.subscribe_events();
     let silence_started = Instant::now();
 
     // Send the request late in the silence window: the waiter's own
@@ -864,7 +871,6 @@ async fn pending_request_replays_after_pong_watchdog_loss() {
         })
     };
 
-    let mut events = client.subscribe_events();
     let reason = loop {
         match tokio::time::timeout(Duration::from_secs(25), events.recv())
             .await
