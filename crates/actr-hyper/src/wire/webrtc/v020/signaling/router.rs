@@ -516,7 +516,7 @@ impl SignalingRouter {
                                                     if let Some(handle) =
                                                         manager.get_controller(&peer).await
                                                     {
-                                                        let _ = handle.force_reconnect().await;
+                                                        let _ = handle.force_reconnect_with_span(span.clone()).await;
                                                     }
                                                 },
                                             )
@@ -603,7 +603,7 @@ impl SignalingRouter {
                                             let _ = crate::timer::timeout(
                                                 crate::timer::ids::RTC_SIGNALING_DISPATCH,
                                                 INBOUND_DISPATCH_TIMEOUT,
-                                                handle.force_reconnect(),
+                                                handle.force_reconnect_with_span(span.clone()),
                                             )
                                             .await;
                                         }
@@ -659,7 +659,7 @@ impl SignalingRouter {
         parent_span: tracing::Span,
     ) {
         let receive_span = tracing::info_span!(
-            "signaling.receive",
+            "signaling.route",
             peer = %from.to_string_repr(),
             message_kind = message.kind_name(),
         );

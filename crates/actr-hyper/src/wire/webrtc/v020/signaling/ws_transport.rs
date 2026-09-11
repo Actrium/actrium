@@ -253,7 +253,7 @@ impl SignalingTransport for V020SignalingTransport {
             flow: Some(signaling_envelope::Flow::ActrRelay(relay)),
         };
         let send_span = tracing::info_span!(
-            "signaling.send",
+            "signaling.transport_send",
             peer = %target_repr,
             message_kind = message.kind_name(),
         );
@@ -337,7 +337,7 @@ impl SignalingTransport for V020SignalingTransport {
                 signaling_envelope::Flow::ActrRelay(relay) => {
                     let receive_span = {
                         let span = tracing::info_span!(
-                            "signaling.receive",
+                            "signaling.transport_receive",
                             envelope_id = %envelope.envelope_id,
                         );
                         #[cfg(feature = "opentelemetry")]

@@ -214,10 +214,14 @@ pub(crate) struct RtcPeerController {
     /// completed business spans open.
     #[cfg(feature = "opentelemetry")]
     generation_contexts: std::collections::HashMap<u64, opentelemetry::Context>,
-    /// The span for the event currently being reduced. Effects targeting a
-    /// still-live generation inherit this processing child; retired generation
-    /// effects fall back to `generation_spans`.
+    /// The span for the event currently being reduced. Effects targeting the
+    /// current attempt or the input generation inherit this processing span;
+    /// other generations resolve their own attempt context.
     active_effect_span: Option<Span>,
+    /// Generation of the current input, when its attempt did not change.
+    /// Reuse its processing span for same-generation effects, including
+    /// fallback/retired generations, without caching a span across turns.
+    active_effect_generation: Option<u64>,
 }
 
 /// Node-level shared dependencies handed to every controller and its effect
@@ -457,6 +461,7 @@ impl RtcPeerController {
             #[cfg(feature = "opentelemetry")]
             generation_contexts: std::collections::HashMap::new(),
             active_effect_span: None,
+            active_effect_generation: None,
         };
         let task = tokio::spawn(controller.run());
         let handle = RtcPeerControllerHandle::new(
@@ -629,7 +634,9 @@ impl RtcPeerController {
         let live_slot = self.state.building_generation == Some(generation)
             || self.state.active_generation == Some(generation)
             || self.state.pending_generation == Some(generation)
-            || self.state.sessions_to_close.contains(&generation);
+            || self.state.sessions_to_close.contains(&generation)
+            // A physically closed Answerer may still signal on this generation.
+            || self.state.parked_signaling_generation == Some(generation);
         let pending_operation = self
             .state
             .pending_operations
@@ -647,7 +654,7 @@ impl RtcPeerController {
             Some(_) => self.attempt_generation == Some(generation),
             None => self.state.active_generation == Some(generation),
         };
-        if current_generation {
+        if current_generation || self.active_effect_generation == Some(generation) {
             if let Some(span) = &self.active_effect_span {
                 return span.clone();
             }
@@ -1221,6 +1228,8 @@ impl RtcPeerController {
 
     async fn apply_inner(&mut self, input: RtcPeerInput) -> bool {
         self.active_effect_span = None;
+        self.active_effect_generation = None;
+        let input_generation = self.input_generation(&input);
         let attempt_key_before = self.current_attempt_key();
         let completed_generation = match &input {
             RtcPeerInput::Completion(completion) => Some(completion.generation()),
@@ -1379,11 +1388,18 @@ impl RtcPeerController {
         let phase_before = self.state.phase;
         let was_terminally_unavailable = self.state.terminally_unavailable();
         let active_generation_before = self.state.active_generation;
+        let parked_generation_before = self.state.parked_signaling_generation;
         let effects = reduce(&mut self.state, input);
         let is_sendable = self.state.sendable();
         self.update_attempt_spans();
         let event_span = Span::current();
         let attempt_key_after = self.current_attempt_key();
+        // A fallback or late completion can target a different generation from
+        // the current attempt. Its own effects can share the input span, but a
+        // transition to another attempt must use the new attempt's fencing.
+        self.active_effect_generation = (attempt_key_before == attempt_key_after)
+            .then_some(input_generation)
+            .flatten();
         self.active_effect_span = match (attempt_key_before, attempt_key_after) {
             (Some(previous), Some(current)) if previous != current => {
                 Some(self.processing_span(&self.current_attempt_span(), &event_span))
@@ -1495,7 +1511,15 @@ impl RtcPeerController {
             }
         }
         self.active_effect_span = None;
+        self.active_effect_generation = None;
         if let Some(generation) = completed_generation {
+            self.cleanup_generation_context_if_retired(generation);
+        }
+        // Leaving the parked slot need not produce another completion for the
+        // old generation, so release its context on the transition itself.
+        if let Some(generation) = parked_generation_before
+            && self.state.parked_signaling_generation != Some(generation)
+        {
             self.cleanup_generation_context_if_retired(generation);
         }
         if let Some((operation_id, result)) = completed_refresh

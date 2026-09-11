@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use actr_protocol::ActrId;
 use tokio::sync::{mpsc, oneshot, watch};
-use webrtc::peer_connection::{RTCIceCandidateInit, RTCSessionDescription};
+use webrtc::peer_connection::RTCSessionDescription;
 
 use crate::wire::webrtc::v020::media::OutboundTrackWriter;
 use crate::wire::webrtc::v020::peer::lane_handle::{ActiveLaneRegistry, LaneHandle};
@@ -716,18 +716,6 @@ impl RtcPeerControllerHandle {
             .await
     }
 
-    pub(crate) async fn apply_remote_description_correlated(
-        &self,
-        desc: RTCSessionDescription,
-        exchange_id: Option<String>,
-    ) -> Result<(), ControllerGone> {
-        self.send_command(RtcPeerCommand::ApplyRemoteDescriptionCorrelated {
-            desc: Box::new(desc),
-            exchange_id,
-        })
-        .await
-    }
-
     /// Deliver a wire-tagged ICE restart offer. This distinction lets the
     /// reducer keep a Soft Recovery on the current PC while treating an
     /// ordinary changed-ufrag Offer as a fresh physical connection.
@@ -737,30 +725,6 @@ impl RtcPeerControllerHandle {
     ) -> Result<(), ControllerGone> {
         self.send_command(RtcPeerCommand::ApplyRemoteIceRestartOffer(Box::new(desc)))
             .await
-    }
-
-    pub(crate) async fn apply_remote_ice_restart_offer_correlated(
-        &self,
-        desc: RTCSessionDescription,
-        exchange_id: Option<String>,
-    ) -> Result<(), ControllerGone> {
-        self.send_command(RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
-            desc: Box::new(desc),
-            exchange_id,
-        })
-        .await
-    }
-
-    pub(crate) async fn apply_ice_restart_request(
-        &self,
-        request_id: String,
-        attempt: u32,
-    ) -> Result<(), ControllerGone> {
-        self.send_command(RtcPeerCommand::ApplyIceRestartRequest {
-            request_id,
-            attempt,
-        })
-        .await
     }
 
     /// Apply a restart request and return the outcome committed by the
@@ -785,31 +749,6 @@ impl RtcPeerControllerHandle {
         outcome.await.map_err(|_| ControllerGone::Gone)
     }
 
-    /// Deliver the receiver's acknowledgement for this controller's current
-    /// Answerer-side restart request.
-    pub(crate) async fn apply_ice_restart_request_ack(
-        &self,
-        request_id: String,
-        attempt: u32,
-        outcome: i32,
-    ) -> Result<(), ControllerGone> {
-        self.send_command(RtcPeerCommand::ApplyIceRestartRequestAck {
-            request_id,
-            attempt,
-            outcome,
-        })
-        .await
-    }
-
-    /// Deliver a remote ICE candidate (from the signaling router).
-    pub(crate) async fn apply_remote_candidate(
-        &self,
-        candidate: RTCIceCandidateInit,
-    ) -> Result<(), ControllerGone> {
-        self.send_command(RtcPeerCommand::ApplyRemoteCandidate(candidate))
-            .await
-    }
-
     pub(crate) async fn signaling_delivery_failed(
         &self,
         transport_epoch: u64,
@@ -827,8 +766,11 @@ impl RtcPeerControllerHandle {
         &self,
         is_offerer: bool,
     ) -> Result<(), ControllerGone> {
-        self.send_command(RtcPeerCommand::ApplyRoleAssignment { is_offerer })
-            .await
+        self.apply_signaling_message_with_span(
+            SignalingMessage::RoleAssignment { is_offerer },
+            tracing::Span::current(),
+        )
+        .await
     }
 
     pub(crate) async fn target_unavailable(
@@ -845,13 +787,19 @@ impl RtcPeerControllerHandle {
         .await
     }
 
-    /// A correlated ICE-restart offer was rejected by the remote because it no
-    /// longer owns the old Session. Escalate through the controller's normal
-    /// Hard Recovery policy instead of mutating the manager/router state.
-    pub(crate) async fn force_reconnect(&self) -> Result<(), ControllerGone> {
-        self.send_command(RtcPeerCommand::NetworkEvent(
-            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::ForceReconnect,
-        ))
+    /// Preserve the triggering inbound message as a causal link when the router
+    /// escalates a shed or timed-out dispatch through the controller mailbox.
+    pub(crate) async fn force_reconnect_with_span(
+        &self,
+        span: tracing::Span,
+    ) -> Result<(), ControllerGone> {
+        self.send_command_with_span(
+            RtcPeerCommand::NetworkEvent(
+                crate::wire::webrtc::v020::recovery::RtcNetworkEvent::ForceReconnect,
+            ),
+            span,
+            true,
+        )
         .await
     }
 
