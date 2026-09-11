@@ -18,7 +18,8 @@ pub(crate) fn inject_span_context(span: &Span, envelope: &mut SignalingEnvelope)
     let span_ref = context.span();
     let span_context = span_ref.span_context();
     if !span_context.is_valid() {
-        tracing::warn!("⚠️ inject_span_context: span context is not valid, skipping injection");
+        // A filtered or disabled span has no OTel context; skipping propagation
+        // is expected for background paths such as the signaling heartbeat.
         return;
     }
 
@@ -90,9 +91,8 @@ pub(crate) fn inject_span_context_to_rpc(span: &Span, envelope: &mut RpcEnvelope
     let span_ref = context.span();
     let span_context = span_ref.span_context();
     if !span_context.is_valid() {
-        tracing::warn!(
-            "⚠️ inject_span_context_to_rpc: span context is not valid, skipping injection"
-        );
+        // A filtered or disabled span has no OTel context; skipping propagation
+        // is expected when tracing is not active for this RPC.
         return;
     }
 

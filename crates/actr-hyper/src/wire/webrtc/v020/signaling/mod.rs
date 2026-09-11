@@ -32,6 +32,9 @@ pub(crate) struct SignalingDispatch {
     pub(crate) peer: ActrId,
     pub(crate) message: SignalingMessage,
     pub(crate) attempt: Option<RelayAttemptIdentity>,
+    /// Library-only context for preserving the originating business span
+    /// across the router and transport queues. This never crosses the wire.
+    pub(crate) span: tracing::Span,
 }
 
 impl SignalingDispatch {
@@ -43,6 +46,26 @@ impl SignalingDispatch {
         negotiation_epoch: u64,
         message: SignalingMessage,
     ) -> Self {
+        Self::tracked_with_span(
+            peer,
+            controller_lifecycle_id,
+            transport_epoch,
+            pc_generation,
+            negotiation_epoch,
+            message,
+            tracing::Span::current(),
+        )
+    }
+
+    pub(crate) fn tracked_with_span(
+        peer: ActrId,
+        controller_lifecycle_id: u64,
+        transport_epoch: u64,
+        pc_generation: u64,
+        negotiation_epoch: u64,
+        message: SignalingMessage,
+        span: tracing::Span,
+    ) -> Self {
         Self {
             peer,
             message,
@@ -52,16 +75,26 @@ impl SignalingDispatch {
                 pc_generation,
                 negotiation_epoch,
             }),
+            span,
         }
     }
 
     /// Protocol responses emitted outside a live Controller do not request a
     /// delivery result and therefore carry no attempt identity.
     pub(crate) fn untracked(peer: ActrId, message: SignalingMessage) -> Self {
+        Self::untracked_with_span(peer, message, tracing::Span::current())
+    }
+
+    pub(crate) fn untracked_with_span(
+        peer: ActrId,
+        message: SignalingMessage,
+        span: tracing::Span,
+    ) -> Self {
         Self {
             peer,
             message,
             attempt: None,
+            span,
         }
     }
 
@@ -84,6 +117,8 @@ pub(crate) enum SignalingInbound {
     PeerMessage {
         from: ActrId,
         message: SignalingMessage,
+        /// Receive-side span recovered from the signaling envelope queue.
+        span: tracing::Span,
     },
     TargetUnavailable {
         target: ActrId,
