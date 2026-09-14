@@ -401,7 +401,7 @@ pub struct ActrRefWrapper {
     inner: ActrRef,
 }
 
-/// Listener for per-peer WebRTC state updates (Stage 6, v0.20 backend).
+/// Listener for per-peer WebRTC state updates (Stage 6, RTC backend).
 #[uniffi::export(callback_interface)]
 #[async_trait::async_trait]
 pub trait RtcPeerStateListener: Send + Sync + 'static {
@@ -410,7 +410,7 @@ pub trait RtcPeerStateListener: Send + Sync + 'static {
     async fn on_state(&self, state: WebRtcPeerStateBridge);
 }
 
-/// A live WebRTC peer-status subscription (Stage 6, v0.20 backend). Dropping
+/// A live WebRTC peer-status subscription (Stage 6, RTC backend). Dropping
 /// it aborts the delivery task.
 #[derive(uniffi::Object)]
 pub struct RtcPeerStateSubscription {
@@ -486,76 +486,50 @@ impl ActrRefWrapper {
         self.inner.is_shutting_down()
     }
 
-    /// Query one peer's current WebRTC state (v0.20 backend). Returns `None`
-    /// when the peer has no controller, the node runs the 0.14 backend, or
-    /// the build does not enable `webrtc-v020`.
+    /// Query one peer's current WebRTC state. Returns `None`
+    /// when the peer has no controller or RTC has not been initialized.
     pub async fn get_rtc_peer_status(&self, peer: ActrId) -> Option<WebRtcPeerStateBridge> {
-        #[cfg(feature = "webrtc-v020")]
-        {
-            let peer: actr_protocol::ActrId = peer.into();
-            self.inner.get_rtc_peer_status(&peer).await.map(Into::into)
-        }
-        #[cfg(not(feature = "webrtc-v020"))]
-        {
-            let _ = peer;
-            None
-        }
+        let peer: actr_protocol::ActrId = peer.into();
+        self.inner.get_rtc_peer_status(&peer).await.map(Into::into)
     }
 
-    /// List every current peer's WebRTC state (v0.20 backend; empty on 0.14
-    /// or when the build does not enable `webrtc-v020`).
+    /// List every current peer's WebRTC state; empty when no peers are registered.
     pub async fn list_rtc_peer_statuses(&self) -> Vec<WebRtcPeerStateBridge> {
-        #[cfg(feature = "webrtc-v020")]
-        {
-            self.inner
-                .list_rtc_peer_statuses()
-                .await
-                .into_iter()
-                .map(Into::into)
-                .collect()
-        }
-        #[cfg(not(feature = "webrtc-v020"))]
-        {
-            Vec::new()
-        }
+        self.inner
+            .list_rtc_peer_statuses()
+            .await
+            .into_iter()
+            .map(Into::into)
+            .collect()
     }
 
-    /// Subscribe to one peer's WebRTC state changes (v0.20 backend). The
+    /// Subscribe to one peer's WebRTC state changes. The
     /// listener immediately receives the current state (initial replay).
     /// Dropping the returned subscription stops delivery. Returns `None` when
-    /// the peer has no controller, the node runs the 0.14 backend, or the
-    /// build does not enable `webrtc-v020`.
+    /// the peer has no controller or RTC has not been initialized.
     pub async fn subscribe_rtc_peer_status(
         &self,
         peer: ActrId,
         listener: Box<dyn RtcPeerStateListener>,
     ) -> Option<Arc<RtcPeerStateSubscription>> {
-        #[cfg(feature = "webrtc-v020")]
-        {
-            let peer: actr_protocol::ActrId = peer.into();
-            let mut rx = self.inner.subscribe_rtc_peer_status(&peer).await?;
-            let listener: Arc<dyn RtcPeerStateListener> = Arc::from(listener);
-            let task = tokio::spawn(async move {
-                // Initial replay: deliver the current state immediately.
-                // Bind before the await so the watch guard is not held across
-                // it (the borrow guard is not Send).
-                let initial: WebRtcPeerStateBridge = rx.borrow().clone().into();
-                listener.on_state(initial).await;
-                loop {
-                    if rx.changed().await.is_err() {
-                        break;
-                    }
-                    let state: WebRtcPeerStateBridge = rx.borrow_and_update().clone().into();
-                    listener.on_state(state).await;
+        let peer: actr_protocol::ActrId = peer.into();
+        let mut rx = self.inner.subscribe_rtc_peer_status(&peer).await?;
+        let listener: Arc<dyn RtcPeerStateListener> = Arc::from(listener);
+        let task = tokio::spawn(async move {
+            // Initial replay: deliver the current state immediately.
+            // Bind before the await so the watch guard is not held across
+            // it (the borrow guard is not Send).
+            let initial: WebRtcPeerStateBridge = rx.borrow().clone().into();
+            listener.on_state(initial).await;
+            loop {
+                if rx.changed().await.is_err() {
+                    break;
                 }
-            });
-            Some(Arc::new(RtcPeerStateSubscription { task }))
-        }
-        #[cfg(not(feature = "webrtc-v020"))]
-        {
-            let _ = (peer, listener);
-            None
-        }
+                let state: WebRtcPeerStateBridge = rx.borrow_and_update().clone().into();
+                listener.on_state(state).await;
+            }
+        });
+        Some(Arc::new(RtcPeerStateSubscription { task }))
     }
 
     /// Call the local guest workload via RPC.

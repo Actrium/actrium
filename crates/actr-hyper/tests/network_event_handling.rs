@@ -1,5 +1,5 @@
 #![allow(deprecated)]
-//! Network-event integration tests over the v0.20 RTC controller hierarchy.
+//! Network-event integration tests over the RTC controller hierarchy.
 
 use std::sync::Arc;
 use std::time::Duration;

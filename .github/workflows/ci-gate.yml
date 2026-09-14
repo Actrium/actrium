@@ -1048,8 +1048,8 @@ jobs:
           --ignored
           --nocapture
 
-  webrtc_v020:
-    name: WebRTC v0.20
+  webrtc:
+    name: WebRTC
     needs: determine
     if: needs.determine.outputs.rust_core == 'true'
     runs-on: [self-hosted, Linux, X64, high]
@@ -1080,18 +1080,17 @@ jobs:
           save-if: "false"
       - name: Install cargo-nextest
         uses: taiki-e/install-action@cargo-nextest
-      # Gate the parallel webrtc-rs v0.20 migration path (the `webrtc-v020`
-      # optional feature), which is otherwise not exercised by CI.
-      - name: Check (webrtc-v020)
-        run: cargo check -p actr-hyper --features webrtc-v020 --all-targets
-      - name: Clippy (webrtc-v020, deny warnings)
-        run: cargo clippy -p actr-hyper --all-targets --features webrtc-v020 -- -D warnings
+      # Exercise the native RTC implementation in a dedicated job.
+      - name: Check (WebRTC)
+        run: cargo check -p actr-hyper --all-targets
+      - name: Clippy (WebRTC, deny warnings)
+        run: cargo clippy -p actr-hyper --all-targets -- -D warnings
       # nextest (not bare cargo test): the real-PC suites in this filter hit
       # CI-load handshake-timing flakes, and libtest would fail the whole job
       # on the first one without retries or running the rest. nextest picks up
       # the .config/nextest.toml retry overrides and --no-fail-fast semantics.
-      - name: Test (webrtc-v020)
-        run: cargo nextest run -p actr-hyper --features webrtc-v020 -E 'test(/^wire::webrtc::v020/)' --no-fail-fast
+      - name: Test (WebRTC)
+        run: cargo nextest run -p actr-hyper -E 'test(/^wire::webrtc::rtc/)' --no-fail-fast
 
   cjk:
     name: Language Policy
@@ -1141,7 +1140,7 @@ jobs:
       - web
       - c_go_workloads
       - test
-      - webrtc_v020
+      - webrtc
       - cjk
     env:
       MODE: ${{ needs.determine.outputs.mode }}
@@ -1162,7 +1161,7 @@ jobs:
       E2E_RUST_RESULT: ${{ needs.e2e_rust.result }}
       E2E_PACKAGE_RUNTIME_RESULT: ${{ needs.e2e_package_runtime.result }}
       TEST_RESULT: ${{ needs.test.result }}
-      WEBRTC_V020_RESULT: ${{ needs.webrtc_v020.result }}
+      WEBRTC_RESULT: ${{ needs.webrtc.result }}
       CJK_RESULT: ${{ needs.cjk.result }}
     steps:
       - name: Summarize gate
@@ -1188,7 +1187,7 @@ jobs:
               "e2e_rust": os.environ["E2E_RUST_RESULT"],
               "e2e_package_runtime": os.environ["E2E_PACKAGE_RUNTIME_RESULT"],
               "test": os.environ["TEST_RESULT"],
-              "webrtc_v020": os.environ["WEBRTC_V020_RESULT"],
+              "webrtc": os.environ["WEBRTC_RESULT"],
               "cjk": os.environ["CJK_RESULT"],
           }
 

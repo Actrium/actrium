@@ -421,7 +421,7 @@ impl PeerTransport {
     /// Whether an already-materialized destination currently has a non-WebRTC
     /// fallback route that can carry `payload_type`.  WebRTC is deliberately
     /// excluded: its `ReadySet` entry reflects the physical wire, while the
-    /// v0.20 controller separately owns peer sendability and may be in
+    /// RTC controller separately owns peer sendability and may be in
     /// `Recovering` even when the physical WebRTC wire is still marked ready.
     /// This is a read-only check used by the readiness waiter; it never creates
     /// a connection or a lane.
@@ -1023,8 +1023,8 @@ impl PeerTransport {
     ///
     /// Called by the legacy WebRTC connection-closed path so outbound
     /// WebSocket response-reader tasks are not inadvertently terminated when a
-    /// WebRTC peer disconnects. The v0.20 backend does not call this method,
-    /// but preserving it keeps the non-v0.20 transport contract intact.
+    /// WebRTC peer disconnects. The RTC backend does not call this method,
+    /// but preserving it keeps the non-RTC transport contract intact.
     #[allow(dead_code)]
     pub(crate) async fn close_webrtc_transport_if_session(
         &self,

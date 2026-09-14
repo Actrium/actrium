@@ -843,9 +843,8 @@ public protocol ActrRefWrapperProtocol: AnyObject, Sendable {
     func discover(targetType: ActrType, count: UInt32) async throws  -> [ActrId]
     
     /**
-     * Query one peer's current WebRTC state (v0.20 backend). Returns `None`
-     * when the peer has no controller, the node runs the 0.14 backend, or
-     * the build does not enable `webrtc-v020`.
+     * Query one peer's current WebRTC state. Returns `None`
+     * when the peer has no controller or RTC has not been initialized.
      */
     func getRtcPeerStatus(peer: ActrId) async  -> WebRtcPeerStateBridge?
     
@@ -855,8 +854,7 @@ public protocol ActrRefWrapperProtocol: AnyObject, Sendable {
     func isShuttingDown()  -> Bool
     
     /**
-     * List every current peer's WebRTC state (v0.20 backend; empty on 0.14
-     * or when the build does not enable `webrtc-v020`).
+     * List every current peer's WebRTC state; empty when no peers are registered.
      */
     func listRtcPeerStatuses() async  -> [WebRtcPeerStateBridge]
     
@@ -875,11 +873,10 @@ public protocol ActrRefWrapperProtocol: AnyObject, Sendable {
     func shutdown() 
     
     /**
-     * Subscribe to one peer's WebRTC state changes (v0.20 backend). The
+     * Subscribe to one peer's WebRTC state changes. The
      * listener immediately receives the current state (initial replay).
      * Dropping the returned subscription stops delivery. Returns `None` when
-     * the peer has no controller, the node runs the 0.14 backend, or the
-     * build does not enable `webrtc-v020`.
+     * the peer has no controller or RTC has not been initialized.
      */
     func subscribeRtcPeerStatus(peer: ActrId, listener: RtcPeerStateListener) async  -> RtcPeerStateSubscription?
     
@@ -1002,9 +999,8 @@ open func discover(targetType: ActrType, count: UInt32)async throws  -> [ActrId]
 }
     
     /**
-     * Query one peer's current WebRTC state (v0.20 backend). Returns `None`
-     * when the peer has no controller, the node runs the 0.14 backend, or
-     * the build does not enable `webrtc-v020`.
+     * Query one peer's current WebRTC state. Returns `None`
+     * when the peer has no controller or RTC has not been initialized.
      */
 open func getRtcPeerStatus(peer: ActrId)async  -> WebRtcPeerStateBridge?  {
     return
@@ -1036,8 +1032,7 @@ open func isShuttingDown() -> Bool  {
 }
     
     /**
-     * List every current peer's WebRTC state (v0.20 backend; empty on 0.14
-     * or when the build does not enable `webrtc-v020`).
+     * List every current peer's WebRTC state; empty when no peers are registered.
      */
 open func listRtcPeerStatuses()async  -> [WebRtcPeerStateBridge]  {
     return
@@ -1092,11 +1087,10 @@ open func shutdown()  {try! rustCall() {
 }
     
     /**
-     * Subscribe to one peer's WebRTC state changes (v0.20 backend). The
+     * Subscribe to one peer's WebRTC state changes. The
      * listener immediately receives the current state (initial replay).
      * Dropping the returned subscription stops delivery. Returns `None` when
-     * the peer has no controller, the node runs the 0.14 backend, or the
-     * build does not enable `webrtc-v020`.
+     * the peer has no controller or RTC has not been initialized.
      */
 open func subscribeRtcPeerStatus(peer: ActrId, listener: RtcPeerStateListener)async  -> RtcPeerStateSubscription?  {
     return
@@ -2323,14 +2317,14 @@ public func FfiConverterTypeOpusEncoder_lower(_ value: OpusEncoder) -> UInt64 {
 
 
 /**
- * A live WebRTC peer-status subscription (Stage 6, v0.20 backend). Dropping
+ * A live WebRTC peer-status subscription (Stage 6, RTC backend). Dropping
  * it aborts the delivery task.
  */
 public protocol RtcPeerStateSubscriptionProtocol: AnyObject, Sendable {
     
 }
 /**
- * A live WebRTC peer-status subscription (Stage 6, v0.20 backend). Dropping
+ * A live WebRTC peer-status subscription (Stage 6, RTC backend). Dropping
  * it aborts the delivery task.
  */
 open class RtcPeerStateSubscription: RtcPeerStateSubscriptionProtocol, @unchecked Sendable {
@@ -3606,7 +3600,7 @@ public func FfiConverterTypeRpcEnvelopeBridge_lower(_ value: RpcEnvelopeBridge) 
 
 
 /**
- * FFI-shaped unified WebRTC peer state (Stage 6, v0.20 backend). Carried by
+ * FFI-shaped unified WebRTC peer state (Stage 6, RTC backend). Carried by
  * `WebRtcObserverBridge::on_state_changed` and the `ActrRefWrapper` status
  * query/list/subscribe APIs. `revision` is monotonic per peer (dedup key).
  */
@@ -4810,7 +4804,7 @@ public func FfiConverterTypeReconnectReason_lower(_ value: ReconnectReason) -> R
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
- * Whether the selected ICE candidate pair is direct or relayed (v0.20
+ * Whether the selected ICE candidate pair is direct or relayed (RTC
  * backend, Stage 6). Mirrors `actr_framework::WebRtcNetworkPath`.
  */
 
@@ -4978,7 +4972,7 @@ public func FfiConverterTypeWebRtcPeerStatusBridge_lower(_ value: WebRtcPeerStat
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
- * Stable, FFI-safe reason a WebRTC peer is unavailable (Stage 6, v0.20
+ * Stable, FFI-safe reason a WebRTC peer is unavailable (Stage 6, RTC
  * backend). Mirrors `actr_framework::WebRtcUnavailableReason`.
  */
 
@@ -5918,7 +5912,7 @@ public func FfiConverterCallbackInterfaceMediaTrackCallback_lower(_ v: MediaTrac
 
 
 /**
- * Listener for per-peer WebRTC state updates (Stage 6, v0.20 backend).
+ * Listener for per-peer WebRTC state updates (Stage 6, RTC backend).
  */
 public protocol RtcPeerStateListener: AnyObject, Sendable {
     
@@ -6317,7 +6311,7 @@ public protocol WebRtcObserverBridge: AnyObject, Sendable {
     func onDisconnected(ctx: ContextBridge, event: PeerEventBridge) async 
     
     /**
-     * Unified per-revision state hook (Stage 6, v0.20 backend). Fires on
+     * Unified per-revision state hook (Stage 6, RTC backend). Fires on
      * every snapshot revision; a late-registered workload receives the
      * current state on the first projection pass.
      */

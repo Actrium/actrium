@@ -25,7 +25,7 @@ public protocol WebRTCObserver: AnyObject, Sendable {
     func onConnecting(ctx: Context, event: PeerEvent) async
     func onConnected(ctx: Context, event: PeerEvent) async
     func onDisconnected(ctx: Context, event: PeerEvent) async
-    /// Unified per-revision state hook (v0.20 backend, Stage 6). Fires on
+    /// Unified per-revision state hook (RTC backend, Stage 6). Fires on
     /// every snapshot revision; a late-registered observer receives the
     /// current state on the first projection pass.
     func onStateChanged(ctx: Context, state: WebRTCPeerState) async

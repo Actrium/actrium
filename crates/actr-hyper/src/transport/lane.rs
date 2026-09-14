@@ -69,7 +69,7 @@ pub(crate) const REASSEMBLY_TTL: std::time::Duration = std::time::Duration::from
 pub(crate) const DC_MAX_PAYLOAD_SIZE: usize = DC_MAX_MESSAGE_SIZE - FRAGMENT_HEADER_SIZE;
 
 // Keep the historical integration-test seam at the fragmentation boundary.
-// The v0.20 data plane moved fragmentation from `WebRtcDataLane` into
+// The RTC data plane moved fragmentation from `WebRtcDataLane` into
 // `RtcPeerControllerHandle`, but the legacy mobile interruption tests still
 // need to pause a concrete multi-fragment send at the same point in time.
 #[cfg(feature = "test-utils")]
@@ -178,9 +178,8 @@ impl Default for ReassemblyLimits {
 }
 
 impl ReassemblyLimits {
-    #[cfg(feature = "webrtc-v020")]
     pub(crate) fn from_buffer_config(
-        config: &crate::wire::webrtc::v020::config::RtcBufferConfig,
+        config: &crate::wire::webrtc::rtc::config::RtcBufferConfig,
     ) -> Self {
         let fragments = config
             .max_inbound_message_bytes
@@ -265,7 +264,7 @@ impl ReassemblyBuffer {
             .flatten()
     }
 
-    /// Bounded insertion used by the v0.20 production pump. Every malformed or
+    /// Bounded insertion used by the RTC production pump. Every malformed or
     /// over-budget fragment is reported explicitly; partial state for the
     /// affected message is discarded so an attacker cannot permanently poison
     /// a message id or retain its bytes until the TTL.
@@ -796,7 +795,7 @@ pub trait DataLane: Send + Sync + std::fmt::Debug {
     fn lane_type(&self) -> &'static str;
 
     /// Whether the lane's backing transport is still usable. Stateless lanes
-    /// default to healthy; v0.20 lanes project their controller sendability so
+    /// default to healthy; RTC lanes project their controller sendability so
     /// the secure wrapper does not hide a retired RTC generation.
     #[allow(dead_code)]
     fn is_healthy(&self) -> bool {

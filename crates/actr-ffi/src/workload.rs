@@ -98,7 +98,7 @@ impl From<&PeerEvent> for PeerEventBridge {
     }
 }
 
-/// Stable, FFI-safe reason a WebRTC peer is unavailable (Stage 6, v0.20
+/// Stable, FFI-safe reason a WebRTC peer is unavailable (Stage 6, RTC
 /// backend). Mirrors `actr_framework::WebRtcUnavailableReason`.
 #[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WebRtcUnavailableReasonBridge {
@@ -135,7 +135,7 @@ impl From<actr_framework::WebRtcUnavailableReason> for WebRtcUnavailableReasonBr
     }
 }
 
-/// Whether the selected ICE candidate pair is direct or relayed (v0.20
+/// Whether the selected ICE candidate pair is direct or relayed (RTC
 /// backend, Stage 6). Mirrors `actr_framework::WebRtcNetworkPath`.
 #[derive(uniffi::Enum, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum WebRtcNetworkPathBridge {
@@ -158,7 +158,7 @@ impl From<actr_framework::WebRtcNetworkPath> for WebRtcNetworkPathBridge {
     }
 }
 
-/// FFI-shaped unified WebRTC peer state (Stage 6, v0.20 backend). Carried by
+/// FFI-shaped unified WebRTC peer state (Stage 6, RTC backend). Carried by
 /// `WebRtcObserverBridge::on_state_changed` and the `ActrRefWrapper` status
 /// query/list/subscribe APIs. `revision` is monotonic per peer (dedup key).
 #[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
@@ -347,7 +347,7 @@ pub trait WebRtcObserverBridge: Send + Sync + 'static {
     async fn on_connecting(&self, ctx: Arc<ContextBridge>, event: PeerEventBridge);
     async fn on_connected(&self, ctx: Arc<ContextBridge>, event: PeerEventBridge);
     async fn on_disconnected(&self, ctx: Arc<ContextBridge>, event: PeerEventBridge);
-    /// Unified per-revision state hook (Stage 6, v0.20 backend). Fires on
+    /// Unified per-revision state hook (Stage 6, RTC backend). Fires on
     /// every snapshot revision; a late-registered workload receives the
     /// current state on the first projection pass.
     async fn on_state_changed(&self, ctx: Arc<ContextBridge>, state: WebRtcPeerStateBridge);

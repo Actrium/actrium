@@ -49,11 +49,10 @@ pub use lane::{
     WebRtcFragmentSendEvent, WebRtcFragmentSendHook, WebRtcFragmentSendHookGuard,
     install_webrtc_fragment_send_hook_for_test,
 };
-// Fragment codec: shared between 0.14 WebRtcDataLane and v0.20 V020DataLane
+// Fragment codec: shared between 0.14 WebRtcDataLane and RTC RtcDataLane
 // so both produce byte-identical wire format on the DataChannel. Only
-// re-exported when the v0.20 feature is active — 0.14 uses them internally
+// re-exported when the RTC feature is active — 0.14 uses them internally
 // within `lane.rs` and does not need the re-export.
-#[cfg(feature = "webrtc-v020")]
 pub(crate) use lane::{
     DC_MAX_PAYLOAD_SIZE, FRAGMENT_HEADER_SIZE, REASSEMBLY_TTL, ReassemblyBuffer, ReassemblyLimits,
     decode_fragment_header, encode_fragment_header,

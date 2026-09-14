@@ -52,7 +52,7 @@ pub(crate) enum ReplySink {
 #[derive(Clone)]
 struct ReplyShared {
     ws_gate: Option<Arc<crate::wire::websocket::WebSocketGate>>,
-    v020_route: crate::lifecycle::node::V020ResponseRoute,
+    rtc_route: crate::lifecycle::node::RtcResponseRoute,
     dedup_state: Arc<Mutex<DedupState>>,
     outstanding_replies: Weak<OutstandingReplies>,
     attempt_id: ReplyAttemptId,
@@ -98,7 +98,7 @@ impl ReplyDeliver {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         ws_gate: Option<Arc<crate::wire::websocket::WebSocketGate>>,
-        v020_route: crate::lifecycle::node::V020ResponseRoute,
+        rtc_route: crate::lifecycle::node::RtcResponseRoute,
         dedup_state: Arc<Mutex<DedupState>>,
         outstanding_replies: Arc<OutstandingReplies>,
         attempt_id: ReplyAttemptId,
@@ -134,7 +134,7 @@ impl ReplyDeliver {
             Self {
                 shared: ReplyShared {
                     ws_gate,
-                    v020_route,
+                    rtc_route,
                     dedup_state,
                     outstanding_replies: Arc::downgrade(&outstanding_replies),
                     attempt_id,
@@ -291,7 +291,7 @@ impl ReplyDeliver {
                 .unwrap_or(Err("<unknown>".to_string()));
             crate::lifecycle::node::mailbox_send_reply(
                 self.shared.ws_gate.clone(),
-                self.shared.v020_route.clone(),
+                self.shared.rtc_route.clone(),
                 caller,
                 self.shared.request_id.clone(),
                 self.shared.route_key.clone(),

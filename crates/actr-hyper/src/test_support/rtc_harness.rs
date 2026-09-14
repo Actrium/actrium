@@ -1,10 +1,10 @@
-//! Integration harness for the webrtc-rs v0.20 architecture.
+//! Integration harness for the webrtc-rs architecture.
 //!
 //! Every peer uses the same production boundaries as a node:
 //! `PeerGate -> PeerTransport -> DefaultWireBuilder -> RtcConnectionManager ->
 //! RtcPeerController -> PeerConnectionSession`. Signaling runs through the
 //! production WebSocket adapter. The optional packet gate is injected at the
-//! v0.20 runtime/socket layer, so network tests do not depend on the removed
+//! RTC runtime/socket layer, so network tests do not depend on the removed
 //! 0.14 coordinator or callback adapter.
 
 use std::collections::HashMap;
@@ -31,21 +31,21 @@ use crate::outbound::{PeerGate, PendingRequestsMap};
 use crate::transport::{
     DefaultWireBuilder, DefaultWireBuilderConfig, PayloadTypeExt, PeerTransport,
 };
-use crate::wire::webrtc::v020::address::{
+use crate::wire::webrtc::rtc::address::{
     DesktopLocalAddressProvider, LocalAddressProvider, TestLocalAddressProvider,
 };
-use crate::wire::webrtc::v020::factory::PeerConnectionFactory;
-use crate::wire::webrtc::v020::fault::DirectedSignalingTransport;
-use crate::wire::webrtc::v020::inbound::{InboundMessage, InboundRouter};
-use crate::wire::webrtc::v020::manager::RtcConnectionManager;
-use crate::wire::webrtc::v020::recovery::RtcNetworkEvent;
-use crate::wire::webrtc::v020::runtime::RtcRuntimeConfig;
-use crate::wire::webrtc::v020::signaling::SharedLocalId;
-use crate::wire::webrtc::v020::signaling::router::SignalingRouter;
-use crate::wire::webrtc::v020::signaling::ws_transport::V020SignalingTransport;
+use crate::wire::webrtc::rtc::factory::PeerConnectionFactory;
+use crate::wire::webrtc::rtc::fault::DirectedSignalingTransport;
+use crate::wire::webrtc::rtc::inbound::{InboundMessage, InboundRouter};
+use crate::wire::webrtc::rtc::manager::RtcConnectionManager;
+use crate::wire::webrtc::rtc::recovery::RtcNetworkEvent;
+use crate::wire::webrtc::rtc::runtime::RtcRuntimeConfig;
+use crate::wire::webrtc::rtc::signaling::SharedLocalId;
+use crate::wire::webrtc::rtc::signaling::router::SignalingRouter;
+use crate::wire::webrtc::rtc::signaling::ws_transport::RtcSignalingTransport;
 use crate::wire::webrtc::{SignalingClient, WebSocketSignalingClient};
 
-/// Test-facing control plane over one node's v0.20 manager.
+/// Test-facing control plane over one node's RTC manager.
 #[derive(Clone)]
 pub struct TestRtcControl {
     manager: Arc<RtcConnectionManager>,
@@ -151,7 +151,7 @@ impl TestEvidenceTimeline {
         &self,
         endpoint: ActrId,
         peer: ActrId,
-        event: &crate::wire::webrtc::v020::events::PeerDriverEvent,
+        event: &crate::wire::webrtc::rtc::events::PeerDriverEvent,
     ) {
         self.events
             .lock()
@@ -179,7 +179,7 @@ impl TestEvidenceTimeline {
 
     pub fn render_with_signaling(
         &self,
-        signaling: &crate::wire::webrtc::v020::fault::DirectedSignalingFaultRegistry,
+        signaling: &crate::wire::webrtc::rtc::fault::DirectedSignalingFaultRegistry,
     ) -> String {
         let mut rows = self
             .events()
@@ -240,14 +240,14 @@ impl TestEvidenceTimeline {
 pub struct TestEvidenceFailureGuard {
     label: String,
     timeline: TestEvidenceTimeline,
-    signaling: crate::wire::webrtc::v020::fault::DirectedSignalingFaultRegistry,
+    signaling: crate::wire::webrtc::rtc::fault::DirectedSignalingFaultRegistry,
 }
 
 impl TestEvidenceFailureGuard {
     pub fn new(
         label: impl Into<String>,
         timeline: TestEvidenceTimeline,
-        signaling: crate::wire::webrtc::v020::fault::DirectedSignalingFaultRegistry,
+        signaling: crate::wire::webrtc::rtc::fault::DirectedSignalingFaultRegistry,
     ) -> Self {
         Self {
             label: label.into(),
@@ -427,7 +427,7 @@ impl TestRtcControl {
         Self {
             manager: node
                 .shared
-                .v020_manager
+                .rtc_manager
                 .clone()
                 .expect("RTC-enabled fixture node"),
         }
@@ -443,7 +443,7 @@ impl TestRtcControl {
             .await
             .expect("fixture controller");
         let generation = controller.snapshot().pc_generation;
-        let lane = crate::wire::webrtc::v020::status::LaneKind::from_payload_type(payload)
+        let lane = crate::wire::webrtc::rtc::status::LaneKind::from_payload_type(payload)
             .expect("DataChannel payload");
         let handle = controller
             .lane_handle(generation, lane)
@@ -606,9 +606,9 @@ impl TestRtcControl {
     pub async fn role(&self, peer: &ActrId) -> Option<TestRtcRole> {
         let role = self.manager.get_snapshot(peer).await?.role;
         Some(match role {
-            crate::wire::webrtc::v020::peer::state::Role::Undetermined => TestRtcRole::Undetermined,
-            crate::wire::webrtc::v020::peer::state::Role::Offerer => TestRtcRole::Offerer,
-            crate::wire::webrtc::v020::peer::state::Role::Answerer => TestRtcRole::Answerer,
+            crate::wire::webrtc::rtc::peer::state::Role::Undetermined => TestRtcRole::Undetermined,
+            crate::wire::webrtc::rtc::peer::state::Role::Offerer => TestRtcRole::Offerer,
+            crate::wire::webrtc::rtc::peer::state::Role::Answerer => TestRtcRole::Answerer,
         })
     }
 
@@ -628,7 +628,7 @@ impl TestRtcControl {
         self.publish(RtcNetworkEvent::ForceReconnect)
     }
 
-    /// Inject a v0.20 `PeerConnectionStateChanged(Failed)` fact through the
+    /// Inject a RTC `PeerConnectionStateChanged(Failed)` fact through the
     /// controller's real event-handler mailbox.
     pub async fn fail_peer(&self, peer: &ActrId) -> Result<u64, String> {
         let handle = self
@@ -669,7 +669,7 @@ impl TestRtcControl {
     }
 
     /// Close one concrete DataChannel through the generation-owned lane
-    /// registry.  This test-only seam exercises the real v0.20 `close()` ->
+    /// registry.  This test-only seam exercises the real RTC `close()` ->
     /// `DataChannel::poll()` -> Controller recovery path without injecting a
     /// synthetic callback.
     pub async fn close_lane(
@@ -677,7 +677,7 @@ impl TestRtcControl {
         peer: &ActrId,
         payload_type: PayloadType,
     ) -> Result<u64, String> {
-        let lane = crate::wire::webrtc::v020::status::LaneKind::from_payload_type(payload_type)
+        let lane = crate::wire::webrtc::rtc::status::LaneKind::from_payload_type(payload_type)
             .ok_or_else(|| format!("{payload_type:?} is not a DataChannel lane"))?;
         let handle = self
             .manager
@@ -741,13 +741,13 @@ impl TestRtcControl {
                 .into_iter()
                 .map(|peer| {
                     let role = match peer.snapshot.role {
-                        crate::wire::webrtc::v020::peer::state::Role::Undetermined => {
+                        crate::wire::webrtc::rtc::peer::state::Role::Undetermined => {
                             TestRtcRole::Undetermined
                         }
-                        crate::wire::webrtc::v020::peer::state::Role::Offerer => {
+                        crate::wire::webrtc::rtc::peer::state::Role::Offerer => {
                             TestRtcRole::Offerer
                         }
-                        crate::wire::webrtc::v020::peer::state::Role::Answerer => {
+                        crate::wire::webrtc::rtc::peer::state::Role::Answerer => {
                             TestRtcRole::Answerer
                         }
                     };
@@ -766,7 +766,7 @@ impl TestRtcControl {
 
     pub(crate) fn recovery_supervisor(
         &self,
-    ) -> Arc<crate::wire::webrtc::v020::recovery::RtcRecoverySupervisor> {
+    ) -> Arc<crate::wire::webrtc::rtc::recovery::RtcRecoverySupervisor> {
         self.manager.supervisor().clone()
     }
 }
@@ -929,7 +929,7 @@ pub struct TestPeer {
     inbound_rx: tokio::sync::Mutex<
         mpsc::Receiver<(
             InboundMessage,
-            crate::wire::webrtc::v020::inbound::InboundLease,
+            crate::wire::webrtc::rtc::inbound::InboundLease,
         )>,
     >,
     router_task: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
@@ -951,7 +951,7 @@ impl TestPeer {
             .unwrap_or(0)
     }
 
-    /// Wait for a request to cross the real v0.20 inbound lane and reach the
+    /// Wait for a request to cross the real RTC inbound lane and reach the
     /// remote business dispatcher. This replaces scheduler polling in in-flight
     /// tests and also supplies a duplicate-execution oracle.
     pub async fn wait_request_count(
@@ -991,7 +991,7 @@ impl TestPeer {
 
     /// Production signaling/transport effects without any test-only RTC fact
     /// publication. Pair this processor with
-    /// `spawn_gated_v020_network_event_supervisor`; using the RTC-aware
+    /// `spawn_gated_rtc_network_event_supervisor`; using the RTC-aware
     /// compatibility processor there would publish every accepted fact twice.
     pub fn production_network_processor(&self) -> Arc<dyn NetworkEventProcessor> {
         Arc::new(DefaultNetworkEventProcessor::new_with_peer_transport(
@@ -1043,7 +1043,7 @@ impl TestPeer {
         tokio::spawn(std::future::pending())
     }
 
-    /// Receive the next non-RPC inbound payload recorded by the v0.20 router.
+    /// Receive the next non-RPC inbound payload recorded by the RTC router.
     pub async fn receive_payload(&self) -> Option<(ActrId, PayloadType, bytes::Bytes)> {
         let (msg, _lease) = self.inbound_rx.lock().await.recv().await?;
         Some((msg.peer, msg.lane.to_payload_type(), msg.payload))
@@ -1077,20 +1077,20 @@ impl TestPeer {
     }
 }
 
-/// Multi-peer harness using real WebSocket signaling and real v0.20 peer
+/// Multi-peer harness using real WebSocket signaling and real RTC peer
 /// connections. With `with_vnet`, UDP loss is injected below the builder-owned
-/// sockets through the v0.20 runtime.
+/// sockets through the RTC runtime.
 pub struct TestHarness {
     pub server: TestSignalingServer,
     pub vnet: Option<VNetPair>,
     pub rtc_faults: crate::wire::webrtc::test_runtime::DirectedRtcFaultRegistry,
-    pub signaling_faults: crate::wire::webrtc::v020::fault::DirectedSignalingFaultRegistry,
+    pub signaling_faults: crate::wire::webrtc::rtc::fault::DirectedSignalingFaultRegistry,
     pub evidence: TestEvidenceTimeline,
-    // The production-Actrix pair/multi-peer matrix needs the directed v0.20
+    // The production-Actrix pair/multi-peer matrix needs the directed RTC
     // fault and observation seams. Keep them out of the legacy VNet harness so
     // its historical recovery cases retain their original Runtime, signaling,
     // address-provider, and scheduling path.
-    v020_matrix_instrumentation: bool,
+    rtc_matrix_instrumentation: bool,
     wildcard_rebind_addresses: bool,
     address_providers: HashMap<u64, Arc<TestLocalAddressProvider>>,
     peers: HashMap<u64, TestPeer>,
@@ -1118,7 +1118,7 @@ impl TestHarness {
             rtc_faults: Default::default(),
             signaling_faults: Default::default(),
             evidence: Default::default(),
-            v020_matrix_instrumentation: false,
+            rtc_matrix_instrumentation: false,
             wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
@@ -1137,7 +1137,7 @@ impl TestHarness {
             rtc_faults: Default::default(),
             signaling_faults: Default::default(),
             evidence: Default::default(),
-            v020_matrix_instrumentation: false,
+            rtc_matrix_instrumentation: false,
             wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
@@ -1157,7 +1157,7 @@ impl TestHarness {
             rtc_faults: Default::default(),
             signaling_faults: Default::default(),
             evidence: Default::default(),
-            v020_matrix_instrumentation: true,
+            rtc_matrix_instrumentation: true,
             wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
@@ -1176,7 +1176,7 @@ impl TestHarness {
             rtc_faults: Default::default(),
             signaling_faults: Default::default(),
             evidence: Default::default(),
-            v020_matrix_instrumentation: true,
+            rtc_matrix_instrumentation: true,
             wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
@@ -1184,7 +1184,7 @@ impl TestHarness {
         }
     }
 
-    /// External-signaling v0.20 fixture that switches the test provider to
+    /// External-signaling RTC fixture that switches the test provider to
     /// wildcard bind inputs after its first synthetic address change. This
     /// keeps the initial pair deterministic while exercising webrtc-rs's live
     /// interface expansion on an ICE-restart rebind.
@@ -1224,7 +1224,7 @@ impl TestHarness {
             .await;
     }
 
-    /// Add a peer whose production v0.20 sessions dispatch remote media into
+    /// Add a peer whose production RTC sessions dispatch remote media into
     /// the supplied node-level registry. This is the T3 media fixture: it uses
     /// the same manager, controller, effect runner, track poll pump, and
     /// `MediaFrameRegistry` wiring as a real node.
@@ -1260,7 +1260,7 @@ impl TestHarness {
         } else {
             Arc::new(TestLocalAddressProvider::new(initial_addresses))
         };
-        let address_provider: Arc<dyn LocalAddressProvider> = if self.v020_matrix_instrumentation {
+        let address_provider: Arc<dyn LocalAddressProvider> = if self.rtc_matrix_instrumentation {
             mutable_address_provider.clone()
         } else {
             Arc::new(DesktopLocalAddressProvider::with_override(vec![
@@ -1290,7 +1290,7 @@ impl TestHarness {
             address_provider,
             rtc_configuration,
         );
-        let factory = if self.v020_matrix_instrumentation {
+        let factory = if self.rtc_matrix_instrumentation {
             factory.with_directed_faults(id.clone(), self.rtc_faults.clone())
         } else {
             factory
@@ -1306,7 +1306,7 @@ impl TestHarness {
         })));
         let (signaling_tx, signaling_rx) = mpsc::channel(128);
         let manager = RtcConnectionManager::with_inbound(factory, signaling_tx, router);
-        let manager = if self.v020_matrix_instrumentation {
+        let manager = if self.rtc_matrix_instrumentation {
             let local_id = id.clone();
             let handler_evidence = self.evidence.clone();
             manager.with_driver_event_observer_for_test(Arc::new(move |peer, event| {
@@ -1323,15 +1323,15 @@ impl TestHarness {
         // synthetic signaling generation and open the RTC recovery gate
         // (dea7ff08 convention, shared with the interop spawners). Tests
         // that exercise supervisor-owned gating spawn their own reconciler
-        // (see `spawn_gated_v020_network_event_supervisor` / the
+        // (see `spawn_gated_rtc_network_event_supervisor` / the
         // `recovery_vnet_supervisor` wiring); its first projection overrides
         // this synthetic value.
         manager.supervisor().set_signaling_generation(Some(0));
         let hook_shutdown = tokio_util::sync::CancellationToken::new();
-        let (hooks, hook_task) = if self.v020_matrix_instrumentation {
+        let (hooks, hook_task) = if self.rtc_matrix_instrumentation {
             let hooks = TestRtcHookRecorder::with_evidence(id.clone(), self.evidence.clone());
             let task = tokio::spawn(
-                crate::wire::webrtc::v020::notification::run_recording_hook_projection(
+                crate::wire::webrtc::rtc::notification::run_recording_hook_projection(
                     manager.clone(),
                     hooks.callback(),
                     hook_shutdown.clone(),
@@ -1347,13 +1347,10 @@ impl TestHarness {
             shared_local_id.clone(),
         ));
         manager.set_signaling_dispatch_chains(signaling_router.dispatch_chains());
-        let ws_transport = V020SignalingTransport::new(
-            signaling_client.clone(),
-            shared_local_id,
-            credential_state,
-        );
+        let ws_transport =
+            RtcSignalingTransport::new(signaling_client.clone(), shared_local_id, credential_state);
         let router_for_task = signaling_router.clone();
-        let router_task = if self.v020_matrix_instrumentation {
+        let router_task = if self.rtc_matrix_instrumentation {
             let ws_transport = DirectedSignalingTransport::new(
                 Arc::new(ws_transport),
                 id.clone(),
@@ -1376,9 +1373,9 @@ impl TestHarness {
             pending_requests: Some(pending.clone()),
             ..Default::default()
         };
-        let wire_builder = DefaultWireBuilder::new(wire_config).with_v020_manager(manager.clone());
+        let wire_builder = DefaultWireBuilder::new(wire_config).with_rtc_manager(manager.clone());
         let transport_manager = Arc::new(PeerTransport::new(id.clone(), Arc::new(wire_builder)));
-        let gate = Arc::new(PeerGate::with_v020_manager(
+        let gate = Arc::new(PeerGate::with_rtc_manager(
             transport_manager.clone(),
             manager.clone(),
             pending,
@@ -1440,7 +1437,7 @@ impl TestHarness {
                         request_changed_for_dispatcher.notify_one();
                         // Some recovery tests intentionally leave a request
                         // pending so controller teardown must release it.  The
-                        // request still traverses the real v0.20 data plane;
+                        // request still traverses the real RTC data plane;
                         // only the business responder is suppressed.
                         if envelope.route_key == "test.no_response" {
                             continue;
@@ -1470,7 +1467,7 @@ impl TestHarness {
             }
         });
         self.bg_tasks.push(dispatcher_task);
-        if self.v020_matrix_instrumentation {
+        if self.rtc_matrix_instrumentation {
             self.address_providers
                 .insert(serial, mutable_address_provider);
         }

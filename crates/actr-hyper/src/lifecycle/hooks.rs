@@ -79,7 +79,7 @@ pub(crate) trait WorkloadHookObserver: Send + Sync + 'static {
     async fn on_webrtc_connecting(&self, _ctx: &RuntimeContext, _event: &PeerEvent) {}
     async fn on_webrtc_connected(&self, _ctx: &RuntimeContext, _event: &PeerEvent) {}
     async fn on_webrtc_disconnected(&self, _ctx: &RuntimeContext, _event: &PeerEvent) {}
-    /// S6-5: unified per-revision state hook (v0.20 backend).
+    /// S6-5: unified per-revision state hook .
     async fn on_webrtc_state_changed(
         &self,
         _ctx: &RuntimeContext,

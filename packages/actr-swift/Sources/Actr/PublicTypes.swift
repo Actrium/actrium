@@ -428,7 +428,7 @@ public struct PeerEvent: Equatable, Hashable, Sendable {
     }
 }
 
-/// Stable reason a WebRTC peer is unavailable (v0.20 backend, Stage 6).
+/// Stable reason a WebRTC peer is unavailable (RTC backend, Stage 6).
 public enum WebRTCUnavailableReason: Equatable, Hashable, Sendable {
     case connectionNotReady
     case peerConnectionBuildFailed
@@ -467,7 +467,7 @@ public enum WebRTCUnavailableReason: Equatable, Hashable, Sendable {
     }
 }
 
-/// Whether the selected ICE candidate pair is direct or relayed (v0.20
+/// Whether the selected ICE candidate pair is direct or relayed (RTC
 /// backend, Stage 6). Resolved asynchronously from stats; never blocks
 /// `sendable`.
 public enum WebRTCNetworkPath: Equatable, Hashable, Sendable {
@@ -487,7 +487,7 @@ public enum WebRTCNetworkPath: Equatable, Hashable, Sendable {
     }
 }
 
-/// A point-in-time, unified view of one WebRTC peer's state (v0.20 backend,
+/// A point-in-time, unified view of one WebRTC peer's state (RTC backend,
 /// Stage 6). Returned by `ActrRef.getRtcPeerStatus` /
 /// `listRtcPeerStatuses` and delivered to `WebRTCObserver.onStateChanged`.
 /// `revision` is monotonic per peer, so consumers can de-duplicate; a

@@ -90,7 +90,7 @@ pub async fn create_peer_with_websocket(
 
 /// Create a WebRTC peer with WebSocket signaling and controllable UDP loss.
 ///
-/// webrtc-rs v0.20 no longer accepts the old VNet socket provider. The helper
+/// webrtc-rs no longer accepts the old VNet socket provider. The helper
 /// keeps the VNet test context for compatibility and installs a runtime packet
 /// gate over the real UDP socket to simulate transport-level disconnection.
 ///
@@ -132,7 +132,7 @@ pub async fn create_peer_with_vnet(
         media_registry,
     );
 
-    // Attach the legacy context and install the v0.20 packet gate before start.
+    // Attach the legacy context and install the RTC packet gate before start.
     coordinator.set_vnet(vnet);
     coordinator.set_test_packet_blocked(packet_blocked);
 

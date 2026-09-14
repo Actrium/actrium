@@ -1,20 +1,16 @@
-//! WebRTC subsystem (v0.20 backend).
+//! WebRTC subsystem: shared signaling client and native RTC implementation.
 //!
-//! The 0.14 stack (coordinator/connection/negotiator/gate) was removed in
-//! Stage 7; what remains here is the shared signaling client plus the v0.20
-//! `RtcConnectionManager`/`RtcPeerController`/`PeerConnectionSession`
-//! architecture under `v020/`.
+//! `rtc` owns peer connection management, per-peer controllers, and sessions.
 
 mod signaling;
 #[cfg(any(test, feature = "test-utils"))]
 pub(crate) mod test_runtime;
 pub(crate) mod trace;
-// The `allow(dead_code)` keeps the v0.20 surface's currently-unused items
+// The `allow(dead_code)` keeps the RTC surface's currently-unused items
 // (observation accessors, convenience constructors) out of the warning set
 // until the S7B-8 cleanup pass trims them deliberately.
-#[cfg(feature = "webrtc-v020")]
 #[allow(dead_code)]
-pub(crate) mod v020;
+pub(crate) mod rtc;
 
 // Re-export public WebRTC surface from this module boundary; internal hook
 // plumbing stays crate-private except under test-utils, where integration

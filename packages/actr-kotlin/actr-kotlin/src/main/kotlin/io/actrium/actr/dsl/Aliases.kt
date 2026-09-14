@@ -22,10 +22,10 @@ typealias PeerEvent = io.actrium.actr.PeerEventBridge
 /** Coarse WebRTC send-readiness state. */
 typealias WebRtcPeerStatus = io.actrium.actr.WebRtcPeerStatusBridge
 
-/** Unified per-revision WebRTC peer state (v0.20 backend, Stage 6). */
+/** Unified per-revision WebRTC peer state (RTC backend, Stage 6). */
 typealias WebRtcPeerState = io.actrium.actr.WebRtcPeerStateBridge
 
-/** Stable reason a WebRTC peer is unavailable (v0.20 backend, Stage 6). */
+/** Stable reason a WebRTC peer is unavailable (RTC backend, Stage 6). */
 typealias WebRtcUnavailableReason = io.actrium.actr.WebRtcUnavailableReasonBridge
 
 /** Credential lifecycle event. */
