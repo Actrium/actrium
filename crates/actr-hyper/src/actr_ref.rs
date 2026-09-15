@@ -63,8 +63,7 @@ pub(crate) struct ActrRefShared {
     pub(crate) shutdown_token: CancellationToken,
     /// Background task handles (receive loops, WebRTC coordinator, etc.)
     pub(crate) task_handles: Mutex<Vec<JoinHandle<()>>>,
-    /// RTC connection manager (RTC backend only). Backs the RTC status
-    /// query/list/subscribe APIs (S6-4).
+    /// RTC connection manager backing the status query/list/subscribe APIs.
     pub(crate) rtc_manager: Option<Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>>,
 }
 
@@ -109,7 +108,7 @@ impl ActrRef {
         self.shared.session_state.clone()
     }
 
-    /// S6-4: query one peer's current WebRTC state. Returns
+    /// Query one peer's current WebRTC state. Returns
     /// `None` when the peer has no controller or RTC has not been initialized.
     pub async fn get_rtc_peer_status(
         &self,
@@ -132,7 +131,7 @@ impl ActrRef {
         }
     }
 
-    /// S6-4: subscribe to one peer's WebRTC state changes.
+    /// Subscribe to one peer's WebRTC state changes.
     /// The receiver replays the current state immediately on subscribe (RFC:
     /// "SUBSCRIBE MUST replay the latest Snapshot immediately"). Returns
     /// `None` when the peer has no controller or RTC has not been initialized.

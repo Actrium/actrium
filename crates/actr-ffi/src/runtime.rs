@@ -401,7 +401,7 @@ pub struct ActrRefWrapper {
     inner: ActrRef,
 }
 
-/// Listener for per-peer WebRTC state updates (Stage 6, RTC backend).
+/// Listener for per-peer WebRTC state updates.
 #[uniffi::export(callback_interface)]
 #[async_trait::async_trait]
 pub trait RtcPeerStateListener: Send + Sync + 'static {
@@ -410,7 +410,7 @@ pub trait RtcPeerStateListener: Send + Sync + 'static {
     async fn on_state(&self, state: WebRtcPeerStateBridge);
 }
 
-/// A live WebRTC peer-status subscription (Stage 6, RTC backend). Dropping
+/// A live WebRTC peer-status subscription. Dropping
 /// it aborts the delivery task.
 #[derive(uniffi::Object)]
 pub struct RtcPeerStateSubscription {

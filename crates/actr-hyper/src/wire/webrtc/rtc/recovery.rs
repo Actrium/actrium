@@ -72,7 +72,7 @@ pub(crate) enum RtcNetworkEvent {
     /// Network connectivity is restored (at least one usable interface).
     NetworkAvailable,
     /// The set of local interface addresses changed (interface up/down or
-    /// Wi-Fi ↔ cellular switch). Starts Soft Recovery so RTC.3 can rebind
+    /// Wi-Fi ↔ cellular switch). Starts Soft Recovery so webrtc-rs 0.20.3 can rebind
     /// ICE transports and re-gather candidates on the existing connection.
     /// A failed restart still follows the controller's Hard Recovery fallback;
     /// the separate long-background and explicit force-reconnect policies keep

@@ -2317,14 +2317,14 @@ public func FfiConverterTypeOpusEncoder_lower(_ value: OpusEncoder) -> UInt64 {
 
 
 /**
- * A live WebRTC peer-status subscription (Stage 6, RTC backend). Dropping
+ * A live WebRTC peer-status subscription. Dropping
  * it aborts the delivery task.
  */
 public protocol RtcPeerStateSubscriptionProtocol: AnyObject, Sendable {
     
 }
 /**
- * A live WebRTC peer-status subscription (Stage 6, RTC backend). Dropping
+ * A live WebRTC peer-status subscription. Dropping
  * it aborts the delivery task.
  */
 open class RtcPeerStateSubscription: RtcPeerStateSubscriptionProtocol, @unchecked Sendable {
@@ -3600,7 +3600,7 @@ public func FfiConverterTypeRpcEnvelopeBridge_lower(_ value: RpcEnvelopeBridge) 
 
 
 /**
- * FFI-shaped unified WebRTC peer state (Stage 6, RTC backend). Carried by
+ * FFI-shaped unified WebRTC peer state. Carried by
  * `WebRtcObserverBridge::on_state_changed` and the `ActrRefWrapper` status
  * query/list/subscribe APIs. `revision` is monotonic per peer (dedup key).
  */
@@ -4804,8 +4804,8 @@ public func FfiConverterTypeReconnectReason_lower(_ value: ReconnectReason) -> R
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
- * Whether the selected ICE candidate pair is direct or relayed (RTC
- * backend, Stage 6). Mirrors `actr_framework::WebRtcNetworkPath`.
+ * Whether the selected ICE candidate pair is direct or relayed. Mirrors
+ *  `actr_framework::WebRtcNetworkPath`.
  */
 
 public enum WebRtcNetworkPathBridge: Equatable, Hashable {
@@ -4972,8 +4972,8 @@ public func FfiConverterTypeWebRtcPeerStatusBridge_lower(_ value: WebRtcPeerStat
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
- * Stable, FFI-safe reason a WebRTC peer is unavailable (Stage 6, RTC
- * backend). Mirrors `actr_framework::WebRtcUnavailableReason`.
+ * Stable, FFI-safe reason a WebRTC peer is unavailable. Mirrors
+ *  `actr_framework::WebRtcUnavailableReason`.
  */
 
 public enum WebRtcUnavailableReasonBridge: Equatable, Hashable {
@@ -5912,7 +5912,7 @@ public func FfiConverterCallbackInterfaceMediaTrackCallback_lower(_ v: MediaTrac
 
 
 /**
- * Listener for per-peer WebRTC state updates (Stage 6, RTC backend).
+ * Listener for per-peer WebRTC state updates.
  */
 public protocol RtcPeerStateListener: AnyObject, Sendable {
     
@@ -6311,7 +6311,7 @@ public protocol WebRtcObserverBridge: AnyObject, Sendable {
     func onDisconnected(ctx: ContextBridge, event: PeerEventBridge) async 
     
     /**
-     * Unified per-revision state hook (Stage 6, RTC backend). Fires on
+     * Unified per-revision state hook. Fires on
      * every snapshot revision; a late-registered workload receives the
      * current state on the first projection pass.
      */

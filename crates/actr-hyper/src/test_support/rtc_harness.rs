@@ -1368,7 +1368,6 @@ impl TestHarness {
         let pending: PendingRequestsMap =
             std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new());
         let wire_config = DefaultWireBuilderConfig {
-            enable_webrtc: true,
             enable_websocket: false,
             pending_requests: Some(pending.clone()),
             ..Default::default()

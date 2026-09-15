@@ -1,7 +1,7 @@
 //! WireBuilder - Wire layer component builder
 //!
 //! Provides default Wire component builder implementation, supporting:
-//! - WebRTC P2P connections (through WebRtcCoordinator)
+//! - WebRTC P2P connections (through the RTC manager)
 //! - WebSocket transport connections
 //! - CancellationToken for terminating in-progress connection creation
 
@@ -28,9 +28,6 @@ use tokio_util::sync::CancellationToken;
 pub struct DefaultWireBuilderConfig {
     /// Local node identity as hex-encoded protobuf `ActrId` bytes, sent in the `X-Actr-Source-ID` header during outbound WebSocket handshakes.
     pub local_id_hex: String,
-
-    /// Enable WebRTC
-    pub enable_webrtc: bool,
 
     /// Enable WebSocket
     pub enable_websocket: bool,
@@ -61,7 +58,6 @@ impl Default for DefaultWireBuilderConfig {
     fn default() -> Self {
         Self {
             local_id_hex: String::new(),
-            enable_webrtc: true,
             enable_websocket: true,
             discovered_ws_addresses: Arc::new(RwLock::new(HashMap::new())),
             credential_state: None,
@@ -75,7 +71,7 @@ impl Default for DefaultWireBuilderConfig {
 ///
 /// Creates WebRTC and/or WebSocket wire handles from configuration and supports attempting multiple connection types during the same creation pass.
 pub struct DefaultWireBuilder {
-    /// RTC manager used to create peer wire handles when WebRTC is enabled.
+    /// RTC manager used to create peer wire handles when present.
     rtc_manager: Option<Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>>,
 
     /// Local node identity hex string used as `X-Actr-Source-ID` in outbound WebSocket handshakes.
@@ -353,8 +349,7 @@ impl WireBuilder for DefaultWireBuilder {
         // independently of PeerTransport. ExistingOnly response traffic may
         // materialize a local DestTransport around that already-sendable
         // Session; it must not dial or negotiate a new connection.
-        if self.config.enable_webrtc
-            && let Some(manager) = self.rtc_manager.as_ref()
+        if let Some(manager) = self.rtc_manager.as_ref()
             && let Some(peer_id) = dest.as_peer_id()
             && let Some(controller) = manager.get_controller(peer_id).await
             && controller.snapshot().sendable
@@ -458,25 +453,22 @@ impl WireBuilder for DefaultWireBuilder {
         check_cancelled(&cancel_token)?;
 
         // 4. Attempt to create a WebRTC connection.
-        if self.config.enable_webrtc {
-            // Materialize a wire handle backed by the RTC manager.
-            if let Some(ref rtc_manager) = self.rtc_manager {
-                if let Some(target_id) = dest.as_peer_id() {
-                    tracing::debug!("[Factory] Creating RTC WebRTC connection to: {:?}", dest);
-                    check_cancelled(&cancel_token)?;
-                    let handle = crate::wire::webrtc::rtc::wire_handle::RtcWireHandle::new(
-                        rtc_manager.clone(),
-                        target_id.clone(),
-                    );
-                    // Hand the unconnected candidate to WirePool. The pool is
-                    // the connection retry owner (three attempts by default);
-                    // pre-connecting here consumed only one attempt and then
-                    // discarded the handle before the pool could retry with a
-                    // fresh Controller transport/PC generation.
-                    connections.push(Arc::new(handle) as Arc<dyn WireHandle>);
-                }
-                return Ok(connections);
+        if let Some(ref rtc_manager) = self.rtc_manager {
+            if let Some(target_id) = dest.as_peer_id() {
+                tracing::debug!("[Factory] Creating WebRTC connection to: {:?}", dest);
+                check_cancelled(&cancel_token)?;
+                let handle = crate::wire::webrtc::rtc::wire_handle::RtcWireHandle::new(
+                    rtc_manager.clone(),
+                    target_id.clone(),
+                );
+                // Hand the unconnected candidate to WirePool. The pool is
+                // the connection retry owner (three attempts by default);
+                // pre-connecting here consumed only one attempt and then
+                // discarded the handle before the pool could retry with a
+                // fresh Controller transport/PC generation.
+                connections.push(Arc::new(handle) as Arc<dyn WireHandle>);
             }
+            return Ok(connections);
         }
 
         tracing::info!(

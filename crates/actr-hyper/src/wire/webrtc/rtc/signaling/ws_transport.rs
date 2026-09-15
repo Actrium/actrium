@@ -270,7 +270,9 @@ impl SignalingTransport for RtcSignalingTransport {
             Ok(()) => Ok(()),
             Err(error) => {
                 tracing::warn!(
-                    target = "rtc-signaling",
+                    // Preserve the deployed structured log field value while
+                    // the Rust module target follows the canonical RTC name.
+                    target = "v020-signaling",
                     peer = %target_repr,
                     error = %error,
                     "failed to send RTC signaling envelope"
@@ -310,7 +312,7 @@ impl SignalingTransport for RtcSignalingTransport {
                     // this edge as end-of-stream permanently killed the RTC
                     // SignalingRouter after every mobile cleanup.
                     tracing::debug!(
-                        target = "rtc-signaling",
+                        target = "v020-signaling",
                         backoff_ms = retry_backoff.as_millis() as u64,
                         "signaling inbound generation ended; backing off before retrying receive"
                     );
@@ -328,7 +330,7 @@ impl SignalingTransport for RtcSignalingTransport {
             let _ = &receive_span;
             let Some(flow) = envelope.flow else {
                 tracing::warn!(
-                    target = "rtc-signaling",
+                    target = "v020-signaling",
                     "dropping signaling envelope without a flow"
                 );
                 continue;
@@ -374,7 +376,7 @@ impl SignalingTransport for RtcSignalingTransport {
                                 // confirmed target-unavailable fact, and must
                                 // be loud enough to diagnose a protocol skew.
                                 tracing::warn!(
-                                    target = "rtc-signaling",
+                                    target = "v020-signaling",
                                     peer = %result.target.to_string_repr(),
                                     raw_status = %unknown,
                                     "unknown relay delivery status from Actrix; treating as rejected"
@@ -404,7 +406,7 @@ impl SignalingTransport for RtcSignalingTransport {
                                 });
                             }
                             RelayDeliveryStatus::RelayDeliveryRejected => tracing::warn!(
-                                target = "rtc-signaling",
+                                target = "v020-signaling",
                                 peer = %result.target.to_string_repr(),
                                 "Actrix rejected RTC signaling relay without declaring the target unavailable"
                             ),

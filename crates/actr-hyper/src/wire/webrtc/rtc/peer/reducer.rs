@@ -327,8 +327,8 @@ pub(crate) enum RtcPeerInput {
         generation: u64,
         lane: LaneKind,
     },
-    /// An inline track mutation (add/remove) timed out mid-operation. webrtc
-    /// 0.20.3 commits transceiver changes before later await points, so the
+    /// An inline track mutation (add/remove) timed out mid-operation.
+    /// webrtc-rs 0.20.3 commits transceiver changes before later await points, so the
     /// peer connection may already hold a mutation the controller's registry
     /// does not track; the session state is untrustworthy and the generation
     /// must fail negotiation instead of serving later offers.
@@ -2456,7 +2456,7 @@ fn restart_after_request_ack(
 ///   by an explicit force-reconnect or long-background policy, start Hard
 ///   Recovery instead.
 /// * `LocalAddressChanged`: start Soft Recovery on the existing
-///   PeerConnection. RTC.3 rebinds ICE transports and refreshes local
+///   PeerConnection. webrtc-rs 0.20.3 rebinds ICE transports and refreshes local
 ///   candidates when the ICE generation restarts. The soft ladder is
 ///   bounded: a restart whose rebind fails (the driver dies, so the next
 ///   `restart_ice` errors) escalates to Hard Recovery immediately, and
@@ -2582,7 +2582,7 @@ fn reduce_network_event(
             maybe_start_deferred_recovery(state, effects);
         }
         RtcNetworkEvent::LocalAddressChanged => {
-            // The RTC.3 backend rebinds ICE transports and re-gathers local
+            // webrtc-rs 0.20.3 rebinds ICE transports and re-gathers local
             // candidates during ICE restart. Treat an address snapshot change
             // as an in-place recovery opportunity; an explicit ForceReconnect
             // or long-background policy still sets `address_changed` and keeps

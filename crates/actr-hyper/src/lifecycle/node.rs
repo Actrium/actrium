@@ -3040,9 +3040,9 @@ impl Inner {
             // Construct the RTC manager, controllers, and recovery stack as
             // one unit sharing the node's identity and inbound dispatch.
             let (rtc_manager, rtc_local_id, rtc_mailbox_slot): (
-                Option<Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>>,
-                Option<crate::wire::webrtc::rtc::signaling::SharedLocalId>,
-                Option<crate::wire::webrtc::rtc::inbound_bridge::MailboxSlot>,
+                Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>,
+                crate::wire::webrtc::rtc::signaling::SharedLocalId,
+                crate::wire::webrtc::rtc::inbound_bridge::MailboxSlot,
             ) = {
                 use crate::wire::webrtc::rtc;
 
@@ -3253,11 +3253,7 @@ impl Inner {
                     task_handles.push(hook_projection_handle);
                 }
 
-                (
-                    Some(rtc_manager),
-                    Some(rtc_local_id),
-                    Some(inbound_mailbox_slot),
-                )
+                (rtc_manager, rtc_local_id, inbound_mailbox_slot)
             };
 
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3265,15 +3261,14 @@ impl Inner {
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             tracing::info!("🏗️  Creating PeerTransport with WebRTC support");
 
-            // Create DefaultWireBuilder with WebRTC coordinator
+            // Create DefaultWireBuilder with the configured wire transports
             use crate::transport::{DefaultWireBuilder, DefaultWireBuilderConfig};
 
-            // WebSocket channel always enabled: target ws:// address is fully discovered at runtime
+            // WebSocket channel is enabled: target ws:// address is fully discovered at runtime
             // Direct-connect mode: encode local node ActrId as hex, sent as X-Actr-Node-Id
             let local_id_hex = hex::encode(actor_id.encode_to_vec());
             let wire_builder_config = DefaultWireBuilderConfig {
                 local_id_hex,
-                enable_webrtc: true,
                 enable_websocket: true,
                 // Share the discovered_ws_addresses map so that post-discovery calls
                 // can use the signaling-provided ws:// URL for this actor node.
@@ -3288,11 +3283,7 @@ impl Inner {
             };
             let wire_builder = {
                 let builder = DefaultWireBuilder::new(wire_builder_config);
-                let builder = builder.with_rtc_manager(
-                    rtc_manager
-                        .clone()
-                        .expect("RTC manager must exist on the RTC backend"),
-                );
+                let builder = builder.with_rtc_manager(rtc_manager.clone());
                 Arc::new(builder)
             };
 
@@ -3308,9 +3299,7 @@ impl Inner {
             use crate::outbound::PeerGate;
             let outproc_gate = Arc::new(PeerGate::with_rtc_manager(
                 transport_manager.clone(),
-                rtc_manager
-                    .clone()
-                    .expect("RTC manager must exist on the RTC backend"),
+                rtc_manager.clone(),
                 pending_requests.clone(),
                 self.send_projection_rx.take(),
             ));
@@ -3367,16 +3356,16 @@ impl Inner {
             // Save references. The RTC manager backs the node-level status
             // APIs (S6-4).
             {
-                self.rtc_manager = rtc_manager.clone();
-                self.rtc_inbound_mailbox_slot = rtc_mailbox_slot.clone();
+                self.rtc_manager = Some(rtc_manager.clone());
+                self.rtc_inbound_mailbox_slot = Some(rtc_mailbox_slot.clone());
             }
             credential_manager
                 .install_hard_rebind_handles(HardRebindHandles {
                     signaling_client: self.signaling_client.clone(),
                     credential_state: credential_state.clone(),
                     peer_transport: Some(transport_manager.clone()),
-                    rtc_manager: rtc_manager.clone(),
-                    rtc_local_id: rtc_local_id.clone(),
+                    rtc_manager: Some(rtc_manager.clone()),
+                    rtc_local_id: Some(rtc_local_id.clone()),
                 })
                 .await;
             tracing::info!("✅ WebRTC infrastructure initialized");
@@ -3646,33 +3635,24 @@ impl Inner {
                 let event_processor = Arc::new(event_processor);
 
                 let shutdown = self.shutdown_token.clone();
-                // S7A-3 (P1): the RTC recovery supervisor feed — accepted
-                // network/app facts are republished to RTC controllers.
+                // Accepted network/app facts are republished to RTC
+                // controllers through the manager's recovery supervisor.
                 let rtc_recovery_feed = self
                     .rtc_manager
                     .as_ref()
-                    .map(|manager| manager.supervisor().clone());
+                    .map(|manager| manager.supervisor().clone())
+                    .expect("RTC manager must exist after infrastructure initialization");
                 let internal_channel = self
                     .network_event_internal
                     .take()
                     .expect("always-on recovery supervisor channel missing at start");
                 let network_event_handle = tokio::spawn(async move {
-                    if let Some(feed) = rtc_recovery_feed {
-                        crate::lifecycle::network_event::run_network_event_reconciler_with_channel_and_rtc_recovery(
-                            event_rx,
-                            internal_channel,
-                            event_processor,
-                            shutdown,
-                            feed,
-                        )
-                        .await;
-                        return;
-                    }
-                    crate::lifecycle::network_event::run_network_event_reconciler_with_channel(
+                    crate::lifecycle::network_event::run_network_event_reconciler_with_channel_and_rtc_recovery(
                         event_rx,
                         internal_channel,
                         event_processor,
                         shutdown,
+                        rtc_recovery_feed,
                     )
                     .await;
                 });

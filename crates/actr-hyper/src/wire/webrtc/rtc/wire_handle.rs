@@ -399,7 +399,6 @@ mod tests {
         let peer = test_actor_id(3);
         let builder = DefaultWireBuilder::new(DefaultWireBuilderConfig {
             enable_websocket: false,
-            enable_webrtc: true,
             ..Default::default()
         })
         .with_rtc_manager(manager.clone());

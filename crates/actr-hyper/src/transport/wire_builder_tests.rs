@@ -44,7 +44,6 @@ async fn test_no_ws_connection_without_discovery() {
     // WebSocket URLs come only from service discovery; without a discovery record no WS connection should be created.
     let config = DefaultWireBuilderConfig {
         enable_websocket: true,
-        enable_webrtc: false,
         local_id_hex: "deadbeef".to_string(),
         discovered_ws_addresses: Arc::new(RwLock::new(HashMap::new())),
         credential_state: None,
@@ -68,7 +67,6 @@ async fn test_ws_connection_from_discovery() {
 
     let config = DefaultWireBuilderConfig {
         enable_websocket: true,
-        enable_webrtc: false,
         local_id_hex: "deadbeef".to_string(),
         discovered_ws_addresses: map,
         credential_state: None,
@@ -91,7 +89,6 @@ async fn existing_connection_lookup_never_creates_discovered_websocket() {
         .insert(actor_id.clone(), "ws://localhost:9001".to_string());
     let config = DefaultWireBuilderConfig {
         enable_websocket: true,
-        enable_webrtc: false,
         local_id_hex: "deadbeef".to_string(),
         discovered_ws_addresses: map,
         credential_state: None,
@@ -109,10 +106,9 @@ async fn existing_connection_lookup_never_creates_discovered_websocket() {
 }
 
 #[tokio::test]
-async fn existing_connection_lookup_without_coordinator_is_empty() {
+async fn existing_connection_lookup_without_rtc_manager_is_empty() {
     let config = DefaultWireBuilderConfig {
         enable_websocket: false,
-        enable_webrtc: true,
         ..Default::default()
     };
     let factory = DefaultWireBuilder::new(config);
@@ -126,9 +122,8 @@ async fn existing_connection_lookup_without_coordinator_is_empty() {
 }
 
 #[test]
-fn default_config_enables_both_transports_with_empty_identity() {
+fn default_config_enables_websocket_with_empty_identity() {
     let cfg = DefaultWireBuilderConfig::default();
-    assert!(cfg.enable_webrtc);
     assert!(cfg.enable_websocket);
     assert!(cfg.local_id_hex.is_empty());
     assert!(cfg.credential_state.is_none());
@@ -148,7 +143,6 @@ async fn cancelled_token_aborts_before_any_connection() {
 
     let config = DefaultWireBuilderConfig {
         enable_websocket: true,
-        enable_webrtc: true, // also enabled — must still be skipped due to early cancel
         local_id_hex: "deadbeef".to_string(),
         discovered_ws_addresses: map,
         credential_state: None,

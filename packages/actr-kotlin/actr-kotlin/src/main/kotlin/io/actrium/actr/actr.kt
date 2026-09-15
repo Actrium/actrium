@@ -4900,7 +4900,7 @@ public object FfiConverterTypeOpusEncoder: FfiConverter<OpusEncoder, Long> {
 
 
 /**
- * A live WebRTC peer-status subscription (Stage 6, RTC backend). Dropping
+ * A live WebRTC peer-status subscription. Dropping
  * it aborts the delivery task.
  */
 public interface RtcPeerStateSubscriptionInterface {
@@ -4909,7 +4909,7 @@ public interface RtcPeerStateSubscriptionInterface {
 }
 
 /**
- * A live WebRTC peer-status subscription (Stage 6, RTC backend). Dropping
+ * A live WebRTC peer-status subscription. Dropping
  * it aborts the delivery task.
  */
 open class RtcPeerStateSubscription: Disposable, AutoCloseable, RtcPeerStateSubscriptionInterface
@@ -6069,7 +6069,7 @@ public object FfiConverterTypeRpcEnvelopeBridge: FfiConverterRustBuffer<RpcEnvel
 
 
 /**
- * FFI-shaped unified WebRTC peer state (Stage 6, RTC backend). Carried by
+ * FFI-shaped unified WebRTC peer state. Carried by
  * `WebRtcObserverBridge::on_state_changed` and the `ActrRefWrapper` status
  * query/list/subscribe APIs. `revision` is monotonic per peer (dedup key).
  */
@@ -7036,8 +7036,8 @@ public object FfiConverterTypeReconnectReason: FfiConverterRustBuffer<ReconnectR
 
 
 /**
- * Whether the selected ICE candidate pair is direct or relayed (RTC
- * backend, Stage 6). Mirrors `actr_framework::WebRtcNetworkPath`.
+ * Whether the selected ICE candidate pair is direct or relayed. Mirrors
+ *  `actr_framework::WebRtcNetworkPath`.
  */
 
 enum class WebRtcNetworkPathBridge {
@@ -7120,8 +7120,8 @@ public object FfiConverterTypeWebRtcPeerStatusBridge: FfiConverterRustBuffer<Web
 
 
 /**
- * Stable, FFI-safe reason a WebRTC peer is unavailable (Stage 6, RTC
- * backend). Mirrors `actr_framework::WebRtcUnavailableReason`.
+ * Stable, FFI-safe reason a WebRTC peer is unavailable. Mirrors
+ *  `actr_framework::WebRtcUnavailableReason`.
  */
 
 enum class WebRtcUnavailableReasonBridge {
@@ -7622,7 +7622,7 @@ public object FfiConverterTypeMediaTrackCallback: FfiConverterCallbackInterface<
 
 
 /**
- * Listener for per-peer WebRTC state updates (Stage 6, RTC backend).
+ * Listener for per-peer WebRTC state updates.
  */
 public interface RtcPeerStateListener {
     
@@ -7869,7 +7869,7 @@ public interface WebRtcObserverBridge {
     suspend fun `onDisconnected`(`ctx`: ContextBridge, `event`: PeerEventBridge)
     
     /**
-     * Unified per-revision state hook (Stage 6, RTC backend). Fires on
+     * Unified per-revision state hook. Fires on
      * every snapshot revision; a late-registered workload receives the
      * current state on the first projection pass.
      */

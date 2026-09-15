@@ -1823,12 +1823,9 @@ impl PeerGate {
         .map(|_| ())
     }
 
-    /// S6-10: RTC `send_media_sample` — the peer's outbound track writer
-    /// (data plane). Admission mirrors the 0.14 path (ExistingOnly allowed:
-    /// sending uses an already-registered track).
-    async fn send_media_sample_rtc(
+    /// Send a media sample through the peer's outbound track writer.
+    pub async fn send_media_sample(
         &self,
-        manager: &Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>,
         target: &ActrId,
         track_id: &str,
         sample: MediaSample,
@@ -1839,7 +1836,7 @@ impl PeerGate {
             .await?;
         self.tighten_with_current_projection(admission)?;
 
-        let Some(handle) = manager.get_controller(target).await else {
+        let Some(handle) = self.rtc_manager.get_controller(target).await else {
             return Err(Self::send_projection_not_ready_error());
         };
         handle
@@ -1848,12 +1845,11 @@ impl PeerGate {
             .map_err(|e| ActrError::Unavailable(format!("WebRTC send failed: {e}")))
     }
 
-    /// S6-10: RTC `add_media_track` — ensure the peer connection (a track
-    /// add may establish it, 0.14 parity), then register the track on the
-    /// active session. Renegotiation rides the controller's effect path.
-    async fn add_media_track_rtc(
+    /// Add a media track to the peer connection and renegotiate it.
+    /// The controller may establish the connection first. Renegotiation is
+    /// offerer-only (RFC-0504 §"Deliberate regressions").
+    pub async fn add_media_track(
         &self,
-        manager: &Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>,
         target: &ActrId,
         track_id: &str,
         codec: &str,
@@ -1867,7 +1863,7 @@ impl PeerGate {
             return Err(Self::send_projection_not_ready_error());
         }
 
-        let handle = manager.ensure_controller(target.clone()).await;
+        let handle = self.rtc_manager.ensure_controller(target.clone()).await;
         handle
             .connect()
             .await
@@ -1901,14 +1897,8 @@ impl PeerGate {
             .map_err(|e| ActrError::Unavailable(format!("WebRTC add track failed: {e}")))
     }
 
-    /// S6-10: RTC `remove_media_track` — unregister the writer and remove
-    /// the track from the active session (renegotiates).
-    async fn remove_media_track_rtc(
-        &self,
-        manager: &Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>,
-        target: &ActrId,
-        track_id: &str,
-    ) -> ActorResult<()> {
+    /// Remove a media track from the peer connection and renegotiate it.
+    pub async fn remove_media_track(&self, target: &ActrId, track_id: &str) -> ActorResult<()> {
         let dest = Self::actr_id_to_dest(target);
         let admission = self
             .preflight_send(target, &dest, PayloadType::MediaRtp)
@@ -1917,7 +1907,7 @@ impl PeerGate {
             return Err(Self::send_projection_not_ready_error());
         }
 
-        let Some(handle) = manager.get_controller(target).await else {
+        let Some(handle) = self.rtc_manager.get_controller(target).await else {
             return Err(ActrError::Unavailable(format!(
                 "track not found: {track_id} (no connection to peer)"
             )));
@@ -1926,42 +1916,6 @@ impl PeerGate {
             .remove_media_track(track_id)
             .await
             .map_err(|e| ActrError::Unavailable(format!("WebRTC remove track failed: {e}")))
-    }
-
-    /// Send a media sample via the peer's RTC outbound track writer (data
-    /// plane). Admission mirrors 0.14 (ExistingOnly allowed: sending uses an
-    /// already-registered track).
-    pub async fn send_media_sample(
-        &self,
-        target: &ActrId,
-        track_id: &str,
-        sample: MediaSample,
-    ) -> ActorResult<()> {
-        let manager = self.rtc_manager.clone();
-        self.send_media_sample_rtc(&manager, target, track_id, sample)
-            .await
-    }
-
-    /// Add a media track on the RTC peer connection (the controller may
-    /// establish the connection first) and renegotiate. Renegotiation is
-    /// offerer-only (RFC-0504 §"Deliberate regressions").
-    pub async fn add_media_track(
-        &self,
-        target: &ActrId,
-        track_id: &str,
-        codec: &str,
-        media_type: &str,
-    ) -> ActorResult<()> {
-        let manager = self.rtc_manager.clone();
-        self.add_media_track_rtc(&manager, target, track_id, codec, media_type)
-            .await
-    }
-
-    /// Remove a media track from the RTC peer connection (renegotiates).
-    pub async fn remove_media_track(&self, target: &ActrId, track_id: &str) -> ActorResult<()> {
-        let manager = self.rtc_manager.clone();
-        self.remove_media_track_rtc(&manager, target, track_id)
-            .await
     }
 
     /// Send DataChunk (Fast Path)
