@@ -187,6 +187,34 @@ class GenerateChangelogTest(unittest.TestCase):
         self.assertNotIn("generated feature", result.stdout)
         self.assertNotIn("Full Changelog", result.stdout)
 
+    def test_from_release_commit_accepts_squash_suffix_and_preserves_notes(self) -> None:
+        for version in ("1.0.0", "1.0.0-rc.1"):
+            with self.subTest(version=version):
+                body = f"## v{version}\n\n    Keep indentation  \n- Reviewed notes"
+                sha = self.commit(f"chore(release): basic train v{version} (#239)", body)
+                result = self.changelog(
+                    "--version", version, "--to-ref", sha, "--from-release-commit",
+                )
+                self.assertEqual(body + "\n", result.stdout)
+
+    def test_from_release_commit_rejects_malformed_squash_subjects(self) -> None:
+        for subject in (
+            "chore(release): basic train v1.0.1 (#239)",
+            "chore(release): basic train v1.0.0 (#abc)",
+            "chore(release): basic train v1.0.0 (#\u0662\u0663\u0669)",
+            "chore(release): basic train v1.0.0 (#239) trailing",
+            "chore(release): basic train v1.0.0 (#239) (#240)",
+            "chore(release): basic train v1.0.0 trailing",
+        ):
+            with self.subTest(subject=subject):
+                sha = self.commit(subject, "## v1.0.0\n\n- Reviewed notes")
+                result = self.changelog(
+                    "--version", "1.0.0", "--to-ref", sha,
+                    "--from-release-commit", check=False,
+                )
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("Release commit subject must be", result.stderr)
+
     def test_from_release_commit_can_prepend_header(self) -> None:
         release_body = "## v1.0.0\n\n- Edited notes"
         release_sha = self.commit("chore(release): basic train v1.0.0", release_body)
@@ -226,7 +254,7 @@ class GenerateChangelogTest(unittest.TestCase):
         )
 
         self.assertNotEqual(0, wrong_subject_result.returncode)
-        self.assertIn("Release commit subject must be exactly", wrong_subject_result.stderr)
+        self.assertIn("Release commit subject must be", wrong_subject_result.stderr)
         self.assertNotEqual(0, empty_body_result.returncode)
         self.assertIn("Release commit body is empty", empty_body_result.stderr)
 

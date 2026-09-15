@@ -36,6 +36,12 @@ slow-timeout = { period = "60s", terminate-after = 5 }
 filter = 'binary(mobile_rtc_pair_contract) | binary(mobile_rtc_multi_peer)'
 retries = 0
 
+# This recovery regression is intentionally retry-free: a retry could hide
+# the signaling wake race that the test is meant to expose.
+[[profile.default.overrides]]
+filter = 'binary(ice_restart_unilateral_outage)'
+retries = 0
+
 # Governance tests keep protocol failures and autonomous-recovery contract
 # gaps visible. Do not hide their first outcome behind automatic retries.
 [[profile.default.overrides]]

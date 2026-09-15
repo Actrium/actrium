@@ -29,7 +29,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 url = "2"
 
 # Internal dependencies
-platform = { path = "../loran-platform", package = "actrix-platform", version = "0.10.0" }
+platform = { path = "../loran-platform", package = "actrix-platform", version = "0.10.3" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

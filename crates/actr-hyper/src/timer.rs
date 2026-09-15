@@ -401,9 +401,9 @@ timer_inventory! {
     },
     WEBRTC_ICE_RESTART_WAIT => {
         id: "webrtc.coordinator.ice_restart_wait", owner: "webrtc_coordinator", category: FailureDeadline,
-        duration: "per-attempt restart timeout", arm: "ICE restart attempt awaits committed connected state",
+        duration: "REMOTE_REQUEST_WAKE_GRACE (500ms) or ICE_RESTART_ATTEMPT_TIMEOUT (10s)", arm: "ICE restart attempt awaits committed connected state; an attempt-1 remote wake may arm the short grace",
         success: "state event plus authoritative state", interrupt: "restart wake or session replacement",
-        expiry: "classify attempt timeout", reset: "new restart attempt", external: false
+        expiry: "classify grace or attempt timeout", reset: "new restart attempt or matching Answer", external: false
     },
     SIGNALING_CONNECT => {
         id: "signaling.connect", owner: "signaling_client", category: FailureDeadline,

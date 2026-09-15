@@ -24,7 +24,10 @@ use super::reducer::{
     RtcPeerEffect, SignalingMessage,
 };
 use crate::wire::webrtc::v020::events::{PeerDriverEvent, PeerEventMailbox};
-use crate::wire::webrtc::v020::recovery::{NETWORK_RECOVERY_TIMEOUT, RtcNetworkEvent};
+use crate::wire::webrtc::v020::recovery::{
+    ICE_RESTART_ATTEMPT_TIMEOUT, NETWORK_RECOVERY_TIMEOUT, REMOTE_REQUEST_WAKE_GRACE,
+    RtcNetworkEvent,
+};
 use crate::wire::webrtc::v020::signaling::SignalingDispatch;
 use crate::wire::webrtc::v020::status::{PeerTransportRetirement, RtcPeerSnapshot};
 
@@ -982,6 +985,104 @@ async fn manual_policy_clock_enforces_one_non_extendable_total_recovery_budget()
 }
 
 #[tokio::test]
+async fn manual_policy_clock_rearms_remote_request_grace_before_attempt_timeout() {
+    let mut h = ControllerTestHarness::spawn(711);
+    drive_offerer_to_sendable(&mut h).await;
+
+    // Drive an announced local restart Offer through the real Controller
+    // effect path. The Answerer's attempt-1 wake then enters the short grace
+    // timer rather than immediately starting a second Offer.
+    h.facts.driver(PeerDriverEvent::PeerConnectionStateChanged {
+        generation: 1,
+        state: RTCPeerConnectionState::Failed,
+    });
+    await_snapshot(&h.handle, "T1 offerer recovery entry", |snapshot| {
+        snapshot.status == actr_framework::WebRtcPeerStatus::Recovering && !snapshot.sendable
+    })
+    .await;
+
+    let restart = h.next_effect().await;
+    let restart_ice_generation = restart
+        .identity
+        .ice_generation
+        .expect("restart effect has an ICE generation");
+    h.effects
+        .complete(EffectCompletion::RestartIce {
+            generation: 1,
+            operation_id: restart.identity.operation_id,
+            ice_generation: restart_ice_generation,
+            result: Ok(()),
+        })
+        .await
+        .expect("complete T1 restart_ice");
+
+    let offer = h.next_effect().await;
+    h.effects
+        .complete(EffectCompletion::CreateOffer {
+            generation: 1,
+            operation_id: offer.identity.operation_id,
+            result: Ok(Box::new(desc_with_ufrag(
+                RTCSdpType::Offer,
+                "restart-offer",
+            ))),
+        })
+        .await
+        .expect("complete T1 restart offer");
+
+    let local = h.next_effect().await;
+    h.effects
+        .complete(EffectCompletion::SetLocalDescription {
+            generation: 1,
+            operation_id: local.identity.operation_id,
+            result: Ok(()),
+        })
+        .await
+        .expect("complete T1 restart local description");
+    let first_offer = timeout(WAIT, h.signaling_rx.recv())
+        .await
+        .expect("T1 restart offer timeout")
+        .expect("T1 signaling channel closed");
+    assert!(matches!(
+        first_offer.message,
+        SignalingMessage::IceRestartOffer { .. }
+    ));
+
+    let revision_before_wake = h.handle.snapshot().revision;
+    let outcome = h
+        .handle
+        .apply_ice_restart_request_with_outcome("grace-wake".to_string(), 1)
+        .await
+        .expect("apply T1 remote request");
+    assert_eq!(
+        outcome,
+        actr_protocol::ice_restart_request_ack::Outcome::Accepted as i32
+    );
+    await_snapshot(&h.handle, "T1 remote wake grace armed", |snapshot| {
+        snapshot.revision > revision_before_wake
+    })
+    .await;
+    tokio::task::yield_now().await;
+
+    h.clock
+        .advance(REMOTE_REQUEST_WAKE_GRACE - Duration::from_millis(1));
+    tokio::task::yield_now().await;
+    assert!(
+        timeout(Duration::from_millis(50), h.effects.next_effect())
+            .await
+            .is_err(),
+        "the normal restart retry must not fire before the 500ms grace expires"
+    );
+
+    h.clock.advance(Duration::from_millis(1));
+    let retry = h.next_effect().await;
+    assert!(matches!(
+        retry.effect,
+        RtcPeerEffect::RestartIce { generation: 1, .. }
+    ));
+    h.shutdown().await;
+}
+
+#[tokio::test]
 async fn manual_policy_clock_retries_answerer_request_until_budget_without_pc_churn() {
     let mut h = ControllerTestHarness::spawn(709);
     drive_answerer_to_sendable(&mut h).await;
@@ -1005,10 +1106,11 @@ async fn manual_policy_clock_retries_answerer_request_until_budget_without_pc_ch
         other => panic!("expected answerer restart request #1, got {other:?}"),
     };
 
-    // The six-second attempt timer only retransmits the same request. It must
+    // The ten-second attempt timer only retransmits the same request. It must
     // not create a hard-recovery generation after the old fixed request cap.
-    for expected_attempt in 2..=8 {
-        h.clock.advance(Duration::from_secs(6));
+    let retry_attempts = 2_u32..=6_u32;
+    for expected_attempt in retry_attempts.clone() {
+        h.clock.advance(ICE_RESTART_ATTEMPT_TIMEOUT);
         let dispatch = timeout(WAIT, h.signaling_rx.recv())
             .await
             .expect("T1 answerer restart request timeout")
@@ -1029,8 +1131,11 @@ async fn manual_policy_clock_retries_answerer_request_until_budget_without_pc_ch
         assert!(!snapshot.sendable);
     }
 
+    let retry_duration = ICE_RESTART_ATTEMPT_TIMEOUT
+        .checked_mul(retry_attempts.count() as u32)
+        .expect("retry duration must fit in a Duration");
     h.clock
-        .advance(NETWORK_RECOVERY_TIMEOUT - Duration::from_secs(7 * 6) - Duration::from_millis(1));
+        .advance(NETWORK_RECOVERY_TIMEOUT - retry_duration - Duration::from_millis(1));
     tokio::task::yield_now().await;
     assert_eq!(
         h.handle.snapshot().status,
@@ -1109,11 +1214,11 @@ async fn manual_policy_clock_wakes_closed_answerer_after_generation_retirement()
         .await
         .expect("complete closed Answerer session");
 
-    // The parked Answerer keeps a six-second attempt timer even though the
+    // The parked Answerer keeps a ten-second attempt timer even though the
     // physical generation is no longer live. Its wake must carry the retired
     // generation only as signaling metadata and must not rebuild locally.
     tokio::task::yield_now().await;
-    h.clock.advance(Duration::from_secs(6));
+    h.clock.advance(ICE_RESTART_ATTEMPT_TIMEOUT);
     let wake = timeout(WAIT, h.signaling_rx.recv())
         .await
         .expect("closed Answerer wake timeout")
@@ -1259,7 +1364,7 @@ async fn failed_hard_replacement_retries_on_the_attempt_deadline() {
     })
     .await;
 
-    h.clock.advance(Duration::from_secs(6));
+    h.clock.advance(ICE_RESTART_ATTEMPT_TIMEOUT);
     let retry = h.next_effect().await;
     assert!(matches!(
         retry.effect,
@@ -1296,7 +1401,7 @@ async fn local_address_change_soft_recovery_retries_on_the_same_pc_generation() 
         .ice_generation
         .expect("first soft attempt has an ICE generation");
 
-    h.clock.advance(Duration::from_secs(6));
+    h.clock.advance(ICE_RESTART_ATTEMPT_TIMEOUT);
     let retry = h.next_effect().await;
     assert!(matches!(
         retry.effect,
@@ -1353,7 +1458,7 @@ async fn hung_hard_replacement_negotiation_is_retired_and_retried() {
         RtcPeerEffect::CreateOffer { generation: 2, .. }
     ));
 
-    h.clock.advance(Duration::from_secs(6));
+    h.clock.advance(ICE_RESTART_ATTEMPT_TIMEOUT);
     let close = h.next_effect().await;
     let retry = h.next_effect().await;
     assert!(matches!(
