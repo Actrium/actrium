@@ -3116,27 +3116,22 @@ impl Inner {
                     .with_rtcp_mux_policy(webrtc::peer_connection::RTCRtcpMuxPolicy::Require)
                     .with_ice_candidate_pool_size(0)
                     .build();
-                let mut setting_engine = webrtc::peer_connection::SettingEngine::default();
-                setting_engine.set_host_acceptance_min_wait(Some(
-                    std::time::Duration::from_millis(
+                let setting_engine = webrtc::peer_connection::SettingEngineBuilder::new()
+                    .with_host_acceptance_min_wait(Some(std::time::Duration::from_millis(
                         self.config.webrtc.advanced.ice_host_acceptance_min_wait,
-                    ),
-                ));
-                setting_engine.set_srflx_acceptance_min_wait(Some(
-                    std::time::Duration::from_millis(
+                    )))
+                    .with_srflx_acceptance_min_wait(Some(std::time::Duration::from_millis(
                         self.config.webrtc.advanced.ice_srflx_acceptance_min_wait,
-                    ),
-                ));
-                setting_engine.set_prflx_acceptance_min_wait(Some(
-                    std::time::Duration::from_millis(
+                    )))
+                    .with_prflx_acceptance_min_wait(Some(std::time::Duration::from_millis(
                         self.config.webrtc.advanced.ice_prflx_acceptance_min_wait,
-                    ),
-                ));
-                setting_engine.set_relay_acceptance_min_wait(Some(
-                    std::time::Duration::from_millis(
+                    )))
+                    .with_relay_acceptance_min_wait(Some(std::time::Duration::from_millis(
                         self.config.webrtc.advanced.ice_relay_acceptance_min_wait,
-                    ),
-                ));
+                    )))
+                    .with_discard_local_candidates_during_ice_restart(true)
+                    .with_sctp_max_receive_buffer_size(runtime_config.sctp_receive_buffer_size())
+                    .build();
                 // Inventory marker: the four acceptance waits above are
                 // protocol-selection timers executed inside v0.20's ICE agent.
                 let _ = crate::timer::ids::EXTERNAL_ICE_CANDIDATE_SELECTION;

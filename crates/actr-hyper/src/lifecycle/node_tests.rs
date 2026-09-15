@@ -1222,14 +1222,20 @@ impl crate::wire::webrtc::v020::peer::effects::SessionOps for ResponsePathSessio
         &self,
         label: &str,
         _init: webrtc::data_channel::RTCDataChannelInit,
-    ) -> Result<Arc<dyn webrtc::data_channel::DataChannel>, webrtc::error::Error> {
+    ) -> Result<
+        Arc<dyn crate::wire::webrtc::v020::peer::adapter::LaneDataChannel>,
+        webrtc::error::Error,
+    > {
         Ok(crate::wire::webrtc::v020::peer::effects::test_support::fake_data_channel(label))
     }
 
     async fn add_track(
         &self,
         _track: Arc<dyn webrtc::media_stream::track_local::TrackLocal>,
-    ) -> Result<Arc<dyn webrtc::rtp_transceiver::RtpSender>, webrtc::error::Error> {
+    ) -> Result<
+        Arc<dyn crate::wire::webrtc::v020::peer::adapter::ActrRtpSender>,
+        webrtc::error::Error,
+    > {
         Err(webrtc::error::Error::Other(
             "response-path test has no media".into(),
         ))
@@ -1237,12 +1243,14 @@ impl crate::wire::webrtc::v020::peer::effects::SessionOps for ResponsePathSessio
 
     async fn remove_track(
         &self,
-        _sender: &Arc<dyn webrtc::rtp_transceiver::RtpSender>,
+        _sender: &Arc<dyn crate::wire::webrtc::v020::peer::adapter::ActrRtpSender>,
     ) -> Result<(), webrtc::error::Error> {
         Ok(())
     }
 
-    async fn get_senders(&self) -> Vec<Arc<dyn webrtc::rtp_transceiver::RtpSender>> {
+    async fn get_senders(
+        &self,
+    ) -> Vec<Arc<dyn crate::wire::webrtc::v020::peer::adapter::ActrRtpSender>> {
         Vec::new()
     }
 

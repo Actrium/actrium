@@ -13,15 +13,16 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use webrtc::data_channel::{DataChannel, RTCDataChannelInit};
+use webrtc::data_channel::RTCDataChannelInit;
 use webrtc::error::Error as RtcError;
 use webrtc::media_stream::track_local::TrackLocal;
 use webrtc::peer_connection::{
     PeerConnection, RTCConfiguration, RTCIceCandidateInit, RTCSessionDescription,
 };
-use webrtc::rtp_transceiver::RtpSender;
 
 use crate::wire::webrtc::v020::event_handler::WebRtcEventHandler;
+
+use super::adapter::{ActrRtpSender, LaneDataChannel, RealLaneDataChannel, RealRtpSender};
 
 /// The subset of `PeerConnection` operations the controller drives. Object-safe
 /// so a session can hold `Arc<dyn SessionOps>` (real or fake).
@@ -43,16 +44,19 @@ pub(crate) trait SessionOps: Send + Sync {
         &self,
         label: &str,
         init: RTCDataChannelInit,
-    ) -> Result<Arc<dyn DataChannel>, RtcError>;
+    ) -> Result<Arc<dyn LaneDataChannel>, RtcError>;
     /// S6-2: add a local media track (media topology). The returned sender
     /// owns the RTP send side. Track add/remove serializes renegotiation
     /// through the controller (RFC §"DataChannel APIs": "Track add/remove
     /// serializes renegotiation through the Controller effect").
-    async fn add_track(&self, track: Arc<dyn TrackLocal>) -> Result<Arc<dyn RtpSender>, RtcError>;
+    async fn add_track(
+        &self,
+        track: Arc<dyn TrackLocal>,
+    ) -> Result<Arc<dyn ActrRtpSender>, RtcError>;
     /// S6-2: remove a previously added local track by its sender.
-    async fn remove_track(&self, sender: &Arc<dyn RtpSender>) -> Result<(), RtcError>;
+    async fn remove_track(&self, sender: &Arc<dyn ActrRtpSender>) -> Result<(), RtcError>;
     /// S6-2: the connection's current RTP senders (media observation).
-    async fn get_senders(&self) -> Vec<Arc<dyn RtpSender>>;
+    async fn get_senders(&self) -> Vec<Arc<dyn ActrRtpSender>>;
     /// S6-3: one full stats sample (`get_stats(Instant::now(), None)`; the
     /// real API is infallible). Used to resolve the selected candidate pair
     /// into the snapshot's `network_path` on entering Sendable.
@@ -154,20 +158,33 @@ impl SessionOps for RealSessionOps {
         &self,
         label: &str,
         init: RTCDataChannelInit,
-    ) -> Result<Arc<dyn DataChannel>, RtcError> {
-        self.pc.create_data_channel(label, Some(init)).await
+    ) -> Result<Arc<dyn LaneDataChannel>, RtcError> {
+        let channel = self.pc.create_data_channel(label, Some(init)).await?;
+        Ok(Arc::new(RealLaneDataChannel::new(channel)))
     }
-    async fn add_track(&self, track: Arc<dyn TrackLocal>) -> Result<Arc<dyn RtpSender>, RtcError> {
+    async fn add_track(
+        &self,
+        track: Arc<dyn TrackLocal>,
+    ) -> Result<Arc<dyn ActrRtpSender>, RtcError> {
         let transceiver = self.pc.add_transceiver_from_track(track, None).await?;
-        transceiver.sender().await?.ok_or_else(|| {
+        let sender = transceiver.sender().await?.ok_or_else(|| {
             RtcError::Other("v0.20 transceiver did not expose its RTP sender".into())
-        })
+        })?;
+        Ok(Arc::new(RealRtpSender::new(sender)))
     }
-    async fn remove_track(&self, sender: &Arc<dyn RtpSender>) -> Result<(), RtcError> {
-        self.pc.remove_track(sender).await
+    async fn remove_track(&self, sender: &Arc<dyn ActrRtpSender>) -> Result<(), RtcError> {
+        let sender = sender
+            .upstream()
+            .ok_or_else(|| RtcError::Other("RTP sender is not backed by WebRTC".into()))?;
+        self.pc.remove_track(&sender).await
     }
-    async fn get_senders(&self) -> Vec<Arc<dyn RtpSender>> {
-        self.pc.get_senders().await
+    async fn get_senders(&self) -> Vec<Arc<dyn ActrRtpSender>> {
+        self.pc
+            .get_senders()
+            .await
+            .into_iter()
+            .map(|sender| Arc::new(RealRtpSender::new(sender)) as Arc<dyn ActrRtpSender>)
+            .collect()
     }
     async fn get_stats(&self) -> webrtc::peer_connection::RTCStatsReport {
         let now = std::time::Instant::now();
@@ -222,6 +239,7 @@ pub(crate) mod test_support {
     use super::*;
     use bytes::BytesMut;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::sync::Notify;
     use webrtc::data_channel::{DataChannelEvent, RTCDataChannelState};
 
     /// A `SessionOps` whose every method returns an unremarkable success. Used
@@ -255,20 +273,20 @@ pub(crate) mod test_support {
             &self,
             _label: &str,
             _init: RTCDataChannelInit,
-        ) -> Result<Arc<dyn DataChannel>, RtcError> {
+        ) -> Result<Arc<dyn LaneDataChannel>, RtcError> {
             // Never exercised: pure-reducer tests ignore the session payload.
             Err(RtcError::Other("NoopSessionOps has no data channel".into()))
         }
         async fn add_track(
             &self,
             _track: Arc<dyn TrackLocal>,
-        ) -> Result<Arc<dyn RtpSender>, RtcError> {
+        ) -> Result<Arc<dyn ActrRtpSender>, RtcError> {
             Err(RtcError::Other("NoopSessionOps has no media".into()))
         }
-        async fn remove_track(&self, _sender: &Arc<dyn RtpSender>) -> Result<(), RtcError> {
+        async fn remove_track(&self, _sender: &Arc<dyn ActrRtpSender>) -> Result<(), RtcError> {
             Ok(())
         }
-        async fn get_senders(&self) -> Vec<Arc<dyn RtpSender>> {
+        async fn get_senders(&self) -> Vec<Arc<dyn ActrRtpSender>> {
             Vec::new()
         }
         async fn get_stats(&self) -> webrtc::peer_connection::RTCStatsReport {
@@ -301,47 +319,29 @@ pub(crate) mod test_support {
     }
 
     #[async_trait]
-    impl DataChannel for FakeDataChannel {
+    impl LaneDataChannel for FakeDataChannel {
         async fn label(&self) -> Result<String, RtcError> {
             Ok(self.label.clone())
-        }
-        async fn ordered(&self) -> Result<bool, RtcError> {
-            Ok(true)
-        }
-        async fn max_packet_life_time(&self) -> Result<Option<u16>, RtcError> {
-            Ok(None)
-        }
-        async fn max_retransmits(&self) -> Result<Option<u16>, RtcError> {
-            Ok(None)
-        }
-        async fn protocol(&self) -> Result<String, RtcError> {
-            Ok(String::new())
         }
         async fn negotiated(&self) -> Result<bool, RtcError> {
             Ok(false)
         }
-        fn id(&self) -> webrtc::data_channel::RTCDataChannelId {
-            0
-        }
         async fn ready_state(&self) -> Result<RTCDataChannelState, RtcError> {
             Ok(RTCDataChannelState::Open)
         }
-        async fn buffered_amount_high_threshold(&self) -> Result<u32, RtcError> {
+        async fn outstanding_bytes(&self) -> Result<usize, RtcError> {
             Ok(0)
-        }
-        async fn set_buffered_amount_high_threshold(&self, _t: u32) -> Result<(), RtcError> {
-            Ok(())
-        }
-        async fn buffered_amount_low_threshold(&self) -> Result<u32, RtcError> {
-            Ok(0)
-        }
-        async fn set_buffered_amount_low_threshold(&self, _t: u32) -> Result<(), RtcError> {
-            Ok(())
         }
         async fn send(&self, _data: BytesMut) -> Result<(), RtcError> {
             Ok(())
         }
         async fn send_text(&self, _text: &str) -> Result<(), RtcError> {
+            Ok(())
+        }
+        async fn try_send(&self, _data: BytesMut) -> Result<(), RtcError> {
+            Ok(())
+        }
+        async fn writable(&self) -> Result<(), RtcError> {
             Ok(())
         }
         async fn poll(&self) -> Option<DataChannelEvent> {
@@ -357,7 +357,7 @@ pub(crate) mod test_support {
         }
     }
 
-    pub(crate) fn fake_data_channel(label: &str) -> Arc<dyn DataChannel> {
+    pub(crate) fn fake_data_channel(label: &str) -> Arc<dyn LaneDataChannel> {
         Arc::new(FakeDataChannel::new(label))
     }
 
@@ -378,47 +378,29 @@ pub(crate) mod test_support {
     }
 
     #[async_trait]
-    impl DataChannel for ScriptedDataChannel {
+    impl LaneDataChannel for ScriptedDataChannel {
         async fn label(&self) -> Result<String, RtcError> {
             Ok(self.label.clone())
-        }
-        async fn ordered(&self) -> Result<bool, RtcError> {
-            Ok(true)
-        }
-        async fn max_packet_life_time(&self) -> Result<Option<u16>, RtcError> {
-            Ok(None)
-        }
-        async fn max_retransmits(&self) -> Result<Option<u16>, RtcError> {
-            Ok(None)
-        }
-        async fn protocol(&self) -> Result<String, RtcError> {
-            Ok(String::new())
         }
         async fn negotiated(&self) -> Result<bool, RtcError> {
             Ok(false)
         }
-        fn id(&self) -> webrtc::data_channel::RTCDataChannelId {
-            0
-        }
         async fn ready_state(&self) -> Result<RTCDataChannelState, RtcError> {
             Ok(RTCDataChannelState::Open)
         }
-        async fn buffered_amount_high_threshold(&self) -> Result<u32, RtcError> {
+        async fn outstanding_bytes(&self) -> Result<usize, RtcError> {
             Ok(0)
-        }
-        async fn set_buffered_amount_high_threshold(&self, _t: u32) -> Result<(), RtcError> {
-            Ok(())
-        }
-        async fn buffered_amount_low_threshold(&self) -> Result<u32, RtcError> {
-            Ok(0)
-        }
-        async fn set_buffered_amount_low_threshold(&self, _t: u32) -> Result<(), RtcError> {
-            Ok(())
         }
         async fn send(&self, _data: BytesMut) -> Result<(), RtcError> {
             Ok(())
         }
         async fn send_text(&self, _text: &str) -> Result<(), RtcError> {
+            Ok(())
+        }
+        async fn try_send(&self, _data: BytesMut) -> Result<(), RtcError> {
+            Ok(())
+        }
+        async fn writable(&self) -> Result<(), RtcError> {
             Ok(())
         }
         async fn poll(&self) -> Option<DataChannelEvent> {
@@ -435,7 +417,7 @@ pub(crate) mod test_support {
     pub(crate) fn scripted_data_channel(
         label: &str,
         events: Vec<DataChannelEvent>,
-    ) -> Arc<dyn DataChannel> {
+    ) -> Arc<dyn LaneDataChannel> {
         Arc::new(ScriptedDataChannel::new(label, events))
     }
 
@@ -446,6 +428,7 @@ pub(crate) mod test_support {
         label: String,
         opened: AtomicBool,
         closed: AtomicBool,
+        open_gate: Option<Arc<Notify>>,
         pub(crate) sent: std::sync::Mutex<Vec<BytesMut>>,
         pub(crate) try_sent: std::sync::Mutex<Vec<BytesMut>>,
         pub(crate) fail_try_send: AtomicBool,
@@ -456,10 +439,15 @@ pub(crate) mod test_support {
 
     impl RecordingDataChannel {
         pub(crate) fn new(label: &str) -> Self {
+            Self::new_with_open_gate(label, None)
+        }
+
+        pub(crate) fn new_with_open_gate(label: &str, open_gate: Option<Arc<Notify>>) -> Self {
             Self {
                 label: label.to_string(),
                 opened: AtomicBool::new(false),
                 closed: AtomicBool::new(false),
+                open_gate,
                 sent: std::sync::Mutex::new(Vec::new()),
                 try_sent: std::sync::Mutex::new(Vec::new()),
                 fail_try_send: AtomicBool::new(false),
@@ -471,42 +459,15 @@ pub(crate) mod test_support {
     }
 
     #[async_trait]
-    impl DataChannel for RecordingDataChannel {
+    impl LaneDataChannel for RecordingDataChannel {
         async fn label(&self) -> Result<String, RtcError> {
             Ok(self.label.clone())
-        }
-        async fn ordered(&self) -> Result<bool, RtcError> {
-            Ok(true)
-        }
-        async fn max_packet_life_time(&self) -> Result<Option<u16>, RtcError> {
-            Ok(None)
-        }
-        async fn max_retransmits(&self) -> Result<Option<u16>, RtcError> {
-            Ok(None)
-        }
-        async fn protocol(&self) -> Result<String, RtcError> {
-            Ok(String::new())
         }
         async fn negotiated(&self) -> Result<bool, RtcError> {
             Ok(false)
         }
-        fn id(&self) -> webrtc::data_channel::RTCDataChannelId {
-            0
-        }
         async fn ready_state(&self) -> Result<RTCDataChannelState, RtcError> {
             Ok(RTCDataChannelState::Open)
-        }
-        async fn buffered_amount_high_threshold(&self) -> Result<u32, RtcError> {
-            Ok(0)
-        }
-        async fn set_buffered_amount_high_threshold(&self, _t: u32) -> Result<(), RtcError> {
-            Ok(())
-        }
-        async fn buffered_amount_low_threshold(&self) -> Result<u32, RtcError> {
-            Ok(0)
-        }
-        async fn set_buffered_amount_low_threshold(&self, _t: u32) -> Result<(), RtcError> {
-            Ok(())
         }
         async fn outstanding_bytes(&self) -> Result<usize, RtcError> {
             Ok(self.outstanding.load(Ordering::SeqCst))
@@ -531,8 +492,18 @@ pub(crate) mod test_support {
             self.try_sent.lock().expect("record lock").push(data);
             Ok(())
         }
+        async fn writable(&self) -> Result<(), RtcError> {
+            if self.closed.load(Ordering::SeqCst) {
+                Err(RtcError::ErrDataChannelClosed)
+            } else {
+                Ok(())
+            }
+        }
         async fn poll(&self) -> Option<DataChannelEvent> {
             if !self.opened.swap(true, Ordering::SeqCst) {
+                if let Some(open_gate) = &self.open_gate {
+                    open_gate.notified().await;
+                }
                 Some(DataChannelEvent::OnOpen)
             } else {
                 std::future::pending().await
@@ -547,5 +518,15 @@ pub(crate) mod test_support {
 
     pub(crate) fn recording_data_channel(label: &str) -> Arc<RecordingDataChannel> {
         Arc::new(RecordingDataChannel::new(label))
+    }
+
+    pub(crate) fn gated_recording_data_channel(
+        label: &str,
+        open_gate: Arc<Notify>,
+    ) -> Arc<RecordingDataChannel> {
+        Arc::new(RecordingDataChannel::new_with_open_gate(
+            label,
+            Some(open_gate),
+        ))
     }
 }

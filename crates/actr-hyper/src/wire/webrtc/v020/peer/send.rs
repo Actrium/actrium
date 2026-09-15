@@ -11,12 +11,12 @@ use std::sync::Arc;
 
 use actr_protocol::ActrId;
 use tokio_util::sync::CancellationToken;
-use webrtc::data_channel::DataChannel;
 use webrtc::error::Error as RtcError;
 
 use crate::transport::DeliveryProgress;
 use crate::wire::webrtc::v020::status::LaneKind;
 
+use super::adapter::LaneDataChannel;
 use super::lane_handle::LaneHandle;
 
 /// A one-send permit: lane + generation + channel + cancellation (RFC §"SendPermit").
@@ -24,7 +24,7 @@ pub(crate) struct SendPermit {
     peer: ActrId,
     generation: u64,
     lane: LaneKind,
-    channel: Arc<dyn DataChannel>,
+    channel: Arc<dyn LaneDataChannel>,
     cancellation: CancellationToken,
 }
 
@@ -46,7 +46,7 @@ impl SendPermit {
         self.generation == current_generation && !self.cancellation.is_cancelled()
     }
 
-    pub(crate) fn channel(&self) -> &Arc<dyn DataChannel> {
+    pub(crate) fn channel(&self) -> &Arc<dyn LaneDataChannel> {
         &self.channel
     }
 

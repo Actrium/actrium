@@ -1291,11 +1291,18 @@ impl RtcPeerController {
             _ => None,
         };
 
-        // A lane's pump reporting Closed removes that lane from the send-path
-        // registry (the reducer independently transitions state; this is the
-        // data-plane mirror so the send path stops handing out the dead lane).
-        if let RtcPeerInput::Lane(LaneEvent::Closed { generation, lane }) = &input {
-            self.lanes.remove(*generation, *lane);
+        // A lane's pump owns the only `poll()` consumer. Its Open event is the
+        // durable DCEP readiness edge; registry insertion alone only means the
+        // DataChannel object exists. Closed removes the data-plane token and
+        // wakes any waiter holding that exact generation/lane handle.
+        match &input {
+            RtcPeerInput::Lane(LaneEvent::Opened { generation, lane }) => {
+                self.lanes.mark_ready(*generation, *lane);
+            }
+            RtcPeerInput::Lane(LaneEvent::Closed { generation, lane }) => {
+                self.lanes.remove(*generation, *lane);
+            }
+            _ => {}
         }
 
         let discovered = match &input {

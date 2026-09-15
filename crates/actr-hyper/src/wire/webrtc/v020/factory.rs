@@ -24,7 +24,7 @@ use futures_util::FutureExt;
 use webrtc::error::Error as RtcError;
 use webrtc::peer_connection::{
     PeerConnection, PeerConnectionBuilder, RTCBundlePolicy, RTCConfiguration,
-    RTCConfigurationBuilder, RTCIceServer, RTCRtcpMuxPolicy, SettingEngine,
+    RTCConfigurationBuilder, RTCIceServer, RTCRtcpMuxPolicy, SettingEngine, SettingEngineBuilder,
 };
 
 use super::address::{LocalAddressProvider, LocalAddressResolver};
@@ -75,13 +75,14 @@ impl PeerConnectionFactory {
         address_provider: Arc<dyn LocalAddressProvider>,
         ice_servers: Vec<RTCIceServer>,
     ) -> Self {
+        let setting_engine = default_setting_engine(&runtime_config);
         Self {
             runtime_config,
             address_provider: Some(address_provider),
             ice_servers,
             configuration: None,
             turn_credential_provider: None,
-            setting_engine: SettingEngine::default(),
+            setting_engine,
             #[cfg(feature = "test-utils")]
             directed_faults: None,
         }
@@ -95,13 +96,14 @@ impl PeerConnectionFactory {
         address_provider: Arc<dyn LocalAddressProvider>,
         configuration: RTCConfiguration,
     ) -> Self {
+        let setting_engine = default_setting_engine(&runtime_config);
         Self {
             runtime_config,
             address_provider: Some(address_provider),
             ice_servers: Vec::new(),
             configuration: Some(configuration),
             turn_credential_provider: None,
-            setting_engine: SettingEngine::default(),
+            setting_engine,
             #[cfg(feature = "test-utils")]
             directed_faults: None,
         }
@@ -117,13 +119,14 @@ impl PeerConnectionFactory {
         runtime_config: RtcRuntimeConfig,
         configuration: RTCConfiguration,
     ) -> Self {
+        let setting_engine = default_setting_engine(&runtime_config);
         Self {
             runtime_config,
             address_provider: None,
             ice_servers: Vec::new(),
             configuration: Some(configuration),
             turn_credential_provider: None,
-            setting_engine: SettingEngine::default(),
+            setting_engine,
             #[cfg(feature = "test-utils")]
             directed_faults: None,
         }
@@ -296,25 +299,22 @@ impl PeerConnectionFactory {
         // on every restart rebind; production wildcard expansion therefore
         // happens at the actual bind/rebind point, while concrete test
         // providers are queried afresh.
-        let mut setting_engine = self.setting_engine.clone();
-        setting_engine.set_discard_local_candidates_during_ice_restart(true);
+        let setting_engine = self.setting_engine.clone();
         let builder = PeerConnectionBuilder::<LocalAddressResolver>::new()
             .with_configuration(configuration)
             .with_runtime(runtime)
             .with_handler(handler)
             .with_udp_addrs(vec![address_resolver])
             .with_setting_engine(setting_engine)
-            .with_sctp_receive_buffer_size(self.runtime_config.sctp_receive_buffer_size())
             .with_data_channel_send_buffer_limit(
                 self.runtime_config.data_channel_send_buffer_limit(),
             )
             .with_media_engine(media_engine)
-            .with_interceptor_registry(interceptor_registry.boxed());
+            .with_interceptor_registry(interceptor_registry);
         let mut builder = builder;
         if self.runtime_config.dedicated_reactor() {
-            builder = builder
-                .with_dedicated_reactor_thread(true)
-                .with_reactor_pool_size(self.runtime_config.reactor_pool_size());
+            builder =
+                builder.with_dedicated_reactor_pool_size(self.runtime_config.reactor_pool_size());
         }
 
         // The builder's async state includes the full ICE/DTLS/SCTP setup.
@@ -323,6 +323,13 @@ impl PeerConnectionFactory {
         let pc = builder.build().boxed().await?;
         Ok(Arc::new(pc))
     }
+}
+
+fn default_setting_engine(runtime_config: &RtcRuntimeConfig) -> SettingEngine {
+    SettingEngineBuilder::new()
+        .with_discard_local_candidates_during_ice_restart(true)
+        .with_sctp_max_receive_buffer_size(runtime_config.sctp_receive_buffer_size())
+        .build()
 }
 
 fn is_turn_url(url: &str) -> bool {

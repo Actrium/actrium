@@ -38,6 +38,7 @@ pub(super) const SOFT_HARD_ESCALATION_ATTEMPT: u32 = 4;
 use crate::wire::webrtc::v020::events::{PeerDriverEvent, PeerStateTick};
 use crate::wire::webrtc::v020::status::{LaneKind, RtcUnavailableReason};
 
+use super::adapter::ActrRtpSender;
 use super::state::{
     LegacyAnswerFence, PendingRtcOperation, PendingRtcOperationKind, RecoveryOrigin, Role,
     RtcPeerPhase, RtcPeerState,
@@ -177,13 +178,11 @@ pub(crate) enum RtcPeerCommand {
     /// renegotiation offer through the normal effect path.
     AddTrack {
         track: Arc<dyn webrtc::media_stream::track_local::TrackLocal>,
-        respond: tokio::sync::oneshot::Sender<
-            Result<Arc<dyn webrtc::rtp_transceiver::RtpSender>, String>,
-        >,
+        respond: tokio::sync::oneshot::Sender<Result<Arc<dyn ActrRtpSender>, String>>,
     },
     /// S6-2: remove a previously added local track by its sender.
     RemoveTrack {
-        sender: Arc<dyn webrtc::rtp_transceiver::RtpSender>,
+        sender: Arc<dyn ActrRtpSender>,
         respond: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
 }

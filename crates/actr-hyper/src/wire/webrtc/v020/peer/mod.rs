@@ -5,6 +5,7 @@
 //! runs blocking WebRTC operations on effect tasks; the handle is the read/send
 //! face for the manager, gate, and business.
 
+pub(crate) mod adapter;
 pub(crate) mod controller;
 pub(crate) mod effect_port;
 pub(crate) mod effects;

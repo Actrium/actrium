@@ -32,6 +32,7 @@ use crate::wire::webrtc::v020::event_handler::WebRtcEventHandler;
 use crate::wire::webrtc::v020::events::PeerEventMailbox;
 use crate::wire::webrtc::v020::status::LaneKind;
 
+use super::adapter::ActrRtpSender;
 use super::effects::{SessionFactory, SessionOps};
 use super::lane_handle::LaneHandle;
 use super::reducer::{EffectCompletion, LaneEvent, RtcPeerEffect};
@@ -399,12 +400,12 @@ pub(crate) trait RtcPeerEffectPort: Send + Sync {
         &self,
         generation: u64,
         track: Arc<dyn webrtc::media_stream::track_local::TrackLocal>,
-    ) -> Option<Result<Arc<dyn webrtc::rtp_transceiver::RtpSender>, webrtc::error::Error>>;
+    ) -> Option<Result<Arc<dyn ActrRtpSender>, webrtc::error::Error>>;
 
     async fn remove_track(
         &self,
         generation: u64,
-        sender: Arc<dyn webrtc::rtp_transceiver::RtpSender>,
+        sender: Arc<dyn ActrRtpSender>,
     ) -> Option<Result<(), webrtc::error::Error>>;
 
     async fn close_all_sessions(&self);
@@ -629,7 +630,7 @@ impl WebRtcEffectRunner {
         &self,
         generation: u64,
         track: Arc<dyn webrtc::media_stream::track_local::TrackLocal>,
-    ) -> Option<Result<Arc<dyn webrtc::rtp_transceiver::RtpSender>, webrtc::error::Error>> {
+    ) -> Option<Result<Arc<dyn ActrRtpSender>, webrtc::error::Error>> {
         let ops = {
             let sessions = self.sessions.lock().expect("sessions lock");
             sessions.get(&generation).map(|s| s.ops().clone())
@@ -652,7 +653,7 @@ impl WebRtcEffectRunner {
     pub(crate) async fn remove_track(
         &self,
         generation: u64,
-        sender: Arc<dyn webrtc::rtp_transceiver::RtpSender>,
+        sender: Arc<dyn ActrRtpSender>,
     ) -> Option<Result<(), webrtc::error::Error>> {
         let ops = {
             let sessions = self.sessions.lock().expect("sessions lock");
@@ -660,7 +661,7 @@ impl WebRtcEffectRunner {
         }?;
         let result = ops.remove_track(&sender).await;
         if result.is_ok() {
-            let track_id = sender.track().track_id().await;
+            let track_id = sender.track_id().await;
             let track = {
                 let mut sessions = self.sessions.lock().expect("sessions lock");
                 sessions
@@ -1206,14 +1207,14 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
         &self,
         generation: u64,
         track: Arc<dyn webrtc::media_stream::track_local::TrackLocal>,
-    ) -> Option<Result<Arc<dyn webrtc::rtp_transceiver::RtpSender>, webrtc::error::Error>> {
+    ) -> Option<Result<Arc<dyn ActrRtpSender>, webrtc::error::Error>> {
         WebRtcEffectRunner::add_track(self, generation, track).await
     }
 
     async fn remove_track(
         &self,
         generation: u64,
-        sender: Arc<dyn webrtc::rtp_transceiver::RtpSender>,
+        sender: Arc<dyn ActrRtpSender>,
     ) -> Option<Result<(), webrtc::error::Error>> {
         WebRtcEffectRunner::remove_track(self, generation, sender).await
     }
@@ -1288,14 +1289,14 @@ impl RtcPeerEffectPort for TestEffectSink {
         &self,
         _generation: u64,
         _track: Arc<dyn webrtc::media_stream::track_local::TrackLocal>,
-    ) -> Option<Result<Arc<dyn webrtc::rtp_transceiver::RtpSender>, webrtc::error::Error>> {
+    ) -> Option<Result<Arc<dyn ActrRtpSender>, webrtc::error::Error>> {
         None
     }
 
     async fn remove_track(
         &self,
         _generation: u64,
-        _sender: Arc<dyn webrtc::rtp_transceiver::RtpSender>,
+        _sender: Arc<dyn ActrRtpSender>,
     ) -> Option<Result<(), webrtc::error::Error>> {
         None
     }

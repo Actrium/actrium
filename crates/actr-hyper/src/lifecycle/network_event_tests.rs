@@ -2180,22 +2180,26 @@ mod inv33_peer_coverage {
             &self,
             label: &str,
             _init: webrtc::data_channel::RTCDataChannelInit,
-        ) -> Result<Arc<dyn webrtc::data_channel::DataChannel>, RtcError> {
+        ) -> Result<Arc<dyn crate::wire::webrtc::v020::peer::adapter::LaneDataChannel>, RtcError>
+        {
             Ok(fake_data_channel(label))
         }
         async fn add_track(
             &self,
             _t: Arc<dyn webrtc::media_stream::track_local::TrackLocal>,
-        ) -> Result<Arc<dyn webrtc::rtp_transceiver::RtpSender>, RtcError> {
+        ) -> Result<Arc<dyn crate::wire::webrtc::v020::peer::adapter::ActrRtpSender>, RtcError>
+        {
             Err(RtcError::Other("no media in inv33 tests".into()))
         }
         async fn remove_track(
             &self,
-            _s: &Arc<dyn webrtc::rtp_transceiver::RtpSender>,
+            _s: &Arc<dyn crate::wire::webrtc::v020::peer::adapter::ActrRtpSender>,
         ) -> Result<(), RtcError> {
             Ok(())
         }
-        async fn get_senders(&self) -> Vec<Arc<dyn webrtc::rtp_transceiver::RtpSender>> {
+        async fn get_senders(
+            &self,
+        ) -> Vec<Arc<dyn crate::wire::webrtc::v020::peer::adapter::ActrRtpSender>> {
             Vec::new()
         }
         async fn get_stats(&self) -> webrtc::peer_connection::RTCStatsReport {

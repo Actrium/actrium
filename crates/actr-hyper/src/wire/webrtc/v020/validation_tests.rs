@@ -24,7 +24,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
-use webrtc::data_channel::{DataChannel, DataChannelEvent, RTCDataChannelInit};
+use webrtc::data_channel::{DataChannelEvent, RTCDataChannelInit};
 use webrtc::peer_connection::{
     PeerConnection, RTCIceConnectionState, RTCIceGatheringState, RTCPeerConnectionIceErrorEvent,
     RTCPeerConnectionIceEvent, RTCPeerConnectionState, RTCSignalingState,
@@ -34,6 +34,7 @@ use super::address::DesktopLocalAddressProvider;
 use super::event_handler::WebRtcEventHandler;
 use super::events::{PeerDriverEvent, PeerEventMailboxReceiver, peer_event_mailbox};
 use super::factory::PeerConnectionFactory;
+use super::peer::adapter::{LaneDataChannel, RealLaneDataChannel};
 use super::runtime::RtcRuntimeConfig;
 
 /// DataChannel label for the RPC reliable lane, mirroring the 0.14 wire label
@@ -71,7 +72,7 @@ fn loopback_factory(runtime_config: RtcRuntimeConfig) -> PeerConnectionFactory {
 struct PeerSignals {
     conn_state_rx: watch::Receiver<RTCPeerConnectionState>,
     ice_state_rx: watch::Receiver<RTCIceConnectionState>,
-    incoming_dc_rx: mpsc::Receiver<Arc<dyn DataChannel>>,
+    incoming_dc_rx: mpsc::Receiver<Arc<dyn LaneDataChannel>>,
 }
 
 /// Consume a peer's driver events, trickling candidates to the remote PC and
@@ -161,7 +162,7 @@ async fn wait_for_pc_state(
 }
 
 /// Poll a data channel until it reports `OnOpen`.
-async fn wait_dc_open(dc: &Arc<dyn DataChannel>, who: &str) {
+async fn wait_dc_open(dc: &Arc<dyn LaneDataChannel>, who: &str) {
     timeout(OP_TIMEOUT, async {
         loop {
             match dc.poll().await {
@@ -176,7 +177,7 @@ async fn wait_dc_open(dc: &Arc<dyn DataChannel>, who: &str) {
 }
 
 /// Poll a data channel until a text message arrives, returning it.
-async fn recv_text(dc: &Arc<dyn DataChannel>, who: &str) -> String {
+async fn recv_text(dc: &Arc<dyn LaneDataChannel>, who: &str) -> String {
     timeout(OP_TIMEOUT, async {
         loop {
             match dc.poll().await {
@@ -200,8 +201,8 @@ async fn build_connected_pair(
 ) -> (
     Arc<dyn PeerConnection>,
     Arc<dyn PeerConnection>,
-    Arc<dyn DataChannel>,
-    Arc<dyn DataChannel>,
+    Arc<dyn LaneDataChannel>,
+    Arc<dyn LaneDataChannel>,
     PeerSignals,
     PeerSignals,
 ) {
@@ -234,6 +235,7 @@ async fn build_connected_pair(
         .create_data_channel(RPC_RELIABLE_LABEL, Some(RTCDataChannelInit::default()))
         .await
         .expect("create RpcReliable data channel");
+    let dc_a: Arc<dyn LaneDataChannel> = Arc::new(RealLaneDataChannel::new(dc_a));
 
     let (signals_a, _fwd_a) = spawn_event_forwarder(rx_a, pc_b.clone(), resources_a);
     let (mut signals_b, _fwd_b) = spawn_event_forwarder(rx_b, pc_a.clone(), resources_b);
@@ -487,11 +489,11 @@ async fn event_handler_tags_generation_and_forwards_facts() {
         },
     )
     .await;
-    PeerConnectionEventHandler::on_data_channel(
-        &handler,
-        super::peer::effects::test_support::fake_data_channel(RPC_RELIABLE_LABEL),
-    )
-    .await;
+    handler
+        .on_test_data_channel(super::peer::effects::test_support::fake_data_channel(
+            RPC_RELIABLE_LABEL,
+        ))
+        .await;
     PeerConnectionEventHandler::on_track(
         &handler,
         super::media::test_support::scripted_track("remote-video", "video/VP8", Vec::new()),

@@ -23,6 +23,7 @@ use crate::wire::webrtc::v020::events::PeerDriverEvent;
 use crate::wire::webrtc::v020::signaling::SignalingDispatch;
 use crate::wire::webrtc::v020::status::RtcPeerSnapshot;
 
+use super::adapter::ActrRtpSender;
 use super::controller::RtcPeerController;
 use super::effects::{SessionFactory, SessionOps};
 use super::handle::RtcPeerControllerHandle;
@@ -82,7 +83,7 @@ impl SessionOps for FakeSessionOps {
         &self,
         label: &str,
         _init: webrtc::data_channel::RTCDataChannelInit,
-    ) -> Result<Arc<dyn webrtc::data_channel::DataChannel>, RtcError> {
+    ) -> Result<Arc<dyn super::adapter::LaneDataChannel>, RtcError> {
         // Reports OnOpen via the fake so the offerer's readiness anchor reaches
         // Sendable through the real pump path.
         Ok(super::effects::test_support::fake_data_channel(label))
@@ -90,18 +91,15 @@ impl SessionOps for FakeSessionOps {
     async fn add_track(
         &self,
         _track: Arc<dyn webrtc::media_stream::track_local::TrackLocal>,
-    ) -> Result<Arc<dyn webrtc::rtp_transceiver::RtpSender>, RtcError> {
+    ) -> Result<Arc<dyn ActrRtpSender>, RtcError> {
         Ok(Arc::new(
             crate::wire::webrtc::v020::media::test_support::FakeRtpSender::new(1),
         ))
     }
-    async fn remove_track(
-        &self,
-        _sender: &Arc<dyn webrtc::rtp_transceiver::RtpSender>,
-    ) -> Result<(), RtcError> {
+    async fn remove_track(&self, _sender: &Arc<dyn ActrRtpSender>) -> Result<(), RtcError> {
         Ok(())
     }
-    async fn get_senders(&self) -> Vec<Arc<dyn webrtc::rtp_transceiver::RtpSender>> {
+    async fn get_senders(&self) -> Vec<Arc<dyn ActrRtpSender>> {
         Vec::new()
     }
     async fn get_stats(&self) -> webrtc::peer_connection::RTCStatsReport {
@@ -427,8 +425,6 @@ async fn controller_exit_cancels_and_joins_inflight_build() {
 /// after the Session is installed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn remote_channel_discovered_during_build_is_accepted_once_session_exists() {
-    use webrtc::peer_connection::PeerConnectionEventHandler;
-
     let mut h = spawn_harness(21);
     h.handle
         .apply_remote_description(desc(RTCSdpType::Offer))
@@ -438,11 +434,11 @@ async fn remote_channel_discovered_during_build_is_accepted_once_session_exists(
     let handler = build.handler.clone();
     let resources = handler.resources();
 
-    PeerConnectionEventHandler::on_data_channel(
-        handler.as_ref(),
-        super::effects::test_support::fake_data_channel("RPC_RELIABLE"),
-    )
-    .await;
+    handler
+        .on_test_data_channel(super::effects::test_support::fake_data_channel(
+            "RPC_RELIABLE",
+        ))
+        .await;
     tokio::task::yield_now().await;
     assert!(
         h.handle.lane_handle(1, LaneKind::RpcReliable).is_none(),
@@ -479,7 +475,6 @@ async fn remote_channel_discovered_during_build_is_accepted_once_session_exists(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn invalid_remote_channel_token_is_closed_and_removed_during_build() {
     use std::sync::atomic::Ordering;
-    use webrtc::peer_connection::PeerConnectionEventHandler;
 
     let mut h = spawn_harness(22);
     h.handle
@@ -491,7 +486,7 @@ async fn invalid_remote_channel_token_is_closed_and_removed_during_build() {
     let resources = handler.resources();
     let channel = super::effects::test_support::recording_data_channel("UNKNOWN_LANE");
 
-    PeerConnectionEventHandler::on_data_channel(handler.as_ref(), channel.clone()).await;
+    handler.on_test_data_channel(channel.clone()).await;
     timeout(WAIT, async {
         loop {
             if channel.close_calls.load(Ordering::SeqCst) == 1 {
@@ -1402,7 +1397,7 @@ impl SessionOps for HangingOps {
         &self,
         label: &str,
         _init: webrtc::data_channel::RTCDataChannelInit,
-    ) -> Result<Arc<dyn webrtc::data_channel::DataChannel>, RtcError> {
+    ) -> Result<Arc<dyn super::adapter::LaneDataChannel>, RtcError> {
         if self.hang_create_data_channel {
             std::future::pending().await
         } else {
@@ -1412,7 +1407,7 @@ impl SessionOps for HangingOps {
     async fn add_track(
         &self,
         _track: Arc<dyn webrtc::media_stream::track_local::TrackLocal>,
-    ) -> Result<Arc<dyn webrtc::rtp_transceiver::RtpSender>, RtcError> {
+    ) -> Result<Arc<dyn ActrRtpSender>, RtcError> {
         if self.hang_track_mutation {
             std::future::pending().await
         } else {
@@ -1421,17 +1416,14 @@ impl SessionOps for HangingOps {
             ))
         }
     }
-    async fn remove_track(
-        &self,
-        _sender: &Arc<dyn webrtc::rtp_transceiver::RtpSender>,
-    ) -> Result<(), RtcError> {
+    async fn remove_track(&self, _sender: &Arc<dyn ActrRtpSender>) -> Result<(), RtcError> {
         if self.hang_remove_track {
             std::future::pending().await
         } else {
             Ok(())
         }
     }
-    async fn get_senders(&self) -> Vec<Arc<dyn webrtc::rtp_transceiver::RtpSender>> {
+    async fn get_senders(&self) -> Vec<Arc<dyn ActrRtpSender>> {
         Vec::new()
     }
     async fn get_stats(&self) -> webrtc::peer_connection::RTCStatsReport {

@@ -23,6 +23,8 @@ use webrtc::media_stream::track_remote::{TrackRemote, TrackRemoteEvent};
 
 use crate::inbound::MediaFrameRegistry;
 
+use super::peer::adapter::ActrRtpSender;
+
 // ---- Outbound media (S6-10) ------------------------------------------------
 
 use std::sync::Mutex as StdMutex;
@@ -146,7 +148,7 @@ pub(crate) struct OutboundTrackWriter {
     track: Arc<TrackLocalStaticRTP>,
     /// The RTP sender returned by `add_track` (set once; needed by
     /// `remove_track`).
-    sender: StdMutex<Option<Arc<dyn webrtc::rtp_transceiver::RtpSender>>>,
+    sender: StdMutex<Option<Arc<dyn ActrRtpSender>>>,
     sequence_number: AtomicU16,
     ssrc: u32,
     payload_type: u8,
@@ -207,12 +209,12 @@ impl OutboundTrackWriter {
     }
 
     /// Record the RTP sender returned by `add_track` (for `remove_track`).
-    pub(crate) fn set_sender(&self, sender: Arc<dyn webrtc::rtp_transceiver::RtpSender>) {
+    pub(crate) fn set_sender(&self, sender: Arc<dyn ActrRtpSender>) {
         *self.sender.lock().expect("writer sender lock") = Some(sender);
     }
 
     /// The recorded sender, if `add_track` completed.
-    pub(crate) fn sender(&self) -> Option<Arc<dyn webrtc::rtp_transceiver::RtpSender>> {
+    pub(crate) fn sender(&self) -> Option<Arc<dyn ActrRtpSender>> {
         self.sender.lock().expect("writer sender lock").clone()
     }
 
@@ -252,16 +254,14 @@ pub(crate) async fn local_track_pump(
     track: Arc<dyn TrackLocal>,
 ) {
     while let Some(event) = track.poll().await {
-        match event {
-            TrackLocalEvent::OnRtcpPacket(packets) => {
-                tracing::debug!(
-                    peer = %peer_id.to_string_repr(),
-                    generation,
-                    %track_id,
-                    rtcp_packets = packets.len(),
-                    "local track RTCP feedback"
-                );
-            }
+        if let TrackLocalEvent::OnRtcpPacket(packets) = event {
+            tracing::debug!(
+                peer = %peer_id.to_string_repr(),
+                generation,
+                %track_id,
+                rtcp_packets = packets.len(),
+                "local track RTCP feedback"
+            );
         }
     }
 }
@@ -504,48 +504,15 @@ pub(crate) mod test_support {
     }
 
     #[async_trait::async_trait]
-    impl webrtc::rtp_transceiver::RtpSender for FakeRtpSender {
+    impl ActrRtpSender for FakeRtpSender {
         fn id(&self) -> rtc::rtp_transceiver::RTCRtpSenderId {
             self.id
         }
-        fn track(&self) -> &Arc<dyn webrtc::media_stream::track_local::TrackLocal> {
-            &self.track
+        async fn track_id(&self) -> String {
+            self.track.track_id().await
         }
-        async fn get_capabilities(
-            &self,
-            _kind: RtpCodecKind,
-        ) -> webrtc::error::Result<Option<rtc::rtp_transceiver::rtp_sender::RTCRtpCapabilities>>
-        {
-            Ok(None)
-        }
-        async fn set_parameters(
-            &self,
-            _parameters: rtc::rtp_transceiver::rtp_sender::RTCRtpSendParameters,
-            _set_parameter_options: Option<
-                rtc::rtp_transceiver::rtp_sender::RTCSetParameterOptions,
-            >,
-        ) -> webrtc::error::Result<()> {
-            Ok(())
-        }
-        async fn get_parameters(
-            &self,
-        ) -> webrtc::error::Result<rtc::rtp_transceiver::rtp_sender::RTCRtpSendParameters> {
-            Ok(Default::default())
-        }
-        async fn replace_track(
-            &self,
-            _track: Arc<dyn webrtc::media_stream::track_local::TrackLocal>,
-        ) -> webrtc::error::Result<()> {
-            Ok(())
-        }
-        async fn set_streams(&self, _streams: Vec<MediaStreamId>) -> webrtc::error::Result<()> {
-            Ok(())
-        }
-        async fn get_stats(
-            &self,
-            _now: std::time::Instant,
-        ) -> webrtc::error::Result<webrtc::peer_connection::RTCStatsReport> {
-            Ok(Default::default())
+        fn upstream(&self) -> Option<Arc<dyn webrtc::rtp_transceiver::RtpSender>> {
+            None
         }
     }
 }

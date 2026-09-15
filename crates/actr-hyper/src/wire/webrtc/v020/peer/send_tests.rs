@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use actr_protocol::{ActrId, ActrType, Realm};
 use async_trait::async_trait;
-use tokio::sync::mpsc;
+use tokio::sync::{Notify, mpsc};
 use tokio::time::timeout;
 
 use webrtc::error::Error as RtcError;
@@ -20,9 +20,10 @@ use webrtc::peer_connection::{
 use crate::wire::webrtc::v020::event_handler::WebRtcEventHandler;
 use crate::wire::webrtc::v020::events::PeerDriverEvent;
 use crate::wire::webrtc::v020::inbound::InboundRouter;
+use crate::wire::webrtc::v020::peer::adapter::ActrRtpSender;
 use crate::wire::webrtc::v020::peer::controller::RtcPeerController;
 use crate::wire::webrtc::v020::peer::effects::test_support::{
-    RecordingDataChannel, recording_data_channel,
+    RecordingDataChannel, gated_recording_data_channel, recording_data_channel,
 };
 use crate::wire::webrtc::v020::peer::effects::{SessionFactory, SessionOps};
 use crate::wire::webrtc::v020::peer::reducer::SignalingMessage;
@@ -54,6 +55,7 @@ fn desc(sdp_type: RTCSdpType) -> RTCSessionDescription {
 /// Session ops whose data channels are recording channels, shared with the test.
 struct RecordingSessionOps {
     channels: Arc<StdMutex<HashMap<String, Arc<RecordingDataChannel>>>>,
+    latency_first_open_gate: Option<Arc<Notify>>,
 }
 
 #[async_trait]
@@ -83,8 +85,13 @@ impl SessionOps for RecordingSessionOps {
         &self,
         label: &str,
         _init: webrtc::data_channel::RTCDataChannelInit,
-    ) -> Result<Arc<dyn webrtc::data_channel::DataChannel>, RtcError> {
-        let channel = recording_data_channel(label);
+    ) -> Result<Arc<dyn super::adapter::LaneDataChannel>, RtcError> {
+        let channel = match (&self.latency_first_open_gate, label) {
+            (Some(open_gate), "STREAM_LATENCY_FIRST") => {
+                gated_recording_data_channel(label, open_gate.clone())
+            }
+            _ => recording_data_channel(label),
+        };
         self.channels
             .lock()
             .unwrap()
@@ -94,18 +101,15 @@ impl SessionOps for RecordingSessionOps {
     async fn add_track(
         &self,
         _track: Arc<dyn webrtc::media_stream::track_local::TrackLocal>,
-    ) -> Result<Arc<dyn webrtc::rtp_transceiver::RtpSender>, RtcError> {
+    ) -> Result<Arc<dyn ActrRtpSender>, RtcError> {
         Ok(Arc::new(
             crate::wire::webrtc::v020::media::test_support::FakeRtpSender::new(1),
         ))
     }
-    async fn remove_track(
-        &self,
-        _sender: &Arc<dyn webrtc::rtp_transceiver::RtpSender>,
-    ) -> Result<(), RtcError> {
+    async fn remove_track(&self, _sender: &Arc<dyn ActrRtpSender>) -> Result<(), RtcError> {
         Ok(())
     }
-    async fn get_senders(&self) -> Vec<Arc<dyn webrtc::rtp_transceiver::RtpSender>> {
+    async fn get_senders(&self) -> Vec<Arc<dyn ActrRtpSender>> {
         Vec::new()
     }
     async fn get_stats(&self) -> webrtc::peer_connection::RTCStatsReport {
@@ -122,6 +126,7 @@ impl SessionOps for RecordingSessionOps {
 struct RecordingFactory {
     channels: Arc<StdMutex<HashMap<String, Arc<RecordingDataChannel>>>>,
     mailbox: Arc<StdMutex<Option<crate::wire::webrtc::v020::events::PeerEventMailbox>>>,
+    latency_first_open_gate: Option<Arc<Notify>>,
 }
 
 #[async_trait]
@@ -133,6 +138,7 @@ impl SessionFactory for RecordingFactory {
         *self.mailbox.lock().unwrap() = Some(handler.mailbox());
         Ok(Arc::new(RecordingSessionOps {
             channels: self.channels.clone(),
+            latency_first_open_gate: self.latency_first_open_gate.clone(),
         }))
     }
 }
@@ -149,12 +155,20 @@ struct SendHarness {
 }
 
 fn spawn_send_harness(serial: u64) -> SendHarness {
+    spawn_send_harness_with_gate(serial, None)
+}
+
+fn spawn_send_harness_with_gate(
+    serial: u64,
+    latency_first_open_gate: Option<Arc<Notify>>,
+) -> SendHarness {
     let (signaling_tx, signaling_rx) = mpsc::channel(16);
     let channels = Arc::new(StdMutex::new(HashMap::new()));
     let mailbox = Arc::new(StdMutex::new(None));
     let factory = Arc::new(RecordingFactory {
         channels: channels.clone(),
         mailbox: mailbox.clone(),
+        latency_first_open_gate,
     });
     let inbound = std::sync::Arc::new(InboundRouter::discard());
     let supervisor = crate::wire::webrtc::v020::recovery::RtcRecoverySupervisor::new();
@@ -187,6 +201,12 @@ fn spawn_send_harness(serial: u64) -> SendHarness {
         _supervisor: supervisor,
         _task: task,
     }
+}
+
+fn spawn_send_harness_waiting_for_latency_first_open(serial: u64) -> (SendHarness, Arc<Notify>) {
+    let open_gate = Arc::new(Notify::new());
+    let harness = spawn_send_harness_with_gate(serial, Some(open_gate.clone()));
+    (harness, open_gate)
 }
 
 fn channel_of(h: &SendHarness, label: &str) -> Arc<RecordingDataChannel> {
@@ -305,6 +325,61 @@ async fn try_send_on_latency_first_lazily_creates_the_lane() {
     let (_, _, _, payload) =
         crate::transport::decode_fragment_header(try_sent[0].clone().freeze()).unwrap();
     assert_eq!(payload.as_ref(), b"fast");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn first_latency_first_send_waits_for_the_lane_open_event() {
+    let (mut h, open_gate) = spawn_send_harness_waiting_for_latency_first_open(215);
+    drive_to_sendable(&mut h).await;
+
+    let handle = h.handle.clone();
+    let send = tokio::spawn(async move {
+        handle
+            .try_send(
+                LaneKind::StreamLatencyFirst,
+                bytes::Bytes::from_static(b"first-after-replacement"),
+            )
+            .await
+    });
+
+    let channel = timeout(WAIT, async {
+        loop {
+            if let Some(channel) = h
+                .channels
+                .lock()
+                .expect("channel registry lock")
+                .get("STREAM_LATENCY_FIRST")
+                .cloned()
+            {
+                return channel;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("latency-first channel should be created");
+
+    // The handle is visible before the pump observes OnOpen. That intermediate
+    // state must not let the first user payload enter the channel.
+    tokio::task::yield_now().await;
+    assert!(!send.is_finished(), "send completed before lane OnOpen");
+    assert_eq!(
+        channel.try_sent.lock().expect("record lock").len(),
+        0,
+        "no payload may be sent before the lane readiness event"
+    );
+
+    open_gate.notify_one();
+    send.await
+        .expect("send task panicked")
+        .expect("send should succeed after lane OnOpen");
+    assert_eq!(
+        channel.try_sent.lock().expect("record lock").len(),
+        1,
+        "the first payload must be submitted exactly once"
+    );
+
+    h.handle.close().await.expect("close send harness");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
