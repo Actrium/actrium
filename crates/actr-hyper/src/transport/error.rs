@@ -69,6 +69,11 @@ pub enum NetworkError {
     #[error("Connection error: {0}")]
     ConnectionError(String),
 
+    /// A signaling response waiter was dropped while the WebSocket generation
+    /// was being rebuilt. Idempotent signaling requests may retry it once.
+    #[error("Receiver dropped while waiting for signaling response")]
+    SignalingReplyDropped,
+
     /// Signaling error
     #[error("Signaling error: {0}")]
     SignalingError(String),
@@ -249,6 +254,7 @@ impl Classify for NetworkError {
             | NetworkError::ResourceExhaustedError(_)
             | NetworkError::WebSocketError(_)
             | NetworkError::WebSocketClosed(_)
+            | NetworkError::SignalingReplyDropped
             | NetworkError::SignalingError(_)
             | NetworkError::WebRtcError(_)
             | NetworkError::NatTraversalError(_)
@@ -343,6 +349,7 @@ impl NetworkError {
 
         match self {
             NetworkError::ConnectionError(_) => "connection",
+            NetworkError::SignalingReplyDropped => "signaling_reply_dropped",
             NetworkError::SignalingError(_) => "signaling",
             NetworkError::WebRtcError(_) => "webrtc",
             NetworkError::ProtocolError(_) => "protocol",
@@ -405,7 +412,9 @@ impl NetworkError {
             | NetworkError::SignalingError(_)
             | NetworkError::ProtocolError(_) => 8,
 
-            NetworkError::ConnectionError(_) | NetworkError::NetworkUnreachableError(_) => 7,
+            NetworkError::ConnectionError(_)
+            | NetworkError::SignalingReplyDropped
+            | NetworkError::NetworkUnreachableError(_) => 7,
 
             NetworkError::NatTraversalError(_)
             | NetworkError::IceError(_)
@@ -470,6 +479,7 @@ impl NetworkError {
             // particular is excluded: it means wait-for-readiness + lane
             // re-acquisition (e.g. mid-rekey), NOT wire eviction.
             NetworkError::ConnectionError(_)
+            | NetworkError::SignalingReplyDropped
             | NetworkError::SignalingError(_)
             | NetworkError::WebRtcError(_)
             | NetworkError::ProtocolError(_)

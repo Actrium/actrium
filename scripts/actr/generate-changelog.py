@@ -173,9 +173,10 @@ def release_commit_body(repo: Path, ref: str, version: str) -> str:
     raw = run_git(repo, "show", "-s", "--format=%s%x00%b", "--end-of-options", target)
     subject, _, body = raw.partition("\x00")
     expected = release_commit_subject(version)
-    if subject.strip() != expected:
+    if not re.fullmatch(rf"{re.escape(expected)}(?: \(#[0-9]+\))?", subject.strip()):
         raise ValueError(
-            f"Release commit subject must be exactly {expected!r}: {subject.strip()!r}"
+            f"Release commit subject must be {expected!r}, optionally suffixed "
+            f"with ' (#PR)': {subject.strip()!r}"
         )
     if not body.strip():
         raise ValueError(f"Release commit body is empty: {target}")

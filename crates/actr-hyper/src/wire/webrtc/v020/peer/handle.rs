@@ -8,15 +8,17 @@
 //! `LaneHandle`/`SendPermit`).
 
 use std::sync::Arc;
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use actr_protocol::ActrId;
-use tokio::sync::{mpsc, watch};
-use webrtc::peer_connection::{RTCIceCandidateInit, RTCSessionDescription};
+use tokio::sync::{mpsc, oneshot, watch};
+use webrtc::peer_connection::RTCSessionDescription;
 
 use crate::wire::webrtc::v020::media::OutboundTrackWriter;
 use crate::wire::webrtc::v020::peer::lane_handle::{ActiveLaneRegistry, LaneHandle};
-use crate::wire::webrtc::v020::peer::reducer::RtcPeerCommand;
+use crate::wire::webrtc::v020::peer::reducer::{RtcPeerCommand, SignalingMessage};
 use crate::wire::webrtc::v020::peer::send::{RtcSendAttempt, RtcSendError};
 use crate::wire::webrtc::v020::status::{LaneKind, RtcPeerSnapshot};
 
@@ -55,6 +57,11 @@ pub(crate) struct RtcPeerControllerHandle {
     /// Shared across clones so every send gets a unique id. The pump's
     /// `ReassemblyBuffer` is per-lane, so cross-lane id reuse is safe.
     msg_id_counter: Arc<AtomicU32>,
+    /// Unit-test instrumentation for the outbound readiness wiring. This is
+    /// deliberately absent from production handles; it counts attempts at the
+    /// mailbox boundary, before the bounded `try_send` result is returned.
+    #[cfg(test)]
+    business_recovery_hint_attempts: Arc<AtomicUsize>,
     /// S6-10: outbound media writers by track id (the media data plane —
     /// writers bypass the controller after registration, like lane sends).
     media_writers:
@@ -98,6 +105,8 @@ impl RtcPeerControllerHandle {
             lanes,
             effect_port,
             msg_id_counter: Arc::new(AtomicU32::new(0)),
+            #[cfg(test)]
+            business_recovery_hint_attempts: Arc::new(AtomicUsize::new(0)),
             media_writers: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             secure: Arc::new(std::sync::Mutex::new(SecureGenerationCell {
                 pc_generation: initial_pc_generation,
@@ -180,6 +189,24 @@ impl RtcPeerControllerHandle {
     /// immediately").
     pub(crate) fn snapshot(&self) -> RtcPeerSnapshot {
         self.snapshot_rx.borrow().clone()
+    }
+
+    pub(crate) fn try_business_recovery_hint(&self) -> bool {
+        #[cfg(test)]
+        self.business_recovery_hint_attempts
+            .fetch_add(1, Ordering::Relaxed);
+        let snapshot = self.snapshot();
+        self.command_tx
+            .try_send(RtcPeerCommand::BusinessRecoveryHint {
+                transport_epoch: snapshot.transport_epoch,
+                pc_generation: snapshot.pc_generation,
+            })
+            .is_ok()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn business_recovery_hint_attempts(&self) -> usize {
+        self.business_recovery_hint_attempts.load(Ordering::Relaxed)
     }
 
     /// Subscribe to snapshot updates; the receiver sees the latest immediately.
@@ -517,9 +544,64 @@ impl RtcPeerControllerHandle {
     /// snapshot published, rather than merely acknowledging mailbox enqueue.
     pub(crate) async fn connect(&self) -> Result<u64, ControllerGone> {
         let (respond, committed) = tokio::sync::oneshot::channel();
-        self.send_command(RtcPeerCommand::ConnectCommitted { respond })
-            .await?;
+        self.send_command_with_span(
+            RtcPeerCommand::ConnectCommitted { respond },
+            tracing::Span::current(),
+            false,
+        )
+        .await?;
         committed.await.map_err(|_| ControllerGone::Gone)
+    }
+
+    /// Deliver one signaling message while preserving the receive-side span
+    /// across the controller mailbox. The span is library metadata only; the
+    /// reducer still receives the same business command as before.
+    pub(crate) async fn apply_signaling_message_with_span(
+        &self,
+        message: SignalingMessage,
+        span: tracing::Span,
+    ) -> Result<(), ControllerGone> {
+        let command = match message {
+            SignalingMessage::Offer { desc, exchange_id } => {
+                RtcPeerCommand::ApplyRemoteDescriptionCorrelated { desc, exchange_id }
+            }
+            SignalingMessage::Answer { desc, exchange_id } => {
+                RtcPeerCommand::ApplyRemoteDescriptionCorrelated { desc, exchange_id }
+            }
+            SignalingMessage::IceRestartOffer { desc, exchange_id } => {
+                RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
+                    desc,
+                    exchange_id: Some(exchange_id),
+                }
+            }
+            SignalingMessage::IceRestartRequest {
+                request_id,
+                attempt,
+            } => RtcPeerCommand::ApplyIceRestartRequest {
+                request_id,
+                attempt,
+            },
+            SignalingMessage::Candidate(candidate) => {
+                RtcPeerCommand::ApplyRemoteCandidate(candidate)
+            }
+            SignalingMessage::RoleAssignment { is_offerer } => {
+                RtcPeerCommand::ApplyRoleAssignment { is_offerer }
+            }
+            SignalingMessage::IceRestartRejected { .. } => RtcPeerCommand::NetworkEvent(
+                crate::wire::webrtc::v020::recovery::RtcNetworkEvent::ForceReconnect,
+            ),
+            SignalingMessage::IceRestartRequestAck {
+                request_id,
+                attempt,
+                outcome,
+            } => RtcPeerCommand::ApplyIceRestartRequestAck {
+                request_id,
+                attempt,
+                outcome,
+            },
+            SignalingMessage::RoleNegotiation => return Ok(()),
+        };
+        self.send_command_with_span(command, span, true).await
     }
 
     /// Terminate only the initial attempt observed by a timed-out caller.
@@ -661,18 +743,6 @@ impl RtcPeerControllerHandle {
             .await
     }
 
-    pub(crate) async fn apply_remote_description_correlated(
-        &self,
-        desc: RTCSessionDescription,
-        exchange_id: Option<String>,
-    ) -> Result<(), ControllerGone> {
-        self.send_command(RtcPeerCommand::ApplyRemoteDescriptionCorrelated {
-            desc: Box::new(desc),
-            exchange_id,
-        })
-        .await
-    }
-
     /// Deliver a wire-tagged ICE restart offer. This distinction lets the
     /// reducer keep a Soft Recovery on the current PC while treating an
     /// ordinary changed-ufrag Offer as a fresh physical connection.
@@ -684,37 +754,26 @@ impl RtcPeerControllerHandle {
             .await
     }
 
-    pub(crate) async fn apply_remote_ice_restart_offer_correlated(
-        &self,
-        desc: RTCSessionDescription,
-        exchange_id: Option<String>,
-    ) -> Result<(), ControllerGone> {
-        self.send_command(RtcPeerCommand::ApplyRemoteIceRestartOfferCorrelated {
-            desc: Box::new(desc),
-            exchange_id,
-        })
-        .await
-    }
-
-    pub(crate) async fn apply_ice_restart_request(
+    /// Apply a restart request and return the outcome committed by the
+    /// controller reducer. The signaling router uses this to avoid deriving
+    /// Ack state from a snapshot taken before the command was serialized.
+    pub(crate) async fn apply_ice_restart_request_with_outcome(
         &self,
         request_id: String,
         attempt: u32,
-    ) -> Result<(), ControllerGone> {
-        self.send_command(RtcPeerCommand::ApplyIceRestartRequest {
-            request_id,
-            attempt,
-        })
-        .await
-    }
-
-    /// Deliver a remote ICE candidate (from the signaling router).
-    pub(crate) async fn apply_remote_candidate(
-        &self,
-        candidate: RTCIceCandidateInit,
-    ) -> Result<(), ControllerGone> {
-        self.send_command(RtcPeerCommand::ApplyRemoteCandidate(candidate))
-            .await
+    ) -> Result<i32, ControllerGone> {
+        let (respond, outcome) = oneshot::channel();
+        self.send_command_with_span(
+            RtcPeerCommand::ApplyIceRestartRequestCommitted {
+                request_id,
+                attempt,
+                respond,
+            },
+            tracing::Span::current(),
+            true,
+        )
+        .await?;
+        outcome.await.map_err(|_| ControllerGone::Gone)
     }
 
     pub(crate) async fn signaling_delivery_failed(
@@ -729,13 +788,30 @@ impl RtcPeerControllerHandle {
         .await
     }
 
+    /// Best-effort response-path prompt. The snapshot identity is captured at
+    /// submission so the reducer can discard a hint that races a replacement
+    /// Controller/PC attempt without blocking the caller on a full mailbox.
+    pub(crate) fn try_recovery_hint(&self, request_id: String) -> bool {
+        let snapshot = self.snapshot();
+        self.command_tx
+            .try_send(RtcPeerCommand::RecoveryHint {
+                request_id,
+                transport_epoch: snapshot.transport_epoch,
+                pc_generation: snapshot.pc_generation,
+            })
+            .is_ok()
+    }
+
     /// Deliver the server's role assignment (from the signaling router).
     pub(crate) async fn apply_role_assignment(
         &self,
         is_offerer: bool,
     ) -> Result<(), ControllerGone> {
-        self.send_command(RtcPeerCommand::ApplyRoleAssignment { is_offerer })
-            .await
+        self.apply_signaling_message_with_span(
+            SignalingMessage::RoleAssignment { is_offerer },
+            tracing::Span::current(),
+        )
+        .await
     }
 
     pub(crate) async fn target_unavailable(
@@ -752,13 +828,19 @@ impl RtcPeerControllerHandle {
         .await
     }
 
-    /// A correlated ICE-restart offer was rejected by the remote because it no
-    /// longer owns the old Session. Escalate through the controller's normal
-    /// Hard Recovery policy instead of mutating the manager/router state.
-    pub(crate) async fn force_reconnect(&self) -> Result<(), ControllerGone> {
-        self.send_command(RtcPeerCommand::NetworkEvent(
-            crate::wire::webrtc::v020::recovery::RtcNetworkEvent::ForceReconnect,
-        ))
+    /// Preserve the triggering inbound message as a causal link when the router
+    /// escalates a shed or timed-out dispatch through the controller mailbox.
+    pub(crate) async fn force_reconnect_with_span(
+        &self,
+        span: tracing::Span,
+    ) -> Result<(), ControllerGone> {
+        self.send_command_with_span(
+            RtcPeerCommand::NetworkEvent(
+                crate::wire::webrtc::v020::recovery::RtcNetworkEvent::ForceReconnect,
+            ),
+            span,
+            true,
+        )
         .await
     }
 
@@ -767,5 +849,19 @@ impl RtcPeerControllerHandle {
             .send(command)
             .await
             .map_err(|_| ControllerGone::Gone)
+    }
+
+    async fn send_command_with_span(
+        &self,
+        command: RtcPeerCommand,
+        span: tracing::Span,
+        remote: bool,
+    ) -> Result<(), ControllerGone> {
+        self.send_command(RtcPeerCommand::Traced {
+            span,
+            remote,
+            command: Box::new(command),
+        })
+        .await
     }
 }

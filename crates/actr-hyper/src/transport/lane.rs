@@ -696,6 +696,7 @@ pub trait DataLane: Send + Sync + std::fmt::Debug {
                     // Transport and genuinely ambiguous failures: the write
                     // may have partially entered the wire.
                     NetworkError::ConnectionError(_)
+                    | NetworkError::SignalingReplyDropped
                     | NetworkError::SignalingError(_)
                     | NetworkError::WebRtcError(_)
                     | NetworkError::ProtocolError(_)
