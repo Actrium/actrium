@@ -64,6 +64,33 @@ class CommitIdentityTest(unittest.TestCase):
         self.assertEqual(identity_check.validate_identity(allowed), [])
         self.assertEqual(len(identity_check.validate_identity(exposed)), 1)
 
+    def test_swift_manifest_filenames_in_messages(self) -> None:
+        messages = (
+            ("ships swift-tools-version 6.2 plus a Package@swift-6.1.swift fallback.", 0),
+            ("Use `packages/example/Package@swift-6.swift`.", 0),
+            ("Use Package@swift-6.1.2.swift and Package@swift-6.2.swift", 0),
+            ("Package@swift-6.1.swift; Signed-off-by: Peer <dev@example.com>", 1),
+            ("Contact dev@swift-6.1.swift", 1),
+            ("Contact Package@swift-6.1.swift.example.com", 1),
+            ("Contact Package@swift-latest.swift", 1),
+        )
+        for message, expected_errors in messages:
+            with self.subTest(message=message):
+                commit = identity_check.CommitIdentity(
+                    sha="d" * 40,
+                    author_name="Developer",
+                    author_email="developer@users.noreply.github.com",
+                    committer_name="Developer",
+                    committer_email="developer@users.noreply.github.com",
+                    parent_count=1,
+                    message=message,
+                )
+                self.assertEqual(len(identity_check.validate_identity(commit)), expected_errors)
+
+        self.assertFalse(
+            identity_check.is_allowed_identity("Developer", "Package@swift-6.1.swift")
+        )
+
     def test_github_service_identity_does_not_require_multiple_parents(self) -> None:
         base = dict(
             sha="c" * 40,
