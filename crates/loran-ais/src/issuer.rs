@@ -930,6 +930,7 @@ impl AIdIssuer {
                             &successor_hash,
                             &response,
                             request.target.as_deref(),
+                            &Self::reissue_request_hash(actor_id, request, renewal_proof),
                         )
                         .await
                     {
@@ -1148,6 +1149,11 @@ impl AIdIssuer {
                 &request.actr_type,
                 &request.realm,
                 request.target.as_deref(),
+                if request.auth_mode == Some(actr_protocol::RegisterAuthMode::Linked as i32) {
+                    actr_protocol::RegisterAuthMode::Linked
+                } else {
+                    actr_protocol::RegisterAuthMode::Package
+                },
             )
             .await?;
 
@@ -1860,6 +1866,7 @@ impl AIdIssuer {
         actr_type: &ActrType,
         realm: &Realm,
         target: Option<&str>,
+        auth_mode: actr_protocol::RegisterAuthMode,
     ) -> Result<ActrId, AidError> {
         let pool = platform::storage::db::get_database().get_pool();
         let issued_at = SystemTime::now()
@@ -1875,14 +1882,15 @@ impl AIdIssuer {
             let serial_number = SerialNumber::sn(realm.realm_id).value();
             let reserved = sqlx::query(
                 "INSERT OR IGNORE INTO issued_actor_identity
-                 (realm_id, serial_number, actor_type, target, issued_at)
-                 VALUES (?, ?, ?, ?, ?)",
+                 (realm_id, serial_number, actor_type, target, issued_at, auth_mode)
+                 VALUES (?, ?, ?, ?, ?, ?)",
             )
             .bind(i64::from(realm.realm_id))
             .bind(serial_number as i64)
             .bind(&actor_type)
             .bind(target)
             .bind(issued_at)
+            .bind(auth_mode as i32)
             .execute(pool)
             .await
             .map_err(|error| {
@@ -2069,30 +2077,60 @@ impl AIdIssuer {
 
     // -------- /reissue idempotency (P1-8) ---------------------------------
 
-    /// Look up a cached `/reissue` response by the manufacturer-auth nonce.
-    ///
-    /// Returns the decrypted [`RegisterResponse`] if a cache entry for this
-    /// nonce exists and has not expired. The handler calls this before
-    /// invoking the full reissue path so a lost-response retry replays the
-    /// exact credential signed on the first attempt instead of re-signing.
-    pub async fn lookup_reissue_cache(&self, nonce: &[u8]) -> Option<RegisterResponse> {
-        if !matches!(nonce.len(), 16 | 32) {
+    /// Bind cache access to the exact previously authenticated identity,
+    /// registration (including signatures), and possession proof. Length prefixes
+    /// keep the protobuf messages unambiguous. The domain separates these keys
+    /// from legacy nonce-only entries, which must never be replayed.
+    fn reissue_request_hash(
+        actor_id: &ActrId,
+        request: &RegisterRequest,
+        renewal_proof: Option<&[u8]>,
+    ) -> Vec<u8> {
+        use sha2::{Digest, Sha256};
+        let mut hash = Sha256::new();
+        hash.update(b"actrix/ais/reissue-request/v2");
+        for part in [
+            actor_id.encode_to_vec(),
+            request.encode_to_vec(),
+            renewal_proof.unwrap_or_default().to_vec(),
+        ] {
+            hash.update((part.len() as u64).to_be_bytes());
+            hash.update(part);
+        }
+        hash.finalize().to_vec()
+    }
+
+    /// Replay only an exact authenticated retry, while honoring current actor,
+    /// realm, package, and publisher revocations. The consumed proof and nonce
+    /// must not be consumed again on this path.
+    pub async fn lookup_reissue_cache(
+        &self,
+        actor_id: &ActrId,
+        request: &RegisterRequest,
+        renewal_proof: Option<&[u8]>,
+    ) -> Option<RegisterResponse> {
+        let nonce = request.manufacturer_auth_nonce.as_ref()?;
+        if !matches!(nonce.len(), 16 | 32) || renewal_proof?.len() != 32 {
             return None;
         }
         let pool = platform::storage::db::get_database().get_pool();
-        let nonce_hash = crate::renewal::hash_token(nonce);
+        let request_hash = Self::reissue_request_hash(actor_id, request, renewal_proof);
         let now = crate::renewal::now_secs();
 
+        // Retain the historical column name to avoid a destructive cache migration.
         let ciphertext: Vec<u8> = sqlx::query_scalar(
             "SELECT response_ciphertext FROM ais_reissue_response_cache
              WHERE nonce_hash = ?1 AND expires_at > ?2",
         )
-        .bind(&nonce_hash)
+        .bind(&request_hash)
         .bind(now)
         .fetch_optional(pool)
         .await
         .ok()??;
 
+        self.recheck_existing_actor(actor_id, request.target.as_deref())
+            .await
+            .ok()?;
         let plaintext = self.decrypt_reissue_response(&ciphertext).ok()?;
         RegisterResponse::decode(plaintext.as_slice()).ok()
     }
@@ -2183,6 +2221,7 @@ impl AIdIssuer {
         successor_hash: &[u8],
         response: &RegisterResponse,
         target: Option<&str>,
+        request_hash: &[u8],
     ) -> Result<(), AidError> {
         let pool = platform::storage::db::get_database().get_pool();
         let now = crate::renewal::now_secs();
@@ -2191,7 +2230,6 @@ impl AIdIssuer {
 
         let response_bytes = response.encode_to_vec();
         let ciphertext = self.encrypt_reissue_response(&response_bytes)?;
-        let nonce_hash = crate::renewal::hash_token(&binding.nonce);
 
         let mut tx = pool
             .begin()
@@ -2242,13 +2280,13 @@ impl AIdIssuer {
             }
         }
 
-        // Cache the encrypted response keyed by nonce hash.
+        // Cache only the exact request that passed authentication and possession checks.
         sqlx::query(
             "INSERT INTO ais_reissue_response_cache
                 (nonce_hash, response_ciphertext, expires_at, created_at)
              VALUES (?, ?, ?, ?)",
         )
-        .bind(&nonce_hash)
+        .bind(request_hash)
         .bind(&ciphertext)
         .bind(cache_expires)
         .bind(now)
@@ -2269,12 +2307,13 @@ impl AIdIssuer {
         // target is non-empty; Linked reissue (no nonce) skips this entirely.
         if let Some(target) = target.filter(|t| !t.is_empty()) {
             sqlx::query(
-                "UPDATE issued_actor_identity SET target = ?1
+                "UPDATE issued_actor_identity SET target = ?1, auth_mode = ?4
                  WHERE realm_id = ?2 AND serial_number = ?3",
             )
             .bind(target)
             .bind(i64::from(actor_id.realm.realm_id))
             .bind(actor_id.serial_number as i64)
+            .bind(actr_protocol::RegisterAuthMode::Package as i32)
             .execute(&mut *tx)
             .await
             .map_err(|e| AidError::GenerationFailed(format!("target persist failed: {e}")))?;
@@ -2297,11 +2336,9 @@ impl AIdIssuer {
     ///
     /// - AIS-04: the actor must not be on the explicit revocation list.
     /// - AIS-03: the realm must still exist and be in a usable state.
-    /// - AIS-03: if this identity corresponds to a published package, that
-    ///   package must not have been revoked and its publisher must not have been
-    ///   suspended or revoked since the credential was first issued. Linked and
-    ///   local identities have no package row and skip the package/publisher
-    ///   check.
+    /// - AIS-03: any published package must remain active, and every package
+    ///   identity (including unpublished packages) requires an active publisher.
+    ///   Explicit Linked identities without a package row skip publisher checks.
     async fn recheck_existing_actor(
         &self,
         actor_id: &ActrId,
@@ -2373,14 +2410,23 @@ impl AIdIssuer {
                 })?
         };
 
-        if statuses.is_empty() {
-            // No package tuple: a linked/local identity has no package lifecycle
-            // to recheck.
+        let auth_mode: Option<i32> = sqlx::query_scalar::<_, Option<i32>>(
+            "SELECT auth_mode FROM issued_actor_identity WHERE realm_id = ? AND serial_number = ?",
+        )
+        .bind(i64::from(actor_id.realm.realm_id))
+        .bind(actor_id.serial_number as i64)
+        .fetch_optional(&pool)
+        .await
+        .map_err(|e| AidError::GenerationFailed(format!("actor auth mode lookup failed: {e}")))?
+        .flatten();
+
+        if statuses.is_empty() && auth_mode == Some(actr_protocol::RegisterAuthMode::Linked as i32)
+        {
             return Ok(());
         }
 
         let has_active = statuses.iter().any(|status| status == "active");
-        if !has_active {
+        if !statuses.is_empty() && !has_active {
             platform::recording::warn!(
                 "Credential issuance rejected: every package for type {} (target={:?}) has been revoked",
                 type_str,
@@ -2389,13 +2435,23 @@ impl AIdIssuer {
             return Err(AidError::PackageRevoked);
         }
 
-        // The package is still active; its publisher must still be active too.
+        // Published and unpublished package identities both require an active publisher.
         let publisher =
             actrix_mfr::model::Manufacturer::get_by_name(&pool, &actor_id.r#type.manufacturer)
                 .await
                 .map_err(|e| {
                     AidError::GenerationFailed(format!("publisher status lookup failed: {e}"))
                 })?;
+        // Pre-upgrade rows have no auth mode. A DNS-style identity is always a
+        // package identity; a non-domain identity without a publisher or package
+        // is the legacy linked case. Known package identities never take this fallback.
+        if auth_mode.is_none()
+            && statuses.is_empty()
+            && publisher.is_none()
+            && !actor_id.r#type.manufacturer.contains('.')
+        {
+            return Ok(());
+        }
         match publisher {
             Some(mfr) if mfr.status == actrix_mfr::model::MfrStatus::Active => Ok(()),
             Some(mfr) => {
