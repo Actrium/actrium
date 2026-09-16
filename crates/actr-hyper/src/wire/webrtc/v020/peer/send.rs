@@ -78,23 +78,34 @@ pub(crate) enum RtcSendError {
     MessageTooLarge,
 }
 
-/// One RTC send result with the delivery fact observed by the controller.
-/// `DataChunkDeliveryUncertain` is the only current outcome that may have
-/// entered the channel; all other errors are proven pre-send failures.
+/// One RTC send result with the delivery fact and adapter-level pre-send proof
+/// observed by the controller. `DataChunkDeliveryUncertain` is the only
+/// current outcome that may have entered the channel; all other errors are
+/// proven pre-send failures.
 #[derive(Debug)]
 pub(crate) struct RtcSendAttempt {
     pub(crate) result: Result<(), RtcSendError>,
     pub(crate) progress: DeliveryProgress,
+    pub(crate) proven_pre_send: bool,
 }
 
 impl RtcSendAttempt {
     pub(crate) fn from_result(result: Result<(), RtcSendError>) -> Self {
-        let progress = match &result {
-            Ok(()) => DeliveryProgress::SubmittedLocally,
-            Err(RtcSendError::DataChunkDeliveryUncertain) => DeliveryProgress::Unknown,
-            Err(_) => DeliveryProgress::NotAttempted,
+        let (progress, proven_pre_send) = match &result {
+            Ok(()) => (DeliveryProgress::SubmittedLocally, false),
+            Err(RtcSendError::DataChunkDeliveryUncertain) => (DeliveryProgress::Unknown, false),
+            Err(
+                RtcSendError::ConnectionNotReady
+                | RtcSendError::DataChannelClosed
+                | RtcSendError::DataChannelBufferFull
+                | RtcSendError::MessageTooLarge,
+            ) => (DeliveryProgress::NotAttempted, true),
         };
-        Self { result, progress }
+        Self {
+            result,
+            progress,
+            proven_pre_send,
+        }
     }
 }
 
@@ -139,6 +150,11 @@ mod tests {
             RtcSendAttempt::from_result(Err(RtcSendError::DataChunkDeliveryUncertain)).progress,
             DeliveryProgress::Unknown
         );
+        assert!(RtcSendAttempt::from_result(Err(RtcSendError::ConnectionNotReady)).proven_pre_send);
+        assert!(
+            !RtcSendAttempt::from_result(Err(RtcSendError::DataChunkDeliveryUncertain))
+                .proven_pre_send
+        );
     }
 
     #[test]
@@ -148,17 +164,45 @@ mod tests {
         // variant — including buffer-full and message-too-large, which are
         // detected before fragmentation hands bytes to the channel — must
         // classify as a proven pre-send failure so route recovery may replay.
-        for error in [
-            RtcSendError::ConnectionNotReady,
-            RtcSendError::DataChannelClosed,
-            RtcSendError::DataChannelBufferFull,
-            RtcSendError::MessageTooLarge,
-        ] {
-            assert_eq!(
-                RtcSendAttempt::from_result(Err(error)).progress,
-                DeliveryProgress::NotAttempted,
-                "{error:?} must remain a proven pre-send failure"
-            );
+        //
+        // The match below is exhaustiveness-checked on purpose (same-crate
+        // enum, no wildcard arm): adding a new `RtcSendError` variant breaks
+        // this function's compilation, forcing an explicit classification
+        // decision instead of silently omitting the variant from a
+        // hand-maintained list.
+        fn classify(error: RtcSendError) -> DeliveryProgress {
+            let attempt = RtcSendAttempt::from_result(Err(error));
+            match error {
+                RtcSendError::ConnectionNotReady
+                | RtcSendError::DataChannelClosed
+                | RtcSendError::DataChannelBufferFull
+                | RtcSendError::MessageTooLarge => {
+                    assert_eq!(
+                        attempt.progress,
+                        DeliveryProgress::NotAttempted,
+                        "{error:?} must remain a proven pre-send failure"
+                    );
+                    assert!(
+                        attempt.proven_pre_send,
+                        "{error:?} must carry adapter-level pre-send proof"
+                    );
+                    DeliveryProgress::NotAttempted
+                }
+                RtcSendError::DataChunkDeliveryUncertain => {
+                    assert_eq!(
+                        attempt.progress,
+                        DeliveryProgress::Unknown,
+                        "{error:?} must stay the only ambiguous outcome"
+                    );
+                    DeliveryProgress::Unknown
+                }
+            }
         }
+
+        classify(RtcSendError::ConnectionNotReady);
+        classify(RtcSendError::DataChannelClosed);
+        classify(RtcSendError::DataChannelBufferFull);
+        classify(RtcSendError::MessageTooLarge);
+        classify(RtcSendError::DataChunkDeliveryUncertain);
     }
 }

@@ -21,12 +21,17 @@ use std::sync::Arc;
 use actr_protocol::ActrId;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
+use tracing::{Instrument, Span};
+#[cfg(feature = "opentelemetry")]
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::wire::webrtc::v020::events::{
     DataChannelDescriptor, PEER_EVENT_MAILBOX_CAPACITY, PeerDriverEvent, TrackDescriptor,
     peer_event_mailbox_with_capacity_and_bytes,
 };
-use crate::wire::webrtc::v020::recovery::RtcNetworkEvent;
+use crate::wire::webrtc::v020::recovery::{
+    ICE_RESTART_ATTEMPT_TIMEOUT, REMOTE_REQUEST_WAKE_GRACE, RtcNetworkEvent,
+};
 use crate::wire::webrtc::v020::signaling::SignalingDispatch;
 use crate::wire::webrtc::v020::status::{LaneKind, PeerTransportRetirement, RtcPeerSnapshot};
 
@@ -40,7 +45,7 @@ use super::reducer::{
     LaneEvent, RtcConfigurationRefreshError, RtcPeerCommand, RtcPeerEffect, RtcPeerInput,
     SignalingMessage, reduce,
 };
-use super::session::SessionResourceId;
+use super::session::{InboundGenerationGate, SessionResourceId};
 use super::state::{PendingRtcOperationKind, RtcPeerState};
 
 #[cfg(feature = "test-utils")]
@@ -52,9 +57,6 @@ const COMMAND_CAPACITY: usize = 64;
 const COMPLETION_CAPACITY: usize = 128;
 /// Bounded capacity of the per-peer lane-event channel.
 const LANE_CAPACITY: usize = 64;
-/// Per-attempt ICE restart readiness budget, preserving the 0.14 policy. The
-/// reducer receives only the elapsed fact; it never reads wall-clock time.
-const ICE_RESTART_ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6);
 /// Server-arbitrated role negotiation keeps the historical short failure
 /// budget, distinct from the longer initial ICE/DataChannel readiness budget.
 const ROLE_NEGOTIATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -81,6 +83,28 @@ struct RetainedSignaling {
     generation: u64,
     negotiation_epoch: u64,
     message: SignalingMessage,
+    /// Retains only the originating attempt's OTel parent state, never the
+    /// business span itself: `tracing-opentelemetry` exports a span when its
+    /// last handle drops, so parking a live `webrtc.connect`/`webrtc.recover`
+    /// span here would inflate its recorded duration by the whole retention
+    /// window (same invariant as `generation_contexts`). Flush re-materializes
+    /// a short-lived `signaling.retry_flush` span parented on this context.
+    #[cfg(feature = "opentelemetry")]
+    context: opentelemetry::Context,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AttemptTraceKey {
+    Connect(u64),
+    Recover {
+        transport_epoch: u64,
+        recovery_epoch: u64,
+    },
+}
+
+struct GenerationTrace {
+    key: AttemptTraceKey,
+    span: Span,
 }
 
 #[derive(Clone)]
@@ -100,6 +124,9 @@ enum PendingDiscoveredResource {
 /// The controller's single-writer control task.
 pub(crate) struct RtcPeerController {
     state: RtcPeerState,
+    /// Generation admitted to the inbound data plane. `None` closes ingress;
+    /// only the exact sendable generation may dispatch business messages.
+    inbound_generation: Arc<InboundGenerationGate>,
     /// The effect port: owns the session registry and executes blocking effects.
     /// The controller submits effects and receives completions; it never holds
     /// sessions or WebRTC implementation objects directly.
@@ -126,13 +153,16 @@ pub(crate) struct RtcPeerController {
     /// async `apply()` while still letting a failed readiness lane stop the
     /// remaining effects from that reducer turn.
     internal_inputs: std::collections::VecDeque<RtcPeerInput>,
-    /// Critical signaling (role probe / offer / answer) retained when the
-    /// signaling queue was full, retried on every event-loop turn. The
-    /// reducer already marked the attempt announced, so dropping the message
-    /// would strand negotiation. The originating transport attempt fences a
-    /// retained message from leaking into a later WirePool retry. Only the
-    /// newest message is retained: a newer offer/answer supersedes any
-    /// retained one.
+    /// Critical signaling retained when the signaling queue is full. When the
+    /// signaling-generation gate is closed, only Offer, Answer, and
+    /// IceRestartRequest are retained; Candidate and RoleNegotiation are
+    /// dropped. Role probes use `role_probe_undelivered` and are re-driven when
+    /// the gate opens, so retaining them here would double-send the probe. The
+    /// reducer already marked the attempt announced, so dropping a retained
+    /// offer/answer/restart request would strand negotiation. The originating
+    /// transport attempt fences retained signaling from leaking into a later
+    /// WirePool retry. Only the newest message is retained: a newer
+    /// offer/answer supersedes any retained one.
     retry_signaling: Option<RetainedSignaling>,
     /// Wake channel: a drained signaling queue re-delivers a retained
     /// critical message without waiting for an unrelated event-loop turn
@@ -170,6 +200,30 @@ pub(crate) struct RtcPeerController {
     /// Node-level shared dependencies (inbound router, throttle,
     /// media registry) handed down from the manager at spawn.
     deps: SharedNodeDeps,
+    /// The active business-operation spans are kept by the controller rather
+    /// than the reducer. Their keys fence late effects from superseded
+    /// connection/recovery attempts.
+    connect_span: Option<(u64, Span)>,
+    recovery_span: Option<((u64, u64), Span)>,
+    /// Attempt context retained by physical generation so late completions and
+    /// cleanup effects stay attached to the attempt that created them.
+    generation_spans: std::collections::HashMap<u64, GenerationTrace>,
+    /// The generation owned by the current attempt. Keep this identity even
+    /// when a failed replacement leaves only the old fallback session alive.
+    attempt_generation: Option<u64>,
+    /// Completed attempt contexts retain only OTel parent state, never the
+    /// ended tracing span itself. This keeps long-lived sessions from keeping
+    /// completed business spans open.
+    #[cfg(feature = "opentelemetry")]
+    generation_contexts: std::collections::HashMap<u64, opentelemetry::Context>,
+    /// The span for the event currently being reduced. Effects targeting the
+    /// current attempt or the input generation inherit this processing span;
+    /// other generations resolve their own attempt context.
+    active_effect_span: Option<Span>,
+    /// Generation of the current input, when its attempt did not change.
+    /// Reuse its processing span for same-generation effects, including
+    /// fallback/retired generations, without caching a span across turns.
+    active_effect_generation: Option<u64>,
 }
 
 /// Node-level shared dependencies handed to every controller and its effect
@@ -190,9 +244,10 @@ pub(crate) struct SharedNodeDeps {
     pub(crate) driver_event_observer: Option<NodeDriverEventObserver>,
     /// Stable identity of this Controller lifetime within its Manager.
     pub(crate) controller_lifecycle_id: u64,
-    /// Manager-owned hard-recovery sink used to release business work that was
-    /// committed to the generation being superseded. Soft recovery keeps the
-    /// same Session and therefore emits no edge.
+    /// Manager-owned generation-invalidation sink used to release business
+    /// work committed to a generation that is being retired or superseded.
+    /// Healthy same-generation Soft Recovery keeps the Session and therefore
+    /// emits no edge.
     pub(crate) peer_generation_invalidated: Option<tokio::sync::broadcast::Sender<(ActrId, u64)>>,
     /// Manager-owned sink for every authoritative sendability edge. PeerGate
     /// pairs falling and rising edges to apply recovery hysteresis to pending
@@ -300,13 +355,14 @@ impl RtcPeerController {
             signaling_generation_rx,
             deps,
             policy_clock,
-            move |peer_id, event_mailbox, lane_tx, deps| {
+            move |peer_id, event_mailbox, lane_tx, deps, inbound_generation| {
                 Arc::new(WebRtcEffectRunner::new(
                     peer_id,
                     factory_for_port,
                     event_mailbox,
                     lane_tx,
                     deps,
+                    inbound_generation,
                 ))
             },
         );
@@ -327,6 +383,7 @@ impl RtcPeerController {
             crate::wire::webrtc::v020::events::PeerEventMailbox,
             mpsc::Sender<LaneEvent>,
             SharedNodeDeps,
+            Arc<InboundGenerationGate>,
         ) -> Arc<dyn RtcPeerEffectPort>,
     ) -> (
         RtcPeerControllerHandle,
@@ -363,16 +420,19 @@ impl RtcPeerController {
         let (lane_tx, lane_rx) = mpsc::channel(LANE_CAPACITY);
         let (signaling_retry_wake_tx, signaling_retry_wake_rx) = mpsc::unbounded_channel();
         let lanes = crate::wire::webrtc::v020::peer::lane_handle::ActiveLaneRegistry::new();
+        let inbound_generation = Arc::new(InboundGenerationGate::new());
 
         let effect_port = make_effect_port(
             peer_id.clone(),
             event_mailbox.clone(),
             lane_tx.clone(),
             deps.clone(),
+            inbound_generation.clone(),
         );
 
         let controller = Self {
             state,
+            inbound_generation,
             effect_port: effect_port.clone(),
             lanes: lanes.clone(),
             inbound: deps.inbound.clone(),
@@ -396,6 +456,14 @@ impl RtcPeerController {
             signaling_generation_rx,
             policy_clock,
             deps: deps.clone(),
+            connect_span: None,
+            recovery_span: None,
+            generation_spans: std::collections::HashMap::new(),
+            attempt_generation: None,
+            #[cfg(feature = "opentelemetry")]
+            generation_contexts: std::collections::HashMap::new(),
+            active_effect_span: None,
+            active_effect_generation: None,
         };
         let task = tokio::spawn(controller.run());
         let handle = RtcPeerControllerHandle::new(
@@ -444,8 +512,268 @@ impl RtcPeerController {
             signaling_generation_rx,
             deps,
             policy_clock,
-            move |_, _, _, _| effect_port,
+            move |_, _, _, _, _| effect_port,
         )
+    }
+
+    fn current_attempt_span(&self) -> Span {
+        self.recovery_span
+            .as_ref()
+            .map(|(_, span)| span.clone())
+            .or_else(|| self.connect_span.as_ref().map(|(_, span)| span.clone()))
+            .unwrap_or_else(Span::current)
+    }
+
+    fn current_attempt_key(&self) -> Option<AttemptTraceKey> {
+        self.recovery_span
+            .as_ref()
+            .map(
+                |((transport_epoch, recovery_epoch), _)| AttemptTraceKey::Recover {
+                    transport_epoch: *transport_epoch,
+                    recovery_epoch: *recovery_epoch,
+                },
+            )
+            .or_else(|| {
+                self.connect_span
+                    .as_ref()
+                    .map(|(transport_epoch, _)| AttemptTraceKey::Connect(*transport_epoch))
+            })
+    }
+
+    fn span_for_generation(&self, generation: u64) -> Span {
+        if let Some(trace) = self.generation_spans.get(&generation) {
+            return trace.span.clone();
+        }
+        #[cfg(feature = "opentelemetry")]
+        if let Some(context) = self.generation_contexts.get(&generation) {
+            let span = tracing::info_span!(
+                parent: None,
+                "webrtc.generation_context",
+                peer = %self.state.peer_id.to_string_repr(),
+                generation,
+            );
+            let _ = span.set_parent(context.clone());
+            return span;
+        }
+        self.current_attempt_span()
+    }
+
+    fn input_generation(&self, input: &RtcPeerInput) -> Option<u64> {
+        match input {
+            RtcPeerInput::DriverEvent(event) => Some(event.generation()),
+            RtcPeerInput::StateTick(tick) => Some(tick.generation),
+            RtcPeerInput::Lane(LaneEvent::Opened { generation, .. })
+            | RtcPeerInput::Lane(LaneEvent::Closed { generation, .. })
+            | RtcPeerInput::LaneCreationFailed { generation, .. }
+            | RtcPeerInput::TrackMutationTimedOut { generation }
+            | RtcPeerInput::MailboxOverflow { generation } => Some(*generation),
+            RtcPeerInput::Completion(completion) => Some(completion.generation()),
+            RtcPeerInput::Command(_) => None,
+            _ => None,
+        }
+    }
+
+    fn processing_span(&self, local_span: &Span, remote_span: &Span) -> Span {
+        let span = tracing::info_span!(
+            parent: None,
+            "webrtc.process",
+            peer = %self.state.peer_id.to_string_repr(),
+            controller_lifecycle_id = self.deps.controller_lifecycle_id,
+        );
+        #[cfg(feature = "opentelemetry")]
+        let _ = span.set_parent(local_span.context());
+        #[cfg(not(feature = "opentelemetry"))]
+        let _ = local_span;
+        span.follows_from(remote_span);
+        span
+    }
+
+    fn finish_attempt_generations(&mut self, key: AttemptTraceKey, span: Span) {
+        #[cfg(feature = "opentelemetry")]
+        let context = span.context();
+        #[cfg(not(feature = "opentelemetry"))]
+        let _ = span;
+        let generations: Vec<u64> = self
+            .generation_spans
+            .iter()
+            .filter_map(|(generation, trace)| (trace.key == key).then_some(*generation))
+            .collect();
+        for generation in generations {
+            self.generation_spans.remove(&generation);
+            #[cfg(feature = "opentelemetry")]
+            self.generation_contexts.insert(generation, context.clone());
+        }
+    }
+
+    fn record_current_generation_spans(&mut self) {
+        let span = self.current_attempt_span();
+        let Some(key) = self.current_attempt_key() else {
+            return;
+        };
+        // A hard replacement owns the building/pending generation, not the
+        // still-active fallback. Soft recovery instead reuses the active PC.
+        // A parked Answerer has no physical session, but its restart requests
+        // still belong to the current recovery on the parked generation.
+        self.attempt_generation = self
+            .state
+            .building_generation
+            .or(self.state.pending_generation)
+            .or(self.attempt_generation)
+            .or(self.state.active_generation)
+            .or(self.state.parked_signaling_generation);
+        let Some(generation) = self.attempt_generation else {
+            return;
+        };
+        if self.state.building_generation == Some(generation)
+            || self.state.pending_generation == Some(generation)
+            || self.state.active_generation == Some(generation)
+            || self.state.parked_signaling_generation == Some(generation)
+        {
+            self.generation_spans
+                .insert(generation, GenerationTrace { key, span });
+            #[cfg(feature = "opentelemetry")]
+            self.generation_contexts.remove(&generation);
+        }
+    }
+
+    fn cleanup_generation_context_if_retired(&mut self, generation: u64) {
+        let live_slot = self.state.building_generation == Some(generation)
+            || self.state.active_generation == Some(generation)
+            || self.state.pending_generation == Some(generation)
+            || self.state.sessions_to_close.contains(&generation)
+            // A physically closed Answerer may still signal on this generation.
+            || self.state.parked_signaling_generation == Some(generation);
+        let pending_operation = self
+            .state
+            .pending_operations
+            .values()
+            .any(|operation| operation.pc_generation == generation);
+        if !live_slot && !pending_operation {
+            self.generation_spans.remove(&generation);
+            #[cfg(feature = "opentelemetry")]
+            self.generation_contexts.remove(&generation);
+        }
+    }
+
+    fn span_for_generation_for_effect(&self, generation: u64) -> Span {
+        let current_generation = match self.current_attempt_key() {
+            Some(_) => self.attempt_generation == Some(generation),
+            None => self.state.active_generation == Some(generation),
+        };
+        if current_generation || self.active_effect_generation == Some(generation) {
+            if let Some(span) = &self.active_effect_span {
+                return span.clone();
+            }
+        }
+        self.span_for_generation(generation)
+    }
+
+    fn span_for_effect(&self, effect: &RtcPeerEffect) -> Span {
+        match effect {
+            RtcPeerEffect::SendSignaling { generation, .. } => {
+                self.span_for_generation_for_effect(*generation)
+            }
+            _ => effect
+                .pending_identity()
+                .map(|(generation, ..)| self.span_for_generation_for_effect(generation))
+                .unwrap_or_else(|| self.current_attempt_span()),
+        }
+    }
+
+    fn finish_connect_span(&mut self, outcome: &'static str) {
+        if let Some((transport_epoch, span)) = self.connect_span.take() {
+            span.in_scope(|| {
+                tracing::info!(transport_epoch, outcome, "webrtc.connect finished");
+            });
+            self.finish_attempt_generations(AttemptTraceKey::Connect(transport_epoch), span);
+        }
+    }
+
+    fn finish_recovery_span(&mut self, outcome: &'static str) {
+        if let Some(((transport_epoch, recovery_epoch), span)) = self.recovery_span.take() {
+            span.in_scope(|| {
+                tracing::info!(
+                    transport_epoch,
+                    recovery_epoch,
+                    outcome,
+                    "webrtc.recover finished"
+                );
+            });
+            self.finish_attempt_generations(
+                AttemptTraceKey::Recover {
+                    transport_epoch,
+                    recovery_epoch,
+                },
+                span,
+            );
+        }
+    }
+
+    fn update_attempt_spans(&mut self) {
+        let previous_key = self.current_attempt_key();
+        if self.state.initial_connection_inflight {
+            let transport_epoch = self.state.transport_epoch;
+            let needs_new = self
+                .connect_span
+                .as_ref()
+                .is_none_or(|(epoch, _)| *epoch != transport_epoch);
+            if needs_new {
+                self.finish_connect_span("superseded");
+                #[cfg(feature = "opentelemetry")]
+                let parent_context = Span::current().context();
+                let span = tracing::info_span!(
+                    parent: None,
+                    "webrtc.connect",
+                    peer = %self.state.peer_id.to_string_repr(),
+                    controller_lifecycle_id = self.deps.controller_lifecycle_id,
+                    transport_epoch,
+                );
+                #[cfg(feature = "opentelemetry")]
+                let _ = span.set_parent(parent_context);
+                self.connect_span = Some((transport_epoch, span));
+            }
+        } else if self.state.sendable() {
+            self.finish_connect_span("sendable");
+        } else {
+            self.finish_connect_span("terminated");
+        }
+
+        if self.state.recovery_inflight {
+            let key = (self.state.transport_epoch, self.state.recovery_epoch);
+            let needs_new = self
+                .recovery_span
+                .as_ref()
+                .is_none_or(|(existing, _)| *existing != key);
+            if needs_new {
+                self.finish_recovery_span("superseded");
+                // Preserve the causal OTel parent without retaining the entered
+                // tracing span: a retry must not extend its predecessor's life.
+                #[cfg(feature = "opentelemetry")]
+                let parent_context = Span::current().context();
+                let span = tracing::info_span!(
+                    parent: None,
+                    "webrtc.recover",
+                    peer = %self.state.peer_id.to_string_repr(),
+                    controller_lifecycle_id = self.deps.controller_lifecycle_id,
+                    transport_epoch = key.0,
+                    recovery_epoch = key.1,
+                    recovery_cycle = self.state.recovery_cycle,
+                );
+                #[cfg(feature = "opentelemetry")]
+                let _ = span.set_parent(parent_context);
+                self.recovery_span = Some((key, span));
+            }
+        } else {
+            self.finish_recovery_span(if self.state.sendable() {
+                "sendable"
+            } else {
+                "terminated"
+            });
+        }
+        if self.current_attempt_key() != previous_key {
+            self.attempt_generation = None;
+        }
+        self.record_current_generation_spans();
     }
 
     async fn run(mut self) {
@@ -457,7 +785,8 @@ impl RtcPeerController {
         let mut state_rx = self.event_rx.state();
         let mut last_state_seq = 0;
         let mut generation_overflow_counts = std::collections::HashMap::<u64, u64>::new();
-        let mut recovery_timer: Option<(u64, super::policy_clock::PolicySleep)> = None;
+        let mut recovery_timer: Option<(u64, &'static str, super::policy_clock::PolicySleep)> =
+            None;
         let mut recovery_budget_timer: Option<(u64, super::policy_clock::PolicySleep)> = None;
         let mut role_negotiation_timer: Option<(u64, super::policy_clock::PolicySleep)> = None;
         let mut initial_connection_timer: Option<(u64, super::policy_clock::PolicySleep)> = None;
@@ -501,14 +830,19 @@ impl RtcPeerController {
             }
 
             // Arm one non-extendable timer for the exact recovery-attempt
-            // epoch. It bounds a Soft restart while an active PC exists and
+            // epoch. It bounds a Soft restart while an active PC exists,
             // supplies the retry delay after a transient Hard replacement
-            // build failure leaves no live PC. While a replacement is actually
-            // building/pending, its effects own convergence and no timer is
-            // armed. Duplicate network facts retain the epoch and cannot move
-            // the deadline.
+            // build failure leaves no live PC, and retransmits a signaling wake
+            // while an Answerer is parked after retiring its physical session.
+            // While a replacement is actually building/pending, its effects own
+            // convergence and no timer is armed. Duplicate network facts
+            // retain the epoch and cannot move the deadline.
             let recovery_attempt_epoch = (self.state.recovery_inflight
-                && self.state.recovery_attempt_started
+                && (self.state.recovery_attempt_started
+                    || (self.state.role == super::state::Role::Answerer
+                        && self.state.awaiting_offer
+                        && (self.state.active_generation.is_some()
+                            || self.state.parked_signaling_generation.is_some())))
                 && self.state.building_generation.is_none()
                 && matches!(
                     self.state.phase,
@@ -519,16 +853,20 @@ impl RtcPeerController {
             .then_some(self.state.recovery_epoch);
             match (
                 recovery_attempt_epoch,
-                recovery_timer.as_ref().map(|(epoch, _)| *epoch),
+                recovery_timer.as_ref().map(|(epoch, _, _)| *epoch),
             ) {
                 (Some(epoch), Some(armed)) if epoch == armed => {}
                 (Some(epoch), _) => {
+                    let (timer_kind, duration) = if self.state.remote_request_wake_pending {
+                        ("remote_request_wake_grace", REMOTE_REQUEST_WAKE_GRACE)
+                    } else {
+                        ("ice_restart_attempt_timeout", ICE_RESTART_ATTEMPT_TIMEOUT)
+                    };
                     recovery_timer = Some((
                         epoch,
-                        self.policy_clock.sleep(
-                            crate::timer::ids::WEBRTC_ICE_RESTART_WAIT,
-                            ICE_RESTART_ATTEMPT_TIMEOUT,
-                        ),
+                        timer_kind,
+                        self.policy_clock
+                            .sleep(crate::timer::ids::WEBRTC_ICE_RESTART_WAIT, duration),
                     ));
                 }
                 (None, _) => recovery_timer = None,
@@ -651,8 +989,14 @@ impl RtcPeerController {
                     // unreachable in practice; ignore it defensively.
                     if let Some(completion) = completion {
                         match completion.into_completion_for(&self.state.peer_id) {
-                            Ok(completion) => {
-                                if self.apply(RtcPeerInput::Completion(completion)).await {
+                            Ok((completion, span)) => {
+                                if self
+                                    .apply_with_effect_span(
+                                        RtcPeerInput::Completion(completion),
+                                        span,
+                                    )
+                                    .await
+                                {
                                     break;
                                 }
                             }
@@ -708,8 +1052,13 @@ impl RtcPeerController {
                             // consuming the retained tail of the broadcast
                             // queue. The next retained NetworkAvailable /
                             // AppForeground fact can then start Soft Recovery;
-                            // a retained address-change / force-reconnect fact
-                            // still escalates to Hard Recovery. Silently
+                            // a retained LocalAddressChanged fact starts Soft
+                            // Recovery on a live generation (a build still
+                            // holding the pre-change snapshot is superseded,
+                            // and an edge coalesced mid-flight re-publishes
+                            // one restart on convergence); an explicit
+                            // force-reconnect fact still escalates to Hard
+                            // Recovery. Silently
                             // skipping here can leave a Sendable controller on
                             // a stale transport when the evicted edge was
                             // NetworkUnavailable.
@@ -748,19 +1097,31 @@ impl RtcPeerController {
                 }
                 _ = async {
                     match recovery_timer.as_mut() {
-                        Some((_, timer)) => timer.as_mut().await,
+                        Some((_, _, timer)) => timer.as_mut().await,
                         None => std::future::pending::<()>().await,
                     }
                 } => {
-                    let recovery_epoch = recovery_timer
+                    let (recovery_epoch, timer_kind, _) = recovery_timer
                         .take()
-                        .expect("guarded recovery timer")
-                        .0;
-                    tracing::warn!(
-                        peer = %self.state.peer_id.to_string_repr(),
-                        recovery_epoch,
-                        "v0.20 recovery attempt deadline elapsed; escalating the attempt"
-                    );
+                        .expect("guarded recovery timer");
+                    match timer_kind {
+                        "remote_request_wake_grace" => {
+                            tracing::warn!(
+                                peer = %self.state.peer_id.to_string_repr(),
+                                recovery_epoch,
+                                timer_kind,
+                                "v0.20 recovery grace elapsed; retrying same-generation ICE restart"
+                            );
+                        }
+                        _ => {
+                            tracing::warn!(
+                                peer = %self.state.peer_id.to_string_repr(),
+                                recovery_epoch,
+                                timer_kind,
+                                "v0.20 recovery attempt timeout elapsed; escalating the attempt"
+                            );
+                        }
+                    }
                     if self
                         .apply(RtcPeerInput::RecoveryDeadlineElapsed { recovery_epoch })
                         .await
@@ -843,6 +1204,12 @@ impl RtcPeerController {
 
         // Final teardown: close every remaining session via the effect port
         // (invariant #12: every PeerConnection is closed by its session).
+        self.finish_recovery_span("closed");
+        self.finish_connect_span("closed");
+        self.generation_spans.clear();
+        #[cfg(feature = "opentelemetry")]
+        self.generation_contexts.clear();
+        self.inbound_generation.set(None);
         for (_, (_, respond)) in self.pending_configuration_refreshes.drain() {
             let _ = respond.send(Err(RtcConfigurationRefreshError::Closed));
         }
@@ -858,6 +1225,39 @@ impl RtcPeerController {
     /// the command channel open (N1) — otherwise only a command-channel close
     /// (every handle dropped) would stop the loop.
     async fn apply(&mut self, input: RtcPeerInput) -> bool {
+        let (input, traced_span) = match input {
+            RtcPeerInput::Command(RtcPeerCommand::Traced {
+                span,
+                remote,
+                command,
+            }) => (RtcPeerInput::Command(*command), Some((span, remote))),
+            input => (input, None),
+        };
+        let local_span = self
+            .input_generation(&input)
+            .map(|generation| self.span_for_generation(generation))
+            .unwrap_or_else(|| self.current_attempt_span());
+        let apply_span = match traced_span {
+            Some((span, true)) => self.processing_span(&local_span, &span),
+            Some((span, false)) => span,
+            None => local_span,
+        };
+        self.apply_inner(input).instrument(apply_span).await
+    }
+
+    async fn apply_with_effect_span(&mut self, input: RtcPeerInput, span: Span) -> bool {
+        self.apply_inner(input).instrument(span).await
+    }
+
+    async fn apply_inner(&mut self, input: RtcPeerInput) -> bool {
+        self.active_effect_span = None;
+        self.active_effect_generation = None;
+        let input_generation = self.input_generation(&input);
+        let attempt_key_before = self.current_attempt_key();
+        let completed_generation = match &input {
+            RtcPeerInput::Completion(completion) => Some(completion.generation()),
+            _ => None,
+        };
         let completed_refresh = match &input {
             RtcPeerInput::Completion(super::reducer::EffectCompletion::RefreshConfiguration {
                 generation,
@@ -1011,8 +1411,31 @@ impl RtcPeerController {
         let phase_before = self.state.phase;
         let was_terminally_unavailable = self.state.terminally_unavailable();
         let active_generation_before = self.state.active_generation;
+        let parked_generation_before = self.state.parked_signaling_generation;
         let effects = reduce(&mut self.state, input);
         let is_sendable = self.state.sendable();
+        self.update_attempt_spans();
+        let event_span = Span::current();
+        let attempt_key_after = self.current_attempt_key();
+        // A fallback or late completion can target a different generation from
+        // the current attempt. Its own effects can share the input span, but a
+        // transition to another attempt must use the new attempt's fencing.
+        self.active_effect_generation = (attempt_key_before == attempt_key_after)
+            .then_some(input_generation)
+            .flatten();
+        self.active_effect_span = match (attempt_key_before, attempt_key_after) {
+            (Some(previous), Some(current)) if previous != current => {
+                Some(self.processing_span(&self.current_attempt_span(), &event_span))
+            }
+            (None, Some(_)) => Some(self.current_attempt_span()),
+            (Some(_), None) => None,
+            _ => Some(event_span),
+        };
+        self.inbound_generation.set(
+            is_sendable
+                .then_some(self.state.active_generation.unwrap_or_default())
+                .filter(|generation| *generation != 0),
+        );
         if self.state.phase != phase_before {
             tracing::debug!(
                 peer = %self.state.peer_id.to_string_repr(),
@@ -1026,10 +1449,15 @@ impl RtcPeerController {
         let builds_session = effects
             .iter()
             .any(|effect| matches!(effect, RtcPeerEffect::BuildSession { .. }));
-        let invalidates_active_generation = builds_session
-            && active_generation_before.is_some()
-            && (self.state.recovery_inflight
-                || self.state.active_generation != active_generation_before);
+        let active_generation_retired = active_generation_before.is_some()
+            && self.state.active_generation != active_generation_before;
+        // A hard replacement invalidates the old generation before the new
+        // one becomes active. A physical Answerer failure can instead retire
+        // the failed generation and park while waiting for the Offerer; that
+        // path has no BuildSession effect, but submitted requests still must be
+        // released before the old close completes.
+        let invalidates_active_generation =
+            active_generation_retired && (builds_session || self.state.recovery_inflight);
         if let Some(respond) = refresh_respond {
             if let Some((generation, operation_id)) = effects.iter().find_map(|effect| match effect
             {
@@ -1104,6 +1532,18 @@ impl RtcPeerController {
             if !self.execute(effect).await {
                 break;
             }
+        }
+        self.active_effect_span = None;
+        self.active_effect_generation = None;
+        if let Some(generation) = completed_generation {
+            self.cleanup_generation_context_if_retired(generation);
+        }
+        // Leaving the parked slot need not produce another completion for the
+        // old generation, so release its context on the transition itself.
+        if let Some(generation) = parked_generation_before
+            && self.state.parked_signaling_generation != Some(generation)
+        {
+            self.cleanup_generation_context_if_retired(generation);
         }
         if let Some((operation_id, result)) = completed_refresh
             && let Some((_, respond)) = self.pending_configuration_refreshes.remove(&operation_id)
@@ -1252,6 +1692,14 @@ impl RtcPeerController {
         let Some(retained) = self.retry_signaling.take() else {
             return;
         };
+        // A committed signaling generation is an execution prerequisite, not
+        // a best-effort hint. Keep the request/SDP queued while the lifecycle
+        // supervisor has withdrawn the generation; the watch edge will wake
+        // the controller and this method will retry after the gate reopens.
+        if self.signaling_generation_rx.borrow().is_none() {
+            self.retry_signaling = Some(retained);
+            return;
+        }
         if !self.retained_signaling_is_live(&retained) {
             tracing::debug!(
                 peer = %self.state.peer_id.to_string_repr(),
@@ -1261,19 +1709,28 @@ impl RtcPeerController {
             );
             return;
         }
-        let dispatch = SignalingDispatch::tracked(
+        let message_kind = retained.message.kind_name();
+        // The retained slot carries only the originating attempt's OTel
+        // context (see `RetainedSignaling`), so re-materialize a short-lived
+        // flush span parented on it instead of reopening the business span.
+        let span = tracing::info_span!("signaling.retry_flush");
+        #[cfg(feature = "opentelemetry")]
+        let _ = span.set_parent(retained.context.clone());
+        let dispatch = SignalingDispatch::tracked_with_span(
             self.state.peer_id.clone(),
             self.deps.controller_lifecycle_id,
             retained.transport_epoch,
             retained.generation,
             retained.negotiation_epoch,
             retained.message,
+            span,
         );
         match self.signaling_tx.try_send(dispatch) {
             Ok(()) => {
                 tracing::info!(
                     peer = %self.state.peer_id.to_string_repr(),
-                    "retried retained SDP through the signaling queue"
+                    message_kind,
+                    "retried retained critical signaling through the signaling queue"
                 );
             }
             Err(tokio::sync::mpsc::error::TrySendError::Full(dispatch)) => {
@@ -1282,6 +1739,8 @@ impl RtcPeerController {
                     generation: retained.generation,
                     negotiation_epoch: retained.negotiation_epoch,
                     message: dispatch.message,
+                    #[cfg(feature = "opentelemetry")]
+                    context: retained.context,
                 });
                 self.arm_signaling_retry_wake();
             }
@@ -1322,6 +1781,9 @@ impl RtcPeerController {
             self.state.initial_connection_inflight
         } else {
             self.state.is_live_generation(retained.generation)
+                || (self.state.role == super::state::Role::Answerer
+                    && self.state.awaiting_offer
+                    && self.state.parked_signaling_generation == Some(retained.generation))
         }
     }
 
@@ -1412,31 +1874,58 @@ impl RtcPeerController {
                 generation,
                 message,
             } => {
+                let is_candidate = matches!(&message, SignalingMessage::Candidate(_));
+                let is_role_probe = matches!(&message, SignalingMessage::RoleNegotiation);
+                let span = self.span_for_generation_for_effect(generation);
                 // The lifecycle supervisor is the sole signaling connection
                 // owner. Do not let a queued RTC completion publish SDP/ICE
                 // after that supervisor has withdrawn the committed
-                // generation; the watch edge will leave the recovery intent
-                // pending until a new generation is committed.
+                // generation. Critical recovery signaling is retained until a
+                // new generation is committed; otherwise an Answerer's first
+                // IceRestartRequest could be lost exactly when the Offerer is
+                // needed to wake up.
                 if self.signaling_generation_rx.borrow().is_none() {
-                    tracing::debug!(
-                        peer = %self.state.peer_id.to_string_repr(),
-                        "no committed signaling generation; dropping RTC signaling effect \
-                         (the role-negotiation probe is re-driven when the gate opens)"
-                    );
+                    if is_candidate || is_role_probe {
+                        // Role probes have a dedicated gate-opening re-drive;
+                        // neither them nor trickle candidates belong in the
+                        // retained critical-signaling slot.
+                        tracing::debug!(
+                            peer = %self.state.peer_id.to_string_repr(),
+                            generation,
+                            "no committed signaling generation; dropping non-recovery signaling"
+                        );
+                    } else {
+                        #[cfg(feature = "opentelemetry")]
+                        let context = span.context();
+                        self.retry_signaling = Some(RetainedSignaling {
+                            transport_epoch: self.state.transport_epoch,
+                            generation,
+                            negotiation_epoch: self.state.negotiation_epoch,
+                            message,
+                            #[cfg(feature = "opentelemetry")]
+                            context,
+                        });
+                        tracing::debug!(
+                            peer = %self.state.peer_id.to_string_repr(),
+                            generation,
+                            "no committed signaling generation; retaining critical RTC signaling"
+                        );
+                    }
                     return true;
                 }
                 // N2 backpressure: never block the event loop on a full signaling
                 // queue, or one peer's signaling storm would stall the node's
                 // other controllers. Non-blocking try_send; a full queue drops the
                 // message and counts it (observable `signaling_dropped` metric).
-                let is_candidate = matches!(message, SignalingMessage::Candidate(_));
-                let dispatch = SignalingDispatch::tracked(
+                let message_kind = message.kind_name();
+                let dispatch = SignalingDispatch::tracked_with_span(
                     self.state.peer_id.clone(),
                     self.deps.controller_lifecycle_id,
                     self.state.transport_epoch,
                     generation,
                     self.state.negotiation_epoch,
                     message,
+                    span,
                 );
                 match self.signaling_tx.try_send(dispatch) {
                     Ok(()) => {
@@ -1446,7 +1935,8 @@ impl RtcPeerController {
                             tracing::debug!(
                                 peer = %self.state.peer_id.to_string_repr(),
                                 generation,
-                                "v0.20 SDP/role signaling dispatched to the router queue"
+                                message_kind,
+                                "v0.20 signaling dispatched to the router queue"
                             );
                         }
                     }
@@ -1484,12 +1974,14 @@ impl RtcPeerController {
                                 generation,
                                 negotiation_epoch: self.state.negotiation_epoch,
                                 message,
+                                #[cfg(feature = "opentelemetry")]
+                                context: dispatch.span.context(),
                             });
                             self.arm_signaling_retry_wake();
                             tracing::warn!(
                                 peer = %self.state.peer_id.to_string_repr(),
                                 signaling_dropped = self.state.signaling_dropped,
-                                "signaling queue full; retained SDP offer/answer for retry on the next event-loop turn"
+                                "signaling queue full; retained critical signaling for retry on the next event-loop turn"
                             );
                         }
                     }
@@ -1508,7 +2000,8 @@ impl RtcPeerController {
 
     fn submit_blocking(&mut self, effect: RtcPeerEffect) {
         let operation_id = effect.pending_identity().map(|(_, id, _, _)| id);
-        let tagged = TaggedRtcPeerEffect::new(self.state.peer_id.clone(), effect)
+        let span = self.span_for_effect(&effect);
+        let tagged = TaggedRtcPeerEffect::new_with_span(self.state.peer_id.clone(), effect, span)
             .expect("controller submits only completion-producing effects");
         if let Err(error) = self.effect_port.submit(tagged, self.completion_tx.clone()) {
             if let Some(operation_id) = operation_id {

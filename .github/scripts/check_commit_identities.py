@@ -13,9 +13,10 @@ from pathlib import Path
 
 USER_NOREPLY_RE = re.compile(r"^[^@\s<>]+@users\.noreply\.github\.com$", re.IGNORECASE)
 EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
+SWIFT_MANIFEST_RE = re.compile(r"Package@swift-[0-9]+(?:\.[0-9]+){0,2}\.swift")
 ANONYMOUS_ROOT_NAME = "root"
-GITHUB_MERGE_COMMITTER_NAME = "GitHub"
-GITHUB_MERGE_COMMITTER_EMAIL = "noreply@github.com"
+GITHUB_SERVICE_COMMITTER_NAME = "GitHub"
+GITHUB_SERVICE_COMMITTER_EMAIL = "noreply@github.com"
 ZERO_SHA = "0" * 40
 
 
@@ -47,18 +48,22 @@ def is_allowed_identity(name: str, email: str) -> bool:
 
 
 def is_allowed_message_email(email: str) -> bool:
-    return bool(USER_NOREPLY_RE.fullmatch(email))
+    # Swift version-specific manifest filenames resemble email addresses.
+    # Exempt only the exact filename shape, and only in commit messages.
+    return bool(USER_NOREPLY_RE.fullmatch(email) or SWIFT_MANIFEST_RE.fullmatch(email))
 
 
 def is_allowed_committer(commit: CommitIdentity) -> bool:
     if is_allowed_identity(commit.committer_name, commit.committer_email):
         return True
-    # GitHub.com signs PR merge commits with this fixed service identity. Keep
-    # the exception narrow so it cannot be used for an ordinary human commit.
+    # GitHub.com stamps every commit it creates on a user's behalf -- merge
+    # commits, squash merges, and web/API edits alike -- with this fixed
+    # service identity (#216). The exact name/email pair names no human, so
+    # no parent-count, PR-suffix, or release-prefix condition is needed to
+    # keep the exception narrow for an ordinary human commit.
     return (
-        commit.parent_count >= 2
-        and commit.committer_name == GITHUB_MERGE_COMMITTER_NAME
-        and commit.committer_email == GITHUB_MERGE_COMMITTER_EMAIL
+        commit.committer_name == GITHUB_SERVICE_COMMITTER_NAME
+        and commit.committer_email == GITHUB_SERVICE_COMMITTER_EMAIL
     )
 
 

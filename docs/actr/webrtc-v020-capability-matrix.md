@@ -91,8 +91,8 @@ drop the requirement).
 | **TURN/UDP** | `RTCIceServer { urls: ["turn:…?transport=udp"], username, credential }` | Supported. `RTCIceServer { urls, username, credential }`; `turn_relayer` drives `TransportProtocol::UDP`. | supported | `turn_relayer.rs:298,666,803`; `server.rs` fields |
 | **TURN/TCP** (`turn:…?transport=tcp`) | TURN over TCP | **Unsupported.** Relayer logs `Skipping unsupported non-UDP TURN url` and skips it (does **not** error). Tracking issue #848 **open**. | **blocked** | `turn_relayer.rs:261`; issue #848 |
 | **TURN/TLS** (`turns:…`) | TURN over TLS | **Unsupported.** Relayer logs `Skipping unsupported secure TURN url` and skips it. | **blocked** | `turn_relayer.rs:256`; issue #848 |
-| **IPv4 / IPv6** | `set_network_types` | Supported with explicit real interface addresses from `LocalAddressProvider`; unspecified `[::]`/`0.0.0.0` addresses are not expanded into candidate addresses. | supported | `setting_engine.rs:610`; `address.rs`; `factory.rs` |
-| **Host-candidate interface enumeration** | ICE agent auto-gathers host candidates on **all** local interfaces | v0.20 does not enumerate interfaces. Actr replaces that behavior with `DesktopLocalAddressProvider` (`if_addrs`) plus a push/poll address monitor that triggers Hard Recovery. | **supported by Actr replacement** | `address.rs`; `recovery.rs`; `stun_gatherer.rs:132-153` |
+| **IPv4 / IPv6** | `set_network_types` | Production uses dual-stack wildcard bind inputs and webrtc-rs expands them into live host candidates. Concrete `LocalAddressProvider` addresses remain available for deterministic tests and explicit platform adapters. | supported | `setting_engine.rs:610`; `address.rs`; `factory.rs` |
+| **Host-candidate interface enumeration** | ICE agent auto-gathers host candidates on **all** local interfaces | Production v0.20 uses dual-stack wildcard bind inputs (`0.0.0.0` and `[::]`); webrtc-rs resolves the live interface set at the initial bind and each ICE-restart rebind. Concrete `LocalAddressProvider` inputs remain available for deterministic tests and explicit platform adapters. Mobile network path events and desktop peer-state callbacks drive recovery; a failed restart can still escalate to Hard Recovery. | supported | `factory.rs`; `address.rs`; `network_event.rs`; `recovery.rs` |
 | **VNet / fault-injection test net** (`set_vnet`, test-utils) | `SettingEngine::set_vnet(Net)` | v0.20 has no VNet and `runtime-mock` supplies virtual time only. Actr uses T1 manual policy time, T2 `RuntimeFaultProbe`/deterministic signaling, and T3 real system/mobile network harnesses instead of pretending the mock Runtime is a network. | **upstream absent; replaced test strategy** | `fault.rs`; `policy_clock.rs`; `docs/webrtc-v020-test-contract.md` |
 | **DataChannel send buffer limit** | (none in 0.14) | Supported (new). `with_data_channel_send_buffer_limit` + `try_send`/`writable`/`outstanding_bytes`. | supported | `peer_connection/mod.rs:402` |
 | **SCTP receive window** | (fixed) | Supported. `with_sctp_receive_buffer_size`, default 1 MiB. | supported | `peer_connection/mod.rs:259` |
@@ -105,6 +105,11 @@ drop the requirement).
 
 The cutover resolves unavailable capabilities through explicit removal and
 startup rejection; none may silently downgrade to ephemeral/UDP behavior.
+
+The iOS `NWPath` adapter exposes Wi-Fi, cellular, Ethernet, and other/loopback
+interfaces, but Network.framework has no dedicated VPN interface type. The
+Swift adapter therefore reports `vpn: false` and documents VPN detection as a
+platform limitation; `.other` is not treated as VPN.
 
 1. **Shared ICE UDP mux (`ice_udp_mux_port`) — BLOCKED.** v0.20 exposes no mux
    injection. Per RFC §"Shared UDP mux and fixed ports" and §"Non-goals", the
@@ -121,9 +126,11 @@ startup rejection; none may silently downgrade to ephemeral/UDP behavior.
 4. **VNet — replaced, not emulated.** Deterministic policy/protocol tests use
    the T1/T2 seams; actual interface/NAT/link behavior remains a T3 system or
    Android/iOS test responsibility.
-5. **Host-candidate source change — implemented.** Native interface
-   enumeration supplies explicit addresses, and the node-owned address monitor
-   triggers Hard Recovery when that set changes.
+5. **Host-candidate source change — implemented.** Production uses dual-stack
+   wildcard binds, and webrtc-rs re-enumerates live interfaces on each
+   ICE-restart rebind. Concrete providers remain test/platform seams. Mobile
+   native path events and desktop PeerConnection state callbacks drive recovery;
+   a failed restart can still escalate to Hard Recovery.
 
 ---
 

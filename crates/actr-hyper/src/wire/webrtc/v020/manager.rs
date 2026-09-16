@@ -225,11 +225,12 @@ pub(crate) struct RtcConnectionManager {
     /// Explicit teardown edge consumed by transport/request owners. The PC
     /// generation makes delayed cleanup safe against a replacement transport.
     peer_closing: tokio::sync::broadcast::Sender<(ActrId, u64)>,
-    /// Controller-owned hard-recovery edge. Already-sent requests must not
-    /// retain their full RPC deadline after the generation that carried them
-    /// has been superseded by a replacement build. Soft recovery deliberately
-    /// emits no edge: committed reliable work keeps the v0.14 behavior and may
-    /// complete when the same Session becomes usable again.
+    /// Controller-owned generation-invalidation edge. Already-sent requests
+    /// must not retain their full RPC deadline after the generation that
+    /// carried them has been retired or superseded. Healthy same-generation
+    /// Soft Recovery deliberately emits no edge: committed reliable work keeps
+    /// the v0.14 behavior and may complete when that Session becomes usable
+    /// again.
     peer_generation_invalidated: tokio::sync::broadcast::Sender<(ActrId, u64)>,
     /// Every Controller-owned sendability edge. PeerGate uses the paired
     /// falling/rising events to bound response waits after a remote-side
@@ -252,8 +253,9 @@ pub(crate) struct RtcConnectionManager {
     /// Combined with the Controller's transport epoch, it protects terminal
     /// cache cleanup from delayed events after controller recreation.
     next_controller_lifecycle_id: AtomicU64,
-    /// Deterministic pre-publication rendezvous used by integration tests to
-    /// place a creator on the exact side of the close-all epoch boundary.
+    /// Deterministic admission/publication rendezvous used by integration
+    /// tests to place inbound Controller creation on the exact side of a
+    /// close boundary.
     #[cfg(feature = "test-utils")]
     peer_publish_barriers: std::sync::Mutex<HashMap<ActrId, Arc<tokio::sync::Barrier>>>,
     peers: RwLock<HashMap<ActrId, PeerSlot>>,
@@ -420,6 +422,19 @@ impl RtcConnectionManager {
         self.peer_generation_invalidated.subscribe()
     }
 
+    /// Test-only seam for exercising pending-request cleanup when Controller
+    /// recovery invalidates a WebRTC generation. Production callers publish
+    /// the same event from the Controller when a generation is retired or
+    /// replaced.
+    #[cfg(test)]
+    pub(crate) fn publish_peer_generation_invalidated_for_test(
+        &self,
+        peer: ActrId,
+        generation: u64,
+    ) {
+        let _ = self.peer_generation_invalidated.send((peer, generation));
+    }
+
     /// Subscribe to authoritative Controller sendability edges. Both sides of
     /// the edge are emitted so consumers can cancel recovery hysteresis when
     /// the same logical peer becomes usable again.
@@ -463,11 +478,12 @@ impl RtcConnectionManager {
         expected_epoch: u64,
         admission: ControllerAdmission,
     ) -> Option<RtcPeerControllerHandle> {
+        let inbound_admission = admission == ControllerAdmission::Inbound;
         loop {
             if self.lifecycle_epoch.load(Ordering::Acquire) != expected_epoch {
                 return None;
             }
-            if admission == ControllerAdmission::Inbound
+            if inbound_admission
                 && self
                     .inbound_suppressed_peers
                     .lock()
@@ -507,7 +523,7 @@ impl RtcConnectionManager {
             // write lock is held. If close-all marks the peer first, this path
             // cannot recreate it; if publication wins, close-all subsequently
             // observes and removes the newly published controller.
-            if admission == ControllerAdmission::Inbound
+            if inbound_admission
                 && self
                     .inbound_suppressed_peers
                     .lock()
@@ -577,7 +593,7 @@ impl RtcConnectionManager {
                 peer = %peer.to_string_repr(),
                 controller_lifecycle_id,
                 pc_generation_floor = next_pc_generation,
-                inbound = admission == ControllerAdmission::Inbound,
+                inbound = inbound_admission,
                 "v0.20 created peer controller"
             );
             peers.insert(
@@ -716,7 +732,13 @@ impl RtcConnectionManager {
             .await
         {
             let _ = handle
-                .apply_remote_description_correlated(offer, exchange_id)
+                .apply_signaling_message_with_span(
+                    SignalingMessage::Offer {
+                        desc: Box::new(offer),
+                        exchange_id,
+                    },
+                    tracing::Span::current(),
+                )
                 .await;
         } else {
             tracing::debug!(
@@ -737,7 +759,12 @@ impl RtcConnectionManager {
             .ensure_controller_for_epoch(peer.clone(), epoch, ControllerAdmission::Inbound)
             .await
         {
-            let _ = handle.apply_role_assignment(is_offerer).await;
+            let _ = handle
+                .apply_signaling_message_with_span(
+                    SignalingMessage::RoleAssignment { is_offerer },
+                    tracing::Span::current(),
+                )
+                .await;
         } else {
             tracing::debug!(
                 peer = %peer.to_string_repr(),
@@ -772,6 +799,30 @@ impl RtcConnectionManager {
         self.signaling_tx
             .try_send(SignalingDispatch::untracked(peer, message))
             .is_ok()
+    }
+
+    /// Send a protocol response only while the exact Controller that produced
+    /// it is still the active registry entry. The peers read lock orders this
+    /// check and the non-blocking queue send against `close_peer`: a close that
+    /// wins first suppresses the Ack, while an Ack that wins first is emitted
+    /// for the Controller's committed state before teardown can remove it.
+    pub(crate) async fn try_send_signaling_for_controller(
+        &self,
+        peer: ActrId,
+        controller_lifecycle_id: u64,
+        message: SignalingMessage,
+    ) -> bool {
+        let peers = self.peers.read().await;
+        let current = matches!(
+            peers.get(&peer),
+            Some(PeerSlot::Active(entry))
+                if entry.handle.controller_lifecycle_id() == controller_lifecycle_id
+        );
+        current
+            && self
+                .signaling_tx
+                .try_send(SignalingDispatch::untracked(peer, message))
+                .is_ok()
     }
 
     /// Apply an Actrix point-in-time fact that the exact target endpoint had no
@@ -832,6 +883,25 @@ impl RtcConnectionManager {
         let _ = handle
             .signaling_delivery_failed(attempt.transport_epoch, attempt.pc_generation)
             .await;
+    }
+
+    /// Submit one response-path recovery hint to the current Controller. The
+    /// hint is deliberately best effort: response delivery must not block on a
+    /// saturated Controller mailbox, and the Controller validates the snapshot
+    /// identity again when it reduces the command.
+    pub(crate) async fn submit_recovery_hint(&self, peer: &ActrId, request_id: &str) -> bool {
+        let Some(handle) = self.get_controller(peer).await else {
+            return false;
+        };
+        let submitted = handle.try_recovery_hint(request_id.to_owned());
+        if !submitted {
+            tracing::debug!(
+                peer = %peer.to_string_repr(),
+                request_id,
+                "v0.20 response recovery hint could not enter the Controller mailbox"
+            );
+        }
+        submitted
     }
 
     /// The latest snapshot for a peer, if it has a controller.
@@ -1048,6 +1118,7 @@ impl RtcConnectionManager {
 
         let action = {
             let mut peers = self.peers.write().await;
+
             match peers.remove(peer) {
                 Some(PeerSlot::Active(entry)) => {
                     let next = entry.snapshot_generation_floor();

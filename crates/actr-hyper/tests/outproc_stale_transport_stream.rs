@@ -84,9 +84,14 @@ fn is_expected_recovery_error(message: &str) -> bool {
         "not opened",
         "timeout",
         "unavailable",
+        "delivery uncertain",
     ]
     .iter()
     .any(|needle| message.contains(needle))
+        // Anchored to the exact `ActrError::DeliveryUncertain` Display
+        // prefix rather than a bare substring, so an unrelated composed
+        // message cannot satisfy this check.
+        || message.starts_with("delivery uncertain for operation")
 }
 
 async fn expect_request_eventually_ok(harness: &TestHarness, request_id: &str, deadline: Duration) {
@@ -187,12 +192,14 @@ async fn test_real_disconnect_stream_send_recovers_and_stale_close_is_ignored() 
         metadata: Vec::new(),
         timestamp_ms: Some(0),
     };
+    let operation_id = format!("{}#{}", stream.stream_id, stream.sequence);
     let payload = bytes::Bytes::from(stream.encode_to_vec());
     let send_fut = source_peer.gate.send_data_chunk(
         &target_id,
         PayloadType::StreamReliable,
         &stream.stream_id,
         payload,
+        &operation_id,
     );
 
     match tokio::time::timeout(Duration::from_secs(5), send_fut).await {

@@ -24,6 +24,9 @@ use actr_protocol::ActrId;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
+use tracing::{Instrument, Span};
+#[cfg(feature = "opentelemetry")]
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::wire::webrtc::v020::event_handler::WebRtcEventHandler;
 use crate::wire::webrtc::v020::events::PeerEventMailbox;
@@ -32,7 +35,9 @@ use crate::wire::webrtc::v020::status::LaneKind;
 use super::effects::{SessionFactory, SessionOps};
 use super::lane_handle::LaneHandle;
 use super::reducer::{EffectCompletion, LaneEvent, RtcPeerEffect};
-use super::session::{PeerConnectionSession, SessionResourceId, SessionResourceRegistry};
+use super::session::{
+    InboundGenerationGate, PeerConnectionSession, SessionResourceId, SessionResourceRegistry,
+};
 
 pub(crate) enum ResourceRegistration<T> {
     Registered(T),
@@ -58,14 +63,41 @@ pub(crate) struct RtcEffectIdentity {
 pub(crate) struct TaggedRtcPeerEffect {
     pub(crate) identity: RtcEffectIdentity,
     pub(crate) effect: RtcPeerEffect,
+    /// Independent operation span carried across the effect task boundary.
+    /// Its OTel parent preserves causality without keeping the business span
+    /// alive when an operation outlasts the attempt that submitted it.
+    pub(crate) span: Span,
 }
 
 impl TaggedRtcPeerEffect {
     pub(crate) fn new(peer_id: ActrId, effect: RtcPeerEffect) -> Result<Self, RtcEffectPortError> {
-        let Some((pc_generation, operation_id, ice_generation, _)) = effect.pending_identity()
+        Self::new_with_span(peer_id, effect, Span::current())
+    }
+
+    pub(crate) fn new_with_span(
+        peer_id: ActrId,
+        effect: RtcPeerEffect,
+        span: Span,
+    ) -> Result<Self, RtcEffectPortError> {
+        let Some((pc_generation, operation_id, ice_generation, kind)) = effect.pending_identity()
         else {
             return Err(RtcEffectPortError::NotBlocking);
         };
+        // Never use a tracing parent here: the registry would keep the attempt
+        // alive until this operation and its completion have both been dropped.
+        // The OTel context carries the parent identity independently instead.
+        let operation_span = tracing::info_span!(
+            parent: None,
+            "webrtc.operation",
+            peer = %peer_id.to_string_repr(),
+            generation = pc_generation,
+            operation_id,
+            ice_generation,
+            operation = ?kind,
+        );
+        #[cfg(feature = "opentelemetry")]
+        let _ = operation_span.set_parent(span.context());
+        drop(span);
         Ok(Self {
             identity: RtcEffectIdentity {
                 peer_id,
@@ -74,6 +106,7 @@ impl TaggedRtcPeerEffect {
                 ice_generation,
             },
             effect,
+            span: operation_span,
         })
     }
 }
@@ -93,16 +126,20 @@ impl fmt::Debug for TaggedRtcPeerEffect {
 pub(crate) struct TaggedRtcEffectCompletion {
     pub(crate) identity: RtcEffectIdentity,
     pub(crate) completion: EffectCompletion,
+    /// The independent operation span, preserving the exact submitting attempt
+    /// as its OTel parent even when the completion arrives after supersession.
+    pub(crate) span: Span,
 }
 
 impl TaggedRtcEffectCompletion {
-    fn new(identity: RtcEffectIdentity, completion: EffectCompletion) -> Self {
+    fn new(identity: RtcEffectIdentity, completion: EffectCompletion, span: Span) -> Self {
         debug_assert_eq!(identity.pc_generation, completion.generation());
         debug_assert_eq!(identity.operation_id, completion.operation_id());
         debug_assert_eq!(identity.ice_generation, completion.ice_generation());
         Self {
             identity,
             completion,
+            span,
         }
     }
 
@@ -110,7 +147,7 @@ impl TaggedRtcEffectCompletion {
     pub(crate) fn into_completion_for(
         self,
         peer_id: &ActrId,
-    ) -> Result<EffectCompletion, RtcEffectPortError> {
+    ) -> Result<(EffectCompletion, Span), RtcEffectPortError> {
         if &self.identity.peer_id != peer_id {
             return Err(RtcEffectPortError::WrongPeer);
         }
@@ -120,7 +157,7 @@ impl TaggedRtcEffectCompletion {
         {
             return Err(RtcEffectPortError::IdentityMismatch);
         }
-        Ok(self.completion)
+        Ok((self.completion, self.span))
     }
 }
 
@@ -232,7 +269,7 @@ pub(crate) struct TestEffectSink {
     peer_id: ActrId,
     effects_tx: mpsc::UnboundedSender<TaggedRtcPeerEffect>,
     effects_rx: tokio::sync::Mutex<mpsc::UnboundedReceiver<TaggedRtcPeerEffect>>,
-    pending: Mutex<HashMap<u64, (RtcEffectIdentity, RtcEffectCompletionSender)>>,
+    pending: Mutex<HashMap<u64, (RtcEffectIdentity, Span, RtcEffectCompletionSender)>>,
     close_all_calls: std::sync::atomic::AtomicU64,
 }
 
@@ -260,7 +297,7 @@ impl TestEffectSink {
         completion: EffectCompletion,
     ) -> Result<(), RtcEffectPortError> {
         let operation_id = completion.operation_id();
-        let (identity, completion_tx) = self
+        let (identity, span, completion_tx) = self
             .pending
             .lock()
             .expect("test effect pending lock")
@@ -273,11 +310,11 @@ impl TestEffectSink {
             self.pending
                 .lock()
                 .expect("test effect pending lock")
-                .insert(operation_id, (identity, completion_tx));
+                .insert(operation_id, (identity, span, completion_tx));
             return Err(RtcEffectPortError::IdentityMismatch);
         }
         completion_tx
-            .send(TaggedRtcEffectCompletion::new(identity, completion))
+            .send(TaggedRtcEffectCompletion::new(identity, completion, span))
             .await
             .map_err(|_| RtcEffectPortError::TestSinkClosed)
     }
@@ -296,12 +333,13 @@ impl TestEffectSink {
             .expect("test effect pending lock")
             .values()
             .next()
-            .map(|(_, tx)| tx.clone())
+            .map(|(_, _, tx)| tx.clone())
             .ok_or(RtcEffectPortError::UnknownOperation)?;
         completion_tx
             .send(TaggedRtcEffectCompletion {
                 identity,
                 completion,
+                span: Span::current(),
             })
             .await
             .map_err(|_| RtcEffectPortError::TestSinkClosed)
@@ -399,6 +437,10 @@ pub(crate) struct WebRtcEffectRunner {
     factory: Arc<dyn SessionFactory>,
     event_mailbox: PeerEventMailbox,
     lane_tx: mpsc::Sender<LaneEvent>,
+    /// Shared admission fence for generation-scoped inbound data pumps. The
+    /// Controller stores the exact sendable generation here; retired or
+    /// recovering generations are rejected before reaching business code.
+    inbound_generation: Arc<InboundGenerationGate>,
     /// Node-level shared dependencies (inbound router,
     /// media registry).
     deps: super::controller::SharedNodeDeps,
@@ -411,6 +453,7 @@ impl WebRtcEffectRunner {
         event_mailbox: PeerEventMailbox,
         lane_tx: mpsc::Sender<LaneEvent>,
         deps: super::controller::SharedNodeDeps,
+        inbound_generation: Arc<InboundGenerationGate>,
     ) -> Self {
         Self {
             peer_id,
@@ -421,6 +464,7 @@ impl WebRtcEffectRunner {
             factory,
             event_mailbox,
             lane_tx,
+            inbound_generation,
             deps,
         }
     }
@@ -460,6 +504,7 @@ impl WebRtcEffectRunner {
                         peer_id: self.peer_id.clone(),
                         lane_tx: self.lane_tx.clone(),
                         inbound: self.deps.inbound.clone(),
+                        inbound_generation: self.inbound_generation.clone(),
                         reassembly_limits: crate::transport::ReassemblyLimits::from_buffer_config(
                             &self.deps.buffer_config,
                         ),
@@ -507,6 +552,7 @@ impl WebRtcEffectRunner {
                 peer_id: self.peer_id.clone(),
                 lane_tx: self.lane_tx.clone(),
                 inbound: self.deps.inbound.clone(),
+                inbound_generation: self.inbound_generation.clone(),
                 reassembly_limits: crate::transport::ReassemblyLimits::from_buffer_config(
                     &self.deps.buffer_config,
                 ),
@@ -710,6 +756,7 @@ impl WebRtcEffectRunner {
         &self,
         identity: RtcEffectIdentity,
         completion_tx: RtcEffectCompletionSender,
+        span: Span,
         f: F,
     ) -> Result<(), RtcEffectPortError>
     where
@@ -728,28 +775,37 @@ impl WebRtcEffectRunner {
                     ))
                 })
         };
-        self.spawn_effect(async move {
+        let completion_span = span.clone();
+        self.spawn_effect(span, async move {
             let completion = f(ops).await;
             let _ = completion_tx
-                .send(TaggedRtcEffectCompletion::new(identity, completion))
+                .send(TaggedRtcEffectCompletion::new(
+                    identity,
+                    completion,
+                    completion_span,
+                ))
                 .await;
         })
     }
 
-    fn spawn_effect<F>(&self, future: F) -> Result<(), RtcEffectPortError>
+    fn spawn_effect<F>(&self, span: Span, future: F) -> Result<(), RtcEffectPortError>
     where
         F: std::future::Future<Output = ()> + Send + 'static,
     {
         self.effect_tasks
             .lock()
             .expect("RTC effect task group lock")
-            .spawn(future)
+            .spawn(future.instrument(span))
     }
 
     /// Atomically perform synchronous registry setup and admit its effect
     /// task under the same runner lifecycle lock. Shutdown therefore cannot
     /// drain the registries between setup and task admission.
-    fn spawn_effect_with<F, Make>(&self, make_future: Make) -> Result<(), RtcEffectPortError>
+    fn spawn_effect_with<F, Make>(
+        &self,
+        span: Span,
+        make_future: Make,
+    ) -> Result<(), RtcEffectPortError>
     where
         F: std::future::Future<Output = ()> + Send + 'static,
         Make: FnOnce() -> F,
@@ -757,7 +813,7 @@ impl WebRtcEffectRunner {
         self.effect_tasks
             .lock()
             .expect("RTC effect task group lock")
-            .spawn_with(make_future)
+            .spawn_with(|| make_future().instrument(span))
     }
 }
 
@@ -771,7 +827,11 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
         if operation.identity.peer_id != self.peer_id {
             return Err(RtcEffectPortError::WrongPeer);
         }
-        let TaggedRtcPeerEffect { identity, effect } = operation;
+        let TaggedRtcPeerEffect {
+            identity,
+            effect,
+            span,
+        } = operation;
         match effect {
             RtcPeerEffect::BuildSession {
                 generation,
@@ -788,7 +848,8 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 let sessions = self.sessions.clone();
                 let resources = self.resources.clone();
                 let peer_id = self.peer_id.clone();
-                self.spawn_effect_with(move || {
+                let completion_span = span.clone();
+                self.spawn_effect_with(span, move || {
                     resources
                         .lock()
                         .expect("resource registries lock")
@@ -839,6 +900,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                                     operation_id,
                                     result: result.map(|_| ()),
                                 },
+                                completion_span,
                             ))
                             .await;
                     }
@@ -847,11 +909,27 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
             RtcPeerEffect::CreateOffer {
                 generation,
                 operation_id,
-            } => self.with_session_ops(identity, completion_tx, move |ops| async move {
+            } => self.with_session_ops(identity, completion_tx, span, move |ops| async move {
+                let started = tokio::time::Instant::now();
+                tracing::debug!(
+                    generation,
+                    operation_id,
+                    stage = "create_offer",
+                    "SDP operation started"
+                );
                 let result = match ops {
                     Ok(ops) => ops.create_offer().await.map(Box::new),
                     Err(error) => Err(error),
                 };
+                // Do not log SDP or opaque backend errors: they may contain ICE credentials.
+                tracing::debug!(
+                    generation,
+                    operation_id,
+                    stage = "create_offer",
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    success = result.is_ok(),
+                    "SDP operation completed"
+                );
                 EffectCompletion::CreateOffer {
                     generation,
                     operation_id,
@@ -861,11 +939,27 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
             RtcPeerEffect::CreateAnswer {
                 generation,
                 operation_id,
-            } => self.with_session_ops(identity, completion_tx, move |ops| async move {
+            } => self.with_session_ops(identity, completion_tx, span, move |ops| async move {
+                let started = tokio::time::Instant::now();
+                tracing::debug!(
+                    generation,
+                    operation_id,
+                    stage = "create_answer",
+                    "SDP operation started"
+                );
                 let result = match ops {
                     Ok(ops) => ops.create_answer().await.map(Box::new),
                     Err(error) => Err(error),
                 };
+                // Do not log SDP or opaque backend errors: they may contain ICE credentials.
+                tracing::debug!(
+                    generation,
+                    operation_id,
+                    stage = "create_answer",
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    success = result.is_ok(),
+                    "SDP operation completed"
+                );
                 EffectCompletion::CreateAnswer {
                     generation,
                     operation_id,
@@ -876,11 +970,27 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 generation,
                 operation_id,
                 desc,
-            } => self.with_session_ops(identity, completion_tx, move |ops| async move {
+            } => self.with_session_ops(identity, completion_tx, span, move |ops| async move {
+                let started = tokio::time::Instant::now();
+                tracing::debug!(
+                    generation,
+                    operation_id,
+                    stage = "set_local_description",
+                    "SDP operation started"
+                );
                 let result = match ops {
                     Ok(ops) => ops.set_local_description(*desc).await,
                     Err(error) => Err(error),
                 };
+                // Do not log SDP or opaque backend errors: they may contain ICE credentials.
+                tracing::debug!(
+                    generation,
+                    operation_id,
+                    stage = "set_local_description",
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    success = result.is_ok(),
+                    "SDP operation completed"
+                );
                 EffectCompletion::SetLocalDescription {
                     generation,
                     operation_id,
@@ -891,11 +1001,27 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 generation,
                 operation_id,
                 desc,
-            } => self.with_session_ops(identity, completion_tx, move |ops| async move {
+            } => self.with_session_ops(identity, completion_tx, span, move |ops| async move {
+                let started = tokio::time::Instant::now();
+                tracing::debug!(
+                    generation,
+                    operation_id,
+                    stage = "set_remote_description",
+                    "SDP operation started"
+                );
                 let result = match ops {
                     Ok(ops) => ops.set_remote_description(*desc).await,
                     Err(error) => Err(error),
                 };
+                // Do not log SDP or opaque backend errors: they may contain ICE credentials.
+                tracing::debug!(
+                    generation,
+                    operation_id,
+                    stage = "set_remote_description",
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    success = result.is_ok(),
+                    "SDP operation completed"
+                );
                 EffectCompletion::SetRemoteDescription {
                     generation,
                     operation_id,
@@ -907,7 +1033,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 operation_id,
                 ice_generation,
                 candidate,
-            } => self.with_session_ops(identity, completion_tx, move |ops| async move {
+            } => self.with_session_ops(identity, completion_tx, span, move |ops| async move {
                 let result = match ops {
                     Ok(ops) => ops.add_ice_candidate(candidate).await,
                     Err(error) => Err(error),
@@ -923,7 +1049,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 generation,
                 operation_id,
                 ice_generation,
-            } => self.with_session_ops(identity, completion_tx, move |ops| async move {
+            } => self.with_session_ops(identity, completion_tx, span, move |ops| async move {
                 let result = match ops {
                     Ok(ops) => ops.restart_ice().await,
                     Err(error) => Err(error),
@@ -941,7 +1067,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 config,
             } => {
                 let peer_id = self.peer_id.clone();
-                self.with_session_ops(identity, completion_tx, move |ops| async move {
+                self.with_session_ops(identity, completion_tx, span, move |ops| async move {
                     let result = match ops {
                         Ok(ops) => ops.set_configuration(*config).await,
                         Err(error) => Err(error),
@@ -966,7 +1092,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
             RtcPeerEffect::GetStats {
                 generation,
                 operation_id,
-            } => self.with_session_ops(identity, completion_tx, move |ops| async move {
+            } => self.with_session_ops(identity, completion_tx, span, move |ops| async move {
                 let report = match ops {
                     Ok(ops) => ops.get_stats().await,
                     Err(_) => Default::default(),
@@ -984,7 +1110,8 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 let sessions = self.sessions.clone();
                 let closing_sessions = self.closing_sessions.clone();
                 let resources = self.resources.clone();
-                self.spawn_effect_with(move || {
+                let completion_span = span.clone();
+                self.spawn_effect_with(span, move || {
                     // Move an active Session to the retiring registry before
                     // asynchronous close starts. The transition and task
                     // admission are atomic with respect to runner shutdown.
@@ -1032,6 +1159,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                                     operation_id,
                                     result,
                                 },
+                                completion_span,
                             ))
                             .await;
                     }
@@ -1110,7 +1238,14 @@ impl RtcPeerEffectPort for TestEffectSink {
         self.pending
             .lock()
             .expect("test effect pending lock")
-            .insert(operation_id, (operation.identity.clone(), completion_tx));
+            .insert(
+                operation_id,
+                (
+                    operation.identity.clone(),
+                    operation.span.clone(),
+                    completion_tx,
+                ),
+            );
         if self.effects_tx.send(operation).is_err() {
             self.pending
                 .lock()
@@ -1168,5 +1303,98 @@ impl RtcPeerEffectPort for TestEffectSink {
     async fn close_all_sessions(&self) {
         self.close_all_calls
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+mod tracing_lifetime_tests {
+    use super::*;
+    use tracing_subscriber::layer::{Context, SubscriberExt};
+    use tracing_subscriber::registry::LookupSpan;
+    use tracing_subscriber::{Layer, Registry};
+
+    #[derive(Clone)]
+    struct ClosedSpans(Arc<Mutex<Vec<&'static str>>>);
+
+    impl<S> Layer<S> for ClosedSpans
+    where
+        S: tracing::Subscriber + for<'lookup> LookupSpan<'lookup>,
+    {
+        fn on_close(&self, id: tracing::span::Id, context: Context<'_, S>) {
+            let span = context.span(&id).expect("closing span exists");
+            self.0.lock().unwrap().push(span.name());
+        }
+    }
+
+    #[test]
+    fn pending_operation_and_completion_do_not_keep_attempt_open() {
+        let closed = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = Registry::default().with(ClosedSpans(closed.clone()));
+        #[cfg(feature = "opentelemetry")]
+        let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder().build();
+        #[cfg(feature = "opentelemetry")]
+        let subscriber = {
+            use opentelemetry::trace::TracerProvider;
+            subscriber.with(tracing_opentelemetry::layer().with_tracer(provider.tracer("test")))
+        };
+        tracing::subscriber::with_default(subscriber, || {
+            let peer_id = ActrId {
+                realm: actr_protocol::Realm { realm_id: 1 },
+                serial_number: 1,
+                r#type: actr_protocol::ActrType {
+                    manufacturer: "test".into(),
+                    name: "node".into(),
+                    version: "1".into(),
+                },
+            };
+            let attempt = tracing::info_span!("webrtc.recover");
+            let operation = attempt.in_scope(|| {
+                TaggedRtcPeerEffect::new_with_span(
+                    peer_id.clone(),
+                    RtcPeerEffect::BuildSession {
+                        generation: 1,
+                        operation_id: 1,
+                    },
+                    attempt.clone(),
+                )
+                .unwrap()
+            });
+            #[cfg(feature = "opentelemetry")]
+            {
+                use opentelemetry::trace::TraceContextExt;
+                let parent = attempt.context();
+                let child = operation.span.context();
+                assert!(parent.span().span_context().is_valid());
+                assert_eq!(
+                    parent.span().span_context().trace_id(),
+                    child.span().span_context().trace_id()
+                );
+                assert_ne!(
+                    parent.span().span_context().span_id(),
+                    child.span().span_context().span_id()
+                );
+            }
+            // Model an attempt deadline while the operation is still pending.
+            drop(attempt);
+            assert_eq!(*closed.lock().unwrap(), vec!["webrtc.recover"]);
+            let completion = TaggedRtcEffectCompletion::new(
+                operation.identity.clone(),
+                EffectCompletion::BuildSession {
+                    generation: 1,
+                    operation_id: 1,
+                    result: Ok(()),
+                },
+                operation.span.clone(),
+            );
+            drop(operation);
+            assert_eq!(*closed.lock().unwrap(), vec!["webrtc.recover"]);
+            // A delayed completion retains operation identity, not the attempt.
+            let (_, span) = completion.into_completion_for(&peer_id).unwrap();
+            drop(span);
+            assert_eq!(
+                *closed.lock().unwrap(),
+                vec!["webrtc.recover", "webrtc.operation"]
+            );
+        });
     }
 }

@@ -19,13 +19,18 @@
 //! consuming the retained tail, so an evicted connectivity-loss edge cannot
 //! leave a stale transport advertised as sendable.
 
+#[cfg(test)]
 use std::net::IpAddr;
 
 use tokio::sync::{broadcast, watch};
+#[cfg(test)]
 use tokio_util::sync::CancellationToken;
 
-// S7A-3 (P2): the address-provider abstraction lives in `address.rs`; re-export
-// it here so the recovery seams (monitor, tests) keep their existing paths.
+// The address-provider abstraction lives in `address.rs`; keep the re-export
+// and monitor bridge test-only. Production recovery is driven by native
+// NetworkPathChanged facts and PeerConnection state callbacks, not by a
+// background address poller.
+#[cfg(test)]
 pub(crate) use super::address::LocalAddressProvider;
 
 /// Default broadcast capacity for network events. Network transitions are
@@ -39,6 +44,19 @@ pub(crate) const NETWORK_EVENT_CAPACITY: usize = 64;
 /// waiting, Soft ICE attempts, answerer request retries, and Hard rebuild as a
 /// single non-extendable window.
 pub(crate) const NETWORK_RECOVERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Per-attempt ICE restart readiness budget during network recovery. The
+/// controller re-arms this for each recovery epoch while the total cycle stays
+/// bounded by [`NETWORK_RECOVERY_TIMEOUT`].
+///
+/// Public so `test_support` can re-export it: integration tests must derive
+/// their timing guards from this window instead of re-hardcoding seconds.
+pub const ICE_RESTART_ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Short grace period for an Answer that races an Answerer's attempt-1 wake
+/// after the Offer has already been announced. If it expires, the reducer
+/// starts a fresh same-generation ICE restart.
+pub const REMOTE_REQUEST_WAKE_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// Network/App lifecycle facts broadcast by the recovery supervisor
 /// (RFC §"RecoverySupervisor"). The supervisor only broadcasts these facts;
@@ -54,8 +72,11 @@ pub(crate) enum RtcNetworkEvent {
     /// Network connectivity is restored (at least one usable interface).
     NetworkAvailable,
     /// The set of local interface addresses changed (interface up/down or
-    /// Wi-Fi ↔ cellular switch). Triggers Hard Recovery because the current
-    /// PeerConnection's ICE candidates are no longer valid.
+    /// Wi-Fi ↔ cellular switch). Starts Soft Recovery so v0.20.3 can rebind
+    /// ICE transports and re-gather candidates on the existing connection.
+    /// A failed restart still follows the controller's Hard Recovery fallback;
+    /// the separate long-background and explicit force-reconnect policies keep
+    /// their own Hard Recovery triggers.
     LocalAddressChanged,
     /// The app moved to the background (mobile lifecycle). The controller may
     /// pause non-essential work; it MUST NOT claim `sendable` while backgrounded
@@ -399,15 +420,14 @@ impl std::fmt::Debug for RtcRecoverySupervisor {
     }
 }
 
-/// Spawn a background task that bridges a `LocalAddressProvider` to the
-/// `RtcRecoverySupervisor`: watches the address snapshot and broadcasts
-/// `LocalAddressChanged` whenever the set of local IPs changes (RFC §"Local
-/// addresses and sockets": "Trigger Hard Recovery when the interface address
-/// changes").
+/// Test-only bridge that watches a `LocalAddressProvider` and broadcasts
+/// `LocalAddressChanged` whenever the set of local IPs changes. Production
+/// recovery receives native network-path facts and peer-state callbacks;
+/// keeping this seam in tests verifies the legacy provider contract without
+/// reintroducing a desktop polling task.
 ///
-/// The task lives for as long as the supervisor and provider are alive. It is
-/// the *only* writer of `LocalAddressChanged` events — platform code should
-/// not publish that variant directly.
+/// The task lives for as long as the supervisor and provider are alive.
+#[cfg(test)]
 pub(crate) fn spawn_address_monitor(
     provider: std::sync::Arc<dyn LocalAddressProvider>,
     supervisor: std::sync::Arc<RtcRecoverySupervisor>,
@@ -473,6 +493,7 @@ pub(crate) fn spawn_address_monitor(
 }
 
 /// Compare two address sets ignoring order and duplicates.
+#[cfg(test)]
 pub(crate) fn same_address_set(a: &[IpAddr], b: &[IpAddr]) -> bool {
     let mut a_sorted = a.to_vec();
     let mut b_sorted = b.to_vec();

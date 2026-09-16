@@ -1,32 +1,34 @@
 //! Local address provider abstraction (RFC §"Local addresses and sockets").
 //!
-//! webrtc-rs v0.20 gathers **one host candidate per explicitly bound socket**
-//! and uses the bound address literally — it never enumerates interfaces and
-//! never expands an unspecified `0.0.0.0` into real addresses (verified against
-//! `stun_gatherer.rs::gather_host_candidates`; see
-//! `docs/webrtc-v020-capability-matrix.md`). This is a hard behavioural
-//! difference from 0.14, which auto-gathered host candidates on every local
-//! interface. Actr must therefore supply real interface addresses to bind, which
-//! is exactly the responsibility of [`LocalAddressProvider`].
+//! webrtc-rs v0.20 can expand IPv4/IPv6 wildcard bind addresses into the live
+//! interface set at every bind, including ICE-restart rebind. Production uses
+//! that upstream path; explicit addresses remain available for deterministic
+//! tests.
 //!
 //! The RFC requires the provider to use platform interface information, support
 //! change notification, avoid the "probe a port, close the socket, then let the
-//! builder bind" race, and fail fast on unsatisfiable bind configuration. The
-//! provider's watch feed is bridged into Hard Recovery by the node-owned address
-//! monitor. Desktop native enumeration is polled for changes; mobile/platform
-//! providers may additionally publish live interface snapshots.
+//! builder bind" race, and fail fast on unsatisfiable bind configuration. A
+//! wildcard is a valid bind descriptor; whether an interface can reach a peer
+//! is decided later by webrtc-rs and ICE, not by this provider. The explicit
+//! provider implementation remains available for deterministic tests and
+//! platform integrations. Production uses v0.20's wildcard resolver directly:
+//! the upstream driver expands the live interface set at each initial bind and
+//! ICE-restart rebind, so a cached address list is not part of production
+//! recovery.
 
-use std::net::{IpAddr, Ipv4Addr};
+use std::{
+    io,
+    net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
+    sync::Arc,
+};
 
 use async_trait::async_trait;
 use tokio::sync::watch;
 
-/// Error type for [`LocalAddressProvider::current_addresses`].
+/// Error type for local-address observation or an invalid bind descriptor.
 ///
-/// The default desktop provider is infallible (it always yields at least the
-/// loopback address); the error variant exists so platform providers that query
-/// a fallible OS API can fail fast instead of silently degrading (RFC §"Local
-/// addresses and sockets": "fail-fast on unsatisfiable bind configuration").
+/// These errors describe the provider's local OS query. They do not represent
+/// end-to-end network reachability or ICE readiness.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum LocalAddressError {
     #[error("failed to enumerate local interfaces: {0}")]
@@ -53,18 +55,85 @@ impl LocalAddressSnapshot {
     }
 }
 
-/// Supplies the local IP addresses a `PeerConnectionFactory` should bind, and
-/// notifies subscribers when that set changes (RFC §"LocalAddressProvider").
+/// Supplies bind inputs to a `PeerConnectionFactory` and publishes local
+/// address snapshots for recovery (RFC §"LocalAddressProvider").
 #[async_trait]
 pub(crate) trait LocalAddressProvider: Send + Sync {
-    /// The current set of local interface addresses to bind (one UDP socket per
-    /// address, ephemeral port).
+    /// The current concrete interface snapshot used for address-change
+    /// detection. A successful result does not imply network or ICE readiness.
     async fn current_addresses(&self) -> Result<Vec<IpAddr>, LocalAddressError>;
+
+    /// Bind inputs re-resolved by webrtc-rs at startup and on ICE restart.
+    /// Production returns dual-stack wildcards so upstream enumerates live
+    /// interfaces at bind time. Explicit/test providers return concrete IPs.
+    /// This is intentionally independent of the concrete snapshots used for
+    /// change detection; a wildcard does not assert that the network is ready.
+    fn current_addresses_sync(&self) -> Result<Vec<IpAddr>, LocalAddressError>;
 
     /// Subscribe to address changes. The receiver immediately exposes the latest
     /// snapshot; platform providers publish a newer revision whenever their
     /// usable interface-address set changes.
     fn subscribe_changes(&self) -> watch::Receiver<LocalAddressSnapshot>;
+}
+
+/// A `ToSocketAddrs` value used by the v0.20 driver on every bind.
+///
+/// Test/platform providers resolve their current address set on each call. The
+/// production factory uses [`Self::wildcard`], which leaves interface
+/// expansion to webrtc-rs at the actual bind/rebind point.
+#[derive(Clone)]
+pub(crate) struct LocalAddressResolver {
+    source: LocalAddressResolverSource,
+}
+
+#[derive(Clone)]
+enum LocalAddressResolverSource {
+    Provider(Arc<dyn LocalAddressProvider>),
+    Wildcard,
+}
+
+impl LocalAddressResolver {
+    pub(crate) fn new(provider: Arc<dyn LocalAddressProvider>) -> Self {
+        Self {
+            source: LocalAddressResolverSource::Provider(provider),
+        }
+    }
+
+    pub(crate) fn wildcard() -> Self {
+        Self {
+            source: LocalAddressResolverSource::Wildcard,
+        }
+    }
+}
+
+impl ToSocketAddrs for LocalAddressResolver {
+    type Iter = std::vec::IntoIter<SocketAddr>;
+
+    fn to_socket_addrs(&self) -> io::Result<Self::Iter> {
+        let addresses = match &self.source {
+            LocalAddressResolverSource::Provider(provider) => provider
+                .current_addresses_sync()
+                .map_err(|error| io::Error::other(error.to_string()))?,
+            LocalAddressResolverSource::Wildcard => vec![
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+            ],
+        };
+        if addresses.is_empty() {
+            // An empty provider resolve must fail loudly: at startup it
+            // surfaces as a build error; at an ICE-restart rebind it fails the
+            // driver's rebind, and the recovery path escalates to a checked
+            // Hard rebuild instead of idling on a silently dead transport.
+            return Err(io::Error::other(
+                "local address provider returned no bind descriptors",
+            ));
+        }
+        Ok(addresses
+            .into_iter()
+            .map(|address| SocketAddr::new(address, 0))
+            .collect::<Vec<_>>()
+            .into_iter())
+    }
 }
 
 /// Default desktop [`LocalAddressProvider`].
@@ -75,9 +144,10 @@ pub(crate) trait LocalAddressProvider: Send + Sync {
 /// platform's native interface API (`getifaddrs` on Unix/Apple platforms and
 /// the corresponding adapter API on Windows). Loopback is retained for local
 /// development, while unspecified and multicast addresses are rejected.
-/// Change detection is performed by the node-owned address monitor, which
-/// combines provider notifications with a polling fallback so desktop and
-/// mobile interface changes both trigger Hard Recovery.
+/// The production node does not instantiate this polling provider. It remains
+/// an explicit provider for tests and platform adapters that need a concrete
+/// address snapshot; production desktop binding uses dual-stack wildcards and
+/// desktop peer-state events as the recovery fallback.
 pub(crate) struct DesktopLocalAddressProvider {
     /// Optional explicit override (used by tests to pin deterministic addresses).
     /// When empty, addresses are auto-detected as described above.
@@ -97,15 +167,15 @@ impl DesktopLocalAddressProvider {
         let initial = LocalAddressSnapshot {
             addresses: if override_addresses.is_empty() {
                 // `new()` cannot return a startup error. This seed is only for
-                // immediate subscription replay; `current_addresses()` runs
-                // the fallible query again and Factory build fails fast.
+                // immediate subscription replay; the production bind path uses
+                // wildcards and does not make startup depend on this seed.
                 Self::detect().unwrap_or_else(|_| vec![IpAddr::V4(Ipv4Addr::LOCALHOST)])
             } else {
                 override_addresses.clone()
             },
             revision: 0,
         };
-        let (change_tx, _) = watch::channel(initial);
+        let (change_tx, _) = watch::channel(initial.clone());
         Self {
             override_addresses,
             change_tx,
@@ -138,10 +208,23 @@ impl DesktopLocalAddressProvider {
 #[async_trait]
 impl LocalAddressProvider for DesktopLocalAddressProvider {
     async fn current_addresses(&self) -> Result<Vec<IpAddr>, LocalAddressError> {
-        if !self.override_addresses.is_empty() {
-            return Ok(self.override_addresses.clone());
+        let addresses = if !self.override_addresses.is_empty() {
+            self.override_addresses.clone()
+        } else {
+            Self::detect()?
+        };
+        Ok(addresses)
+    }
+
+    fn current_addresses_sync(&self) -> Result<Vec<IpAddr>, LocalAddressError> {
+        if self.override_addresses.is_empty() {
+            Ok(vec![
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+            ])
+        } else {
+            Ok(self.override_addresses.clone())
         }
-        Self::detect()
     }
 
     fn subscribe_changes(&self) -> watch::Receiver<LocalAddressSnapshot> {
@@ -156,21 +239,39 @@ impl Default for DesktopLocalAddressProvider {
 }
 
 /// Mutable address provider for production-factory integration tests. Each
-/// update changes the exact address set consumed by the next v0.20 PC build;
-/// publishing a lifecycle fact alone is intentionally insufficient.
+/// update changes the exact address set consumed by the next v0.20 PC build or
+/// same-generation ICE-restart rebind; publishing a lifecycle fact alone is
+/// intentionally insufficient.
 #[cfg(feature = "test-utils")]
 pub struct TestLocalAddressProvider {
     current: std::sync::RwLock<LocalAddressSnapshot>,
+    initial_addresses: Vec<IpAddr>,
+    wildcard_bind_after_change: bool,
     change_tx: watch::Sender<LocalAddressSnapshot>,
 }
 
 #[cfg(feature = "test-utils")]
 impl TestLocalAddressProvider {
     pub fn new(addresses: Vec<IpAddr>) -> Self {
+        Self::with_bind_mode(addresses, false)
+    }
+
+    /// Keep the initial test bind deterministic, then expose dual-stack
+    /// wildcards after the first address change. This exercises the production
+    /// rebind path: the upstream driver expands the wildcard against the live
+    /// interfaces when ICE restart rebinds the existing PeerConnection.
+    pub fn new_with_wildcard_rebind(addresses: Vec<IpAddr>) -> Self {
+        Self::with_bind_mode(addresses, true)
+    }
+
+    fn with_bind_mode(addresses: Vec<IpAddr>, wildcard_bind_after_change: bool) -> Self {
         let initial = LocalAddressSnapshot::new(addresses);
+        let initial_addresses = initial.addresses.clone();
         let (change_tx, _) = watch::channel(initial.clone());
         Self {
             current: std::sync::RwLock::new(initial),
+            initial_addresses,
+            wildcard_bind_after_change,
             change_tx,
         }
     }
@@ -207,7 +308,229 @@ impl LocalAddressProvider for TestLocalAddressProvider {
         }
     }
 
+    fn current_addresses_sync(&self) -> Result<Vec<IpAddr>, LocalAddressError> {
+        let addresses = self
+            .current
+            .read()
+            .expect("address test lock poisoned")
+            .addresses
+            .clone();
+        if addresses.is_empty() {
+            Err(LocalAddressError::NoUsableAddress)
+        } else if self.wildcard_bind_after_change && addresses != self.initial_addresses {
+            Ok(vec![
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+            ])
+        } else {
+            Ok(addresses)
+        }
+    }
+
     fn subscribe_changes(&self) -> watch::Receiver<LocalAddressSnapshot> {
         self.change_tx.subscribe()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sync_snapshot_serves_the_seed_before_any_refresh() {
+        let provider =
+            DesktopLocalAddressProvider::with_override(vec![IpAddr::V4(Ipv4Addr::LOCALHOST)]);
+        assert_eq!(
+            provider
+                .current_addresses_sync()
+                .expect("seeded sync snapshot"),
+            vec![IpAddr::V4(Ipv4Addr::LOCALHOST)]
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_bind_inputs_remain_independent_of_async_snapshots() {
+        let provider = DesktopLocalAddressProvider::with_override(vec![IpAddr::V4(Ipv4Addr::new(
+            127, 0, 0, 2,
+        ))]);
+        let refreshed = provider.current_addresses().await.expect("async refresh");
+        // Explicit providers pin their bind inputs. Production providers use
+        // wildcards instead; neither path treats the snapshot as readiness.
+        assert_eq!(
+            provider
+                .current_addresses_sync()
+                .expect("explicit bind inputs"),
+            refreshed
+        );
+    }
+
+    #[tokio::test]
+    async fn production_bind_plan_is_wildcard_independent_of_detection() {
+        let provider = DesktopLocalAddressProvider::new();
+        let refreshed = provider
+            .current_addresses()
+            .await
+            .expect("detect must succeed on a host with a usable interface");
+        assert!(!refreshed.is_empty());
+        assert_eq!(
+            provider
+                .current_addresses_sync()
+                .expect("detected sync snapshot"),
+            vec![
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+            ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod resolver_tests {
+    use super::*;
+    use std::sync::RwLock;
+
+    #[test]
+    fn wildcard_resolver_keeps_interface_expansion_in_webrtc_rs() {
+        let resolved = LocalAddressResolver::wildcard()
+            .to_socket_addrs()
+            .expect("wildcard bind plan");
+        assert_eq!(
+            resolved.collect::<Vec<_>>(),
+            vec![
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
+                SocketAddr::new(IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED), 0),
+            ]
+        );
+    }
+
+    /// Provider with a mutable set, optionally erroring on empty like the
+    /// production providers do.
+    struct MutableStubProvider {
+        addresses: RwLock<Vec<IpAddr>>,
+        error_when_empty: bool,
+        change_tx: watch::Sender<LocalAddressSnapshot>,
+    }
+
+    struct WildcardOnlyProvider {
+        change_tx: watch::Sender<LocalAddressSnapshot>,
+    }
+
+    impl WildcardOnlyProvider {
+        fn new() -> Self {
+            let (change_tx, _) = watch::channel(LocalAddressSnapshot::new(Vec::new()));
+            Self { change_tx }
+        }
+    }
+
+    impl MutableStubProvider {
+        fn new(addresses: Vec<IpAddr>, error_when_empty: bool) -> Self {
+            let (change_tx, _) = watch::channel(LocalAddressSnapshot::new(addresses.clone()));
+            Self {
+                addresses: RwLock::new(addresses),
+                error_when_empty,
+                change_tx,
+            }
+        }
+
+        fn set(&self, addresses: Vec<IpAddr>) {
+            *self.addresses.write().expect("stub lock poisoned") = addresses;
+        }
+    }
+
+    #[async_trait]
+    impl LocalAddressProvider for MutableStubProvider {
+        async fn current_addresses(&self) -> Result<Vec<IpAddr>, LocalAddressError> {
+            self.current_addresses_sync()
+        }
+
+        fn current_addresses_sync(&self) -> Result<Vec<IpAddr>, LocalAddressError> {
+            let addresses = self.addresses.read().expect("stub lock poisoned").clone();
+            if addresses.is_empty() && self.error_when_empty {
+                Err(LocalAddressError::NoUsableAddress)
+            } else {
+                Ok(addresses)
+            }
+        }
+
+        fn subscribe_changes(&self) -> watch::Receiver<LocalAddressSnapshot> {
+            self.change_tx.subscribe()
+        }
+    }
+
+    #[async_trait]
+    impl LocalAddressProvider for WildcardOnlyProvider {
+        async fn current_addresses(&self) -> Result<Vec<IpAddr>, LocalAddressError> {
+            Err(LocalAddressError::NoUsableAddress)
+        }
+
+        fn current_addresses_sync(&self) -> Result<Vec<IpAddr>, LocalAddressError> {
+            Ok(vec![
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+            ])
+        }
+
+        fn subscribe_changes(&self) -> watch::Receiver<LocalAddressSnapshot> {
+            self.change_tx.subscribe()
+        }
+    }
+
+    #[test]
+    fn resolver_keeps_wildcard_bind_plan_separate_from_readiness_snapshot() {
+        let resolver = LocalAddressResolver::new(Arc::new(WildcardOnlyProvider::new()));
+        let resolved = resolver
+            .to_socket_addrs()
+            .expect("wildcard bind descriptors are valid")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            resolved,
+            vec![
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
+                SocketAddr::new(IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED), 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn resolver_propagates_sync_errors() {
+        let resolver =
+            LocalAddressResolver::new(Arc::new(MutableStubProvider::new(Vec::new(), true)));
+        let error = resolver
+            .to_socket_addrs()
+            .expect_err("a sync snapshot error must fail the resolve");
+        assert!(error.to_string().contains("no usable local interface"));
+    }
+
+    #[test]
+    fn resolver_fails_loudly_on_empty_ok_snapshot() {
+        // A provider violating the contract with Ok(empty) must still not
+        // hand the driver an empty bind plan.
+        let resolver =
+            LocalAddressResolver::new(Arc::new(MutableStubProvider::new(Vec::new(), false)));
+        let error = resolver
+            .to_socket_addrs()
+            .expect_err("an empty provider set must fail the resolve loudly");
+        assert!(error.to_string().contains("no bind descriptors"));
+    }
+
+    #[test]
+    fn resolver_fails_loudly_when_provider_empties_after_build() {
+        let provider = Arc::new(MutableStubProvider::new(
+            vec![IpAddr::V4(Ipv4Addr::LOCALHOST)],
+            true,
+        ));
+        let resolver = LocalAddressResolver::new(provider.clone());
+        assert_eq!(
+            resolver.to_socket_addrs().expect("initial resolve").count(),
+            1
+        );
+
+        // The runtime case that matters: the provider goes empty after the
+        // initial build; the restart-rebind resolve must fail loudly rather
+        // than let the driver idle on zero sockets.
+        provider.set(Vec::new());
+        resolver
+            .to_socket_addrs()
+            .expect_err("a provider that went empty must fail the rebind resolve");
     }
 }

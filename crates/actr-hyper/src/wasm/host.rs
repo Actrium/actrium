@@ -6,7 +6,7 @@
 //!
 //! # Contract
 //!
-//! The guest component must implement the `actr:workload@0.6.0`
+//! The guest component must implement the `actr:workload@0.7.0`
 //! `actr-workload-guest-v2` world defined in
 //! `crates/actr-framework/wit-v2/actr-workload.wit`. That contract carries one
 //! `dispatch(envelope, ctx)` export for inbound RPC plus seventeen observation
@@ -546,7 +546,7 @@ impl WasmHost {
                     "this .actr package was built by an old SDK (wit-bindgen \
                      <= 0.57 async-lift ABI), which wasmtime 46 rejects per \
                      the Component Model spec. Rebuild it with the current SDK, \
-                     which emits the supported actr:workload@0.6.0 async-world \
+                     which emits the supported actr:workload@0.7.0 async-world \
                      ABI. wasmtime reported: {raw}"
                 ));
             }
@@ -588,7 +588,7 @@ impl WasmHost {
     /// Instantiate the component into a runnable internal workload.
     ///
     /// Probes the component's exported world and rejects anything that is not
-    /// the sole supported `actr:workload@0.6.0` async world, then instantiates
+    /// the sole supported `actr:workload@0.7.0` async world, then instantiates
     /// it on the `run_concurrent` async path via [`WasmWorkloadV2::instantiate`].
     /// Retired `@0.1.0` through `@0.5.0` packages (or an unrecognised world)
     /// are rejected with an actionable rebuild hint rather than loaded.
@@ -616,7 +616,7 @@ impl WasmHost {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Reject a compiled [`Component`] unless it implements the sole supported
-/// `actr:workload@0.6.0` async world. The decision is grounded purely in the
+/// `actr:workload@0.7.0` async world. The decision is grounded purely in the
 /// component's exported instance types — never reads the `.actr` manifest —
 /// so it reflects what the binary actually exports.
 ///
@@ -624,17 +624,20 @@ impl WasmHost {
 /// `@0.2.0`/`@0.3.0` async worlds, the pre-state-hook `@0.4.0`, or the
 /// pre-EXPLICIT-reply `@0.5.0`) — or no recognised world at all — is rejected
 /// with an actionable rebuild hint. Older packages must be rebuilt with the
-/// current SDK, which emits only the 0.6.0 async-world ABI.
+/// current SDK, which emits only the 0.7.0 async-world ABI.
 fn probe_world(component: &Component, engine: &Engine) -> WasmResult<()> {
-    let mut saw_v6 = false;
+    let mut saw_v07 = false;
+    let mut saw_v06 = false;
     let mut saw_v5 = false;
     let mut saw_v4 = false;
     let mut saw_v3 = false;
     let mut saw_v2 = false;
     let mut saw_v1 = false;
     for (name, _item) in component.component_type().exports(engine) {
-        if name.starts_with("actr:workload/workload@0.6.0") {
-            saw_v6 = true;
+        if name.starts_with("actr:workload/workload@0.7.0") {
+            saw_v07 = true;
+        } else if name.starts_with("actr:workload/workload@0.6.0") {
+            saw_v06 = true;
         } else if name.starts_with("actr:workload/workload@0.5.0") {
             saw_v5 = true;
         } else if name.starts_with("actr:workload/workload@0.4.0") {
@@ -652,15 +655,16 @@ fn probe_world(component: &Component, engine: &Engine) -> WasmResult<()> {
         + u8::from(saw_v3)
         + u8::from(saw_v4)
         + u8::from(saw_v5)
-        + u8::from(saw_v6);
-    if saw_v6 && recognized_worlds == 1 {
+        + u8::from(saw_v06)
+        + u8::from(saw_v07);
+    if saw_v07 && recognized_worlds == 1 {
         return Ok(());
     }
     if recognized_worlds > 1 {
         return Err(WasmError::LoadFailed(
             "component exports multiple actr:workload/workload ABI versions; \
              a package must implement exactly one world (rebuild with the current \
-             SDK, which emits only @0.6.0)"
+             SDK, which emits only @0.7.0)"
                 .to_string(),
         ));
     }
@@ -669,7 +673,14 @@ fn probe_world(component: &Component, engine: &Engine) -> WasmResult<()> {
             "component exports the retired actr:workload@0.5.0 async world, whose \
              invocation context and host imports predate the EXPLICIT reply \
              boundary; rebuild the package with the current SDK, which emits \
-             actr:workload@0.6.0"
+             actr:workload@0.7.0"
+                .to_string(),
+        ));
+    }
+    if saw_v06 {
+        return Err(WasmError::LoadFailed(
+            "component exports the retired actr:workload@0.6.0 async world; rebuild the \
+             package with the current SDK, which emits actr:workload@0.7.0"
                 .to_string(),
         ));
     }
@@ -677,7 +688,7 @@ fn probe_world(component: &Component, engine: &Engine) -> WasmResult<()> {
         return Err(WasmError::LoadFailed(
             "component exports the retired actr:workload@0.4.0 async world, which \
              predates the required on-webrtc-state-changed guest export; rebuild \
-             the package with the current SDK, which emits actr:workload@0.6.0"
+             the package with the current SDK, which emits actr:workload@0.7.0"
                 .to_string(),
         ));
     }
@@ -686,7 +697,7 @@ fn probe_world(component: &Component, engine: &Engine) -> WasmResult<()> {
             "component exports the retired actr:workload@0.3.0 async world, whose \
              host call imports do not carry the declared payload-type lane; \
              rebuild the package with the current SDK, which emits \
-             actr:workload@0.6.0"
+             actr:workload@0.7.0"
                 .to_string(),
         ));
     }
@@ -694,7 +705,7 @@ fn probe_world(component: &Component, engine: &Engine) -> WasmResult<()> {
         return Err(WasmError::LoadFailed(
             "component exports the retired actr:workload@0.2.0 async world, whose \
              host call imports do not carry a caller-selected timeout; rebuild the \
-             package with the current SDK, which emits actr:workload@0.6.0"
+             package with the current SDK, which emits actr:workload@0.7.0"
                 .to_string(),
         ));
     }
@@ -702,13 +713,13 @@ fn probe_world(component: &Component, engine: &Engine) -> WasmResult<()> {
         return Err(WasmError::LoadFailed(
             "component exports the retired actr:workload@0.1.0 synchronous world; \
              rebuild the package with the current SDK, which emits only the \
-             actr:workload@0.6.0 async-world ABI"
+             actr:workload@0.7.0 async-world ABI"
                 .to_string(),
         ));
     }
     Err(WasmError::LoadFailed(
         "component exports no recognised actr:workload/workload world \
-         (expected @0.6.0); rebuild the package with a current SDK"
+         (expected @0.7.0); rebuild the package with a current SDK"
             .to_string(),
     ))
 }

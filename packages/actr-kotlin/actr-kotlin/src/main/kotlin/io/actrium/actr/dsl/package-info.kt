@@ -13,7 +13,8 @@
  *   DataChunkCallback, MediaSample, MediaTrackCallback, MediaType, OpusEncoder
  * - DSL builders: actrType(), actrId(), dataChunk(), workload()
  * - Extensions: String.toActrType(), ActrRef.discover(String), etc.
- * - Utilities: withRetry(), withStartedActor(), SimpleWorkload, RoutedWorkload
+ * - Utilities: withRetry() for explicitly idempotent non-transport work,
+ *   withStartedActor(), SimpleWorkload, RoutedWorkload
  * - Logging: setLogCallback()
  * - Manifest: Manifest class, resolveManifestDependency(),
  *   resolveManifestDependencyAliasList(), resolveManifestPackageActrType()

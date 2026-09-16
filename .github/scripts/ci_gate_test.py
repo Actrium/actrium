@@ -383,7 +383,8 @@ def test_release_train_supports_generic_maintenance_branches() -> None:
     assert "ref: main" not in workflow
     assert "--branch main" not in workflow
     assert "--latest=false" in workflow
-    assert "--notes-start-tag" in workflow
+    assert '--from-release-commit' in workflow
+    assert 'scripts/actr/generate-changelog.py' in workflow
     assert "needs.context.result == 'success'" in workflow
 
     assert "^release-([0-9]+)\\.([0-9]+)$" in release_script
@@ -410,7 +411,7 @@ def test_e2e_actrix_uses_in_tree_install_instead_of_artifact_download() -> None:
     assert "Actrium/actrix" not in workflow
     assert "actions: read" not in workflow
 
-    assert "runs-on: ubuntu-latest-m" in pkg_job
+    assert "runs-on: [self-hosted, Linux, X64, high]" in pkg_job
     assert "runs-on: macos-arm64-larger" in swift_job
 
 
@@ -671,15 +672,25 @@ def test_swift_e2e_covers_short_and_long_background_recovery() -> None:
     assert "await sendRecoveryEcho(\"\\(input)-foreground-\\(cycle)\")" in content_view
 
 
-def test_swift_e2e_retries_bounded_connection_not_ready() -> None:
+def test_swift_e2e_delegates_recovery_to_framework() -> None:
     service = (ROOT / "tests/e2e/actr/swift-echo-app/EchoApp/ActrService.swift").read_text(
         encoding="utf-8"
     )
+    content_view = (ROOT / "tests/e2e/actr/swift-echo-app/EchoApp/ContentView.swift").read_text(
+        encoding="utf-8"
+    )
 
-    assert "func sendEchoWhenReady" in service
-    assert ".ConnectionNotReady(info)" in service
-    assert "clock.now < deadline" in service
-    assert "ACTR_E2E_RETRY:ConnectionNotReady" in service
+    assert "func sendEcho(_ input: String)" in service
+    # The removed retry helper must not be CALLED. A regex tolerates
+    # whitespace/comments between the identifier and its argument list, so
+    # formatting or line wrapping cannot produce a false pass/fail.
+    import re
+
+    assert not re.search(r"sendEchoWhenReady\s*\(", service), (
+        "application-side readiness retry leaked"
+    )
+    assert "Call owns route readiness and transport retry" in content_view
+    assert "ACTR_E2E_RETRY:ConnectionNotReady" not in service
 
 
 def _create_service_registry(db_path: Path) -> None:
@@ -907,7 +918,7 @@ if __name__ == "__main__":
     test_run_sh_uses_correct_signaling_cache_table()
     test_swift_e2e_only_shuts_down_its_selected_simulator()
     test_swift_e2e_covers_short_and_long_background_recovery()
-    test_swift_e2e_retries_bounded_connection_not_ready()
+    test_swift_e2e_delegates_recovery_to_framework()
     test_service_readiness_rejects_missing_or_unrelated_registration()
     test_service_readiness_waits_for_exact_registration()
     test_nightly_e2e_includes_swift_datastream()

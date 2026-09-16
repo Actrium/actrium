@@ -9,6 +9,7 @@ use tokio::time::{Duration, timeout};
 struct FakeLane {
     send_count: Arc<AtomicUsize>,
     send_closed: bool,
+    healthy: bool,
 }
 
 #[async_trait]
@@ -33,11 +34,19 @@ impl DataLane for FakeLane {
             DeliveryProgress::SubmittedLocally
         };
         let result = self.send(data).await;
-        SendAttemptResult { result, progress }
+        SendAttemptResult {
+            result,
+            progress,
+            proven_pre_send: self.send_closed,
+        }
     }
 
     fn lane_type(&self) -> &'static str {
         "fake"
+    }
+
+    fn is_healthy(&self) -> bool {
+        self.healthy
     }
 }
 
@@ -48,6 +57,7 @@ struct FakeWire {
     lane_closed: bool,
     lane_send_closed: bool,
     lane_non_established: bool,
+    lane_healthy: bool,
     retry_get_lane_closed_after_invalidate: bool,
     connected: AtomicBool,
     invalidated: AtomicBool,
@@ -63,6 +73,7 @@ impl FakeWire {
             lane_closed: false,
             lane_send_closed: false,
             lane_non_established: false,
+            lane_healthy: true,
             retry_get_lane_closed_after_invalidate: false,
             connected: AtomicBool::new(false),
             invalidated: AtomicBool::new(false),
@@ -88,6 +99,11 @@ impl FakeWire {
 
     fn lane_non_established(mut self) -> Self {
         self.lane_non_established = true;
+        self
+    }
+
+    fn lane_unhealthy(mut self) -> Self {
+        self.lane_healthy = false;
         self
     }
 
@@ -156,6 +172,7 @@ impl WireHandle for FakeWire {
         Ok(Arc::new(FakeLane {
             send_count: Arc::clone(&self.send_count),
             send_closed: self.lane_send_closed,
+            healthy: self.lane_healthy,
         }))
     }
 
@@ -248,6 +265,26 @@ async fn send_falls_back_to_websocket_when_webrtc_fails() {
     .await
     .expect("send should not hang")
     .expect("send should use WebSocket fallback");
+
+    assert_eq!(websocket_sends.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
+async fn send_falls_back_when_webrtc_lane_is_not_healthy() {
+    let websocket_sends = Arc::new(AtomicUsize::new(0));
+    let transport = test_transport(vec![
+        Arc::new(FakeWire::new(ConnType::WebRTC).lane_unhealthy()),
+        Arc::new(FakeWire::new(ConnType::WebSocket).with_send_count(Arc::clone(&websocket_sends))),
+    ])
+    .await;
+
+    timeout(
+        Duration::from_secs(1),
+        transport.send_with_identity(PayloadType::StreamReliable, b"payload"),
+    )
+    .await
+    .expect("send should not hang")
+    .expect("an unhealthy WebRTC lane should fall back to WebSocket");
 
     assert_eq!(websocket_sends.load(Ordering::Relaxed), 1);
 }
@@ -406,7 +443,11 @@ impl DataLane for RekeyRecoveryLane {
             DeliveryProgress::SubmittedLocally
         };
         let result = self.send(data).await;
-        SendAttemptResult { result, progress }
+        SendAttemptResult {
+            result,
+            progress,
+            proven_pre_send: first,
+        }
     }
 
     fn lane_type(&self) -> &'static str {
@@ -564,6 +605,7 @@ impl DataLane for MisclassifiedSecureLane {
             // Intentionally model an adapter that failed to classify the
             // secure gate before the write.
             progress: DeliveryProgress::Unknown,
+            proven_pre_send: false,
         }
     }
 
@@ -646,10 +688,9 @@ impl DataLane for ClosedLikePreSendLane {
 
     async fn send_with_progress(&self, _data: bytes::Bytes) -> SendAttemptResult {
         self.send_count.fetch_add(1, Ordering::Relaxed);
-        SendAttemptResult::failed(
-            NetworkError::DataChannelClosed("proven pre-send closure".into()),
-            DeliveryProgress::NotAttempted,
-        )
+        SendAttemptResult::failed_pre_send(NetworkError::DataChannelClosed(
+            "proven pre-send closure".into(),
+        ))
     }
 
     fn lane_type(&self) -> &'static str {
@@ -730,9 +771,11 @@ async fn not_attempted_first_lane_still_falls_back() {
         "a proven pre-send failure keeps the self-heal fallback: {:?}",
         attempt.result
     );
-    assert!(
-        webrtc_sends.load(Ordering::Relaxed) >= 1,
-        "the WebRTC lane was tried first"
+    assert_eq!(
+        webrtc_sends.load(Ordering::Relaxed),
+        2,
+        "the WebRTC lane is attempted at most twice (initial + one bounded \
+         self-heal retry) before the WebSocket fallback"
     );
     assert_eq!(
         websocket_sends.load(Ordering::Relaxed),

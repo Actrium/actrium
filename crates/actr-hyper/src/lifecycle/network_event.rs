@@ -93,7 +93,10 @@ use super::recovery_supervisor::{
 use super::session_state::{SessionPhase, SessionState};
 
 const NETWORK_EVENT_RESULT_TIMEOUT: Duration = Duration::from_secs(5);
-const SIGNALING_PROBE_TIMEOUT: Duration = Duration::from_secs(1);
+// Mobile network handovers can delay the signaling Pong briefly. Keep the
+// probe bounded, but give the existing WebSocket time to survive the switch
+// before rebuilding it and dropping in-flight signaling requests.
+const SIGNALING_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 pub(crate) const LONG_BACKGROUND_RECONNECT_THRESHOLD_MS: u64 = 30_000;
 /// Upper bound accepted for `background_duration_ms` (30 days, in ms).
 ///
@@ -291,6 +294,7 @@ impl NetworkRecoveryError {
             | NetworkError::JsonError(_)
             | NetworkError::Other(_) => Self::InvariantViolation { detail },
             NetworkError::ConnectionError(_)
+            | NetworkError::SignalingReplyDropped
             | NetworkError::SignalingError(_)
             | NetworkError::WebRtcError(_)
             | NetworkError::NetworkUnreachableError(_)
@@ -509,6 +513,19 @@ pub trait NetworkEventProcessor: Send + Sync {
     /// - `Err(String)`: cleanup failed, contains error message
     async fn cleanup_connections(&self) -> Result<(), String>;
 
+    /// Recovery-aware cleanup for automatic rebuilds.
+    ///
+    /// [`NetworkRecoveryAction::ForceReconnect`] tears the stack down only to
+    /// rebuild it immediately. The runtime implementation routes the signaling
+    /// teardown through `disconnect_for_recovery()`, which arms the
+    /// idempotent-retry mark for the replacement generation: RouteCandidates
+    /// and GetSigningKey waiters dropped by the rebuild replay once after the
+    /// replacement commits instead of failing fast. Manual teardown keeps
+    /// [`Self::cleanup_connections`] and its fail-fast contract.
+    async fn cleanup_connections_for_recovery(&self) -> Result<(), String> {
+        self.cleanup_connections().await
+    }
+
     /// Probe existing connectivity without forcing cleanup.
     async fn probe_connectivity(&self) -> Result<(), String> {
         Ok(())
@@ -516,7 +533,7 @@ pub trait NetworkEventProcessor: Send + Sync {
 
     /// Proactively clean up and restore connections.
     async fn force_reconnect(&self) -> Result<(), String> {
-        self.cleanup_connections().await?;
+        self.cleanup_connections_for_recovery().await?;
         self.process_network_available().await
     }
 
@@ -664,6 +681,20 @@ pub struct DefaultNetworkEventProcessor {
     debounce_state: Option<Arc<DebounceState>>,
     recovery_state: Arc<SignalingRecoveryState>,
     session_state: Option<SessionState>,
+}
+
+/// Which signaling teardown contract a cleanup sequence uses.
+#[derive(Clone, Copy)]
+enum SignalingTeardown {
+    /// Ordinary disconnect: dropped idempotent waiters fail fast. Manual,
+    /// offline, and bounded teardown keep this contract.
+    Manual,
+    /// Recovery disconnect: dropped idempotent waiters replay once after the
+    /// replacement generation commits. Automatic rebuilds that are immediately
+    /// followed by a reconnect (ForceReconnect) use this, so an in-flight
+    /// RouteCandidates/GetSigningKey request survives the rebuild it
+    /// overlapped with.
+    Recovery,
 }
 
 impl DefaultNetworkEventProcessor {
@@ -844,7 +875,7 @@ impl DefaultNetworkEventProcessor {
                     e
                 );
 
-                if let Err(disconnect_err) = self.signaling_client.disconnect().await {
+                if let Err(disconnect_err) = self.signaling_client.disconnect_for_recovery().await {
                     tracing::warn!(
                         reason = reason,
                         "⚠️ Failed to disconnect unhealthy signaling before rebuild: {}",
@@ -945,7 +976,7 @@ impl DefaultNetworkEventProcessor {
                     "Connectivity probe failed; restoring connections: {}",
                     e
                 );
-                if let Err(disconnect_err) = self.signaling_client.disconnect().await {
+                if let Err(disconnect_err) = self.signaling_client.disconnect_for_recovery().await {
                     tracing::warn!(
                         reason = reason,
                         "Failed to disconnect unhealthy signaling before restore: {}",
@@ -1002,7 +1033,10 @@ impl DefaultNetworkEventProcessor {
         &self,
         action_id: Option<u64>,
     ) -> Result<(), NetworkRecoveryError> {
-        self.cleanup_connections()
+        // Recovery-aware cleanup: ForceReconnect always rebuilds signaling
+        // right after the teardown, so idempotent waiters dropped here must
+        // replay on the replacement instead of failing fast.
+        self.cleanup_connections_for_recovery()
             .await
             .map_err(|error| NetworkRecoveryError::from_opaque("ForceReconnect cleanup", error))?;
         // cleanup_connections disconnected signaling and drained the old
@@ -1043,7 +1077,10 @@ impl DefaultNetworkEventProcessor {
     /// step that leaves an error behind. The logical teardown goal — releasing
     /// local signaling, coordinator, and transport resources — is always
     /// attempted to completion; residuals are diagnostics, not early returns.
-    async fn cleanup_connections_collect(&self) -> Vec<String> {
+    async fn cleanup_connections_collect(
+        &self,
+        signaling_teardown: SignalingTeardown,
+    ) -> Vec<String> {
         let mut residuals: Vec<String> = Vec::new();
 
         tracing::info!("🧹 Cleaning up all connections (bounded)...");
@@ -1052,7 +1089,11 @@ impl DefaultNetworkEventProcessor {
         // lifecycle. Disconnect resets the inbound queue, so delayed Offer,
         // RoleAssignment, and ICE messages cannot repopulate state after drain.
         tracing::info!("🔌 Disconnecting WebSocket before peer cleanup...");
-        match self.signaling_client.disconnect().await {
+        let signaling_disconnect = match signaling_teardown {
+            SignalingTeardown::Manual => self.signaling_client.disconnect().await,
+            SignalingTeardown::Recovery => self.signaling_client.disconnect_for_recovery().await,
+        };
+        match signaling_disconnect {
             Ok(_) => tracing::info!("✅ WebSocket disconnected successfully"),
             Err(e) => {
                 let err_msg = format!("Failed to disconnect WebSocket before cleanup: {e}");
@@ -1105,7 +1146,7 @@ impl DefaultNetworkEventProcessor {
         match crate::timer::timeout(
             crate::timer::ids::RECOVERY_CLEANUP_TEARDOWN,
             budget,
-            self.cleanup_connections_collect(),
+            self.cleanup_connections_collect(SignalingTeardown::Manual),
         )
         .await
         {
@@ -1443,7 +1484,9 @@ impl NetworkEventProcessor for DefaultNetworkEventProcessor {
     /// - No debounce check (proactive calls always execute)
     /// - Intended for app lifecycle management, not network event response
     async fn cleanup_connections(&self) -> Result<(), String> {
-        let residuals = self.cleanup_connections_collect().await;
+        let residuals = self
+            .cleanup_connections_collect(SignalingTeardown::Manual)
+            .await;
         if let Some(err) = residuals.into_iter().next() {
             tracing::warn!(
                 error = %err,
@@ -1452,6 +1495,22 @@ impl NetworkEventProcessor for DefaultNetworkEventProcessor {
             Err(err)
         } else {
             tracing::info!("✅ Connection cleanup completed");
+            Ok(())
+        }
+    }
+
+    async fn cleanup_connections_for_recovery(&self) -> Result<(), String> {
+        let residuals = self
+            .cleanup_connections_collect(SignalingTeardown::Recovery)
+            .await;
+        if let Some(err) = residuals.into_iter().next() {
+            tracing::warn!(
+                error = %err,
+                "Recovery cleanup released remaining resources but did not fully quiesce"
+            );
+            Err(err)
+        } else {
+            tracing::info!("✅ Recovery cleanup completed");
             Ok(())
         }
     }
@@ -1897,19 +1956,93 @@ struct ReconcilerConfig {
 }
 
 #[cfg(feature = "webrtc-v020")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct V020PathObservation {
+    semantic_path: tp::SemanticPath,
+    /// Transport identity includes VPN because entering/leaving a VPN changes
+    /// the effective route/interface class. Billing and data-saver properties
+    /// can change without requiring an ICE rebind; the lifecycle policy keeps
+    /// those fields in its own signaling probe fingerprint.
+    transport_fingerprint: u8,
+}
+
+#[cfg(feature = "webrtc-v020")]
+fn v020_path_observation(snapshot: &NetworkSnapshot) -> V020PathObservation {
+    let transport = snapshot.transport;
+    let mut transport_fingerprint = 0u8;
+    transport_fingerprint |= transport.wifi as u8;
+    transport_fingerprint |= (transport.cellular as u8) << 1;
+    transport_fingerprint |= (transport.ethernet as u8) << 2;
+    transport_fingerprint |= (transport.vpn as u8) << 3;
+    transport_fingerprint |= (transport.other as u8) << 4;
+
+    V020PathObservation {
+        semantic_path: match snapshot.availability {
+            NetworkAvailability::Unknown => tp::SemanticPath::Unknown,
+            NetworkAvailability::Available => tp::SemanticPath::Online,
+            NetworkAvailability::Unavailable => tp::SemanticPath::Offline,
+        },
+        transport_fingerprint,
+    }
+}
+
+#[cfg(feature = "webrtc-v020")]
 fn publish_v020_network_fact(
     feed: &crate::wire::webrtc::v020::recovery::RtcRecoverySupervisor,
     event: &NetworkEvent,
+    previous_path: Option<V020PathObservation>,
+    path_change_pending: &mut bool,
+    current_path: &mut Option<V020PathObservation>,
 ) {
     use crate::wire::webrtc::v020::recovery::RtcNetworkEvent;
 
+    if let NetworkEvent::NetworkPathChanged { snapshot } = event {
+        let observation = v020_path_observation(snapshot);
+        let address_changed = match observation.semantic_path {
+            tp::SemanticPath::Unknown => {
+                // Android can report a new default-network handle as
+                // Online -> Unknown -> Online. Keep the path edge alive until
+                // the new network has a usable capability snapshot.
+                if previous_path
+                    .is_some_and(|previous| previous.semantic_path == tp::SemanticPath::Online)
+                {
+                    *path_change_pending = true;
+                }
+                false
+            }
+            tp::SemanticPath::Offline => {
+                // Availability recovery below owns Offline -> Online. Do not
+                // turn the same transition into a second local-address edge.
+                *path_change_pending = false;
+                false
+            }
+            tp::SemanticPath::Online => {
+                let changed_after_unknown = *path_change_pending;
+                let changed_transport = previous_path.is_some_and(|previous| {
+                    previous.semantic_path == tp::SemanticPath::Online
+                        && previous.transport_fingerprint != observation.transport_fingerprint
+                });
+                *path_change_pending = false;
+                changed_after_unknown || changed_transport
+            }
+        };
+        *current_path = Some(observation);
+
+        // Preserve the existing availability projection. A material path
+        // change additionally becomes a v0.20 RTC fact so an already-sendable
+        // PeerConnection does not wait for a delayed Disconnected/Failed edge.
+        if snapshot.is_offline() {
+            feed.publish(RtcNetworkEvent::NetworkUnavailable);
+        } else if snapshot.should_restore() {
+            feed.publish(RtcNetworkEvent::NetworkAvailable);
+        }
+        if address_changed {
+            feed.publish(RtcNetworkEvent::LocalAddressChanged);
+        }
+        return;
+    }
+
     let fact = match event {
-        NetworkEvent::NetworkPathChanged { snapshot } if snapshot.is_offline() => {
-            Some(RtcNetworkEvent::NetworkUnavailable)
-        }
-        NetworkEvent::NetworkPathChanged { snapshot } if snapshot.should_restore() => {
-            Some(RtcNetworkEvent::NetworkAvailable)
-        }
         NetworkEvent::AppLifecycleChanged {
             state: AppLifecycleState::Background,
         } => Some(RtcNetworkEvent::AppBackground),
@@ -2227,6 +2360,10 @@ async fn reconcile_loop(
     let mut last_action_id: Option<u64> = None;
     let mut last_outcome: Option<ObservedOutcome> = None;
     let mut current_monitor_source_epoch: Option<u64> = None;
+    #[cfg(feature = "webrtc-v020")]
+    let mut v020_path_observation: Option<V020PathObservation> = None;
+    #[cfg(feature = "webrtc-v020")]
+    let mut v020_path_change_pending = false;
 
     // Arm the gated bootstrap deadline (no-op under `Ungated`).
     if let Some(op) = supervisor.bootstrap_arm(start.elapsed()) {
@@ -2318,6 +2455,8 @@ async fn reconcile_loop(
                 let input = event_to_input(&event, epoch, observed_at);
                 #[cfg(feature = "webrtc-v020")]
                 let previous_revision = supervisor.view().policy_revision;
+                #[cfg(feature = "webrtc-v020")]
+                let previous_v020_path = v020_path_observation;
                 let terminate = handle_supervisor_input(
                     &mut supervisor, input, now, start, &internal_tx, &mut timers,
                     &mut effect, &processor, &status_tx, &mut last_action_id, &mut last_outcome,
@@ -2332,7 +2471,13 @@ async fn reconcile_loop(
                     // probe/reconnect work.
                     sync_v020_signaling_generation(feed, &supervisor);
                     if supervisor.view().policy_revision != previous_revision {
-                        publish_v020_network_fact(feed, &event);
+                        publish_v020_network_fact(
+                            feed,
+                            &event,
+                            previous_v020_path,
+                            &mut v020_path_change_pending,
+                            &mut v020_path_observation,
+                        );
                     }
                 }
                 // Acceptance: reply as soon as the fact is accepted and one

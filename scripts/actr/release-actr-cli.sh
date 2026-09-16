@@ -226,22 +226,52 @@ upload_asset_once() {
     "$upload_url?name=$(basename "$asset_path")" --data-binary "@$asset_path"
 }
 
+release_notes_payload() {
+  local repository=$1 tag=$2 version=$3 body
+  local source_root="${ACTR_REPO_ROOT:-$(pwd)}"
+  local source_ref="${RELEASE_SHA:-$tag}"
+  body=$(python3 "$(dirname "${BASH_SOURCE[0]}")/generate-changelog.py" \
+    --repo "$source_root" --version "$version" --to-ref "$source_ref" \
+    --from-release-commit \
+    --branch "${RELEASE_BRANCH:-main}" \
+    --repository-url "https://github.com/$repository" \
+    --header "$source_root/.github/release-notes-header.md") || return 1
+  printf '%s\n' "$body" | python3 -c '
+import json
+import sys
+print(json.dumps({
+    "tag_name": sys.argv[1],
+    "name": sys.argv[1],
+    "body": sys.stdin.read(),
+    "prerelease": "-" in sys.argv[2],
+    "make_latest": "false" if sys.argv[3] != "main" else "legacy",
+}))
+' "$tag" "$version" "${RELEASE_BRANCH:-main}"
+}
+
 resolve_release() {
-  local repository=$1 tag=$2 token=$3 create_release=$4 response
+  local repository=$1 tag=$2 token=$3 create_release=$4 response payload version release_id
   response=$(curl -fsSL \
     -H "Accept: application/vnd.github+json" \
     -H "Authorization: Bearer $token" \
     -H "User-Agent: actr-release-cli" \
     -H "X-GitHub-Api-Version: 2022-11-28" \
     "$CLI_RELEASE_API/repos/$repository/releases/tags/$tag" 2>/dev/null || true)
-  if [[ -z "$response" && "$create_release" == true ]]; then
-    response=$(curl -fsSL -X POST \
+  if [[ "$create_release" == true ]]; then
+    version=$(version_from_release_tag "$tag")
+    payload=$(release_notes_payload "$repository" "$tag" "$version") || return 1
+    local method=POST endpoint="$CLI_RELEASE_API/repos/$repository/releases"
+    if [[ -n "$response" ]]; then
+      release_id=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"$response")
+      method=PATCH
+      endpoint="$endpoint/$release_id"
+    fi
+    response=$(curl -fsSL -X "$method" \
       -H "Accept: application/vnd.github+json" \
       -H "Authorization: Bearer $token" \
       -H "User-Agent: actr-release-cli" \
       -H "X-GitHub-Api-Version: 2022-11-28" \
-      "$CLI_RELEASE_API/repos/$repository/releases" \
-      -d "$(python3 -c 'import json,sys; print(json.dumps({"tag_name":sys.argv[1],"name":"actr "+sys.argv[1],"generate_release_notes":True,"prerelease":sys.argv[2]=="true"}))' "$tag" "${PRE_RELEASE:-false}")")
+      "$endpoint" -d "$payload")
   fi
   [[ -n "$response" ]] || fail "GitHub Release $repository@$tag does not exist"
   printf '%s' "$response"

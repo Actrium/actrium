@@ -295,6 +295,15 @@ impl RuntimeContext {
         }
     }
 
+    /// Terminal permission error for a realm-denied session, shared by every
+    /// readiness entry point so identical sessions surface one error class
+    /// regardless of which path checked readiness.
+    fn realm_unavailable_error() -> ActrError {
+        ActrError::PermissionDenied(
+            "realm unavailable: membership denied for this session".to_string(),
+        )
+    }
+
     async fn ensure_session_ready(&self) -> ActorResult<()> {
         let Some(session_state) = &self.session_state else {
             return Ok(());
@@ -309,26 +318,70 @@ impl RuntimeContext {
             ));
         }
 
-        if session_state.phase().await != SessionPhase::Active {
-            return Err(ActrError::ConnectionNotReady(
+        // Same phase contract as `ensure_session_ready_until`: a realm-denied
+        // session is terminal and must surface `PermissionDenied`, never a
+        // retryable `ConnectionNotReady`.
+        match session_state.phase().await {
+            SessionPhase::Active => Ok(()),
+            SessionPhase::RealmUnavailable => Err(Self::realm_unavailable_error()),
+            SessionPhase::Rebinding => Err(ActrError::ConnectionNotReady(
                 ConnectionNotReadyInfo::without_retry_hint(),
-            ));
+            )),
         }
-
-        Ok(())
     }
 
-    /// Run the session preflight under the operation's already-created
-    /// absolute deadline.  Readiness is an outbound stage, not a separate
-    /// timeout budget; `definition` names the entry path so a Tell or
-    /// DataChunk readiness timeout is not traced as a caller RPC deadline.
+    /// Wait for the context's session generation to become active under the
+    /// operation's already-created absolute deadline.  A hard rebind gates
+    /// new outbound work while the replacement credentials and signaling
+    /// projections are installed; callers must wait for that transition
+    /// rather than exposing the transient `Rebinding` phase as an immediate
+    /// `ConnectionNotReady` error.
+    ///
+    /// A context from an older generation is never revived.  Once the shared
+    /// session publishes a different generation, the context remains stale
+    /// and returns `ConnectionNotReady` immediately.
     async fn ensure_session_ready_until(
         &self,
         definition: crate::timer::TimerDefinition,
         deadline: crate::transport::RpcDeadline,
     ) -> ActorResult<()> {
-        match crate::timer::timeout_at(definition, deadline.instant(), self.ensure_session_ready())
-            .await
+        let Some(session_state) = &self.session_state else {
+            return Ok(());
+        };
+
+        let context_generation = self.context_generation;
+        let mut readiness = session_state.subscribe_readiness();
+        match crate::timer::timeout_at(definition, deadline.instant(), async move {
+            loop {
+                let current = *readiness.borrow();
+
+                if current.generation != context_generation {
+                    return Err(ActrError::ConnectionNotReady(
+                        ConnectionNotReadyInfo::without_retry_hint(),
+                    ));
+                }
+
+                match current.phase {
+                    SessionPhase::Active => return Ok(()),
+                    // RealmUnavailable is terminal for this session: the realm
+                    // denied membership (403) and no renewal is attempted.
+                    // Surface the terminal permission failure so retry-keyed
+                    // callers stop instead of polling a phase that cannot
+                    // transition back to Active automatically.
+                    SessionPhase::RealmUnavailable => {
+                        return Err(Self::realm_unavailable_error());
+                    }
+                    SessionPhase::Rebinding => {}
+                }
+
+                if readiness.changed().await.is_err() {
+                    return Err(ActrError::ConnectionNotReady(
+                        ConnectionNotReadyInfo::without_retry_hint(),
+                    ));
+                }
+            }
+        })
+        .await
         {
             Ok(result) => result,
             Err(_) => Err(ActrError::TimedOut),

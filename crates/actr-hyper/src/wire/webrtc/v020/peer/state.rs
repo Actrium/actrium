@@ -36,6 +36,34 @@ pub(crate) enum Role {
     Answerer,
 }
 
+/// Initiating fact for the current logical recovery cycle.
+///
+/// This identity is deliberately scoped to `recovery_cycle`, not to one
+/// restart attempt: gate deferral and deadline retries must preserve the
+/// original cause so a remote attempt-1 wake is only coalesced when the local
+/// endpoint actually owns the recovery round.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RecoveryOrigin {
+    /// A local WebRTC/driver failure started the recovery.
+    PeerFailure,
+    /// A local network or lifecycle fact started (or deferred) the recovery.
+    LocalNetwork,
+    /// The remote Answerer explicitly requested the recovery.
+    RemoteRequest,
+}
+
+/// Compatibility fence for an uncorrelated legacy Answer.
+///
+/// Once a local Offer has been superseded by a retry, a legacy Answer has no
+/// exchange id and cannot identify which Offer it answers. ICE credentials do
+/// not provide a sufficient ordering or correlation signal, so every
+/// uncorrelated Answer is rejected until the current correlated exchange
+/// completes. The prior remote ufrag is retained for diagnostics only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LegacyAnswerFence {
+    pub(crate) previous_remote_ufrag: Option<String>,
+}
+
 /// Stable identity of one blocking RTC effect.  The reducer records this when
 /// it emits an effect and consumes it only after an exact completion match.
 /// This prevents two operations on the same PC generation from authenticating
@@ -119,6 +147,11 @@ pub(crate) struct RtcPeerState {
     /// Generation of a pending (hard-recovery) session (Stage 5; declared for
     /// the one-active-generation invariant).
     pub(crate) pending_generation: Option<u64>,
+    /// A retired physical generation that an Answerer may still name on a
+    /// recovery wake while waiting for the Offerer to create a replacement.
+    /// This is a signaling identity only; it is never considered live by
+    /// `is_live_generation` and cannot receive RTC events or data-plane work.
+    pub(crate) parked_signaling_generation: Option<u64>,
     /// Current ICE generation within the active PC generation.
     pub(crate) ice_generation: u64,
 
@@ -130,19 +163,56 @@ pub(crate) struct RtcPeerState {
     /// Connected callbacks from the pre-restart ICE state cannot restore
     /// sendability while this is false.
     pub(crate) recovery_negotiated: bool,
-    /// Monotone identity of the current recovery deadline. It advances only
-    /// when a new recovery epoch/session replacement begins, so duplicate
+    /// Monotone identity of the current recovery deadline. It advances when a
+    /// new recovery epoch/session replacement begins or when an accepted remote
+    /// restart Offer supersedes the request-only attempt deadline, so duplicate
     /// network facts cannot extend an in-flight deadline.
     pub(crate) recovery_epoch: u64,
     /// Identity of the end-to-end recovery budget. Unlike `recovery_epoch`,
     /// this advances only when entering a new logical recovery cycle; Soft
     /// retries and Hard escalation cannot extend its deadline.
     pub(crate) recovery_cycle: u64,
+    /// Coalesce business-driven wakes across concurrent callers within a cycle.
+    pub(crate) business_hint_cycle: Option<u64>,
+    /// First remote Offer window for each ICE generation in a logical cycle
+    /// and physical generation. Duplicate Offers for the same ICE generation
+    /// must not extend the recovery deadline, while a fresh restart Offer may
+    /// re-arm it for the new ICE exchange.
+    pub(crate) answerer_offer_deadline: Option<(u64, u64, u64)>,
     /// A Soft/Hard recovery operation has been launched for the current
     /// recovering epoch. Network-event storms are facts, not a request to run
     /// the same restart repeatedly; this latch is cleared only on convergence
     /// or a terminal attempt failure.
     pub(crate) recovery_attempt_started: bool,
+    /// Initiating fact for the current logical recovery cycle. This is set
+    /// when the cycle is first started and survives signaling-gate deferral,
+    /// soft retries, and hard escalation. The origin is diagnostic context; it
+    /// must not by itself suppress an attempt-1 remote wake. Operation state
+    /// determines whether a local restart is still in flight, and a
+    /// `PeerFailure` recovery remains wakeable for issue #227.
+    pub(crate) recovery_origin: Option<RecoveryOrigin>,
+    /// The current recovery round has been confirmed by a remote
+    /// `IceRestartRequest`. Late local lifecycle/address facts must coalesce
+    /// into that request-driven exchange instead of launching a second offer.
+    pub(crate) recovery_started_by_remote_request: bool,
+    /// An attempt-1 request arrived while this offerer's restart Offer is
+    /// still awaiting its Answer. Give that in-flight exchange a short grace
+    /// window; if no Answer arrives, the request wakes a fresh Offer.
+    pub(crate) remote_request_wake_pending: bool,
+    /// Offerer-side count of deadline-driven Soft retries within the current
+    /// recovery cycle. Retries that keep failing to converge prove the
+    /// restart is not repairing the transport (e.g. the restart rebind
+    /// silently kept a dead interface), so the ladder escalates to a checked
+    /// Hard rebuild at the threshold instead of spinning until the cycle
+    /// budget terminates the attempt.
+    pub(crate) soft_recovery_attempts: u32,
+    /// A `LocalAddressChanged` edge arrived while a soft round was already in
+    /// flight and was coalesced by the attempt latch. When the in-flight
+    /// round converges (on the pre-edge address set), one more restart is
+    /// published so the link moves onto the current set instead of stranding
+    /// on the superseded interface. Cleared when a new soft round launches
+    /// (its rebind resolves the current set) and on Hard rebuild/terminate.
+    pub(crate) address_edge_pending: bool,
     pub(crate) ever_connected: bool,
 
     // Close/lifecycle.
@@ -194,11 +264,12 @@ pub(crate) struct RtcPeerState {
     pub(crate) app_foreground: bool,
     pub(crate) signaling_generation: Option<u64>,
 
-    /// S5-2/S5-5: set when `LocalAddressChanged` (or `ForceReconnect`) was
-    /// received. Forces Hard Recovery (PC generation + 1) instead of Soft
-    /// (ICE restart) on the next recovery attempt, because the current
-    /// PeerConnection's ICE candidates are no longer valid. Cleared when the
-    /// connection reaches `Sendable` again (recovery succeeded).
+    /// S5-5: set by an explicit `ForceReconnect` or long-background policy.
+    /// It forces Hard Recovery (PC generation + 1) instead of Soft Recovery.
+    /// A `LocalAddressChanged` fact itself starts Soft Recovery on the current
+    /// PeerConnection; a failed restart can still escalate through the normal
+    /// hard-recovery paths. Cleared when the connection reaches `Sendable`
+    /// again (recovery succeeded).
     pub(crate) address_changed: bool,
 
     /// S5-4: make-before-break pending session readiness facts. During Hard
@@ -246,6 +317,12 @@ pub(crate) struct RtcPeerState {
     /// must not be applied to the current generation merely because its SDP
     /// type is `Answer`.
     pub(crate) pending_local_sdp_exchange_id: Option<String>,
+
+    /// Set when a local Offer with no Answer yet is superseded by a recovery
+    /// retry. Legacy Answers without an exchange id are then rejected until
+    /// the current correlated exchange completes; the stored ufrag is only
+    /// diagnostic context.
+    pub(crate) legacy_answer_fence: Option<LegacyAnswerFence>,
 
     /// Correlation identity received with the latest accepted remote Offer.
     /// The answerer echoes it on the matching Answer after the serialized SDP
@@ -329,6 +406,7 @@ impl RtcPeerState {
             building_generation: None,
             active_generation: None,
             pending_generation: None,
+            parked_signaling_generation: None,
             ice_generation: 0,
             pc_connected: false,
             rpc_reliable_open: false,
@@ -336,7 +414,14 @@ impl RtcPeerState {
             recovery_negotiated: true,
             recovery_epoch: 0,
             recovery_cycle: 0,
+            business_hint_cycle: None,
+            answerer_offer_deadline: None,
             recovery_attempt_started: false,
+            recovery_origin: None,
+            recovery_started_by_remote_request: false,
+            remote_request_wake_pending: false,
+            soft_recovery_attempts: 0,
+            address_edge_pending: false,
             ever_connected: false,
             close_requested: false,
             terminal_close_done: false,
@@ -367,6 +452,7 @@ impl RtcPeerState {
             announced_local_description_generation: None,
             pending_local_candidates: Vec::new(),
             pending_local_sdp_exchange_id: None,
+            legacy_answer_fence: None,
             pending_remote_sdp_exchange_id: None,
             pending_local_restart_exchange_id: None,
             local_restart_request_id: None,
@@ -448,6 +534,7 @@ impl RtcPeerState {
         self.initial_connection_inflight = true;
         self.ever_connected = false;
         self.unavailable_reason = None;
+        self.parked_signaling_generation = None;
     }
 
     /// Whether the current attempt has converged to terminal unavailable

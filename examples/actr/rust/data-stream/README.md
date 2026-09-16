@@ -154,6 +154,25 @@ let dest = Dest::Peer(receiver_id);
 ctx.send_data_chunk(&dest, chunk).await?;
 ```
 
+`StreamReliable` waits for a usable WebRTC/WebSocket route inside the
+framework and consumes one bounded send deadline. Do not retain the chunk for a
+connection Hook or replay it from a fallback timer. A successful call means the
+local transport accepted the chunk; it does not acknowledge remote processing.
+If the result is an uncertain-delivery error, stop automatic replay and resolve
+the outcome with an application ACK, checksum, or idempotency key.
+
+The returned future is cancellable. Dropping it releases the framework's
+readiness waiter and does not leave an offline payload queue behind:
+
+```rust
+let shutdown = tokio_util::sync::CancellationToken::new();
+let send = ctx.send_data_chunk(&dest, chunk);
+tokio::select! {
+    result = send => result?,
+    _ = shutdown.cancelled() => return Ok(()),
+}
+```
+
 ### Receiver Side
 
 ```rust

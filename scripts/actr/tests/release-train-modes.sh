@@ -401,7 +401,7 @@ test_release_train_workflow_accepts_pre_release_commits() {
 
   # Anchored pattern from the gate; hyphens are allowed inside pre-release
   # identifiers so it stays consistent with the asset-workflow regexes.
-  local pattern='^chore\(release\): basic train v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+  local pattern='^chore\(release\): basic train v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?( \(#[0-9]+\))?$'
   if ! grep -qF "$pattern" .github/workflows/release-train.yml; then
     printf 'release train gate regex must match pre-release commit titles\n' >&2
     exit 1
@@ -412,6 +412,8 @@ test_release_train_workflow_accepts_pre_release_commits() {
   # fails here instead of silently skipping the train.
   local sample
   for sample in \
+    'chore(release): basic train v0.10.2 (#239)' \
+    'chore(release): basic train v0.8.0-rc.1 (#240)' \
     'chore(release): basic train v0.8.0' \
     'chore(release): basic train v0.8.0-rc.1' \
     'chore(release): basic train v0.8.0-alpha.12' \
@@ -424,6 +426,8 @@ test_release_train_workflow_accepts_pre_release_commits() {
   done
   for sample in \
     'chore(release): basic train v0.8.0-rc.1 trailing' \
+    'chore(release): basic train v0.8.0 (#abc)' \
+    'chore(release): basic train v0.8.0 (#239) trailing' \
     'chore(release): basic train v0.8' \
     'feat: basic train v0.8.0-rc.1'; do
     if [[ "$sample" =~ $pattern ]]; then
@@ -431,6 +435,52 @@ test_release_train_workflow_accepts_pre_release_commits() {
       exit 1
     fi
   done
+
+  # Execute the workflow's actual gate script, including first-line extraction,
+  # failure status and dispatch handling, rather than only its regex.
+  python3 - <<'PY_GATE'
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+import textwrap
+
+workflow = Path(".github/workflows/release-train.yml").read_text()
+step = workflow.split("      - name: Check if head commit is a release merge\n", 1)[1]
+script = textwrap.dedent(step.split("        run: |\n", 1)[1].split("\n      - name:", 1)[0])
+cases = [
+    ("push", "chore(release): basic train v0.10.2 (#239)\n\n## v0.10.2", 0, "true"),
+    ("push", "chore(release): basic train v0.8.0-rc.1 (#240)", 0, "true"),
+    ("push", "chore(release): basic train v0.10.2", 0, "true"),
+    ("push", "chore(release): basic train v0.8.0-rc.1 trailing", 1, None),
+    ("push", "chore(release): basic train v0.8", 1, None),
+    ("push", "chore(release): basic train v0.10.2 (#abc)", 1, None),
+    ("push", "chore(release): malformed\n\nchore(release): basic train v0.10.2", 1, None),
+    ("push", "feat: ordinary change", 0, "false"),
+    ("push", "docs: example\n\nchore(release): basic train v0.10.2", 0, "false"),
+    ("push", "", 0, "false"),
+    ("workflow_dispatch", "chore(release): malformed", 0, "true"),
+    ("workflow_dispatch", "", 0, "true"),
+]
+with tempfile.TemporaryDirectory() as directory:
+    output = Path(directory) / "output"
+    for event, message, status, should_run in cases:
+        output.write_text("")
+        result = subprocess.run(
+            ["bash", "-e", "-o", "pipefail", "-c", script],
+            env={**os.environ, "EVENT_NAME": event, "REF_NAME": "main",
+                 "INPUT_TARGET_BRANCH": "", "HEAD_COMMIT_MESSAGE": message,
+                 "GITHUB_OUTPUT": str(output)},
+            capture_output=True, text=True,
+        )
+        assert result.returncode == status, (event, message, result)
+        if should_run is None:
+            assert "::error::" in result.stdout, result
+            assert message.split("\n", 1)[0] in result.stdout, result
+            assert "should_run=true" not in output.read_text(), message
+        else:
+            assert f"should_run={should_run}\n" in output.read_text(), (message, output.read_text())
+PY_GATE
 
   if ! grep -q 'pre_release=true' .github/workflows/release-train.yml; then
     printf 'release train context must infer pre_release from dashed versions\n' >&2

@@ -132,6 +132,22 @@ fn make_ws_client(config: SignalingConfig) -> Arc<WebSocketSignalingClient> {
     Arc::new(WebSocketSignalingClient::new(config))
 }
 
+/// Publish the socket state a committed connection would have. The
+/// send-failure teardown is fenced on this published `Connected` state, so
+/// tests exercising send failures must run against a live published
+/// generation rather than a bare `connected` flag.
+fn publish_connected_socket_state(client: &WebSocketSignalingClient) {
+    let generation = client.connection_generation.load(Ordering::Acquire);
+    *client
+        .socket_state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = SignalingSocketState::Connected {
+        generation,
+        action_id: None,
+    };
+    client.connected.store(true, Ordering::Release);
+}
+
 fn attach_supervisor_fact_sink(
     client: &WebSocketSignalingClient,
 ) -> mpsc::UnboundedReceiver<tp::Input> {
@@ -355,7 +371,7 @@ async fn disconnect_lock_waits_share_one_absolute_deadline() {
 #[tokio::test(start_paused = true)]
 async fn send_envelope_times_out_while_waiting_for_sink_lock() {
     let client = make_ws_client(make_config());
-    client.connected.store(true, Ordering::Release);
+    publish_connected_socket_state(&client);
     let mut events = client.subscribe_events();
     let _sink_guard = client.ws_sink.lock().await;
 
@@ -395,7 +411,7 @@ async fn send_envelope_times_out_while_waiting_for_sink_lock() {
 #[tokio::test(start_paused = true)]
 async fn send_envelope_timeout_fires_no_earlier_than_its_deadline() {
     let client = make_ws_client(make_config());
-    client.connected.store(true, Ordering::Release);
+    publish_connected_socket_state(&client);
     let _sink_guard = client.ws_sink.lock().await;
 
     let send_task = {
@@ -434,7 +450,7 @@ async fn send_envelope_failure_publishes_disconnect_fact_without_local_retry() {
     let client = make_ws_client(make_config());
     let mut facts = attach_supervisor_fact_sink(&client);
     client.connection_generation.store(23, Ordering::Release);
-    client.connected.store(true, Ordering::Release);
+    publish_connected_socket_state(&client);
     let mut events = client.subscribe_events();
 
     let err = client
@@ -753,7 +769,7 @@ async fn ping_send_failure_emits_remote_reset_for_snapshotted_generation() {
 #[tokio::test]
 async fn send_envelope_failure_does_not_wait_for_reentrant_hook() {
     let client = make_ws_client(make_config());
-    client.connected.store(true, Ordering::Release);
+    publish_connected_socket_state(&client);
 
     let hook_entered = Arc::new(tokio::sync::Notify::new());
     let hook_release = Arc::new(tokio::sync::Notify::new());
@@ -1900,4 +1916,154 @@ async fn test_inbound_egress_rejects_frame_larger_than_budget() {
 
     let result = egress.send(SignalingEnvelope::default(), 4096).await;
     assert_eq!(result, Err(InboundEnqueueError::Saturated));
+}
+
+// ---------------------------------------------------------------------------
+// Generation-fenced send-failure teardown (PR #229 review, Finding 3)
+// ---------------------------------------------------------------------------
+
+/// Bind a local WebSocket server that completes every handshake and then
+/// holds each connection open without ever reading it again. Holding (rather
+/// than closing) keeps the client's receiver task parked, so the only
+/// teardown observed comes from the code under test.
+async fn spawn_silent_ws_server() -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind silent signaling server");
+    let url = format!("ws://{}", listener.local_addr().expect("server address"));
+    let task = tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                if let Ok(websocket) = tokio_tungstenite::accept_async(stream).await {
+                    let _held = websocket;
+                    std::future::pending::<()>().await;
+                }
+            });
+        }
+    });
+    (url, task)
+}
+
+fn local_server_config(url: &str) -> SignalingConfig {
+    SignalingConfig {
+        server_url: Url::parse(url).unwrap(),
+        connection_timeout: 5,
+        heartbeat_interval: 30,
+        reconnect_config: ReconnectConfig::default(),
+        auth_config: None,
+        webrtc_role: None,
+        inbound_queue: InboundQueueConfig::default(),
+    }
+}
+
+/// A send failure on a socket whose generation a recovery already superseded
+/// must not touch the replacement connection: no liveness swap, no task
+/// aborts, no sink teardown, and no spurious Disconnected transition.
+#[tokio::test]
+async fn send_failure_teardown_skips_superseded_generation() {
+    let (url, server) = spawn_silent_ws_server().await;
+    let client = make_ws_client(local_server_config(&url));
+    client.connect().await.expect("initial connect");
+
+    // The send under test began on this generation; capture it before the
+    // recovery takeover, exactly as send_envelope snapshots its socket.
+    let failed_generation = client.connection_generation.load(Ordering::Acquire);
+    client
+        .disconnect_for_recovery()
+        .await
+        .expect("recovery disconnect");
+    client
+        .connect()
+        .await
+        .expect("replacement connect on the bumped generation");
+    assert!(client.is_connected(), "replacement socket must be live");
+
+    let mut events = client.subscribe_events();
+    client
+        .handle_envelope_send_failure(failed_generation, DisconnectReason::SendFailed)
+        .await;
+
+    assert!(
+        client.is_connected(),
+        "a superseded send failure must not drop the replacement connection"
+    );
+    let ping_alive = {
+        let guard = client.ping_task.lock().await;
+        guard.as_ref().is_some_and(|handle| !handle.is_finished())
+    };
+    assert!(ping_alive, "replacement ping task must keep running");
+    let receiver_alive = {
+        let guard = client.receiver_task.lock().await;
+        guard.as_ref().is_some_and(|handle| !handle.is_finished())
+    };
+    assert!(
+        receiver_alive,
+        "replacement receiver task must keep running"
+    );
+    assert!(
+        client.ws_sink.lock().await.is_some(),
+        "replacement sink must stay installed"
+    );
+    assert!(
+        matches!(
+            events.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ),
+        "no disconnect transition may be published for the live replacement"
+    );
+
+    client.disconnect().await.expect("disconnect test client");
+    server.abort();
+}
+
+/// A send failure on the still-live generation owns the teardown: old tasks
+/// are aborted, the sink is retired, waiters are dropped, and exactly one
+/// Disconnected transition is published for that generation.
+#[tokio::test]
+async fn send_failure_teardown_completes_for_live_generation() {
+    let (url, server) = spawn_silent_ws_server().await;
+    let client = make_ws_client(local_server_config(&url));
+    client.connect().await.expect("initial connect");
+    let generation = client.connection_generation.load(Ordering::Acquire);
+
+    let mut events = client.subscribe_events();
+    client
+        .handle_envelope_send_failure(generation, DisconnectReason::SendFailed)
+        .await;
+
+    assert!(!client.is_connected(), "failed socket must be invalidated");
+    assert!(
+        client.ping_task.lock().await.is_none(),
+        "old ping task must be aborted"
+    );
+    assert!(
+        client.receiver_task.lock().await.is_none(),
+        "old receiver task must be aborted"
+    );
+    assert!(
+        client.ws_sink.lock().await.is_none(),
+        "old sink must be retired"
+    );
+    let published = matches!(
+        &*client
+            .socket_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        SignalingSocketState::Disconnected {
+            last_generation: Some(published)
+        } if *published == generation
+    );
+    assert!(
+        published,
+        "the failure handler must publish its own Disconnected state"
+    );
+    match tokio::time::timeout(std::time::Duration::from_secs(1), events.recv()).await {
+        Ok(Ok(SignalingEvent::Disconnected { reason })) => {
+            assert!(matches!(reason, DisconnectReason::SendFailed));
+        }
+        other => panic!("expected one Disconnected transition, got {other:?}"),
+    }
+
+    client.disconnect().await.expect("disconnect test client");
+    server.abort();
 }

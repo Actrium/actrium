@@ -5,8 +5,9 @@
 //! stream (RFC: "the SignalingClient receive stream MUST have one consumer").
 //! Inbound Offer/Answer/Candidate/RoleAssignment are dispatched to the target
 //! peer's controller; an offer from an unknown peer requests the manager to create
-//! an answerer controller. Outbound messages from controllers are forwarded onto
-//! the transport.
+//! an answerer controller. A request acknowledgement is also routed back to the
+//! requester's Controller so a missing remote Session can start a fresh attempt.
+//! Outbound messages from controllers are forwarded onto the transport.
 //!
 //! The router is transport-agnostic: [`SignalingTransport`] abstracts the wire
 //! (the production WebSocket signaling client, or an in-memory bus in tests).
@@ -18,6 +19,9 @@ use std::sync::Arc;
 use actr_protocol::ActrId;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
+use tracing::Instrument;
+#[cfg(feature = "opentelemetry")]
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::wire::webrtc::v020::manager::RtcConnectionManager;
 use crate::wire::webrtc::v020::peer::reducer::SignalingMessage;
@@ -64,7 +68,11 @@ pub(crate) trait SignalingTransport: Send + Sync {
     async fn recv_event(&self) -> Option<SignalingInbound> {
         self.recv()
             .await
-            .map(|(from, message)| SignalingInbound::PeerMessage { from, message })
+            .map(|(from, message)| SignalingInbound::PeerMessage {
+                from,
+                message,
+                span: tracing::Span::current(),
+            })
     }
 }
 
@@ -315,6 +323,57 @@ impl SignalingRouter {
         self.dispatch_chains.clone()
     }
 
+    fn try_send_ice_restart_request_ack(
+        &self,
+        peer: ActrId,
+        request_id: String,
+        attempt: u32,
+        outcome: i32,
+    ) {
+        let sent = self.manager.try_send_signaling(
+            peer.clone(),
+            SignalingMessage::IceRestartRequestAck {
+                request_id,
+                attempt,
+                outcome,
+            },
+        );
+        if !sent {
+            tracing::warn!(
+                peer = %peer.to_string_repr(),
+                "outbound signaling full; dropped ICE restart request acknowledgement"
+            );
+        }
+    }
+
+    async fn try_send_ice_restart_request_ack_for_controller(
+        &self,
+        peer: ActrId,
+        controller_lifecycle_id: u64,
+        request_id: String,
+        attempt: u32,
+        outcome: i32,
+    ) {
+        let sent = self
+            .manager
+            .try_send_signaling_for_controller(
+                peer.clone(),
+                controller_lifecycle_id,
+                SignalingMessage::IceRestartRequestAck {
+                    request_id,
+                    attempt,
+                    outcome,
+                },
+            )
+            .await;
+        if !sent {
+            tracing::debug!(
+                peer = %peer.to_string_repr(),
+                "skipping ICE restart request acknowledgement after Controller retirement or queue saturation"
+            );
+        }
+    }
+
     /// Run the routing loop: forward controller-originated messages onto the
     /// transport, and dispatch transport-originated messages to controllers.
     ///
@@ -355,7 +414,12 @@ impl SignalingRouter {
                                     | SignalingMessage::IceRestartOffer { .. }
                             )
                             .then(|| dispatch.message.clone());
-                            if let Err(error) = transport.send_dispatch(dispatch).await {
+                            let dispatch_span = dispatch.span.clone();
+                            if let Err(error) = transport
+                                .send_dispatch(dispatch)
+                                .instrument(dispatch_span)
+                                .await
+                            {
                                 tracing::warn!(
                                     peer = %peer.to_string_repr(),
                                     generation = attempt.map(|a| a.pc_generation).unwrap_or(0),
@@ -386,7 +450,11 @@ impl SignalingRouter {
                 }
                 inbound = transport.recv_event() => {
                     match inbound {
-                        Some(SignalingInbound::PeerMessage { from, message }) => {
+                        Some(SignalingInbound::PeerMessage {
+                            from,
+                            message,
+                            span,
+                        }) => {
                             while inbound_tasks.try_join_next().is_some() {}
                             // Reap finished escalations every iteration so a
                             // sustained multi-identity flood cannot grow the
@@ -448,7 +516,7 @@ impl SignalingRouter {
                                                     if let Some(handle) =
                                                         manager.get_controller(&peer).await
                                                     {
-                                                        let _ = handle.force_reconnect().await;
+                                                        let _ = handle.force_reconnect_with_span(span.clone()).await;
                                                     }
                                                 },
                                             )
@@ -503,7 +571,13 @@ impl SignalingRouter {
                                                 gate.notified().await;
                                             }
                                             routing_started.store(true, std::sync::atomic::Ordering::Release);
-                                            router.route_inbound(from.clone(), message).await;
+                                            router
+                                                .route_inbound_with_span(
+                                                    from.clone(),
+                                                    message,
+                                                    span.clone(),
+                                                )
+                                                .await;
                                         },
                                     )
                                     .await
@@ -529,7 +603,7 @@ impl SignalingRouter {
                                             let _ = crate::timer::timeout(
                                                 crate::timer::ids::RTC_SIGNALING_DISPATCH,
                                                 INBOUND_DISPATCH_TIMEOUT,
-                                                handle.force_reconnect(),
+                                                handle.force_reconnect_with_span(span.clone()),
                                             )
                                             .await;
                                         }
@@ -574,6 +648,31 @@ impl SignalingRouter {
 
     /// Dispatch one inbound message to the right controller by remote `ActrId`.
     pub(crate) async fn route_inbound(&self, from: ActrId, message: SignalingMessage) {
+        self.route_inbound_with_span(from, message, tracing::Span::current())
+            .await;
+    }
+
+    pub(crate) async fn route_inbound_with_span(
+        &self,
+        from: ActrId,
+        message: SignalingMessage,
+        parent_span: tracing::Span,
+    ) {
+        let receive_span = tracing::info_span!(
+            "signaling.route",
+            peer = %from.to_string_repr(),
+            message_kind = message.kind_name(),
+        );
+        #[cfg(feature = "opentelemetry")]
+        let _ = receive_span.set_parent(parent_span.context());
+        #[cfg(not(feature = "opentelemetry"))]
+        let _ = &parent_span;
+        self.route_inbound_inner(from, message)
+            .instrument(receive_span)
+            .await;
+    }
+
+    async fn route_inbound_inner(&self, from: ActrId, message: SignalingMessage) {
         match message {
             SignalingMessage::Offer { desc, exchange_id } => {
                 // An offer from an unknown peer creates an answerer controller
@@ -585,7 +684,10 @@ impl SignalingRouter {
             SignalingMessage::IceRestartOffer { desc, exchange_id } => {
                 if let Some(handle) = self.manager.get_controller(&from).await {
                     let _ = handle
-                        .apply_remote_ice_restart_offer_correlated(*desc, Some(exchange_id.clone()))
+                        .apply_signaling_message_with_span(
+                            SignalingMessage::IceRestartOffer { desc, exchange_id },
+                            tracing::Span::current(),
+                        )
                         .await;
                 } else {
                     // Preserve the existing wire contract: a restart offer is
@@ -613,18 +715,48 @@ impl SignalingRouter {
                 attempt,
             } => {
                 if let Some(handle) = self.manager.get_controller(&from).await {
-                    let _ = handle.apply_ice_restart_request(request_id, attempt).await;
+                    let controller_lifecycle_id = handle.controller_lifecycle_id();
+                    match handle
+                        .apply_ice_restart_request_with_outcome(request_id.clone(), attempt)
+                        .await
+                    {
+                        Ok(outcome) => {
+                            self.try_send_ice_restart_request_ack_for_controller(
+                                from,
+                                controller_lifecycle_id,
+                                request_id,
+                                attempt,
+                                outcome,
+                            )
+                            .await;
+                        }
+                        Err(_) => {
+                            tracing::debug!(
+                                peer = %from.to_string_repr(),
+                                "dropping ICE restart request acknowledgement after Controller shutdown"
+                            );
+                        }
+                    }
                 } else {
-                    tracing::warn!(
-                        peer = %from.to_string_repr(),
-                        "dropping ICE restart request for unknown peer"
+                    // Preserve the pre-542 Coordinator contract: a request
+                    // cannot be applied without a local Controller/Session.
+                    // The Answerer consumes this negative acknowledgement and
+                    // starts a fresh role-negotiated connection attempt.
+                    self.try_send_ice_restart_request_ack(
+                        from,
+                        request_id,
+                        attempt,
+                        actr_protocol::ice_restart_request_ack::Outcome::NoActiveSession as i32,
                     );
                 }
             }
             SignalingMessage::Answer { desc, exchange_id } => {
                 if let Some(handle) = self.manager.get_controller(&from).await {
                     let _ = handle
-                        .apply_remote_description_correlated(*desc, exchange_id)
+                        .apply_signaling_message_with_span(
+                            SignalingMessage::Answer { desc, exchange_id },
+                            tracing::Span::current(),
+                        )
                         .await;
                 } else {
                     tracing::warn!(
@@ -635,7 +767,12 @@ impl SignalingRouter {
             }
             SignalingMessage::Candidate(candidate) => {
                 if let Some(handle) = self.manager.get_controller(&from).await {
-                    let _ = handle.apply_remote_candidate(candidate).await;
+                    let _ = handle
+                        .apply_signaling_message_with_span(
+                            SignalingMessage::Candidate(candidate),
+                            tracing::Span::current(),
+                        )
+                        .await;
                 } else {
                     tracing::debug!(
                         peer = %from.to_string_repr(),
@@ -669,7 +806,38 @@ impl SignalingRouter {
                     "remote rejected ICE restart; escalating to Hard Recovery"
                 );
                 if let Some(handle) = self.manager.get_controller(&from).await {
-                    let _ = handle.force_reconnect().await;
+                    let _ = handle
+                        .apply_signaling_message_with_span(
+                            SignalingMessage::IceRestartRejected {
+                                exchange_id,
+                                reason,
+                            },
+                            tracing::Span::current(),
+                        )
+                        .await;
+                }
+            }
+            SignalingMessage::IceRestartRequestAck {
+                request_id,
+                attempt,
+                outcome,
+            } => {
+                if let Some(handle) = self.manager.get_controller(&from).await {
+                    let _ = handle
+                        .apply_signaling_message_with_span(
+                            SignalingMessage::IceRestartRequestAck {
+                                request_id,
+                                attempt,
+                                outcome,
+                            },
+                            tracing::Span::current(),
+                        )
+                        .await;
+                } else {
+                    tracing::debug!(
+                        peer = %from.to_string_repr(),
+                        "dropping ICE restart request acknowledgement for unknown peer"
+                    );
                 }
             }
         }

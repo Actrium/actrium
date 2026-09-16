@@ -57,7 +57,9 @@ public sealed partial class MainWindow : Window
         RuntimeLog.Info($"Sending echo request; length={(message ?? InputBox.Text).Length}");
         try
         {
-            var reply = await _service.SendEchoWhenReadyAsync(message ?? InputBox.Text);
+            // Call owns route readiness and transport retry; the UI does not
+            // replay the request from a connection Hook or fallback timer.
+            var reply = await _service.SendEchoAsync(message ?? InputBox.Text);
             RuntimeLog.Info($"Echo reply received; length={reply.Length}");
             ReplyText.Text = reply;
             ActrService.EmitResult(reply);

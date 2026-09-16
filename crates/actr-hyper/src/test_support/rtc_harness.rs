@@ -421,6 +421,56 @@ impl TestRtcHookRecorder {
 }
 
 impl TestRtcControl {
+    /// Observe and fault the manager of a fully started production Node.
+    #[cfg(test)]
+    pub(crate) fn for_node(node: &crate::ActrRef) -> Self {
+        Self {
+            manager: node
+                .shared
+                .v020_manager
+                .clone()
+                .expect("RTC-enabled fixture node"),
+        }
+    }
+
+    /// Hold the concrete channel so tests can prove reuse rather than merely
+    /// comparing lane counts. This does not change readiness or controller state.
+    #[cfg(test)]
+    pub(crate) async fn lane_probe(&self, peer: &ActrId, payload: PayloadType) -> TestLaneProbe {
+        let controller = self
+            .manager
+            .get_controller(peer)
+            .await
+            .expect("fixture controller");
+        let generation = controller.snapshot().pc_generation;
+        let lane = crate::wire::webrtc::v020::status::LaneKind::from_payload_type(payload)
+            .expect("DataChannel payload");
+        let handle = controller
+            .lane_handle(generation, lane)
+            .expect("fixture lane");
+        TestLaneProbe {
+            channel: handle.channel().clone(),
+        }
+    }
+
+    /// Close physical resources without removing their logical Controller,
+    /// then deliver its terminal driver fact. This models S4 explicitly;
+    /// it does not pretend the test merely changed a network interface.
+    #[cfg(test)]
+    pub(crate) async fn retire_physical_session(&self, peer: &ActrId) -> u64 {
+        let handle = self
+            .manager
+            .get_controller(peer)
+            .await
+            .expect("fixture controller");
+        let generation = handle.snapshot().pc_generation;
+        handle.force_close_sessions().await;
+        handle.inject_peer_connection_state_for_test(
+            webrtc::peer_connection::RTCPeerConnectionState::Closed,
+        );
+        generation
+    }
+
     fn new(manager: Arc<RtcConnectionManager>) -> Self {
         Self { manager }
     }
@@ -510,6 +560,43 @@ impl TestRtcControl {
 
     pub async fn generation(&self, peer: &ActrId) -> Option<u64> {
         self.state(peer).await.map(|state| state.pc_generation)
+    }
+
+    pub async fn ice_generation(&self, peer: &ActrId) -> Option<u64> {
+        self.manager
+            .get_snapshot(peer)
+            .await
+            .map(|state| state.ice_generation)
+    }
+
+    pub async fn wait_ice_generation(
+        &self,
+        peer: &ActrId,
+        exclusive_minimum: u64,
+        timeout: Duration,
+    ) -> Option<u64> {
+        crate::timer::timeout(crate::timer::ids::WEBRTC_PEER_SENDABLE, timeout, async {
+            let mut peer_set = self.manager.subscribe_peers();
+            loop {
+                if let Some(mut rx) = self.manager.subscribe(peer).await {
+                    loop {
+                        let state = rx.borrow().clone();
+                        if state.ice_generation > exclusive_minimum {
+                            return state.ice_generation;
+                        }
+                        if rx.changed().await.is_err() {
+                            break;
+                        }
+                    }
+                }
+                peer_set
+                    .changed()
+                    .await
+                    .expect("manager peer registry watch closed");
+            }
+        })
+        .await
+        .ok()
     }
 
     pub async fn is_sendable(&self, peer: &ActrId) -> bool {
@@ -681,6 +768,26 @@ impl TestRtcControl {
         &self,
     ) -> Arc<crate::wire::webrtc::v020::recovery::RtcRecoverySupervisor> {
         self.manager.supervisor().clone()
+    }
+}
+
+/// A physical-channel observation token; holding it never grants sendability.
+#[cfg(test)]
+pub(crate) struct TestLaneProbe {
+    channel: Arc<dyn webrtc::data_channel::DataChannel>,
+}
+
+#[cfg(test)]
+impl TestLaneProbe {
+    pub(crate) fn same_channel(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.channel, &other.channel)
+    }
+
+    pub(crate) async fn is_open(&self) -> bool {
+        matches!(
+            self.channel.ready_state().await,
+            Ok(webrtc::data_channel::RTCDataChannelState::Open)
+        )
     }
 }
 
@@ -984,6 +1091,7 @@ pub struct TestHarness {
     // its historical recovery cases retain their original Runtime, signaling,
     // address-provider, and scheduling path.
     v020_matrix_instrumentation: bool,
+    wildcard_rebind_addresses: bool,
     address_providers: HashMap<u64, Arc<TestLocalAddressProvider>>,
     peers: HashMap<u64, TestPeer>,
     bg_tasks: Vec<tokio::task::JoinHandle<()>>,
@@ -1011,6 +1119,7 @@ impl TestHarness {
             signaling_faults: Default::default(),
             evidence: Default::default(),
             v020_matrix_instrumentation: false,
+            wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
             bg_tasks: Vec::new(),
@@ -1029,6 +1138,7 @@ impl TestHarness {
             signaling_faults: Default::default(),
             evidence: Default::default(),
             v020_matrix_instrumentation: false,
+            wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
             bg_tasks: Vec::new(),
@@ -1048,6 +1158,7 @@ impl TestHarness {
             signaling_faults: Default::default(),
             evidence: Default::default(),
             v020_matrix_instrumentation: true,
+            wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
             bg_tasks: Vec::new(),
@@ -1066,10 +1177,23 @@ impl TestHarness {
             signaling_faults: Default::default(),
             evidence: Default::default(),
             v020_matrix_instrumentation: true,
+            wildcard_rebind_addresses: false,
             address_providers: HashMap::new(),
             peers: HashMap::new(),
             bg_tasks: Vec::new(),
         }
+    }
+
+    /// External-signaling v0.20 fixture that switches the test provider to
+    /// wildcard bind inputs after its first synthetic address change. This
+    /// keeps the initial pair deterministic while exercising webrtc-rs's live
+    /// interface expansion on an ICE-restart rebind.
+    pub async fn with_external_signaling_and_wildcard_rebind(
+        signaling_url: impl Into<String>,
+    ) -> Self {
+        let mut harness = Self::with_external_signaling(signaling_url).await;
+        harness.wildcard_rebind_addresses = true;
+        harness
     }
 
     pub async fn add_peer(&mut self, serial: u64) {
@@ -1128,9 +1252,14 @@ impl TestHarness {
     ) {
         assert!(!self.peers.contains_key(&serial), "duplicate peer {serial}");
         let id = make_actor_id(serial);
-        let mutable_address_provider = Arc::new(TestLocalAddressProvider::new(vec![IpAddr::V4(
-            Ipv4Addr::LOCALHOST,
-        )]));
+        let initial_addresses = vec![IpAddr::V4(Ipv4Addr::LOCALHOST)];
+        let mutable_address_provider = if self.wildcard_rebind_addresses {
+            Arc::new(TestLocalAddressProvider::new_with_wildcard_rebind(
+                initial_addresses,
+            ))
+        } else {
+            Arc::new(TestLocalAddressProvider::new(initial_addresses))
+        };
         let address_provider: Arc<dyn LocalAddressProvider> = if self.v020_matrix_instrumentation {
             mutable_address_provider.clone()
         } else {
@@ -1395,13 +1524,6 @@ impl TestHarness {
             .set_addresses(addresses)
     }
 
-    pub(crate) fn address_provider(&self, serial: u64) -> Arc<TestLocalAddressProvider> {
-        self.address_providers
-            .get(&serial)
-            .unwrap_or_else(|| panic!("peer {serial} address provider not found"))
-            .clone()
-    }
-
     /// Remove and fully shut down one independent endpoint while leaving the
     /// other endpoints and the externally owned Actrix services alive. This is
     /// the process-restart seam used by the mobile pair contract.
@@ -1425,6 +1547,22 @@ impl TestHarness {
         self.peer(from).rtc.wait_sendable(&target, timeout).await;
         let source = self.peer(from).id.clone();
         self.peer(to).rtc.wait_sendable(&source, timeout).await;
+    }
+
+    /// Wait until the production signaling handler has completed the
+    /// actor-registration phase for this peer. The WebSocket client reports
+    /// connected after the handshake, while the server registers the
+    /// `actor_id -> client_id` index inside its upgrade task. A Ping/Pong is
+    /// processed only after that registration code, so it provides an
+    /// event-driven readiness barrier for pair tests.
+    pub async fn wait_for_signaling_registration(&self, serial: u64, timeout: Duration) {
+        self.peer(serial)
+            .signaling_client
+            .probe_alive(timeout)
+            .await
+            .unwrap_or_else(|error| {
+                panic!("peer {serial} signaling registration did not become ready: {error}")
+            });
     }
 
     pub fn simulate_disconnect(&self) {

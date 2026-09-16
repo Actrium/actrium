@@ -93,13 +93,23 @@ jobs:
 
   gen-test:
     name: Kotlin Codegen Test
-    runs-on: ubuntu-latest-m
+    # High pool: the codegen job resolves one pinned Gradle 9.2.1 distribution
+    # plus crate downloads, and compiles Rust + Kotlin in parallel — the
+    # external cluster's egress and 4-16 CPU / SSD work volume cut both the
+    # download and compile phases.
+    runs-on: [self-hosted, Linux, X64, high]
     env:
       ACTR_GRADLE_REPOSITORIES: canonical
+      # rustc-level compilation cache (in-cluster MinIO backend) instead of
+      # Swatinem/rust-cache: on ephemeral ARC pods the rust-cache post-job
+      # upload to the GitHub Actions cache blob store goes over the slow
+      # public egress (5-10 min per run) while sccache hits the local
+      # backend over the cluster network.
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: wasm32-unknown-unknown
       - name: Setup Java
@@ -107,7 +117,13 @@ jobs:
         with:
           java-version: "17"
           distribution: "temurin"
-          cache: gradle
+          # No `cache: gradle`: the ~/.gradle cache archive lives in the
+          # GitHub Actions cache blob store; restoring it over the ARC public
+          # egress times out past the blob SAS validity (~20 min, then fails —
+          # observed 2026-09-08). JDK comes from the image toolcache instantly,
+          # the Gradle distribution is pre-seeded in the image, and incremental
+          # build state is covered by the targeted `Cache Gradle build outputs`
+          # step below.
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
@@ -125,7 +141,6 @@ jobs:
           curl -fsSL https://github.com/rustwasm/wasm-pack/releases/download/v0.13.1/wasm-pack-v0.13.1-x86_64-unknown-linux-musl.tar.gz | tar xz -C /tmp
           mv /tmp/wasm-pack-v0.13.1-x86_64-unknown-linux-musl/wasm-pack ~/.cargo/bin/
           chmod +x ~/.cargo/bin/wasm-pack
-      - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
       - name: Cache Gradle build outputs
