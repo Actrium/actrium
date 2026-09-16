@@ -12,7 +12,7 @@ default = []
 testing = []
 
 [dependencies]
-admin = { path = "../loran-control", package = "actrix-admin", version = "0.10.3" }
+admin = { path = "../loran-control", package = "actrix-admin", version = "0.10.4" }
 
 [lints]
 workspace = true
