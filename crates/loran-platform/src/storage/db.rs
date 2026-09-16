@@ -211,6 +211,7 @@ impl Database {
                 serial_number INTEGER NOT NULL,
                 actor_type TEXT NOT NULL,
                 target TEXT,
+                auth_mode INTEGER,
                 issued_at INTEGER NOT NULL,
                 PRIMARY KEY(realm_id, serial_number),
                 FOREIGN KEY(realm_id) REFERENCES realm(id) ON DELETE CASCADE
@@ -223,6 +224,8 @@ impl Database {
         // add it idempotently so existing rows get NULL (per-target recheck
         // degrades to type-only for those rows, logged in recheck_existing_actor).
         add_column_if_missing(&mut tx, "issued_actor_identity", "target", "TEXT").await?;
+        // NULL preserves the distinction between legacy rows and verified Linked registrations.
+        add_column_if_missing(&mut tx, "issued_actor_identity", "auth_mode", "INTEGER").await?;
 
         // Publisher Registry (Manufacturer Registry) tables
         // name is the canonical HTTPS publisher domain.
@@ -403,7 +406,7 @@ impl Database {
         .execute(&mut *tx)
         .await?;
 
-        // /reissue idempotent response cache. Keyed by SHA-256(nonce) so a lost-
+        // /reissue idempotent response cache. Keyed by an authenticated request hash so a lost-
         // response retry of the same attempt decrypts and replays the exact
         // credential AIS signed on the first attempt instead of re-signing. The
         // nonce consume, this cache write, and the `delivered_at` mark on the
@@ -544,6 +547,36 @@ mod tests {
         .execute(db.get_pool())
         .await;
         assert!(second.is_err(), "v1 must enforce one Realm per database");
+    }
+
+    #[tokio::test]
+    async fn existing_v1_actor_ledger_gains_nullable_auth_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::new(dir.path()).await.unwrap();
+        sqlx::query("ALTER TABLE issued_actor_identity DROP COLUMN auth_mode")
+            .execute(db.get_pool())
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO realm (id, name, status, enabled, created_at, secret_current)
+             VALUES (1, 'primary', 'Active', 1, 1, 'hash')",
+        )
+        .execute(db.get_pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO issued_actor_identity (realm_id, serial_number, actor_type, target, issued_at)
+             VALUES (1, 42, 'apps.example.com/worker@1.0.0', 'wasm32-wasip1', 1)",
+        ).execute(db.get_pool()).await.unwrap();
+        db.get_pool().close().await;
+
+        let upgraded = Database::new(dir.path()).await.unwrap();
+        let row: (String, Option<i32>) = sqlx::query_as(
+            "SELECT actor_type, auth_mode FROM issued_actor_identity WHERE realm_id = 1 AND serial_number = 42",
+        ).fetch_one(upgraded.get_pool()).await.unwrap();
+        assert_eq!(row, ("apps.example.com/worker@1.0.0".to_string(), None));
+        // Repeated initialization preserves the upgraded schema and records.
+        upgraded.initialize_schema().await.unwrap();
     }
 
     #[tokio::test]

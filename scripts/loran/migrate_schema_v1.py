@@ -181,6 +181,7 @@ def apply_migration(
             serial_number INTEGER NOT NULL,
             actor_type TEXT NOT NULL,
             target TEXT,
+            auth_mode INTEGER,
             issued_at INTEGER NOT NULL,
             PRIMARY KEY(realm_id, serial_number),
             FOREIGN KEY(realm_id) REFERENCES realm(id) ON DELETE CASCADE

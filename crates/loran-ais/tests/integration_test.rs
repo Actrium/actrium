@@ -3508,3 +3508,166 @@ async fn test_reissue_proof_rejected_after_replay_window() {
 
     env.shutdown_signer().await;
 }
+
+/// A nonce is public authorization context, not a bearer credential for cached
+/// reissue responses. Exact retries must work; modified credentials must not.
+#[tokio::test]
+#[serial]
+async fn test_reissue_cache_requires_original_authenticated_request() {
+    let fx = path2_fixture("cache.example.com", "CacheBinding", "wasm32-wasip1").await;
+    let app = create_test_router(&fx._env).await;
+    let mut registration = base_path2_request(&fx, 1001);
+    sign_manufacturer_request(&mut registration, &fx.key, &fx.manifest_bytes);
+    let initial = post_register(app.clone(), registration.clone(), Some("seed-realm-secret")).await;
+    let initial = match initial.result.unwrap() {
+        register_response::Result::Success(ok) => ok,
+        other => panic!("initial registration failed: {other:?}"),
+    };
+    sign_manufacturer_request_at(
+        &mut registration,
+        &fx.key,
+        &fx.manifest_bytes,
+        test_unix_now_secs(),
+        vec![0x93; 32],
+    );
+    let request = ReissueCredentialRequest {
+        actr_id: initial.actr_id.clone(),
+        registration,
+        renewal_proof: initial.renewal_token,
+        attempt_id: control_attempt_id(),
+    };
+    let first = post_reissue(app.clone(), request.clone(), Some("seed-realm-secret")).await;
+    assert!(matches!(
+        &first.result,
+        Some(register_response::Result::Success(_))
+    ));
+    // A new issuer instance must still recognize the durable request binding.
+    let restarted = create_test_router(&fx._env).await;
+    let replay = post_reissue(restarted, request.clone(), Some("seed-realm-secret")).await;
+    assert_eq!(first.encode_to_vec(), replay.encode_to_vec());
+
+    let mut mutations = Vec::new();
+    let mut missing_proof = request.clone();
+    missing_proof.renewal_proof = None;
+    mutations.push(missing_proof);
+    let mut wrong_proof = request.clone();
+    wrong_proof.renewal_proof = Some(prost::bytes::Bytes::from(vec![0xff; 32]));
+    mutations.push(wrong_proof);
+    let mut missing_signature = request.clone();
+    missing_signature.registration.manufacturer_auth_signature = None;
+    mutations.push(missing_signature);
+    let mut wrong_actor = request.clone();
+    wrong_actor.actr_id.serial_number += 1;
+    mutations.push(wrong_actor);
+    let mut wrong_target = request.clone();
+    wrong_target.registration.target = Some("aarch64-apple-darwin".to_string());
+    mutations.push(wrong_target);
+    let mut linked = request.clone();
+    linked.registration.auth_mode = Some(RegisterAuthMode::Linked as i32);
+    mutations.push(linked);
+    for changed in mutations {
+        let response = post_reissue(app.clone(), changed, Some("seed-realm-secret")).await;
+        assert!(
+            matches!(response.result, Some(register_response::Result::Error(_))),
+            "a changed request must not retrieve cached credentials"
+        );
+    }
+
+    // Cached credentials must not bypass an actor revocation either.
+    ais::renewal::revoke_actor(&request.actr_id, "cache regression")
+        .await
+        .unwrap();
+    let revoked = post_reissue(app, request, Some("seed-realm-secret")).await;
+    assert!(matches!(
+        revoked.result,
+        Some(register_response::Result::Error(_))
+    ));
+}
+
+/// Path 2 has no package row, but is still publisher-authenticated. Exercise
+/// the real renewal endpoint, legacy NULL auth modes, and publisher deletion.
+#[tokio::test]
+#[serial]
+async fn test_unpublished_renewal_enforces_publisher_status() {
+    let fx = path2_fixture("renew.example.com", "UnpublishedRenew", "wasm32-wasip1").await;
+    let app = create_test_router(&fx._env).await;
+    let mut registration = base_path2_request(&fx, 1001);
+    sign_manufacturer_request(&mut registration, &fx.key, &fx.manifest_bytes);
+    let initial = post_register(app.clone(), registration, Some("seed-realm-secret")).await;
+    let initial = match initial.result.unwrap() {
+        register_response::Result::Success(ok) => ok,
+        other => panic!("initial registration failed: {other:?}"),
+    };
+    let pool = platform::storage::db::get_database().get_pool();
+    let mode: i32 = sqlx::query_scalar(
+        "SELECT auth_mode FROM issued_actor_identity WHERE realm_id = ? AND serial_number = ?",
+    )
+    .bind(1001_i64)
+    .bind(initial.actr_id.serial_number as i64)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(mode, RegisterAuthMode::Package as i32);
+    let renew = RenewCredentialRequest {
+        actr_id: initial.actr_id.clone(),
+        renewal_token: initial.renewal_token.unwrap(),
+        attempt_id: control_attempt_id(),
+    };
+    let (status, _) = post_renew_raw(app.clone(), renew.clone()).await;
+    assert_eq!(status, StatusCode::OK);
+
+    for legacy in [false, true] {
+        if legacy {
+            sqlx::query("UPDATE issued_actor_identity SET auth_mode = NULL WHERE realm_id = ? AND serial_number = ?")
+                .bind(1001_i64).bind(initial.actr_id.serial_number as i64)
+                .execute(pool).await.unwrap();
+        }
+        for publisher_status in ["suspended", "revoked"] {
+            sqlx::query("UPDATE mfr SET status = ? WHERE name = ?")
+                .bind(publisher_status)
+                .bind(&fx.manufacturer)
+                .execute(pool)
+                .await
+                .unwrap();
+            let (status, response) = post_renew_raw(app.clone(), renew.clone()).await;
+            assert_eq!(
+                status,
+                StatusCode::FORBIDDEN,
+                "legacy={legacy}, status={publisher_status}"
+            );
+            assert!(matches!(
+                response.result,
+                Some(renew_credential_response::Result::Error(_))
+            ));
+        }
+    }
+    sqlx::query("DELETE FROM mfr WHERE name = ?")
+        .bind(&fx.manufacturer)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, _) = post_renew_raw(app.clone(), renew).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Explicit Linked registration still renews without a publisher row.
+    let linked = post_register(
+        app.clone(),
+        linked_register_request(),
+        Some("seed-realm-secret"),
+    )
+    .await;
+    let linked = match linked.result.unwrap() {
+        register_response::Result::Success(ok) => ok,
+        other => panic!("linked registration failed: {other:?}"),
+    };
+    let (status, _) = post_renew_raw(
+        app,
+        RenewCredentialRequest {
+            actr_id: linked.actr_id,
+            renewal_token: linked.renewal_token.unwrap(),
+            attempt_id: control_attempt_id(),
+        },
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}

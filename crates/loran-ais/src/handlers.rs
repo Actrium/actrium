@@ -394,30 +394,28 @@ async fn reissue_credential(
             }
         };
 
-    // P1-8: before re-signing, replay a cached response for this attempt. A
-    // lost-response retry with the same manufacturer_auth nonce decrypts and
-    // returns the exact credential signed on the first attempt instead of
-    // re-running the full signing path (and re-burning the nonce). Only the
-    // package-auth path carries a nonce; Linked reissue has no cache key and
-    // always takes the live path.
-    if let Some(nonce) = registration
-        .manufacturer_auth_nonce
-        .as_ref()
-        .filter(|n| !n.is_empty())
+    // Replay only an exact previously authenticated package reissue request.
+    // The issuer binds the cache key to the signatures and renewal proof too.
+    if let Some(cached) = state
+        .issuer
+        .lookup_reissue_cache(
+            &request.actr_id,
+            registration,
+            request.renewal_proof.as_deref(),
+        )
+        .await
     {
-        if let Some(cached) = state.issuer.lookup_reissue_cache(nonce).await {
-            let succeeded = matches!(&cached.result, Some(register_response::Result::Success(_)));
-            if let Some(ref counters) = state.counters {
-                counters
-                    .record_request(succeeded, start.elapsed().as_secs_f64() * 1000.0)
-                    .await;
-            }
-            platform::recording::info!(
-                "Credential reissue replayed from response cache for actor {}",
-                request.actr_id.to_string_repr()
-            );
-            return encode_result(cached);
+        let succeeded = matches!(&cached.result, Some(register_response::Result::Success(_)));
+        if let Some(ref counters) = state.counters {
+            counters
+                .record_request(succeeded, start.elapsed().as_secs_f64() * 1000.0)
+                .await;
         }
+        platform::recording::info!(
+            "Credential reissue replayed from response cache for actor {}",
+            request.actr_id.to_string_repr()
+        );
+        return encode_result(cached);
     }
 
     let result = state

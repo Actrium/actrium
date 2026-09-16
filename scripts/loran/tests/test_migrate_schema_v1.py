@@ -83,6 +83,7 @@ class SchemaV1MigrationTest(unittest.TestCase):
 
             self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 1)
             self.assertIn("descriptor_json", MIGRATION.columns(db, "mfr"))
+            self.assertIn("auth_mode", MIGRATION.columns(db, "issued_actor_identity"))
             self.assertIn("signing_key_id", MIGRATION.columns(db, "mfr_package"))
             self.assertEqual(
                 db.execute("SELECT access FROM actoracl").fetchall(),
