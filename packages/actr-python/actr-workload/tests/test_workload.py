@@ -144,15 +144,28 @@ class WorkloadAuthoringTests(unittest.TestCase):
             async def on_error(self, event, ctx) -> None:
                 seen.append(ctx)
 
+            async def on_webrtc_state_changed(self, event, ctx) -> None:
+                seen.append(ctx)
+                await ctx.log("info", "state changed")
+
         raw = _Invocation()
 
         async def exercise() -> None:
             workload = UserWorkload()
             await workload.on_signaling_connecting(raw)
             await workload.on_error("event", ctx=raw)
+            await workload.on_webrtc_state_changed("state", raw)
+            await workload.on_webrtc_state_changed("state", ctx=raw)
 
-        asyncio.run(exercise())
-        self.assertEqual(len(seen), 2)
+        async def log_message(token, level, message):
+            self.assertEqual((token, level, message), (7, "info", "state changed"))
+
+        with patch(
+            "actr_workload.context._bindings",
+            return_value=(SimpleNamespace(log_message=log_message), None),
+        ):
+            asyncio.run(exercise())
+        self.assertEqual(len(seen), 4)
         self.assertTrue(all(isinstance(ctx, ActrContext) for ctx in seen))
         self.assertEqual(seen[0].request_id, "request")
 
