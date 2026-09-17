@@ -1,4 +1,5 @@
-//! TURN credential rotation through webrtc-rs v0.20 `set_configuration`.
+//! TURN credential rotation through Actr's v0.20 backend and the v0.21 RTC
+//! `set_configuration` path.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
