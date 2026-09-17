@@ -20,6 +20,9 @@ const TURN_REALM: &str = "actr.test";
 const TURN_SHARED_TEST_KEY: &str = "turn-rotation-integration-key";
 const WAIT: Duration = Duration::from_secs(60);
 
+#[path = "turn_credential_rotation/issue_248.rs"]
+mod issue_248;
+
 type HmacSha1 = Hmac<Sha1>;
 
 struct CountingAuthenticator {
