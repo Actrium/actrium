@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "actr-config"
-version = "0.10.3"
+version = "0.10.4"
 dependencies = [
  "actr-protocol",
  "chrono",
@@ -18,7 +18,7 @@ dependencies = [
 
 [[package]]
 name = "actr-framework"
-version = "0.10.3"
+version = "0.10.4"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -33,7 +33,7 @@ dependencies = [
 
 [[package]]
 name = "actr-hyper"
-version = "0.10.3"
+version = "0.10.4"
 dependencies = [
  "actr-config",
  "actr-framework",
@@ -86,7 +86,7 @@ dependencies = [
 
 [[package]]
 name = "actr-pack"
-version = "0.10.3"
+version = "0.10.4"
 dependencies = [
  "actr-protocol",
  "base64",
@@ -102,7 +102,7 @@ dependencies = [
 
 [[package]]
 name = "actr-platform-traits"
-version = "0.10.3"
+version = "0.10.4"
 dependencies = [
  "async-trait",
  "hex",
@@ -111,7 +111,7 @@ dependencies = [
 
 [[package]]
 name = "actr-protocol"
-version = "0.10.3"
+version = "0.10.4"
 dependencies = [
  "anyhow",
  "base64",
@@ -131,7 +131,7 @@ dependencies = [
 
 [[package]]
 name = "actr-runtime"
-version = "0.10.3"
+version = "0.10.4"
 dependencies = [
  "actr-framework",
  "actr-protocol",
@@ -143,7 +143,7 @@ dependencies = [
 
 [[package]]
 name = "actr-runtime-mailbox"
-version = "0.10.3"
+version = "0.10.4"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -160,7 +160,7 @@ dependencies = [
 
 [[package]]
 name = "actr-service-compat"
-version = "0.10.3"
+version = "0.10.4"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -173,7 +173,7 @@ dependencies = [
 
 [[package]]
 name = "actr-ts"
-version = "0.10.3"
+version = "0.10.4"
 dependencies = [
  "actr-config",
  "actr-framework",
@@ -3277,9 +3277,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.41"
+version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b92b125634d9b795e7beca796cc790df15a7fb38323bf3196fda83292d06b1f"
+checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "once_cell",
  "ring",
@@ -3313,9 +3313,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.13"
+version = "0.103.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
+checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
 dependencies = [
  "ring",
  "rustls-pki-types",

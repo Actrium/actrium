@@ -71,7 +71,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/apple/swift-protobuf.git",
-            .upToNextMinor(from: "1.32.0")
+            .upToNextMinor(from: "1.38.1")
         )
     ],
     targets: [
