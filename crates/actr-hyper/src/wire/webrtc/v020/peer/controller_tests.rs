@@ -24,7 +24,7 @@ use crate::wire::webrtc::v020::events::PeerDriverEvent;
 use crate::wire::webrtc::v020::signaling::SignalingDispatch;
 use crate::wire::webrtc::v020::status::RtcPeerSnapshot;
 
-use super::controller::RtcPeerController;
+use super::controller::{RtcPeerController, SignalingDispatchOutcome};
 use super::effects::{SessionFactory, SessionOps};
 use super::handle::RtcPeerControllerHandle;
 use super::reducer::{LaneEvent, SignalingMessage};
@@ -37,6 +37,12 @@ const WAIT: Duration = Duration::from_secs(5);
 /// retained slot, so a delivery that needs anything close to `WAIT` is not the
 /// prompt release this regression is about.
 const RETENTION_RELEASE_WAIT: Duration = Duration::from_secs(1);
+
+/// Bound for confirming that a controller turn did *not* replay a consumed
+/// retained slot. An event-loop turn runs `flush_retry_signaling` before it
+/// selects on any input, so a wrongful second delivery is due immediately; this
+/// only has to outlast the wake-up, not any production timer.
+const NO_REPLAY_WAIT: Duration = Duration::from_millis(500);
 
 fn test_actor_id(serial_number: u64) -> ActrId {
     ActrId {
@@ -157,6 +163,11 @@ struct Harness {
     lane_tx: mpsc::Sender<LaneEvent>,
     signaling_rx: mpsc::Receiver<SignalingDispatch>,
     builds: mpsc::Receiver<BuildRequest>,
+    /// Every critical-signaling gate decision the controller made, in order.
+    /// This is the only way a test can tell a dispatch that met a closed gate
+    /// from one that met an open gate: both leave the snapshot and the
+    /// signaling queue identical until some later turn.
+    dispatch_outcomes: mpsc::UnboundedReceiver<(SignalingDispatchOutcome, u64)>,
     /// Kept alive so the broadcast sender is not dropped (which would close
     /// the controller's network event receiver and exit its event loop).
     _supervisor: crate::wire::webrtc::v020::recovery::RtcRecoverySupervisor,
@@ -176,6 +187,11 @@ fn spawn_harness_with_signaling_capacity(serial: u64, capacity: usize) -> Harnes
     let inbound = std::sync::Arc::new(crate::wire::webrtc::v020::inbound::InboundRouter::discard());
     let supervisor = crate::wire::webrtc::v020::recovery::RtcRecoverySupervisor::new();
     supervisor.set_signaling_generation(Some(0));
+    let (outcome_tx, dispatch_outcomes) = mpsc::unbounded_channel();
+    let dispatch_observer: super::controller::SignalingDispatchObserver =
+        Arc::new(move |outcome, generation| {
+            let _ = outcome_tx.send((outcome, generation));
+        });
     let (handle, lane_tx, task) = RtcPeerController::spawn(
         test_actor_id(serial),
         factory,
@@ -188,6 +204,8 @@ fn spawn_harness_with_signaling_capacity(serial: u64, capacity: usize) -> Harnes
             buffer_config: crate::wire::webrtc::v020::config::RtcBufferConfig::default(),
             #[cfg(feature = "test-utils")]
             driver_event_observer: None,
+            #[cfg(feature = "test-utils")]
+            signaling_dispatch_observer: Some(dispatch_observer),
             controller_lifecycle_id: 1,
             peer_generation_invalidated: None,
             peer_sendability_changed: None,
@@ -201,6 +219,7 @@ fn spawn_harness_with_signaling_capacity(serial: u64, capacity: usize) -> Harnes
         lane_tx,
         signaling_rx,
         builds: builds_rx,
+        dispatch_outcomes,
         _supervisor: supervisor,
         _task: task,
     }
@@ -532,6 +551,7 @@ async fn controller_exit_cancels_and_joins_inflight_build() {
         lane_tx: _lane_tx,
         signaling_rx: _signaling_rx,
         builds: _builds,
+        dispatch_outcomes: _dispatch_outcomes,
         _supervisor,
         _task,
     } = h;
@@ -884,23 +904,17 @@ async fn drive_gated_answerer_into_recovery(
     (handler, recovering)
 }
 
-/// Wait for the Answerer's recovery Answer to reach its last blocking step — a
-/// `set_local_description` the test's [`GatedSessionOps`] holds open — while the
-/// signaling gate stays closed. The controller cannot reach `SendSignaling`
-/// before this call returns, so keeping the gate closed until then is what makes
-/// the retained-delivery assertions meaningful: everything the recovery answer
-/// does after this point meets a gate the test has not yet opened.
-///
-/// Returns the snapshot revision the controller had settled on with the call
-/// parked; the following completions must move past it. Also asserts the
-/// pipeline escaped nothing while parked, and fails if the controller never
-/// reaches the call at all (a diagnosis, not a silent pass).
-async fn await_parked_local_description(h: &mut Harness, ops: &GatedSessionOps, what: &str) -> u64 {
+/// Wait for the recovery Answer to reach the held `set_local_description`,
+/// while the signaling gate stays closed. Releasing a call the controller has
+/// not reached yet would let `release_one` race the pipeline it is meant to
+/// pin, so the caller must observe the park first. Also asserts nothing escaped
+/// while the pipeline ran to the call.
+async fn await_parked_local_description(h: &mut Harness, ops: &GatedSessionOps, what: &str) {
     let deadline = Instant::now() + WAIT;
     while !ops.is_parked() {
         assert!(
             h.signaling_rx.try_recv().is_err(),
-            "signaling escaped while the recovery Answer was still behind the closed gate"
+            "signaling escaped a closed signaling gate: {what}"
         );
         assert!(
             Instant::now() < deadline,
@@ -908,26 +922,54 @@ async fn await_parked_local_description(h: &mut Harness, ops: &GatedSessionOps, 
         );
         sleep(Duration::from_millis(1)).await;
     }
-    h.handle.snapshot().revision
 }
 
-/// Wait while the controller runs the rest of the Answer pipeline with the gate
-/// still closed. Nothing may escape: a `SendSignaling` that ran under the open
-/// gate later would prove nothing. The controller has to be given room to reach
-/// the gate, and the retained Answer must not double-deliver while it does.
-async fn await_no_escape_before_gate_opens(h: &mut Harness, parked_revision: u64, what: &str) {
-    let deadline = Instant::now() + RETENTION_RELEASE_WAIT;
-    while h.handle.snapshot().revision == parked_revision && Instant::now() < deadline {
+/// Wait for the controller to report one specific critical-signaling gate
+/// decision, while the gate stays closed, skipping the decisions that earlier
+/// phases already produced (the initial negotiation's dispatches are all
+/// `Sent`).
+///
+/// The controller executes `SendSignaling` inline and the decision it makes is
+/// otherwise invisible: a dispatch that a closed gate retained and one that an
+/// open gate sent both leave the snapshot — and the signaling queue — identical
+/// until some later turn. Waiting on a snapshot revision or a delivery timeout
+/// therefore cannot prove which decision ran, and a regression that opens the
+/// gate too early would still pass. Waiting on the reported decision can.
+///
+/// Fails on the first *other* closed-gate decision, which is never expected
+/// here, and on any signaling escaping while the gate is closed. `within` is
+/// the budget for the decision to be reported.
+async fn await_dispatch_outcome(
+    h: &mut Harness,
+    wanted: SignalingDispatchOutcome,
+    within: Duration,
+    what: &str,
+) -> u64 {
+    let deadline = Instant::now() + within;
+    loop {
         assert!(
             h.signaling_rx.try_recv().is_err(),
-            "signaling spilled out of a closed signaling gate: {what}"
+            "signaling escaped a closed signaling gate: {what}"
         );
-        sleep(Duration::from_millis(1)).await;
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for {wanted:?}: {what}"
+        );
+        match timeout(Duration::from_millis(1), h.dispatch_outcomes.recv()).await {
+            Ok(Some((outcome, generation))) => {
+                if outcome.is_gate_closed_resolution() && outcome != wanted {
+                    panic!(
+                        "unexpected closed-gate decision {outcome:?} while awaiting {wanted:?}: {what}"
+                    );
+                }
+                if outcome == wanted {
+                    return generation;
+                }
+            }
+            Ok(None) => panic!("dispatch observer closed while awaiting {wanted:?}: {what}"),
+            Err(_) => {}
+        }
     }
-    assert!(
-        h.signaling_rx.try_recv().is_err(),
-        "recovery Answer must wait behind the closed signaling gate: {what}"
-    );
 }
 
 /// A terminal Answerer failure must wake the Offerer even when the lifecycle
@@ -996,33 +1038,65 @@ async fn gate_closed_retains_recovery_answer_until_signaling_returns() {
         .await
         .expect("send recovery offer");
 
-    let parked_revision = await_parked_local_description(&mut h, &ops, "recovery Answer").await;
-
-    // Release the held `set_local_description`. The Answer is created and
-    // reduced locally, the controller attempts `SendSignaling` — and the gate
-    // is still closed, so the critical signaling has to be retained rather
-    // than dropped.
+    // Release the held `set_local_description`, letting the controller reduce
+    // the Answer and reach `SendSignaling`. The gate is still closed, so the
+    // critical signaling has to be retained rather than dropped — and the
+    // controller has to say so before the gate opens, or this proves nothing.
+    await_parked_local_description(&mut h, &ops, "recovery Answer").await;
     assert!(
         ops.release_one(),
         "the recovery Answer must still be parked at set_local_description"
     );
-
-    await_no_escape_before_gate_opens(&mut h, parked_revision, "recovery Answer").await;
+    let answered_generation = await_dispatch_outcome(
+        &mut h,
+        SignalingDispatchOutcome::Retained,
+        WAIT,
+        "recovery Answer",
+    )
+    .await;
+    assert!(
+        h.signaling_rx.try_recv().is_err(),
+        "recovery Answer must wait behind the closed signaling gate"
+    );
 
     h._supervisor.set_signaling_generation(Some(2));
-    let retained_answer = timeout(RETENTION_RELEASE_WAIT, h.signaling_rx.recv())
-        .await
-        .expect("timed out waiting for retained recovery Answer")
-        .expect("signaling closed");
+    let released = await_dispatch_outcome(
+        &mut h,
+        SignalingDispatchOutcome::RetainedFlushed,
+        RETENTION_RELEASE_WAIT,
+        "gate reopen",
+    )
+    .await;
+    assert_eq!(
+        released, answered_generation,
+        "the retained Answer must be released under the generation it was answered for"
+    );
+    let retained_answer = h
+        .signaling_rx
+        .try_recv()
+        .expect("the released Answer must still be on the signaling queue");
     match retained_answer.message {
         SignalingMessage::Answer { exchange_id, .. } => {
             assert_eq!(exchange_id.as_deref(), Some("issue-234-recovery-offer"));
         }
         other => panic!("expected retained recovery Answer, got {other:?}"),
     }
+
+    // Give the controller another turn — an event-loop turn flushes the
+    // retained slot before it selects on any input — and require that the
+    // consumed slot was not replanted. Sampling the queue without a turn would
+    // only show that nothing was *already* re-delivered.
+    h._supervisor
+        .publish(crate::wire::webrtc::v020::recovery::RtcNetworkEvent::NetworkUnavailable);
+    assert!(
+        timeout(NO_REPLAY_WAIT, h.dispatch_outcomes.recv())
+            .await
+            .is_err(),
+        "a consumed retained slot must not be replayed on a later turn"
+    );
     assert!(
         h.signaling_rx.try_recv().is_err(),
-        "the retained recovery Answer slot must be consumed, not replayed"
+        "the retained Answer must be delivered exactly once"
     );
 
     h.handle.close().await.expect("close answerer controller");
