@@ -5,12 +5,13 @@
 //! offerer/answerer flows to `Sendable`, and multi-controller isolation.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use actr_protocol::{ActrId, ActrType, Realm};
 use async_trait::async_trait;
-use tokio::sync::{mpsc, oneshot};
-use tokio::time::timeout;
+use tokio::sync::{Notify, mpsc, oneshot};
+use tokio::time::{Instant, sleep, timeout};
 
 use webrtc::error::Error as RtcError;
 use webrtc::peer_connection::{
@@ -30,6 +31,12 @@ use super::reducer::{LaneEvent, SignalingMessage};
 use crate::wire::webrtc::v020::status::LaneKind;
 
 const WAIT: Duration = Duration::from_secs(5);
+
+/// Bound for a retained-critical-signaling release. The gate-opening watch
+/// edge wakes the controller directly and the next event-loop turn flushes the
+/// retained slot, so a delivery that needs anything close to `WAIT` is not the
+/// prompt release this regression is about.
+const RETENTION_RELEASE_WAIT: Duration = Duration::from_secs(1);
 
 fn test_actor_id(serial_number: u64) -> ActrId {
     ActrId {
@@ -219,6 +226,125 @@ fn complete_build(build: BuildRequest, result: Result<Arc<dyn SessionOps>, RtcEr
 /// A successful build with the canned fake session.
 fn succeed_build(build: BuildRequest) {
     complete_build(build, Ok(Arc::new(FakeSessionOps)));
+}
+
+/// A fake session whose `set_local_description` the test can hold open.
+///
+/// A blocked `set_local_description` is the last point before the controller
+/// reduces the completion and hands the local description to the signaling
+/// router, so holding it open pins the controller exactly one step short of
+/// `SendSignaling`. Releasing it then lets the test prove which synchronous
+/// gate decision that dispatch met, instead of racing an unsynchronized
+/// pipeline against a generation commit.
+struct GatedSessionOps {
+    /// Set while a `set_local_description` is parked and has not been released.
+    /// `released` is the signal that lets a parked call return. The test can
+    /// only reach [`Self::release_one`] after the controller has arrived here,
+    /// so releasing the call — and therefore letting the controller reach
+    /// `SendSignaling` — always happens after the test saw it parked.
+    parked: AtomicBool,
+    released: Notify,
+    armed: AtomicBool,
+}
+
+impl GatedSessionOps {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            parked: AtomicBool::new(false),
+            released: Notify::new(),
+            armed: AtomicBool::new(false),
+        })
+    }
+
+    /// Hold the next `set_local_description` until [`Self::release_one`].
+    fn arm(&self) {
+        self.armed.store(true, Ordering::SeqCst);
+    }
+
+    /// Whether a `set_local_description` is currently parked.
+    fn is_parked(&self) -> bool {
+        self.parked.load(Ordering::SeqCst)
+    }
+
+    /// Release the parked `set_local_description`. Returns whether one was
+    /// actually parked: `false` means the controller had already got past it,
+    /// so the caller's gate-closed and gate-open assertions are not testing the
+    /// order they claim to.
+    fn release_one(&self) -> bool {
+        if !self.parked.swap(false, Ordering::SeqCst) {
+            return false;
+        }
+        self.released.notify_one();
+        true
+    }
+}
+
+/// Park a held `set_local_description` until the test releases it. Callers only
+/// arm the gate for a session whose `set_local_description` they expect to
+/// reach, so an unarmed call completes immediately.
+async fn park_if_armed(ops: &GatedSessionOps) {
+    if !ops.armed.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    let released = ops.released.notified();
+    ops.parked.store(true, Ordering::SeqCst);
+    released.await;
+}
+
+#[async_trait]
+impl SessionOps for GatedSessionOps {
+    async fn create_offer(&self) -> Result<RTCSessionDescription, RtcError> {
+        Ok(desc(RTCSdpType::Offer))
+    }
+    async fn create_answer(&self) -> Result<RTCSessionDescription, RtcError> {
+        Ok(desc(RTCSdpType::Answer))
+    }
+    async fn set_local_description(&self, _d: RTCSessionDescription) -> Result<(), RtcError> {
+        park_if_armed(self).await;
+        Ok(())
+    }
+    async fn set_remote_description(&self, _d: RTCSessionDescription) -> Result<(), RtcError> {
+        Ok(())
+    }
+    async fn add_ice_candidate(&self, _candidate: RTCIceCandidateInit) -> Result<(), RtcError> {
+        Ok(())
+    }
+    async fn restart_ice(&self) -> Result<(), RtcError> {
+        Ok(())
+    }
+    async fn set_configuration(&self, _config: RTCConfiguration) -> Result<(), RtcError> {
+        Ok(())
+    }
+    async fn create_data_channel(
+        &self,
+        label: &str,
+        _init: webrtc::data_channel::RTCDataChannelInit,
+    ) -> Result<Arc<dyn webrtc::data_channel::DataChannel>, RtcError> {
+        Ok(super::effects::test_support::fake_data_channel(label))
+    }
+    async fn add_track(
+        &self,
+        _track: Arc<dyn webrtc::media_stream::track_local::TrackLocal>,
+    ) -> Result<Arc<dyn webrtc::rtp_transceiver::RtpSender>, RtcError> {
+        Ok(Arc::new(
+            crate::wire::webrtc::v020::media::test_support::FakeRtpSender::new(1),
+        ))
+    }
+    async fn remove_track(
+        &self,
+        _sender: &Arc<dyn webrtc::rtp_transceiver::RtpSender>,
+    ) -> Result<(), RtcError> {
+        Ok(())
+    }
+    async fn get_senders(&self) -> Vec<Arc<dyn webrtc::rtp_transceiver::RtpSender>> {
+        Vec::new()
+    }
+    async fn get_stats(&self) -> webrtc::peer_connection::RTCStatsReport {
+        Default::default()
+    }
+    async fn close(&self) -> Result<(), RtcError> {
+        Ok(())
+    }
 }
 
 /// Wait until the snapshot satisfies `pred`, returning it.
@@ -703,25 +829,32 @@ async fn full_queue_retains_critical_sdp_and_retries_once_drained() {
     h.handle.close().await.expect("send close");
 }
 
-/// A terminal Answerer failure must wake the Offerer even when the lifecycle
-/// supervisor has temporarily withdrawn signaling. The request is critical
-/// signaling and must remain queued until a committed generation is available.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn gate_closed_retains_answerer_restart_request_until_signaling_returns() {
-    let mut h = spawn_harness(711);
+/// Drive the Answerer through its initial connection to `Sendable`, then
+/// withdraw the signaling generation and drive the accepted loss edge that
+/// starts recovery. This leaves the controller `Recovering` with the signaling
+/// gate closed: the precondition both gated-critical-signaling regressions
+/// share before they inject the fact whose response must be retained.
+async fn drive_gated_answerer_into_recovery(
+    h: &mut Harness,
+    session: Arc<dyn SessionOps>,
+    what: &str,
+) -> (Arc<WebRtcEventHandler>, RtcPeerSnapshot) {
     h.handle
         .apply_remote_description(desc(RTCSdpType::Offer))
         .await
-        .expect("send incoming offer");
-    let build = next_build(&mut h).await;
+        .expect("send initial offer");
+    let build = next_build(h).await;
     let handler = build.handler.clone();
-    succeed_build(build);
+    complete_build(build, Ok(session));
 
-    let answer = timeout(WAIT, h.signaling_rx.recv())
+    let initial_answer = timeout(WAIT, h.signaling_rx.recv())
         .await
-        .expect("timed out waiting for answer")
+        .expect("timed out waiting for initial answer")
         .expect("signaling closed");
-    assert!(matches!(&answer.message, SignalingMessage::Answer { .. }));
+    assert!(matches!(
+        initial_answer.message,
+        SignalingMessage::Answer { .. }
+    ));
     handler
         .mailbox()
         .try_publish(PeerDriverEvent::PeerConnectionStateChanged {
@@ -735,7 +868,7 @@ async fn gate_closed_retains_answerer_restart_request_until_signaling_returns() 
         })
         .await
         .expect("send lane open");
-    await_snapshot(&h, "answerer sendable", |snapshot| snapshot.sendable).await;
+    await_snapshot(h, what, |snapshot| snapshot.sendable).await;
 
     h._supervisor.set_signaling_generation(None);
     // Network event handling reconciles the signaling watch before reducing
@@ -744,10 +877,68 @@ async fn gate_closed_retains_answerer_restart_request_until_signaling_returns() 
     // public snapshot.
     h._supervisor
         .publish(crate::wire::webrtc::v020::recovery::RtcNetworkEvent::NetworkUnavailable);
-    let gated = await_snapshot(&h, "signaling-gated recovery", |snapshot| {
+    let recovering = await_snapshot(h, "signaling-gated recovery", |snapshot| {
         snapshot.status == actr_framework::WebRtcPeerStatus::Recovering && !snapshot.sendable
     })
     .await;
+    (handler, recovering)
+}
+
+/// Wait for the Answerer's recovery Answer to reach its last blocking step — a
+/// `set_local_description` the test's [`GatedSessionOps`] holds open — while the
+/// signaling gate stays closed. The controller cannot reach `SendSignaling`
+/// before this call returns, so keeping the gate closed until then is what makes
+/// the retained-delivery assertions meaningful: everything the recovery answer
+/// does after this point meets a gate the test has not yet opened.
+///
+/// Returns the snapshot revision the controller had settled on with the call
+/// parked; the following completions must move past it. Also asserts the
+/// pipeline escaped nothing while parked, and fails if the controller never
+/// reaches the call at all (a diagnosis, not a silent pass).
+async fn await_parked_local_description(h: &mut Harness, ops: &GatedSessionOps, what: &str) -> u64 {
+    let deadline = Instant::now() + WAIT;
+    while !ops.is_parked() {
+        assert!(
+            h.signaling_rx.try_recv().is_err(),
+            "signaling escaped while the recovery Answer was still behind the closed gate"
+        );
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for the recovery Answer to reach set_local_description: {what}"
+        );
+        sleep(Duration::from_millis(1)).await;
+    }
+    h.handle.snapshot().revision
+}
+
+/// Wait while the controller runs the rest of the Answer pipeline with the gate
+/// still closed. Nothing may escape: a `SendSignaling` that ran under the open
+/// gate later would prove nothing. The controller has to be given room to reach
+/// the gate, and the retained Answer must not double-deliver while it does.
+async fn await_no_escape_before_gate_opens(h: &mut Harness, parked_revision: u64, what: &str) {
+    let deadline = Instant::now() + RETENTION_RELEASE_WAIT;
+    while h.handle.snapshot().revision == parked_revision && Instant::now() < deadline {
+        assert!(
+            h.signaling_rx.try_recv().is_err(),
+            "signaling spilled out of a closed signaling gate: {what}"
+        );
+        sleep(Duration::from_millis(1)).await;
+    }
+    assert!(
+        h.signaling_rx.try_recv().is_err(),
+        "recovery Answer must wait behind the closed signaling gate: {what}"
+    );
+}
+
+/// A terminal Answerer failure must wake the Offerer even when the lifecycle
+/// supervisor has temporarily withdrawn signaling. The request is critical
+/// signaling and must remain queued until a committed generation is available.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn gate_closed_retains_answerer_restart_request_until_signaling_returns() {
+    let mut h = spawn_harness(711);
+    let (handler, recovering) =
+        drive_gated_answerer_into_recovery(&mut h, Arc::new(FakeSessionOps), "answerer sendable")
+            .await;
 
     handler
         .mailbox()
@@ -756,7 +947,7 @@ async fn gate_closed_retains_answerer_restart_request_until_signaling_returns() 
             state: RTCPeerConnectionState::Failed,
         });
     await_snapshot(&h, "failed answerer parked", |snapshot| {
-        snapshot.revision > gated.revision
+        snapshot.revision > recovering.revision
             && snapshot.status == actr_framework::WebRtcPeerStatus::Recovering
             && !snapshot.sendable
     })
@@ -786,48 +977,15 @@ async fn gate_closed_retains_answerer_restart_request_until_signaling_returns() 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn gate_closed_retains_recovery_answer_until_signaling_returns() {
     let mut h = spawn_harness(712);
-    h.handle
-        .apply_remote_description(desc(RTCSdpType::Offer))
-        .await
-        .expect("send initial offer");
-    let build = next_build(&mut h).await;
-    let handler = build.handler.clone();
-    succeed_build(build);
-
-    let initial_answer = timeout(WAIT, h.signaling_rx.recv())
-        .await
-        .expect("timed out waiting for initial answer")
-        .expect("signaling closed");
-    assert!(matches!(
-        initial_answer.message,
-        SignalingMessage::Answer { .. }
-    ));
-    handler
-        .mailbox()
-        .try_publish(PeerDriverEvent::PeerConnectionStateChanged {
-            generation: 1,
-            state: RTCPeerConnectionState::Connected,
-        });
-    h.lane_tx
-        .send(LaneEvent::Opened {
-            generation: 1,
-            lane: LaneKind::RpcReliable,
-        })
-        .await
-        .expect("send lane open");
-    await_snapshot(&h, "initial answerer sendable", |snapshot| {
-        snapshot.sendable
-    })
-    .await;
-
-    h._supervisor.set_signaling_generation(None);
-    h._supervisor
-        .publish(crate::wire::webrtc::v020::recovery::RtcNetworkEvent::NetworkUnavailable);
-    await_snapshot(&h, "recovery with signaling gate closed", |snapshot| {
-        snapshot.status == actr_framework::WebRtcPeerStatus::Recovering && !snapshot.sendable
-    })
-    .await;
-
+    let ops = GatedSessionOps::new();
+    // The gate is armed for the recovery offer, so the initial connection —
+    // which also runs `set_local_description` — completes ungated.
+    let (_, _) =
+        drive_gated_answerer_into_recovery(&mut h, ops.clone(), "initial answerer sendable").await;
+    // Hold the session's next `set_local_description`. `drive_gated` already
+    // withdrew the signaling generation and left it withdrawn, so everything
+    // the recovery Answer does from here meets a closed gate.
+    ops.arm();
     // This is the Offerer wake that was visible in the iOS log. It arrives
     // while the Answerer's signaling generation is still unavailable.
     h.handle
@@ -838,15 +996,21 @@ async fn gate_closed_retains_recovery_answer_until_signaling_returns() {
         .await
         .expect("send recovery offer");
 
-    // The Answer is generated locally, but must not be published while the
-    // signaling gate is closed.
+    let parked_revision = await_parked_local_description(&mut h, &ops, "recovery Answer").await;
+
+    // Release the held `set_local_description`. The Answer is created and
+    // reduced locally, the controller attempts `SendSignaling` — and the gate
+    // is still closed, so the critical signaling has to be retained rather
+    // than dropped.
     assert!(
-        h.signaling_rx.try_recv().is_err(),
-        "recovery Answer must wait behind the closed signaling gate"
+        ops.release_one(),
+        "the recovery Answer must still be parked at set_local_description"
     );
 
+    await_no_escape_before_gate_opens(&mut h, parked_revision, "recovery Answer").await;
+
     h._supervisor.set_signaling_generation(Some(2));
-    let retained_answer = timeout(WAIT, h.signaling_rx.recv())
+    let retained_answer = timeout(RETENTION_RELEASE_WAIT, h.signaling_rx.recv())
         .await
         .expect("timed out waiting for retained recovery Answer")
         .expect("signaling closed");
@@ -856,6 +1020,10 @@ async fn gate_closed_retains_recovery_answer_until_signaling_returns() {
         }
         other => panic!("expected retained recovery Answer, got {other:?}"),
     }
+    assert!(
+        h.signaling_rx.try_recv().is_err(),
+        "the retained recovery Answer slot must be consumed, not replayed"
+    );
 
     h.handle.close().await.expect("close answerer controller");
 }
