@@ -19,6 +19,45 @@ fn config(path: &Path, enable_wal: bool) -> SqliteConfig {
 }
 
 #[tokio::test]
+async fn uri_options_cannot_bypass_ownership() {
+    for wal in [false, true] {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("mailbox.db");
+        let cfg = config(&path, wal);
+        let mailbox = SqliteMailbox::with_config(cfg.clone()).await.unwrap();
+        let id = mailbox
+            .enqueue(vec![1], vec![2], MessagePriority::Normal)
+            .await
+            .unwrap();
+        mailbox.dequeue().await.unwrap();
+        for options in [
+            "cache=shared",
+            "nolock=1",
+            "vfs=unix-none",
+            "mode=ro&immutable=1",
+        ] {
+            let uri = format!("file:{}?{options}", path.display());
+            assert!(matches!(
+                SqliteMailbox::with_config(config(Path::new(&uri), wal)).await,
+                Err(StorageError::ConfigError(_))
+            ));
+        }
+        assert_eq!(mailbox.status().await.unwrap().inflight_messages, 1);
+        assert!(mailbox.dequeue().await.unwrap().is_empty());
+        drop(mailbox);
+        let mailbox = SqliteMailbox::with_config(cfg).await.unwrap();
+        assert_eq!(mailbox.dequeue().await.unwrap()[0].id, id);
+    }
+
+    // Named shared-memory databases also allow multiple connections to share
+    // active messages, unlike the supported independent :memory: databases.
+    assert!(matches!(
+        SqliteMailbox::new("file:mailbox?mode=memory&cache=shared").await,
+        Err(StorageError::ConfigError(_))
+    ));
+}
+
+#[tokio::test]
 async fn reopen_preserves_unacked_records_and_queued_messages() {
     for wal in [false, true] {
         let dir = tempdir().unwrap();
@@ -229,6 +268,62 @@ impl Drop for ChildGuard {
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
+}
+
+#[test]
+fn process_shared_cache_default_cannot_bypass_ownership() {
+    // Isolate SQLite's global setting from other tests and library users.
+    let mut child = ChildGuard(
+        Command::new(std::env::current_exe().unwrap())
+            .args(["--ignored", "--exact", "shared_cache_child"])
+            .env("ACTR_MAILBOX_SHARED_CACHE_CHILD", "1")
+            .stdin(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            assert!(status.success(), "shared-cache child failed: {status}");
+            break;
+        }
+        assert!(Instant::now() < deadline, "shared-cache child timed out");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+#[ignore = "subprocess helper for the process-wide shared-cache setting"]
+fn shared_cache_child() {
+    if std::env::var_os("ACTR_MAILBOX_SHARED_CACHE_CHILD").is_none() {
+        return;
+    }
+    // SAFETY: This standalone subprocess has no other SQLite users. The
+    // setting is made before opening any connections and dies with the child.
+    assert_eq!(unsafe { rusqlite::ffi::sqlite3_enable_shared_cache(1) }, 0);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        for wal in [false, true] {
+            let dir = tempdir().unwrap();
+            let cfg = config(&dir.path().join("mailbox.db"), wal);
+            let mailbox = SqliteMailbox::with_config(cfg.clone()).await.unwrap();
+            let id = mailbox
+                .enqueue(vec![1], vec![2], MessagePriority::Normal)
+                .await
+                .unwrap();
+            mailbox.dequeue().await.unwrap();
+            assert!(matches!(
+                SqliteMailbox::with_config(cfg.clone()).await,
+                Err(StorageError::ConcurrencyError(_))
+            ));
+            assert_eq!(mailbox.status().await.unwrap().inflight_messages, 1);
+            drop(mailbox);
+            let mailbox = SqliteMailbox::with_config(cfg).await.unwrap();
+            assert_eq!(mailbox.dequeue().await.unwrap()[0].id, id);
+        }
+    });
 }
 
 #[tokio::test]

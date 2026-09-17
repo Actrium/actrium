@@ -17,6 +17,11 @@
 底层连接关闭；进程崩溃后由操作系统释放文件锁。锁冲突的 busy timeout 为 250 毫秒，
 初始化失败会返回 `StorageError::ConcurrencyError`。
 
+连接强制使用私有缓存，不受进程级共享缓存设置影响。数据库参数仅接受文件系统路径或
+`:memory:`；SQLite `file:` URI 会返回 `StorageError::ConfigError`，避免 URI 参数
+（如 `cache=shared`、`nolock=1` 或自定义 `vfs`）绕过独占锁。实际文件名若以 `file:` 开头，
+请使用 `./file:...` 或绝对路径。
+
 打开数据库时，实例先取得独占权，再在事务内将遗留的 `Inflight` 消息恢复为 `Queued`。
 事务提交后实例才可用；恢复失败会回滚并返回错误。消息 ID、内容、优先级和创建时间不变，
 已 ACK 删除的消息不会恢复。此行为适用于 WAL 和非 WAL 文件数据库；`:memory:` 实例相互独立，

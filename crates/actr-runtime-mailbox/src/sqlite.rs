@@ -8,7 +8,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, TransactionBehavior, params};
+use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -20,7 +20,7 @@ use uuid::Uuid;
 /// SQLite configuration
 #[derive(Debug, Clone)]
 pub struct SqliteConfig {
-    /// Database file path
+    /// Database file path or `:memory:`. SQLite `file:` URIs are not supported.
     pub database_path: PathBuf,
     /// Whether to enable WAL mode
     pub enable_wal: bool,
@@ -42,7 +42,25 @@ struct SqliteConnection {
 
 impl SqliteConnection {
     fn new(config: &SqliteConfig) -> StorageResult<Self> {
-        let mut conn = Connection::open(&config.database_path)?;
+        // URI options can override PRIVATE_CACHE or even disable file locks.
+        // Reject them before opening, including when URI support is enabled
+        // globally by another SQLite user in the process.
+        if config
+            .database_path
+            .as_os_str()
+            .as_encoded_bytes()
+            .starts_with(b"file:")
+        {
+            return Err(StorageError::ConfigError(
+                "Mailbox requires a filesystem path or :memory:, not a SQLite file: URI".into(),
+            ));
+        }
+        // A shared pager retains locks for the cache, not for this instance;
+        // another connection could otherwise recover our active Inflight rows.
+        // Override the process-wide shared-cache default explicitly.
+        let flags = (OpenFlags::default() & !OpenFlags::SQLITE_OPEN_URI)
+            | OpenFlags::SQLITE_OPEN_PRIVATE_CACHE;
+        let mut conn = Connection::open_with_flags(&config.database_path, flags)?;
         // Ownership contention is a startup error, not an unbounded wait.
         conn.busy_timeout(Duration::from_millis(250))?;
         // Set this before the first WAL access. Unlike an exclusive transaction
@@ -106,6 +124,8 @@ impl SqliteConnection {
 /// Delivery is at least once: a crash after business side effects but before
 /// ACK can repeat those effects, so handlers need durable business idempotency.
 /// `:memory:` databases remain independent and do not survive a restart.
+/// Pass a filesystem path or `:memory:`; SQLite `file:` URIs are rejected to
+/// prevent URI options from bypassing exclusive ownership.
 pub struct SqliteMailbox {
     connection: Arc<SqliteConnection>,
     /// Optional depth observer invoked after every successful
