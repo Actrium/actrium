@@ -43,7 +43,7 @@ The preferred name for the test-side process is **Actr Soak Endpoint**. The
 preferred binary, image, and Kubernetes application name is
 `actr-soak-endpoint`; it describes what the process is (an Actr endpoint under
 soak test) and avoids the ambiguity of “Agent” with AI agents or Actrix
-services. The current implementation still uses `rtc-soak-agent` in a few
+services. The current implementation still uses `actr-soak-agent` in a few
 binary, image, selector, and metric names. Those names are compatibility
 aliases during the rename and do not define topology identities.
 
@@ -66,7 +66,7 @@ The terms below have one fixed meaning in this RFC:
 | **Soak Dashboard** | The UI/API and persistent run store. It owns manual test runs and embeds the SoakController. |
 | **SoakController** | The deterministic planner/executor that expands a seed into actions, calls endpoints, collects evidence, and invokes the Result Evaluator. |
 | **Endpoint Control API** | Test-namespace HTTP adapter exposed by each Actr Soak Endpoint. It accepts only predefined, authenticated actions and observations. |
-| **Agent API / `rtc-soak-agent`** | Legacy implementation names for the Endpoint Control API and endpoint binary. They remain only for migration compatibility. |
+| **Agent API / `actr-soak-agent`** | Legacy implementation names for the Endpoint Control API and endpoint binary. They remain only for migration compatibility. |
 | **Seed** | The recorded random seed from which the event plan and action order are reproduced. |
 | **Event plan** | The concrete, timestamped actions generated from a seed, including business probes and injected events. |
 | **Lifecycle event** | A logical mobile fact such as Background, Foreground, Available, or Unavailable delivered through `NetworkEventHandle`; it is not a real device operation. |
@@ -81,7 +81,7 @@ The terms below have one fixed meaning in this RFC:
 The naming migration is deliberately documentation-first: changing the
 preferred term does not silently rename a deployed binary or break existing
 selectors. A later implementation PR may add `actr-soak-endpoint` as the
-primary target and retain `rtc-soak-agent` as a short-lived alias; metric names
+primary target and retain `actr-soak-agent` as a short-lived alias; metric names
 such as `actr_soak_agent_*` remain compatibility names until a versioned metric
 migration is agreed.
 
@@ -105,10 +105,38 @@ Dashboard run state is persisted to its PVC. If the Dashboard Pod restarts, an
 active run is marked `Interrupted` rather than resumed; unattended release runs
 therefore need an external scheduler and recovery policy.
 
+### Topology ownership and plan compatibility
+
+CI owns the deployed topology. A deployment fixes the Endpoint count, canonical
+Endpoint identities (`actr-0` ... `actr-N`), Actr credentials, the
+`SOAK_REMOTE_PEERS`/`SOAK_INITIATOR_PEERS` configuration, and the allowed Peer
+graph. CI writes this immutable graph to an `actr-soak-topology` ConfigMap and
+passes the same graph to the Dashboard.
+
+The Dashboard owns only the test plan inside that deployed topology. Its
+`small`, `multi-peer`, Nightly, Weekend, and Fault controls select a logical
+traffic/event plan; they MUST NOT create, delete, scale, or reconfigure
+Endpoint Pods, credentials, or real Peer edges during a run. `endpoint_count`
+is derived from the deployed Endpoint set and is read-only to the Dashboard.
+
+Every generated plan MUST use only Endpoint identities and Peer edges present
+in `actr-soak-topology`. A seed MAY randomize action order and selection among
+allowed edges, but MUST NOT invent a Peer that is absent from
+`SOAK_REMOTE_PEERS`. The Dashboard MUST reject an incompatible plan before it
+starts.
+
+Changing the physical topology (for example, Pair to Multi-peer, or 2 to 10
+Endpoints) requires a new CI deployment or a separate namespace. CI MUST NOT
+redeploy a namespace while its Dashboard has an active run. The initial
+implementation uses one Dashboard per namespace/topology; a future multi-
+namespace Dashboard is a separate feature and does not weaken this ownership
+boundary.
+
 ## Summary
 
-CI builds and deploys real Actrix, multiple Actr endpoints, and the
-`soak-dashboard` into Kubernetes, but it does not start a soak run. The
+CI builds and deploys real Actrix, multiple Actr endpoints, the immutable
+topology manifest, and the `soak-dashboard` into Kubernetes, but it does not
+start a soak run. The
 Dashboard is the interactive test owner: an operator previews or starts a
 plan, injects lifecycle/network/RTC/signaling events, and observes the
 endpoints' bidirectional business traffic. The Dashboard's embedded
@@ -147,6 +175,7 @@ Complete flow:
 GitHub Actions / ARC Runner
   -> fix the main SHA, build, and push Actrix, endpoint, and Dashboard images
   -> create/update the Kubernetes namespace, Secrets, RBAC, and NetworkPolicy
+  -> write the immutable actr-soak-topology manifest
   -> deploy Actrix, actr-0 ... actr-N, Dashboard, and collectors
   -> wait for Pod/Dashboard health only; do not start a soak plan
 
@@ -241,7 +270,7 @@ same test process:
 ```text
 actr-N Pod
   `-- actr-soak-endpoint [test-utils/soak build]
-      (current compatibility target: rtc-soak-agent)
+      (current compatibility target: actr-soak-agent)
       |-- ActrNode
       |-- production RuntimeContext / PeerGate / RTC Manager
       |-- endpoint control API
@@ -427,22 +456,22 @@ GET /v1/peers, /v1/events, /metrics
 Implementation directories and deliverables:
 
 ```text
-testing/rtc-soak/
-  actr-soak-endpoint/       [preferred name; current target: rtc-soak-agent]
-  rtc-soak-controller/
+testing/actr-soak/
+  actr-soak-endpoint/       [preferred name; current target: actr-soak-agent]
+  actr-soak-controller/
   protocols/
   workload/
   result-evaluator/       [preferred name; current implementation path: oracle/]
   artifact/
 
-deploy/rtc-soak/
+deploy/actr-soak/
   namespace.yaml
   actrix-statefulset.yaml
   endpoint-statefulset.yaml
   network-policy.yaml
   rbac.yaml
 
-docker/rtc-soak/
+docker/actr-soak/
   Dockerfile.endpoint       [preferred name; current file may remain Dockerfile.agent]
 
 .github/workflows/ci-rtc-k8s-soak.yml
@@ -459,7 +488,7 @@ signaling, or FFI semantics.
 
 The Endpoint Control API is a remote control adapter in the test namespace. The
 preferred process name is `actr-soak-endpoint`; the current binary and
-deployment manifests still use the compatibility name `rtc-soak-agent`, also
+deployment manifests still use the compatibility name `actr-soak-agent`, also
 referred to as `Agent API` in existing code. It is not the formal actr SDK or a
 production service API. It can call only predefined actions and cannot execute
 shell, `eval`, or arbitrary memory mutation.
@@ -967,7 +996,7 @@ CANCELLED
 #### 13.1 Namespace
 
 ```text
-actr-rtc-soak-<run-id>
+actr-soak-<run-id>
   |-- actrix-0
   |-- actr-0 ... actr-N
   |-- soak-dashboard
