@@ -1031,9 +1031,12 @@ async fn gate_closed_retains_recovery_answer_until_signaling_returns() {
     // This is the Offerer wake that was visible in the iOS log. It arrives
     // while the Answerer's signaling generation is still unavailable.
     h.handle
-        .apply_remote_ice_restart_offer_correlated(
-            desc(RTCSdpType::Offer),
-            Some("issue-234-recovery-offer".to_string()),
+        .apply_signaling_message_with_span(
+            SignalingMessage::IceRestartOffer {
+                desc: Box::new(desc(RTCSdpType::Offer)),
+                exchange_id: "issue-234-recovery-offer".to_string(),
+            },
+            tracing::Span::current(),
         )
         .await
         .expect("send recovery offer");
