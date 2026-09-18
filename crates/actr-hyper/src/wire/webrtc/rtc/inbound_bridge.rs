@@ -6,6 +6,14 @@
 //! calls `dispatch()`, ensuring RTC inbound messages take the same path as
 //! 0.14 (RPC → Mailbox/pending_requests, DataChunk → DataChunkRegistry).
 //!
+//! Dispatch preserves the legacy `WebRtcGate` ordering contract. Every message
+//! belongs to one of three traffic classes — RPC (`RpcReliable` and
+//! `RpcSignal`, which the 0.14 gate drained from a single `receive_rpc_message`
+//! loop), `StreamReliable`, and `StreamLatencyFirst` — and each class is
+//! drained by exactly one FIFO worker. Same-class messages are dispatched
+//! strictly in arrival order regardless of peer, generation, or lane, while the
+//! three classes make progress independently.
+//!
 //! The bridge also handles stream-level uncertain-delivery notification: when
 //! a lane closes with outstanding bytes, the bridge notifies the data-chunk
 //! tracker so the business can observe the uncertainty.
@@ -13,7 +21,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
-use actr_protocol::ActrId;
 use actr_protocol::prost::Message as ProstMessage;
 use actr_runtime_mailbox::Mailbox;
 use tokio::sync::RwLock;
@@ -31,11 +38,34 @@ use super::status::LaneKind;
 /// holds a slot that is filled when the mailbox becomes available.
 pub(crate) type MailboxSlot = Arc<RwLock<Option<Arc<dyn Mailbox>>>>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct DispatchKey {
-    peer: ActrId,
-    generation: u64,
-    lane: LaneKind,
+/// The FIFO scope of one inbound dispatch worker.
+///
+/// The pre-v0.20 gate kept three long-lived sequential receive loops:
+/// `RpcReliable` and `RpcSignal` were read from the same `receive_rpc_message()`
+/// queue, `StreamReliable` had its own loop, and `StreamLatencyFirst` had an
+/// independent one. Keying queues by traffic class — instead of by peer,
+/// generation, and lane — restores that contract, so a class stays FIFO across
+/// peers and generations even though the three classes run concurrently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum DispatchClass {
+    /// `RpcReliable` and `RpcSignal` share one FIFO worker.
+    Rpc,
+    /// Reliable stream chunks; blocking on a full queue applies backpressure.
+    StreamReliable,
+    /// Latency-first chunks, isolated from `StreamReliable` so a backpressured
+    /// reliable stream cannot stall them upstream of the registry's
+    /// drop-newest policy.
+    StreamLatencyFirst,
+}
+
+impl DispatchClass {
+    fn from_lane(lane: LaneKind) -> Self {
+        match lane {
+            LaneKind::RpcReliable | LaneKind::RpcSignal => Self::Rpc,
+            LaneKind::StreamReliable => Self::StreamReliable,
+            LaneKind::StreamLatencyFirst => Self::StreamLatencyFirst,
+        }
+    }
 }
 
 struct DispatchItem {
@@ -46,8 +76,8 @@ struct DispatchItem {
 #[derive(Default)]
 struct DispatchTaskState {
     closed: bool,
-    queues: HashMap<DispatchKey, VecDeque<DispatchItem>>,
-    running: HashSet<DispatchKey>,
+    queues: HashMap<DispatchClass, VecDeque<DispatchItem>>,
+    running: HashSet<DispatchClass>,
 }
 
 #[derive(Clone)]
@@ -58,7 +88,7 @@ struct DispatchTasks {
 
 fn spawn_dispatch_worker(
     tasks: &DispatchTasks,
-    key: DispatchKey,
+    class: DispatchClass,
     dispatcher: Arc<InboundDispatcher>,
     mailbox_slot: MailboxSlot,
     shutdown: CancellationToken,
@@ -71,10 +101,10 @@ fn spawn_dispatch_worker(
                 if state.closed {
                     return;
                 }
-                let item = state.queues.get_mut(&key).and_then(VecDeque::pop_front);
+                let item = state.queues.get_mut(&class).and_then(VecDeque::pop_front);
                 if item.is_none() {
-                    state.queues.remove(&key);
-                    state.running.remove(&key);
+                    state.queues.remove(&class);
+                    state.running.remove(&class);
                 }
                 item
             };
@@ -134,11 +164,7 @@ pub(crate) fn dispatcher_bridge(
     let handler_tasks = tasks.clone();
     let dispatch_shutdown = shutdown.clone();
     let handler: InboundHandler = std::sync::Arc::new(move |msg: InboundMessage, lease| {
-        let key = DispatchKey {
-            peer: msg.peer.clone(),
-            generation: msg.generation,
-            lane: msg.lane,
-        };
+        let class = DispatchClass::from_lane(msg.lane);
         // Keep admission and worker registration atomic with shutdown.
         // TaskTracker::close() does not prevent spawning new tasks, so the
         // worker must be tracked before the monitor can close and wait.
@@ -151,16 +177,16 @@ pub(crate) fn dispatcher_bridge(
         }
         state
             .queues
-            .entry(key.clone())
+            .entry(class)
             .or_default()
             .push_back(DispatchItem {
                 message: msg,
                 lease,
             });
-        if state.running.insert(key.clone()) {
+        if state.running.insert(class) {
             spawn_dispatch_worker(
                 &handler_tasks,
-                key,
+                class,
                 dispatcher.clone(),
                 mailbox_slot.clone(),
                 dispatch_shutdown.clone(),

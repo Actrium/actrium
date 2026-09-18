@@ -14,6 +14,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{Notify, RwLock, mpsc};
 use uuid::Uuid;
 
+/// Upper bound for every "this must happen" wait. A failure surfaces as a
+/// timeout instead of a hang, which keeps these tests deterministic.
+const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 fn test_id(serial: u64) -> ActrId {
     ActrId {
         realm: Realm { realm_id: 1 },
@@ -26,10 +30,56 @@ fn test_id(serial: u64) -> ActrId {
     }
 }
 
+/// Route an RPC request through the bridge.
+fn route_rpc(
+    router: &InboundRouter,
+    request_id: &str,
+    peer: u64,
+    generation: u64,
+    lane: LaneKind,
+) -> bool {
+    let envelope = actr_protocol::RpcEnvelope {
+        request_id: request_id.to_string(),
+        route_key: "test".to_string(),
+        direction: Some(actr_protocol::Direction::Request as i32),
+        ..Default::default()
+    };
+    router.route(InboundMessage {
+        peer: test_id(peer),
+        generation,
+        lane,
+        payload: bytes::Bytes::from(envelope.encode_to_vec()),
+    })
+}
+
+/// Route a data chunk through the bridge.
+fn route_chunk(router: &InboundRouter, stream_id: &str, sequence: u64, lane: LaneKind) -> bool {
+    let chunk = DataChunk {
+        stream_id: stream_id.to_string(),
+        sequence,
+        payload: bytes::Bytes::from_static(b"chunk"),
+        ..Default::default()
+    };
+    router.route(InboundMessage {
+        peer: test_id(2),
+        generation: 1,
+        lane,
+        payload: bytes::Bytes::from(chunk.encode_to_vec()),
+    })
+}
+
+/// Wait until the mailbox has seen at least `count` enqueues.
+async fn wait_for_enqueues(mailbox: &CapturingMailbox, count: usize) {
+    while mailbox.enqueue_count.load(Ordering::SeqCst) < count {
+        mailbox.enqueued.notified().await;
+    }
+}
+
 struct CapturingMailbox {
     enqueue_count: AtomicUsize,
     enqueued: Notify,
     first_enqueue_release: Option<Notify>,
+    enqueued_requests: std::sync::Mutex<Vec<String>>,
 }
 
 struct BlockingMailbox {
@@ -68,7 +118,33 @@ impl CapturingMailbox {
             enqueue_count: AtomicUsize::new(0),
             enqueued: Notify::new(),
             first_enqueue_release: None,
+            enqueued_requests: std::sync::Mutex::new(Vec::new()),
         })
+    }
+
+    /// A capturing mailbox whose first enqueue blocks until
+    /// [`CapturingMailbox::release_first`] is called.
+    fn blocking_first() -> Arc<Self> {
+        Arc::new(Self {
+            enqueue_count: AtomicUsize::new(0),
+            enqueued: Notify::new(),
+            first_enqueue_release: Some(Notify::new()),
+            enqueued_requests: std::sync::Mutex::new(Vec::new()),
+        })
+    }
+
+    fn release_first(&self) {
+        if let Some(release) = &self.first_enqueue_release {
+            release.notify_one();
+        }
+    }
+
+    /// Request ids in the order the mailbox received them.
+    fn requests(&self) -> Vec<String> {
+        self.enqueued_requests
+            .lock()
+            .expect("capturing mailbox request log")
+            .clone()
     }
 }
 
@@ -77,10 +153,16 @@ impl Mailbox for CapturingMailbox {
     async fn enqueue(
         &self,
         _from: Vec<u8>,
-        _payload: Vec<u8>,
+        payload: Vec<u8>,
         _priority: MessagePriority,
     ) -> StorageResult<Uuid> {
         let previous = self.enqueue_count.fetch_add(1, Ordering::SeqCst);
+        if let Ok(envelope) = actr_protocol::RpcEnvelope::decode(&payload[..]) {
+            self.enqueued_requests
+                .lock()
+                .expect("capturing mailbox request log")
+                .push(envelope.request_id);
+        }
         self.enqueued.notify_one();
         if previous == 0 {
             if let Some(release) = &self.first_enqueue_release {
@@ -116,33 +198,20 @@ async fn bridge_routes_rpc_to_mailbox() {
     let (handler, tasks) = dispatcher_bridge(dispatcher, slot, shutdown.clone());
     let router = InboundRouter::new(handler);
 
-    // Send an RPC request through the bridge.
-    let envelope = actr_protocol::RpcEnvelope {
-        request_id: "bridge-rpc".to_string(),
-        route_key: "test".to_string(),
-        payload: Some(bytes::Bytes::from("hello")),
-        error: None,
-        direction: Some(actr_protocol::Direction::Request as i32),
-        timeout_ms: 5000,
-        ..Default::default()
-    };
-    let data = bytes::Bytes::from(ProstMessage::encode_to_vec(&envelope));
-    assert!(router.route(InboundMessage {
-        peer: test_id(2),
-        generation: 1,
-        lane: LaneKind::RpcReliable,
-        payload: data,
-    }));
+    assert!(route_rpc(
+        &router,
+        "bridge-rpc",
+        2,
+        1,
+        LaneKind::RpcReliable
+    ));
 
     // Wait for the async dispatch to complete.
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while mailbox.enqueue_count.load(Ordering::SeqCst) == 0 {
-            mailbox.enqueued.notified().await;
-        }
-    })
-    .await
-    .expect("mailbox should receive the RPC request");
+    tokio::time::timeout(TIMEOUT, wait_for_enqueues(&mailbox, 1))
+        .await
+        .expect("mailbox should receive the RPC request");
     assert_eq!(mailbox.enqueue_count.load(Ordering::SeqCst), 1);
+    assert_eq!(mailbox.requests(), ["bridge-rpc"]);
     shutdown.cancel();
     tasks.await.expect("bridge tasks converge");
 }
@@ -168,25 +237,19 @@ async fn bridge_preserves_data_chunk_order_per_lane() {
     let (handler, tasks) = dispatcher_bridge(dispatcher, slot, shutdown.clone());
     let router = InboundRouter::new(handler);
 
-    for sequence in [0, 1] {
-        let chunk = DataChunk {
-            stream_id: "ordered-stream".to_string(),
+    for sequence in [0u64, 1] {
+        assert!(route_chunk(
+            &router,
+            "ordered-stream",
             sequence,
-            payload: bytes::Bytes::from_static(b"chunk"),
-            ..Default::default()
-        };
-        assert!(router.route(InboundMessage {
-            peer: test_id(2),
-            generation: 1,
-            lane: LaneKind::StreamReliable,
-            payload: bytes::Bytes::from(chunk.encode_to_vec()),
-        }));
+            LaneKind::StreamReliable
+        ));
     }
 
     let mut received = Vec::new();
     for _ in 0..2 {
         received.push(
-            tokio::time::timeout(std::time::Duration::from_secs(5), sequence_rx.recv())
+            tokio::time::timeout(TIMEOUT, sequence_rx.recv())
                 .await
                 .expect("ordered stream callback should complete")
                 .expect("ordered stream callback channel should remain open"),
@@ -198,68 +261,144 @@ async fn bridge_preserves_data_chunk_order_per_lane() {
     tasks.await.expect("bridge tasks converge");
 }
 
-#[tokio::test]
-async fn bridge_serializes_blocked_lane_without_blocking_other_lanes() {
+/// The pre-v0.20 gate drained `RpcReliable` and `RpcSignal` from a single
+/// receive loop, so both lanes are one traffic class: a dispatch in either lane
+/// must not overtake an earlier one, even when it comes from another peer or
+/// generation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bridge_rpc_lanes_share_one_fifo_worker() {
     let pending = Arc::new(crate::transport::correlation::RpcCorrelation::new());
     let dispatcher = Arc::new(InboundDispatcher::new(
         pending,
         Arc::new(DataChunkRegistry::new()),
     ));
-    let mailbox = Arc::new(CapturingMailbox {
-        enqueue_count: AtomicUsize::new(0),
-        enqueued: Notify::new(),
-        first_enqueue_release: Some(Notify::new()),
-    });
+    let mailbox = CapturingMailbox::blocking_first();
     let slot: MailboxSlot = Arc::new(RwLock::new(Some(mailbox.clone())));
     let shutdown = tokio_util::sync::CancellationToken::new();
     let (handler, tasks) = dispatcher_bridge(dispatcher, slot, shutdown.clone());
     let router = InboundRouter::new(handler);
-    let route = |request_id: &str, lane| {
-        let envelope = actr_protocol::RpcEnvelope {
-            request_id: request_id.to_string(),
-            route_key: "test".to_string(),
-            direction: Some(actr_protocol::Direction::Request as i32),
-            ..Default::default()
-        };
-        assert!(router.route(InboundMessage {
-            peer: test_id(2),
-            generation: 1,
-            lane,
-            payload: bytes::Bytes::from(envelope.encode_to_vec()),
-        }));
-    };
-    let wait_for_enqueues = |count| {
-        let mailbox = &mailbox;
-        async move {
-            while mailbox.enqueue_count.load(Ordering::SeqCst) < count {
-                mailbox.enqueued.notified().await;
-            }
-        }
-    };
 
-    route("first", LaneKind::RpcReliable);
-    tokio::time::timeout(std::time::Duration::from_secs(5), wait_for_enqueues(1))
+    assert!(route_rpc(
+        &router,
+        "rpc-reliable-first",
+        2,
+        1,
+        LaneKind::RpcReliable
+    ));
+    tokio::time::timeout(TIMEOUT, wait_for_enqueues(&mailbox, 1))
         .await
-        .expect("first dispatch should block in the mailbox");
-    route("second", LaneKind::RpcReliable);
-    route("independent", LaneKind::RpcSignal);
-    tokio::time::timeout(std::time::Duration::from_secs(5), wait_for_enqueues(2))
-        .await
-        .expect("another lane should dispatch while the first is blocked");
+        .expect("the first RPC dispatch should block inside the mailbox");
+
+    // Another lane, and another peer/generation: same traffic class, so both
+    // wait behind the blocked dispatch.
+    assert!(route_rpc(&router, "rpc-signal", 3, 7, LaneKind::RpcSignal));
+    assert!(route_rpc(
+        &router,
+        "rpc-reliable-second",
+        2,
+        1,
+        LaneKind::RpcReliable
+    ));
     assert!(
-        tokio::time::timeout(std::time::Duration::from_millis(100), wait_for_enqueues(3))
-            .await
-            .is_err(),
-        "the second same-lane dispatch must wait for the first to complete"
-    );
-    assert_eq!(router.inflight().0, 2, "queued work must retain its lease");
-
-    mailbox.first_enqueue_release.as_ref().unwrap().notify_one();
-    tokio::time::timeout(std::time::Duration::from_secs(5), wait_for_enqueues(3))
+        tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            wait_for_enqueues(&mailbox, 2)
+        )
         .await
-        .expect("the queued dispatch should resume after the first completes");
+        .is_err(),
+        "RpcSignal must not overtake a blocked RpcReliable dispatch: both lanes share one FIFO worker"
+    );
+    assert_eq!(router.inflight().0, 3, "queued work must retain its lease");
+
+    mailbox.release_first();
+    tokio::time::timeout(TIMEOUT, wait_for_enqueues(&mailbox, 3))
+        .await
+        .expect("queued RPC dispatches should resume after the first completes");
+    assert_eq!(
+        mailbox.requests(),
+        ["rpc-reliable-first", "rpc-signal", "rpc-reliable-second"]
+    );
+
     shutdown.cancel();
-    tasks.await.expect("bridge tasks converge");
+    tokio::time::timeout(TIMEOUT, tasks)
+        .await
+        .expect("bridge tasks converge")
+        .expect("bridge monitor should exit cleanly");
+    assert_eq!(router.inflight(), (0, 0));
+}
+
+/// The three traffic classes own independent workers: blocking the RPC class
+/// must not stall either stream class.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bridge_keeps_traffic_classes_independent() {
+    let pending = Arc::new(crate::transport::correlation::RpcCorrelation::new());
+    let registry = Arc::new(DataChunkRegistry::new());
+    let (sequence_tx, mut sequence_rx) = mpsc::unbounded_channel();
+    let callback: crate::inbound::DataChunkCallback = Arc::new(move |chunk: DataChunk, _sender| {
+        let sequence_tx = sequence_tx.clone();
+        Box::pin(async move {
+            let _ = sequence_tx.send(chunk.sequence);
+            Ok(())
+        })
+    });
+    registry.register("independent-stream".to_string(), callback);
+
+    let dispatcher = Arc::new(InboundDispatcher::new(pending, registry));
+    let mailbox = CapturingMailbox::blocking_first();
+    let slot: MailboxSlot = Arc::new(RwLock::new(Some(mailbox.clone())));
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let (handler, tasks) = dispatcher_bridge(dispatcher, slot, shutdown.clone());
+    let router = InboundRouter::new(handler);
+
+    // Occupy the RPC class with a dispatch that never leaves the mailbox.
+    assert!(route_rpc(
+        &router,
+        "rpc-blocked",
+        2,
+        1,
+        LaneKind::RpcReliable
+    ));
+    tokio::time::timeout(TIMEOUT, wait_for_enqueues(&mailbox, 1))
+        .await
+        .expect("the RPC dispatch should reach the mailbox");
+
+    // Both stream classes keep draining while the RPC class is blocked.
+    assert!(route_chunk(
+        &router,
+        "independent-stream",
+        0,
+        LaneKind::StreamReliable
+    ));
+    let reliable = tokio::time::timeout(TIMEOUT, sequence_rx.recv())
+        .await
+        .expect("the reliable stream class must dispatch while RPC is blocked")
+        .expect("ordered stream callback channel should remain open");
+    assert_eq!(reliable, 0);
+
+    assert!(route_chunk(
+        &router,
+        "independent-stream",
+        1,
+        LaneKind::StreamLatencyFirst
+    ));
+    let latency_first = tokio::time::timeout(TIMEOUT, sequence_rx.recv())
+        .await
+        .expect("the latency-first class must dispatch while RPC is blocked")
+        .expect("ordered stream callback channel should remain open");
+    assert_eq!(latency_first, 1);
+
+    assert_eq!(
+        mailbox.enqueue_count.load(Ordering::SeqCst),
+        1,
+        "the blocked RPC class must stay blocked while streams drain"
+    );
+
+    mailbox.release_first();
+    shutdown.cancel();
+    tokio::time::timeout(TIMEOUT, tasks)
+        .await
+        .expect("bridge tasks converge")
+        .expect("bridge monitor should exit cleanly");
     assert_eq!(router.inflight(), (0, 0));
 }
 
@@ -275,12 +414,13 @@ async fn bridge_drops_message_when_mailbox_not_set() {
     let router = InboundRouter::new(handler);
 
     // This should not panic; the message is dropped with a warning.
-    assert!(router.route(InboundMessage {
-        peer: test_id(2),
-        generation: 1,
-        lane: LaneKind::RpcReliable,
-        payload: bytes::Bytes::from("test"),
-    }));
+    assert!(route_rpc(
+        &router,
+        "dropped-rpc",
+        2,
+        1,
+        LaneKind::RpcReliable
+    ));
     // Give the spawned task a chance to run.
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     shutdown.cancel();
@@ -301,38 +441,30 @@ async fn bridge_shutdown_cancels_a_blocked_dispatch_and_converges() {
     let (handler, tasks) = dispatcher_bridge(dispatcher, slot, shutdown.clone());
     let router = InboundRouter::new(handler);
 
-    let envelope = actr_protocol::RpcEnvelope {
-        request_id: "blocked-bridge-rpc".to_string(),
-        route_key: "test".to_string(),
-        payload: Some(bytes::Bytes::from("hello")),
-        direction: Some(actr_protocol::Direction::Request as i32),
-        timeout_ms: 5000,
-        ..Default::default()
-    };
-    assert!(router.route(InboundMessage {
-        peer: test_id(2),
-        generation: 1,
-        lane: LaneKind::RpcReliable,
-        payload: bytes::Bytes::from(ProstMessage::encode_to_vec(&envelope)),
-    }));
-    tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        mailbox.entered.notified(),
-    )
-    .await
-    .expect("dispatch should reach the blocking mailbox");
+    assert!(route_rpc(
+        &router,
+        "blocked-bridge-rpc",
+        2,
+        1,
+        LaneKind::RpcReliable
+    ));
+    tokio::time::timeout(TIMEOUT, mailbox.entered.notified())
+        .await
+        .expect("dispatch should reach the blocking mailbox");
 
-    // Keep a second message queued behind the blocked dispatch. Shutdown
-    // must release both the active lease and the queued lease.
-    assert!(router.route(InboundMessage {
-        peer: test_id(2),
-        generation: 1,
-        lane: LaneKind::RpcReliable,
-        payload: bytes::Bytes::from(envelope.encode_to_vec()),
-    }));
+    // The other RPC lane belongs to the same traffic class, so this message
+    // stays queued behind the blocked dispatch. Shutdown must release both the
+    // active lease and the queued lease.
+    assert!(route_rpc(
+        &router,
+        "queued-bridge-signal",
+        2,
+        1,
+        LaneKind::RpcSignal
+    ));
     assert_eq!(router.inflight().0, 2);
     shutdown.cancel();
-    tokio::time::timeout(std::time::Duration::from_secs(5), tasks)
+    tokio::time::timeout(TIMEOUT, tasks)
         .await
         .expect("bridge task group must converge after shutdown")
         .expect("bridge monitor should exit cleanly");
