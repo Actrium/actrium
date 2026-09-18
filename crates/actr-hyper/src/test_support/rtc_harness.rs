@@ -774,7 +774,7 @@ impl TestRtcControl {
 /// A physical-channel observation token; holding it never grants sendability.
 #[cfg(test)]
 pub(crate) struct TestLaneProbe {
-    channel: Arc<dyn webrtc::data_channel::DataChannel>,
+    channel: Arc<dyn crate::wire::webrtc::rtc::peer::adapter::LaneDataChannel>,
 }
 
 #[cfg(test)]

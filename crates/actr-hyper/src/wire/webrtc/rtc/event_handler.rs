@@ -29,7 +29,7 @@ use std::sync::Arc;
 use actr_protocol::ActrId;
 use async_trait::async_trait;
 
-use webrtc::data_channel::DataChannel;
+use webrtc::data_channel::DataChannel as UpstreamDataChannel;
 use webrtc::media_stream::track_remote::TrackRemote;
 use webrtc::peer_connection::{
     PeerConnectionEventHandler, RTCIceConnectionState, RTCIceGatheringState,
@@ -38,6 +38,7 @@ use webrtc::peer_connection::{
 };
 
 use super::events::{DataChannelDescriptor, PeerDriverEvent, PeerEventMailbox, TrackDescriptor};
+use super::peer::adapter::{LaneDataChannel, RealLaneDataChannel};
 use super::peer::session::SessionResourceRegistry;
 
 /// Translates RTC driver callbacks for one PC generation into
@@ -97,6 +98,32 @@ impl WebRtcEventHandler {
     #[cfg(test)]
     pub(crate) fn mailbox(&self) -> PeerEventMailbox {
         self.event_tx.clone()
+    }
+
+    /// Drive the data-channel callback with Actr's narrow adapter in tests.
+    #[cfg(test)]
+    pub(crate) async fn on_test_data_channel(&self, data_channel: Arc<dyn LaneDataChannel>) {
+        self.handle_data_channel(data_channel).await;
+    }
+
+    async fn handle_data_channel(&self, data_channel: Arc<dyn LaneDataChannel>) {
+        let Ok(resource_id) = self.resources.try_insert_data_channel(data_channel.clone()) else {
+            self.event_tx.mark_overflow(self.generation);
+            return;
+        };
+        let generation = self.generation;
+        let event_tx = self.event_tx.clone();
+        self.resources.spawn_normalization(async move {
+            let descriptor = DataChannelDescriptor {
+                label: data_channel.label().await.unwrap_or_default(),
+                negotiated: data_channel.negotiated().await.unwrap_or(false),
+            };
+            event_tx.try_publish(PeerDriverEvent::DataChannelDiscovered {
+                generation,
+                resource_id,
+                descriptor,
+            });
+        });
     }
 }
 
@@ -174,33 +201,10 @@ impl PeerConnectionEventHandler for WebRtcEventHandler {
         });
     }
 
-    async fn on_data_channel(&self, data_channel: Arc<dyn DataChannel>) {
-        // Store the raw object first. Only the opaque token + immutable metadata
-        // may cross into the Controller mailbox.
-        let Ok(resource_id) = self.resources.try_insert_data_channel(data_channel.clone()) else {
-            self.event_tx.mark_overflow(self.generation);
-            // The resource registry is bounded. Overflow marks the generation
-            // unhealthy; the Controller performs Hard Recovery and the owning
-            // PC is explicitly closed. Dropping this callback clone avoids an
-            // unbounded detached-close task storm.
-            return;
-        };
-        let generation = self.generation;
-        let event_tx = self.event_tx.clone();
-        // Metadata getters are asynchronous in RTC. Run the finite
-        // normalization step outside the driver callback; the callback itself
-        // never waits for the Controller, mailbox capacity, or driver work.
-        self.resources.spawn_normalization(async move {
-            let descriptor = DataChannelDescriptor {
-                label: data_channel.label().await.unwrap_or_default(),
-                negotiated: data_channel.negotiated().await.unwrap_or(false),
-            };
-            event_tx.try_publish(PeerDriverEvent::DataChannelDiscovered {
-                generation,
-                resource_id,
-                descriptor,
-            });
-        });
+    async fn on_data_channel(&self, data_channel: Arc<dyn UpstreamDataChannel>) {
+        let data_channel: Arc<dyn LaneDataChannel> =
+            Arc::new(RealLaneDataChannel::new(data_channel));
+        self.handle_data_channel(data_channel).await;
     }
 
     async fn on_track(&self, track: Arc<dyn TrackRemote>) {

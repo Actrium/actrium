@@ -24,7 +24,6 @@ use tokio::task::JoinSet;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use webrtc::data_channel::DataChannel;
 use webrtc::error::Error as RtcError;
 use webrtc::media_stream::track_local::TrackLocal;
 use webrtc::media_stream::track_remote::TrackRemote;
@@ -36,6 +35,7 @@ use crate::wire::webrtc::rtc::inbound::InboundRouter;
 use crate::wire::webrtc::rtc::media::TrackMeta;
 use crate::wire::webrtc::rtc::status::LaneKind;
 
+use super::adapter::LaneDataChannel;
 use super::effects::SessionOps;
 use super::lane_handle::LaneHandle;
 use super::reducer::LaneEvent;
@@ -48,7 +48,7 @@ pub(crate) struct SessionResourceId(u64);
 
 #[derive(Clone)]
 enum SessionResource {
-    DataChannel(Arc<dyn DataChannel>),
+    DataChannel(Arc<dyn LaneDataChannel>),
     RemoteTrack(Arc<dyn TrackRemote>),
 }
 
@@ -92,7 +92,7 @@ impl SessionResourceRegistry {
 
     pub(crate) fn try_insert_data_channel(
         &self,
-        channel: Arc<dyn DataChannel>,
+        channel: Arc<dyn LaneDataChannel>,
     ) -> Result<SessionResourceId, ()> {
         if self.closed.load(Ordering::Acquire) {
             return Err(());
@@ -148,7 +148,10 @@ impl SessionResourceRegistry {
         )
     }
 
-    pub(crate) fn take_data_channel(&self, id: SessionResourceId) -> Option<Arc<dyn DataChannel>> {
+    pub(crate) fn take_data_channel(
+        &self,
+        id: SessionResourceId,
+    ) -> Option<Arc<dyn LaneDataChannel>> {
         let resource = self
             .resources
             .lock()
@@ -502,7 +505,7 @@ const INBOUND_ADMISSION_WAIT: std::time::Duration = std::time::Duration::from_se
 pub(crate) async fn lane_pump(
     generation: u64,
     lane: LaneKind,
-    channel: Arc<dyn DataChannel>,
+    channel: Arc<dyn LaneDataChannel>,
     plumbing: LanePlumbing,
     cancellation: CancellationToken,
 ) {
@@ -696,6 +699,7 @@ pub(crate) async fn lane_pump(
                 let _ = lane_tx.send(LaneEvent::Closed { generation, lane }).await;
                 return;
             }
+            _ => {}
         }
     }
 }
@@ -719,7 +723,7 @@ pub(crate) struct PeerConnectionSession {
     /// The session's DataChannel resource registry, keyed by lane. The session
     /// is the sole owner of concrete channel objects; the controller only sees
     /// the `LaneHandle` tokens returned by `register_channel`/`create_lane`.
-    channels: HashMap<LaneKind, Arc<dyn DataChannel>>,
+    channels: HashMap<LaneKind, Arc<dyn LaneDataChannel>>,
     /// The session's remote-track resource registry, keyed by track id
     /// (Stage 6). Each track has exactly one pump (its sole `poll()` consumer)
     /// owned by this session's JoinSet.
@@ -782,7 +786,7 @@ impl PeerConnectionSession {
     pub(crate) fn register_channel(
         &mut self,
         lane: LaneKind,
-        channel: Arc<dyn DataChannel>,
+        channel: Arc<dyn LaneDataChannel>,
         plumbing: LanePlumbing,
     ) -> LaneHandle {
         let handle = LaneHandle::new(self.generation, lane, channel.clone(), self.cancellation());
