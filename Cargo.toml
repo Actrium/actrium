@@ -126,9 +126,9 @@ opentelemetry-appender-tracing = "0.32.0"
 tracing-opentelemetry = "0.33.0"
 
 # === WebRTC ===
-webrtc = { version = "0.20.3", default-features = false, features = ["runtime-tokio"] }
-rtc = "0.20.3"
-rtc-rtp = "0.20.3"
+webrtc = { version = "0.21.0-rc.2", default-features = false, features = ["runtime-tokio", "crypto-ring"] }
+rtc = { version = "0.21.0-rc.2", default-features = false, features = ["crypto-ring"] }
+rtc-rtp = "0.21.0-rc.2"
 
 # === Loran server dependencies (compatibility crate names remain Actrix) ===
 turn_crate = { package = "turn", version = "0.11.0" }

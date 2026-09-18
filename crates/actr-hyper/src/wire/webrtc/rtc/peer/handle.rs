@@ -17,7 +17,10 @@ use tokio::sync::{mpsc, oneshot, watch};
 use webrtc::peer_connection::RTCSessionDescription;
 
 use crate::wire::webrtc::rtc::media::OutboundTrackWriter;
-use crate::wire::webrtc::rtc::peer::lane_handle::{ActiveLaneRegistry, LaneHandle};
+use crate::wire::webrtc::rtc::peer::adapter::ActrRtpSender;
+use crate::wire::webrtc::rtc::peer::lane_handle::{
+    ActiveLaneRegistry, LaneHandle, LaneReadinessWait,
+};
 use crate::wire::webrtc::rtc::peer::reducer::{RtcPeerCommand, SignalingMessage};
 use crate::wire::webrtc::rtc::peer::send::{RtcSendAttempt, RtcSendError};
 use crate::wire::webrtc::rtc::status::{LaneKind, RtcPeerSnapshot};
@@ -496,32 +499,36 @@ impl RtcPeerControllerHandle {
         Ok(permit)
     }
 
-    /// Get the lane handle, lazily creating the lane via the controller if it
-    /// does not exist yet, waiting (bounded) for registration.
+    /// Get a lane handle and wait for its DataChannel handshake to complete.
+    ///
+    /// The Controller publishes a handle as soon as the concrete channel is
+    /// registered, but the single-consumer lane pump publishes `OnOpen` only
+    /// after the real DCEP/SCTP readiness boundary. The bounded wait covers
+    /// both handle materialization and that readiness edge.
     async fn lane_or_ensure(
         &self,
         lane: LaneKind,
         generation: u64,
     ) -> Result<LaneHandle, RtcSendError> {
-        if let Some(handle) = self.lane_handle(generation, lane) {
-            return Ok(handle);
-        }
-        // Lazily create the lane via the controller.
-        self.send_command(RtcPeerCommand::EnsureLane(lane))
-            .await
-            .map_err(|_| RtcSendError::ConnectionNotReady)?;
-        // Bounded wait for the controller to create + register the lane. N1:
-        // sleep on the registry's change watch instead of busy-polling; the
-        // outer timer-facade timeout bounds the wait. The handle holds a
-        // registry clone, so the watch sender outlives this receiver and
-        // `changed()` cannot fail.
         let mut changes = self.lanes.subscribe_changes();
+        if self.lane_handle(generation, lane).is_none() {
+            self.send_command(RtcPeerCommand::EnsureLane(lane))
+                .await
+                .map_err(|_| RtcSendError::ConnectionNotReady)?;
+        }
+
+        // Bounded wait for the controller to create + register the lane and for
+        // its pump to observe `OnOpen`. N1: sleep on the registry's change
+        // watch instead of busy-polling; the handle's readiness watch carries
+        // the second lifecycle edge.
         let wait = async {
             loop {
                 if let Some(handle) = self.lane_handle(generation, lane) {
-                    return handle;
+                    return self.wait_for_lane_ready(handle, generation).await;
                 }
-                let _ = changes.changed().await;
+                if changes.changed().await.is_err() {
+                    return Err(RtcSendError::ConnectionNotReady);
+                }
             }
         };
         match crate::timer::timeout(
@@ -531,11 +538,36 @@ impl RtcPeerControllerHandle {
         )
         .await
         {
-            Ok(handle) => Ok(handle),
-            // Tolerate an insert landing exactly at the deadline.
-            Err(_) => self
-                .lane_handle(generation, lane)
-                .ok_or(RtcSendError::ConnectionNotReady),
+            Ok(handle) => handle,
+            // Tolerate a readiness edge landing exactly at the deadline.
+            Err(_) => match self.lane_handle(generation, lane) {
+                Some(handle)
+                    if handle.is_ready()
+                        && handle.is_live()
+                        && self.snapshot().pc_generation == generation =>
+                {
+                    Ok(handle)
+                }
+                _ => Err(RtcSendError::ConnectionNotReady),
+            },
+        }
+    }
+
+    async fn wait_for_lane_ready(
+        &self,
+        handle: LaneHandle,
+        generation: u64,
+    ) -> Result<LaneHandle, RtcSendError> {
+        match handle.wait_ready().await {
+            LaneReadinessWait::Ready
+                if handle.is_live() && self.snapshot().pc_generation == generation =>
+            {
+                Ok(handle)
+            }
+            LaneReadinessWait::Closed => Err(RtcSendError::DataChannelClosed),
+            LaneReadinessWait::Ready | LaneReadinessWait::Cancelled => {
+                Err(RtcSendError::ConnectionNotReady)
+            }
         }
     }
 
@@ -643,7 +675,7 @@ impl RtcPeerControllerHandle {
     pub(crate) async fn add_track(
         &self,
         track: Arc<dyn webrtc::media_stream::track_local::TrackLocal>,
-    ) -> Result<Arc<dyn webrtc::rtp_transceiver::RtpSender>, String> {
+    ) -> Result<Arc<dyn ActrRtpSender>, String> {
         let (respond, rx) = tokio::sync::oneshot::channel();
         self.send_command(RtcPeerCommand::AddTrack { track, respond })
             .await
@@ -653,10 +685,7 @@ impl RtcPeerControllerHandle {
     }
 
     /// S6-2: remove a previously added local track by its sender.
-    pub(crate) async fn remove_track(
-        &self,
-        sender: Arc<dyn webrtc::rtp_transceiver::RtpSender>,
-    ) -> Result<(), String> {
+    pub(crate) async fn remove_track(&self, sender: Arc<dyn ActrRtpSender>) -> Result<(), String> {
         let (respond, rx) = tokio::sync::oneshot::channel();
         self.send_command(RtcPeerCommand::RemoveTrack { sender, respond })
             .await

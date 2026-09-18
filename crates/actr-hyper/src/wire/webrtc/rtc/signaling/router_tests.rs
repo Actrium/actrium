@@ -14,6 +14,7 @@ use webrtc::peer_connection::{
 
 use crate::wire::webrtc::rtc::event_handler::WebRtcEventHandler;
 use crate::wire::webrtc::rtc::manager::RtcConnectionManager;
+use crate::wire::webrtc::rtc::peer::adapter::ActrRtpSender;
 use crate::wire::webrtc::rtc::peer::effects::{SessionFactory, SessionOps};
 use crate::wire::webrtc::rtc::peer::reducer::SignalingMessage;
 use crate::wire::webrtc::rtc::signaling::{SignalingDispatch, SignalingInbound};
@@ -68,22 +69,19 @@ impl SessionOps for FakeOps {
         &self,
         label: &str,
         _init: webrtc::data_channel::RTCDataChannelInit,
-    ) -> Result<Arc<dyn webrtc::data_channel::DataChannel>, RtcError> {
+    ) -> Result<Arc<dyn crate::wire::webrtc::rtc::peer::adapter::LaneDataChannel>, RtcError> {
         Ok(crate::wire::webrtc::rtc::peer::effects::test_support::fake_data_channel(label))
     }
     async fn add_track(
         &self,
         _track: Arc<dyn webrtc::media_stream::track_local::TrackLocal>,
-    ) -> Result<Arc<dyn webrtc::rtp_transceiver::RtpSender>, RtcError> {
+    ) -> Result<Arc<dyn ActrRtpSender>, RtcError> {
         Err(RtcError::Other("no media in router tests".into()))
     }
-    async fn remove_track(
-        &self,
-        _sender: &Arc<dyn webrtc::rtp_transceiver::RtpSender>,
-    ) -> Result<(), RtcError> {
+    async fn remove_track(&self, _sender: &Arc<dyn ActrRtpSender>) -> Result<(), RtcError> {
         Ok(())
     }
-    async fn get_senders(&self) -> Vec<Arc<dyn webrtc::rtp_transceiver::RtpSender>> {
+    async fn get_senders(&self) -> Vec<Arc<dyn ActrRtpSender>> {
         Vec::new()
     }
     async fn get_stats(&self) -> webrtc::peer_connection::RTCStatsReport {
