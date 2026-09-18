@@ -51,6 +51,37 @@ use super::state::{PendingRtcOperationKind, RtcPeerState};
 #[cfg(feature = "test-utils")]
 pub(crate) type NodeDriverEventObserver = Arc<dyn Fn(&ActrId, &PeerDriverEvent) + Send + Sync>;
 
+/// What one critical-signaling dispatch actually met at the lifecycle gate.
+///
+/// `SendSignaling` is executed inline by the controller, and the gate decision
+/// it makes is otherwise unobservable from outside: a dispatch that a closed
+/// gate retained and a dispatch that an open gate sent both leave the snapshot
+/// unchanged until a much later turn. Recovery regressions need to pin which
+/// one happened, so the controller can report it through
+/// [`SignalingDispatchObserver`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SignalingDispatchOutcome {
+    /// The gate was committed; the message went to the signaling queue.
+    Sent,
+    /// The gate was withdrawn; critical signaling was retained until it returns.
+    Retained,
+    /// A retained critical message was delivered after the gate returned.
+    RetainedFlushed,
+}
+
+impl SignalingDispatchOutcome {
+    /// Whether this outcome is a closed gate resolving where a dispatch landed,
+    /// rather than an open gate delivering it.
+    pub(crate) fn is_gate_closed_resolution(&self) -> bool {
+        matches!(self, Self::Retained)
+    }
+}
+
+/// Test-only sink for [`SignalingDispatchOutcome`]; production leaves it unset.
+#[cfg(feature = "test-utils")]
+pub(crate) type SignalingDispatchObserver =
+    Arc<dyn Fn(SignalingDispatchOutcome, u64) + Send + Sync>;
+
 /// Bounded capacity of the per-peer command mailbox.
 const COMMAND_CAPACITY: usize = 64;
 /// Bounded capacity of the per-peer effect-completion channel.
@@ -224,6 +255,10 @@ pub(crate) struct RtcPeerController {
     /// Reuse its processing span for same-generation effects, including
     /// fallback/retired generations, without caching a span across turns.
     active_effect_generation: Option<u64>,
+    /// Test-only reporter of critical-signaling gate decisions; see
+    /// [`SharedNodeDeps::signaling_dispatch_observer`].
+    #[cfg(feature = "test-utils")]
+    signaling_dispatch_observer: Option<SignalingDispatchObserver>,
 }
 
 /// Node-level shared dependencies handed to every controller and its effect
@@ -242,6 +277,11 @@ pub(crate) struct SharedNodeDeps {
     /// Production managers leave this unset.
     #[cfg(feature = "test-utils")]
     pub(crate) driver_event_observer: Option<NodeDriverEventObserver>,
+    /// Test-only observation of every critical-signaling gate decision, so
+    /// recovery tests can prove a dispatch met a closed gate instead of racing
+    /// the generation commit. Production managers leave this unset.
+    #[cfg(feature = "test-utils")]
+    pub(crate) signaling_dispatch_observer: Option<SignalingDispatchObserver>,
     /// Stable identity of this Controller lifetime within its Manager.
     pub(crate) controller_lifecycle_id: u64,
     /// Manager-owned generation-invalidation sink used to release business
@@ -455,6 +495,8 @@ impl RtcPeerController {
             network_rx,
             signaling_generation_rx,
             policy_clock,
+            #[cfg(feature = "test-utils")]
+            signaling_dispatch_observer: deps.signaling_dispatch_observer.clone(),
             deps: deps.clone(),
             connect_span: None,
             recovery_span: None,
@@ -1727,6 +1769,10 @@ impl RtcPeerController {
         );
         match self.signaling_tx.try_send(dispatch) {
             Ok(()) => {
+                self.observe_signaling_dispatch(
+                    SignalingDispatchOutcome::RetainedFlushed,
+                    retained.generation,
+                );
                 tracing::info!(
                     peer = %self.state.peer_id.to_string_repr(),
                     message_kind,
@@ -1784,6 +1830,15 @@ impl RtcPeerController {
                 || (self.state.role == super::state::Role::Answerer
                     && self.state.awaiting_offer
                     && self.state.parked_signaling_generation == Some(retained.generation))
+        }
+    }
+
+    /// Report one critical-signaling gate decision to a test observer. Always
+    /// inlined to nothing outside `test-utils`.
+    fn observe_signaling_dispatch(&self, _outcome: SignalingDispatchOutcome, _generation: u64) {
+        #[cfg(feature = "test-utils")]
+        if let Some(observer) = &self.signaling_dispatch_observer {
+            observer(_outcome, _generation);
         }
     }
 
@@ -1905,6 +1960,10 @@ impl RtcPeerController {
                             #[cfg(feature = "opentelemetry")]
                             context,
                         });
+                        self.observe_signaling_dispatch(
+                            SignalingDispatchOutcome::Retained,
+                            generation,
+                        );
                         tracing::debug!(
                             peer = %self.state.peer_id.to_string_repr(),
                             generation,
@@ -1929,6 +1988,7 @@ impl RtcPeerController {
                 );
                 match self.signaling_tx.try_send(dispatch) {
                     Ok(()) => {
+                        self.observe_signaling_dispatch(SignalingDispatchOutcome::Sent, generation);
                         // Candidates are high-volume trickle traffic; only the
                         // critical SDP/role messages get a dispatch log.
                         if !is_candidate {
