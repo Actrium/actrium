@@ -12,7 +12,15 @@
 //! loop), `StreamReliable`, and `StreamLatencyFirst` — and each class is
 //! drained by exactly one FIFO worker. Same-class messages are dispatched
 //! strictly in arrival order regardless of peer, generation, or lane, while the
-//! three classes make progress independently.
+//! three classes make progress independently once admitted.
+//!
+//! Those guarantees only cover messages the bridge receives. Admission happens
+//! earlier, in `InboundRouter`, which enforces a single message and byte budget
+//! across every lane and keeps each accepted message's capacity lease until its
+//! dispatch completes. A saturated class therefore consumes shared admission
+//! capacity, and further messages — including ones belonging to an idle class —
+//! are dropped by `InboundRouter::route()` before any class worker can run.
+//! `bridge_admission_is_shared_across_classes` pins that overload behavior.
 //!
 //! The bridge also handles stream-level uncertain-delivery notification: when
 //! a lane closes with outstanding bytes, the bridge notifies the data-chunk

@@ -328,20 +328,23 @@ async fn bridge_rpc_lanes_share_one_fifo_worker() {
 }
 
 /// The three traffic classes own independent workers: blocking the RPC class
-/// must not stall either stream class.
+/// must not stall either stream class. Cross-class *ordering* is deliberately
+/// not asserted — the classes run concurrently by design.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn bridge_keeps_traffic_classes_independent() {
     let pending = Arc::new(crate::transport::correlation::RpcCorrelation::new());
     let registry = Arc::new(DataChunkRegistry::new());
-    let (sequence_tx, mut sequence_rx) = mpsc::unbounded_channel();
+    let (stream_tx, mut stream_rx) = mpsc::unbounded_channel();
     let callback: crate::inbound::DataChunkCallback = Arc::new(move |chunk: DataChunk, _sender| {
-        let sequence_tx = sequence_tx.clone();
+        let stream_tx = stream_tx.clone();
         Box::pin(async move {
-            let _ = sequence_tx.send(chunk.sequence);
+            let _ = stream_tx.send(chunk.stream_id.clone());
             Ok(())
         })
     });
-    registry.register("independent-stream".to_string(), callback);
+    // One stream per class, so each class is observed on its own.
+    registry.register("reliable-stream".to_string(), callback.clone());
+    registry.register("latency-first-stream".to_string(), callback);
 
     let dispatcher = Arc::new(InboundDispatcher::new(pending, registry));
     let mailbox = CapturingMailbox::blocking_first();
@@ -362,30 +365,33 @@ async fn bridge_keeps_traffic_classes_independent() {
         .await
         .expect("the RPC dispatch should reach the mailbox");
 
-    // Both stream classes keep draining while the RPC class is blocked.
+    // Both stream classes keep draining while the RPC class is blocked. Their
+    // relative order is unspecified, so only the set of observed classes is
+    // asserted.
     assert!(route_chunk(
         &router,
-        "independent-stream",
+        "reliable-stream",
         0,
         LaneKind::StreamReliable
     ));
-    let reliable = tokio::time::timeout(TIMEOUT, sequence_rx.recv())
-        .await
-        .expect("the reliable stream class must dispatch while RPC is blocked")
-        .expect("ordered stream callback channel should remain open");
-    assert_eq!(reliable, 0);
-
     assert!(route_chunk(
         &router,
-        "independent-stream",
-        1,
+        "latency-first-stream",
+        0,
         LaneKind::StreamLatencyFirst
     ));
-    let latency_first = tokio::time::timeout(TIMEOUT, sequence_rx.recv())
-        .await
-        .expect("the latency-first class must dispatch while RPC is blocked")
-        .expect("ordered stream callback channel should remain open");
-    assert_eq!(latency_first, 1);
+
+    let mut observed = Vec::new();
+    for _ in 0..2 {
+        observed.push(
+            tokio::time::timeout(TIMEOUT, stream_rx.recv())
+                .await
+                .expect("both stream classes must dispatch while RPC is blocked")
+                .expect("stream callback channel should remain open"),
+        );
+    }
+    observed.sort();
+    assert_eq!(observed, ["latency-first-stream", "reliable-stream"]);
 
     assert_eq!(
         mailbox.enqueue_count.load(Ordering::SeqCst),
@@ -400,6 +406,79 @@ async fn bridge_keeps_traffic_classes_independent() {
         .expect("bridge tasks converge")
         .expect("bridge monitor should exit cleanly");
     assert_eq!(router.inflight(), (0, 0));
+}
+
+/// Admission, unlike dispatch, is not per class. `InboundRouter` enforces one
+/// message and byte budget across every lane and keeps each accepted message's
+/// capacity lease until its dispatch completes, so a blocked class can consume
+/// the shared capacity and an idle class's message is then dropped at admission
+/// before its worker runs. This test pins that overload behavior explicitly;
+/// class-isolated admission budgets would remove the coupling.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bridge_admission_is_shared_across_classes() {
+    let pending = Arc::new(crate::transport::correlation::RpcCorrelation::new());
+    let dispatcher = Arc::new(InboundDispatcher::new(
+        pending,
+        Arc::new(DataChunkRegistry::new()),
+    ));
+    let mailbox = CapturingMailbox::blocking_first();
+    let slot: MailboxSlot = Arc::new(RwLock::new(Some(mailbox.clone())));
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let (handler, tasks) = dispatcher_bridge(dispatcher, slot, shutdown.clone());
+    let config = super::config::RtcBufferConfig {
+        max_inbound_dispatch_messages: 2,
+        ..super::config::RtcBufferConfig::default()
+    };
+    let router = InboundRouter::new_with_config(handler, config);
+
+    // One active plus one queued RPC dispatch hold the entire shared budget.
+    assert!(route_rpc(
+        &router,
+        "rpc-active",
+        2,
+        1,
+        LaneKind::RpcReliable
+    ));
+    tokio::time::timeout(TIMEOUT, wait_for_enqueues(&mailbox, 1))
+        .await
+        .expect("the active RPC dispatch should block inside the mailbox");
+    assert!(route_rpc(
+        &router,
+        "rpc-queued",
+        2,
+        1,
+        LaneKind::RpcReliable
+    ));
+    assert_eq!(router.inflight().0, 2, "queued work must retain its lease");
+
+    // The stream worker is idle, but admission is shared: the router rejects
+    // the chunk before the stream class can run.
+    assert!(
+        !route_chunk(&router, "admission-stream", 0, LaneKind::StreamReliable),
+        "shared admission must reject stream traffic while the RPC class holds the budget"
+    );
+
+    // Draining the blocked dispatch frees the budget and admission recovers.
+    mailbox.release_first();
+    tokio::time::timeout(TIMEOUT, async {
+        while router.inflight().0 != 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the RPC class should drain once the mailbox releases");
+    assert!(route_chunk(
+        &router,
+        "admission-stream",
+        0,
+        LaneKind::StreamReliable
+    ));
+
+    shutdown.cancel();
+    tokio::time::timeout(TIMEOUT, tasks)
+        .await
+        .expect("bridge tasks converge")
+        .expect("bridge monitor should exit cleanly");
 }
 
 #[tokio::test]
