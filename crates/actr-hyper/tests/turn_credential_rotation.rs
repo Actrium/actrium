@@ -1,4 +1,5 @@
-//! TURN credential rotation through webrtc-rs `set_configuration`.
+//! TURN credential rotation through Actr's v0.20 backend and the v0.21 RTC
+//! `set_configuration` path.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -159,7 +160,7 @@ async fn turn_credential_rotation_propagates_new_relay_credentials_to_actrix_tur
             relay_configuration(turn_address, &new_credential),
         )
         .await
-        .expect("RTC set_configuration command");
+        .expect("v0.20 set_configuration command");
     harness.peer(46_501).rtc.network_unavailable();
     harness
         .peer(46_501)
@@ -181,7 +182,7 @@ async fn turn_credential_rotation_propagates_new_relay_credentials_to_actrix_tur
 }
 
 /// A re-allocation is detected by counting the server's TURN authentication
-/// transactions. The RTC factory enables the upstream ICE-restart rebind
+/// transactions. The v0.20 factory enables the upstream ICE-restart rebind
 /// (webrtc-rs/webrtc#868), so a plain ICE restart drops and rebinds the UDP
 /// transport; its old TURN allocation cannot be reused and a fresh allocation
 /// must authenticate again.
