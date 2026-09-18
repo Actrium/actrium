@@ -238,21 +238,16 @@ pub(crate) async fn inproc_send_reply(
     }
 }
 
-/// The v0.20 response route (present only on the v0.20 backend).
-#[cfg(feature = "webrtc-v020")]
-pub(crate) type V020ResponseRoute =
-    Option<Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>>;
-/// Zero-sized stand-in on the 0.14 backend (the v0.20 manager type does not
-/// exist there); the response path never reads it.
-#[cfg(not(feature = "webrtc-v020"))]
-pub(crate) type V020ResponseRoute = ();
+/// RTC response route, populated when the node's RTC manager is initialized.
+pub(crate) type RtcResponseRoute =
+    Option<Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>>;
 
 /// Send `response_envelope` back to `caller` via the best available transport.
 ///
 /// Priority: inbound WebSocket connection (if the caller dialled us directly) →
-/// the v0.20 RTC lane. Module-level so both the inline mailbox path and the
+/// the RTC lane. Module-level so both the inline mailbox path and the
 /// gate-on continuation share one implementation.
-/// How long the v0.20 response path waits for the caller's peer to become
+/// How long the RTC response path waits for the caller's peer to become
 /// sendable before falling through to the gate-off delivery path. Named (like
 /// DATA_CHUNK_SEND_TIMEOUT / TELL_SEND_TIMEOUT) so the budget stays tunable
 /// and greppable; the wait is an `.await` inside the mailbox reply path, so
@@ -261,7 +256,7 @@ const CALLER_SENDABLE_WAIT: std::time::Duration = std::time::Duration::from_secs
 
 async fn send_envelope_to_caller(
     ws_gate: &Option<Arc<crate::wire::websocket::WebSocketGate>>,
-    _v020_route: &V020ResponseRoute,
+    rtc_route: &RtcResponseRoute,
     caller: &ActrId,
     response_envelope: RpcEnvelope,
     request_id: &str,
@@ -314,12 +309,11 @@ async fn send_envelope_to_caller(
         }
     }
 
-    // 2. v0.20 backend: route the response through the peer's reliable lane.
+    // 2. RTC backend: route the response through the peer's reliable lane.
     // The request arrived over this lane, so the peer session exists and is
     // sendable (RpcReliable IS the readiness anchor); the bounded wait only
     // covers snapshot projection lag on a freshly connected pair.
-    #[cfg(feature = "webrtc-v020")]
-    if let Some(manager) = _v020_route {
+    if let Some(manager) = rtc_route {
         if let Some(handle) = manager.get_controller(caller).await {
             let mut rx = handle.subscribe();
             let waited = crate::timer::timeout(
@@ -344,7 +338,7 @@ async fn send_envelope_to_caller(
                     Ok(()) => {
                         match handle
                             .send(
-                                crate::wire::webrtc::v020::status::LaneKind::RpcReliable,
+                                crate::wire::webrtc::rtc::status::LaneKind::RpcReliable,
                                 bytes::Bytes::from(buf),
                             )
                             .await
@@ -356,7 +350,7 @@ async fn send_envelope_to_caller(
                                     route_key = %route_key,
                                     payload_type = "RpcReliable",
                                     target_actor = %caller,
-                                    "response send succeeded via v0.20 RTC reliable lane"
+                                    "response send succeeded via RTC reliable lane"
                                 );
                                 return;
                             }
@@ -367,7 +361,7 @@ async fn send_envelope_to_caller(
                                     request_id = request_id,
                                     route_key = %route_key,
                                     target_actor = %caller,
-                                    "❌ v0.20 response send failed: {e:?}"
+                                    "❌ RTC response send failed: {e:?}"
                                 );
                                 return;
                             }
@@ -380,7 +374,7 @@ async fn send_envelope_to_caller(
                             request_id = request_id,
                             route_key = %route_key,
                             target_actor = %caller,
-                            "❌ v0.20 response encode failed: {e}"
+                            "❌ RTC response encode failed: {e}"
                         );
                         return;
                     }
@@ -418,7 +412,7 @@ async fn send_envelope_to_caller(
                 request_id = request_id,
                 route_key = %route_key,
                 target_actor = %caller,
-                "❌ v0.20 peer not sendable for response within the wait window"
+                "❌ RTC peer not sendable for response within the wait window"
             );
             return;
         }
@@ -428,19 +422,9 @@ async fn send_envelope_to_caller(
             request_id = request_id,
             route_key = %route_key,
             target_actor = %caller,
-            "❌ no v0.20 controller for response caller"
+            "❌ no RTC controller for response caller"
         );
     }
-
-    // The 0.14 WebRtcGate fallback used to live here; the v0.20 arm above is
-    // the only RTC response route now.
-    #[cfg(not(feature = "webrtc-v020"))]
-    tracing::error!(
-        severity = 7,
-        error_category = "transport_error",
-        request_id = request_id,
-        "❌ No gate available to send response"
-    );
 }
 
 /// Send the RESPONSE envelope for an inbound mailbox call (Ok or Err path).
@@ -451,7 +435,7 @@ async fn send_envelope_to_caller(
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn mailbox_send_reply(
     ws_gate: Option<Arc<crate::wire::websocket::WebSocketGate>>,
-    v020_route: V020ResponseRoute,
+    rtc_route: RtcResponseRoute,
     caller: Result<ActrId, String>,
     request_id: String,
     route_key: String,
@@ -480,7 +464,7 @@ pub(crate) async fn mailbox_send_reply(
                 #[cfg(feature = "opentelemetry")]
                 let send_fut = send_envelope_to_caller(
                     &ws_gate,
-                    &v020_route,
+                    &rtc_route,
                     &caller,
                     response_envelope,
                     &request_id,
@@ -490,7 +474,7 @@ pub(crate) async fn mailbox_send_reply(
                 #[cfg(not(feature = "opentelemetry"))]
                 let send_fut = send_envelope_to_caller(
                     &ws_gate,
-                    &v020_route,
+                    &rtc_route,
                     &caller,
                     response_envelope,
                     &request_id,
@@ -539,7 +523,7 @@ pub(crate) async fn mailbox_send_reply(
 
                 send_envelope_to_caller(
                     &ws_gate,
-                    &v020_route,
+                    &rtc_route,
                     &caller,
                     error_envelope,
                     &request_id,
@@ -573,7 +557,7 @@ pub(crate) async fn mailbox_ack(mailbox: Arc<dyn Mailbox>, msg_id: uuid::Uuid, r
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn mailbox_reply_and_ack(
     ws_gate: Option<Arc<crate::wire::websocket::WebSocketGate>>,
-    v020_route: V020ResponseRoute,
+    rtc_route: RtcResponseRoute,
     mailbox: Arc<dyn Mailbox>,
     caller: Result<ActrId, String>,
     request_id: String,
@@ -587,7 +571,7 @@ pub(crate) async fn mailbox_reply_and_ack(
 ) {
     mailbox_send_reply(
         ws_gate,
-        v020_route,
+        rtc_route,
         caller,
         request_id.clone(),
         route_key,
@@ -678,17 +662,15 @@ pub(crate) struct Inner {
     /// Unified identity/credential snapshot for renewal and hard rebind.
     pub(crate) session_state: Option<SessionState>,
 
-    /// v0.20 connection manager (created after startup; v0.20 backend only).
+    /// RTC connection manager (created after startup; RTC backend only).
     /// Backs the node-level RTC status query/list/subscribe APIs (S6-4).
-    #[cfg(feature = "webrtc-v020")]
-    pub(crate) v020_manager: Option<Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>>,
+    pub(crate) rtc_manager: Option<Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>>,
 
-    /// v0.20 inbound mailbox slot (v0.20 backend only): the late-bound mailbox
+    /// RTC inbound mailbox slot (RTC backend only): the late-bound mailbox
     /// reference the W3b inbound bridge reads to route DataChannel payloads
     /// into the node mailbox. Filled when the receive loops start.
-    #[cfg(feature = "webrtc-v020")]
-    pub(crate) v020_inbound_mailbox_slot:
-        Option<crate::wire::webrtc::v020::inbound_bridge::MailboxSlot>,
+    pub(crate) rtc_inbound_mailbox_slot:
+        Option<crate::wire::webrtc::rtc::inbound_bridge::MailboxSlot>,
 
     /// Peer transport manager (created after startup)
     pub(crate) peer_transport: Option<Arc<crate::transport::PeerTransport>>,
@@ -1629,24 +1611,23 @@ fn spawn_workload_stop_task(
     tokio::spawn(task)
 }
 
-/// W6 config guard for the v0.20 backend (Stage 7 Phase A decision): reject
+/// W6 config guard for the RTC backend (Stage 7 Phase A decision): reject
 /// unsupported capabilities at startup instead of degrading silently.
-/// `ice_udp_mux_port` has no upstream v0.20 equivalent; TURN over TLS/TCP is
-/// silently skipped by webrtc-rs v0.20 (issue #848), so it is a hard error —
+/// `ice_udp_mux_port` has no upstream RTC equivalent; TURN over TLS/TCP is
+/// silently skipped by webrtc-rs (issue #848), so it is a hard error —
 /// the operator must fix the config, not discover a skipped server at runtime.
-#[cfg(feature = "webrtc-v020")]
-fn validate_v020_config(config: &actr_config::WebRtcConfig) -> ActorResult<()> {
+fn validate_rtc_config(config: &actr_config::WebRtcConfig) -> ActorResult<()> {
     if config.advanced.ice_udp_mux_port.is_some() {
         return Err(ActrError::Internal(
-            "ice_udp_mux_port is not supported in v0.20 mode \
-             (upstream webrtc-rs v0.20 has no shared ICE UDP mux)"
+            "ice_udp_mux_port is not supported in the RTC implementation \
+             (upstream webrtc-rs has no shared ICE UDP mux)"
                 .to_string(),
         ));
     }
     if config.advanced.udp_ports.is_some() {
         return Err(ActrError::Internal(
-            "WebRTC UDP port ranges are not supported in v0.20 mode \
-             (webrtc-rs v0.20 exposes explicit bind addresses but no EphemeralUDP range)"
+            "WebRTC UDP port ranges are not supported in the RTC implementation \
+             (webrtc-rs exposes explicit bind addresses but no EphemeralUDP range)"
                 .to_string(),
         ));
     }
@@ -1654,7 +1635,7 @@ fn validate_v020_config(config: &actr_config::WebRtcConfig) -> ActorResult<()> {
         for url in &server.urls {
             if url.starts_with("turns:") || url.contains("transport=tcp") {
                 return Err(ActrError::Internal(format!(
-                    "TURN over TLS/TCP is not supported in v0.20 mode \
+                    "TURN over TLS/TCP is not supported in the RTC implementation \
                      (webrtc-rs issue #848): {url}"
                 )));
             }
@@ -2054,15 +2035,12 @@ impl Inner {
                         // caller-side bound, not a tokio-await deadline.
                         let reply_deadline =
                             crate::lifecycle::dedup::caller_reply_deadline(envelope.timeout_ms);
-                        #[cfg(feature = "webrtc-v020")]
-                        let v020_route: V020ResponseRoute = self.v020_manager.clone();
-                        #[cfg(not(feature = "webrtc-v020"))]
-                        let v020_route: V020ResponseRoute = ();
+                        let rtc_route: RtcResponseRoute = self.rtc_manager.clone();
                         let attempt_id = self.outstanding_replies.allocate_attempt_id();
                         explicit_attempt_id = Some(attempt_id);
                         let (deliver, _flag) = crate::lifecycle::reply_deliver::ReplyDeliver::new(
                             self.websocket_gate.clone(),
-                            v020_route,
+                            rtc_route,
                             self.dedup_state.clone(),
                             self.outstanding_replies.clone(),
                             attempt_id,
@@ -2507,10 +2485,8 @@ impl Inner {
             actor_id: None,
             credential_state: None,
             session_state: None,
-            #[cfg(feature = "webrtc-v020")]
-            v020_manager: None,
-            #[cfg(feature = "webrtc-v020")]
-            v020_inbound_mailbox_slot: None,
+            rtc_manager: None,
+            rtc_inbound_mailbox_slot: None,
             peer_transport: None,
             websocket_gate: None,
             shell_to_workload: Some(shell_to_workload),
@@ -3040,7 +3016,7 @@ impl Inner {
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             tracing::info!("🌐 Initializing WebRTC infrastructure");
 
-            // Fail fast on WebRTC options the v0.20 integration cannot honor
+            // Fail fast on WebRTC options the RTC integration cannot honor
             // (file-based config is already rejected at parse time; this
             // covers programmatically built configs). A fixed UDP port is a
             // deployment precondition, so silently ignoring it would present
@@ -3056,39 +3032,30 @@ impl Inner {
 
             // Pre-allocate the pending-requests map so it can be shared between
             // DefaultWireBuilder (for outbound WS response reader tasks), the
-            // v0.20 inbound dispatcher, and PeerGate (request/response
+            // RTC inbound dispatcher, and PeerGate (request/response
             // matching).
             let pending_requests: crate::outbound::PendingRequestsMap =
                 std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new());
 
-            // W5: v0.20 exclusive backend switch. When the `webrtc-v020`
-            // feature is enabled, the v0.20 stack replaces the 0.14
-            // coordinator entirely (RFC rollback: "revert as a whole, never
-            // per-peer backend mixing"). The 0.14 coordinator is NOT
-            // constructed in v0.20 mode.
-            //
-            // The v0.20 path is the exclusive production RTC backend; its
-            // manager/controller/recovery stack is constructed as one unit.
-            #[cfg(feature = "webrtc-v020")]
-            let (v020_manager, v020_local_id, v020_mailbox_slot): (
-                Option<Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>>,
-                Option<crate::wire::webrtc::v020::signaling::SharedLocalId>,
-                Option<crate::wire::webrtc::v020::inbound_bridge::MailboxSlot>,
+            // Construct the RTC manager, controllers, and recovery stack as
+            // one unit sharing the node's identity and inbound dispatch.
+            let (rtc_manager, rtc_local_id, rtc_mailbox_slot): (
+                Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>,
+                crate::wire::webrtc::rtc::signaling::SharedLocalId,
+                crate::wire::webrtc::rtc::inbound_bridge::MailboxSlot,
             ) = {
-                use crate::wire::webrtc::v020;
+                use crate::wire::webrtc::rtc;
 
-                // W6: fail-fast on unsupported v0.20 config capabilities
+                // W6: fail-fast on unsupported RTC config capabilities
                 // (capability matrix). Don't silently degrade.
-                validate_v020_config(&self.config.webrtc)?;
+                validate_rtc_config(&self.config.webrtc)?;
 
-                // Create the v0.20 factory with production config.
-                let buffer_config = v020::config::RtcBufferConfig::default();
+                // Create the RTC factory with production config.
+                let buffer_config = rtc::config::RtcBufferConfig::default();
                 buffer_config.validate().map_err(|error| {
-                    ActrError::Internal(format!(
-                        "invalid v0.20 RTC resource configuration: {error}"
-                    ))
+                    ActrError::Internal(format!("invalid RTC resource configuration: {error}"))
                 })?;
-                let runtime_config = v020::runtime::RtcRuntimeConfig::desktop_default()
+                let runtime_config = rtc::runtime::RtcRuntimeConfig::desktop_default()
                     .with_buffer_config(buffer_config.clone());
                 let ice_servers: Vec<webrtc::peer_connection::RTCIceServer> = self
                     .config
@@ -3133,10 +3100,10 @@ impl Inner {
                     .with_sctp_max_receive_buffer_size(runtime_config.sctp_receive_buffer_size())
                     .build();
                 // Inventory marker: the four acceptance waits above are
-                // protocol-selection timers executed inside v0.20's ICE agent.
+                // protocol-selection timers executed inside RTC's ICE agent.
                 let _ = crate::timer::ids::EXTERNAL_ICE_CANDIDATE_SELECTION;
                 let factory = Arc::new(
-                    v020::factory::PeerConnectionFactory::new_with_configuration_and_wildcard_bind(
+                    rtc::factory::PeerConnectionFactory::new_with_configuration_and_wildcard_bind(
                         runtime_config,
                         rtc_configuration,
                     )
@@ -3144,20 +3111,20 @@ impl Inner {
                     .with_setting_engine(setting_engine),
                 );
 
-                // Create the v0.20 signaling channel + manager + router.
+                // Create the RTC signaling channel + manager + router.
                 // CF-1: the local identity lives in a shared, rebind-updatable
                 // cell so hard rebind can adopt the fresh ActrId (0.14 parity:
                 // coordinator.set_local_id). Stage 6: the node media registry
                 // is attached so session track pumps dispatch received RTP to
                 // the same business surface as the 0.14 stack.
                 let (signaling_tx, signaling_rx) = tokio::sync::mpsc::channel(256);
-                // W3b production wiring: route inbound v0.20 data-plane
+                // W3b production wiring: route inbound RTC data-plane
                 // payloads through the shared InboundDispatcher (RPC → mailbox
                 // / pending_requests, DataChunk → DataChunkRegistry). Without
                 // this the manager's default `InboundRouter::discard()` drops
                 // every inbound payload. The mailbox is late-bound (filled
                 // when the receive loops start).
-                let inbound_mailbox_slot: v020::inbound_bridge::MailboxSlot =
+                let inbound_mailbox_slot: rtc::inbound_bridge::MailboxSlot =
                     std::sync::Arc::new(tokio::sync::RwLock::new(None));
                 let inbound_dispatcher =
                     Arc::new(crate::inbound::dispatcher::InboundDispatcher::new(
@@ -3165,17 +3132,17 @@ impl Inner {
                         self.data_chunk_registry.clone(),
                     ));
                 let (inbound_handler, inbound_dispatch_tasks) =
-                    v020::inbound_bridge::dispatcher_bridge(
+                    rtc::inbound_bridge::dispatcher_bridge(
                         inbound_dispatcher,
                         inbound_mailbox_slot.clone(),
                         self.shutdown_token.child_token(),
                     );
                 task_handles.push(inbound_dispatch_tasks);
-                let v020_manager = Arc::new(
-                    v020::manager::RtcConnectionManager::with_inbound_config(
+                let rtc_manager = Arc::new(
+                    rtc::manager::RtcConnectionManager::with_inbound_config(
                         factory.clone(),
                         signaling_tx,
-                        Arc::new(v020::inbound::InboundRouter::new_with_config(
+                        Arc::new(rtc::inbound::InboundRouter::new_with_config(
                             inbound_handler,
                             buffer_config.clone(),
                         )),
@@ -3184,14 +3151,14 @@ impl Inner {
                     .with_media_registry(media_frame_registry.clone()),
                 );
                 // AIS rotates the HMAC TURN credential together with the actor
-                // credential. Apply the new value to live v0.20 sessions via
+                // credential. Apply the new value to live RTC sessions via
                 // set_configuration(); every future Factory build also reads
                 // the same shared provider, so idle/new generations cannot
                 // retain the bootstrap credential.
                 {
                     let mut turn_revision_rx = credential_state.subscribe_turn_revision();
                     let factory_for_turn_refresh = factory.clone();
-                    let manager_for_turn_refresh = v020_manager.clone();
+                    let manager_for_turn_refresh = rtc_manager.clone();
                     let turn_refresh_shutdown = self.shutdown_token.child_token();
                     let turn_refresh_handle = tokio::spawn(async move {
                         loop {
@@ -3210,13 +3177,13 @@ impl Inner {
                                             tracing::info!(
                                                 revision,
                                                 refreshed_peers,
-                                                "v0.20 TURN credential configuration refreshed"
+                                                "RTC TURN credential configuration refreshed"
                                             );
                                         }
                                         Err(error) => tracing::error!(
                                             revision,
                                             error = %error,
-                                            "v0.20 TURN credential refresh could not materialize RTC configuration"
+                                            "RTC TURN credential refresh could not materialize RTC configuration"
                                         ),
                                     }
                                 }
@@ -3225,24 +3192,24 @@ impl Inner {
                     });
                     task_handles.push(turn_refresh_handle);
                 }
-                let v020_local_id = v020::signaling::SharedLocalId::new(actor_id.clone());
-                let v020_transport = v020::signaling::ws_transport::V020SignalingTransport::new(
+                let rtc_local_id = rtc::signaling::SharedLocalId::new(actor_id.clone());
+                let rtc_transport = rtc::signaling::ws_transport::RtcSignalingTransport::new(
                     self.signaling_client.clone(),
-                    v020_local_id.clone(),
+                    rtc_local_id.clone(),
                     credential_state.clone(),
                 );
-                let v020_router = v020::signaling::router::SignalingRouter::new(
-                    v020_manager.clone(),
-                    v020_local_id.clone(),
+                let rtc_router = rtc::signaling::router::SignalingRouter::new(
+                    rtc_manager.clone(),
+                    rtc_local_id.clone(),
                 );
                 // Teardown-time cleanup of the router's per-peer dispatch
                 // locks needs the manager to see the same map instance.
-                v020_manager.set_signaling_dispatch_chains(v020_router.dispatch_chains());
+                rtc_manager.set_signaling_dispatch_chains(rtc_router.dispatch_chains());
                 let router_shutdown = self.shutdown_token.child_token();
                 let router_handle = tokio::spawn(async move {
                     tokio::select! {
                         _ = router_shutdown.cancelled() => {}
-                        _ = v020_router.run(v020_transport, signaling_rx) => {}
+                        _ = rtc_router.run(rtc_transport, signaling_rx) => {}
                     }
                 });
                 task_handles.push(router_handle);
@@ -3267,10 +3234,10 @@ impl Inner {
                                 ))
                             })
                         });
-                    let manager_for_hooks = v020_manager.clone();
+                    let manager_for_hooks = rtc_manager.clone();
                     let hook_shutdown = self.shutdown_token.child_token();
                     let hook_projection_handle = tokio::spawn(async move {
-                        v020::notification::run_hook_projection(
+                        rtc::notification::run_hook_projection(
                             manager_for_hooks,
                             hook_observer,
                             ctx_builder,
@@ -3281,11 +3248,7 @@ impl Inner {
                     task_handles.push(hook_projection_handle);
                 }
 
-                (
-                    Some(v020_manager),
-                    Some(v020_local_id),
-                    Some(inbound_mailbox_slot),
-                )
+                (rtc_manager, rtc_local_id, inbound_mailbox_slot)
             };
 
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3293,15 +3256,14 @@ impl Inner {
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             tracing::info!("🏗️  Creating PeerTransport with WebRTC support");
 
-            // Create DefaultWireBuilder with WebRTC coordinator
+            // Create DefaultWireBuilder with the configured wire transports
             use crate::transport::{DefaultWireBuilder, DefaultWireBuilderConfig};
 
-            // WebSocket channel always enabled: target ws:// address is fully discovered at runtime
+            // WebSocket channel is enabled: target ws:// address is fully discovered at runtime
             // Direct-connect mode: encode local node ActrId as hex, sent as X-Actr-Node-Id
             let local_id_hex = hex::encode(actor_id.encode_to_vec());
             let wire_builder_config = DefaultWireBuilderConfig {
                 local_id_hex,
-                enable_webrtc: true,
                 enable_websocket: true,
                 // Share the discovered_ws_addresses map so that post-discovery calls
                 // can use the signaling-provided ws:// URL for this actor node.
@@ -3316,14 +3278,7 @@ impl Inner {
             };
             let wire_builder = {
                 let builder = DefaultWireBuilder::new(wire_builder_config);
-                #[cfg(feature = "webrtc-v020")]
-                let builder = builder.with_v020_manager(
-                    v020_manager
-                        .clone()
-                        .expect("v0.20 manager must exist on the v0.20 backend"),
-                );
-                #[cfg(not(feature = "webrtc-v020"))]
-                let builder = builder;
+                let builder = builder.with_rtc_manager(rtc_manager.clone());
                 Arc::new(builder)
             };
 
@@ -3333,22 +3288,13 @@ impl Inner {
             self.peer_transport = Some(transport_manager.clone());
 
             // Create PeerGate with the pre-allocated pending_requests map.
-            // The v0.20 manager is the only send authority (W5); nodes
+            // The RTC manager is the only send authority (W5); nodes
             // without a network-event handle get the always-Normal projection
             // default inside the constructor.
             use crate::outbound::PeerGate;
-            #[cfg(feature = "webrtc-v020")]
-            let outproc_gate = Arc::new(PeerGate::with_v020_manager(
+            let outproc_gate = Arc::new(PeerGate::with_rtc_manager(
                 transport_manager.clone(),
-                v020_manager
-                    .clone()
-                    .expect("v0.20 manager must exist on the v0.20 backend"),
-                pending_requests.clone(),
-                self.send_projection_rx.take(),
-            ));
-            #[cfg(not(feature = "webrtc-v020"))]
-            let outproc_gate = Arc::new(PeerGate::new(
-                transport_manager.clone(),
+                rtc_manager.clone(),
                 pending_requests.clone(),
                 self.send_projection_rx.take(),
             ));
@@ -3373,7 +3319,7 @@ impl Inner {
             // so hook contexts can issue `Dest::Peer(_)` calls.
             //
             // Unconditional: WebSocket lanes carry peer traffic in every
-            // feature configuration (including builds without `webrtc-v020`)
+            // supported configuration
             // and can classify a post-submission failure as
             // `DeliveryProgress::Unknown`, so the hook must be installed in
             // all of them.
@@ -3402,22 +3348,19 @@ impl Inner {
                 outproc_gate.set_hook_callback(cb);
             }
 
-            // Save references. The v0.20 manager backs the node-level status
+            // Save references. The RTC manager backs the node-level status
             // APIs (S6-4).
-            #[cfg(feature = "webrtc-v020")]
             {
-                self.v020_manager = v020_manager.clone();
-                self.v020_inbound_mailbox_slot = v020_mailbox_slot.clone();
+                self.rtc_manager = Some(rtc_manager.clone());
+                self.rtc_inbound_mailbox_slot = Some(rtc_mailbox_slot.clone());
             }
             credential_manager
                 .install_hard_rebind_handles(HardRebindHandles {
                     signaling_client: self.signaling_client.clone(),
                     credential_state: credential_state.clone(),
                     peer_transport: Some(transport_manager.clone()),
-                    #[cfg(feature = "webrtc-v020")]
-                    v020_manager: v020_manager.clone(),
-                    #[cfg(feature = "webrtc-v020")]
-                    v020_local_id: v020_local_id.clone(),
+                    rtc_manager: Some(rtc_manager.clone()),
+                    rtc_local_id: Some(rtc_local_id.clone()),
                 })
                 .await;
             tracing::info!("✅ WebRTC infrastructure initialized");
@@ -3683,40 +3626,28 @@ impl Inner {
                         )
                     }
                     .with_session_state(session_state.clone());
-                #[cfg(feature = "webrtc-v020")]
-                let event_processor = event_processor.with_v020_manager(self.v020_manager.clone());
+                let event_processor = event_processor.with_rtc_manager(self.rtc_manager.clone());
                 let event_processor = Arc::new(event_processor);
 
                 let shutdown = self.shutdown_token.clone();
-                // S7A-3 (P1): the v0.20 recovery supervisor feed — accepted
-                // network/app facts are republished to v0.20 controllers.
-                #[cfg(feature = "webrtc-v020")]
-                let v020_recovery_feed = self
-                    .v020_manager
+                // Accepted network/app facts are republished to RTC
+                // controllers through the manager's recovery supervisor.
+                let rtc_recovery_feed = self
+                    .rtc_manager
                     .as_ref()
-                    .map(|manager| manager.supervisor().clone());
+                    .map(|manager| manager.supervisor().clone())
+                    .expect("RTC manager must exist after infrastructure initialization");
                 let internal_channel = self
                     .network_event_internal
                     .take()
                     .expect("always-on recovery supervisor channel missing at start");
                 let network_event_handle = tokio::spawn(async move {
-                    #[cfg(feature = "webrtc-v020")]
-                    if let Some(feed) = v020_recovery_feed {
-                        crate::lifecycle::network_event::run_network_event_reconciler_with_channel_and_v020_recovery(
-                            event_rx,
-                            internal_channel,
-                            event_processor,
-                            shutdown,
-                            feed,
-                        )
-                        .await;
-                        return;
-                    }
-                    crate::lifecycle::network_event::run_network_event_reconciler_with_channel(
+                    crate::lifecycle::network_event::run_network_event_reconciler_with_channel_and_rtc_recovery(
                         event_rx,
                         internal_channel,
                         event_processor,
                         shutdown,
+                        rtc_recovery_feed,
                     )
                     .await;
                 });
@@ -3739,8 +3670,7 @@ impl Inner {
                 let client = self.signaling_client.clone();
                 let actor_id_for_unreg = actor_id.clone();
                 let credential_state_for_unreg = credential_state.clone();
-                #[cfg(feature = "webrtc-v020")]
-                let v020_manager_for_unreg = self.v020_manager.clone();
+                let rtc_manager_for_unreg = self.rtc_manager.clone();
 
                 let unregister_handle = tokio::spawn(async move {
                     // Wait for shutdown signal
@@ -3751,10 +3681,9 @@ impl Inner {
                     );
 
                     // 1. Close all WebRTC peer connections first (if any).
-                    // The v0.20 manager's close_all is bounded by its internal
+                    // The RTC manager's close_all is bounded by its internal
                     // deadline; the 0.14 coordinator leg is gone.
-                    #[cfg(feature = "webrtc-v020")]
-                    if let Some(manager) = v020_manager_for_unreg {
+                    if let Some(manager) = rtc_manager_for_unreg {
                         manager.close_all().await;
                         tracing::info!("✅ All WebRTC peers closed before UnregisterRequest");
                     }
@@ -3824,10 +3753,9 @@ impl Inner {
             .expect("CredentialState must be initialized in start()");
         let session_state = credential_manager.session_state();
         let shutdown_token = self.shutdown_token.clone();
-        // S6-4: capture the v0.20 manager before `self` moves into the Arc so
+        // S6-4: capture the RTC manager before `self` moves into the Arc so
         // ActrRefShared can expose the status APIs.
-        #[cfg(feature = "webrtc-v020")]
-        let v020_manager = self.v020_manager.clone();
+        let rtc_manager = self.rtc_manager.clone();
         let node_ref = Arc::new(self);
 
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3848,12 +3776,11 @@ impl Inner {
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         tracing::info!("🚀 Starting WebRTC background loops");
 
-        // Start the v0.20 signaling router; the lifecycle supervisor owns the
+        // Start the RTC signaling router; the lifecycle supervisor owns the
         // signaling connection itself.
-        // v0.20 backend (W3b): publish the mailbox to the inbound bridge so
-        // v0.20 DataChannel payloads route into the node mailbox.
-        #[cfg(feature = "webrtc-v020")]
-        if let Some(slot) = &node_ref.v020_inbound_mailbox_slot {
+        // RTC backend (W3b): publish the mailbox to the inbound bridge so
+        // RTC DataChannel payloads route into the node mailbox.
+        if let Some(slot) = &node_ref.rtc_inbound_mailbox_slot {
             *slot.write().await = Some(node_ref.mailbox.clone());
         }
 
@@ -4376,10 +4303,7 @@ impl Inner {
             let node = node_ref.clone();
             let mailbox = node_ref.mailbox.clone();
             let ws_gate = node_ref.websocket_gate.clone();
-            #[cfg(feature = "webrtc-v020")]
-            let v020_route: V020ResponseRoute = node_ref.v020_manager.clone();
-            #[cfg(not(feature = "webrtc-v020"))]
-            let v020_route: V020ResponseRoute = ();
+            let rtc_route: RtcResponseRoute = node_ref.rtc_manager.clone();
             let shutdown = shutdown_token.clone();
             let mailbox_enqueue_wake = mailbox_enqueue_wake.clone();
             let outstanding_replies = node_ref.outstanding_replies.clone();
@@ -4565,7 +4489,7 @@ impl Inner {
                                                 let tracestate = envelope.tracestate.clone();
                                                 let msg_id = msg_record.id;
                                                 let ws_gate = ws_gate.clone();
-                                                let v020_route = v020_route.clone();
+                                                let rtc_route = rtc_route.clone();
                                                 let mailbox_c = mailbox.clone();
                                                 #[cfg(not(feature = "opentelemetry"))]
                                                 let span = tracing::Span::none();
@@ -4590,7 +4514,7 @@ impl Inner {
                                                         match cont.await {
                                                             IncomingOutcome::Replied(result) => {
                                                                 mailbox_reply_and_ack(
-                                                                    ws_gate, v020_route, mailbox_c,
+                                                                    ws_gate, rtc_route, mailbox_c,
                                                                     caller_owned, request_id, route_key,
                                                                     traceparent, tracestate, expects_response,
                                                                     msg_id, result, span,
@@ -4618,7 +4542,7 @@ impl Inner {
                                                     match handle_incoming_fut.await {
                                                         IncomingOutcome::Replied(result) => {
                                                             mailbox_reply_and_ack(
-                                                                ws_gate, v020_route, mailbox_c,
+                                                                ws_gate, rtc_route, mailbox_c,
                                                                 caller_owned, request_id, route_key,
                                                                 traceparent, tracestate, expects_response,
                                                                 msg_id, result, span,
@@ -4755,8 +4679,7 @@ impl Inner {
             session_state: Some(session_state),
             shutdown_token,
             task_handles: Mutex::new(task_handles),
-            #[cfg(feature = "webrtc-v020")]
-            v020_manager: v020_manager.clone(),
+            rtc_manager: rtc_manager.clone(),
         });
 
         // Create ActrRef

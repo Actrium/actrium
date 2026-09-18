@@ -1,4 +1,4 @@
-//! Soft ICE recovery integration tests for the v0.20 controller architecture.
+//! Soft ICE recovery integration tests for the RTC controller architecture.
 
 use std::time::Duration;
 

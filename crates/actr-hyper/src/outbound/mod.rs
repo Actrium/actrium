@@ -159,19 +159,7 @@ impl Gate {
                     "MediaTrack is only supported for remote actors via WebRTC".to_string(),
                 ))
             }
-            Gate::Peer(gate) => {
-                #[cfg(feature = "webrtc-v020")]
-                {
-                    gate.send_media_sample(target, track_id, sample).await
-                }
-                #[cfg(not(feature = "webrtc-v020"))]
-                {
-                    let _ = (gate, target, track_id, sample);
-                    Err(ActrError::NotImplemented(
-                        "MediaTrack requires the webrtc-v020 feature".to_string(),
-                    ))
-                }
-            }
+            Gate::Peer(gate) => gate.send_media_sample(target, track_id, sample).await,
         }
     }
 
@@ -188,18 +176,8 @@ impl Gate {
                 "MediaTrack is only supported for remote actors via WebRTC".to_string(),
             )),
             Gate::Peer(gate) => {
-                #[cfg(feature = "webrtc-v020")]
-                {
-                    gate.add_media_track(target, track_id, codec, media_type)
-                        .await
-                }
-                #[cfg(not(feature = "webrtc-v020"))]
-                {
-                    let _ = (gate, target, track_id, codec, media_type);
-                    Err(ActrError::NotImplemented(
-                        "MediaTrack requires the webrtc-v020 feature".to_string(),
-                    ))
-                }
+                gate.add_media_track(target, track_id, codec, media_type)
+                    .await
             }
         }
     }
@@ -214,19 +192,7 @@ impl Gate {
             Gate::Host(_gate) => Err(ActrError::NotImplemented(
                 "MediaTrack is only supported for remote actors via WebRTC".to_string(),
             )),
-            Gate::Peer(gate) => {
-                #[cfg(feature = "webrtc-v020")]
-                {
-                    gate.remove_media_track(target, track_id).await
-                }
-                #[cfg(not(feature = "webrtc-v020"))]
-                {
-                    let _ = (gate, target, track_id);
-                    Err(ActrError::NotImplemented(
-                        "MediaTrack requires the webrtc-v020 feature".to_string(),
-                    ))
-                }
-            }
+            Gate::Peer(gate) => gate.remove_media_track(target, track_id).await,
         }
     }
 

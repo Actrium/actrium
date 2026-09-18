@@ -18,7 +18,6 @@ use crate::transport::{
     new_delivery_progress_cell, observed_delivery_progress,
 };
 use actr_framework::Bytes;
-#[cfg(any(feature = "webrtc-v020", test))]
 use actr_framework::MediaSample;
 use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{
@@ -26,11 +25,10 @@ use actr_protocol::{
     RpcEnvelope,
 };
 // The bounded readiness-waiter accounting uses HashMap unconditionally; the
-// v0.20 cleanup tasks (also consumers on their builds) share this import.
+// RTC cleanup tasks (also consumers on their builds) share this import.
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
-#[cfg(any(test, feature = "test-utils", feature = "webrtc-v020"))]
 use std::time::Duration;
 #[cfg(any(test, feature = "test-utils"))]
 use tokio::sync::oneshot;
@@ -73,7 +71,6 @@ const MIN_ONE_SHOT_SEND_SLICE: std::time::Duration = std::time::Duration::from_m
 /// Preserve in-flight reliable RPCs across a brief sendability dip, but do not
 /// let a remote-side recovery leave response waits parked until their much
 /// longer business deadline.
-#[cfg(feature = "webrtc-v020")]
 const PENDING_RECOVERY_GRACE: Duration = Duration::from_secs(5);
 
 /// Per-operation send authority captured at outbound admission.
@@ -106,7 +103,7 @@ struct GateSendAttempt {
 /// outbound gate per runtime, so in practice they bound the node). A host
 /// constructing multiple gates gets one budget per gate — the ceilings are
 /// not a node-level aggregate across gates. Byte ceilings charge the
-/// serialized payload handed to the admission layer; v0.20 stream framing
+/// serialized payload handed to the admission layer; RTC stream framing
 /// adds an 8-byte fragment header per transmitted frame, which is excluded
 /// from the retained-byte accounting (bounded at ~0.2% of the per-peer
 /// ceiling per waiter).
@@ -282,16 +279,16 @@ impl SendAdmission {
 
 /// A `SessionFactory` that never builds — the gate test seam's manager is
 /// always empty, so a build attempt is a test bug.
-#[cfg(all(feature = "webrtc-v020", feature = "test-utils"))]
+#[cfg(feature = "test-utils")]
 struct NoopSessionFactory;
 
-#[cfg(all(feature = "webrtc-v020", feature = "test-utils"))]
+#[cfg(feature = "test-utils")]
 #[async_trait::async_trait]
-impl crate::wire::webrtc::v020::peer::effects::SessionFactory for NoopSessionFactory {
+impl crate::wire::webrtc::rtc::peer::effects::SessionFactory for NoopSessionFactory {
     async fn build(
         &self,
-        _handler: Arc<crate::wire::webrtc::v020::event_handler::WebRtcEventHandler>,
-    ) -> Result<Arc<dyn crate::wire::webrtc::v020::peer::effects::SessionOps>, webrtc::error::Error>
+        _handler: Arc<crate::wire::webrtc::rtc::event_handler::WebRtcEventHandler>,
+    ) -> Result<Arc<dyn crate::wire::webrtc::rtc::peer::effects::SessionOps>, webrtc::error::Error>
     {
         Err(webrtc::error::Error::Other(
             "NoopSessionFactory never builds (gate test seam)".to_string(),
@@ -307,7 +304,7 @@ impl crate::wire::webrtc::v020::peer::effects::SessionFactory for NoopSessionFac
 /// - Maintain pending_requests for Request/Response matching
 /// - Support MediaTrack sending via WebRTC
 ///
-/// The v0.20 `RtcConnectionManager`'s `RtcPeerSnapshot.sendable` is the only
+/// The RTC `RtcConnectionManager`'s `RtcPeerSnapshot.sendable` is the only
 /// RTC preflight (RFC §"Send path and SendPermit": "PeerGate MUST delete its
 /// own recovering-peer collection; the Controller Snapshot and LaneHandle are
 /// the only preflight status sources"). There is no recovering/closing-peer
@@ -320,9 +317,8 @@ pub struct PeerGate {
     /// RAII registration - a dropped caller future removes its own entry.
     pending_requests: PendingRequestsMap,
 
-    /// The v0.20 connection manager: the RTC preflight authority.
-    #[cfg(feature = "webrtc-v020")]
-    v020_manager: Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
+    /// The RTC connection manager: the RTC preflight authority.
+    rtc_manager: Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>,
 
     /// Live global send authority derived by the recovery supervisor.
     send_projection_rx: watch::Receiver<SendProjection>,
@@ -340,53 +336,27 @@ pub struct PeerGate {
 }
 
 impl PeerGate {
-    /// Create a PeerGate: the v0.20 `RtcConnectionManager`'s snapshot is the
+    /// Create a PeerGate: the RTC `RtcConnectionManager`'s snapshot is the
     /// only RTC preflight (RFC item 5). There is no recovering/closing-peer
     /// tracking — the gate never populates or consults any.
     ///
     /// `send_projection_rx` is the recovery supervisor's live projection;
     /// nodes without a network-event handle pass `None` for the always-Normal
     /// default.
-    #[cfg(feature = "webrtc-v020")]
-    pub(crate) fn with_v020_manager(
+    pub(crate) fn with_rtc_manager(
         transport_manager: Arc<PeerTransport>,
-        v020_manager: Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
+        rtc_manager: Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>,
         pending_requests: PendingRequestsMap,
         send_projection_rx: Option<watch::Receiver<SendProjection>>,
     ) -> Self {
-        Self::spawn_pending_close_cleanup(&v020_manager, &transport_manager, &pending_requests);
-        Self::spawn_terminal_transport_cleanup(
-            &v020_manager,
-            &transport_manager,
-            &pending_requests,
-        );
-        Self::spawn_pending_invalidated_generation_cleanup(&v020_manager, &pending_requests);
-        Self::spawn_pending_sendability_cleanup(&v020_manager, &pending_requests);
+        Self::spawn_pending_close_cleanup(&rtc_manager, &transport_manager, &pending_requests);
+        Self::spawn_terminal_transport_cleanup(&rtc_manager, &transport_manager, &pending_requests);
+        Self::spawn_pending_invalidated_generation_cleanup(&rtc_manager, &pending_requests);
+        Self::spawn_pending_sendability_cleanup(&rtc_manager, &pending_requests);
         Self {
             transport_manager,
             pending_requests,
-            v020_manager,
-            send_projection_rx: send_projection_rx
-                .unwrap_or_else(Self::normal_send_projection_receiver),
-            waiter_budget: Arc::new(WaiterBudget::default()),
-            hook_callback: std::sync::OnceLock::new(),
-        }
-    }
-
-    /// Create a PeerGate for configurations without the `webrtc-v020`
-    /// backend: WebSocket lanes carry peer traffic and there is no RTC
-    /// preflight authority, so admission comes from the send projection
-    /// alone. The delivery-uncertainty hook stays installable — a WebSocket
-    /// write can still classify as `DeliveryUncertain`.
-    #[cfg(not(feature = "webrtc-v020"))]
-    pub(crate) fn new(
-        transport_manager: Arc<PeerTransport>,
-        pending_requests: PendingRequestsMap,
-        send_projection_rx: Option<watch::Receiver<SendProjection>>,
-    ) -> Self {
-        Self {
-            transport_manager,
-            pending_requests,
+            rtc_manager,
             send_projection_rx: send_projection_rx
                 .unwrap_or_else(Self::normal_send_projection_receiver),
             waiter_budget: Arc::new(WaiterBudget::default()),
@@ -443,9 +413,8 @@ impl PeerGate {
     /// `RecoveryExhausted`). Generation invalidation deliberately keeps the
     /// logical transport; this terminal edge removes it so the next send dials
     /// a fresh transport instead of reusing a closed ready wire.
-    #[cfg(feature = "webrtc-v020")]
     fn spawn_terminal_transport_cleanup(
-        manager: &Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
+        manager: &Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>,
         transport_manager: &Arc<PeerTransport>,
         pending_requests: &PendingRequestsMap,
     ) {
@@ -557,9 +526,8 @@ impl PeerGate {
     /// Release already-sent RPCs when the manager starts explicit peer
     /// teardown. Snapshot preflight governs new sends; this edge governs the
     /// response wait that remains after bytes have entered the DataChannel.
-    #[cfg(feature = "webrtc-v020")]
     fn spawn_pending_close_cleanup(
-        manager: &Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
+        manager: &Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>,
         transport_manager: &Arc<PeerTransport>,
         pending_requests: &PendingRequestsMap,
     ) {
@@ -630,14 +598,13 @@ impl PeerGate {
     /// Release response waits when the Controller retires or replaces the
     /// Session that carried them. Unlike explicit close cleanup, this normally
     /// keeps the DestTransport: hard recovery replaces its generation in place
-    /// and the generation-aware v0.20 lanes become usable after convergence.
+    /// and the generation-aware RTC lanes become usable after convergence.
     /// A request that has not reached a concrete lane yet must remain eligible
     /// for that replacement. Only a request already accepted by the invalidated
     /// WebRTC generation is released, and that result is explicitly uncertain
     /// rather than retryable.
-    #[cfg(feature = "webrtc-v020")]
     fn spawn_pending_invalidated_generation_cleanup(
-        manager: &Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
+        manager: &Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>,
         pending_requests: &PendingRequestsMap,
     ) {
         let mut invalidated = manager.subscribe_peer_generation_invalidated();
@@ -712,9 +679,8 @@ impl PeerGate {
     /// short Soft Recovery. If the peer stays non-sendable, only correlation
     /// waiters are released; the DestTransport remains available for the
     /// Controller's generation-aware recovery path.
-    #[cfg(feature = "webrtc-v020")]
     fn spawn_pending_sendability_cleanup(
-        manager: &Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
+        manager: &Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>,
         pending_requests: &PendingRequestsMap,
     ) {
         let mut sendability = manager.subscribe_peer_sendability_changed();
@@ -848,27 +814,27 @@ impl PeerGate {
         Ok(admission.tighten(self.current_send_admission()?))
     }
 
-    /// An empty v0.20 manager for gate tests: no peer ever has a controller,
+    /// An empty RTC manager for gate tests: no peer ever has a controller,
     /// so the snapshot preflight admits and the injected transport drives the
     /// behavior under test.
-    #[cfg(all(feature = "webrtc-v020", feature = "test-utils"))]
-    fn empty_manager_for_test() -> Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager> {
+    #[cfg(feature = "test-utils")]
+    fn empty_manager_for_test() -> Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager> {
         let (signaling_tx, _drop_rx) = tokio::sync::mpsc::channel(1);
         Arc::new(
-            crate::wire::webrtc::v020::manager::RtcConnectionManager::new(
+            crate::wire::webrtc::rtc::manager::RtcConnectionManager::new(
                 Arc::new(NoopSessionFactory),
                 signaling_tx,
             ),
         )
     }
 
-    /// Test-support constructor (test-utils): a gate over an EMPTY v0.20
+    /// Test-support constructor (test-utils): a gate over an EMPTY RTC
     /// manager (see [`Self::empty_manager_for_test`]) with the always-Normal
     /// projection default. Lets integration tests build a gate without naming
     /// the crate-private manager/factory/projection types.
-    #[cfg(all(feature = "webrtc-v020", feature = "test-utils"))]
+    #[cfg(feature = "test-utils")]
     pub fn for_test(transport_manager: Arc<PeerTransport>) -> Self {
-        Self::with_v020_manager(
+        Self::with_rtc_manager(
             transport_manager,
             Self::empty_manager_for_test(),
             Arc::new(RpcCorrelation::new()),
@@ -938,7 +904,7 @@ impl PeerGate {
     /// Outbound admission. The global send projection is read before any
     /// await so globally blocked work fails fast.
     ///
-    /// The v0.20 Controller Snapshot is the only RTC preflight (RFC item 5):
+    /// The RTC Controller Snapshot is the only RTC preflight (RFC item 5):
     /// a peer whose controller exists but is not sendable is withheld unless
     /// this payload has an already-ready fallback route; a peer with NO
     /// controller yet is admitted so the transport dials on demand (0.14
@@ -962,18 +928,17 @@ impl PeerGate {
     ) -> ActorResult<SendAdmission> {
         let admission = self.current_send_admission()?;
 
-        #[cfg(feature = "webrtc-v020")]
         {
-            if self.v020_manager.is_closing(target).await {
+            if self.rtc_manager.is_closing(target).await {
                 return Err(Self::send_projection_not_ready_error());
             }
-            if self.v020_send_blocked(target, dest).await
+            if self.rtc_send_blocked(target, dest).await
                 // Re-evaluate once before rejecting. The first pass awaits
                 // both the controller snapshot and the transport lock, so a
                 // readiness edge or a concurrent materialization can land in
                 // that window; turning either into a rejection would be a
                 // false negative.
-                && self.v020_send_blocked(target, dest).await
+                && self.rtc_send_blocked(target, dest).await
                 && (!matches!(
                     payload_type,
                     PayloadType::RpcReliable | PayloadType::StreamReliable
@@ -1016,8 +981,7 @@ impl PeerGate {
         let waiter_class = WaiterClass::for_payload(payload_type)
             .expect("waitable route payloads must have a waiter class");
         let mut projection = self.send_projection_rx.clone();
-        #[cfg(feature = "webrtc-v020")]
-        let mut snapshots = self.v020_manager.subscribe_peer_snapshot_events();
+        let mut snapshots = self.rtc_manager.subscribe_peer_snapshot_events();
         // Subscribe to the materialization revision BEFORE resolving the
         // destination ready-set: if the destination is absent or still
         // `Connecting` there is no ready-set to watch, and without this
@@ -1038,15 +1002,13 @@ impl PeerGate {
         // coalesces the reduced effect, but this latch prevents mailbox
         // traffic from amplifying while the waiter observes unrelated wake
         // sources. A later request gets a fresh latch and may submit again.
-        #[cfg(feature = "webrtc-v020")]
         let mut business_hint_submitted = false;
 
         loop {
             match self.preflight_send(target, dest, payload_type).await {
                 Ok(admission) => return Ok(admission),
                 Err(error @ ActrError::ConnectionNotReady(_)) => {
-                    #[cfg(feature = "webrtc-v020")]
-                    if self.v020_manager.is_closing(target).await {
+                    if self.rtc_manager.is_closing(target).await {
                         return Err(error);
                     }
 
@@ -1072,9 +1034,8 @@ impl PeerGate {
                     }
                     deadline.ensure_remaining()?;
 
-                    #[cfg(feature = "webrtc-v020")]
                     if *projection.borrow() == SendProjection::Normal {
-                        if let Some(handle) = self.v020_manager.get_controller(target).await {
+                        if let Some(handle) = self.rtc_manager.get_controller(target).await {
                             if !business_hint_submitted {
                                 business_hint_submitted = true;
                                 // Controller owns lifecycle eligibility and
@@ -1085,7 +1046,7 @@ impl PeerGate {
                                         target: "actr_recovery_hint",
                                         peer = %target.to_string_repr(),
                                         payload_type = ?payload_type,
-                                        "v0.20 business recovery hint was rejected by the controller mailbox"
+                                        "RTC business recovery hint was rejected by the controller mailbox"
                                     );
                                 }
                             }
@@ -1111,7 +1072,6 @@ impl PeerGate {
                         }
                     };
 
-                    #[cfg(feature = "webrtc-v020")]
                     let snapshot_changed = async {
                         // Any snapshot revision may unblock the wait: the
                         // readiness projection is destination-wide, so there
@@ -1122,8 +1082,6 @@ impl PeerGate {
                             Err(tokio::sync::broadcast::error::RecvError::Closed) => Err(()),
                         }
                     };
-                    #[cfg(not(feature = "webrtc-v020"))]
-                    let snapshot_changed = async { std::future::pending::<Result<(), ()>>().await };
 
                     tokio::select! {
                         biased;
@@ -1170,11 +1128,10 @@ impl PeerGate {
         }
     }
 
-    /// Whether the v0.20 controller projection currently withholds business
+    /// Whether the RTC controller projection currently withholds business
     /// sends to `target`.
-    #[cfg(feature = "webrtc-v020")]
-    async fn v020_send_blocked(&self, target: &ActrId, dest: &Dest) -> bool {
-        let Some(snapshot) = self.v020_manager.get_snapshot(target).await else {
+    async fn rtc_send_blocked(&self, target: &ActrId, dest: &Dest) -> bool {
+        let Some(snapshot) = self.rtc_manager.get_snapshot(target).await else {
             // No controller yet: the transport dials on demand (0.14 parity).
             return false;
         };
@@ -1866,13 +1823,9 @@ impl PeerGate {
         .map(|_| ())
     }
 
-    /// S6-10: v0.20 `send_media_sample` — the peer's outbound track writer
-    /// (data plane). Admission mirrors the 0.14 path (ExistingOnly allowed:
-    /// sending uses an already-registered track).
-    #[cfg(feature = "webrtc-v020")]
-    async fn send_media_sample_v020(
+    /// Send a media sample through the peer's outbound track writer.
+    pub async fn send_media_sample(
         &self,
-        manager: &Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
         target: &ActrId,
         track_id: &str,
         sample: MediaSample,
@@ -1883,7 +1836,7 @@ impl PeerGate {
             .await?;
         self.tighten_with_current_projection(admission)?;
 
-        let Some(handle) = manager.get_controller(target).await else {
+        let Some(handle) = self.rtc_manager.get_controller(target).await else {
             return Err(Self::send_projection_not_ready_error());
         };
         handle
@@ -1892,13 +1845,11 @@ impl PeerGate {
             .map_err(|e| ActrError::Unavailable(format!("WebRTC send failed: {e}")))
     }
 
-    /// S6-10: v0.20 `add_media_track` — ensure the peer connection (a track
-    /// add may establish it, 0.14 parity), then register the track on the
-    /// active session. Renegotiation rides the controller's effect path.
-    #[cfg(feature = "webrtc-v020")]
-    async fn add_media_track_v020(
+    /// Add a media track to the peer connection and renegotiate it.
+    /// The controller may establish the connection first. Renegotiation is
+    /// offerer-only (RFC-0504 §"Deliberate regressions").
+    pub async fn add_media_track(
         &self,
-        manager: &Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
         target: &ActrId,
         track_id: &str,
         codec: &str,
@@ -1912,7 +1863,7 @@ impl PeerGate {
             return Err(Self::send_projection_not_ready_error());
         }
 
-        let handle = manager.ensure_controller(target.clone()).await;
+        let handle = self.rtc_manager.ensure_controller(target.clone()).await;
         handle
             .connect()
             .await
@@ -1946,15 +1897,8 @@ impl PeerGate {
             .map_err(|e| ActrError::Unavailable(format!("WebRTC add track failed: {e}")))
     }
 
-    /// S6-10: v0.20 `remove_media_track` — unregister the writer and remove
-    /// the track from the active session (renegotiates).
-    #[cfg(feature = "webrtc-v020")]
-    async fn remove_media_track_v020(
-        &self,
-        manager: &Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
-        target: &ActrId,
-        track_id: &str,
-    ) -> ActorResult<()> {
+    /// Remove a media track from the peer connection and renegotiate it.
+    pub async fn remove_media_track(&self, target: &ActrId, track_id: &str) -> ActorResult<()> {
         let dest = Self::actr_id_to_dest(target);
         let admission = self
             .preflight_send(target, &dest, PayloadType::MediaRtp)
@@ -1963,7 +1907,7 @@ impl PeerGate {
             return Err(Self::send_projection_not_ready_error());
         }
 
-        let Some(handle) = manager.get_controller(target).await else {
+        let Some(handle) = self.rtc_manager.get_controller(target).await else {
             return Err(ActrError::Unavailable(format!(
                 "track not found: {track_id} (no connection to peer)"
             )));
@@ -1972,45 +1916,6 @@ impl PeerGate {
             .remove_media_track(track_id)
             .await
             .map_err(|e| ActrError::Unavailable(format!("WebRTC remove track failed: {e}")))
-    }
-
-    /// Send a media sample via the peer's v0.20 outbound track writer (data
-    /// plane). Admission mirrors 0.14 (ExistingOnly allowed: sending uses an
-    /// already-registered track).
-    #[cfg(feature = "webrtc-v020")]
-    pub async fn send_media_sample(
-        &self,
-        target: &ActrId,
-        track_id: &str,
-        sample: MediaSample,
-    ) -> ActorResult<()> {
-        let manager = self.v020_manager.clone();
-        self.send_media_sample_v020(&manager, target, track_id, sample)
-            .await
-    }
-
-    /// Add a media track on the v0.20 peer connection (the controller may
-    /// establish the connection first) and renegotiate. Renegotiation is
-    /// offerer-only (RFC-0504 §"Deliberate regressions").
-    #[cfg(feature = "webrtc-v020")]
-    pub async fn add_media_track(
-        &self,
-        target: &ActrId,
-        track_id: &str,
-        codec: &str,
-        media_type: &str,
-    ) -> ActorResult<()> {
-        let manager = self.v020_manager.clone();
-        self.add_media_track_v020(&manager, target, track_id, codec, media_type)
-            .await
-    }
-
-    /// Remove a media track from the v0.20 peer connection (renegotiates).
-    #[cfg(feature = "webrtc-v020")]
-    pub async fn remove_media_track(&self, target: &ActrId, track_id: &str) -> ActorResult<()> {
-        let manager = self.v020_manager.clone();
-        self.remove_media_track_v020(&manager, target, track_id)
-            .await
     }
 
     /// Send DataChunk (Fast Path)
@@ -2092,12 +1997,12 @@ impl PeerGate {
         let dest = Self::actr_id_to_dest(target);
 
         // Delivery uncertainty on a session close mid-flight is surfaced by
-        // the v0.20 lane send itself (RtcSendError::DataChunkDeliveryUncertain
+        // the RTC lane send itself (RtcSendError::DataChunkDeliveryUncertain
         // mapped at the transport boundary); no separate tracker lives here.
         //
         // Reclaim semantics: unlike the retired 0.14 path (which recorded the
         // chosen transport in a sent-slot and force-closed it on deadline
-        // expiry), the v0.20 architecture makes the Controller's recovery the
+        // expiry), the RTC architecture makes the Controller's recovery the
         // canonical reclaim mechanism — the recovery deadline, ICE/DTLS state
         // monitoring, and terminal transport cleanup retire an unhealthy
         // session. A chunk-send timeout therefore only fails this send; it
@@ -2520,7 +2425,7 @@ mod tests {
         ));
         let pending_requests: PendingRequestsMap = Arc::new(RpcCorrelation::new());
         let (projection_tx, projection_rx) = watch::channel(projection);
-        let gate = PeerGate::with_v020_manager(
+        let gate = PeerGate::with_rtc_manager(
             transport.clone(),
             PeerGate::empty_manager_for_test(),
             pending_requests,
@@ -2550,7 +2455,6 @@ mod tests {
         assert_eq!(builds.load(Ordering::SeqCst), 0);
     }
 
-    #[cfg(feature = "webrtc-v020")]
     #[tokio::test(start_paused = true)]
     async fn request_deadline_covers_preflight_wait() {
         let (gate, transport, _projection_tx, builds, sends) =
@@ -2568,7 +2472,7 @@ mod tests {
         // Hold the manager peers-map write lock so the preflight `is_closing`
         // read blocks. A caller deadline must bound this wait even though no
         // pending request or transport send has started yet.
-        let preflight_guard = gate.v020_manager.hold_peers_write_for_test().await;
+        let preflight_guard = gate.rtc_manager.hold_peers_write_for_test().await;
         let request_gate = Arc::clone(&gate);
         let request = tokio::spawn(async move {
             request_gate
@@ -2755,7 +2659,7 @@ mod tests {
         let manager = PeerGate::empty_manager_for_test();
         let pending_requests: PendingRequestsMap = Arc::new(RpcCorrelation::new());
         let gate =
-            PeerGate::with_v020_manager(transport.clone(), manager.clone(), pending_requests, None);
+            PeerGate::with_rtc_manager(transport.clone(), manager.clone(), pending_requests, None);
 
         gate.send_message_with_type(&target, PayloadType::RpcReliable, RpcEnvelope::default())
             .await
@@ -2778,7 +2682,7 @@ mod tests {
             .await;
 
         manager.publish_peer_transport_retired_for_test(
-            crate::wire::webrtc::v020::status::PeerTransportRetirement {
+            crate::wire::webrtc::rtc::status::PeerTransportRetirement {
                 lifecycle: lifecycle.clone(),
                 reason: actr_framework::WebRtcUnavailableReason::RecoveryExhausted,
             },
@@ -3001,7 +2905,7 @@ mod tests {
     #[cfg(feature = "test-utils")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn route_waiter_submits_one_business_recovery_hint_per_waiter() {
-        use crate::wire::webrtc::v020::manager::RtcConnectionManager;
+        use crate::wire::webrtc::rtc::manager::RtcConnectionManager;
 
         let (signaling_tx, _signaling_rx) = tokio::sync::mpsc::channel(16);
         let manager = Arc::new(RtcConnectionManager::new(
@@ -3026,7 +2930,7 @@ mod tests {
                 sends: Arc::new(AtomicUsize::new(0)),
             }),
         ));
-        let gate = PeerGate::with_v020_manager(
+        let gate = PeerGate::with_rtc_manager(
             transport,
             manager.clone(),
             Arc::new(RpcCorrelation::new()),
@@ -3056,7 +2960,7 @@ mod tests {
         let (gate, _transport, _projection_tx, _builds, _sends) =
             gate_with_projection(SendProjection::Normal);
         let peer = test_actor_id(2);
-        let manager = gate.v020_manager.clone();
+        let manager = gate.rtc_manager.clone();
 
         let awaiting = gate
             .pending_requests
@@ -3115,7 +3019,7 @@ mod tests {
         ));
         let manager = PeerGate::empty_manager_for_test();
         let pending_requests: PendingRequestsMap = Arc::new(RpcCorrelation::new());
-        let gate = Arc::new(PeerGate::with_v020_manager(
+        let gate = Arc::new(PeerGate::with_rtc_manager(
             transport,
             manager.clone(),
             pending_requests,
@@ -3826,7 +3730,7 @@ mod tests {
         ));
         let pending_requests: PendingRequestsMap = Arc::new(RpcCorrelation::new());
         let (_projection_tx, projection_rx) = watch::channel(SendProjection::Normal);
-        let gate = Arc::new(PeerGate::with_v020_manager(
+        let gate = Arc::new(PeerGate::with_rtc_manager(
             transport,
             PeerGate::empty_manager_for_test(),
             pending_requests.clone(),
@@ -3886,7 +3790,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "webrtc-v020")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn non_sendable_controller_with_ready_websocket_fallback_admits() {
         use crate::transport::ConnType;
@@ -3976,7 +3879,7 @@ mod tests {
         let manager = PeerGate::empty_manager_for_test();
         let pending_requests: PendingRequestsMap = Arc::new(RpcCorrelation::new());
         let gate =
-            PeerGate::with_v020_manager(transport.clone(), manager.clone(), pending_requests, None);
+            PeerGate::with_rtc_manager(transport.clone(), manager.clone(), pending_requests, None);
 
         // Force a non-sendable controller for the target: it exists, but the
         // no-op factory never completes a session, so `sendable` is false.
@@ -4103,7 +4006,6 @@ mod tests {
             "removal must bump the revision"
         );
     }
-    #[cfg(feature = "webrtc-v020")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn at_most_once_survives_an_unsafe_reattempt_after_unknown() {
         // Adversarial pin for the safe-reattempt boundary: a lane may report

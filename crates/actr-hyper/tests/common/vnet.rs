@@ -3,7 +3,7 @@
 //! Provides the compatibility test context and shared packet gate used to
 //! simulate network disconnection and reconnection below ICE.
 //!
-//! webrtc-rs v0.20 owns the UDP sockets created by `PeerConnectionBuilder` and
+//! webrtc-rs owns the UDP sockets created by `PeerConnectionBuilder` and
 //! no longer accepts the legacy VNet socket provider. Tests retain the existing
 //! `VNetPair` API, while the shared `network_blocked` flag now also drives a
 //! runtime wrapper around those builder-owned sockets.
@@ -29,7 +29,7 @@
 //!                    │                      │
 //!                 shared network_blocked flag
 //!                            │
-//!                 v0.20 packet-filter runtime
+//!                 RTC packet-filter runtime
 //!                            │
 //!                 RTCPeerConnection UDP sockets
 //! ```
@@ -172,7 +172,7 @@ impl VNetPair {
         self.network_blocked.load(Ordering::SeqCst)
     }
 
-    /// Shared packet gate for the webrtc-rs v0.20 test runtime.
+    /// Shared packet gate for the webrtc-rs test runtime.
     pub fn packet_blocked_flag(&self) -> Arc<AtomicBool> {
         self.network_blocked.clone()
     }

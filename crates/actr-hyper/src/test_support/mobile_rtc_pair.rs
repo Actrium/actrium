@@ -59,7 +59,7 @@ pub struct MobileEventDriver {
 }
 
 impl MobileEventDriver {
-    /// Attach the production gated lifecycle reconciler and v0.20 recovery
+    /// Attach the production gated lifecycle reconciler and RTC recovery
     /// feed to one endpoint in any integration topology. Mobile tests submit
     /// native network-path events explicitly; address polling is intentionally
     /// not part of the mobile production path.
@@ -67,7 +67,7 @@ impl MobileEventDriver {
         let peer = harness.peer(serial);
         let processor = peer.production_network_processor();
         let (handle, facts, shutdown, task, status) =
-            super::spawn_gated_v020_network_event_supervisor(processor, &peer.rtc);
+            super::spawn_gated_rtc_network_event_supervisor(processor, &peer.rtc);
         // Wire the signaling client's generation facts into this supervisor
         // and seed a live generation (the `recovery_vnet_supervisor` wiring).
         // The harness client connects eagerly at `add_peer`, before this sink
@@ -202,7 +202,7 @@ impl MobileEventDriver {
 }
 
 /// Two independent Actr endpoints connected through production Actrix
-/// Signaling/STUN/TURN and real webrtc-rs v0.20 PeerConnections.
+/// Signaling/STUN/TURN and real webrtc-rs PeerConnections.
 pub struct MobileRtcPairHarness {
     services: ActrixTestServices,
     harness: TestHarness,
@@ -665,7 +665,7 @@ impl MobileRtcPairHarness {
     }
 
     /// Start a DataChunk send without waiting for its remote observation so a
-    /// test can interrupt a concrete fragmented send at the v0.20 lane seam.
+    /// test can interrupt a concrete fragmented send at the RTC lane seam.
     pub fn spawn_data_chunk(
         &self,
         from: PairEndpoint,
@@ -782,7 +782,7 @@ impl MobileRtcPairHarness {
     }
 
     /// Wait until the configured physical link fault is observed on either
-    /// endpoint's generation-scoped v0.20 Runtime wrapper.
+    /// endpoint's generation-scoped RTC Runtime wrapper.
     pub async fn wait_rtc_fault_hit(
         &self,
         timeout: Duration,
