@@ -119,6 +119,7 @@ impl ControllerTestHarness {
             buffer_config: crate::wire::webrtc::v020::config::RtcBufferConfig::default(),
             #[cfg(feature = "test-utils")]
             driver_event_observer: None,
+            signaling_dispatch_observer: None,
             controller_lifecycle_id: 1,
             peer_generation_invalidated: None,
             peer_sendability_changed: None,
