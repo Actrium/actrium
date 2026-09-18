@@ -6,12 +6,12 @@ use crate::inbound::DataChunkRegistry;
 use crate::inbound::dispatcher::InboundDispatcher;
 use crate::wire::webrtc::rtc::status::LaneKind;
 use actr_protocol::prost::Message as ProstMessage;
-use actr_protocol::{ActrId, ActrType, Realm};
+use actr_protocol::{ActrId, ActrType, DataChunk, Realm};
 use actr_runtime_mailbox::{Mailbox, MailboxStats, MessagePriority, MessageRecord, StorageResult};
 use async_trait::async_trait;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::{Notify, RwLock, mpsc};
 use uuid::Uuid;
 
 fn test_id(serial: u64) -> ActrId {
@@ -136,6 +136,57 @@ async fn bridge_routes_rpc_to_mailbox() {
     .await
     .expect("mailbox should receive the RPC request");
     assert_eq!(mailbox.enqueue_count.load(Ordering::SeqCst), 1);
+    shutdown.cancel();
+    tasks.await.expect("bridge tasks converge");
+}
+
+#[tokio::test]
+async fn bridge_preserves_data_chunk_order_per_lane() {
+    let pending: crate::transport::correlation::PendingRequestsMap =
+        std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new());
+    let registry = Arc::new(DataChunkRegistry::new());
+    let (sequence_tx, mut sequence_rx) = mpsc::unbounded_channel();
+    let callback: crate::inbound::DataChunkCallback = Arc::new(move |chunk: DataChunk, _sender| {
+        let sequence_tx = sequence_tx.clone();
+        Box::pin(async move {
+            let _ = sequence_tx.send(chunk.sequence);
+            Ok(())
+        })
+    });
+    registry.register("ordered-stream".to_string(), callback);
+
+    let dispatcher = Arc::new(InboundDispatcher::new(pending, registry));
+    let slot: MailboxSlot = Arc::new(RwLock::new(Some(CapturingMailbox::new())));
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let (handler, tasks) = dispatcher_bridge(dispatcher, slot, shutdown.clone());
+    let router = InboundRouter::new(handler);
+
+    for sequence in [0, 1] {
+        let chunk = DataChunk {
+            stream_id: "ordered-stream".to_string(),
+            sequence,
+            payload: bytes::Bytes::from_static(b"chunk"),
+            ..Default::default()
+        };
+        assert!(router.route(InboundMessage {
+            peer: test_id(2),
+            generation: 1,
+            lane: LaneKind::StreamReliable,
+            payload: bytes::Bytes::from(chunk.encode_to_vec()),
+        }));
+    }
+
+    let mut received = Vec::new();
+    for _ in 0..2 {
+        received.push(
+            tokio::time::timeout(std::time::Duration::from_secs(5), sequence_rx.recv())
+                .await
+                .expect("ordered stream callback should complete")
+                .expect("ordered stream callback channel should remain open"),
+        );
+    }
+    assert_eq!(received, [0, 1]);
+
     shutdown.cancel();
     tasks.await.expect("bridge tasks converge");
 }
