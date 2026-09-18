@@ -582,7 +582,7 @@ impl WirePool {
         };
         drop(conns);
 
-        // A long-lived v0.20 Controller can advance to a fresh transport epoch
+        // A long-lived RTC Controller can advance to a fresh transport epoch
         // while the same Ready WireHandle remains cached. Its live identity is
         // authoritative: consulting the commit-time snapshot first would let a
         // delayed terminal event for epoch N evict the healthy epoch N+1.

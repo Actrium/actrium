@@ -28,7 +28,7 @@
 # making progress toward its bounded assertion timeout.
 slow-timeout = { period = "60s", terminate-after = 5 }
 
-# The v0.20 mobile pair contract is deliberately deterministic and is the PR
+# The RTC mobile pair contract is deliberately deterministic and is the PR
 # recovery gate. A retry would hide exactly the race/storm regressions this
 # suite is intended to expose. Keep this before the general integration-test
 # override: nextest uses the first matching override for each setting.
@@ -48,17 +48,17 @@ retries = 0
 filter = 'package(actr-hyper) and (test(/^connection_governance_matrix::/) | test(/^connection_governance_production::/) | test(/^connection_governance_inflight::/))'
 retries = 0
 
-# The v0.20 validation/interop/wiring suites live in the lib target but build
+# The RTC validation/interop/wiring suites live in the lib target but build
 # REAL PeerConnections (ICE + DTLS handshakes over loopback), so they are not
 # the deterministic unit tests the kind(lib) retry-free assumption describes.
 # Under the full workspace run's CPU contention their handshake can exceed the
 # test's own timeout on a slow draw (observed in CI as
-# `v020_offer_answer_bidirectional_close_loop` timing out at its 15s
-# OP_TIMEOUT while passing in the dedicated, less-loaded v0.20 gate job).
+# `rtc_offer_answer_bidirectional_close_loop` timing out at its 15s
+# OP_TIMEOUT while passing in the dedicated, less-loaded RTC gate job).
 # Scope the same bounded retries the integration tests get to exactly these
 # real-PC modules; every other lib test stays retry-free.
 [[profile.default.overrides]]
-filter = 'package(actr-hyper) and (test(wire::webrtc::v020::validation_tests) | test(wire::webrtc::v020::interop_tests) | test(wire::webrtc::v020::wiring_tests))'
+filter = 'package(actr-hyper) and (test(wire::webrtc::rtc::validation_tests) | test(wire::webrtc::rtc::interop_tests) | test(wire::webrtc::rtc::wiring_tests))'
 retries = 2
 
 [[profile.default.overrides]]

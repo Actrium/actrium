@@ -1,6 +1,6 @@
 //! Regression test for the historical ICE-connected/SCTP-not-ready race.
 //!
-//! In the v0.20 architecture the business boundary is the authoritative
+//! In the RTC architecture the business boundary is the authoritative
 //! controller snapshot, not a raw ICE/PeerConnection callback. `Connected`
 //! is published only after the active generation's `RpcReliable` channel is
 //! open. This test performs three real ICE restarts and sends a burst at the

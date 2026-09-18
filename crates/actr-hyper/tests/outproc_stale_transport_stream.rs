@@ -47,7 +47,7 @@ fn spawn_event_storm(rtc: TestRtcControl) -> tokio::task::JoinHandle<()> {
             tokio::time::sleep(delay).await;
 
             for seq in 0..256 {
-                // Stress the actual v0.20 recovery ingress. Repeated facts are
+                // Stress the actual RTC recovery ingress. Repeated facts are
                 // intentionally coalesced/deduplicated by each controller.
                 match seq % 4 {
                     0 => {

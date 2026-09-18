@@ -52,8 +52,8 @@
 //! │           (Channel Management)                      │  HostTransport
 //! │                                                     │  PeerTransport
 //! ├─────────────────────────────────────────────────────┤
-//! │  Layer 0: Wire                                      │  WebRtcGate
-//! │           (Physical Connections)                     │  WebRtcCoordinator
+//! │  Layer 0: Wire                                      │  RtcPeerController
+//! │           (Physical Connections)                     │  RtcConnectionManager
 //! │                                                     │  SignalingClient
 //! └─────────────────────────────────────────────────────┘
 //! ```
