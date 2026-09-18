@@ -29,6 +29,7 @@ fn test_id(serial: u64) -> ActrId {
 struct CapturingMailbox {
     enqueue_count: AtomicUsize,
     enqueued: Notify,
+    first_enqueue_release: Option<Notify>,
 }
 
 struct BlockingMailbox {
@@ -66,6 +67,7 @@ impl CapturingMailbox {
         Arc::new(Self {
             enqueue_count: AtomicUsize::new(0),
             enqueued: Notify::new(),
+            first_enqueue_release: None,
         })
     }
 }
@@ -78,8 +80,13 @@ impl Mailbox for CapturingMailbox {
         _payload: Vec<u8>,
         _priority: MessagePriority,
     ) -> StorageResult<Uuid> {
-        self.enqueue_count.fetch_add(1, Ordering::SeqCst);
+        let previous = self.enqueue_count.fetch_add(1, Ordering::SeqCst);
         self.enqueued.notify_one();
+        if previous == 0 {
+            if let Some(release) = &self.first_enqueue_release {
+                release.notified().await;
+            }
+        }
         Ok(Uuid::new_v4())
     }
     async fn dequeue(&self) -> StorageResult<Vec<MessageRecord>> {
@@ -140,7 +147,7 @@ async fn bridge_routes_rpc_to_mailbox() {
     tasks.await.expect("bridge tasks converge");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn bridge_preserves_data_chunk_order_per_lane() {
     let pending: crate::transport::correlation::PendingRequestsMap =
         std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new());
@@ -189,6 +196,71 @@ async fn bridge_preserves_data_chunk_order_per_lane() {
 
     shutdown.cancel();
     tasks.await.expect("bridge tasks converge");
+}
+
+#[tokio::test]
+async fn bridge_serializes_blocked_lane_without_blocking_other_lanes() {
+    let pending = Arc::new(crate::transport::correlation::RpcCorrelation::new());
+    let dispatcher = Arc::new(InboundDispatcher::new(
+        pending,
+        Arc::new(DataChunkRegistry::new()),
+    ));
+    let mailbox = Arc::new(CapturingMailbox {
+        enqueue_count: AtomicUsize::new(0),
+        enqueued: Notify::new(),
+        first_enqueue_release: Some(Notify::new()),
+    });
+    let slot: MailboxSlot = Arc::new(RwLock::new(Some(mailbox.clone())));
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let (handler, tasks) = dispatcher_bridge(dispatcher, slot, shutdown.clone());
+    let router = InboundRouter::new(handler);
+    let route = |request_id: &str, lane| {
+        let envelope = actr_protocol::RpcEnvelope {
+            request_id: request_id.to_string(),
+            route_key: "test".to_string(),
+            direction: Some(actr_protocol::Direction::Request as i32),
+            ..Default::default()
+        };
+        assert!(router.route(InboundMessage {
+            peer: test_id(2),
+            generation: 1,
+            lane,
+            payload: bytes::Bytes::from(envelope.encode_to_vec()),
+        }));
+    };
+    let wait_for_enqueues = |count| {
+        let mailbox = &mailbox;
+        async move {
+            while mailbox.enqueue_count.load(Ordering::SeqCst) < count {
+                mailbox.enqueued.notified().await;
+            }
+        }
+    };
+
+    route("first", LaneKind::RpcReliable);
+    tokio::time::timeout(std::time::Duration::from_secs(5), wait_for_enqueues(1))
+        .await
+        .expect("first dispatch should block in the mailbox");
+    route("second", LaneKind::RpcReliable);
+    route("independent", LaneKind::RpcSignal);
+    tokio::time::timeout(std::time::Duration::from_secs(5), wait_for_enqueues(2))
+        .await
+        .expect("another lane should dispatch while the first is blocked");
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(100), wait_for_enqueues(3))
+            .await
+            .is_err(),
+        "the second same-lane dispatch must wait for the first to complete"
+    );
+    assert_eq!(router.inflight().0, 2, "queued work must retain its lease");
+
+    mailbox.first_enqueue_release.as_ref().unwrap().notify_one();
+    tokio::time::timeout(std::time::Duration::from_secs(5), wait_for_enqueues(3))
+        .await
+        .expect("the queued dispatch should resume after the first completes");
+    shutdown.cancel();
+    tasks.await.expect("bridge tasks converge");
+    assert_eq!(router.inflight(), (0, 0));
 }
 
 #[tokio::test]
@@ -250,9 +322,19 @@ async fn bridge_shutdown_cancels_a_blocked_dispatch_and_converges() {
     .await
     .expect("dispatch should reach the blocking mailbox");
 
+    // Keep a second message queued behind the blocked dispatch. Shutdown
+    // must release both the active lease and the queued lease.
+    assert!(router.route(InboundMessage {
+        peer: test_id(2),
+        generation: 1,
+        lane: LaneKind::RpcReliable,
+        payload: bytes::Bytes::from(envelope.encode_to_vec()),
+    }));
+    assert_eq!(router.inflight().0, 2);
     shutdown.cancel();
     tokio::time::timeout(std::time::Duration::from_secs(5), tasks)
         .await
         .expect("bridge task group must converge after shutdown")
         .expect("bridge monitor should exit cleanly");
+    assert_eq!(router.inflight(), (0, 0));
 }

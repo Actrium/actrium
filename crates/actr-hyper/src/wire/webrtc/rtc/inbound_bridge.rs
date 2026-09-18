@@ -139,27 +139,25 @@ pub(crate) fn dispatcher_bridge(
             generation: msg.generation,
             lane: msg.lane,
         };
-        let start_worker = {
-            // Admission and shutdown are serialized. Once the node starts
-            // closing, no new queue or worker can appear after convergence.
-            let mut state = handler_tasks
-                .state
-                .lock()
-                .expect("RTC inbound dispatch task lock");
-            if state.closed {
-                return;
-            }
-            state
-                .queues
-                .entry(key.clone())
-                .or_default()
-                .push_back(DispatchItem {
-                    message: msg,
-                    lease,
-                });
-            state.running.insert(key.clone())
-        };
-        if start_worker {
+        // Keep admission and worker registration atomic with shutdown.
+        // TaskTracker::close() does not prevent spawning new tasks, so the
+        // worker must be tracked before the monitor can close and wait.
+        let mut state = handler_tasks
+            .state
+            .lock()
+            .expect("RTC inbound dispatch task lock");
+        if state.closed {
+            return;
+        }
+        state
+            .queues
+            .entry(key.clone())
+            .or_default()
+            .push_back(DispatchItem {
+                message: msg,
+                lease,
+            });
+        if state.running.insert(key.clone()) {
             spawn_dispatch_worker(
                 &handler_tasks,
                 key,
