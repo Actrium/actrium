@@ -89,7 +89,7 @@ async fn recovery_attempt_timer_restarts_after_offer_before_rtc_readiness() {
         SignalingFaultRule::Delay(INJECTED_OFFER_DELAY),
     );
 
-    // Signaling remains healthy while the real v0.20 UDP path is blackholed.
+    // Signaling remains healthy while the real RTC UDP path is blackholed.
     // This lets the Offer/Answer complete while keeping the physical
     // readiness anchor unavailable, which is the timer race under test.
     pair.set_rtc_fault(LinkDirection::Both, PacketRule::Blackhole)

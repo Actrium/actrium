@@ -1,4 +1,4 @@
-//! Resource-level invariant confirmations after the webrtc-rs v0.20 cutover.
+//! Resource-level invariant confirmations after the webrtc-rs cutover.
 //!
 //! Transport-flight tests remain black-box tests of `PeerTransport`; RTC tests
 //! use the production T3 path and observe only authoritative snapshots,
@@ -415,9 +415,9 @@ async fn inv15_blackbox_close_linearizes_late_successful_peer_publication() {
         tokio::spawn(async move { rtc.connect(target).await })
     };
 
-    rendezvous(&publish, "v0.20 controller pre-publication boundary").await;
+    rendezvous(&publish, "RTC controller pre-publication boundary").await;
     rtc.close_all().await;
-    rendezvous(&publish, "late v0.20 controller publication release").await;
+    rendezvous(&publish, "late RTC controller publication release").await;
     connecting.await.expect("connect race task");
 
     let remaining = rtc.state(&target).await;

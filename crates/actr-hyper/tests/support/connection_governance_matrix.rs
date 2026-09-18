@@ -1,4 +1,4 @@
-//! Connection-governance matrix coverage for the v0.20 RTC path.
+//! Connection-governance matrix coverage for the RTC path.
 //!
 //! These scenarios keep the opposite endpoint alive and do not call the
 //! test-only `close_peer`/`connect` recovery helper after the fault. That is

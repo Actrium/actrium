@@ -1,4 +1,4 @@
-//! Mobile full-disconnect recovery through the webrtc-rs v0.20 architecture.
+//! Mobile full-disconnect recovery through the webrtc-rs architecture.
 //!
 //! The mobile endpoint is exercised as both offerer and answerer. Temporary
 //! loss and interface changes use soft recovery and preserve `pc_generation`;

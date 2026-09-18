@@ -29,7 +29,7 @@ pub enum LinkDirection {
     Both,
 }
 
-/// Deterministic packet disposition supported at the v0.20 Runtime/socket
+/// Deterministic packet disposition supported at the RTC Runtime/socket
 /// seam. Every rule is scoped to one `(local, remote, pc_generation)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PacketRule {
@@ -130,7 +130,7 @@ impl DirectedRtcFaultHandle {
         }
     }
 
-    /// Addresses handed to v0.20's `with_udp_addrs` for this exact build.
+    /// Addresses handed to RTC's `with_udp_addrs` for this exact build.
     pub fn bind_addresses(&self) -> Vec<SocketAddr> {
         self.state
             .bind_addresses
@@ -198,7 +198,7 @@ impl DirectedRtcFaultHandle {
     }
 }
 
-/// Registry for link-, direction-, and generation-scoped v0.20 socket faults.
+/// Registry for link-, direction-, and generation-scoped RTC socket faults.
 #[derive(Debug, Clone, Default)]
 pub struct DirectedRtcFaultRegistry {
     scopes: Arc<Mutex<HashMap<FaultKey, Arc<ScopedFaultState>>>>,
@@ -226,7 +226,7 @@ impl DirectedRtcFaultRegistry {
 
     /// Apply one logical directional rule to both socket faces that carry it.
     /// Returns `false` until both endpoint generations have been built and
-    /// registered by the v0.20 factory.
+    /// registered by the RTC factory.
     pub fn set_link_rule(
         &self,
         a: (&ActrId, u64),

@@ -2634,9 +2634,8 @@ public interface ActrRefWrapperInterface {
     suspend fun `discover`(`targetType`: ActrType, `count`: kotlin.UInt): List<ActrId>
     
     /**
-     * Query one peer's current WebRTC state (v0.20 backend). Returns `None`
-     * when the peer has no controller, the node runs the 0.14 backend, or
-     * the build does not enable `webrtc-v020`.
+     * Query one peer's current WebRTC state. Returns `None`
+     * when the peer has no controller or RTC has not been initialized.
      */
     suspend fun `getRtcPeerStatus`(`peer`: ActrId): WebRtcPeerStateBridge?
     
@@ -2646,8 +2645,7 @@ public interface ActrRefWrapperInterface {
     fun `isShuttingDown`(): kotlin.Boolean
     
     /**
-     * List every current peer's WebRTC state (v0.20 backend; empty on 0.14
-     * or when the build does not enable `webrtc-v020`).
+     * List every current peer's WebRTC state; empty when no peers are registered.
      */
     suspend fun `listRtcPeerStatuses`(): List<WebRtcPeerStateBridge>
     
@@ -2666,11 +2664,10 @@ public interface ActrRefWrapperInterface {
     fun `shutdown`()
     
     /**
-     * Subscribe to one peer's WebRTC state changes (v0.20 backend). The
+     * Subscribe to one peer's WebRTC state changes. The
      * listener immediately receives the current state (initial replay).
      * Dropping the returned subscription stops delivery. Returns `None` when
-     * the peer has no controller, the node runs the 0.14 backend, or the
-     * build does not enable `webrtc-v020`.
+     * the peer has no controller or RTC has not been initialized.
      */
     suspend fun `subscribeRtcPeerStatus`(`peer`: ActrId, `listener`: RtcPeerStateListener): RtcPeerStateSubscription?
     
@@ -2852,9 +2849,8 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
 
     
     /**
-     * Query one peer's current WebRTC state (v0.20 backend). Returns `None`
-     * when the peer has no controller, the node runs the 0.14 backend, or
-     * the build does not enable `webrtc-v020`.
+     * Query one peer's current WebRTC state. Returns `None`
+     * when the peer has no controller or RTC has not been initialized.
      */
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `getRtcPeerStatus`(`peer`: ActrId) : WebRtcPeerStateBridge? {
@@ -2893,8 +2889,7 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
 
     
     /**
-     * List every current peer's WebRTC state (v0.20 backend; empty on 0.14
-     * or when the build does not enable `webrtc-v020`).
+     * List every current peer's WebRTC state; empty when no peers are registered.
      */
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `listRtcPeerStatuses`() : List<WebRtcPeerStateBridge> {
@@ -2960,11 +2955,10 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
 
     
     /**
-     * Subscribe to one peer's WebRTC state changes (v0.20 backend). The
+     * Subscribe to one peer's WebRTC state changes. The
      * listener immediately receives the current state (initial replay).
      * Dropping the returned subscription stops delivery. Returns `None` when
-     * the peer has no controller, the node runs the 0.14 backend, or the
-     * build does not enable `webrtc-v020`.
+     * the peer has no controller or RTC has not been initialized.
      */
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `subscribeRtcPeerStatus`(`peer`: ActrId, `listener`: RtcPeerStateListener) : RtcPeerStateSubscription? {
@@ -4906,7 +4900,7 @@ public object FfiConverterTypeOpusEncoder: FfiConverter<OpusEncoder, Long> {
 
 
 /**
- * A live WebRTC peer-status subscription (Stage 6, v0.20 backend). Dropping
+ * A live WebRTC peer-status subscription. Dropping
  * it aborts the delivery task.
  */
 public interface RtcPeerStateSubscriptionInterface {
@@ -4915,7 +4909,7 @@ public interface RtcPeerStateSubscriptionInterface {
 }
 
 /**
- * A live WebRTC peer-status subscription (Stage 6, v0.20 backend). Dropping
+ * A live WebRTC peer-status subscription. Dropping
  * it aborts the delivery task.
  */
 open class RtcPeerStateSubscription: Disposable, AutoCloseable, RtcPeerStateSubscriptionInterface
@@ -6075,7 +6069,7 @@ public object FfiConverterTypeRpcEnvelopeBridge: FfiConverterRustBuffer<RpcEnvel
 
 
 /**
- * FFI-shaped unified WebRTC peer state (Stage 6, v0.20 backend). Carried by
+ * FFI-shaped unified WebRTC peer state. Carried by
  * `WebRtcObserverBridge::on_state_changed` and the `ActrRefWrapper` status
  * query/list/subscribe APIs. `revision` is monotonic per peer (dedup key).
  */
@@ -7042,8 +7036,8 @@ public object FfiConverterTypeReconnectReason: FfiConverterRustBuffer<ReconnectR
 
 
 /**
- * Whether the selected ICE candidate pair is direct or relayed (v0.20
- * backend, Stage 6). Mirrors `actr_framework::WebRtcNetworkPath`.
+ * Whether the selected ICE candidate pair is direct or relayed. Mirrors
+ *  `actr_framework::WebRtcNetworkPath`.
  */
 
 enum class WebRtcNetworkPathBridge {
@@ -7126,8 +7120,8 @@ public object FfiConverterTypeWebRtcPeerStatusBridge: FfiConverterRustBuffer<Web
 
 
 /**
- * Stable, FFI-safe reason a WebRTC peer is unavailable (Stage 6, v0.20
- * backend). Mirrors `actr_framework::WebRtcUnavailableReason`.
+ * Stable, FFI-safe reason a WebRTC peer is unavailable. Mirrors
+ *  `actr_framework::WebRtcUnavailableReason`.
  */
 
 enum class WebRtcUnavailableReasonBridge {
@@ -7628,7 +7622,7 @@ public object FfiConverterTypeMediaTrackCallback: FfiConverterCallbackInterface<
 
 
 /**
- * Listener for per-peer WebRTC state updates (Stage 6, v0.20 backend).
+ * Listener for per-peer WebRTC state updates.
  */
 public interface RtcPeerStateListener {
     
@@ -7875,7 +7869,7 @@ public interface WebRtcObserverBridge {
     suspend fun `onDisconnected`(`ctx`: ContextBridge, `event`: PeerEventBridge)
     
     /**
-     * Unified per-revision state hook (Stage 6, v0.20 backend). Fires on
+     * Unified per-revision state hook. Fires on
      * every snapshot revision; a late-registered workload receives the
      * current state on the first projection pass.
      */

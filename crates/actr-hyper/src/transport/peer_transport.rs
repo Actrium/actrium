@@ -421,7 +421,7 @@ impl PeerTransport {
     /// Whether an already-materialized destination currently has a non-WebRTC
     /// fallback route that can carry `payload_type`.  WebRTC is deliberately
     /// excluded: its `ReadySet` entry reflects the physical wire, while the
-    /// v0.20 controller separately owns peer sendability and may be in
+    /// RTC controller separately owns peer sendability and may be in
     /// `Recovering` even when the physical WebRTC wire is still marked ready.
     /// This is a read-only check used by the readiness waiter; it never creates
     /// a connection or a lane.
@@ -1006,61 +1006,6 @@ impl PeerTransport {
                 Err(error)
             }
         }
-    }
-
-    /// Session-guarded close of only the WebRTC connection for the specified
-    /// Dest, leaving the WebSocket connection (if any) alive.
-    ///
-    /// Close **only** the WebRTC connection for `dest` when its session still
-    /// matches `(peer_id, session_id)`, leaving the WebSocket fallback lane
-    /// (and any in-flight RPC responses it carries) intact.
-    ///
-    /// Returns `Ok(true)` when the WebRTC connection was actually closed.
-    /// Returns `Ok(false)` when the event is stale (identity mismatch) or the
-    /// transport state has already changed — in that case **no** pending
-    /// requests should be cleaned, and the peer should be removed from
-    /// `closing_peers` immediately.
-    ///
-    /// Called by the legacy WebRTC connection-closed path so outbound
-    /// WebSocket response-reader tasks are not inadvertently terminated when a
-    /// WebRTC peer disconnects. The v0.20 backend does not call this method,
-    /// but preserving it keeps the non-v0.20 transport contract intact.
-    #[allow(dead_code)]
-    pub(crate) async fn close_webrtc_transport_if_session(
-        &self,
-        dest: &Dest,
-        peer_id: &ActrId,
-        session_id: u64,
-    ) -> NetworkResult<bool> {
-        let transport = {
-            let transports = self.transports.read().await;
-            match transports.get(dest) {
-                Some(DestState::Connected(transport)) => Some(Arc::clone(transport)),
-                _ => None,
-            }
-        };
-
-        let Some(transport) = transport else {
-            tracing::debug!(
-                "Stale WebRTC-only close event for {:?} (session {} absent)",
-                dest,
-                session_id
-            );
-            return Ok(false);
-        };
-        if !transport.matches_webrtc_session(peer_id, session_id).await {
-            tracing::debug!(
-                "Stale WebRTC-only close event for {:?} (session {} mismatch)",
-                dest,
-                session_id
-            );
-            return Ok(false);
-        }
-
-        transport
-            .close_connection(super::wire_pool::ConnType::WebRTC)
-            .await?;
-        Ok(true)
     }
 
     /// Close DestTransport for specified Dest (full teardown, including WebSocket).

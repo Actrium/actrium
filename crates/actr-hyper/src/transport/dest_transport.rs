@@ -275,7 +275,7 @@ impl DestTransport {
                         Ok(lane) => {
                             // A physical wire can remain in WirePool's
                             // ready-set while its concrete lane is no longer
-                            // sendable (for example, v0.20 controller
+                            // sendable (for example, RTC controller
                             // recovery).  Do not select that stale candidate;
                             // continue to the next payload-capable route so a
                             // ready WebSocket fallback can carry the send.

@@ -30,11 +30,10 @@ pub use recovery_supervisor::ConnectionFact;
 // `process_network_event_batch` and `select_network_recovery_action` are the
 // deprecated legacy batch path; they are still re-exported for the migration
 // window, so this re-export intentionally allows the deprecation lint. Only
-// the v0.20 recovery reducer (and its tests) reads the threshold today.
-#[cfg(any(feature = "webrtc-v020", feature = "test-utils"))]
+// the RTC recovery reducer (and its tests) reads the threshold today.
 pub(crate) use network_event::LONG_BACKGROUND_RECONNECT_THRESHOLD_MS;
-#[cfg(all(feature = "test-utils", feature = "webrtc-v020"))]
-pub(crate) use network_event::run_network_event_reconciler_with_channel_and_v020_recovery_and_status;
+#[cfg(feature = "test-utils")]
+pub(crate) use network_event::run_network_event_reconciler_with_channel_and_rtc_recovery_and_status;
 #[allow(deprecated)]
 pub use network_event::{
     AppLifecycleState, CleanupReason, DebounceConfig, DefaultNetworkEventProcessor,

@@ -28,17 +28,17 @@ pub use crate::transport::{
     WebRtcFragmentSendEvent, WebRtcFragmentSendHook, WebRtcFragmentSendHookGuard,
     install_webrtc_fragment_send_hook_for_test,
 };
-pub use crate::wire::webrtc::test_runtime::{
-    DirectedRtcFaultHandle, DirectedRtcFaultMetrics, DirectedRtcFaultRegistry, LinkDirection,
-    PacketRule,
-};
-pub use crate::wire::webrtc::v020::address::TestLocalAddressProvider;
-pub use crate::wire::webrtc::v020::fault::{
+pub use crate::wire::webrtc::rtc::address::TestLocalAddressProvider;
+pub use crate::wire::webrtc::rtc::fault::{
     DirectedSignalingFaultMetrics, DirectedSignalingFaultRegistry, SignalingFaultRule,
     SignalingMessageClass, SignalingTraceEvent,
 };
-pub use crate::wire::webrtc::v020::recovery::{
+pub use crate::wire::webrtc::rtc::recovery::{
     ICE_RESTART_ATTEMPT_TIMEOUT, REMOTE_REQUEST_WAKE_GRACE,
+};
+pub use crate::wire::webrtc::test_runtime::{
+    DirectedRtcFaultHandle, DirectedRtcFaultMetrics, DirectedRtcFaultRegistry, LinkDirection,
+    PacketRule,
 };
 pub use actrix_services::ActrixTestServices;
 pub use mobile_rtc_pair::{
@@ -108,7 +108,7 @@ pub fn create_credential_state_for_test(
 
 /// Compatibility namespace for integration tests that import the elementary
 /// helpers through `test_support::utils`. RTC construction lives in
-/// [`TestHarness`] so every integration topology uses the v0.20 stack.
+/// [`TestHarness`] so every integration topology uses the RTC stack.
 pub mod utils {
     pub use super::{
         create_credential_state_for_test, dummy_credential, install_test_crypto_provider,
@@ -238,14 +238,14 @@ pub fn spawn_gated_network_event_supervisor(
     spawn_network_event_supervisor_with_channel(processor, fact_sink, channel)
 }
 
-/// Spawn the gated lifecycle reconciler with the same v0.20 recovery feed as
+/// Spawn the gated lifecycle reconciler with the same RTC recovery feed as
 /// `Node::start()` and expose its policy status stream.
 ///
 /// `processor` must not publish `RtcNetworkEvent` itself. Use
 /// [`TestPeer::production_network_processor`], not the compatibility
 /// [`RtcAwareNetworkEventProcessor`], so each accepted platform fact reaches
 /// the manager supervisor exactly once.
-pub fn spawn_gated_v020_network_event_supervisor(
+pub fn spawn_gated_rtc_network_event_supervisor(
     processor: Arc<dyn crate::lifecycle::NetworkEventProcessor>,
     rtc: &TestRtcControl,
 ) -> (
@@ -263,7 +263,7 @@ pub fn spawn_gated_v020_network_event_supervisor(
     let (status_tx, status_rx) =
         tokio::sync::watch::channel(crate::lifecycle::SupervisorStatus::default());
     let task = tokio::spawn(
-        crate::lifecycle::run_network_event_reconciler_with_channel_and_v020_recovery_and_status(
+        crate::lifecycle::run_network_event_reconciler_with_channel_and_rtc_recovery_and_status(
             event_rx,
             channel,
             processor,
