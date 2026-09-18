@@ -9,6 +9,8 @@ mod data_chunk_registry;
 pub(crate) mod dispatcher;
 mod media_frame_registry;
 
+#[cfg(test)]
+pub(crate) use data_chunk_registry::DataChunkCallback;
 pub(crate) use data_chunk_registry::DataChunkRegistry;
 pub use media_frame_registry::MediaFrameRegistry;
 #[cfg(feature = "test-utils")]
