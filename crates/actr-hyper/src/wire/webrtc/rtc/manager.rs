@@ -198,6 +198,11 @@ pub(crate) struct RtcConnectionManager {
     #[cfg(feature = "test-utils")]
     driver_event_observer:
         Option<crate::wire::webrtc::rtc::peer::controller::NodeDriverEventObserver>,
+    /// Critical-signaling gate-decision observer used only by recovery
+    /// evidence. It never participates in Controller decisions.
+    #[cfg(feature = "test-utils")]
+    signaling_dispatch_observer:
+        Option<crate::wire::webrtc::rtc::peer::controller::SignalingDispatchObserver>,
     /// S6-6b: bumped whenever the peer registry changes (controller created or
     /// removed), so the hook projection re-sweeps peer ids on the edge instead
     /// of polling on an interval.
@@ -313,6 +318,8 @@ impl RtcConnectionManager {
             media_registry: None,
             #[cfg(feature = "test-utils")]
             driver_event_observer: None,
+            #[cfg(feature = "test-utils")]
+            signaling_dispatch_observer: None,
             signaling_dispatch_chains: std::sync::Mutex::new(None),
             peer_set_version: watch::channel(0u64).0,
             next_pc_generations: std::sync::Mutex::new(HashMap::new()),
@@ -580,6 +587,8 @@ impl RtcConnectionManager {
                     buffer_config: self.buffer_config.clone(),
                     #[cfg(feature = "test-utils")]
                     driver_event_observer: self.driver_event_observer.clone(),
+                    #[cfg(feature = "test-utils")]
+                    signaling_dispatch_observer: self.signaling_dispatch_observer.clone(),
                     controller_lifecycle_id,
                     peer_generation_invalidated: Some(self.peer_generation_invalidated.clone()),
                     peer_sendability_changed: Some(self.peer_sendability_changed.clone()),
