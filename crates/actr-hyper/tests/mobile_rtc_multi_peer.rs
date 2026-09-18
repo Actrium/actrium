@@ -1,5 +1,5 @@
 //! Multi-peer isolation over real Actrix services, production mobile recovery
-//! feed, and independent v0.20 controllers.
+//! feed, and independent RTC controllers.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -291,10 +291,10 @@ impl MultiPeerTopology {
             .expect("remote directed Runtime fault handle");
         tokio::select! {
             hit = a.wait_for_hit_after(0, Duration::from_secs(10)) => {
-                hit.expect("A-side v0.20 Runtime fault did not hit");
+                hit.expect("A-side RTC Runtime fault did not hit");
             }
             hit = remote_handle.wait_for_hit_after(0, Duration::from_secs(10)) => {
-                hit.expect("remote-side v0.20 Runtime fault did not hit");
+                hit.expect("remote-side RTC Runtime fault did not hit");
             }
         }
         self.harness.evidence.record(
@@ -302,7 +302,7 @@ impl MultiPeerTopology {
             "fault",
             Some(self.peer_id(remote)),
             "RTC link fault",
-            "hit real v0.20 Runtime",
+            "hit real RTC Runtime",
         );
     }
 
@@ -388,7 +388,7 @@ async fn mp01_one_link_fault_does_not_change_or_block_other_peer_connections() {
         .rtc
         .wait_state(&b, WAIT, |state| !state.sendable)
         .await
-        .expect("A-B must become non-sendable from a real v0.20 ICE/PC callback");
+        .expect("A-B must become non-sendable from a real RTC ICE/PC callback");
     let blocked_hook = topology
         .harness
         .peer(A)
@@ -689,7 +689,7 @@ async fn mp05_close_peer_during_recovery_cannot_revive_it_or_affect_other_links(
         .rtc
         .wait_state(&b, WAIT, |state| !state.sendable)
         .await
-        .expect("A-B recovery must be driven by the real v0.20 callback");
+        .expect("A-B recovery must be driven by the real RTC callback");
     let blocked_hook = topology
         .harness
         .peer(A)

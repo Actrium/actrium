@@ -1,5 +1,5 @@
 //! VNet black-box coverage for the responsive recovery supervisor and the
-//! v0.20 per-peer controllers.
+//! RTC per-peer controllers.
 
 use std::sync::Arc;
 use std::time::Duration;

@@ -1164,12 +1164,10 @@ fn build_response_envelope_pins_zero_timeout_per_contract() {
     assert!(err_env.error.is_some());
 }
 
-#[cfg(feature = "webrtc-v020")]
 struct ResponsePathSessionOps;
 
-#[cfg(feature = "webrtc-v020")]
 #[async_trait::async_trait]
-impl crate::wire::webrtc::v020::peer::effects::SessionOps for ResponsePathSessionOps {
+impl crate::wire::webrtc::rtc::peer::effects::SessionOps for ResponsePathSessionOps {
     async fn create_offer(
         &self,
     ) -> Result<webrtc::peer_connection::RTCSessionDescription, webrtc::error::Error> {
@@ -1223,7 +1221,7 @@ impl crate::wire::webrtc::v020::peer::effects::SessionOps for ResponsePathSessio
         label: &str,
         _init: webrtc::data_channel::RTCDataChannelInit,
     ) -> Result<Arc<dyn webrtc::data_channel::DataChannel>, webrtc::error::Error> {
-        Ok(crate::wire::webrtc::v020::peer::effects::test_support::fake_data_channel(label))
+        Ok(crate::wire::webrtc::rtc::peer::effects::test_support::fake_data_channel(label))
     }
 
     async fn add_track(
@@ -1255,31 +1253,28 @@ impl crate::wire::webrtc::v020::peer::effects::SessionOps for ResponsePathSessio
     }
 }
 
-#[cfg(feature = "webrtc-v020")]
 struct ResponsePathSessionFactory;
 
-#[cfg(feature = "webrtc-v020")]
 #[async_trait::async_trait]
-impl crate::wire::webrtc::v020::peer::effects::SessionFactory for ResponsePathSessionFactory {
+impl crate::wire::webrtc::rtc::peer::effects::SessionFactory for ResponsePathSessionFactory {
     async fn build(
         &self,
-        _handler: Arc<crate::wire::webrtc::v020::event_handler::WebRtcEventHandler>,
-    ) -> Result<Arc<dyn crate::wire::webrtc::v020::peer::effects::SessionOps>, webrtc::error::Error>
+        _handler: Arc<crate::wire::webrtc::rtc::event_handler::WebRtcEventHandler>,
+    ) -> Result<Arc<dyn crate::wire::webrtc::rtc::peer::effects::SessionOps>, webrtc::error::Error>
     {
         Ok(Arc::new(ResponsePathSessionOps))
     }
 }
 
-#[cfg(feature = "webrtc-v020")]
 #[tokio::test(start_paused = true)]
 async fn response_send_timeout_submits_recovery_hint_to_current_peer() {
-    use crate::wire::webrtc::v020::manager::RtcConnectionManager;
+    use crate::wire::webrtc::rtc::manager::RtcConnectionManager;
 
     let (signaling_tx, mut signaling_rx) = tokio::sync::mpsc::channel(16);
     let manager = Arc::new(
         RtcConnectionManager::new(Arc::new(ResponsePathSessionFactory), signaling_tx)
             .with_policy_clock_for_test(Arc::new(
-                crate::wire::webrtc::v020::peer::policy_clock::ManualPolicyClock::default(),
+                crate::wire::webrtc::rtc::peer::policy_clock::ManualPolicyClock::default(),
             )),
     );
     manager.supervisor().set_signaling_generation(Some(0));
@@ -1308,7 +1303,7 @@ async fn response_send_timeout_submits_recovery_hint_to_current_peer() {
                 .expect("controller signaling channel open");
             if matches!(
                 dispatch.message,
-                crate::wire::webrtc::v020::peer::reducer::SignalingMessage::Offer { .. }
+                crate::wire::webrtc::rtc::peer::reducer::SignalingMessage::Offer { .. }
             ) {
                 break;
             }
@@ -2396,10 +2391,9 @@ async fn plain_node_surface_keeps_headless_profile_ungated() {
         .expect("plain node reconciler should shut down cleanly");
 }
 
-// ── S7A-1: W6 v020 config fail-fast ────────────────────────────────────────
+// ── S7A-1: W6 rtc config fail-fast ────────────────────────────────────────
 
-#[cfg(feature = "webrtc-v020")]
-mod v020_config_guard {
+mod rtc_config_guard {
     use actr_config::{IceServer, WebRtcConfig};
 
     fn config_with_url(url: &str) -> WebRtcConfig {
@@ -2415,14 +2409,14 @@ mod v020_config_guard {
     #[test]
     fn turns_tls_url_is_a_hard_error() {
         let err =
-            super::super::validate_v020_config(&config_with_url("turns:turn.example.com:5349"))
+            super::super::validate_rtc_config(&config_with_url("turns:turn.example.com:5349"))
                 .expect_err("turns: must fail fast");
         assert!(err.to_string().contains("issue #848"), "got: {err}");
     }
 
     #[test]
     fn turn_tcp_transport_is_a_hard_error() {
-        let err = super::super::validate_v020_config(&config_with_url(
+        let err = super::super::validate_rtc_config(&config_with_url(
             "turn:turn.example.com:3478?transport=tcp",
         ))
         .expect_err("transport=tcp must fail fast");
@@ -2433,7 +2427,7 @@ mod v020_config_guard {
     fn udp_mux_port_is_a_hard_error() {
         let mut config = WebRtcConfig::default();
         config.advanced.ice_udp_mux_port = Some(5000);
-        let err = super::super::validate_v020_config(&config)
+        let err = super::super::validate_rtc_config(&config)
             .expect_err("ice_udp_mux_port must fail fast");
         assert!(err.to_string().contains("ice_udp_mux_port"), "got: {err}");
     }
@@ -2443,7 +2437,7 @@ mod v020_config_guard {
         let mut config = WebRtcConfig::default();
         config.advanced.udp_ports = Some((40_000, 40_100));
         let err =
-            super::super::validate_v020_config(&config).expect_err("UDP port range must fail fast");
+            super::super::validate_rtc_config(&config).expect_err("UDP port range must fail fast");
         assert!(err.to_string().contains("port ranges"), "got: {err}");
     }
 
@@ -2454,7 +2448,7 @@ mod v020_config_guard {
             urls: vec!["stun:stun.example.com:3478".to_string()],
             ..Default::default()
         });
-        super::super::validate_v020_config(&config).expect("UDP TURN/STUN is supported");
+        super::super::validate_rtc_config(&config).expect("UDP TURN/STUN is supported");
     }
 }
 

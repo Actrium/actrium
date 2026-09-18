@@ -86,10 +86,9 @@ async fn close_transport_if_current_replaced_instance_does_not_mark_closing() {
     );
 }
 
-// ── close_webrtc_transport_if_session: WebRTC-only teardown, WS kept alive ──
+// ── transport lifecycle and retry behavior ──────────────────────────────────
 
-/// Minimal wire that succeeds on `connect`, counts `close` calls, and optionally
-/// carries a `WireIdentity` (so `matches_webrtc_session` can match).
+/// Minimal wire that succeeds on `connect` and counts `close` calls.
 #[derive(Debug)]
 struct CountingWire {
     conn_type: ConnType,
@@ -978,45 +977,6 @@ async fn flight_waiter_does_not_expire_before_its_creator() {
     assert!(Arc::ptr_eq(&created, &observed));
 }
 
-/// Build a `PeerTransport` whose `dest` maps to a ready `DestTransport` carrying
-/// both a WebRTC wire (with the given session identity) and a WebSocket wire.
-///
-/// Returns the manager and the `dest` key; the caller already holds `Arc`s to
-/// the two `CountingWire`s so it can assert on their `close_count` directly.
-async fn peer_transport_with_webrtc_and_ws(
-    peer_id: ActrId,
-    session_id: u64,
-    webrtc: Arc<CountingWire>,
-    websocket: Arc<CountingWire>,
-) -> (PeerTransport, Dest) {
-    let mgr = PeerTransport::new(peer_id.clone(), create_test_factory());
-    let dest = Dest::host();
-
-    let transport = DestTransport::new(dest.clone(), vec![webrtc, websocket])
-        .await
-        .expect("transport should be created");
-
-    // `DestTransport::new` spawns background `connect` tasks; wait for the
-    // WebRTC wire to become Ready so `matches_webrtc_session` can observe it.
-    let ready = timeout(Duration::from_secs(2), async {
-        loop {
-            if transport.matches_webrtc_session(&peer_id, session_id).await {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await;
-    assert!(ready.is_ok(), "WebRTC wire should become Ready in time");
-
-    mgr.transports
-        .write()
-        .await
-        .insert(dest.clone(), DestState::Connected(Arc::new(transport)));
-
-    (mgr, dest)
-}
-
 #[tokio::test]
 async fn terminal_lifecycle_close_is_instance_guarded() {
     let peer_id = ActrId::default();
@@ -1113,88 +1073,6 @@ async fn all_failed_before_first_ready_evicts_destination() {
     .expect("all-failed connection flight must be evicted");
     assert_eq!(wire.attempts.load(Ordering::SeqCst), 1);
     assert_eq!(wire.close_count.load(Ordering::SeqCst), 1);
-}
-
-#[tokio::test]
-async fn close_webrtc_transport_if_session_closes_only_webrtc_keeps_websocket() {
-    let peer_id = ActrId::default();
-    let session_id = 42u64;
-
-    let webrtc = Arc::new(CountingWire::new(
-        ConnType::WebRTC,
-        Some(WireIdentity::WebRtc {
-            peer_id: peer_id.clone(),
-            session_id,
-        }),
-    ));
-    let websocket = Arc::new(CountingWire::new(ConnType::WebSocket, None));
-
-    let (mgr, dest) = peer_transport_with_webrtc_and_ws(
-        peer_id.clone(),
-        session_id,
-        webrtc.clone(),
-        websocket.clone(),
-    )
-    .await;
-
-    let closed = mgr
-        .close_webrtc_transport_if_session(&dest, &peer_id, session_id)
-        .await
-        .expect("session-matched close should not error");
-
-    assert!(closed, "matching session should close the WebRTC wire");
-    assert_eq!(
-        webrtc.close_count(),
-        1,
-        "WebRTC wire should be closed exactly once"
-    );
-    assert_eq!(
-        websocket.close_count(),
-        0,
-        "WebSocket fallback wire must NOT be closed by a WebRTC-only teardown"
-    );
-}
-
-#[tokio::test]
-async fn close_webrtc_transport_if_session_skips_on_stale_session() {
-    let peer_id = ActrId::default();
-    let active_session = 42u64;
-    let stale_session = 7u64;
-
-    let webrtc = Arc::new(CountingWire::new(
-        ConnType::WebRTC,
-        Some(WireIdentity::WebRtc {
-            peer_id: peer_id.clone(),
-            session_id: active_session,
-        }),
-    ));
-    let websocket = Arc::new(CountingWire::new(ConnType::WebSocket, None));
-
-    let (mgr, dest) = peer_transport_with_webrtc_and_ws(
-        peer_id.clone(),
-        active_session,
-        webrtc.clone(),
-        websocket.clone(),
-    )
-    .await;
-
-    // A stale close event referencing a different session must be a no-op.
-    let closed = mgr
-        .close_webrtc_transport_if_session(&dest, &peer_id, stale_session)
-        .await
-        .expect("stale close should not error");
-
-    assert!(!closed, "stale session close should be skipped");
-    assert_eq!(
-        webrtc.close_count(),
-        0,
-        "WebRTC wire must NOT be closed for a stale session"
-    );
-    assert_eq!(
-        websocket.close_count(),
-        0,
-        "WebSocket wire must NOT be closed for a stale session"
-    );
 }
 
 // ── SentTransportSlot: selection-time recording for timeout reclaim ──

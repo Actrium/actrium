@@ -433,7 +433,7 @@ async fn test_registry_sender_id_forwarded() {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //
 // Full path: PeerGate A adds an OPUS track → RtcPeerController negotiates SDP
-// over production WebSocket signaling → the v0.20 TrackLocal writer emits RTP
+// over production WebSocket signaling → the RTC TrackLocal writer emits RTP
 // → B's build-time EventHandler registers TrackRemote → its sole poll pump
 // dispatches through MediaFrameRegistry → the business callback receives it.
 //
@@ -457,7 +457,7 @@ async fn test_media_rtp_audio_loopback() {
     init_tracing();
     tracing::info!("═══ test_media_rtp_audio_loopback ═══");
 
-    // ── Build both production v0.20 peers, B owns a testable registry ───────
+    // ── Build both production RTC peers, B owns a testable registry ───────
     let id_a = make_actor_id(701);
     let id_b = make_actor_id(702);
     let registry_b = Arc::new(MediaFrameRegistry::new());

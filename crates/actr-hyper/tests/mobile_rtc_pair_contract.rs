@@ -1,5 +1,5 @@
 //! PR-gate pair contract for mobile recovery through real Actrix services and
-//! the production v0.20 lifecycle feed.
+//! the production RTC lifecycle feed.
 
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr};
@@ -104,7 +104,7 @@ fn assert_bind_ip(addresses: &[std::net::SocketAddr], expected: Ipv4Addr) {
             && addresses
                 .iter()
                 .all(|address| address.ip() == IpAddr::V4(expected)),
-        "v0.20 builder used unexpected bind addresses: {addresses:?}"
+        "RTC builder used unexpected bind addresses: {addresses:?}"
     );
 }
 
@@ -1099,7 +1099,7 @@ async fn p14_inflight_rpc_is_bounded_across_hard_recovery(
             .peer(pair.serial(to))
             .wait_request_count(REQUEST_ID, 1, Duration::from_secs(10))
             .await,
-        "in-flight request must cross the real v0.20 lane before recovery"
+        "in-flight request must cross the real RTC lane before recovery"
     );
 
     pair.background(PairEndpoint::A).await;

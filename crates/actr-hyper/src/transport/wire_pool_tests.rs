@@ -807,7 +807,7 @@ async fn inbound_frames_rejected_before_auth() {
 /// the wire's secure state goes terminal (`Closed`/`Failed`), rather than
 /// parking forever and leaking the wire's `Arc`.
 ///
-/// Observed via `Arc::strong_count`: v0.20 deliberately retains the failed
+/// Observed via `Arc::strong_count`: RTC deliberately retains the failed
 /// handle in `WireStatus::Failed(handle)` for transport-lifecycle CAS. After
 /// the terminal transition the listener must release its clone, leaving only
 /// the test and the pool's failed slot.
@@ -837,7 +837,7 @@ async fn listener_task_exits_on_terminal_secure_state() {
     .expect("Verified wire must surface as ready");
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // Retire the slot. v0.20 keeps the failed handle for lifecycle identity,
+    // Retire the slot. RTC keeps the failed handle for lifecycle identity,
     // so test + pool + listener remain until the terminal edge is observed.
     pool.mark_connection_closed(ConnType::WebSocket).await;
     assert!(

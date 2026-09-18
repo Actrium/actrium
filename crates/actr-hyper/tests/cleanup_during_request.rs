@@ -1,7 +1,7 @@
-//! Cleanup/request race coverage for the webrtc-rs v0.20 architecture.
+//! Cleanup/request race coverage for the webrtc-rs architecture.
 //!
 //! These tests retain the production failure scenarios from the 0.14 suite,
-//! but drive them through the real v0.20 stack:
+//! but drive them through the real RTC stack:
 //! `PeerGate -> PeerTransport -> RtcConnectionManager ->
 //! RtcPeerController -> PeerConnectionSession`.
 
@@ -136,7 +136,7 @@ async fn test_request_succeeds_after_cleanup() {
 }
 
 /// The historical bug left a `DestTransport` pointing at a closed 0.14
-/// coordinator. v0.20 teardown must invalidate that cache before a later send,
+/// coordinator. RTC teardown must invalidate that cache before a later send,
 /// and the replacement controller must create a usable transport.
 #[tokio::test]
 #[ignore]
