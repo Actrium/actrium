@@ -7,8 +7,8 @@ set -euo pipefail
 # - ../../crates/actr-ffi (Rust FFI crate with the UniFFI configuration)
 #
 # Outputs:
-# - ./ActrBindings/** (Actr.swift + headers + modulemap)
-# - ./ActrFFI.xcframework/**
+# - ./dist/ActrBindings/** (Actr.swift + headers + modulemap)
+# - ./dist/ActrFFI.xcframework/**
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${ROOT_DIR}"
@@ -60,9 +60,9 @@ resolve_root_path() {
   fi
 }
 
-BINDINGS_DIR="$(resolve_root_path "${ACTR_BINDINGS_PATH:-ActrBindings}")"
+BINDINGS_DIR="$(resolve_root_path "${ACTR_BINDINGS_PATH:-dist/ActrBindings}")"
 HEADERS_DIR="${BINDINGS_DIR}/include"
-XCFRAMEWORK_DIR="$(resolve_root_path "${ACTR_BINARY_PATH:-${FRAMEWORK_NAME}.xcframework}")"
+XCFRAMEWORK_DIR="$(resolve_root_path "${ACTR_BINARY_PATH:-dist/${FRAMEWORK_NAME}.xcframework}")"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
