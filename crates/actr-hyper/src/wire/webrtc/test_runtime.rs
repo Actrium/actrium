@@ -204,6 +204,17 @@ pub struct DirectedRtcFaultRegistry {
     scopes: Arc<Mutex<HashMap<FaultKey, Arc<ScopedFaultState>>>>,
 }
 
+/// Pair of test-only fault registries injectable into a real `Node` through
+/// [`crate::Node::with_test_faults`]. Both registries share state across
+/// clones, so the host can keep its own copy for rule installation and hit
+/// observation while the node uses its copy inside the factory and signaling
+/// transport.
+#[derive(Debug, Clone, Default)]
+pub struct TestFaultRegistries {
+    pub rtc: DirectedRtcFaultRegistry,
+    pub signaling: crate::wire::webrtc::rtc::fault::DirectedSignalingFaultRegistry,
+}
+
 impl DirectedRtcFaultRegistry {
     pub fn handle(
         &self,
@@ -286,6 +297,25 @@ impl DirectedRtcFaultRegistry {
             .lock()
             .expect("RTC fault registry lock poisoned")
             .len()
+    }
+
+    /// Number of generation scopes with a currently active non-Pass rule.
+    /// Retained scopes for retired generations are excluded from this count.
+    pub fn active_rule_count(&self) -> usize {
+        self.scopes
+            .lock()
+            .expect("RTC fault registry lock poisoned")
+            .values()
+            .filter(|state| {
+                !matches!(
+                    *state.outgoing.lock().expect("RTC fault lock poisoned"),
+                    PacketRule::Pass
+                ) || !matches!(
+                    *state.incoming.lock().expect("RTC fault lock poisoned"),
+                    PacketRule::Pass
+                )
+            })
+            .count()
     }
 
     pub fn clear(&self) {

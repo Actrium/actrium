@@ -38,7 +38,7 @@ pub use crate::wire::webrtc::rtc::recovery::{
 };
 pub use crate::wire::webrtc::test_runtime::{
     DirectedRtcFaultHandle, DirectedRtcFaultMetrics, DirectedRtcFaultRegistry, LinkDirection,
-    PacketRule,
+    PacketRule, TestFaultRegistries,
 };
 pub use actrix_services::ActrixTestServices;
 pub use mobile_rtc_pair::{

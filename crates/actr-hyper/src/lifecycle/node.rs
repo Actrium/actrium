@@ -662,6 +662,13 @@ pub(crate) struct Inner {
     /// Unified identity/credential snapshot for renewal and hard rebind.
     pub(crate) session_state: Option<SessionState>,
 
+    /// Test-only directed fault registries (`test-utils` builds only), set
+    /// by attach/link from [`crate::Node::with_test_faults`]. When present,
+    /// `start()` wraps the RTC factory and signaling transport with the
+    /// registries. Production builds never see this field.
+    #[cfg(feature = "test-utils")]
+    pub(crate) test_faults: Option<crate::wire::webrtc::test_runtime::TestFaultRegistries>,
+
     /// RTC connection manager (created after startup; RTC backend only).
     /// Backs the node-level RTC status query/list/subscribe APIs (S6-4).
     pub(crate) rtc_manager: Option<Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>>,
@@ -2485,6 +2492,8 @@ impl Inner {
             actor_id: None,
             credential_state: None,
             session_state: None,
+            #[cfg(feature = "test-utils")]
+            test_faults: None,
             rtc_manager: None,
             rtc_inbound_mailbox_slot: None,
             peer_transport: None,
@@ -3102,14 +3111,23 @@ impl Inner {
                 // Inventory marker: the four acceptance waits above are
                 // protocol-selection timers executed inside RTC's ICE agent.
                 let _ = crate::timer::ids::EXTERNAL_ICE_CANDIDATE_SELECTION;
-                let factory = Arc::new(
+                let factory =
                     rtc::factory::PeerConnectionFactory::new_with_configuration_and_wildcard_bind(
                         runtime_config,
                         rtc_configuration,
                     )
                     .with_turn_credential_provider(Arc::new(credential_state.clone()))
-                    .with_setting_engine(setting_engine),
-                );
+                    .with_setting_engine(setting_engine);
+                // Test-only seam: every generation built by this real Node
+                // consults the same directed RTC registry as the harness.
+                #[cfg(feature = "test-utils")]
+                let factory = match self.test_faults.as_ref() {
+                    Some(faults) => {
+                        factory.with_directed_faults(actor_id.clone(), faults.rtc.clone())
+                    }
+                    None => factory,
+                };
+                let factory = Arc::new(factory);
 
                 // Create the RTC signaling channel + manager + router.
                 // CF-1: the local identity lives in a shared, rebind-updatable
@@ -3206,6 +3224,29 @@ impl Inner {
                 // locks needs the manager to see the same map instance.
                 rtc_manager.set_signaling_dispatch_chains(rtc_router.dispatch_chains());
                 let router_shutdown = self.shutdown_token.child_token();
+                #[cfg(feature = "test-utils")]
+                let router_handle = match self.test_faults.as_ref() {
+                    Some(faults) => {
+                        let transport = rtc::fault::DirectedSignalingTransport::new(
+                            Arc::new(rtc_transport),
+                            actor_id.clone(),
+                            faults.signaling.clone(),
+                        );
+                        tokio::spawn(async move {
+                            tokio::select! {
+                                _ = router_shutdown.cancelled() => {}
+                                _ = rtc_router.run(transport, signaling_rx) => {}
+                            }
+                        })
+                    }
+                    None => tokio::spawn(async move {
+                        tokio::select! {
+                            _ = router_shutdown.cancelled() => {}
+                            _ = rtc_router.run(rtc_transport, signaling_rx) => {}
+                        }
+                    }),
+                };
+                #[cfg(not(feature = "test-utils"))]
                 let router_handle = tokio::spawn(async move {
                     tokio::select! {
                         _ = router_shutdown.cancelled() => {}

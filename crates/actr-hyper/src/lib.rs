@@ -473,6 +473,11 @@ pub struct Node<S: NodeState = Attached> {
     /// [`Node::with_conflict_keys`], consumed by attach / link into the dispatch
     /// scheduler. `None` = no declarations = fully serial dispatch.
     pending_conflict_keys: Option<crate::dispatch::ConflictKeySpec>,
+    /// Test-only directed fault registries declared on `Node<Init>` via
+    /// [`Node::with_test_faults`], consumed by attach / link into the node
+    /// inner so `start()` wraps the v0.20 RTC runtime and signaling transport.
+    #[cfg(feature = "test-utils")]
+    pending_test_faults: Option<crate::wire::webrtc::test_runtime::TestFaultRegistries>,
     _state: std::marker::PhantomData<S>,
 }
 
@@ -879,6 +884,8 @@ impl Node {
             pending_runtime_config: Some(runtime_config),
             pending_linked_manifest: None,
             pending_conflict_keys: None,
+            #[cfg(feature = "test-utils")]
+            pending_test_faults: None,
             _state: std::marker::PhantomData,
         }
     }
@@ -978,6 +985,24 @@ impl Node<Init> {
         self.pending_conflict_keys = Some(spec);
         self
     }
+
+    /// Install test-only directed fault registries (`test-utils` builds only).
+    ///
+    /// When set, `Node::start` wraps the v0.20 `PeerConnectionFactory` runtime
+    /// with the RTC registry (generation-scoped UDP packet rules) and the
+    /// signaling transport with the signaling registry (per-class message
+    /// rules). The host keeps its own clone of [`TestFaultRegistries`] for
+    /// rule installation and hit observation — both registries share state
+    /// across clones. Production builds without the `test-utils` feature do
+    /// not expose this method and never wrap anything.
+    #[cfg(feature = "test-utils")]
+    pub fn with_test_faults(
+        mut self,
+        faults: crate::wire::webrtc::test_runtime::TestFaultRegistries,
+    ) -> Self {
+        self.pending_test_faults = Some(faults);
+        self
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -994,6 +1019,8 @@ impl Node<Init> {
             .pending_runtime_config
             .expect("Node<Init> without pending runtime config");
         let conflict_keys = self.pending_conflict_keys;
+        #[cfg(feature = "test-utils")]
+        let test_faults = self.pending_test_faults;
         let hyper_inner = self.hyper;
         let loaded = load_workload_package_inner(&hyper_inner, package).await?;
         // Only consume the lock entry when the verified manifest authenticates
@@ -1045,6 +1072,10 @@ impl Node<Init> {
                 workload_dispatch: node_inner.workload_dispatch.clone(),
             });
         node_inner.hook_observer = Some(observer);
+        #[cfg(feature = "test-utils")]
+        {
+            node_inner.test_faults = test_faults;
+        }
         Ok(Node {
             hyper: hyper_inner,
             attachment: Some(Attachment {
@@ -1055,6 +1086,8 @@ impl Node<Init> {
             pending_runtime_config: None,
             pending_linked_manifest: None,
             pending_conflict_keys: None,
+            #[cfg(feature = "test-utils")]
+            pending_test_faults: None,
             _state: std::marker::PhantomData,
         })
     }
@@ -1082,6 +1115,8 @@ impl Node<Init> {
             .pending_runtime_config
             .expect("Node<Init> without pending runtime config");
         let conflict_keys = self.pending_conflict_keys;
+        #[cfg(feature = "test-utils")]
+        let test_faults = self.pending_test_faults;
         let hyper_inner = self.hyper;
         let mailbox_backpressure_threshold =
             hyper_inner.config.resolved_mailbox_backpressure_threshold();
@@ -1105,6 +1140,10 @@ impl Node<Init> {
         let observer: Arc<dyn crate::lifecycle::hooks::WorkloadHookObserver> =
             Arc::new(crate::workload::LinkedHandleObserver { handle });
         node_inner.hook_observer = Some(observer);
+        #[cfg(feature = "test-utils")]
+        {
+            node_inner.test_faults = test_faults;
+        }
         Ok(Node {
             hyper: hyper_inner,
             attachment: Some(Attachment {
@@ -1115,6 +1154,8 @@ impl Node<Init> {
             pending_runtime_config: None,
             pending_linked_manifest: None,
             pending_conflict_keys: None,
+            #[cfg(feature = "test-utils")]
+            pending_test_faults: None,
             _state: std::marker::PhantomData,
         })
     }
@@ -1178,6 +1219,35 @@ impl Node<Attached> {
     pub async fn register(self, ais_endpoint: &str) -> HyperResult<Node<Registered>> {
         self.register_with_manufacturer_auth(ais_endpoint, None)
             .await
+    }
+
+    /// Adopt an already-issued registration payload (`test-utils` builds
+    /// only). Consumes `Node<Attached>` and returns `Node<Registered>`
+    /// without contacting AIS: `start()` uses the injected `RegisterOk`
+    /// verbatim (identity, AId credential, TURN credential, heartbeat
+    /// advice, and AIS signing key), so callers that pre-issue
+    /// deterministic per-endpoint credentials out-of-band can pin the node
+    /// identity exactly like the test-support harness does.
+    #[cfg(feature = "test-utils")]
+    pub fn with_preregistered_credential(
+        mut self,
+        register_ok: actr_protocol::register_response::RegisterOk,
+    ) -> Node<Registered> {
+        let attachment = self
+            .attachment
+            .as_mut()
+            .expect("Node<Attached> without attachment");
+        attachment.node.set_preregistered_credential(register_ok);
+        Node {
+            hyper: self.hyper,
+            attachment: self.attachment,
+            pending_runtime_config: None,
+            pending_linked_manifest: None,
+            pending_conflict_keys: None,
+            #[cfg(feature = "test-utils")]
+            pending_test_faults: None,
+            _state: std::marker::PhantomData,
+        }
     }
 
     /// Register with AIS and optionally attach manufacturer authorization for
@@ -1324,6 +1394,8 @@ impl Node<Attached> {
             pending_runtime_config: None,
             pending_linked_manifest: None,
             pending_conflict_keys: None,
+            #[cfg(feature = "test-utils")]
+            pending_test_faults: None,
             _state: std::marker::PhantomData,
         })
     }
