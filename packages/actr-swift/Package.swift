@@ -6,15 +6,20 @@ import PackageDescription
 // - This monorepo package is for local development and CI validation only.
 // - External SwiftPM consumers should use the published actr-swift package.
 let env = ProcessInfo.processInfo.environment
-let bindingsPath = env["ACTR_BINDINGS_PATH"] ?? "ActrBindings"
+let bindingsPath = env["ACTR_BINDINGS_PATH"] ?? "dist/ActrBindings"
 let overrideBinaryPath = env["ACTR_BINARY_PATH"]
 let distBinaryPath = "dist/ActrFFI.xcframework"
-let localBinaryPath = "ActrFFI.xcframework"
 
 let manifestDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 let packageRootURL = URL(fileURLWithPath: manifestDir, isDirectory: true)
 let distBinaryAbsolutePath = packageRootURL.appendingPathComponent(distBinaryPath).path
-let localBinaryAbsolutePath = packageRootURL.appendingPathComponent(localBinaryPath).path
+
+for file in ["Actr.swift", "actrFFI.c", "include/actrFFI.h"] {
+    let path = packageRootURL.appendingPathComponent(bindingsPath).appendingPathComponent(file).path
+    guard FileManager.default.fileExists(atPath: path) else {
+        fatalError("Missing generated Swift bindings at \(path). Run ./build-xcframework.sh first; use matching ACTR_BINDINGS_PATH and ACTR_BINARY_PATH overrides for custom outputs.")
+    }
+}
 
 func binaryPathRelativeToPackageRoot(_ path: String) -> String? {
     if path.hasPrefix("/") {
@@ -40,18 +45,13 @@ if let overrideBinaryPath {
         name: "ActrFFILib",
         path: distBinaryPath
     )
-} else if FileManager.default.fileExists(atPath: localBinaryAbsolutePath) {
-    actrBinaryTarget = .binaryTarget(
-        name: "ActrFFILib",
-        path: localBinaryPath
-    )
 } else {
     fatalError("""
     Missing local ActrFFI.xcframework for repository-local Swift validation.
     Build it first with:
-      ACTR_BINDINGS_PATH=dist/ActrBindings ACTR_BINARY_PATH=dist/ActrFFI.xcframework ./build-xcframework.sh
+      ./build-xcframework.sh
     Then run Swift commands with:
-      ACTR_BINDINGS_PATH=dist/ActrBindings ACTR_BINARY_PATH=dist/ActrFFI.xcframework swift test
+      swift build
     External SwiftPM consumers should depend on the published actr-swift package instead.
     """)
 }
