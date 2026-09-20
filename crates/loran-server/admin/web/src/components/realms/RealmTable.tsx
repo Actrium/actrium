@@ -42,7 +42,8 @@ export function RealmTable({
         </thead>
         <tbody className="divide-y divide-gray-100">
           {realms.map((realm) => {
-            const isRotating = !!(realm.secret_rotation_state?.previous_valid_until);
+            const validUntil = realm.secret_rotation_state?.previous_valid_until;
+            const isRotating = !!validUntil && validUntil * 1000 > Date.now();
             
             return (
             <tr key={realm.realm_id} className="hover:bg-gray-50 transition-colors">
