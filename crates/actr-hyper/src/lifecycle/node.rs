@@ -1170,13 +1170,38 @@ fn guest_rpc_payload_type(raw: i32) -> actr_protocol::PayloadType {
     }
 }
 
-/// Cancellation tokens of active guest stream forwarders, keyed by stream_id.
+/// Handle to one active guest stream forwarder task.
+///
+/// `done` flips to `true` once the forwarder has closed the stream and
+/// unregistered it from the DataChunk registry, letting unregister/re-register
+/// flows wait for actual teardown instead of racing it.
+struct StreamForwarder {
+    cancel: CancellationToken,
+    done: tokio::sync::watch::Receiver<bool>,
+}
+
+/// Cancellation handles of active guest stream forwarders, keyed by stream_id.
 ///
 /// `RegisterStream` spawns one forwarder task per registration (bounded by
-/// the guest's registration count); `UnregisterStream` cancels it. Shared by
-/// every host-operation handler of one actor runner.
+/// the guest's registration count); `UnregisterStream` cancels it and waits
+/// for its teardown. Shared by every host-operation handler of one actor
+/// runner.
 type StreamForwarders =
-    std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, CancellationToken>>>;
+    std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, Arc<StreamForwarder>>>>;
+
+/// Cancel `forwarder` and wait until its task has closed the stream and
+/// unregistered it from the DataChunk registry.
+async fn retire_stream_forwarder(forwarder: &StreamForwarder) {
+    forwarder.cancel.cancel();
+    let mut done = forwarder.done.clone();
+    while !*done.borrow() {
+        // The sender is dropped if the forwarder task dies without signaling
+        // (e.g. runner abort); treat that as retired rather than hanging.
+        if done.changed().await.is_err() {
+            break;
+        }
+    }
+}
 
 /// Host operation executor - routes guest outbound calls through RuntimeContext
 ///
@@ -1310,6 +1335,18 @@ async fn host_operation_handler(
 
         HostOperation::RegisterStream(req) => {
             let stream_id = req.stream_id;
+            // A stale forwarder for the same stream (guest closed its local
+            // subscription without unregistering, or rebinds the stream) must
+            // be retired first, otherwise data_chunks rejects the new
+            // subscription as a duplicate.
+            let stale = stream_forwarders
+                .lock()
+                .expect("stream forwarders poisoned")
+                .remove(&stream_id);
+            if let Some(stale) = stale {
+                retire_stream_forwarder(&stale).await;
+            }
+
             let mut stream = match ctx.data_chunks(stream_id.clone(), Default::default()).await {
                 Ok(stream) => stream,
                 Err(e) => {
@@ -1318,12 +1355,17 @@ async fn host_operation_handler(
                 }
             };
 
-            let cancel = CancellationToken::new();
+            let (done_tx, done_rx) = tokio::sync::watch::channel(false);
+            let entry = Arc::new(StreamForwarder {
+                cancel: CancellationToken::new(),
+                done: done_rx,
+            });
             stream_forwarders
                 .lock()
                 .expect("stream forwarders poisoned")
-                .insert(stream_id.clone(), cancel.clone());
+                .insert(stream_id.clone(), entry.clone());
 
+            let cancel = entry.cancel.clone();
             let forwarders = stream_forwarders.clone();
             let forwarder_ctx = ctx.clone();
             let forwarder_dispatch = workload_dispatch.clone();
@@ -1392,25 +1434,34 @@ async fn host_operation_handler(
                         break;
                     }
                 }
-                forwarders
-                    .lock()
-                    .expect("stream forwarders poisoned")
-                    .remove(&stream_id);
+                // Remove only our own entry: a re-registration may already
+                // have installed a newer forwarder for this stream.
+                {
+                    let mut guard = forwarders.lock().expect("stream forwarders poisoned");
+                    if guard
+                        .get(&stream_id)
+                        .is_some_and(|current| Arc::ptr_eq(current, &entry))
+                    {
+                        guard.remove(&stream_id);
+                    }
+                }
                 stream.close().await;
+                let _ = done_tx.send(true);
             });
 
             HostOperationResult::Done
         }
 
         HostOperation::UnregisterStream(req) => {
-            let token = stream_forwarders
+            let forwarder = stream_forwarders
                 .lock()
                 .expect("stream forwarders poisoned")
                 .remove(&req.stream_id);
-            if let Some(token) = token {
-                // The forwarder observes the cancellation, closes the stream,
-                // and unregisters it from the DataChunk registry.
-                token.cancel();
+            if let Some(forwarder) = forwarder {
+                // Wait for the forwarder to close the stream and unregister it
+                // from the DataChunk registry, so an immediate re-register of
+                // the same stream_id cannot be rejected as a duplicate.
+                retire_stream_forwarder(&forwarder).await;
             }
             // Idempotent: unregistering a stream with no active forwarder
             // (never registered, or already terminated) is a no-op success,
@@ -1563,12 +1614,16 @@ async fn stream_callback_host_operation_handler(
             HostOperationResult::AbiError(abi_code::UNSUPPORTED_OP)
         }
         HostOperation::UnregisterStream(req) => {
-            let token = stream_forwarders
+            let forwarder = stream_forwarders
                 .lock()
                 .expect("stream forwarders poisoned")
                 .remove(&req.stream_id);
-            if let Some(token) = token {
-                token.cancel();
+            if let Some(forwarder) = forwarder {
+                // Cancel only, never await: this nested handler runs inside
+                // the forwarder's own dispatch, so waiting for its teardown
+                // would self-deadlock. The forwarder closes the stream after
+                // the current dispatch returns.
+                forwarder.cancel.cancel();
             }
             HostOperationResult::Done
         }

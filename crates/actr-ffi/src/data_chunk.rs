@@ -43,7 +43,7 @@ impl From<actr_framework::DataChunkEvent> for DataChunkEventBridge {
 #[derive(uniffi::Object)]
 pub struct DataChunkStreamBridge {
     // `None` once the stream has been taken for closing.
-    inner: tokio::sync::Mutex<Option<DataChunkStream>>,
+    inner: std::sync::Arc<tokio::sync::Mutex<Option<DataChunkStream>>>,
     closed: AtomicBool,
     wake: CancellationToken,
 }
@@ -51,7 +51,7 @@ pub struct DataChunkStreamBridge {
 impl DataChunkStreamBridge {
     pub(crate) fn new(stream: DataChunkStream) -> Self {
         Self {
-            inner: tokio::sync::Mutex::new(Some(stream)),
+            inner: std::sync::Arc::new(tokio::sync::Mutex::new(Some(stream))),
             closed: AtomicBool::new(false),
             wake: CancellationToken::new(),
         }
@@ -110,11 +110,25 @@ impl DataChunkStreamBridge {
         self.wake.cancel();
         // Never wait behind a pending next(): if it holds the lock, its
         // cancellation arm performs the close instead.
-        if let Ok(mut guard) = self.inner.try_lock()
-            && let Some(stream) = guard.take()
-        {
-            drop(guard);
-            stream.close().await;
+        if let Ok(mut guard) = self.inner.try_lock() {
+            if let Some(stream) = guard.take() {
+                drop(guard);
+                stream.close().await;
+            }
+        } else {
+            // Fallback: a pending next() holding the lock will normally run
+            // its cancellation arm, but a foreign runtime may drop that
+            // future without ever re-polling it. Queue a detached closer that
+            // runs as soon as the lock is free so the subscription is always
+            // torn down (bounded: one task per close call).
+            let inner = self.inner.clone();
+            tokio::spawn(async move {
+                let mut guard = inner.lock().await;
+                if let Some(stream) = guard.take() {
+                    drop(guard);
+                    stream.close().await;
+                }
+            });
         }
         Ok(())
     }

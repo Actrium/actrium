@@ -525,6 +525,14 @@ class BoundedQueue<T> {
  * Single-consumer async iterable over one DataChunk subscription. `close()`
  * unregisters immediately, drops buffered items, and wakes pending readers;
  * the iterator's `return()` (e.g. `break` out of `for await`) closes too.
+ *
+ * Host-side teardown note: the subscription-time ctx token is retired once
+ * the subscribing invocation returns, and calling a host import with a
+ * retired token traps the store. `close()` therefore only calls
+ * `hostUnregisterStream` when it runs inside a live invocation; otherwise it
+ * tears down locally and the host reclaims its registration on the next
+ * delivery (the dispatch fails against the missing queue) or when the guest
+ * re-subscribes (the host retires the stale forwarder first).
  */
 export class DataChunkStream implements AsyncIterable<DataChunkEvent> {
   private iterator?: AsyncIterator<DataChunkEvent>;
@@ -533,7 +541,6 @@ export class DataChunkStream implements AsyncIterable<DataChunkEvent> {
   constructor(
     private readonly streamId: string,
     private readonly queue: BoundedQueue<DataChunkEvent>,
-    private readonly ctx?: InvocationCtx,
   ) {}
 
   async close(): Promise<void> {
@@ -541,7 +548,10 @@ export class DataChunkStream implements AsyncIterable<DataChunkEvent> {
       this.closePromise = (async () => {
         this.queue.close();
         streamQueues.delete(this.streamId);
-        await hostUnregisterStream(resolveCtxToken(this.ctx), this.streamId);
+        const liveCtx = getCurrentInvocationCtx();
+        if (liveCtx) {
+          await hostUnregisterStream(resolveCtxToken(liveCtx), this.streamId);
+        }
       })();
     }
     return this.closePromise;
@@ -654,7 +664,7 @@ export async function dataChunks(
   await hostRegisterStream(resolveCtxToken(ctx), streamId);
   const queue = new BoundedQueue<DataChunkEvent>(capacity);
   streamQueues.set(streamId, queue);
-  return new DataChunkStream(streamId, queue, ctx);
+  return new DataChunkStream(streamId, queue);
 }
 
 /** Create an outbound sink; only the two stream lanes are accepted. */

@@ -246,12 +246,32 @@ describe('@actrium/actr-workload', () => {
     const ctx = testInvocationCtx(12n);
 
     const stream = await runtime.dataChunks('stream-1', undefined, ctx);
-    await stream.close();
+    // Inside a live invocation the host unregister import fires.
+    await runtime.withInvocationCtx(ctx, () => stream.close());
 
     expect(host.hostCalls.unregisterStream).toEqual(['stream-1']);
     await expect(
       runtime.__dispatchDataChunk(testChunk(), testActorId(), ctx),
     ).rejects.toThrow('No stream subscription for stream-1');
+  });
+
+  it('close outside a live invocation tears down locally only', async () => {
+    const { host, runtime } = await loadRuntime();
+    const ctx = testInvocationCtx(13n);
+
+    const stream = await runtime.dataChunks('stream-1', undefined, ctx);
+    // No active invocation: the subscription-time token may be retired, so
+    // close() must not touch the host import at all.
+    await stream.close();
+
+    expect(host.hostCalls.unregisterStream).toEqual([]);
+    await expect(
+      runtime.__dispatchDataChunk(testChunk(), testActorId(), ctx),
+    ).rejects.toThrow('No stream subscription for stream-1');
+
+    // Local teardown still frees the stream for re-subscription.
+    const reopened = await runtime.dataChunks('stream-1', undefined, ctx);
+    await reopened.close();
   });
 
   it('rejects duplicate subscriptions for the same stream', async () => {
@@ -296,24 +316,25 @@ describe('@actrium/actr-workload', () => {
     const stream = await runtime.dataChunks('stream-1', undefined, ctx);
 
     await runtime.__dispatchDataChunk(testChunk(), testActorId(), ctx);
-    for await (const event of stream) {
-      void event;
-      break;
-    }
+    await runtime.withInvocationCtx(ctx, async () => {
+      for await (const event of stream) {
+        void event;
+        break;
+      }
+    });
 
     expect(host.hostCalls.unregisterStream).toEqual(['stream-1']);
   });
 
   it('close is idempotent', async () => {
     const { host, runtime } = await loadRuntime();
-    const stream = await runtime.dataChunks(
-      'stream-1',
-      undefined,
-      testInvocationCtx(20n),
-    );
+    const ctx = testInvocationCtx(20n);
+    const stream = await runtime.dataChunks('stream-1', undefined, ctx);
 
-    await stream.close();
-    await stream.close();
+    await runtime.withInvocationCtx(ctx, async () => {
+      await stream.close();
+      await stream.close();
+    });
 
     expect(host.hostCalls.unregisterStream).toEqual(['stream-1']);
   });
@@ -476,16 +497,19 @@ describe('@actrium/actr-workload', () => {
     const ctx = new runtime.ActrContext(testInvocationCtx(96n));
 
     const stream = await ctx.dataChunks('ctx-stream');
+    const invocation = testInvocationCtx(96n);
     await runtime.__dispatchDataChunk(
       testChunk({ streamId: 'ctx-stream' }),
       testActorId(),
-      testInvocationCtx(96n),
+      invocation,
     );
     const events: DataChunkEvent[] = [];
-    for await (const event of stream) {
-      events.push(event);
-      break;
-    }
+    await runtime.withInvocationCtx(invocation, async () => {
+      for await (const event of stream) {
+        events.push(event);
+        break;
+      }
+    });
     expect(events).toHaveLength(1);
 
     const sink = await ctx.dataChunkSink(

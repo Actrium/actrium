@@ -6927,9 +6927,11 @@ sealed class ActrException: kotlin.Exception() {
      * of the existing UniFFI ABI.
      *
      * The field is named `cause_detail` rather than `cause`: Kotlin
-     * `Throwable.cause` would clash with a generated `cause` property.
-     * Field names do not affect the UniFFI wire format (variants serialize
-     * as ordinal + positional fields), so this is not an ABI change.
+     * `Throwable.cause` would clash with a generated `cause` property
+     * (uniffi.toml `[bindings.kotlin.rename]` does not reach fields, so the
+     * rename must happen here). Field names do not affect the UniFFI wire
+     * format (variants serialize as ordinal + positional fields), so this
+     * is not an ABI change.
      */
     class DeliveryUncertain(
         

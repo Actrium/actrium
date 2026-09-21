@@ -1019,15 +1019,26 @@ pub unsafe extern "C" fn actr_host_respond_reverse_rpc(
     })
 }
 
-/// Cancellation tokens of active stream listeners, keyed by
+/// Handle to one active stream listener task.
+///
+/// `done` flips to `true` once the listener has closed the stream and
+/// unregistered it from the runtime, so `actr_stream_unlisten` can report
+/// SUCCESS only after actual teardown (listen/unlisten/re-listen flows cannot
+/// race the runtime's duplicate-subscription rejection).
+struct StreamListener {
+    cancel: tokio_util::sync::CancellationToken,
+    done: tokio::sync::watch::Receiver<bool>,
+}
+
+/// Cancellation handles of active stream listeners, keyed by
 /// `(ref_handle, stream_id)`. `actr_stream_listen` inserts one entry per
-/// subscription; `actr_stream_unlisten` cancels and removes it.
+/// subscription; `actr_stream_unlisten` cancels it and waits for teardown.
 fn stream_listeners() -> &'static std::sync::Mutex<
-    std::collections::HashMap<(usize, String), tokio_util::sync::CancellationToken>,
+    std::collections::HashMap<(usize, String), std::sync::Arc<StreamListener>>,
 > {
     static LISTENERS: std::sync::OnceLock<
         std::sync::Mutex<
-            std::collections::HashMap<(usize, String), tokio_util::sync::CancellationToken>,
+            std::collections::HashMap<(usize, String), std::sync::Arc<StreamListener>>,
         >,
     > = std::sync::OnceLock::new();
     LISTENERS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
@@ -1094,11 +1105,16 @@ pub unsafe extern "C" fn actr_stream_listen(
                         return;
                     }
                 };
-                let cancel = tokio_util::sync::CancellationToken::new();
+                let (done_tx, done_rx) = tokio::sync::watch::channel(false);
+                let entry = std::sync::Arc::new(StreamListener {
+                    cancel: tokio_util::sync::CancellationToken::new(),
+                    done: done_rx,
+                });
                 stream_listeners()
                     .lock()
                     .unwrap()
-                    .insert((ref_key, stream_id.clone()), cancel.clone());
+                    .insert((ref_key, stream_id.clone()), entry.clone());
+                let cancel = entry.cancel.clone();
                 callback(SUCCESS, std::ptr::null(), 0, ud as *mut c_void);
                 // Forward until unlistened, the stream ends, or the node
                 // shuts down (runtime teardown terminates the stream).
@@ -1115,10 +1131,17 @@ pub unsafe extern "C" fn actr_stream_listen(
                     }
                 }
                 stream.close().await;
-                stream_listeners()
-                    .lock()
-                    .unwrap()
-                    .remove(&(ref_key, stream_id));
+                // Remove only our own entry: a re-listen during close may
+                // already have installed a newer listener for this stream.
+                let mut listeners = stream_listeners().lock().unwrap();
+                if listeners
+                    .get(&(ref_key, stream_id.clone()))
+                    .is_some_and(|current| std::sync::Arc::ptr_eq(current, &entry))
+                {
+                    listeners.remove(&(ref_key, stream_id));
+                }
+                drop(listeners);
+                let _ = done_tx.send(true);
             },
             move |code| emit_void_error(code, "actr-cabi task failed", callback, ud as *mut c_void),
         )
@@ -1168,14 +1191,23 @@ pub unsafe extern "C" fn actr_stream_unlisten(
         let ref_key = ref_handle as usize;
         runtime::spawn_guarded(
             async move {
-                let token = stream_listeners()
+                let listener = stream_listeners()
                     .lock()
                     .unwrap()
                     .remove(&(ref_key, stream_id));
-                if let Some(token) = token {
-                    // The listener task observes the cancellation and closes
-                    // the stream, unregistering it from the runtime.
-                    token.cancel();
+                if let Some(listener) = listener {
+                    // Report SUCCESS only after the listener task has closed
+                    // the stream and unregistered it from the runtime, so an
+                    // immediate re-listen cannot be rejected as a duplicate.
+                    listener.cancel.cancel();
+                    let mut done = listener.done.clone();
+                    while !*done.borrow() {
+                        // A dropped sender (task died without signaling)
+                        // counts as retired.
+                        if done.changed().await.is_err() {
+                            break;
+                        }
+                    }
                 }
                 callback(SUCCESS, std::ptr::null(), 0, ud as *mut c_void);
             },

@@ -435,14 +435,22 @@ final class DuplexEchoProbeRunner: @unchecked Sendable {
             sessions.append((sid, s)); log.append(contentsOf: sl)
         }
 
+        // Pre-create both sinks BEFORE the task group: `sinks` is plain
+        // mutable state on a @unchecked Sendable class, so concurrent
+        // first-use inside child tasks would be a data race.
+        var sessionSinks: [(sid: String, c2s: String, sink: DataChunkSink)] = []
+        for (sid, s) in sessions {
+            sessionSinks.append((sid, s.c2s, try await sink(for: s.c2s, payloadType: .streamReliable)))
+        }
+
         // Send concurrently (sinks serialize per stream inside the bridge).
         try await withThrowingTaskGroup(of: Void.self) { g in
-            for (sid, s) in sessions {
+            for (sid, c2s, sessionSink) in sessionSinks {
                 g.addTask {
                     for seq: UInt64 in [1,2] {
-                        let chunk = DataChunk(streamId: s.c2s, sequence: seq, payload: Data("\(sid == "concurrent-apple" ? "apple" : "banana")-\(seq)".utf8),
+                        let chunk = DataChunk(streamId: c2s, sequence: seq, payload: Data("\(sid == "concurrent-apple" ? "apple" : "banana")-\(seq)".utf8),
                             metadata: [.init(key: "session_id", value: sid)], timestampMs: nil)
-                        try await self.sink(for: s.c2s, payloadType: .streamReliable).send(chunk)
+                        try await sessionSink.send(chunk)
                     }
                 }
             }

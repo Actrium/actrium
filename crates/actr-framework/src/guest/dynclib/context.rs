@@ -305,8 +305,14 @@ impl Context for DynclibContext {
         options: crate::DataChunkStreamOptions,
     ) -> ActorResult<crate::DataChunkStream> {
         let capacity = crate::validate_stream_options(&options)?;
+
+        // Check, insert, host-register, and rollback in ONE lock scope:
+        // `invoke_frame` is synchronous, so holding the lock across it keeps
+        // the duplicate check atomic with the insertion (a concurrent
+        // data_chunks on another thread cannot slip between them).
+        let (tx, rx) = futures_channel::mpsc::channel(capacity);
         {
-            let senders = stream_senders()
+            let mut senders = stream_senders()
                 .lock()
                 .map_err(|_| ActrError::Internal("stream sender registry poisoned".into()))?;
             if senders.contains_key(&stream_id) {
@@ -314,25 +320,16 @@ impl Context for DynclibContext {
                     "stream '{stream_id}' already has an active subscription"
                 )));
             }
-        }
+            senders.insert(stream_id.clone(), tx);
 
-        // Install the guest queue first (matching the previous callback-first
-        // ordering), roll it back if the host registration frame fails.
-        let (tx, rx) = futures_channel::mpsc::channel(capacity);
-        stream_senders()
-            .lock()
-            .map_err(|_| ActrError::Internal("stream sender registry poisoned".into()))?
-            .insert(stream_id.clone(), tx);
-
-        let payload = HostRegisterStreamV1 {
-            stream_id: stream_id.clone(),
-        };
-        let reply = self.invoke_frame(payload.to_frame().map_err(abi_error_to_actr)?)?;
-        if reply.status != abi::code::SUCCESS {
-            if let Ok(mut senders) = stream_senders().lock() {
+            let payload = HostRegisterStreamV1 {
+                stream_id: stream_id.clone(),
+            };
+            let reply = self.invoke_frame(payload.to_frame().map_err(abi_error_to_actr)?)?;
+            if reply.status != abi::code::SUCCESS {
                 senders.remove(&stream_id);
+                return Err(reply_to_actr_error(reply));
             }
-            return Err(reply_to_actr_error(reply));
         }
 
         let cancel_stream_id = stream_id.clone();

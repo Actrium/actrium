@@ -722,6 +722,75 @@ async fn unregister_unknown_stream_is_idempotent_done() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unregister_then_reregister_same_stream_succeeds() {
+    let (ctx, wl) = harness().await;
+    let forwarders: StreamForwarders = Default::default();
+    let register = || {
+        HostOperation::RegisterStream(HostRegisterStreamV1 {
+            stream_id: "rebind".to_string(),
+        })
+    };
+
+    let first = host_operation_handler(
+        ctx.clone(),
+        weak_runner(&wl),
+        forwarders.clone(),
+        register(),
+    )
+    .await;
+    assert!(matches!(first, HostOperationResult::Done));
+
+    let unregister = host_operation_handler(
+        ctx.clone(),
+        weak_runner(&wl),
+        forwarders.clone(),
+        HostOperation::UnregisterStream(HostUnregisterStreamV1 {
+            stream_id: "rebind".to_string(),
+        }),
+    )
+    .await;
+    assert!(matches!(unregister, HostOperationResult::Done));
+
+    // The runtime subscription must be gone by the time unregister reports
+    // Done — a re-register of the same stream_id must not be rejected as a
+    // duplicate.
+    let second = host_operation_handler(ctx, weak_runner(&wl), forwarders, register()).await;
+    assert!(
+        matches!(second, HostOperationResult::Done),
+        "re-register after unregister must succeed: {second:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reregister_without_unregister_retires_stale_forwarder() {
+    let (ctx, wl) = harness().await;
+    let forwarders: StreamForwarders = Default::default();
+    let register = || {
+        HostOperation::RegisterStream(HostRegisterStreamV1 {
+            stream_id: "rebind-stale".to_string(),
+        })
+    };
+
+    let first = host_operation_handler(
+        ctx.clone(),
+        weak_runner(&wl),
+        forwarders.clone(),
+        register(),
+    )
+    .await;
+    assert!(matches!(first, HostOperationResult::Done));
+
+    // A guest that closes its local subscription without unregistering (or
+    // rebinds the stream) re-registers directly: the host retires the stale
+    // forwarder instead of rejecting the new subscription as a duplicate.
+    let second = host_operation_handler(ctx, weak_runner(&wl), forwarders, register()).await;
+    assert!(
+        matches!(second, HostOperationResult::Done),
+        "re-register without unregister must retire the stale forwarder: {second:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn send_data_chunk_rejects_non_stream_payload_type() {
     let (ctx, wl) = harness().await;
     // RpcReliable is a valid PayloadType but not a stream type → PROTOCOL_ERROR.

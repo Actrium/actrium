@@ -124,16 +124,18 @@ open class SimpleWorkload(
         dataChunkChannel.send(DataChunkRequest(target, dataChunk))
     }
 
+    /** Sinks bound to (target, streamId), created lazily on first send and
+     * closed on failure and in [onStop]. */
+    private val dataChunkSinks =
+        java.util.concurrent.ConcurrentHashMap<Pair<ActrId, String>, io.actrium.actr.DataChunkSinkBridge>()
+
     override suspend fun onStart(ctx: ActrContext) {
         // Start a coroutine to handle DataChunk requests
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
-            // Sinks are bound to (target, streamId); cache one per pair.
-            val sinks =
-                mutableMapOf<Pair<ActrId, String>, io.actrium.actr.DataChunkSinkBridge>()
             for (request in dataChunkChannel) {
+                val key = request.target to request.dataChunk.streamId
                 try {
-                    val key = request.target to request.dataChunk.streamId
-                    val sink = sinks.getOrPut(key) {
+                    val sink = dataChunkSinks.getOrPut(key) {
                         ctx.dataChunkSink(
                             request.target,
                             request.dataChunk.streamId,
@@ -142,7 +144,9 @@ open class SimpleWorkload(
                     }
                     sink.send(request.dataChunk)
                 } catch (e: Exception) {
-                    // Log error but continue processing
+                    // Evict and close the failed sink so a later send
+                    // recreates it instead of reusing a broken one.
+                    dataChunkSinks.remove(key)?.runCatching { closeAsync() }
                     println("Failed to send DataChunk: ${e.message}")
                 }
             }
@@ -157,6 +161,8 @@ open class SimpleWorkload(
     }
 
     override suspend fun onStop(ctx: ActrContext) {
+        dataChunkSinks.values.forEach { bridge -> bridge.runCatching { bridge.closeAsync() } }
+        dataChunkSinks.clear()
         onStopHandler(ctx)
     }
 

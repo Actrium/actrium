@@ -1,4 +1,5 @@
 import ActrBindings
+import Foundation
 
 /// One inbound DataChunk together with its sender.
 public struct DataChunkEvent: Sendable {
@@ -34,13 +35,21 @@ public struct DataChunkSequence: AsyncSequence, Sendable {
     }
 
     final class State: @unchecked Sendable {
-        var iteratorVended = false
+        private let lock = NSLock()
+        private var vended = false
+
+        /// True for the first caller only; every later caller gets `false`.
+        func claimIterator() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            if vended { return false }
+            vended = true
+            return true
+        }
     }
 
     public func makeAsyncIterator() -> Iterator {
-        let firstConsumer = !state.iteratorVended
-        state.iteratorVended = true
-        return Iterator(bridge: bridge, usable: firstConsumer)
+        Iterator(bridge: bridge, usable: state.claimIterator())
     }
 
     /// Close the subscription. Idempotent; wakes a pending `next()` with `nil`.
