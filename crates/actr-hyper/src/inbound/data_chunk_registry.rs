@@ -8,13 +8,6 @@
 //! - **Same stream = FIFO run-to-completion**: chunks of one stream are
 //!   delivered to the callback strictly in arrival order, one at a time. The
 //!   previous chunk's callback future fully resolves before the next starts.
-//!   A callback therefore must never block waiting for a *later* chunk of the
-//!   same stream (e.g. an end-of-stream handler polling for stragglers): the
-//!   later chunk's callback is queued behind it, so both stall forever — a
-//!   self-deadlock. Finalize out-of-band instead: a separate RPC from the
-//!   sender after the last chunk (the `EndTransfer` pattern in
-//!   `examples/actr/rust/data-stream/receiver/src/file_transfer_service.rs`),
-//!   or a detached task watching shared reassembly state.
 //! - **Different streams = independent workers**: each stream has its own
 //!   worker, so a slow callback on stream A never blocks stream B's callback
 //!   *execution*. Enqueue runs in a shared per-class receive task, so under
@@ -39,13 +32,14 @@
 //! - **unregister = drain**: removing a stream drops the stored sender; the
 //!   worker drains already-queued chunks then exits (already-accepted chunks are
 //!   still delivered, matching reliable "accepted == delivered").
-//! - **re-register = immediate swap**: the callback travels with each queued
-//!   chunk (cloned at `dispatch` time), so replacing a stream's handler — even
-//!   by re-registering the same `stream_id` without unregistering first — takes
-//!   effect on the very next dispatched chunk. A worker never pins the callback
-//!   it was spawned with, which also makes any residual/racing worker benign:
-//!   whichever worker drains a chunk runs the callback the dispatcher captured
-//!   for that chunk, never a stale one.
+//! - **re-register requires unregister first**: a duplicate registration for
+//!   an active `stream_id` is rejected with `InvalidArgument`; the only swap
+//!   path is unregister-then-register. The callback travels with each queued
+//!   chunk (captured at `dispatch` time), so chunks accepted before an
+//!   unregister are delivered to the previous consumer — never to the
+//!   replacement subscription — and any residual/racing worker stays benign:
+//!   whichever worker drains a chunk runs the callback the dispatcher
+//!   captured for that chunk.
 //! - **unregister + re-register = drain first**: if a stream is re-registered
 //!   while its previous worker is draining already-accepted chunks, new
 //!   dispatches wait for the previous worker to exit before creating a
@@ -59,7 +53,7 @@
 //! A worker is never resurrected after its channel closes: once unregistered or
 //! shut down, a stream stays gone until explicitly re-registered.
 
-use actr_protocol::{ActorResult, ActrId, DataChunk, PayloadType};
+use actr_protocol::{ActorResult, ActrError, ActrId, DataChunk, PayloadType};
 use futures_util::FutureExt as _;
 use futures_util::future::BoxFuture;
 use std::collections::HashMap;
@@ -99,9 +93,9 @@ pub(crate) type DataChunkCallback =
 /// callback captured at dispatch time.
 ///
 /// The callback is enqueued per-chunk (rather than pinned when the worker is
-/// spawned) so that re-registering a `stream_id`'s handler takes effect on the
-/// next dispatched chunk instead of being shadowed by the worker's original
-/// callback.
+/// spawned) so chunks accepted before an unregister are always delivered to
+/// the previous consumer, never to a replacement subscription registered
+/// during the drain window.
 struct QueuedChunk {
     chunk: DataChunk,
     sender_id: ActrId,
@@ -312,25 +306,38 @@ impl DataChunkRegistry {
 
     /// Register stream callback
     ///
+    /// Only one active subscription is allowed per `stream_id`: a duplicate
+    /// registration is rejected with [`ActrError::InvalidArgument`] instead of
+    /// replacing the existing consumer.
+    ///
     /// # Arguments
     /// - `stream_id`: stream identifier (must be globally unique)
     /// - `callback`: data stream handler callback
-    pub(crate) fn register(&self, stream_id: String, callback: DataChunkCallback) {
+    pub(crate) fn register(
+        &self,
+        stream_id: String,
+        callback: DataChunkCallback,
+    ) -> ActorResult<()> {
         let mut state = self
             .inner
             .state
             .lock()
             .expect("data stream registry state poisoned");
         if state.shutting_down || self.inner.shutdown.is_cancelled() {
-            tracing::debug!(
-                stream_id = %stream_id,
-                "data stream registry is shut down; ignoring register"
-            );
-            return;
+            return Err(ActrError::Unavailable(format!(
+                "data stream registry is shut down; cannot register '{stream_id}'"
+            )));
         }
 
-        state.streams.entry(stream_id.clone()).or_default().callback = Some(callback);
+        let entry = state.streams.entry(stream_id.clone()).or_default();
+        if entry.callback.is_some() {
+            return Err(ActrError::InvalidArgument(format!(
+                "stream '{stream_id}' already has an active subscription"
+            )));
+        }
+        entry.callback = Some(callback);
         tracing::info!("📡 Registered data stream handler: {}", stream_id);
+        Ok(())
     }
 
     /// Unregister stream callback (drain semantics)

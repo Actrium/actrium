@@ -285,15 +285,19 @@ async fn data_chunk_readiness_consumes_send_budget_before_gate_dispatch() {
 
     ss.enter_rebinding().await;
     let request = tokio::spawn(async move {
-        c.send_data_chunk(
-            &Dest::Host,
-            actr_protocol::DataChunk {
-                stream_id: "stage-budget".to_string(),
-                sequence: 1,
-                ..Default::default()
-            },
-            actr_protocol::PayloadType::StreamReliable,
-        )
+        use futures_util::SinkExt;
+        let mut sink = c
+            .data_chunk_sink(
+                &Dest::Host,
+                "stage-budget".to_string(),
+                actr_protocol::PayloadType::StreamReliable,
+            )
+            .await?;
+        sink.send(actr_protocol::DataChunk {
+            stream_id: "stage-budget".to_string(),
+            sequence: 1,
+            ..Default::default()
+        })
         .await
     });
 

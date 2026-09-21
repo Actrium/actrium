@@ -219,6 +219,7 @@ import {
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
+const activeStreams = new Map();
 
 function toUint8Array(payload: ArrayBuffer | ArrayLike<number>): Uint8Array {
   if (payload instanceof Uint8Array) {
@@ -250,25 +251,33 @@ class EchoServiceHandlerImpl implements ActrDispatchHandler {
       `typescript echo: prepare ${inboundStreamId} -> ${replyStreamId}`,
     );
 
-    await ctx.registerStream(
-      inboundStreamId,
-      async (chunk, sender, streamCtx) => {
-        const incoming = textDecoder.decode(toUint8Array(chunk.payload));
-        console.log(`typescript echo: stream ${inboundStreamId} ${incoming}`);
-        await streamCtx.sendDataChunk(
-          { peer: sender },
-          {
+    const stream = await ctx.dataChunks(inboundStreamId);
+    activeStreams.set(inboundStreamId, stream);
+    void (async () => {
+      try {
+        for await (const event of stream) {
+          const incoming = textDecoder.decode(toUint8Array(event.chunk.payload));
+          console.log(`typescript echo: stream ${inboundStreamId} ${incoming}`);
+          const sink = await ctx.dataChunkSink(
+            { peer: event.sender },
+            replyStreamId,
+            PayloadType.StreamReliable,
+          );
+          await sink.send({
             streamId: replyStreamId,
-            sequence: BigInt(chunk.sequence) + 1n,
+            sequence: BigInt(event.chunk.sequence) + 1n,
             payload: textEncoder.encode(`${replyMessage}: ${incoming}`),
             metadata: [{ key: 'echo-runtime', value: 'typescript-wasm' }],
             timestampMs: BigInt(Date.now()),
-          },
-          PayloadType.StreamReliable,
-        );
-        await streamCtx.unregisterStream(inboundStreamId);
-      },
-    );
+          });
+          await sink.close();
+          break;
+        }
+      } finally {
+        activeStreams.delete(inboundStreamId);
+        await stream.close();
+      }
+    })();
 
     return create(StreamPrepareResponseSchema, {
       status: `registered:${inboundStreamId}`,
@@ -280,7 +289,9 @@ class EchoServiceHandlerImpl implements ActrDispatchHandler {
     ctx: ActrContext,
   ): Promise<StreamReleaseResponse> {
     console.log(`typescript echo: release ${request.streamId}`);
-    await ctx.unregisterStream(request.streamId);
+    const stream = activeStreams.get(request.streamId);
+    activeStreams.delete(request.streamId);
+    await stream?.close();
     return create(StreamReleaseResponseSchema, {
       status: `unregistered:${request.streamId}`,
     });

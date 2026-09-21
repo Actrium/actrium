@@ -620,9 +620,6 @@ internal open class UniffiForeignFutureResultVoid(
 internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
     fun callback(`callbackData`: Long,`result`: UniffiForeignFutureResultVoid.UniffiByValue,)
 }
-internal interface UniffiCallbackInterfaceDataChunkCallbackMethod0 : com.sun.jna.Callback {
-    fun callback(`uniffiHandle`: Long,`chunk`: RustBuffer.ByValue,`sender`: RustBuffer.ByValue,`uniffiFutureCallback`: UniffiForeignFutureCompleteVoid,`uniffiCallbackData`: Long,`uniffiOutDroppedCallback`: UniffiForeignFutureDroppedCallbackStruct,)
-}
 internal interface UniffiCallbackInterfaceMediaTrackCallbackMethod0 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`sample`: RustBuffer.ByValue,`sender`: RustBuffer.ByValue,`uniffiFutureCallback`: UniffiForeignFutureCompleteVoid,`uniffiCallbackData`: Long,`uniffiOutDroppedCallback`: UniffiForeignFutureDroppedCallbackStruct,)
 }
@@ -685,25 +682,6 @@ internal interface UniffiCallbackInterfaceWorkloadLifecycleBridgeMethod3 : com.s
 }
 internal interface UniffiCallbackInterfaceWorkloadLifecycleBridgeMethod4 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`ctx`: Long,`envelope`: RustBuffer.ByValue,`uniffiFutureCallback`: UniffiForeignFutureCompleteRustBuffer,`uniffiCallbackData`: Long,`uniffiOutDroppedCallback`: UniffiForeignFutureDroppedCallbackStruct,)
-}
-@Structure.FieldOrder("uniffiFree", "uniffiClone", "onStream")
-internal open class UniffiVTableCallbackInterfaceDataChunkCallback(
-    @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
-    @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
-    @JvmField internal var `onStream`: UniffiCallbackInterfaceDataChunkCallbackMethod0? = null,
-) : Structure() {
-    class UniffiByValue(
-        `uniffiFree`: UniffiCallbackInterfaceFree? = null,
-        `uniffiClone`: UniffiCallbackInterfaceClone? = null,
-        `onStream`: UniffiCallbackInterfaceDataChunkCallbackMethod0? = null,
-    ): UniffiVTableCallbackInterfaceDataChunkCallback(`uniffiFree`,`uniffiClone`,`onStream`,), Structure.ByValue
-
-   internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceDataChunkCallback) {
-        `uniffiFree` = other.`uniffiFree`
-        `uniffiClone` = other.`uniffiClone`
-        `onStream` = other.`onStream`
-    }
-
 }
 @Structure.FieldOrder("uniffiFree", "uniffiClone", "onSample")
 internal open class UniffiVTableCallbackInterfaceMediaTrackCallback(
@@ -939,8 +917,6 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_actr_checksum_func_actr_error_kind(
     ): Short
-    external fun uniffi_actr_checksum_func_actr_error_message(
-    ): Short
     external fun uniffi_actr_checksum_func_actr_error_requires_dlq(
     ): Short
     external fun uniffi_actr_checksum_func_actr_error_throw_for_test(
@@ -961,13 +937,15 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_actr_checksum_method_contextbridge_claim_reply(
     ): Short
+    external fun uniffi_actr_checksum_method_contextbridge_data_chunk_sink(
+    ): Short
+    external fun uniffi_actr_checksum_method_contextbridge_data_chunks(
+    ): Short
     external fun uniffi_actr_checksum_method_contextbridge_discover(
     ): Short
     external fun uniffi_actr_checksum_method_contextbridge_log(
     ): Short
     external fun uniffi_actr_checksum_method_contextbridge_register_media_track(
-    ): Short
-    external fun uniffi_actr_checksum_method_contextbridge_register_stream(
     ): Short
     external fun uniffi_actr_checksum_method_contextbridge_remove_media_track(
     ): Short
@@ -981,15 +959,19 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_actr_checksum_method_contextbridge_self_id(
     ): Short
-    external fun uniffi_actr_checksum_method_contextbridge_send_data_chunk(
-    ): Short
     external fun uniffi_actr_checksum_method_contextbridge_send_media_sample(
     ): Short
     external fun uniffi_actr_checksum_method_contextbridge_tell_raw(
     ): Short
     external fun uniffi_actr_checksum_method_contextbridge_unregister_media_track(
     ): Short
-    external fun uniffi_actr_checksum_method_contextbridge_unregister_stream(
+    external fun uniffi_actr_checksum_method_datachunksinkbridge_close(
+    ): Short
+    external fun uniffi_actr_checksum_method_datachunksinkbridge_send(
+    ): Short
+    external fun uniffi_actr_checksum_method_datachunkstreambridge_close(
+    ): Short
+    external fun uniffi_actr_checksum_method_datachunkstreambridge_next(
     ): Short
     external fun uniffi_actr_checksum_method_opusencoder_encode(
     ): Short
@@ -1040,8 +1022,6 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_actr_checksum_constructor_dynamicworkload_new(
     ): Short
     external fun uniffi_actr_checksum_constructor_runtimeobservers_new(
-    ): Short
-    external fun uniffi_actr_checksum_method_datachunkcallback_on_stream(
     ): Short
     external fun uniffi_actr_checksum_method_mediatrackcallback_on_sample(
     ): Short
@@ -1102,7 +1082,6 @@ internal object UniffiLib {
     init {
         Native.register(UniffiLib::class.java, findLibraryName(componentName = "actr"))
         uniffiCallbackInterfaceCredentialObserverBridge.register(this)
-        uniffiCallbackInterfaceDataChunkCallback.register(this)
         uniffiCallbackInterfaceLogCallback.register(this)
         uniffiCallbackInterfaceMailboxObserverBridge.register(this)
         uniffiCallbackInterfaceMediaTrackCallback.register(this)
@@ -1125,13 +1104,15 @@ external fun uniffi_actr_fn_method_contextbridge_caller_id(`ptr`: Long,uniffi_ou
 ): RustBuffer.ByValue
 external fun uniffi_actr_fn_method_contextbridge_claim_reply(`ptr`: Long,
 ): Long
+external fun uniffi_actr_fn_method_contextbridge_data_chunk_sink(`ptr`: Long,`target`: RustBuffer.ByValue,`streamId`: RustBuffer.ByValue,`payloadType`: RustBuffer.ByValue,
+): Long
+external fun uniffi_actr_fn_method_contextbridge_data_chunks(`ptr`: Long,`streamId`: RustBuffer.ByValue,`capacity`: RustBuffer.ByValue,
+): Long
 external fun uniffi_actr_fn_method_contextbridge_discover(`ptr`: Long,`targetType`: RustBuffer.ByValue,
 ): Long
 external fun uniffi_actr_fn_method_contextbridge_log(`ptr`: Long,`level`: RustBuffer.ByValue,`msg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_actr_fn_method_contextbridge_register_media_track(`ptr`: Long,`trackId`: RustBuffer.ByValue,`callback`: Long,
-): Long
-external fun uniffi_actr_fn_method_contextbridge_register_stream(`ptr`: Long,`streamId`: RustBuffer.ByValue,`callback`: Long,
 ): Long
 external fun uniffi_actr_fn_method_contextbridge_remove_media_track(`ptr`: Long,`target`: RustBuffer.ByValue,`trackId`: RustBuffer.ByValue,
 ): Long
@@ -1145,15 +1126,27 @@ external fun uniffi_actr_fn_method_contextbridge_resolve_dependency(`ptr`: Long,
 ): Long
 external fun uniffi_actr_fn_method_contextbridge_self_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_actr_fn_method_contextbridge_send_data_chunk(`ptr`: Long,`target`: RustBuffer.ByValue,`chunk`: RustBuffer.ByValue,`payloadType`: RustBuffer.ByValue,
-): Long
 external fun uniffi_actr_fn_method_contextbridge_send_media_sample(`ptr`: Long,`target`: RustBuffer.ByValue,`trackId`: RustBuffer.ByValue,`sample`: RustBuffer.ByValue,
 ): Long
 external fun uniffi_actr_fn_method_contextbridge_tell_raw(`ptr`: Long,`target`: RustBuffer.ByValue,`routeKey`: RustBuffer.ByValue,`payloadType`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,
 ): Long
 external fun uniffi_actr_fn_method_contextbridge_unregister_media_track(`ptr`: Long,`trackId`: RustBuffer.ByValue,
 ): Long
-external fun uniffi_actr_fn_method_contextbridge_unregister_stream(`ptr`: Long,`streamId`: RustBuffer.ByValue,
+external fun uniffi_actr_fn_clone_datachunksinkbridge(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_actr_fn_free_datachunksinkbridge(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_actr_fn_method_datachunksinkbridge_close(`ptr`: Long,
+): Long
+external fun uniffi_actr_fn_method_datachunksinkbridge_send(`ptr`: Long,`chunk`: RustBuffer.ByValue,
+): Long
+external fun uniffi_actr_fn_clone_datachunkstreambridge(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_actr_fn_free_datachunkstreambridge(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_actr_fn_method_datachunkstreambridge_close(`ptr`: Long,
+): Long
+external fun uniffi_actr_fn_method_datachunkstreambridge_next(`ptr`: Long,
 ): Long
 external fun uniffi_actr_fn_clone_opusencoder(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
@@ -1233,8 +1226,6 @@ external fun uniffi_actr_fn_free_runtimeobservers(`handle`: Long,uniffi_out_err:
 ): Unit
 external fun uniffi_actr_fn_constructor_runtimeobservers_new(`signaling`: RustBuffer.ByValue,`websocket`: RustBuffer.ByValue,`webrtc`: RustBuffer.ByValue,`credential`: RustBuffer.ByValue,`mailbox`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
-external fun uniffi_actr_fn_init_callback_vtable_datachunkcallback(`vtable`: UniffiVTableCallbackInterfaceDataChunkCallback,
-): Unit
 external fun uniffi_actr_fn_init_callback_vtable_mediatrackcallback(`vtable`: UniffiVTableCallbackInterfaceMediaTrackCallback,
 ): Unit
 external fun uniffi_actr_fn_init_callback_vtable_logcallback(`vtable`: UniffiVTableCallbackInterfaceLogCallback,
@@ -1257,13 +1248,11 @@ external fun uniffi_actr_fn_func_actr_error_is_retryable(`err`: RustBuffer.ByVal
 ): Byte
 external fun uniffi_actr_fn_func_actr_error_kind(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_actr_fn_func_actr_error_message(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-): RustBuffer.ByValue
-external fun uniffi_actr_fn_func_actr_error_requires_dlq(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+external fun uniffi_actr_fn_func_actr_error_requires_dlq(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
-external fun uniffi_actr_fn_func_actr_error_throw_for_test(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+external fun uniffi_actr_fn_func_actr_error_throw_for_test(`err`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
-external fun uniffi_actr_fn_func_set_log_callback(`callback`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+external fun uniffi_actr_fn_func_set_log_callback(`callback`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_actr_fn_func_resolve_manifest_dependency(`manifestPath`: RustBuffer.ByValue,`dependencyAlias`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1396,9 +1385,6 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_func_actr_error_kind() != 40651.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_func_actr_error_message() != 60098.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
     if (lib.uniffi_actr_checksum_func_actr_error_requires_dlq() != 62057.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1408,13 +1394,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_func_set_log_callback() != 22627.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_func_resolve_manifest_dependency() != 47641.toShort()) {
+    if (lib.uniffi_actr_checksum_func_resolve_manifest_dependency() != 20704.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_func_resolve_manifest_dependency_alias_list() != 45756.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_func_resolve_manifest_package_actr_type() != 8884.toShort()) {
+    if (lib.uniffi_actr_checksum_func_resolve_manifest_package_actr_type() != 16114.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_contextbridge_add_media_track() != 37665.toShort()) {
@@ -1429,16 +1415,19 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_contextbridge_claim_reply() != 7617.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_method_contextbridge_discover() != 2735.toShort()) {
+    if (lib.uniffi_actr_checksum_method_contextbridge_data_chunk_sink() != 27523.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actr_checksum_method_contextbridge_data_chunks() != 31270.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actr_checksum_method_contextbridge_discover() != 38410.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_contextbridge_log() != 34242.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_contextbridge_register_media_track() != 43039.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_actr_checksum_method_contextbridge_register_stream() != 32659.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_contextbridge_remove_media_track() != 43937.toShort()) {
@@ -1459,9 +1448,6 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_contextbridge_self_id() != 56416.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_method_contextbridge_send_data_chunk() != 60974.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
     if (lib.uniffi_actr_checksum_method_contextbridge_send_media_sample() != 63657.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1471,7 +1457,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_contextbridge_unregister_media_track() != 52187.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_method_contextbridge_unregister_stream() != 31891.toShort()) {
+    if (lib.uniffi_actr_checksum_method_datachunksinkbridge_close() != 21245.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actr_checksum_method_datachunksinkbridge_send() != 21274.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actr_checksum_method_datachunkstreambridge_close() != 24663.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actr_checksum_method_datachunkstreambridge_next() != 30311.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_opusencoder_encode() != 35920.toShort()) {
@@ -1547,9 +1542,6 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_constructor_runtimeobservers_new() != 44140.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_actr_checksum_method_datachunkcallback_on_stream() != 33678.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_mediatrackcallback_on_sample() != 56040.toShort()) {
@@ -3005,13 +2997,13 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
         { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         ActrException.ErrorHandler,
     )
     }
 
-
+    
     /**
      * Wait for shutdown to complete.
      */
@@ -3208,12 +3200,27 @@ public interface ContextBridgeInterface {
      * may legitimately encode to zero bytes.
      */
     suspend fun `claimReply`()
-
+    
+    /**
+     * Create an opaque send handle bound to a target actor, stream ID, and
+     * lane (`StreamReliable` or `StreamLatencyFirst`).
+     */
+    suspend fun `dataChunkSink`(`target`: ActrId, `streamId`: kotlin.String, `payloadType`: PayloadType): DataChunkSinkBridge
+    
+    /**
+     * Subscribe to inbound DataChunks for a stream ID.
+     *
+     * Returns an opaque pull handle; `None` capacity selects the default.
+     * Only one active subscription is allowed per stream ID within one
+     * actor/context instance.
+     */
+    suspend fun `dataChunks`(`streamId`: kotlin.String, `capacity`: kotlin.UInt?): DataChunkStreamBridge
+    
     /**
      * Discover an actor of the specified type
      *
      * # Arguments
-     * - `target_type`: Actor type to discover (publisher + name)
+     * - `target_type`: Actor type to discover (manufacturer + name)
      *
      * # Returns
      * The ActrId of a discovered actor
@@ -3231,16 +3238,6 @@ public interface ContextBridgeInterface {
     suspend fun `registerMediaTrack`(`trackId`: kotlin.String, `callback`: MediaTrackCallback)
     
     /**
-     * Register a DataChunk callback for a stream ID.
-     *
-     * Chunks of one stream are delivered to the callback serially,
-     * run-to-completion, in arrival order; different streams run
-     * independently. See [`DataChunkCallback`] for the resulting blocking
-     * constraint and reassembly rules.
-     */
-    suspend fun `registerStream`(`streamId`: kotlin.String, `callback`: DataChunkCallback)
-    
-    /**
      * Remove a media track from the WebRTC connection with the target.
      */
     suspend fun `removeMediaTrack`(`target`: ActrId, `trackId`: kotlin.String)
@@ -3249,12 +3246,12 @@ public interface ContextBridgeInterface {
      * Deliver an error response through the current inbound RPC reply boundary.
      */
     suspend fun `replyError`(`error`: ActrException)
-
+    
     /**
      * Deliver a response through the current inbound RPC reply boundary.
      */
     suspend fun `replyRaw`(`payload`: kotlin.ByteArray)
-
+    
     /**
      * Request ID associated with the current dispatch or lifecycle context.
      */
@@ -3269,16 +3266,6 @@ public interface ContextBridgeInterface {
      * Current actor ID associated with this context.
      */
     fun `selfId`(): ActrId
-    
-    /**
-     * Send a DataChunk to a remote actor (Fast Path)
-     *
-     * # Arguments
-     * - `target`: Target actor ID
-     * - `chunk`: DataChunk containing stream_id, sequence, payload, etc.
-     * - `payload_type`: Stream lane selection for delivery guarantees.
-     */
-    suspend fun `sendDataChunk`(`target`: ActrId, `chunk`: DataChunk, `payloadType`: PayloadType)
     
     /**
      * Send a media sample via WebRTC native RTP track
@@ -3300,11 +3287,6 @@ public interface ContextBridgeInterface {
      * Unregister a media track callback
      */
     suspend fun `unregisterMediaTrack`(`trackId`: kotlin.String)
-    
-    /**
-     * Unregister a DataChunk callback for a stream ID.
-     */
-    suspend fun `unregisterStream`(`streamId`: kotlin.String)
     
     companion object
 }
@@ -3408,7 +3390,7 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         }
     }
 
-
+    
     /**
      * Add a media track to the WebRTC connection with the target
      */
@@ -3499,7 +3481,7 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         callWithHandle { uniffiHandle ->
             UniffiLib.uniffi_actr_fn_method_contextbridge_claim_reply(
                 uniffiHandle,
-
+                
             )
         },
         { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_void(future, callback, continuation) },
@@ -3507,18 +3489,71 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         ActrException.ErrorHandler,
     )
     }
 
+    
+    /**
+     * Create an opaque send handle bound to a target actor, stream ID, and
+     * lane (`StreamReliable` or `StreamLatencyFirst`).
+     */
+    @Throws(ActrException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `dataChunkSink`(`target`: ActrId, `streamId`: kotlin.String, `payloadType`: PayloadType) : DataChunkSinkBridge {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_actr_fn_method_contextbridge_data_chunk_sink(
+                uniffiHandle,
+                FfiConverterTypeActrId.lower(`target`),FfiConverterString.lower(`streamId`),FfiConverterTypePayloadType.lower(`payloadType`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_u64(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_u64(future, continuation) },
+        { future -> UniffiLib.ffi_actr_rust_future_free_u64(future) },
+        // lift function
+        { FfiConverterTypeDataChunkSinkBridge.lift(it) },
+        // Error FFI converter
+        ActrException.ErrorHandler,
+    )
+    }
 
+    
+    /**
+     * Subscribe to inbound DataChunks for a stream ID.
+     *
+     * Returns an opaque pull handle; `None` capacity selects the default.
+     * Only one active subscription is allowed per stream ID within one
+     * actor/context instance.
+     */
+    @Throws(ActrException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `dataChunks`(`streamId`: kotlin.String, `capacity`: kotlin.UInt?) : DataChunkStreamBridge {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_actr_fn_method_contextbridge_data_chunks(
+                uniffiHandle,
+                FfiConverterString.lower(`streamId`),FfiConverterOptionalUInt.lower(`capacity`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_u64(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_u64(future, continuation) },
+        { future -> UniffiLib.ffi_actr_rust_future_free_u64(future) },
+        // lift function
+        { FfiConverterTypeDataChunkStreamBridge.lift(it) },
+        // Error FFI converter
+        ActrException.ErrorHandler,
+    )
+    }
+
+    
     /**
      * Discover an actor of the specified type
      *
      * # Arguments
-     * - `target_type`: Actor type to discover (publisher + name)
+     * - `target_type`: Actor type to discover (manufacturer + name)
      *
      * # Returns
      * The ActrId of a discovered actor
@@ -3585,36 +3620,6 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
 
     
     /**
-     * Register a DataChunk callback for a stream ID.
-     *
-     * Chunks of one stream are delivered to the callback serially,
-     * run-to-completion, in arrival order; different streams run
-     * independently. See [`DataChunkCallback`] for the resulting blocking
-     * constraint and reassembly rules.
-     */
-    @Throws(ActrException::class)
-    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-    override suspend fun `registerStream`(`streamId`: kotlin.String, `callback`: DataChunkCallback) {
-        return uniffiRustCallAsync(
-        callWithHandle { uniffiHandle ->
-            UniffiLib.uniffi_actr_fn_method_contextbridge_register_stream(
-                uniffiHandle,
-                FfiConverterString.lower(`streamId`),FfiConverterTypeDataChunkCallback.lower(`callback`),
-            )
-        },
-        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_void(future, callback, continuation) },
-        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_void(future, continuation) },
-        { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
-        // lift function
-        { Unit },
-        
-        // Error FFI converter
-        ActrException.ErrorHandler,
-    )
-    }
-
-    
-    /**
      * Remove a media track from the WebRTC connection with the target.
      */
     @Throws(ActrException::class)
@@ -3657,13 +3662,13 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         ActrException.ErrorHandler,
     )
     }
 
-
+    
     /**
      * Deliver a response through the current inbound RPC reply boundary.
      */
@@ -3682,13 +3687,13 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
         // lift function
         { Unit },
-
+        
         // Error FFI converter
         ActrException.ErrorHandler,
     )
     }
 
-
+    
     /**
      * Request ID associated with the current dispatch or lifecycle context.
      */override fun `requestId`(): kotlin.String {
@@ -3743,36 +3748,6 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
     )
     }
     
-
-    
-    /**
-     * Send a DataChunk to a remote actor (Fast Path)
-     *
-     * # Arguments
-     * - `target`: Target actor ID
-     * - `chunk`: DataChunk containing stream_id, sequence, payload, etc.
-     * - `payload_type`: Stream lane selection for delivery guarantees.
-     */
-    @Throws(ActrException::class)
-    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-    override suspend fun `sendDataChunk`(`target`: ActrId, `chunk`: DataChunk, `payloadType`: PayloadType) {
-        return uniffiRustCallAsync(
-        callWithHandle { uniffiHandle ->
-            UniffiLib.uniffi_actr_fn_method_contextbridge_send_data_chunk(
-                uniffiHandle,
-                FfiConverterTypeActrId.lower(`target`),FfiConverterTypeDataChunk.lower(`chunk`),FfiConverterTypePayloadType.lower(`payloadType`),
-            )
-        },
-        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_void(future, callback, continuation) },
-        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_void(future, continuation) },
-        { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
-        // lift function
-        { Unit },
-        
-        // Error FFI converter
-        ActrException.ErrorHandler,
-    )
-    }
 
     
     /**
@@ -3856,31 +3831,6 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
     }
 
     
-    /**
-     * Unregister a DataChunk callback for a stream ID.
-     */
-    @Throws(ActrException::class)
-    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-    override suspend fun `unregisterStream`(`streamId`: kotlin.String) {
-        return uniffiRustCallAsync(
-        callWithHandle { uniffiHandle ->
-            UniffiLib.uniffi_actr_fn_method_contextbridge_unregister_stream(
-                uniffiHandle,
-                FfiConverterString.lower(`streamId`),
-            )
-        },
-        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_void(future, callback, continuation) },
-        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_void(future, continuation) },
-        { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
-        // lift function
-        { Unit },
-        
-        // Error FFI converter
-        ActrException.ErrorHandler,
-    )
-    }
-
-    
 
     
 
@@ -3914,6 +3864,625 @@ public object FfiConverterTypeContextBridge: FfiConverter<ContextBridge, Long> {
     override fun allocationSize(value: ContextBridge) = 8UL
 
     override fun write(value: ContextBridge, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+/**
+ * Opaque send handle bound to one destination, stream ID, and lane.
+ */
+public interface DataChunkSinkBridgeInterface {
+    
+    /**
+     * Stop accepting new sends, wait for already accepted sends to finish,
+     * and close. Idempotent.
+     */
+    suspend fun `closeAsync`()
+    
+    /**
+     * Send one chunk. The chunk's `stream_id` must equal the sink's stream
+     * ID. Calls are serialized; a call after `close()` returns
+     * [`ActrError::InvalidArgument`].
+     */
+    suspend fun `send`(`chunk`: DataChunk)
+    
+    companion object
+}
+
+/**
+ * Opaque send handle bound to one destination, stream ID, and lane.
+ */
+open class DataChunkSinkBridge: Disposable, AutoCloseable, DataChunkSinkBridgeInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_actr_fn_free_datachunksinkbridge(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_actr_fn_clone_datachunksinkbridge(handle, status)
+        }
+    }
+
+    
+    /**
+     * Stop accepting new sends, wait for already accepted sends to finish,
+     * and close. Idempotent.
+     */
+    @Throws(ActrException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `closeAsync`() {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_actr_fn_method_datachunksinkbridge_close(
+                uniffiHandle,
+                
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_void(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_void(future, continuation) },
+        { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
+        // lift function
+        { Unit },
+        
+        // Error FFI converter
+        ActrException.ErrorHandler,
+    )
+    }
+
+    
+    /**
+     * Send one chunk. The chunk's `stream_id` must equal the sink's stream
+     * ID. Calls are serialized; a call after `close()` returns
+     * [`ActrError::InvalidArgument`].
+     */
+    @Throws(ActrException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `send`(`chunk`: DataChunk) {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_actr_fn_method_datachunksinkbridge_send(
+                uniffiHandle,
+                FfiConverterTypeDataChunk.lower(`chunk`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_void(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_void(future, continuation) },
+        { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
+        // lift function
+        { Unit },
+        
+        // Error FFI converter
+        ActrException.ErrorHandler,
+    )
+    }
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDataChunkSinkBridge: FfiConverter<DataChunkSinkBridge, Long> {
+    override fun lower(value: DataChunkSinkBridge): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): DataChunkSinkBridge {
+        return DataChunkSinkBridge(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): DataChunkSinkBridge {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: DataChunkSinkBridge) = 8UL
+
+    override fun write(value: DataChunkSinkBridge, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+/**
+ * Opaque pull handle for one DataChunk subscription.
+ */
+public interface DataChunkStreamBridgeInterface {
+    
+    /**
+     * Close the subscription: idempotent, never waits behind a pending
+     * `next()`, and wakes any pending `next()` with `Ok(None)`.
+     */
+    suspend fun `closeAsync`()
+    
+    /**
+     * Wait for the next inbound chunk. Returns `None` at end of stream and
+     * after `close()`. Only one call may be pending at a time.
+     *
+     * Cancellation safety: dropping this future (e.g. foreign coroutine
+     * cancellation) releases the internal lock guard via RAII, so the handle
+     * stays usable.
+     */
+    suspend fun `next`(): DataChunkEventBridge?
+    
+    companion object
+}
+
+/**
+ * Opaque pull handle for one DataChunk subscription.
+ */
+open class DataChunkStreamBridge: Disposable, AutoCloseable, DataChunkStreamBridgeInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_actr_fn_free_datachunkstreambridge(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_actr_fn_clone_datachunkstreambridge(handle, status)
+        }
+    }
+
+    
+    /**
+     * Close the subscription: idempotent, never waits behind a pending
+     * `next()`, and wakes any pending `next()` with `Ok(None)`.
+     */
+    @Throws(ActrException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `closeAsync`() {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_actr_fn_method_datachunkstreambridge_close(
+                uniffiHandle,
+                
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_void(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_void(future, continuation) },
+        { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
+        // lift function
+        { Unit },
+        
+        // Error FFI converter
+        ActrException.ErrorHandler,
+    )
+    }
+
+    
+    /**
+     * Wait for the next inbound chunk. Returns `None` at end of stream and
+     * after `close()`. Only one call may be pending at a time.
+     *
+     * Cancellation safety: dropping this future (e.g. foreign coroutine
+     * cancellation) releases the internal lock guard via RAII, so the handle
+     * stays usable.
+     */
+    @Throws(ActrException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `next`() : DataChunkEventBridge? {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_actr_fn_method_datachunkstreambridge_next(
+                uniffiHandle,
+                
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.ffi_actr_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterOptionalTypeDataChunkEventBridge.lift(it) },
+        // Error FFI converter
+        ActrException.ErrorHandler,
+    )
+    }
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDataChunkStreamBridge: FfiConverter<DataChunkStreamBridge, Long> {
+    override fun lower(value: DataChunkStreamBridge): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): DataChunkStreamBridge {
+        return DataChunkStreamBridge(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): DataChunkStreamBridge {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: DataChunkStreamBridge) = 8UL
+
+    override fun write(value: DataChunkStreamBridge, buf: ByteBuffer) {
         buf.putLong(lower(value))
     }
 }
@@ -5333,15 +5902,14 @@ public object FfiConverterTypeRuntimeObservers: FfiConverter<RuntimeObservers, L
 
 
 /**
- * Actor identifier (Realm name + Actor serial)
+ * Actor identifier (realm + serial_number + type)
  */
 data class ActrId (
-    /**
-     * Realm name, `<realm_id>@<domain>`
-     */
-    var `realm`: kotlin.String
+    var `realm`: Realm
     , 
     var `serialNumber`: kotlin.ULong
+    , 
+    var `type`: ActrType
     
 ){
     
@@ -5358,29 +5926,32 @@ data class ActrId (
 public object FfiConverterTypeActrId: FfiConverterRustBuffer<ActrId> {
     override fun read(buf: ByteBuffer): ActrId {
         return ActrId(
-            FfiConverterString.read(buf),
+            FfiConverterTypeRealm.read(buf),
             FfiConverterULong.read(buf),
+            FfiConverterTypeActrType.read(buf),
         )
     }
 
     override fun allocationSize(value: ActrId) = (
-            FfiConverterString.allocationSize(value.`realm`) +
-            FfiConverterULong.allocationSize(value.`serialNumber`)
+            FfiConverterTypeRealm.allocationSize(value.`realm`) +
+            FfiConverterULong.allocationSize(value.`serialNumber`) +
+            FfiConverterTypeActrType.allocationSize(value.`type`)
     )
 
     override fun write(value: ActrId, buf: ByteBuffer) {
-            FfiConverterString.write(value.`realm`, buf)
+            FfiConverterTypeRealm.write(value.`realm`, buf)
             FfiConverterULong.write(value.`serialNumber`, buf)
+            FfiConverterTypeActrType.write(value.`type`, buf)
     }
 }
 
 
 
 /**
- * Actor type (publisher + name + version)
+ * Actor type (manufacturer + name + version)
  */
 data class ActrType (
-    var `publisher`: kotlin.String
+    var `manufacturer`: kotlin.String
     , 
     var `name`: kotlin.String
     , 
@@ -5408,13 +5979,13 @@ public object FfiConverterTypeActrType: FfiConverterRustBuffer<ActrType> {
     }
 
     override fun allocationSize(value: ActrType) = (
-            FfiConverterString.allocationSize(value.`publisher`) +
+            FfiConverterString.allocationSize(value.`manufacturer`) +
             FfiConverterString.allocationSize(value.`name`) +
             FfiConverterString.allocationSize(value.`version`)
     )
 
     override fun write(value: ActrType, buf: ByteBuffer) {
-            FfiConverterString.write(value.`publisher`, buf)
+            FfiConverterString.write(value.`manufacturer`, buf)
             FfiConverterString.write(value.`name`, buf)
             FfiConverterString.write(value.`version`, buf)
     }
@@ -5609,6 +6180,48 @@ public object FfiConverterTypeDataChunk: FfiConverterRustBuffer<DataChunk> {
             FfiConverterByteArray.write(value.`payload`, buf)
             FfiConverterSequenceTypeMetadataEntry.write(value.`metadata`, buf)
             FfiConverterOptionalLong.write(value.`timestampMs`, buf)
+    }
+}
+
+
+
+/**
+ * One inbound DataChunk with its sender, as returned by
+ * [`DataChunkStreamBridge::next`].
+ */
+data class DataChunkEventBridge (
+    var `chunk`: DataChunk
+    , 
+    var `sender`: ActrId
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDataChunkEventBridge: FfiConverterRustBuffer<DataChunkEventBridge> {
+    override fun read(buf: ByteBuffer): DataChunkEventBridge {
+        return DataChunkEventBridge(
+            FfiConverterTypeDataChunk.read(buf),
+            FfiConverterTypeActrId.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: DataChunkEventBridge) = (
+            FfiConverterTypeDataChunk.allocationSize(value.`chunk`) +
+            FfiConverterTypeActrId.allocationSize(value.`sender`)
+    )
+
+    override fun write(value: DataChunkEventBridge, buf: ByteBuffer) {
+            FfiConverterTypeDataChunk.write(value.`chunk`, buf)
+            FfiConverterTypeActrId.write(value.`sender`, buf)
     }
 }
 
@@ -5988,6 +6601,42 @@ public object FfiConverterTypePeerEventBridge: FfiConverterRustBuffer<PeerEventB
 
 
 /**
+ * Security realm identifier
+ */
+data class Realm (
+    var `realmId`: kotlin.UInt
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRealm: FfiConverterRustBuffer<Realm> {
+    override fun read(buf: ByteBuffer): Realm {
+        return Realm(
+            FfiConverterUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: Realm) = (
+            FfiConverterUInt.allocationSize(value.`realmId`)
+    )
+
+    override fun write(value: Realm, buf: ByteBuffer) {
+            FfiConverterUInt.write(value.`realmId`, buf)
+    }
+}
+
+
+
+/**
  * RPC Envelope exposed to FFI
  *
  * Contains the route key, payload, request ID, and request deadline for an RPC message.
@@ -6166,39 +6815,13 @@ public object FfiConverterTypeWebRtcPeerStateBridge: FfiConverterRustBuffer<WebR
  * never reorder or remove an established case.
  */
 sealed class ActrException: kotlin.Exception() {
-    // Keep exception inspection safe before native loading or after linkage failure.
-    internal fun displayMessage(nativeMessage: (ActrException) -> String = ::actrErrorMessage): String {
-        try {
-            return nativeMessage(this)
-        } catch (_: LinkageError) {
-            // Includes UnsatisfiedLinkError, ExceptionInInitializerError and
-            // NoClassDefFoundError on subsequent access to a failed initializer.
-            return when (this) {
-                is Unavailable -> "unavailable: $msg"
-                is ConnectionNotReady -> "connection not ready: " +
-                    (info.retryAfterMs?.let { "retry after ${it}ms" } ?: "no retry hint")
-                is TimedOut -> "timed out"
-                is NotFound -> "not found: $msg"
-                is PermissionDenied -> "permission denied: $msg"
-                is InvalidArgument -> "invalid argument: $msg"
-                is UnknownRoute -> "unknown route: $msg"
-                is DependencyNotFound -> "dependency '$serviceName' not found: $detail"
-                is DecodeFailure -> "decode failure: $msg"
-                is NotImplemented -> "not implemented: $msg"
-                is Internal -> "internal error: $msg"
-                is Config -> "config: $msg"
-                is DeliveryUncertain -> "delivery uncertain for operation $operationId: $causeDetail"
-            }
-        }
-    }
-
     
     class Unavailable(
         
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = displayMessage()
+            get() = "msg=${ `msg` }"
     }
     
     class ConnectionNotReady(
@@ -6206,13 +6829,13 @@ sealed class ActrException: kotlin.Exception() {
         val `info`: ConnectionNotReadyInfo
         ) : ActrException() {
         override val message
-            get() = displayMessage()
+            get() = "info=${ `info` }"
     }
     
     class TimedOut(
         ) : ActrException() {
         override val message
-            get() = displayMessage()
+            get() = ""
     }
     
     class NotFound(
@@ -6220,7 +6843,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = displayMessage()
+            get() = "msg=${ `msg` }"
     }
     
     class PermissionDenied(
@@ -6228,7 +6851,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = displayMessage()
+            get() = "msg=${ `msg` }"
     }
     
     class InvalidArgument(
@@ -6236,7 +6859,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = displayMessage()
+            get() = "msg=${ `msg` }"
     }
     
     class UnknownRoute(
@@ -6244,7 +6867,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = displayMessage()
+            get() = "msg=${ `msg` }"
     }
     
     class DependencyNotFound(
@@ -6254,7 +6877,7 @@ sealed class ActrException: kotlin.Exception() {
         val `detail`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = displayMessage()
+            get() = "serviceName=${ `serviceName` }, detail=${ `detail` }"
     }
     
     class DecodeFailure(
@@ -6262,7 +6885,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = displayMessage()
+            get() = "msg=${ `msg` }"
     }
     
     class NotImplemented(
@@ -6270,7 +6893,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = displayMessage()
+            get() = "msg=${ `msg` }"
     }
     
     class Internal(
@@ -6278,7 +6901,7 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = displayMessage()
+            get() = "msg=${ `msg` }"
     }
     
     /**
@@ -6293,24 +6916,29 @@ sealed class ActrException: kotlin.Exception() {
         val `msg`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = displayMessage()
+            get() = "msg=${ `msg` }"
     }
-
+    
     /**
      * The operation may have entered the transport, so generic retry is
      * unsafe. Keep the operation ID and cause available to SDK callers.
      *
      * This variant is intentionally appended to preserve the discriminants
      * of the existing UniFFI ABI.
+     *
+     * The field is named `cause_detail` rather than `cause`: Kotlin
+     * `Throwable.cause` would clash with a generated `cause` property.
+     * Field names do not affect the UniFFI wire format (variants serialize
+     * as ordinal + positional fields), so this is not an ABI change.
      */
     class DeliveryUncertain(
-
-        val `operationId`: kotlin.String,
-
-        val causeDetail: kotlin.String
+        
+        val `operationId`: kotlin.String, 
+        
+        val `causeDetail`: kotlin.String
         ) : ActrException() {
         override val message
-            get() = displayMessage()
+            get() = "operationId=${ `operationId` }, causeDetail=${ `causeDetail` }"
     }
     
 
@@ -6441,7 +7069,7 @@ public object FfiConverterTypeActrError : FfiConverterRustBuffer<ActrException> 
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
                 + FfiConverterString.allocationSize(value.`operationId`)
-                + FfiConverterString.allocationSize(value.causeDetail)
+                + FfiConverterString.allocationSize(value.`causeDetail`)
             )
         }
     }
@@ -6511,7 +7139,7 @@ public object FfiConverterTypeActrError : FfiConverterRustBuffer<ActrException> 
             is ActrException.DeliveryUncertain -> {
                 buf.putInt(13)
                 FfiConverterString.write(value.`operationId`, buf)
-                FfiConverterString.write(value.causeDetail, buf)
+                FfiConverterString.write(value.`causeDetail`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -7302,104 +7930,6 @@ internal object uniffiCallbackInterfaceCredentialObserverBridge {
  * @suppress
  */
 public object FfiConverterTypeCredentialObserverBridge: FfiConverterCallbackInterface<CredentialObserverBridge>()
-
-
-
-
-
-/**
- * Callback interface for DataChunk events.
- *
- * Chunks of one stream are delivered to `on_stream` serially,
- * run-to-completion, strictly in arrival order; different streams run
- * independently (see `Context::register_stream`). Consequently `on_stream`
- * must not block waiting for a later chunk of the same stream — that chunk
- * is queued behind this call, so both stall forever (self-deadlock).
- * Finalize a stream out-of-band instead: a separate RPC the sender invokes
- * after the last chunk, or a background task watching shared reassembly
- * state. Reassemble and detect gaps by `DataChunk.sequence` — chunks are
- * dispatched in send order, but `StreamLatencyFirst` drops and reconnects
- * can lose in-flight chunks.
- */
-public interface DataChunkCallback {
-    
-    /**
-     * Handle an incoming DataChunk.
-     */
-    suspend fun `onStream`(`chunk`: DataChunk, `sender`: ActrId)
-    
-    companion object
-}
-
-
-
-// Put the implementation in an object so we don't pollute the top-level namespace
-internal object uniffiCallbackInterfaceDataChunkCallback {
-    internal object `onStream`: UniffiCallbackInterfaceDataChunkCallbackMethod0 {
-        override fun callback(`uniffiHandle`: Long,`chunk`: RustBuffer.ByValue,`sender`: RustBuffer.ByValue,`uniffiFutureCallback`: UniffiForeignFutureCompleteVoid,`uniffiCallbackData`: Long,`uniffiOutDroppedCallback`: UniffiForeignFutureDroppedCallbackStruct,) {
-            val uniffiObj = FfiConverterTypeDataChunkCallback.handleMap.get(uniffiHandle)
-            val makeCall = suspend { ->
-                uniffiObj.`onStream`(
-                    FfiConverterTypeDataChunk.lift(`chunk`),
-                    FfiConverterTypeActrId.lift(`sender`),
-                )
-            }
-            val uniffiHandleSuccess = { _: Unit ->
-                val uniffiResult = UniffiForeignFutureResultVoid.UniffiByValue(
-                    UniffiRustCallStatus.ByValue()
-                )
-                uniffiResult.write()
-                uniffiFutureCallback.callback(uniffiCallbackData, uniffiResult)
-            }
-            val uniffiHandleError = { callStatus: UniffiRustCallStatus.ByValue ->
-                uniffiFutureCallback.callback(
-                    uniffiCallbackData,
-                    UniffiForeignFutureResultVoid.UniffiByValue(
-                        callStatus,
-                    ),
-                )
-            }
-            uniffiTraitInterfaceCallAsyncWithError(
-                makeCall,
-                uniffiHandleSuccess,
-                uniffiHandleError,
-                { e: ActrException -> FfiConverterTypeActrError.lower(e) },
-                uniffiOutDroppedCallback
-            )
-        }
-    }
-
-    internal object uniffiFree: UniffiCallbackInterfaceFree {
-        override fun callback(handle: Long) {
-            FfiConverterTypeDataChunkCallback.handleMap.remove(handle)
-        }
-    }
-
-    internal object uniffiClone: UniffiCallbackInterfaceClone {
-        override fun callback(handle: Long): Long {
-            return FfiConverterTypeDataChunkCallback.handleMap.clone(handle)
-        }
-    }
-
-    internal var vtable = UniffiVTableCallbackInterfaceDataChunkCallback.UniffiByValue(
-        uniffiFree,
-        uniffiClone,
-        `onStream`,
-    )
-
-    // Registers the foreign callback with the Rust side.
-    // This method is generated for each callback interface.
-    internal fun register(lib: UniffiLib) {
-        lib.uniffi_actr_fn_init_callback_vtable_datachunkcallback(vtable)
-    }
-}
-
-/**
- * The ffiConverter which transforms the Callbacks in to handles to pass to Rust.
- *
- * @suppress
- */
-public object FfiConverterTypeDataChunkCallback: FfiConverterCallbackInterface<DataChunkCallback>()
 
 
 
@@ -8484,6 +9014,38 @@ public object FfiConverterTypeWorkloadLifecycleBridge: FfiConverterCallbackInter
 /**
  * @suppress
  */
+public object FfiConverterOptionalUInt: FfiConverterRustBuffer<kotlin.UInt?> {
+    override fun read(buf: ByteBuffer): kotlin.UInt? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterUInt.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.UInt?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterUInt.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.UInt?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterUInt.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalULong: FfiConverterRustBuffer<kotlin.ULong?> {
     override fun read(buf: ByteBuffer): kotlin.ULong? {
         if (buf.get().toInt() == 0) {
@@ -8698,6 +9260,38 @@ public object FfiConverterOptionalTypeActrId: FfiConverterRustBuffer<ActrId?> {
         } else {
             buf.put(1)
             FfiConverterTypeActrId.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeDataChunkEventBridge: FfiConverterRustBuffer<DataChunkEventBridge?> {
+    override fun read(buf: ByteBuffer): DataChunkEventBridge? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeDataChunkEventBridge.read(buf)
+    }
+
+    override fun allocationSize(value: DataChunkEventBridge?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeDataChunkEventBridge.allocationSize(value)
+        }
+    }
+
+    override fun write(value: DataChunkEventBridge?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeDataChunkEventBridge.write(value, buf)
         }
     }
 }
@@ -9164,30 +9758,17 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
     
 
         /**
-         * Rust Display text for an error, shared by SDK message properties.
-         */ fun `actrErrorMessage`(`err`: ActrException): kotlin.String {
-            return FfiConverterString.lift(
-    uniffiRustCall() { _status ->
-    UniffiLib.uniffi_actr_fn_func_actr_error_message(
-
-        FfiConverterTypeActrError.lower(`err`),_status)
-}
-    )
-    }
-
-
-        /**
          * `true` iff the error is in the Corrupt fault domain — route to DLQ.
          */ fun `actrErrorRequiresDlq`(`err`: ActrException): kotlin.Boolean {
             return FfiConverterBoolean.lift(
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_actr_fn_func_actr_error_requires_dlq(
-
+    
         FfiConverterTypeActrError.lower(`err`),_status)
 }
     )
     }
-
+    
 
         /**
          * Test hook: fail with `err` so foreign-side error-buffer readers are
@@ -9200,14 +9781,14 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
          * same buffer layout instead of calling this hook.
          */
     @Throws(ActrException::class) fun `actrErrorThrowForTest`(`err`: ActrException)
-        =
+        = 
     uniffiRustCallWithError(ActrException) { _status ->
     UniffiLib.uniffi_actr_fn_func_actr_error_throw_for_test(
-
+    
         FfiConverterTypeActrError.lower(`err`),_status)
 }
-
-
+    
+    
 
         /**
          * Set or clear the global log callback.
@@ -9231,7 +9812,7 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
          * Parses the manifest, looks up the dependency by alias, and returns its
          * `actr_type` field as a structured `ActrType` record. This is the canonical
          * way for linked-runtime hosts (iOS, Android) to discover which remote actor
-         * type a dependency resolves to, without hardcoding `"publisher/program@version"`
+         * type a dependency resolves to, without hardcoding `"manufacturer:name:version"`
          * strings in application code.
          */
     @Throws(ActrException::class) fun `resolveManifestDependency`(`manifestPath`: kotlin.String, `dependencyAlias`: kotlin.String): ActrType {
@@ -9269,7 +9850,7 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
          * Parses the manifest and returns the `[package]` block's actr_type fields
          * as a structured `ActrType` record. Linked-runtime hosts (iOS, Android) use
          * this to determine their own actor type without hardcoding
-         * `"publisher/program@version"` strings.
+         * `"manufacturer:name:version"` strings.
          */
     @Throws(ActrException::class) fun `resolveManifestPackageActrType`(`manifestPath`: kotlin.String): ActrType {
             return FfiConverterTypeActrType.lift(
@@ -9281,3 +9862,5 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
     )
     }
     
+
+

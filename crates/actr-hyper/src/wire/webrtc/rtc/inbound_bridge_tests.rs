@@ -230,7 +230,9 @@ async fn bridge_preserves_data_chunk_order_per_lane() {
             Ok(())
         })
     });
-    registry.register("ordered-stream".to_string(), callback);
+    registry
+        .register("ordered-stream".to_string(), callback)
+        .unwrap();
 
     let dispatcher = Arc::new(InboundDispatcher::new(
         pending,
@@ -349,8 +351,12 @@ async fn bridge_keeps_traffic_classes_independent() {
         })
     });
     // One stream per class, so each class is observed on its own.
-    registry.register("reliable-stream".to_string(), callback.clone());
-    registry.register("latency-first-stream".to_string(), callback);
+    registry
+        .register("reliable-stream".to_string(), callback.clone())
+        .unwrap();
+    registry
+        .register("latency-first-stream".to_string(), callback)
+        .unwrap();
 
     let dispatcher = Arc::new(InboundDispatcher::new(
         pending,

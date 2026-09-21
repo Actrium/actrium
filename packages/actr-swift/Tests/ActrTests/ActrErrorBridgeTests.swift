@@ -79,7 +79,7 @@ struct ActrErrorBridgeTests {
             try ActrBindings.actrErrorThrowForTest(
                 err: .DeliveryUncertain(
                     operationId: "swift-ffi-1",
-                    cause: "ambiguous partial write"
+                    causeDetail: "ambiguous partial write"
                 ))
             Issue.record("actrErrorThrowForTest was expected to throw")
         } catch let error as ActrBindings.ActrError {

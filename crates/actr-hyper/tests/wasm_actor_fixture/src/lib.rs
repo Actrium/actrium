@@ -33,6 +33,15 @@ use bytes::Bytes;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::UNIX_EPOCH;
 
+thread_local! {
+    /// Parked `test/captured-context-stream` subscription + its captured
+    /// context, type-erased because the dispatcher is generic over `C:
+    /// Context` (the same `C` is used for register and drain within one
+    /// test).
+    static PARKED_STREAM: std::cell::RefCell<Option<Box<dyn std::any::Any>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 #[derive(Clone, PartialEq, actr_protocol::prost::Message)]
 struct TypedDoubleRequest {
     #[prost(int32, tag = "1")]
@@ -285,30 +294,90 @@ impl MessageDispatcher for DoubleDispatcher {
                 Ok(Bytes::from(peak.to_le_bytes().to_vec()))
             }
             "test/register-stream-context" => {
-                // A stream callback executes after this dispatch has returned.
-                // Capturing Context is the only way the callback-only API can
-                // issue host operations later, so this locks in the V2 token
-                // rebinding contract.
+                // The stream consumer executes after this dispatch has
+                // returned. Capturing Context is the only way the consumer
+                // can issue host operations later, so this locks in the V2
+                // token rebinding contract.
                 let callback_ctx = ctx.clone();
-                ctx.register_stream(
-                    "test/captured-context-stream".to_string(),
-                    move |_chunk, _sender| {
-                        let callback_ctx = callback_ctx.clone();
-                        Box::pin(async move {
-                            callback_ctx
-                                .call_raw(
-                                    callback_ctx.self_id(),
-                                    "test/stream-callback",
-                                    Bytes::from_static(b"stream-callback"),
-                                    30_000,
-                                )
-                                .await?;
-                            Ok(())
-                        })
-                    },
-                )
-                .await?;
+                let mut incoming = ctx
+                    .data_chunks(
+                        "test/captured-context-stream".to_string(),
+                        Default::default(),
+                    )
+                    .await?;
+                let consumer = async move {
+                    use futures_util::StreamExt;
+                    while let Some(event) = incoming.next().await {
+                        if event.is_err() {
+                            break;
+                        }
+                        let _ = callback_ctx
+                            .call_raw(
+                                callback_ctx.self_id(),
+                                "test/stream-callback",
+                                Bytes::from_static(b"stream-callback"),
+                                30_000,
+                            )
+                            .await;
+                    }
+                };
+                #[cfg(target_arch = "wasm32")]
+                actr_framework::guest::wasm::spawn_local(consumer);
+                #[cfg(not(target_arch = "wasm32"))]
+                tokio::spawn(consumer);
                 Ok(Bytes::new())
+            }
+            "test/park-stream-context" => {
+                // Resident-region variant: on wasm32-wasip2 guest code only
+                // runs while some invocation is active, and the resident
+                // run_concurrent region retires subtasks when their command
+                // completes — so a spawned consumer cannot outlive its
+                // dispatch there. Park the subscription instead and consume
+                // it in a later invocation ("test/drain-parked-stream").
+                let incoming = ctx
+                    .data_chunks(
+                        "test/captured-context-stream".to_string(),
+                        Default::default(),
+                    )
+                    .await?;
+                PARKED_STREAM.with(|slot| {
+                    *slot.borrow_mut() = Some(Box::new(incoming));
+                });
+                Ok(Bytes::new())
+            }
+            "test/drain-parked-stream" => {
+                let taken = PARKED_STREAM.with(|slot| slot.borrow_mut().take());
+                let Some(boxed) = taken else {
+                    return Err(ActrError::Internal(
+                        "no parked stream; call test/park-stream-context first".into(),
+                    ));
+                };
+                let Ok(mut incoming) = boxed.downcast::<actr_framework::DataChunkStream>() else {
+                    return Err(ActrError::Internal("parked stream type mismatch".into()));
+                };
+                use futures_util::StreamExt;
+                let mut drained = 0u64;
+                // The test dispatches exactly one chunk; take it, then close
+                // (awaiting the next item would pend on the open channel).
+                if let Some(event) = incoming.next().await {
+                    if event.is_ok() {
+                        drained += 1;
+                        // Use THIS invocation's live context: the captured
+                        // registration token is only aliased during the
+                        // on-data-chunk invocation (begin_stream_callback),
+                        // not here.
+                        let _ = ctx
+                            .call_raw(
+                                ctx.self_id(),
+                                "test/stream-callback",
+                                Bytes::from_static(b"stream-callback"),
+                                30_000,
+                            )
+                            .await;
+                    }
+                }
+                incoming.close().await;
+                Ok(Bytes::from(drained.to_le_bytes().to_vec()))
             }
             "test/boom-after-await" => {
                 // Exercise Phase 0.5 spike Test 8: perform a host-side

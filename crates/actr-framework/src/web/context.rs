@@ -33,14 +33,14 @@
 use std::rc::Rc;
 
 use actr_protocol::{
-    ActorResult, ActrError, ActrId, ActrType, ConnectionNotReadyInfo, DataChunk, PayloadType,
+    ActorResult, ActrError, ActrId, ActrType, ConnectionNotReadyInfo, PayloadType,
     RpcRequest,
 };
 use async_trait::async_trait;
 use futures_util::future::BoxFuture;
 use prost::Message as ProstMessage;
 
-use crate::{Context, Dest, LogLevel, MaybeSendBoxFuture, MaybeSendSync, MediaSample};
+use crate::{Context, Dest, LogLevel, MediaSample};
 
 // Pull in the WIT-lowered mirror types from `actr-web-abi` under aliases
 // so the guest-import call sites don't have to disambiguate per line.
@@ -165,6 +165,10 @@ fn wit_error_to_proto(e: wit::ActrError) -> ActrError {
         wit::ActrError::DecodeFailure(m) => ActrError::DecodeFailure(m),
         wit::ActrError::NotImplemented(m) => ActrError::NotImplemented(m),
         wit::ActrError::Internal(m) => ActrError::Internal(m),
+        wit::ActrError::DeliveryUncertain(p) => ActrError::DeliveryUncertain {
+            operation_id: p.operation_id,
+            cause: p.cause,
+        },
     }
 }
 
@@ -314,26 +318,21 @@ impl Context for WebContext {
 
     // ── DataChunk fast path (not supported on web) ─────────────────────
 
-    async fn register_stream<F>(&self, _stream_id: String, _callback: F) -> ActorResult<()>
-    where
-        F: Fn(DataChunk, ActrId) -> MaybeSendBoxFuture<'static, ActorResult<()>>
-            + MaybeSendSync
-            + 'static,
-    {
-        Err(Self::not_implemented("register_stream"))
+    async fn data_chunks(
+        &self,
+        _stream_id: String,
+        _options: crate::DataChunkStreamOptions,
+    ) -> ActorResult<crate::DataChunkStream> {
+        Err(Self::not_implemented("data_chunks"))
     }
 
-    async fn unregister_stream(&self, _stream_id: &str) -> ActorResult<()> {
-        Err(Self::not_implemented("unregister_stream"))
-    }
-
-    async fn send_data_chunk(
+    async fn data_chunk_sink(
         &self,
         _target: &Dest,
-        _chunk: DataChunk,
+        _stream_id: String,
         _payload_type: PayloadType,
-    ) -> ActorResult<()> {
-        Err(Self::not_implemented("send_data_chunk"))
+    ) -> ActorResult<crate::DataChunkSink> {
+        Err(Self::not_implemented("data_chunk_sink"))
     }
 
     // ── MediaTrack fast path (WebRTC native, not available to web guests) ──

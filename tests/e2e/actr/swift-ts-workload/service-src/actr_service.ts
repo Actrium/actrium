@@ -5,6 +5,8 @@ import {
   defineWorkload,
   type ActrId,
   type DataChunk,
+  type DataChunkSink,
+  type DataChunkStream,
   type MetadataEntry,
 } from '@actrium/actr-workload';
 
@@ -37,6 +39,8 @@ type SessionState = {
   payloadType: PayloadType;
   clientChunksReceived: number;
   serviceChunksSent: number;
+  stream?: DataChunkStream;
+  sink?: DataChunkSink;
 };
 
 const sessionsById = new Map<string, SessionState>();
@@ -84,22 +88,32 @@ class DuplexEchoServiceHandlerImpl implements ActrDispatchHandler {
       serviceChunksSent: 0,
     };
 
-    await ctx.registerStream(
-      request.clientToServiceStreamId,
-      async (chunk, sender, streamCtx) => {
-        await this.onClientChunk(chunk, sender, streamCtx);
-      },
-    );
+    state.stream = await ctx.dataChunks(request.clientToServiceStreamId);
 
     sessionsById.set(request.sessionId, state);
     sessionIdByClientStreamId.set(request.clientToServiceStreamId, request.sessionId);
+
+    void this.consumeClientChunks(state.stream, ctx);
 
     return create(StartDuplexStreamResponseSchema, {
       sessionId: request.sessionId,
       acceptedClientToServiceStreamId: request.clientToServiceStreamId,
       serviceToClientStreamId,
-      status: `registered:${request.clientToServiceStreamId}`,
+      status: `subscribed:${request.clientToServiceStreamId}`,
     });
+  }
+
+  private async consumeClientChunks(
+    stream: DataChunkStream,
+    ctx: ActrContext,
+  ): Promise<void> {
+    try {
+      for await (const event of stream) {
+        await this.onClientChunk(event.chunk, event.sender, ctx);
+      }
+    } finally {
+      await stream.close();
+    }
   }
 
   async duplexEchoServiceFinishDuplexStream(
@@ -107,7 +121,8 @@ class DuplexEchoServiceHandlerImpl implements ActrDispatchHandler {
     ctx: ActrContext,
   ): Promise<FinishDuplexStreamResponse> {
     const state = sessionsById.get(request.sessionId);
-    await ctx.unregisterStream(request.clientToServiceStreamId);
+    await state?.stream?.close();
+    await state?.sink?.close();
     sessionIdByClientStreamId.delete(request.clientToServiceStreamId);
     if (state) {
       sessionsById.delete(request.sessionId);
@@ -116,7 +131,7 @@ class DuplexEchoServiceHandlerImpl implements ActrDispatchHandler {
       sessionId: request.sessionId,
       clientChunksReceived: state?.clientChunksReceived ?? 0,
       serviceChunksSent: state?.serviceChunksSent ?? 0,
-      status: `unregistered:${request.clientToServiceStreamId}`,
+      status: `closed:${request.clientToServiceStreamId}`,
     });
   }
 
@@ -145,17 +160,20 @@ class DuplexEchoServiceHandlerImpl implements ActrDispatchHandler {
       { key: 'source_stream_id', value: chunk.streamId },
     ];
 
-    await ctx.sendDataChunk(
-      { peer: sender },
-      {
-        streamId: state.serviceToClientStreamId,
-        sequence: ackSequence,
-        payload: textEncoder.encode(ackPayload),
-        metadata: ackMetadata,
-        timestampMs: BigInt(Date.now()),
-      },
-      state.payloadType,
-    );
+    if (!state.sink) {
+      state.sink = await ctx.dataChunkSink(
+        { peer: sender },
+        state.serviceToClientStreamId,
+        state.payloadType,
+      );
+    }
+    await state.sink.send({
+      streamId: state.serviceToClientStreamId,
+      sequence: ackSequence,
+      payload: textEncoder.encode(ackPayload),
+      metadata: ackMetadata,
+      timestampMs: BigInt(Date.now()),
+    });
   }
 }
 

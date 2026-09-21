@@ -127,13 +127,20 @@ open class SimpleWorkload(
     override suspend fun onStart(ctx: ActrContext) {
         // Start a coroutine to handle DataChunk requests
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+            // Sinks are bound to (target, streamId); cache one per pair.
+            val sinks =
+                mutableMapOf<Pair<ActrId, String>, io.actrium.actr.DataChunkSinkBridge>()
             for (request in dataChunkChannel) {
                 try {
-                    ctx.sendDataChunk(
-                        request.target,
-                        request.dataChunk,
-                        PayloadType.STREAM_RELIABLE,
-                    )
+                    val key = request.target to request.dataChunk.streamId
+                    val sink = sinks.getOrPut(key) {
+                        ctx.dataChunkSink(
+                            request.target,
+                            request.dataChunk.streamId,
+                            PayloadType.STREAM_RELIABLE,
+                        )
+                    }
+                    sink.send(request.dataChunk)
                 } catch (e: Exception) {
                     // Log error but continue processing
                     println("Failed to send DataChunk: ${e.message}")

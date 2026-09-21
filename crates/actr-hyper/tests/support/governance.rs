@@ -41,6 +41,9 @@ pub struct Journal {
     changed: Notify,
     pub reply_release: Semaphore,
     pub chunk_release: Semaphore,
+    /// Per-stream consumer tasks spawned by the "open-stream" command;
+    /// "finish" aborts the task, dropping the stream and unregistering it.
+    stream_tasks: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
 }
 
 impl Default for Journal {
@@ -50,6 +53,7 @@ impl Default for Journal {
             changed: Notify::new(),
             reply_release: Semaphore::new(0),
             chunk_release: Semaphore::new(0),
+            stream_tasks: Mutex::default(),
         }
     }
 }
@@ -121,26 +125,34 @@ impl MessageDispatcher for RecordingDispatcher {
             "open-stream" => {
                 let stream = String::from_utf8(payload.to_vec()).unwrap();
                 let journal = w.0.clone();
-                ctx.register_stream(stream.clone(), move |chunk, _| {
-                    let journal = journal.clone();
-                    let stream = stream.clone();
-                    Box::pin(async move {
+                let mut chunks = ctx.data_chunks(stream.clone(), Default::default()).await?;
+                let task_stream = stream.clone();
+                let handle = tokio::spawn(async move {
+                    use futures_util::StreamExt;
+                    while let Some(event) = chunks.next().await {
+                        let Ok(event) = event else { break };
+                        let chunk = event.chunk;
                         journal.record(
-                            format!("chunk-enter:{stream}:{}", chunk.sequence),
+                            format!("chunk-enter:{task_stream}:{}", chunk.sequence),
                             chunk.payload.clone(),
                         );
-                        if stream.starts_with("held-") {
+                        if task_stream.starts_with("held-") {
                             journal.chunk_release.acquire().await.unwrap().forget();
                         }
-                        journal.record(format!("chunk:{stream}:{}", chunk.sequence), chunk.payload);
-                        Ok(())
-                    })
-                })
-                .await?;
+                        journal.record(
+                            format!("chunk:{task_stream}:{}", chunk.sequence),
+                            chunk.payload,
+                        );
+                    }
+                });
+                w.0.stream_tasks.lock().unwrap().insert(stream, handle);
             }
             "finish" => {
                 let stream = String::from_utf8(payload.to_vec()).unwrap();
-                ctx.unregister_stream(&stream).await?;
+                if let Some(handle) = w.0.stream_tasks.lock().unwrap().remove(&stream) {
+                    // Aborting drops the stream, which unregisters it.
+                    handle.abort();
+                }
                 w.0.record(format!("finished:{stream}"), Bytes::new());
             }
             _ => {}

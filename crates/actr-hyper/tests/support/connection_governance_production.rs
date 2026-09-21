@@ -118,7 +118,7 @@ async fn production_answerer_replacement_delivers_tell_signal_and_both_stream_la
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn production_finish_drains_already_entered_callback_without_blocking_rpc() {
+async fn production_finish_cancels_held_callback_without_blocking_rpc() {
     let pair = Nodes::new(TestRtcRole::Answerer).await;
     let stream = "held-finish";
     pair.call(
@@ -150,10 +150,21 @@ async fn production_finish_drains_already_entered_callback_without_blocking_rpc(
     pair.call(1, "finish", Bytes::from_static(stream.as_bytes()), 3_000)
         .await
         .expect("Finish must not block behind callback");
-    pair.echo(1, "unrelated-rpc-during-drain").await;
+    pair.echo(1, "unrelated-rpc-during-cancel").await;
+    // Explicit consumer close is the cancellation exception: the in-flight
+    // delivery is aborted, so releasing the held callback must NOT complete
+    // it afterwards.
     pair.journals[0].chunk_release.add_permits(1);
-    pair.journals[0].wait("chunk:held-finish:1", 1).await;
-    assert_eq!(pair.journals[0].count("chunk:held-finish:1"), 1);
+    let completed = tokio::time::timeout(
+        Duration::from_millis(500),
+        pair.journals[0].wait("chunk:held-finish:1", 1),
+    )
+    .await;
+    assert!(
+        completed.is_err(),
+        "cancelled stream must not drain its held callback after finish"
+    );
+    assert_eq!(pair.journals[0].count("chunk:held-finish:1"), 0);
     pair.shutdown().await;
 }
 

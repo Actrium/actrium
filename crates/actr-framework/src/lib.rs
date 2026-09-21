@@ -121,6 +121,7 @@
 
 // Module declarations
 mod context;
+mod data_chunk;
 mod dest;
 mod dispatcher;
 mod reply;
@@ -145,6 +146,15 @@ pub mod test_support;
 
 // Public re-exports
 pub use context::{Context, LogLevel, MaybeSendBoxFuture, MaybeSendSync, MediaSample, MediaType};
+pub use data_chunk::{
+    DEFAULT_DATA_CHUNK_CAPACITY, DataChunkEvent, DataChunkSink, DataChunkStream,
+    DataChunkStreamOptions,
+};
+// Backend construction hooks (runtime implementations, not user code).
+#[doc(hidden)]
+pub use data_chunk::{
+    SendDataChunkFn, StreamCancelFn, StreamCloser, StreamWaitFn, validate_stream_options,
+};
 pub use dest::Dest;
 pub use dispatcher::MessageDispatcher;
 pub use reply::{Deliver, Reply, ReplyDeadline, ReplyDispatchGuard, ReplyOutcome};

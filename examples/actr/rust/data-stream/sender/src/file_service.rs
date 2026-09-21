@@ -80,6 +80,15 @@ impl LocalFileServiceHandler for MyFileService {
         // Phase 2: Send DataChunks (Data Plane - Fast Path)
         info!("📦 Phase 2: Sending {} DataChunks...", chunks.len());
 
+        use futures_util::SinkExt;
+        let mut sink = ctx
+            .data_chunk_sink(
+                &Dest::Peer(receiver_id.clone()),
+                "test-stream-001".to_string(),
+                actr_protocol::PayloadType::StreamReliable,
+            )
+            .await?;
+
         for (i, chunk) in chunks.iter().enumerate() {
             let data_chunk = DataChunk {
                 stream_id: "test-stream-001".to_string(),
@@ -89,12 +98,7 @@ impl LocalFileServiceHandler for MyFileService {
                 timestamp_ms: Some(chrono::Utc::now().timestamp_millis()),
             };
 
-            ctx.send_data_chunk(
-                &Dest::Peer(receiver_id.clone()),
-                data_chunk,
-                actr_protocol::PayloadType::StreamReliable,
-            )
-                .await?;
+            sink.send(data_chunk).await?;
 
             let progress = ((i + 1) as f64 / chunks.len() as f64 * 100.0) as u32;
             info!(
@@ -105,6 +109,8 @@ impl LocalFileServiceHandler for MyFileService {
                 progress
             );
         }
+
+        sink.close().await?;
 
         info!("✅ All chunks sent successfully");
 

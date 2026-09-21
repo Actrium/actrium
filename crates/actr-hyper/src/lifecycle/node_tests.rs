@@ -523,6 +523,7 @@ async fn callraw_without_peer_returns_internal() {
     let res = host_operation_handler(
         ctx,
         weak_runner(&wl),
+        Default::default(),
         // A positive timeout is required to pass sender-side validation so the
         // call reaches gate selection, which is the path under test here.
         HostOperation::CallRaw(HostCallRawV1 {
@@ -541,6 +542,7 @@ async fn call_with_default_dest_returns_error() {
     let res = host_operation_handler(
         ctx,
         weak_runner(&wl),
+        Default::default(),
         HostOperation::Call(HostCallV1::default()),
     )
     .await;
@@ -553,6 +555,7 @@ async fn tell_with_default_dest_returns_error() {
     let res = host_operation_handler(
         ctx,
         weak_runner(&wl),
+        Default::default(),
         HostOperation::Tell(HostTellV1::default()),
     )
     .await;
@@ -565,6 +568,7 @@ async fn discover_without_realm_returns_unavailable() {
     let res = host_operation_handler(
         ctx,
         weak_runner(&wl),
+        Default::default(),
         HostOperation::Discover(HostDiscoverV1::default()),
     )
     .await;
@@ -581,6 +585,7 @@ async fn missing_dependency_alias_preserves_structured_error() {
     let result = host_operation_handler(
         ctx,
         weak_runner(&workload),
+        Default::default(),
         HostOperation::ResolveDependency(HostResolveDependencyV1 {
             alias: "missing".into(),
         }),
@@ -598,6 +603,7 @@ async fn register_and_unregister_stream_roundtrip() {
     let register = host_operation_handler(
         ctx.clone(),
         weak_runner(&wl),
+        Default::default(),
         HostOperation::RegisterStream(HostRegisterStreamV1 {
             stream_id: "stream-1".to_string(),
         }),
@@ -611,6 +617,7 @@ async fn register_and_unregister_stream_roundtrip() {
     let unregister = host_operation_handler(
         ctx,
         weak_runner(&wl),
+        Default::default(),
         HostOperation::UnregisterStream(HostUnregisterStreamV1 {
             stream_id: "stream-1".to_string(),
         }),
@@ -623,7 +630,7 @@ async fn register_and_unregister_stream_roundtrip() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn node_teardown_releases_registered_stream_callback_cycle() {
+async fn node_teardown_releases_data_chunk_registry_without_cycle() {
     let (ctx, wl) = harness().await;
     let registry = ctx.data_chunk_registry_for_test();
     let weak_registry = Arc::downgrade(&registry);
@@ -632,6 +639,7 @@ async fn node_teardown_releases_registered_stream_callback_cycle() {
     let register = host_operation_handler(
         ctx.clone(),
         weak_runner(&wl),
+        Default::default(),
         HostOperation::RegisterStream(HostRegisterStreamV1 {
             stream_id: "cycle-stream".to_string(),
         }),
@@ -639,9 +647,8 @@ async fn node_teardown_releases_registered_stream_callback_cycle() {
     .await;
     assert!(matches!(register, HostOperationResult::Done));
 
-    // Execute the exact callback installed by the host bridge. A linked
-    // workload intentionally reports NotImplemented for package stream
-    // callbacks, which proves the callback reached the live actor runner.
+    // The registered callback is the host bridge feeding the guest-delivery
+    // forwarder; invoking it accepts the chunk into the subscription queue.
     let callback_result = registry
         .invoke_for_test(
             actr_protocol::DataChunk {
@@ -653,7 +660,23 @@ async fn node_teardown_releases_registered_stream_callback_cycle() {
         )
         .await
         .expect("registered callback");
-    assert!(matches!(callback_result, Err(ActrError::NotImplemented(_))));
+    assert!(
+        callback_result.is_ok(),
+        "bridge callback accepts the chunk: {callback_result:?}"
+    );
+
+    // The forwarder then delivers the chunk to the live actor runner. A
+    // linked workload intentionally reports NotImplemented for stream
+    // callbacks, so the forwarder tears the subscription down — proving the
+    // delivery reached the runner.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while registry.callback_len() != 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "forwarder did not tear down the subscription after runner-side delivery failure"
+        );
+        tokio::task::yield_now().await;
+    }
 
     drop(ctx);
     // `ActorHandle::drop` only schedules cancellation. Join the runner before
@@ -662,18 +685,21 @@ async fn node_teardown_releases_registered_stream_callback_cycle() {
     wl.abort_and_join().await;
     drop(wl);
     drop(registry);
-    assert!(
-        weak_registry.upgrade().is_some(),
-        "the regression fixture must retain the registry through its callback"
-    );
 
-    // `Inner` owns this guard in production. Dropping it clears callbacks,
-    // which drops the captured RuntimeContext and releases the registry.
+    // The stream-first bridge callback captures only the subscription channel
+    // sender — never the RuntimeContext — so the old callback -> context ->
+    // registry ownership cycle cannot form: once the context, runner, and
+    // test handle are dropped, the registry is released immediately. The
+    // cleanup guard (Weak) is a no-op on the dead registry.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while weak_registry.upgrade().is_some() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "stream-first teardown must not retain the data chunk registry"
+        );
+        tokio::task::yield_now().await;
+    }
     drop(cleanup);
-    assert!(
-        weak_registry.upgrade().is_none(),
-        "node teardown must break the stream callback ownership cycle"
-    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -682,6 +708,7 @@ async fn unregister_unknown_stream_is_idempotent_done() {
     let res = host_operation_handler(
         ctx,
         weak_runner(&wl),
+        Default::default(),
         HostOperation::UnregisterStream(HostUnregisterStreamV1 {
             stream_id: "never-registered".to_string(),
         }),
@@ -701,6 +728,7 @@ async fn send_data_chunk_rejects_non_stream_payload_type() {
     let res = host_operation_handler(
         ctx,
         weak_runner(&wl),
+        Default::default(),
         HostOperation::SendDataChunk(HostSendDataChunkV1 {
             dest: DestV1::workload(),
             payload_type: PayloadType::RpcReliable as i32,
@@ -717,6 +745,7 @@ async fn send_data_chunk_rejects_unknown_payload_type() {
     let res = host_operation_handler(
         ctx,
         weak_runner(&wl),
+        Default::default(),
         HostOperation::SendDataChunk(HostSendDataChunkV1 {
             dest: DestV1::workload(),
             payload_type: 9999,
@@ -734,6 +763,7 @@ async fn send_data_chunk_valid_type_routes_and_errors() {
     let res = host_operation_handler(
         ctx,
         weak_runner(&wl),
+        Default::default(),
         HostOperation::SendDataChunk(HostSendDataChunkV1 {
             dest: DestV1::workload(),
             payload_type: PayloadType::StreamReliable as i32,
@@ -762,6 +792,7 @@ async fn stream_callback_callraw_without_peer_errors() {
     let ctx = actorless_harness().await.0;
     let res = stream_callback_host_operation_handler(
         ctx,
+        Default::default(),
         // A positive timeout is required to pass sender-side validation so the
         // call reaches gate selection, which is the path under test here.
         HostOperation::CallRaw(HostCallRawV1 {
@@ -776,18 +807,24 @@ async fn stream_callback_callraw_without_peer_errors() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stream_callback_call_with_default_dest_errors() {
     let ctx = ctx_only().await;
-    let res =
-        stream_callback_host_operation_handler(ctx, HostOperation::Call(HostCallV1::default()))
-            .await;
+    let res = stream_callback_host_operation_handler(
+        ctx,
+        Default::default(),
+        HostOperation::Call(HostCallV1::default()),
+    )
+    .await;
     expect_abi_error_code(res, abi_code::PROTOCOL_ERROR);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stream_callback_tell_with_default_dest_errors() {
     let ctx = ctx_only().await;
-    let res =
-        stream_callback_host_operation_handler(ctx, HostOperation::Tell(HostTellV1::default()))
-            .await;
+    let res = stream_callback_host_operation_handler(
+        ctx,
+        Default::default(),
+        HostOperation::Tell(HostTellV1::default()),
+    )
+    .await;
     expect_abi_error_code(res, abi_code::PROTOCOL_ERROR);
 }
 
@@ -796,6 +833,7 @@ async fn stream_callback_discover_errors() {
     let ctx = ctx_only().await;
     let res = stream_callback_host_operation_handler(
         ctx,
+        Default::default(),
         HostOperation::Discover(HostDiscoverV1::default()),
     )
     .await;
@@ -810,6 +848,7 @@ async fn stream_callback_register_stream_is_unsupported() {
     let ctx = ctx_only().await;
     let res = stream_callback_host_operation_handler(
         ctx,
+        Default::default(),
         HostOperation::RegisterStream(HostRegisterStreamV1 {
             stream_id: "s".to_string(),
         }),
@@ -824,6 +863,7 @@ async fn stream_callback_unregister_is_idempotent_done() {
     let ctx = ctx_only().await;
     let res = stream_callback_host_operation_handler(
         ctx,
+        Default::default(),
         HostOperation::UnregisterStream(HostUnregisterStreamV1 {
             stream_id: "never".to_string(),
         }),
@@ -840,6 +880,7 @@ async fn stream_callback_send_rejects_non_stream_payload_type() {
     let ctx = ctx_only().await;
     let res = stream_callback_host_operation_handler(
         ctx,
+        Default::default(),
         HostOperation::SendDataChunk(HostSendDataChunkV1 {
             dest: DestV1::workload(),
             payload_type: PayloadType::RpcReliable as i32,
@@ -855,6 +896,7 @@ async fn stream_callback_send_rejects_unknown_payload_type() {
     let ctx = ctx_only().await;
     let res = stream_callback_host_operation_handler(
         ctx,
+        Default::default(),
         HostOperation::SendDataChunk(HostSendDataChunkV1 {
             dest: DestV1::workload(),
             payload_type: 9999,
@@ -870,6 +912,7 @@ async fn stream_callback_send_valid_type_routes_and_errors() {
     let ctx = ctx_only().await;
     let res = stream_callback_host_operation_handler(
         ctx,
+        Default::default(),
         HostOperation::SendDataChunk(HostSendDataChunkV1 {
             dest: DestV1::workload(),
             payload_type: PayloadType::StreamLatencyFirst as i32,
@@ -2647,6 +2690,7 @@ async fn call_with_stream_lane_is_rejected_as_invalid_argument() {
     let res = host_operation_handler(
         ctx,
         weak_runner(&wl),
+        Default::default(),
         // A guest that (incorrectly) declares a stream lane for a typed call
         // must surface InvalidArgument from ensure_rpc_payload_type, not have
         // the lane silently dropped onto the reliable lane.
@@ -2674,6 +2718,7 @@ async fn call_with_signal_lane_passes_lane_validation() {
     let res = host_operation_handler(
         ctx,
         weak_runner(&wl),
+        Default::default(),
         // RpcSignal is a valid RPC lane: lane validation passes and the call
         // proceeds to gate selection, which fails here only because no remote
         // actor gate is installed (same outcome as the reliable-lane case).

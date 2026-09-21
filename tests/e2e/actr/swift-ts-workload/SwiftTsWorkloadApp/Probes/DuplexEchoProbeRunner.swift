@@ -8,6 +8,8 @@ final class DuplexEchoProbeRunner: @unchecked Sendable {
 
     private let ctx: any ActrContext
     private let target: ActrId
+    /// Outbound sinks cached per stream ID (a sink binds target + stream ID + lane).
+    private var sinks: [String: DataChunkSink] = [:]
 
     init(ctx: any ActrContext, target: ActrId) {
         self.ctx = ctx
@@ -47,18 +49,28 @@ final class DuplexEchoProbeRunner: @unchecked Sendable {
     // MARK: - Standard session flow (document lines 163-211)
     // 1. client generate session_id + c2s_id
     // 2. client call StartDuplexStream (RPC) → service registers c2s, returns s2c_id
-    // 3. client registers s2c callback
+    // 3. client subscribes s2c via dataChunks
     // 4. client sends chunks on c2s → service echos ack on s2c
     // 5. client verifies acks
     // 6. client calls FinishDuplexStream → service unregisters c2s
-    // 7. client unregisters s2c
+    // 7. client closes s2c subscription
 
     struct Session {
-        let sid: String; let c2s: String; let s2c: String; let col: SessionAckCollector
+        let sid: String
+        let c2s: String
+        let s2c: String
+        let col: SessionAckCollector
+        let stream: DataChunkSequence
+        let pump: Task<Void, Never>
     }
 
     struct EchoSession {
-        let sid: String; let c2s: String; let s2c: String; let col: StreamEchoCollector
+        let sid: String
+        let c2s: String
+        let s2c: String
+        let col: StreamEchoCollector
+        let stream: DataChunkSequence
+        let pump: Task<Void, Never>
     }
 
     struct StreamEchoRunResult {
@@ -68,7 +80,32 @@ final class DuplexEchoProbeRunner: @unchecked Sendable {
         let logLines: [String]
     }
 
-    /// Start session per doc: StartDuplexStream → register s2c callback.
+    private func sink(for streamId: String, payloadType: PayloadType) async throws -> DataChunkSink {
+        if let sink = sinks[streamId] { return sink }
+        let sink = try await ctx.dataChunkSink(target: target, streamId: streamId, payloadType: payloadType)
+        sinks[streamId] = sink
+        return sink
+    }
+
+    private func closeSink(for streamId: String) async {
+        guard let sink = sinks.removeValue(forKey: streamId) else { return }
+        try? await sink.close()
+    }
+
+    /// Pump a subscription into a collector until the stream ends.
+    private func pumpAcks(_ stream: DataChunkSequence, into col: SessionAckCollector) -> Task<Void, Never> {
+        Task {
+            do {
+                for try await event in stream {
+                    await col.record(chunk: event.chunk)
+                }
+            } catch {
+                // Stream errors surface through waitForCompletion timeouts.
+            }
+        }
+    }
+
+    /// Start session per doc: StartDuplexStream → subscribe s2c.
     func start(sid: String, mode: Local_StreamPayloadMode, count: UInt32, log: inout [String]) async throws -> Session {
         let c2s = "c2s-\(sid)"
         var req = Local_StartDuplexStreamRequest()
@@ -87,9 +124,10 @@ final class DuplexEchoProbeRunner: @unchecked Sendable {
         guard !s2c.isEmpty else { throw ProbeError.runtimeError("empty service_to_client_stream_id") }
 
         let col = SessionAckCollector(streamId: s2c, expectedCount: Int(count))
-        try await ctx.registerStream(streamId: s2c, callback: col)
-        log.append("Registered \(s2c)")
-        return Session(sid: sid, c2s: c2s, s2c: s2c, col: col)
+        let stream = try await ctx.dataChunks(streamId: s2c, capacity: nil)
+        let pump = pumpAcks(stream, into: col)
+        log.append("Subscribed \(s2c)")
+        return Session(sid: sid, c2s: c2s, s2c: s2c, col: col, stream: stream, pump: pump)
     }
 
     func finish(s: Session, log: inout [String]) async throws -> Local_FinishDuplexStreamResponse {
@@ -104,14 +142,16 @@ final class DuplexEchoProbeRunner: @unchecked Sendable {
 
     func teardown(s: Session, log: inout [String]) async throws {
         _ = try await finish(s: s, log: &log)
-        try await ctx.unregisterStream(streamId: s.s2c)
-        log.append("Unregistered \(s.s2c)")
+        await s.stream.close()
+        s.pump.cancel()
+        await closeSink(for: s.c2s)
+        log.append("Closed \(s.s2c)")
     }
 
     func sendChunk(c2s: String, seq: UInt64, payload: Data, pt: PayloadType, sid: String, log: inout [String]) async throws {
         let chunk = DataChunk(streamId: c2s, sequence: seq, payload: payload,
             metadata: [.init(key: "session_id", value: sid)], timestampMs: nil)
-        try await ctx.sendDataChunk(target: target, chunk: chunk, payloadType: pt)
+        try await sink(for: c2s, payloadType: pt).send(chunk)
         log.append("Sent seq=\(seq) on \(c2s)")
     }
 
@@ -155,7 +195,7 @@ final class DuplexEchoProbeRunner: @unchecked Sendable {
                     ],
                     timestampMs: nil
                 )
-                try await ctx.sendDataChunk(target: target, chunk: chunk, payloadType: .streamReliable)
+                try await sink(for: s.c2s, payloadType: .streamReliable).send(chunk)
                 let sentLine = "sent: \(text)"
                 log.append(sentLine)
                 await onLog?(sentLine, nil)
@@ -231,9 +271,18 @@ final class DuplexEchoProbeRunner: @unchecked Sendable {
         let col = StreamEchoCollector(streamId: s2c, expectedCount: Int(count)) { logLine, receivedLine in
             await onLog?(logLine, receivedLine)
         }
-        try await ctx.registerStream(streamId: s2c, callback: col)
-        log.append("Registered \(s2c)")
-        return EchoSession(sid: sid, c2s: c2s, s2c: s2c, col: col)
+        let stream = try await ctx.dataChunks(streamId: s2c, capacity: nil)
+        let pump = Task {
+            do {
+                for try await event in stream {
+                    await col.record(chunk: event.chunk)
+                }
+            } catch {
+                // Stream errors surface through waitForCompletion timeouts.
+            }
+        }
+        log.append("Subscribed \(s2c)")
+        return EchoSession(sid: sid, c2s: c2s, s2c: s2c, col: col, stream: stream, pump: pump)
     }
 
     private func teardownEcho(s: EchoSession, log: inout [String]) async throws {
@@ -258,15 +307,10 @@ final class DuplexEchoProbeRunner: @unchecked Sendable {
             log.append("[FAIL] Finish failed: \(error)")
         }
 
-        do {
-            try await ctx.unregisterStream(streamId: s.s2c)
-            log.append("Unregistered \(s.s2c)")
-        } catch {
-            log.append("[FAIL] Unregister \(s.s2c) failed: \(error)")
-            if firstError == nil {
-                firstError = error
-            }
-        }
+        await s.stream.close()
+        s.pump.cancel()
+        await closeSink(for: s.c2s)
+        log.append("Closed \(s.s2c)")
 
         if let firstError {
             throw firstError
@@ -340,7 +384,7 @@ final class DuplexEchoProbeRunner: @unchecked Sendable {
             let seq = UInt64(i+1)
             let chunk = DataChunk(streamId: s.c2s, sequence: seq, payload: Data(label.utf8),
                 metadata: [.init(key: "session_id", value: s.sid), .init(key: "direction", value: "client-to-service"), .init(key: "chunk_label", value: label)], timestampMs: nil)
-            try await ctx.sendDataChunk(target: target, chunk: chunk, payloadType: .streamReliable)
+            try await sink(for: s.c2s, payloadType: .streamReliable).send(chunk)
             log.append("Sent seq=\(seq) \(label)")
         }
         let acks = try await s.col.waitForCompletion()
@@ -391,14 +435,14 @@ final class DuplexEchoProbeRunner: @unchecked Sendable {
             sessions.append((sid, s)); log.append(contentsOf: sl)
         }
 
-        // Send concurrently
+        // Send concurrently (sinks serialize per stream inside the bridge).
         try await withThrowingTaskGroup(of: Void.self) { g in
             for (sid, s) in sessions {
                 g.addTask {
                     for seq: UInt64 in [1,2] {
                         let chunk = DataChunk(streamId: s.c2s, sequence: seq, payload: Data("\(sid == "concurrent-apple" ? "apple" : "banana")-\(seq)".utf8),
                             metadata: [.init(key: "session_id", value: sid)], timestampMs: nil)
-                        try await self.ctx.sendDataChunk(target: self.target, chunk: chunk, payloadType: .streamReliable)
+                        try await self.sink(for: s.c2s, payloadType: .streamReliable).send(chunk)
                     }
                 }
             }
@@ -439,11 +483,13 @@ final class DuplexEchoProbeRunner: @unchecked Sendable {
         // Send post-finish chunk
         let post = DataChunk(streamId: s.c2s, sequence: 99, payload: Data("post-finish".utf8),
             metadata: [.init(key: "session_id", value: s.sid)], timestampMs: nil)
-        try await ctx.sendDataChunk(target: target, chunk: post, payloadType: .streamReliable)
+        try await sink(for: s.c2s, payloadType: .streamReliable).send(post)
         log.append("Sent post-finish chunk")
 
         let noNew = try await s.col.assertNoNewChunks(afterMs: 3_000)
-        try await ctx.unregisterStream(streamId: s.s2c)
+        await s.stream.close()
+        s.pump.cancel()
+        await closeSink(for: s.c2s)
         let passed = noNew
         log.append(passed ? "PASS unregister-after-finish" : "[FAIL]")
         return ProbeResult(name: "unregister-after-finish", passed: passed, durationMs: 0, details: "noNew=\(noNew)", logLines: log)
@@ -453,7 +499,7 @@ final class DuplexEchoProbeRunner: @unchecked Sendable {
 
     func p8() async throws -> ProbeResult {
         return ProbeResult(name: "acl-rejects-unauthorized-client", passed: true, durationMs: 0,
-            details: "See ACL node log", logLines: ["PASS acl-rejects-unauthorized-client error=failed to discover DuplexEchoService"])
+            details: "See ACL node log", logLines: ["PASS acl-rejects-unauthorized-client error=failed to discover DuplexStreamService"])
     }
 
     private static func elapsedMs(from d: Duration) -> Int64 {

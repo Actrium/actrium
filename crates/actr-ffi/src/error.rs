@@ -135,8 +135,16 @@ pub enum ActrError {
     ///
     /// This variant is intentionally appended to preserve the discriminants
     /// of the existing UniFFI ABI.
-    #[error("delivery uncertain for operation {operation_id}: {cause}")]
-    DeliveryUncertain { operation_id: String, cause: String },
+    ///
+    /// The field is named `cause_detail` rather than `cause`: Kotlin
+    /// `Throwable.cause` would clash with a generated `cause` property.
+    /// Field names do not affect the UniFFI wire format (variants serialize
+    /// as ordinal + positional fields), so this is not an ABI change.
+    #[error("delivery uncertain for operation {operation_id}: {cause_detail}")]
+    DeliveryUncertain {
+        operation_id: String,
+        cause_detail: String,
+    },
 }
 
 pub type ActrResult<T> = Result<T, ActrError>;
@@ -278,7 +286,7 @@ impl From<actr_protocol::ActrError> for ActrError {
                 cause,
             } => ActrError::DeliveryUncertain {
                 operation_id,
-                cause,
+                cause_detail: cause,
             },
             actr_protocol::ActrError::NotFound(msg) => ActrError::NotFound { msg },
             actr_protocol::ActrError::PermissionDenied(msg) => ActrError::PermissionDenied { msg },
@@ -314,10 +322,10 @@ impl From<ActrError> for actr_protocol::ActrError {
             ActrError::TimedOut => actr_protocol::ActrError::TimedOut,
             ActrError::DeliveryUncertain {
                 operation_id,
-                cause,
+                cause_detail,
             } => actr_protocol::ActrError::DeliveryUncertain {
                 operation_id,
-                cause,
+                cause: cause_detail,
             },
             ActrError::NotFound { msg } => actr_protocol::ActrError::NotFound(msg),
             ActrError::PermissionDenied { msg } => actr_protocol::ActrError::PermissionDenied(msg),
@@ -476,7 +484,7 @@ mod tests {
         assert_eq!(
             ActrError::DeliveryUncertain {
                 operation_id: "op-1".into(),
-                cause: "closed after write".into(),
+                cause_detail: "closed after write".into(),
             }
             .kind(),
             ErrorKind::Internal,
@@ -514,7 +522,7 @@ mod tests {
         assert!(
             !ActrError::DeliveryUncertain {
                 operation_id: "op-1".into(),
-                cause: "closed after write".into(),
+                cause_detail: "closed after write".into(),
             }
             .is_retryable()
         );

@@ -2,8 +2,9 @@ import Actr
 import Foundation
 
 /// Per-session DataChunk ack collector.
-/// Registered as DataChunkCallback for a specific service_to_client_stream_id.
-actor SessionAckCollector: DataChunkCallback {
+/// Fed by a `DataChunkSequence` pump task for a specific
+/// service_to_client_stream_id.
+actor SessionAckCollector {
     private var chunks: [UInt64: DataChunk] = [:]
     private let expectedCount: Int
     private let streamId: String
@@ -13,7 +14,7 @@ actor SessionAckCollector: DataChunkCallback {
         self.expectedCount = expectedCount
     }
 
-    func onStream(chunk: DataChunk, sender: ActrId) async throws {
+    func record(chunk: DataChunk) {
         guard chunk.streamId == streamId else { return }
         chunks[chunk.sequence] = chunk
     }

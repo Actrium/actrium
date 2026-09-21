@@ -25,9 +25,7 @@ use std::path::PathBuf;
 use actr_config::ConfigParser;
 use actr_framework::{Context as RtContext, MessageDispatcher, Workload as RtWorkload};
 use actr_hyper::Node;
-use actr_protocol::{
-    ActorResult, ActrError, ActrId, DataChunk, PayloadType, RpcEnvelope, RpcRequest,
-};
+use actr_protocol::{ActorResult, ActrError, DataChunk, PayloadType, RpcEnvelope, RpcRequest};
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -141,6 +139,17 @@ async fn handle_start_server_stream<C: RtContext>(
 
     // Spawn delivery so the control RPC returns immediately.
     tokio::spawn(async move {
+        use futures_util::SinkExt;
+        let mut sink = match ctx_clone
+            .data_chunk_sink(&dest, stream_id.clone(), PayloadType::StreamReliable)
+            .await
+        {
+            Ok(sink) => sink,
+            Err(e) => {
+                warn!(error = ?e, "server-stream: data_chunk_sink failed");
+                return;
+            }
+        };
         for seq in 0..count {
             let payload = format!("{text}:{seq}").into_bytes();
             let chunk = DataChunk {
@@ -150,15 +159,13 @@ async fn handle_start_server_stream<C: RtContext>(
                 metadata: vec![],
                 timestamp_ms: None,
             };
-            if let Err(e) = ctx_clone
-                .send_data_chunk(&dest, chunk, PayloadType::StreamReliable)
-                .await
-            {
-                warn!(seq, error = ?e, "server-stream: send_data_chunk failed");
+            if let Err(e) = sink.send(chunk).await {
+                warn!(seq, error = ?e, "server-stream: sink send failed");
                 break;
             }
             info!(seq, "server-stream: chunk sent");
         }
+        let _ = sink.close().await;
         info!(count, "server-stream: all chunks delivered");
     });
 
@@ -185,38 +192,41 @@ async fn handle_setup_bidi<C: RtContext>(
     );
 
     let client_rx_id = req.client_rx_stream_id.clone();
-    let ctx_clone = ctx.clone();
     let dest = actr_framework::Dest::Peer(caller_id);
 
-    ctx.register_stream(
-        req.server_rx_stream_id.clone(),
-        move |chunk: DataChunk, sender_id: ActrId| {
-            let ctx_inner = ctx_clone.clone();
-            let dest_inner = dest.clone();
-            let reply_stream_id = client_rx_id.clone();
-            Box::pin(async move {
-                let seq = chunk.sequence;
-                info!(seq, from = ?sender_id, "bidi: chunk received, echoing");
-                let echo_chunk = DataChunk {
-                    stream_id: reply_stream_id,
-                    sequence: seq,
-                    payload: chunk.payload,
-                    metadata: vec![],
-                    timestamp_ms: None,
-                };
-                if let Err(e) = ctx_inner
-                    .send_data_chunk(&dest_inner, echo_chunk, PayloadType::StreamReliable)
-                    .await
-                {
-                    warn!(seq, error = ?e, "bidi: echo failed");
-                }
-                Ok(())
-            })
-        },
-    )
-    .await?;
+    let mut incoming = ctx
+        .data_chunks(req.server_rx_stream_id.clone(), Default::default())
+        .await?;
+    let mut reply_sink = ctx
+        .data_chunk_sink(&dest, client_rx_id.clone(), PayloadType::StreamReliable)
+        .await?;
 
-    info!(server_rx = %req.server_rx_stream_id, "bidi: stream registered");
+    // Consume the subscription on a dedicated task so the control RPC returns
+    // immediately; the task (and subscription) lives until the stream ends or
+    // the actor shuts down.
+    tokio::spawn(async move {
+        use futures_util::{SinkExt, StreamExt};
+        while let Some(event) = incoming.next().await {
+            let Ok(event) = event else { break };
+            let chunk = event.chunk;
+            let seq = chunk.sequence;
+            info!(seq, from = ?event.sender, "bidi: chunk received, echoing");
+            let echo_chunk = DataChunk {
+                stream_id: client_rx_id.clone(),
+                sequence: seq,
+                payload: chunk.payload,
+                metadata: vec![],
+                timestamp_ms: None,
+            };
+            if let Err(e) = reply_sink.send(echo_chunk).await {
+                warn!(seq, error = ?e, "bidi: echo failed");
+                break;
+            }
+        }
+        incoming.close().await;
+    });
+
+    info!(server_rx = %req.server_rx_stream_id, "bidi: stream subscribed");
     Ok(SetupBidiResponse { ok: true })
 }
 

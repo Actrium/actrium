@@ -4,10 +4,14 @@ import android.util.Log
 import com.example.generated.ActrDispatchHandler
 import io.actrium.actr.ActrId
 import io.actrium.actr.DataChunk
-import io.actrium.actr.DataChunkCallback
+import io.actrium.actr.DataChunkStreamBridge
 import io.actrium.actr.PayloadType
 import io.actrium.actr.dsl.ActrContext
+import io.actrium.actr.dsl.asFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * Implementation of ActrDispatchHandler (StreamClientHandler)
@@ -74,50 +78,49 @@ class MyUnifiedHandler : ActrDispatchHandler {
                     "return_stream=${startResp.serviceToClientStreamId}, status=${startResp.status}",
             )
 
-            // Step 2: Register callback for the server's return stream (if any)
+            // Step 2: Subscribe to the server's return stream (if any);
+            // the collector coroutine closes the subscription when cancelled.
             val serverStreamId = startResp.serviceToClientStreamId
+            var serverStream: DataChunkStreamBridge? = null
             if (serverStreamId.isNotBlank()) {
-                ctx.registerStream(
-                    serverStreamId,
-                    object : DataChunkCallback {
-                        override suspend fun onStream(
-                            chunk: DataChunk,
-                            sender: ActrId,
-                        ) {
-                            val text = String(chunk.payload, Charsets.UTF_8)
-                            Log.i(
-                                TAG,
-                                "client received ${chunk.sequence} from ${sender.serialNumber}: $text",
-                            )
-                        }
-                    },
-                )
-                Log.i(TAG, "✅ Registered stream handler for server return stream: $serverStreamId")
+                val stream = ctx.dataChunks(serverStreamId, null)
+                serverStream = stream
+                CoroutineScope(Dispatchers.IO).launch {
+                    stream.asFlow().collect { event ->
+                        val text = String(event.chunk.payload, Charsets.UTF_8)
+                        Log.i(
+                            TAG,
+                            "client received ${event.chunk.sequence} from ${event.sender.serialNumber}: $text",
+                        )
+                    }
+                }
+                Log.i(TAG, "✅ Subscribed to server return stream: $serverStreamId")
             }
 
             // Step 3: Send DataChunk chunks to the server (synchronous)
-            for (i in 1..messageCount) {
-                val message = "[client $clientId] message $i"
-                val dataChunk =
-                    DataChunk(
-                        streamId = clientStreamId,
-                        sequence = i.toULong(),
-                        payload = message.toByteArray(Charsets.UTF_8),
-                        metadata = emptyList(),
-                        timestampMs = System.currentTimeMillis(),
-                    )
+            val sink = ctx.dataChunkSink(serverId, clientStreamId, PayloadType.STREAM_RELIABLE)
+            try {
+                for (i in 1..messageCount) {
+                    val message = "[client $clientId] message $i"
+                    val dataChunk =
+                        DataChunk(
+                            streamId = clientStreamId,
+                            sequence = i.toULong(),
+                            payload = message.toByteArray(Charsets.UTF_8),
+                            metadata = emptyList(),
+                            timestampMs = System.currentTimeMillis(),
+                        )
 
-                Log.i(TAG, "client sending $i/$messageCount: $message")
-                try {
-                    ctx.sendDataChunk(
-                        serverId,
-                        dataChunk,
-                        PayloadType.STREAM_RELIABLE,
-                    )
-                } catch (e: Exception) {
-                    Log.e(TAG, "client send_data_chunk error: ${e.message}")
+                    Log.i(TAG, "client sending $i/$messageCount: $message")
+                    try {
+                        sink.send(dataChunk)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "client sink send error: ${e.message}")
+                    }
+                    delay(1000)
                 }
-                delay(1000)
+            } finally {
+                sink.closeAsync()
             }
 
             // Step 4: Call FinishDuplexStream
@@ -148,13 +151,13 @@ class MyUnifiedHandler : ActrDispatchHandler {
                 Log.e(TAG, "FinishDuplexStream error: ${e.message}")
             }
 
-            // Step 5: Unregister return stream callback
-            if (serverStreamId.isNotBlank()) {
+            // Step 5: Close the return stream subscription
+            serverStream?.let { stream ->
                 try {
-                    ctx.unregisterStream(serverStreamId)
-                    Log.i(TAG, "✅ Unregistered stream handler: $serverStreamId")
+                    stream.closeAsync()
+                    Log.i(TAG, "✅ Closed stream subscription: $serverStreamId")
                 } catch (e: Exception) {
-                    Log.e(TAG, "unregisterStream error: ${e.message}")
+                    Log.e(TAG, "stream close error: ${e.message}")
                 }
             }
 

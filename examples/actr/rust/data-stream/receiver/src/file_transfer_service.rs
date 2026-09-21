@@ -2,7 +2,7 @@
 
 use crate::generated::file_transfer::*;
 use crate::generated::file_transfer_actor::FileTransferServiceHandler;
-use actr_protocol::{ActorResult, DataChunk};
+use actr_protocol::ActorResult;
 use actr_hyper::prelude::*;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -19,6 +19,9 @@ pub struct FileTransferService {
     chunks_received: Arc<Mutex<u32>>,
     /// receive[...]
     bytes_received: Arc<Mutex<u64>>,
+    /// Per-stream consumer tasks; `end_transfer` aborts the task, which
+    /// drops the stream and unregisters the subscription.
+    stream_tasks: Arc<Mutex<std::collections::HashMap<String, tokio::task::JoinHandle<()>>>>,
 }
 
 impl FileTransferService {
@@ -26,6 +29,7 @@ impl FileTransferService {
         Self {
             chunks_received: Arc::new(Mutex::new(0)),
             bytes_received: Arc::new(Mutex::new(0)),
+            stream_tasks: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
     }
 }
@@ -51,18 +55,22 @@ impl FileTransferServiceHandler for FileTransferService {
         *self.chunks_received.lock().await = 0;
         *self.bytes_received.lock().await = 0;
 
-        // register DataChunk [...]
+        // subscribe to DataChunks for the stream
         let stream_id = req.stream_id.clone();
         let chunks_counter = self.chunks_received.clone();
         let bytes_counter = self.bytes_received.clone();
         let total_size = req.total_size;
         let chunk_count = req.chunk_count;
 
-        ctx.register_stream(stream_id.clone(), move |data_chunk: DataChunk, sender_id: ActrId| {
-            let chunks_counter = chunks_counter.clone();
-            let bytes_counter = bytes_counter.clone();
-
-            Box::pin(async move {
+        let mut data_chunks = ctx
+            .data_chunks(stream_id.clone(), Default::default())
+            .await?;
+        let handle = tokio::spawn(async move {
+            use futures_util::StreamExt;
+            while let Some(event) = data_chunks.next().await {
+                let Ok(event) = event else { break };
+                let data_chunk = event.chunk;
+                let sender_id = event.sender;
                 let mut chunks = chunks_counter.lock().await;
                 let mut bytes = bytes_counter.lock().await;
 
@@ -87,12 +95,14 @@ impl FileTransferServiceHandler for FileTransferService {
                     let preview = &text[..text.len().min(80)];
                     tracing::debug!("   Content preview: {}", preview);
                 }
+            }
+        });
+        self.stream_tasks
+            .lock()
+            .await
+            .insert(stream_id.clone(), handle);
 
-                Ok(())
-            })
-        }).await?;
-
-        tracing::info!("✅ DataChunk callback registered for '{}'", stream_id);
+        tracing::info!("✅ DataChunk subscription active for '{}'", stream_id);
         tracing::info!(
             "   Ready to receive {} chunks ({} bytes)",
             chunk_count,
@@ -118,10 +128,13 @@ impl FileTransferServiceHandler for FileTransferService {
         tracing::info!("   stream_id: {}", req.stream_id);
         tracing::info!("   success: {}", req.success);
 
-        // [...]register[...]
-        ctx.unregister_stream(&req.stream_id).await?;
+        // [...]unsubscribe[...]
+        if let Some(handle) = self.stream_tasks.lock().await.remove(&req.stream_id) {
+            // Aborting drops the stream, which unregisters the subscription.
+            handle.abort();
+        }
         tracing::info!(
-            "✅ DataChunk callback unregistered for '{}'",
+            "✅ DataChunk subscription closed for '{}'",
             req.stream_id
         );
 

@@ -1019,11 +1019,25 @@ pub unsafe extern "C" fn actr_host_respond_reverse_rpc(
     })
 }
 
+/// Cancellation tokens of active stream listeners, keyed by
+/// `(ref_handle, stream_id)`. `actr_stream_listen` inserts one entry per
+/// subscription; `actr_stream_unlisten` cancels and removes it.
+fn stream_listeners() -> &'static std::sync::Mutex<
+    std::collections::HashMap<(usize, String), tokio_util::sync::CancellationToken>,
+> {
+    static LISTENERS: std::sync::OnceLock<
+        std::sync::Mutex<
+            std::collections::HashMap<(usize, String), tokio_util::sync::CancellationToken>,
+        >,
+    > = std::sync::OnceLock::new();
+    LISTENERS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
 /// Subscribe the node to one inbound data stream and forward every chunk to
 /// the registered host stream sink. Async — registration result via
 /// `callback`. One listener per `stream_id`: a second `listen` for the same
-/// id follows `Context::register_stream` semantics (replacement or error as
-/// implemented by the runtime).
+/// id fails with an error through `callback` (duplicate subscriptions are
+/// rejected by the runtime).
 ///
 /// Chunks arriving before a sink is registered are dropped (traced), not
 /// buffered. Only chunks whose `stream_id` exactly equals this argument reach
@@ -1066,19 +1080,45 @@ pub unsafe extern "C" fn actr_stream_listen(
             }
         };
         let ud = user_data as usize;
+        let ref_key = ref_handle as usize;
         runtime::spawn_guarded(
             async move {
+                use futures_util::StreamExt;
+
                 let ctx = actr_ref.app_context().await;
-                match ctx
-                    .register_stream(stream_id, |chunk, sender| {
-                        host_sink::forward_chunk_to_host(&chunk, &sender);
-                        Box::pin(async { Ok(()) })
-                    })
-                    .await
+                let mut stream = match ctx.data_chunks(stream_id.clone(), Default::default()).await
                 {
-                    Ok(()) => callback(SUCCESS, std::ptr::null(), 0, ud as *mut c_void),
-                    Err(e) => emit_void_error(GENERIC_ERROR, e, callback, ud as *mut c_void),
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        emit_void_error(GENERIC_ERROR, e, callback, ud as *mut c_void);
+                        return;
+                    }
+                };
+                let cancel = tokio_util::sync::CancellationToken::new();
+                stream_listeners()
+                    .lock()
+                    .unwrap()
+                    .insert((ref_key, stream_id.clone()), cancel.clone());
+                callback(SUCCESS, std::ptr::null(), 0, ud as *mut c_void);
+                // Forward until unlistened, the stream ends, or the node
+                // shuts down (runtime teardown terminates the stream).
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = cancel.cancelled() => break,
+                        item = stream.next() => match item {
+                            Some(Ok(event)) => {
+                                host_sink::forward_chunk_to_host(&event.chunk, &event.sender);
+                            }
+                            Some(Err(_)) | None => break,
+                        },
+                    }
                 }
+                stream.close().await;
+                stream_listeners()
+                    .lock()
+                    .unwrap()
+                    .remove(&(ref_key, stream_id));
             },
             move |code| emit_void_error(code, "actr-cabi task failed", callback, ud as *mut c_void),
         )
@@ -1087,8 +1127,8 @@ pub unsafe extern "C" fn actr_stream_listen(
 
 /// Stop forwarding one stream. Async — result via `callback`. Unlistening a
 /// stream that was never listened is an idempotent runtime no-op and completes
-/// successfully through `callback`. Chunks already accepted by the runtime
-/// may still finish their callback after unlisten completes.
+/// successfully through `callback`. Unlistening drops chunks buffered for the
+/// listener without delivering them.
 ///
 /// # Safety
 ///
@@ -1114,6 +1154,7 @@ pub unsafe extern "C" fn actr_stream_unlisten(
                 return HANDLE_INVALID;
             }
         };
+        drop(actr_ref);
         // SAFETY: the function's contract requires `stream_id_ptr` to be
         // readable for `stream_id_len` bytes whenever it is non-null.
         let stream_id = match unsafe { decode_str(stream_id_ptr, stream_id_len) } {
@@ -1124,13 +1165,19 @@ pub unsafe extern "C" fn actr_stream_unlisten(
             }
         };
         let ud = user_data as usize;
+        let ref_key = ref_handle as usize;
         runtime::spawn_guarded(
             async move {
-                let ctx = actr_ref.app_context().await;
-                match ctx.unregister_stream(&stream_id).await {
-                    Ok(()) => callback(SUCCESS, std::ptr::null(), 0, ud as *mut c_void),
-                    Err(e) => emit_void_error(GENERIC_ERROR, e, callback, ud as *mut c_void),
+                let token = stream_listeners()
+                    .lock()
+                    .unwrap()
+                    .remove(&(ref_key, stream_id));
+                if let Some(token) = token {
+                    // The listener task observes the cancellation and closes
+                    // the stream, unregistering it from the runtime.
+                    token.cancel();
                 }
+                callback(SUCCESS, std::ptr::null(), 0, ud as *mut c_void);
             },
             move |code| emit_void_error(code, "actr-cabi task failed", callback, ud as *mut c_void),
         )

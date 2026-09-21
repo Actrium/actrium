@@ -220,24 +220,28 @@ async fn scenario_server_stream(
     let stream_id = format!("server-stream-{}", uuid::Uuid::new_v4());
     let chunk_count = STREAM_CHUNK_COUNT;
 
-    // Register a callback BEFORE the control RPC so no chunk is missed.
+    // Subscribe BEFORE the control RPC so no chunk is missed.
     let received = Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
-    let received_clone = received.clone();
     let done_tx = Arc::new(tokio::sync::Notify::new());
-    let done_tx_clone = done_tx.clone();
     let expected = chunk_count as usize;
 
     let ctx = actr_ref.app_context().await;
-    ctx.register_stream(
-        stream_id.clone(),
-        move |chunk: DataChunk, sender_id: ActrId| {
-            let received = received_clone.clone();
-            let done_tx = done_tx_clone.clone();
-            Box::pin(async move {
+    let mut incoming = ctx
+        .data_chunks(stream_id.clone(), Default::default())
+        .await
+        .context("data_chunks failed")?;
+    let collector = {
+        let received = received.clone();
+        let done_tx = done_tx.clone();
+        tokio::spawn(async move {
+            use futures_util::StreamExt;
+            while let Some(event) = incoming.next().await {
+                let Ok(event) = event else { break };
+                let chunk = event.chunk;
                 let text = String::from_utf8_lossy(&chunk.payload).to_string();
                 info!(
                     seq = chunk.sequence,
-                    from = ?sender_id,
+                    from = ?event.sender,
                     text = %text,
                     "server-stream chunk received",
                 );
@@ -246,12 +250,9 @@ async fn scenario_server_stream(
                 if guard.len() >= expected {
                     done_tx.notify_one();
                 }
-                Ok(())
-            })
-        },
-    )
-    .await
-    .context("register_stream failed")?;
+            }
+        })
+    };
 
     info!(
         stream_id = %stream_id,
@@ -296,10 +297,8 @@ async fn scenario_server_stream(
     info!(n, "all server-stream chunks received");
     println!("[server-stream] received {n}/{chunk_count} chunks");
 
-    // Unregister the callback.
-    ctx.unregister_stream(&stream_id)
-        .await
-        .context("unregister_stream failed")?;
+    // Close the subscription (aborting drops the stream, which unregisters).
+    collector.abort();
 
     Ok(())
 }
@@ -313,24 +312,28 @@ async fn scenario_bidi(
     let client_rx_id = format!("bidi-client-rx-{}", uuid::Uuid::new_v4());
     let server_rx_id = format!("bidi-server-rx-{}", uuid::Uuid::new_v4());
 
-    // Register receiver for echoed chunks.
+    // Subscribe to echoed chunks.
     let received = Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
-    let received_clone = received.clone();
     let done_tx = Arc::new(tokio::sync::Notify::new());
-    let done_tx_clone = done_tx.clone();
     let expected = chunk_count as usize;
 
     let ctx = actr_ref.app_context().await;
-    ctx.register_stream(
-        client_rx_id.clone(),
-        move |chunk: DataChunk, sender_id: ActrId| {
-            let received = received_clone.clone();
-            let done_tx = done_tx_clone.clone();
-            Box::pin(async move {
+    let mut incoming = ctx
+        .data_chunks(client_rx_id.clone(), Default::default())
+        .await
+        .context("data_chunks for client_rx failed")?;
+    let collector = {
+        let received = received.clone();
+        let done_tx = done_tx.clone();
+        tokio::spawn(async move {
+            use futures_util::StreamExt;
+            while let Some(event) = incoming.next().await {
+                let Ok(event) = event else { break };
+                let chunk = event.chunk;
                 let text = String::from_utf8_lossy(&chunk.payload).to_string();
                 info!(
                     seq = chunk.sequence,
-                    from = ?sender_id,
+                    from = ?event.sender,
                     text = %text,
                     "bidi echo chunk received",
                 );
@@ -339,12 +342,9 @@ async fn scenario_bidi(
                 if guard.len() >= expected {
                     done_tx.notify_one();
                 }
-                Ok(())
-            })
-        },
-    )
-    .await
-    .context("register_stream for client_rx failed")?;
+            }
+        })
+    };
 
     // Tell server about the bidi setup.
     let resp: SetupBidiResponse = actr_ref
@@ -365,7 +365,12 @@ async fn scenario_bidi(
     }
 
     // Send N chunks to the server.
+    use futures_util::SinkExt;
     let dest = actr_framework::Dest::Peer(target.clone());
+    let mut sink = ctx
+        .data_chunk_sink(&dest, server_rx_id.clone(), PayloadType::StreamReliable)
+        .await
+        .context("data_chunk_sink failed")?;
     for seq in 0..chunk_count {
         let payload = format!("{message}:{seq}").into_bytes();
         let chunk = DataChunk {
@@ -375,11 +380,12 @@ async fn scenario_bidi(
             metadata: vec![],
             timestamp_ms: None,
         };
-        ctx.send_data_chunk(&dest, chunk, PayloadType::StreamReliable)
+        sink.send(chunk)
             .await
-            .with_context(|| format!("send_data_chunk seq={seq} failed"))?;
+            .with_context(|| format!("sink send seq={seq} failed"))?;
         info!(seq, "bidi: sent chunk to server");
     }
+    sink.close().await.context("sink close failed")?;
 
     // Wait for all echoed chunks.
     let timeout = Duration::from_millis(RPC_TIMEOUT_MS as u64);
@@ -398,10 +404,8 @@ async fn scenario_bidi(
     info!(n, "all bidi echo chunks received");
     println!("[bidi] received {n}/{chunk_count} echo chunks");
 
-    // Clean up.
-    ctx.unregister_stream(&client_rx_id)
-        .await
-        .context("unregister_stream client_rx failed")?;
+    // Clean up (aborting drops the stream, which unregisters).
+    collector.abort();
 
     Ok(())
 }

@@ -16,6 +16,7 @@ tracing-subscriber = "0.3"
 anyhow = { workspace = true }
 prost = { workspace = true }
 bytes = { workspace = true }
+futures-util = { version = "0.3", features = ["sink"] }
 async-trait = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 

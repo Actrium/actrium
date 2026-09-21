@@ -185,8 +185,8 @@ public enum ActrError: Error, Equatable, Hashable, LocalizedError, Sendable {
             self = .Internal(msg: msg)
         case let .Config(msg):
             self = .Config(msg: msg)
-        case let .DeliveryUncertain(operationId, cause):
-            self = .DeliveryUncertain(operationId: operationId, cause: cause)
+        case let .DeliveryUncertain(operationId, causeDetail):
+            self = .DeliveryUncertain(operationId: operationId, cause: causeDetail)
         }
     }
 
@@ -227,7 +227,7 @@ public enum ActrError: Error, Equatable, Hashable, LocalizedError, Sendable {
         case let .Config(msg):
             return .Config(msg: msg)
         case let .DeliveryUncertain(operationId, cause):
-            return .DeliveryUncertain(operationId: operationId, cause: cause)
+            return .DeliveryUncertain(operationId: operationId, causeDetail: cause)
         }
     }
 

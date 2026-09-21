@@ -32,18 +32,16 @@ public protocol ActrContext: Sendable {
         payload: Data
     ) async throws(ActrError)
 
-    func registerStream(
+    func dataChunks(
         streamId: String,
-        callback: any DataChunkCallback
-    ) async throws(ActrError)
+        capacity: UInt32?
+    ) async throws(ActrError) -> DataChunkSequence
 
-    func unregisterStream(streamId: String) async throws(ActrError)
-
-    func sendDataChunk(
+    func dataChunkSink(
         target: ActrId,
-        chunk: DataChunk,
+        streamId: String,
         payloadType: PayloadType
-    ) async throws(ActrError)
+    ) async throws(ActrError) -> DataChunkSink
 
     func addMediaTrack(
         target: ActrId,
@@ -103,20 +101,23 @@ public extension ActrContext {
         throw ActrError.NotImplemented(msg: "resolveDependency is not implemented by this ActrContext")
     }
 
-    func registerStream(streamId _: String, callback _: any DataChunkCallback) async throws(ActrError) {
-        throw ActrError.NotImplemented(msg: "registerStream is not implemented by this ActrContext")
+    func dataChunks(
+        streamId _: String,
+        capacity _: UInt32?
+    ) async throws(ActrError) -> DataChunkSequence {
+        throw ActrError.NotImplemented(msg: "dataChunks is not implemented by this ActrContext")
     }
 
-    func unregisterStream(streamId _: String) async throws(ActrError) {
-        throw ActrError.NotImplemented(msg: "unregisterStream is not implemented by this ActrContext")
+    func dataChunks(streamId: String) async throws(ActrError) -> DataChunkSequence {
+        try await dataChunks(streamId: streamId, capacity: nil)
     }
 
-    func sendDataChunk(
+    func dataChunkSink(
         target _: ActrId,
-        chunk _: DataChunk,
+        streamId _: String,
         payloadType _: PayloadType
-    ) async throws(ActrError) {
-        throw ActrError.NotImplemented(msg: "sendDataChunk is not implemented by this ActrContext")
+    ) async throws(ActrError) -> DataChunkSink {
+        throw ActrError.NotImplemented(msg: "dataChunkSink is not implemented by this ActrContext")
     }
 
     func addMediaTrack(
@@ -316,15 +317,30 @@ public final class Context: ActrContext, @unchecked Sendable {
         }
     }
 
-    public func registerStream(
+    public func dataChunks(
         streamId: String,
-        callback: any DataChunkCallback
-    ) async throws(ActrError) {
+        capacity: UInt32?
+    ) async throws(ActrError) -> DataChunkSequence {
         do {
-            try await bridge.registerStream(
+            let bridge = try await bridge.dataChunks(streamId: streamId, capacity: capacity)
+            return DataChunkSequence(bridge: bridge)
+        } catch {
+            throw ActrError(error: error)
+        }
+    }
+
+    public func dataChunkSink(
+        target: ActrId,
+        streamId: String,
+        payloadType: PayloadType
+    ) async throws(ActrError) -> DataChunkSink {
+        do {
+            let bridge = try await bridge.dataChunkSink(
+                target: target.bridge,
                 streamId: streamId,
-                callback: DataChunkCallbackAdapter(callback)
+                payloadType: payloadType.bridge
             )
+            return DataChunkSink(bridge: bridge)
         } catch {
             throw ActrError(error: error)
         }
@@ -333,22 +349,6 @@ public final class Context: ActrContext, @unchecked Sendable {
     public func removeMediaTrack(target: ActrId, trackId: String) async throws(ActrError) {
         do {
             try await bridge.removeMediaTrack(target: target.bridge, trackId: trackId)
-        } catch {
-            throw ActrError(error: error)
-        }
-    }
-
-    public func sendDataChunk(
-        target: ActrId,
-        chunk: DataChunk,
-        payloadType: PayloadType
-    ) async throws(ActrError) {
-        do {
-            try await bridge.sendDataChunk(
-                target: target.bridge,
-                chunk: chunk.bridge,
-                payloadType: payloadType.bridge
-            )
         } catch {
             throw ActrError(error: error)
         }
@@ -391,14 +391,6 @@ public final class Context: ActrContext, @unchecked Sendable {
     public func unregisterMediaTrack(trackId: String) async throws(ActrError) {
         do {
             try await bridge.unregisterMediaTrack(trackId: trackId)
-        } catch {
-            throw ActrError(error: error)
-        }
-    }
-
-    public func unregisterStream(streamId: String) async throws(ActrError) {
-        do {
-            try await bridge.unregisterStream(streamId: streamId)
         } catch {
             throw ActrError(error: error)
         }

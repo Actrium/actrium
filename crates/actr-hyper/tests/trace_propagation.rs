@@ -24,9 +24,7 @@
 
 use std::sync::Arc;
 
-use actr_framework::{
-    Bytes, Context, MaybeSendBoxFuture, MaybeSendSync, MessageDispatcher, Workload,
-};
+use actr_framework::{Bytes, Context, MessageDispatcher, Workload};
 use actr_hyper::outbound::HostGate;
 use actr_hyper::test_support::TestHarness;
 use actr_hyper::transport::HostTransport;
@@ -117,25 +115,20 @@ impl Context for MockCtx {
         Err(ActrError::NotImplemented("mock".to_string()))
     }
 
-    async fn register_stream<F>(&self, _id: String, _cb: F) -> ActorResult<()>
-    where
-        F: Fn(actr_protocol::DataChunk, ActrId) -> MaybeSendBoxFuture<'static, ActorResult<()>>
-            + MaybeSendSync
-            + 'static,
-    {
+    async fn data_chunks(
+        &self,
+        _id: String,
+        _options: actr_framework::DataChunkStreamOptions,
+    ) -> ActorResult<actr_framework::DataChunkStream> {
         Err(ActrError::NotImplemented("mock".to_string()))
     }
 
-    async fn unregister_stream(&self, _id: &str) -> ActorResult<()> {
-        Err(ActrError::NotImplemented("mock".to_string()))
-    }
-
-    async fn send_data_chunk(
+    async fn data_chunk_sink(
         &self,
         _target: &actr_framework::Dest,
-        _chunk: actr_protocol::DataChunk,
+        _id: String,
         _pt: actr_protocol::PayloadType,
-    ) -> ActorResult<()> {
+    ) -> ActorResult<actr_framework::DataChunkSink> {
         Err(ActrError::NotImplemented("mock".to_string()))
     }
 

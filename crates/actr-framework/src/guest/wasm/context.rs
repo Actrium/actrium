@@ -7,8 +7,7 @@
 //! instance.
 
 use actr_protocol::{
-    ActorResult, ActrError, ActrId, ActrType, ConnectionNotReadyInfo, DataChunk, PayloadType,
-    RpcRequest,
+    ActorResult, ActrError, ActrId, ActrType, ConnectionNotReadyInfo, PayloadType, RpcRequest,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -16,9 +15,8 @@ use futures_util::future::BoxFuture;
 use prost::Message as ProstMessage;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 
-use crate::{Context, Deliver, Dest, MaybeSendBoxFuture, MaybeSendSync, MediaSample, ReplyOutcome};
+use crate::{Context, Deliver, Dest, MediaSample, ReplyOutcome};
 
 use super::context_helpers::{
     actr_id_from_wit, actr_id_to_wit, actr_type_from_wit, actr_type_to_wit, data_chunk_from_wit,
@@ -162,29 +160,58 @@ impl Deliver for WasmReplyDeliver {
     }
 }
 
-type StreamCallback = Rc<dyn Fn(DataChunk, ActrId) -> MaybeSendBoxFuture<'static, ActorResult<()>>>;
-
 thread_local! {
     /// A Component Model guest runs cooperatively on one WASM thread. Keeping
-    /// callbacks local lets ordinary generic handlers capture `C: Context`
+    /// senders local lets ordinary generic handlers capture `C: Context`
     /// without manufacturing native-only `Send + Sync` bounds.
-    static STREAM_CALLBACKS: RefCell<HashMap<String, StreamCallback>> =
-        RefCell::new(HashMap::new());
+    ///
+    /// One sender per active `data_chunks` subscription; the host runner
+    /// queues DataChunk delivery behind the register import, so a stalled
+    /// queue backpressures only this stream.
+    static STREAM_SENDERS: RefCell<
+        HashMap<String, futures_channel::mpsc::Sender<ActorResult<crate::DataChunkEvent>>>,
+    > = RefCell::new(HashMap::new());
 }
 
 pub(crate) async fn dispatch_registered_stream(
     chunk: wit_types::DataChunk,
     sender: wit_types::ActrId,
+    ctx_token: u64,
 ) -> ActorResult<()> {
     let chunk = data_chunk_from_wit(chunk);
     let sender = actr_id_from_wit(&sender);
-    let callback =
-        STREAM_CALLBACKS.with(|callbacks| callbacks.borrow().get(&chunk.stream_id).cloned());
+    let tx = STREAM_SENDERS.with(|senders| senders.borrow().get(&chunk.stream_id).cloned());
 
-    match callback {
-        Some(callback) => callback(chunk, sender).await,
+    match tx {
+        Some(mut tx) => {
+            use futures_util::SinkExt;
+            let stream_id = chunk.stream_id.clone();
+            let event = crate::DataChunkEvent { chunk, sender };
+            match tx.send(Ok(event)).await {
+                Ok(()) => {
+                    // Yield so consumer tasks spawned with `spawn_local` can
+                    // start (and issue their host imports) before this export
+                    // returns; the queue still preserves per-stream FIFO.
+                    wit_bindgen::yield_async().await;
+                    Ok(())
+                }
+                // The receiver was dropped without close() (best-effort Drop
+                // path abandons the async host unregister). Remove the stale
+                // entry and tear down the host registration with THIS live
+                // invocation's token.
+                Err(_) => {
+                    STREAM_SENDERS.with(|senders| {
+                        senders.borrow_mut().remove(&stream_id);
+                    });
+                    let _ = wit_host::unregister_stream(ctx_token, stream_id.clone()).await;
+                    Err(ActrError::NotFound(format!(
+                        "stream subscription for '{stream_id}' is gone"
+                    )))
+                }
+            }
+        }
         None => Err(ActrError::NotFound(format!(
-            "no stream callback registered for '{}'",
+            "no stream subscription for '{}'",
             chunk.stream_id
         ))),
     }
@@ -289,49 +316,68 @@ impl Context for WasmContext {
         .map_err(wit_actr_error_to_proto)
     }
 
-    async fn register_stream<F>(&self, stream_id: String, callback: F) -> ActorResult<()>
-    where
-        F: Fn(DataChunk, ActrId) -> MaybeSendBoxFuture<'static, ActorResult<()>>
-            + MaybeSendSync
-            + 'static,
-    {
+    async fn data_chunks(
+        &self,
+        stream_id: String,
+        options: crate::DataChunkStreamOptions,
+    ) -> ActorResult<crate::DataChunkStream> {
+        let capacity = crate::validate_stream_options(&options)?;
+        let already_subscribed =
+            STREAM_SENDERS.with(|senders| senders.borrow().contains_key(&stream_id));
+        if already_subscribed {
+            return Err(ActrError::InvalidArgument(format!(
+                "stream '{stream_id}' already has an active subscription"
+            )));
+        }
         // Register host-side first. The runner queues DataChunk delivery behind
-        // this invocation, so installing the guest callback immediately after
+        // this invocation, so installing the guest queue immediately after
         // the awaited import cannot miss a delivery; this ordering also avoids
-        // retaining a guest callback when host registration fails.
+        // retaining a guest queue when host registration fails.
         wit_host::register_stream(self.ctx_token, stream_id.clone())
             .await
             .map_err(wit_actr_error_to_proto)?;
-        STREAM_CALLBACKS.with(|callbacks| {
-            callbacks.borrow_mut().insert(stream_id, Rc::new(callback));
+        let (tx, rx) = futures_channel::mpsc::channel(capacity);
+        STREAM_SENDERS.with(|senders| {
+            senders.borrow_mut().insert(stream_id.clone(), tx);
         });
-        Ok(())
+        let cancel_stream_id = stream_id;
+        // Cancel-only closer: the async host unregister import would need a
+        // live invocation token, but close()/drop may run in an invocation
+        // where the registering token is already retired. Host-side teardown
+        // happens instead on the next on-data-chunk delivery, which calls the
+        // unregister import with that invocation's live token (see
+        // dispatch_registered_stream).
+        let closer = crate::StreamCloser::new(Box::new(move || {
+            STREAM_SENDERS.with(|senders| {
+                senders.borrow_mut().remove(&cancel_stream_id);
+            });
+        }));
+        Ok(crate::DataChunkStream::from_parts(rx, closer))
     }
 
-    async fn unregister_stream(&self, stream_id: &str) -> ActorResult<()> {
-        wit_host::unregister_stream(self.ctx_token, stream_id.to_string())
-            .await
-            .map_err(wit_actr_error_to_proto)?;
-        STREAM_CALLBACKS.with(|callbacks| {
-            callbacks.borrow_mut().remove(stream_id);
-        });
-        Ok(())
-    }
-
-    async fn send_data_chunk(
+    async fn data_chunk_sink(
         &self,
         target: &Dest,
-        chunk: DataChunk,
+        stream_id: String,
         payload_type: PayloadType,
-    ) -> ActorResult<()> {
-        wit_host::send_data_chunk(
-            self.ctx_token,
-            dest_to_wit(target),
-            data_chunk_to_wit(chunk),
-            payload_type_to_wit(payload_type),
-        )
-        .await
-        .map_err(wit_actr_error_to_proto)
+    ) -> ActorResult<crate::DataChunkSink> {
+        let ctx_token = self.ctx_token;
+        let wit_dest = dest_to_wit(target);
+        let wit_payload_type = payload_type_to_wit(payload_type);
+        let send_fn: crate::SendDataChunkFn = Box::new(move |chunk| {
+            let wit_dest = wit_dest.clone();
+            Box::pin(async move {
+                wit_host::send_data_chunk(
+                    ctx_token,
+                    wit_dest,
+                    data_chunk_to_wit(chunk),
+                    wit_payload_type,
+                )
+                .await
+                .map_err(wit_actr_error_to_proto)
+            })
+        });
+        crate::DataChunkSink::new(stream_id, payload_type, send_fn)
     }
 
     async fn discover_route_candidate(&self, target_type: &ActrType) -> ActorResult<ActrId> {

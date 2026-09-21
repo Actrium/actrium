@@ -307,7 +307,7 @@ async fn component_model_typed_call_forwards_timeout() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn serial_stream_callback_rebinds_captured_context_token() {
+async fn serial_stream_consumer_rebinds_captured_context_token() {
     let host = fixture_host();
     let mut workload = instantiate_wasm_workload(host).await.expect("instantiate");
     workload
@@ -317,8 +317,11 @@ async fn serial_stream_callback_rebinds_captured_context_token() {
             &stream_registration_bridge(),
         )
         .await
-        .expect("register stream callback");
+        .expect("register stream subscription");
 
+    // The spawned guest consumer runs during the on-data-chunk invocation
+    // and issues its host op through the captured (registration) token,
+    // which the host aliases to this invocation's live bridge.
     let (bridge, calls) = stream_callback_bridge();
     workload
         .handle_data_chunk(
@@ -333,29 +336,46 @@ async fn serial_stream_callback_rebinds_captured_context_token() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn resident_stream_callback_rebinds_captured_context_token() {
+async fn resident_stream_consumer_drains_in_later_invocation() {
     let host = fixture_host();
     let workload = instantiate_wasm_workload(host).await.expect("instantiate");
     let runner = workload.into_interleaved_runner(None);
     runner
         .dispatch(
-            &make_envelope("test/register-stream-context", Vec::new()),
+            &make_envelope("test/park-stream-context", Vec::new()),
             test_ctx(),
             &stream_registration_bridge(),
         )
         .await
-        .expect("register stream callback through resident region");
+        .expect("park stream subscription through resident region");
 
-    let (bridge, calls) = stream_callback_bridge();
+    // The resident DataChunk barrier enqueues into the parked subscription;
+    // no guest consumer is required to be live at this point.
     runner
         .data_chunk(
             captured_context_chunk(),
             test_actr_id(),
             test_ctx(),
+            &unreachable_bridge(),
+        )
+        .await
+        .expect("resident DataChunk barrier enqueues into the parked subscription");
+
+    // A later invocation drains the queue with its own live context.
+    let (bridge, calls) = stream_callback_bridge();
+    let drained = runner
+        .dispatch(
+            &make_envelope("test/drain-parked-stream", Vec::new()),
+            test_ctx(),
             &bridge,
         )
         .await
-        .expect("resident DataChunk barrier must rebind the captured context token");
+        .expect("resident drain must issue host ops through the live invocation");
+    assert_eq!(
+        drained.as_ref(),
+        &1u64.to_le_bytes(),
+        "exactly one queued chunk must be drained"
+    );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     runner.shutdown().await;
 }
