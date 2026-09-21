@@ -539,11 +539,17 @@ shell, `eval`, or arbitrary memory mutation.
 | GET | `/v1/events` | Hook, state edges, Fault hits, and signaling trace |
 | GET | `/metrics` | Prometheus metrics |
 | GET | `/v1/metrics` | Optional JSON metric snapshot |
+| GET | `/v1/resources` | Process resource snapshot (RSS, FDs, sockets) |
+| GET | `/v1/diagnostics` | Endpoint diagnostics snapshot |
+| POST | `/v1/observations/data-chunk` | Record a DataChunk receipt observation |
 | POST | `/v1/probes/rpc` | Send a probe through the formal RPC business path |
 | POST | `/v1/probes/data-chunk` | Send a probe through the formal DataChunk path |
 | POST | `/v1/events/lifecycle` | Background/Foreground |
 | POST | `/v1/events/network-path` | Available/Unavailable/transport |
 | POST | `/v1/faults/rtc` | Install, update, or heal an RTC Fault |
+| POST | `/v1/faults/rtc/prepare` | Prepare a two-sided RTC Fault transaction (run-scoped, idempotent) |
+| POST | `/v1/faults/rtc/commit` | Commit a prepared RTC Fault transaction on both endpoints |
+| POST | `/v1/faults/rtc/rollback` | Roll back a prepared RTC Fault transaction |
 | POST | `/v1/faults/signaling` | Install, update, or heal a signaling Fault |
 | POST | `/v1/actions/cleanup` | Call the production cleanup entry point |
 | POST | `/v1/actions/force-reconnect` | Call the production force-reconnect entry point |

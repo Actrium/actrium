@@ -473,11 +473,17 @@ Endpoint 控制 API 是测试命名空间内的远程控制适配层。推荐进
 | GET | /v1/events | Hook、状态边沿、Fault 命中和信令 trace |
 | GET | /metrics | Prometheus 指标 |
 | GET | /v1/metrics | JSON 指标快照，可选 |
+| GET | /v1/resources | 进程资源快照（RSS、FD、socket） |
+| GET | /v1/diagnostics | Endpoint 诊断快照 |
+| POST | /v1/observations/data-chunk | 记录一条 DataChunk 接收证据 |
 | POST | /v1/probes/rpc | 通过正式 RPC 业务链路发送探针 |
 | POST | /v1/probes/data-chunk | 通过正式 DataChunk 链路发送探针 |
 | POST | /v1/events/lifecycle | Background/Foreground |
 | POST | /v1/events/network-path | Available/Unavailable/transport |
 | POST | /v1/faults/rtc | 安装、更新或解除 RTC Fault |
+| POST | /v1/faults/rtc/prepare | 准备一次双侧 RTC Fault 事务（run 作用域、幂等） |
+| POST | /v1/faults/rtc/commit | 在两端提交已准备的 RTC Fault 事务 |
+| POST | /v1/faults/rtc/rollback | 回滚已准备的 RTC Fault 事务 |
 | POST | /v1/faults/signaling | 安装、更新或解除信令 Fault |
 | POST | /v1/actions/cleanup | 调用生产 cleanup 入口 |
 | POST | /v1/actions/force-reconnect | 调用生产 force reconnect 入口 |
