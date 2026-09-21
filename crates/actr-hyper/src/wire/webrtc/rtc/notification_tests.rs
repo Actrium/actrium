@@ -307,6 +307,67 @@ fn projection_staying_sendable_fires_nothing() {
     assert_hooks(&events, &[]);
 }
 
+// ── S6-6c: Connected-epoch latch ─────────────────────────────────────────
+
+use crate::wire::webrtc::rtc::notification::apply_connected_epoch_latch;
+
+fn connected_event(peer: &ActrId) -> HookEvent {
+    HookEvent::WebRtcConnected {
+        peer_id: peer.clone(),
+        relayed: false,
+    }
+}
+
+fn disconnected_event(peer: &ActrId) -> HookEvent {
+    HookEvent::WebRtcDisconnected {
+        peer_id: peer.clone(),
+        status: WebRtcPeerStatus::Recovering,
+    }
+}
+
+#[test]
+fn latch_suppresses_repeated_connected_within_epoch() {
+    // A sendable flap without an intervening disconnect (renegotiation
+    // under load) must not re-fire the connected hook (P14 regression).
+    let peer = test_actor_id(1);
+    let (first, latched) = apply_connected_epoch_latch(vec![connected_event(&peer)], false);
+    assert_hooks(&first, &["connected"]);
+    assert!(latched);
+    let (second, latched) = apply_connected_epoch_latch(vec![connected_event(&peer)], latched);
+    assert_hooks(&second, &[]);
+    assert!(latched);
+}
+
+#[test]
+fn latch_rearms_after_disconnect() {
+    // A genuine disconnect/reconnect cycle must still surface both edges.
+    let peer = test_actor_id(1);
+    let (_, latched) = apply_connected_epoch_latch(vec![connected_event(&peer)], false);
+    let (disconnected, latched) =
+        apply_connected_epoch_latch(vec![disconnected_event(&peer)], latched);
+    assert_hooks(&disconnected, &["disconnected"]);
+    assert!(!latched);
+    let (reconnected, latched) = apply_connected_epoch_latch(vec![connected_event(&peer)], latched);
+    assert_hooks(&reconnected, &["connected"]);
+    assert!(latched);
+}
+
+#[test]
+fn latch_leaves_other_events_untouched() {
+    let peer = test_actor_id(1);
+    let (events, latched) = apply_connected_epoch_latch(
+        vec![
+            HookEvent::WebRtcConnectStart {
+                peer_id: peer.clone(),
+            },
+            disconnected_event(&peer),
+        ],
+        true,
+    );
+    assert_hooks(&events, &["connect_start", "disconnected"]);
+    assert!(!latched);
+}
+
 // ── S6-6b: transition-driven hook projection (end-to-end) ──────────────────
 
 mod projection {
