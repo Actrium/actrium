@@ -1,9 +1,48 @@
 @testable import Actr
 import ActrBindings
+import Foundation
 import Testing
 
 @Suite(.serialized)
 struct ActrErrorBridgeTests {
+    @Test
+    func allMessagesMatchRustDisplayAfterThrowAndPublicBridge() throws {
+        let text = "\u{4e2d}\u{6587}\n\"quoted\"\\path"
+        let cases: [(ActrBindings.ActrError, String)] = [
+            (.Unavailable(msg: text), "unavailable: \(text)"),
+            (.ConnectionNotReady(info: .init(retryAfterMs: 42)),
+             "connection not ready: retry_after_ms=Some(42)"),
+            (.ConnectionNotReady(info: .init(retryAfterMs: nil)),
+             "connection not ready: retry_after_ms=None"),
+            (.TimedOut, "timed out"),
+            (.NotFound(msg: text), "not found: \(text)"),
+            (.PermissionDenied(msg: text), "permission denied: \(text)"),
+            (.InvalidArgument(msg: text), "invalid argument: \(text)"),
+            (.UnknownRoute(msg: text), "unknown route: \(text)"),
+            (.DependencyNotFound(serviceName: "echo", detail: text), "dependency 'echo' not found: \(text)"),
+            (.DecodeFailure(msg: text), "decode failure: \(text)"),
+            (.NotImplemented(msg: text), "not implemented: \(text)"),
+            (.Internal(msg: text), "internal error: \(text)"),
+            (.Config(msg: text), "config: \(text)"),
+            (.DeliveryUncertain(operationId: "op-1", cause: text), "delivery uncertain for operation op-1: \(text)"),
+            (.Internal(msg: ""), "internal error: "),
+        ]
+        for (original, expected) in cases {
+            #expect(ActrBindings.actrErrorMessage(err: original) == expected)
+            #expect(original.localizedDescription == expected)
+            do {
+                try ActrBindings.actrErrorThrowForTest(err: original)
+                Issue.record("expected Rust to throw")
+            } catch let error as ActrBindings.ActrError {
+                #expect(error == original)
+                #expect(error.localizedDescription == expected)
+                let publicError = Actr.ActrError(bridge: error)
+                #expect(publicError.localizedDescription == expected)
+                #expect(publicError.bridge == original)
+            }
+        }
+    }
+
     @Test
     func deliveryUncertainBridgeRoundTripPreservesFields() {
         // Both modules define `ActrError` (the high-level wrapper in `Actr`

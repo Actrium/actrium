@@ -346,6 +346,7 @@ if [[ "${ACTR_GENERATE_KOTLIN_BINDINGS}" == true ]]; then
     rm -f "${GENERATED_PACKAGE_DIR}/actr.kt"
     rm -rf "${GENERATED_PACKAGE_DIR}/io" "${OLD_GENERATED_DIR}"
     (cd "${CRATE_DIR}" && uniffi-bindgen generate --library "${HOST_LIBRARY_PATH}" --language kotlin --out-dir "${KOTLIN_SRC_DIR}")
+    python3 "${WORKSPACE_ROOT}/scripts/actr/patch-error-messages.py" kotlin "${GENERATED_PACKAGE_DIR}/actr.kt"
 fi
 
 echo ""

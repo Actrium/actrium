@@ -228,6 +228,12 @@ impl ActrError {
 // clone. Swift / Kotlin consumers call these as module-level functions:
 // `actrErrorKind(err)` / `actrErrorIsRetryable(err)` / etc.
 
+/// Rust Display text for an error, shared by SDK message properties.
+#[uniffi::export]
+pub fn actr_error_message(err: ActrError) -> String {
+    err.to_string()
+}
+
 /// Fault-domain classification of `err` (see [`ErrorKind`]).
 #[uniffi::export]
 pub fn actr_error_kind(err: ActrError) -> ErrorKind {
@@ -350,6 +356,23 @@ impl Classify for ActrError {
 mod tests {
     use super::*;
 
+    #[test]
+    fn sdk_message_preserves_config_and_unicode_payloads() {
+        let msg = "\u{4e2d}\u{6587}\n\"quoted\"\\path";
+        assert_eq!(
+            actr_error_message(ActrError::Config { msg: msg.into() }),
+            format!("config: {msg}")
+        );
+        assert_eq!(
+            actr_error_message(ActrError::ConnectionNotReady {
+                info: ConnectionNotReadyInfo {
+                    retry_after_ms: None
+                },
+            }),
+            "connection not ready: retry_after_ms=None"
+        );
+    }
+
     #[tokio::test]
     async fn dropping_run_on_tokio_runtime_future_aborts_task() {
         use std::sync::atomic::{AtomicBool, Ordering};
@@ -419,6 +442,10 @@ mod tests {
 
         for original in cases {
             let ffi: ActrError = original.clone().into();
+            assert_eq!(
+                actr_error_message(original.clone().into()),
+                original.to_string()
+            );
             let back: actr_protocol::ActrError = ffi.into();
             assert_eq!(format!("{original}"), format!("{back}"));
         }

@@ -586,3 +586,16 @@ await refWrapper.waitForShutdown()
 
 - [Actr README](../README.md) - Package overview and build instructions
 - [Echo App Example](../../echo-app/README.md) - Example iOS application using Actr
+
+## Error message contract
+
+Both `ActrBindings.ActrError.localizedDescription` and public
+`Actr.ActrError.localizedDescription` use Rust `ActrError::Display`, matching
+Kotlin's `ActrException.message` and TypeScript's native error payload message.
+For example, an internal error containing `unknown text: unknown` displays
+`internal error: unknown text: unknown`. Error cases and associated values remain
+unchanged. The getter calls native `actrErrorMessage`; use bindings and native
+libraries from the same SDK version. Match on cases rather than parsing text.
+
+Binding generation runs `scripts/actr/patch-error-messages.py`; invoke it after
+any manual UniFFI generation too.

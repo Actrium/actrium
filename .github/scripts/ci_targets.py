@@ -243,6 +243,16 @@ def detect_targets(changed_files: list[str], full_run: bool) -> tuple[dict[str, 
             reasons.append(f"typescript_stream_e2e:{path}")
             continue
 
+        if path in (
+            "scripts/actr/patch-error-messages.py",
+            "scripts/actr/tests/test_patch_error_messages.py",
+            "scripts/actr/tests/fixtures/ActrError.swift",
+        ):
+            targets["swift_binding"] = True
+            targets["kotlin_binding"] = True
+            reasons.append(f"sdk_error_messages:{path}")
+            continue
+
         if path.startswith(
             ("packages/actr-swift/", "packages/actr-cabi/swift/", "tools/actr/protoc-gen/swift/")
         ):

@@ -602,3 +602,17 @@ The low-level API is in `io.actrium.actr` and consists of UniFFI-generated bindi
 | `actrErrorKind(e: ActrException): ErrorKind` | Classify fault domain |
 | `actrErrorIsRetryable(e: ActrException): Boolean` | Check if transient/retryable |
 | `actrErrorRequiresDlq(e: ActrException): Boolean` | Check if corrupt (dead-letter queue) |
+
+## Error message contract
+
+`ActrException.message` uses Rust `ActrError::Display` for every variant,
+including `TimedOut` (`timed out`) and errors with multiple fields. For example,
+`Internal("unknown text: unknown")` displays `internal error: unknown text: unknown`.
+Fields such as `msg`, the error variant, and retry classification remain available.
+The message getter calls native `actrErrorMessage`, so bindings and `libactr.so`
+must come from the same SDK version. Pure JVM tests can inspect payload fields;
+message integration tests run on Android with the matching native library.
+The separate `userMessage` convenience property retains its existing UI wording.
+
+Binding generation runs `scripts/actr/patch-error-messages.py`; invoke it after
+any manual UniFFI generation too. It rejects missing exports and template drift.

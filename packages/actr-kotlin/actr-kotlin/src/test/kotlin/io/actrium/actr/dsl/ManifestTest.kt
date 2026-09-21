@@ -11,6 +11,8 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
+// Manifest unit tests inspect payloads without loading native code.
+// Standard message formatting is covered by ActrErrorMessageTest on Android.
 class ManifestTest {
     private class FakeManifestResolver(
         var aliases: List<String> = listOf("EchoService", "DataStreamServer"),
@@ -130,7 +132,7 @@ class ManifestTest {
                 manifest.packageType()
             }
 
-        assertTrue("parse" in err.message.orEmpty())
+        assertTrue("parse" in err.msg)
     }
 
     @Test
@@ -192,7 +194,7 @@ class ManifestTest {
                 manifest.resolveDependency("NonExistentAlias")
             }
 
-        assertTrue("NonExistentAlias" in err.message.orEmpty())
+        assertTrue("NonExistentAlias" in err.msg)
     }
 
     @Test
@@ -254,7 +256,7 @@ class ManifestTest {
                 manifest.resolveDependency("BadDep")
             }
 
-        assertTrue("actr_type" in err.message.orEmpty())
+        assertTrue("actr_type" in err.msg)
     }
 
     @Test
@@ -270,7 +272,7 @@ class ManifestTest {
                 manifest.resolveDependency("anything")
             }
 
-        assertTrue("parse" in err.message.orEmpty())
+        assertTrue("parse" in err.msg)
     }
 
     @Test
@@ -286,6 +288,6 @@ class ManifestTest {
                 manifest.dependencyAliases()
             }
 
-        assertTrue("parse" in err.message.orEmpty())
+        assertTrue("parse" in err.msg)
     }
 }

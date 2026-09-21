@@ -13,6 +13,8 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v5
+      - name: Test SDK error message generation
+        run: python3 scripts/actr/tests/test_patch_error_messages.py
       - name: Validate Android build script
         run: scripts/actr/tests/kotlin-android-build-script.sh
 

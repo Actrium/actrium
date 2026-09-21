@@ -7,6 +7,21 @@ import ci_targets
 
 
 class CiTargetsTest(unittest.TestCase):
+    def test_error_message_generation_changes_check_both_sdks(self) -> None:
+        for path in (
+            "scripts/actr/patch-error-messages.py",
+            "scripts/actr/tests/test_patch_error_messages.py",
+            "scripts/actr/tests/fixtures/ActrError.swift",
+        ):
+            with self.subTest(path=path):
+                targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+                self.assertTrue(targets["swift_binding"])
+                self.assertTrue(targets["kotlin_binding"])
+                self.assertTrue(targets["release_related"])
+                self.assertFalse(targets["rust_core"])
+                self.assertIn(f"sdk_error_messages:{path}", reasons)
+
     def test_e2e_rust_sources_and_manifests_trigger_compile_check(self) -> None:
         paths = (
             "tests/e2e/actr/Cargo.toml",

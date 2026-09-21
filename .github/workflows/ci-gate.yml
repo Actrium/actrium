@@ -80,6 +80,8 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y sqlite3
           fi
+      - name: Test SDK error message generation
+        run: python3 scripts/actr/tests/test_patch_error_messages.py
       - name: Test target detection
         run: python .github/scripts/ci_targets_test.py
       - name: Test CI configuration
