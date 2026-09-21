@@ -61,6 +61,9 @@ The terms below have one fixed meaning in this RFC:
 | **Actr Soak Endpoint** | One test Pod/process running a real Actr RTC endpoint and the test-only control adapter. Preferred implementation name: `actr-soak-endpoint`. |
 | **Endpoint identity** | Stable topology name `actr-N`; it is separate from the ActrId, Pod IP, and Pod UID. |
 | **Peer** | The remote endpoint at one connection edge. A Peer relationship is directional from the observer's point of view. |
+| **Endpoint pool** | The fixed-size set of Endpoints deployed by CI with no baked Peer graph; pool members are leased to runs. |
+| **Peer wiring** | Runtime establishment and teardown of Peer edges by the SoakController through the peer-management API; the wired graph is recorded in `plan.json`. |
+| **Lease** | The exclusive assignment of a pool subset to one run; disjoint leases MAY run concurrently. |
 | **ActrNode** | The production Actr node hosted inside an Actr Soak Endpoint. |
 | **Actrix** | The real signaling/STUN/TURN service used by the endpoints; it is not an endpoint and not a test controller. |
 | **Soak Dashboard** | The UI/API and persistent run store. It owns manual test runs and embeds the SoakController. |
@@ -91,15 +94,15 @@ The current operating model is “CI deploys; Dashboard controls the test”:
 
 | Component | Responsibilities | Explicitly does not do |
 | --- | --- | --- |
-| GitHub Actions / CI | Pin the SHA; build and push Actrix/endpoint/Dashboard images; deploy the namespace, Secrets, RBAC, NetworkPolicy, Actrix, `actr-0` ... `actr-N`, and Dashboard; wait for Pod and Dashboard health | Create a test Controller Job, generate a plan, inject Faults, or start the soak business loop |
-| `soak-dashboard` | Serve the UI/API; preview and start plans; call endpoint control APIs; inject lifecycle/network/RTC/signaling events; collect metrics, logs, Result Evaluator output, and artifacts | Build images, publish releases, or receive `cluster-admin` |
+| GitHub Actions / CI | Pin the SHA; build and push Actrix/endpoint/Dashboard images; deploy the namespace, Secrets, RBAC, NetworkPolicy, Actrix, the unwired endpoint pool (`actr-0` ... `actr-N`), and Dashboard; wait for Pod and Dashboard health | Create a test Controller Job, generate a plan, wire Peer edges, inject Faults, or start the soak business loop |
+| `soak-dashboard` | Serve the UI/API; preview and start plans; lease pool subsets and wire/tear down Peer graphs; call endpoint control APIs; inject lifecycle/network/RTC/signaling events; collect metrics, logs, Result Evaluator output, and artifacts | Build images, publish releases, or receive `cluster-admin` |
 | Actr endpoint (`actr-N`) | Run the real Actr RTC endpoint and test workload; establish signaling/ICE/DTLS/SCTP/DataChannel through Actrix; expose control and observation APIs | Modify Controller-internal state directly or bypass `PeerGate` to operate a DataChannel |
 
 The Dashboard embeds the SoakController, so a run does not require a CI Job.
-CI only deploys the topology and MUST NOT start or control a soak run. CI and
+CI only deploys the pool and MUST NOT start or control a soak run. CI and
 Dashboard MUST NOT control the same endpoint set at the same time. Nightly and
-Weekend profiles are started from the Dashboard (manually or by a separate
-Dashboard scheduler) and use the same exclusive namespace ownership.
+Weekend profiles are submitted to the Dashboard queue (manually or by the
+Dashboard scheduler) and hold the pool exclusively while they run.
 
 Dashboard run state is persisted to its PVC. If the Dashboard Pod restarts, an
 active run is marked `Interrupted` rather than resumed; unattended release runs
@@ -107,43 +110,61 @@ therefore need an external scheduler and recovery policy.
 
 ### Topology ownership and plan compatibility
 
-CI owns the deployed topology. A deployment fixes the Endpoint count, canonical
-Endpoint identities (`actr-0` ... `actr-N`), Actr credentials, the
-`SOAK_REMOTE_PEERS`/`SOAK_INITIATOR_PEERS` configuration, and the allowed Peer
-graph. CI writes this immutable graph to an `actr-soak-topology` ConfigMap and
-passes the same graph to the Dashboard.
+CI owns the endpoint pool, not the topology. A deployment fixes only the pool
+size, canonical Endpoint identities (`actr-0` ... `actr-N`), Actr credentials,
+and the images. Endpoints start with no baked Peer graph; boot-time wiring such
+as `SOAK_REMOTE_PEERS`/`SOAK_INITIATOR_PEERS` is not part of the deployed
+contract.
 
-The Dashboard owns only the test plan inside that deployed topology. Its
-`small`, `multi-peer`, Nightly, Weekend, and Fault controls select a logical
-traffic/event plan; they MUST NOT create, delete, scale, or reconfigure
-Endpoint Pods, credentials, or real Peer edges during a run. `endpoint_count`
-is derived from the deployed Endpoint set and is read-only to the Dashboard.
+The Dashboard owns the topology as plan data. Every plan carries an explicit
+Peer graph in `plan.json`; at run start the embedded SoakController wires the
+graph through the peer-management endpoints of the Endpoint Control API,
+verifies connectivity, and tears the wiring down when the run ends. Changing
+the topology shape (Pair to Multi-peer, ring to hub+leaf) is a plan change, not
+a redeployment.
 
-Every generated plan MUST use only Endpoint identities and Peer edges present
-in `actr-soak-topology`. A seed MAY randomize action order and selection among
-allowed edges, but MUST NOT invent a Peer that is absent from
-`SOAK_REMOTE_PEERS`. The Dashboard MUST reject an incompatible plan before it
-starts.
+Plan compatibility reduces to pool fit: a plan is valid when its Endpoint count
+fits the idle pool and its shape is supported by the SoakController. The
+Dashboard MUST reject a plan that does not fit before it starts.
 
-Changing the physical topology (for example, Pair to Multi-peer, or 2 to 10
-Endpoints) requires a new CI deployment or a separate namespace. CI MUST NOT
-redeploy a namespace while its Dashboard has an active run. The initial
-implementation uses one Dashboard per namespace/topology; a future multi-
-namespace Dashboard is a separate feature and does not weaken this ownership
-boundary.
+The Dashboard leases an exclusive subset of the pool to each run.
+Fault/event-coverage profiles (pair-event, process-churn, multi-peer) MAY run
+concurrently on disjoint subsets; resource-sensitive profiles (Nightly,
+Weekend, release) MUST hold the entire pool exclusively. Runs that cannot be
+placed wait in the Dashboard queue; the 23:00 CST scheduler also submits runs
+to this queue. This replaces the earlier hard limit of one active run per
+namespace.
+
+Pool reuse hygiene is part of the contract:
+
+- a run MUST pass its final quiescence check (pending work, Fault leases, and
+  recovery obligations all zero) before its leased subset returns to the idle
+  pool;
+- every run begins with `/v1/actions/cleanup` on its leased Endpoints and
+  samples a fresh resource baseline;
+- every run uses its own realm/ActrId prefix on the shared Actrix and MUST
+  verify that its TURN allocations and registrations have drained before it
+  completes;
+- the pool is rolling-rebuilt on a schedule and before release-gate runs.
+
+Resizing the pool still requires a new CI deployment. CI MUST NOT redeploy a
+namespace while its Dashboard has an active run. The initial implementation
+uses one Dashboard per namespace; a future multi-namespace Dashboard is a
+separate feature and does not weaken this ownership boundary.
 
 ## Summary
 
-CI builds and deploys real Actrix, multiple Actr endpoints, the immutable
-topology manifest, and the `soak-dashboard` into Kubernetes, but it does not
+CI builds and deploys real Actrix, an unwired pool of Actr endpoints, and the
+`soak-dashboard` into Kubernetes, but it does not
 start a soak run. The
 Dashboard is the interactive test owner: an operator previews or starts a
-plan, injects lifecycle/network/RTC/signaling events, and observes the
+plan, the embedded SoakController wires the plan's Peer graph over a leased
+pool subset, injects lifecycle/network/RTC/signaling events, and observes the
 endpoints' bidirectional business traffic. The Dashboard's embedded
 SoakController collects endpoint, Actrix, and Kubernetes evidence and evaluates
 the deterministic Result Evaluator. CI remains responsible for image provenance
 and deployment health; it does not start, control, or schedule the soak run.
-CI and Dashboard MUST NOT control the same topology concurrently.
+CI and Dashboard MUST NOT control the same endpoint pool concurrently.
 
 ## Motivation
 
@@ -167,7 +188,7 @@ event entry point. It does not change the wire format or formal SDK semantics.
 
 One sentence:
 
-> CI builds and deploys real Actrix, `actr-0` ... `actr-N`, and the `soak-dashboard` into Kubernetes; the Dashboard then starts a fixed-seed soak run, continuously sends bidirectional business traffic, injects mobile events and RTC/signaling Faults, and uses endpoint state, business results, Actrix metrics, and Kubernetes resource metrics to judge recovery correctness and long-term stability.
+> CI builds and deploys real Actrix, an unwired endpoint pool (`actr-0` ... `actr-N`), and the `soak-dashboard` into Kubernetes; the Dashboard then wires the plan's Peer graph over a leased pool subset, starts a fixed-seed soak run, continuously sends bidirectional business traffic, injects mobile events and RTC/signaling Faults, and uses endpoint state, business results, Actrix metrics, and Kubernetes resource metrics to judge recovery correctness and long-term stability.
 
 Complete flow:
 
@@ -175,12 +196,12 @@ Complete flow:
 GitHub Actions / ARC Runner
   -> fix the main SHA, build, and push Actrix, endpoint, and Dashboard images
   -> create/update the Kubernetes namespace, Secrets, RBAC, and NetworkPolicy
-  -> write the immutable actr-soak-topology manifest
-  -> deploy Actrix, actr-0 ... actr-N, Dashboard, and collectors
+  -> deploy Actrix, the unwired endpoint pool (actr-0 ... actr-N), Dashboard, and collectors
   -> wait for Pod/Dashboard health only; do not start a soak plan
 
 soak-dashboard (operator/API)
   -> preview or start a run and generate the event plan from a fixed seed
+  -> lease a pool subset and wire the plan's Peer graph through the peer-management API
   -> embedded SoakController performs preflight and starts bidirectional traffic
   -> continuously send RPC, DataChunk, and fragmented business traffic
   -> inject lifecycle, network, RTC, and signaling events through the endpoint control API
@@ -188,6 +209,7 @@ soak-dashboard (operator/API)
   -> collect Snapshots, Hooks, Fault hits, business results, Actrix metrics, and K8s metrics
   -> Result Evaluator judges business, recovery, isolation, generation fencing, and resource convergence
   -> archive complete artifacts and reproduce.sh in the Dashboard PVC
+  -> pass the quiescence gate, tear down the wiring, and return the leased subset to the pool
   -> the operator or a separate read-only analyzer may export artifacts and run Claude Code
   -> after a human fix, replay with the original seed
 ```
@@ -259,6 +281,12 @@ GitHub Actions
 Kubernetes / cAdvisor / Prometheus / procfs collector
   `-> Pod, process, CPU, RSS, FD, Socket, restart, OOM, and Actrix metrics
 ```
+
+The diagram shows logical roles, not a fixed Peer graph. CI deploys the
+endpoints as an unwired pool; the SoakController wires the plan's Peer graph at
+run start through the peer-management API and tears it down at run end. Two
+endpoints therefore exchange real RTC traffic only when a run has wired an
+edge between them.
 
 #### 3.2 Endpoint Pod shape
 
@@ -422,12 +450,13 @@ AI only reads evidence and provides initial attribution.
 | Test Workload | Test Actor/Probe Driver inside `actr-N` | Send RPC, Tell, and DataChunk through `RuntimeContext`; continuously produce bidirectional traffic |
 | Soak Dashboard | Kubernetes Deployment | Serve the UI/BFF, persist run state, and expose authenticated manual control |
 | Soak Controller | Embedded in Dashboard | Generate seed plans, call endpoint control APIs, schedule events, run the Result Evaluator, and archive artifacts |
+| Pool lease manager | Dashboard module | Lease exclusive pool subsets to runs, queue runs that do not fit, and enforce profile-level concurrency (coverage profiles concurrent, resource profiles exclusive) |
 | RTC/signaling Fault Adapter | Wrap production Runtime and signaling transport | Call `DirectedRtcFaultRegistry` and `DirectedSignalingFaultRegistry` without changing Controller/Session logic |
 | Observation Adapter | Read Manager Snapshot, Hooks, and test counters | Convert results to endpoint JSON, event streams, and Prometheus metrics |
 | Actrix | Kubernetes StatefulSet | Provide real Signaling, STUN, TURN, and AIS; Endpoints use Service DNS |
 | Collector | Sidecar or separate Deployment | Collect endpoint, Actrix, Kubernetes, procfs, and log data |
 | Result Evaluator | Deterministic Controller module (implementation directory currently `oracle/`) | Check business correctness, recovery deadlines, Peer isolation, generation fencing, and resource trends |
-| CI deploy workflow | GitHub Actions | Build/push immutable images, deploy the namespace topology, and wait for health; it MUST NOT start the test plan |
+| CI deploy workflow | GitHub Actions | Build/push immutable images, deploy the namespace and the endpoint pool, and wait for health; it MUST NOT start the test plan |
 
 Endpoint control call relationships:
 
@@ -447,6 +476,10 @@ POST /v1/events/lifecycle
 POST /v1/faults/rtc or /v1/faults/signaling
   -> test-only Fault Adapter
   -> production Runtime/signaling transport seam
+
+POST /v1/peers or DELETE /v1/peers
+  -> ActrNode peer establishment or teardown
+  -> Peer Snapshot confirms the wired edge
 
 GET /v1/peers, /v1/events, /metrics
   -> Snapshot / Hook / Metrics Adapter
@@ -501,6 +534,8 @@ shell, `eval`, or arbitrary memory mutation.
 | GET | `/readyz` | Node, ActrId, Actrix, and test workload readiness |
 | GET | `/v1/identity` | run, Pod, ActrId, pod UID, and process incarnation |
 | GET | `/v1/peers` | Peer Snapshot and resource observation |
+| POST | `/v1/peers` | Wire a Peer edge to a target endpoint (run-scoped, idempotent) |
+| DELETE | `/v1/peers` | Tear down Peer wiring installed by a run |
 | GET | `/v1/events` | Hook, state edges, Fault hits, and signaling trace |
 | GET | `/metrics` | Prometheus metrics |
 | GET | `/v1/metrics` | Optional JSON metric snapshot |
@@ -515,6 +550,10 @@ shell, `eval`, or arbitrary memory mutation.
 
 Every write request carries `run_id`, `action_id`, `deadline_ms`, and
 `expected_generation`; the endpoint control API makes `action_id` idempotent.
+
+Peer-wiring writes are run-scoped: a run MUST tear down every edge it wired
+before its leased subset returns to the pool, and the SoakController MUST NOT
+wire an edge to an endpoint outside its lease.
 
 #### 6.3 Business probes
 
@@ -722,7 +761,9 @@ run_seed
 
 Use an explicit reproducible PRNG. Before every action is generated, write the
 plan to `plan.json`; do not depend on Pod return order, system time, or an
-unrecorded random number.
+unrecorded random number. `topology_seed` drives the generation of the Peer
+graph recorded in `plan.json` and wired at run start; the graph is plan data,
+not a deployment constraint.
 
 #### 8.2 Scheduling constraints
 
@@ -758,16 +799,20 @@ permanently miss rare events.
 
 #### 9.1 Topology profiles
 
+Topology profiles are wiring recipes. The SoakController applies a profile over
+its leased pool subset at run start through the peer-management API; profiles
+do not require different deployments.
+
 | Profile | Topology |
 | --- | --- |
 | `pair` | `actr-0` and `actr-1`, one Peer edge |
 | `small` | `actr-0` ... `actr-N`, fixed ring plus random cross-Peers |
 | `multi-peer` | `actr-0` Hub plus `actr-1` ... `actr-N` Leaves; each endpoint is limited to 4--8 active Peers |
 | `restart` | `actr-0` ... `actr-N`, periodically rebuild identities |
-| `relay` | All connections use TURN relay |
+| `relay` | All connections MUST use TURN relay; the controller MUST verify relayed paths from endpoint diagnostics rather than assume them |
 
 Do not fully interconnect 50 Endpoints; avoid O(N^2) connections dominating
-test resources. Every profile MUST record its Peer graph.
+test resources. Every profile MUST record its wired Peer graph in `plan.json`.
 
 #### 9.2 Business model
 
@@ -973,6 +1018,10 @@ old session/lane/Fault lease = 0
 recovery obligation = 0
 ```
 
+The final quiescence check doubles as the pool handoff gate: a leased subset
+MUST NOT return to the idle pool until these values are zero (or only
+explicitly in-flight requests remain).
+
 After warm-up, use the median, P95, and linear slope of the long-run window:
 
 - FD, Socket, task, and pending MUST NOT have a sustained positive slope;
@@ -998,7 +1047,7 @@ CANCELLED
 ```text
 actr-soak-<run-id>
   |-- actrix-0
-  |-- actr-0 ... actr-N
+  |-- endpoint pool: actr-0 ... actr-N (unwired)
   |-- soak-dashboard
   |-- collector
   `-- artifact-uploader
@@ -1012,7 +1061,7 @@ artifacts.
 | Component | Kubernetes type | Description |
 | --- | --- | --- |
 | Actrix | StatefulSet, initially one replica | Signaling, STUN, TURN, AIS |
-| Actr Endpoint (`actr-N`) | StatefulSet | Stable ordinal; the Pod IP may change after rebuild |
+| Actr Endpoint (`actr-N`) | StatefulSet | Stable ordinal; the Pod IP may change after rebuild; pool members start unwired and Peer edges are established at run start |
 | Soak Dashboard | Deployment | UI/BFF, manual control, embedded Controller, and run-state persistence |
 | Collector | Sidecar or separate Deployment | Metrics, procfs, and logs |
 
@@ -1043,6 +1092,10 @@ Dashboard -> `actr-N`: TCP 9090
 All Pods -> kube-dns: TCP/UDP 53
 Other traffic:      denied
 ```
+
+The pool model relies on the endpoint-to-endpoint UDP allowance; it MUST NOT
+be narrowed per run, because any pool member may be wired to any other by a
+plan.
 
 The first phase uses only the endpoint Fault Registry and lifecycle events.
 
@@ -1102,7 +1155,7 @@ At minimum, `reproduce.sh` can:
 
 1. use the same main SHA and image digest;
 2. use the same `plan.json`;
-3. use the same topology and configuration;
+3. re-wire the same Peer graph recorded in `plan.json`, with the same configuration;
 4. replay only the failed action window;
 5. output the same action IDs, generations, and Result Evaluator result.
 
@@ -1116,16 +1169,18 @@ CI (build/deploy workflow)
   -> cargo fmt and build test images
   -> push endpoint, Actrix, and Dashboard images; record digests
   -> create namespace, Secret, RBAC, and NetworkPolicy
-  -> deploy Actrix, actr-0 ... actr-N, soak-dashboard, and collectors
+  -> deploy Actrix, the unwired endpoint pool, soak-dashboard, and collectors
   -> wait for Pod and Dashboard health only
   -> stop; do not generate a plan, inject events, or start a soak plan
 
 Dashboard (operator/API)
   -> preview and start one run
+  -> lease a pool subset and wire the plan's Peer graph
   -> embedded SoakController performs endpoint preflight and business traffic
   -> inject lifecycle/network/RTC/signaling events
   -> collect endpoint, Actrix, and Kubernetes evidence
   -> evaluate the Result Evaluator and persist artifacts in the Dashboard PVC
+  -> pass the quiescence gate and return the leased subset to the pool
   -> operator reviews logs, the Result Evaluator output, and artifacts
 ```
 
@@ -1194,18 +1249,19 @@ AI initial attribution
 
 #### 16.1 Profiles
 
-| Profile | Topology | Duration | Purpose |
-| --- | --- | ---: | --- |
-| `preflight` | 1 Actrix + 2 Endpoints | 10 min | Image, network, API, and artifacts |
-| `pair-event` | 2 Endpoints | 30--60 min | Events and RTC/signaling Faults |
-| `process-churn` | 2 Endpoints | 30--60 min | SIGTERM, SIGKILL, and identity rebuild |
-| `multi-peer` | Hub + 9 Leaves | 2 h | Peer isolation and concurrent recovery |
-| `nightly` | 2--10 Endpoints | 8 h | Long-term overnight stability |
-| `weekend` | 10--50 Endpoints | 48 h | Weekend resource and recovery soak |
-| `release` | 50--100 Endpoints | 8--24 h | Release gate |
+| Profile | Topology | Duration | Purpose | Pool use |
+| --- | --- | ---: | --- | --- |
+| `preflight` | 1 Actrix + 2 Endpoints | 10 min | Image, network, API, and artifacts | Concurrent-capable |
+| `pair-event` | 2 Endpoints | 30--60 min | Events and RTC/signaling Faults | Concurrent on disjoint subsets |
+| `process-churn` | 2 Endpoints | 30--60 min | SIGTERM, SIGKILL, and identity rebuild | Concurrent on disjoint subsets |
+| `multi-peer` | Hub + 9 Leaves | 2 h | Peer isolation and concurrent recovery | Concurrent on disjoint subsets |
+| `nightly` | 2--10 Endpoints | 8 h | Long-term overnight stability | Exclusive pool |
+| `weekend` | 10--50 Endpoints | 48 h | Weekend resource and recovery soak | Exclusive pool |
+| `release` | 50--100 Endpoints | 8--24 h | Release gate | Exclusive pool, fresh rolling rebuild |
 
 Report steady and recovery windows separately: steady windows do not inject
-destructive Faults; recovery windows periodically inject and heal them.
+destructive Faults; recovery windows periodically inject and heal them. Runs
+that do not fit the idle pool wait in the Dashboard queue.
 
 #### 16.2 Implementation phases
 
@@ -1216,8 +1272,9 @@ destructive Faults; recovery windows periodically inject and heal them.
 3. **Phase 2: events and deterministic Faults** — connect
    `NetworkEventHandle`, RTC/signaling Registries, idempotency, generation
    fencing, and historical Issue scenarios.
-4. **Phase 3: multi-Pod and lifecycle** — add StatefulSets, two-sided Fault
-   commit, Pod/Actrix restart, resource collection, and the Result Evaluator.
+4. **Phase 3: multi-Pod and lifecycle** — add StatefulSets, the endpoint pool
+   with runtime Peer wiring and leases, two-sided Fault commit, Pod/Actrix
+   restart, resource collection, and the Result Evaluator.
 5. **Phase 4: Nightly 8 hours** — add fixed-seed random events, coverage checks,
    `retry=0`, and Claude Code analysis.
 6. **Phase 5: Weekend 48 hours and external network** — add relay, credential
@@ -1277,7 +1334,11 @@ Code OIDC.
 - Claude Code performs only initial analysis, and human fixes can replay the original seed;
 - test namespace, Pods, Jobs, PVCs, and temporary Secrets can be cleaned up automatically.
 - CI image/deployment jobs do not start a Dashboard-controlled run;
-- Dashboard is the sole test owner per namespace.
+- Dashboard is the sole test owner per namespace;
+- Peer graphs are wired and torn down through the peer-management API and recorded in `plan.json`;
+- pool subsets are leased exclusively and returned only after the quiescence gate;
+- coverage profiles can run concurrently on disjoint subsets, while Nightly, Weekend, and release runs hold the pool exclusively;
+- the pool can be rolling-rebuilt on schedule and before release-gate runs without losing artifacts.
 
 ### 18. References
 
@@ -1294,6 +1355,8 @@ Code OIDC.
 - A same-process endpoint adapter is more invasive to build and package than a generic black-box driver, and crate-private observations need a test-only facade.
 - Runtime/socket Faults are deterministic and targeted, but cannot model every kernel, CNI, NAT, MTU, or carrier-network behavior.
 - Resource trends can be noisy under shared capacity; dedicated nodes and explicit infrastructure classification add operational cost.
+- An always-on endpoint pool consumes CPU and memory between runs; pool sizing trades idle cost against queue wait time.
+- Reusing pool Pods across runs risks residual-state contamination; the quiescence handoff gate, per-run cleanup and realm isolation, and scheduled rolling rebuilds bound but do not eliminate this risk.
 - The first phase validates server-side lifecycle facts rather than real mobile process suspension and radio handover.
 
 ## Alternatives
@@ -1336,6 +1399,18 @@ Full mesh maximizes pair combinations, but connection count grows quadratically
 and can make the cluster the bottleneck. Ring, seeded cross edges, and Hub/Leaf
 profiles provide controlled coverage and explicit fan-out pressure.
 
+### CI-owned fixed topology with an immutable topology ConfigMap
+
+An earlier revision of this RFC had CI bake the Peer graph into the deployment
+(`SOAK_REMOTE_PEERS`/`SOAK_INITIATOR_PEERS`) and publish an immutable
+`actr-soak-topology` ConfigMap that the Dashboard validated plans against. That
+model keeps two sources of truth (deployment parameters and Dashboard plan
+state) that can silently drift, turns every topology change into a
+redeployment, and degrades compatibility checking to special cases (for
+example, rejecting a ring plan because the deployed graph is hub+leaf). The
+pool model makes the topology plan data instead: the plan is the only source of
+truth, compatibility reduces to pool fit, and no contract artifact is needed.
+
 ### No change
 
 Existing short tests catch many protocol regressions, but cannot provide a
@@ -1358,6 +1433,11 @@ multi-Pod lifecycle; Phase 4 runs Nightly; and Phase 5 runs the Weekend profile
 and optional external-network comparisons. k6 and TURN allocation accounting
 are explicitly deferred.
 
+The initial actr-soak deployment bakes the Peer graph at boot through
+`SOAK_REMOTE_PEERS`. Migrating to the pool model adds the peer-management write
+API and controller-side wiring; the boot-time graph remains a compatibility
+path for single-topology namespaces until the pool model lands.
+
 ## Unresolved questions
 
 - Which Kubernetes metrics backend is available on the target cluster?
@@ -1366,6 +1446,9 @@ are explicitly deferred.
 - Which object storage (PVC, MinIO, or S3-compatible storage) is approved for immutable artifacts and Claude Code input?
 - Which external network comparison profiles should be added after the deterministic phase, and how should infrastructure noise be classified?
 - Does the target Actrix deployment expose sufficient signaling and service metrics, or require a separate observability change?
+- What is the effort to add runtime Peer add/remove to the production ActrNode (node mode)? The TestHarness (remote mode) path is expected to be straightforward; the node-mode path decides the pool model's timeline.
+- How should the endpoint pool be sized, and should Dashboard queue depth drive pool autoscaling?
+- What cross-run resource-contention noise is acceptable for concurrent coverage profiles before a run is classified INVALID_INFRASTRUCTURE?
 
 These questions do not block Phase 0. They MUST be resolved in the tracking
 issue before the corresponding phase is accepted.
@@ -1377,4 +1460,6 @@ issue before the corresponding phase is accepted.
 - add Actrix-side TURN allocation accounting in a separate observability RFC;
 - add CNI, `tc/netem`, or Chaos Mesh profiles for node and network realism;
 - run Actrix replicas, rolling upgrades, and cross-version actr/Actrix matrices;
+- autoscale the endpoint pool from Dashboard queue depth and profile demand;
+- manage several pools across namespaces from one Dashboard;
 - feed structured Result Evaluator evidence from Dashboard-controlled runs into an issue-triage bot while keeping any release gate deterministic.

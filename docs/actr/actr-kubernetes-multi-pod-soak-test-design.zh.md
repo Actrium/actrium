@@ -54,6 +54,9 @@ credential 配置必须使用 `actr-N` 名称。
 | **Actr Soak Endpoint** | 一个测试 Pod/进程，运行真实 Actr RTC 端点和测试专用控制适配器；推荐实现名称为 `actr-soak-endpoint`。 |
 | **Endpoint identity** | 拓扑中的稳定名称 `actr-N`，与 ActrId、Pod IP、Pod UID 分开。 |
 | **Peer** | 某条连接边上的远端端点；关系从观察端点的视角是有方向的。 |
+| **Endpoint pool** | CI 部署的固定大小 Endpoint 集合，启动时不带预设 Peer 图；池成员以租约方式分配给各个 run。 |
+| **Peer wiring** | SoakController 在运行时通过 peer 管理 API 建立和拆除 Peer 边；接线的图记录在 `plan.json` 中。 |
+| **Lease（租约）** | 把池的一个子集独占分配给一个 run；不相交的租约允许并发运行。 |
 | **ActrNode** | 运行在 Actr Soak Endpoint 内的生产 Actr 节点。 |
 | **Actrix** | Endpoint 使用的真实信令/STUN/TURN 服务，不是 Endpoint，也不是测试控制器。 |
 | **Soak Dashboard** | 提供 UI/API 和持久化运行记录，并内嵌 SoakController。 |
@@ -82,13 +85,13 @@ credential 配置必须使用 `actr-N` 名称。
 
 | 组件 | 负责内容 | 不负责内容 |
 | --- | --- | --- |
-| GitHub Actions / CI | 固定 SHA、构建并推送 Actrix/Endpoint/Dashboard 镜像；部署 namespace、Secret、RBAC、NetworkPolicy、Actrix、`actr-0...actr-N` 和 Dashboard；等待 Pod 与 Dashboard 健康 | 不创建测试 Controller Job，不生成测试计划，不注入 Fault，不启动浸泡业务循环 |
-| soak-dashboard | 提供 UI/API；预览和启动测试计划；调用 Endpoint 控制 API；注入生命周期、网络、RTC/信令事件；收集指标、日志、结果判定器输出和 artifact | 不构建镜像，不负责 CI 发布，不应获得 cluster-admin |
+| GitHub Actions / CI | 固定 SHA、构建并推送 Actrix/Endpoint/Dashboard 镜像；部署 namespace、Secret、RBAC、NetworkPolicy、Actrix、未接线的 Endpoint 池（`actr-0...actr-N`）和 Dashboard；等待 Pod 与 Dashboard 健康 | 不创建测试 Controller Job，不生成测试计划，不接线 Peer 边，不注入 Fault，不启动浸泡业务循环 |
+| soak-dashboard | 提供 UI/API；预览和启动测试计划；租用池子集并通过 peer 管理 API 接线/拆除 Peer 图；调用 Endpoint 控制 API；注入生命周期、网络、RTC/信令事件；收集指标、日志、结果判定器输出和 artifact | 不构建镜像，不负责 CI 发布，不应获得 cluster-admin |
 | Endpoint (`actr-N`) | 运行真实 Actr RTC 端点和测试 workload；通过 Actrix 建立 signaling/ICE/DTLS/SCTP/DataChannel；提供控制和观测接口 | 不直接修改 Controller 内部状态，不绕过 PeerGate 操作 DataChannel |
 
 Dashboard 内嵌 Soak Controller，因此测试不需要 CI Job。CI 只负责部署，不能启动或
-控制浸泡测试。Nightly/Weekend 由 Dashboard 的操作员或独立 Dashboard 调度器启动，
-同一 namespace 始终只能有一个测试控制者。
+控制浸泡测试。Nightly/Weekend 由操作员或 Dashboard 调度器提交到 Dashboard 队列，
+运行期间独占整个池；并发与租约规则见下节。
 
 Dashboard 当前运行状态写入 PVC；Dashboard Pod 重启会将正在运行的任务标记为
 Interrupted，不会自动续跑。因此 Dashboard 适合人工调试和受控长跑，正式无人值守
@@ -96,23 +99,36 @@ Interrupted，不会自动续跑。因此 Dashboard 适合人工调试和受控�
 
 ### 拓扑归属与计划兼容性
 
-CI 拥有已部署的物理拓扑。一次部署会固定 Endpoint 数量、规范身份
-（`actr-0` 到 `actr-N`）、Actr credential、`SOAK_REMOTE_PEERS`、
-`SOAK_INITIATOR_PEERS` 以及允许的 Peer 图。CI 将这份不可变拓扑写入
-`actr-soak-topology` ConfigMap，并把同一份拓扑提供给 Dashboard。
+CI 拥有的是 Endpoint 池，而不是拓扑。一次部署只固定池大小、规范身份
+（`actr-0` 到 `actr-N`）、Actr credential 和镜像。Endpoint 启动时不带预置
+Peer 图；`SOAK_REMOTE_PEERS`、`SOAK_INITIATOR_PEERS` 这类启动期接线不再是
+部署契约的一部分。
 
-Dashboard 只拥有已部署拓扑内的测试计划。`small`、`multi-peer`、Nightly、
-Weekend 和 Fault 控制只选择业务/事件计划，运行过程中不能创建、删除、扩缩容或
-重新配置 Endpoint Pod、credential 和真实 Peer 边。`endpoint_count` 由已部署的
-Endpoint 集合决定，Dashboard 只读，不能动态修改。
+Dashboard 把拓扑作为计划数据来拥有。每个计划在 `plan.json` 中携带显式的 Peer 图；
+run 启动时，内嵌 SoakController 通过 Endpoint 控制 API 的 peer 管理接口完成接线
+并验证连通性，run 结束时拆除。改变拓扑形状（Pair 到 Multi-peer、ring 到
+hub+leaf）是修改计划，不是重新部署。
 
-每个计划只能使用 `actr-soak-topology` 中已有的 Endpoint 身份和 Peer 边。seed 可以
-随机化动作顺序以及已允许边的选择，但不能生成 `SOAK_REMOTE_PEERS` 中不存在的 Peer。
-Dashboard 在启动前必须拒绝与已部署拓扑不兼容的计划。
+计划兼容性简化为池适配：计划的 Endpoint 数量不超过空闲池大小、形状被
+SoakController 支持即为合法。Dashboard 必须在启动前拒绝放不进空闲池的计划。
 
-如果要改变物理拓扑，例如从 Pair 切换到 Multi-peer，或从 2 个 Endpoint 扩展到 10 个，
-必须由 CI 重新部署或使用新的 namespace。Dashboard 有运行任务时，CI 不得重新部署同一
-namespace。第一版采用“一套 namespace/拓扑对应一个 Dashboard”；以后如果要做跨
+Dashboard 为每个 run 分配池的独占子集（租约）。事件/Fault 覆盖类 profile
+（pair-event、process-churn、multi-peer）允许在不相交的子集上并发；资源敏感
+profile（Nightly、Weekend、release）必须独占整个池。放不下的 run 在 Dashboard
+队列中等待；23:00 定时调度器也向该队列提交 run。这取代了早期"同一时刻只允许
+一个 run"的硬限制。
+
+池复用卫生纪律是契约的一部分：
+
+- run 必须通过收尾 quiescence 检查（pending、Fault lease、recovery obligation
+  全部清零），其租约子集才能归还空闲池；
+- 每个 run 开始时对租到的 Endpoint 执行 `/v1/actions/cleanup`，并重新采集资源基线；
+- 每个 run 在共享 Actrix 上使用独立 realm/ActrId 前缀，结束前必须确认本 run 的
+  TURN allocation 和注册已排空；
+- 池按计划定期滚动重建，release 门禁 run 前也必须重建。
+
+调整池大小仍需 CI 重新部署。Dashboard 有活动 run 时，CI 不得重新部署同一
+namespace。第一版采用"一套 namespace 对应一个 Dashboard"；以后如果要做跨
 namespace Dashboard，需要单独设计，不能削弱这个控制边界。
 
 ---
@@ -121,7 +137,7 @@ namespace Dashboard，需要单独设计，不能削弱这个控制边界。
 
 一句话：
 
-> CI 在 Kubernetes 中部署真实 Actrix、`actr-0` 到 `actr-N` 和 `soak-dashboard`；Dashboard 再用固定 seed 启动浸泡测试，持续发送双向业务、随机注入移动事件和 RTC/信令 Fault，并根据端点状态、业务结果、Actrix 指标和 Kubernetes 资源指标判断恢复正确性与长期稳定性。
+> CI 在 Kubernetes 中部署真实 Actrix、未接线的 Endpoint 池（`actr-0` 到 `actr-N`）和 `soak-dashboard`；Dashboard 再按计划接线 Peer 图、用固定 seed 启动浸泡测试，持续发送双向业务、随机注入移动事件和 RTC/信令 Fault，并根据端点状态、业务结果、Actrix 指标和 Kubernetes 资源指标判断恢复正确性与长期稳定性。
 
 完整流程：
 
@@ -129,12 +145,12 @@ namespace Dashboard，需要单独设计，不能削弱这个控制边界。
 GitHub Actions / ARC Runner
   → 固定 main SHA，构建并推送 Actrix、Endpoint 和 Dashboard 镜像
   → 创建/更新 namespace、Secret、RBAC 和 NetworkPolicy
-  → 写入不可变的 actr-soak-topology 拓扑清单
-  → 部署 Actrix、actr-0 到 actr-N、Dashboard 和采集器
+  → 部署 Actrix、未接线的 Endpoint 池（actr-0 到 actr-N）、Dashboard 和采集器
   → 只等待 Pod/Dashboard 健康，不启动浸泡计划
 
 soak-dashboard（操作员/API）
   → 预览或启动测试，根据固定 seed 生成事件计划
+  → 租用池子集，通过 peer 管理 API 接线计划中的 Peer 图并验证连通性
   → 内嵌 SoakController 执行端点 preflight 和双向业务
   → Endpoint 通过真实 Actrix 完成 signaling、ICE、DTLS、SCTP、DataChannel
   → 持续发送 RPC、DataChunk 和分片业务
@@ -143,6 +159,7 @@ soak-dashboard（操作员/API）
   → 收集 Snapshot、Hook、Fault 命中、业务结果、Actrix 和 K8s 指标
   → 结果判定器判断业务、恢复、隔离、generation fencing 和资源收敛
   → 将完整 artifact 和 reproduce.sh 写入 Dashboard PVC
+  → 通过 quiescence 闸门后拆除接线，把租约子集归还池中
   → 操作员或独立只读分析器可在运行结束后导出 artifact 并调用 Claude Code
   → 人工修复后使用原 seed 重放
 ~~~
@@ -217,6 +234,10 @@ GitHub Actions
 Kubernetes / cAdvisor / Prometheus / procfs collector
   └─ Pod、进程、CPU、RSS、FD、Socket、重启、OOM 和 Actrix 指标
 ~~~
+
+图中是逻辑角色，不是固定的 Peer 图。CI 部署的是未接线的 Endpoint 池；
+SoakController 在 run 启动时通过 peer 管理 API 按计划接线、结束时拆除。只有当
+某个 run 接线了某条边，两个 Endpoint 之间才会有真实 RTC 流量。
 
 ### 3.2 Endpoint Pod 形态
 
@@ -364,12 +385,13 @@ RtcRuntimeConfig::runtime()
 | Test Workload | `actr-N` 内的测试 Actor/Probe Driver | 通过 `RuntimeContext` 发送 RPC、Tell 和 DataChunk，持续产生双向业务 |
 | Soak Dashboard | Kubernetes Deployment | 提供 UI/BFF、持久化运行状态，并提供认证的人工控制入口 |
 | Soak Controller | Dashboard 内嵌 | 生成 seed 计划，调用 Endpoint 控制 API，执行事件编排、结果判定器和 artifact 归档 |
+| 池租约管理器 | Dashboard 模块 | 为 run 分配独占池子集、排队放不下的 run，并按 profile 执行并发策略（覆盖类可并发、资源类独占） |
 | RTC/信令 Fault Adapter | 包装生产 Runtime 和 signaling transport | 调用 `DirectedRtcFaultRegistry`、`DirectedSignalingFaultRegistry`，不改变 Controller/Session 逻辑 |
 | Observation Adapter | 读取 Manager Snapshot、Hook 和测试计数器 | 转换为 Endpoint JSON、事件流和 Prometheus 指标 |
 | Actrix | Kubernetes StatefulSet | 提供真实 Signaling、STUN/TURN/AIS 服务；Endpoint 通过 Service DNS 访问 |
 | Collector | sidecar 或独立 Deployment | 采集 Endpoint、Actrix、Kubernetes、procfs 和日志数据 |
 | 结果判定器（Result Evaluator） | Controller 内确定性模块（当前实现目录为 `oracle/`） | 检查业务正确性、恢复时限、Peer 隔离、generation fencing 和资源趋势 |
-| CI 部署工作流 | GitHub Actions | 构建/推送不可变镜像，部署 namespace 拓扑并等待健康；不得启动测试计划 |
+| CI 部署工作流 | GitHub Actions | 构建/推送不可变镜像，部署 namespace 和 Endpoint 池并等待健康；不得启动测试计划 |
 
 Endpoint 控制调用关系：
 
@@ -389,6 +411,10 @@ POST /v1/events/lifecycle
 POST /v1/faults/rtc 或 /v1/faults/signaling
   → test-only Fault Adapter
   → 生产 Runtime/Signaling transport seam
+
+POST /v1/peers 或 DELETE /v1/peers
+  → ActrNode 建立或拆除 Peer 边
+  → Peer Snapshot 确认接线结果
 
 GET /v1/peers、/v1/events、/metrics
   → Snapshot / Hook / Metrics Adapter
@@ -442,6 +468,8 @@ Endpoint 控制 API 是测试命名空间内的远程控制适配层。推荐进
 | GET | /readyz | Node、ActrId、Actrix 和测试 workload 已就绪 |
 | GET | /v1/identity | run、Pod、ActrId、pod_uid、process incarnation |
 | GET | /v1/peers | Peer Snapshot 和资源 observation |
+| POST | /v1/peers | 接线一条到目标 Endpoint 的 Peer 边（run 作用域、幂等） |
+| DELETE | /v1/peers | 拆除本 run 接线的 Peer 边 |
 | GET | /v1/events | Hook、状态边沿、Fault 命中和信令 trace |
 | GET | /metrics | Prometheus 指标 |
 | GET | /v1/metrics | JSON 指标快照，可选 |
@@ -455,6 +483,9 @@ Endpoint 控制 API 是测试命名空间内的远程控制适配层。推荐进
 | POST | /v1/actions/force-reconnect | 调用生产 force reconnect 入口 |
 
 所有写请求携带 run_id、action_id、deadline_ms 和 expected_generation；Endpoint 控制 API 对 action_id 做幂等。
+
+peer 接线写请求是 run 作用域的：run 必须在租约子集归还池之前拆除自己接线的
+所有边；Controller 不得向租约外的 Endpoint 接线。
 
 ### 6.3 业务探针
 
@@ -652,7 +683,7 @@ run_seed
   └── lifecycle_seed
 ~~~
 
-使用显式可复现的 PRNG。每次动作生成前把计划写入 plan.json，不依赖 Pod 返回顺序、系统时间或未记录的随机数。
+使用显式可复现的 PRNG。每次动作生成前把计划写入 plan.json，不依赖 Pod 返回顺序、系统时间或未记录的随机数。`topology_seed` 驱动生成记录在 `plan.json` 中、run 启动时接线的 Peer 图；Peer 图是计划数据，不是部署约束。
 
 ### 8.2 调度约束
 
@@ -688,15 +719,18 @@ run_seed
 
 ### 9.1 拓扑 profile
 
+拓扑 profile 是接线配方。SoakController 在 run 启动时把 profile 应用到租到的
+池子集上；不同 profile 不需要不同的部署。
+
 | Profile | 拓扑 |
 | --- | --- |
 | pair | `actr-0` 和 `actr-1`，单 Peer 边 |
 | small | `actr-0` 到 `actr-N`，固定 ring + 随机交叉 Peer |
 | multi-peer | `actr-0` 作为 hub，`actr-1` 到 `actr-N` 作为 leaf，每个端点限制 4～8 个活跃 Peer |
 | restart | `actr-0` 到 `actr-N`，周期性重建身份 |
-| relay | 全部使用 TURN relay |
+| relay | 全部连接必须走 TURN relay；Controller 必须依据 Endpoint 诊断信息验证 relay 路径，不得假定 |
 
-不建议 50 个 Endpoint 全互联，避免 O(N²) 连接数主导测试资源。每个 profile 必须记录 peer graph。
+不建议 50 个 Endpoint 全互联，避免 O(N²) 连接数主导测试资源。每个 profile 必须把接线后的 Peer 图记录在 `plan.json` 中。
 
 ### 9.2 业务模型
 
@@ -898,6 +932,9 @@ BuildThrottle.active = 0
 recovery obligation = 0
 ~~~
 
+收尾 quiescence 检查同时是池的交接闸门：上述值清零（或只剩明确在途请求）之前，
+租约子集不得归还空闲池。
+
 长时间使用 warm-up 后窗口的中位数、P95 和线性斜率：
 
 - FD、Socket、task、pending 不允许持续正斜率；
@@ -925,7 +962,7 @@ CANCELLED
 ~~~text
 actr-soak-<run-id>
   ├── actrix-0
-  ├── actr-0 ... actr-N
+  ├── Endpoint 池：actr-0 ... actr-N（未接线）
   ├── soak-dashboard
   ├── collector
   └── artifact-uploader
@@ -938,7 +975,7 @@ namespace 内隔离 realm、ActrId、credential、Fault、NetworkPolicy 和 arti
 | 组件 | Kubernetes 类型 | 说明 |
 | --- | --- | --- |
 | Actrix | StatefulSet，初始 1 副本 | Signaling、STUN、TURN、AIS |
-| Actr Endpoint（`actr-N`） | StatefulSet | 稳定 ordinal，Pod 重建后 IP 仍可能变化 |
+| Actr Endpoint（`actr-N`） | StatefulSet | 稳定 ordinal，Pod 重建后 IP 仍可能变化；池成员启动时不接线，Peer 边在 run 启动时建立 |
 | Soak Dashboard | Deployment | UI/BFF、人工控制、内嵌 Controller 和运行状态持久化 |
 | Collector | sidecar 或独立 Deployment | metrics、procfs、日志 |
 
@@ -967,6 +1004,9 @@ Dashboard → `actr-N`：TCP 9090
 所有 Pod → kube-dns：TCP/UDP 53
 其他流量：拒绝
 ~~~
+
+池模型依赖 Endpoint 之间的 UDP 放行；不得按 run 收窄，因为任何池成员都可能被
+计划接线到任何其他成员。
 
 第一阶段只使用 Endpoint Fault Registry 和生命周期事件；真实 CNI delay/loss/partition 作为后续 profile。
 
@@ -1019,7 +1059,7 @@ reproduce.sh 至少能：
 
 1. 使用同一 main SHA 和镜像 digest；
 2. 使用同一 plan.json；
-3. 使用相同拓扑和配置；
+3. 按 `plan.json` 重新接线相同的 Peer 图，并使用相同配置；
 4. 只重放失败动作窗口；
 5. 输出相同的 action_id、generation 和结果判定器结果。
 
@@ -1033,16 +1073,18 @@ CI（构建/部署工作流）
   → cargo fmt 和构建测试镜像
   → 推送 Endpoint、Actrix 和 Dashboard 镜像并记录 digest
   → 创建/更新 namespace、Secret、RBAC 和 NetworkPolicy
-  → 部署 Actrix、actr-0 到 actr-N、Dashboard 和采集器
+  → 部署 Actrix、未接线的 Endpoint 池、Dashboard 和采集器
   → 只等待 Pod/Dashboard 健康
   → 停止；不创建 Controller Job，不启动浸泡计划
 
 Dashboard（操作员/API）
   → 预览并启动一次测试
+  → 租用池子集并接线计划中的 Peer 图
   → 内嵌 SoakController 执行 Endpoint preflight 和业务流量
   → 注入生命周期、网络、RTC/信令事件
   → 收集 Endpoint、Actrix 和 Kubernetes 证据
   → 执行结果判定器，将 artifact 写入 Dashboard PVC
+  → 通过 quiescence 闸门，把租约子集归还池中
   → 操作员查看日志、结果判定器输出和 artifact
 ~~~
 
@@ -1112,17 +1154,17 @@ AI 初步归因
 
 ### 16.1 Profile
 
-| Profile | 拓扑 | 时长 | 目的 |
-| --- | --- | ---: | --- |
-| preflight | 1 Actrix + 2 Endpoint | 10 min | 镜像、网络、API 和 artifact |
-| pair-event | 2 Endpoint | 30～60 min | 事件、RTC/信令 Fault |
-| process-churn | 2 Endpoint | 30～60 min | SIGTERM、SIGKILL、身份重建 |
-| multi-peer | hub + 9 leaf | 2 h | Peer 隔离、并发 recovery |
-| nightly | 2～10 Endpoint | 8 h | 夜间长期稳定 |
-| weekend | 10～50 Endpoint | 48 h | 周末资源和恢复浸泡 |
-| release | 50～100 Endpoint | 8～24 h | 发布门禁 |
+| Profile | 拓扑 | 时长 | 目的 | 池占用 |
+| --- | --- | ---: | --- | --- |
+| preflight | 1 Actrix + 2 Endpoint | 10 min | 镜像、网络、API 和 artifact | 可并发 |
+| pair-event | 2 Endpoint | 30～60 min | 事件、RTC/信令 Fault | 可在不相交子集上并发 |
+| process-churn | 2 Endpoint | 30～60 min | SIGTERM、SIGKILL、身份重建 | 可在不相交子集上并发 |
+| multi-peer | hub + 9 leaf | 2 h | Peer 隔离、并发 recovery | 可在不相交子集上并发 |
+| nightly | 2～10 Endpoint | 8 h | 夜间长期稳定 | 独占整个池 |
+| weekend | 10～50 Endpoint | 48 h | 周末资源和恢复浸泡 | 独占整个池 |
+| release | 50～100 Endpoint | 8～24 h | 发布门禁 | 独占整个池，跑前滚动重建 |
 
-steady 和 recovery 分开报告：steady 不注入破坏性 Fault，recovery 周期性注入并恢复。
+steady 和 recovery 分开报告：steady 不注入破坏性 Fault，recovery 周期性注入并恢复。放不进空闲池的 run 在 Dashboard 队列中等待。
 
 ### 16.2 实施阶段
 
@@ -1136,7 +1178,7 @@ steady 和 recovery 分开报告：steady 不注入破坏性 Fault，recovery �
    接入 NetworkEventHandle、RTC/信令 Registry、幂等、generation fencing 和历史 Issue 场景。
 
 4. **Phase 3：多 Pod 和生命周期**
-   接入 StatefulSet、双端 Fault commit、Pod/Actrix restart、资源采集和结果判定器。
+   接入 StatefulSet、Endpoint 池与运行时 Peer 接线/租约、双端 Fault commit、Pod/Actrix restart、资源采集和结果判定器。
 
 5. **Phase 4：Nightly 8 小时**
    加入固定 seed 随机事件、coverage 检查、retry=0 和 Claude Code 分析。
@@ -1198,7 +1240,11 @@ steady 和 recovery 分开报告：steady 不注入破坏性 Fault，recovery �
 - Claude Code 只做初步分析，人工修复后可按原 seed 重放；
 - 测试 namespace、Pod、Job、PVC 和临时 Secret 可自动清理。
 - CI 的镜像/部署工作流不会启动 Dashboard 控制的测试；
-- Dashboard 是每个 namespace 的唯一测试控制者。
+- Dashboard 是每个 namespace 的唯一测试控制者；
+- Peer 图通过 peer 管理 API 接线和拆除，并记录在 plan.json 中；
+- 池子集独占租用，只有通过 quiescence 闸门后才归还；
+- 覆盖类 profile 可在不相交子集上并发，Nightly/Weekend/release 独占整个池；
+- 池可按计划滚动重建，重建不丢失 artifact。
 
 ---
 
