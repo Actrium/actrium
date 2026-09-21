@@ -15,8 +15,10 @@
 //!     completion of the work unit.
 //!
 //! If the consumer crashes after `dequeue` but before `ack`, those `Inflight` messages remain
-//! in the database. On the next consumer restart, a "cleanup" routine can be implemented to
-//! reprocess these "stuck" messages.
+//! in the database. The SQLite backend takes exclusive database ownership and
+//! restores these messages to Queued when reopened. This provides at-least-once
+//! delivery for unacknowledged persisted messages, not exactly-once business
+//! execution: handlers must tolerate repeated side effects after a crash.
 
 use crate::error::StorageResult;
 use async_trait::async_trait;
