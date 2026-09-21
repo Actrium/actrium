@@ -877,7 +877,9 @@ Kubernetes 可以直接收集 Pod CPU、内存、重启、OOM 和 throttling。F
 - stale generation 修改当前 generation；
 - Fault 已声明但没有命中；
 - Pod 出现非预期 OOMKilled、eviction 或自动重启；
-- Controller 自身 retry 或违反动作约束。
+- Controller 自身 retry 或违反动作约束；
+- artifact 脱敏闸门失败，或在已导出的 artifact 中检出 secret、未脱敏的
+  完整 payload（见 §14.1）。
 
 ### 12.2 业务正确性
 
@@ -998,12 +1000,23 @@ STUN/TURN 和 relay bind.ice.advertised_ip 使用稳定的 LoadBalancer、MetalL
 ### 13.4 NetworkPolicy
 
 ~~~text
-Dashboard → `actr-N`：TCP 9090
-`actr-N` → Actrix：TCP HTTP/Signaling、UDP STUN/TURN
+Dashboard → `actr-N`：TCP 9090（Endpoint 控制 API）
+Dashboard → Kubernetes API：TCP 443/6443（读取 Pod、Events、日志、metrics；
+              仅限批准的生命周期动词）
+Collector/Prometheus → `actr-N`：TCP 9091（Endpoint metrics 抓取）
+Collector/Prometheus → Actrix：TCP metrics 端口（Actrix metrics 抓取）
+`actr-N` → Actrix：TCP HTTP/Signaling、UDP STUN/TURN 3478
+`actr-N` ↔ Actrix：TURN relay UDP 端口段（relay allocation 的中继媒体，
+            relay profile 必需）
 `actr-N` ↔ `actr-N`：WebRTC ephemeral UDP
 所有 Pod → kube-dns：TCP/UDP 53
 其他流量：拒绝
 ~~~
+
+矩阵必须列出设计依赖的每一条流量；缺少 allow 规则导致的是 harness 故障而非
+SUT 故障，归类 INVALID_INFRASTRUCTURE。Dashboard 到 Kubernetes API 的出向
+只允许指向 API server；TURN relay 端口段必须是配置的专用段，不得放宽为
+大范围 UDP 放行。
 
 池模型依赖 Endpoint 之间的 UDP 放行；不得按 run 收窄，因为任何池成员都可能被
 计划接线到任何其他成员。
@@ -1053,7 +1066,19 @@ Collector：0.5 CPU / 512 MiB
 
 必须记录 main SHA、镜像 digest、配置摘要、seed、Pod UID、ActrId、process incarnation、action_id 和 collector 版本。
 
-Pod 删除后 artifact 不能依赖 emptyDir，使用 S3/MinIO、PVC 或集中日志系统。归档前脱敏。
+Pod 删除后 artifact 不能依赖 emptyDir，使用 S3/MinIO、PVC 或集中日志系统。
+
+脱敏是确定性闸门，不是尽力而为的过滤。独立的脱敏步骤必须在证据收集之后、
+任何 artifact 上传、导出或组装 Claude Code 输入之前运行。它扫描日志、快照和
+证据 JSON 中的 TURN password、AId token、Endpoint 控制 token、私钥、带凭据
+URL 和完整业务 payload，使用固定模式加 manifest 中记录的每 run 凭据清单；
+基于模式匹配，结果确定，不引入模型。该闸门是 artifact 上传验收的一部分：
+
+- 闸门通过前 artifact 不得离开 namespace 或 PVC；闸门结果本身也作为 artifact
+  落盘（`redaction.json`）；
+- 闸门失败（扫描器错误）或发现无法脱敏的内容时，阻断 artifact 导出，且本 run
+  不得判 PASS；归类 FAIL_HARNESS（证据管线不安全），不得归为 FAIL_SUT；
+- 已导出的 artifact 中检出 secret 属于立即失败（§12.1），并触发相关凭据轮换。
 
 reproduce.sh 至少能：
 

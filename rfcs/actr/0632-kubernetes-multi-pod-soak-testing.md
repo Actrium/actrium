@@ -960,7 +960,9 @@ Read-only observation and system collection remain separate from Fault control.
 - a stale generation modifies the current generation;
 - a declared Fault records no hit;
 - a Pod has unexpected OOMKilled, eviction, or restart;
-- the Controller retries or violates action constraints.
+- the Controller retries or violates action constraints;
+- the artifact redaction gate fails, or a secret or unredacted payload is
+  detected in an exported artifact (see §14.1).
 
 #### 12.2 Business correctness
 
@@ -1086,12 +1088,24 @@ re-render the address and re-register it.
 #### 13.4 NetworkPolicy
 
 ```text
-Dashboard -> `actr-N`: TCP 9090
-`actr-N` -> Actrix:     TCP HTTP/Signaling, UDP STUN/TURN
-`actr-N` <-> `actr-N`:  WebRTC ephemeral UDP
-All Pods -> kube-dns: TCP/UDP 53
-Other traffic:      denied
+Dashboard -> `actr-N`:        TCP 9090 (Endpoint control API)
+Dashboard -> Kubernetes API:  TCP 443/6443 (Pods, Events, logs, and metrics
+                              reads; approved lifecycle verbs only)
+Collector/Prometheus -> `actr-N`: TCP 9091 (Endpoint metrics scrape)
+Collector/Prometheus -> Actrix:   TCP metrics port (Actrix metrics scrape)
+`actr-N` -> Actrix:           TCP HTTP/Signaling, UDP STUN/TURN 3478
+`actr-N` <-> Actrix:          TURN relay UDP range (relayed media to and from
+                              relay allocations; required by the relay profile)
+`actr-N` <-> `actr-N`:        WebRTC ephemeral UDP
+All Pods -> kube-dns:         TCP/UDP 53
+Other traffic:                denied
 ```
+
+The matrix MUST list every flow the design depends on; a missing allow rule
+fails the harness, not the SUT, and is classified INVALID_INFRASTRUCTURE. The
+Dashboard egress to the Kubernetes API MUST be scoped to the API server only,
+and the TURN relay range MUST be the configured dedicated range rather than a
+broad UDP allowance.
 
 The pool model relies on the endpoint-to-endpoint UDP allowance; it MUST NOT
 be narrowed per run, because any pool member may be wired to any other by a
@@ -1149,7 +1163,24 @@ Record the main SHA, image digest, configuration summary, seed, Pod UID,
 ActrId, process incarnation, action ID, and Collector version.
 
 After Pod deletion, artifacts MUST NOT depend on `emptyDir`; use S3/MinIO,
-PVC, or a centralized log system. Redact before archiving.
+PVC, or a centralized log system.
+
+Redaction is a deterministic gate, not a best-effort filter. A dedicated
+redaction step MUST run after evidence collection and before any artifact
+upload, export, or Claude Code input is assembled. It scans logs, snapshots,
+and evidence JSON for TURN passwords, AId tokens, endpoint control tokens,
+private keys, credential-bearing URLs, and complete business payloads, using
+fixed patterns plus the per-run credential inventory recorded in the
+manifest; it is pattern-based and deterministic, with no model involvement.
+The gate is part of artifact-upload acceptance:
+
+- artifacts MUST NOT leave the namespace or PVC before the gate passes, and
+  the gate result is itself recorded as an artifact (`redaction.json`);
+- a gate failure (scanner error) or an unredactable finding blocks artifact
+  export and prevents a PASS classification; the run is classified
+  FAIL_HARNESS because the evidence pipeline is unsafe, never FAIL_SUT;
+- a secret detected in an already-exported artifact is an immediate failure
+  (§12.1) and triggers credential rotation for the affected material.
 
 At minimum, `reproduce.sh` can:
 
