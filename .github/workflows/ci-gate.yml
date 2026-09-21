@@ -452,6 +452,13 @@ jobs:
         # Prebuilt binary. Pin to a fixed release for reproducibility if
         # desired via `taiki-e/install-action@v2` with `tool: cargo-nextest@<ver>`.
         uses: taiki-e/install-action@cargo-nextest
+      - name: RFC-0507 live WebSocket no-replay gate
+        if: matrix.shard == 'rest'
+        # Fail if the exact acceptance test disappears; its nextest override
+        # forbids retries. The full shard below retains all other safety gates.
+        run: >-
+          cargo nextest run -p actr-hyper --all-features --no-tests=fail
+          -E 'test(/^outbound::peer_gate::websocket_tests::live_websocket_partial_write_is_uncertain_without_replay$/)'
       - name: Run tests (nextest, ${{ matrix.shard }} shard)
         # Integration tests (tests/) get bounded retries via .config/nextest.toml.
         # --no-fail-fast: run the whole suite even when a test fails. With the
