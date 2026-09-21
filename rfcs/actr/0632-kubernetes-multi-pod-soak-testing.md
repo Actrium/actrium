@@ -1464,10 +1464,17 @@ multi-Pod lifecycle; Phase 4 runs Nightly; and Phase 5 runs the Weekend profile
 and optional external-network comparisons. k6 and TURN allocation accounting
 are explicitly deferred.
 
-The initial actr-soak deployment bakes the Peer graph at boot through
-`SOAK_REMOTE_PEERS`. Migrating to the pool model adds the peer-management write
-API and controller-side wiring; the boot-time graph remains a compatibility
-path for single-topology namespaces until the pool model lands.
+The soak Endpoint runs only the production ActrNode path, with test seams
+(Fault Registries, preregistered credentials) injected by test-utils. The
+earlier TestHarness-based remote mode is removed rather than retained as a
+compatibility path: the pool model has exactly one Endpoint type.
+
+The initial node-mode deployment still bakes the Peer graph at boot through
+per-Endpoint `remote-peers` configuration. Migrating to the pool model adds
+the peer-management write API and controller-side wiring; node-mode boot-time
+wiring MAY remain as a short-lived migration bridge for single-topology
+namespaces until the pool model lands, and is then deleted together with the
+boot-wiring configuration surface.
 
 ## Unresolved questions
 
@@ -1477,7 +1484,7 @@ path for single-topology namespaces until the pool model lands.
 - Which object storage (PVC, MinIO, or S3-compatible storage) is approved for immutable artifacts and Claude Code input?
 - Which external network comparison profiles should be added after the deterministic phase, and how should infrastructure noise be classified?
 - Does the target Actrix deployment expose sufficient signaling and service metrics, or require a separate observability change?
-- What is the effort to add runtime Peer add/remove to the production ActrNode (node mode)? The TestHarness (remote mode) path is expected to be straightforward; the node-mode path decides the pool model's timeline.
+- How does the production ActrNode learn about and connect to a Peer at runtime (Actrix realm discovery, explicit dial, or first-message establishment), and what is the effort to expose run-scoped Peer add/remove to the Endpoint Control API? With the TestHarness mode removed, this single question decides the pool model's timeline.
 - How should the endpoint pool be sized, and should Dashboard queue depth drive pool autoscaling?
 - What cross-run resource-contention noise is acceptable for concurrent coverage profiles before a run is classified INVALID_INFRASTRUCTURE?
 

@@ -1211,6 +1211,13 @@ steady 和 recovery 分开报告：steady 不注入破坏性 Fault，recovery �
 6. **Phase 5：Weekend 48 小时和外部网络**
    增加 relay、credential rotation、rolling restart、NetworkPolicy/Chaos Mesh/tc-netem 对照。
 
+浸泡 Endpoint 只保留生产 ActrNode 路径，测试接缝（Fault Registry、预注册凭证）由
+test-utils 注入；早期的 TestHarness remote 模式直接删除，不作为兼容路径保留——池
+模型下只有一种 Endpoint 类型。当前 node 模式部署仍在启动时通过每个 Endpoint 的
+`remote-peers` 配置接线；迁移到池模型时新增 peer 管理写 API 和 Controller 侧接线，
+node 启动期接线可作为单拓扑 namespace 的短暂过渡，池模型落地后与启动接线配置面
+一并删除。
+
 ---
 
 ## 17. 必需资源、风险与完成定义
