@@ -27,7 +27,7 @@ use webrtc::peer_connection::{
     RTCConfigurationBuilder, RTCIceServer, RTCRtcpMuxPolicy, SettingEngine, SettingEngineBuilder,
 };
 
-use super::address::{LocalAddressProvider, LocalAddressResolver};
+use super::address::{LocalAddressProvider, LocalAddressResolver, WildcardFamilies};
 use super::event_handler::WebRtcEventHandler;
 use super::runtime::RtcRuntimeConfig;
 
@@ -62,6 +62,10 @@ pub(crate) struct PeerConnectionFactory {
     configuration: Option<RTCConfiguration>,
     turn_credential_provider: Option<Arc<dyn TurnCredentialProvider>>,
     setting_engine: SettingEngine,
+    /// Wildcard bind families derived from the configured ICE server URLs.
+    /// Only the wildcard (production) bind path consults this; explicit
+    /// address providers pin their own addresses.
+    wildcard_families: WildcardFamilies,
     #[cfg(feature = "test-utils")]
     directed_faults: Option<(
         ActrId,
@@ -76,6 +80,7 @@ impl PeerConnectionFactory {
         ice_servers: Vec<RTCIceServer>,
     ) -> Self {
         let setting_engine = default_setting_engine(&runtime_config);
+        let wildcard_families = wildcard_families_for_servers(&ice_servers);
         Self {
             runtime_config,
             address_provider: Some(address_provider),
@@ -83,6 +88,7 @@ impl PeerConnectionFactory {
             configuration: None,
             turn_credential_provider: None,
             setting_engine,
+            wildcard_families,
             #[cfg(feature = "test-utils")]
             directed_faults: None,
         }
@@ -97,6 +103,7 @@ impl PeerConnectionFactory {
         configuration: RTCConfiguration,
     ) -> Self {
         let setting_engine = default_setting_engine(&runtime_config);
+        let wildcard_families = wildcard_families_for_servers(configuration.ice_servers());
         Self {
             runtime_config,
             address_provider: Some(address_provider),
@@ -104,6 +111,7 @@ impl PeerConnectionFactory {
             configuration: Some(configuration),
             turn_credential_provider: None,
             setting_engine,
+            wildcard_families,
             #[cfg(feature = "test-utils")]
             directed_faults: None,
         }
@@ -120,6 +128,7 @@ impl PeerConnectionFactory {
         configuration: RTCConfiguration,
     ) -> Self {
         let setting_engine = default_setting_engine(&runtime_config);
+        let wildcard_families = wildcard_families_for_servers(configuration.ice_servers());
         Self {
             runtime_config,
             address_provider: None,
@@ -127,6 +136,7 @@ impl PeerConnectionFactory {
             configuration: Some(configuration),
             turn_credential_provider: None,
             setting_engine,
+            wildcard_families,
             #[cfg(feature = "test-utils")]
             directed_faults: None,
         }
@@ -236,10 +246,7 @@ impl PeerConnectionFactory {
             Some(provider) => provider
                 .current_addresses_sync()
                 .map_err(|e| RtcError::Other(format!("local address provider failed: {e}")))?,
-            None => vec![
-                std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
-                std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
-            ],
+            None => self.wildcard_families.wildcards(),
         };
         if bind_ips.is_empty() {
             return Err(RtcError::Other(
@@ -258,7 +265,7 @@ impl PeerConnectionFactory {
             .collect();
         let address_resolver = match &self.address_provider {
             Some(provider) => LocalAddressResolver::new(provider.clone()),
-            None => LocalAddressResolver::wildcard(),
+            None => LocalAddressResolver::wildcard(self.wildcard_families),
         };
 
         let configuration = self.current_configuration().await?;
@@ -336,6 +343,77 @@ fn is_turn_url(url: &str) -> bool {
     url.split_once(':').is_some_and(|(scheme, _)| {
         scheme.eq_ignore_ascii_case("turn") || scheme.eq_ignore_ascii_case("turns")
     })
+}
+
+/// Host kind of a STUN/TURN URL, used to decide the wildcard bind families.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IceUrlHost {
+    V4,
+    V6,
+    /// A hostname (resolution result unknown until gather time) or an
+    /// unparseable URL. Both must leave the bind plan dual-stack.
+    Name,
+}
+
+/// Classify the host of a `stun:`/`stuns:`/`turn:`/`turns:` URL.
+///
+/// Accepted shapes: `scheme:host`, `scheme:host:port`, `scheme:host:port?transport=udp`,
+/// and bracketed IPv6 literals (`scheme:[::1]:3478`). Anything else — unknown
+/// scheme, missing host, malformed bracket — is treated as a hostname so the
+/// bind plan stays dual-stack rather than wrongly excluding a family.
+fn ice_url_host(url: &str) -> IceUrlHost {
+    let Some((scheme, rest)) = url.split_once(':') else {
+        return IceUrlHost::Name;
+    };
+    if !matches!(
+        scheme.to_ascii_lowercase().as_str(),
+        "stun" | "stuns" | "turn" | "turns"
+    ) {
+        return IceUrlHost::Name;
+    }
+    let host = if let Some(bracketed) = rest.strip_prefix('[') {
+        match bracketed.split_once(']') {
+            Some((inner, _)) => inner,
+            None => return IceUrlHost::Name,
+        }
+    } else {
+        rest.split([':', '/', '?']).next().unwrap_or(rest)
+    };
+    match host.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(_)) => IceUrlHost::V4,
+        Ok(std::net::IpAddr::V6(_)) => IceUrlHost::V6,
+        Err(_) => IceUrlHost::Name,
+    }
+}
+
+/// Derive the wildcard bind families from the configured ICE servers.
+///
+/// webrtc-rs creates one STUN client per (server URL, local socket) pair and
+/// logs an ERROR for every cross-family mismatch — on a dual-stack host with
+/// an IPv4-literal STUN URL, every IPv6 socket produces a deterministic
+/// resolve failure plus a doomed gather attempt. When every configured server
+/// host is an IP literal of a single family, the other family can never reach
+/// those servers, so the bind plan is restricted to the matching family and
+/// the mismatch is removed at the source. Hostname URLs resolve to an unknown
+/// family set, and a mixed-literal set can serve both, so both keep the
+/// dual-stack default.
+fn wildcard_families_for_servers(servers: &[RTCIceServer]) -> WildcardFamilies {
+    let mut has_v4 = false;
+    let mut has_v6 = false;
+    for url in servers.iter().flat_map(|server| server.urls.iter()) {
+        match ice_url_host(url) {
+            IceUrlHost::V4 => has_v4 = true,
+            IceUrlHost::V6 => has_v6 = true,
+            IceUrlHost::Name => return WildcardFamilies::DUAL_STACK,
+        }
+    }
+    match (has_v4, has_v6) {
+        (true, false) => WildcardFamilies::IPV4_ONLY,
+        (false, true) => WildcardFamilies::IPV6_ONLY,
+        // No servers (host candidates only) or literals of both families:
+        // keep gathering on both stacks.
+        _ => WildcardFamilies::DUAL_STACK,
+    }
 }
 
 #[async_trait::async_trait]
@@ -418,6 +496,78 @@ mod tests {
             password: password.to_string(),
             expires_at: 1,
         }
+    }
+
+    fn ice_server(urls: &[&str]) -> RTCIceServer {
+        RTCIceServer {
+            urls: urls.iter().map(|url| url.to_string()).collect(),
+            username: String::new(),
+            credential: String::new(),
+        }
+    }
+
+    #[test]
+    fn ice_url_host_classification() {
+        assert_eq!(ice_url_host("stun:127.0.0.1:3478"), IceUrlHost::V4);
+        assert_eq!(ice_url_host("stun:127.0.0.1"), IceUrlHost::V4);
+        assert_eq!(
+            ice_url_host("turn:10.0.0.2:3478?transport=udp"),
+            IceUrlHost::V4
+        );
+        assert_eq!(ice_url_host("stuns:[::1]:3478"), IceUrlHost::V6);
+        assert_eq!(ice_url_host("turn:[2001:db8::1]"), IceUrlHost::V6);
+        assert_eq!(ice_url_host("stun:stun.example.org"), IceUrlHost::Name);
+        assert_eq!(ice_url_host("stun:stun.example.org:3478"), IceUrlHost::Name);
+        // Unknown schemes and malformed URLs must not restrict the bind plan.
+        assert_eq!(ice_url_host("http:127.0.0.1:8080"), IceUrlHost::Name);
+        assert_eq!(ice_url_host("127.0.0.1:3478"), IceUrlHost::Name);
+        assert_eq!(ice_url_host("stun:[::1"), IceUrlHost::Name);
+        assert_eq!(ice_url_host("stun:"), IceUrlHost::Name);
+    }
+
+    #[test]
+    fn wildcard_families_follow_server_literal_families() {
+        // IPv4-literal-only servers restrict the bind plan to IPv4, so no
+        // IPv6 socket is ever bound and no cross-family STUN client exists.
+        assert_eq!(
+            wildcard_families_for_servers(&[ice_server(&[
+                "stun:127.0.0.1:3478",
+                "turn:127.0.0.1:3478"
+            ])]),
+            WildcardFamilies::IPV4_ONLY
+        );
+        assert_eq!(
+            wildcard_families_for_servers(&[ice_server(&["stun:[::1]:3478"])]),
+            WildcardFamilies::IPV6_ONLY
+        );
+        // Hostnames, mixed literals, and the no-server case stay dual-stack.
+        assert_eq!(
+            wildcard_families_for_servers(&[ice_server(&["stun:stun.example.org:3478"])]),
+            WildcardFamilies::DUAL_STACK
+        );
+        assert_eq!(
+            wildcard_families_for_servers(&[ice_server(&[
+                "stun:127.0.0.1:3478",
+                "stun:[::1]:3478"
+            ])]),
+            WildcardFamilies::DUAL_STACK
+        );
+        assert_eq!(
+            wildcard_families_for_servers(&[]),
+            WildcardFamilies::DUAL_STACK
+        );
+    }
+
+    #[test]
+    fn factory_derives_bind_families_from_configuration() {
+        let configuration = RTCConfigurationBuilder::default()
+            .with_ice_servers(vec![ice_server(&["stun:127.0.0.1:3478"])])
+            .build();
+        let factory = PeerConnectionFactory::new_with_configuration_and_wildcard_bind(
+            RtcRuntimeConfig::desktop_default(),
+            configuration,
+        );
+        assert_eq!(factory.wildcard_families, WildcardFamilies::IPV4_ONLY);
     }
 
     fn factory(configuration: RTCConfiguration) -> PeerConnectionFactory {

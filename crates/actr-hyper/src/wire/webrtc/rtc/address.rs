@@ -76,6 +76,43 @@ pub(crate) trait LocalAddressProvider: Send + Sync {
     fn subscribe_changes(&self) -> watch::Receiver<LocalAddressSnapshot>;
 }
 
+/// Which IP families a wildcard bind plan may use.
+///
+/// Restricting the family drops the other family's wildcard from the bind
+/// plan, so the driver never binds sockets (and therefore never gathers
+/// candidates or creates STUN clients) for the excluded family.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WildcardFamilies {
+    pub(crate) ipv4: bool,
+    pub(crate) ipv6: bool,
+}
+
+impl WildcardFamilies {
+    pub(crate) const DUAL_STACK: Self = Self {
+        ipv4: true,
+        ipv6: true,
+    };
+    pub(crate) const IPV4_ONLY: Self = Self {
+        ipv4: true,
+        ipv6: false,
+    };
+    pub(crate) const IPV6_ONLY: Self = Self {
+        ipv4: false,
+        ipv6: true,
+    };
+
+    pub(crate) fn wildcards(self) -> Vec<IpAddr> {
+        let mut addresses = Vec::with_capacity(2);
+        if self.ipv4 {
+            addresses.push(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+        }
+        if self.ipv6 {
+            addresses.push(IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED));
+        }
+        addresses
+    }
+}
+
 /// A `ToSocketAddrs` value used by the RTC driver on every bind.
 ///
 /// Test/platform providers resolve their current address set on each call. The
@@ -89,7 +126,7 @@ pub(crate) struct LocalAddressResolver {
 #[derive(Clone)]
 enum LocalAddressResolverSource {
     Provider(Arc<dyn LocalAddressProvider>),
-    Wildcard,
+    Wildcard(WildcardFamilies),
 }
 
 impl LocalAddressResolver {
@@ -99,9 +136,9 @@ impl LocalAddressResolver {
         }
     }
 
-    pub(crate) fn wildcard() -> Self {
+    pub(crate) fn wildcard(families: WildcardFamilies) -> Self {
         Self {
-            source: LocalAddressResolverSource::Wildcard,
+            source: LocalAddressResolverSource::Wildcard(families),
         }
     }
 }
@@ -114,10 +151,7 @@ impl ToSocketAddrs for LocalAddressResolver {
             LocalAddressResolverSource::Provider(provider) => provider
                 .current_addresses_sync()
                 .map_err(|error| io::Error::other(error.to_string()))?,
-            LocalAddressResolverSource::Wildcard => vec![
-                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
-            ],
+            LocalAddressResolverSource::Wildcard(families) => families.wildcards(),
         };
         if addresses.is_empty() {
             // An empty provider resolve must fail loudly: at startup it
@@ -391,7 +425,7 @@ mod resolver_tests {
 
     #[test]
     fn wildcard_resolver_keeps_interface_expansion_in_webrtc_rs() {
-        let resolved = LocalAddressResolver::wildcard()
+        let resolved = LocalAddressResolver::wildcard(WildcardFamilies::DUAL_STACK)
             .to_socket_addrs()
             .expect("wildcard bind plan");
         assert_eq!(
@@ -400,6 +434,28 @@ mod resolver_tests {
                 SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
                 SocketAddr::new(IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED), 0),
             ]
+        );
+    }
+
+    #[test]
+    fn single_family_wildcard_binds_only_that_family() {
+        let v4 = LocalAddressResolver::wildcard(WildcardFamilies::IPV4_ONLY)
+            .to_socket_addrs()
+            .expect("v4-only bind plan");
+        assert_eq!(
+            v4.collect::<Vec<_>>(),
+            vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)]
+        );
+
+        let v6 = LocalAddressResolver::wildcard(WildcardFamilies::IPV6_ONLY)
+            .to_socket_addrs()
+            .expect("v6-only bind plan");
+        assert_eq!(
+            v6.collect::<Vec<_>>(),
+            vec![SocketAddr::new(
+                IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+                0
+            )]
         );
     }
 
