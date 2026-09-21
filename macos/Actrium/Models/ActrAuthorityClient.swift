@@ -92,7 +92,7 @@ private struct ActrPublicTarget {
     var discoveryURL: URL? {
         var components = URLComponents()
         components.scheme = allowsPlainHTTP ? "http" : "https"
-        components.host = host
+        components.host = host.contains(":") ? "[\(host)]" : host
         components.port = port
         components.path = "/.well-known/actr"
         return components.url
@@ -109,7 +109,7 @@ private struct ActrPublicTarget {
             throw ActrAuthorityError.invalidURL(url.absoluteString)
         }
 
-        let normalizedHost = rawHost.lowercased()
+        let normalizedHost = rawHost.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
         let normalizedPort = url.port == 443 ? nil : url.port
         let displayHost = normalizedHost.contains(":") ? "[\(normalizedHost)]" : normalizedHost
         authority = normalizedPort.map { "\(displayHost):\($0)" } ?? displayHost
@@ -226,13 +226,13 @@ final class ActrAuthorityClient {
         }), let endpoint = URL(string: packageService.href) else {
             throw ActrAuthorityError.missingPackageService
         }
-        try validateTransport(endpoint)
+        try ActrAuthorityTransport.validate(endpoint)
 
         guard var resolutionComponents = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
             throw ActrAuthorityError.invalidResponse("packages href is malformed")
         }
-        resolutionComponents.path = resolutionComponents.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        resolutionComponents.path = "/\(resolutionComponents.path)/resolve"
+        resolutionComponents.percentEncodedPath = resolutionComponents.percentEncodedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        resolutionComponents.percentEncodedPath = "/\(resolutionComponents.percentEncodedPath)/resolve"
             .replacingOccurrences(of: "//", with: "/")
         resolutionComponents.queryItems = [URLQueryItem(name: "target", value: requested.target)]
         guard let resolutionURL = resolutionComponents.url else {
@@ -258,7 +258,7 @@ final class ActrAuthorityClient {
               let artifactURL = URL(string: resolution.package.href) else {
             throw ActrAuthorityError.invalidResponse("package href or SHA-256 is malformed")
         }
-        try validateTransport(artifactURL)
+        try ActrAuthorityTransport.validate(artifactURL)
 
         let packageData = try await get(
             artifactURL,
@@ -284,35 +284,30 @@ final class ActrAuthorityClient {
         return packageURL
     }
 
-    private func get(_ url: URL, accept: String, limit: Int) async throws -> Data {
-        try validateTransport(url)
+    nonisolated private func get(_ url: URL, accept: String, limit: Int) async throws -> Data {
+        try ActrAuthorityTransport.validate(url)
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.timeoutInterval = 30
         request.setValue(accept, forHTTPHeaderField: "Accept")
-        let (data, response) = try await session.data(for: request)
+        let (bytes, response) = try await session.bytes(for: request, delegate: ActrAuthorityRedirectDelegate())
+        defer { bytes.task.cancel() }
         guard let http = response as? HTTPURLResponse,
               (200..<300).contains(http.statusCode) else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             throw ActrAuthorityError.invalidResponse("GET \(url.absoluteString) returned HTTP \(status)")
         }
-        guard data.count <= limit else {
+        if response.expectedContentLength > Int64(limit) {
             throw ActrAuthorityError.invalidResponse("response exceeded \(limit) bytes")
         }
+        var data = Data()
+        for try await byte in bytes {
+            guard data.count < limit else {
+                throw ActrAuthorityError.invalidResponse("response exceeded \(limit) bytes")
+            }
+            data.append(byte)
+        }
         return data
-    }
-
-    private func validateTransport(_ url: URL) throws {
-        guard let scheme = url.scheme?.lowercased(), let host = url.host?.lowercased() else {
-            throw ActrAuthorityError.invalidURL(url.absoluteString)
-        }
-        if scheme == "https" {
-            return
-        }
-        if scheme == "http", host == "localhost" || host == "127.0.0.1" || host == "::1" {
-            return
-        }
-        throw ActrAuthorityError.insecureEndpoint(url.absoluteString)
     }
 
     private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
@@ -338,5 +333,45 @@ final class ActrAuthorityClient {
         return root
             .appendingPathComponent("io.actrium.app", isDirectory: true)
             .appendingPathComponent("ActorPackages", isDirectory: true)
+    }
+}
+
+// Apply the same policy to advertised URLs and every redirect before sending it.
+enum ActrAuthorityTransport {
+    nonisolated static func validate(_ url: URL) throws {
+        guard let scheme = url.scheme?.lowercased(),
+              let rawHost = url.host, !rawHost.isEmpty,
+              url.user == nil, url.password == nil else {
+            throw ActrAuthorityError.invalidURL(url.absoluteString)
+        }
+        let host = rawHost.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        if scheme == "https" {
+            return
+        }
+        if scheme == "http", host == "localhost" || host == "127.0.0.1" || host == "::1" {
+            return
+        }
+        throw ActrAuthorityError.insecureEndpoint(url.absoluteString)
+    }
+}
+
+final class ActrAuthorityRedirectDelegate: NSObject, URLSessionTaskDelegate {
+    nonisolated override init() {
+        super.init()
+    }
+
+    nonisolated func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        guard let url = request.url,
+              (try? ActrAuthorityTransport.validate(url)) != nil else {
+            completionHandler(nil)
+            return
+        }
+        completionHandler(request)
     }
 }

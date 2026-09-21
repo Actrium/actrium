@@ -107,7 +107,6 @@ private struct ContentAreaView: View {
     @ObservedObject var bookmarkVM: BookmarkViewModel
     @ObservedObject var devTools: DevToolsManager = .shared
 
-    @State private var hasHandledLaunchURL = false
     @State private var hasAppliedDebugConfig = false
 
     let cornerRadius: CGFloat
@@ -126,8 +125,6 @@ private struct ContentAreaView: View {
             viewModel.historyVM = historyVM
             // Check for pending group transfer
             checkPendingGroupTransfer()
-            // Handle launch URL (only once)
-            handleLaunchURLIfNeeded()
             // Apply debug configuration (only once)
             applyDebugConfigIfNeeded()
         }
@@ -244,23 +241,6 @@ private struct ContentAreaView: View {
         // Create group from imported tabs
         if !newTabIds.isEmpty {
             viewModel.createGroupFromTabs(newTabIds, name: groupName, color: color)
-        }
-    }
-
-    // MARK: - Launch URL Handling
-
-    private func handleLaunchURLIfNeeded() {
-        guard !hasHandledLaunchURL,
-              let launchURL = ActriumApp.launchURL else { return }
-        hasHandledLaunchURL = true
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            let tab = viewModel.addNewTab(focusAddressBar: false)
-            viewModel.navigateCurrentTab(to: launchURL.absoluteString)
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                viewModel.actriumMode = .focus(tabId: tab.id)
-            }
         }
     }
 

@@ -38,14 +38,14 @@ final class DatabaseManager {
     private func getDatabasePath() -> String {
         let fileManager = FileManager.default
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appFolder = appSupport.appendingPathComponent("Actrium", isDirectory: true)
+        let appFolder = ApplePersistentStoragePaths.applicationDirectory(in: appSupport)
 
         // Create directory if needed
         if !fileManager.fileExists(atPath: appFolder.path) {
             try? fileManager.createDirectory(at: appFolder, withIntermediateDirectories: true)
         }
 
-        return appFolder.appendingPathComponent("actrium.db").path
+        return ApplePersistentStoragePaths.appDatabasePath(in: appFolder)
     }
 
     private func createTables() {

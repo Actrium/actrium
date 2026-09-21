@@ -22,10 +22,17 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
+                // Continue using the existing file, including its SQLite sidecars.
+                val legacyName = "actro_database"
+                val databaseName = if (context.applicationContext.getDatabasePath(legacyName).exists()) {
+                    legacyName
+                } else {
+                    ActriumAndroidPersistenceContract.DATABASE_NAME
+                }
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    ActriumAndroidPersistenceContract.DATABASE_NAME
+                    databaseName
                 ).build()
                 INSTANCE = instance
                 instance

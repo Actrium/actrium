@@ -6,13 +6,27 @@ import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
 import io.actrium.app.rust.ActriumCore
+import java.io.File
 import java.util.UUID
 
 class BrowserStorageSyncCredentialStore(
     context: Context,
-    private val preferencesName: String = DEFAULT_PREFERENCES_NAME
+    preferencesName: String = DEFAULT_PREFERENCES_NAME
 ) : BrowserStorageSyncCredentialsProvider {
     private val appContext = context.applicationContext
+    // Encrypted preferences bind ciphertext to the file name, so reopen the
+    // existing store in place instead of renaming its XML file.
+    private val preferencesName: String = if (preferencesName == DEFAULT_PREFERENCES_NAME) {
+        val legacyName = "actro_browser_sync_credentials"
+        val preferencesDir = File(appContext.applicationInfo.dataDir, "shared_prefs")
+        val hasLegacyStore = listOf(legacyName, encryptedPreferencesName(legacyName)).any { name ->
+            File(preferencesDir, "$name.xml").exists() ||
+                File(preferencesDir, "$name.xml.bak").exists()
+        }
+        if (hasLegacyStore) legacyName else preferencesName
+    } else {
+        preferencesName
+    }
 
     /**
      * Encrypted preferences backing the credential store. Created lazily because

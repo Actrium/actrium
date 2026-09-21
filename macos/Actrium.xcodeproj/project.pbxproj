@@ -867,13 +867,16 @@
 					"$(inherited)",
 					"-weak_framework",
 					AppIntents,
+					"-larchive",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.app;
+				// Keep the installed application identity stable across product renames.
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_OBJC_BRIDGING_HEADER = "Actrium/Actrium-Bridging-Header.h";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
@@ -906,13 +909,16 @@
 					"$(inherited)",
 					"-weak_framework",
 					AppIntents,
+					"-larchive",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.app;
+				// Keep the installed application identity stable across product renames.
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_OBJC_BRIDGING_HEADER = "Actrium/Actrium-Bridging-Header.h";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;

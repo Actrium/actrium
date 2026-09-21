@@ -34,7 +34,8 @@ private final class ActrMockURLProtocol: URLProtocol {
 @MainActor
 @Suite(.serialized)
 struct ActrAuthorityClientTests {
-    @Test func resolvesAuthorityTargetAndCachesVerifiedPackage() async throws {
+    @Test(arguments: ["localhost:8081", "[::1]:8081"], ["/actr/packages", "/actr%2Fpackages"])
+    func resolvesAuthorityTargetAndCachesVerifiedPackage(authority: String, servicePath: String) async throws {
         let packageData = Data("signed actor package".utf8)
         let digest = SHA256.hash(data: packageData).map { String(format: "%02x", $0) }.joined()
         let cacheDirectory = FileManager.default.temporaryDirectory
@@ -48,19 +49,19 @@ struct ActrAuthorityClientTests {
             let url = try #require(request.url)
             let body: Data
             let contentType: String
-            switch url.path {
+            switch url.path(percentEncoded: true) {
             case "/.well-known/actr":
                 body = try JSONSerialization.data(withJSONObject: [
                     "version": 1,
-                    "authority": "actr://localhost:8081",
+                    "authority": "actr://\(authority)",
                     "services": [[
                         "rel": "packages",
-                        "href": "http://localhost:8081/actr/packages",
+                        "href": "http://\(authority)\(servicePath)",
                         "protocol": "actr-packages/1",
                     ]],
                 ])
                 contentType = "application/json"
-            case "/actr/packages/resolve":
+            case "\(servicePath)/resolve":
                 let target = URLComponents(url: url, resolvingAgainstBaseURL: false)?
                     .queryItems?.first(where: { $0.name == "target" })?.value
                 #expect(target == "echo")
@@ -68,7 +69,7 @@ struct ActrAuthorityClientTests {
                     "version": 1,
                     "target": "echo",
                     "package": [
-                        "href": "http://localhost:8081/actr/packages/artifact?target=echo&sha256=\(digest)",
+                        "href": "http://\(authority)\(servicePath)/artifact?target=echo&sha256=\(digest)",
                         "media_type": "application/zip",
                         "sha256": digest,
                         "size": packageData.count,
@@ -76,7 +77,7 @@ struct ActrAuthorityClientTests {
                     ],
                 ])
                 contentType = "application/json"
-            case "/actr/packages/artifact":
+            case "\(servicePath)/artifact":
                 body = packageData
                 contentType = "application/zip"
             default:
@@ -99,7 +100,7 @@ struct ActrAuthorityClientTests {
         let client = ActrAuthorityClient(session: session, cacheDirectory: cacheDirectory)
 
         let packageURL = try await client.resolveAndDownload(
-            try #require(URL(string: "actr://localhost:8081/echo"))
+            try #require(URL(string: "actr://\(authority)/echo"))
         )
 
         #expect(packageURL.lastPathComponent == "\(digest).actr")
@@ -147,4 +148,57 @@ struct ActrAuthorityClientTests {
             }
         }
     }
+    @Test(arguments: [false, true])
+    func rejectsOversizedDescriptor(advertiseLength: Bool) async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ActrMockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer {
+            ActrMockURLProtocol.handler = nil
+            session.invalidateAndCancel()
+        }
+        ActrMockURLProtocol.handler = { request in
+            let body = Data(repeating: 0x20, count: 64 * 1024 + 1)
+            let response = try #require(HTTPURLResponse(
+                url: #require(request.url), statusCode: 200, httpVersion: "HTTP/1.1",
+                headerFields: advertiseLength ? ["Content-Length": String(body.count)] : [:]
+            ))
+            return (response, body)
+        }
+        do {
+            _ = try await ActrAuthorityClient(session: session).resolveAndDownload(
+                try #require(URL(string: "actr://localhost:8081/echo"))
+            )
+            Issue.record("Expected descriptor size rejection")
+        } catch let error as ActrAuthorityError {
+            guard case .invalidResponse(let message) = error else {
+                Issue.record("Unexpected error: \(error)")
+                return
+            }
+            #expect(message == "response exceeded 65536 bytes")
+        }
+    }
+
+    @Test(arguments: ["https://cdn.example/package", "http://[::1]:8081/package", "http://remote.example/package"])
+    func validatesRedirectBeforeFollowing(destination: String) throws {
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let source = try #require(URL(string: "https://authority.example/package"))
+        let request = URLRequest(url: try #require(URL(string: destination)))
+        let response = try #require(HTTPURLResponse(
+            url: source, statusCode: 302, httpVersion: "HTTP/1.1", headerFields: nil
+        ))
+        let task = session.dataTask(with: source)
+        defer { task.cancel() }
+        ActrAuthorityRedirectDelegate().urlSession(
+            session, task: task, willPerformHTTPRedirection: response, newRequest: request
+        ) { redirected in
+            if destination == "http://remote.example/package" {
+                #expect(redirected == nil)
+            } else {
+                #expect(redirected?.url == request.url)
+            }
+        }
+    }
+
 }

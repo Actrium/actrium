@@ -971,9 +971,14 @@ class BrowserStorageDatabase private constructor(
         }
 
         fun databasePath(context: Context): String {
-            return context.applicationContext
-                .getDatabasePath(ActriumCore.browserStorageDatabaseName())
-                .absolutePath
+            val appContext = context.applicationContext
+            // Reuse the old store in place to preserve its WAL and journal files.
+            val legacyFile = appContext.getDatabasePath("actro_browser.db")
+            return if (legacyFile.exists()) {
+                legacyFile.absolutePath
+            } else {
+                appContext.getDatabasePath(ActriumCore.browserStorageDatabaseName()).absolutePath
+            }
         }
     }
 }

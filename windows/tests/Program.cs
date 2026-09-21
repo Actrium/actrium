@@ -670,10 +670,30 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertEqual(null, WindowsStartupOptions.FromArgs(["--user-data-root"]).UserDataRoot);
         return Task.CompletedTask;
     }),
-    ("builds Windows app data root", () =>
+    ("preserves existing Windows stores after product rename", () =>
     {
-        var root = WindowsAppPaths.GetLocalAppDataRoot();
-        AssertTrue(root.EndsWith(Path.Combine("Actrium", "Actrium", "Windows"), StringComparison.OrdinalIgnoreCase));
+        var directory = CreateTempDirectoryPath();
+        try
+        {
+            var currentRoot = Path.Combine(directory, "Actrium", "Actrium", "Windows");
+            AssertEqual(currentRoot, WindowsAppPaths.GetDefaultLocalAppDataRoot(directory));
+            Directory.CreateDirectory(currentRoot);
+            var legacyRoot = Path.Combine(directory, "Actrium", "Actro", "Windows");
+            Directory.CreateDirectory(legacyRoot);
+            AssertEqual(legacyRoot, WindowsAppPaths.GetDefaultLocalAppDataRoot(directory));
+            var legacyDatabase = Path.Combine(legacyRoot, "actro_browser.db");
+            File.WriteAllText(legacyDatabase, "existing database");
+            File.WriteAllText(legacyDatabase + "-wal", "pending journal");
+            File.WriteAllText(Path.Combine(legacyRoot, "actrium_browser.db"), "");
+            AssertEqual(legacyDatabase, BrowserStorageDatabase.GetDatabasePathInDirectory(legacyRoot));
+            AssertEqual(legacyDatabase, BrowserStorageDatabase.GetDatabasePathForLegacyFile(
+                Path.Combine(legacyRoot, "browser-history.json")));
+            AssertEqual("pending journal", File.ReadAllText(legacyDatabase + "-wal"));
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
         return Task.CompletedTask;
     }),
     ("honors the user data root environment override", () =>
@@ -698,8 +718,9 @@ var tests = new (string Name, Func<Task> Run)[]
             // Blank overrides fall back to the standard per-user root.
             Environment.SetEnvironmentVariable(
                 WindowsAppPaths.UserDataRootEnvironmentVariable, "   ");
-            AssertTrue(WindowsAppPaths.GetLocalAppDataRoot().EndsWith(
-                Path.Combine("Actrium", "Actrium", "Windows"), StringComparison.OrdinalIgnoreCase));
+            AssertEqual(WindowsAppPaths.GetDefaultLocalAppDataRoot(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)),
+                WindowsAppPaths.GetLocalAppDataRoot());
 
             // A relative override would silently split state across instances:
             // it must fail loudly instead of resolving against the CWD.
@@ -729,7 +750,7 @@ var tests = new (string Name, Func<Task> Run)[]
     {
         var userDataFolder = BrowserProfilePolicy.GetDefaultUserDataFolder();
         AssertTrue(userDataFolder.EndsWith(
-            Path.Combine("Actrium", "Actrium", "Windows", BrowserProfilePolicy.UserDataFolderName),
+            Path.Combine(WindowsAppPaths.GetLocalAppDataRoot(), BrowserProfilePolicy.UserDataFolderName),
             StringComparison.OrdinalIgnoreCase));
         return Task.CompletedTask;
     }),
@@ -740,9 +761,7 @@ var tests = new (string Name, Func<Task> Run)[]
 
         AssertTrue(userDataFolder.EndsWith(
             Path.Combine(
-                "Actrium",
-                "Actrium",
-                "Windows",
+                WindowsAppPaths.GetLocalAppDataRoot(),
                 BrowserProfilePolicy.PrivateUserDataParentFolderName,
                 "aaaaaaaabbbbccccddddeeeeeeeeeeee"),
             StringComparison.OrdinalIgnoreCase));

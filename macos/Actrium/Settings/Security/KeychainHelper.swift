@@ -21,7 +21,8 @@ enum KeychainError: LocalizedError {
 }
 
 struct KeychainHelper {
-    private static let service = "io.actrium.app.vault"
+    // Preserve the installed vault credential across product renames.
+    private static let service = "com.actro.vault"
     private static let account = "master-password"
 
     /// Save master password to standard Keychain (no biometric access control)

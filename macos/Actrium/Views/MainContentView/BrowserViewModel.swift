@@ -29,6 +29,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         $actriumMode.eraseToAnyPublisher()
     }
     @Published var tabs: [Tab] = []
+    private var actorNavigationIDs: [UUID: UUID] = [:]
     @Published var currentTabId: UUID?
     // Default that all tabs are left-side panel visible; overrides are recorded only when user switching
     @Published private var leftPanelVisibility: [UUID: Bool] = [:]
@@ -155,6 +156,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     func closeTab(id: UUID) {
+        actorNavigationIDs.removeValue(forKey: id)
         // Get the slot position of the tab being closed
         guard let closedPosition = tabSlotPositions[id] else {
             logger.warning(" Cannot find tab slot position")
@@ -679,6 +681,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             return
         }
 
+        actorNavigationIDs.removeValue(forKey: currentTabId)
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // 1. Check for local file path
@@ -723,9 +726,20 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
             if ActrPublicURLScheme.isSupported(url.scheme) {
                 let tabId = tabs[index].id
+                let navigationID = UUID()
+                actorNavigationIDs[tabId] = navigationID
                 tabs[index].url = url
                 tabs[index].title = "Loading Actor"
                 tabs[index].systemTabType = nil
+                tabs[index].appId = nil
+                tabs[index].unifiedScript = nil
+                tabs[index].leftPanelScript = nil
+                tabs[index].rightPanelScript = nil
+                tabs[index].guestScript = nil
+                tabs[index].htmlContent = nil
+                tabs[index].contractName = nil
+                tabs[index].contractVersion = nil
+                tabs[index].permissions = []
                 objectWillChange.send()
                 persistBrowserPageSession()
 
@@ -733,20 +747,39 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     do {
                         let packageURL = try await ActrAuthorityClient.shared.resolveAndDownload(url)
                         guard let self,
-                              let currentIndex = self.tabs.firstIndex(where: { $0.id == tabId }) else {
+                              self.actorNavigationIDs[tabId] == navigationID,
+                              let currentIndex = self.tabs.firstIndex(where: { $0.id == tabId }),
+                              self.tabs[currentIndex].url == url else {
                             return
                         }
-                        self.loadActrPackageIntoCurrentTab(
+                        // Archive expansion is bounded and runs outside the main actor.
+                        let root = try await Task.detached(priority: .userInitiated) {
+                            try ActrPackageExtractor.extract(archive: packageURL)
+                        }.value
+                        defer { try? FileManager.default.removeItem(at: root) }
+                        guard self.actorNavigationIDs[tabId] == navigationID,
+                              let currentIndex = self.tabs.firstIndex(where: { $0.id == tabId }),
+                              self.tabs[currentIndex].url == url else {
+                            return
+                        }
+                        guard self.loadActrPackageIntoCurrentTab(
                             from: packageURL,
                             tabIndex: currentIndex,
-                            displayURL: url
-                        )
+                            displayURL: url,
+                            extractedRoot: root
+                        ) else {
+                            throw ActrAuthorityError.invalidResponse("Unable to load extracted Actor package")
+                        }
+                        self.actorNavigationIDs.removeValue(forKey: tabId)
                     } catch {
                         logger.error("[navigateCurrentTab] Actr resolution failed: \(error.localizedDescription)")
                         guard let self,
-                              let currentIndex = self.tabs.firstIndex(where: { $0.id == tabId }) else {
+                              self.actorNavigationIDs[tabId] == navigationID,
+                              let currentIndex = self.tabs.firstIndex(where: { $0.id == tabId }),
+                              self.tabs[currentIndex].url == url else {
                             return
                         }
+                        self.actorNavigationIDs.removeValue(forKey: tabId)
                         self.tabs[currentIndex].title = "Unable to Open Actor"
                         self.objectWillChange.send()
                         self.persistBrowserPageSession()
@@ -783,21 +816,25 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     /// Load ACTR app into the current tab (in-place update, not creating new tab)
     /// Used by actr:// URL navigation to update current tab content
+    @discardableResult
     private func loadActrPackageIntoCurrentTab(
         from fileURL: URL,
         tabIndex: Int,
-        displayURL: URL? = nil
-    ) {
+        displayURL: URL? = nil,
+        extractedRoot: URL? = nil
+    ) -> Bool {
         let resolvedURL = fileURL.standardizedFileURL
 
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: resolvedURL.path, isDirectory: &isDirectory) else {
             logger.error("❌ [loadActrPackageIntoCurrentTab] Path does not exist: \(resolvedURL.path)")
-            return
+            return false
         }
 
         let rootDir: URL
-        if isDirectory.boolValue {
+        if let extractedRoot {
+            rootDir = extractedRoot
+        } else if isDirectory.boolValue {
             rootDir = resolvedURL
         } else {
             // Package archive mode - extract to temp
@@ -808,13 +845,19 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 try unzipActrPackage(archive: resolvedURL, to: tempDir)
             } catch {
                 logger.error("❌ [loadActrPackageIntoCurrentTab] Unpressure failed: \(error.localizedDescription)")
-                return
+                return false
             }
             rootDir = tempDir
         }
 
         do {
             let manifestInfo = try readPackageManifest(fromRoot: rootDir)
+            if extractedRoot != nil {
+                let scriptPaths = [manifestInfo.unifiedScript, manifestInfo.leftPanelScript, manifestInfo.rightPanelScript]
+                guard scriptPaths.compactMap({ $0 }).allSatisfy(ActrPackageExtractor.isSafeRelativePath) else {
+                    throw ActrAuthorityError.invalidResponse("Actor package contains an unsafe script path")
+                }
+            }
             let tabTitle = manifestInfo.name ?? resolvedURL.deletingPathExtension().lastPathComponent
 
             // Register app if appId is provided.
@@ -834,19 +877,19 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             // Read scripts
             var unifiedScript: String? = nil
             if let unifiedFileName = manifestInfo.unifiedScript {
-                unifiedScript = readScript(fromRoot: rootDir, fileName: unifiedFileName)
+                unifiedScript = readScript(fromRoot: rootDir, fileName: unifiedFileName, confinedToRoot: extractedRoot != nil)
             }
 
             var leftPanelScript: String? = nil
             var rightPanelScript: String? = nil
             if let leftFileName = manifestInfo.leftPanelScript {
-                leftPanelScript = readScript(fromRoot: rootDir, fileName: leftFileName)
+                leftPanelScript = readScript(fromRoot: rootDir, fileName: leftFileName, confinedToRoot: extractedRoot != nil)
             }
             if let rightFileName = manifestInfo.rightPanelScript {
-                rightPanelScript = readScript(fromRoot: rootDir, fileName: rightFileName)
+                rightPanelScript = readScript(fromRoot: rootDir, fileName: rightFileName, confinedToRoot: extractedRoot != nil)
             }
 
-            let guestScript = readGuestScript(fromRoot: rootDir)
+            let guestScript = readGuestScript(fromRoot: rootDir, confinedToRoot: extractedRoot != nil)
 
             // Public packages retain their stable actr:// address. Local development
             // inputs remain file URLs instead of masquerading as authority URLs.
@@ -893,9 +936,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
             // Record History visit for ACTR app
             historyVM?.recordVisit(tab: tabs[tabIndex])
+            return true
 
         } catch {
             logger.error("❌ [loadActrPackageIntoCurrentTab] Loading failed: \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -1644,13 +1689,29 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     /// Universal script reading method
-    private func readScript(fromRoot root: URL, fileName: String) -> String? {
+    private func readScript(fromRoot root: URL, fileName: String, confinedToRoot: Bool = false) -> String? {
+        if confinedToRoot && !ActrPackageExtractor.isSafeRelativePath(fileName) { return nil }
+        func readCandidate(_ candidate: URL) -> String? {
+            let safeURL: URL
+            if confinedToRoot {
+                let rootPath = root.standardizedFileURL.path + "/"
+                guard candidate.standardizedFileURL.path.hasPrefix(rootPath),
+                      let contained = ActrPackageExtractor.containedFile(
+                        in: root,
+                        relativePath: String(candidate.standardizedFileURL.path.dropFirst(rootPath.count))
+                      ) else { return nil }
+                safeURL = contained
+            } else {
+                safeURL = candidate
+            }
+            return try? String(contentsOf: safeURL, encoding: .utf8)
+        }
         let fm = FileManager.default
 
         // If fileName Include path (e. g.) "dist/unified-app.js") Directly spell-read
         if fileName.contains("/") {
             let fullPath = root.appendingPathComponent(fileName)
-            if let script = try? String(contentsOf: fullPath, encoding: .utf8) {
+            if let script = readCandidate(fullPath) {
                 logger.notice(" I found it. \(fileName): \(fullPath.path)")
                 return script
             }
@@ -1658,7 +1719,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
         // First look in root directory
         if let direct = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first(where: { $0.lastPathComponent == fileName }) {
-            if let script = try? String(contentsOf: direct, encoding: .utf8) {
+            if let script = readCandidate(direct) {
                 logger.notice(" I found it. \(fileName): \(direct.path)")
                 return script
             }
@@ -1668,7 +1729,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         if let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: nil) {
             for case let fileURL as URL in enumerator {
                 if fileURL.lastPathComponent == fileName {
-                    if let script = try? String(contentsOf: fileURL, encoding: .utf8) {
+                    if let script = readCandidate(fileURL) {
                         logger.notice(" I found it. \(fileName): \(fileURL.path)")
                         return script
                     }
@@ -1680,8 +1741,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     /// Read guest.js (Backward compatibility)
-    private func readGuestScript(fromRoot root: URL) -> String? {
-        return readScript(fromRoot: root, fileName: "guest.js")
+    private func readGuestScript(fromRoot root: URL, confinedToRoot: Bool = false) -> String? {
+        return readScript(fromRoot: root, fileName: "guest.js", confinedToRoot: confinedToRoot)
     }
 
     private func renderACTRInfoHTML(name: String, version: String, description: String, sourcePath: String) -> String {

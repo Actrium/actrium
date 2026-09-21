@@ -1,4 +1,5 @@
 import Foundation
+import ActriumCore
 import os
 
 // Versioned browser sync provider connection settings, the macOS sibling of
@@ -74,7 +75,7 @@ final class BrowserSyncProviderSettingsStore {
     private static func defaultFileURL() -> URL {
         let fileManager = FileManager.default
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appFolder = appSupport.appendingPathComponent("Actrium", isDirectory: true)
+        let appFolder = ApplePersistentStoragePaths.applicationDirectory(in: appSupport)
         if !fileManager.fileExists(atPath: appFolder.path) {
             try? fileManager.createDirectory(at: appFolder, withIntermediateDirectories: true)
         }

@@ -403,7 +403,7 @@ final class BrowserDataRepository {
     private static func databasePath() -> String {
         let fileManager = FileManager.default
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appFolder = appSupport.appendingPathComponent("Actrium", isDirectory: true)
+        let appFolder = ApplePersistentStoragePaths.applicationDirectory(in: appSupport)
         if !fileManager.fileExists(atPath: appFolder.path) {
             try? fileManager.createDirectory(at: appFolder, withIntermediateDirectories: true)
         }

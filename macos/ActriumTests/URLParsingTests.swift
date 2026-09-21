@@ -34,6 +34,13 @@ struct URLParsingTests {
         #expect(vm.isLocalFilePath("actr://localhost:8081/echo") == false)
     }
 
+    @Test func uppercaseActorSchemeIsRecognized() {
+        let input = "ACTR://localhost:8081/echo.actr"
+        #expect(vm.parseURL(input)?.absoluteString == input)
+        #expect(!vm.isLocalFilePath(input))
+        #expect(ActrPublicURLScheme.isSupported("ACTR"))
+    }
+
     @Test func fileURL_isRecognizedAsLocalPath() {
         #expect(vm.isLocalFilePath("file:///tmp/example.actr"))
     }

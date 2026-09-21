@@ -97,7 +97,8 @@ android {
 
     namespace = "io.actrium.app"
     defaultConfig {
-        applicationId = "io.actrium.app"
+        // Keep the published application identity so updates retain the existing sandbox.
+        applicationId = "io.actrium.actro"
         minSdk = rootProject.ext.minSdkVersion
         targetSdk = rootProject.ext.targetSdkVersion
         versionCode = 1_28_00

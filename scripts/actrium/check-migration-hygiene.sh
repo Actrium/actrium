@@ -57,18 +57,53 @@ retired_browser_upper=$(printf '%s%s' 'ACT' 'RO')
 retired_browser_pattern="${retired_browser_name}|${retired_browser_title}|${retired_browser_upper}"
 old_browser_name_matches=$(
   # Keep the retired spelling assembled at runtime so the guard does not
-  # contain the value that it rejects.
+  # contain the value that it rejects. The archive checklist preserves historical
+  # repository identities. Release identities and storage compatibility code retain
+  # durable identifiers so upgrades can read existing sandboxes and preferences.
   git grep -n \
     -e "$retired_browser_name" \
     -e "$retired_browser_title" \
     -e "$retired_browser_upper" \
-    -- . 2>/dev/null || true
+    -- . ':!docs/migration/source-archive-readiness.md' \
+    ':!packages/actrium-platform/apple/ActriumCore/Sources/ActriumCore/ApplePersistentStoragePaths.swift' \
+    ':!packages/actrium-platform/apple/ActriumCore/Tests/ActriumCoreTests/ApplePersistentStoragePathsTests.swift' \
+    ':!macos/Actrium/Settings/Security/KeychainHelper.swift' \
+    ':!ios/Actrium.xcodeproj/project.pbxproj' \
+    ':!macos/Actrium.xcodeproj/project.pbxproj' \
+    ':!android/android/app/build.gradle' \
+    ':!android/android/app/src/main/java/io/actrium/app/data/database/AppDatabase.kt' \
+    ':!android/android/app/src/main/java/io/actrium/app/data/database/BrowserStorageDatabase.kt' \
+    ':!android/android/app/src/main/java/io/actrium/app/data/sync/BrowserStorageSyncCredentialStore.kt' \
+    ':!windows/src/WindowsAppPaths.cs' \
+    ':!windows/src/BrowserStorageDatabase.cs' \
+    ':!windows/tests/Program.cs' 2>/dev/null || true
 )
 
 if [ -n "$old_browser_name_matches" ]; then
   print_matches_failure "retired browser name remains in first-party files" "$old_browser_name_matches"
 else
-  print_ok "retired browser name is absent from first-party files"
+  print_ok "retired browser name is limited to historical and upgrade compatibility files"
+fi
+
+# Branding can change; installed application identities cannot change without
+# abandoning the existing sandbox, update channel, and preferences domain.
+check_apple_release_identity() {
+  project=$1
+  expected=$2
+  count=$(rg -c -F "PRODUCT_BUNDLE_IDENTIFIER = ${expected};" "$project" || true)
+  if [ "$count" = 2 ]; then
+    print_ok "$project preserves its installed identity in Debug and Release"
+  else
+    print_matches_failure "installed Apple application identity changed" "$project must preserve $expected in both configurations"
+  fi
+}
+
+check_apple_release_identity ios/Actrium.xcodeproj/project.pbxproj "io.actrium.${retired_browser_name}.ios"
+check_apple_release_identity macos/Actrium.xcodeproj/project.pbxproj "io.actrium.${retired_browser_name}"
+if rg -q -F "applicationId = \"io.actrium.${retired_browser_name}\"" android/android/app/build.gradle; then
+  print_ok "Android preserves its installed application ID"
+else
+  print_matches_failure "installed Android application identity changed" "Keep the existing applicationId independently of the source namespace"
 fi
 
 old_browser_path_matches=$(

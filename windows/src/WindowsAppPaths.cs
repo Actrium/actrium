@@ -33,8 +33,21 @@ internal static class WindowsAppPaths
             return trimmed;
         }
 
+        return GetDefaultLocalAppDataRoot(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+    }
+
+    internal static string GetDefaultLocalAppDataRoot(string localApplicationData)
+    {
+        // Keep profiles, database journals, and saved absolute paths together.
+        var legacyRoot = Path.Combine(localApplicationData, "Actrium", "Actro", "Windows");
+        if (Directory.Exists(legacyRoot))
+        {
+            return legacyRoot;
+        }
+
         return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            localApplicationData,
             "Actrium",
             "Actrium",
             "Windows");

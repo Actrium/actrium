@@ -18,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @Published var focusedViewModel: BrowserViewModel?
 
     private var cancellables = Set<AnyCancellable>()
+    private var hasFinishedLaunching = false
+    private var pendingOpenURLs: [URL] = []
 
     // MARK: - NSApplicationDelegate
 
@@ -37,6 +39,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // Create initial window
         createNewWindow()
 
+        // AppKit can deliver URL events before services and the first window are ready.
+        // Consume the command-line URL here so subsequent windows never replay it.
+        if let launchURL = ActriumApp.launchURL {
+            pendingOpenURLs.insert(launchURL, at: 0)
+            ActriumApp.launchURL = nil
+        }
+        hasFinishedLaunching = true
+        openPendingURLs()
+
         // Ensure focusedViewModel is set after the run loop settles
         DispatchQueue.main.async { [weak self] in
             self?.refreshFocusedViewModel()
@@ -45,6 +56,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return false  // Keep app running even when all windows are closed
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        pendingOpenURLs.append(contentsOf: urls)
+        openPendingURLs()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -96,6 +112,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
             .store(in: &cancellables)
 
+        // Do not route later URL events to a controller whose window was closed.
+        NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)
+            .sink { [weak self] notification in
+                guard let self, let window = notification.object as? NSWindow,
+                      let controller = self.windowControllers.first(where: { $0.window === window }) else { return }
+                self.removeWindowController(controller)
+            }
+            .store(in: &cancellables)
+
         // Track key window changes so SwiftUI menus re-evaluate
         for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
             NotificationCenter.default.publisher(for: name)
@@ -112,6 +137,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     // MARK: - Window Management
+
+    private func openPendingURLs() {
+        guard hasFinishedLaunching, !pendingOpenURLs.isEmpty else { return }
+
+        // The app stays alive after its last window closes.
+        if windowControllers.isEmpty {
+            createNewWindow()
+        }
+        guard let controller = windowControllers.first(where: { $0.window?.isKeyWindow == true })
+            ?? windowControllers.first(where: { $0.window?.isMainWindow == true })
+            ?? windowControllers.last else { return }
+
+        let urls = pendingOpenURLs
+        pendingOpenURLs.removeAll()
+        controller.window?.deminiaturize(nil)
+        controller.showWindow()
+        for url in urls {
+            // Keep each delivered URL in its own tab, including multi-URL events.
+            controller.viewModel.addNewTab(focusAddressBar: false)
+            controller.viewModel.navigateCurrentTab(to: url.absoluteString)
+        }
+        refreshFocusedViewModel()
+    }
 
     @objc func createNewWindow() {
         let viewModel = BrowserViewModel()

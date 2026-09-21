@@ -536,7 +536,8 @@
 					"-fmodule-map-file=\"${PODS_ROOT}/Headers/Public/react_utils/React-utils.modulemap\"",
 					"-fmodule-map-file=\"${PODS_ROOT}/Headers/Public/yoga/Yoga.modulemap\"",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.app.ios;
+				// Keep the installed application identity stable across product renames.
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.ios;
 				PRODUCT_NAME = Actrium;
 				REGISTER_APP_GROUPS = YES;
 				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
@@ -681,7 +682,8 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.1;
 				MARKETING_VERSION = 1.28.5;
-				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.app.ios;
+				// Keep the installed application identity stable across product renames.
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.ios;
 				PRODUCT_NAME = Actrium;
 				REGISTER_APP_GROUPS = YES;
 				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
