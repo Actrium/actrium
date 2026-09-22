@@ -33,7 +33,7 @@ Realm Profile 激活），见 `REALM_V1_ARCHITECTURE.zh.md` 第 9 节。缺陷�
 5. `TURN_STUN_INTEROP_TESTING.zh.md`
 6. `REALM_V1_ACCEPTANCE_EVIDENCE.zh.md`
 7. `DEPENDENCY_RISK_REGISTER.zh.md`
-8. `scripts/loran/migrate_schema_v1.py`
+8. `scripts/loran/migrate_schema_v1.py`、`scripts/loran/migrate_schema_v2.py`
 
 ## 高风险代码
 
@@ -112,7 +112,7 @@ Realm Profile 激活），见 `REALM_V1_ARCHITECTURE.zh.md` 第 9 节。缺陷�
 
 ### 已确认的正向控制（做对的部分，勿回退）
 
-- schema v1 gate 对未版本化/错误版本库 fail-closed（`unsupported ... run the standalone migration tool`）。
+- schema 版本 gate（当前 v2）对未版本化/错误版本库 fail-closed（`unsupported ... run the standalone migration tool`）。
 - JWT 算法锁定 HS256、无 `alg:none`/RS-HS 混淆；realm 单例唯一索引（该控制针对当时的单 Realm 契约；多 Realm 目标契约中由按 Realm
 分区与 Realm 名唯一约束取代，见架构契约第 9 节）；signaling 侧 credential source/连接绑定；移除全局 `CorsLayer::permissive`；TURN 出厂 placeholder secret 已移除并 fail-closed。
 - 浏览器 TURN relay-only 互操作：Chrome 148、Firefox 152 均 PASS（relay/relay UDP）；Safari 26.5 经自动化未在窗口内完成握手，记为待人工复核；独立 RFC5766 客户端 / iOS·Android 原生 / NAT 矩阵 / TURN-over-TCP·TLS 仍为发布前外部矩阵缺口。

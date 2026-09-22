@@ -38,7 +38,7 @@ loran-server
 
 ### `loran-platform`
 
-- SQLite `user_version` 必须等于 schema v1；
+- SQLite `user_version` 必须等于 schema v2；
 - 当前实现：数据库层强制每实例最多一个 Realm。目标契约：移除单例约束，改为
   Realm 名唯一（含 Realm Provider tombstone），所有按 Realm 分区的状态以内部
   `realm_id` 为外键；
@@ -65,7 +65,7 @@ loran-server
 ### `loran-signaling`
 
 - upgrade 身份、Actor credential 中的 Actor 和 envelope source 必须一致；
-- Actor Registry 按 Realm 分区（代码中仍名 service registry，待历史名清理分支改名）；
+- Actor Registry 按 Realm 分区（SQLite 表 `actor_registry`，启动时由旧表 `service_registry` 原地改名）；
 - 原生客户端用 headers，浏览器用限定 WebSocket subprotocol transport；
 - 连接 ACL 默认拒绝；
 - 帧大小、连接数、消息速率和内存状态有界。
