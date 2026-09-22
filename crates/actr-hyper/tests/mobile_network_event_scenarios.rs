@@ -711,7 +711,7 @@ fn parse_mobile_jsonl_events(jsonl: &str) -> Vec<NetworkEvent> {
 }
 
 fn spawn_rpc_router(_name: &str) -> tokio::task::JoinHandle<()> {
-    // `TestHarness` owns the sole v0.20 InboundRouter consumer and already
+    // `TestHarness` owns the sole RTC InboundRouter consumer and already
     // performs request/response dispatch. Keep a cancellable task only for the
     // app-kill/restart orchestration exercised by these scenarios.
     tokio::spawn(std::future::pending())

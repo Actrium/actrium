@@ -1,6 +1,6 @@
 [package]
 name = "actr-hyper"
-version = "0.10.4"
+version = "0.10.5"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -14,10 +14,8 @@ categories = ["asynchronous", "cryptography", "network-programming"]
 workspace = true
 
 [features]
-# The v0.20 backend is the default and only PeerConnection implementation.
-# Disabling default features is supported for non-RTC build surfaces; it does
-# not select the removed 0.14 stack.
-default = ["webrtc-v020"]
+# Native builds include the RTC implementation unconditionally.
+default = []
 wasm-engine = ["dep:wasmtime", "dep:wasmtime-wasi"]
 dynclib-engine = ["dep:libloading"]
 opentelemetry = [
@@ -43,9 +41,6 @@ test-utils = [
   "dep:turn_crate",
   "dep:webrtc-util",
 ]
-# Transitional source gate. The v0.20 dependencies themselves are mandatory;
-# this feature only keeps the cutover diff bisectable until the module rename.
-webrtc-v020 = []
 
 [dependencies]
 # === Internal ===

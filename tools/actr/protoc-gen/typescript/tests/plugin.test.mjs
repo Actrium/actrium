@@ -149,6 +149,9 @@ service RemoteService {
   ]);
   assert.ok(metadata.generated_files.includes("actr_dispatch.ts"));
 
+  const client = readFileSync(join(output, "service_client.ts"), "utf8");
+  assert.match(client, /payloadType: 1,/);
+
   const dispatcher = readFileSync(join(output, "actr_dispatch.ts"), "utf8");
   assert.match(dispatcher, /resolveDependency\("remote-service"\)/);
   assert.match(dispatcher, /discover\(actrType\)/);
@@ -271,3 +274,38 @@ service LocalService { rpc Call(Request) returns (Response); }
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /duplicate route_key/);
 });
+
+for (const [lane, numericLane] of [
+  ["rpcReliable", 0],
+  ["rpcSignal", 1],
+  ["streamReliable", 2],
+  ["streamLatencyFirst", 3],
+  ["mediaRtp", 4],
+]) {
+  test(`remote request companion preserves ${lane}`, () => {
+    const { output, result } = generate(
+      `syntax = "proto3";
+package remote;
+message Request {}
+message Response {}
+service RemoteService { rpc Call(Request) returns (Response); }
+`,
+      [
+        {
+          route_key: "remote.RemoteService.Call",
+          proto_file: "service.proto",
+          proto_service: "remote.RemoteService",
+          method: "Call",
+          input_type: "remote.Request",
+          output_type: "remote.Response",
+          payload_type: lane,
+          reply_mode: "return",
+          dependency_alias: "remote-service",
+        },
+      ],
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const client = readFileSync(join(output, "service_client.ts"), "utf8");
+    assert.match(client, new RegExp(`payloadType: ${numericLane},`));
+  });
+}

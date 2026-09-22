@@ -1,4 +1,4 @@
-//! Integration tests for outbound behavior across the v0.20 RTC lifecycle.
+//! Integration tests for outbound behavior across the RTC lifecycle.
 //!
 //! These are T3 tests: every request traverses `PeerGate -> PeerTransport ->
 //! RtcConnectionManager -> RtcPeerController -> PeerConnectionSession` and

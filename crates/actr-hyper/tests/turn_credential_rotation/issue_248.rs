@@ -1,4 +1,4 @@
-//! Manual regression probes for issue #248 on webrtc 0.20.3 / turn 0.11.0.
+//! Manual regression probes for issue #248 on the v0.21 RTC/TURN stack.
 //! Assertions describe the fixed behavior; ignored until the upstream defects are fixed.
 //! Run with `cargo test -p actr-hyper --test turn_credential_rotation issue_248 -- --ignored --nocapture`.
 
@@ -39,19 +39,23 @@ async fn allocate_retransmission_replays_success() {
     let credential = turn_credential(&make_actor_id(46_541), expires);
     let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let local = socket.local_addr().unwrap();
-    let mut client = Client::new(ClientConfig {
-        stun_serv_addr: address.to_string(),
-        turn_serv_addr: address.to_string(),
-        local_addr: local,
-        transport_protocol: TransportProtocol::UDP,
-        username: credential.username,
-        password: credential.password,
-        realm: String::new(),
-        software: String::new(),
-        rto_in_ms: 0,
-    })
+    let mut client = Client::new(
+        ClientConfig {
+            stun_serv_addr: address.to_string(),
+            turn_serv_addr: address.to_string(),
+            local_addr: local,
+            transport_protocol: TransportProtocol::UDP,
+            username: credential.username,
+            password: credential.password,
+            realm: String::new(),
+            software: String::new(),
+            rto_in_ms: 0,
+            allocation_refresh_interval_cap: None,
+        },
+        rtc::crypto::default_provider().unwrap(),
+    )
     .unwrap();
-    client.allocate().unwrap();
+    client.allocate(std::time::Instant::now()).unwrap();
     let anonymous = client.poll_write().unwrap();
     let challenge = exchange(&socket, address, &anonymous.message).await;
     client
@@ -103,7 +107,7 @@ async fn allocate_retransmission_replays_success() {
         Event::AllocateResponse(_, relay) => relay,
         event => panic!("expected Allocate success: {event:?}"),
     };
-    client.allocate().unwrap();
+    client.allocate(std::time::Instant::now()).unwrap();
     let anonymous = client.poll_write().unwrap();
     let challenge = exchange(&socket, address, &anonymous.message).await;
     client
@@ -123,7 +127,11 @@ async fn allocate_retransmission_replays_success() {
     let mut code = ErrorCodeAttribute::default();
     code.get_from(&conflict).unwrap();
     // Positive cleanup control: an explicit Refresh(0) removes the allocation.
-    client.relay(relay_addr).unwrap().close().unwrap();
+    client
+        .relay(relay_addr)
+        .unwrap()
+        .close(std::time::Instant::now())
+        .unwrap();
     let delete = client.poll_write().unwrap();
     let deleted = exchange(&socket, address, &delete.message).await;
     let remaining = server.get_allocations_info(None).await.unwrap().len();

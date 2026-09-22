@@ -1,4 +1,4 @@
-//! Retry dedup and request-id semantics on the v0.20 production path.
+//! Retry dedup and request-id semantics on the RTC production path.
 
 use actr_hyper::test_support::TestHarness;
 use actr_protocol::{ActrError, Direction, RpcEnvelope};
@@ -83,7 +83,7 @@ async fn test_late_response_after_connection_closed_is_dropped() {
         .register_pending_for_test(request_id, harness.peer(200).id.clone())
         .await;
 
-    // The v0.20 lifecycle projects terminal/recovery failure into the same
+    // The RTC lifecycle projects terminal/recovery failure into the same
     // response correlator. Once the first terminal result consumes the id, a
     // physically late response from a retired generation is a no-op.
     assert!(

@@ -1,4 +1,4 @@
-//! Disconnect/reconnect integration coverage for the v0.20 RTC architecture.
+//! Disconnect/reconnect integration coverage for the RTC architecture.
 //!
 //! All scenarios retain their historical entry names while observing the new
 //! authority: `RtcPeerSnapshot`, monotone PC generations, production signaling
@@ -512,7 +512,7 @@ async fn test_data_channel_on_close_cleans_webrtc_transport() {
         .expect("anchor close must rebuild the physical session");
     assert!(recovered.pc_generation > old_generation);
 
-    // v0.20 keeps the logical DestTransport/controller projection and swaps
+    // RTC keeps the logical DestTransport/controller projection and swaps
     // its generation-bound lane underneath it; the next RPC proves the cache
     // is not stale after the old DataChannel's OnClose event.
     assert!(harness.peer(100).transport_manager.has_dest(&dest).await);
