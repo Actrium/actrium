@@ -30,6 +30,10 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
     @Published var tabs: [Tab] = []
     private var actorNavigationIDs: [UUID: UUID] = [:]
+    /// Resolves an actr:// authority URL to a verified on-disk package.
+    /// Defaults to the production client; tests inject a controlled resolver
+    /// to drive navigation races deterministically.
+    private let resolveActorPackage: (URL) async throws -> URL
     @Published var currentTabId: UUID?
     // Default that all tabs are left-side panel visible; overrides are recorded only when user switching
     @Published private var leftPanelVisibility: [UUID: Bool] = [:]
@@ -70,7 +74,10 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         return tabs.first(where: { $0.id == currentTabId })
     }
 
-    init() {
+    init(resolveActorPackage: @escaping (URL) async throws -> URL = { url in
+        try await ActrAuthorityClient.shared.resolveAndDownload(url)
+    }) {
+        self.resolveActorPackage = resolveActorPackage
         // Initialize slot positions first
         initializeSlotPositions()
 
@@ -743,9 +750,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 objectWillChange.send()
                 persistBrowserPageSession()
 
-                Task { [weak self] in
+                Task { [weak self, resolveActorPackage = self.resolveActorPackage] in
                     do {
-                        let packageURL = try await ActrAuthorityClient.shared.resolveAndDownload(url)
+                        let packageURL = try await resolveActorPackage(url)
                         guard let self,
                               self.actorNavigationIDs[tabId] == navigationID,
                               let currentIndex = self.tabs.firstIndex(where: { $0.id == tabId }),

@@ -53,7 +53,8 @@ struct ActrPackageExtractorTests {
             "deepPath": Self.deepPath,
             "corrupt": "aW52YWxpZCB6aXA=",
         ]
-        try #require(Data(base64Encoded: try #require(fixtures[kind]))).write(to: archive)
+        let encodedFixture = try #require(fixtures[kind])
+        try #require(Data(base64Encoded: encodedFixture)).write(to: archive)
         #expect(throws: (any Error).self) {
             _ = try ActrPackageExtractor.extract(
                 archive: archive,

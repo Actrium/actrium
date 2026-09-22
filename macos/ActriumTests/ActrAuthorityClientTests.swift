@@ -159,8 +159,9 @@ struct ActrAuthorityClientTests {
         }
         ActrMockURLProtocol.handler = { request in
             let body = Data(repeating: 0x20, count: 64 * 1024 + 1)
+            let requestURL = try #require(request.url)
             let response = try #require(HTTPURLResponse(
-                url: #require(request.url), statusCode: 200, httpVersion: "HTTP/1.1",
+                url: requestURL, statusCode: 200, httpVersion: "HTTP/1.1",
                 headerFields: advertiseLength ? ["Content-Length": String(body.count)] : [:]
             ))
             return (response, body)
