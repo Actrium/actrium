@@ -1,11 +1,11 @@
-# Actrix Realm v1 指标
+# Loran Realm v1 指标
 
-Actrix 暴露两类互补观测数据：
+Loran 暴露两类互补观测数据：
 
 - `/metrics` 与 `/{service}/metrics`：Prometheus 文本格式；
 - `/admin/api/metrics/timeseries`：Admin UI 使用的单节点内存 ring buffer。
 
-准确指标名以 `crates/platform/src/metrics.rs` 和各 service 的 metrics 定义为准；
+准确指标名以 `crates/loran-platform/src/metrics.rs` 和各 service 的 metrics 定义为准；
 本文不复制一份可能过期的完整列表。
 
 ## 访问控制
@@ -18,15 +18,15 @@ curl --fail --cacert /etc/actrix/pki/ca.pem \
   https://realm.example.com/metrics
 ```
 
-服务名使用 `signer`、`ais`、`signaling`、`stun`、`turn`。Publisher Registry
-目前没有独立 ring series；其 HTTP/安全事件仍进入全局指标与 recording channels。
+服务名使用 `signer`（Issuer Signer）、`issuer`、`signaling`、`stun`、`turn`。Publisher
+Registry 目前没有独立 ring series；其 HTTP/安全事件仍进入全局指标与 recording channels。
 
 ## 命名与标签
 
-- 新指标使用 `actrix_` namespace；
-- Signer 不再使用 `ks` 作为新 label；
-- Realm、Actor ID、Publisher、credential、nonce 或 secret 不得成为高基数/敏感 label；
-  目标契约下一个实例承载大量 Realm，Realm 引用与命名空间尤其不得作为 label，按
+- 新指标沿用代码中的 `actrix_` 前缀；
+- Issuer Signer 的 label 统一为 `signer`；
+- Realm、ActorId、Publisher、Actor credential、nonce 或 secret 不得成为高基数/敏感 label；
+  目标契约下一个实例承载大量 Realm，Realm 名与域名尤其不得作为 label，按
   Realm 的状态、配额与挂起情况只以聚合计数暴露；
 - path label 必须模板化，不能包含用户输入或 ID；
 - 认证失败只记录有限枚举 reason。

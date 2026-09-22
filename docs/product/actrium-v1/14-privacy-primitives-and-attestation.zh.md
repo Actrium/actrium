@@ -74,7 +74,7 @@ Actor A ── encrypted edge ── Actor B ── encrypted edge ── Actor 
 |---|---|---|---|
 | Actor Secure Channel | 网络窃听、篡改、重放、relay | payload 只被经认证端点解密 | 端点收到明文后不会泄露 |
 | `.actr` 签名与 provenance | CDN、镜像篡改、供应链替换 | 运行 artifact 的来源和 digest | artifact 本身没有恶意逻辑 |
-| WASM capability sandbox | 恶意/错误 workload | imports、内存边界和可能出口可枚举、可强制 | Host/内核不会偷看；允许出口的接收者不会滥用 |
+| WASM capability sandbox | 恶意/错误 workload | imports、内存边界和可能出口可枚举、可强制 | Actr Host/内核不会偷看；允许出口的接收者不会滥用 |
 | Native Capsule | 第三方 native workload | native 进程无法绕过 broker 使用原始资源 | 内核零漏洞；与 WASM 同等可移植、可验证 |
 | TEE / Confidential Computing | 云管理员、宿主机、Hypervisor 等基础设施对手 | 指定执行边界中的 data in use 受到硬件隔离 | workload 本身不会主动外泄 |
 | Remote Attestation | 伪造运行环境、错误版本 | 某 Attester 对环境状态给出了可验 Evidence | 该状态自动满足业务 policy |
@@ -138,7 +138,7 @@ pass | indeterminate | fail | not-required
 
 展示：全部 `CONTROLLED` 且 `Ready` 且通道有效 → 绿；无红而有未知 → 黄；任一 `UNCONTROLLED` → 红；切面未就绪 → 不展示颜色。
 
-不是所有 Actor、所有数据都强制要求 CC。例如 public 数据可以允许在普通 WASM Host 上运行；secret 数据的组织策略可以要求 `compute_confidentiality=pass`。
+不是所有 Actor、所有数据都强制要求 CC。例如 public 数据可以允许在普通 WASM Actr Host 上运行；secret 数据的组织策略可以要求 `compute_confidentiality=pass`。
 
 ### 4.1 绿标主体：Application Instance Snapshot
 
@@ -186,7 +186,7 @@ package_digest = "sha256:..."
 
 [[actro.privacy_contract.actor_role]]
 role = "primary-service"
-actr_type = "notes.example:team-notes-service:1.4.2"
+actr_type = "notes.example/team-notes-service@1.4.2"
 cardinality = "1"
 required = true
 
@@ -202,7 +202,7 @@ data_classes = ["private"]
 capabilities = ["actor.call:infer.v1"]
 ```
 
-声明不是说明文字，而是 Host 能发放能力的上界：
+声明不是说明文字，而是 Actr Host 能发放能力的上界：
 
 ```text
 Effective Capability =
@@ -258,7 +258,7 @@ Change → SUSPENDED → 取证 / 评定 → Resume（须有当前 AA）→ 尝�
 - Actor workload/config/Host/compute/accelerator assurance 变化；
 - 新增或扩大 Actor edge、data class、purpose、terminal；
 - audit/log/telemetry sink、字段、读取主体或 retention 变化；
-- Workspace/storage/provider 变化；
+- Workspace 或 Workspace Provider 变化；
 - capability 或 declassification 扩张。
 
 不改变图结构（仍可能因证据过期而重评）：
@@ -361,7 +361,7 @@ roles
 
 双方当前 `ActorStateId` 必须进入联合 transcript 并被双向认证：只对本方字段做 MAC 不足以抵抗旧状态问候重放（见 [安全协议](../../security/03-protocol.zh.md) §3 与形式模型 F-CHAN-01）。任一方 `ActorStateId` 变化后，旧通道不得承载应用数据，须针对新状态重新握手。
 
-Actor Host 必须证明持有 Actor key 和临时会话 key。若目标运行在 TEE 中，临时解密公钥必须由 TEE 内生成，或被 TEE 安全持有，并进入 attestation Evidence/Result。
+Actor Actr Host 必须证明持有 Actor key 和临时会话 key。若目标运行在 TEE 中，临时解密公钥必须由 TEE 内生成，或被 TEE 安全持有，并进入 attestation Evidence/Result。
 
 ### 6.3 数据面
 
@@ -409,7 +409,7 @@ CC 的目标是保护 data in use，使代码和数据在硬件支持、可证�
 其主要价值是把以下主体从隐私信任边界中移出或削弱其权限：
 
 - 云平台管理员；
-- Host OS / Hypervisor；
+- Actr Host OS / Hypervisor；
 - 同机其他 VM、容器或进程；
 - 部分物理与设备攻击者。
 
@@ -430,7 +430,7 @@ workload_confinement = pass
 egress_closure = pass
 ```
 
-同理，WASM 出口闭合不能证明云管理员无法读取普通 Host 内存。
+同理，WASM 出口闭合不能证明云管理员无法读取普通 Actr Host 内存。
 
 ### 7.3 Canonical Compute Claims
 
@@ -470,9 +470,9 @@ Actro 采用标准远程证明角色：
 
 | 角色 | Actro 中的实体 | 职责 |
 |---|---|---|
-| Attester | Host TEE、设备、GPU/NPU、可信 launcher | 产生关于 Target Environment 的 Evidence |
+| Attester | Actr Host TEE、设备、GPU/NPU、可信 launcher | 产生关于 Target Environment 的 Evidence |
 | Verifier | Realm/组织/本地受信 Verifier 与 vendor adapter | 验证签名、证书链、测量值、参考值、撤销与 freshness |
-| Relying Party | 发数据的 Actor Host、Privacy Agent、Key Broker | 根据 Attestation Result 和本地 policy 做授权决定 |
+| Relying Party | 发数据的 Actor Actr Host、Privacy Agent、Key Broker | 根据 Attestation Result 和本地 policy 做授权决定 |
 
 需要严格区分：
 
@@ -553,7 +553,7 @@ private/secret 数据推荐采用：
 9. Result 到期、TCB 撤销或 graph 变化时 re-attest/rekey
 ```
 
-没有通过 appraisal 时，敏感数据密钥不得先释放给普通 Host，再由 Host 转发进 TEE。
+没有通过 appraisal 时，敏感数据密钥不得先释放给普通 Actr Host，再由 Actr Host 转发进 TEE。
 
 ## 10. GPU、NPU 与异构算力
 
@@ -596,7 +596,7 @@ CPU TEE / Confidential VM
 }
 ```
 
-如果 accelerator 没有设备级证明，或 CPU→设备传输会在普通 Host/驱动中暴露明文：
+如果 accelerator 没有设备级证明，或 CPU→设备传输会在普通 Actr Host/驱动中暴露明文：
 
 ```text
 compute_confidentiality = indeterminate
@@ -673,19 +673,19 @@ operator_visibility = "authorized-security-admin"
 encrypted = true
 ```
 
-Host 必须把日志 capability、字段 schema、目标、加密、保留期、读取主体和导出行为纳入隐私图。能记录 payload、prompt、Workspace 内容、模型输入输出或稳定用户标识时，必须按其真实 data class 重新评估，不能统称「审计」绕过策略。
+Actr Host 必须把日志 capability、字段 schema、目标、加密、保留期、读取主体和导出行为纳入隐私图。能记录 payload、prompt、Workspace 内容、模型输入输出或稳定用户标识时，必须按其真实 data class 重新评估，不能统称「审计」绕过策略。
 
 Attestation 可以证明正在运行包含某日志配置的 workload/环境，Host broker 可以证明只发放了声明的 audit capability；它不能仅凭「服务器有审计日志」证明服务器没有其他隐蔽记录。因此：
 
 - WASM/Native confinement 证明没有绕过 broker 的其他日志出口；
-- CC 证明 Host/云管理员不能在边界外读取内存并偷偷记录；
+- CC 证明 Actr Host/云管理员不能在边界外读取内存并偷偷记录；
 - audit sink 自身的存储、管理员和导出方继续作为闭包节点或 Certified Privacy Domain；
-- 未声明日志、Host 级明文采集或无法证明的 retention 使相关事实为 `UNKNOWN` 或 `UNCONTROLLED`。
+- 未声明日志、Actr Host 级明文采集或无法证明的 retention 使相关事实为 `UNKNOWN` 或 `UNCONTROLLED`。
 
 对 LLM Server 和 GPU/NPU 尤其要区分：
 
 - accelerator Attestation 通常证明设备身份、固件、CC mode 和设备状态，不自动证明上层 LLM Server 没有把 prompt/response 写入日志；
-- 若日志通过受控文件、对象存储、网络或 Actor capability 离开被证明边界，Host 必须观察到 audit edge；
+- 若日志通过受控文件、对象存储、网络或 Actor capability 离开被证明边界，Actr Host 必须观察到 audit edge；
 - 若日志逻辑位于被度量 workload 内，workload/config digest 可以证明「运行的是哪套日志代码与配置」，但仍要结合封闭 egress 和可信 Verifier 才能证明没有其他口子；
 - 若是 opaque 第三方 LLM API，外部调用方不能仅凭 GPU 证明技术性检测其内部留存；只能依赖 Certified Privacy Domain 对 retention/audit 的有 scope 证明。没有该证明该项为 `UNKNOWN`。
 
@@ -699,7 +699,7 @@ Attestation 可以证明正在运行包含某日志配置的 workload/环境，H
 
 - 输入、内部值和输出 schema 带 data class；
 - 跨类别输出需要显式 declassification capability；
-- Host 校验结构、大小、目标和用途；
+- Actr Host 校验结构、大小、目标和用途；
 - 聚合查询可以要求 k-anonymity、差分隐私预算或最小样本数；
 - model inference 明确 prompt、embedding、cache、tool result 和 telemetry 的分类；
 - 对高带宽 covert channel 做配额、速率和调用形状限制；
@@ -822,7 +822,7 @@ Actro / Actr Privacy Control Plane
 └── Audit & Transparency Log
 ```
 
-组织（Realm 命名空间持有者）或其委派的 Provider 可以运营或委派 Verifier、Reference Value、Revocation 和 Key Broker 服务，但它不是唯一全球信任根；单个实例 Realm 只在自己的 policy 中选择信任哪些 Verifier。组织和本地 Actro 可以选择自己的 Verifier 与 appraisal policy。
+Realm 签名 key 持有方（Realm 域名所有者）或其委派的 Realm Provider 可以运营或委派 Verifier、Reference Value、Revocation 和 Key Broker 服务，但它不是唯一全球信任根；单个实例 Realm 只在自己的 policy 中选择信任哪些 Verifier。组织和本地 Actro 可以选择自己的 Verifier 与 appraisal policy。
 
 ## 16. 失败与撤销
 
@@ -905,7 +905,7 @@ PRIVACY_AUDIT_SINK_NOT_DECLARED
 - WASM egress closure；
 - Workspace envelope encryption；
 - package provenance；
-- 非自签的 `ActorAssurance`（Host 可评 Guest，不得自签 Host）；
+- 非自签的 `ActorAssurance`（Actr Host 可评 Guest，不得自签 Actr Host）；
 - 不要求 CC 的 public/private policy。
 
 ### P2：Confidential CPU

@@ -1,10 +1,10 @@
-# Actrix 文档索引
+# Loran 文档索引
 
 ## 建议阅读顺序
 
 1. [`README`](../README.md)：产品边界、启动和发布门槛。
 2. [`REALM_V1_ARCHITECTURE.zh.md`](REALM_V1_ARCHITECTURE.zh.md)：规范性架构契约：Realm 对应应用实例，
-   以命名空间 + 本地名标识，一个实例承载多个 Realm；第 9 节列出与当前代码的差异。
+   以 Realm 名 `<label>@<domain>` 标识，一个实例承载多个 Realm；第 9 节列出与当前代码的差异。
 3. [`THREAT_MODEL_REALM_V1.zh.md`](THREAT_MODEL_REALM_V1.zh.md)：资产、威胁、缓解与发布门槛。
 4. [`CONFIGURATION.md`](CONFIGURATION.zh.md)：单节点生产配置（当前实现单 Realm，目标契约多 Realm）。
 5. [`API.md`](API.zh.md)：公开传输与路由边界。
@@ -16,13 +16,13 @@
 - [`SERVICES.md`](SERVICES.zh.md)：服务生命周期、运维和恢复。
 - [`DEVELOPMENT.md`](DEVELOPMENT.zh.md)：构建与贡献。
 - [`CONFIG_EXAMPLES.md`](CONFIG_EXAMPLES.zh.md)：生产与本地 profile。
-- [`KS_GUIDE.md`](KS_GUIDE.zh.md)：Signer 信任边界（文件名为历史名称）。
+- [`KS_GUIDE.md`](KS_GUIDE.zh.md)：Issuer Signer 信任边界（文件名沿用历史名称，见 GLOSSARY）。
 - [`TURN_STUN_INTEROP_TESTING.zh.md`](TURN_STUN_INTEROP_TESTING.zh.md)：ICE 验证。
 - [`REALM_V1_ACCEPTANCE_EVIDENCE.zh.md`](REALM_V1_ACCEPTANCE_EVIDENCE.zh.md)：目标到自动证据和外部门槛的映射。
 - [`DEPENDENCY_RISK_REGISTER.zh.md`](DEPENDENCY_RISK_REGISTER.zh.md)：依赖告警处置、例外和退出条件。
 - [`INDEPENDENT_SECURITY_REVIEW.zh.md`](INDEPENDENT_SECURITY_REVIEW.zh.md)：独立评审范围与报告模板。
 - [`prometheus-metrics.md`](prometheus-metrics.zh.md)：指标。
-- [`GLOSSARY.md`](GLOSSARY.zh.md)：术语。
+- [`GLOSSARY.md`](GLOSSARY.zh.md)：术语与「历史名称对照」。
 
 ## 历史资料
 

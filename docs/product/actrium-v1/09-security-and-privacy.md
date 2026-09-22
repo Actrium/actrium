@@ -41,7 +41,7 @@ flowchart LR
     SH -->|credentials/transport| R
 ```
 
-Lettered Host There are still possible gaps;“Lettered”It is stated that it is within the platform ' s credible calculation base and does not imply that there is no need for an audit.
+Lettered Actr Host There are still possible gaps;“Lettered”It is stated that it is within the platform ' s credible calculation base and does not imply that there is no need for an audit.
 
 ## 3. Assets
 
@@ -50,10 +50,9 @@ Lettered Host There are still possible gaps;“Lettered”It is stated that it i
 - Workspace (a) Content;
 - Actor Long-term private key;
 - Realm membership/refresh material;
-- the local installation root key (from which the `installation-id` is derived);
 - Service Status and snapshot;
-- Provider credential;
-- User Identity and ACL;
+- Workspace Provider credential;
+- user identity and application permissions;
 - package signing key;
 - Service session secret.
 
@@ -62,7 +61,7 @@ Lettered Host There are still possible gaps;“Lettered”It is stated that it i
 - ActorId;
 - Program/Service Use of records;
 - Realm membership;
-- Realm references (which reveal the namespace and instance name);
+- Realm names (which reveal the domain and instance name);
 - IP, online time, connection;
 - Workspace Display name and location;
 - (a) The delegation of authority;
@@ -75,7 +74,7 @@ Lettered Host There are still possible gaps;“Lettered”It is stated that it i
 - Malicious. Keel Guest;
 - Malicious. Service workload;
 - It's bad or lost. Marketplace;
-- Malicious. Realm, signaling or TURN Provider;
+- Malicious. Realm, signaling or TURN Realm Provider;
 - Other processes with equipment;
 - The assailant with the right to do so;
 - Stolen equipment;
@@ -94,7 +93,7 @@ Lettered Host There are still possible gaps;“Lettered”It is stated that it i
 | Guest Direct networking | No Default fetch/socket;`host:net` capability + allowlist |
 | Image Invisible networking/Bring your own header | ActroSafeImage Only asset id Or controlled. URL |
 | Guest Any Actor | Only exposure to fixed PrimaryService capability |
-| Guest Counterfeiting Users/Permissions | Host Attach Uncoverable session metadata |
+| Guest Counterfeiting Users/Permissions | Actr Host Attach Uncoverable session metadata |
 | Guest Infinite Cycle | QuickJS interrupt timeout,Closable runtime |
 | Guest Memory depletion | per-Guest heap cap, payload/render limits |
 | Bridge/Component misuse | schemaComponent/props/event/RemoteRef White list |
@@ -104,9 +103,9 @@ Lettered Host There are still possible gaps;“Lettered”It is stated that it i
 | URL Batch creation | Confirm,creation intent Quotas, sources and flows |
 | URL Discover Permissions | ActorId Not capability, URI None token |
 | Actor Counterfeit | Realm credential, Actor key proof, challenge |
-| Forged or rolled-back Realm Profile | Profile must be signed by a pinned namespace key; first trust via Web PKI or enterprise pin; namespace key changes require a valid rotation chain; monotonic `sequence`, immutable `provider.id`, retired Realms rejected; Profiles do not expire and clients refresh them periodically; a Profile that cannot be fetched, fails verification or is retired must not cause a fallback to the default provider in the authority descriptor |
+| Forged or rolled-back Realm Profile | Realm Profile must be signed by a pinned Realm signing key; first trust via Web PKI or enterprise pin; Realm signing key changes require a valid rotation chain; monotonic `sequence`, immutable `provider.id`, retired Realms rejected; Realm Profiles do not expire and clients refresh them periodically; a Realm Profile that cannot be fetched, fails verification or is retired must not lead to using any Realm Provider other than the Realm Profile's |
 | Client disguised as official Actro Front | Service Default not trusting client to achieve; controlled scenes are tested separately platform/runtime attestation |
-| Malicious. Actor "Don't leak" self-report. | The person assessed cannot sign out for final `ActorAssurance`;a valid declaration by Host Close |
+| Malicious. Actor "Don't leak" self-report. | The person assessed cannot sign out for final `ActorAssurance`;a valid declaration by Actr Host Close |
 | Service Concealing the support. Actor | No root map to find out; no green underage |
 | WASM Declarations differ from actual exports | Comparison manifest, imports; valid declaration and actual side; confirmation of non-declaration of export `UNCONTROLLED` |
 | Concurrent process Native Around broker | Third parties NativeCdylib Hold `UNKNOWN` or confirmed as `UNCONTROLLED`;no greening |
@@ -115,7 +114,7 @@ Lettered Host There are still possible gaps;“Lettered”It is stated that it i
 | Cloud Administrator or Hypervisor Read Agent Express | secret policy Request TEE/CC;release data keys only after remote certification |
 | Legal TEE Proof of being forwarded to malicious example | Evidence Tie nonce, Actor/runtime, workload digest, policy, audience and ephemeral key |
 | Just... CPU TEE, GPU/NPU Still exposed. | CPU+Guest+driver+IOMMU/link+device firmware/memory composite attestation |
-| Self-report by the manufacturer“Supports classified calculations” | versioned Verifier adapter, vendor trust root, Reference Values, Endorsements, TCB Undo and Negative Test |
+| Hardware vendor self-report ("supports confidential computing") | versioned Verifier adapter, vendor trust root, Reference Values, Endorsements, TCB Undo and Negative Test |
 | CC Intra-negative. workload Active leak | CC No substitute WASM/Native confinement, egress closure with output control |
 | Legal Actor Response to stolen tape secret | data-class schema, declassification capability, output size/Objective/Purpose gate |
 | New Actor Data first and then verify | pending edge Sync gate;Mark Do not send business before passing payload |
@@ -147,7 +146,7 @@ publisher
 + capability
 + scope
 + workspace/service
-+ principal/device
++ principal/client
 ```
 
 Only name can be remembered by using program.
@@ -213,7 +212,7 @@ Static scans are the issuance of diagnostics, not the complete security boundary
 
 - Fixed QuickJS;
 - No injection. fetch, WebSocket, filesystem, process, native module;
-- Host module dispatch Rejected without a declaration;
+- Actr Host module dispatch Rejected without a declaration;
 - input/output/event schema;
 - deadline, rate limit, payload limit;
 - timer/callback Cleaning;
@@ -246,7 +245,7 @@ The security centre shows the actual level:
 | S3 OS process isolation | Desktop Long-Term Objectives | helper process/AppContainer/XPC |
 | T1 Trusted Native | Actro First party/Enterprise | Native workloadTrust. |
 
-Don't put it in the car. S1 The case is written.“Process level segregation”.QuickJS Yes. C Engine,Host/Bridge/The component layer leaks may still be crossing the language sandbox.
+Don't put it in the car. S1 The case is written.“Process level segregation”.QuickJS Yes. C Engine,Actr Host/Bridge/The component layer leaks may still be crossing the language sandbox.
 
 ## 9. Service workload Clear.
 
@@ -293,19 +292,19 @@ Publisher package endpoint Available CDN, but CDN URL Not automatically Guest ne
 - signaling ticket One-time;
 - Attach challenge (b) Two-way;
 - session id Unpredictable;
-- session metadata By Host Add;
+- session metadata By Actr Host Add;
 - lease The message is rejected after due date;
 - replay/idempotency key (a) The window is clear;
 - `service` URI mismatch Direct failure;
 - Service offline No, no, no. fallback.
 
-ActorType, Host Version and package digest The client statement is not a valid one. runtime attestation;Service Data rights and operational mandates cannot be relied on in these self-reported fields.
+ActorType, Actr Host Version and package digest The client statement is not a valid one. runtime attestation;Service Data rights and operational mandates cannot be relied on in these self-reported fields.
 
 ## 12. Workspace Clear.
 
 - Front/Guest No path;
 - Service Use brokered handle;
-- Provider credential (a) Independence;
+- Workspace Provider credential (a) Independence;
 - Path canonicalization;
 - symlink/hardlink policy;
 - Atom writing;
@@ -322,10 +321,9 @@ Secret classification:
 
 | Secret | Storage | Exposure range |
 |---|---|---|
-| Device key (separate per Realm, derived from the device root key by Realm reference or generated independently) | OS secure storage | Identity Manager |
+| Realm client key (generated separately per Realm; how Actro generates it internally is not specified) | OS secure storage | Identity Manager |
 | Service Actor key | OS secure storage | Service runtime bootstrap |
-| Realm refresh material | OS secure storage | Realm Manager |
-| Installation root key (derives the `installation-id`) | OS secure storage | Realm Manager |
+| Realm client key | OS secure storage | Realm Manager |
 | signaling ticket | Memory | signaling clientOne time. |
 | TURN credential | Memory | ICE stackShort term |
 | Workspace credential | OS secure storage | Workspace broker |
@@ -379,7 +377,7 @@ Default does not contain:
 
 - Actro Host Security update can require restart Front;
 - package (a) Discontinuation of the hierarchy;
-- Revoking a Realm issuer key or namespace key immediately affects new connections;
+- Revoking a Realm issuer key or Realm signing key immediately affects new connections;
 - Created session At the latest. credential/lease Term expires;
 - compromised Publisher key (a) A historical and credible version of the text, judged by the time of signature and the scope of revocation;
 - emergency blocklist (a) Signing, expiry and auditable;
@@ -390,7 +388,7 @@ Default does not contain:
 Actro The user data flow depends on:
 
 - Workspace Provider;
-- Service (c) Host;
+- Service host device;
 - Realm;
 - signaling/TURN;
 - Publisher API;
@@ -398,7 +396,7 @@ Actro The user data flow depends on:
 
 Installation pages and security centres must be available“Where will the data go?”, instead of a general privacy switch.
 
-A Realm reference appears in shared URIs as part of the ActorId and reveals the Realm namespace and `local_name`. By default Actro generates a fully random `local_name` for each instance (containing no program name or user input); the human-readable name goes into `display_name` and never enters the ActorId. When the user explicitly chooses a readable `local_name`, the confirmation page and the pre-sharing UI should warn that it is exposed in links. A device uses a separate device key in each Realm and never reuses it across Realms, so different instances cannot correlate the same device by it. For self-service creation in a Provider-owned namespace the user signs in with a Provider account; the Provider can link the instances created by one account (it signs them anyway), but instance members never see the account.
+A Realm name appears in shared URIs as part of the ActorId and reveals the Realm domain and the Realm label (`label`). By default Actro generates a fully random `label` for each instance (containing no program name or user input); the human-readable name goes into `display_name` and never enters the ActorId. When the user explicitly chooses a readable `label`, the confirmation page and the pre-sharing UI should warn that it is exposed in links. Realm names and ActorIds look like email addresses (`k7m2q9xh@acme.com`); Actro must never render them as `mailto:` links and should label them clearly as instance addresses. Each Realm uses a separate Realm client key, never reused across Realms, so different instances cannot correlate the same client by it. When the Realm signing key holder is a Realm Provider, the user signs in with a Realm Provider account to create; the Realm Provider can link the instances created by one account (it signs them anyway), but instance members never see the account.
 
 ## 17. Security development requirements
 
@@ -407,7 +405,7 @@ A Realm reference appears in shared URIs as part of the ActorId and reveals the 
 - WASM import validation;
 - archive extraction property tests;
 - session replay/lease tests;
-- Namespace key rotation chain, Realm Profile `sequence` rollback and issuer key rotation tests;
+- Realm signing key rotation chain, Realm Profile `sequence` rollback and Realm issuer key rotation tests;
 - signaling/TURN credential leakage tests;
 - capability policy differential tests;
 - More Tab Resource segregation failure injection;

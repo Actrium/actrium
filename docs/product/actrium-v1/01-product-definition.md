@@ -15,7 +15,7 @@ Users see familiar browsers:
 The developers see the bound little program platform:
 
 - Only for front desk. Keel Guest;
-- You don't need to do it yourself.Actor Registration, correspondence, access window and cross-platform Host;
+- You don't need to do it yourself.Actor Registration, correspondence, access window and cross-platform Actr Host;
 - The front desk is always a type. Primary Service capability (a) Visiting operations;
 - Backstage. Service Available Actor Modelling of more complex services;
 - A precise coordinates can be used. HTTPS Access, validation, cache and recurrence.
@@ -46,7 +46,7 @@ Core tasks:
 - Selection Workspace And create an example;
 - Work will continue later from history, collection or exemplification library;
 - There are examples of connections on another device;
-- Know clearly who the program comes from, which Realm (and namespace) the instance belongs to, and which permissions have been granted.
+- Know clearly who the program comes from, which Realm (and domain) the instance belongs to, and which permissions have been granted.
 
 ### 3.2 Program Developer
 
@@ -61,25 +61,25 @@ Core tasks:
 - Release unchangeable with your own domain name `.actr` Packages;
 - Quick debugging in local development mode.
 
-### 3.3 Publisher / Organisational Administrator
+### 3.3 Publisher
 
-Publish programs through a domain and maintain signing keys, versions, revocation information and a recommended Provider. Realms are created per instance, so a Publisher cannot recommend a particular Realm in advance.
+Publish programs through a domain and maintain Publisher signing keys, versions and revocation information. Realms are created per instance, so a Publisher cannot designate a particular Realm in advance.
 
-### 3.4 Namespace Administrator and Realm Owner
+### 3.4 Realm Signing Key Holder and Realm Owner
 
-The namespace administrator (usually organisational IT) holds the Realm namespace key, publishes the namespace descriptor, and operates the organisation's signing tool or service: after authenticating members under the organisation's own policy, it signs Realm creation requests and Profiles under that namespace on their behalf; the administrator also decides which Provider to delegate to and is responsible for namespace key rotation. In v1, individual users can only self-serve Realm creation in the local namespace or a Provider-owned namespace.
+The owner of a Realm domain is the Realm signing key holder: it publishes the Realm signing keys in the authority descriptor, authorizes Realm creation under that domain after authenticating requesters under its own policy, decides which Realm Provider to use and is responsible for Realm signing key rotation; it may also delegate custody of the keys to a Realm Provider. No domain, no Realm (except local Realms).
 
-The Realm owner is the creator of an application instance and manages that instance Realm's membership, Actor admission, ACL, invitations, device revocation and audit.
+The Realm owner is the creator of an application instance and manages that instance's Realm membership, Actor admission, connection ACL, Realm invitations, client revocation and audit.
 
 ### 3.5 Marketplace Operator
 
-Provide information on process discovery, classification, audit, risk labelling and revocation, but not in possession Publisher the namespace.
+Provide information on process discovery, classification, audit, risk labelling and revocation, but does not own any Publisher name.
 
 ## 4. Core user story
 
 ### 4.1 New instance
 
-> As a user, when I type or click an `actr://` address without a `service` parameter, Actro should first validate the program, show permissions and the Workspace and Realm namespace choices, create a new Realm under the chosen namespace (the local namespace by default) with a Service inside it, and then rewrite the address into one that reconnects to that Service.
+> As a user, when I type or click an `actr://` address without a `service` parameter, Actro should first validate the program, show permissions and the Workspace and Realm domain choices, create a new Realm under the chosen domain (a local Realm by default) with a Service inside it, and then rewrite the address into one that reconnects to that Service.
 
 ### 4.2 Connection already exists
 
@@ -99,7 +99,7 @@ Provide information on process discovery, classification, audit, risk labelling 
 
 ### 4.6 Realm With Network
 
-> As a user, I don't need to fill in signaling and TURN addresses; Actro selects endpoints and short-lived credentials from a Realm Profile signed by a trusted namespace key, while showing me the current instance's Realm, its namespace and connection status.
+> As a user, I don't need to fill in signaling and TURN addresses; Actro selects endpoints and short-lived credentials from a Realm Profile signed by a trusted Realm signing key, while showing me the current instance's Realm, its domain and connection status.
 
 ### 4.7 More Actor Privacy status
 
@@ -122,13 +122,13 @@ UI-only Procedures are also provided at the minimum provided by the Platform Ser
 - Publisher No replacement Front Native Host.
 - Front Only carry Keel Guest.
 - Guest Defaults no arbitrary network, file,Actor discovery Or original modular capacity.
-- All capabilities are stated, authorized by the user and Host The three-way cross.
+- All capabilities are stated, authorized by the user and Actr Host The three-way cross.
 
 ### G-03: To make the address readable, replicable, recoverable
 
 - Program coordinate Responsible“Run what?”.
 - Service ActorId Responsible“Which instance to connect to”.
-- Realm reference Responsible“Where to verify and find.”.
+- The Realm name decides where to verify and address.
 - URL Don't carry secrets.
 
 ### G-04: Reuse Web and the security infrastructure
@@ -142,7 +142,7 @@ The Front sees only one Primary Service, but the backend may contain multiple Ac
 ### G-06: Provide end-to-end application security
 
 - The conclusions are assembled along the lines of an effective and unincorporated `dependency map ' ;Front (a) Positioning only;
-- WASM the Declaration,imports, capacity and actual export Host (a) Cross-certification;
+- WASM the Declaration,imports, capacity and actual export Actr Host (a) Cross-certification;
 - Just... `Ready` And all of them. `CONTROLLED` The green is the only way to show it.
 - A clear distinction between yellow and red; no green display on hang-up;
 - New configuration only for new data; state change connection,Capability And the data sheet.
@@ -158,7 +158,7 @@ v1 Do not:
 - (b) Multi-person real-time collaboration agreements;
 - In situ no sense replaces running Service workload;
 - Automatic cross-Realm (cross-instance) federation and global Actor search;
-- Namespace-level SSO or member directory;
+- Domain-level SSO or member directory;
 - Open Anonymous TURN;
 - Only by Marketplace System clearance is granted when the marking is reviewed;
 - Commitments on mobile platforms 24×7 Local Backstage Service Online.
@@ -171,7 +171,7 @@ URL Yes. `service` Connected, none. `service` Just create; do not change intent 
 
 ### 7.2 Address does not equal permissions
 
-ActorId It's location and identity. Access rights. Realm credential, Service ACL and session authorization.
+An ActorId is a location and identity; access is decided by the Realm credential, application permissions and session authorization.
 
 ### 7.3 Status Service
 
@@ -183,7 +183,7 @@ Tab, Front Actor, Guest It's all re-established;Workspace Tie, state of operatio
 
 ### 7.5 Default Minimum Capabilities
 
-Undeclared, Unauthorized, Unauthorised, UnauthorisedHost Unrealized capacity is not available at all.
+Capabilities that are undeclared, unauthorized or not implemented by the Actr Host are unavailable.
 
 ### 7.6 Platform limit visible
 
@@ -205,7 +205,7 @@ One controlled node cannot offset another unknown or uncontrolled node; there is
 - Fixed Native Front Host + Keel JS Guest;
 - Local Service Create, stop, start, connect, recycle and clear;
 - Workspace (a) Tie;
-- Realm namespace descriptors, per-instance Realms and their Profiles, identity, signaling and TURN short-lived credentials;
+- Realm signing keys, per-instance Realms and their Realm Profiles, identity, signaling and TURN short-lived credentials;
 - `ActorAssurance` / `ApplicationAssurance`, no root-dependent maps, the weakest items to be gathered `Ready` (a) Demonstration;
 - (a) Competence, quotas, audits and error pages;
 - Local development sources.

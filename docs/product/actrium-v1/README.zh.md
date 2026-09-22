@@ -32,14 +32,14 @@ Tab
 - Keel Guest 是程序开发者唯一可定制的前台代码。
 - Service Actor 是有状态程序实例，也是 Front 进入 Actor 世界的唯一主入口。
 - Workspace 由 Service 持有，Front 不碰路径、密钥或底层存储。
-- `ActorId` 自带 Realm 引用（命名空间 + 本地名）并精确标识 Service 实例；已知 `ActorId` 时不得再负载均衡。
+- `ActorId` 形如 `<serial>.<label>@<domain>`，自带 Realm 名并精确标识 Service 实例，不含程序类型；已知 `ActorId` 时不得再负载均衡。
 - `publisher/program@version` 精确标识不可变的程序版本。
-- Realm 对应一个应用实例，管该实例的身份、准入与网络入口；域名只作 Realm 的命名空间；信令和 TURN 是 Realm 委派的共享基础设施。
+- Realm 对应一个应用实例，管该实例的身份、准入与网络入口；域名只用来给 Realm 命名；信令和 TURN 是 Realm 委派的共享基础设施。
 
 但它依赖三项必须先补齐的基础能力：
 
-1. **持久、可解析的 ActorId**：Service Actor 重启、断网、凭据续期或迁移后必须保留同一 `ActorId`，并能由 ID 得到 Realm 引用。当前 Actr 的 hard rebind 可能换 ID，且 ID 只带 provider 内部的数值 Realm，不能直接作为长期、可分享 URL 语义。
-2. **域名 Publisher**：Actr 的 manufacturer/publisher 语义与长度限制需要调整，使规范化 DNS 域名成为程序发布者身份。
+1. **持久、可解析的 ActorId**：Service Actor 重启、断网、凭据续期或迁移后必须保留同一 `ActorId`，并能由 ID 得到 Realm 名。当前 Actr 的 hard rebind 可能换 ID，且 ID 只带 Realm Provider 内部的数值 Realm，不能直接作为长期、可分享 URL 语义。
+2. **域名 Publisher**：Actr 的 publisher 语义与长度限制需要调整，使规范化 DNS 域名成为程序发布者身份。
 3. **真正封闭的 Front Host**：Actro 必须在 Keel 之前完成包校验，并以 capability、组件白名单、资源配额和确定的沙箱后端限制 Guest；不能把远端 URL 直接交给 Keel 加载。
 
 ## 3. 冻结的核心决策
@@ -51,21 +51,21 @@ Tab
 | D-003 | 「1:1」是 live Front 视角的唯一绑定，不是 Service 与历史 Tab 的永久双射；Service 独立存活并可被新 Front 重连。 |
 | D-004 | v1 默认采用独占交互会话；同一 Service URL 在本机再次打开时优先聚焦已有 Tab。共享会话是后续显式能力。 |
 | D-005 | Service 绑定零个或一个 Workspace；需要多 Actor 的程序由 Primary Service 在后台编排。 |
-| D-006 | Front workload 由 Actro 原生提供，Publisher 不能替换 Host；Publisher 只能提供 Keel Guest、资源、声明与 Service workload。 |
+| D-006 | Front workload 由 Actro 原生提供，Publisher 不能替换 Actr Host；Publisher 只能提供 Keel Guest、资源、声明与 Service workload。 |
 | D-007 | v1 第三方 Front Guest 只开放 Keel JS Guest，并固定使用具备硬超时和堆上限的 QuickJS 后端。 |
 | D-008 | 一个 Actro Program Release 是一个签名 `.actr` 包：Service workload 是可执行主体，Keel Guest 是受签名保护的包资源。 |
 | D-009 | `actr://publisher/program@version` 表示创建；增加 `service=<ActorId>` 表示只连接，不得失败后偷偷新建。 |
-| D-010 | Publisher 身份是规范化域名，不含端口；经可信 Profile 委派的实际 HTTPS、WSS、STUN、TURN 端点可以显式使用端口。 |
+| D-010 | Publisher 身份是规范化域名，不含端口；经可信 Publisher Profile 委派的实际 HTTPS、WSS、STUN、TURN 端点可以显式使用端口。 |
 | D-011 | Marketplace 是发现、审核与撤销信息源，不是 Publisher 命名权威；域名与包签名才是来源链。 |
-| D-012 | v1 ActorId 必须包含可验证的 Realm 引用（命名空间 + 本地名，如 `notes~dns:acme.com`）；它是公开地址和密码学身份，不是 bearer token，知道 URL 不等于有权连接。 |
-| D-013 | Realm 是逻辑信任域，对应一个应用实例，可委派多个信令/TURN 服务；Realm 与某个物理信令进程不是一回事，一个 provider 承载多个 Realm；Realm 在创建时绑定一个 provider，此后不可更换。 |
+| D-012 | v1 ActorId 必须包含可验证的 Realm 名（`<label>@<domain>`，如 `notes@acme.com`），程序类型不在 ActorId 中；它是公开地址和密码学身份，不是 bearer token，知道 URL 不等于有权连接。 |
+| D-013 | Realm 是逻辑信任域，对应一个应用实例，可委派多个信令/TURN 服务；Realm 与某个物理信令进程不是一回事，一个 Realm Provider 承载多个 Realm；Realm 在创建时绑定一个 Realm Provider，此后不可更换。 |
 | D-014 | Service 实例固定到精确版本与包 digest；v1 升级通过显式迁移创建新 Actor，而不是原地替换 workload。 |
 | D-015 | Realm credential 证明 Actor key、身份和 claims，不自动证明对端真的运行官方 Actro Host；Service 必须把 Front 当作不受信客户端独立授权。 |
-| D-016 | Workspace 的 requirement、provisioning、access 和 providers 是独立维度，不能混成一个枚举。 |
+| D-016 | Workspace 的 requirement、provisioning、access 和允许的 Workspace Provider（`providers`）是独立维度，不能混成一个枚举。 |
 | D-017 | 删除分为可恢复的 Trashed 与不可恢复的 Purged/Deleted；删除 Workspace 始终是独立动作。 |
-| D-018 | Publisher 与 Realm 命名空间的域名 bootstrap 固定使用 HTTPS 443（Realm 命名空间即 `https://<domain>/.well-known/actr` authority descriptor）；Realm Profile 来自 core relation `realms` 声明的 HTTPS 位置（可带端口）；经验证 Profile 委派的实际 endpoint 可以带端口。`realm_namespace` 成员与 `realms` relation 已在 Actr Authority Discovery §4.3–4.4 定义；取不到或验不过 Realm Profile 时不得回退到 authority descriptor 中的默认 provider。 |
+| D-018 | Publisher 与 Realm 域名的 bootstrap 固定使用 HTTPS 443（即 `https://<domain>/.well-known/actr` authority descriptor）；Realm Profile 来自 core relation `realms` 声明的 HTTPS 位置（可带端口）；经验证 Realm Profile 委派的实际 endpoint 可以带端口。`realm_signing_keys` 成员与 `realms` relation 已在 Actr Authority Discovery §4.3–4.4 定义；取不到或验不过 Realm Profile 时不得使用 Realm Profile 以外的任何 Realm Provider。 |
 | D-019 | 应用保障按无根有效依赖图汇聚；通道有效且 `Ready` 时，展示颜色取全部节点结论的最弱项。Front 只定位，不是图根。 |
-| D-020 | `ActorAssurance` 由验证者签发，`issuer ≠ subject`。Host 可评 Guest、可提供证据，不得自签自己的最终结论。 |
+| D-020 | `ActorAssurance` 由验证者签发，`issuer ≠ subject`。Actr Host 可评 Guest、可提供证据，不得自签自己的最终结论。 |
 | D-021 | 顶层只分绿 / 黄 / 红；切面未就绪时显示无法建立，不是第四色。未知不是已确认泄漏，但绝不能显示为绿。 |
 | D-022 | WASM 可通过 import / 有效能力 / 出口闭包度量；第三方同进程 Native 不得绿，合规 out-of-process Native Capsule 才可能提升。 |
 | D-023 | 结论必须联动数据面：挂起与非 `LocalContinue` 的成员不得处理应用数据；新配置只作用于新数据。 |
@@ -100,7 +100,7 @@ Tab
 10. [需求与验收标准](10-requirements-and-acceptance.md)：功能需求、非功能需求和端到端验收。
 11. [交付计划与可行性](11-delivery-plan.md)：基础改造、分期、风险与退出条件。
 12. [参考协议与样例](12-reference-spec.md)：Manifest、Publisher/Realm Profile、握手消息和术语。
-13. [Actro 隐私标记与图汇聚](13-privacy-state-and-aggregation.md)：把现行安全模型落到 Tab / Front / Host。
+13. [Actro 隐私标记与图汇聚](13-privacy-state-and-aggregation.md)：把现行安全模型落到 Tab / Front / Actr Host。
 14. [隐私原语、远程证明与可信算力](14-privacy-primitives-and-attestation.md)：全过程加密、WASM/CC 分工、RATS、密钥释放与 CPU/GPU/NPU 组合证明。
 
 ## 5. 规范用语
@@ -130,14 +130,16 @@ Tab
 
 本设计以以下公开实现为可行性依据，但不被其历史结构约束：
 
-- [Actrium/actr](https://github.com/Actrium/actr)：Actor 模型、`ActrId` 精确寻址、Realm/ACL、信令、WebRTC、`.actr` 签名包和 WASM workload。
+- [Actrium/actr](https://github.com/Actrium/actr)：Actor 模型、`ActrId` 精确寻址、Realm/连接 ACL、信令、WebRTC、`.actr` 签名包和 WASM workload。
 - [Actrium/keel](https://github.com/Actrium/keel)：Keel Host/Guest、Bridge、JS 沙箱、契约与原生组件渲染。
 - [Actro 当前架构概览](../../architecture/overview.md)：多平台 Shell、共享运行时与 Actr SDK 边界。
 
 已验证的关键事实包括：
 
-- Actr 当前 `ActrId` 文本形式为 `<serial_hex>@<realm_id>/<manufacturer>:<name>:<version>`；目标格式必须以 Realm 引用取代数值 realm_id，例如 `<serial_hex>@<local_name>~dns:<domain>/<manufacturer>:<name>:<version>`。
+- Actr 当前 `ActrId` 文本形式为 `<serial_hex>@<realm_id>/<publisher>:<program>:<version>`；目标格式为 `<serial>.<label>@<domain>`：以 Realm 名取代数值 realm_id，并把程序类型移到注册与 Actor credential 中。
 - Actr 已支持 `Dest::Peer(ActrId)` 精确寻址和按 `ActrType` 发现，两者可以清晰分工。
 - `.actr` 已具备 Ed25519 manifest 签名、SHA-256 文件绑定和资源；依赖锁按 workload/构建流程可选。
 - Keel 的 Host/Guest 边界与白名单模块机制适合承载 Front，但其 `Engine.loadBundle(URL)` 本身不是可信分发系统。
 - Keel 多数「原生」沙箱仍是同一 OS 进程内的语言运行时隔离，不能宣称为浏览器级进程隔离。
+
+本文档正文统一使用 Loran、Publisher Registry、Issuer、publisher 等规范名；代码和旧文档中的历史名称集中列在 [Loran 术语表「历史名称对照」](../../../loran/docs/GLOSSARY.zh.md)。

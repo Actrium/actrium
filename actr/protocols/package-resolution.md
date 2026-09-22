@@ -54,7 +54,7 @@ Accept: application/json
 
 `target` is required exactly once. Its value is the complete normalized Target
 without the leading slash, encoded as an HTTP query value. The server treats it
-as opaque and must not assume that its segments are a manufacturer, version,
+as opaque and must not assume that its segments are a publisher, version,
 realm, filesystem path, or Actor identity.
 
 Resolution is safe and idempotent. Servers should provide explicit HTTP cache
@@ -85,7 +85,7 @@ Success uses `200 OK` and `application/json`. The body conforms to
 - `target` must exactly equal the submitted decoded Target.
 - `href` is the absolute locator for the immutable artifact selected by this
   resolution.
-- `media_type` is `application/zip` because `actr-package/1` is a ZIP container.
+- `media_type` is `application/zip` because `actr-package/2` is a ZIP container.
 - `sha256` covers the complete response body of the artifact download.
 - `size` is the expected number of artifact octets.
 - `profile` is an optional hint. It can support an early compatibility check,
@@ -101,7 +101,7 @@ The client retrieves the absolute `package.href` with `GET` and an appropriate
 
 The client must limit the download, verify both `size` and `sha256`, and only
 then pass the bytes to the Actor Package verifier. Transport integrity does not
-replace manifest signature, publisher trust, Workload Profile, Host API, or
+replace manifest signature, publisher trust, Workload Profile, Actr Host API, or
 capability-policy verification.
 
 Artifact URLs should be content-addressed and may therefore use long-lived
@@ -121,11 +121,11 @@ rejects a request when that digest no longer matches the configured artifact.
 
 Error bodies are not successful Package Resolution documents.
 
-## 7. Host behavior
+## 7. Actr Host behavior
 
-A resolved Target can still be incompatible with the current Host. For example,
+A resolved Target can still be incompatible with the current Actr Host. For example,
 Actrium may accept `keel.guest/1`, while a Wasmtime Host accepts
-`actr.component/1`. An incompatible Host reports an unsupported profile instead
+`actr.component/1`. An incompatible Actr Host reports an unsupported profile instead
 of interpreting a server workload as a browsable page.
 
 For Echo, the intended sequence is:
@@ -148,7 +148,7 @@ default Loran daemon may mount both and advertise the component through
 `rel=packages`; an authority may instead advertise a different Loran node,
 object-store gateway, or CDN-backed implementation.
 
-MFR remains responsible for publisher identity, keys, signing authority, and
+Publisher Registry remains responsible for publisher identity, keys, signing authority, and
 publication audit. It is not the artifact store merely because both components
 can be deployed together.
 

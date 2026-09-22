@@ -1,4 +1,4 @@
-# Actrix TURN/STUN 互操作与滥用测试
+# Loran TURN/STUN 互操作与滥用测试
 
 状态：Realm v1 可复现验收说明。这里区分自动回归、本机真实浏览器验证和发布前外部
 矩阵，避免用一个 localhost 成功案例冒充公网生产认证。
@@ -10,10 +10,10 @@ cargo test -p actrix-turn --test udp_interop -- --nocapture --test-threads=1
 cargo test -p actrix-stun -- --nocapture --test-threads=1
 ```
 
-TURN integration test 使用独立的 `turn` client API 连接 Actrix server，覆盖：
+TURN integration test 使用独立的 `turn` client API 连接 Loran server，覆盖：
 
 1. STUN Binding 和 mapped address；
-2. 带 Realm/provider/audience/Actor scope 的时效 credential；
+2. 带 Realm/Realm Provider/audience/Actor scope 的时效 TURN credential；
 3. TURN Allocate；
 4. CreatePermission；
 5. client → peer 与 peer → client 双向 UDP relay；
@@ -37,7 +37,7 @@ cargo run -p actrix-turn --example browser_interop
 
 1. 创建两个 `RTCPeerConnection`；
 2. 将两端 `iceTransportPolicy` 都设为 `relay`；
-3. 只配置临时 Actrix TURN UDP credential；
+3. 只配置临时 Loran TURN UDP credential；
 4. 完成 offer/answer 和两个 TURN allocation；
 5. 通过 DataChannel 发送 `ping` 并接收 `pong:ping`；
 6. 从 WebRTC stats 验证选中 candidate pair 的两端都是 `relay`、协议为 UDP。
@@ -82,7 +82,7 @@ fixture 每次运行生成独立 TURN secret，credential 十分钟过期，只�
 - full-cone、restricted、port-restricted、symmetric NAT 和双 NAT；
 - UDP 被屏蔽时的 TURN/TCP 与 TURN/TLS；当前 v1 若尚未实现，应明确列为能力缺口，
   不能以 UDP 结果代替；
-- 过期、错误 Realm/provider/audience、重放和错误 MESSAGE-INTEGRITY；
+- 过期、错误 Realm/Realm Provider/audience、重放和错误 MESSAGE-INTEGRITY；
 - allocation/permission/channel bind 洪泛、超大包、随机包、慢速连接和 relay 带宽
   耗尽；
 - 持续测试下的 CPU、内存、FD、socket、队列长度、丢包率和 P95/P99。

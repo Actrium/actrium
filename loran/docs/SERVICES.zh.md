@@ -1,14 +1,14 @@
-# Actrix Realm v1 服务与运维
+# Loran Realm v1 服务与运维
 
 ## 服务矩阵
 
 | 服务 | 传输 | 默认路径/端口来源 | 身份要求 |
 |---|---|---|---|
-| Realm descriptor（当前实现） | HTTPS | `/.well-known/actr/realm.json` | 公开、只含非秘密信息；目标契约中移除，仅在 authority descriptor 的 `realms` relation 指向本 provider 时托管 Realm Profile |
-| AIS | HTTPS + protobuf | `/ais` | Realm capability + workload proof |
+| Realm descriptor（当前实现） | HTTPS | `/.well-known/actr/realm.json` | 公开、只含非秘密信息；目标契约中移除，仅在 authority descriptor 的 `realms` relation 指向本 Realm Provider 时提供 Realm Profile |
+| Issuer | HTTPS + protobuf | `/issuer` | Realm capability + workload proof |
 | Signaling | WSS | `/signaling/ws` | Actor credential |
-| Signer | gRPC/HTTP2 | `/signer.v1.Signer/*` | nonce-auth；建议内网或 mTLS |
-| Publisher Registry | HTTPS | `/registry` | 查询公开；发布需 Publisher nonce/signature |
+| Issuer Signer | gRPC/HTTP2 | `/signer.v1.Signer/*` | nonce-auth；建议内网或 mTLS |
+| Publisher Registry | HTTPS | `/publisher-registry` | 查询公开；发布需 Publisher nonce/signature |
 | Admin | HTTPS | `/admin`、`/admin/api` | Argon2id login + Bearer session |
 | STUN | UDP | `bind.ice` | Binding 公开 |
 | TURN | UDP | `bind.ice` + relay range | scoped 短期 TURN credential |
@@ -23,16 +23,17 @@ HTTP 服务在一个 listener 上组合。STUN/TURN 使用独立 UDP socket；TU
 1. 解析配置并执行 fail-closed 校验；
 2. 打开 SQLite，验证 `PRAGMA user_version = 1`；
 3. 初始化 recording、监控与控制面；
-4. 构建 Signer、AIS、Signaling、Publisher Registry 和 descriptor router；
+4. 构建 Issuer Signer、Issuer、Signaling（含 Actor Registry）、Publisher Registry 和
+   descriptor router；
 5. 绑定 HTTPS 与 ICE listener；
 6. 报告 readiness。
 
-没有 provision Realm 时，进程可以运行以便管理员初始化，但 Realm descriptor/AIS
+没有 provision Realm 时，进程可以运行以便管理员初始化，但 Realm descriptor/Issuer
 不会伪造默认 Realm。目标契约下实例本身不需要 provision 任何 Realm；请求所属 Realm
 不存在或不是 `active` 时一律拒绝。任何 schema 或生产安全校验失败都会在监听前退出。
 
 关闭时先停止接受新请求，取消后台 renewal/cleanup task，关闭 ICE listener，再等待
-已有 task 的有界退出。服务重启不得清空 Actor identity ledger 或 renewal 状态。
+已有 task 的有界退出。服务重启不得清空已签发 Actor 身份登记或 renewal 状态。
 
 ## 健康与 readiness
 
@@ -42,8 +43,8 @@ HTTP 服务在一个 listener 上组合。STUN/TURN 使用独立 UDP socket；TU
 - SQLite 可读写；
 - 当前实现：恰好一个 Active Realm；目标契约：Realm 状态按 Realm 报告，单个 Realm
   挂起或未激活不影响实例整体 readiness；
-- Signer 可签名/取 verifying key；
-- AIS、Signaling 依赖就绪；
+- Issuer Signer 可签名/取 verifying key；
+- Issuer、Signaling 依赖就绪；
 - ICE advertised endpoint 与 relay range 可用。
 
 `/metrics` 和健康接口可能暴露部署拓扑，应使用 allowlist 或 htpasswd，避免直接公网
@@ -56,7 +57,7 @@ HTTP router、证书和部分配置支持 reload，但以下变更不应无停�
 - Realm 替换（当前实现）；
 - SQLite schema；
 - `worker_id`；
-- TURN、renewal、Realm、Signer KEK 等 secret；
+- TURN、renewal、Realm、Issuer Signer KEK（`ACTRIX_SIGNER_KEK`）等 secret；
 - relay port range 与公网网络拓扑。
 
 这些变更需要维护窗口、备份、显式迁移/轮换和回滚验证。热重载不得让旧 router 的
@@ -69,27 +70,28 @@ database 文件。恢复演练应验证：
 
 - schema version；
 - Realm 集合与状态（当前实现：唯一 Realm）；
-- Realm/Signer/renewal/TURN secret 是否与备份匹配；
+- Realm/Issuer Signer/renewal/TURN secret 是否与备份匹配；
 - 已有 Service Actor 能以 possession proof 恢复同一 ID；
 - Publisher 历史 key、revocation 和 package metadata 未丢失；
-- identity ledger 不会重用 serial。
+- 已签发身份登记不会重用 serial。
 
 迁移脚本会自行创建备份，但这不能代替正式灾备。
 
 ## Key rotation 与 revocation
 
-- Realm signing key：新旧 verifying key 有明确生效/撤销窗口，credential 期限不被
-  tolerance 延长。目标契约下每个 Realm 一把 issuer key，轮换后须由命名空间 key 签署
-  新 Profile 委派新 key。
-- 命名空间 key：由命名空间所有者轮换，不在 Actrix 内完成；Actrix 周期性重新获取
-  `realm_namespace`，Profile 的签名 key 被移除时丢弃该 Profile，找不到有效 Profile 的
-  Realm 会被挂起。
-- Publisher key：当前实现先由 Registry 发 challenge，再通过 Publisher HTTPS descriptor
-  证明新 key；目标契约中由 Publisher 发布新的签名 Profile，Actrix 周期刷新后启用；正常退休 key 仍可验历史包，泄露 key 必须显式 revoke。
-- TURN secret：轮换会影响未过期凭证，需协调 AIS 与 TURN 并观察 allocation。目标
-  契约下它是 provider 主密钥，轮换会同时影响全部 Realm 的派生 secret。
-- renewal secret：直接替换会破坏稳定 Actor ID 恢复，必须按迁移方案处理。
-- Signer KEK：应通过受测 rewrap 流程，不允许把明文私钥作为中间状态落盘。
+- Realm issuer key：新旧 verifying key 有明确生效/撤销窗口，Actor credential 期限不被
+  tolerance 延长。目标契约下每个 Realm 一把 Realm issuer key，轮换后须由 Realm 签名 key
+  签署新 Realm Profile 委派新 key。
+- Realm 签名 key：由 Realm 签名 key 持有方轮换（持有方为本 Realm Provider 时除外，不在
+  Loran 内完成）；Loran 周期性重新获取 `realm_signing_keys`，Realm Profile 的签名 key 被
+  移除时丢弃该 Realm Profile，找不到有效 Realm Profile 的 Realm 会被挂起。
+- Publisher key：当前实现先由 Publisher Registry 发 challenge，再通过 Publisher HTTPS
+  descriptor 证明新 key；目标契约中由 Publisher 发布新的签名 Publisher Profile，Publisher
+  Registry 周期刷新后启用；正常退休 key 仍可验历史包，泄露 key 必须显式 revoke。
+- TURN secret：轮换会影响未过期凭证，需协调 Issuer 与 TURN 并观察 allocation。目标
+  契约下它是 Realm Provider 主密钥，轮换会同时影响全部 Realm 的派生 secret。
+- renewal secret：直接替换会破坏稳定 ActorId 恢复，必须按迁移方案处理。
+- Issuer Signer KEK：应通过受测 rewrap 流程，不允许把明文私钥作为中间状态落盘。
 
 所有轮换与撤销动作必须进入 audit channel。
 
@@ -99,11 +101,11 @@ v1 不承诺 HA。单节点容量取决于：
 
 - Signaling 并发连接与 frame/message rate；
 - TURN allocation、permission、bandwidth 与 relay ports；
-- auth/credential cache 上限；
+- auth/Actor credential cache 上限；
 - SQLite 写入延迟、WAL/磁盘空间；
-- Publisher descriptor 外联超时与大小上限；
-- 目标契约下承载的 Realm 数、authority descriptor/Profile 周期性校验的外联量，以及
-  按命名空间与按 Realm 的配额。
+- Publisher Profile 外联超时与大小上限；
+- 目标契约下承载的 Realm 数、authority descriptor/Realm Profile 周期性校验的外联量，以及
+  按 Realm 域名与按 Realm 的配额。
 
 在目标硬件和网络上压测后再设置限流。提高上限不能以移除边界或关闭默认拒绝为代价。
 
@@ -111,12 +113,12 @@ v1 不承诺 HA。单节点容量取决于：
 
 1. 先检查配置校验和 schema version，不要让进程自动「修复」生产数据。
 2. 对照 Realm descriptor（目标契约：Realm Profile）的实际 endpoint 与证书/SAN/防火墙。
-3. credential 错误按 issuer、provider、audience、Realm、Actor、expiry 逐项核对；目标
+3. Actor credential 错误按 issuer、Realm Provider、audience、Realm、Actor、expiry 逐项核对；目标
    契约下再核对 Realm 状态是否为 `active`。
-4. Signaling 连接成功但无法发现时检查 ACL；v1 默认拒绝是预期。
+4. Signaling 连接成功但无法发现时检查连接 ACL；v1 默认拒绝是预期。
 5. STUN 成功而 WebRTC 失败时检查 TURN credential、relay range 和对称 NAT。
 6. Publisher 失败时检查 DNS 规范化、公网解析、well-known body、key ID 和 nonce。
-7. 日志中若出现 secret/credential，先按泄露事件处置，再修复日志。
+7. 日志中若出现 secret/Actor credential，先按泄露事件处置，再修复日志。
 
 互操作与滥用测试见
 [`TURN_STUN_INTEROP_TESTING.zh.md`](TURN_STUN_INTEROP_TESTING.zh.md)，发布条件见

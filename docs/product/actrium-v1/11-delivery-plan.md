@@ -8,7 +8,7 @@ The existing technology accumulation already covers most of the“Mechanisms”:
 
 - Actr It's accurate. `ActorId` (a) Address;
 - Actr Yes, it's pressed. `ActrType` (a) Discovery;
-- Actr Yes. Realm, ACL, signaling, WebRTC, TURN;
+- Actr already has Realm, connection ACL, signaling, WebRTC and TURN;
 - Actr Yes. Linked, NativeCdylib and WASM workload;
 - Actr `.actr` Signed, signed,hash, resources and dependencies;
 - Keel Existing Host/Guest, Bridge, contracts,JS sandbox and native component trees;
@@ -18,7 +18,7 @@ What is really missing is product-level invariacies and some key syntaxes:
 
 1. Service ActorId (b) Permanent identity;
 2. Publisher domain with package key (a) The formal chain of trust;
-3. Realm namespaces, per-instance Realm Profiles and Provider delegation;
+3. Realm domains and signing keys, per-instance Realm Profiles and Realm Provider delegation;
 4. Program/Service/Workspace Separation;
 5. Fixed Front Native Host And controlled. Keel Guest;
 6. `actr://` Create/Connectivity services;
@@ -65,7 +65,7 @@ Turn the syntax of the product in this document into a cross-storey testable con
 - `actr://` URI schema (a) with the test vector;
 - Publisher Profile/Release schema;
 - Actro manifest extension schema;
-- Realm namespace (the `realm_namespace` member of the authority descriptor and the core relation `realms`, defined in Actr Authority Discovery §4.3–4.4) and Realm Profile schema;
+- Realm signing keys (the `realm_signing_keys` member of the authority descriptor and the core relation `realms`, defined in Actr Authority Discovery §4.3–4.4) and Realm Profile schema;
 - persistent Actor identity lifecycle ADR;
 - Front–Service session proto;
 - ActorAssurance / ApplicationAssurance / EncGraph schema;
@@ -87,18 +87,18 @@ Turn the syntax of the product in this document into a cross-storey testable con
 ### Actr I'll change it.
 
 1. ActorLong term key Models;
-2. ActorId text and wire model replace the numeric realm_id with a verifiable Realm reference (namespace + local name);
+2. ActorId text and wire model become `<serial>.<label>@<domain>`: a verifiable Realm name replaces the numeric realm_id, and the Actor type moves into registration and the credential;
 3. New & & & & & & New reclaim ActorId Two paths to registration;
 4. ActorId, renewal/identity state (a) Sustainability;
 5. hard re-auth Keep Same ActorId;
-6. Realm Internal serial Never again;
+6. Actor serials are never reused within a Realm;
 7. current endpoint/presence with logical ActorId Separation;
-8. Realm namespace descriptor, namespace-key-signed Realm Profile and issuer key discovery;
+8. Realm signing keys, the Realm Profiles they sign, and Realm issuer key discovery;
 9. Actor credential Tie public keyand transcript/SDP challenge (a) Proof of private key holding;
 10. signaling One-time ticket/header;
-11. Provider delegation and failover; one Provider hosts many Realms, and Realm creation is authorized by a namespace key signature;
+11. Realm Provider delegation and failover; one Realm Provider hosts many Realms, and Realm creation is authorized by a Realm signing key signature;
 12. per-Realm/TURN-pool key id (a) With rotation;
-13. Publisher/manufacturer DNS Length and standardization;
+13. Publisher DNS length and normalization;
 14. Actor store namespace Accept instance identity;
 15. Authenticator identification and signature `ActorAssurance`;
 16. Actor spawn/call/stream/egress edge Observation;
@@ -108,7 +108,7 @@ Turn the syntax of the product in this document into a cross-storey testable con
 
 - `Dest::Peer(ActrId)` (a) Accurate location;
 - `ActrType + fingerprint` (a) Discovery;
-- Realm default-deny ACL;
+- Realm default-deny connection ACL;
 - workload lifecycle hooks;
 - `.actr` verification;
 - WebRTC state/fast path.
@@ -116,10 +116,10 @@ Turn the syntax of the product in this document into a cross-storey testable con
 ### Exit Conditions
 
 - Same Service Re-starting,credential Extension,hard re-auth, signaling failover Back ID No change;
-- A Realm can replace signaling endpoints within the same Provider while its Realm reference and ActorIds stay the same;
+- A Realm can replace signaling endpoints within the same Realm Provider while its Realm name and ActorIds stay the same;
 - ActorId reclaim Yes. key proof and conflict protection;
 - legacy ephemeral identity The path will not be taken Actro Service Use;
-- Host It's practical. workload and Actor edge Generate Authenticable evidenceNo, no, no. Actor Can not hide the controlled side.
+- Actr Host It's practical. workload and Actor edge Generate Authenticable evidenceNo, no, no. Actor Can not hide the controlled side.
 
 ## 5. P1-B: Publisher with package
 
@@ -139,7 +139,7 @@ Turn the syntax of the product in this document into a cross-storey testable con
 
 ### Actr package Changes
 
-- manufacturer Allow Normative Publisher domain;
+- The publisher field accepts normalized Publisher domains;
 - manifest Add Backwards Compatible `[actro]` section;
 - verifier Output typed Actro metadata;
 - binary Only support is allowed kind;
@@ -169,7 +169,7 @@ Turn the syntax of the product in this document into a cross-storey testable con
 
 ### Keel
 
-- Support Host From Authenticated bytes Loading;
+- Support Actr Host From Authenticated bytes Loading;
 - fixed QuickJS provider config;
 - Make it real and validate it. Native QuickJS `JS_SetInterruptHandler`/deadline;
 - - Put it on. per-Guest heap limit Import runtimeand achieves credibility heap Diagnosis;
@@ -210,7 +210,7 @@ Turn the syntax of the product in this document into a cross-storey testable con
 - exclusive writer lease;
 - stop/start/archive/trash/restore/purge;
 - snapshot/restore;
-- local namespace and one local Realm per instance;
+- the local pseudo-domain `<installation-id>.actr.alt` and one local Realm per instance;
 - platform runtime adapters;
 - Service subtree privacy aggregate;
 - Actor/terminal egress evidence.
@@ -254,10 +254,9 @@ Turn the syntax of the product in this document into a cross-storey testable con
 
 ### Delivery
 
-- Namespace trust and per-instance creation of networked Realms;
-- Joining an instance Realm by invitation;
-- membership;
-- signaling Provider failover;
+- Domain trust and per-instance creation of networked Realms;
+- Joining an instance Realm by Realm invitation and obtaining Realm membership;
+- signaling Realm Provider failover;
 - P2P/TURN;
 - From Description ActorId Parsing portable URI Realm;
 - Actor/peer handshake;
@@ -272,7 +271,7 @@ Turn the syntax of the product in this document into a cross-storey testable con
 - No authority to know. ActorId (a) Connection;
 - signaling We can't pretend to be Actor;
 - TURN Use short-term credential;
-- Provider failover No, I'm not. ActorId.
+- Realm Provider failover No, I'm not. ActorId.
 
 ## 10. P4: Hardening with Public Beta
 
@@ -294,11 +293,11 @@ Turn the syntax of the product in this document into a cross-storey testable con
 - Network switching;
 - Move Side suspend/kill;
 - package cache corruption;
-- Namespace key and Realm issuer key rotation;
+- Realm signing key and Realm issuer key rotation;
 - Large Tab/Service;
 - Long time. lease;
 - Migration/Roll back;
-- More Host Untransmitted, mixed snapshot rejections and optional dependency Segregation.
+- More Actr Host Untransmitted, mixed snapshot rejections and optional dependency Segregation.
 
 ### Products
 
@@ -343,12 +342,12 @@ History `.actr` URLFar away. app API And many Tab legacy runtime:
 | Service WASM Inadequate capacity | High | capability broker with ABIMake the smallest ring. |
 | Workspace Overwrite damage | High | v1 exclusive writer |
 | URI Create Abused | Medium | Confirm, tweak, etc., restricted flow, quota |
-| Realm/Provider Overcentre | Medium | profile Delegation of authority, many ProviderSelf-custodial |
+| Over-centralized Realm Providers | Medium | Realm Profile delegation, many Realm Providers, self-hosting |
 | Packing format extension fork | Medium | Direct Extension `.actr`No, no, no, no, no, no, no. |
-| Multiplatform Host Behavioural drift | Medium |Share schema/golden tests, fixed sandbox |
+| Multiplatform Actr Host Behavioural drift | Medium |Share schema/golden tests, fixed sandbox |
 | Version/ActorType Upgrade Complex | Medium | v1 Remarkable new Actor Migration |
 | Marketplace Mistaked as trust. | Medium | UI And separate the identity from the agreement./Audit |
-| Actor Self-reported, undiscovered or concealed downstream. | High | Host Closed valid declaration and discovery; self-reporting only declarations; prohibition of self-signature final conclusions |
+| Actor Self-reported, undiscovered or concealed downstream. | High | Actr Host Closed valid declaration and discovery; self-reporting only declarations; prohibition of self-signature final conclusions |
 | The change in privacy chart dynamics led to brief green misreporting | High | Change is hung up, not Ready No greens, no old data. |
 | Large/Circulation caused DoS | Medium | No-go-connected weight, no-node limit, no-node limit, no-node minimum, no-node minimum, no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no-no. |
 | Native Capsule Platform Semantic Float | High | Fixed conformance profile;absorption missing fail closed Or keep unknown |
@@ -362,9 +361,9 @@ Here's what I can do. P0/P1 ADR , do not change the core semantic of this text:
 - Service WASM Host API Use WIT Specific versions;
 - Front–ServiceOperations contract From Proto How to generate Keel TS schema;
 - helper process The order in which the platform is implemented;
-- Auto-generation format for local Realm `local_name`;
+- Auto-generation format for local Realm `label`s;
 - snapshot envelope The specific coding and the version are negotiated;
-- Marketplace Transparent log providers;
+- Marketplace transparency log services;
 - Private enterprise CA The strategy format for the project;
 - `ActorAssurance` Remote certification format and platform attestation provider;
 - privacy evidence root Specific coding and cache strategies;
@@ -383,14 +382,14 @@ The following is no longer an open question:
 - Is the letter...“Powerlessness”: No;
 - Whether a Realm is bound one-to-one to a physical signaling server: No;
 - Whether a Realm corresponds to an application instance: Yes, Create makes a new Realm;
-- Whether one Provider hosts many Realms: Yes.
+- Whether one Realm Provider hosts many Realms: Yes.
 
 ## 14. Min. & Quantification
 
 The first can show that the incision is only done:
 
 1. macOS;
-2. a local Realm under the local namespace;
+2. a local Realm;
 3. An autograph. `.actr` WASM Service;
 4. One in the bag. Keel JS Guest;
 5. managed Workspace;

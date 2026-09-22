@@ -49,19 +49,19 @@ Front 使用 Actr linked/native workload：
 - 每个 resident app Tab 创建一个逻辑 Front Actor 实例；
 - 负责 Actor 注册、身份、连接、会话、Keel Engine 和 Host capability；
 - Realm credential 只能证明 Actor key、ActorId、ActorType 与 issuer claims，不能单独证明实际运行代码；
-- Service 必须把 Front 当作不受信客户端，独立实施 principal、ACL、业务命令和 Workspace 授权。
+- Service 必须把 Front 当作不受信客户端，独立实施 principal、应用权限、业务命令和 Workspace 授权。
 
-「Native workload」在这里表示 Host 由平台原生提供，不表示 Guest 可以提供 native code。
+「Native workload」在这里表示 Actr Host 由平台原生提供，不表示 Guest 可以提供 native code。
 
 ### 2.2 Front Actor 类型
 
 Front 的 ActorType 是 Actro 系统类型，例如：
 
 ```text
-actrium:actro-front:1.0.0
+actrium/actro-front@1.0.0
 ```
 
-它描述 Host runtime，不伪装成 Program 的 Service ActrType。Attach handshake 由 Host 额外声明：
+它描述 Host runtime，不伪装成 Program 的 Service ActrType。Attach handshake 由 Actr Host 额外声明：
 
 - Program Release coordinate；
 - package digest；
@@ -123,9 +123,9 @@ v1 不允许 Keel 自动选择 JSC/Hermes/QuickJS：
 - 必须实现并启用 interrupt handler 硬超时；
 - 必须把 per-Guest heap limit 真正传入每个 QuickJS runtime；
 - 每个 Tab 使用独立 runtime/context；
-- 每个 Guest 在 Host 可中止的专用执行线程/worker 上运行，UI 只接收经过 schema 和配额检查的 render ops；
+- 每个 Guest 在 Actr Host 可中止的专用执行线程/worker 上运行，UI 只接收经过 schema 和配额检查的 render ops；
 - 销毁时清理 timer、callback、listener 和 remote ref；
-- provider 变化视为安全基线变更，需要版本和测试。
+- JS 引擎变化视为安全基线变更，需要版本和测试。
 
 固定 QuickJS 是为了让安全语义跨平台一致，不代表 QuickJS 是 OS 进程隔离。
 
@@ -145,7 +145,7 @@ v1 不宣称：
 
 - 浏览器 renderer 级独立进程；
 - 内核边界；
-- QuickJS/C++ 引擎内存安全漏洞无法影响 Host；
+- QuickJS/C++ 引擎内存安全漏洞无法影响 Actr Host；
 - Guest 卡死永远不会影响同进程调度。
 
 高风险 Publisher 的长期目标是：
@@ -154,7 +154,7 @@ v1 不宣称：
 - Windows AppContainer/helper process；
 - Android isolatedProcess；
 - iOS 可行范围内的独立 extension/helper 或更强 WASM runtime；
-- 可由 Host 强制 terminate 的 worker。
+- 可由 Actr Host 强制 terminate 的 worker。
 
 ## 4. Actro Safe Component Registry
 
@@ -176,7 +176,7 @@ Actro 不能直接把通用 Keel `DefaultComponents` 全量暴露给不受信 Gu
 - `Image` 默认只接受 package asset id；
 - 远端 Image 走显式 `host:net` capability 和域名 allowlist；
 - Guest 不得自带任意 HTTP headers；
-- `WebView` 不进入默认 registry；
+- `WebView` 不进入默认 Actro Component Registry；
 - 外链、Modal、StatusBar、文件选择和系统分享必须通过显式 capability；
 - v1 默认禁用通用字符串 RemoteRef，仅开放类型化方法。
 
@@ -229,7 +229,7 @@ interface PrimaryService {
 }
 ```
 
-Host 在内部固定 target 为当前 Service ActorId。Guest 不可传 target ActorId。
+Actr Host 在内部固定 target 为当前 Service ActorId。Guest 不可传 target ActorId。
 
 ### 5.3 其他 Front capability
 
@@ -300,8 +300,8 @@ Service workload 的依赖和网络能力必须在 package manifest 中声明。
 
 Realm 对应一个应用实例，因此 Front 与 Primary Service 天然在同一 Realm；Primary Service 编排的 Auxiliary Actor 也在该 Realm 内：
 
-- Front 在 Attach 前取得该实例 Realm 的 membership（通常经邀请加入）；
-- Realm ACL 决定 Front type 能否连接 Service type；
+- Front 在 Attach 前取得该实例的 Realm membership（通常经 Realm 邀请加入）；
+- 连接 ACL 决定 Front type 能否连接 Service type；
 - Service 再进行用户/实例级授权；
 - 类型发现只在本 Realm（本实例的 Actor）内进行；
 - 跨实例（跨 Realm）调用由 Service 后台处理：Service 的宿主按目标 Realm 的加入策略在该 Realm 取得客户端身份；Front 不直接联邦，v1 没有 federation。
@@ -408,7 +408,7 @@ Service 按顺序检查：
 6. Program coordinate（兼容性声明）；
 7. package digest（兼容性声明；无 attestation 时不是远端代码证明）；
 8. protocol fingerprint；
-9. Principal/Device/Workspace ACL；
+9. Principal/Device/Workspace 应用权限；
 10. attachment policy；
 11. 当前 lease；
 12. 调用方要求的策略、当前 `ActorStateId` / AA 与 nonce；
@@ -428,7 +428,7 @@ v1 exclusive lease：
 - `Detach` 主动释放；
 - Front crash 后 lease 到期；
 - Takeover 需要权限与冲突策略；
-- lease id/session secret 只保存在 Host 内存和安全 IPC，不给 Guest；
+- lease id/session secret 只保存在 Actr Host 内存和安全 IPC，不给 Guest；
 - 同一个过期 session 的消息必须拒绝。
 
 ## 10. 消息路由
@@ -446,17 +446,17 @@ Guest call
   → Guest
 ```
 
-Host 必须附加不可由 Guest覆盖的 metadata：
+Actr Host 必须附加不可由 Guest覆盖的 metadata：
 
 - session id；
-- principal/device id 的最小化 claim；
+- principal/client id 的最小化 claim；
 - program digest；
 - trace id；
 - deadline；
 - idempotency key（适用时）。
 
 Service 不能信任 Guest payload 中自报的用户、Workspace 或权限字段。
-Service 同样不能仅凭 Front 自报的 Host 版本、package digest 或 ActorType 授予高权限。
+Service 同样不能仅凭 Front 自报的 Actr Host 版本、package digest 或 ActorType 授予高权限。
 
 ## 11. 生命周期协议
 
@@ -565,8 +565,8 @@ Front Host、Service Host、Workspace broker 和 Actor transport 必须把实际
 - Actor spawn/discover/call/stream/close；
 - capability grant/revoke；
 - Workspace 与外部网络 edge；
-- package、credential、Host key 和 policy 撤销。
+- package、credential、Actr Host key 和 policy 撤销。
 
-Publisher workload 可以声明预期出口，但不能成为拓扑完整性的唯一来源。Host 对 WASM 比较声明、imports、有效能力与实际边，按 `structureId` 与当前 `ActorStateId` 组图；新 Actor 在当前 AA 通过且 `ACTIVE` 前不得收到应用数据。Front 定位整张无根图，取各节点最弱项；展示还须 `Ready`。
+Publisher workload 可以声明预期出口，但不能成为拓扑完整性的唯一来源。Actr Host 对 WASM 比较声明、imports、有效能力与实际边，按 `structureId` 与当前 `ActorStateId` 组图；新 Actor 在当前 AA 通过且 `ACTIVE` 前不得收到应用数据。Front 定位整张无根图，取各节点最弱项；展示还须 `Ready`。
 
 结论变化必须传到 Shell 和 session guard。绿 / 黄 / 红与挂起必须联动 Capability 和数据面，不能只是 UI 装饰。新配置只作用于新数据。
