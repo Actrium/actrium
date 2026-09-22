@@ -433,7 +433,7 @@ revocation 状态。
 
 ## 8. 数据与升级
 
-schema v1 使用 SQLite `PRAGMA user_version = 1`。Loran 遇到旧版或未知 schema
+当前 schema v2 使用 SQLite `PRAGMA user_version = 2`。Loran 遇到旧版或未知 schema
 直接拒绝启动，不在启动路径中执行「尝试 ALTER 后忽略错误」。
 
 目标表结构：
@@ -454,12 +454,18 @@ Loran 重启恢复的记录可继续提供 ServiceSpec，但在原 Actor 认证�
 Discovery 或 RouteCandidates。显式注销则先原子删除该 Actor 的缓存服务，再返回
 成功，因而紧接着重启也不能复活已注销记录。
 
-离线工具（数据库文件名沿用当前实现）：
+离线工具按序执行（数据库文件名沿用当前实现；未版本化库先 v1，v1 库直接 v2）：
 
 ```bash
 python3 scripts/loran/migrate_schema_v1.py /var/lib/actrix/actrix.db --dry-run
 python3 scripts/loran/migrate_schema_v1.py /var/lib/actrix/actrix.db
+python3 scripts/loran/migrate_schema_v2.py /var/lib/actrix/actrix.db --dry-run
+python3 scripts/loran/migrate_schema_v2.py /var/lib/actrix/actrix.db
 ```
+
+v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把已存 Actor 类型字符串
+改写为 `publisher/program@version`。Actor Registry 表由 Signaling 启动时从
+`service_registry` 原地改名为 `actor_registry`。
 
 旧的非域名 publisher 身份没有安全的域名映射。可先人工重新 provision，或显式使用
 `--drop-publisher-data` 丢弃旧 Publisher Registry/package 数据。工具通过 SQLite backup API

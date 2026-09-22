@@ -86,7 +86,7 @@ workload 可使用 Actr Host 管理的非 DNS publisher 值，不能借此进入
 ## Actor Registry
 
 Loran 按 Realm 记录在线 Actor 及其 Actor 类型、端点的注册表，供发现与连接 ACL 使用。
-当前代码中仍名 service registry（表 `service_registry`），将在历史名清理分支改名。
+SQLite 表为 `actor_registry`（启动时由旧表 `service_registry` 原地改名）。
 
 ## Actr Host / Guest
 
@@ -102,9 +102,9 @@ Publisher Profile 签名 key 签署。
 ## Publisher Registry
 
 Loran 中管理 publisher 身份、Publisher 签名权限与发布审计的服务（代码
-`crates/loran-publisher-registry`，路由 `/publisher-registry/*`，管理 API
-`/admin/api/publisher-registry`，配置 `[services.publisher_registry]`），也是
-`register_publisher` 的接收方。Publisher key id 前缀为 `publisher-`（26 字符）。
+`crates/loran-publisher-registry`，公开路由 `/registry/*`，管理 API
+`/admin/api/publishers`，配置 `[services.publisher_registry]`），也是
+`register_publisher` 的接收方。Publisher key id 形如 `actr-pub-<16 hex>`。
 
 ## 连接 ACL
 
@@ -191,11 +191,11 @@ Workspace；Actor 删除不删除 Workspace。Workspace 不属于 Loran Realm �
 | 规范名 | 历史名 | 说明 |
 | --- | --- | --- |
 | Loran | Actrix | 服务端套件旧名；发布的 Rust 包与二进制仍名 `actrix*`（如 `crates/loran-server`、`actrix-issuer`、`actrix-publisher-registry`），默认数据库文件仍为 `actrix.db`，示例配置为 `actrix.example.toml`，指标前缀 `actrix_` |
-| Issuer | Authority、AIS（Actor Identity Service） | 目录 `crates/loran-ais` → `crates/loran-issuer`；包 `actrix-ais` → `actrix-issuer`；路由 `/ais` → `/issuer`；配置 `[services.ais]` → `[services.issuer]`；Actr.toml `ais_endpoint` → `issuer_endpoint`；表 `ais_renewal_token`/`ais_control_attempt` → `issuer_*`；key 存储 `ais_keys.db` → `issuer_keys.db`（启动时迁移） |
+| Issuer | Authority、AIS（Actor Identity Service） | 目录 `crates/loran-ais` → `crates/loran-issuer`；包 `actrix-ais` → `actrix-issuer`；路由 `/ais` → `/issuer`；配置 `[services.ais]` → `[services.issuer]`；Actr.toml `ais_endpoint` → `issuer_endpoint`；表 `ais_renewal_token`、`ais_reissue_response_cache`、`ais_manufacturer_auth_nonce` → `issuer_renewal_token`、`issuer_reissue_response_cache`、`issuer_publisher_auth_nonce`（schema v2 离线迁移）；管理路由 `/admin/api/services/ais/keys` → `/admin/api/services/issuer/keys`；key 存储 `ais_keys.db` → `issuer_keys.db`（启动时迁移） |
 | Issuer Signer | KS、Key Server | gRPC 包 `ks.v1` → `signer.v1`；配置 `[services.ks]`、`dependencies.ks` → `[services.signer]`、`dependencies.signer`；环境变量 `ACTRIX_KS_KEK` → `ACTRIX_SIGNER_KEK`；示例 `ks.db` → `signer.db`；Postgres 默认库 `actrix_ks` → `actrix_signer`；指标 `KS_*` → `SIGNER_*` |
-| publisher | manufacturer | 包清单 `actr-package/1` 与 proto `ActrType` 曾用此字段名；`actr-package/2` 起统一为 `publisher`（proto 字段编号不变），旧键被拒绝并提示改名；CLI 用户配置 `[mfr] manufacturer` → `[publisher] name` |
-| Publisher Registry | MFR（源自 manufacturer） | 目录 `crates/loran-mfr` → `crates/loran-publisher-registry`；包 `actrix-mfr` → `actrix-publisher-registry`；路由 `/mfr/*` → `/publisher-registry/*`、`/admin/api/mfr` → `/admin/api/publisher-registry`；配置 `[services.mfr]` → `[services.publisher_registry]`；表 `mfr*` → `publisher*`；key id 前缀 `mfr-` → `publisher-`；GitHub 验证仓库 `actr-mfr-verify` → `actr-publisher-verify` |
-| Actor Registry | service registry | 当前代码仍名 `service_registry`，待历史名清理分支改名 |
+| publisher | manufacturer | 包清单 `actr-package/1` 与 proto `ActrType` 曾用此字段名；`actr-package/2` 起统一为 `publisher`（proto 字段编号不变），旧键被拒绝并提示改名；Actor 类型字符串旧形式 `publisher:name:version`（曾写作 `manufacturer:name:version`）→ `publisher/program@version`，旧形式被拒绝，已存数据由 schema v2 离线工具改写；CLI 用户配置 `[mfr] manufacturer` → `[publisher] name` |
+| Publisher Registry | MFR（源自 manufacturer） | 目录 `crates/loran-mfr` → `crates/loran-publisher-registry`；包 `actrix-mfr` → `actrix-publisher-registry`；路由保持 `/registry/*` 与 `/admin/api/publishers`；配置 `[services.mfr]` → `[services.publisher_registry]`；表 `mfr*` → `publisher*`、列 `mfr_id`/`manufacturer` → `publisher_id`/`publisher`（schema v2 离线迁移）；key id 格式 `actr-pub-<16 hex>` 不变；GitHub 验证仓库 `actr-mfr-verify` → `actr-publisher-verify` |
+| Actor Registry | service registry | 类型 `ServiceRegistry` → `ActorRegistry`；SQLite 表 `service_registry` → `actor_registry`、列 `actor_manufacturer` → `actor_publisher`（启动时原地改名） |
 | Realm Provider ID（Realm Provider 的 DNS authority） | `actrix-official` | 当前实现中固定的 provider ID 常量 |
 | Realm 名 | 数值 `realm_id`、`actr:realm:<realm_id>:authority` | 当前实现中的 Realm 标识与 credential issuer 字符串 |
 | Realm 签名 key、`realm_signing_keys` | 命名空间 key、`realm_namespace` | 本契约早期草稿用语 |

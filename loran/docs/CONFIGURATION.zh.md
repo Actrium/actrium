@@ -187,8 +187,12 @@ Realm 的配额同样属于
 旧 SQLite 必须停机后运行：
 
 ```bash
+# 未版本化库：先升到 v1
 python3 scripts/loran/migrate_schema_v1.py /var/lib/actrix/actrix.db --dry-run
 python3 scripts/loran/migrate_schema_v1.py /var/lib/actrix/actrix.db
+# v1 库：升到当前 v2
+python3 scripts/loran/migrate_schema_v2.py /var/lib/actrix/actrix.db --dry-run
+python3 scripts/loran/migrate_schema_v2.py /var/lib/actrix/actrix.db
 ```
 
 详见[架构契约](REALM_V1_ARCHITECTURE.zh.md)和

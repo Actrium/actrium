@@ -62,9 +62,9 @@ descriptor（`https://<domain>/.well-known/actr` 中的 `realm_signing_keys` 成
 
 ## Publisher Registry
 
-公开路由前缀：`/publisher-registry`。
+公开路由前缀：`/registry`。
 
-- `GET /publishers/{domain}/verifying-key`
+- `GET /publishers/{name}/verifying-key`
 - `POST /packages/nonce`
 - `POST /packages/publish`
 
@@ -88,9 +88,10 @@ v1 JSON 统一使用 publisher 术语：
 ```
 
 其他旧 JSON/query 名称不属于 v1 契约；内部 SQLite 列名和 crate 名不构成 API。Publisher
-key id 前缀为 `publisher-`（26 字符）。
+key id 形如 `actr-pub-<16 hex>`（公钥 SHA-256 的前 16 个十六进制字符）。
 
-管理路由前缀：`/admin/api/publisher-registry`，受 Admin JWT 保护。Publisher ID 是规范化 HTTPS
+管理路由前缀：`/admin/api/publishers`，受 Admin JWT 保护。Issuer key 管理为
+`/admin/api/services/issuer/keys`（及 `/rotate`）。Publisher ID 是规范化 HTTPS
 域名。当前实现通过固定路径 `https://<publisher>/.well-known/actr/publisher.json` 的
 descriptor 证明控制权；目标契约中该路径移除（与 authority-discovery「`/.well-known/actr`
 下不定义子路径」冲突），改为读取 `https://<publisher>/.well-known/actr` authority
@@ -136,13 +137,18 @@ Realm secret，但不提供硬删除或替换另一个 Realm；替换属于停�
 
 ## Schema migration
 
-运行时只自动初始化空数据库。旧的未版本化 SQLite 必须停机执行：
+当前 schema 为 v2（`PRAGMA user_version = 2`）。运行时只自动初始化空数据库；其他版本必须
+停机按序执行离线工具（未版本化库先 v1，再 v2）：
 
 ```bash
-python3 scripts/loran/migrate_schema_v1.py /path/to/actrix.db
+python3 scripts/loran/migrate_schema_v1.py /path/to/actrix.db   # 未版本化 → v1
+python3 scripts/loran/migrate_schema_v2.py /path/to/actrix.db   # v1 → v2
 ```
 
-脚本先创建备份，并拒绝多 Realm 或无法安全映射的旧 publisher 数据。目标契约下，旧
+两个脚本都先创建备份、在单个排他事务中执行，并支持 `--dry-run`。v1 工具拒绝多 Realm 或
+无法安全映射的旧 publisher 数据；v2 工具改名历史表/列/索引（`mfr*` → `publisher*`、
+`ais*` → `issuer*`、`manufacturer` → `publisher`），并把已存 Actor 类型字符串从
+`publisher:name:version` 改写为 `publisher/program@version`。目标契约下，旧
 Realm 须由实例运营者显式映射到 Realm 名，并由对应 Realm 域名的 Realm 签名 key 签署 Realm
 Profile 后才能激活。
 
