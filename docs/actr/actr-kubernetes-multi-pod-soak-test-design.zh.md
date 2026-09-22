@@ -621,8 +621,13 @@ registry.set_link_rule(
 ~~~text
 actr-0：local=actr-0, remote=actr-1，设置 outgoing=Blackhole
 actr-1：local=actr-1, remote=actr-0，设置 incoming=Blackhole
-Controller：等待两端 hit，再开始 recovery 结果判定
+Controller：等待两端安装确认，并在有效丢弃点观察到命中，再开始 recovery 结果判定
 ~~~
+
+命中预期跟随有效丢弃点，而不是两侧计数。A 设置 outgoing=Blackhole 后，A 记录发送命中
+但根本不会发出数据报，因此不得要求 B 的 incoming 规则记录命中；要求双侧命中会让
+正确注入的 Fault 被 §12.1 的"Fault 已声明但没有命中"误判。也可以把 outgoing 和
+incoming blackhole 拆成两个独立动作分别演练。
 
 解除故障时两端都恢复为 Pass。新 generation 不隐式继承旧 generation 的 Fault。
 
@@ -698,6 +703,10 @@ run_seed
 - Fault 安装和解除成对出现；
 - Pod 删除不能和同一 Pod 的 Fault commit 同时执行；
 - 每个 coverage window 必须覆盖关键事件类别；
+- 包含 Actrix 级或共享基础设施动作（Actrix restart、TURN credential rotation 等）的
+  计划必须独占整个池；允许在不相交池子集上并发的 profile 不得包含共享基础设施
+  动作——realm 隔离的是身份，不是进程重启，一个 run 重启共享 Actrix 会让另一个 run
+  在 §12.1 下被误判为非预期退出或非目标 Peer 受影响；
 - 事件生成器可以随机，结果判定器和恢复 deadline 不能随机；
 - 任何动作都记录 target、direction、generation、开始时间、结束时间和结果。
 
@@ -1195,7 +1204,7 @@ AI 初步归因
 | weekend | 10～50 Endpoint | 48 h | 周末资源和恢复浸泡 | 独占整个池 |
 | release | 50～100 Endpoint | 8～24 h | 发布门禁 | 独占整个池，跑前滚动重建 |
 
-steady 和 recovery 分开报告：steady 不注入破坏性 Fault，recovery 周期性注入并恢复。放不进空闲池的 run 在 Dashboard 队列中等待。
+steady 和 recovery 分开报告：steady 不注入破坏性 Fault，recovery 周期性注入并恢复。放不进空闲池的 run 在 Dashboard 队列中等待。标注"可在不相交子集上并发"的 profile 只有在采样事件集不含 Actrix 级和其他共享基础设施动作时才能共享池（§8.2）；一旦 run 采样到这类动作，该 run 必须独占整个池。
 
 ### 16.2 实施阶段
 

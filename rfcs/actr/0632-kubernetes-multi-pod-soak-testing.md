@@ -696,8 +696,16 @@ requires two endpoint control actions:
 ```text
 actr-0: local=actr-0, remote=actr-1, set outgoing=Blackhole
 actr-1: local=actr-1, remote=actr-0, set incoming=Blackhole
-Controller: wait for hits on both sides, then run the recovery Result Evaluator
+Controller: wait for installation acknowledgements from both endpoints and a
+hit at the effective drop point, then run the recovery Result Evaluator
 ```
+
+Hit expectations follow the effective drop point, not the side count. With
+outgoing=Blackhole on A, A records a send hit without ever transmitting a
+datagram, so B's incoming rule MUST NOT be expected to record a hit;
+requiring both would fail a correctly injected Fault under §12.1 ("a declared
+Fault records no hit"). Exercising outgoing and incoming blackholes as
+separate actions is an acceptable alternative.
 
 When healing, both sides return to `Pass`. A new generation does not implicitly
 inherit an old generation's Fault.
@@ -778,6 +786,13 @@ not a deployment constraint.
 - Fault installation and healing are paired;
 - Pod deletion MUST NOT run concurrently with a Fault commit for the same Pod;
 - every coverage window MUST cover the key event classes;
+- a plan containing Actrix-wide or shared-infrastructure actions (Actrix
+  restart, TURN credential rotation, or similar) MUST hold the whole pool
+  exclusively, and profiles that MAY run concurrently on disjoint pool
+  subsets MUST NOT include shared-infrastructure actions; realms isolate
+  identities, not process restarts, and one run restarting the shared Actrix
+  would make another run report an unexpected exit or a non-target-Peer
+  failure under §12.1;
 - the event generator MAY be random, but the Result Evaluator and recovery deadlines MUST NOT be random;
 - every action records target, direction, generation, start time, end time, and result.
 
@@ -1298,7 +1313,10 @@ AI initial attribution
 
 Report steady and recovery windows separately: steady windows do not inject
 destructive Faults; recovery windows periodically inject and heal them. Runs
-that do not fit the idle pool wait in the Dashboard queue.
+that do not fit the idle pool wait in the Dashboard queue. A "Concurrent on
+disjoint subsets" profile MAY share the pool only while its sampled event set
+excludes Actrix-wide and other shared-infrastructure actions (§8.2); if such
+an action is sampled for a run, that run MUST take the pool exclusively.
 
 #### 16.2 Implementation phases
 
