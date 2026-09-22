@@ -1050,7 +1050,13 @@ impl TestWorkloadRunner {
         host_abi: &HostAbiFn,
     ) -> actr_protocol::ActorResult<()> {
         self.handle
-            .dispatch_data_chunk(chunk, sender, invocation, host_abi)
+            .dispatch_data_chunk_until_cancelled(
+                chunk,
+                sender,
+                invocation,
+                host_abi,
+                &tokio_util::sync::CancellationToken::new(),
+            )
             .await
     }
 

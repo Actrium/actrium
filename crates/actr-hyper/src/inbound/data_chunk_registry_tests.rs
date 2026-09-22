@@ -726,3 +726,31 @@ async fn dispatch_after_unregister_is_warn_only() {
     reg.dispatch(chunk("s1"), ActrId::default(), RELIABLE).await;
     assert_eq!(reg.worker_len(), 0);
 }
+
+/// A re-registered stream must never receive chunks dispatched before its own
+/// registration: a chunk dropped while the stream was unregistered does not
+/// surface on the replacement subscription.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reregistered_stream_only_receives_chunks_dispatched_after_registration() {
+    let reg = DataChunkRegistry::with_capacity(8);
+    let (cb_a, _, mut probe_a) = Harness::new();
+    let (cb_b, _, mut probe_b) = Harness::new();
+
+    reg.register("s1".into(), cb_a).unwrap();
+    reg.dispatch(chunk_seq("s1", 1), ActrId::default(), RELIABLE)
+        .await;
+    assert_eq!(probe_a.wait_done().await, 1);
+
+    reg.unregister("s1");
+    // Dispatched while unregistered: dropped, never delivered to anyone.
+    reg.dispatch(chunk_seq("s1", 2), ActrId::default(), RELIABLE)
+        .await;
+
+    reg.register("s1".into(), cb_b).unwrap();
+    reg.dispatch(chunk_seq("s1", 3), ActrId::default(), RELIABLE)
+        .await;
+    assert_eq!(probe_b.wait_done().await, 3);
+
+    assert_eq!(probe_a.completions(), vec![1]);
+    assert_eq!(probe_b.completions(), vec![3]);
+}

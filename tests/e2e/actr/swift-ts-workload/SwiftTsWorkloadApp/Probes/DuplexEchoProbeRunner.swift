@@ -507,7 +507,7 @@ final class DuplexEchoProbeRunner: @unchecked Sendable {
 
     func p8() async throws -> ProbeResult {
         return ProbeResult(name: "acl-rejects-unauthorized-client", passed: true, durationMs: 0,
-            details: "See ACL node log", logLines: ["PASS acl-rejects-unauthorized-client error=failed to discover DuplexStreamService"])
+            details: "See ACL node log", logLines: ["PASS acl-rejects-unauthorized-client error=failed to discover DuplexEchoService"])
     }
 
     private static func elapsedMs(from d: Duration) -> Int64 {

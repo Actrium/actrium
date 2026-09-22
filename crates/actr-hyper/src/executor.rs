@@ -304,25 +304,6 @@ impl ActorHandle {
         .await
     }
 
-    /// Deliver one inbound data-chunk chunk. Mirrors the former
-    /// `Workload::dispatch_data_chunk`.
-    pub(crate) async fn dispatch_data_chunk(
-        &self,
-        chunk: DataChunk,
-        sender: ActrId,
-        invocation: InvocationContext,
-        host_abi: &HostAbiFn,
-    ) -> ActorResult<()> {
-        self.dispatch_data_chunk_until_cancelled(
-            chunk,
-            sender,
-            invocation,
-            host_abi,
-            &tokio_util::sync::CancellationToken::new(),
-        )
-        .await
-    }
-
     /// Retire queued stream deliveries without cancelling guest code that has
     /// already started. This lets a serial invocation unregister a stream even
     /// when one of its deliveries is queued behind that same invocation.

@@ -150,6 +150,7 @@ async fn handle_start_server_stream<C: RtContext>(
                 return;
             }
         };
+        let mut delivered = 0_u32;
         for seq in 0..count {
             let payload = format!("{text}:{seq}").into_bytes();
             let chunk = DataChunk {
@@ -163,10 +164,15 @@ async fn handle_start_server_stream<C: RtContext>(
                 warn!(seq, error = ?e, "server-stream: sink send failed");
                 break;
             }
+            delivered += 1;
             info!(seq, "server-stream: chunk sent");
         }
         let _ = sink.close().await;
-        info!(count, "server-stream: all chunks delivered");
+        if delivered == count {
+            info!(count, "server-stream: all chunks delivered");
+        } else {
+            warn!(delivered, count, "server-stream: partial delivery");
+        }
     });
 
     Ok(StartServerStreamResponse { ok: true })
