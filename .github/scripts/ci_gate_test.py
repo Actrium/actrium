@@ -664,10 +664,10 @@ def test_no_actrix_release_train_artifact_download_script() -> None:
 def test_run_sh_uses_correct_signaling_cache_table() -> None:
     run_sh = (ROOT / "tests/e2e/actr/swift-echo-app/run.sh").read_text(encoding="utf-8")
 
-    # Must query the actual table name (service_registry, not service_registrations)
-    assert "service_registry" in run_sh
+    # Must query the actual table name (actor_registry, not service_registrations)
+    assert "actor_registry" in run_sh
     assert "service_registrations" not in run_sh
-    assert "actor_registry" not in run_sh
+    assert "service_registry" not in run_sh
 
 
 def test_swift_e2e_only_shuts_down_its_selected_simulator() -> None:
@@ -713,11 +713,11 @@ def test_swift_e2e_delegates_recovery_to_framework() -> None:
     assert "ACTR_E2E_RETRY:ConnectionNotReady" not in service
 
 
-def _create_service_registry(db_path: Path) -> None:
+def _create_actor_registry(db_path: Path) -> None:
     with sqlite3.connect(db_path) as connection:
         connection.execute(
             """
-            CREATE TABLE service_registry (
+            CREATE TABLE actor_registry (
                 actor_realm_id INTEGER NOT NULL,
                 actor_publisher TEXT NOT NULL,
                 actor_device_name TEXT NOT NULL,
@@ -749,7 +749,7 @@ def _run_service_readiness(db_path: Path, timeout: str = "0") -> subprocess.Comp
 def test_service_readiness_rejects_missing_or_unrelated_registration() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         db_path = Path(temp_dir) / "signaling_cache.db"
-        _create_service_registry(db_path)
+        _create_actor_registry(db_path)
 
         missing = _run_service_readiness(db_path)
         assert missing.returncode != 0
@@ -757,7 +757,7 @@ def test_service_readiness_rejects_missing_or_unrelated_registration() -> None:
         with sqlite3.connect(db_path) as connection:
             connection.execute(
                 """
-                INSERT INTO service_registry
+                INSERT INTO actor_registry
                     (actor_realm_id, actor_publisher, actor_device_name,
                      service_name, status, last_heartbeat_at)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -879,14 +879,14 @@ def test_swift_datastream_e2e_builds_custom_proto_flow_from_empty() -> None:
 def test_service_readiness_waits_for_exact_registration() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         db_path = Path(temp_dir) / "signaling_cache.db"
-        _create_service_registry(db_path)
+        _create_actor_registry(db_path)
 
         script = """
             source "$1"
             (
                 sleep 0.2
                 sqlite3 "$2" \
-                    "INSERT INTO service_registry VALUES \
+                    "INSERT INTO actor_registry VALUES \
                     (1001, 'actrium', 'EchoService', 'actrium:EchoService', 'Available', 1);"
             ) &
             SERVICE_READY_POLL_INTERVAL_SECONDS=0.1 \

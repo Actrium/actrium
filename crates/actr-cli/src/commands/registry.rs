@@ -1,4 +1,4 @@
-//! `actr registry` — remote service registry interactions (Issuer / signaling).
+//! `actr registry` — remote Actor Registry interactions (Issuer / signaling).
 //!
 //! Subcommands:
 //!   - `discover`    — find services available on the network
@@ -85,7 +85,7 @@ impl Command for RegistryArgs {
     }
 
     fn description(&self) -> &str {
-        "Interact with the remote service registry (discover, publish, fingerprint)"
+        "Interact with the remote Actor Registry (discover, publish, fingerprint)"
     }
 }
 

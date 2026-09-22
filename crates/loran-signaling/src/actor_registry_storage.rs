@@ -1,4 +1,4 @@
-//! ServiceRegistry SQLite persistent cache layer
+//! ActorRegistry SQLite persistent cache layer
 //!
 //! ## Design Principles
 //!
@@ -14,7 +14,7 @@
 //! - Heartbeat: HashMap + SQLite (update TTL)
 //! - Cleanup: Periodic cleanup of expired data
 
-use crate::service_registry::{ServiceCapabilities, ServiceInfo, ServiceLocation, ServiceStatus};
+use crate::actor_registry::{ServiceCapabilities, ServiceInfo, ServiceLocation, ServiceStatus};
 use actr_protocol::{Acl, ActrId, ServiceSpec};
 use anyhow::{Context, Result};
 use prost::Message as ProstMessage;
@@ -28,9 +28,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-/// ServiceRegistry persistent storage
+/// ActorRegistry persistent storage
 #[derive(Debug)]
-pub struct ServiceRegistryStorage {
+pub struct ActorRegistryStorage {
     pool: SqlitePool,
     /// TTL (seconds), default 3600 seconds (1 hour)
     default_ttl_secs: u64,
@@ -39,7 +39,7 @@ pub struct ServiceRegistryStorage {
 /// Default service TTL (1 hour)
 pub const DEFAULT_SERVICE_TTL_SECS: u64 = 12 * 3600; // temporary workaround
 
-impl ServiceRegistryStorage {
+impl ActorRegistryStorage {
     /// Create a storage instance
     pub async fn new(database_file: impl AsRef<Path>, ttl_secs: Option<u64>) -> Result<Self> {
         let db_path = database_file.as_ref();
@@ -67,7 +67,7 @@ impl ServiceRegistryStorage {
 
         storage.init_schema().await?;
         platform::recording::info!(
-            "✅ ServiceRegistryStorage initialized with TTL={}s",
+            "✅ ActorRegistryStorage initialized with TTL={}s",
             storage.default_ttl_secs
         );
 
@@ -76,18 +76,24 @@ impl ServiceRegistryStorage {
 
     /// Initialize database schema
     async fn init_schema(&self) -> Result<()> {
+        // Migration: rename the table of databases created before the Actor
+        // Registry rename. Ignored when the table is new or already migrated.
+        let _ = sqlx::query("ALTER TABLE service_registry RENAME TO actor_registry")
+            .execute(&self.pool)
+            .await;
+
         // Migration: rename the publisher column of pre-actr-package/2 tables
         // before the statements below reference it. Ignored when the table is
         // new or already migrated.
         let _ = sqlx::query(
-            "ALTER TABLE service_registry RENAME COLUMN actor_manufacturer TO actor_publisher",
+            "ALTER TABLE actor_registry RENAME COLUMN actor_manufacturer TO actor_publisher",
         )
         .execute(&self.pool)
         .await;
 
         sqlx::query(
             r#"
-            CREATE TABLE IF NOT EXISTS service_registry (
+            CREATE TABLE IF NOT EXISTS actor_registry (
                 -- ActorId fields
                 actor_serial_number INTEGER NOT NULL,
                 actor_realm_id INTEGER NOT NULL,
@@ -134,24 +140,24 @@ impl ServiceRegistryStorage {
                 PRIMARY KEY (actor_serial_number, actor_realm_id, service_name)
             );
 
-            CREATE INDEX IF NOT EXISTS idx_expires_at ON service_registry(expires_at);
-            CREATE INDEX IF NOT EXISTS idx_service_name ON service_registry(service_name);
+            CREATE INDEX IF NOT EXISTS idx_expires_at ON actor_registry(expires_at);
+            CREATE INDEX IF NOT EXISTS idx_service_name ON actor_registry(service_name);
             "#,
         )
         .execute(&self.pool)
         .await
-        .with_context(|| "Failed to create service_registry table")?;
+        .with_context(|| "Failed to create actor_registry table")?;
 
-        // Migration: add ws_address column to legacy service_registry table
-        let _ = sqlx::query("ALTER TABLE service_registry ADD COLUMN ws_address TEXT")
+        // Migration: add ws_address column to legacy actor_registry table
+        let _ = sqlx::query("ALTER TABLE actor_registry ADD COLUMN ws_address TEXT")
             .execute(&self.pool)
             .await; // Ignore error if column already exists
 
-        // Migration: add actor_version column to pre-#389 service_registry tables.
+        // Migration: add actor_version column to pre-#389 actor_registry tables.
         // CREATE TABLE IF NOT EXISTS is a no-op on them, leaving INSERT/SELECT to
         // fail with "no such column: actor_version" (#648).
         let _ = sqlx::query(
-            "ALTER TABLE service_registry ADD COLUMN actor_version TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE actor_registry ADD COLUMN actor_version TEXT NOT NULL DEFAULT ''",
         )
         .execute(&self.pool)
         .await; // Ignore error if column already exists
@@ -194,7 +200,7 @@ impl ServiceRegistryStorage {
 
         sqlx::query(
             r#"
-            INSERT INTO service_registry (
+            INSERT INTO actor_registry (
                 actor_serial_number, actor_realm_id, actor_publisher, actor_device_name,
                 actor_version,
                 service_name, message_types, capabilities_json, status,
@@ -282,7 +288,7 @@ impl ServiceRegistryStorage {
 
         let rows_affected = sqlx::query(
             r#"
-            UPDATE service_registry
+            UPDATE actor_registry
             SET last_heartbeat_at = ?1, expires_at = ?2
             WHERE actor_serial_number = ?3 AND actor_realm_id = ?4 AND service_name = ?5
             "#,
@@ -312,7 +318,7 @@ impl ServiceRegistryStorage {
     pub async fn delete_service(&self, actor_id: &ActrId, service_name: &str) -> Result<()> {
         sqlx::query(
             r#"
-            DELETE FROM service_registry
+            DELETE FROM actor_registry
             WHERE actor_serial_number = ?1 AND actor_realm_id = ?2 AND service_name = ?3
             "#,
         )
@@ -346,7 +352,7 @@ impl ServiceRegistryStorage {
                 geo_region, geo_longitude, geo_latitude,
                 sticky_client_ids, ws_address,
                 last_heartbeat_at
-            FROM service_registry
+            FROM actor_registry
             WHERE expires_at > ?1
             ORDER BY service_name, actor_serial_number
             "#,
@@ -401,7 +407,7 @@ impl ServiceRegistryStorage {
                 geo_region, geo_longitude, geo_latitude,
                 sticky_client_ids, ws_address,
                 last_heartbeat_at
-            FROM service_registry
+            FROM actor_registry
             WHERE actor_serial_number = ?1
               AND actor_realm_id = ?2
               AND actor_publisher = ?3
@@ -452,7 +458,7 @@ impl ServiceRegistryStorage {
 
         let result = sqlx::query(
             r#"
-            DELETE FROM service_registry WHERE expires_at <= ?1
+            DELETE FROM actor_registry WHERE expires_at <= ?1
             "#,
         )
         .bind(now as i64)
@@ -554,12 +560,12 @@ impl ServiceRegistryStorage {
     pub async fn get_stats(&self) -> Result<CacheStats> {
         let now = current_timestamp();
 
-        let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM service_registry")
+        let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM actor_registry")
             .fetch_one(&self.pool)
             .await?;
 
         let expired: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM service_registry WHERE expires_at <= ?1")
+            sqlx::query_scalar("SELECT COUNT(*) FROM actor_registry WHERE expires_at <= ?1")
                 .bind(now as i64)
                 .fetch_one(&self.pool)
                 .await?;
@@ -650,7 +656,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_save_and_load() {
-        let storage = ServiceRegistryStorage::new(":memory:", Some(3600))
+        let storage = ActorRegistryStorage::new(":memory:", Some(3600))
             .await
             .unwrap();
 
@@ -672,7 +678,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_by_actor_requires_exact_type() {
-        let storage = ServiceRegistryStorage::new(":memory:", Some(3600))
+        let storage = ActorRegistryStorage::new(":memory:", Some(3600))
             .await
             .unwrap();
 
@@ -691,7 +697,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ttl_expiration() {
-        let storage = ServiceRegistryStorage::new(":memory:", Some(1))
+        let storage = ActorRegistryStorage::new(":memory:", Some(1))
             .await
             .unwrap();
 
@@ -712,7 +718,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup_expired() {
-        let storage = ServiceRegistryStorage::new(":memory:", Some(1))
+        let storage = ActorRegistryStorage::new(":memory:", Some(1))
             .await
             .unwrap();
 
@@ -733,13 +739,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_migrates_legacy_table_missing_actor_version() {
-        let storage = ServiceRegistryStorage::new(":memory:", Some(3600))
+        let storage = ActorRegistryStorage::new(":memory:", Some(3600))
             .await
             .unwrap();
 
-        // Recreate the pre-#389 schema (22 columns, no actor_version, and the
-        // publisher column under its retired name)
-        sqlx::query("DROP TABLE service_registry")
+        // Recreate the pre-#389 schema (22 columns, no actor_version, the
+        // publisher column under its retired name, and the retired table name)
+        sqlx::query("DROP TABLE actor_registry")
             .execute(&storage.pool)
             .await
             .unwrap();
@@ -797,7 +803,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_heartbeat() {
-        let storage = ServiceRegistryStorage::new(":memory:", Some(10))
+        let storage = ActorRegistryStorage::new(":memory:", Some(10))
             .await
             .unwrap();
 
