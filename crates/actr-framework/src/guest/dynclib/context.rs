@@ -172,6 +172,13 @@ impl DynclibContext {
             data
         };
 
+        // Every legit reply is a non-empty frame; an empty one would decode to
+        // a default AbiReply whose SUCCESS status is a lie.
+        if bytes.is_empty() {
+            return Err(ActrError::Internal(
+                "dynclib host returned an empty reply frame".into(),
+            ));
+        }
         abi::decode_message::<AbiReply>(&bytes).map_err(abi_error_to_actr)
     }
 }

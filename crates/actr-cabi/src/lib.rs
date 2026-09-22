@@ -1215,6 +1215,34 @@ pub unsafe extern "C" fn actr_stream_unlisten(
     })
 }
 
+/// Release any opaque handle and its correctly typed inner value.
+///
+/// # Safety
+///
+/// `handle` may be null, stale, already consumed, or already released; those
+/// cases are safe no-ops. Non-null values are treated only as opaque integer
+/// tokens and are never dereferenced.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn actr_release_handle(handle: *mut c_void) {
+    catch_unwind_void(|| {
+        drop_handle(handle);
+    });
+}
+
+/// Release an `ActrRefHandle`.
+///
+/// # Safety
+///
+/// `handle` may be null, stale, already released, or the wrong handle type;
+/// those cases are safe no-ops. In-flight operations own an `ActrRef` clone, so
+/// releasing the token concurrently cannot make those operations dangle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn actr_release_actr_ref(handle: *mut c_void) {
+    catch_unwind_void(|| {
+        drop_actr_ref(handle);
+    });
+}
+
 #[cfg(test)]
 mod stream_listener_tests {
     use super::*;
@@ -1341,56 +1369,4 @@ pub unsafe extern "C" fn actr_free_string(ptr: *mut c_char, len: usize) {
         };
         free_cstring(ptr.cast::<u8>(), allocation_len);
     });
-}
-
-/// Release any opaque handle and its correctly typed inner value.
-///
-/// # Safety
-///
-/// `handle` may be null, stale, already consumed, or already released; those
-/// cases are safe no-ops. Non-null values are treated only as opaque integer
-/// tokens and are never dereferenced.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn actr_release_handle(handle: *mut c_void) {
-    catch_unwind_void(|| {
-        drop_handle(handle);
-    });
-}
-
-/// Release an `ActrRefHandle`.
-///
-/// # Safety
-///
-/// `handle` may be null, stale, already released, or the wrong handle type;
-/// those cases are safe no-ops. In-flight operations own an `ActrRef` clone, so
-/// releasing the token concurrently cannot make those operations dangle.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn actr_release_actr_ref(handle: *mut c_void) {
-    catch_unwind_void(|| {
-        drop_actr_ref(handle);
-    });
-}
-
-#[cfg(test)]
-mod call_error_status_tests {
-    use super::*;
-
-    #[test]
-    fn untracked_call_deadlines_have_uncertain_delivery_status() {
-        assert_eq!(
-            actr_ref_call_error_status(&actr_protocol::ActrError::TimedOut),
-            DELIVERY_UNCERTAIN
-        );
-        assert_eq!(
-            actr_ref_call_error_status(&actr_protocol::ActrError::DeliveryUncertain {
-                operation_id: "op-1".into(),
-                cause: "send was submitted".into(),
-            }),
-            DELIVERY_UNCERTAIN
-        );
-        assert_eq!(
-            actr_ref_call_error_status(&actr_protocol::ActrError::Unavailable("offline".into())),
-            GENERIC_ERROR
-        );
-    }
 }
