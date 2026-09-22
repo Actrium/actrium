@@ -14,13 +14,14 @@ flowchart LR
     S -->|可编排| A["Auxiliary Actors"]
     S -->|属于| R["Realm"]
     F -->|属于| R
+    R -->|命名于| NS["Realm 命名空间<br/>dns:domain / local:installation"]
     F -.隐私汇聚.-> PRIV["Application Privacy Closure"]
     PRIV -.覆盖.-> S
     PRIV -.覆盖.-> A
     PRIV -.覆盖.-> WS
 ```
 
-## 2. 六个核心对象
+## 2. 七个核心对象
 
 ### 2.1 Program
 
@@ -69,7 +70,7 @@ ProgramReleaseId = publisher/program@version
 - 可以本地运行，也可以远端运行；
 - 可以编排其他 Actor，但对 Front 暴露一个主 façade。
 
-Service 不是“程序类型”，也不是可随意替换的负载均衡候选。
+Service 不是「程序类型」，也不是可随意替换的负载均衡候选。
 
 ### 2.4 Front Actor
 
@@ -114,7 +115,27 @@ WorkspaceBinding
 
 `credential_ref` 指向系统安全存储，不能出现在 URL、普通数据库或 Guest launch context 中。
 
-## 3. “Tab–Service 1:1”的精确定义
+### 2.7 Realm
+
+一个应用实例的信任与治理域。Create Intent 创建 Primary Service 实例时，同时在所选
+Realm 命名空间下新建一个 Realm；该实例的 Primary Service、它编排的 Auxiliary Actors、
+以及 Attach 到它的 Front 都属于这个 Realm。Realm 不跟 Program 走，也不是组织级成员域。
+
+```text
+Realm 引用 = <local_name>~dns:<domain>            # 联网
+           | <local_name>~local:<installation-id>  # 本机
+```
+
+- Realm 命名空间：`dns:<domain>` 归域名所有者，`local:<installation-id>` 归该 Actro
+  安装。域名只用作天然唯一、归属可验证的命名空间，不承载基础设施；
+- 命名空间 key 是该命名空间下所有 Realm 的长期信任根，逐个签发 Realm Profile；
+- `local_name` 在命名空间内唯一、创建后不可修改、退役后永不复用；
+- 一个 Provider（信令、TURN、issuer）承载大量 Realm；Realm 在创建时绑定一个 Provider，此后不可更换。
+
+Publisher 域名命名程序（谁发布），Realm 命名空间命名部署（谁运营）；同一 Program
+Release 可以运行在 `notes~dns:acme.com`，也可以运行在 `notes~dns:foo.org`。
+
+## 3. 「Tab–Service 1:1」的精确定义
 
 ### 3.1 产品不变量
 
@@ -148,7 +169,7 @@ Primary Service Actor 1 ── 0..1 Workspace
 - 从收藏重新打开为何不能继续原实例；
 - 同一实例迁移到新设备后为何必须改身份。
 
-因此最简模型不是“两个生命周期绑死”，而是：
+因此最简模型不是「两个生命周期绑死」，而是：
 
 > Front 始终只面对一个 Service；Service 独立存在，并接受经过授权的新 Front 会话。
 
@@ -191,8 +212,8 @@ Actr 当前把 manufacturer/name 共用较短的 `Name` 约束。目标设计必
 
 Service ActorId 必须满足：
 
-- `Realm authority + realm_id + serial + ActrType` 的整体全局可区分；
-- 自身携带可验证、可解析的 Realm authority；
+- `Realm 引用（命名空间 + local_name）+ serial + ActrType` 的整体全局可区分；
+- 自身携带可验证、可解析的 Realm 引用；
 - 在 Realm 内永久唯一；
 - Realm 不得把已使用 ID 分配给另一个实例；
 - 凭据正常续期、hard re-auth、信令切换、进程重启和运行位置迁移时保持不变；
@@ -206,15 +227,16 @@ Service ActorId 必须满足：
 <serial_hex>@<realm_id>/<publisher>:<program>:<version>
 ```
 
-它缺少 Realm authority。v1 必须扩展 ActorId 数据模型与标准 formatter，使 DNS Realm 可从 ActorId 本身解析；例如：
+它只有数值 `realm_id`，缺少可解析的 Realm 引用。v1 必须扩展 ActorId 数据模型与标准 formatter，使 Realm 可从 ActorId 本身解析：
 
 ```text
-<serial_hex>@<realm_id>~dns:<realm-domain>/<publisher>:<program>:<version>
+<serial_hex>@<local_name>~dns:<domain>/<publisher>:<program>:<version>
+例：2af01@notes~dns:acme.com/notes.example:team-notes:1.4.2
 ```
 
-本地 Realm 使用 `local:<installation-id>` authority。最终 wire/text 编码由 Actr ADR 冻结，但不能退回“只给一个 realm_id，再靠 Actro 私下猜 Realm”的语义。
+本机 Realm 使用 `local:<installation-id>` 命名空间，例如 `2af01@h3x8p2wq~local:<installation-id>/...`。数值 `realm_id` 只是 Provider 内部句柄，不进入 ActorId。最终 wire/text 编码由 Actr ADR 冻结，但不能退回「只给一个 realm_id，再靠 Actro 私下猜 Realm」的语义；legacy ActorId 导入时必须显式补足 Realm 引用并重写。
 
-同时，其生命周期语义必须从“本次注册地址”升级为“可续租的持久逻辑 Actor 身份”。
+同时，其生命周期语义必须从「本次注册地址」升级为「可续租的持久逻辑 Actor 身份」。
 
 ### 4.3 ActorId 不是秘密
 
@@ -228,7 +250,7 @@ ActorId 可以进入地址栏、历史和收藏，但不能单独授予访问权
 
 ### 4.4 不增加公共 ServiceInstanceId
 
-目标模型不再向 URL 增加一层公共“逻辑服务键”。如果 ActrId 不能稳定，就应修复 ActrId，而不是让所有上层长期维护：
+目标模型不再向 URL 增加一层公共「逻辑服务键」。如果 ActrId 不能稳定，就应修复 ActrId，而不是让所有上层长期维护：
 
 ```text
 ServiceInstanceId → current ActorId
@@ -248,7 +270,8 @@ Actro 本地数据库可以有纯存储用途的 `record_id`，但它不是网�
 | Workspace 绑定 | Service Actor | Front 不可重绑 |
 | Program Release metadata | Program Catalog | 以 coordinate + digest 为主键 |
 | Actor 长期私钥 | 安全存储 | 不进入普通 SQLite |
-| Realm membership credential | 安全存储 | 短期、可续期、可撤销 |
+| Realm 命名空间信任（命名空间 key pin） | Actro Realm Manager | 首次确认后固定，按签名轮换链更新 |
+| Realm membership credential | 安全存储 | 按 Realm（即按实例）签发；短期、可续期、可撤销 |
 | 权限授予 | Actro Permission Store | 绑定 publisher/program/major/digest/Workspace 范围 |
 | ActorAssurance | 验证者（issuer ≠ subject） | 针对准确 `ActorStateId` 的节点结论 |
 | ApplicationAssurance | 应用评定者 | 无根图当前切面的汇聚结论；展示还须 Ready |
@@ -262,15 +285,19 @@ Actro 本地数据库可以有纯存储用途的 `record_id`，但它不是网�
 无 `service` 的 URI 是 Create Intent。Actro：
 
 1. 解析并验证 Program Release；
-2. 选择 Realm 与 Workspace；
-3. 在本地创建一个新的 Service Actor；
-4. 获得持久 ActorId；
+2. 选择 Realm 命名空间（默认本机 `local` 命名空间）、生成随机 `local_name`（用户可显式改为可读名）并选择 Workspace；
+3. 在该命名空间下新建一个 Realm：`local` 命名空间只在本机建立本地 record，不涉及 Profile 与签名请求；DNS 命名空间获得其 Profile 与 membership，创建请求与 Profile 须由命名空间 key 签名，Provider 自有命名空间由该 Provider 签名（用户以其在该 Provider 的账号认证），组织命名空间须经组织的命名空间签名工具/服务按组织策略认证成员后代签；
+4. 在该 Realm 内创建一个新的 Service Actor，获得持久 ActorId；
 5. 用该 ID 创建 Front 会话；
 6. 原位改写 URI。
 
+第 3–4 步是一个以 `idempotency_key` 为幂等键的事务，严格按序执行：取得命名空间授权 → Provider 创建 pending Realm → 签名 Profile 并以 `activate_realm` 提交 → Realm 变为 active → 创建 Service Actor 并取得 ActorId。任一步失败都不创建 Service Actor；pending Realm 过期由 Provider 自动清理；随机 `local_name` 在 Creation Intent 中只生成一次，用同一 `idempotency_key` 重试时沿用它；Provider 以 `(namespace, local_name, 请求方)` 为幂等键，继续同一个 pending Realm，不重复创建；不同请求方同名或命中已有 active Realm、tombstone 时返回冲突（签名请求的 nonce 只防字节级重放）。`local` 命名空间只有本地 record 与 Service Actor 两步。
+
+Create 不会把新实例放进一个已有 Realm；Service 升级为新 Program Release 时，新 Service Actor 创建在原实例的同一 Realm 内，成员与 ACL 延续，ActorId 按迁移规则变化。
+
 ### 6.2 类型发现
 
-按 `ActrType` 发现适合无状态基础设施、辅助服务或管理操作。它不用于替换用户已经指定的 Workspace-bound Service。
+按 `ActrType` 发现适合本实例内的辅助服务或管理操作，范围限于本 Realm（本实例的 Actor）；v1 不做跨 Realm 发现。它不用于替换用户已经指定的 Workspace-bound Service。
 
 ### 6.3 精确连接
 
@@ -280,7 +307,7 @@ Actro 本地数据库可以有纯存储用途的 `record_id`，但它不是网�
 - 不换同类型候选；
 - 不因为 offline 而创建新实例；
 - Program/Version 不匹配时拒绝；
-- Realm 未配置时请求导入或信任 Realm Profile。
+- ActorId 所属命名空间尚未信任时，请求用户确认信任该命名空间；尚未加入该 Realm 时，走邀请/加入流程。
 
 ## 7. Primary Service façade
 
@@ -301,7 +328,7 @@ Guest 不直接获得：
 - Service credential；
 - 任意 socket。
 
-如果程序需要多个后台 Actor，Primary Service 在自己的权限边界内完成发现、创建和编排。
+如果程序需要多个后台 Actor，Primary Service 在自己的权限边界内完成发现、创建和编排；这些 Actor 与它同属一个 Realm。跨实例（跨 Realm）调用由 Service 后台按目标 Realm 的加入策略取得客户端身份完成。
 
 ## 8. 系统程序
 

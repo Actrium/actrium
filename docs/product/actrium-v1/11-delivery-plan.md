@@ -18,7 +18,7 @@ What is really missing is product-level invariacies and some key syntaxes:
 
 1. Service ActorId (b) Permanent identity;
 2. Publisher domain with package key (a) The formal chain of trust;
-3. Realm Profile with Provider (a) Assignment;
+3. Realm namespaces, per-instance Realm Profiles and Provider delegation;
 4. Program/Service/Workspace Separation;
 5. Fixed Front Native Host And controlled. Keel Guest;
 6. `actr://` Create/Connectivity services;
@@ -65,7 +65,7 @@ Turn the syntax of the product in this document into a cross-storey testable con
 - `actr://` URI schema (a) with the test vector;
 - Publisher Profile/Release schema;
 - Actro manifest extension schema;
-- Realm Profile schema;
+- Realm namespace (the `realm_namespace` member of the authority descriptor and the core relation `realms`, defined in Actr Authority Discovery §4.3–4.4) and Realm Profile schema;
 - persistent Actor identity lifecycle ADR;
 - Front–Service session proto;
 - ActorAssurance / ApplicationAssurance / EncGraph schema;
@@ -87,16 +87,16 @@ Turn the syntax of the product in this document into a cross-storey testable con
 ### Actr I'll change it.
 
 1. ActorLong term key Models;
-2. ActorId Text and wire model Include as Verifiable Realm authority;
+2. ActorId text and wire model replace the numeric realm_id with a verifiable Realm reference (namespace + local name);
 3. New & & & & & & New reclaim ActorId Two paths to registration;
 4. ActorId, renewal/identity state (a) Sustainability;
 5. hard re-auth Keep Same ActorId;
 6. Realm Internal serial Never again;
 7. current endpoint/presence with logical ActorId Separation;
-8. Realm Profile and issuer key discovery;
+8. Realm namespace descriptor, namespace-key-signed Realm Profile and issuer key discovery;
 9. Actor credential Tie public keyand transcript/SDP challenge (a) Proof of private key holding;
 10. signaling One-time ticket/header;
-11. Provider Accreditation and failover;
+11. Provider delegation and failover; one Provider hosts many Realms, and Realm creation is authorized by a namespace key signature;
 12. per-Realm/TURN-pool key id (a) With rotation;
 13. Publisher/manufacturer DNS Length and standardization;
 14. Actor store namespace Accept instance identity;
@@ -116,7 +116,7 @@ Turn the syntax of the product in this document into a cross-storey testable con
 ### Exit Conditions
 
 - Same Service Re-starting,credential Extension,hard re-auth, signaling failover Back ID No change;
-- Realm It's a replacement. signaling endpoint;
+- A Realm can replace signaling endpoints within the same Provider while its Realm reference and ActorIds stay the same;
 - ActorId reclaim Yes. key proof and conflict protection;
 - legacy ephemeral identity The path will not be taken Actro Service Use;
 - Host It's practical. workload and Actor edge Generate Authenticable evidenceNo, no, no. Actor Can not hide the controlled side.
@@ -126,7 +126,7 @@ Turn the syntax of the product in this document into a cross-storey testable con
 ### Delivery
 
 - Publisher Profile resolver;
-- well-known release resolver;
+- release resolver based on `program_resolver`;
 - domain/IDNA normalizer;
 - key history/rotation store;
 - package digest pinning;
@@ -210,7 +210,7 @@ Turn the syntax of the product in this document into a cross-storey testable con
 - exclusive writer lease;
 - stop/start/archive/trash/restore/purge;
 - snapshot/restore;
-- local Realm;
+- local namespace and one local Realm per instance;
 - platform runtime adapters;
 - Service subtree privacy aggregate;
 - Actor/terminal egress evidence.
@@ -254,7 +254,8 @@ Turn the syntax of the product in this document into a cross-storey testable con
 
 ### Delivery
 
-- Realm onboarding;
+- Namespace trust and per-instance creation of networked Realms;
+- Joining an instance Realm by invitation;
 - membership;
 - signaling Provider failover;
 - P2P/TURN;
@@ -293,7 +294,7 @@ Turn the syntax of the product in this document into a cross-storey testable con
 - Network switching;
 - Move Side suspend/kill;
 - package cache corruption;
-- Realm key rotation;
+- Namespace key and Realm issuer key rotation;
 - Large Tab/Service;
 - Long time. lease;
 - Migration/Roll back;
@@ -361,7 +362,7 @@ Here's what I can do. P0/P1 ADR , do not change the core semantic of this text:
 - Service WASM Host API Use WIT Specific versions;
 - Front–ServiceOperations contract From Proto How to generate Keel TS schema;
 - helper process The order in which the platform is implemented;
-- Local Realm ID (a) The distribution format;
+- Auto-generation format for local Realm `local_name`;
 - snapshot envelope The specific coding and the version are negotiated;
 - Marketplace Transparent log providers;
 - Private enterprise CA The strategy format for the project;
@@ -380,14 +381,16 @@ The following is no longer an open question:
 - Yes. service Failure to create alternative: No;
 - Marketplace Name authority: No;
 - Is the letter...“Powerlessness”: No;
-- Realm Whether to bind to a physical order: No.
+- Whether a Realm is bound one-to-one to a physical signaling server: No;
+- Whether a Realm corresponds to an application instance: Yes, Create makes a new Realm;
+- Whether one Provider hosts many Realms: Yes.
 
 ## 14. Min. & Quantification
 
 The first can show that the incision is only done:
 
 1. macOS;
-2. local Realm;
+2. a local Realm under the local namespace;
 3. An autograph. `.actr` WASM Service;
 4. One in the bag. Keel JS Guest;
 5. managed Workspace;

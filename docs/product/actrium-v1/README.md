@@ -32,13 +32,13 @@ Its main value is not to draw fewer layers, but to make each layer assume only o
 - Keel Guest is the only pre-office code that the program developer can customise.
 - Service Actor There are examples of state-of-the-state programs, too. Front Enter Actor The only main entrance to the world.
 - Workspace By Service Hold on,Front Do not touch path, key or bottom storage.
-- `ActorId` Bring your own Realm authority And it's a good sign. Service examples;known `ActorId` , and the balance may no longer be carried.
+- `ActorId` carries its own Realm reference (namespace + local name) and identifies the Service instance exactly; once an `ActorId` is known, it must not be load-balanced.
 - `publisher/program@version` Accurately identify the unchangeable version of the program.
-- Realm Management of identity, access and Internet access; and letters and TURN Yes. Realm (c) The assigned infrastructure.
+- A Realm corresponds to one application instance and governs that instance's identity, admission and network entry; the domain only serves as the Realm's namespace; signaling and TURN are shared infrastructure delegated by the Realm.
 
 But it relies on three basic capabilities that must be completed first:
 
-1. **Persistence, decipherable. ActorId**: Service Actor Restart, denet, renew or relocate and must retain the same `ActorId`, and can be made by ID Got it. Realm authority. Current Actr It's... hard rebind Maybe. IDand ID Only with Value Realm, cannot be directly shared as long-term URL Semantics.
+1. **Persistent, resolvable ActorId**: a Service Actor must keep the same `ActorId` across restarts, network loss, credential renewal or migration, and the Realm reference must be derivable from the ID. Today's Actr hard rebind may change the ID, and the ID only carries a provider-internal numeric Realm, so it cannot directly serve as long-term, shareable URL semantics.
 2. **Domain Name Publisher**: Actr It's... manufacturer/publisher Semantic and length limits need to be adjusted to regularize DNS Domain name becomes the program publisher 's identity.
 3. **It's really closed. Front Host**: Actro It must be. Keel . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . capability, white list of components, resource quotas and identified sandbox backend limits Guest;cannotsat affix URL Just give it to me. Keel Load.
 
@@ -57,13 +57,13 @@ But it relies on three basic capabilities that must be completed first:
 | D-009 | `actr://publisher/program@version` indicating creation;adding `service=<ActorId>` is only connected, and cannot be built by sneaking up. |
 | D-010 | Publisher Identity is a standardized domain name, without port; credible Profile Actual HTTPS, WSS, STUN, TURN End points can be used in a visible manner. |
 | D-011 | Marketplace It's a source of information, not a source of information. Publisher Name authority; domain name and package signature are the source chain. |
-| D-012 | v1 ActorId Must contain verifiable Realm authority; it's a public address and password identity, not bearer tokenYes, sir. URL It does not mean that you have the right to connect. |
-| D-013 | Realm It's a logical trust field, which can assign multiple letters./TURN Services;Realm It's not the same thing as a physical messenger process. |
+| D-012 | A v1 ActorId must contain a verifiable Realm reference (namespace + local name, e.g. `notes~dns:acme.com`); it is a public address and cryptographic identity, not a bearer token: knowing the URL does not grant the right to connect. |
+| D-013 | A Realm is a logical trust domain corresponding to one application instance and may delegate multiple signaling/TURN services; a Realm is not the same thing as a physical signaling process, and one provider hosts many Realms; a Realm is bound to one provider when it is created and can never switch. |
 | D-014 | Service Examples fixed to exact version and package digest;v1 Upgrade Creates new by Visible Migration Actor, instead of replacing it. workload. |
 | D-015 | Realm credential Prove it. Actor keyand claims, does not automatically prove that the other side is actually running the official Actro Host;Service We have to. Front Consider it independent of the letter client. |
 | D-016 | Workspace It's... requirement, provisioning, access and providers It's an independent dimension, not a single count. |
 | D-017 | Remove as Restoreable Trashed And irrecoverable. Purged/Deleted;deleting Workspace Always acting independently. |
-| D-018 | Publisher/Realm Domain Name bootstrap Fixed Use HTTPS 443;experience Profile Actual endpoint You can bring port. |
+| D-018 | Domain bootstrap for Publishers and Realm namespaces always uses HTTPS 443 (a Realm namespace is the `https://<domain>/.well-known/actr` authority descriptor); a Realm Profile comes from the HTTPS location declared by the core relation `realms` (ports allowed); actual endpoints delegated by a verified Profile may carry ports. The `realm_namespace` member and the `realms` relation are defined in Actr Authority Discovery §4.3–4.4; when a Realm Profile cannot be fetched or verified, clients must not fall back to the default provider in the authority descriptor. |
 | D-019 | Application safeguards are aggregated on a no root-effective basis; access is effective and `Ready` , displays the weakest item of the colour to take all nodes from.Front Just locate, not Tugan. |
 | D-020 | `ActorAssurance` The issue is issued by the certifier.`issuer ≠ subject`.Host assessable GuestEvidence may be provided and no self-signed final conclusions may be made. |
 | D-021 | The top floor is green only. / Yellow / Red; the cut is not a fourth colour when it is not ready. Unknown is not a confirmed leak, but must never be green. |
@@ -136,7 +136,7 @@ This design is based on the following publicly available feasibility but is not 
 
 Key facts that have been verified include:
 
-- Actr Current `ActrId` Text form is `<serial_hex>@<realm_id>/<manufacturer>:<name>:<version>`;the target format must also be added Realm authority.
+- Actr's current `ActrId` text form is `<serial_hex>@<realm_id>/<manufacturer>:<name>:<version>`; the target format must replace the numeric realm_id with a Realm reference, e.g. `<serial_hex>@<local_name>~dns:<domain>/<manufacturer>:<name>:<version>`.
 - Actr Supported `Dest::Peer(ActrId)` Accurately locate and press `ActrType` It was found that the two could be clearly divided.
 - `.actr` Existing Ed25519 manifest Signature,SHA-256 File binding and resources; relying on lock-down workload/The build process is optional.
 - Keel It's... Host/Guest Border and White List module mechanism suitable for carrying FrontBut it's... `Engine.loadBundle(URL)` It is not a credible distribution system in itself.

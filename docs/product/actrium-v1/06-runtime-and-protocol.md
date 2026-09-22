@@ -298,12 +298,13 @@ Service workload The dependence and network capacity must be package manifest It
 
 ### 6.3 Same Realm Request
 
-v1 Request Front and Primary Service Same. Realm:
+A Realm corresponds to one application instance, so the Front and the Primary Service are naturally in the same Realm; Auxiliary Actors orchestrated by the Primary Service are in that Realm too:
 
-- Front Yes. Attach Getting to Realm membership;
-- Realm ACL Decision Front type Connect Service type;
-- Service Re-initiate user/(b) A case-by-case mandate;
-- Cross RealmCall by Service Backstage processing,Front Not directly federal.
+- before Attach, the Front obtains membership in that instance's Realm (usually by invitation);
+- the Realm ACL decides whether a Front type may connect to a Service type;
+- the Service then performs user/instance-level authorization;
+- type discovery only happens within this Realm (this instance's Actors);
+- cross-instance (cross-Realm) calls are handled by the Service backend: the Service's host obtains a client identity in the target Realm according to that Realm's join policy; the Front never federates directly, and v1 has no federation.
 
 This significantly reduces the level of trust and wrongs.
 

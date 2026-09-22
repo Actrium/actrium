@@ -25,17 +25,18 @@
 | FR-URI-004 | Attach I'm not going to fail. LB, downgraded or create alternative examples. |
 | FR-URI-005 | ActorId type I have to. URI coordinate Perfect match. |
 | FR-URI-006 | It's a must to be created. replace For the tape. `service` It's... URI. |
-| FR-URI-007 | portable Attach URI Must carry the parseable Realm authority. |
+| FR-URI-007 | A portable Attach URI must carry a resolvable Realm reference (DNS namespace + local name). |
 | FR-URI-008 | URI Not to include credential, session secret, Workspace secret or bearer invite. |
 | FR-URI-009 | Official Publisher authority Do not contain ports; develop sources for use `actr-dev://`. |
 | FR-URI-010 | Parser Must be implemented IDNA, repeats the reservation parameters, illegal coding and control character checks. |
+| FR-URI-011 | A Create URI must select the Realm namespace with the `namespace` parameter and use the local namespace when it is omitted; the `realm` parameter is only allowed for legacy Attach import. |
 
 ### 1.3 Program Catalog and distribution
 
 | ID | Requirements |
 |---|---|
 | FR-PKG-001 | Program Catalog with Service Inventory We have to split up. |
-| FR-PKG-002 | coordinate It's got to be passed. Publisher HTTPS well-known Path resolution. |
+| FR-PKG-002 | A coordinate must be resolved through the `program_resolver` declared by the `publisher` member of the Publisher authority descriptor (`/.well-known/actr`). |
 | FR-PKG-003 | Every precision coordinate It has to be fixed. package digest. |
 | FR-PKG-004 | `.actr` Validation required Publisher key, manifest signature And all the files. hash. |
 | FR-PKG-005 | I must refuse. zip traversal, the number of documents exceeding the limit, the total amount of depressives and the compressed bomb. |
@@ -89,10 +90,10 @@
 
 | ID | Requirements |
 |---|---|
-| FR-NET-001 | Actro Must Embe Inline signaling client and local Realm, don't write the only global server that's dead. |
-| FR-NET-002 | Realm Profile It's got to be passed. HTTPS and sign the certificate. |
+| FR-NET-001 | Actro must embed a signaling client and the local Realm namespace, and must not hard-code a single global server. |
+| FR-NET-002 | The Realm namespace descriptor (the `realm_namespace` member of the authority descriptor, defined in Actr Authority Discovery §4.4) must be fetched over HTTPS; a Realm Profile must be signed by a trusted namespace key, and its validity does not depend on where it was fetched from. |
 | FR-NET-003 | One. Realm There must be more than one assignment signaling/TURN endpoint. |
-| FR-NET-004 | v1 Front with Primary Service It has to be the same. Realm. |
+| FR-NET-004 | In v1 the Front and the Primary Service must be in the same Realm, i.e. the Realm of the same application instance; type discovery only happens within that Realm. |
 | FR-NET-005 | Actor credential We have to tie it down. ActorId, Actor key, ActorType, Realm and the duration. |
 | FR-NET-006 | Service identity It's got to be supported by the long-term. key reclaim Same ActorId. |
 | FR-NET-007 | signaling credential No longer to be put in URL query. |
@@ -101,10 +102,14 @@
 | FR-NET-010 | endpoint Non-standard ports are available, but must be credible Profile/Publisher metadata. |
 | FR-NET-011 | Service offline It must be distinguishable and not degenerate to the same type of discovery. |
 | FR-NET-012 | v1 Multiple signaling endpoint It's the same thing. Realm Control side. failover, do not support hidden cross-control federation. |
-| FR-NET-013 | Local Realm ActorId We have to tie it down. installation authorityBan copying as cross-equipment portable link. |
+| FR-NET-013 | A Local Realm ActorId must use the `local:<installation-id>` namespace and must not be copied as a cross-device portable link. |
 | FR-NET-014 | Service I can't just do it. Front Self-reported. ActorType, Host Version or digest High-risk delegation of authority; independence must be validated when required attestation. |
-| FR-NET-015 | Realm bootstrap It has to be fixed. HTTPS 443and Profile continuity key, serial number, validity period and rotation chain to prevent rollback. |
-| FR-NET-016 | Actro Must provide Realm Accession, recertification, equipment cancellation, departure and key Changed disposal process. |
+| FR-NET-015 | Realm namespace bootstrap (`https://<domain>/.well-known/actr`) must always use HTTPS 443, and rollback is prevented by the namespace key rotation chain plus the Realm Profile sequence number (Realm Profiles do not expire). |
+| FR-NET-016 | Actro must provide flows for trusting a namespace, joining an instance Realm by invitation, re-authentication, device revocation, leaving and handling namespace key changes. |
+| FR-NET-017 | A Create Intent must create a new Realm under the chosen namespace; `local_name` is unique within the namespace, immutable after creation and never reused after retirement. |
+| FR-NET-018 | When a Service is upgraded to a new Program Release, the new Service Actor must be created in the same Realm; migrating to another Realm must produce a new ActorId. |
+| FR-NET-019 | When a Realm Profile cannot be fetched, fails verification or is retired, Actro must not talk to that Realm through the default provider in the authority descriptor; the default provider is only a suggestion when creating a new Realm. |
+| FR-NET-020 | The namespace targeted by Create must already be trusted, or first trust must be completed on the Create confirmation page; in v1 individual users can only self-serve Realm creation in the local namespace or a Provider-owned namespace, and creation requests and Profiles in an organisation namespace must be signed by the organisation's namespace-key signing tool/service. |
 
 ### 1.7 PermissionSecurity and privacy
 
@@ -122,7 +127,7 @@
 | FR-SEC-010 | Telemetry must be closed by default; the user or administrator must minimize sensitive markings after they are enabled. |
 | FR-SEC-011 | Undo grant It must be terminated immediately. capability handleand terminates or reduces the power of active sessions. |
 | FR-SEC-012 | Service Invitations must be one-time, expired, revocable and inapplicable bearer secret Entry instance URI. |
-| FR-SEC-013 | Service ACL At least support it. owner/editor/viewer ♪ The role and the turn ♪ Realm membership Separate from the case-by-case authorization. |
+| FR-SEC-013 | The Service ACL must support at least owner/editor/viewer roles and keep Realm membership separate from instance authorization: membership only decides whether one may enter the instance's network (the prerequisite for obtaining an Actor credential, connecting to signaling and the Attach handshake), while roles and permissions inside the instance are still decided by the Service ACL and session authorization. |
 | FR-SEC-014 | Apply colours must lifecycle, reachability, health and enforcement field. |
 | FR-SEC-015 | Application maps must be non-existent and effectively dependent on the connectivity weight and include all of them `Transfer(ActorId)` Members. |
 | FR-SEC-016 | The passage is valid and `Ready` , the colour must be displayed to take the weakest of all nodes. |
@@ -216,7 +221,7 @@ Any increase must be subject to the Platform ' s cap and authority policy.
 | NFR-REL-003 | Attach The number of times a substitute instance in the failed path is created 0. |
 | NFR-REL-004 | package cache Writing must be atoms, and old versions can still be verified after power cuts. |
 | NFR-REL-005 | Front crash Don't damage it. Service store or Workspace. |
-| NFR-REL-006 | signaling Provider Toggle cannot change ActorId. |
+| NFR-REL-006 | Failing over between signaling endpoints of the same Provider must not change the ActorId. |
 | NFR-REL-007 | lease Network vibrating tests should not produce two that work at the same time. exclusive attachment. |
 | NFR-REL-008 | beta It's... crash-free app session It has to be done. 99.5%, stable It has to be done. 99.9%. |
 
@@ -320,7 +325,7 @@ Any increase must be subject to the Platform ' s cap and authority policy.
 **When** Second device Attach<br>
 **Then** Service Back occupied; a second cannot be established without authorization active attachment.
 
-### AC-011: Realm Provider Switch
+### AC-011: Signaling endpoint failover
 
 **Given** signaling A Fault,Profile Statement signaling B<br>
 **When** Actor Reconnect<br>
@@ -382,8 +387,8 @@ Any increase must be subject to the Platform ' s cap and authority policy.
 
 ### AC-021: Profile Roll back
 
-**Given** Locally Accepted sequence 31 It's... Realm/Profile continuity key history<br>
-**When** endpoint Return is still valid but sequence 30 It's... Profileor not old key Authorized new root<br>
+**Given** The namespace key rotation chain is pinned locally and a Realm Profile with sequence 31 has been accepted<br>
+**When** the endpoint returns a still-valid Profile with sequence 30, or a Profile signed by a new key not authorized by the old namespace key<br>
 **Then** Refuse with a security error. Do not switch. issuer/signaling endpoint.
 
 ### AC-022: Invitations are not URL Permissions
@@ -560,6 +565,36 @@ Any increase must be subject to the Platform ' s cap and authority policy.
 **When** Host Access Attestation, Reference Values And Shell Show downgrade diff<br>
 **Then** The minimum control surface can be communicated, but the node is suspended and the relying party cannot process the applied data; old state payload Can't pass.
 
+### AC-051: Create makes a new Realm
+
+**Given** the user has trusted the namespace `team.example`<br>
+**When** they open `actr://notes.example/team-notes@1.4.2?namespace=team.example` and confirm creation<br>
+**Then** a new Realm is created under `team.example` (e.g. `k7m2q9xh~dns:team.example`) and the Service ActorId carries that Realm reference; creating again yields another Realm rather than reusing the first.
+
+### AC-052: Realm bound to its Provider
+
+**Given** a Realm's Profile has been accepted, and a later Profile arrives with a valid namespace key signature and a higher `sequence` but a different `provider.id`<br>
+**When** the Service and Front reconnect<br>
+**Then** the Profile is rejected with `REALM_PROVIDER_MISMATCH` and the new Provider is not contacted; a higher-`sequence` Profile that rotates issuer keys within the same Provider takes effect normally, and the Realm reference and ActorId stay the same.
+
+### AC-053: Retired Realm
+
+**Given** the namespace has published a Realm Profile with `status = retired`<br>
+**When** an instance URI under that Realm is opened<br>
+**Then** the connection is refused with a stable error, and the same `local_name` cannot be reused for a new Realm.
+
+### AC-054: No fallback when the Profile is unavailable
+
+**Given** the instance Realm's Profile cannot be fetched or fails signature verification, while the domain's authority descriptor declares a default provider in `services`<br>
+**When** the user opens that instance URI<br>
+**Then** a Realm-unreachable or security error is shown; the default provider is not contacted and no substitute instance is created.
+
+### AC-055: Create transaction failure and retry
+
+**Given** the user confirms Create under an organisation namespace<br>
+**When** the organisation's signing service is unreachable or the provider fails to activate the Realm, and the user then retries with the same `idempotency_key`<br>
+**Then** no Service Actor is produced on failure; the retry continues the same pending Realm (same `local_name`; the provider identifies it by `(namespace, local_name, requester)`) instead of creating another Realm; expired pending Realms are cleaned up automatically.
+
 ## 4. Compatibility acceptance matrix
 
 Each published candidate should be covered at least:
@@ -654,7 +689,7 @@ Telemetry is default. Release indicators are obtained first and foremost by loca
 ### v1 Stable
 
 - All MUST (a) Need to pass;
-- AC-001 to AC-050 Automation or repetitivability;
+- AC-001 to AC-055 Automation or repetitivability;
 - (a) The high-risk audit of security is zero;
 - crash-free and the recovery target meets the release threshold;
 - Publication of the version of the agreement and the compatibility commitments;
@@ -668,7 +703,7 @@ Telemetry is default. Release indicators are obtained first and foremost by loca
 | Tab/Front/Service Unified Model | FR-SH-001—006, FR-FRONT-001 | AC-002, AC-008—010 | P2-A, P3-A |
 | Accuracy, duration Actor Identity | FR-SVC-001—003, FR-NET-005—006 | AC-009, AC-011, AC-019 | P1-A |
 | Publisher Supply chain with bag | FR-PKG-002—014 | AC-005, AC-016, AC-021 | P1-B |
-| Realm/Letters are authorized but limited. | FR-NET-001—016 | AC-011, AC-012, AC-020—023 | P1-A, P3-B |
+| Realm/Letters are authorized but limited. | FR-NET-001—020, FR-URI-011 | AC-011, AC-012, AC-020—023, AC-051—055 | P1-A, P3-B |
 | Workspace Not UI/Remove Error | FR-SVC-005—016, FR-SEC-009 | AC-013—015, AC-023 | P2-B |
 | Guest It's operational but not transboundary. | FR-FRONT-002—010, NFR-SEC-001—004 | AC-006, AC-007 | P2-A, P4 |
 | Apply the example of a re-evaluation of the privacy snapshot and dynamic map | FR-SEC-014—059, NFR-SEC-007—014 | AC-024—050 | P0, P1-A, P2, P3-A, P4 |

@@ -183,7 +183,8 @@ CreationIntent
 ├── creation_intent_id
 ├── source_uri
 ├── program_release + digest
-├── realm
+├── realm_namespace
+├── realm_local_name
 ├── workspace_selection
 ├── requested_permissions
 ├── stage
@@ -260,7 +261,7 @@ program_release
 
 service
   actor_id, actor_id_hash, publisher, program, version, digest,
-  realm_domain, realm_id, workspace_id, runtime_location,
+  realm_namespace, realm_local_name, workspace_id, runtime_location,
   lifecycle_state, desired_state, reachability, health,
   attachment_state, placement, created_at, last_opened_at
 
@@ -290,11 +291,17 @@ privacy_aggregate
 creation_intent
   intent_id, uri, stage, result_actor_id, timestamps
 
+realm_namespace
+  namespace, namespace_keys, namespace_sequence, authority_descriptor_digest
+
 realm
-  domain, realm_id, profile_digest, issuer_keys, membership_ref
+  namespace, local_name, profile_digest, profile_sequence, provider_id,
+  issuer_keys, membership_ref, device_key_ref
 ```
 
 Service Table to Complete ActorId (a) Be the business key;`actor_id_hash` Only for indexing and directories.
+
+`realm_namespace` records each trusted Realm namespace (a DNS namespace is an authority: the `realm_namespace` member in `https://<domain>/.well-known/actr`, defined in Actr Authority Discovery §4.4) together with its pinned namespace keys (`namespace_keys`, every key ever accepted) and accepted `sequence` (`namespace_sequence`), which are refreshed with the Profiles so that removed keys revoke the Profiles they signed; `realm` records each instance Realm, where `profile_sequence` and `provider_id` are used to reject rolled-back Profiles and Profiles naming a different Provider (both empty for a local Realm, which has no Profile), and `device_key_ref` points to that Realm's own device key (never reused across Realms). Neither uses the numeric realm_id, which is only a provider-internal handle.
 
 `ApplicationAssurance` It's a derivative of the current cut, no. Service . Cache expired,Tab Recalculation must be made after reconstruction, state or chart changes; presentation must also be made `Ready`Original attestation token Prefer to the long-term encryption cache or memory, and complete remote scaling, not for convenience UI The project is being implemented in the United States and is being implemented in the United States.
 
@@ -398,7 +405,7 @@ Upgrade is migration:
 ```text
 Old Service ActorId + v1 Workspace
   → quiesce + snapshot
-  → New Service ActorId + v2 workload
+  → New Service ActorId + v2 workload (same Realm)
   → import/migrate
   → Workspace lease handoff
   → user verification
@@ -413,11 +420,13 @@ Advantages:
 - New and old contract (a) Be able to coexist;
 - URI I won't claim to be old. ActorId Has become a new type.
 
+The new Service Actor is created in the same Realm as the original instance: the instance has not changed, Realm membership and ACL carry over, and only the ActorId changes under the rules above.
+
 The disadvantage is... ActorId Changes;Actro Update local collections and current Tab. Old links can be used to hint when local migration records are saved“Example moved”; other devices only see old examples offline/archivedUnless it's old Service Signing migration tips continue to be provided during rollback.Realm Level alias/redirect It's a follow-up capability, not here. v1 Quietly achieved.
 
 ## 12. Service Relocation of equipment
 
-Same Realmand Program Release . Host migration can be maintained ActorId:
+Host migration within the same Realm and the same Program Release may keep the ActorId. A Realm is permanently bound to its Provider; changing operators means creating a new instance on the new Provider and migrating under the rules in this section. Migrating to another Realm (including from the local namespace to a DNS namespace) must produce a new ActorId:
 
 1. Access migration lease;
 2. (b) Stop the new request from the old host;

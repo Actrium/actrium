@@ -358,7 +358,10 @@ SHA-256，并拒绝缺失、重复、摘要不匹配或未在 manifest 声明的
 
 版本 1 的 `algorithm` 为 `ed25519`。`key-id` 标识发布者用于此次 release 的公钥，但它
 本身不是信任锚。Host 必须从受信 publisher metadata、组织策略或其他可信渠道取得公钥，
-不能因为 Package 自称某个 key-id 就信任该 key。
+不能因为 Package 自称某个 key-id 就信任该 key。publisher metadata 以签名 Publisher Profile
+的形式内嵌在 publisher 域名的 authority descriptor 中（`https://<publisher>/.well-known/actr`
+的 `publisher` member，见 [Actr Authority Discovery](authority-discovery.zh.md) 第 4.5 节），
+不另设独立的 Well-Known 文件。
 
 `manifest.sig` 是对 Package 中原始 `manifest.toml` bytes 的 Ed25519 signature，使用原始
 64-byte encoding。

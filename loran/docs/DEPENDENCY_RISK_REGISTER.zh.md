@@ -4,7 +4,8 @@
 
 ## 范围与原则
 
-本登记只覆盖 Actrix 默认单 Realm、单节点、SQLite profile 及其内嵌 Admin UI。仓库中
+本登记只覆盖 Actrix 默认单节点、SQLite profile（当前实现单 Realm；多 Realm 目标契约
+不引入新的运行时依赖类别，实现时需复评 authority descriptor 获取与 JCS 规范化依赖） 及其内嵌 Admin UI。仓库中
 示例、其他语言 binding 和实验目录的告警由各自 owner 处理，不能被本文替代。
 
 - `Cargo.lock` 的 Rust 审计不允许 advisory ignore；
@@ -24,7 +25,7 @@
 | Vite/Rollup/Babel/PostCSS/smol-toml 告警 | 重新解析 npm 与 pnpm 锁文件至已修复版本，生产 bundle 重新构建 | 已修复 |
 | 原 CI 忽略的 3 个 Rust advisory | 更新锁文件后 `maxminddb 0.26`、`protobuf 2`、`rsa 0.9` 均不再存在；删除 CI 中全部 `cargo audit --ignore` | 已消除豁免 |
 
-`cargo audit` 仍报告 5 个不会使其失败的 warning，不能把它们伪装成“零风险”：
+`cargo audit` 仍报告 5 个不会使其失败的 warning，不能把它们伪装成「零风险」：
 
 - `audiopus_sys` unmaintained 不在 Actrix 依赖树中；
 - `bincode 1.3.3` unmaintained 由上游 `webrtc -> dtls` 引入；

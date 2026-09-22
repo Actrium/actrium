@@ -80,10 +80,11 @@ target. It is also the HTTPS origin used for authority discovery. If the port
 is omitted, authority discovery uses the default HTTPS port. If present, the
 explicit port is used by the discovery HTTPS origin.
 
-An Actr realm is an application-level namespace and is not part of the URI
-authority. One authority can operate multiple realms under the same domain and
-TLS control. Realms that require independent bootstrap control should use
-distinct authorities, normally distinct hostnames.
+A Realm is not part of the URI authority. A port-less DNS authority can also
+act as a Realm namespace: the domain supplies a globally unique,
+ownership-verifiable name, and each Realm under it is one application instance
+identified by a local name (Section 7.1). One authority can therefore be the
+namespace of many Realms without operating any Actr infrastructure itself.
 
 The `userinfo` production from generic URI syntax is forbidden. Therefore an
 Actr URI never uses a form such as `actr://user@example.com/...`.
@@ -190,9 +191,9 @@ Non-conforming examples:
 
 ## 7. Relationship to Actor Packages and instances
 
-An Actr runtime may use structured identities containing a realm, serial
-number, manufacturer, Actor type, and version. Those internal identities are
-not automatically public Actr URIs.
+An Actr runtime may use structured identities containing a Realm reference,
+serial number, publisher, Actor type, and version. Those identities are not
+Actr URIs and are never placed in the URI authority.
 
 A non-empty target resolves only to an entry Actor Package release. The Target
 may remain stable while release policy advances it, but each resolution result
@@ -203,6 +204,61 @@ configuration. That Actor later discovers dependencies through its manifest,
 contracts, and runtime discovery. A browser user can therefore open
 `actr://example.com/echo` to start an Echo UI without navigating to a URI for a
 particular Echo Server instance.
+
+### 7.1 Realm references
+
+A Realm is the trust and governance domain of one application instance. It is
+named by a namespace and a local name:
+
+```abnf
+realm-ref       = local-name "~" realm-namespace
+realm-namespace = "dns:" dns-name / "local:" installation-id
+local-name      = let-dig [ *61( let-dig / "-" ) let-dig ]
+let-dig         = %x61-7A / DIGIT              ; lowercase a-z and 0-9
+installation-id = 26( %x61-7A / %x32-37 )      ; lowercase base32, a-z and 2-7
+```
+
+- `dns-name` is a DNS name normalized as in Section 5: lowercase IDNA A-labels
+  with no port, userinfo, or path. `dns:<dns-name>` is the same namespace as
+  the port-less Actr authority `actr://<dns-name>`; its namespace keys are
+  published by [Actr Authority Discovery](authority-discovery.md). An
+  authority with an explicit port or an IP literal is never a Realm namespace.
+- `local:<installation-id>` is the namespace of one Actr Host installation.
+  `installation-id` is derived from the installation root key as defined by
+  [Actr Realm Profile](realm-profile.md). A local Realm reference is usable
+  only on that installation.
+- `local-name` follows DNS label rules: 1 to 63 characters, lowercase ASCII
+  letters, digits, and `-`, not starting or ending with `-`. It is unique
+  within its namespace, immutable after creation, and never reused after the
+  Realm is retired. Hosts generate a random local name by default
+  (Section 9); a readable name is an explicit choice.
+
+Examples:
+
+```text
+k7m2q9xh~dns:acme.com                ; default random local name
+notes~dns:acme.com                   ; readable name chosen explicitly
+h3x8p2wq~local:<installation-id>
+```
+
+Realm references are compared as exact strings after normalization. Parsing a
+Realm reference is purely syntactic and has no network side effect; resolving
+a DNS Realm reference to a verified Realm Profile is defined by Actr Realm
+Profile.
+
+### 7.2 Actor identity text form
+
+The text form of a persistent Actor identity is:
+
+```text
+<serial_hex>@<realm-ref>/<publisher>:<program>:<version>
+```
+
+For example, `2af01@k7m2q9xh~dns:acme.com/notes.example:team-notes:1.4.2`.
+`serial_hex` is the lowercase hexadecimal serial number issued by the Realm's
+issuer. Provider-internal numeric realm identifiers **MUST NOT** appear in
+this form. An Actor identity is not an Actr URI; when one is carried inside a
+URI, the carrying protocol percent-encodes it as data.
 
 ## 8. Legacy URI migration
 
@@ -243,6 +299,10 @@ through configured legacy authority data, then emit a new authority-based URI.
   internationalized-domain homograph risks.
 - Authorization is evaluated when resolving or contacting a target. Possession
   of an Actr URI alone does not grant access.
+- Realm references and Actor identities reveal the Realm namespace and local
+  name wherever they are shared. Hosts **SHOULD** generate a random local name
+  by default when creating a Realm and keep the human-readable title in the
+  Realm Profile's `display_name`.
 
 ## 10. IANA considerations
 
@@ -272,8 +332,9 @@ defined by Actr Authority Discovery.
 This initial draft deliberately leaves the following work open:
 
 - define the target-reference selectors and resolution protocol;
-- define how public target references map to realms and structured Actor
+- define how public target references map to Realms and structured Actor
   identities;
+- freeze the binary encoding of Actor identities that carry a Realm reference;
 - specify error behavior and authorization challenges during target
   resolution;
 - add parser, normalization, equivalence, and legacy-migration test vectors;

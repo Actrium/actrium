@@ -30,33 +30,37 @@ Actro Do not maintain another global set Publisher ID Registration centre.
 
 ### 2.2 Publisher Profile
 
-Fixed entry:
+A Publisher domain is also an Actr authority. The Publisher Profile is published as the optional `publisher` member of the authority descriptor, in the domain's single bootstrap resource:
 
 ```text
-GET https://<publisher>/.well-known/actrium-publisher.json
+GET https://<publisher>/.well-known/actr
 ```
 
-It's from Publisher Directly exported identity domain bootstrap URL, standard must be used HTTPS 443♪ Can't come from ♪ `actr://` .Profile After the test was successful, it declared it. `programResolver`, CDN Other services endpoint You can use a visible port.
+The `publisher` member is defined in Actr Authority Discovery §4.5. Authority discovery defines no path components below `/.well-known/actr`, so Publishers do not get a separate well-known file. The same descriptor may also carry `realm_namespace` (when the domain is also a Realm namespace) and `services` (such as `packages`).
 
-bootstrap Do not follow the cross Origin redirect;when moving the entrance is required, old Profile New assignment by signature resolver or root rotation.
+The bootstrap URL is derived directly from the Publisher identity domain. It must use standard HTTPS on port 443 and cannot take a port from the `actr://` URI. Once the Profile has been verified, the `program_resolver`, CDN and other service endpoints it declares may use explicit ports.
 
-At least include:
+Fetching the descriptor follows the redirect rules of authority discovery: at most five redirects, each over HTTPS; a redirect target never becomes a new authority, and the `authority` binding is still validated against the original Publisher domain. The validity of the `publisher` member depends only on its own signature and the pinned root/key history, not on the origin it was fetched from. To move the resolver, the old Profile signs a delegation to the new resolver, or a root rotation is performed.
 
-- schema version;
-- Normative Publisher Domain names;
-- Current and Historical Profile continuity keys;
-- Current and Historical package signing keys;
-- key id(a) Algorithm, validity and revocation;
-- Program resolver base;
-- (b) Secure contact addresses;
-- Optional Marketplace/Transparency log statement.
+The `publisher` member uses snake_case field names and contains at least:
 
-The first time you get it, trust comes from URL hostname It's... Web PKIOr from the company. Publisher root pin;Profile Carrying root You can't prove it in a loop. Profile I'm not sure.Actro Fixed root/key historyFollow-up Profile It is necessary to:
+- `schema`: `actr.publisher/v1`;
+- `domain`: the normalized Publisher domain, which must equal the host of the descriptor's `authority`;
+- current and historical Profile continuity keys;
+- current and historical package signing keys;
+- key id, algorithm, validity period and revocation status;
+- `program_resolver`: the required Program resolver base, with no default;
+- a security contact address;
+- optional Marketplace/transparency log statements.
 
-- Press RFC 8785 JCS Normative signature payload, revalidate detached Ed25519 Signature;
-- Handing a single-tone increment `sequence`and the time of issuance and expiry;
-- Through the old root New Signing Rotation Chain Introduction root;
-- The government has refused to roll back, expired and unauthorised.
+On first retrieval, trust comes from the Web PKI of the URL hostname, or from an enterprise-provisioned Publisher root pin; a root carried inside the Profile cannot vouch for itself. After accepting the first Profile, Actro pins the root/key history, and every later Profile must:
+
+- be signed over an RFC 8785 JCS canonicalized payload (the `publisher` member with its `signature` field removed), verified as a detached Ed25519 signature;
+- carry a monotonically increasing `sequence`, an issue time and an expiry time;
+- introduce any new root through a rotation chain signed by the old root;
+- be rejected on rollback, expiry or unauthorized root change.
+
+The parts of the descriptor outside `publisher` are unsigned and play no part in Publisher trust decisions.
 
 offline root It's highly recommended. Publisher Mode of transportation, but hardware required/Offline Save by Marketplace or an enhanced corporate strategy;wire protocol It must be supported.
 
@@ -72,13 +76,13 @@ Domain name control only determines the future launch entrance and cannot rewrit
 
 ## 3. Coordinate Present. package ..the determination resolution of the
 
-Profile It's... `programResolver` Determines the base address. When no visible statement, the default value is:
+The Profile's required `program_resolver` determines the resolution base; the release description lives at:
 
 ```text
-https://<publisher>/.well-known/actrium/v1/programs/<program>/<version>/release.json
+<program_resolver><program>/<version>/release.json
 ```
 
-Default address still uses standard HTTPS 443;validated Profile Assigned resolver It can be located elsewhere. HTTPS Origin, and can also use non-standard ports.
+For example `https://notes.example/actrium/programs/team-notes/1.4.2/release.json`. The resolver may be any HTTPS origin and path and may use a non-standard port; it is declared by the verified Profile, and no well-known default path is used.
 
 `release.json` It is a small, cached publication description, which includes at least:
 

@@ -7,12 +7,13 @@
 
 Signer 是 Authority 的最小私钥边界：
 
-1. 生成 Ed25519 signing key；
+1. 生成 Ed25519 signing key（目标契约下每个 Realm 一把 issuer key，全部 Realm 共用同一
+   Signer）；
 2. 在服务端保存私钥，只返回 verifying key；
 3. 对 AIS 提交的精确消息签名；
 4. 按 `expires_at` 停止签名，并支持 key rotation/revocation 审计。
 
-Signer 不负责 Actor 路由、Realm 管理、Publisher 下载，也不提供“获取私钥”接口。
+Signer 不负责 Actor 路由、Realm 管理、Publisher 下载，也不提供「获取私钥」接口。
 
 ## 接口
 
