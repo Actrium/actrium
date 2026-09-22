@@ -1243,35 +1243,6 @@ pub unsafe extern "C" fn actr_release_actr_ref(handle: *mut c_void) {
     });
 }
 
-#[cfg(test)]
-mod stream_listener_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn concurrent_unlisten_waits_for_listener_teardown() {
-        let key = (usize::MAX, "concurrent-unlisten".to_owned());
-        let (done_tx, done_rx) = tokio::sync::watch::channel(false);
-        let entry = std::sync::Arc::new(StreamListener {
-            cancel: tokio_util::sync::CancellationToken::new(),
-            done: done_rx,
-        });
-        stream_listeners()
-            .lock()
-            .unwrap()
-            .insert(key.clone(), entry.clone());
-        let mut first = Box::pin(stop_stream_listener(key.0, key.1.clone()));
-        assert!(futures_util::poll!(first.as_mut()).is_pending());
-        assert!(entry.cancel.is_cancelled());
-        let mut second = Box::pin(stop_stream_listener(key.0, key.1.clone()));
-        assert!(futures_util::poll!(second.as_mut()).is_pending());
-
-        // The listener removes its entry only after closing the subscription.
-        stream_listeners().lock().unwrap().remove(&key);
-        done_tx.send(true).unwrap();
-        first.await;
-        second.await;
-    }
-}
 // ── ActrRef: shutdown ────────────────────────────────────────────────────────
 
 /// Shut down the actr node (synchronous). The handle remains valid for
@@ -1369,4 +1340,34 @@ pub unsafe extern "C" fn actr_free_string(ptr: *mut c_char, len: usize) {
         };
         free_cstring(ptr.cast::<u8>(), allocation_len);
     });
+}
+
+#[cfg(test)]
+mod stream_listener_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn concurrent_unlisten_waits_for_listener_teardown() {
+        let key = (usize::MAX, "concurrent-unlisten".to_owned());
+        let (done_tx, done_rx) = tokio::sync::watch::channel(false);
+        let entry = std::sync::Arc::new(StreamListener {
+            cancel: tokio_util::sync::CancellationToken::new(),
+            done: done_rx,
+        });
+        stream_listeners()
+            .lock()
+            .unwrap()
+            .insert(key.clone(), entry.clone());
+        let mut first = Box::pin(stop_stream_listener(key.0, key.1.clone()));
+        assert!(futures_util::poll!(first.as_mut()).is_pending());
+        assert!(entry.cancel.is_cancelled());
+        let mut second = Box::pin(stop_stream_listener(key.0, key.1.clone()));
+        assert!(futures_util::poll!(second.as_mut()).is_pending());
+
+        // The listener removes its entry only after closing the subscription.
+        stream_listeners().lock().unwrap().remove(&key);
+        done_tx.send(true).unwrap();
+        first.await;
+        second.await;
+    }
 }
