@@ -29,7 +29,7 @@
 │ Management: Admin UI/API + Realm 生命周期               │
 └────────────────────────┬─────────────────────────────────┘
                          ▼
-                    SQLite schema v1
+                    SQLite schema v2
 ```
 
 这些是逻辑平面，不要求永远同进程。v1 默认 all-in-one 是为了减少部署依赖；Issuer

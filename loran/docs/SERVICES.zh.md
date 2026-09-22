@@ -8,7 +8,7 @@
 | Issuer | HTTPS + protobuf | `/issuer` | Realm capability + workload proof |
 | Signaling | WSS | `/signaling/ws` | Actor credential |
 | Issuer Signer | gRPC/HTTP2 | `/signer.v1.Signer/*` | nonce-auth；建议内网或 mTLS |
-| Publisher Registry | HTTPS | `/publisher-registry` | 查询公开；发布需 Publisher nonce/signature |
+| Publisher Registry | HTTPS | `/registry` | 查询公开；发布需 Publisher nonce/signature |
 | Admin | HTTPS | `/admin`、`/admin/api` | Argon2id login + Bearer session |
 | STUN | UDP | `bind.ice` | Binding 公开 |
 | TURN | UDP | `bind.ice` + relay range | scoped 短期 TURN credential |
@@ -21,7 +21,7 @@ HTTP 服务在一个 listener 上组合。STUN/TURN 使用独立 UDP socket；TU
 启动顺序的安全前提：
 
 1. 解析配置并执行 fail-closed 校验；
-2. 打开 SQLite，验证 `PRAGMA user_version = 1`；
+2. 打开 SQLite，验证 `PRAGMA user_version = 2`；
 3. 初始化 recording、监控与控制面；
 4. 构建 Issuer Signer、Issuer、Signaling（含 Actor Registry）、Publisher Registry 和
    descriptor router；
