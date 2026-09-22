@@ -51,7 +51,7 @@ Front 使用 Actr linked/native workload：
 - Realm credential 只能证明 Actor key、ActorId、ActorType 与 issuer claims，不能单独证明实际运行代码；
 - Service 必须把 Front 当作不受信客户端，独立实施 principal、ACL、业务命令和 Workspace 授权。
 
-“Native workload”在这里表示 Host 由平台原生提供，不表示 Guest 可以提供 native code。
+「Native workload」在这里表示 Host 由平台原生提供，不表示 Guest 可以提供 native code。
 
 ### 2.2 Front Actor 类型
 
@@ -73,7 +73,7 @@ actrium:actro-front:1.0.0
 
 这些字段由正常 Actro Host 从已验证 package 构造，Guest 无法覆盖；但对远端 Service 而言它们仍是客户端声明，只用于兼容性协商，不能替代业务授权或远程 attestation。
 
-受管 Realm 可以把平台 app attestation、发行签名或企业设备证明纳入 credential。若 Service policy 要求“官方 Actro runtime”，Attach 必须验证该证明；没有证明时不得假定 ActorType 等于真实运行时。
+受管 Realm 可以把平台 app attestation、发行签名或企业设备证明纳入 credential。若 Service policy 要求「官方 Actro runtime」，Attach 必须验证该证明；没有证明时不得假定 ActorType 等于真实运行时。
 
 ### 2.3 Front 生命周期
 
@@ -298,12 +298,13 @@ Service workload 的依赖和网络能力必须在 package manifest 中声明。
 
 ### 6.3 同 Realm 要求
 
-v1 要求 Front 和 Primary Service 在同一 Realm：
+Realm 对应一个应用实例，因此 Front 与 Primary Service 天然在同一 Realm；Primary Service 编排的 Auxiliary Actor 也在该 Realm 内：
 
-- Front 在 Attach 前取得该 Realm membership；
+- Front 在 Attach 前取得该实例 Realm 的 membership（通常经邀请加入）；
 - Realm ACL 决定 Front type 能否连接 Service type；
 - Service 再进行用户/实例级授权；
-- 跨 Realm调用由 Service 后台处理，Front 不直接联邦。
+- 类型发现只在本 Realm（本实例的 Actor）内进行；
+- 跨实例（跨 Realm）调用由 Service 后台处理：Service 的宿主按目标 Realm 的加入策略在该 Realm 取得客户端身份；Front 不直接联邦，v1 没有 federation。
 
 这显著缩小信任和错误面。
 
@@ -413,7 +414,7 @@ Service 按顺序检查：
 12. 调用方要求的策略、当前 `ActorStateId` / AA 与 nonce；
 13. 资源和速率限制。
 
-任何身份或 digest mismatch 都是 hard fail，不进入“兼容模式”。
+任何身份或 digest mismatch 都是 hard fail，不进入「兼容模式」。
 
 Host API 或协议版本可以在双方声明的范围内协商；协商结果必须固定到 session。
 

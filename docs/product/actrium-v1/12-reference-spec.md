@@ -10,6 +10,14 @@
 actr://notes.example/team-notes@1.4.2
 ```
 
+Create under a given namespace (creates a new Realm; without `namespace` the instance is created in the local `local` namespace):
+
+```text
+actr://notes.example/team-notes@1.4.2?namespace=acme.com
+```
+
+A Create URI does not carry a `local_name`. By default Actro generates the new Realm's `local_name` at random (a short lowercase base32 string with no program name), and the human-readable name goes into the Realm Profile's `display_name`; by default the example above yields a Realm reference such as `k7m2q9xh~dns:acme.com`. The user may explicitly choose a readable `local_name` on the confirmation page; `notes` in the Attach example below is such an explicitly chosen name.
+
 ### Create + Guest route
 
 ```text
@@ -19,16 +27,18 @@ actr://notes.example/team-notes@1.4.2/today?filter=assigned
 ### Attach
 
 ```text
-actr://notes.example/team-notes@1.4.2/today?service=2af01%4042~dns%3Ateam.example%2Fnotes.example%3Ateam-notes%3A1.4.2
+actr://notes.example/team-notes@1.4.2/today?service=2af01%40notes~dns%3Aacme.com%2Fnotes.example%3Ateam-notes%3A1.4.2
 ```
 
 After decoded v1 ActorId:
 
 ```text
-2af01@42~dns:team.example/notes.example:team-notes:1.4.2
+2af01@notes~dns:acme.com/notes.example:team-notes:1.4.2
 ```
 
-Current Actr It's... legacy `2af01@42/notes.example:team-notes:1.4.2` Missing Realm authority, can only be filled by a visible import process, not by portable Attach URI.
+Here `notes~dns:acme.com` is the Realm reference: the Realm with local name `notes` in namespace `dns:acme.com`, i.e. one application instance.
+
+The current Actr legacy form `2af01@42/notes.example:team-notes:1.4.2` lacks a Realm reference; it can only be completed by an explicit import flow and cannot be used as a portable Attach URI. The earlier draft `2af01@42~dns:team.example/...` is withdrawn.
 
 ### Development
 
@@ -38,65 +48,76 @@ actr-dev://localhost:7443/team-notes@0.0.0-dev
 
 ## 2. Publisher Profile
 
-Entry:
+The Publisher Profile is the optional `publisher` member of the authority descriptor (defined in Actr Authority Discovery §4.5), served from the Publisher domain's single bootstrap resource:
 
 ```text
-https://notes.example/.well-known/actrium-publisher.json
+https://notes.example/.well-known/actr
 ```
 
-Example:
+Example (the `publisher` member uses snake_case; `domain` must equal the host of `authority`; `program_resolver` is required and has no default):
 
 ```json
 {
-  "schemaVersion": 1,
-  "sequence": 17,
-  "publisher": "notes.example",
-  "programResolver": "https://notes.example/.well-known/actrium/v1/programs/",
-  "profileSigningKeys": [
+  "version": 1,
+  "authority": "actr://notes.example",
+  "services": [
     {
-      "id": "publisher-root-1",
-      "algorithm": "Ed25519",
-      "publicKey": "<base64>",
-      "status": "active"
+      "rel": "packages",
+      "href": "https://packages.notes.example/actr/packages",
+      "protocol": "actr-packages/1"
     }
   ],
-  "keys": [
-    {
-      "id": "ed25519:2026-q2",
+  "publisher": {
+    "schema": "actr.publisher/v1",
+    "sequence": 17,
+    "domain": "notes.example",
+    "program_resolver": "https://notes.example/actrium/programs/",
+    "profile_signing_keys": [
+      {
+        "id": "publisher-root-1",
+        "algorithm": "Ed25519",
+        "public_key": "<base64>",
+        "status": "active"
+      }
+    ],
+    "keys": [
+      {
+        "id": "ed25519:2026-q2",
+        "algorithm": "Ed25519",
+        "public_key": "<base64>",
+        "not_before": "2026-04-01T00:00:00Z",
+        "not_after": "2027-04-01T00:00:00Z",
+        "status": "active"
+      },
+      {
+        "id": "ed25519:2025",
+        "algorithm": "Ed25519",
+        "public_key": "<base64>",
+        "not_before": "2025-01-01T00:00:00Z",
+        "not_after": "2026-06-30T00:00:00Z",
+        "status": "retired"
+      }
+    ],
+    "security_contact": "mailto:security@notes.example",
+    "profile_issued_at": "2026-07-29T00:00:00Z",
+    "profile_expires_at": "2026-08-29T00:00:00Z",
+    "signature": {
+      "key_id": "publisher-root-1",
       "algorithm": "Ed25519",
-      "publicKey": "<base64>",
-      "notBefore": "2026-04-01T00:00:00Z",
-      "notAfter": "2027-04-01T00:00:00Z",
-      "status": "active"
-    },
-    {
-      "id": "ed25519:2025",
-      "algorithm": "Ed25519",
-      "publicKey": "<base64>",
-      "notBefore": "2025-01-01T00:00:00Z",
-      "notAfter": "2026-06-30T00:00:00Z",
-      "status": "retired"
+      "value": "<base64>"
     }
-  ],
-  "securityContact": "mailto:security@notes.example",
-  "profileIssuedAt": "2026-07-29T00:00:00Z",
-  "profileExpiresAt": "2026-08-29T00:00:00Z",
-  "signature": {
-    "keyId": "publisher-root-1",
-    "algorithm": "Ed25519",
-    "value": "<base64>"
   }
 }
 ```
 
-`signature` Object does not enter itself payload;the rest JSON Press RFC 8785 JCS Standardize and do it. detached Ed25519 Verify.`sequence` I'm going to have to do it on a one-way basis.
+The `publisher.signature` object itself is excluded from the payload; the rest of the `publisher` member is canonicalized with RFC 8785 JCS and verified as a detached Ed25519 signature. `sequence` must increase monotonically. The parts of the descriptor outside `publisher` are unsigned and play no part in Publisher trust decisions.
 
 ## 3. Release metadata
 
 Entry:
 
 ```text
-https://notes.example/.well-known/actrium/v1/programs/team-notes/1.4.2/release.json
+https://notes.example/actrium/programs/team-notes/1.4.2/release.json
 ```
 
 Example:
@@ -307,90 +328,151 @@ Concurrent process `NativeCdylib` Do not use the profileAnd I can't judge him fo
 
 Actro This document cannot be trusted; the results of the installation must be consistent with it.
 
-## 6. Realm Profile
+## 6. Realm Namespace and Realm Profile
 
-Entry:
+### 6.1 Namespace: authority descriptor extension
+
+A DNS Realm namespace is an Actr authority. The namespace descriptor lives in that authority's descriptor:
 
 ```text
-https://team.example/.well-known/actrium-realm.json
+https://acme.com/.well-known/actr
 ```
 
-Example:
+Sample (the `realm_namespace` member and the `realms` relation are defined in Actr Authority Discovery §4.3–4.4):
 
 ```json
 {
-  "schemaVersion": 1,
-  "sequence": 31,
-  "realm": {
-    "domain": "team.example",
-    "realmId": 42,
-    "displayName": "Example Team",
-    "status": "active"
-  },
-  "profileSigningKeys": [
+  "version": 1,
+  "authority": "actr://acme.com",
+  "services": [
     {
-      "id": "realm-root-1",
-      "algorithm": "Ed25519",
-      "publicKey": "<base64>",
-      "status": "active"
+      "rel": "signaling",
+      "href": "wss://signal.provider.example/actr",
+      "protocol": "actr-signaling/1"
+    },
+    {
+      "rel": "ice-config",
+      "href": "https://rtc.provider.example/actr/ice",
+      "protocol": "actr-ice-config/1"
+    },
+    {
+      "rel": "realms",
+      "href": "https://realms.provider.example/acme.com",
+      "protocol": "actr-realm-profile/1"
     }
   ],
-  "issuer": {
-    "url": "https://identity.team.example",
+  "realm_namespace": {
+    "sequence": 3,
     "keys": [
       {
-        "id": "realm-key-2026-2",
+        "id": "ns-2026-1",
         "algorithm": "Ed25519",
-        "publicKey": "<base64>",
+        "public_key": "<base64>",
+        "status": "active"
+      },
+      {
+        "id": "ns-2025-1",
+        "algorithm": "Ed25519",
+        "public_key": "<base64>",
+        "status": "retired"
+      }
+    ],
+    "rotations": [
+      {
+        "from": "ns-2025-1",
+        "to": "ns-2026-1",
+        "sequence": 2,
+        "signature": "<base64>"
+      }
+    ],
+    "signature": {
+      "key_id": "ns-2026-1",
+      "algorithm": "Ed25519",
+      "value": "<base64>"
+    }
+  }
+}
+```
+
+`realm_namespace.keys` is the long-term trust root of every Realm in the namespace; each entry in `rotations` is signed by its `from` key over the JCS form of `{from, to, public_key, sequence}`, where `sequence` is the member `sequence` that introduced it; removing a key from `keys` revokes every Profile it signed; `realm_namespace.signature` is made by an `active` key over the JCS canonical form of the member with `signature` removed, covering `sequence`. The rest of the descriptor is unsigned and does not list Realms. The signaling, ice-config and other entries in `services` are the authority's default Provider and serve only as a suggestion when creating a new Realm; a specific Realm is delegated solely by its Profile, and clients must not fall back to the default Provider when the Profile is unavailable, invalid or retired. The Provider's own descriptor (`https://provider.example/.well-known/actr`) advertises its management request endpoint with a `realm-management` link (protocol `actr-realm-management/1`).
+
+### 6.2 Realm Profile
+
+The entry point is the `realms` relation `href` plus the local name:
+
+```text
+https://realms.provider.example/acme.com/k7m2q9xh
+```
+
+Sample:
+
+```json
+{
+  "schema": "actr.realm/v1",
+  "sequence": 31,
+  "realm": {
+    "namespace": "dns:acme.com",
+    "local_name": "k7m2q9xh",
+    "display_name": "Acme Notes",
+    "status": "active"
+  },
+  "issuer": {
+    "id": "actr:realm:k7m2q9xh~dns:acme.com:authority",
+    "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
+    "keys": [
+      {
+        "id": "issuer-2026-2",
+        "algorithm": "Ed25519",
+        "public_key": "<base64>",
         "status": "active"
       }
     ]
   },
-  "signaling": [
-    {
-      "url": "wss://signal-a.team.example/ws",
-      "priority": 10,
-      "controlPlaneId": "team.example/v1",
-      "ticketAudience": "signal-a"
-    },
-    {
-      "url": "wss://signal.provider.example:8443/ws",
-      "priority": 20,
-      "controlPlaneId": "team.example/v1",
-      "ticketAudience": "signal-b"
-    }
-  ],
-  "ice": [
-    {
-      "urls": ["stun:stun.team.example:3478"]
-    },
-    {
-      "urls": ["turns:turn.provider.example:5349"],
-      "credentialAudience": "turn-pool-1"
-    }
-  ],
-  "policy": {
-    "membership": "invite-only",
-    "crossRealm": false,
-    "offlineCredentialGraceSeconds": 0
+  "provider": {
+    "id": "provider.example",
+    "signaling": [
+      {
+        "url": "wss://signal-a.provider.example/ws",
+        "priority": 10,
+        "control_plane_id": "provider.example/v1",
+        "ticket_audience": "signal-a"
+      },
+      {
+        "url": "wss://signal-b.provider.example:8443/ws",
+        "priority": 20,
+        "control_plane_id": "provider.example/v1",
+        "ticket_audience": "signal-b"
+      }
+    ],
+    "ice": [
+      {
+        "urls": ["stun:stun.provider.example:3478"]
+      },
+      {
+        "urls": ["turns:turn.provider.example:5349"],
+        "credential_audience": "turn-pool-1"
+      }
+    ]
   },
-  "profileIssuedAt": "2026-07-29T00:00:00Z",
-  "profileExpiresAt": "2026-08-29T00:00:00Z",
+  "policy": {
+    "membership": "invite-only"
+  },
+  "issued_at": "2026-07-29T00:00:00Z",
   "signature": {
-    "keyId": "realm-root-1",
+    "key_id": "ns-2026-1",
     "algorithm": "Ed25519",
     "value": "<base64>"
   }
 }
 ```
 
-Multiple signaling endpoint Share `controlPlaneId`It means they're the same. Realm presence/control plane A copy or a malfunction to switch the entrance instead of v1 federation.
+`signature` is made by an `active` key from `realm_namespace`; the hosting location does not affect validity, and an existing Profile signed by a key that is later retired stays valid until a higher `sequence` supersedes it. Profiles do not expire; rollback protection relies only on `sequence`. `provider.id` is the Provider's normalized DNS authority and is immutable for the Realm's lifetime. Multiple signaling endpoints sharing a `control_plane_id` are replicas or failover entries of the same Provider presence/control plane, not v1 federation. Rotating issuer keys or changing endpoints within the same Provider publishes a Profile with a higher `sequence`; retirement publishes a new Profile with `status` set to `retired`, which stays valid forever.
 
 ## 7. Service Inventory Record
 
 ```json
 {
-  "actorId": "2af01@42~dns:team.example/notes.example:team-notes:1.4.2",
+  "actorId": "2af01@notes~dns:acme.com/notes.example:team-notes:1.4.2",
   "program": {
     "publisher": "notes.example",
     "name": "team-notes",
@@ -398,8 +480,8 @@ Multiple signaling endpoint Share `controlPlaneId`It means they're the same. Rea
     "packageDigest": "sha256:..."
   },
   "realm": {
-    "domain": "team.example",
-    "realmId": 42
+    "namespace": "dns:acme.com",
+    "localName": "notes"
   },
   "workspaceId": "ws_01...",
   "runtime": {
@@ -433,7 +515,7 @@ Other Organiser actor private key, Workspace credential or signaling/TURN token.
   },
   "capability": "host:clipboard.write",
   "scope": {
-    "serviceActorId": "2af01@42~dns:team.example/notes.example:team-notes:1.4.2",
+    "serviceActorId": "2af01@notes~dns:acme.com/notes.example:team-notes:1.4.2",
     "workspaceId": "ws_01..."
   },
   "decision": "allow-while-open",
@@ -460,7 +542,7 @@ Guest Read only:
   },
   "session": {
     "connection": "p2p",
-    "realmDisplayName": "Example Team"
+    "realmDisplayName": "Acme Notes"
   },
   "workspace": {
     "displayName": "Team Notes",
@@ -513,6 +595,7 @@ URI_VERSION_INVALID
 URI_RESERVED_DUPLICATE
 URI_ACTOR_ID_INVALID
 URI_ACTOR_TYPE_MISMATCH
+URI_NAMESPACE_INVALID
 URI_REALM_REQUIRED
 URI_REALM_MISMATCH
 URI_LOCAL_REALM_FOREIGN
@@ -542,9 +625,13 @@ SERVICE_IMPORT_FORBIDDEN
 ### Realm/Identity
 
 ```text
+REALM_NAMESPACE_INVALID
+REALM_NAMESPACE_UNTRUSTED
+REALM_NAMESPACE_KEY_CHANGED
 REALM_PROFILE_INVALID
-REALM_PROFILE_EXPIRED
+REALM_PROVIDER_MISMATCH
 REALM_PROFILE_ROLLBACK
+REALM_RETIRED
 REALM_LOGIN_REQUIRED
 REALM_MEMBERSHIP_REVOKED
 DEVICE_REVOKED
@@ -748,10 +835,14 @@ closed
 | Keel Guest | Publisher Only custom front-office code |
 | Primary Service | Front The only thing bound up is a status business. Actor |
 | Auxiliary Actor | By Primary Service Organization of the background Actor |
-| ActorId | Carry Realm authority- Persistence and precision of the coded. Actor Identity |
+| ActorId | Persistent, cryptographically bound, exact Actor identity carrying a Realm reference |
 | ActrType | publisher/manufacturer + name/program + version |
 | Workspace | Service Operational data held capability |
-| Realm | Actor Identity, access,ACL and Network Provider The Logical Governance Field |
+| Realm | Logical trust and governance domain of one application instance: Actor identity, admission, ACL and Provider delegation |
+| Realm namespace | Namespace of Realms: `dns:<domain>` (an Actr authority without port) or `local:<installation-id>`; holds the namespace key |
+| Realm reference | `<local_name>~dns:<domain>` or `<local_name>~local:<installation-id>` |
+| Realm Profile | Per-Realm document signed by the namespace key, delegating issuer and Provider |
+| Provider | Shared infrastructure hosting many Realms (signaling, STUN/TURN, issuer) |
 | Signaling | presence, Discovery and WebRTC Consultation and control |
 | STUN | NAT Map found |
 | TURN | P2P Controlled flow relays in unattractive times |

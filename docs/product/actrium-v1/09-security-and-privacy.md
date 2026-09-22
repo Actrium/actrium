@@ -50,6 +50,7 @@ Lettered Host There are still possible gaps;“Lettered”It is stated that it i
 - Workspace (a) Content;
 - Actor Long-term private key;
 - Realm membership/refresh material;
+- the local installation root key (from which the `installation-id` is derived);
 - Service Status and snapshot;
 - Provider credential;
 - User Identity and ACL;
@@ -61,6 +62,7 @@ Lettered Host There are still possible gaps;“Lettered”It is stated that it i
 - ActorId;
 - Program/Service Use of records;
 - Realm membership;
+- Realm references (which reveal the namespace and instance name);
 - IP, online time, connection;
 - Workspace Display name and location;
 - (a) The delegation of authority;
@@ -102,6 +104,7 @@ Lettered Host There are still possible gaps;“Lettered”It is stated that it i
 | URL Batch creation | Confirm,creation intent Quotas, sources and flows |
 | URL Discover Permissions | ActorId Not capability, URI None token |
 | Actor Counterfeit | Realm credential, Actor key proof, challenge |
+| Forged or rolled-back Realm Profile | Profile must be signed by a pinned namespace key; first trust via Web PKI or enterprise pin; namespace key changes require a valid rotation chain; monotonic `sequence`, immutable `provider.id`, retired Realms rejected; Profiles do not expire and clients refresh them periodically; a Profile that cannot be fetched, fails verification or is retired must not cause a fallback to the default provider in the authority descriptor |
 | Client disguised as official Actro Front | Service Default not trusting client to achieve; controlled scenes are tested separately platform/runtime attestation |
 | Malicious. Actor "Don't leak" self-report. | The person assessed cannot sign out for final `ActorAssurance`;a valid declaration by Host Close |
 | Service Concealing the support. Actor | No root map to find out; no green underage |
@@ -319,9 +322,10 @@ Secret classification:
 
 | Secret | Storage | Exposure range |
 |---|---|---|
-| Device key | OS secure storage | Identity Manager |
+| Device key (separate per Realm, derived from the device root key by Realm reference or generated independently) | OS secure storage | Identity Manager |
 | Service Actor key | OS secure storage | Service runtime bootstrap |
 | Realm refresh material | OS secure storage | Realm Manager |
+| Installation root key (derives the `installation-id`) | OS secure storage | Realm Manager |
 | signaling ticket | Memory | signaling clientOne time. |
 | TURN credential | Memory | ICE stackShort term |
 | Workspace credential | OS secure storage | Workspace broker |
@@ -375,7 +379,7 @@ Default does not contain:
 
 - Actro Host Security update can require restart Front;
 - package (a) Discontinuation of the hierarchy;
-- Realm key (a) The revocation immediately affects the new connection;
+- Revoking a Realm issuer key or namespace key immediately affects new connections;
 - Created session At the latest. credential/lease Term expires;
 - compromised Publisher key (a) A historical and credible version of the text, judged by the time of signature and the scope of revocation;
 - emergency blocklist (a) Signing, expiry and auditable;
@@ -394,6 +398,8 @@ Actro The user data flow depends on:
 
 Installation pages and security centres must be available“Where will the data go?”, instead of a general privacy switch.
 
+A Realm reference appears in shared URIs as part of the ActorId and reveals the Realm namespace and `local_name`. By default Actro generates a fully random `local_name` for each instance (containing no program name or user input); the human-readable name goes into `display_name` and never enters the ActorId. When the user explicitly chooses a readable `local_name`, the confirmation page and the pre-sharing UI should warn that it is exposed in links. A device uses a separate device key in each Realm and never reuses it across Realms, so different instances cannot correlate the same device by it. For self-service creation in a Provider-owned namespace the user signs in with a Provider account; the Provider can link the instances created by one account (it signs them anyway), but instance members never see the account.
+
 ## 17. Security development requirements
 
 - URI/package/manifest/ActorId parser fuzz;
@@ -401,7 +407,7 @@ Installation pages and security centres must be available“Where will the data 
 - WASM import validation;
 - archive extraction property tests;
 - session replay/lease tests;
-- Realm key rotation/rollback tests;
+- Namespace key rotation chain, Realm Profile `sequence` rollback and issuer key rotation tests;
 - signaling/TURN credential leakage tests;
 - capability policy differential tests;
 - More Tab Resource segregation failure injection;

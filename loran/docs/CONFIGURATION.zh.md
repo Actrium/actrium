@@ -1,6 +1,8 @@
 # Actrix Realm v1 配置
 
-本文描述单 Realm、单节点、SQLite profile。字段的可运行模板以
+本文描述当前实现的单 Realm、单节点、SQLite profile。目标契约下一个实例承载多个
+Realm，配置中与之相关的差异在对应小节标注，完整差异见
+[架构契约](REALM_V1_ARCHITECTURE.zh.md)第 9 节。字段的可运行模板以
 [`config.example.toml`](../config.example.toml)为准；配置结构使用
 `deny_unknown_fields`，旧字段或拼错字段会导致启动失败。
 
@@ -60,7 +62,8 @@ advertised_ip = "203.0.113.10"
 advertised_port = 3478
 ```
 
-HTTP 与 ICE 端口均可配置，并会精确出现在 Realm descriptor 中。防火墙必须放行
+HTTP 与 ICE 端口均可配置，并会精确出现在 Realm descriptor 中（目标契约：出现在
+待签 Realm Profile 的 provider 端点中）。防火墙必须放行
 HTTP/TCP、ICE/UDP 以及 TURN relay port range。`advertised_ip` 必须是客户端可达
 地址，不能用监听通配地址代替。
 
@@ -73,8 +76,12 @@ relay_port_range = "49152-65535"
 turn_secret = "<generate-with-openssl-rand-base64-48>"
 ```
 
-`turn_secret` 同时供 AIS 签发和 TURN 验证时效凭证，必须按 Realm/provider 独立、
-稳定保存。直接替换会使尚未过期的 TURN credential 失效，因此轮换必须作为显式
+`[turn].realm` 是 TURN 长期凭据算法中的认证域字符串（TURN REALM），与 Actr Realm
+不是一回事，不随 Actr Realm 数量变化。
+
+`turn_secret` 同时供 AIS 签发和 TURN 验证时效凭证，必须按 provider 独立、稳定保存。
+目标契约下它作为 provider 主密钥，每个 Actr Realm 的 TURN secret 由它按 Realm 引用
+与 provider ID 经 HKDF 派生，不在配置中逐个声明。直接替换会使尚未过期的 TURN credential 失效，因此轮换必须作为显式
 维护操作。relay range 不得包含特权端口，起始值不得大于结束值。
 
 ## Signer
@@ -149,8 +156,9 @@ session_expiry_secs = 86400
 enabled = false
 ```
 
-Admin UI 密码只接受 Argon2id PHC hash，明文密码字段不存在。v1 推荐只启用 Admin
-UI，由系统管理员 provision 唯一 Realm。`grpc_api` 是 supervisor 集成接口；启用后
+Admin UI 密码只接受 Argon2id PHC hash，明文密码字段不存在。当前实现推荐只启用 Admin
+UI，由系统管理员 provision 唯一 Realm；目标契约下 Realm 由命名空间 key 签名的请求
+创建，Admin UI 用于实例运营。`grpc_api` 是 supervisor 集成接口；启用后
 需要独立的 hex shared secret，并会改变 Realm 写入归属，不属于首版默认部署。
 
 ## Recording 与监控
@@ -164,8 +172,16 @@ operations 分成独立 channel。secret、credential、Authorization、WebSocke
 
 ## Realm provision 与数据
 
-Realm 不在 TOML 中声明。空 schema 启动后，由系统管理员通过受保护管理面创建唯一
-Realm。数据库唯一约束阻止第二个 Realm；运行时不提供硬删除/替换。
+Realm 不在 TOML 中声明。
+
+当前实现：空 schema 启动后，由系统管理员通过受保护管理面创建唯一 Realm。数据库
+唯一约束阻止第二个 Realm；运行时不提供硬删除/替换。
+
+目标契约：一个实例承载多个 Realm，默认不限制数量；需要独占部署时可配置
+`max_realms = 1`（该字段尚未实现）。Realm 经命名空间 key 签名的创建请求与 Profile
+验证后激活，收到 retired Profile 时退役并写入 tombstone。provider ID（provider 的规范化
+DNS authority，取代当前常量 `actrix-official`）、按命名空间与按 Realm 的配额同样属于
+待实现配置。
 
 旧 SQLite 必须停机后运行：
 

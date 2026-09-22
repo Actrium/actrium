@@ -112,7 +112,7 @@ stateDiagram-v2
 - permission grant；
 - Service Inventory record。
 
-任何失败都补偿未提交资源；已经成功签发 ActorId 后不能假装“完全回滚”，必须保留恢复记录或 tombstone，且不能重新使用该身份。
+任何失败都补偿未提交资源；已经成功签发 ActorId 后不能假装「完全回滚」，必须保留恢复记录或 tombstone，且不能重新使用该身份。
 
 ### 4.2 Running
 
@@ -127,7 +127,7 @@ stateDiagram-v2
 - ActorId 仍属于该 Service；
 - identity/key、Workspace binding 和 store 保留；
 - signaling presence offline；
-- 本地 Service Manager 知道它已停止，因此本机 Attach 可以返回“已停止/可启动”；
+- 本地 Service Manager 知道它已停止，因此本机 Attach 可以返回「已停止/可启动」；
 - 远端只有在宿主控制面提供签名状态时才能报告 stopped；否则观察者只能得到 offline/unreachable；
 - Actor 自身停止后不能响应请求，启动操作由宿主控制面执行；
 - 用户具备宿主管理 capability 时可以在宿主设备启动。
@@ -183,7 +183,8 @@ CreationIntent
 ├── creation_intent_id
 ├── source_uri
 ├── program_release + digest
-├── realm
+├── realm_namespace
+├── realm_local_name
 ├── workspace_selection
 ├── requested_permissions
 ├── stage
@@ -260,7 +261,7 @@ program_release
 
 service
   actor_id, actor_id_hash, publisher, program, version, digest,
-  realm_domain, realm_id, workspace_id, runtime_location,
+  realm_namespace, realm_local_name, workspace_id, runtime_location,
   lifecycle_state, desired_state, reachability, health,
   attachment_state, placement, created_at, last_opened_at
 
@@ -290,11 +291,17 @@ privacy_aggregate
 creation_intent
   intent_id, uri, stage, result_actor_id, timestamps
 
+realm_namespace
+  namespace, namespace_keys, namespace_sequence, authority_descriptor_digest
+
 realm
-  domain, realm_id, profile_digest, issuer_keys, membership_ref
+  namespace, local_name, profile_digest, profile_sequence, provider_id,
+  issuer_keys, membership_ref, device_key_ref
 ```
 
 Service 表以完整 ActorId 为业务主键；`actor_id_hash` 只用于索引和目录。
+
+`realm_namespace` 记录每个已信任的 Realm 命名空间（DNS 命名空间即 authority，`https://<domain>/.well-known/actr` 中的 `realm_namespace` 成员，已在 Actr Authority Discovery §4.4 定义）（`namespace_keys` 为曾接受并固定的命名空间 key，`namespace_sequence` 为已接受的 `sequence`），随 Profile 一同刷新，以便被移除的 key 使其签过的 Profile 失效；`realm` 记录每个实例 Realm，`profile_sequence` 与 `provider_id` 用于拒绝回滚或 `provider.id` 改变的 Profile（本机 Realm 无 Profile，两者为空），`device_key_ref` 指向该 Realm 独立的设备 key（不跨 Realm 复用）。两者都不使用数值 realm_id，它只是 provider 内部句柄。
 
 `ApplicationAssurance` 是当前切面的派生结论，不是 Service 的永久属性。缓存过期、Tab 重建、状态或图变化后必须重算；展示还须 `Ready`。原始 attestation token 和完整远端拓扑优先保存在短期加密缓存或内存中，不能因便于 UI 展示而长期明文落库。
 
@@ -327,7 +334,7 @@ Service 表以完整 ActorId 为业务主键；`actor_id_hash` 只用于索引�
 - 本地绝对路径；
 - 未保护的 Provider token。
 
-如果 Service 只存在于一台设备，其他设备的 Inventory 记录显示“远端/宿主设备离线”，而不是尝试本地复制身份。
+如果 Service 只存在于一台设备，其他设备的 Inventory 记录显示「远端/宿主设备离线」，而不是尝试本地复制身份。
 
 ## 9. Workspace 锁与租约
 
@@ -398,7 +405,7 @@ v1 不原地修改 `ActorId.type.version` 所对应的 workload。
 ```text
 Old Service ActorId + v1 Workspace
   → quiesce + snapshot
-  → New Service ActorId + v2 workload
+  → New Service ActorId + v2 workload（同一 Realm）
   → import/migrate
   → Workspace lease handoff
   → user verification
@@ -413,11 +420,13 @@ Old Service ActorId + v1 Workspace
 - 新旧 contract 可以并存；
 - URI 不会声称旧 ActorId 已变成新类型。
 
-缺点是 ActorId 变化；Actro 可以更新本地收藏和当前 Tab。本地已保存迁移记录时，旧链接可以提示“实例已迁移”；其他设备只能看到旧实例 offline/archived，除非旧 Service 在回滚期继续提供签名迁移提示。Realm 级 alias/redirect 是后续能力，不在 v1 静默实现。
+新 Service Actor 创建在原实例的同一 Realm 内：实例没有变，Realm 成员与 ACL 延续，只有 ActorId 按上述规则变化。
+
+缺点是 ActorId 变化；Actro 可以更新本地收藏和当前 Tab。本地已保存迁移记录时，旧链接可以提示「实例已迁移」；其他设备只能看到旧实例 offline/archived，除非旧 Service 在回滚期继续提供签名迁移提示。Realm 级 alias/redirect 是后续能力，不在 v1 静默实现。
 
 ## 12. Service 迁移设备
 
-同 Realm、同 Program Release 的主机迁移可以保留 ActorId：
+同 Realm、同 Program Release 的主机迁移可以保留 ActorId。Realm 与 Provider 永久绑定；换运营方即在新 Provider 上新建实例，按本节规则迁移。迁移到另一个 Realm（包括 local 命名空间迁到 DNS 命名空间）必须产生新 ActorId。
 
 1. 获取 migration lease；
 2. 停止旧宿主新请求；
@@ -451,10 +460,10 @@ Workspace 如果本来是旧设备本地目录，必须单独迁移或保持远�
 
 - 前台 Service/通知可扩展可用时间，但必须符合平台政策；
 - Doze、后台限制和厂商策略会影响在线性；
-- 用户可选择“仅使用时运行”；
+- 用户可选择「仅使用时运行」；
 - 不以系统限制失败为 Actor 不存在。
 
-产品 UI 必须区分“Stopped”“Suspended”“Host offline”和“Actor not found”。
+产品 UI 必须区分「Stopped」「Suspended」「Host offline」和「Actor not found」。
 
 ## 14. 删除与可恢复性
 

@@ -14,13 +14,14 @@ flowchart LR
     S -->|Organization| A["Auxiliary Actors"]
     S -->|belong to| R["Realm"]
     F -->|belong to| R
+    R -->|named in| NS["Realm namespace<br/>dns:domain / local:installation"]
     F -.Privacy Convergence.-> PRIV["Application Privacy Closure"]
     PRIV -.Overwrite.-> S
     PRIV -.Overwrite.-> A
     PRIV -.Overwrite.-> WS
 ```
 
-## 2. Six core objects
+## 2. Seven core objects
 
 ### 2.1 Program
 
@@ -114,6 +115,22 @@ WorkspaceBinding
 
 `credential_ref` Point to system secure storage. Not allowed to be present. URL, general database or Guest launch context Medium.
 
+### 2.7 Realm
+
+The trust and governance domain of one application instance. When a Create Intent creates a Primary Service instance, it also creates a new Realm in the selected Realm namespace; the instance's Primary Service, the Auxiliary Actors it orchestrates, and the Fronts attached to it all belong to that Realm. A Realm does not follow the Program, and it is not an organization-level membership domain.
+
+```text
+Realm reference = <local_name>~dns:<domain>            # networked
+                | <local_name>~local:<installation-id>  # local
+```
+
+- Realm namespace: `dns:<domain>` belongs to the domain owner; `local:<installation-id>` belongs to that Actro installation. The domain is used only as a naturally unique, ownership-verifiable namespace and hosts no infrastructure;
+- The namespace key is the long-term trust root for every Realm in the namespace and signs each Realm Profile;
+- `local_name` is unique within the namespace, immutable after creation, and never reused after retirement;
+- One Provider (signaling, TURN, issuer) hosts many Realms; a Realm is bound to one Provider when it is created and can never switch.
+
+A Publisher domain names a program (who published it); a Realm namespace names a deployment (who operates it). The same Program Release can run in `notes~dns:acme.com` and in `notes~dns:foo.org`.
+
 ## 3. “Tab–Service 1:1”Accurate definition of
 
 ### 3.1 Product is not variable
@@ -191,8 +208,8 @@ Actr Current manufacturer/name Shorter share. `Name` Containment. Target design 
 
 Service ActorId It is essential to meet:
 
-- `Realm authority + realm_id + serial + ActrType` The overall picture is distinguishable;
-- Carrying a verifiable, decipherable. Realm authority;
+- `Realm reference (namespace + local_name) + serial + ActrType` is globally distinguishable as a whole;
+- It carries a verifiable, resolvable Realm reference;
 - Yes. Realm (a) Permanent and sole;
 - Realm We must not use them. ID (b) To allocate another example;
 - On the basis of normal renewal,hard re-auth, the change of letters, the re-launching of processes and the relocation of operational positions remain the same;
@@ -206,13 +223,14 @@ Current Actr It's... legacy The text is in the form of:
 <serial_hex>@<realm_id>/<publisher>:<program>:<version>
 ```
 
-It's missing. Realm authority.v1 It has to be expanded. ActorId Data models and standards formatter♪ And make DNS Realm From ActorId (a) Self-determine; for example:
+It only carries a numeric `realm_id` and lacks a resolvable Realm reference. v1 must extend the ActorId data model and standard formatter so the Realm can be resolved from the ActorId itself:
 
 ```text
-<serial_hex>@<realm_id>~dns:<realm-domain>/<publisher>:<program>:<version>
+<serial_hex>@<local_name>~dns:<domain>/<publisher>:<program>:<version>
+e.g. 2af01@notes~dns:acme.com/notes.example:team-notes:1.4.2
 ```
 
-Local Realm Use `local:<installation-id>` authorityFinally. wire/text Encoding by Actr ADR Freezing, but not returning.“Just one. realm_idFuck! Actro Private guess. Realm”Semantics.
+A local Realm uses the `local:<installation-id>` namespace, e.g. `2af01@h3x8p2wq~local:<installation-id>/...`. The numeric `realm_id` is only a Provider-internal handle and never appears in the ActorId. The final wire/text encoding is frozen by an Actr ADR, but it must not fall back to "give only a realm_id and let Actro privately guess the Realm"; importing a legacy ActorId must explicitly supply the Realm reference and rewrite it.
 
 At the same time, the semantics of its life cycle must be derived from“Current registration address”Upgrade to“Durable logic of renewable rent Actor Identity”.
 
@@ -248,7 +266,8 @@ Actro Local databases can have pure storage. `record_id`But it's not a network i
 | Workspace Tie | Service Actor | Front No re-tabling. |
 | Program Release metadata | Program Catalog | Here. coordinate + digest As Primary Key |
 | Actor Long-term private key | Secure Storage | Not normal SQLite |
-| Realm membership credential | Secure Storage | Short-term, renewable, revocable |
+| Realm namespace trust (namespace key pin) | Actro Realm Manager | Pinned after first confirmation; updated only via a signed rotation chain |
+| Realm membership credential | Secure Storage | Issued per Realm (i.e. per instance); short-term, renewable, revocable |
 | Permissions granted | Actro Permission Store | Tie publisher/program/major/digest/Workspace Scope |
 | ActorAssurance | Authenticator (%1)issuer ≠ subject) | For accuracy `ActorStateId` Nodal conclusion |
 | ApplicationAssurance | Applied assessor | Consemination conclusions of current no root map cut-off; presentation required Ready |
@@ -261,16 +280,20 @@ The three acts must be separated:
 
 None `service` It's... URI Yes. Create Intent.Actro:
 
-1. Parsing and Validating Program Release;
-2. Selection Realm with Workspace;
-3. Create a new local Service Actor;
-4. Get a hold of it. ActorId;
+1. Parse and validate the Program Release;
+2. Select a Realm namespace (default: the local `local` namespace), generate a random `local_name` (the user may explicitly choose a readable one) and select a Workspace;
+3. Create a new Realm in that namespace: in the `local` namespace Actro only creates a local record, with no Profile and no signed request; in a DNS namespace Actro obtains the Realm's Profile and membership, and the creation request and Profile must be signed by the namespace key: the Provider for a Provider-owned namespace (the user authenticates to it with their account at that Provider), and for an organization namespace the organization's namespace signing tool/service, which countersigns after authenticating the member under the organization's own policy;
+4. Create a new Service Actor in that Realm and obtain its durable ActorId;
 5. Use the... ID Create Front Sessions;
 6. In-place Rewrite URI.
 
+Steps 3–4 form one transaction keyed by `idempotency_key` and run strictly in order: obtain namespace authorization → the Provider creates a pending Realm → sign the Profile and submit it with `activate_realm` → the Realm becomes active → create the Service Actor and obtain its ActorId. If any step fails, no Service Actor is created; the Provider cleans up expired pending Realms automatically; the random `local_name` is generated once in the Creation Intent and reused on retries with the same `idempotency_key`; the Provider treats `(namespace, local_name, requester)` as the idempotency key and continues the same pending Realm instead of creating another, returning a conflict for a different requester using the same name or for an existing active Realm or tombstone (the signed request's nonce only prevents byte-for-byte replay). In the `local` namespace only the local record and the Service Actor are created.
+
+Create never places a new instance into an existing Realm. When a Service upgrades to a new Program Release, the new Service Actor is created in the same Realm as the original instance; members and ACL carry over, and the ActorId changes according to the migration rules.
+
 ### 6.2 Type found
 
-Press `ActrType` It is not used to replace a user that has already been designated Workspace-bound Service.
+Discovery by `ActrType` suits auxiliary services or management operations within the instance, scoped to this Realm (the instance's own Actors); v1 has no cross-Realm discovery. It is not used to replace a Workspace-bound Service the user has already designated.
 
 ### 6.3 Exact Connection
 
@@ -280,7 +303,7 @@ Yes. `service` It's... URI We have to go. `Dest::Peer(ActorId)`:
 - No candidate of the same type;
 - Not because offline The project will be a new one.
 - Program/Version Reject when matching;
-- Realm Request import or trust if not configured Realm Profile.
+- If the ActorId's namespace is not yet trusted, ask the user to confirm trust in that namespace; if the user has not joined the Realm, go through the invitation/join flow.
 
 ## 7. Primary Service Interface
 
@@ -301,7 +324,7 @@ Guest Not directly obtained:
 - Service credential;
 - Any socket.
 
-If the program needs more backstages, Actor, Primary Service Discovery, creation and organization within the limits of their competence.
+If the program needs multiple background Actors, the Primary Service discovers, creates and orchestrates them within its own permission boundary; these Actors belong to the same Realm. Cross-instance (cross-Realm) calls are handled by the Service backend, which obtains a client identity in the target Realm according to that Realm's join policy.
 
 ## 8. System Program
 

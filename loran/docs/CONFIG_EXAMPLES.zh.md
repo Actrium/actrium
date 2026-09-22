@@ -1,7 +1,9 @@
 # Actrix Realm v1 配置示例
 
-v1 只推荐一种生产拓扑：单 Realm、单节点、SQLite、官方 provider、all-in-one。
-本文不提供多 Realm、集群、跨区域或 federation 示例，因为实现不承诺这些能力。
+v1 只推荐一种生产拓扑：单节点、SQLite、官方 provider、all-in-one。目标契约下这个
+单节点作为共享 provider 承载多个 Realm，无需为每个 Realm 另起实例；当前实现仍只
+允许一个 Realm（见[架构契约](REALM_V1_ARCHITECTURE.zh.md)第 9 节）。本文不提供集群、
+跨区域或 federation 示例，因为实现不承诺这些能力。
 
 ## 安全单节点生产版
 
@@ -85,8 +87,12 @@ ACTRIX_SIGNER_KEK="<64-hex-or-44-base64>" \
   actrix test /etc/actrix/config.toml
 ```
 
-验证通过后再由 service manager/systemd 注入同一环境变量并启动。首次启动后，管理员
-在 Admin UI 中创建唯一 Realm；在此之前 descriptor 返回 503 是正确行为。
+验证通过后再由 service manager/systemd 注入同一环境变量并启动。首次启动后：
+
+- 当前实现：管理员在 Admin UI 中创建唯一 Realm；在此之前 descriptor 返回 503 是
+  正确行为。
+- 目标契约：Realm 由命名空间 key 签名的创建请求建立，Profile 验证通过后激活；
+  实例本身不需要预先 provision 任何 Realm。
 
 ## 本地开发
 
@@ -163,5 +169,5 @@ client_cert = "/etc/actrix/pki/ais.pem"
 client_key = "/etc/actrix/pki/ais-key.pem"
 ```
 
-这只是逻辑平面的物理隔离，不会把一个实例变成多 Realm 或 HA。首版若无该隔离需求，
+这只是逻辑平面的物理隔离，不改变实例承载的 Realm 数量，也不提供 HA。首版若无该隔离需求，
 all-in-one 更简单，也更容易正确运维。

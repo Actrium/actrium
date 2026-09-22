@@ -30,33 +30,37 @@ Actro 不维护另一套全局 Publisher ID 注册中心。
 
 ### 2.2 Publisher Profile
 
-固定入口：
+Publisher 域名同时是一个 Actr authority。Publisher Profile 作为 authority descriptor 的可选成员 `publisher` 发布在该域名唯一的 bootstrap 资源中：
 
 ```text
-GET https://<publisher>/.well-known/actrium-publisher.json
+GET https://<publisher>/.well-known/actr
 ```
 
-这是由 Publisher 身份域名直接导出的 bootstrap URL，必须使用标准 HTTPS 443，不能从 `actr://` 中另带端口。Profile 验证成功后，它声明的 `programResolver`、CDN 和其他服务 endpoint 可以使用显式端口。
+`publisher` 成员已在 Actr Authority Discovery §4.5 定义；按 authority-discovery 的规定，`/.well-known/actr` 之下不定义子路径，因此 Publisher 不另设 well-known 文件。同一份 descriptor 还可以承载 `realm_namespace`（若该域名也是 Realm 命名空间）与 `services`（如 `packages`）。
 
-bootstrap 不跟随跨 Origin redirect；需要迁移入口时，旧 Profile 应签名委派新的 resolver 或 root rotation。
+bootstrap URL 由 Publisher 身份域名直接导出，必须使用标准 HTTPS 443，不能从 `actr://` 中另带端口。Profile 验证成功后，它声明的 `program_resolver`、CDN 和其他服务 endpoint 可以使用显式端口。
 
-至少包含：
+获取 descriptor 时遵循 authority-discovery 的 redirect 规则：最多 5 次、每跳必须 HTTPS，redirect 目标不成为新的 authority，仍须用原 Publisher 域名验证 `authority` 绑定。`publisher` 成员的有效性只取决于其自身签名与固定的 root/key history，不取决于从哪个 origin 取得；需要迁移 resolver 时，由旧 Profile 签名委派新的 resolver 或通过 root rotation 完成。
 
-- schema version；
-- 规范化 Publisher 域名；
+`publisher` 成员字段使用 snake_case，至少包含：
+
+- `schema`：`actr.publisher/v1`；
+- `domain`：规范化 Publisher 域名，必须与 descriptor `authority` 的主机名一致；
 - 当前和历史 Profile continuity keys；
 - 当前和历史 package signing keys；
 - key id、算法、有效期与撤销状态；
-- Program resolver base；
+- `program_resolver`：必填的 Program resolver 基址，没有默认值；
 - 安全联系地址；
 - 可选 Marketplace/透明日志声明。
 
 第一次获取时，信任来自 URL hostname 的 Web PKI，或来自企业预置的 Publisher root pin；Profile 内携带的 root 不能循环地自证可信。接受首个 Profile 后，Actro 固定 root/key history，后续 Profile 必须：
 
-- 按 RFC 8785 JCS 规范化签名 payload，再验证 detached Ed25519 签名；
+- 按 RFC 8785 JCS 规范化签名 payload（`publisher` 成员去掉其 `signature` 字段），再验证 detached Ed25519 签名；
 - 携带单调递增的 `sequence`、签发时间和到期时间；
 - 通过旧 root 签名的轮换链引入新 root；
 - 拒绝回滚、过期和未授权换根。
+
+descriptor 中 `publisher` 以外的部分不签名，不参与 Publisher 信任判断。
 
 offline root 是强烈推荐的 Publisher 运维方式，但是否要求硬件/离线保存可由 Marketplace 或企业策略提高；wire protocol 必须支持它。
 
@@ -72,13 +76,13 @@ offline root 是强烈推荐的 Publisher 运维方式，但是否要求硬件/�
 
 ## 3. Coordinate 到 package 的确定性解析
 
-Profile 的 `programResolver` 决定解析基址。未显式声明时，默认值为：
+Profile 的 `program_resolver`（必填）决定解析基址，release 描述位于：
 
 ```text
-https://<publisher>/.well-known/actrium/v1/programs/<program>/<version>/release.json
+<program_resolver><program>/<version>/release.json
 ```
 
-默认地址仍使用标准 HTTPS 443；经过已验证 Profile 委派的 resolver 可以位于其他 HTTPS Origin，也可以使用非标准端口。
+例如 `https://notes.example/actrium/programs/team-notes/1.4.2/release.json`。resolver 可以是任意 HTTPS Origin 与路径，也可以使用非标准端口；它由已验证的 Profile 声明，不使用任何 well-known 默认路径。
 
 `release.json` 是小型、可缓存的发布描述，至少包含：
 
@@ -202,7 +206,7 @@ v1 Marketplace 仍只开放 WASM Service。Native Capsule 是桌面优先的后�
 
 ### 5.3 UI-only 程序
 
-v1 不引入“没有 Service 的页面应用”特例。工具链为 UI-only 程序生成一个平台定义的最小 WASM Service Component：
+v1 不引入「没有 Service 的页面应用」特例。工具链为 UI-only 程序生成一个平台定义的最小 WASM Service Component：
 
 - 它仍有与 Program Release 相同的 ActrType 和独立 ActorId；
 - 默认没有 Workspace 和外部网络能力；
@@ -270,7 +274,7 @@ data_classes = ["private"]
 
 ## 7. 权限、组件和配额声明
 
-包声明的是“申请”，不是实际授权：
+包声明的是「申请」，不是实际授权：
 
 ```text
 effective capabilities =
@@ -357,7 +361,7 @@ Actro 本地以以下联合键保存：
 
 - 第一次接受后固定 digest；
 - 后续同 coordinate 不同 digest = `PACKAGE_EQUIVOCATION`；
-- 不能用“Publisher 更新了文件”覆盖缓存；
+- 不能用「Publisher 更新了文件」覆盖缓存；
 - 更新必须使用新 SemVer；
 - Service 实例固定其 package digest；
 - 缓存清理不能删除仍被 Service 引用的 digest；
@@ -402,7 +406,7 @@ Marketplace 不可以：
 - 为第三方抢注其域名命名空间；
 - 静默替换 Publisher package；
 - 用市场登录身份替代 Publisher 域名；
-- 因“已审核”绕过 Actro 权限；
+- 因「已审核」绕过 Actro 权限；
 - 把下架与 Service/Workspace 自动删除等同。
 
 ## 12. 撤销政策

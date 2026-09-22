@@ -15,7 +15,7 @@ Actro Shell
 
 ### 1.1 Program Catalog
 
-回答“我可以运行什么”：
+回答「我可以运行什么」：
 
 - 已安装程序；
 - Marketplace 收藏或推荐；
@@ -25,13 +25,13 @@ Actro Shell
 
 ### 1.2 Service Inventory
 
-回答“我已经创建了什么”：
+回答「我已经创建了什么」：
 
 - Service ActorId；
 - 程序和精确版本；
 - Workspace 显示名；
 - Local/Remote 运行位置；
-- Realm；
+- Realm 引用（命名空间 + local_name）；
 - 生命周期、可达性、健康度和会话占用四组独立状态；
 - 最近打开时间和当前 Tab；
 - 启动、停止、打开、导出链接、迁移、归档、移入回收站和彻底清除等操作。
@@ -46,7 +46,7 @@ Program 与 Service 必须在 UI 和数据模型中分开。安装一个程序�
 |---|---|---|
 | `publisher/program@version` | URI 主体 | 我正在运行谁发布的哪个版本？ |
 | `service=<ActorId>` | URI 查询参数 | 我是在创建，还是连接哪个现有实例？ |
-| Realm authority | Service ActorId；Create 时可选 `realm` 参数 | 这个 Actor 在哪个信任/网络域里？ |
+| Realm 引用 | Service ActorId；Create 时可选 `namespace` 参数选择新 Realm 的命名空间 | 这个实例属于哪个 Realm，由谁的命名空间签发？ |
 
 ### 2.1 安全指示
 
@@ -55,18 +55,18 @@ Program 与 Service 必须在 UI 和数据模型中分开。安装一个程序�
 - 当前应用保障：绿 / 黄 / 红，或正在重新验证；
 - Publisher 域名及 verified/development/revoked 状态；
 - 当前 package digest 的短指纹；
-- Realm 名称；
+- Realm 引用及其命名空间；命名空间 key 由 Provider 托管时如实标明；
 - Service 连接状态：local、P2P、TURN relayed、offline；
 - 当前权限是否有高风险授权。
 
-不得只用一个含义模糊的“锁”图标把 TLS、包安全、Actor 身份和权限混在一起。
+不得只用一个含义模糊的「锁」图标把 TLS、包安全、Actor 身份和权限混在一起。
 
 只有 `Ready` 且应用结论为 `CONTROLLED` 才能显示绿色。黄不等于已知泄露，但同样不能显示绿色。挂起或切面过期时显示「正在重新验证 / 通信已阻断」。点击必须能看到当前策略、Actor 数、workload 种类、声明出口、最弱项、所信验证者和结论有效期。
 
 ### 2.2 创建与连接的可见差异
 
-- 无 `service`：显示“将创建新实例”。
-- 有 `service`：显示实例名或 ActorId 短指纹，提示“连接现有实例”。
+- 无 `service`：显示「将创建新实例」，同时显示新 Realm 将建立在哪个命名空间下。
+- 有 `service`：显示实例名或 ActorId 短指纹，提示「连接现有实例」。
 - 创建完成后地址栏必须立即变成带 `service` 的规范化 URI。
 - 连接失败时地址栏保持原 URI，不自动删除 `service`。
 
@@ -75,13 +75,13 @@ Program 与 Service 必须在 UI 和数据模型中分开。安装一个程序�
 Actro 首次启动完成以下配置：
 
 1. 在 OS 安全存储中创建设备密钥；
-2. 建立带 `local:<installation-id>` authority 的本地 Realm；
-3. 设置默认新建位置为“本机”；
-4. 允许用户稍后加入组织 Realm；
+2. 建立 `local:<installation-id>` 本机 Realm 命名空间，`installation-id` 由安装根 key 派生；
+3. 设置默认新建位置为「本机」，即新实例的 Realm 建立在本机命名空间下；
+4. 允许用户稍后信任组织的 Realm 命名空间，或通过邀请加入其他实例的 Realm；
 5. 展示 Program Catalog 和 Service Inventory 的区别；
 6. 默认关闭匿名遥测和开发模式。
 
-本地 Realm 允许离线运行本机 Front 与 Service，但其 URI 只在该 Actro 安装内可解析。跨设备连接需要先把 Service 迁移到带 DNS authority 的联网 Realm。
+首次启动不创建任何 Realm；每个本机实例在创建时获得自己的本地 Realm。本地 Realm 允许离线运行本机 Front 与 Service，但其 URI 只在该 Actro 安装内可解析。跨设备连接需要先把 Service 迁移到 DNS 命名空间下的新 Realm，并获得新的 ActorId。
 
 ## 4. 安装程序
 
@@ -92,7 +92,7 @@ Actro 首次启动完成以下配置：
 3. Actro 从 Publisher HTTPS 入口解析并下载 `.actr`；
 4. 校验 HTTPS、Publisher key、包签名、digest、兼容性和压缩包限制；
 5. 记录 Program Release；
-6. 只缓存程序，不自动创建 Service，除非用户点击“创建实例”。
+6. 只缓存程序，不自动创建 Service，除非用户点击「创建实例」。
 
 Marketplace 返回的下载地址不是最终信任源；Actro 必须回到 Publisher 可信元数据或校验已固定的 Publisher 签名和 digest。
 
@@ -110,7 +110,7 @@ Marketplace 返回的下载地址不是最终信任源；Actro 必须回到 Publ
 本地 `.actr` 包：
 
 - 仍必须通过结构、hash 和签名检查；
-- 签名 key 不属于已验证域名时标记为“本地开发身份”；
+- 签名 key 不属于已验证域名时标记为「本地开发身份」；
 - 不得占用同名 verified Publisher 的可信记录；
 - 不自动同步到其他设备；
 - 运行时始终显示开发标记。
@@ -131,10 +131,13 @@ sequenceDiagram
     U->>A: 打开无 service 的 actr:// URI
     A->>P: 解析并验证 Program Release
     P-->>A: package digest + manifest
-    A->>U: 权限、Realm、Workspace 确认
+    A->>U: 权限、命名空间与 local_name、Workspace 确认
     U-->>A: 确认创建
-    A->>M: Create(idempotency_key, package, workspace, realm)
-    M->>S: 持久化身份并启动 Service
+    A->>M: Create(idempotency_key, package, workspace, namespace, local_name, display_name)
+    M->>M: 取得命名空间授权
+    M->>M: Provider 创建 pending Realm
+    M->>M: 签名 Profile 并提交激活，Realm 变为 active，取得 membership
+    M->>S: 在新 Realm 内持久化身份并启动 Service
     S-->>M: stable ActorId
     M-->>A: Service record + ActorId
     A->>A: replace URI with service=ActorId
@@ -145,7 +148,20 @@ sequenceDiagram
     A-->>U: 显示程序
 ```
 
-### 5.2 Workspace 选择
+### 5.2 命名空间与 local_name
+
+每个新实例都会新建一个 Realm，确认页显示：
+
+- 命名空间：默认本机 `local`；可选已信任的 DNS 命名空间（组织域名，或 Provider 自有命名空间）；
+- `local_name`：Actro 默认生成完全随机的短串（如 `k7m2q9xh`，base32 小写），不含程序名或用户输入；可读名称写入 `display_name` 显示给用户，只在本地和 Realm Profile 中出现，不进入 ActorId；用户也可以显式改用可读的 `local_name`（如 `notes`），确认页提示可读名会随分享链接暴露；
+- 使用 Provider 自有命名空间时，明确提示命名空间 key 由该 Provider 托管，信任根即该 Provider；用户需登录其在该 Provider 的账号（OAuth 2.0 + PKCE，首次登录后 Actro 保存会话），实例的管理权绑定该账号，换机或丢设备后重新登录即可恢复；
+- 选择组织命名空间时，由组织的命名空间签名服务按组织策略认证当前用户后代签创建请求与 Profile；确认页显示将由哪个组织授权，授权被拒或签名服务不可达时给出明确错误，不回落到其他命名空间。
+
+v1 中个人用户只能在本机 `local` 命名空间或 Provider 自有命名空间自助创建；在组织命名空间创建必须经组织签名服务授权。命名空间尚未受信时，必须在确认页完成首次信任。
+
+`local_name` 创建后不可修改；同一命名空间内已用过的名字不能再次使用。
+
+### 5.3 Workspace 选择
 
 Manifest 必须分别声明三个维度，不能把它们压进一个枚举：
 
@@ -153,7 +169,7 @@ Manifest 必须分别声明三个维度，不能把它们压进一个枚举：
 - provisioning：`managed` 或 `user-selected`；
 - access：`read-only` 或 `read-write`。
 
-它还可以限制允许的 Provider，例如 `managed-store`、`local-folder`、`cloud-drive` 或 `remote-repository`。`managed` 是配置方式，不是“是否需要 Workspace”；`read-only` 是访问模式，也不是生命周期模式。
+它还可以限制允许的 Provider，例如 `managed-store`、`local-folder`、`cloud-drive` 或 `remote-repository`。`managed` 是配置方式，不是「是否需要 Workspace」；`read-only` 是访问模式，也不是生命周期模式。
 
 选择器显示：
 
@@ -164,21 +180,28 @@ Manifest 必须分别声明三个维度，不能把它们压进一个枚举：
 - 备份和同步能力；
 - 删除 Service 时 Workspace 的处理方式。
 
-### 5.3 创建幂等
+### 5.4 创建幂等
 
 同一次导航事务必须携带本地 `creation_intent_id`：
 
 - UI 重绘、网络重试、回退再前进和包下载重试不能重复创建；
-- 创建成功但 Front 启动失败时，Service 仍进入 Inventory，页面提供“重试连接”；
+- 创建成功但 Front 启动失败时，Service 仍进入 Inventory，页面提供「重试连接」；
 - 用户再次显式打开同一个无 `service` URI，表示新的 Create Intent，需要再次确认；
 - 外部来源短时间批量触发创建必须受配额和速率限制。
+
+`idempotency_key` 由 `creation_intent_id` 派生。Create 事务按「命名空间授权 → pending Realm → 签名 Profile 并提交激活 → Realm active → 创建 Service Actor」顺序执行：
+
+- 在 Realm 变为 active 之前的任一步失败，都不创建 Service Actor，Inventory 中不出现半成品实例；页面说明失败在哪一步（授权被拒、Provider 不可达、Profile 发布失败），并提供重试；
+- 默认随机的 `local_name` 在创建 Creation Intent 时生成一次并随之持久化，重试不会重新生成；
+- 重试沿用同一 `creation_intent_id`，继续同一个 pending Realm 与同一 `local_name`，不重复创建；若 Realm 已激活但响应丢失，重试只返回其状态，管理 token 用 `reissue_admin_token` 取回（Provider 自有命名空间凭账号完成）；
+- 用户放弃后，pending Realm 由 Provider 过期自动清理。
 
 ## 6. 连接已有实例
 
 ### 6.1 主流程
 
 1. 解析 URI；
-2. 从 Service ActorId 解析 Realm authority；
+2. 从 Service ActorId 解析 Realm 引用，获取命名空间描述与 Realm Profile 并验证签名；
 3. 验证 ActorId 中的 `ActrType` 与 URI coordinate 完全一致；
 4. 确保精确 Program Release 已安装并匹配 digest；
 5. 连接指定 ActorId；
@@ -192,7 +215,7 @@ Manifest 必须分别声明三个维度，不能把它们压进一个枚举：
 如果已有活跃 Tab 连接同一 ActorId：
 
 - 默认聚焦已有 Tab；
-- 用户显式选择“在新 Tab 打开”时，v1 提示该实例为独占会话；
+- 用户显式选择「在新 Tab 打开」时，v1 提示该实例为独占会话；
 - 不创建第二个 Service；
 - 不以同类型 Service 替代。
 
@@ -202,7 +225,7 @@ Manifest 必须分别声明三个维度，不能把它们压进一个枚举：
 
 - 当前会话占用设备的可公开名称；
 - lease 预计到期时间；
-- “等待”“请求接管”“取消”操作；
+- 「等待」「请求接管」「取消」操作；
 - 接管必须由 Service policy 和当前用户权限决定。
 
 ## 7. Tab 行为
@@ -212,13 +235,13 @@ Actro UI 中有两类 Tab：
 - **Shell Navigation Tab**：安装、创建确认、错误详情、Program 和 Service 管理页面；它不代表应用运行，因此可以没有 Front Actor。
 - **Resident App Tab**：处于 loading、running 或 suspended 的应用页；任一时刻必须恰有一个 live Front Actor，并且 Front 完成 Attach 后恰有一个 Primary Service。
 
-内存压力下被淘汰的应用页进入 dormant 状态，此时可暂时没有 Front；重新激活时必须重建 Front 并 Attach 原 Service。产品文案所说的“每个 Tab 一个 Actor”特指 resident app Tab，而不是所有 Shell 页面或磁盘中的休眠记录。
+内存压力下被淘汰的应用页进入 dormant 状态，此时可暂时没有 Front；重新激活时必须重建 Front 并 Attach 原 Service。产品文案所说的「每个 Tab 一个 Actor」特指 resident app Tab，而不是所有 Shell 页面或磁盘中的休眠记录。
 
 ### 7.1 新建
 
 - 创建 URI：走 Create Intent。
 - 连接 URI：走 Attach Intent。
-- 从 Service Inventory 点“打开”：构造连接 URI。
+- 从 Service Inventory 点「打开」：构造连接 URI。
 
 ### 7.2 刷新
 
@@ -272,7 +295,7 @@ Actro 必须明确区分：
 - **程序模板收藏**：不含 `service`，每次打开都创建新实例。
 - **实例收藏**：含 `service`，回到同一 Service。
 
-UI 文案不得都叫“收藏页面”。
+UI 文案不得都叫「收藏页面」。
 
 ### 8.2 历史
 
@@ -285,12 +308,13 @@ UI 文案不得都叫“收藏页面”。
 
 分享实例 URI只分享地址，不自动授予访问权：
 
-- 接收者仍需属于 Realm；
+- 接收者仍需加入该实例的 Realm；
 - Service ACL 必须允许；
-- 邀请通过 Realm/Service 的独立授权流程完成；
-- bearer token 不进入 URI query 或 fragment。
+- 邀请通过该 Realm 与 Service 的独立授权流程完成；
+- bearer token 不进入 URI query 或 fragment；
+- 实例 URI 中的 ActorId 会暴露 Realm 命名空间与 `local_name`；分享私密实例前应提示这一点，若实例使用了可读 `local_name`，分享前应额外提示。
 
-Local Realm 实例没有 portable link。“复制链接”只能复制明确标记的本机链接；真正分享前必须迁移到联网 Realm，并获得新的 ActorId。
+本地 Realm 实例没有 portable link。「复制链接」只能复制明确标记的本机链接；真正分享前必须迁移到 DNS 命名空间下的新 Realm，并获得新的 ActorId。
 
 ## 9. Program Catalog 体验
 
@@ -305,9 +329,9 @@ Local Realm 实例没有 portable link。“复制链接”只能复制明确标
 - Workspace 模式；
 - 已创建实例数量；
 - 更新、撤销、兼容性状态；
-- “创建实例”“查看实例”“移除缓存”。
+- 「创建实例」「查看实例」「移除缓存」。
 
-“移除缓存”若仍有 Service 使用该 digest，应拒绝或保留运行所需副本。
+「移除缓存」若仍有 Service 使用该 digest，应拒绝或保留运行所需副本。
 
 Program Catalog 只能显示 Release assurance（签名、digest、撤销、审核），不能预先宣称某个未来运行实例或整张应用图为绿。
 
@@ -319,7 +343,7 @@ Program Catalog 只能显示 Release assurance（签名、digest、撤销、审�
 - ActorId 短指纹和复制入口；
 - Program Release；
 - Workspace；
-- Realm；
+- Realm 引用；
 - 本地/远端；
 - 运行状态；
 - 当前会话；
@@ -353,7 +377,10 @@ Service Inventory 可以显示最后一次观察到的应用结论与时间，�
 | Publisher untrusted | 域名或 key 未受信 | 查看证书/开发模式 |
 | Digest conflict | 同版本出现不同内容 | 阻止运行、查看安全报告 |
 | Package revoked | 版本被撤销 | 查看原因、隔离运行或删除 |
-| Realm unknown | 不知道如何验证/寻址 | 导入 Realm Profile |
+| Namespace untrusted | 实例所属命名空间尚未受信 | 查看命名空间与 key 指纹、确认信任 |
+| Namespace authorization failed | 组织签名服务拒绝授权或不可达，无法在该组织命名空间创建实例 | 联系组织管理员，或改在本机/Provider 命名空间创建 |
+| Realm not joined | 命名空间已信任，但尚未加入该实例的 Realm | 使用邀请加入或请求邀请 |
+| Realm retired | 该实例的 Realm 已退役 | 查看归档信息，不新建替代实例 |
 | Service offline | 精确实例不在线 | 重试、查看实例；仅本地已知 stopped 时提供启动 |
 | Permission denied | 找到了但无权 Attach | 请求授权 |
 | Session occupied | 独占 lease 被占用 | 等待或请求接管 |
@@ -366,7 +393,7 @@ Service Inventory 可以显示最后一次观察到的应用结论与时间，�
 | 保障为红 | 已确认未受控出口或 Retain | 阻止数据路径、查看最弱项 |
 | 图不完整 | 无法证明无根图完整发现 | 禁用受保护能力或迁移到受支持 Host |
 
-错误页不得用统一的“无法连接”隐藏安全差异。
+错误页不得用统一的「无法连接」隐藏安全差异。
 
 ## 12. 开发者体验
 
@@ -376,7 +403,7 @@ Service Inventory 可以显示最后一次观察到的应用结论与时间，�
 - 配置 `actr-dev://` HTTPS Origin；
 - 查看 manifest、digest、contract 与 capability；
 - 热更新 Guest，但每次变更使用新的开发 digest；
-- 启动本地 Realm/Service；
+- 启动本地 Realm 与 Service；
 - 检查 Front–Service RPC；
 - 查看 Keel render ops、CPU、heap、timer 和 capability 调用；
 - 模拟权限拒绝、离线、TURN、Service 崩溃和 Front 重建。
@@ -394,16 +421,17 @@ Service Inventory 可以显示最后一次观察到的应用结论与时间，�
 
 ## 14. Realm、设备与身份体验
 
-Actro 的身份页至少支持：
+Realm 对应单个实例，因此身份页按两层组织：信任的命名空间，以及已加入的 Realm（实例）。至少支持：
 
-- 加入 Realm：通过组织域名或一次性邀请完成登录、设备注册和 Profile 固定；
+- 信任命名空间：首次遇到某个 DNS 命名空间时，经 HTTPS 获取该域名的 authority descriptor（`https://<domain>/.well-known/actr`）中的命名空间描述，展示域名与命名空间 key 指纹，由用户或组织策略确认后固定；
+- 加入 Realm：通过一次性邀请加入某个实例的 Realm，完成登录、设备注册和 membership 获取；Actro 自动完成各 Realm 的设备注册，不要求用户逐个配置；设备在每个 Realm 使用独立的设备 key，不跨 Realm 复用，不同实例无法据此关联同一设备；
 - 重新认证：credential 到期或管理员要求时，暂停新的 Attach，保留本地数据并引导恢复；
 - 设备撤销：列出设备、最后活动时间和已托管 Service；撤销后使设备 credential 失效；
-- 离开 Realm：先说明受影响的 Service、Workspace 与分享关系，不静默迁到 Local Realm；
-- Realm key 变更：展示经过签名的轮换链；没有有效轮换链时按身份变化处理；
+- 离开 Realm：即失去对该实例的访问；先说明受影响的 Service、Workspace 与分享关系，不静默迁到本地 Realm；
+- 命名空间 key 变更：展示经过签名的轮换链；没有有效轮换链时按身份变化处理，重新确认信任；
 - 恢复：设备丢失后只恢复已加密备份或远端宿主中的数据，不承诺恢复从未备份的 Actor 私钥。
 
-加入 Realm 不等于获得所有 Service 的访问权；它只建立成员和设备身份，实际 Attach 仍由 Service ACL 决定。
+信任命名空间不等于加入其中任何 Realm；加入 Realm 也只建立成员和设备身份，实际 Attach 仍由 Service ACL 决定。命名空间级 SSO/目录属于后续能力，v1 不做。
 
 ## 15. 分享、邀请与 ACL
 
@@ -418,9 +446,9 @@ Service 的最小 ACL 角色为：
 分享流程：
 
 1. owner 选择成员/组织主体、角色和过期时间；
-2. Service 或 Realm issuer 生成一次性邀请；
+2. Service 或该实例的 Realm issuer 生成一次性邀请，邀请携带 Realm 引用，可内嵌 Realm Profile；
 3. 邀请通过独立安全通道传递，不写进 `actr://` URI；
-4. 接收者登录目标 Realm、接受邀请；
+4. 接收者信任该命名空间（如尚未信任）、加入该 Realm、接受邀请；
 5. Service ACL 记录主体和角色，邀请随即失效；
 6. owner 可以撤销 ACL；下一次调用必须失败，活跃会话按策略立即终止或降权。
 
@@ -430,7 +458,7 @@ Service 的最小 ACL 角色为：
 
 - 安装页只展示 package 请求的 capability，不授予运行权限；
 - 创建时授予 Service、Workspace 和长期后台能力，并写入持久 grant；
-- Front 的相机、麦克风、剪贴板等交互能力按首次使用即时请求，可选“仅本次会话”；
+- Front 的相机、麦克风、剪贴板等交互能力按首次使用即时请求，可选「仅本次会话」；
 - 管理员 policy 可以预先拒绝或约束 scope，但不能在 UI 中伪装成用户同意；
 - 撤销持久 grant 后，Host 必须立即失效相关 capability handle，并结束仍在使用它的调用；
 - 远端 Service 的宿主级权限由远端宿主管理；本地 Actro 只能显示经签名声明的结果，不能替用户修改另一台宿主的 OS 权限。
@@ -444,7 +472,7 @@ v1 的 Create Intent 只在当前 Actro 支持的本地 Service Host 上创建�
 - 从同一用户的加密 Inventory 同步实例地址；
 - 显式导入带签名的 Service 元数据。
 
-Actro 只有在远端宿主另行授予 management capability 时，才能远程启动、停止、迁移或清除 Service；否则只提供 Attach、请求授权和查看可验证状态。iOS/Android 上“长期在线”通常意味着连接桌面、服务器或其他远端宿主，不意味着移动端能任意创建云端进程。通用服务器宿主和云调度不属于 Actro v1 客户端范围。
+Actro 只有在远端宿主另行授予 management capability 时，才能远程启动、停止、迁移或清除 Service；否则只提供 Attach、请求授权和查看可验证状态。iOS/Android 上「长期在线」通常意味着连接桌面、服务器或其他远端宿主，不意味着移动端能任意创建云端进程。通用服务器宿主和云调度不属于 Actro v1 客户端范围。
 
 ## 18. Guest 导航语义
 

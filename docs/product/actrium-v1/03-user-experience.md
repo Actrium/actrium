@@ -31,7 +31,7 @@ Answer“What have I created?”:
 - (a) A precise version of the procedure and the procedure;
 - Workspace Display name;
 - Local/Remote (a) Run location;
-- Realm;
+- Realm reference (namespace + local_name);
 - (a) Life cycle, accessibility, health and session occupation of four sets of independence;
 - Recent Open Time and Current Tab;
 - Start, stop, open, export links, move, archive, move to the wastebin and clean up.
@@ -46,7 +46,7 @@ The address bar also expresses three questions:
 |---|---|---|
 | `publisher/program@version` | URI Subject | I'm running which version of who's issuing? |
 | `service=<ActorId>` | URI Query Parameters | Am I creating, or is there a connection to any existing example? |
-| Realm authority | Service ActorId;Create Optional `realm` Parameters | This. Actor In what trust?/In the domain? |
+| Realm reference | Service ActorId; on Create, the optional `namespace` parameter selects the namespace for the new Realm | Which Realm does this instance belong to, and whose namespace issued it? |
 
 ### 2.1 Security instructions
 
@@ -55,7 +55,7 @@ The security control on the left side of the address bar must show:
 - Current application security: green / Yellow / red, or re-validation;
 - Publisher Domain name and verified/development/revoked (a) Status;
 - Current package digest Short fingerprints;
-- Realm Name;
+- The Realm reference and its namespace; state plainly when the namespace key is custodied by a Provider;
 - Service Connection status:local, P2P, TURN relayed, offline;
 - Is there a high-risk mandate for the current mandate?
 
@@ -65,7 +65,7 @@ Just... `Ready` And apply the conclusion to `CONTROLLED` . Yellow does not equal
 
 ### 2.2 Create visible differences with connections
 
-- None `service`: Show“New instance will be created”.
+- None `service`: Show“New instance will be created”, together with the namespace in which the new Realm will be created.
 - Yes. `service`: Show example name or ActorId Short prints, tips.“Connect existing instance”.
 - The address bar must be immediately made a belt after the creation is completed `service` Regularization of the URI.
 - Keep address bar when connection failed URI,do not automatically delete `service`.
@@ -75,13 +75,13 @@ Just... `Ready` And apply the conclusion to `CONTROLLED` . Yellow does not equal
 Actro The following configurations were completed for the first start:
 
 1. Yes. OS Create a device key in a secure storage;
-2. Create a Belt `local:<installation-id>` authority Local Realm;
-3. Set the default new position to“This machine.”;
-4. Allow users to join the organization later Realm;
+2. Create the `local:<installation-id>` local Realm namespace, with the `installation-id` derived from the installation root key;
+3. Set the default new position to“This machine.”, i.e. new instances get their Realm in the local namespace;
+4. Allow users to later trust an organization's Realm namespace, or join other instances' Realms by invitation;
 5. Presentation Program Catalog and Service Inventory (b) Distinction;
 6. Default to close anonymous telemetry and development mode.
 
-Local Realm Allow offline running of the machine Front with ServiceBut it's... URI Just in there. Actro Installs a parseable device. Cross-device connection requires a first handing Service Move to Belt DNS authority Networking of the Internet Realm.
+First start creates no Realm; each local instance gets its own local Realm when it is created. A local Realm allows the local Front and Service to run offline, but its URI is only resolvable within that Actro installation. Cross-device connection requires first migrating the Service to a new Realm in a DNS namespace, which yields a new ActorId.
 
 ## 4. Installer
 
@@ -131,10 +131,13 @@ sequenceDiagram
     U->>A: Open None service It's... actr:// URI
     A->>P: Parsing and Validating Program Release
     P-->>A: package digest + manifest
-    A->>U: (a) Competence,Realm, Workspace Confirm.
+    A->>U: Confirm permissions, namespace and local_name, Workspace
     U-->>A: Confirm creation
-    A->>M: Create(idempotency_key, package, workspace, realm)
-    M->>S: Enduring identity and startup Service
+    A->>M: Create(idempotency_key, package, workspace, namespace, local_name, display_name)
+    M->>M: Obtain namespace authorization
+    M->>M: Provider creates a pending Realm
+    M->>M: Sign Profile and submit for activation, Realm becomes active, obtain membership
+    M->>S: Persist identity in the new Realm and start Service
     S-->>M: stable ActorId
     M-->>A: Service record + ActorId
     A->>A: replace URI with service=ActorId
@@ -145,7 +148,20 @@ sequenceDiagram
     A-->>U: Show Programs
 ```
 
-### 5.2 Workspace Selection
+### 5.2 Namespace and local_name
+
+Every new instance creates a new Realm. The confirmation page shows:
+
+- Namespace: the local `local` namespace by default; optionally a trusted DNS namespace (an organization domain, or a Provider-owned namespace);
+- `local_name`: by default Actro generates a fully random short string (e.g. `k7m2q9xh`, lowercase base32) that contains no program name or user input; the human-readable name goes into `display_name`, which is shown to users and appears only locally and in the Realm Profile, never in the ActorId; the user may explicitly choose a readable `local_name` instead (e.g. `notes`), and the confirmation page warns that a readable name is exposed in shared links;
+- When a Provider-owned namespace is used, state clearly that its namespace key is custodied by that Provider, which is therefore the trust root; the user signs in with their account at that Provider (OAuth 2.0 + PKCE; Actro keeps the session after the first sign-in), and the instance's admin rights are bound to that account, so signing in again restores them on a new or lost device;
+- When an organization namespace is selected, the organization's namespace signing service authenticates the current user under the organization's policy and countersigns the creation request and Profile; the confirmation page shows which organization will authorize, and a clear error is shown if authorization is refused or the signing service is unreachable, without falling back to another namespace.
+
+In v1, individual users can self-serve creation only in the local `local` namespace or a Provider-owned namespace; creation in an organization namespace must be authorized by the organization's signing service. If the namespace is not yet trusted, first-time trust must be completed on the confirmation page.
+
+`local_name` cannot be changed after creation, and a name already used in the same namespace cannot be used again.
+
+### 5.3 Workspace Selection
 
 Manifest Three dimensions must be declared separately and cannot be pressed into one enumerator:
 
@@ -164,7 +180,7 @@ Selector display:
 - Backup and synchronization capabilities;
 - Delete Service Time Workspace - The way it's handled.
 
-### 5.3 Create a Tile etc.
+### 5.4 Create a Tile etc.
 
 The same navigation service must carry local `creation_intent_id`:
 
@@ -173,12 +189,19 @@ The same navigation service must carry local `creation_intent_id`:
 - User again visible opens the same no-no `service` URI, new Create Intent, needs to be reconfirmed;
 - Short-term bulk triggers from external sources must be subject to quotas and speed limits.
 
+`idempotency_key` is derived from `creation_intent_id`. The Create transaction runs in the order "namespace authorization → pending Realm → sign the Profile and submit it for activation → Realm active → create Service Actor":
+
+- If any step fails before the Realm becomes active, no Service Actor is created and no half-built instance appears in the Inventory; the page states which step failed (authorization refused, Provider unreachable, Profile publication failed) and offers a retry;
+- The default random `local_name` is generated once when the Creation Intent is created and persisted with it, so a retry never generates a new one;
+- A retry reuses the same `creation_intent_id` and continues the same pending Realm and `local_name`, without creating another; if the Realm was activated but the response was lost, the retry returns only its state and the admin token is recovered with `reissue_admin_token` (by account in a Provider-owned namespace);
+- If the user gives up, the Provider cleans up the pending Realm automatically on expiry.
+
 ## 6. Connection already exists
 
 ### 6.1 Main Process
 
 1. Parsing URI;
-2. From Service ActorId Parsing Realm authority;
+2. Parse the Realm reference from the Service ActorId, fetch the namespace description and Realm Profile, and verify their signatures;
 3. Authentication ActorId Medium `ActrType` with URI coordinate (a) Full consistency;
 4. Ensure accuracy Program Release Installed and Matched digest;
 5. Connection Aspect ActorId;
@@ -285,12 +308,13 @@ UI It's not all about writing.“Collection Pages”.
 
 Share Examples URIShare addresses only, not automatically granted access:
 
-- The recipient still needs to be part of Realm;
+- The recipient still needs to join the instance's Realm;
 - Service ACL (b) Must allow;
-- Invited for adoption Realm/Service (a) The completion of the independent delegation process;
-- bearer token Do Not Enter URI query or fragment.
+- Invitations are completed through the independent authorization flow of that Realm and Service;
+- bearer token Do Not Enter URI query or fragment;
+- The ActorId in an instance URI reveals the Realm namespace and `local_name`; warn about this before sharing a private instance, with an additional warning when the instance uses a readable `local_name`.
 
-Local Realm No examples. portable link.“Copy Link”Only clearly marked links can be copied; migration to network must take place before genuine sharing Realm, and get new ActorId.
+Local Realm instances have no portable link.“Copy Link”Only clearly marked local links can be copied; before genuine sharing, the instance must migrate to a new Realm in a DNS namespace and get a new ActorId.
 
 ## 9. Program Catalog Experience
 
@@ -319,7 +343,7 @@ Each example shows that:
 - ActorId Short fingerprints and copying entrances;
 - Program Release;
 - Workspace;
-- Realm;
+- Realm reference;
 - Local/(a) Far end;
 - (a) State of operation;
 - Current session;
@@ -353,7 +377,10 @@ Error page must distinguish between:
 | Publisher untrusted | Domain name or key Untrusted | View Certificate/Development Mode |
 | Digest conflict | Different content for the same version | Stop running, view security reports |
 | Package revoked | Version revoked | View cause, separate or delete |
-| Realm unknown | I don't know how to verify it./Chile | Import Realm Profile |
+| Namespace untrusted | The instance's namespace is not yet trusted | View the namespace and key fingerprint, confirm trust |
+| Namespace authorization failed | The organization's signing service refused or is unreachable, so the instance cannot be created in that organization namespace | Contact the organization admin, or create in the local/Provider namespace |
+| Realm not joined | The namespace is trusted, but the user has not joined this instance's Realm | Join with an invitation or request one |
+| Realm retired | This instance's Realm has been retired | View archive information; do not create a replacement instance |
 | Service offline | Exact examples not available online | Retry, view examples; only locally known stopped , and then start it. |
 | Permission denied | I found it, but I didn't have the right. Attach | Request for authorization |
 | Session occupied | Monarchy lease Intended | Waiting for or requesting takeover |
@@ -376,7 +403,7 @@ Developer model provides:
 - Configure `actr-dev://` HTTPS Origin;
 - View manifest, digest, contract with capability;
 - Hot Update Guest, but new developments are used every time a change is made digest;
-- Start Local Realm/Service;
+- Start a local Realm and Service;
 - Inspection Front–Service RPC;
 - View Keel render ops, CPU, heap, timer and capability Call;
 - Simulation permission denied, offline,TURN, Service Crash and Front Rebuild.
@@ -394,16 +421,17 @@ Development mode does not change official URI and official Publisher Rule of tru
 
 ## 14. Realm, equipment and identity experience
 
-Actro The identity page supports at least:
+A Realm corresponds to a single instance, so the identity page is organized in two layers: trusted namespaces, and joined Realms (instances). Actro's identity page supports at least:
 
-- Add Realm: Login, equipment registration and registration through an organizational domain name or one-time invitation Profile (b) Fixed;
+- Trust a namespace: on first encountering a DNS namespace, fetch the namespace description from that domain's authority descriptor (`https://<domain>/.well-known/actr`) over HTTPS, show the domain and namespace key fingerprint, and pin it after confirmation by the user or organization policy;
+- Join a Realm: join an instance's Realm with a one-time invitation, completing login, device registration and membership; Actro performs device registration for each Realm automatically, without per-Realm user configuration; the device uses a separate device key in each Realm, never reused across Realms, so different instances cannot correlate the same device;
 - Re-accreditation:credential Pause new ones when due or when asked by the administrator Attach, preserve local data and guide recovery;
 - Equipment cancelled: equipment, final activity time and hosting Service;deactivation of equipment credential (a) Ineffectiveness;
-- Leave Realm: First state the impact Service, Workspace We're not moving in quietly. Local Realm;
-- Realm key Change: display of signed rotation chain; processing by identity change when no valid rotation chain exists;
+- Leave Realm: this means losing access to that instance; first state the affected Service, Workspace and sharing relationships, and never silently migrate to a local Realm;
+- Namespace key change: display the signed rotation chain; without a valid rotation chain, treat it as an identity change and re-confirm trust;
 - Restore: Only encrypted backup or remote host data will be restored after the equipment is lost, and no commitment to restore never-backed Actor Private key.
 
-Add Realm Not equal to all Service The right of access; it only establishes membership and equipment, and actual Attach Still by Service ACL Decision.
+Trusting a namespace does not join any Realm in it; joining a Realm only establishes member and device identity, and actual Attach is still decided by the Service ACL. Namespace-level SSO/directories are a later capability, not part of v1.
 
 ## 15. Share, invite and ACL
 
@@ -418,9 +446,9 @@ Service The smallest ACL The role is:
 Sharing process:
 
 1. owner Selection of members/(a) The subject, role and expiry of the organization;
-2. Service or Realm issuer (a) Generate a one-time invitation;
+2. The Service or the instance's Realm issuer generates a one-time invitation carrying the Realm reference, optionally embedding the Realm Profile;
 3. Invite for transmission via the independent safe passage, not written in `actr://` URI;
-4. Recipient login target Realmand accepted the invitation;
+4. The recipient trusts the namespace (if not yet trusted), joins the Realm and accepts the invitation;
 5. Service ACL Record the subject and role, and the invitation expires;
 6. owner It can be revoked. ACL; the next call must fail and active sessions are strategically terminated or reduced immediately.
 

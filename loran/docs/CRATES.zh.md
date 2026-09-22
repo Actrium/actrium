@@ -38,9 +38,11 @@ actrixd
 ### `platform`
 
 - SQLite `user_version` 必须等于 schema v1；
-- 数据库层强制每实例最多一个 Realm；
+- 当前实现：数据库层强制每实例最多一个 Realm。目标契约：移除单例约束，改为
+  `(namespace, local_name)` 唯一（含 tombstone），所有按 Realm 分区的状态以内部
+  `realm_id` 为外键；
 - credential validation 检查 protocol version、issuer、provider、audience、Realm、
-  Actor 和过期时间；
+  Actor 和过期时间；目标契约下 issuer 带 Realm 引用，且 Realm 必须为 `active`；
 - 配置未知字段和生产不安全值 fail closed。
 
 ### `ais`
@@ -49,7 +51,8 @@ actrixd
 - serial 由显式 worker ID 的 Snowflake 候选生成，并在 SQLite ledger 中永久预留；
 - package workload 必须有 Publisher/package proof，linked workload 必须有授权证明；
 - renewal 需要 possession proof，不能仅凭 Actor ID 续签；
-- Realm registration capability 不得下发给 Guest。
+- Realm registration capability 不得下发给 Guest；
+- 目标契约：serial ledger 按 Realm 分区，只为 `active` Realm 签发。
 
 ### `signer`
 

@@ -4,7 +4,7 @@
 
 总体为 **可行，但不是只改 Actro UI**。
 
-现有技术积累已经覆盖大部分“机制”：
+现有技术积累已经覆盖大部分「机制」：
 
 - Actr 有精确 `ActorId` 寻址；
 - Actr 有按 `ActrType` 发现；
@@ -18,7 +18,7 @@
 
 1. Service ActorId 的持久身份；
 2. Publisher domain 与 package key 的正式信任链；
-3. Realm Profile 与 Provider 委派；
+3. Realm 命名空间、按实例创建的 Realm Profile 与 Provider 委派；
 4. Program/Service/Workspace 分离；
 5. 固定 Front Native Host 和受控 Keel Guest；
 6. `actr://` 的创建/连接事务；
@@ -65,7 +65,7 @@ flowchart LR
 - `actr://` URI schema 与测试向量；
 - Publisher Profile/Release schema；
 - Actro manifest extension schema；
-- Realm Profile schema；
+- Realm 命名空间（authority descriptor 的 `realm_namespace` 成员与 core relation `realms`，已在 Actr Authority Discovery §4.3–4.4 定义）与 Realm Profile schema；
 - persistent Actor identity lifecycle ADR；
 - Front–Service session proto；
 - ActorAssurance / ApplicationAssurance / EncGraph schema；
@@ -80,23 +80,23 @@ flowchart LR
 - Actro、Actr、Keel 维护者对核心不变量签字；
 - schema 有版本字段；
 - create/attach/identity mismatch 的 golden tests 冻结；
-- 无“先实现再决定 ActorId 是否稳定”的悬空问题。
+- 无「先实现再决定 ActorId 是否稳定」的悬空问题。
 
 ## 4. P1-A：Actr 持久身份与 Realm
 
 ### Actr 必改
 
 1. Actor长期 key 模型；
-2. ActorId 文本和 wire model 纳入可验证 Realm authority；
+2. ActorId 文本和 wire model 以可验证的 Realm 引用（命名空间 + 本地名）取代数值 realm_id；
 3. 新建与 reclaim ActorId 两条注册路径；
 4. ActorId、renewal/identity state 持久化；
 5. hard re-auth 保持同一 ActorId；
 6. Realm 内 serial 永不复用；
 7. current endpoint/presence 与 logical ActorId 分离；
-8. Realm Profile 和 issuer key discovery；
+8. Realm 命名空间描述、命名空间 key 签名的 Realm Profile 和 issuer key discovery；
 9. Actor credential 绑定 public key，并以 transcript/SDP challenge 证明私钥持有；
 10. signaling 一次性 ticket/header；
-11. Provider 委派与 failover；
+11. Provider 委派与 failover；一个 Provider 承载多个 Realm，Realm 创建经命名空间 key 签名授权；
 12. per-Realm/TURN-pool key id 与轮换；
 13. Publisher/manufacturer DNS 长度和规范化；
 14. Actor store namespace 接受 instance identity；
@@ -116,7 +116,7 @@ flowchart LR
 ### 退出条件
 
 - 同一 Service 在进程重启、credential 续期、hard re-auth、signaling failover 后 ID 不变；
-- Realm 可以替换 signaling endpoint；
+- Realm 可以在同一 Provider 内替换 signaling endpoint，Realm 引用与 ActorId 不变；
 - ActorId reclaim 有 key proof 和冲突保护；
 - legacy ephemeral identity 路径不会被 Actro Service 使用；
 - Host 能为实际 workload 和 Actor edge 生成可验证 evidence，恶意 Actor 不能隐藏受控调用边。
@@ -126,7 +126,7 @@ flowchart LR
 ### 交付物
 
 - Publisher Profile resolver；
-- well-known release resolver；
+- 基于 `program_resolver` 的 release resolver；
 - domain/IDNA normalizer；
 - key history/rotation store；
 - package digest pinning；
@@ -210,7 +210,7 @@ flowchart LR
 - exclusive writer lease；
 - stop/start/archive/trash/restore/purge；
 - snapshot/restore；
-- local Realm；
+- local 命名空间与每实例 local Realm；
 - platform runtime adapters；
 - Service subtree privacy aggregate；
 - Actor/terminal egress evidence。
@@ -254,8 +254,8 @@ flowchart LR
 
 ### 交付物
 
-- Realm onboarding；
-- membership；
+- 命名空间信任与按实例创建联网 Realm；
+- 经邀请加入实例 Realm 与 membership；
 - signaling Provider failover；
 - P2P/TURN；
 - 从自描述 ActorId 解析 portable URI Realm；
@@ -293,7 +293,7 @@ flowchart LR
 - 网络切换；
 - 移动端 suspend/kill；
 - package cache corruption；
-- Realm key rotation；
+- 命名空间 key 与 Realm issuer key rotation；
 - 大规模 Tab/Service；
 - 长时间 lease；
 - 迁移/回滚；
@@ -361,7 +361,7 @@ flowchart LR
 - Service WASM Host API 使用 WIT 的具体版本；
 - Front–Service业务 contract 从 Proto 如何生成 Keel TS schema；
 - helper process 的平台实现顺序；
-- 本地 Realm ID 的分配格式；
+- 本地 Realm `local_name` 的自动生成格式；
 - snapshot envelope 的具体编码与版本协商；
 - Marketplace 透明日志供应商；
 - 企业私有 CA 的策略格式；
@@ -379,15 +379,17 @@ flowchart LR
 - 无 service 是否创建：是；
 - 有 service 失败是否创建替代：否；
 - Marketplace 是否命名权威：否；
-- 信令是否“无实权”：否；
-- Realm 与物理信令是否一一绑定：否。
+- 信令是否「无实权」：否；
+- Realm 与物理信令是否一一绑定：否；
+- Realm 是否对应应用实例：是，Create 新建 Realm；
+- 一个 Provider 是否承载多个 Realm：是。
 
 ## 14. 最小纵切
 
 第一个可演示纵切只做：
 
 1. macOS；
-2. local Realm；
+2. local 命名空间下的本地 Realm；
 3. 一个签名 `.actr` WASM Service；
 4. 包内一个 Keel JS Guest；
 5. managed Workspace；
