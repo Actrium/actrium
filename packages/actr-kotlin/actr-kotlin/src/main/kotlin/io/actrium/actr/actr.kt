@@ -1402,7 +1402,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_func_actr_error_requires_dlq() != 62057.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_func_actr_error_throw_for_test() != 53545.toShort()) {
+    if (lib.uniffi_actr_checksum_func_actr_error_throw_for_test() != 12923.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_func_set_log_callback() != 22627.toShort()) {
@@ -1495,13 +1495,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_actrrefwrapper_discover() != 21192.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_method_actrrefwrapper_get_rtc_peer_status() != 47575.toShort()) {
+    if (lib.uniffi_actr_checksum_method_actrrefwrapper_get_rtc_peer_status() != 25495.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_actrrefwrapper_is_shutting_down() != 50332.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_method_actrrefwrapper_list_rtc_peer_statuses() != 18889.toShort()) {
+    if (lib.uniffi_actr_checksum_method_actrrefwrapper_list_rtc_peer_statuses() != 7724.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_actrrefwrapper_resolve_dependency() != 33582.toShort()) {
@@ -1510,7 +1510,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_actrrefwrapper_shutdown() != 60173.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_method_actrrefwrapper_subscribe_rtc_peer_status() != 51801.toShort()) {
+    if (lib.uniffi_actr_checksum_method_actrrefwrapper_subscribe_rtc_peer_status() != 11328.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_actrrefwrapper_tell() != 38430.toShort()) {
@@ -1588,7 +1588,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_webrtcobserverbridge_on_disconnected() != 44359.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_method_webrtcobserverbridge_on_state_changed() != 48957.toShort()) {
+    if (lib.uniffi_actr_checksum_method_webrtcobserverbridge_on_state_changed() != 35507.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_websocketobserverbridge_on_connecting() != 31917.toShort()) {

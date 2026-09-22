@@ -293,6 +293,26 @@ jobs:
         run: cargo test -p actr-framework-protoc-codegen --test well_known_type_smoke
       - name: Verify RFC-0400 timer inventory
         run: cargo test -p actr-hyper --lib timer::tests::inv24_production_timer_calls_and_inventory_do_not_drift
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check committed Kotlin binding checksums against the native library
+        # The Kotlin UniFFI bindings are committed, yet no pull-request job loads
+        # a native library: the Kotlin job compiles the binding and runs
+        # JVM-only tests, and the instrumentation test that would dlopen libactr
+        # only runs in the scheduled E2E workflow. A stale checksum table
+        # therefore stays invisible until an SDK consumer pairs the committed
+        # binding with a library built from the same commit, where UniFFI aborts
+        # inside uniffiCheckApiChecksums and the SDK fails to load. This job
+        # already has the native toolchain and a warm cargo cache, so verifying
+        # the constants here is cheap. Changes under crates/actr-ffi/ are what
+        # can invalidate them, and those set rust_core.
+        run: |
+          cargo build -p libactr
+          python3 scripts/actr/check-binding-checksums.py \
+            --library target/debug/libactr.so \
+            --binding packages/actr-kotlin/actr-kotlin/src/main/kotlin/io/actrium/actr/actr.kt
       - name: Clippy (deny warnings)
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
