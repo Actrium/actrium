@@ -17,7 +17,7 @@ use tracing::{debug, error, info, warn};
 /// Parses the manifest, looks up the dependency by alias, and returns its
 /// `actr_type` field as a structured `ActrType` record. This is the canonical
 /// way for linked-runtime hosts (iOS, Android) to discover which remote actor
-/// type a dependency resolves to, without hardcoding `"publisher:name:version"`
+/// type a dependency resolves to, without hardcoding `"publisher/program@version"`
 /// strings in application code.
 #[uniffi::export]
 pub fn resolve_manifest_dependency(
@@ -58,7 +58,7 @@ pub fn resolve_manifest_dependency(
 /// Parses the manifest and returns the `[package]` block's actr_type fields
 /// as a structured `ActrType` record. Linked-runtime hosts (iOS, Android) use
 /// this to determine their own actor type without hardcoding
-/// `"publisher:name:version"` strings.
+/// `"publisher/program@version"` strings.
 #[uniffi::export]
 pub fn resolve_manifest_package_actr_type(manifest_path: String) -> ActrResult<ActrType> {
     let manifest = actr_config::ConfigParser::from_manifest_file(&manifest_path).map_err(|e| {
@@ -759,7 +759,7 @@ publisher = "acme"
 version = "0.1.0"
 
 [dependencies]
-echo = { actr_type = "acme:EchoService:1.0.0" }
+echo = { actr_type = "acme/EchoService@1.0.0" }
 "#,
         )
         .expect("write manifest.toml");
@@ -774,7 +774,7 @@ echo = { actr_type = "acme:EchoService:1.0.0" }
         let temp = tempdir().expect("temp dir");
         write_test_config(temp.path(), &server);
         let manifest_path = write_test_manifest(temp.path());
-        let manifest_type = actr_protocol::ActrType::from_string_repr("acme:LinkedProbe:0.1.0")
+        let manifest_type = actr_protocol::ActrType::from_string_repr("acme/LinkedProbe@0.1.0")
             .expect("manifest actor type");
 
         let init = load_linked_init(manifest_path.to_str().unwrap(), &manifest_type)
@@ -815,7 +815,7 @@ echo = { actr_type = "acme:EchoService:1.0.0" }
             }
         );
 
-        let wrong_type = actr_protocol::ActrType::from_string_repr("other:Override:9.9.9").unwrap();
+        let wrong_type = actr_protocol::ActrType::from_string_repr("other/Override@9.9.9").unwrap();
         let error = match load_linked_init(manifest_path.to_str().unwrap(), &wrong_type).await {
             Ok(_) => panic!("mismatching linked identity should fail"),
             Err(error) => error,

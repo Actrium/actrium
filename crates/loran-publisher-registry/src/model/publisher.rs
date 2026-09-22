@@ -259,7 +259,7 @@ impl Publisher {
     /// key - the publisher must rotate to a brand-new key.
     ///
     /// Doing both writes in one transaction is required for safety: a half-applied
-    /// state where the key is archived as revoked but still present on the `publisher_record`
+    /// state where the key is archived as revoked but still present on the `publisher`
     /// row would let `resolve_by_name` (which does not consult the revoked set)
     /// keep serving the compromised key.
     pub async fn revoke_active_key(

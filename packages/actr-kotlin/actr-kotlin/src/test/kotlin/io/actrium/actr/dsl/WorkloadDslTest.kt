@@ -30,7 +30,7 @@ class WorkloadDslTest {
             val workload =
                 workload {
                     realm = 7u
-                    type = "acme:EchoClient:1.2.3"
+                    type = "acme/EchoClient@1.2.3"
                     onStart {
                         calls += "start"
                         assertSame(ctx, it)
@@ -73,9 +73,9 @@ class WorkloadDslTest {
                     type("demo", "NamedWorker", "3.1.4")
                 }
 
-        assertEquals("acme:DirectWorker:2.0.0", direct.type)
+        assertEquals("acme/DirectWorker@2.0.0", direct.type)
         assertNotNull(direct.build())
-        assertEquals("demo:NamedWorker:3.1.4", named.type)
+        assertEquals("demo/NamedWorker@3.1.4", named.type)
         assertNotNull(named.build())
     }
 
@@ -84,7 +84,7 @@ class WorkloadDslTest {
         val missingRealm =
             assertFailsWith<IllegalArgumentException> {
                 workload {
-                    type = "acme:EchoClient:1.0.0"
+                    type = "acme/EchoClient@1.0.0"
                 }
             }
         val missingType =
@@ -102,7 +102,7 @@ class WorkloadDslTest {
     fun `simple workload tracks target server and rejects unimplemented dispatch`() =
         runTest {
             val target = actorId("acme", "EchoService")
-            val workload = SimpleWorkload(7u, "acme:EchoClient:1.0.0")
+            val workload = SimpleWorkload(7u, "acme/EchoClient@1.0.0")
 
             assertNull(workload.getTargetServerId())
             workload.setTargetServerId(target)
@@ -125,7 +125,7 @@ class WorkloadDslTest {
             val workload =
                 object : RoutedWorkload(
                     realmId = 9u,
-                    typeString = "acme:RoutedClient:1.0.0",
+                    typeString = "acme/RoutedClient@1.0.0",
                 ) {}
             val target = actorId("acme", "RoutedService")
 

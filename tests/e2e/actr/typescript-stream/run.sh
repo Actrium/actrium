@@ -464,7 +464,7 @@ license = "Apache-2.0"
 tags = ["dev", "service"]
 
 [dependencies]
-EchoService = { actr_type = "demo1:EchoService:1.0.0" }
+EchoService = { actr_type = "demo1/EchoService@1.0.0" }
 
 [binary]
 path = "dist/relay_service.cdylib"
@@ -810,7 +810,7 @@ license = "Apache-2.0"
 tags = ["dev", "app"]
 
 [dependencies]
-RelayService = { actr_type = "demo1:RelayService:1.0.0" }
+RelayService = { actr_type = "demo1/RelayService@1.0.0" }
 
 [binary]
 path = "dist/app.cdylib"
@@ -930,7 +930,7 @@ async fn main() -> Result<()> {
         name: "RelayService".to_string(),
         version: "1.0.0".to_string(),
     };
-    info!("Discovering demo1:RelayService:1.0.0");
+    info!("Discovering demo1/RelayService@1.0.0");
     eprintln!("client phase: discover RelayService");
     let relay_actor = tokio::time::timeout(OP_TIMEOUT, async {
         actr_ref

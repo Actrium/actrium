@@ -115,6 +115,18 @@ INSERT INTO ais_manufacturer_auth_nonce (manufacturer, key_id, nonce, created_at
     VALUES ('apps.example.com', 'actr-pub-0123456789abcdef', x'01', 1, 2);
 INSERT INTO ais_renewal_token (actor_id, token_hash, expires_at, created_at)
     VALUES ('actor', x'02', 2, 1);
+CREATE TABLE actoracl (
+    rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+    realm_id INTEGER NOT NULL,
+    source_realm_id INTEGER,
+    from_type TEXT NOT NULL,
+    to_type TEXT NOT NULL,
+    access INTEGER NOT NULL
+);
+INSERT INTO actoracl (realm_id, from_type, to_type, access)
+    VALUES (1, 'acme:client:1.0.0', 'acme:echo:1.0.0', 1);
+INSERT INTO actoracl (realm_id, from_type, to_type, access)
+    VALUES (1, 'ANONCLNT', 'apps.example.com/echo@1.0.0', 0);
 PRAGMA user_version = 1;
 """
 
@@ -172,6 +184,21 @@ class MigrateSchemaV2Test(unittest.TestCase):
                 "SELECT sql FROM sqlite_master WHERE name = 'publisher_challenge'"
             ).fetchone()[0]
             self.assertIn("REFERENCES \"publisher\"(id)", references)
+
+    def test_rewrites_colon_form_actor_types(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            db = self.database(directory)
+            MIGRATION.migrate(db)
+            rows = db.execute(
+                "SELECT from_type, to_type FROM actoracl ORDER BY rowid"
+            ).fetchall()
+            self.assertEqual(
+                rows,
+                [
+                    ("acme/client@1.0.0", "acme/echo@1.0.0"),
+                    ("ANONCLNT", "apps.example.com/echo@1.0.0"),
+                ],
+            )
 
     def test_rejects_other_versions(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

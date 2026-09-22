@@ -6,8 +6,8 @@
 
 ## 架构
 
-- 客户端：`e2e.actrium.test:SwiftTsWorkloadApp:0.1.0`（iOS 模拟器，ActrNode.linked）
-- 服务端：`e2e.actrium.test:DuplexEchoService:1.0.0`（TS workload，wasm32-wasip2，`actr run` 托管）
+- 客户端：`e2e.actrium.test/SwiftTsWorkloadApp@0.1.0`（iOS 模拟器，ActrNode.linked）
+- 服务端：`e2e.actrium.test/DuplexEchoService@1.0.0`（TS workload，wasm32-wasip2，`actr run` 托管）
 - 信令：本仓库内真实 actrix（`ensure_actrix_available` 按需从 `crates/loran-server` 安装）
 
 ## 验证

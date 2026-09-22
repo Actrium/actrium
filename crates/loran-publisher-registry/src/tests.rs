@@ -74,7 +74,7 @@ async fn setup_test_pool() -> SqlitePool {
     )
     .execute(&pool)
     .await
-    .expect("failed to create record table");
+    .expect("failed to create publisher table");
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS publisher_challenge (

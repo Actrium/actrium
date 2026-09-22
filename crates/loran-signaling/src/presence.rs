@@ -287,14 +287,8 @@ impl PresenceManager {
         let from_realm = from_actor.realm.realm_id;
         let to_realm = to_actor.realm.realm_id;
 
-        let from_type = format!(
-            "{}:{}:{}",
-            from_actor.r#type.publisher, from_actor.r#type.name, from_actor.r#type.version
-        );
-        let to_type = format!(
-            "{}:{}:{}",
-            to_actor.r#type.publisher, to_actor.r#type.name, to_actor.r#type.version
-        );
+        let from_type = from_actor.r#type.to_string_repr();
+        let to_type = to_actor.r#type.to_string_repr();
 
         ActorAcl::can_discover(from_realm, to_realm, &from_type, &to_type).await
     }

@@ -206,7 +206,7 @@ turn_urls = ["turn:localhost:3478"]
 
 [[acl.rules]]
 permission = "allow"
-type = "acme:echo-client-app:0.1.0"
+type = "acme/echo-client-app@0.1.0"
 
 [[trust]]
 kind = "static"
@@ -244,7 +244,7 @@ turn_urls = ["turn:localhost:3478"]
 
 [[acl.rules]]
 permission = "allow"
-type = "acme:EchoService:0.2.0"
+type = "acme/EchoService@0.2.0"
 
 [web]
 port = 5173

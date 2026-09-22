@@ -121,7 +121,7 @@ class EchoIntegrationTest {
         val monitorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
         val actorType = Manifest.from(File(manifestPath)).packageType()
-        Log.i(TAG, "Actor type: ${actorType.publisher}:${actorType.name}:${actorType.version}")
+        Log.i(TAG, "Actor type: ${actorType.publisher}/${actorType.name}@${actorType.version}")
 
         val workload = __PACKAGE__.UnifiedWorkload()
         val lifecycle = __PACKAGE__.UnifiedLifecycleAdapter(workload)

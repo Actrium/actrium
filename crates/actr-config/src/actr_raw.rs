@@ -306,7 +306,7 @@ tier = "premium"
 
 [[acl.rules]]
 permission = "allow"
-type = "acme:EchoService:1.0.0"
+type = "acme/EchoService@1.0.0"
 
 [scripts]
 dev = "cargo run"

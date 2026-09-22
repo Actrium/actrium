@@ -479,7 +479,7 @@ fn actr_web_calls_generated_typescript_echo_workload() {
         &service_package,
         &mock,
         &public_key,
-        "acme:echo-client-app:0.1.0",
+        "acme/echo-client-app@0.1.0",
         None,
     );
 
@@ -505,7 +505,7 @@ fn actr_web_calls_generated_typescript_echo_workload() {
         &client_package,
         &mock,
         &public_key,
-        "acme:EchoService:0.1.0",
+        "acme/EchoService@0.1.0",
         Some(client_port),
     );
 

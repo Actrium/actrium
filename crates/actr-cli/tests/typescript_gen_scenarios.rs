@@ -210,7 +210,7 @@ name = "RemoteApp"
 publisher = "acme"
 version="0.0.1"
 [dependencies]
-echo-service = { actr_type = "acme:EchoService:0.0.1" }
+echo-service = { actr_type = "acme/EchoService@0.0.1" }
 
 [system.signaling]
 url = "wss://localhost:8080"
@@ -234,7 +234,7 @@ name = "BothService"
 publisher = "acme"
 version = "0.0.1"
 [dependencies]
-echo-service = { actr_type = "acme:EchoService:0.0.1" }
+echo-service = { actr_type = "acme/EchoService@0.0.1" }
 
 [system.signaling]
 url = "wss://localhost:8080"
@@ -258,8 +258,8 @@ name = "BothTwoRemotesService"
 publisher = "acme"
 version="0.0.1"
 [dependencies]
-echo-service = { actr_type = "acme:EchoService:0.0.1" }
-profile-service = { actr_type = "acme:ProfileService:0.0.1" }
+echo-service = { actr_type = "acme/EchoService@0.0.1" }
+profile-service = { actr_type = "acme/ProfileService@0.0.1" }
 
 [system.signaling]
 url = "wss://localhost:8080"

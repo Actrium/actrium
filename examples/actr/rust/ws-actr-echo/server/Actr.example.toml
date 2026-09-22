@@ -33,7 +33,7 @@ advertised_host = "127.0.0.1"
 
 [[acl.rules]]
 permission = "allow"
-type = "acme:ws-echo-client-app:1.0.0"
+type = "acme/ws-echo-client-app@1.0.0"
 
 [scripts]
 dev = "cargo run"

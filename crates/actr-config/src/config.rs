@@ -234,7 +234,7 @@ pub struct Dependency {
     /// Owning Realm
     pub realm: Realm,
 
-    /// Actor type (publisher:name:version)
+    /// Actor type (publisher/program@version)
     pub actr_type: Option<ActrType>,
 
     /// Strict service reference for exact fingerprint matching.

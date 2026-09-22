@@ -29,11 +29,11 @@ turn_urls = ["turn:127.0.0.1:__ICE_PORT__"]
 # means appending another rule here, not loosening to a wildcard.
 [[acl.rules]]
 permission = "allow"
-type = "polyglot:RustDriver:0.1.0"
+type = "polyglot/RustDriver@0.1.0"
 
 [[acl.rules]]
 permission = "allow"
-type = "polyglot:TsDriver:0.1.0"
+type = "polyglot/TsDriver@0.1.0"
 
 [[trust]]
 kind = "static"

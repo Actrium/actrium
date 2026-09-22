@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let dep = LockedDependency::new(
         "user-service".to_string(),
-        "acme:user-service:1.0.0".to_string(),
+        "acme/user-service@1.0.0".to_string(),
         spec_meta,
     );
 

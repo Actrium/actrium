@@ -212,8 +212,8 @@ fn pin_echo_service_dependency_to_registry_version(project_dir: &Path) {
     let manifest_path = project_dir.join("manifest.toml");
     let manifest = fs::read_to_string(&manifest_path).expect("read manifest.toml");
     let rewritten = manifest.replace(
-        r#"EchoService = { actr_type = "acme:EchoService:1.0.0" }"#,
-        r#"EchoService = { actr_type = "acme:EchoService:0.1.0" }"#,
+        r#"EchoService = { actr_type = "acme/EchoService@1.0.0" }"#,
+        r#"EchoService = { actr_type = "acme/EchoService@0.1.0" }"#,
     );
     fs::write(&manifest_path, rewritten).expect("write manifest.toml");
 }

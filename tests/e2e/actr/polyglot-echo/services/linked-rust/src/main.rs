@@ -1,7 +1,7 @@
 //! polyglot-echo Echo server — linked Rust workload binary.
 //!
 //! Same wire shape as the cdylib path (registers
-//! `polyglot:EchoService:1.0.0`, serves `echo.EchoService.Echo`), but
+//! `polyglot/EchoService@1.0.0`, serves `echo.EchoService.Echo`), but
 //! built as a normal binary that links actr-hyper directly instead of
 //! being dlopened by `actr run`.  This validates the linked-workload
 //! transport path against the same client drivers, with no client

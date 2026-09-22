@@ -58,7 +58,7 @@ ActrNativeInfo info = ActrCabiNode.ValidateNative(
     "actr.e2e.echo-app"); // confirms the expected workload bundle is linked
 var node = new ActrCabiNode();
 await node.FromConfig("actr.toml");               // Node<Init>
-node.WithActorType("actrium:Echo:1.0.0");         // sets the Issuer actor identity
+node.WithActorType("actrium/Echo@1.0.0");         // sets the Issuer actor identity
 await node.LinkWorkload("cabi.Echo");             // actr_workload_create → Node::link
 await node.Register();                            // Node::register (remote actrix Issuer)
 await node.Start();                               // Node::start → ActrRef

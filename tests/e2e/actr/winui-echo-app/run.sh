@@ -540,7 +540,7 @@ turn_urls = ["turn:${ICE_HOST}:${ICE_PORT}"]
 
 [[acl.rules]]
 permission = "allow"
-type = "${PUBLISHER}:EchoApp:0.1.0"
+type = "${PUBLISHER}/EchoApp@0.1.0"
 EOF
     RUST_LOG="${RUST_LOG:-info}" run_actr run -c "$SERVER_RUNTIME_PATH" >"$LOG_DIR/server.log" 2>&1 &
     SERVER_PID=$!

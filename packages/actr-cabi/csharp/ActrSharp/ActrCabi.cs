@@ -1117,7 +1117,7 @@ public sealed class ActrCabiNode : IDisposable
     /// Set the concrete identity used when a linked workload registers with
     /// Issuer. Call after <see cref="FromConfig"/> and before
     /// <see cref="LinkWorkload"/> using
-    /// <c>publisher:name:version</c>.
+    /// <c>publisher/program@version</c>.
     /// </summary>
     public void WithActorType(string actorType)
     {

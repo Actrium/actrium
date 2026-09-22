@@ -103,7 +103,7 @@ uint32_t actr_cabi_bundle_count(void);
 int32_t actr_node_from_config(const char* path_ptr, size_t path_len,
                               actr_handle_callback callback, void* user_data);
 /* Consume an init handle and return a replacement with the linked actor
- * identity set. actor_type must be <publisher>:<name>:<version>. */
+ * identity set. actor_type must be <publisher>/<program>@<version>. */
 actr_node_init_handle actr_node_with_actor_type(actr_node_init_handle init_handle,
                                                 const char* actor_type_ptr,
                                                 size_t actor_type_len);

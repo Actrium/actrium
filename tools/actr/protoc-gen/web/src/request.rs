@@ -161,7 +161,7 @@ impl WebCodegenRequest {
         types
     }
 
-    /// Get the target actr type for peer discovery (publisher:name:version).
+    /// Get the target actr type for peer discovery (publisher/program@version).
     ///
     /// For an actor that imports a remote service, the target is the
     /// declared dependency. For an actor that only exports services, the
@@ -179,15 +179,15 @@ impl WebCodegenRequest {
                 .and_then(|d| {
                     d.actr_type
                         .as_ref()
-                        .map(|t| format!("{}:{}:{}", t.publisher, t.name, t.version))
+                        .map(|t| format!("{}/{}@{}", t.publisher, t.name, t.version))
                 })
                 .unwrap_or_default()
         }
     }
 
-    /// Get client actr type (this actor's type) — publisher:name:version
+    /// Get client actr type (this actor's type) — publisher/program@version
     pub fn client_actr_type(&self) -> String {
-        format!("{}:{}:{}", self.publisher, self.actr_name, self.version)
+        format!("{}/{}@{}", self.publisher, self.actr_name, self.version)
     }
 
     /// Get crate/WASM module name (snake_case)

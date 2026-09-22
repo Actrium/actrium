@@ -142,10 +142,10 @@ pub enum RawDependency {
     /// Example:
     /// ```toml
     /// [dependencies]
-    /// echo = { actr_type = "acme:echo-service:1.0.0", service = "EchoService:abc1f3d" }
+    /// echo = { actr_type = "acme/echo-service@1.0.0", service = "EchoService:abc1f3d" }
     /// ```
     Specified {
-        /// Full ActrType string: "publisher:name:version"
+        /// Full ActrType string: "publisher/program@version"
         #[serde(rename = "actr_type")]
         actr_type: String,
 
@@ -443,7 +443,7 @@ user-service = {}
 name = "test"
 publisher = "acme"
 [dependencies]
-shared = { actr_type = "acme:logging-service:1.0.0", service = "LoggingService:abc123", realm = 9999 }
+shared = { actr_type = "acme/logging-service@1.0.0", service = "LoggingService:abc123", realm = 9999 }
 "#;
         let config = ManifestRawConfig::from_str(toml_content).unwrap();
         let dep = config.dependencies.get("shared").unwrap();
@@ -453,7 +453,7 @@ shared = { actr_type = "acme:logging-service:1.0.0", service = "LoggingService:a
             realm,
         } = dep
         {
-            assert_eq!(actr_type, "acme:logging-service:1.0.0");
+            assert_eq!(actr_type, "acme/logging-service@1.0.0");
             assert_eq!(service.as_deref(), Some("LoggingService:abc123"));
             assert_eq!(*realm, Some(9999));
         } else {
@@ -468,7 +468,7 @@ shared = { actr_type = "acme:logging-service:1.0.0", service = "LoggingService:a
 name = "test"
 publisher = "acme"
 [dependencies]
-shared = { actr_type = "acme:logging-service:1.0.0" }
+shared = { actr_type = "acme/logging-service@1.0.0" }
 "#;
         let config = ManifestRawConfig::from_str(toml_content).unwrap();
         let dep = config.dependencies.get("shared").unwrap();

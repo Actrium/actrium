@@ -27,8 +27,8 @@ tracing_service_name = "android-echo-client"
 
 [[acl.rules]]
 permission = "allow"
-type = "acme:EchoService:1.0.0"
+type = "acme/EchoService@1.0.0"
 
 [[acl.rules]]
 permission = "allow"
-type = "acme:DataStreamConcurrentServer:1.0.0"
+type = "acme/DataStreamConcurrentServer@1.0.0"

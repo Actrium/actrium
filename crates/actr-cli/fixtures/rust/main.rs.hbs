@@ -59,7 +59,7 @@ async fn main() -> Result<()> {
         .start()
         .await
         .context("failed to start app node")?;
-    info!("Calling {{PUBLISHER}}:EchoService:1.0.0");
+    info!("Calling {{PUBLISHER}}/EchoService@1.0.0");
 
     let response = actr_ref
         .call(

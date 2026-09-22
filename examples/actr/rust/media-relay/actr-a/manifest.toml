@@ -7,4 +7,4 @@ authors = ["Actr Dev Team"]
 
 exports = []
 [dependencies]
-RelayService = { actr_type = "actr-example:RelayService:1.0.0" }
+RelayService = { actr_type = "actr-example/RelayService@1.0.0" }

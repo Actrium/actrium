@@ -459,7 +459,7 @@ publisher = manifest_data["publisher"]
 name = manifest_data["name"]
 version = manifest_data["version"]
 target = manifest_data.get("binary", {}).get("target", "cdylib")
-type_str = f"{publisher}:{name}:{version}"
+type_str = f"{publisher}/{name}@{version}"
 
 conn = sqlite3.connect(db_path)
 try:

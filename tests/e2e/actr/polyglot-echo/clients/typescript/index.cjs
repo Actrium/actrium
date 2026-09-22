@@ -7,7 +7,7 @@
 //
 // Inputs (positional CLI args, all required):
 //   --actr-toml <path>        runtime config rendered by setup.sh
-//   --service-type <triple>   "publisher:name:version" to discover
+//   --service-type <triple>   "publisher/program@version" to discover
 //   --message <string>        payload to echo
 //
 // On success the driver prints `[Received reply] <reply>` and exits 0.
@@ -138,7 +138,7 @@ function parseArgs(argv) {
   const parts = out.serviceType.split(':');
   if (parts.length !== 3) {
     throw new Error(
-      `--service-type must be 'publisher:name:version', got ${out.serviceType}`,
+      `--service-type must be 'publisher/program@version', got ${out.serviceType}`,
     );
   }
   out.actrType = {
