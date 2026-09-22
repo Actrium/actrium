@@ -32,14 +32,14 @@ Its main value is not to draw fewer layers, but to make each layer assume only o
 - Keel Guest is the only pre-office code that the program developer can customise.
 - Service Actor There are examples of state-of-the-state programs, too. Front Enter Actor The only main entrance to the world.
 - Workspace By Service Hold on,Front Do not touch path, key or bottom storage.
-- `ActorId` carries its own Realm reference (namespace + local name) and identifies the Service instance exactly; once an `ActorId` is known, it must not be load-balanced.
+- An `ActorId` has the form `<serial>.<label>@<domain>`; it carries its own Realm name, identifies the Service instance exactly and contains no program type; once an `ActorId` is known, it must not be load-balanced.
 - `publisher/program@version` Accurately identify the unchangeable version of the program.
-- A Realm corresponds to one application instance and governs that instance's identity, admission and network entry; the domain only serves as the Realm's namespace; signaling and TURN are shared infrastructure delegated by the Realm.
+- A Realm corresponds to one application instance and governs that instance's identity, admission and network entry; the domain is only used to name Realms; signaling and TURN are shared infrastructure delegated by the Realm.
 
 But it relies on three basic capabilities that must be completed first:
 
-1. **Persistent, resolvable ActorId**: a Service Actor must keep the same `ActorId` across restarts, network loss, credential renewal or migration, and the Realm reference must be derivable from the ID. Today's Actr hard rebind may change the ID, and the ID only carries a provider-internal numeric Realm, so it cannot directly serve as long-term, shareable URL semantics.
-2. **Domain Name Publisher**: Actr It's... manufacturer/publisher Semantic and length limits need to be adjusted to regularize DNS Domain name becomes the program publisher 's identity.
+1. **Persistent, resolvable ActorId**: a Service Actor must keep the same `ActorId` across restarts, network loss, credential renewal or migration, and the Realm name must be derivable from the ID. Today's Actr hard rebind may change the ID, and the ID only carries a numeric Realm internal to the Realm Provider, so it cannot directly serve as long-term, shareable URL semantics.
+2. **Domain-name Publisher**: Actr's publisher semantics and length limits must change so that a normalized DNS domain becomes the program publisher's identity.
 3. **It's really closed. Front Host**: Actro It must be. Keel . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . capability, white list of components, resource quotas and identified sandbox backend limits Guest;cannotsat affix URL Just give it to me. Keel Load.
 
 ## 3. Core decision-making for freezing
@@ -51,19 +51,19 @@ But it relies on three basic capabilities that must be completed first:
 | D-003 | “1:1”Yes. live Front The only binding of the angles, not the one. Service And history Tab (b) Permanent double-fire;Service Alive and can be replaced. Front Reconnection. |
 | D-004 | v1 Default use of monogamous interactive sessions; same Service URL Focus now when this machine is open again. Tab. Sharing sessions is a follow-up and visible capability. |
 | D-005 | Service Tie zero or one. Workspace;required more Actor Procedure by Primary Service In the back. |
-| D-006 | Front workload By Actro It's a natural.Publisher Can not replace Host;Publisher Only if you're available. Keel Guestresources, statements and Service workload. |
+| D-006 | Front workload By Actro It's a natural.Publisher Can not replace Actr Host;Publisher Only if you're available. Keel Guestresources, statements and Service workload. |
 | D-007 | v1 Third parties Front Guest Open only Keel JS Guestand fixed-use with hard timeout and stack caps QuickJS Backend. |
 | D-008 | One. Actro Program Release It's a signature. `.actr` Package:Service workload Is the subject of enforceability,Keel Guest It is a package of resources protected by a signature. |
 | D-009 | `actr://publisher/program@version` indicating creation;adding `service=<ActorId>` is only connected, and cannot be built by sneaking up. |
-| D-010 | Publisher Identity is a standardized domain name, without port; credible Profile Actual HTTPS, WSS, STUN, TURN End points can be used in a visible manner. |
+| D-010 | Publisher Identity is a standardized domain name, without port; credible Publisher Profile Actual HTTPS, WSS, STUN, TURN End points can be used in a visible manner. |
 | D-011 | Marketplace It's a source of information, not a source of information. Publisher Name authority; domain name and package signature are the source chain. |
-| D-012 | A v1 ActorId must contain a verifiable Realm reference (namespace + local name, e.g. `notes~dns:acme.com`); it is a public address and cryptographic identity, not a bearer token: knowing the URL does not grant the right to connect. |
-| D-013 | A Realm is a logical trust domain corresponding to one application instance and may delegate multiple signaling/TURN services; a Realm is not the same thing as a physical signaling process, and one provider hosts many Realms; a Realm is bound to one provider when it is created and can never switch. |
+| D-012 | A v1 ActorId must contain a verifiable Realm name (`<label>@<domain>`, e.g. `notes@acme.com`), and no program type; it is a public address and cryptographic identity, not a bearer token: knowing the URL does not grant the right to connect. |
+| D-013 | A Realm is a logical trust domain corresponding to one application instance and may delegate multiple signaling/TURN services; a Realm is not the same thing as a physical signaling process, and one Realm Provider hosts many Realms; a Realm is bound to one Realm Provider when it is created and can never switch. |
 | D-014 | Service Examples fixed to exact version and package digest;v1 Upgrade Creates new by Visible Migration Actor, instead of replacing it. workload. |
 | D-015 | Realm credential Prove it. Actor keyand claims, does not automatically prove that the other side is actually running the official Actro Host;Service We have to. Front Consider it independent of the letter client. |
-| D-016 | Workspace It's... requirement, provisioning, access and providers It's an independent dimension, not a single count. |
+| D-016 | A Workspace's requirement, provisioning, access and allowed Workspace Providers (`providers`) are independent dimensions and must not be merged into one enum. |
 | D-017 | Remove as Restoreable Trashed And irrecoverable. Purged/Deleted;deleting Workspace Always acting independently. |
-| D-018 | Domain bootstrap for Publishers and Realm namespaces always uses HTTPS 443 (a Realm namespace is the `https://<domain>/.well-known/actr` authority descriptor); a Realm Profile comes from the HTTPS location declared by the core relation `realms` (ports allowed); actual endpoints delegated by a verified Profile may carry ports. The `realm_namespace` member and the `realms` relation are defined in Actr Authority Discovery §4.3–4.4; when a Realm Profile cannot be fetched or verified, clients must not fall back to the default provider in the authority descriptor. |
+| D-018 | Domain bootstrap for Publishers and Realm domains always uses HTTPS 443 (the `https://<domain>/.well-known/actr` authority descriptor); a Realm Profile comes from the HTTPS location declared by the core relation `realms` (ports allowed); actual endpoints delegated by a verified Realm Profile may carry ports. The `realm_signing_keys` member and the `realms` relation are defined in Actr Authority Discovery §4.3–4.4; when a Realm Profile cannot be fetched or verified, clients must not use any Realm Provider other than the Realm Profile's. |
 | D-019 | Application safeguards are aggregated on a no root-effective basis; access is effective and `Ready` , displays the weakest item of the colour to take all nodes from.Front Just locate, not Tugan. |
 | D-020 | `ActorAssurance` The issue is issued by the certifier.`issuer ≠ subject`.Host assessable GuestEvidence may be provided and no self-signed final conclusions may be made. |
 | D-021 | The top floor is green only. / Yellow / Red; the cut is not a fourth colour when it is not ready. Unknown is not a confirmed leak, but must never be green. |
@@ -100,7 +100,7 @@ The recommendations are read in order:
 10. [Demand and acceptance criteria](10-requirements-and-acceptance.md): Functional needs, non-functional needs and end-to-end acceptance.
 11. [Delivery plan and feasibility](11-delivery-plan.md): Basic adaptation, phasing, risk and conditions of exit.
 12. [Reference protocol and sample](12-reference-spec.md): Manifest, Publisher/Realm Profile# And the handshake news and the terminology. #
-13. [Actro Privacy tags and diagrams are assembled](13-privacy-state-and-aggregation.md): to bring the current security model to Tab / Front / Host.
+13. [Actro Privacy tags and diagrams are assembled](13-privacy-state-and-aggregation.md): to bring the current security model to Tab / Front / Actr Host.
 14. [Privacy, remote certification and credible algorithms](14-privacy-primitives-and-attestation.md): All-process encryption,WASM/CC Division of labour,RATSKey Releases and CPU/GPU/NPU Group certification.
 
 ## 5. Normative Use of Terms
@@ -130,14 +130,16 @@ In the event of a conflict, the following order of interpretation is given:
 
 This design is based on the following publicly available feasibility but is not bound by its historical structure:
 
-- [Actrium/actr](https://github.com/Actrium/actr): Actor Models,`ActrId` Accurately locate,Realm/ACL♪ By letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter,WebRTC, `.actr` Signature bag and WASM workload.
+- [Actrium/actr](https://github.com/Actrium/actr): Actor model, precise `ActrId` addressing, Realm/connection ACL, signaling, WebRTC, signed `.actr` packages and WASM workloads.
 - [Actrium/keel](https://github.com/Actrium/keel): Keel Host/Guest, Bridge, JS Sandboxes, contracts and raw components rendered.
 - [Actro Overview of the current structure](../../architecture/overview.md): Multiplatforms Shell, share running time with Actr SDK Borders.
 
 Key facts that have been verified include:
 
-- Actr's current `ActrId` text form is `<serial_hex>@<realm_id>/<manufacturer>:<name>:<version>`; the target format must replace the numeric realm_id with a Realm reference, e.g. `<serial_hex>@<local_name>~dns:<domain>/<manufacturer>:<name>:<version>`.
+- Actr's current `ActrId` text form is `<serial_hex>@<realm_id>/<publisher>:<program>:<version>`; the target format is `<serial>.<label>@<domain>`: the Realm name replaces the numeric realm_id, and the program type moves into registration and the Actor credential.
 - Actr Supported `Dest::Peer(ActrId)` Accurately locate and press `ActrType` It was found that the two could be clearly divided.
 - `.actr` Existing Ed25519 manifest Signature,SHA-256 File binding and resources; relying on lock-down workload/The build process is optional.
 - Keel It's... Host/Guest Border and White List module mechanism suitable for carrying FrontBut it's... `Engine.loadBundle(URL)` It is not a credible distribution system in itself.
-- Keel Most“Native”The sandbox is still the same. OS Language segregation within the process cannot be declared as a browser-level process isolation.
+- Most Keel "native" sandboxes are still language-runtime isolation inside one OS process and cannot be claimed as browser-grade process isolation.
+
+These documents use the canonical names Loran, Publisher Registry, Issuer and publisher throughout; historical names found in code and older documents are listed in one place, the "历史名称对照" (historical names) section of the [Loran glossary](../../../loran/docs/GLOSSARY.zh.md).

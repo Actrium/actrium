@@ -1,23 +1,23 @@
-# Actrix Signer v1 指南
+# Loran Issuer Signer v1 指南
 
-状态：首版安全契约。历史名称 KS 只为内部类型兼容保留；面向用户的名称统一为
-**Signer**。
+状态：首版安全契约。Issuer Signer 是 Issuer 的签名后端，代码 `crates/loran-signer`，配置
+`[services.signer]`，gRPC 包 `signer.v1`（历史名称见 GLOSSARY「历史名称对照」）。
 
 ## 职责
 
-Signer 是 Authority 的最小私钥边界：
+Issuer Signer 是 Issuer 的最小私钥边界：
 
-1. 生成 Ed25519 signing key（目标契约下每个 Realm 一把 issuer key，全部 Realm 共用同一
-   Signer）；
+1. 生成 Ed25519 signing key（目标契约下每个 Realm 一把 Realm issuer key，全部 Realm 共用
+   同一 Issuer Signer）；
 2. 在服务端保存私钥，只返回 verifying key；
-3. 对 AIS 提交的精确消息签名；
+3. 对 Issuer 提交的精确消息签名；
 4. 按 `expires_at` 停止签名，并支持 key rotation/revocation 审计。
 
-Signer 不负责 Actor 路由、Realm 管理、Publisher 下载，也不提供「获取私钥」接口。
+Issuer Signer 不负责 Actor 路由、Realm 管理、Publisher 下载，也不提供「获取私钥」接口。
 
 ## 接口
 
-Actrix all-in-one profile 将 Signer gRPC 挂载在主 HTTP/2 监听器：
+Loran all-in-one profile 将 Issuer Signer gRPC 挂载在主 HTTP/2 监听器：
 
 ```text
 /signer.v1.Signer/GenerateSigningKey
@@ -48,16 +48,16 @@ actrix-signer-v1:sign:<key_id>:sha256:<message_digest>
 kek_env = "ACTRIX_SIGNER_KEK"
 ```
 
-也可以使用 `kek_file`；文件应只有 Actrix 运行用户可读。`kek` 直接写配置只适合受控
+也可以使用 `kek_file`；文件应只有 Loran 运行用户可读。`kek` 直接写配置只适合受控
 迁移或测试。缺少 KEK 的 `env = "prod"` 配置会 fail closed。首版不强制外部 KMS，
-但 Signer 可以拆成独立进程和安全边界。
+但 Issuer Signer 可以拆成独立进程和安全边界。
 
 ## 生命周期
 
 - 新 key 在 `expires_at` 前可用于签名；
 - 到期后立即拒绝新签名；
 - tolerance 只允许历史验签/平滑读取 verifying metadata，不延长签名能力；
-- AIS rotation 先生成并发布 successor，再切换 active key；
+- Issuer rotation 先生成并发布 successor，再切换 active key；
 - revocation 与轮换必须进入审计记录。
 
 ## 运维要求

@@ -49,19 +49,19 @@ Front Use Actr linked/native workload:
 - Every one. resident app Tab Create a Logic Front Actor Examples;
 - Responsible Actor Registering, identity, connection, session,Keel Engine and Host capability;
 - Realm credential It's just proof. Actor key, ActorId, ActorType with issuer claims, the actual running code cannot be independently proven;
-- Service We have to. Front As untrusted client, perform independently principal, ACLOperational orders and Workspace Delegation of authority.
+- The Service must treat the Front as an untrusted client and independently enforce principal, application permissions, business commands and Workspace authorization.
 
-“Native workload”Here you are. Host Provided by original of platform, not intended Guest Available native code.
+“Native workload”Here you are. Actr Host Provided by original of platform, not intended Guest Available native code.
 
 ### 2.2 Front Actor Type
 
 Front It's... ActorType Yes. Actro Type of system, e.g.:
 
 ```text
-actrium:actro-front:1.0.0
+actrium/actro-front@1.0.0
 ```
 
-It describes Host runtimeNot disguised. Program It's... Service ActrType.Attach handshake By Host Additional declarations:
+It describes Host runtimeNot disguised. Program It's... Service ActrType.Attach handshake By Actr Host Additional declarations:
 
 - Program Release coordinate;
 - package digest;
@@ -123,9 +123,9 @@ v1 Not permitted Keel AutoSelect JSC/Hermes/QuickJS:
 - It must be achieved and enabled interrupt handler (a) Hard timeout;
 - We have to. per-Guest heap limit ♪ Really bring in every one ♪ QuickJS runtime;
 - Every one. Tab Use independence runtime/context;
-- Every one. Guest Yes. Host Disable from the special execution thread/worker Run on,UI Only through schema And the quota check. render ops;
+- Every one. Guest Yes. Actr Host Disable from the special execution thread/worker Run on,UI Only through schema And the quota check. render ops;
 - Cleaning up on destruction timer, callback, listener and remote ref;
-- provider Changes are considered to be changes to the security baseline and require a version and test.
+- A JS engine change is a security-baseline change and requires a version bump and tests.
 
 Fixed QuickJS It's to make the security semantics consistent across the platform. QuickJS Yes. OS Process isolation.
 
@@ -145,7 +145,7 @@ v1 No:
 
 - Browser renderer (b) The level of independence process;
 - (a) The nuclear boundary;
-- QuickJS/C++ We can't influence the security breach in the engine. Host;
+- QuickJS/C++ We can't influence the security breach in the engine. Actr Host;
 - Guest The death of a card will never affect the movement of the process.
 
 High risk Publisher The long-term objectives are:
@@ -154,7 +154,7 @@ High risk Publisher The long-term objectives are:
 - Windows AppContainer/helper process;
 - Android isolatedProcess;
 - iOS Independence to the extent feasible extension/helper Or stronger. WASM runtime;
-- May be Host Force terminate It's... worker.
+- May be Actr Host Force terminate It's... worker.
 
 ## 4. Actro Safe Component Registry
 
@@ -176,7 +176,7 @@ Special rules:
 - `Image` Default accept only package asset id;
 - Far Image Showdown. `host:net` capability Domain names allowlist;
 - Guest I'm not taking any of this with me. HTTP headers;
-- `WebView` Do Not Enter Default registry;
+- `WebView` is not in the default Actro Component Registry;
 - The outside chain,Modal, StatusBar, file selection and system sharing must be visible capability;
 - v1 Default Disable General String RemoteRef, only the typeing method is open.
 
@@ -229,7 +229,7 @@ interface PrimaryService {
 }
 ```
 
-Host Fixed inside target For Current Service ActorId.Guest It's not passed. target ActorId.
+Actr Host Fixed inside target For Current Service ActorId.Guest It's not passed. target ActorId.
 
 ### 5.3 Other Front capability
 
@@ -300,8 +300,8 @@ Service workload The dependence and network capacity must be package manifest It
 
 A Realm corresponds to one application instance, so the Front and the Primary Service are naturally in the same Realm; Auxiliary Actors orchestrated by the Primary Service are in that Realm too:
 
-- before Attach, the Front obtains membership in that instance's Realm (usually by invitation);
-- the Realm ACL decides whether a Front type may connect to a Service type;
+- before Attach, the Front obtains Realm membership for that instance (usually by Realm invitation);
+- the connection ACL decides whether a Front type may connect to a Service type;
 - the Service then performs user/instance-level authorization;
 - type discovery only happens within this Realm (this instance's Actors);
 - cross-instance (cross-Realm) calls are handled by the Service backend: the Service's host obtains a client identity in the target Realm according to that Realm's join policy; the Front never federates directly, and v1 has no federation.
@@ -408,7 +408,7 @@ Service Sequenced examination:
 6. Program coordinate(Statement of compatibility);
 7. package digest(declaration of compatibility; none) attestation is not a remote code certificate;
 8. protocol fingerprint;
-9. Principal/Device/Workspace ACL;
+9. Principal/Device/Workspace application permissions;
 10. attachment policy;
 11. Current lease;
 12. Strategy, current caller 's request `ActorStateId` / AA with nonce;
@@ -428,7 +428,7 @@ v1 exclusive lease:
 - `Detach` (a) Active release;
 - Front crash Back lease (a) Due;
 - Takeover The need for competence and conflict strategies;
-- lease id/session secret Save only in Host Memory and security IPCI'm not giving it to you. Guest;
+- lease id/session secret Save only in Actr Host Memory and security IPCI'm not giving it to you. Guest;
 - Same Expiry session The message must be rejected.
 
 ## 10. Message Route
@@ -446,17 +446,17 @@ Guest call
   → Guest
 ```
 
-Host It has to be attached. GuestOverwrite metadata:
+Actr Host It has to be attached. GuestOverwrite metadata:
 
 - session id;
-- principal/device id Minimize claim;
+- Minimized principal/client id claims;
 - program digest;
 - trace id;
 - deadline;
 - idempotency key(where applicable).
 
 Service I can't trust you. Guest payload and the self-reported users,Workspace or permission fields.
-Service And you can't just do it. Front Self-reported. Host Version,package digest or ActorType High authority granted.
+Service And you can't just do it. Front Self-reported. Actr Host Version,package digest or ActorType High authority granted.
 
 ## 11. Life cycle protocols
 
@@ -565,7 +565,7 @@ Front Host, Service Host, Workspace broker and Actor transport The actual data e
 - Actor spawn/discover/call/stream/close;
 - capability grant/revoke;
 - Workspace With external networks edge;
-- package, credential, Host key and policy Undo.
+- package, credential, Actr Host key and policy Undo.
 
 Publisher workload An expected export can be declared, but it cannot be the only source of integrity.Host Yeah. WASM Comparative statements,imports, effective capacity and practical edge, by `structureId` With Current `ActorStateId` groups; new Actor Current AA Adopted and `ACTIVE` Application data should not be received until now.Front Position the entire unroot map, with the weakest of the nodes; the display must be `Ready`.
 

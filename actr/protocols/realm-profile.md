@@ -4,94 +4,106 @@ Language: **English** | [简体中文](realm-profile.zh.md)
 
 Status: initial draft.
 
-This document defines how an Actr client or provider resolves a Realm
-reference to a verified Realm Profile, the `actr.realm/v1` Profile format, and
-the management requests a provider accepts.
+This document defines how an Actr Host or Realm Provider resolves a Realm
+name to a verified Realm Profile, the `actr.realm/v1` Realm Profile format,
+and the Realm management requests a Realm Provider accepts.
 
 ## 1. Scope
 
-A Realm is the trust and governance domain of one application instance.
-Creating an application instance creates a new Realm. A Realm is named by a
-namespace and a local name, written as a Realm reference such as
-`k7m2q9xh~dns:acme.com`. The syntax of Realm references is defined in
+A Realm is the trust boundary of one application instance. Creating an
+application instance creates a new Realm. A Realm is named `<label>@<domain>`,
+for example `k7m2q9xh@acme.com`; the syntax is defined in
 [Actr URI](uri.md), Section 7.1.
 
-A Realm Profile is a signed, public document that says which issuer and which
-provider serve a Realm. The namespace key signs it, so the Profile can be
-hosted anywhere: on the domain's own static hosting, at a provider, or
-embedded in an invitation. Where it was fetched from does not affect its
-validity.
+A Realm Profile is a signed, public document that says which Issuer and which
+Realm Provider serve a Realm. A Realm signing key of the Realm domain signs
+it, so the Realm Profile can be stored anywhere: on the domain's own static
+hosting, at a Realm Provider, or embedded in a Realm invitation. Where it was
+fetched from does not affect its validity.
 
-A Realm is served by one provider for its whole life. A provider is a running
-deployment, run by some operator, that provides the Realm's signaling, TURN,
-and issuer. Moving an application to another operator means creating a new
-Realm there and migrating application data; the old Realm is retired.
+A Realm is served by one Realm Provider for its whole life. A Realm Provider
+is a running deployment, run by some operator, that provides the Realm's
+signaling, TURN, and Issuer. Moving an application to another operator means
+creating a new Realm there and migrating application data; the old Realm is
+retired.
 
 This document does not define the signaling, identity, or ICE protocols a
-provider exposes, the Actor credential format, or membership and
-authorization inside an application instance.
+Realm Provider exposes, the Actor credential format, or Realm membership and
+application permissions inside an application instance.
 
 The keywords **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are
 to be interpreted as described by BCP 14 when they appear in uppercase.
 
-## 2. Namespaces
+## 2. Realm domains
 
-| Namespace | Owner | Trust root |
-| --- | --- | --- |
-| `dns:<domain>` | The domain owner | The namespace keys in the `realm_namespace` member of `https://<domain>/.well-known/actr` |
-| `local:<installation-id>` | One Actr Host installation | The Host's own local records |
+Every Realm lives under a Realm domain, which serves only as its naming root:
+an existing, globally unique name whose ownership can be verified. Without a
+domain there is no Realm, except for local Realms (Section 2.2).
 
-### 2.1 DNS namespaces
+### 2.1 DNS domains
 
-A DNS namespace is the same name as the port-less Actr authority
-`actr://<domain>`. Its Ed25519 namespace keys are the long-term trust root of
-every Realm in the namespace. Their publication, rotation, and rollback
-protection are defined by [Actr Authority Discovery](authority-discovery.md),
-Section 4.4. A domain publishes its namespace keys once; creating a Realm does
-not change the domain's hosting.
+A DNS Realm domain is the same name as the port-less Actr authority
+`actr://<domain>`. Its owner is the **Realm signing key holder**: its Ed25519
+Realm signing keys are the long-term trust root of every Realm under the
+domain. Their publication, rotation, and rollback protection are defined by
+[Actr Authority Discovery](authority-discovery.md), Section 4.4. A domain
+publishes its Realm signing keys once; creating a Realm does not change the
+domain's hosting.
 
-A provider-owned namespace, such as `dns:realms.provider.example`, is an
-ordinary DNS namespace whose keys the provider holds. It lets users without a
-domain create Realms (Section 7.3).
+The domain owner may hold the keys itself, typically in a signing service, or
+delegate their custody to a Realm Provider. A person without a domain of their
+own obtains Realms under a Realm Provider's domain; that Realm Provider owns
+the domain and holds its keys. Whoever holds the keys is the trust root of the
+domain's Realms.
 
-### 2.2 Local namespaces
+A Realm is **under a Realm Provider's domain** when, compared as normalized
+A-labels, its Realm domain equals the Realm Provider ID of its Realm Profile or
+ends with `"."` followed by that Realm Provider ID (on a label boundary). Only
+in that case do Actr Hosts show the Realm Provider as the trust root; otherwise
+they show the Realm domain. A domain owner that delegated custody of its keys
+to a Realm Provider is not visible to Actr Hosts (Section 9).
 
-A local namespace belongs to one Host installation. Its `installation-id` is
-the lowercase RFC 4648 base32 encoding, without padding, of the first 16 bytes
-of the SHA-256 digest of the raw 32-byte installation root public key.
+### 2.2 Local Realms
 
-Local Realms have no Profile, no provider, and no management requests. The
-Host keeps a local record for each local Realm. A local Realm reference is
-usable only on that installation and cannot be resolved by other parties. The
-rest of this document applies to DNS namespaces only.
+A local Realm uses the pseudo-domain `<installation-id>.actr.alt` under the
+RFC 9476 `.alt` suffix. `installation-id` is 128 random bits generated at
+installation, encoded as 26 characters of lowercase RFC 4648 base32 without
+padding.
+
+Actr Hosts **MUST NOT** resolve `.actr.alt` names through DNS or send them to
+any Realm Provider. Local Realms have no Realm Profile, no Realm Provider, and
+no Realm management requests; the Actr Host keeps a local record for each one.
+A local Realm name is usable only on that installation. The rest of this
+document applies to DNS Realm domains only.
 
 ## 3. Locating a Realm Profile
 
-For a Realm reference `<local_name>~dns:<domain>`, a client:
+For a Realm name `<label>@<domain>`, an Actr Host:
 
 1. obtains and verifies the authority descriptor of `actr://<domain>` and its
-   `realm_namespace` member, as defined by Actr Authority Discovery;
+   `realm_signing_keys` member, as defined by Actr Authority Discovery;
 2. selects the service links with `rel` `realms` and protocol
    `actr-realm-profile/1`;
 3. for each link in document order, removes any trailing `/` from `href` and
-   sends `GET <href>/<local_name>` with `Accept: application/json`, stopping
-   at the first response that yields a valid Profile.
+   sends `GET <href>/<label>` with `Accept: application/json`, stopping at the
+   first response that yields a valid Profile.
 
 A `realms` href **MUST NOT** contain a query or fragment. It **MAY** point to
-the domain's own hosting or to a provider, and **MAY** carry an explicit port.
-If no link yields a valid Profile (because of `404 Not Found`, another error,
-a timeout, or an invalid document), the Profile is unavailable.
+the domain's own hosting or to a Realm Provider, and **MAY** carry an explicit
+port. If no link yields a valid Realm Profile (because of `404 Not Found`,
+another error, a timeout, or an invalid document), the Realm Profile is
+unavailable.
 
-The request is public. Clients **MUST** use HTTPS and **MUST NOT** send
+The request is public. Actr Hosts **MUST** use HTTPS and **MUST NOT** send
 `Authorization` headers, cookies, or other credentials. Redirects follow the
 rules of Actr Authority Discovery: at most five, every hop over HTTPS. A
-privileged process, such as a provider, **MUST** additionally apply
+privileged process, such as a Realm Provider, **MUST** additionally apply
 server-side request forgery checks on every hop: reject non-public addresses,
 pin each hop to the pre-checked address, and limit the response to 64 KiB.
 
-A Profile **MAY** also be delivered out of band, for example embedded in an
-invitation. A client verifies such a Profile exactly as one fetched over
-HTTPS.
+A Realm Profile **MAY** also be delivered out of band, for example embedded in
+a Realm invitation. An Actr Host verifies such a Realm Profile exactly as one
+fetched over HTTPS.
 
 ## 4. Profile format
 
@@ -102,13 +114,11 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
   "schema": "actr.realm/v1",
   "sequence": 31,
   "realm": {
-    "namespace": "dns:acme.com",
-    "local_name": "k7m2q9xh",
+    "name": "k7m2q9xh@acme.com",
     "display_name": "Acme Notes",
     "status": "active"
   },
   "issuer": {
-    "id": "actr:realm:k7m2q9xh~dns:acme.com:authority",
     "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
     "keys": [
       { "id": "issuer-2026-2", "algorithm": "Ed25519", "public_key": "<base64>", "status": "active" }
@@ -133,181 +143,200 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
     "membership": "invite-only"
   },
   "issued_at": "2026-07-29T00:00:00Z",
-  "signature": { "key_id": "ns-2026-1", "algorithm": "Ed25519", "value": "<base64>" }
+  "signature": { "key_id": "rs-2026-1", "algorithm": "Ed25519", "value": "<base64>" }
 }
 ```
 
 | Member | Meaning |
 | --- | --- |
 | `schema` | **MUST** be `actr.realm/v1`. |
-| `sequence` | Non-negative integer that increases with every Profile published for this Realm. |
-| `realm.namespace`, `realm.local_name` | The Realm reference. They **MUST** match the reference being resolved. |
+| `sequence` | Realm Profile sequence: a non-negative integer that increases with every Realm Profile published for this Realm. |
+| `realm.name` | The Realm name. It **MUST** equal the name being resolved. |
 | `realm.display_name` | Human-readable title. It is not an identifier. |
 | `realm.status` | `active` or `retired`. |
-| `issuer.id` | **MUST** be `actr:realm:<realm-ref>:authority`. Actor credentials for the Realm carry this value as their issuer. |
-| `issuer.url` | Registration and verification endpoint of the issuer. |
-| `issuer.keys` | Issuer public keys used to verify Actor credentials. |
-| `provider.id` | The provider's canonical DNS authority. It never changes during the Realm's life. |
-| `provider.signaling` | Signaling endpoints. Entries sharing a `control_plane_id` are replicas or failover entries of one provider control plane, not a federation. |
+| `issuer.url` | Registration and verification endpoint of the Issuer. |
+| `issuer.keys` | Realm issuer public keys used to verify Actor credentials. |
+| `provider.id` | Realm Provider ID: the Realm Provider's canonical DNS authority. It never changes during the Realm's life. |
+| `provider.signaling` | Signaling endpoints. Entries sharing a `control_plane_id` are replicas or failover entries of one Realm Provider control plane, not a federation. |
 | `provider.ice` | STUN and TURN endpoints. TURN entries name the `credential_audience` for short-lived TURN credentials. |
 | `policy` | Join policy of the Realm. |
-| `issued_at` | RFC 3339 time the Profile was signed. It is informational; Profiles do not expire. |
-| `signature` | Detached signature by a namespace key. |
+| `issued_at` | RFC 3339 time the Realm Profile was signed. It is informational; Realm Profiles do not expire. |
+| `signature` | Detached signature by a Realm signing key. |
 
-A Profile **MUST NOT** contain secrets, private keys, access tokens, member
-lists, or user-specific data. Clients **MUST** ignore unknown members.
+A Realm Profile **MUST NOT** contain secrets, private keys, access tokens,
+member lists, or user-specific data. Actr Hosts **MUST** ignore unknown
+members.
 
 ## 5. Verification
 
 `signature` is a detached Ed25519 signature over the RFC 8785 JCS canonical
-form of the Profile with the `signature` member removed. Signers **MUST** use
-an `active` namespace key.
+form of the Realm Profile with the `signature` member removed. The Realm
+signing key holder **MUST** use an `active` Realm signing key.
 
-A client or provider accepts a Profile only when all of the following hold:
+An Actr Host or Realm Provider accepts a Realm Profile only when all of the
+following hold:
 
-1. `schema` is `actr.realm/v1`, and `realm.namespace` and `realm.local_name`
-   match the Realm reference being resolved;
-2. `signature.key_id` names a key listed in the accepted `realm_namespace`
-   member (Actr Authority Discovery, Section 4.4), and the signature verifies
-   with that key;
-3. `issuer.id` equals `actr:realm:<realm-ref>:authority`;
-4. if a Profile for this Realm was accepted before:
-   - `sequence` is not lower than the highest accepted `sequence`, and if
-     equal, the Profile is identical to the accepted one;
-   - `provider.id` equals that of the accepted Profile;
-   - the accepted Profile is not retired.
+1. `schema` is `actr.realm/v1`, and `realm.name` equals the Realm name being
+   resolved;
+2. `signature.key_id` names a key listed in the accepted `realm_signing_keys`
+   member of the Realm's domain (Actr Authority Discovery, Section 4.4), and
+   the signature verifies with that key;
+3. if a Realm Profile for this Realm was accepted before:
+   - its Realm Profile sequence is not lower than the highest accepted one,
+     and if equal, the Realm Profile is identical to the accepted one;
+   - `provider.id` equals that of the accepted Realm Profile;
+   - the accepted Realm Profile is not retired.
 
-Validity depends only on these checks, never on the URL the Profile came from.
-A provider that hosts a Profile is therefore not a trust root.
+Validity depends only on these checks, never on the URL the Realm Profile came
+from. A Realm Provider that stores a Realm Profile is therefore not a trust
+root.
 
-A Profile with `status` `retired` is a permanent tombstone. After accepting
-it, a client **MUST** stop using the Realm.
+A retired Realm Profile (`status` `retired`) is permanent. After accepting
+it, an Actr Host **MUST** stop using the Realm.
 
 ## 6. Using a Realm
 
-A client reaches a Realm only through the issuer and provider named by its
-accepted Profile. Actor credentials for the Realm are verified with
-`issuer.keys`, and their issuer **MUST** equal `issuer.id`. Membership of a
-Realm admits a principal to the instance's network; roles and permissions
-inside the instance are decided by the application, not by this document.
+An Actr Host reaches a Realm only through the Issuer and Realm Provider named
+by its accepted Realm Profile. Actor credentials for the Realm name the Realm
+as their issuer and are verified with the Realm issuer keys in `issuer.keys`.
+Realm membership means that a client has registered its Realm client key in
+the Realm and has not been revoked; it admits the client to the instance's
+network, and the Issuer issues Actor credentials only to registered,
+unrevoked Realm client keys; application
+permissions inside the instance are decided by the application, not by this
+document.
 
-A client **SHOULD** refresh the namespace's `realm_namespace` member and the
-Profile from its `realms` location when it establishes a session with the
-Realm, and at least every 24 hours while it stays connected. A provider
-**SHOULD** refresh both for the Realms it serves at the same interval, and
-stops issuing credentials for a Realm whose latest Profile is retired or no
-longer lists the issuer key it signs with.
+An Actr Host **SHOULD** refresh the domain's `realm_signing_keys` member and
+the Realm Profile from its `realms` location when it establishes a session
+with the Realm, and at least every 24 hours while it stays connected. A Realm
+Provider **SHOULD** refresh both for the Realms it serves at the same
+interval, and stops issuing Actor credentials for a Realm whose latest Realm
+Profile is retired or no longer lists the Realm issuer key it signs with.
 
-If the key that signed an accepted Profile has been removed from the
-namespace's `keys` (a revocation; Actr Authority Discovery, Section 4.4), the
-client or provider discards that Profile together with its `sequence` and
-`provider.id` baseline, and falls back to the last accepted Profile signed by
-a still-listed key; if there is none, it obtains the Profile again as if none
-had been accepted. This lets a namespace owner purge Profiles signed with a compromised
-key, including ones with an inflated `sequence`, by removing the key and
-re-signing the affected Profiles with an active key.
+If the key that signed an accepted Realm Profile has been removed from the
+domain's `keys` (a revocation; Actr Authority Discovery, Section 4.4), the
+Actr Host or Realm Provider discards that Realm Profile together with its
+Realm Profile sequence and `provider.id` baseline, and falls back to the last
+accepted Realm Profile signed by a still-listed key; if there is none, it
+obtains the Realm Profile again as if none had been accepted. This lets a
+domain owner purge Realm Profiles signed with a compromised key, including
+ones with an inflated sequence, by removing the key and re-signing the
+affected Realm Profiles with an active key.
 
-When a refresh finds the Profile unavailable, the client keeps using its
-accepted Profile. When a fetched Profile fails verification, the client
-ignores it, keeps the accepted Profile, and reports the failure. When no
-Profile has ever been accepted and none can be obtained, the client **MUST**
-report an error. In every case the client **MUST NOT** fall back to the
-default services of the authority descriptor or to any other provider.
+When a refresh finds the Realm Profile unavailable, the Actr Host keeps using
+its accepted Realm Profile. When a fetched Realm Profile fails verification,
+the Actr Host ignores it, keeps the accepted one, and reports the failure.
+When no Realm Profile has ever been accepted and none can be obtained, the
+Actr Host **MUST** report an error. In every case the Actr Host **MUST NOT**
+use any Realm Provider other than the one named by the accepted Realm Profile,
+including services listed in the authority descriptor.
 
 ## 7. Lifecycle
 
 ### 7.1 Creation
 
-1. The namespace key holder sends a `create_realm` request (Section 8) to the
-   chosen provider. The provider creates a pending Realm, prepares its issuer
-   key and endpoints, and returns the unsigned first Profile.
-2. The namespace key holder signs that Profile and always submits it with an
-   `activate_realm` request. The provider verifies it (Section 5), activates
-   the Realm, and returns the Realm's admin token once, in the `activate_realm`
-   response. If the provider hosts the `realms` location, it serves the
-   Profile from then on; otherwise the namespace owner publishes it there.
+The Actr Host, the user, or the key holder's policy chooses the Realm
+Provider. Every step is authorized by the Realm signing key holder
+(Section 7.3).
 
-In a provider-owned namespace the provider signs the Profile itself, so no
-`activate_realm` request is needed (Section 7.3). A pending Realm that is not
-activated in time expires and is removed.
+1. A `create_realm` request (Section 8) goes to the chosen Realm Provider.
+   The Realm Provider creates a pending Realm, prepares its Realm issuer key
+   and endpoints, and returns the unsigned first Realm Profile.
+2. The Realm signing key holder signs that Realm Profile and always submits it
+   with an `activate_realm` request. The Realm Provider verifies it
+   (Section 5), activates the Realm, and returns the Realm admin token once, in
+   the `activate_realm` response. If the Realm Provider serves the `realms`
+   location, it serves the Realm Profile from then on; otherwise the domain
+   owner publishes it there.
+
+For a Realm under the Realm Provider's domain, the Realm Provider signs the
+Realm Profile itself, so no `activate_realm` request is needed (Section 7.3). A
+pending Realm that is not activated in time expires and is removed.
 
 ### 7.2 Updates
 
-A higher-`sequence` Profile may change the issuer keys, the provider's
-endpoints, `display_name`, and `policy`. It **MUST NOT** change `provider.id`.
+A higher-sequence Realm Profile may change the Realm issuer keys, the Realm
+Provider's endpoints, `display_name`, and `policy`. It **MUST NOT** change
+`provider.id`.
 
-### 7.3 Provider-owned namespaces
+### 7.3 Authorization by the key holder
 
-In a provider-owned namespace, the provider holds the namespace keys and
-creates Realms for users who have an account with it. The Host authenticates
-the user with the OAuth 2.0 authorization code flow with PKCE (RFC 6749,
-RFC 7636). The `href` of the `identity` service link in that namespace's
-authority descriptor is the OAuth issuer identifier; the authorization server
-metadata is at its RFC 8414 well-known location. The authorization server
-**MUST** accept the fixed public client ID `actr-host` without a client
-secret, with redirects per RFC 8252 (loopback or private-use URI scheme); the
-Host requests scope `realm_management`. The Host then sends `create_realm` and
-`reissue_admin_token` with the access token as a bearer token (RFC 6750)
-instead of an envelope signature; the provider signs the Profile itself and
-returns the admin token in the `create_realm` response. A Host that lost that
-response recovers the token with `reissue_admin_token`.
+Creating and activating a Realm and reissuing its Realm admin token require
+the authorization of the Realm signing key holder. Version 1 defines no
+delegated creation keys. The Actr Host picks the path with the rule of
+Section 2.1:
 
-Quotas and the Realm's management rights, including reissuing its admin
-token, are bound to the account, so a user who changes or loses a device only
-signs in again. Account registration, sign-in methods, and abuse controls are
-up to the provider.
-
-Clients **MUST** show that the provider operator is the trust root of Realms
-in a provider-owned namespace.
-
-In a namespace owned by an organization, the organization's signing service
-authenticates members under its own policy and signs requests and Profiles on
-their behalf. Version 1 defines no delegated creation keys.
+- **A Realm under the Realm Provider's domain.** The Realm Provider
+  authenticates the requester by a Realm Provider account. The Actr Host uses
+  the OAuth 2.0 authorization code flow with PKCE (RFC 6749, RFC 7636). The
+  `href` of the `identity` service link in the Realm Provider's own authority
+  descriptor (`https://<Realm Provider ID>/.well-known/actr`) is the OAuth
+  authorization server identifier (issuer identifier, RFC 8414); the authorization server metadata is at its RFC 8414 well-known
+  location. The authorization server **MUST** accept the fixed public client
+  ID `actr-host` without a client secret, with redirects per RFC 8252
+  (loopback or private-use URI scheme); the Actr Host requests scope
+  `realm_management`. The Actr Host sends `create_realm` and
+  `reissue_admin_token` with the access token as a bearer token (RFC 6750)
+  instead of an envelope signature; the Realm Provider signs the Realm Profile
+  itself and returns the Realm admin token in the `create_realm` response. An
+  Actr Host that lost that response recovers the token with
+  `reissue_admin_token`. Quotas and the Realm's admin rights, including
+  reissuing its Realm admin token, are bound to the Realm Provider account, so
+  a user who changes or loses a device only signs in again. Account
+  registration, sign-in methods, and abuse controls are up to the Realm
+  Provider.
+- **Any other Realm.** Each Realm management request is an Actr management
+  envelope signed by an active Realm signing key (Section 8), obtained from
+  the signing service of the Realm signing key holder, whether that is the
+  domain owner or a Realm Provider it delegated custody to. How that signing
+  service authenticates the people it signs for is outside this document.
 
 ### 7.4 Retirement
 
-Retirement has one path: the namespace owner publishes a Profile with
-`status` `retired`. Providers learn it by refreshing, write a local tombstone,
-and stop serving the Realm. The local name is never reused in that namespace.
-A retired Profile keeps the same `provider.id` and has a higher `sequence`.
-If the Realm's provider has shut down, the namespace owner points the `realms`
-link at a location it controls and publishes the retired Profile there. A
-provider-owned namespace disappears with its provider: its Realms cannot be
-retired and can only be recreated elsewhere.
+Retirement has one path: the domain owner publishes a retired Realm Profile.
+Realm Providers learn it by refreshing, write a Realm Provider tombstone, and
+stop serving the Realm. The Realm name is never reused. A retired Realm
+Profile keeps the same `provider.id` and has a higher sequence. If the Realm's
+Realm Provider has shut down, the domain owner points the `realms` link at a
+location it controls and publishes the retired Realm Profile there. A domain
+owned by a Realm Provider disappears with it: its Realms cannot be retired
+and can only be recreated elsewhere.
 
-### 7.5 Namespace key loss
+### 7.5 Realm signing key loss
 
-If every namespace private key is lost, existing Realms can no longer receive
-new Profiles. The domain owner may publish a new namespace key, which clients
-treat as an identity change (Actr Authority Discovery, Section 4.4), and create
-new Realms under new local names. Keeping the lost keys listed as `retired`
-lets existing Realms keep working with their current Profiles.
+If every Realm signing private key of a domain is lost, existing Realms can no
+longer receive new Realm Profiles. The domain owner may publish a new Realm
+signing key, which Actr Hosts treat as an identity change (Actr Authority
+Discovery, Section 4.4), and create new Realms under new Realm labels. Keeping
+the lost keys listed as `retired` lets existing Realms keep working with their
+current Realm Profiles.
 
-## 8. Provider management requests
+## 8. Realm management requests
 
-A provider accepts these management requests as HTTPS `POST` requests to the
-`realm-management` service link of its own authority descriptor,
-`https://<provider_id>/.well-known/actr` (Actr Authority Discovery,
-Section 4.3):
+A Realm Provider accepts these Realm management requests as HTTPS `POST`
+requests to the `realm-management` service link of its own authority
+descriptor, `https://<provider_id>/.well-known/actr` (Actr Authority
+Discovery, Section 4.3):
 
 | `op` | Purpose |
 | --- | --- |
-| `create_realm` | Create a pending Realm and return its unsigned first Profile. |
-| `activate_realm` | Submit the signed first Profile in `profile`; the response carries the admin token once. |
-| `reissue_admin_token` | Issue a new admin token and invalidate the old one. |
+| `create_realm` | Create a pending Realm and return its unsigned first Realm Profile. |
+| `activate_realm` | Submit the signed first Realm Profile in `profile`; the response carries the Realm admin token once. |
+| `reissue_admin_token` | Issue a new Realm admin token and invalidate the old one. |
 
-In a DNS namespace, each request is signed by an active namespace key using
-the envelope below. In a provider-owned namespace, requests carry the same
-payload, including `provider_id`, `nonce`, and validity, without a signature,
-and are authorized by the account's bearer access token (Section 7.3).
+For a Realm under the Realm Provider's domain (Section 2.1), requests carry
+the payload below, including `provider_id`, `nonce`, and validity, without a
+signature, and are authorized by the Realm Provider account's bearer access
+token (Section 7.3). For any other Realm, each request is an Actr management
+envelope: the payload below plus a signature by an active Realm signing key of
+the Realm domain.
 
 The payload of a `create_realm` request is:
 
 ```json
 {
   "op": "create_realm",
-  "namespace": "dns:acme.com",
-  "local_name": "k7m2q9xh",
+  "realm": "k7m2q9xh@acme.com",
   "provider_id": "provider.example",
   "requester": "<opaque member id>",
   "nonce": "<random>",
@@ -317,71 +346,81 @@ The payload of a `create_realm` request is:
 ```
 
 Other operations use the same envelope with their own `op` and fields.
-`requester` is optional: an organization's signing service sets it to an
-opaque identifier of the member it signs for. Other specifications **MAY**
-reuse this envelope with their own `op` values; for example, Actr Authority
-Discovery, Section 4.5, uses it to register a publisher.
+`requester` is optional: a key holder's signing service sets it to an opaque
+identifier of the person it signs for. In bearer requests the Realm Provider
+**MUST** ignore `requester` and uses the Realm Provider account as the
+requester. Other specifications **MAY** reuse the
+Actr management envelope with their own `op` values; for example, Actr
+Authority Discovery, Section 4.5, uses it to register a publisher.
 
 - The payload is canonicalized with RFC 8785 JCS and accompanied by a detached
   Ed25519 signature and its `key_id`.
-- `provider_id` **MUST** equal the receiving provider's canonical DNS
-  authority, so a request cannot be replayed at another provider.
-- `expires_at` minus `issued_at` **MUST NOT** exceed five minutes. Providers
-  reject requests outside that window.
-- Providers record each `nonce` until the request expires and reject its
+- `provider_id` **MUST** equal the receiving Realm Provider ID, so a request
+  cannot be replayed at another Realm Provider.
+- `expires_at` minus `issued_at` **MUST NOT** exceed five minutes. Realm
+  Providers reject requests outside that window.
+- Realm Providers record each `nonce` until the request expires and reject its
   reuse. The nonce prevents only byte-level replay.
-- `create_realm` is idempotent on `(namespace, local_name, requester)`, where
-  the requester is the `requester` field (absent means empty) or, in a
-  provider-owned namespace, the account. A repeated request from the same
-  requester for its own pending or active Realm returns the Realm's state,
-  without an admin token. A request that names a Realm of another requester,
-  or a retired Realm, fails with a conflict.
+- `create_realm` is idempotent on the Realm Provider idempotency key
+  `(realm, requester)`, where the requester is the `requester` field (absent
+  means empty) or, for bearer requests, the Realm Provider account. A repeated request from the same requester for its own
+  pending or active Realm returns the Realm's state, without a Realm admin
+  token. A request that names a Realm of another requester, or a retired
+  Realm, fails with a conflict.
 - `activate_realm` on an already active Realm fails with a conflict. A lost
-  admin token is recovered only with `reissue_admin_token`.
+  Realm admin token is recovered only with `reissue_admin_token`.
 
-Before accepting a signed request, a provider verifies the signing namespace
-key through Actr Authority Discovery under the same rules as clients. Because
-this fetch happens before the signature is verified, a provider **MUST**
-rate-limit it per source address and per target domain and **SHOULD** cache the results,
-including failures. A provider **SHOULD** enforce quotas per namespace and per
-Realm.
+Before accepting a signed request, a Realm Provider verifies the Realm signing
+key through Actr Authority Discovery under the same rules as Actr Hosts.
+Because this fetch happens before the signature is verified, a Realm Provider
+**MUST** rate-limit it per source address and per target domain and **SHOULD**
+cache the results, including failures. A Realm Provider **SHOULD** enforce
+quotas per Realm domain and per Realm.
 
 ## 9. Security and privacy considerations
 
-- Namespace keys are high-value keys. Offline or hardware storage is strongly
-  recommended; the provider does not hold namespace keys for third-party
-  domains.
-- Profiles do not expire. A client that has never seen a newer Profile may
-  accept an older one delivered out of band, for example in an old
-  invitation. Refreshing from the `realms` location bounds this window, and
-  `sequence` prevents rollback for any client that has seen the newer
-  Profile.
-- Forbidding fallback to default services prevents an attacker who blocks
-  Profile retrieval from redirecting clients to an unauthorized provider.
-- The authority descriptor does not list Realms, but a Realm reference reveals
-  its namespace and local name wherever it is shared. Hosts **SHOULD**
-  generate a random local name by default and keep the readable title in
+- Realm signing keys are high-value keys. Offline or hardware storage is
+  strongly recommended. A Realm Provider holds Realm signing keys only for
+  domains whose owners delegated custody to it, including its own domains.
+- Realm Profiles do not expire. An Actr Host that has never seen a newer Realm
+  Profile may accept an older one delivered out of band, for example in an old
+  Realm invitation. Refreshing from the `realms` location bounds this window,
+  and the Realm Profile sequence prevents rollback for any Actr Host that has
+  seen the newer Realm Profile.
+- Using only the Realm Provider named by the Realm Profile prevents an
+  attacker who blocks Realm Profile retrieval from redirecting Actr Hosts to
+  an unauthorized Realm Provider.
+- The authority descriptor does not list Realms, but a Realm name reveals its
+  Realm domain and Realm label wherever it is shared. Actr Hosts **SHOULD**
+  generate a random Realm label by default and keep the readable title in
   `display_name`.
-- A compromised namespace key is revoked by removing it from `keys` and
-  re-signing the affected Profiles (Section 6). A client that has not yet
-  seen the updated `realm_namespace` member cannot tell; this is a residual
-  risk bounded by refreshing.
-- Removing a key also drops the retired tombstones and `provider.id`
-  baselines that rest on Profiles it signed. This is an accepted consequence
-  inside the namespace owner's trust boundary: "a local name is never reused"
-  is an obligation on the owner, which clients can enforce only for Profiles
-  signed by still-listed keys. Provider-local tombstones are unaffected.
-- Hosts use a distinct device key in each Realm, so Realms cannot correlate a
-  device by its key. In a provider-owned namespace, the provider can link the
-  Realms created by one account, which it already signs for; Realm members do
-  not see the account.
+- Realm names and ActorIds look like email addresses. Actr Hosts **MUST NOT**
+  render them as `mailto:` links and should display them as instance
+  addresses ([Actr URI](uri.md), Section 7.1).
+- Actr Hosts cannot see that a domain owner delegated custody of its Realm
+  signing keys to a Realm Provider; for such Realms they show the Realm domain
+  as the trust root. This is an accepted limitation.
+- A compromised Realm signing key is revoked by removing it from `keys` and
+  re-signing the affected Realm Profiles (Section 6). An Actr Host that has
+  not yet seen the updated `realm_signing_keys` member cannot tell; this is a
+  residual risk bounded by refreshing.
+- Removing a key also drops the retired Realm Profiles and `provider.id`
+  baselines that rest on Realm Profiles it signed. This is an accepted
+  consequence inside the domain owner's trust boundary: "a Realm name is never
+  reused" is an obligation on the owner, which Actr Hosts can enforce only for
+  Realm Profiles signed by still-listed keys. Realm Provider tombstones are
+  unaffected.
+- Actr Hosts use a distinct Realm client key in each Realm, so Realms cannot
+  correlate a client by its key. For Realms under its domain, a Realm
+  Provider can link the Realms created by one Realm Provider account, which it
+  already signs for; Realm members do not see the account. The same holds for a key
+  holder's signing service.
 
 ## 10. Open work
 
-- Define machine-readable JSON Schemas for `actr.realm/v1` and management
-  requests, with signing test vectors.
-- Define delegated creation keys with scoped local-name prefixes and
-  lifetimes.
+- Define machine-readable JSON Schemas for `actr.realm/v1` and Realm
+  management requests, with signing test vectors.
+- Define delegated creation keys with scoped Realm label prefixes and lifetimes.
 
 ## 11. References
 
@@ -396,3 +435,4 @@ Realm.
 - [RFC 8252: OAuth 2.0 for Native Apps](https://www.rfc-editor.org/rfc/rfc8252.html)
 - [RFC 8414: OAuth 2.0 Authorization Server Metadata](https://www.rfc-editor.org/rfc/rfc8414.html)
 - [RFC 8785: JSON Canonicalization Scheme (JCS)](https://www.rfc-editor.org/rfc/rfc8785.html)
+- [RFC 9476: The .alt Special-Use Top-Level Domain](https://www.rfc-editor.org/rfc/rfc9476.html)

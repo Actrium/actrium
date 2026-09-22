@@ -10,13 +10,13 @@
 actr://notes.example/team-notes@1.4.2
 ```
 
-在指定命名空间下创建（新建一个 Realm；省略 `namespace` 时创建到本机 `local` 命名空间）：
+在指定域名下创建（新建一个 Realm；省略 `domain` 时创建为本机 Realm）：
 
 ```text
-actr://notes.example/team-notes@1.4.2?namespace=acme.com
+actr://notes.example/team-notes@1.4.2?domain=acme.com
 ```
 
-Create URI 不携带 `local_name`。新 Realm 的 `local_name` 默认由 Actro 随机生成（base32 小写短串，不含程序名），可读名称写入 Realm Profile 的 `display_name`；上例默认得到的 Realm 引用形如 `k7m2q9xh~dns:acme.com`。用户可在确认页显式改用可读 `local_name`，下文 Attach 样例中的 `notes` 即此类显式选择的名字。
+Create URI 不携带 `label`。新 Realm 的 `label` 默认由 Actro 随机生成（base32 小写短串，不含程序名），可读名称写入 Realm Profile 的 `display_name`；上例默认得到的 Realm 名形如 `k7m2q9xh@acme.com`。用户可在确认页显式改用可读 `label`，下文 Attach 样例中的 `notes` 即此类显式选择的名字。
 
 ### Create + Guest route
 
@@ -27,18 +27,18 @@ actr://notes.example/team-notes@1.4.2/today?filter=assigned
 ### Attach
 
 ```text
-actr://notes.example/team-notes@1.4.2/today?service=2af01%40notes~dns%3Aacme.com%2Fnotes.example%3Ateam-notes%3A1.4.2
+actr://notes.example/team-notes@1.4.2/today?service=2af01.notes%40acme.com
 ```
 
 解码后的 v1 ActorId：
 
 ```text
-2af01@notes~dns:acme.com/notes.example:team-notes:1.4.2
+2af01.notes@acme.com
 ```
 
-其中 `notes~dns:acme.com` 是 Realm 引用：命名空间 `dns:acme.com` 下本地名为 `notes` 的 Realm，即一个应用实例。
+其中 `notes@acme.com` 是 Realm 名：Realm 域名 `acme.com` 下 Realm label 为 `notes` 的 Realm，即一个应用实例。ActorId 只标识「哪个 Realm 里的哪个 Actor」；程序身份 `publisher/program@version` 由注册与 Actor credential 携带，不在 ActorId 中。
 
-当前 Actr 的 legacy `2af01@42/notes.example:team-notes:1.4.2` 缺 Realm 引用，只能通过显式导入流程补足，不能作为 portable Attach URI。早期草案 `2af01@42~dns:team.example/...` 已作废。
+当前 Actr 的 legacy `2af01@42/notes.example:team-notes:1.4.2` 缺 Realm 名且内嵌程序类型，只能通过显式导入流程改写，不能作为 portable Attach URI。早期草案 `2af01@42~dns:team.example/...` 已作废。
 
 ### Development
 
@@ -150,7 +150,7 @@ Release 的 `signature` 同样排除在 JCS payload 外，并由 Publisher Profi
 示意：
 
 ```toml
-manufacturer = "notes.example"
+publisher = "notes.example"
 name = "team-notes"
 version = "1.4.2"
 signature_algorithm = "ed25519"
@@ -202,7 +202,7 @@ data_classes = ["public", "private", "secret"]
 default_unknown_action = "block-private-and-secret"
 
 [[actro.privacy.actor_egress]]
-actr_type = "notes.example:index-worker:1.4.2"
+actr_type = "notes.example/index-worker@1.4.2"
 required = false
 data_classes = ["private"]
 
@@ -328,17 +328,17 @@ ipc = ["actr.capability.v1"]
 
 Actro 不能只信这个文件；安装分析结果必须与它一致。
 
-## 6. Realm 命名空间与 Realm Profile
+## 6. Realm 签名 key 与 Realm Profile
 
-### 6.1 命名空间：authority descriptor 扩展
+### 6.1 Realm 签名 key：authority descriptor 扩展
 
-DNS Realm 命名空间即 Actr authority。命名空间描述位于该 authority 的 descriptor：
+域名的 Realm 签名 key 发布在该域名（不含端口的 Actr authority）的 descriptor 中：
 
 ```text
 https://acme.com/.well-known/actr
 ```
 
-样例（`realm_namespace` 成员与 `realms` relation 已在 Actr Authority Discovery §4.3–4.4 定义）：
+样例（`realm_signing_keys` 成员与 `realms` relation 已在 Actr Authority Discovery §4.3–4.4 定义）：
 
 ```json
 {
@@ -361,17 +361,17 @@ https://acme.com/.well-known/actr
       "protocol": "actr-realm-profile/1"
     }
   ],
-  "realm_namespace": {
+  "realm_signing_keys": {
     "sequence": 3,
     "keys": [
       {
-        "id": "ns-2026-1",
+        "id": "rs-2026-1",
         "algorithm": "Ed25519",
         "public_key": "<base64>",
         "status": "active"
       },
       {
-        "id": "ns-2025-1",
+        "id": "rs-2025-1",
         "algorithm": "Ed25519",
         "public_key": "<base64>",
         "status": "retired"
@@ -379,14 +379,14 @@ https://acme.com/.well-known/actr
     ],
     "rotations": [
       {
-        "from": "ns-2025-1",
-        "to": "ns-2026-1",
+        "from": "rs-2025-1",
+        "to": "rs-2026-1",
         "sequence": 2,
         "signature": "<base64>"
       }
     ],
     "signature": {
-      "key_id": "ns-2026-1",
+      "key_id": "rs-2026-1",
       "algorithm": "Ed25519",
       "value": "<base64>"
     }
@@ -394,11 +394,11 @@ https://acme.com/.well-known/actr
 }
 ```
 
-`realm_namespace.keys` 是该命名空间下所有 Realm 的长期信任根；`rotations` 中每一项由 `from` key 对 `{from, to, public_key, sequence}` 的 JCS 形式签名，`sequence` 为引入该轮换时的成员 `sequence`；从 `keys` 移除某个 key 即吊销它签过的全部 Profile；`realm_namespace.signature` 由某个 `active` key 对去掉 `signature` 后的该成员 JCS 规范化结果签名，覆盖 `sequence`。descriptor 其余部分不签名，也不列出 Realm 清单。`services` 中的 signaling、ice-config 等是 authority 的默认 Provider，只作创建新 Realm 时的建议；具体 Realm 只按其 Profile 委派，Profile 不可用、无效或退役时不得回退到默认 Provider。Provider 自身的 descriptor（`https://provider.example/.well-known/actr`）另以 `realm-management` link（protocol `actr-realm-management/1`）公布管理请求端点。
+`realm_signing_keys.keys` 是该域名下所有 Realm 的长期信任根；`rotations` 中每一项由 `from` key 对 `{from, to, public_key, sequence}` 的 JCS 形式签名，`sequence` 为引入该轮换时的成员 `sequence`；从 `keys` 移除某个 key 即吊销它签过的全部 Realm Profile；`realm_signing_keys.signature` 由某个 `active` key 对去掉 `signature` 后的该成员 JCS 规范化结果签名，覆盖 `sequence`。descriptor 其余部分不签名，也不列出 Realm 清单。`services` 中的 signaling、ice-config 等服务于该 authority 自身，与该域名下的 Realm 无关；访问 Realm 只使用其 Realm Profile 指定的 Realm Provider，Realm Profile 不可用、无效或退役时不得使用任何其他 Realm Provider。Realm Provider 自身的 descriptor（`https://provider.example/.well-known/actr`）另以 `realm-management` link（protocol `actr-realm-management/1`）公布管理请求端点。
 
 ### 6.2 Realm Profile
 
-入口为 `realms` relation 的 `href` 加本地名：
+入口为 `realms` relation 的 `href` 加 `label`：
 
 ```text
 https://realms.provider.example/acme.com/k7m2q9xh
@@ -411,13 +411,11 @@ https://realms.provider.example/acme.com/k7m2q9xh
   "schema": "actr.realm/v1",
   "sequence": 31,
   "realm": {
-    "namespace": "dns:acme.com",
-    "local_name": "k7m2q9xh",
+    "name": "k7m2q9xh@acme.com",
     "display_name": "Acme Notes",
     "status": "active"
   },
   "issuer": {
-    "id": "actr:realm:k7m2q9xh~dns:acme.com:authority",
     "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
     "keys": [
       {
@@ -459,30 +457,27 @@ https://realms.provider.example/acme.com/k7m2q9xh
   },
   "issued_at": "2026-07-29T00:00:00Z",
   "signature": {
-    "key_id": "ns-2026-1",
+    "key_id": "rs-2026-1",
     "algorithm": "Ed25519",
     "value": "<base64>"
   }
 }
 ```
 
-`signature` 由 `realm_namespace` 中的 `active` key 签署，托管位置不影响有效性；由后来退役的 key 签发的既有 Profile 在被更高 `sequence` 取代前仍有效。Profile 不设过期时间，回滚保护只靠 `sequence`；`provider.id` 是 Provider 的规范化 DNS authority，在 Realm 生命周期内不可变。多个 signaling endpoint 共享 `control_plane_id`，表示它们是同一 Provider presence/control plane 的副本或故障切换入口，而不是 v1 federation。同一 Provider 下轮换 issuer key 或变更端点时发布更高 `sequence` 的 Profile；退役时发布 `status` 为 `retired` 的新 Profile，永久有效。
+`signature` 由 `realm_signing_keys` 中的 `active` key 签署；Actor credential 的 issuer 即 `realm.name`，存放位置不影响有效性；由后来退役的 key 签发的既有 Realm Profile 在被更高 `sequence` 取代前仍有效。Realm Profile 不设过期时间，回滚保护只靠 `sequence`；`provider.id` 是 Realm Provider 的规范化 DNS authority，在 Realm 生命周期内不可变。多个 signaling endpoint 共享 `control_plane_id`，表示它们是同一 Realm Provider presence/control plane 的副本或故障切换入口，而不是 v1 federation。同一 Realm Provider 下轮换 Realm issuer key 或变更端点时发布更高 `sequence` 的 Realm Profile；退役时发布 `status` 为 `retired` 的新 Realm Profile，永久有效。
 
 ## 7. Service Inventory Record
 
 ```json
 {
-  "actorId": "2af01@notes~dns:acme.com/notes.example:team-notes:1.4.2",
+  "actorId": "2af01.notes@acme.com",
   "program": {
     "publisher": "notes.example",
     "name": "team-notes",
     "version": "1.4.2",
     "packageDigest": "sha256:..."
   },
-  "realm": {
-    "namespace": "dns:acme.com",
-    "localName": "notes"
-  },
+  "realm": "notes@acme.com",
   "workspaceId": "ws_01...",
   "runtime": {
     "placement": "local",
@@ -515,7 +510,7 @@ https://realms.provider.example/acme.com/k7m2q9xh
   },
   "capability": "host:clipboard.write",
   "scope": {
-    "serviceActorId": "2af01@notes~dns:acme.com/notes.example:team-notes:1.4.2",
+    "serviceActorId": "2af01.notes@acme.com",
     "workspaceId": "ws_01..."
   },
   "decision": "allow-while-open",
@@ -595,7 +590,8 @@ URI_VERSION_INVALID
 URI_RESERVED_DUPLICATE
 URI_ACTOR_ID_INVALID
 URI_ACTOR_TYPE_MISMATCH
-URI_NAMESPACE_INVALID
+URI_DOMAIN_INVALID
+URI_DOMAIN_NOT_ALLOWED
 URI_REALM_REQUIRED
 URI_REALM_MISMATCH
 URI_LOCAL_REALM_FOREIGN
@@ -625,16 +621,17 @@ SERVICE_IMPORT_FORBIDDEN
 ### Realm/Identity
 
 ```text
-REALM_NAMESPACE_INVALID
-REALM_NAMESPACE_UNTRUSTED
-REALM_NAMESPACE_KEY_CHANGED
+REALM_KEYS_INVALID
+REALM_DOMAIN_UNTRUSTED
+REALM_SIGNING_KEY_CHANGED
+REALM_PROFILE_UNAVAILABLE
 REALM_PROFILE_INVALID
 REALM_PROVIDER_MISMATCH
 REALM_PROFILE_ROLLBACK
 REALM_RETIRED
 REALM_LOGIN_REQUIRED
 REALM_MEMBERSHIP_REVOKED
-DEVICE_REVOKED
+CLIENT_REVOKED
 INVITE_EXPIRED
 INVITE_ALREADY_USED
 INVITE_REVOKED
@@ -823,10 +820,11 @@ closed
 
 | 术语 | 定义 |
 |---|---|
-| Actro | Actrium 程序浏览器与宿主平台 |
+| Actro | Actrium 程序浏览器与宿主产品，提供 Actr Host 及更多能力 |
 | Actr | Actor 通信、身份、发现和 workload runtime 框架 |
+| Actr Host | 运行 Actor 的宿主（与 Guest 相对）；Actro 是提供 Actr Host 的产品之一 |
 | Keel | 沙箱化动态原生 UI 的 Host/Guest runtime |
-| Program | Publisher 命名空间内的程序 |
+| Program | Publisher 发布的程序 |
 | Program Release | `publisher/program@version` 对应的不可变包 |
 | Publisher | 以规范化 DNS 域名标识的发布者 |
 | `.actr` package | Actr 签名 workload 包；在 Actro 中同时携带 Service 与 Keel Guest 资源 |
@@ -835,18 +833,20 @@ closed
 | Keel Guest | Publisher 唯一可定制的前台代码 |
 | Primary Service | Front 唯一绑定的有状态业务 Actor |
 | Auxiliary Actor | 由 Primary Service 编排的后台 Actor |
-| ActorId | 携带 Realm 引用、持久且密码学绑定的精确 Actor 身份 |
-| ActrType | publisher/manufacturer + name/program + version |
+| ActorId | `<serial>.<label>@<domain>`：持久且密码学绑定的精确 Actor 身份，不含程序类型 |
+| ActrType | `publisher/program@version`，由注册与 Actor credential 携带 |
 | Workspace | Service 持有的业务数据 capability |
-| Realm | 一个应用实例的逻辑信任与治理域：Actor 身份、准入、ACL 和 Provider 委派 |
-| Realm 命名空间 | Realm 的命名空间：`dns:<domain>`（即不含端口的 Actr authority）或 `local:<installation-id>`；持有命名空间 key |
-| Realm 引用 | `<local_name>~dns:<domain>` 或 `<local_name>~local:<installation-id>` |
-| Realm Profile | 由命名空间 key 签名、委派 issuer 与 Provider 的每 Realm 文档 |
-| Provider | 承载大量 Realm 的共享基础设施（signaling、STUN/TURN、issuer） |
+| Realm | 一个应用实例的逻辑信任与治理域：Actor 身份、准入、连接 ACL 和 Realm Provider 委派 |
+| Realm 名 | `<label>@<domain>`；`domain` 为 DNS 域名，本机 Realm 为 `<installation-id>.actr.alt` |
+| Realm 签名 key | Realm 域名在 descriptor 的 `realm_signing_keys` 中公布、用于签署 Realm Profile 的 key；持有方即域名所有者，可委托 Realm Provider 代持 |
+| Realm Profile | 由 Realm 签名 key 签名、委派 Issuer 与 Realm Provider 的每 Realm 文档 |
+| Realm Provider | 承载大量 Realm 的共享基础设施运营方（signaling、STUN/TURN、Issuer）；Realm 创建时绑定，此后不变 |
+| Realm 客户端 key | 某成员的某个客户端安装在某个 Realm 中的 key，按 Realm 独立，可单独吊销 |
+| Actr 管理信封 | Realm 签名 key 签署的 Realm 管理请求格式（绑定 `provider_id`、≤5 分钟、nonce）；`register_publisher` 复用 |
 | Signaling | presence、发现与 WebRTC 协商控制面 |
 | STUN | NAT 映射发现 |
 | TURN | P2P 不可达时的受控流量中继 |
-| Capability | Host 明确授予 Guest/Service 的最小能力 |
+| Capability | Actr Host 明确授予 Guest/Service 的最小能力 |
 | Package digest | 精确 Program Release 的不可变内容指纹 |
 | Attachment lease | Front 使用 Service 的短期会话租约 |
 | Marketplace | 程序发现、审核和撤销信息服务，不是 Publisher 命名权威 |
@@ -854,7 +854,7 @@ closed
 | ActorAssurance | 验证者针对准确 `ActorStateId` 的节点结论；禁止自签 |
 | ApplicationAssurance | 当前就绪切面的汇聚结论 |
 | Ready | 快照当前且全部成员 ACTIVE；展示颜色的前提 |
-| Native Capsule | 在独立 OS sandbox 中运行、只开放 Host brokered IPC 的 Native workload |
+| Native Capsule | 在独立 OS sandbox 中运行、只开放 Actr Host brokered IPC 的 Native workload |
 
 ## 13. 规范与实现参考
 

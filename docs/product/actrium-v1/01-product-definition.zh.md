@@ -15,7 +15,7 @@ Actro 要把 Actor 程序变成普通用户可以理解、安装、创建、打�
 开发者看到的是受约束的小程序平台：
 
 - 前台只写 Keel Guest；
-- 不需要自己实现窗口、路由、Actor 注册、信令、权限弹窗和跨平台 Host；
+- 不需要自己实现窗口、路由、Actor 注册、信令、权限弹窗和跨平台 Actr Host；
 - 前台永远通过一个类型化 Primary Service capability 访问业务；
 - 后台 Service 可以使用 Actor 模型组合更复杂的服务；
 - 一个精确坐标可以被 HTTPS 获取、验证、缓存和复现。
@@ -46,7 +46,7 @@ Actro 要把 Actor 程序变成普通用户可以理解、安装、创建、打�
 - 选择 Workspace 并创建一个实例；
 - 稍后从历史、收藏或实例库继续工作；
 - 在另一设备上连接已有实例；
-- 明确知道程序来自谁、实例属于哪个 Realm（及其命名空间）、获得了哪些权限。
+- 明确知道程序来自谁、实例属于哪个 Realm（及其域名）、获得了哪些权限。
 
 ### 3.2 程序开发者
 
@@ -61,25 +61,25 @@ Actro 要把 Actor 程序变成普通用户可以理解、安装、创建、打�
 - 用自己的域名发布不可变 `.actr` 包；
 - 在本地开发模式快速调试。
 
-### 3.3 Publisher / 组织管理员
+### 3.3 Publisher
 
-通过域名发布程序，维护签名密钥、版本、撤销信息和推荐 Provider。Realm 按实例创建，Publisher 无法预先推荐某个 Realm。
+通过域名发布程序，维护 Publisher 签名 key、版本和撤销信息。Realm 按实例创建，Publisher 无法预先指定某个 Realm。
 
-### 3.4 命名空间管理员与 Realm 所有者
+### 3.4 Realm 签名 key 持有方与 Realm 所有者
 
-命名空间管理员（通常是组织 IT）持有 Realm 命名空间 key，发布命名空间描述，运营组织的签名工具或服务：按组织自己的策略认证成员后，代签在该命名空间下创建 Realm 的请求与 Profile；决定委派哪个 Provider，并负责命名空间 key 轮换。v1 中个人用户只能在本机 local 命名空间或 Provider 自有命名空间自助创建 Realm。
+Realm 域名的所有者即 Realm 签名 key 持有方：在 authority descriptor 中发布 Realm 签名 key，按自己的策略认证请求方后授权在该域名下创建 Realm，决定使用哪个 Realm Provider，并负责 Realm 签名 key 轮换；也可以委托 Realm Provider 代持 key。没有域名就不分配 Realm（本机 Realm 除外）。
 
-Realm 所有者即应用实例的创建者，管理该实例 Realm 的成员身份、Actor 准入、ACL、邀请、设备撤销与审计。
+Realm 所有者即应用实例的创建者，管理该实例 Realm 的成员身份、Actor 准入、连接 ACL、Realm 邀请、客户端撤销与审计。
 
 ### 3.5 Marketplace 运营者
 
-提供程序发现、分类、审核、风险标注和撤销信息，但不拥有 Publisher 的命名空间。
+提供程序发现、分类、审核、风险标注和撤销信息，但不拥有 Publisher 的命名权。
 
 ## 4. 核心用户故事
 
 ### 4.1 新建实例
 
-> 作为用户，我输入或点击一个没有 `service` 参数的 `actr://` 地址，Actro 应先验证程序、展示权限、Workspace 与 Realm 命名空间选择，在所选命名空间下新建一个 Realm 并在其中创建 Service（默认使用本机命名空间），然后把地址改写为可重连该 Service 的地址。
+> 作为用户，我输入或点击一个没有 `service` 参数的 `actr://` 地址，Actro 应先验证程序、展示权限、Workspace 与 Realm 域名选择，在所选域名下新建一个 Realm 并在其中创建 Service（默认创建本机 Realm），然后把地址改写为可重连该 Service 的地址。
 
 ### 4.2 连接已有实例
 
@@ -99,7 +99,7 @@ Realm 所有者即应用实例的创建者，管理该实例 Realm 的成员身�
 
 ### 4.6 Realm 与网络
 
-> 作为用户，我不需要手填信令和 TURN 地址；Actro 根据已信任命名空间 key 签名的 Realm Profile 选择端点和短期凭据，同时让我看见当前实例的 Realm、其命名空间和连接状态。
+> 作为用户，我不需要手填信令和 TURN 地址；Actro 根据已信任的 Realm 签名 key 签名的 Realm Profile 选择端点和短期凭据，同时让我看见当前实例的 Realm、其域名和连接状态。
 
 ### 4.7 多 Actor 隐私状态
 
@@ -122,13 +122,13 @@ UI-only 程序也使用平台提供的最小 Service，而不是再创造第二�
 - Publisher 不得替换 Front Native Host。
 - Front 只能携带 Keel Guest。
 - Guest 默认没有任意网络、文件、Actor discovery 或原生模块能力。
-- 所有能力由声明、用户授权和 Host 实现三者取交集。
+- 所有能力由声明、用户授权和 Actr Host 实现三者取交集。
 
 ### G-03：让地址可读、可复制、可恢复
 
 - Program coordinate 负责「运行什么」。
 - Service ActorId 负责「连接哪个实例」。
-- Realm reference 负责「去哪里验证和寻址」。
+- Realm 名负责「去哪里验证和寻址」。
 - URL 不携带秘密。
 
 ### G-04：复用 Web 的成熟安全基础设施
@@ -142,7 +142,7 @@ Front 只看到一个 Primary Service，不代表后台只能有一个 Actor。P
 ### G-06：提供端到端应用保障
 
 - 结论沿无根有效依赖图汇聚；Front 只定位；
-- WASM 的声明、imports、有效能力和实际出口由 Host 交叉验证；
+- WASM 的声明、imports、有效能力和实际出口由 Actr Host 交叉验证；
 - 只有 `Ready` 且全部节点 `CONTROLLED` 才显示绿；
 - 黄与红明确区分；挂起不得展示绿；
 - 新配置只作用于新数据；状态变化联动通道、Capability 和数据面。
@@ -158,7 +158,7 @@ v1 不做：
 - 多人实时协作协议；
 - 原地无感替换正在运行的 Service workload；
 - 跨 Realm（跨实例）自动联邦和全局 Actor 搜索；
-- 命名空间级 SSO 或成员目录；
+- 域名级 SSO 或成员目录；
 - 开放匿名 TURN；
 - 仅凭 Marketplace 审核标记就授予系统权限；
 - 在移动平台承诺 24×7 本地后台 Service 在线。
@@ -171,7 +171,7 @@ URL 有 `service` 就连接，无 `service` 就创建；失败时不改变意图
 
 ### 7.2 地址不等于权限
 
-ActorId 是定位与身份，访问权由 Realm credential、Service ACL 和会话授权决定。
+ActorId 是定位与身份，访问权由 Realm credential、应用权限和会话授权决定。
 
 ### 7.3 状态归 Service
 
@@ -183,7 +183,7 @@ Tab、Front Actor、Guest 都可以重建；Workspace 绑定、业务状态与�
 
 ### 7.5 默认最小能力
 
-未声明、未授权、Host 未实现的能力一律不可用。
+未声明、未授权、Actr Host 未实现的能力一律不可用。
 
 ### 7.6 平台限制显式化
 
@@ -205,7 +205,7 @@ Tab、Front Actor、Guest 都可以重建；Workspace 绑定、业务状态与�
 - 固定 Native Front Host + Keel JS Guest；
 - 本地 Service 创建、停止、启动、连接、回收站和彻底清除；
 - Workspace 绑定；
-- Realm 命名空间描述、按实例创建的 Realm 及其 Profile、身份、信令与 TURN 短期凭据；
+- Realm 签名 key、按实例创建的 Realm 及其 Realm Profile、身份、信令与 TURN 短期凭据；
 - `ActorAssurance` / `ApplicationAssurance`、无根依赖图、最弱项汇聚与 `Ready` 展示；
 - 权限、配额、审计和错误页面；
 - 本地开发来源。

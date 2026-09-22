@@ -22,7 +22,7 @@
      - `crates/signaling/src/presence.rs`
 
 3. 类型匹配一致性修复（已落地）
-   - 统一使用 `manufacturer:name`，修复部分路径只用 `name` 导致 ACL 误判的问题。
+   - 统一使用 `publisher/program`，修复部分路径只用 `name` 导致 ACL 误判的问题。
 
 4. ACL 重注册脏规则清理（已落地）
    - 服务注册时先清理 `realm + to_type` 的旧规则，再写入新规则。
@@ -65,7 +65,7 @@
 > 历史研究资料：不属于 Realm v1 契约。v1 明确不实现跨 Realm federation；
 > 若后续立项，必须通过新 protocol/descriptor version 重新评审。
 >
-> 与当前 v1 契约的关系：v1 中 Realm 对应一次应用实例部署，一个 Actrix 实例承载多个
-> Realm。同一实例内的不同 Realm 默认互不可见；v1 的 ACL 只作用于同一 Realm，管理接口
+> 与当前 v1 契约的关系：v1 中 Realm 对应一次应用实例部署，一个 Loran 实例承载多个
+> Realm。同一实例内的不同 Realm 默认互不可见；v1 的连接 ACL 只作用于同一 Realm，管理接口
 > 拒绝非空 `source_realm_id`，该维度仅保留供后续跨 Realm 规则使用。跨实例调用由
 > Service 后台在目标 Realm 取得客户端身份完成，而不是靠本文的跨 Realm ACL 放行。

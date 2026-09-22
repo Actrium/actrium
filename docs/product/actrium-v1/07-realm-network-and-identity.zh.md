@@ -4,25 +4,25 @@
 
 ```mermaid
 flowchart TB
-    NS["Realm 命名空间<br/>dns:域名 + 命名空间 key"]
+    NS["域名<br/>Realm 签名 key"]
     R["Realm<br/>一个应用实例的身份与治理域"]
-    AIS["Identity / Credential Issuer"]
-    SG1["Signaling Provider A"]
-    SG2["Signaling Provider B"]
+    ISS["Issuer"]
+    SG1["Signaling endpoint A"]
+    SG2["Signaling endpoint B"]
     ICE["STUN / TURN Pool"]
-    ACL["Membership / ACL / Revocation"]
+    ACL["Membership / 连接 ACL / Revocation"]
     F["Front Actor"]
     S["Service Actor"]
 
-    NS -->|签署 Profile| R
-    R --> AIS
+    NS -->|签署 Realm Profile| R
+    R --> ISS
     R --> ACL
     R -->|委派| SG1
     R -->|委派| SG2
     R -->|委派| ICE
-    AIS -->|Actor credential| F
-    AIS -->|Actor credential| S
-    AIS -->|short-lived TURN credential| ICE
+    ISS -->|Actor credential| F
+    ISS -->|Actor credential| S
+    ISS -->|short-lived TURN credential| ICE
     F --> SG1
     S --> SG1
     SG2 -.故障切换副本.-> SG1
@@ -32,63 +32,63 @@ flowchart TB
 结论：
 
 - Realm 对应一个应用实例：每创建一个应用实例，就创建一个 Realm；
-- Realm 以「命名空间 + 本地名」命名，一个域名命名空间下可以有多个 Realm；
+- Realm 以「Realm label + Realm 域名」命名，一个域名下可以有多个 Realm；
 - Realm 与信令通常强绑定，但这种绑定是「信任和配置委派」，不是「一个 Realm 等于一台信令服务器」；
 - 一个 Realm 可以委派多个信令集群；
-- 一个 Provider（信令、STUN/TURN、issuer 等共享基础设施）承载大量 Realm；
-- Realm 在创建时绑定一个 Provider，此后不可更换；同一 Provider 内部的机器与端点可以替换，Realm 身份和 ActorId 不变。
+- 一个 Realm Provider（信令、STUN/TURN、Issuer 等共享基础设施）承载大量 Realm；
+- Realm 在创建时绑定一个 Realm Provider，此后不可更换；同一 Realm Provider 内部的机器与端点可以替换，Realm 身份和 ActorId 不变。
 
-v1 中多个 signaling endpoint 必须属于同一个逻辑控制面，使用共享/复制的 presence，或按确定规则让所有 Actor 使用同一 active primary。它们是副本与故障切换入口，不是任意相互联邦的独立 Provider；跨 Provider federation 是后续协议。
+v1 中多个 signaling endpoint 必须属于同一个逻辑控制面，使用共享/复制的 presence，或按确定规则让所有 Actor 使用同一 active primary。它们是副本与故障切换入口，不是任意相互联邦的独立 Realm Provider；跨 Realm Provider federation 是后续协议。
 
 ## 2. Realm 的定义
 
 ### 2.1 Realm 是实例概念
 
-Realm 是一个应用实例的逻辑信任和治理域。在 Actrium 中，Create Intent 创建 Primary Service 实例时，同时在所选命名空间下创建一个新 Realm；该实例的 Primary Service、它编排的 Auxiliary Actor，以及 Attach 到它的 Front，都属于这个 Realm。
+Realm 是一个应用实例的逻辑信任和治理域。在 Actrium 中，Create Intent 创建 Primary Service 实例时，同时在所选域名下创建一个新 Realm；该实例的 Primary Service、它编排的 Auxiliary Actor，以及 Attach 到它的 Front，都属于这个 Realm。
 
 Realm 不跟程序走：同一个 `notes.example/team-notes` 被 A 组织创建一次、被 B 组织创建一次，就是两个 Realm。Realm 也不是组织级成员域：一个组织运营多少个应用实例，就有多少个 Realm。
 
 Realm 负责：
 
 - 本实例的成员、设备和 Actor 准入；
-- ActorId 命名空间；
+- Actor serial 分配；
 - Actor credential 签发与续期；
-- ACL、撤销与审计；
-- 通过 Realm Profile 委派受信任的信令、STUN、TURN、issuer 端点；
+- 连接 ACL、撤销与审计；
+- 通过 Realm Profile 委派受信任的信令、STUN、TURN、Issuer 端点；
 - 为信令和 TURN 颁发短期、限 audience 的凭据。
 
 v1 不做跨 Realm 规则与 federation；跨实例调用见 [06 §6.3](06-runtime-and-protocol.md)。
 
-### 2.2 命名空间与本地名
+### 2.2 Realm 名
 
-Realm 借用命名空间命名。DNS 域名在现实中已经具备全局唯一性，且归属可验证；Realm 只使用这两点，不要求域名承载任何基础设施。
+Realm 以域名命名。DNS 域名在现实中已经具备全局唯一性，且归属可验证；Realm 只使用这两点，不要求域名承载任何基础设施。
 
 ```text
-Realm 命名空间 = dns:<domain> | local:<installation-id>
-Realm          = 命名空间 + local_name
-Realm 引用     = <local_name>~dns:<domain> | <local_name>~local:<installation-id>
-例             = notes~dns:acme.com
+Realm 名 = <label>@<domain>
+例       = k7m2q9xh@acme.com
+本机     = k7m2q9xh@<installation-id>.actr.alt
 ```
 
 - `domain` 为规范化 DNS 域名（小写 IDNA A-label，无 scheme、端口、userinfo 或 path），规则与 Publisher ID 相同；
-- `local_name` 使用 DNS label 规则 `[a-z0-9-]`，1..63 字符，不以 `-` 开头或结尾；在命名空间内唯一，创建后不可修改；
-- Actro 创建实例时默认生成完全随机的 `local_name`（如 `k7m2q9xh`，base32 小写，不含程序名），可读名称放在 Realm Profile 的 `display_name`；用户可在确认界面显式改用可读的 `local_name`（如 `notes`）。本文中的 `notes~dns:acme.com` 即显式选择可读名的例子；
-- 已退役 Realm 的 `local_name` 永不复用：命名空间所有者不得复用，Provider 在本地以 tombstone 强制；
-- DNS 命名空间的命名空间 key 是该命名空间下所有 Realm 的长期信任根；本机命名空间的 `installation-id` 由安装根 key 派生，本机 Realm 不使用 Profile（见 5.1）。
+- 本机 Realm 的 `domain` 为 `<installation-id>.actr.alt`：`installation-id` 是安装时随机生成的 128 位标识（base32 小写 26 字符）；`.alt` 按 RFC 9476 永不经 DNS 解析，Actro 见到 `.actr.alt` 只查本地记录，不对外发送、不解析；本机 Realm 不使用 Realm Profile（见 5.1）；
+- `label` 使用 DNS label 规则 `[a-z0-9-]`，1..63 字符，不以 `-` 开头或结尾；在域名内唯一，创建后不可修改；
+- Actro 创建实例时默认生成完全随机的 `label`（如 `k7m2q9xh`，base32 小写，不含程序名），可读名称放在 Realm Profile 的 `display_name`；用户可在确认界面显式改用可读的 `label`（如 `notes`）。本文中的 `notes@acme.com` 即显式选择可读名的例子；
+- 已退役 Realm 的 Realm label 永不复用：域名所有者不得复用，Realm Provider 以 Realm Provider tombstone 强制；
+- 域名的 Realm 签名 key 是该域名下所有 Realm 的长期信任根。
 
-数值 `realm_id` 只是 Provider 内部的数据库句柄，不是 Realm 身份，不出现在 ActorId、Realm Profile、issuer 标识或跨 Provider 的比较中。
+数值 `realm_id` 只是 Realm Provider 内部的数据库句柄，不是 Realm 身份，不出现在 ActorId、Realm Profile 或跨 Realm Provider 的比较中。
 
-### 2.3 Realm、Publisher 与 Provider
+### 2.3 Realm、Publisher 与 Realm Provider
 
-| | Publisher | Realm | Provider |
+| | Publisher | Realm | Realm Provider |
 |---|---|---|---|
 | 是什么 | 程序的发布者 | 一个应用实例的信任域 | 共享基础设施 |
-| 标识 | 规范化 DNS 域名 | 命名空间 + `local_name` | provider ID |
-| 长期信任根 | Publisher key | 命名空间 key | 无（只持有被委派的 issuer key） |
+| 标识 | 规范化 DNS 域名 | Realm 名 `<label>@<domain>` | Realm Provider ID（Realm Provider 的域名） |
+| 长期信任根 | Publisher key | Realm 签名 key | 无；持有 Realm 签名 key 时（其域名下的 Realm，或受托代持）即为信任根 |
 
-每个 Realm 在创建时绑定一个 Provider，此后不可更换。需要换运营方时，在新 Provider 上新建实例并做应用层数据迁移，旧实例退役。
+每个 Realm 在创建时绑定一个 Realm Provider，此后不可更换。需要换运营方时，在新 Realm Provider 上新建实例并做应用层数据迁移，旧实例退役。
 
-Publisher 域名命名程序（谁发布），Realm 命名空间命名部署（谁运营）。同一个包可以运行在 `notes~dns:acme.com`，也可以运行在 `notes~dns:foo.org`。一个 Provider（如 Actrix/Loran）承载来自多个命名空间的大量 Realm。
+Publisher 域名命名程序（谁发布），Realm 域名命名部署（谁运营）。同一个包可以运行在 `notes@acme.com`，也可以运行在 `notes@foo.org`。一个 Realm Provider（如一套 Loran 部署）承载来自多个域名的大量 Realm。
 
 Realm 不是：
 
@@ -100,31 +100,31 @@ Realm 不是：
 - Workspace；
 - 组织或用户目录。
 
-## 3. 命名空间描述与 Realm Profile
+## 3. Realm 签名 key 与 Realm Profile
 
-发现与信任分两级：每个域名在其 Actr authority descriptor 中发布一次命名空间描述，每个 Realm 一份由命名空间 key 签名的 Realm Profile。DNS Realm 命名空间就是不含端口的 Actr authority：`notes~dns:acme.com` 的命名空间即 `actr://acme.com`，与 [Actr URI](../../../actr/protocols/uri.zh.md) 中「同一 authority 可以运行多个 realm」一致。
+发现与信任分两级：每个域名在其 Actr authority descriptor 中发布一次 Realm 签名 key，每个 Realm 一份由 Realm 签名 key 签名的 Realm Profile。Realm 名中的域名就是不含端口的 Actr authority：`notes@acme.com` 的签名 key 取自 `actr://acme.com`，一个 authority 下可以有多个 Realm（见 [Actr URI](../../../actr/protocols/uri.zh.md)）。
 
-### 3.1 命名空间描述
+### 3.1 Realm 签名 key
 
 ```text
 GET https://<domain>/.well-known/actr
 ```
 
-命名空间描述不是独立文件，而是 authority descriptor 中的两项内容，已在 [Actr Authority Discovery](../../../actr/protocols/authority-discovery.zh.md) §4.3–4.4 定义：
+它不是独立文件，而是 authority descriptor 中的两项内容，已在 [Actr Authority Discovery](../../../actr/protocols/authority-discovery.zh.md) §4.3–4.4 定义：
 
-- 可选成员 `realm_namespace`：当前和历史命名空间 key 与 key id、轮换签名链、单调 `sequence`，以及整体 `signature`；
+- 可选成员 `realm_signing_keys`：当前和历史 Realm 签名 key 与 key id、轮换签名链、单调 `sequence`，以及整体 `signature`；
 - core relation `realms`，protocol `actr-realm-profile/1`：`href` 指向 Realm Profile 服务。
 
-`realm_namespace.signature` 由某个 `active` 命名空间 key 对去掉 `signature` 后的 `realm_namespace` 成员做 RFC 8785 JCS 规范化后签名，覆盖 `sequence`，在固定命名空间 key 之后提供回滚保护。authority descriptor 的其余部分仍是无签名的公开文档。
+`realm_signing_keys.signature` 由某个 `active` key 对去掉 `signature` 后的该成员做 RFC 8785 JCS 规范化后签名，覆盖 `sequence`，在固定 key 之后提供回滚保护。authority descriptor 的其余部分仍是无签名的公开文档。
 
 规则：
 
 - 获取、HTTPS、authority 绑定校验、redirect 与大小上限均以 Authority Discovery 为准；不得使用 `/.well-known/actr` 下的任何子路径；
 - 每个域名只发布一次，之后在该域名下创建 Realm 不需要再改动域名；
-- 首次信任来自 Web PKI 或企业预置的命名空间 key pin；descriptor 内的签名不能自证首个 root；
-- 命名空间 key 轮换时，旧 key 签名 `{from, to, public_key, sequence}` 形成轮换链；没有有效轮换链的 key 变化按身份变化处理，必须重新确认信任；
-- 从 `keys` 中移除某个 key 即吊销它签过的一切：客户端与 Provider 以刷新 Profile 的节奏刷新 `realm_namespace`，已接受 Profile 的签名 key 被移除时，丢弃该 Profile 及其 `sequence` 基线，改用最后一份由仍列出的 key 签名的 Profile（没有则重新获取）；
-- descriptor 中已有的 `signaling`、`identity`、`ice-config` 等是该 authority 的默认 Provider，只作为创建新 Realm 时的建议；某个 Realm 的实际委派只以其 Profile 为准。Realm Profile 取不到、验证失败或已退役时，客户端不得改用默认 Provider 与该 Realm 通信；
+- 首次信任来自 Web PKI 或企业预置的 key pin；descriptor 内的签名不能自证首个 root；
+- Realm 签名 key 轮换时，旧 key 签名 `{from, to, public_key, sequence}` 形成轮换链；没有有效轮换链的 key 变化按身份变化处理，必须重新确认信任；
+- 从 `keys` 中移除某个 key 即吊销它签过的一切：客户端与 Realm Provider 以刷新 Realm Profile 的节奏刷新 `realm_signing_keys`，已接受 Realm Profile 的签名 key 被移除时，丢弃该 Realm Profile 及其 `sequence` 基线，改用最后一份由仍列出的 key 签名的 Realm Profile（没有则重新获取）；
+- descriptor 中的 `signaling`、`identity`、`ice-config` 等服务于该 authority 自身，与该域名下的 Realm 无关；访问某个 Realm 只使用其 Realm Profile 指定的 Realm Provider。Realm Profile 取不到、验证失败或已退役时，客户端不得使用任何其他 Realm Provider 与该 Realm 通信；
 - descriptor 不列出 Realm 清单，避免实例被枚举。
 
 ### 3.2 Realm Profile
@@ -132,39 +132,43 @@ GET https://<domain>/.well-known/actr
 位置：
 
 ```text
-GET <realms href>/<local_name>
+GET <realms href>/<label>
 ```
 
-`realms` 的 `href` 可以指向域名自己的静态托管（如 `https://acme.com/actr/realms`），也可以指向 Provider（如 `https://realms.provider.example/acme.com`，可带显式端口）；Realm Profile 也可以随邀请内嵌。Profile 的有效性只取决于命名空间 key 的签名，不取决于从哪里取到；因此 Provider 可以托管 Profile 而不成为信任根。
+`realms` 的 `href` 可以指向域名自己的静态托管（如 `https://acme.com/actr/realms`），也可以指向 Realm Provider（如 `https://realms.provider.example/acme.com`，可带显式端口）；Realm Profile 也可以随邀请内嵌。Realm Profile 的有效性只取决于 Realm 签名 key 的签名，不取决于从哪里取到；因此 Realm Provider 可以托管 Realm Profile 而不成为信任根。
 
-Profile 至少包含：
+Realm Profile 至少包含：
 
 - schema（`actr.realm/v1`）；
-- `namespace`、`local_name` 与显示名；
+- `realm.name`（完整 Realm 名）与显示名；
 - `status`：`active` 或 `retired`；
-- 单调 `sequence` 与签发时间 `issued_at`（Profile 不设过期时间）；
-- issuer 标识 `actr:realm:<Realm 引用>:authority`、issuer URL、issuer keys/key ids；
-- provider ID、signaling endpoints、STUN/TURN endpoints；
+- 单调 `sequence` 与签发时间 `issued_at`（Realm Profile 不设过期时间）；
+- issuer URL、Realm issuer keys/key ids（Actor credential 的 issuer 即 Realm 名）；
+- Realm Provider ID、signaling endpoints、STUN/TURN endpoints；
 - credential audience；
-- ACL/加入策略；
-- 命名空间 key 签名。
+- 加入策略（`policy`）；
+- Realm 签名 key 签名。
 
-Profile 使用 RFC 8785 JCS 规范化 payload 和 detached Ed25519 签名；签名 key 必须是 `active` 命名空间 key；由后来退役的 key 签发的既有 Profile 在被更高 `sequence` 取代前仍有效。Profile 不过期，回滚保护只依赖每个 Realm 的单调 `sequence`（相同 `sequence` 的内容必须完全一致）；客户端建立会话时或至少每 24 小时按 `realms` 位置刷新。`provider.id` 在 Realm 生命周期内不可变，客户端拒绝 `provider.id` 与已接受 Profile 不同的新 Profile。只包含非秘密信息。
+Realm Profile 使用 RFC 8785 JCS 规范化 payload 和 detached Ed25519 签名；签名 key 必须是 `active` Realm 签名 key；由后来退役的 key 签发的既有 Realm Profile 在被更高 `sequence` 取代前仍有效。Realm Profile 不过期，回滚保护只依赖每个 Realm 的单调 `sequence`（相同 `sequence` 的内容必须完全一致）；客户端建立会话时或至少每 24 小时按 `realms` 位置刷新。`provider.id` 在 Realm 生命周期内不可变，客户端拒绝 `provider.id` 与已接受 Realm Profile 不同的新 Realm Profile。只包含非秘密信息。
 
 生命周期：
 
-- 创建与激活：管理请求以 `POST` 发往 Provider 自身 authority descriptor（`https://<provider_id>/.well-known/actr`）的 `realm-management` link。调用方以命名空间 key 签名的 `create_realm` 请求 Provider 创建 pending Realm，响应返回待签 Profile payload；调用方签名 Profile 后总是以 `activate_realm` 提交给 Provider，其响应即激活响应，一次性返回管理 token（Provider 自有命名空间由 Provider 自签，激活在内部完成）。幂等键为 `(namespace, local_name, 请求方)`：同一请求方对自己的 pending 或 active Realm 重试返回其状态（不返回管理 token）；不同请求方命中同名 Realm，或任何请求命中 tombstone，一律冲突；重复 `activate_realm` 返回冲突，丢失的管理 token 只能用 `reissue_admin_token` 取回（Provider 自有命名空间丢失 `create_realm` 响应时同样如此）；
-- 更新：同一 Provider 下轮换 issuer key、变更端点、修改 `display_name` 或加入策略，均发布更高 `sequence` 的 Profile；
-- 退役：退役只有一条路径，即命名空间所有者发布 `status = retired` 的新 Profile（保持相同 `provider.id`、`sequence` 更高），作为永久有效的 tombstone；Provider 通过周期刷新得知并写入本地 tombstone；若 Provider 已停服，命名空间所有者把 `realms` href 改指自控位置并在那里发布 retired Profile；Provider 自有命名空间随 Provider 一起消失，其中的 Realm 无法退役，只能在别处新建；
-- 命名空间 key 全部丢失且没有可用轮换链时，该命名空间下的既有 Realm 都无法再签发后续 Profile。域名所有者只能发布新的命名空间 key（客户端按身份变化处理、重新确认信任），并在新 `local_name` 下重建实例。
+- 创建与激活：Realm 管理请求以 `POST` 发往 Realm Provider 自身 authority descriptor（`https://<provider_id>/.well-known/actr`）的 `realm-management` link。`create_realm` 请求 Realm Provider 创建 pending Realm，响应返回待签 Realm Profile payload；Realm 签名 key 持有方签名后以 `activate_realm` 提交，其响应即激活响应，一次性返回 Realm 管理 token（持有方即该 Realm Provider 时，签名与激活在其内部完成）。Realm Provider 幂等键为 `(realm, 请求方)`：同一请求方对自己的 pending 或 active Realm 重试返回其状态（不返回 Realm 管理 token）；不同请求方命中同名 Realm，或任何请求命中 Realm Provider tombstone，一律冲突；重复 `activate_realm` 返回冲突，丢失的 Realm 管理 token 只能用 `reissue_admin_token` 取回；
+- 更新：同一 Realm Provider 下轮换 Realm issuer key、变更端点、修改 `display_name` 或加入策略，均发布 Realm Profile sequence 更高的新 Realm Profile；
+- 退役：退役只有一条路径，即 Realm 签名 key 持有方发布 `status = retired` 的退役 Realm Profile（保持相同 `provider.id`、sequence 更高），永久有效；Realm Provider 通过周期刷新得知并写入 Realm Provider tombstone；若 Realm Provider 已停服，域名所有者把 `realms` href 改指自控存放位置并在那里发布退役 Realm Profile；域名本身属于已停服 Realm Provider 时，其中的 Realm 无法退役，只能在别处新建；
+- Realm 签名 key 全部丢失且没有可用轮换链时，该 Realm 域名下的既有 Realm 都无法再签发后续 Realm Profile。域名所有者只能发布新的 Realm 签名 key（客户端按身份变化处理、重新确认信任），并在新 Realm label 下重建实例。
 
-创建授权（谁签 Profile）：创建 Realm 的请求与 Profile 都必须由命名空间 key 签名，因此能否创建取决于谁能使用这把 key。
+创建授权：没有域名就不分配 Realm（本机 Realm 除外）。每个 Realm 域名的所有者就是 Realm 签名 key 持有方，可以委托 Realm Provider 代持；创建、激活和重签 Realm 管理 token 都必须经持有方授权。
 
-- 本机命名空间：Actro 在本机直接创建，不涉及签名请求与 Profile；
-- Provider 自有命名空间：由 Provider 运营方签名，个人用户在其中自助创建；用户以其在该 Provider 的账号认证（OAuth 2.0 授权码 + PKCE；descriptor 中 `identity` link 的 `href` 即 OAuth issuer，所有 Provider 接受固定公共 client ID `actr-host`），Provider 按账号计配额，Realm 管理权绑定该账号，换机或丢设备只需重新登录。Provider 能关联同一账号创建的实例（它本来就是签名方），实例成员看不到账号；
-- 组织命名空间：由组织持有命名空间 key 的签名工具/服务按组织自己的策略认证成员后，代签创建请求与 Profile；组织自建 Provider 时，也可以让自己的 Provider 持有命名空间 key，这仍是组织自己的基础设施。
+Actro 只凭一个可判定条件区分两条路径：在规范化 A-label 上比较，Realm 域名等于 Realm Provider ID，或以 `"." + Realm Provider ID` 结尾（按 label 边界），即为「Realm Provider 域名下的 Realm」。
 
-v1 中个人用户只能在本机命名空间或 Provider 自有命名空间自助创建 Realm。由命名空间 key 签发受限的「创建委派 key」（限定 `local_name` 前缀、配额、有效期）属于后续能力。
+- 本机 Realm：Actro 在本机直接创建，不涉及 Realm 管理请求与 Realm Profile；
+- Realm Provider 域名下的 Realm：由该 Realm Provider 以 Realm Provider 账号认证请求方（OAuth 2.0 授权码 + PKCE；授权服务器入口是该 Realm Provider 自身 descriptor 中 `identity` link 的 `href`，即 OAuth 授权服务器标识（issuer identifier，RFC 8414）；所有 Realm Provider 接受固定公共 client ID `actr-host`），请求携带 bearer token；Realm Provider 按账号计配额，Realm 管理权绑定该账号，换机或丢失客户端只需重新登录。Realm Provider 能关联同一账号创建的实例（它本来就是签名方），实例成员看不到账号。确认页显示信任根为该 Realm Provider；
+- 其他 Realm 域名：由 Realm 签名 key 持有方的签名服务签发 Actr 管理信封（绑定 `provider_id`、有效期不超过 5 分钟、nonce 防重放），持有方如何认证其成员由持有方自己决定。确认页显示信任根为该 Realm 域名。
+
+域名所有者委托 Realm Provider 代持 Realm 签名 key 时，公开文档中没有任何字段表明这一点，Actro 仍显示信任根为该 Realm 域名；受托的 Realm Provider 以持有方身份提供签名服务。这种代持对用户不可见，是已接受的限制。
+
+由 Realm 签名 key 签发受限的「创建委派 key」（限定 `label` 前缀、配额、有效期）属于后续能力。
 
 ### 3.3 ActorId 如何携带 Realm
 
@@ -176,19 +180,21 @@ v1 中个人用户只能在本机命名空间或 Provider 自有命名空间自�
 
 新设备仅凭 `42` 无法知道：
 
-- 去哪个命名空间取 Realm Profile 和 issuer key；
+- 去哪个域名取 Realm Profile 和 Realm issuer key；
 - 连哪个信令集群；
-- Realm 42 是否与另一个 Provider 上的 Realm 42 冲突。
+- Realm 42 是否与另一个 Realm Provider 上的 Realm 42 冲突。
 
-Actro v1 因而要求 ActorId 自带 Realm 引用：
+Actro v1 因而要求 ActorId 自带 Realm 名，且只包含 Actor serial 与 Realm 名：
 
 ```text
-<serial_hex>@<local_name>~dns:<domain>/<publisher>:<program>:<version>
-2af01@notes~dns:acme.com/notes.example:team-notes:1.4.2
-2af01@h3x8p2wq~local:<installation-id>/notes.example:team-notes:1.4.2
+<serial>.<label>@<domain>
+2af01.notes@acme.com
+2af01.h3x8p2wq@<installation-id>.actr.alt
 ```
 
-早期草案中的 `2af01@42~dns:team.example/...`（数值 realm_id 加 authority）作废，数值 realm_id 由 `local_name` 取代。`service` 参数本身即可定位 Realm；Attach URI 不再长期保留第二个 `realm` 参数。当前只含 `u32` 的 ActrId 视为 legacy，导入时必须显式补足 Realm 引用并重写成 v1 标准形式，不能猜测。
+ActorId 类似进程 ID，只回答「哪个 Realm 里的哪个 Actor」。程序身份（Actor 类型 `publisher/program@version`）不在 ActorId 中，由注册与 Actor credential 携带；连接 ACL 与服务发现使用注册/credential 中的类型。Publisher 改域名或程序升级都不会改变 ActorId 的格式。
+
+早期草案中的 `2af01@42~dns:team.example/...`（数值 realm_id 加 authority）作废。`service` 参数本身即可定位 Realm；Attach URI 不再长期保留第二个 `realm` 参数。当前只含 `u32` 且内嵌类型的 ActrId 视为 legacy，导入时必须显式补足 Realm 名并重写成 v1 标准形式，不能猜测。
 
 ## 4. 信令服务器的权力边界
 
@@ -215,7 +221,7 @@ Actro v1 因而要求 ActorId 自带 Realm 引用：
 - 修改已认证的 offer/answer 而不被发现；
 - 颁发任意 Realm credential；
 - 获得 Workspace capability；
-- 用 ActorId 绕过 Service ACL。
+- 用 ActorId 绕过应用权限。
 
 这些边界依赖：
 
@@ -232,8 +238,8 @@ Actro v1 因而要求 ActorId 自带 Realm 引用：
 - ActorId 到当前连接的临时映射；
 - 类型发现与候选排序；
 - WebRTC offer/answer/ICE 交换；
-- ACL 初筛；
-- Provider failover；
+- 连接 ACL 初筛；
+- Realm Provider failover；
 - 网络状态事件。
 
 它不负责保存 Service 业务状态。
@@ -243,10 +249,10 @@ Actro v1 因而要求 ActorId 自带 Realm 引用：
 Actro 内置：
 
 - Actr signaling client；
-- Realm 命名空间描述与 Realm Profile resolver；
-- issuer/credential client；
+- Realm 签名 key 与 Realm Profile resolver；
+- Issuer/credential client；
 - STUN/TURN 配置和故障切换；
-- 本地 Realm 的 loopback/embedded signaling；
+- 本机 Realm 的 loopback/embedded signaling；
 - 诊断和状态 UI。
 
 Actro 不写死：
@@ -257,29 +263,27 @@ Actro 不写死：
 - Publisher 自己的信令地址；
 - 静态 TURN 密码。
 
-### 5.1 本地 Realm
+### 5.1 本机 Realm
 
-本机实例使用 `local:<installation-id>` 命名空间（`installation-id` 由安装根 key 派生），每个本机实例一个本地 Realm。本地 Realm 没有 Provider，不使用 Realm Profile 与签名请求，Actro 只保存本地 record。本机 Front 与本机 Service：
+本机实例的 Realm 名使用本机伪域名 `<installation-id>.actr.alt`，每个本机实例一个本机 Realm。本机 Realm 没有 Realm Provider，不使用 Realm Profile 与 Realm 管理请求，Actro 只保存本地 record。本机 Front 与本机 Service：
 
 - 优先使用 in-process/loopback transport；
-- embedded signaling 只处理本地 Realm；
+- embedded signaling 只处理本机 Realm；
 - 不需要公网 STUN/TURN；
 - 离线可用；
-- ActorId 仍是持久身份，并包含 `~local:<installation-id>` Realm 引用；
+- ActorId 仍是持久身份，形如 `2af01.h3x8p2wq@<installation-id>.actr.alt`；
 - 只有同一 installation 可以解析该 Realm；
-- 「复制 portable link」必须禁用；迁移到 DNS 命名空间即创建新 Realm，并签发新 ActorId。
+- 「复制 portable link」必须禁用；迁移到域名下即创建新 Realm，并签发新 ActorId。
 
 ### 5.2 联网 Realm
 
-联网实例的 Realm 位于某个 DNS 命名空间下：
+联网实例的 Realm 位于某个域名下：
 
-- 用户或组织管理员先信任该命名空间（首次确认并固定命名空间 key）；
-- 创建实例时，Actro 在该命名空间下创建新 Realm，Realm 所有者即实例创建者；
-- 其他用户通过邀请加入这个实例的 Realm，取得该 Realm 的 membership；
-- Actor 运行时使用 Profile 中的 Provider，该 Provider 在 Realm 生命周期内不变；
-- Profile 与命名空间描述的更新都必须验证签名、轮换链和 `sequence`。
-
-没有自己域名的用户可以使用 Provider 运营方的命名空间（如 `dns:realms.provider.example`）。此时命名空间 key 由 Provider 运营方托管，信任根即 Provider 运营方，Actro 必须如实显示。
+- 用户或管理员先信任该 Realm 域名（首次确认并固定其 Realm 签名 key）；
+- 创建实例时，Actro 在该域名下创建新 Realm，Realm 所有者即实例创建者；
+- 其他用户通过 Realm 邀请加入这个实例的 Realm，取得 Realm membership；
+- Actor 运行时使用 Realm Profile 中的 Realm Provider，该 Realm Provider 在 Realm 生命周期内不变；
+- Realm Profile 与 `realm_signing_keys` 的更新都必须验证签名、轮换链和 `sequence`。
 
 ## 6. Actor 身份
 
@@ -294,7 +298,7 @@ ActorId
 + private key proof
 ```
 
-设备在每个 Realm 使用独立的设备 key（由设备根 key 按 Realm 引用派生，或独立生成），不跨 Realm 复用，不同实例无法据设备 key 关联同一设备。credential 中的 principal/device binding 绑定的是该 Realm 的设备 key。
+Realm 客户端 key 是某个成员的某个客户端安装在某个 Realm 中使用的 key：每个 Realm 独立生成（Actro 内部如何生成不对外规定），不跨 Realm 复用，可单独吊销某个客户端，不同实例也无法据此关联同一客户端。Actor credential 中的 principal/client binding 绑定的是该 Realm 客户端 key。
 
 Credential claims 应包含：
 
@@ -302,7 +306,7 @@ Credential claims 应包含：
 - Realm；
 - ActorType；
 - actor public key；
-- principal/device binding；
+- principal/client binding；
 - issuer/key id；
 - issued/expiry；
 - audience；
@@ -325,8 +329,8 @@ Service Actor 的长期私钥和 ActorId 在创建事务中一次生成/签发�
 以下操作必须保持 ActorId：
 
 - Actro/Service 进程重启；
-- credential 正常续期；
-- renewal token 丢失后的重新认证，只要能证明同一长期 key；
+- Actor credential 正常续期；
+- Actor credential 的 renewal token 丢失后的重新认证，只要能证明同一长期 key；
 - signaling reconnect；
 - endpoint/IP 变化；
 - P2P 与 TURN 切换；
@@ -335,8 +339,8 @@ Service Actor 的长期私钥和 ActorId 在创建事务中一次生成/签发�
 以下操作产生新 ActorId：
 
 - 创建新 Service；
-- Service 升级为新 Program Release（新 Service Actor 仍创建在同一 Realm，成员与 ACL 延续）；
-- 迁移到另一个 Realm（包括从本地命名空间迁到 DNS 命名空间）；
+- Service 升级为新 Program Release（新 Service Actor 仍创建在同一 Realm，成员与应用权限延续）；
+- 迁移到另一个 Realm（包括从本机 Realm 迁到域名下的 Realm）；
 - 长期 key 被撤销且不能恢复；
 - 显式 clone/fork。
 
@@ -344,57 +348,59 @@ Actr 当前 hard rebind 可能返回新 ID。v1 前必须新增「凭长期 key 
 
 ### 6.3 ID 分配
 
-Realm 必须保证 serial 在自身命名空间内永久不复用：
+Realm 必须保证 Actor serial 在本 Realm 内永久不复用：
 
 - 使用带唯一约束的 Realm allocator；
 - 或使用足够强的 key-derived/随机 ID 并做碰撞检查；
 - 不能依赖 hostname/PID 哈希的弱 worker id 就宣称无条件唯一；
-- 撤销 Actor 后 serial 仍保留 tombstone；
-- Realm 与 Provider 永久绑定，serial 始终由同一 Provider 分配。
+- 撤销 Actor 后其 Actor serial 由 Realm Provider 永久保留、不再分配；
+- Realm 与 Realm Provider 永久绑定，Actor serial 始终由同一 Realm Provider 分配。
 
-### 6.4 Host 证据身份
+### 6.4 Actr Host 证据身份
 
-Host 为 workload 出口闭包提供证据时，必须使用独立、可验证的 Host 证据键：
+Actr Host 为 workload 出口闭包提供证据时，必须使用独立、可验证的 Actr Host 证据键：
 
-- Local Realm 由当前安装根绑定，只对本安装构成信任；
-- 联网 Realm 可以把 Host key 绑定到 device credential；
+- 本机 Realm 的 Actr Host key 只绑定当前安装，只对本安装构成信任；
+- 联网 Realm 可以把 Actr Host key 绑定到 Realm 客户端 key；
 - 受管场景可以进一步绑定 platform/runtime attestation；
-- Host 证据键撤销必须使依赖该键的尚未过期结论立即失效；
-- Host 不得自签自己的最终 `ActorAssurance`；
-- Actor 自身的长期 key 不能冒充 Host 证据键；
+- Actr Host 证据键撤销必须使依赖该键的尚未过期结论立即失效；
+- Actr Host 不得自签自己的最终 `ActorAssurance`；
+- Actor 自身的长期 key 不能冒充 Actr Host 证据键；
 - signaling 只能转发结论摘要，不能签发 workload kind、egress closure 或图完整性主张。
 
-远端验证方根据自身策略决定是否信任该 Host 的证据。没有被接受的 `ActorAssurance` 时，身份仍可能 authentic，但节点结论不得为 `CONTROLLED`。
+远端验证方根据自身策略决定是否信任该 Actr Host 的证据。没有被接受的 `ActorAssurance` 时，身份仍可能 authentic，但节点结论不得为 `CONTROLLED`。
 
 ## 7. 身份验证流程
 
-### 7.1 信任命名空间与加入实例 Realm
+### 7.1 信任域名与加入实例 Realm
 
-信任命名空间（每个命名空间一次）：
+信任域名（每个域名一次）：
 
-1. 按 Authority Discovery 获取 `https://<domain>/.well-known/actr`，读取 `realm_namespace`；
-2. 用户/组织管理员确认命名空间；
-3. Actro 固定命名空间 key，建立命名空间 record。
+1. 按 Authority Discovery 获取 `https://<domain>/.well-known/actr`，读取 `realm_signing_keys`；
+2. 用户或管理员确认该 Realm 域名；
+3. Actro 固定其 Realm 签名 key，建立域名 record。
 
 加入某个实例的 Realm（每个实例一次）：
 
-1. 从邀请或 `service` ActorId 得到 Realm 引用；邀请可以内嵌 Realm Profile；
-2. 获取 Realm Profile，验证命名空间 key 签名、`sequence` 与 `status`；
-3. 设备为该 Realm 派生或生成独立的设备 key；principal/device 按该 Realm 的加入策略完成邀请或登录；
-4. Realm 签发 membership credential；
-5. 设备安全存储保存 key/refresh material；
+1. 从 Realm 邀请或 `service` ActorId 得到 Realm 名；Realm 邀请可以内嵌 Realm Profile；
+2. 获取 Realm Profile，验证 Realm 签名 key 签名、`sequence` 与 `status`；
+3. 客户端为该 Realm 生成独立的 Realm 客户端 key；principal/client 按该 Realm 的加入策略完成 Realm 邀请或登录；
+4. Realm Provider 登记该 Realm 客户端 key，即完成客户端注册，取得 Realm membership；不另发 membership 凭证；
+5. OS 安全存储保存 Realm 客户端 key；
 6. Actro 建立 Realm record。
 
-加入 Realm 只针对这一个实例；用户使用多个实例时，Actro 自动完成各 Realm 的设备注册，每个 Realm 使用不同的设备 key。命名空间级 SSO/目录属于后续能力，v1 不做。
+此后每次申请 Actor credential，客户端都用 Realm 客户端 key 证明持有；Issuer 只对已注册且未撤销的 Realm 客户端 key 签发。撤销某个客户端即撤销其 Realm 客户端 key 注册，已签发的短期 Actor credential 到期失效。
 
-membership 与实例授权是两层：Realm membership 只决定能否进入该实例的网络，即取得 Actor credential、连接 signaling、进行 Attach 握手的前提；实例内的角色与权限（读写、管理、分享）仍由 Service ACL 与会话授权决定。两者即使同属一个实例也不合并，取得 membership 不等于获得任何实例内权限。
+加入 Realm 只针对这一个实例；用户使用多个实例时，Actro 自动完成各 Realm 的客户端注册，每个 Realm 使用不同的 Realm 客户端 key。域名级 SSO/目录属于后续能力，v1 不做。
+
+membership 与实例授权是两层：Realm membership 只决定能否进入该实例的网络，即取得 Actor credential、连接 signaling、进行 Attach 握手的前提；实例内的角色与权限（读写、管理、分享）属于应用权限，由应用与会话授权决定；Actr 运行时按 Actor 类型决定谁能发现、连接谁，称为连接 ACL。两者即使同属一个实例也不合并，取得 membership 不等于获得任何实例内权限。
 
 ### 7.2 Actor 注册
 
-1. Host 生成或读取 Actor长期 key；
+1. Actr Host 生成或读取 Actor长期 key；
 2. 请求新 ActorId 或 reclaim 已有 ActorId；
-3. issuer 验证 membership、ActorType 和允许的 claim；需要受管 runtime 时另验 platform attestation；
-4. issuer 签发短期 Actor credential；
+3. Issuer 验证 Realm membership、ActorType 和允许的 claim；需要受管 runtime 时另验 platform attestation；
+4. Issuer 签发短期 Actor credential，携带 ActorId 与 Actor 类型；
 5. Actor 使用短期 ticket 连接 signaling；
 6. signaling 验证 issuer、audience、ActorId 和 proof。
 
@@ -404,7 +410,7 @@ membership 与实例授权是两层：Realm membership 只决定能否进入该�
 2. WebRTC/transport 建立；
 3. 双方验证 Realm credential 与 Actor key；需要时再验证独立 runtime attestation；
 4. challenge/nonce 防止重放；
-5. Front–Service Attach 再验证 Program digest 与 session ACL；
+5. Front–Service Attach 再验证 Program digest 与会话的应用权限；
 6. 成功后 Guest capability 才可用。
 
 ## 8. 信令认证凭据
@@ -417,7 +423,7 @@ membership 与实例授权是两层：Realm membership 只决定能否进入该�
 目标方案：
 
 - WebSocket `Authorization` header；或
-- issuer 签发的一次性、极短期 signaling ticket；
+- Issuer 签发的一次性、极短期 signaling ticket；
 - ticket 绑定 ActorId、endpoint audience、nonce 和到期；
 - 成功连接后立即作废；
 - 日志只记录 ticket key id，不记录值。
@@ -448,7 +454,7 @@ TurnAuthRealm
 - 绑定 Actor/会话或 principal；
 - 绑定 TURN pool audience；
 - 有到期、带宽、并发 allocation 配额；
-- 由 Realm issuer 或其授权 credential broker 签发；
+- 由该 Realm 的 Issuer 或其授权的 credential broker 签发；
 - 支持 key id 和轮换；
 - 不使用跨所有 Realm 的单一长期 shared secret；
 - 不允许匿名开放中继。
@@ -462,9 +468,9 @@ TURN 通常看不到 DTLS/SRTP/DataChannel 明文，但可以看到：
 - allocation；
 - 中继关系。
 
-它也可以丢包、限速、拒绝或记录流量。因此 Realm 必须明确其 TURN Provider 和隐私政策。
+它也可以丢包、限速、拒绝或记录流量。因此 Realm 必须明确其 TURN Realm Provider 和隐私政策。
 
-## 10. Provider 委派与故障切换
+## 10. Realm Provider 委派与故障切换
 
 Realm Profile 可以声明多个 endpoint：
 
@@ -483,13 +489,13 @@ Realm Profile 可以声明多个 endpoint：
 
 规则：
 
-- endpoint 域名可以不同于 Realm 命名空间的域名；
-- 由命名空间 key 签署的 Realm Profile 构成委派授权；
-- Profile 的托管位置不影响其有效性；
+- endpoint 域名可以不同于 Realm 名中的域名；
+- 由 Realm 签名 key 签署的 Realm Profile 构成委派授权；
+- Realm Profile 的存放位置不影响其有效性；
 - 非默认端口允许；
 - endpoint 切换不改变 Realm 或 ActorId；
-- failover 不能跳到未声明 Provider；
-- Provider 证书和 ticket audience 必须匹配。
+- failover 不能跳到未声明 Realm Provider；
+- Realm Provider 证书和 ticket audience 必须匹配。
 
 ## 11. 端口政策
 
@@ -498,34 +504,34 @@ Realm Profile 可以声明多个 endpoint：
 | `actr://` Publisher identity | 不允许端口 |
 | Publisher Profile bootstrap | 固定 authority 域名的 HTTPS 443 |
 | 默认 Release bootstrap | 固定 Publisher 域名的 HTTPS 443 |
-| Profile 委派的 resolver/CDN/issuer | 可显式端口，必须 HTTPS |
-| Realm 命名空间（authority descriptor `/.well-known/actr`） | 固定命名空间域名的 HTTPS 443 |
+| Realm Profile 委派的 resolver/CDN/Issuer | 可显式端口，必须 HTTPS |
+| Realm 签名 key（authority descriptor `/.well-known/actr`） | 固定 Realm 域名的 HTTPS 443 |
 | Realm Profile | `realms` relation 声明的 HTTPS 位置，可显式端口 |
 | Signaling WSS | 可显式端口 |
 | STUN/TURN | 按协议显式端口 |
 | `actr-dev://` | 可含端口 |
 | localhost/private CA | 仅开发/企业显式策略 |
 
-这样既保留部署自由，又不把网络端口变成产品命名空间。
+这样既保留部署自由，又不把网络端口变成产品标识的一部分。
 
 ## 12. 信任链
 
 | 信任链 | 根 | 验证对象 | 失败后 |
 |---|---|---|---|
 | Publisher/Package | DNS/TLS + Publisher key | package bytes/digest | 不加载程序 |
-| Realm/Actor | DNS/TLS + authority descriptor 中的命名空间 key → Realm Profile → issuer key；Actor key | 对端身份/准入 | 不连接 Actor |
+| Realm/Actor | DNS/TLS + authority descriptor 中的 Realm 签名 key → Realm Profile → Realm issuer key；Actor key | 对端身份/准入 | 不连接 Actor |
 | Front Session | Service policy + challenge | 当前 Front/用户/lease | 不开放业务 RPC |
-| Signaling/TURN | 命名空间 key 签署的 Realm Profile 委派 | 控制面与中继资源 | 切换或离线 |
+| Signaling/TURN | Realm 签名 key 签署的 Realm Profile 委派 | 控制面与中继资源 | 切换或离线 |
 | Marketplace | 市场签名/策略 | 审核与撤销信息 | 降低信任/阻止安装 |
 
 任何一条链都不能替代其他链。
 
 ## 13. Offline 与失联
 
-### 13.1 本地 Realm
+### 13.1 本机 Realm
 
 - 已安装固定 digest 可离线运行；
-- 本机 Actor credential 可以由 local issuer 恢复；
+- 本机 Actor credential 可以由 Actro 内嵌 issuer 恢复；
 - loopback 不需要 TURN；
 - 撤销只影响本机管理。
 
@@ -541,7 +547,7 @@ Realm Profile、credential 或撤销信息不可达时：
 
 ## 14. 隐私
 
-Realm/Provider 可以观察的元数据必须在隐私页说明：
+Realm 与 Realm Provider 可以观察的元数据必须在隐私页说明：
 
 - ActorId；
 - IP；
@@ -555,9 +561,9 @@ Realm/Provider 可以观察的元数据必须在隐私页说明：
 - 不把 Program route、Workspace 名或业务 payload发给信令；
 - 使用短期 ticket；
 - offer/answer 绑定并加密可加密部分；
-- Provider 日志最小化和短保留；
+- Realm Provider 日志最小化和短保留；
 - 允许企业自托管；
-- 支持多个 Provider 和透明状态显示；
+- 支持多个 Realm Provider 和透明状态显示；
 - authority descriptor 不列出 Realm 清单。
 
-Realm 引用出现在 ActorId 和 URL 中，会暴露命名空间与实例名；Actro 默认生成完全随机的 `local_name`，避免名字被猜测和枚举；显式选择可读名时，应知晓它会随分享暴露。
+Realm 名出现在 ActorId 和 URL 中，会暴露域名与实例名；Actro 默认生成完全随机的 `label`，避免名字被猜测和枚举；显式选择可读名时，应知晓它会随分享暴露。

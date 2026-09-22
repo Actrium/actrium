@@ -1,6 +1,6 @@
 # 13. Actro 隐私标记与图汇聚
 
-> 安全语义以 [docs/security](../../security/README.zh.md) 为准。本章只写 Actro 如何把该模型落到 Tab、Front、Host 和数据面。两者冲突时改本章，不改现行安全模型。
+> 安全语义以 [docs/security](../../security/README.zh.md) 为准。本章只写 Actro 如何把该模型落到 Tab、Front、Actr Host 和数据面。两者冲突时改本章，不改现行安全模型。
 
 成熟度：`Specified`。
 
@@ -52,7 +52,7 @@ EncGraph    = actrium/graph/v1 规范 JSON（排序后的 ActorId 与有向边�
 
 不进入图：仅安装未执行的 Program、无有效依赖的同 Realm Actor、跨 Principal Actor。跨 Principal 或无效 Actor 出口仍在发起方计分，不得判 `CONTROLLED`。
 
-非 Actor 目标（屏幕、文件、Workspace、HTTPS API）是 Host 可强制的汇。TLS 主机名只证明送到该域名，不证明域内不继续外泄。目标分类不由声明方自选：可出示 Actr 身份的端点必须按 Actor 目标评定并接受跨 Principal 规则，不得改写成 HTTPS 汇绕过评分；类别无法判定时该出口保持 `UNKNOWN`。用户信任一个汇的语义是「认可数据离开保障范围」。只转发端到端密文的 TURN 不入图。
+非 Actor 目标（屏幕、文件、Workspace、HTTPS API）是 Actr Host 可强制的汇。TLS 主机名只证明送到该域名，不证明域内不继续外泄。目标分类不由声明方自选：可出示 Actr 身份的端点必须按 Actor 目标评定并接受跨 Principal 规则，不得改写成 HTTPS 汇绕过评分；类别无法判定时该出口保持 `UNKNOWN`。用户信任一个汇的语义是「认可数据离开保障范围」。只转发端到端密文的 TURN 不入图。
 
 Front 的最终节点结论是：
 
@@ -60,7 +60,7 @@ Front 的最终节点结论是：
 R_A(Front) = join(Actro Host 平台事实, Keel Guest 出口事实)
 ```
 
-Host 能做而 Guest 不能做的出口，仍是这个 Actor 的出口。不能只评 Guest。
+Actr Host 能做而 Guest 不能做的出口，仍是这个 Actor 的出口。不能只评 Guest。
 
 ## 4. 状态变化
 
@@ -79,7 +79,7 @@ LocalContinue(b | C)    := ACTIVE ∧ 当前 AA 仍适用 ∧ 不依赖 C ∧ �
 
 ### 5.1 WASM
 
-判 `CONTROLLED` 至少同时满足：制品与已验证包一致；import 可枚举；无 ambient 文件系统 / socket / 进程 API；能力全部经 Host；有效声明是 Manifest ∪ Host ∪ 环境不可排除项；每个 Actor 目标入图另评；每个非 Actor 汇被策略认可；证据未过期。
+判 `CONTROLLED` 至少同时满足：制品与已验证包一致；import 可枚举；无 ambient 文件系统 / socket / 进程 API；能力全部经 Actr Host；有效声明是 Manifest ∪ Actr Host ∪ 环境不可排除项；每个 Actor 目标入图另评；每个非 Actor 汇被策略认可；证据未过期。
 
 可度量的是：
 
@@ -102,9 +102,9 @@ observed ⊆ 有效声明且被强制
 
 ### 5.4 Actro Native Front Host
 
-不能把平台 Host 一律判未知，否则所有 Tab 永远非绿。Host 结论来自官方签名、安装完整性、版本策略和设备证明；安装无法验证或版本已撤销时，同样是黄或红。被评估的是 Front 进程整体。
+不能把平台 Actr Host 一律判未知，否则所有 Tab 永远非绿。Actr Host 结论来自官方签名、安装完整性、版本策略和设备证明；安装无法验证或版本已撤销时，同样是黄或红。被评估的是 Front 进程整体。
 
-Host 可以为 Guest 提供证据或作为验证者签发 `ActorAssurance`，但 **issuer ≠ subject**：Host 不得自签自己的最终结论。
+Actr Host 可以为 Guest 提供证据或作为验证者签发 `ActorAssurance`，但 **issuer ≠ subject**：Actr Host 不得自签自己的最终结论。
 
 ### 5.5 外部 HTTPS
 
@@ -112,7 +112,7 @@ Host 可以为 Guest 提供证据或作为验证者签发 `ActorAssurance`，但
 
 ## 6. 声明是输入
 
-`.actr` Manifest 的 `[actro.privacy]` 与 Native Capsule profile 仍是待验证输入，不是结论。Host 必须对照 imports、实际能力、实际边。发现未声明且可能行使的出口：确认则可红，无法确认则黄。
+`.actr` Manifest 的 `[actro.privacy]` 与 Native Capsule profile 仍是待验证输入，不是结论。Actr Host 必须对照 imports、实际能力、实际边。发现未声明且可能行使的出口：确认则可红，无法确认则黄。
 
 ## 7. 谁签发结论
 
@@ -136,7 +136,7 @@ Actro 内的 Privacy Agent 负责观测、取证、组图和向验证者提交�
 | 应用 Privacy Mark | `ApplicationAssurance` 的颜色；展示还须 `Ready` |
 | privacyGraphId + epoch | `structureId` + `ApplicationStateId` |
 | GraphRoot | 无。Front 只定位 |
-| Host 自签 Mark | 禁止作为被评估者的最终结论 |
+| Actr Host 自签 Mark | 禁止作为被评估者的最终结论 |
 
 示意（字段名可在 schema 仓库版本化，语义不得弱于下表）：
 

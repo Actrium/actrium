@@ -14,7 +14,7 @@ HTTPS (a) The procedure cannot be proved to have been malicious;Marketplace Audi
 
 ## 2. Publisher Identity
 
-### 2.1 Domain name is Namespace
+### 2.1 The Domain Is the Publisher ID
 
 Publisher The agreement to use a domain name is reasonable because it is directly re-used:
 
@@ -36,24 +36,24 @@ A Publisher domain is also an Actr authority. The Publisher Profile is published
 GET https://<publisher>/.well-known/actr
 ```
 
-The `publisher` member is defined in Actr Authority Discovery §4.5. Authority discovery defines no path components below `/.well-known/actr`, so Publishers do not get a separate well-known file. The same descriptor may also carry `realm_namespace` (when the domain is also a Realm namespace) and `services` (such as `packages`).
+The `publisher` member is defined in Actr Authority Discovery §4.5. Authority discovery defines no path components below `/.well-known/actr`, so Publishers do not get a separate well-known file. The same descriptor may also carry `realm_signing_keys` (when the domain also has Realms) and `services` (such as `packages`).
 
-The bootstrap URL is derived directly from the Publisher identity domain. It must use standard HTTPS on port 443 and cannot take a port from the `actr://` URI. Once the Profile has been verified, the `program_resolver`, CDN and other service endpoints it declares may use explicit ports.
+The bootstrap URL is derived directly from the Publisher identity domain. It must use standard HTTPS on port 443 and cannot take a port from the `actr://` URI. Once the Publisher Profile has been verified, the `program_resolver`, CDN and other service endpoints it declares may use explicit ports.
 
-Fetching the descriptor follows the redirect rules of authority discovery: at most five redirects, each over HTTPS; a redirect target never becomes a new authority, and the `authority` binding is still validated against the original Publisher domain. The validity of the `publisher` member depends only on its own signature and the pinned root/key history, not on the origin it was fetched from. To move the resolver, the old Profile signs a delegation to the new resolver, or a root rotation is performed.
+Fetching the descriptor follows the redirect rules of authority discovery: at most five redirects, each over HTTPS; a redirect target never becomes a new authority, and the `authority` binding is still validated against the original Publisher domain. The validity of the `publisher` member depends only on its own signature and the pinned root/key history, not on the origin it was fetched from. To move the resolver, the old Publisher Profile signs a delegation to the new resolver, or a root rotation is performed.
 
 The `publisher` member uses snake_case field names and contains at least:
 
 - `schema`: `actr.publisher/v1`;
 - `domain`: the normalized Publisher domain, which must equal the host of the descriptor's `authority`;
-- current and historical Profile continuity keys;
+- current and historical Publisher Profile signing keys (`profile_signing_keys`);
 - current and historical package signing keys;
 - key id, algorithm, validity period and revocation status;
 - `program_resolver`: the required Program resolver base, with no default;
 - a security contact address;
 - optional Marketplace/transparency log statements.
 
-On first retrieval, trust comes from the Web PKI of the URL hostname, or from an enterprise-provisioned Publisher root pin; a root carried inside the Profile cannot vouch for itself. After accepting the first Profile, Actro pins the root/key history, and every later Profile must:
+On first retrieval, trust comes from the Web PKI of the URL hostname, or from an enterprise-provisioned Publisher root pin; a root carried inside the Publisher Profile cannot vouch for itself. After accepting the first Publisher Profile, Actro pins the root/key history, and every later Publisher Profile must:
 
 - be signed over an RFC 8785 JCS canonicalized payload (the `publisher` member with its `signature` field removed), verified as a detached Ed25519 signature;
 - carry a monotonically increasing `sequence`, an issue time and an expiry time;
@@ -76,13 +76,15 @@ Domain name control only determines the future launch entrance and cannot rewrit
 
 ## 3. Coordinate Present. package ..the determination resolution of the
 
-The Profile's required `program_resolver` determines the resolution base; the release description lives at:
+The Publisher Profile's required `program_resolver` determines the resolution base; the release description lives at:
 
 ```text
 <program_resolver><program>/<version>/release.json
 ```
 
-For example `https://notes.example/actrium/programs/team-notes/1.4.2/release.json`. The resolver may be any HTTPS origin and path and may use a non-standard port; it is declared by the verified Profile, and no well-known default path is used.
+For example `https://notes.example/actrium/programs/team-notes/1.4.2/release.json`. The resolver may be any HTTPS origin and path and may use a non-standard port; it is declared by the verified Publisher Profile, and no well-known default path is used.
+
+`program_resolver` and the descriptor's `packages` relation do different jobs and do not replace each other: `packages` resolves a public URI Target (such as `actr://notes.example/echo`) to an entry Actor Package; it is a mutable deployment mapping in the unsigned part of the descriptor. `program_resolver` resolves `publisher/program@version` to release metadata; it sits inside the Publisher signature and decides the trusted release location. On both paths the package content is verified against the manifest signature and digest.
 
 `release.json` It is a small, cached publication description, which includes at least:
 
@@ -112,11 +114,11 @@ Requests:
 - production Only allowed HTTPS;
 - Yeah. 3xx Jump to CDNBut eventually package It has to match. Publisher Description digest;
 - release metadata Short-cut caches and expiry times are required;
-- release descriptor You have to press it. JCS Regulate and by Profile Authorized. key Do it. detached signature;
+- release descriptor You have to press it. JCS Regulate and by Publisher Profile Authorized. key Do it. detached signature;
 - package It can be long in itself. immutable cache;
 - Same coordinate Return Different digest Time hard fail.
 
-Promise. `publisher/program@version` A valid download with certainty. `.actr` workload Package, and allow Publisher It's credible. Profile Self-selection after assignment resolver, CDN And the port.
+Promise. `publisher/program@version` A valid download with certainty. `.actr` workload Package, and allow Publisher It's credible. Publisher Profile Self-selection after assignment resolver, CDN And the port.
 
 ## 4. One. Program ReleaseOne. `.actr` Package
 
@@ -165,7 +167,7 @@ A formal third party package shall not contain:
 - Not here. manifest The list of enforceable scripts;
 - Replaced from network on run Guest The entrance.
 
-Publisher Only if you're available. Guest (a) With the declaration;Host "and will always be." Actro Client release.
+Publisher Only if you're available. Guest (a) With the declaration;Actr Host "and will always be." Actro Client release.
 
 ## 5. Service workload Policy
 
@@ -198,7 +200,7 @@ Native Service It can't change. Front Still allowed only Keel Guest Rule.
 
 Native workload A further distinction must be made:
 
-- `NativeCdylib`: Load Host Address space; no export closure can be shown and no third-party examples may be green;
+- `NativeCdylib`: Load Actr Host Address space; no export closure can be shown and no third-party examples may be green;
 - `NativeCapsule`: the process of independence restricted, only OS sandboxNo original network/Documentation,sealed libraries and brokered IPC It's possible to rate it as all effective. `CONTROLLED`;
 - `NativeTrusted`: Actro Home or enterprise preset TCBIt's not open. Marketplace trust tier.
 
@@ -220,7 +222,7 @@ v1 Do Not Include“No, I don't. Service Page Application”Special case. The to
 
 Actr Foundation manifest Continue to provide:
 
-- manufacturer/publisher;
+- publisher;
 - name/program;
 - version;
 - binary target/kind/hash;
@@ -265,7 +267,7 @@ data_classes = ["public", "private", "secret"]
 default_unknown_action = "block-private-and-secret"
 
 [[actro.privacy.actor_egress]]
-actr_type = "notes.example:index-worker:1.4.2"
+actr_type = "notes.example/index-worker@1.4.2"
 required = false
 data_classes = ["private"]
 ```
@@ -295,12 +297,12 @@ Manifest At least declare:
 - Workspace access mode;
 - Guest heapsingle execution time,render op;
 - Service memory/fuel/storage/network;
-- Minimum Host/SDK/contract Version.
+- Minimum Actr Host/SDK/contract Version.
 - Data disaggregation, expected Actor Export,terminal egress, required/optional and the lowest conclusions.
 
 Additional high-risk privileges must be issued and reconfirmed at the time of the upgrade.
 
-Privacy Declaration It's static. allowlist and installation instructions are not the authoritative source of running privacy maps.Host We have to. WASM importsActual capability Compared to actual edge (a) A comparative statement;Publisher Mark Dependency as optional I can't cover it. Host The data flow is the basis of the closed package.
+Privacy Declaration It's static. allowlist and installation instructions are not the authoritative source of running privacy maps.Host We have to. WASM importsActual capability Compared to actual edge (a) A comparative statement;Publisher Mark Dependency as optional I can't cover it. Actr Host The data flow is the basis of the closed package.
 
 ## 8. Download and verify current lines
 
@@ -375,7 +377,7 @@ Local first-seen pin Only current installations can be protected;Marketplace Hel
 
 - Certificate of control of current domain name;
 - (a) Transfer of confidentiality and integrity;
-- Profile and release metadata (a) Sources of information;
+- Publisher Profile and release metadata (a) Sources of information;
 - Standard Agent/CDN/Cache capacity.
 
 ### Package Signature and digest Provision
@@ -403,7 +405,7 @@ Marketplace This could include:
 
 Marketplace You can't:
 
-- (b) Acquiring for third parties the space for their domain names;
+- Squat domain names on behalf of third parties;
 - Silent Replace Publisher package;
 - Replace with market-entry identity Publisher Domain names;
 - Because“Audited”Around Actro (a) Competence;

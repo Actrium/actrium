@@ -27,8 +27,8 @@
         "$ref": "#/$defs/service"
       }
     },
-    "realm_namespace": {
-      "$ref": "#/$defs/realm_namespace"
+    "realm_signing_keys": {
+      "$ref": "#/$defs/realm_signing_keys"
     },
     "publisher": {
       "description": "Optional signed Publisher Profile carried inline (snake_case, schema actr.publisher/v1). Its full format is left to the Actor Package specification; it is verified by its own signature. 'domain' must equal the authority host and 'program_resolver' is required.",
@@ -124,8 +124,8 @@
       },
       "additionalProperties": true
     },
-    "realm_namespace": {
-      "description": "Namespace keys for Realms named dns:<authority host>. Only valid on port-less DNS authorities. Signed as a whole by an active key over the JCS form without 'signature'.",
+    "realm_signing_keys": {
+      "description": "Realm signing keys for Realms named <label>@<authority host>. Only valid on port-less DNS authorities. Signed as a whole by an active key over the JCS form without 'signature'.",
       "type": "object",
       "required": [
         "sequence",

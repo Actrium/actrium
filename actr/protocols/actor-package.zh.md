@@ -5,10 +5,10 @@
 本文仅提供简体中文版。后续若形成英文规范，应保持两者的协议要求一致。
 
 本文定义 `.actr` Actor Package 的逻辑模型、ZIP 容器、manifest、Workload Profile、
-Host 要求、Actor 依赖、完整性验证和装载流程。
+Actr Host 要求、Actor 依赖、完整性验证和装载流程。
 
 `.actr` 发布的是一个 Actor 类型的一次可安装发布，而不是某个网络角色的安装包，也不是
-只装有一段可执行文件的通用压缩包。包内 Workload 描述 Actor 的业务计算，Host 声明该
+只装有一段可执行文件的通用压缩包。包内 Workload 描述 Actor 的业务计算，Actr Host 声明该
 Workload 所需的可信运行环境；运行时结合包、部署配置和新分配的实例身份创建 Actor。
 
 本文中的大写关键词 **MUST**、**MUST NOT**、**SHOULD**、**SHOULD NOT** 和 **MAY**
@@ -21,7 +21,7 @@ Workload 所需的可信运行环境；运行时结合包、部署配置和新�
 - 所有可分发 Actor 使用同一种 `.actr` 包；
 - 一个包精确发布一个 Actor 类型和一个主 Workload；
 - Workload Profile 只表达装载和执行方式，不表达 Actor 的网络角色；
-- Host 依赖与远端 Actor 依赖分开声明；
+- Actr Host 依赖与远端 Actor 依赖分开声明；
 - Actrium 可以直接从 `.actr` 中识别并装载 Keel Guest Workload；
 - 一个根 `.actr` 可以通过签名锁文件引用其他 `.actr`，无需额外的应用归档层；
 - 包内所有可执行内容、contract 和资源都受到同一条完整性与签名链保护。
@@ -47,28 +47,29 @@ Keel 的下级规范分别定义。
 
 ### 2.2 Actor 类型
 
-由 `manufacturer`、`name` 和 `version` 确定的可执行 Actor 定义。Actor 类型不是运行时
-实例身份，不包含 realm 或 serial number。
+由 `publisher`、`name` 和 `version` 确定的可执行 Actor 定义。Actor 类型
+不是运行时实例身份，不包含 realm 或 serial number，也不进入 ActorId；它由 Actor 注册与
+Actor credential 携带。
 
 ### 2.3 Actor 实例
 
-Host 使用 Actor Package、部署配置和运行时身份实例化出来的节点。不同实例可以来自同一
+Actr Host 使用 Actor Package、部署配置和运行时身份实例化出来的节点。不同实例可以来自同一
 Package，但必须具有各自的 Actor identity 和状态。
 
 ### 2.4 Workload
 
-Actor 内的业务计算。Workload 负责 Actor message、生命周期事件和允许的 Host 调用。
+Actor 内的业务计算。Workload 负责 Actor message、生命周期事件和允许的 Actr Host 调用。
 Workload 的具体文件形态与 ABI 由 Workload Profile 定义。
 
 ### 2.5 Workload Profile
 
-一个带版本的执行约定，规定 Host 如何解释 Workload entry、如何建立 ABI、如何映射
+一个带版本的执行约定，规定 Actr Host 如何解释 Workload entry、如何建立 ABI、如何映射
 message 和生命周期，以及允许出现哪些 profile-specific manifest 字段。
 
-### 2.6 Host
+### 2.6 Actr Host
 
 创建 Actor 实例、提供 mailbox、transport、storage、clock、UI 或其他受控能力，并装载
-Workload 的可信软件。Host 是运行环境，不是远端 Actor。
+Workload 的可信软件。Actr Host 是运行环境，不是远端 Actor。
 
 ### 2.7 Actor 依赖
 
@@ -95,7 +96,7 @@ Actor Package
 └── 文件摘要与发布者签名
 ```
 
-Host 完成实例化后，运行关系为：
+Actr Host 完成实例化后，运行关系为：
 
 ```text
 Actor instance
@@ -134,7 +135,7 @@ Package **MUST NOT** 声明当前 Actor 是 client、server、frontend、backend
 Actor Package 文件名 **MUST** 使用 `.actr` 扩展名。文件名只用于存储和展示，不能作为
 Actor 类型、版本或信任判断的依据。
 
-版本 1 使用 ZIP 容器。所有 entry **MUST** 使用 ZIP `STORE` method，**MUST NOT** 使用
+版本 2 使用 ZIP 容器。所有 entry **MUST** 使用 ZIP `STORE` method，**MUST NOT** 使用
 ZIP encryption。文本文件默认使用 UTF-8；具体 payload 可以使用 Workload Profile 规定的
 二进制格式。
 
@@ -144,7 +145,7 @@ Package 根目录保留：
 
 | 路径 | 要求 | 用途 |
 | --- | --- | --- |
-| `manifest.toml` | 必需 | Actor、Workload、Host、文件和签名元数据。 |
+| `manifest.toml` | 必需 | Actor、Workload、Actr Host、文件和签名元数据。 |
 | `manifest.sig` | 必需 | 对原始 `manifest.toml` bytes 的发布者签名。 |
 | `manifest.lock.toml` | 可选 | 精确依赖解析结果。存在时必须由 manifest 绑定。 |
 
@@ -181,13 +182,13 @@ ZIP entry path：
 
 ### 6.1 顶层结构
 
-版本 1 manifest 至少包含：
+版本 2 manifest 至少包含：
 
 ```toml
-format = "actr-package/1"
+format = "actr-package/2"
 
 [actor]
-manufacturer = "acme"
+publisher = "acme.com"
 name = "notes"
 version = "1.2.0"
 
@@ -205,7 +206,10 @@ key-id = "release-2026"
 ```
 
 `format` **MUST** 精确标识 Actor Package format major version。读取器遇到不支持的 major
-version 时 **MUST** 拒绝，不能猜测其字段含义。
+version 时 **MUST** 拒绝，不能猜测其字段含义。`actr-package/1` 已停用：读取器 **MUST**
+拒绝 `format = "actr-package/1"` 或 `[actor]` 缺少 `publisher` 的 manifest，并返回明确指出
+需改用 `actr-package/2` 与 `publisher` 字段的错误；旧字段名不作为别名接受（历史字段名见
+Loran 术语表「历史名称对照」）。
 
 ### 6.2 `[actor]`
 
@@ -213,14 +217,14 @@ version 时 **MUST** 拒绝，不能猜测其字段含义。
 
 | 字段 | 含义 |
 | --- | --- |
-| `manufacturer` | 发布及命名 Actor 类型的主体标识。 |
-| `name` | manufacturer namespace 内的 Actor 类型名称。 |
+| `publisher` | 发布及命名 Actor 类型的 publisher 标识（规范化 DNS 域名）。 |
+| `name` | 该 publisher 下的 Actor 类型名称。 |
 | `version` | 此 release 的语义版本。 |
 
-三者共同形成规范 Actor type：
+三者共同形成 Actor 类型，唯一的规范文本形式为（`program` 即 `name` 字段）：
 
 ```text
-manufacturer:name:version
+publisher/program@version
 ```
 
 `[actor]` **MUST NOT** 包含 instance serial、realm、authority endpoint、signaling address、
@@ -243,13 +247,13 @@ Workload entry 必须由 `files` 列表绑定，并且其 role 必须为 `worklo
 
 ### 6.4 `[host]`
 
-`[host]` 声明装载 Workload 所需的 Host contract，而不是把 Host 实现作为远端 Actor 依赖。
+`[host]` 声明装载 Workload 所需的 Actr Host contract，而不是把 Actr Host 实现作为远端 Actor 依赖。
 它必须包含：
 
 | 字段 | 含义 |
 | --- | --- |
-| `profile` | Host 所实现的带版本运行 Profile。 |
-| `api` | Package 可接受的 Host API 版本范围。 |
+| `profile` | Actr Host 所实现的带版本运行 Profile。 |
+| `api` | Package 可接受的 Actr Host API 版本范围。 |
 
 它还可以包含：
 
@@ -264,19 +268,19 @@ optional-capabilities = [
 ]
 ```
 
-Host **MUST** 在执行 Workload 前验证：
+Actr Host **MUST** 在执行 Workload 前验证：
 
 1. 支持 `profile`；
-2. Host API version 落在 `api` 范围内；
+2. Actr Host API version 落在 `api` 范围内；
 3. 所有 required capability 都可用并获策略允许；
-4. Workload Profile 与 Host Profile 的组合有效。
+4. Workload Profile 与 Actr Host Profile 的组合有效。
 
-任意 required 条件不满足时，Host **MUST** 拒绝实例化。Optional capability 不可用时，
-Host 可以继续实例化，但必须通过 Profile 定义的 feature detection 机制向 Workload 报告。
+任意 required 条件不满足时，Actr Host **MUST** 拒绝实例化。Optional capability 不可用时，
+Actr Host 可以继续实例化，但必须通过 Profile 定义的 feature detection 机制向 Workload 报告。
 
-Host 实现通常由平台内置或在应用构建时链接。版本 1 不定义 Package 内 Host executable，
-`[host]` 也 **MUST NOT** 包含指向包内 Host implementation 的 `entry`。这是因为 Host 属于
-可信计算边界，普通 Package 不能通过自带 Host 绕过 capability、签名和沙箱策略。
+Actr Host 实现通常由平台内置或在应用构建时链接。版本 2 不定义 Package 内 Actr Host executable，
+`[host]` 也 **MUST NOT** 包含指向包内 Actr Host implementation 的 `entry`。这是因为 Actr Host 属于
+可信计算边界，普通 Package 不能通过自带 Actr Host 绕过 capability、签名和沙箱策略。
 
 ### 6.5 Actor 依赖
 
@@ -295,7 +299,7 @@ version = "^1.4.0"
 required = false
 ```
 
-Alias 是当前 Workload 内的稳定引用名。`actor` 标识 manufacturer 与 Actor name，`version`
+Alias 是当前 Workload 内的稳定引用名。`actor` 标识 publisher 与 Actor name，`version`
 给出允许范围。`contract` 可绑定调用方编译时使用的 interface；Profile 或下级规范可以增加
 contract fingerprint。
 
@@ -303,11 +307,11 @@ contract fingerprint。
 
 - **MUST NOT** 表达 client/server 关系；
 - **MUST NOT** 隐含依赖与当前 Actor 同进程、同设备或同 realm；
-- **MUST NOT** 被当作 Host implementation；
+- **MUST NOT** 被当作 Actr Host implementation；
 - **MAY** 在运行时解析到零个、一个或多个合规 Actor instance，具体由 contract 和发现
   规范决定。
 
-Required dependency 无法解析时，Host 必须按相关 lifecycle 规范使 Actor 保持未就绪或
+Required dependency 无法解析时，Actr Host 必须按相关 lifecycle 规范使 Actor 保持未就绪或
 返回明确错误，不能静默绑定到不满足类型、版本或 contract 的实例。
 
 ### 6.6 依赖锁
@@ -341,7 +345,7 @@ size = 18432
 sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 ```
 
-版本 1 定义以下基础 role：
+版本 2 定义以下基础 role：
 
 | Role | 含义 |
 | --- | --- |
@@ -356,8 +360,8 @@ SHA-256，并拒绝缺失、重复、摘要不匹配或未在 manifest 声明的
 
 ### 6.8 `[signature]`
 
-版本 1 的 `algorithm` 为 `ed25519`。`key-id` 标识发布者用于此次 release 的公钥，但它
-本身不是信任锚。Host 必须从受信 publisher metadata、组织策略或其他可信渠道取得公钥，
+版本 2 的 `algorithm` 为 `ed25519`。`key-id` 标识发布者用于此次 release 的公钥，但它
+本身不是信任锚。Actr Host 必须从受信 publisher metadata、组织策略或其他可信渠道取得公钥，
 不能因为 Package 自称某个 key-id 就信任该 key。publisher metadata 以签名 Publisher Profile
 的形式内嵌在 publisher 域名的 authority descriptor 中（`https://<publisher>/.well-known/actr`
 的 `publisher` member，见 [Actr Authority Discovery](authority-discovery.zh.md) 第 4.5 节），
@@ -373,15 +377,15 @@ SHA-256，并拒绝缺失、重复、摘要不匹配或未在 manifest 声明的
 每个 Workload Profile 必须定义：
 
 - entry 文件形态；
-- Workload 与 Host 的 ABI；
+- Workload 与 Actr Host 的 ABI；
 - Actor message 如何映射到 Workload；
 - lifecycle 事件如何映射到 Workload；
-- Workload 如何调用 Host capability；
+- Workload 如何调用 Actr Host capability；
 - profile-specific manifest 字段；
 - 支持的 target 与资源限制；
 - profile-specific 安全要求。
 
-Profile **MUST NOT** 重新定义 Actor type、Package 签名、文件摘要、dependency alias 或 Host
+Profile **MUST NOT** 重新定义 Actor type、Package 签名、文件摘要、dependency alias 或 Actr Host
 信任规则。
 
 初始保留以下 Profile 标识：
@@ -390,11 +394,11 @@ Profile **MUST NOT** 重新定义 Actor type、Package 签名、文件摘要、d
 | --- | --- |
 | `actr.component/1` | WebAssembly Component Model Workload。 |
 | `actr.native/1` | 平台原生动态库 Workload。 |
-| `actr.linked/1` | 构建时与 Host 链接的 Workload。 |
+| `actr.linked/1` | 构建时与 Actr Host 链接的 Workload。 |
 | `keel.guest/1` | 由兼容 Keel Runtime 装载的 Guest Workload。 |
 
 上述 Profile 的完整 ABI 必须由各自的下级规范定义。仅知道 Profile 名称不足以安全执行。
-Profile、Profile Runtime、Execution Engine 与 Host 的分层及首批实现命名见
+Profile、Profile Runtime、Execution Engine 与 Actr Host 的分层及首批实现命名见
 [`workload-runtimes.zh.md`](../../docs/architecture/workload-runtimes.zh.md)。
 
 ### 7.2 `keel.guest/1`
@@ -421,14 +425,14 @@ capabilities = "workload/capabilities.json"
 contract = "contracts/notes.json"
 ```
 
-Actrium Host 必须：
+Actrium Actr Host 必须：
 
 1. 验证整个 `.actr` 及发布者信任；
 2. 为此次实例化创建或取得 Actor identity；
 3. 建立 mailbox、transport、storage 和 lifecycle；
 4. 在 Keel sandbox 中装载 Guest entry；
 5. 按 Keel contract 把 Actor message 映射到 Guest export；
-6. 把 Guest 的 Actor 调用映射到受控 Host capability；
+6. 把 Guest 的 Actor 调用映射到受控 Actr Host capability；
 7. 对输入、输出和 capability boundary 执行 schema 与权限检查；
 8. 在 Actor 停止或失去有效身份时终止相应 Guest execution。
 
@@ -440,21 +444,21 @@ Keel capability manifest 必须作为 role `profile` 文件受外层 manifest �
 它不能自行替代 Package 签名，也不需要重复定义 Package name、version 或 publisher。
 
 `keel.guest/1` 的完整 Guest ABI、capability schema 和 UI lifecycle 属于 Keel 下级规范；
-Actrium 的导航和多窗口行为属于产品扩展规范。基础 Actr parser 只负责验证 Package；不支持该 Profile 的 Host
+Actrium 的导航和多窗口行为属于产品扩展规范。基础 Actr parser 只负责验证 Package；不支持该 Profile 的 Actr Host
 必须报告 unsupported-profile。
 
-## 8. Host 模型
+## 8. Actr Host 模型
 
-Host 在任何 Actor 实例中都存在；可选的是 Host 的具体提供方式，而不是 Host 本身。
+Actr Host 在任何 Actor 实例中都存在；可选的是 Actr Host 的具体提供方式，而不是 Actr Host 本身。
 
-Host implementation 可以：
+Actr Host implementation 可以：
 
 - 内置于 Actrium；
 - 内置于服务器 runtime；
 - 与移动或桌面应用链接；
 - 由受管平台预先安装。
 
-Package 只声明 Host contract 和 capability 要求，不以普通 Actor dependency 下载 Host。
+Package 只声明 Actr Host contract 和 capability 要求，不以普通 Actor dependency 下载 Actr Host。
 这样同一 Actor Package 可以由多个兼容实现承载，而无需绑定到具体产品 build。
 
 平台可以基于来源、target、Workload Profile 和 capability 采用更严格策略。例如：
@@ -462,13 +466,13 @@ Package 只声明 Host contract 和 capability 要求，不以普通 Actor depen
 - Actrium 可以允许 `keel.guest/1`，但拒绝第三方 native Workload；
 - iOS 可以只接受 linked 或平台允许的 Wasm Profile；
 - 企业环境可以要求额外 publisher、审计或签名策略；
-- Host 可以拒绝格式有效但 capability 过宽的 Package。
+- Actr Host 可以拒绝格式有效但 capability 过宽的 Package。
 
 格式有效不代表平台必须执行。
 
 ## 9. 安装与装载流程
 
-合规 installer/Host 至少按以下顺序处理：
+合规 installer/Actr Host 至少按以下顺序处理：
 
 1. 以受限 ZIP reader 打开 Package；
 2. 验证 entry path、数量、method 和 size limit；
@@ -478,15 +482,15 @@ Package 只声明 Host contract 和 capability 要求，不以普通 Actor depen
 6. 验证 manifest signature；
 7. 验证所有声明文件的 size 与 SHA-256；
 8. 拒绝未声明或重复的 payload entry；
-9. 验证 Actor type、Workload Profile 和 Host 要求；
+9. 验证 Actor type、Workload Profile 和 Actr Host 要求；
 10. 解析并验证依赖锁；
 11. 获取和验证尚未安装的依赖 `.actr`；
 12. 应用平台安装及 capability policy；
 13. 创建 Actor identity 与部署配置；
-14. 实例化 Host 并装载 Workload；
+14. 实例化 Actr Host 并装载 Workload；
 15. 仅在 required dependency 和 lifecycle 条件满足后进入 Ready。
 
-实现 **MUST NOT** 在签名、摘要、Host 要求和平台策略验证完成前执行 Workload、解析动态
+实现 **MUST NOT** 在签名、摘要、Actr Host 要求和平台策略验证完成前执行 Workload、解析动态
 脚本入口或加载 native library。
 
 ## 10. 分发与依赖组合
@@ -523,12 +527,12 @@ Package repository 可以单独传输每个 `.actr`，也可以在缓存或下�
 - 本地数据目录和设备绝对路径；
 - 当前 authority 解析结果。
 
-Package 可以声明需要哪些协议、Host API、capability 和 Actor dependency；具体 endpoint 与
+Package 可以声明需要哪些协议、Actr Host API、capability 和 Actor dependency；具体 endpoint 与
 credential 由 `actr:` URI、authority discovery、部署配置和授权流程提供。
 
 ## 12. 完整性、签名与 Package digest
 
-版本 1 的完整性链为：
+版本 2 的完整性链为：
 
 ```text
 payload bytes
@@ -537,13 +541,13 @@ payload bytes
 ```
 
 签名保证 manifest 的发布者真实性；manifest 中的摘要绑定每个 payload。ZIP header、entry
-顺序和其他未签名 metadata 不能改变 Actor、Workload、Host 或资源语义。
+顺序和其他未签名 metadata 不能改变 Actor、Workload、Actr Host 或资源语义。
 
 Repository 和 lock file 可以使用整个 `.actr` bytes 的 SHA-256 作为 Package digest。该
 digest 用于精确下载和缓存；它不能替代 manifest signature 和 publisher trust validation。
 
 为提高可重现性，packager **SHOULD** 固定 entry 顺序、timestamp、permission bits 和其他
-ZIP metadata。后续规范可以定义 canonical archive encoding，但版本 1 的语义验证不依赖
+ZIP metadata。后续规范可以定义 canonical archive encoding，但版本 2 的语义验证不依赖
 ZIP entry 顺序。
 
 ## 13. 版本与扩展
@@ -552,15 +556,15 @@ ZIP entry 顺序。
 
 | 层 | 示例 | 不兼容时的处理 |
 | --- | --- | --- |
-| Package format | `actr-package/1` | 不支持 major version 时拒绝。 |
+| Package format | `actr-package/2` | 不支持 major version 时拒绝。 |
 | Workload Profile | `keel.guest/1` | 不支持 Profile major version 时拒绝。 |
-| Host API | `^1.0.0` | Host version 不在范围内时拒绝。 |
+| Actr Host API | `^1.0.0` | Actr Host version 不在范围内时拒绝。 |
 
 实现可以忽略 manifest 中明确标记为 optional 的未知 metadata，但不得忽略：
 
 - 未知 Package format major；
 - 未知 Workload Profile；
-- required Host capability；
+- required Actr Host capability；
 - required dependency；
 - 未知签名或摘要算法；
 - 影响执行入口、权限、contract 或验证语义的未知字段。
@@ -570,25 +574,25 @@ optional。
 
 ## 14. 安全与隐私考虑
 
-- Host 必须把 Package、manifest、lock 和所有 payload 视为不可信输入，直至验证完成。
+- Actr Host 必须把 Package、manifest、lock 和所有 payload 视为不可信输入，直至验证完成。
 - ZIP reader 必须防止 path traversal、重复 entry、特殊文件、资源耗尽和解包覆盖。
 - Workload entry、contract、capability manifest 和可执行资源必须全部被签名 manifest
   间接绑定。
 - 发布者签名只证明来源和未被修改，不自动证明代码安全；平台仍需执行 sandbox、capability
   和 publisher policy。
-- Package 不能自带普通第三方 Host 替代实现，否则会破坏 Host/Workload 信任边界。
+- Package 不能自带普通第三方 Actr Host 替代实现，否则会破坏 Actr Host/Workload 信任边界。
 - Native Workload 具有更高权限，平台应默认采用更严格的来源和安装策略。
 - Package 不得包含长期 credential 或用户专属授权；Package 很可能被公开缓存和复制。
-- Host 必须对 Guest/Workload 输入输出执行 Profile 规定的 schema、size 和 resource limit。
+- Actr Host 必须对 Guest/Workload 输入输出执行 Profile 规定的 schema、size 和 resource limit。
 - 依赖解析必须验证精确 identity、version、digest 和 contract，不能只按显示名称绑定。
 
 ## 15. 完整 Actrium 示例
 
 ```toml
-format = "actr-package/1"
+format = "actr-package/2"
 
 [actor]
-manufacturer = "acme"
+publisher = "acme.com"
 name = "notes"
 version = "1.2.0"
 
@@ -670,7 +674,7 @@ sha256 = "5123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 ```
 
 安装此 Package 时，Actrium 识别 `keel.guest/1`，验证并解析依赖，再把 Keel Guest 作为
-`acme:notes:1.2.0` 的 Workload 装载。该 Actor 与 `notes-sync` 等依赖 Actor 通过正常 Actr
+`acme.com/notes@1.2.0` 的 Workload 装载。该 Actor 与 `notes-sync` 等依赖 Actor 通过正常 Actr
 contract 通信。
 
 ## 16. 合规性
@@ -692,9 +696,9 @@ contract 通信。
 Workload Profile 时完成静态真实性验证，但必须把可执行状态报告为 unsupported，不能报告
 为 runnable。
 
-### 16.3 合规 Host
+### 16.3 合规 Actr Host
 
-合规 Host 必须在通用验证基础上验证 Workload Profile、Host API、capability、contract、
+合规 Actr Host 必须在通用验证基础上验证 Workload Profile、Actr Host API、capability、contract、
 依赖和平台策略，并按 Profile 建立 Actor identity、mailbox 与 lifecycle。
 
 ## 17. 后续规范
@@ -708,7 +712,7 @@ Workload Profile 时完成静态真实性验证，但必须把可执行状态报
 - `actr.native/1` Workload Profile；
 - `actr.linked/1` Workload Profile；
 - `keel.guest/1` Workload Profile；
-- `actr.host/1` Host API 与 lifecycle；
+- `actr.host/1` Actr Host API 与 lifecycle；
 - Actrium product metadata extension；
 - conformance fixtures、恶意 ZIP 样例和跨实现测试向量。
 

@@ -1,21 +1,21 @@
-# Actrix Realm v1 独立安全评审包
+# Loran Realm v1 独立安全评审包
 
 状态：交给独立评审者的范围与验收模板。项目作者不得把自审签字当作独立结论。
 
 ## 评审目标
 
-判断单节点、SQLite、官方 provider profile 是否存在可导致以下结果的缺陷。评审对象
+判断单节点、SQLite、单一 Realm Provider profile 是否存在可导致以下结果的缺陷。评审对象
 须写明所评审的 commit 属于哪种 Realm 模型：当前实现是一个实例一个 Realm；目标
-契约是一个实例承载多个 Realm（命名空间 + 本地名，以命名空间 key 签名的 Realm
-Profile 激活），见 `REALM_V1_ARCHITECTURE.zh.md` 第 9 节。缺陷类别：
+契约是一个实例承载多个 Realm（Realm 名 `<label>@<domain>`，以 Realm 签名 key 签名的
+Realm Profile 激活），见 `REALM_V1_ARCHITECTURE.zh.md` 第 9 节。缺陷类别：
 
 - 未授权签发或冒充 Actor；
-- 跨 Realm/provider/audience 重放，或同一实例内 Realm 之间的状态、缓存、发现与管理
+- 跨 Realm/Realm Provider/audience 重放，或同一实例内 Realm 之间的状态、缓存、发现与管理
   权限串通；
-- 在他人命名空间下创建或激活 Realm、接受未经命名空间 key 签名、已回滚或改换 `provider.id` 的
-  Profile，或在 Profile 不可用时回退到未委派的 provider；
-- 绕过 ACL 发现/连接 Actor；
-- 获取 Signer 私钥、Realm/TURN/renewal/Admin secret；
+- 在他人域名下创建或激活 Realm、接受未经 Realm 签名 key 签名、已回滚或改换 `provider.id` 的
+  Realm Profile，或在 Realm Profile 不可用时回退到未委派的 Realm Provider；
+- 绕过连接 ACL 发现/连接 Actor；
+- 获取 Issuer Signer 私钥、Realm/TURN/renewal/Admin secret；
 - 发布或运行未获 Publisher 授权的 package；
 - SSRF、DNS rebinding 或任意内网读取；
 - TURN 未授权中继、资源耗尽或流量放大；
@@ -33,32 +33,32 @@ Profile 激活），见 `REALM_V1_ARCHITECTURE.zh.md` 第 9 节。缺陷类别�
 5. `TURN_STUN_INTEROP_TESTING.zh.md`
 6. `REALM_V1_ACCEPTANCE_EVIDENCE.zh.md`
 7. `DEPENDENCY_RISK_REGISTER.zh.md`
-8. `scripts/migrate_schema_v1.py`
+8. `scripts/loran/migrate_schema_v1.py`
 
 ## 高风险代码
 
 | 边界 | 位置 | 重点 |
 |---|---|---|
-| 配置/启动 | `platform/src/config`、`actrixd/src/main.rs` | fail closed、secret 来源、TLS、降权 |
-| SQLite | `platform/src/storage/db.rs`、迁移脚本 | schema gate、Realm 约束（当前：singleton；目标：`(namespace, local_name)` 唯一与 tombstone）、事务/备份 |
-| Authority | `ais/src/issuer.rs`、`renewal.rs` | 注册模式、proof、nonce、scope、ID collision |
-| Signer | `signer/src/grpc_handlers.rs`、`storage` | auth payload、expiry、KEK、私钥不外泄 |
-| Signaling | `signaling/src/axum_router.rs`、`server.rs` | WS transport、source binding、ACL、限流 |
-| TURN/STUN | `turn/src/authenticator.rs`、`stun/src/lib.rs` | credential、cache、allocation、畸形流量 |
-| Publisher | `mfr/src/publisher.rs`、`manager.rs` | SSRF、descriptor、rotation、nonce、签名 |
-| Admin | `actrixd/src/service/http/admin_api.rs` | Argon2id/JWT、Realm 唯一性（目标：命名空间签名请求与单 Realm 管理 token 的作用域）、审计 |
+| 配置/启动 | `crates/loran-platform/src/config`、`crates/loran-server/src/main.rs` | fail closed、secret 来源、TLS、降权 |
+| SQLite | `crates/loran-platform/src/storage/db.rs`、迁移脚本 | schema gate、Realm 约束（当前：singleton；目标：Realm 名唯一与 Realm Provider tombstone）、事务/备份 |
+| Issuer | `crates/loran-issuer/src/issuer.rs`、`renewal.rs` | 注册模式、proof、nonce、scope、ID collision |
+| Issuer Signer | `crates/loran-signer/src/grpc_handlers.rs`、`storage` | auth payload、expiry、KEK、私钥不外泄 |
+| Signaling | `crates/loran-signaling/src/axum_router.rs`、`server.rs` | WS transport、source binding、连接 ACL、限流 |
+| TURN/STUN | `crates/loran-turn/src/authenticator.rs`、`crates/loran-stun/src/lib.rs` | credential、cache、allocation、畸形流量 |
+| Publisher Registry | `crates/loran-publisher-registry/src/`（publisher 发现、`manager.rs`） | SSRF、descriptor、rotation、nonce、签名 |
+| Admin | `crates/loran-server/src/service/http/admin_api.rs` | Argon2id/JWT、Realm 唯一性（目标：Realm 管理请求与单 Realm 的 Realm 管理 token 的作用域）、审计 |
 
-评审还应确认旧 `manufacturer` SDK/authoring 源码字段没有意外重新进入 Actrix v1 的
-HTTP/JSON、包清单和 Actor ID 边界；源码命名迁移本身不作为安全通过的替代条件。
+评审还应确认 SDK/authoring 源码中的历史发布者字段名（见 GLOSSARY「历史名称对照」）没有
+意外重新进入 Loran v1 的 HTTP/JSON、包清单和 ActorId 边界；源码命名迁移本身不作为安全通过的替代条件。
 
 ## 最小动态测试
 
-- 对所有管理/Signer/AIS/Signaling 请求做缺失、错误、过期、重放、跨 scope credential
+- 对所有管理/Issuer Signer/Issuer/Signaling 请求做缺失、错误、过期、重放、跨 scope credential
   测试；
 - 并发创建 Realm、并发消费 nonce、并发 renewal 和时钟回拨；
 - 目标契约：两个 Realm 使用相同 Actor 类型与相同 serial 候选时，credential、presence、
-  TURN、ACL 与管理接口互不相通；伪造或回滚 `realm_namespace`/Profile；authority
-  descriptor 获取在逐跳重定向下的 SSRF/DNS rebinding；命名空间签名请求重放到其他 provider
+  TURN、连接 ACL 与管理接口互不相通；伪造或回滚 `realm_signing_keys`/Realm Profile；authority
+  descriptor 获取在逐跳重定向下的 SSRF/DNS rebinding；Realm 管理请求重放到其他 Realm Provider
   或在有效期内重复提交；
 - Publisher DNS 在预检查与连接间切换到 loopback/private/link-local；
 - redirect、超限 descriptor、慢响应、Unicode/大小写/尾点/端口域名；
@@ -114,5 +114,5 @@ HTTP/JSON、包清单和 Actor ID 边界；源码命名迁移本身不作为安�
 
 - schema v1 gate 对未版本化/错误版本库 fail-closed（`unsupported ... run the standalone migration tool`）。
 - JWT 算法锁定 HS256、无 `alg:none`/RS-HS 混淆；realm 单例唯一索引（该控制针对当时的单 Realm 契约；多 Realm 目标契约中由按 Realm
-分区与 `(namespace, local_name)` 唯一约束取代，见架构契约第 9 节）；signaling 侧 credential source/连接绑定；移除全局 `CorsLayer::permissive`；TURN 出厂 placeholder secret 已移除并 fail-closed。
+分区与 Realm 名唯一约束取代，见架构契约第 9 节）；signaling 侧 credential source/连接绑定；移除全局 `CorsLayer::permissive`；TURN 出厂 placeholder secret 已移除并 fail-closed。
 - 浏览器 TURN relay-only 互操作：Chrome 148、Firefox 152 均 PASS（relay/relay UDP）；Safari 26.5 经自动化未在窗口内完成握手，记为待人工复核；独立 RFC5766 客户端 / iOS·Android 原生 / NAT 矩阵 / TURN-over-TCP·TLS 仍为发布前外部矩阵缺口。
