@@ -1031,7 +1031,7 @@ impl Context for RuntimeContext {
             ));
         }
 
-        let service_name = format!("{}:{}", target_type.manufacturer, target_type.name);
+        let service_name = format!("{}:{}", target_type.publisher, target_type.name);
 
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // Step 1: Get fingerprint from manifest.lock.toml (when available)
@@ -1106,7 +1106,7 @@ impl Context for RuntimeContext {
         result.candidates.into_iter().next().ok_or_else(|| {
             ActrError::NotFound(format!(
                 "No route candidates for type {}/{}",
-                target_type.manufacturer, target_type.name
+                target_type.publisher, target_type.name
             ))
         })
     }

@@ -11,7 +11,7 @@ async fn cache_returns_cached_key_without_http() {
 
     let mut server = mockito::Server::new_async().await;
     let mock = server
-        .mock("GET", "/registry/publishers/test-mfr/verifying-key")
+        .mock("GET", "/registry/publishers/test-publisher/verifying-key")
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(format!(r#"{{"public_key":"{key_b64}"}}"#))
@@ -19,12 +19,12 @@ async fn cache_returns_cached_key_without_http() {
         .create_async()
         .await;
 
-    let cache = MfrCertCache::new(server.url());
+    let cache = PublisherCertCache::new(server.url());
 
     // first miss -> calls HTTP
-    let k1 = cache.get_or_fetch("test-mfr", None).await.unwrap();
+    let k1 = cache.get_or_fetch("test-publisher", None).await.unwrap();
     // second hit -> no HTTP call
-    let k2 = cache.get_or_fetch("test-mfr", None).await.unwrap();
+    let k2 = cache.get_or_fetch("test-publisher", None).await.unwrap();
 
     mock.assert_async().await;
     assert_eq!(k1.to_bytes(), k2.to_bytes());
@@ -35,26 +35,29 @@ async fn cache_returns_cached_key_without_http() {
 async fn fetch_fails_on_404() {
     let mut server = mockito::Server::new_async().await;
     let _mock = server
-        .mock("GET", "/registry/publishers/unknown-mfr/verifying-key")
+        .mock(
+            "GET",
+            "/registry/publishers/unknown-publisher/verifying-key",
+        )
         .with_status(404)
         .create_async()
         .await;
 
-    let cache = MfrCertCache::new(server.url());
-    let result = cache.get_or_fetch("unknown-mfr", None).await;
+    let cache = PublisherCertCache::new(server.url());
+    let result = cache.get_or_fetch("unknown-publisher", None).await;
 
     assert!(
-        matches!(result, Err(HyperError::UntrustedManufacturer(_))),
-        "404 should return UntrustedManufacturer, actual: {result:?}"
+        matches!(result, Err(HyperError::UntrustedPublisher(_))),
+        "404 should return UntrustedPublisher, actual: {result:?}"
     );
 }
 
 #[tokio::test]
 async fn debug_impl_contains_endpoint_and_ttl() {
-    let cache = MfrCertCache::new("http://ais.example");
+    let cache = PublisherCertCache::new("http://issuer.example");
     let s = format!("{cache:?}");
-    assert!(s.contains("MfrCertCache"));
-    assert!(s.contains("ais_endpoint"));
+    assert!(s.contains("PublisherCertCache"));
+    assert!(s.contains("issuer_endpoint"));
     assert!(s.contains("ttl"));
     // finish_non_exhaustive() omits the cache map.
     assert!(!s.contains("cache"));
@@ -80,7 +83,7 @@ async fn get_or_fetch_with_key_id_hits_cache_on_second_call() {
         .create_async()
         .await;
 
-    let cache = MfrCertCache::new(server.url());
+    let cache = PublisherCertCache::new(server.url());
     let k1 = cache.get_or_fetch("m", Some("v1")).await.unwrap();
     let k2 = cache.get_or_fetch("m", Some("v1")).await.unwrap();
     mock.assert_async().await;
@@ -98,7 +101,7 @@ async fn fetch_fails_on_malformed_json_body() {
         .create_async()
         .await;
 
-    let cache = MfrCertCache::new(server.url());
+    let cache = PublisherCertCache::new(server.url());
     let err = cache.get_or_fetch("badjson", None).await.unwrap_err();
     let msg = err.to_string();
     assert!(
@@ -118,7 +121,7 @@ async fn fetch_fails_on_invalid_base64_key() {
         .create_async()
         .await;
 
-    let cache = MfrCertCache::new(server.url());
+    let cache = PublisherCertCache::new(server.url());
     let err = cache.get_or_fetch("badb64", None).await.unwrap_err();
     assert!(
         err.to_string().contains("base64"),
@@ -139,7 +142,7 @@ async fn fetch_fails_on_wrong_key_length() {
         .create_async()
         .await;
 
-    let cache = MfrCertCache::new(server.url());
+    let cache = PublisherCertCache::new(server.url());
     let err = cache.get_or_fetch("badlen", None).await.unwrap_err();
     assert!(
         err.to_string().contains("32 bytes"),

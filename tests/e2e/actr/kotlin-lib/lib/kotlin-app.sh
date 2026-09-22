@@ -12,7 +12,7 @@
 #
 # Globals expected from the run.sh:
 #   REPO_ROOT, SCRIPT_DIR, RUN_DIR, SQLITE_DIR, LOG_DIR, DIST_DIR
-#   HTTP_PORT, ICE_PORT, ADMIN_PASSWORD, MANUFACTURER, ADMIN_TOKEN
+#   HTTP_PORT, ICE_PORT, ADMIN_PASSWORD, PUBLISHER, ADMIN_TOKEN
 #   ACTR_CLI_MANIFEST, ACTR_TARGET_DIR, TEMP_SERVICE_TARGET_DIR
 #   ACTRIX_CONFIG_TEMPLATE, ACTRIX_CONFIG_PATH, SERVER_RUNTIME_PATH
 #   SERVICE_KEYCHAIN, SERVICE_PUBLIC_KEY, PROVISIONED_KEYCHAIN, PROVISIONED_PUBLIC_KEY
@@ -128,12 +128,12 @@ write_project_keychain_config() {
     local keychain_path="$2"
     mkdir -p "$project_dir/.actr"
     cat >"$project_dir/.actr/config.toml" <<EOF
-[mfr]
+[publisher]
 keychain = "$keychain_path"
 EOF
 }
 
-provision_mfr_keychain() {
+provision_publisher_keychain() {
     provision_e2e_publisher
 }
 
@@ -145,7 +145,7 @@ build_and_publish_service() {
     local service_version="$3"
     section "📦 Building and publishing the ${service_actor} server package"
 
-    SERVICE_PACKAGE="$DIST_DIR/${MANUFACTURER}-${service_actor}-${service_version}-${HOST_TARGET}.actr"
+    SERVICE_PACKAGE="$DIST_DIR/${PUBLISHER}-${service_actor}-${service_version}-${HOST_TARGET}.actr"
     (
         cd "$service_dir"
         CARGO_TARGET_DIR="$TEMP_SERVICE_TARGET_DIR" run_actr build \
@@ -173,14 +173,14 @@ publish_app_package_identity() {
 
     local marker="$RUN_DIR/${app_actor}-identity.bin"
     local manifest="$RUN_DIR/${app_actor}-package-manifest.toml"
-    local package="$DIST_DIR/${MANUFACTURER}-${app_actor}-${app_version}-${HOST_TARGET}.actr"
+    local package="$DIST_DIR/${PUBLISHER}-${app_actor}-${app_version}-${HOST_TARGET}.actr"
     printf 'linked %s identity marker\n' "$app_actor" >"$marker"
     cat >"$manifest" <<EOF
 edition = 1
 
 [package]
 name = "${app_actor}"
-manufacturer = "${MANUFACTURER}"
+publisher = "${PUBLISHER}"
 version = "${app_version}"
 description = "Actrium ${app_actor} linked runtime identity marker"
 
@@ -218,8 +218,8 @@ path = "${service_package}"
 [signaling]
 url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
 
-[ais_endpoint]
-url = "http://127.0.0.1:${HTTP_PORT}/ais"
+[issuer_endpoint]
+url = "http://127.0.0.1:${HTTP_PORT}/issuer"
 
 [deployment]
 realm_id = ${REALM_ID}
@@ -227,7 +227,7 @@ realm_secret = "${REALM_SECRET}"
 
 [[trust]]
 kind = "registry"
-endpoint = "http://127.0.0.1:${HTTP_PORT}/ais"
+endpoint = "http://127.0.0.1:${HTTP_PORT}/issuer"
 
 [discovery]
 visible = true
@@ -295,10 +295,10 @@ check_service_ready() {
     local db_path="$SQLITE_DIR/signaling_cache.db"
     local timeout="${SERVICE_READY_TIMEOUT_SECONDS:-60}"
     if ! wait_for_service_registration \
-        "$db_path" "$REALM_ID" "$MANUFACTURER" "$service_actor" "$timeout"; then
+        "$db_path" "$REALM_ID" "$PUBLISHER" "$service_actor" "$timeout"; then
         echo "Service registrations observed before timeout:" >&2
         [ -f "$db_path" ] && sqlite3 "$db_path" \
-            "SELECT actor_realm_id, actor_manufacturer, actor_device_name, service_name, status FROM service_registry;" \
+            "SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status FROM service_registry;" \
             >&2 2>/dev/null || true
         tail -n 120 "$LOG_DIR/server.log" >&2 2>/dev/null || true
         fail "${service_actor} did not register with signaling within ${timeout}s"
@@ -309,13 +309,13 @@ check_service_ready() {
 # ──── Kotlin app scaffolding ────
 
 # Scaffold a Kotlin Android app via `actr init`. Args:
-#   <template> <project_name> <out_dir> <signaling_url> <manufacturer>.
+#   <template> <project_name> <out_dir> <signaling_url> <publisher>.
 scaffold_kotlin_app() {
     local template="$1"
     local project_name="$2"
     local out_dir="$3"
     local signaling_url="$4"
-    local manufacturer="$5"
+    local publisher="$5"
     section "🧱 Scaffolding temporary Kotlin app (${template})"
     mkdir -p "$out_dir"
     (
@@ -325,7 +325,7 @@ scaffold_kotlin_app() {
             --template "$template" \
             --role app \
             --signaling "$signaling_url" \
-            --manufacturer "$manufacturer" \
+            --publisher "$publisher" \
             --project-name "$project_name" .
     )
     success "Kotlin app scaffolded: $out_dir"
@@ -523,7 +523,7 @@ capture_kotlin_diagnostics() {
     local db_path="$SQLITE_DIR/signaling_cache.db"
     if [ -f "$db_path" ]; then
         sqlite3 "$db_path" \
-            "SELECT actor_realm_id, actor_manufacturer, actor_device_name, service_name, status FROM service_registry;" \
+            "SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status FROM service_registry;" \
             >"$diag_dir/signaling-cache.txt" 2>/dev/null || true
     fi
     for log in "$LOG_DIR"/*.log; do

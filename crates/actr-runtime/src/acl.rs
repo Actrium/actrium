@@ -89,7 +89,7 @@ pub fn check_acl_permission(
 fn matches_rule(caller: &ActrId, rule: &AclRule) -> bool {
     use actr_protocol::acl_rule::SourceRealm;
 
-    // Exact type match (manufacturer + name + version)
+    // Exact type match (publisher + name + version)
     if caller.r#type != rule.from_type {
         return false;
     }
@@ -106,11 +106,11 @@ mod tests {
     use super::*;
     use actr_protocol::{ActrType, Realm, acl_rule::Permission, acl_rule::SourceRealm};
 
-    fn make_id(manufacturer: &str, name: &str, version: &str, realm_id: u32) -> ActrId {
+    fn make_id(publisher: &str, name: &str, version: &str, realm_id: u32) -> ActrId {
         ActrId {
             serial_number: 0xaabb,
             r#type: ActrType {
-                manufacturer: manufacturer.into(),
+                publisher: publisher.into(),
                 name: name.into(),
                 version: version.into(),
             },
@@ -118,11 +118,11 @@ mod tests {
         }
     }
 
-    fn make_rule(manufacturer: &str, name: &str, version: &str, perm: Permission) -> AclRule {
+    fn make_rule(publisher: &str, name: &str, version: &str, perm: Permission) -> AclRule {
         AclRule {
             permission: perm as i32,
             from_type: ActrType {
-                manufacturer: manufacturer.into(),
+                publisher: publisher.into(),
                 name: name.into(),
                 version: version.into(),
             },
@@ -192,7 +192,7 @@ mod tests {
             rules: vec![AclRule {
                 permission: Permission::Allow as i32,
                 from_type: ActrType {
-                    manufacturer: "acme".into(),
+                    publisher: "acme".into(),
                     name: "client".into(),
                     version: "0.1.0".into(),
                 },

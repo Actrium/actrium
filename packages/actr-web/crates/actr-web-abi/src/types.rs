@@ -32,7 +32,7 @@ pub struct ActrId {
 /// Lowered from WIT `record actr-type`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActrType {
-    pub manufacturer: String,
+    pub publisher: String,
     pub name: String,
     pub version: String,
 }

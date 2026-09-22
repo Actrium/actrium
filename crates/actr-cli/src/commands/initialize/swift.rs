@@ -22,7 +22,7 @@ impl ProjectInitializer for SwiftInitializer {
         let mut template_context = TemplateContext::new_with_versions(
             &context.project_name,
             &context.signaling_url,
-            &context.manufacturer,
+            &context.publisher,
             service_name,
             is_service,
         )
@@ -55,7 +55,7 @@ impl ProjectInitializer for SwiftInitializer {
         let template_context = TemplateContext::new(
             &context.project_name,
             &context.signaling_url,
-            &context.manufacturer,
+            &context.publisher,
             context.template.to_service_name(),
             context.echo_role == Some(EchoRole::Service),
         );

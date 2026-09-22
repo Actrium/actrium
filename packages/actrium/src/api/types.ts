@@ -22,7 +22,7 @@ export interface AppInfo {
   actr_hash_code: string; // guest sha1 code
   realm_id: string; // toml realm id
   server_actor_type: {
-    manufacturer: string; // toml actor manufacturer
+    publisher: string; // toml actor publisher
     name: string; // toml actor name
   };
 

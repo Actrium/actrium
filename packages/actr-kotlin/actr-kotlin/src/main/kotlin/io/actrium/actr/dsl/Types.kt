@@ -12,19 +12,19 @@ import io.actrium.actr.Realm
 // ============================================================================
 
 /**
- * Create an ActrType from a string in "manufacturer:name:version" format.
+ * Create an ActrType from a string in "publisher:name:version" format.
  *
  * @param typeString Type string like "acme:EchoService:1.0.0"
- * @return ActrType with parsed manufacturer, name, and version
+ * @return ActrType with parsed publisher, name, and version
  * @throws IllegalArgumentException if format is invalid
  */
 fun String.toActrType(): ActrType {
     val parts = this.split(":", limit = 3)
     require(parts.size == 3) {
-        "ActrType string must be in 'manufacturer:name:version' format, got: $this"
+        "ActrType string must be in 'publisher:name:version' format, got: $this"
     }
     require(parts[2].isNotBlank()) { "ActrType version must not be blank" }
-    return ActrType(manufacturer = parts[0], name = parts[1], version = parts[2])
+    return ActrType(publisher = parts[0], name = parts[1], version = parts[2])
 }
 
 /**
@@ -33,7 +33,7 @@ fun String.toActrType(): ActrType {
  * Example:
  * ```kotlin
  * val type = actrType {
- *     manufacturer = "acme"
+ *     publisher = "acme"
  *     name = "EchoService"
  *     version = "1.0.0"
  * }
@@ -42,7 +42,7 @@ fun String.toActrType(): ActrType {
 inline fun actrType(builder: ActrTypeBuilder.() -> Unit): ActrType = ActrTypeBuilder().apply(builder).build()
 
 /**
- * Create an ActrType from manufacturer, name, and version.
+ * Create an ActrType from publisher, name, and version.
  *
  * Example:
  * ```kotlin
@@ -50,22 +50,22 @@ inline fun actrType(builder: ActrTypeBuilder.() -> Unit): ActrType = ActrTypeBui
  * ```
  */
 fun actrType(
-    manufacturer: String,
+    publisher: String,
     name: String,
     version: String,
-): ActrType = ActrType(manufacturer = manufacturer, name = name, version = version)
+): ActrType = ActrType(publisher = publisher, name = name, version = version)
 
 /** Builder for ActrType. */
 class ActrTypeBuilder {
-    var manufacturer: String = ""
+    var publisher: String = ""
     var name: String = ""
     var version: String = ""
 
     fun build(): ActrType {
-        require(manufacturer.isNotBlank()) { "manufacturer must not be blank" }
+        require(publisher.isNotBlank()) { "publisher must not be blank" }
         require(name.isNotBlank()) { "name must not be blank" }
         require(version.isNotBlank()) { "version must not be blank" }
-        return ActrType(manufacturer = manufacturer, name = name, version = version)
+        return ActrType(publisher = publisher, name = name, version = version)
     }
 }
 
@@ -74,12 +74,12 @@ class ActrTypeBuilder {
 // ============================================================================
 
 /** Convert ActrType to string representation. */
-fun ActrType.toTypeString(): String = "$manufacturer:$name:$version"
+fun ActrType.toTypeString(): String = "$publisher:$name:$version"
 
 /** Check if this type matches a type string. */
 fun ActrType.matches(typeString: String): Boolean {
     val other = typeString.toActrType()
-    return manufacturer == other.manufacturer && name == other.name
+    return publisher == other.publisher && name == other.name
 }
 
 // ============================================================================
@@ -118,13 +118,13 @@ class ActrIdBuilder {
         _type = actrType
     }
 
-    /** Set the actor type with manufacturer, name, and version. */
+    /** Set the actor type with publisher, name, and version. */
     fun type(
-        manufacturer: String,
+        publisher: String,
         name: String,
         version: String,
     ) {
-        _type = ActrType(manufacturer = manufacturer, name = name, version = version)
+        _type = ActrType(publisher = publisher, name = name, version = version)
     }
 
     fun build(): ActrId {
@@ -143,10 +143,10 @@ val ActrId.realmId: UInt
     get() = realm.realmId
 
 /** Get a short string representation. */
-fun ActrId.toShortString(): String = "${type.manufacturer}:${type.name}@${serialNumber.toString(16)}"
+fun ActrId.toShortString(): String = "${type.publisher}:${type.name}@${serialNumber.toString(16)}"
 
 /** Get a full string representation. */
-fun ActrId.toFullString(): String = "${type.manufacturer}:${type.name}@${serialNumber.toString(16)}:${realm.realmId}"
+fun ActrId.toFullString(): String = "${type.publisher}:${type.name}@${serialNumber.toString(16)}:${realm.realmId}"
 
 // ============================================================================
 // DataChunk Builders

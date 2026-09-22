@@ -11,6 +11,6 @@ fn smoke_verify_package() {
 
     let manifest = common::verify_package(&package_path, &common::pubkey_path())
         .expect("package should verify");
-    assert_eq!(manifest.manufacturer, "actrium");
+    assert_eq!(manifest.publisher, "actrium");
     assert_eq!(manifest.name, "EchoService");
 }

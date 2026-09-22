@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageManifest {
     #[serde(rename = "publisher")]
-    pub manufacturer: String,
+    pub publisher: String,
     pub name: String,
     pub version: String,
     pub binary: BinaryEntry,
@@ -155,7 +155,7 @@ pub struct ManifestMetadata {
 impl PackageManifest {
     /// Canonical program identity: publisher/program@version.
     pub fn actr_type_str(&self) -> String {
-        format!("{}/{}@{}", self.manufacturer, self.name, self.version)
+        format!("{}/{}@{}", self.publisher, self.name, self.version)
     }
 
     /// Parse from TOML string
@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn package_manifest_uses_publisher_identity_contract() {
         let manifest = PackageManifest {
-            manufacturer: "apps.example.com".to_string(),
+            publisher: "apps.example.com".to_string(),
             name: "editor".to_string(),
             version: "1.2.0".to_string(),
             binary: BinaryEntry {
@@ -200,6 +200,6 @@ mod tests {
         assert!(!encoded.contains("manufacturer"));
         assert_eq!(manifest.actr_type_str(), "apps.example.com/editor@1.2.0");
         let decoded = PackageManifest::from_toml(&encoded).unwrap();
-        assert_eq!(decoded.manufacturer, "apps.example.com");
+        assert_eq!(decoded.publisher, "apps.example.com");
     }
 }

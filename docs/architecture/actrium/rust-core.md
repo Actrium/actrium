@@ -1111,7 +1111,7 @@ high-confidence shared logic:
   chunk/checksum/status/type values, prompt/attachment/local-service RPC route
   keys, platform-specific RPC timeout values, and promise error codes used by
   iOS native, Android native, and RN TypeScript bridge adapters
-- `parse_actr_actor_type`, the canonical `manufacturer+name` Actr actor type
+- `parse_actr_actor_type`, the canonical `publisher+name` Actr actor type
   parser used by iOS and Android before constructing their platform SDK
   `ActrType` values
 - `email_bridge_contract` / `EMAIL_BRIDGE_CONTRACT` for the Email native module
@@ -1426,7 +1426,7 @@ RPC timeout selection, promise handling, and React Native event emission.
 
 iOS `ActrBridge` also calls `ActroCore.parseActrActorType(raw:)` to validate
 and split the RN `actorType` wire string before constructing the Swift SDK
-`ActrType`. Rust owns the exact `manufacturer+name` parsing rule and rejects
+`ActrType`. Rust owns the exact `publisher+name` parsing rule and rejects
 ambiguous or empty values; Swift still owns actor system creation, discovery,
 and error mapping into the existing ActrBridge promise flow.
 
@@ -1547,7 +1547,7 @@ dispatch, its current 300-second prompt timeout, protobuf forwarding, and
 
 Android `ActrBridge.initializeService` now calls
 `ActroCore.parseActrActorType()` and passes the resulting
-`ActrActorTypeInfo` into `ActrManager`. Rust owns the `manufacturer+name`
+`ActrActorTypeInfo` into `ActrManager`. Rust owns the `publisher+name`
 validation and trimming behavior, while Android still owns Actr system
 creation, network monitor setup, discovery, and platform SDK `ActrType`
 construction.
@@ -1703,7 +1703,7 @@ This keeps large binary blobs out of normal source commits.
      platform-specific RPC timeout values, and promise error codes are now
      Rust-owned through
      `actr_bridge_contract` and generated `ACTR_BRIDGE_CONTRACT`.
-     `parse_actr_actor_type` now also owns the shared `manufacturer+name`
+     `parse_actr_actor_type` now also owns the shared `publisher+name`
      actorType parsing rule consumed by iOS and Android. `openTab` is capped at
      key/payload contracts plus local classifier adapters that remove duplicated
      bridge parsing; Apple still keeps its platform route policy, and future

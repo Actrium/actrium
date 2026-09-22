@@ -5,7 +5,7 @@
 //! ## Package structure
 //!
 //! ```text
-//! {mfr}-{name}-{version}-{target}.actr
+//! {publisher}-{name}-{version}-{target}.actr
 //! +-- manifest.toml       # manifest (TOML, signed payload)
 //! +-- manifest.sig        # Ed25519 signature (64 bytes raw)
 //! +-- manifest.lock.toml  # dependency lock (optional)
@@ -32,7 +32,7 @@ pub mod verify;
 mod util;
 
 pub use actor_package::{
-    ACTOR_PACKAGE_FORMAT_V1, ActorDependency, ActorDescriptor, ActorPackOptions,
+    ACTOR_PACKAGE_FORMAT_V2, ActorDependency, ActorDescriptor, ActorPackOptions,
     ActorPackageManifest, ActriumExtension, HostRequirements, InspectedActorPackage,
     KEEL_GUEST_PROFILE_V1, KeelGuestDescriptor, PackageExtensions, PackageFileEntry,
     SignatureDescriptor, WorkloadDescriptor, inspect_actor_package, inspect_actor_package_bounded,
@@ -59,7 +59,7 @@ pub use verify::{
 ///
 /// Algorithm: `"actr-pub-" + hex(sha256(public_key_bytes))[..16]`
 ///
-/// This MUST match the server-side implementation in `actrix-mfr::crypto::compute_key_id`.
+/// This MUST match the server-side implementation in `actrix-publisher-registry::crypto::compute_key_id`.
 pub fn compute_key_id(public_key_bytes: &[u8]) -> String {
     let hex_str = util::sha256_hex(public_key_bytes);
     format!("actr-pub-{}", &hex_str[..16])

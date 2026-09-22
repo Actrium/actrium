@@ -51,7 +51,7 @@ struct ActrixHarness {
 }
 
 impl ActrixHarness {
-    /// Start actrix with default features (AIS/Signer/Signaling) and wait for health
+    /// Start actrix with default features (Issuer/Signer/Signaling) and wait for health
     async fn start(token_ttl: u64) -> Self {
         let tmp = tempfile::tempdir().expect("temp dir");
         let port = choose_port();
@@ -68,7 +68,7 @@ impl ActrixHarness {
             &log_path,
         )
         .await;
-        wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
+        wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
         wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
         ensure_realm(&data_dir, 1001).await;
 
@@ -120,7 +120,7 @@ fn write_fullstack_config(dir: &Path, port: u16, token_ttl_secs: u64) -> (PathBu
         f,
         r#"
 name = "actrix-fullstack-test"
-enable = 25  # ENABLE_SIGNALING | ENABLE_AIS | ENABLE_SIGNER
+enable = 25  # ENABLE_SIGNALING | ENABLE_ISSUER | ENABLE_SIGNER
 env = "dev"
 sqlite_path = "{sqlite}"
 actrix_shared_key = "{shared}"
@@ -156,10 +156,10 @@ turn_secret = "fullstack-turn-secret-0123456789abcdef"
 backend = "sqlite"
 key_ttl_seconds = 3600
 [services.signer.storage.sqlite]
-path = "ks.db"
+path = "signer.db"
 
-[services.ais]
-[services.ais.server]
+[services.issuer]
+[services.issuer.server]
 token_ttl_secs = {token_ttl}
 renewal_token_secret = "{renewal_secret}"
 
@@ -202,7 +202,7 @@ fn write_fullstack_config_with_rate_limits(
         f,
         r#"
 name = "actrix-fullstack-test-rate-limit"
-enable = 25  # ENABLE_SIGNALING | ENABLE_AIS | ENABLE_SIGNER
+enable = 25  # ENABLE_SIGNALING | ENABLE_ISSUER | ENABLE_SIGNER
 env = "dev"
 sqlite_path = "{sqlite}"
 actrix_shared_key = "{shared}"
@@ -238,10 +238,10 @@ turn_secret = "fullstack-turn-secret-0123456789abcdef"
 backend = "sqlite"
 key_ttl_seconds = 3600
 [services.signer.storage.sqlite]
-path = "ks.db"
+path = "signer.db"
 
-[services.ais]
-[services.ais.server]
+[services.issuer]
+[services.issuer.server]
 token_ttl_secs = {token_ttl}
 renewal_token_secret = "{renewal_secret}"
 
@@ -280,11 +280,11 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
     (config_path, signer_port)
 }
 
-fn write_fullstack_config_with_ais_signer_endpoint(
+fn write_fullstack_config_with_issuer_signer_endpoint(
     dir: &Path,
     port: u16,
     token_ttl_secs: u64,
-    ais_signer_endpoint: &str,
+    issuer_signer_endpoint: &str,
 ) -> (PathBuf, u16) {
     let data_dir = dir.join("data");
     fs::create_dir_all(&data_dir).expect("create data dir");
@@ -295,12 +295,12 @@ fn write_fullstack_config_with_ais_signer_endpoint(
     writeln!(
         f,
         r#"
-name = "actrix-fullstack-test-ais-dependency"
-enable = 25  # ENABLE_SIGNALING | ENABLE_AIS | ENABLE_SIGNER
+name = "actrix-fullstack-test-issuer-dependency"
+enable = 25  # ENABLE_SIGNALING | ENABLE_ISSUER | ENABLE_SIGNER
 env = "dev"
 sqlite_path = "{sqlite}"
 actrix_shared_key = "{shared}"
-location_tag = "local,test,fullstack,ais-dependency"
+location_tag = "local,test,fullstack,issuer-dependency"
 pid = "{pid}"
 
 [bind]
@@ -332,14 +332,14 @@ turn_secret = "fullstack-turn-secret-0123456789abcdef"
 backend = "sqlite"
 key_ttl_seconds = 3600
 [services.signer.storage.sqlite]
-path = "ks.db"
+path = "signer.db"
 
-[services.ais]
-[services.ais.server]
+[services.issuer]
+[services.issuer.server]
 token_ttl_secs = {token_ttl}
 renewal_token_secret = "{renewal_secret}"
-[services.ais.dependencies.signer]
-endpoint = "{ais_signer_endpoint}"
+[services.issuer.dependencies.signer]
+endpoint = "{issuer_signer_endpoint}"
 timeout_seconds = 1
 enable_tls = false
 
@@ -358,7 +358,7 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
         signer_port = signer_port,
         token_ttl = token_ttl_secs,
         renewal_secret = RENEWAL_TOKEN_SECRET,
-        ais_signer_endpoint = ais_signer_endpoint,
+        issuer_signer_endpoint = issuer_signer_endpoint,
         pid = dir.join("actrix.pid").display()
     )
     .expect("write config");
@@ -366,7 +366,7 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
 }
 
 #[allow(dead_code)]
-fn write_signaling_without_local_ais_config(dir: &Path, port: u16) -> PathBuf {
+fn write_signaling_without_local_issuer_config(dir: &Path, port: u16) -> PathBuf {
     let data_dir = dir.join("data");
     fs::create_dir_all(&data_dir).expect("create data dir");
     let config_path = dir.join("config.toml");
@@ -374,12 +374,12 @@ fn write_signaling_without_local_ais_config(dir: &Path, port: u16) -> PathBuf {
     writeln!(
         f,
         r#"
-name = "actrix-fullstack-signaling-without-ais"
+name = "actrix-fullstack-signaling-without-issuer"
 enable = 17  # ENABLE_SIGNALING | ENABLE_SIGNER
 env = "dev"
 sqlite_path = "{sqlite}"
 actrix_shared_key = "{shared}"
-location_tag = "local,test,fullstack,signaling-no-ais"
+location_tag = "local,test,fullstack,signaling-no-issuer"
 pid = "{pid}"
 
 [bind]
@@ -404,12 +404,12 @@ realm = "actrix.local"
 backend = "sqlite"
 key_ttl_seconds = 3600
 [services.signer.storage.sqlite]
-path = "ks.db"
+path = "signer.db"
 
 [services.signaling]
 [services.signaling.server]
 ws_path = "/signaling"
-[services.signaling.dependencies.ais]
+[services.signaling.dependencies.issuer]
 endpoint = "http://127.0.0.1:1"
 timeout_seconds = 1
 
@@ -452,19 +452,19 @@ async fn ensure_realm(sqlite_dir: &Path, realm_id: u32) {
     .expect("insert realm");
 }
 
-/// Register via AIS HTTP, returns RegisterOk
-async fn ais_register_http(
+/// Register via Issuer HTTP, returns RegisterOk
+async fn issuer_register_http(
     base_url: &str,
     realm_id: u32,
-    manufacturer: &str,
+    publisher: &str,
     name: &str,
     service_spec: Option<actr_protocol::ServiceSpec>,
     acl: Option<Acl>,
 ) -> register_response::RegisterOk {
-    ais_register_http_with_secret(
+    issuer_register_http_with_secret(
         base_url,
         realm_id,
-        manufacturer,
+        publisher,
         name,
         service_spec,
         acl,
@@ -473,10 +473,10 @@ async fn ais_register_http(
     .await
 }
 
-async fn ais_register_http_with_secret(
+async fn issuer_register_http_with_secret(
     base_url: &str,
     realm_id: u32,
-    manufacturer: &str,
+    publisher: &str,
     name: &str,
     service_spec: Option<actr_protocol::ServiceSpec>,
     acl: Option<Acl>,
@@ -484,7 +484,7 @@ async fn ais_register_http_with_secret(
 ) -> register_response::RegisterOk {
     let register_req = RegisterRequest {
         actr_type: ActrType {
-            manufacturer: manufacturer.to_string(),
+            publisher: publisher.to_string(),
             name: name.to_string(),
             version: "1.0.0".to_string(),
         },
@@ -494,15 +494,15 @@ async fn ais_register_http_with_secret(
         service: None,
         ws_address: None,
         manifest_raw: None,
-        mfr_signature: None,
+        publisher_signature: None,
         target: None,
         auth_mode: Some(RegisterAuthMode::Linked as i32),
-        manufacturer_auth_signature: None,
-        manufacturer_auth_signed_at: None,
-        manufacturer_auth_nonce: None,
+        publisher_auth_signature: None,
+        publisher_auth_signed_at: None,
+        publisher_auth_nonce: None,
     };
     let client = reqwest::Client::new();
-    let register_url = format!("{base_url}/ais/register");
+    let register_url = format!("{base_url}/issuer/register");
     let mut req = client
         .post(&register_url)
         .header("content-type", "application/octet-stream")
@@ -513,17 +513,17 @@ async fn ais_register_http_with_secret(
     let rsp_bytes = req
         .send()
         .await
-        .expect("ais register call")
+        .expect("issuer register call")
         .bytes()
         .await
-        .expect("ais register bytes")
+        .expect("issuer register bytes")
         .to_vec();
     let register_rsp = RegisterResponse::decode(&*rsp_bytes).expect("decode register response");
     match register_rsp.result.expect("result missing") {
         register_response::Result::Success(ok) => ok,
         register_response::Result::Error(err) => {
             panic!(
-                "ais register failed: code={} message={}",
+                "issuer register failed: code={} message={}",
                 err.code, err.message
             );
         }
@@ -604,42 +604,42 @@ async fn recv_envelope(read: &mut WsRead) -> actr_protocol::SignalingEnvelope {
 
 async fn ws_register_with_spec(
     port: u16,
-    manufacturer: &str,
+    publisher: &str,
     name: &str,
     acl: Option<Acl>,
     service_spec: Option<actr_protocol::ServiceSpec>,
 ) -> (WsWrite, WsRead, register_response::RegisterOk) {
-    ws_register_in_realm_with_spec(port, manufacturer, name, 1001, acl, service_spec).await
+    ws_register_in_realm_with_spec(port, publisher, name, 1001, acl, service_spec).await
 }
 
 async fn ws_register_in_realm_with_spec(
     port: u16,
-    manufacturer: &str,
+    publisher: &str,
     name: &str,
     realm_id: u32,
     acl: Option<Acl>,
     service_spec: Option<actr_protocol::ServiceSpec>,
 ) -> (WsWrite, WsRead, register_response::RegisterOk) {
     let base_url = format!("http://127.0.0.1:{port}");
-    let ok = ais_register_http(&base_url, realm_id, manufacturer, name, service_spec, acl).await;
+    let ok = issuer_register_http(&base_url, realm_id, publisher, name, service_spec, acl).await;
     let (write, read) = connect_ws_authenticated(port, &ok).await;
     (write, read, ok)
 }
 
 async fn ws_register(
     port: u16,
-    manufacturer: &str,
+    publisher: &str,
     name: &str,
     acl: Option<Acl>,
 ) -> (WsWrite, WsRead, register_response::RegisterOk) {
-    ws_register_with_spec(port, manufacturer, name, acl, None).await
+    ws_register_with_spec(port, publisher, name, acl, None).await
 }
 
 async fn query_route_candidates(
     write: &mut WsWrite,
     read: &mut WsRead,
     source: &register_response::RegisterOk,
-    target_manufacturer: &str,
+    target_publisher: &str,
     target_name: &str,
 ) -> Vec<actr_protocol::ActrId> {
     let route_req = actr_protocol::ActrToSignaling {
@@ -649,7 +649,7 @@ async fn query_route_candidates(
             actr_protocol::actr_to_signaling::Payload::RouteCandidatesRequest(
                 actr_protocol::RouteCandidatesRequest {
                     target_type: ActrType {
-                        manufacturer: target_manufacturer.into(),
+                        publisher: target_publisher.into(),
                         name: target_name.into(),
                         version: "1.0.0".to_string(),
                     },
@@ -698,7 +698,7 @@ async fn query_discovery_entries(
         credential: source.credential.clone(),
         payload: Some(actr_protocol::actr_to_signaling::Payload::DiscoveryRequest(
             actr_protocol::DiscoveryRequest {
-                manufacturer: publisher.map(str::to_string),
+                publisher: publisher.map(str::to_string),
                 limit: Some(64),
             },
         )),
@@ -909,20 +909,20 @@ async fn actrix_end_to_end_register_and_health() {
     let mut harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
 
     let base = harness.base_url();
-    let ais_health = format!("{base}/ais/health");
+    let issuer_health = format!("{base}/issuer/health");
     let signaling_health = format!("{base}/signaling/health");
 
     let log_path = harness.log_path().to_path_buf();
     let signer_endpoint = format!("http://127.0.0.1:{}", harness.signer_port);
     wait_for_signer_ready(&signer_endpoint, &mut harness.child, &log_path).await;
-    wait_for_health(&ais_health, &mut harness.child, &log_path).await;
+    wait_for_health(&issuer_health, &mut harness.child, &log_path).await;
     wait_for_health(&signaling_health, &mut harness.child, &log_path).await;
     ensure_realm(&harness.data_dir, 1001).await;
 
     let client = reqwest::Client::new();
 
     // Signer health via authenticated gRPC call on the dedicated listener
-    let mut ks_client = GrpcClient::new(&GrpcClientConfig {
+    let mut signer_client = GrpcClient::new(&GrpcClientConfig {
         endpoint: signer_endpoint.clone(),
         actrix_shared_key: ACTRIX_SHARED_KEY.to_string(),
         timeout_seconds: 5,
@@ -933,15 +933,22 @@ async fn actrix_end_to_end_register_and_health() {
         client_key: None,
     })
     .await
-    .expect("create ks grpc client");
-    let ks_status = ks_client.health_check().await.expect("ks grpc health");
-    assert_eq!(ks_status, "healthy");
+    .expect("create signer grpc client");
+    let signer_status = signer_client
+        .health_check()
+        .await
+        .expect("signer grpc health");
+    assert_eq!(signer_status, "healthy");
 
-    // AIS health JSON
-    let ais_resp = client.get(&ais_health).send().await.expect("ais health");
-    assert!(ais_resp.status().is_success());
-    let ais_body: Value = ais_resp.json().await.expect("ais health json");
-    assert_eq!(ais_body["status"], "healthy");
+    // Issuer health JSON
+    let issuer_resp = client
+        .get(&issuer_health)
+        .send()
+        .await
+        .expect("issuer health");
+    assert!(issuer_resp.status().is_success());
+    let issuer_body: Value = issuer_resp.json().await.expect("issuer health json");
+    assert_eq!(issuer_body["status"], "healthy");
 
     // Signaling health plain text
     let sig_resp = client
@@ -956,10 +963,10 @@ async fn actrix_end_to_end_register_and_health() {
         "signaling health text: {sig_text}"
     );
 
-    // Register an actor via AIS HTTP (protobuf body)
+    // Register an actor via Issuer HTTP (protobuf body)
     let register_req = RegisterRequest {
         actr_type: ActrType {
-            manufacturer: "acme".to_string(),
+            publisher: "acme".to_string(),
             name: "device".to_string(),
             version: "1.0.0".to_string(),
         },
@@ -969,15 +976,15 @@ async fn actrix_end_to_end_register_and_health() {
         service: None,
         ws_address: None,
         manifest_raw: None,
-        mfr_signature: None,
+        publisher_signature: None,
         target: None,
         auth_mode: Some(RegisterAuthMode::Linked as i32),
-        manufacturer_auth_signature: None,
-        manufacturer_auth_signed_at: None,
-        manufacturer_auth_nonce: None,
+        publisher_auth_signature: None,
+        publisher_auth_signed_at: None,
+        publisher_auth_nonce: None,
     };
     let body = register_req.encode_to_vec();
-    let register_url = format!("{base}/ais/register");
+    let register_url = format!("{base}/issuer/register");
     let rsp_bytes = client
         .post(&register_url)
         .header("x-actrix-realm-secret", TEST_REALM_SECRET)
@@ -1000,7 +1007,7 @@ async fn actrix_end_to_end_register_and_health() {
     assert_eq!(ok.actr_id.realm.realm_id, 1001);
 
     // Validate credential through AIdCredentialValidator — reads from the same
-    // signaling_key_cache.db that actrix wrote during AIS key loading.
+    // signaling_key_cache.db that actrix wrote during Issuer key loading.
     AIdCredentialValidator::init(&harness.data_dir)
         .await
         .expect("validator init");
@@ -1172,10 +1179,10 @@ async fn actrix_end_to_end_register_and_health() {
 
 #[tokio::test]
 #[serial]
-async fn ais_register_returns_error_response_for_malformed_protobuf() {
+async fn issuer_register_returns_error_response_for_malformed_protobuf() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
     let client = reqwest::Client::new();
-    let register_url = format!("{}/ais/register", harness.base_url());
+    let register_url = format!("{}/issuer/register", harness.base_url());
 
     let response = client
         .post(&register_url)
@@ -1186,7 +1193,7 @@ async fn ais_register_returns_error_response_for_malformed_protobuf() {
         .expect("send malformed register request");
     assert!(
         response.status().is_success(),
-        "ais register should respond with protobuf error body"
+        "issuer register should respond with protobuf error body"
     );
 
     let rsp_bytes = response.bytes().await.expect("read response body").to_vec();
@@ -1208,14 +1215,14 @@ async fn ais_register_returns_error_response_for_malformed_protobuf() {
 
 #[tokio::test]
 #[serial]
-async fn ais_register_rejects_non_preprovisioned_realm() {
+async fn issuer_register_rejects_non_preprovisioned_realm() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
     let client = reqwest::Client::new();
-    let register_url = format!("{}/ais/register", harness.base_url());
+    let register_url = format!("{}/issuer/register", harness.base_url());
 
     let register_req = RegisterRequest {
         actr_type: ActrType {
-            manufacturer: "acme".to_string(),
+            publisher: "acme".to_string(),
             name: "realm-device".to_string(),
             version: "1.0.0".to_string(),
         },
@@ -1225,12 +1232,12 @@ async fn ais_register_rejects_non_preprovisioned_realm() {
         service: None,
         ws_address: None,
         manifest_raw: None,
-        mfr_signature: None,
+        publisher_signature: None,
         target: None,
         auth_mode: Some(RegisterAuthMode::Linked as i32),
-        manufacturer_auth_signature: None,
-        manufacturer_auth_signed_at: None,
-        manufacturer_auth_nonce: None,
+        publisher_auth_signature: None,
+        publisher_auth_signed_at: None,
+        publisher_auth_nonce: None,
     };
 
     let rsp_bytes = client
@@ -1261,13 +1268,13 @@ async fn ais_register_rejects_non_preprovisioned_realm() {
 
 #[tokio::test]
 #[serial]
-async fn ais_does_not_expose_public_key_rotation() {
+async fn issuer_does_not_expose_public_key_rotation() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
     let client = reqwest::Client::new();
     let base = harness.base_url();
 
     let current_before: Value = client
-        .get(format!("{base}/ais/current-key"))
+        .get(format!("{base}/issuer/current-key"))
         .send()
         .await
         .expect("current-key request before rotate")
@@ -1281,19 +1288,19 @@ async fn ais_does_not_expose_public_key_rotation() {
 
     // The unauthenticated public rotate endpoint must be gone.
     let public_rotate = client
-        .post(format!("{base}/ais/rotate-key"))
+        .post(format!("{base}/issuer/rotate-key"))
         .send()
         .await
         .expect("public rotate-key request");
     assert_eq!(
         public_rotate.status(),
         404,
-        "public /ais/rotate-key should no longer exist"
+        "public /issuer/rotate-key should no longer exist"
     );
 
     // Unauthenticated calls to the admin rotate route are rejected.
     let unauth = client
-        .post(format!("{base}/admin/api/services/ais/keys/rotate"))
+        .post(format!("{base}/admin/api/services/issuer/keys/rotate"))
         .send()
         .await
         .expect("unauthenticated admin rotate request");
@@ -1313,7 +1320,7 @@ async fn ais_does_not_expose_public_key_rotation() {
         .expect("admin login should return token");
 
     let rotated: Value = client
-        .post(format!("{base}/admin/api/services/ais/keys/rotate"))
+        .post(format!("{base}/admin/api/services/issuer/keys/rotate"))
         .bearer_auth(token)
         .send()
         .await
@@ -1331,7 +1338,7 @@ async fn ais_does_not_expose_public_key_rotation() {
     );
 
     let current_after: Value = client
-        .get(format!("{base}/ais/current-key"))
+        .get(format!("{base}/issuer/current-key"))
         .send()
         .await
         .expect("current-key request after rotate")
@@ -1350,7 +1357,7 @@ async fn ais_does_not_expose_public_key_rotation() {
 
 #[tokio::test]
 #[serial]
-async fn ais_register_enforces_realm_secret_when_configured() {
+async fn issuer_register_enforces_realm_secret_when_configured() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
     let client = reqwest::Client::new();
     let base = harness.base_url();
@@ -1383,7 +1390,7 @@ async fn ais_register_enforces_realm_secret_when_configured() {
 
     let register_req = RegisterRequest {
         actr_type: ActrType {
-            manufacturer: "acme".to_string(),
+            publisher: "acme".to_string(),
             name: "secret-check".to_string(),
             version: "1.0.0".to_string(),
         },
@@ -1393,18 +1400,18 @@ async fn ais_register_enforces_realm_secret_when_configured() {
         service: None,
         ws_address: None,
         manifest_raw: None,
-        mfr_signature: None,
+        publisher_signature: None,
         target: None,
         auth_mode: Some(RegisterAuthMode::Linked as i32),
-        manufacturer_auth_signature: None,
-        manufacturer_auth_signed_at: None,
-        manufacturer_auth_nonce: None,
+        publisher_auth_signature: None,
+        publisher_auth_signed_at: None,
+        publisher_auth_nonce: None,
     };
 
-    // 1) Without realm_secret, AIS HTTP registration should be rejected
+    // 1) Without realm_secret, Issuer HTTP registration should be rejected
     {
         let rsp_bytes = client
-            .post(format!("{base}/ais/register"))
+            .post(format!("{base}/issuer/register"))
             .header("content-type", "application/octet-stream")
             .body(register_req.encode_to_vec())
             .send()
@@ -1428,10 +1435,10 @@ async fn ais_register_enforces_realm_secret_when_configured() {
         }
     }
 
-    // 2) With wrong realm_secret, AIS HTTP registration should be rejected
+    // 2) With wrong realm_secret, Issuer HTTP registration should be rejected
     {
         let rsp_bytes = client
-            .post(format!("{base}/ais/register"))
+            .post(format!("{base}/issuer/register"))
             .header("content-type", "application/octet-stream")
             .header("x-actrix-realm-secret", "wrong-secret")
             .body(register_req.encode_to_vec())
@@ -1456,10 +1463,10 @@ async fn ais_register_enforces_realm_secret_when_configured() {
         }
     }
 
-    // 3) With correct realm_secret, AIS HTTP registration should succeed
+    // 3) With correct realm_secret, Issuer HTTP registration should succeed
     {
         let rsp_bytes = client
-            .post(format!("{base}/ais/register"))
+            .post(format!("{base}/issuer/register"))
             .header("content-type", "application/octet-stream")
             .header("x-actrix-realm-secret", realm_secret)
             .body(register_req.encode_to_vec())
@@ -1485,16 +1492,16 @@ async fn ais_register_enforces_realm_secret_when_configured() {
 
 #[tokio::test]
 #[serial]
-async fn ais_health_and_endpoints_degrade_when_ks_dependency_is_unreachable() {
+async fn issuer_health_and_endpoints_degrade_when_signer_dependency_is_unreachable() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
-    let (config_path, signer_port) = write_fullstack_config_with_ais_signer_endpoint(
+    let (config_path, signer_port) = write_fullstack_config_with_issuer_signer_endpoint(
         tmp.path(),
         port,
         DEFAULT_TOKEN_TTL,
         "http://127.0.0.1:1",
     );
-    let log_path = tmp.path().join("actrix_fullstack_ais_degraded.log");
+    let log_path = tmp.path().join("actrix_fullstack_issuer_degraded.log");
     ensure_realm(&tmp.path().join("data"), 1001).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
@@ -1507,24 +1514,24 @@ async fn ais_health_and_endpoints_degrade_when_ks_dependency_is_unreachable() {
     .await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
 
-    // With lazy Signer connection, AIS routes are mounted but degrade at runtime
+    // With lazy Signer connection, Issuer routes are mounted but degrade at runtime
     let client = reqwest::Client::new();
-    let ais_health = client
-        .get(format!("{base}/ais/health"))
+    let issuer_health = client
+        .get(format!("{base}/issuer/health"))
         .send()
         .await
-        .expect("ais health request");
-    assert_eq!(ais_health.status(), reqwest::StatusCode::OK);
-    let body: serde_json::Value = ais_health.json().await.expect("health json");
+        .expect("issuer health request");
+    assert_eq!(issuer_health.status(), reqwest::StatusCode::OK);
+    let body: serde_json::Value = issuer_health.json().await.expect("health json");
     assert_eq!(
         body["status"], "degraded",
-        "AIS should report degraded when Signer is unreachable"
+        "Issuer should report degraded when Signer is unreachable"
     );
-    assert_eq!(body["ks_service"], "failed");
+    assert_eq!(body["signer_service"], "failed");
 
     let register_req = RegisterRequest {
         actr_type: ActrType {
-            manufacturer: "acme".to_string(),
+            publisher: "acme".to_string(),
             name: "svc".to_string(),
             version: "1.0.0".to_string(),
         },
@@ -1534,26 +1541,26 @@ async fn ais_health_and_endpoints_degrade_when_ks_dependency_is_unreachable() {
         service: None,
         ws_address: None,
         manifest_raw: None,
-        mfr_signature: None,
+        publisher_signature: None,
         target: None,
         auth_mode: Some(RegisterAuthMode::Linked as i32),
-        manufacturer_auth_signature: None,
-        manufacturer_auth_signed_at: None,
-        manufacturer_auth_nonce: None,
+        publisher_auth_signature: None,
+        publisher_auth_signed_at: None,
+        publisher_auth_nonce: None,
     };
     let register_resp = client
-        .post(format!("{base}/ais/register"))
+        .post(format!("{base}/issuer/register"))
         .header("x-actrix-realm-secret", TEST_REALM_SECRET)
         .body(register_req.encode_to_vec())
         .send()
         .await
-        .expect("ais register request");
+        .expect("issuer register request");
     // HTTP 200 but protobuf body should contain an error
     let resp_bytes = register_resp.bytes().await.expect("read register body");
     let resp = RegisterResponse::decode(resp_bytes).expect("decode register response");
     assert!(
         matches!(resp.result, Some(register_response::Result::Error(_))),
-        "AIS register should return protobuf error when Signer is unreachable, got {:?}",
+        "Issuer register should return protobuf error when Signer is unreachable, got {:?}",
         resp.result
     );
 
@@ -1812,13 +1819,13 @@ async fn signaling_connection_rate_limit_rejects_second_concurrent_connection() 
         &log_path,
     )
     .await;
-    wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
+    wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
 
     // Register two different actors for testing connection rate limiting
     let base_url = format!("http://127.0.0.1:{port}");
-    let ok1 = ais_register_http(&base_url, 1001, "acme", "rate1", None, None).await;
-    let ok2 = ais_register_http(&base_url, 1001, "acme", "rate2", None, None).await;
+    let ok1 = issuer_register_http(&base_url, 1001, "acme", "rate1", None, None).await;
+    let ok2 = issuer_register_http(&base_url, 1001, "acme", "rate2", None, None).await;
 
     let (_first_write, _first_read) = connect_ws_authenticated(port, &ok1).await;
 
@@ -1857,7 +1864,7 @@ async fn signaling_message_rate_limit_returns_envelope_error() {
         &log_path,
     )
     .await;
-    wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
+    wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
 
     let (mut write, mut read, register_ok) = ws_register(port, "acme", "rate-limited", None).await;
@@ -1922,7 +1929,7 @@ async fn signaling_register_and_discovery_acl_allow() {
         &log_path,
     )
     .await;
-    wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
+    wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
     ensure_realm(&tmp.path().join("data"), 1001).await;
 
@@ -1931,7 +1938,7 @@ async fn signaling_register_and_discovery_acl_allow() {
         rules: vec![AclRule {
             permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "acme".into(),
+                publisher: "acme".into(),
                 name: "client".into(),
                 version: "1.0.0".to_string(),
             },
@@ -1951,7 +1958,7 @@ async fn signaling_register_and_discovery_acl_allow() {
         credential: client_ok.credential.clone(),
         payload: Some(actr_protocol::actr_to_signaling::Payload::DiscoveryRequest(
             actr_protocol::DiscoveryRequest {
-                manufacturer: Some("acme".into()),
+                publisher: Some("acme".into()),
                 limit: Some(10),
             },
         )),
@@ -1968,7 +1975,7 @@ async fn signaling_register_and_discovery_acl_allow() {
                         "expected at least one service entry"
                     );
                     assert_eq!(ok.entries[0].actr_type.name, "svc");
-                    assert_eq!(ok.entries[0].actr_type.manufacturer, "acme");
+                    assert_eq!(ok.entries[0].actr_type.publisher, "acme");
                 }
                 other => panic!("unexpected discovery result {other:?}"),
             },
@@ -1997,7 +2004,7 @@ async fn signaling_discovery_acl_denied() {
         &log_path,
     )
     .await;
-    wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
+    wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
     ensure_realm(&tmp.path().join("data"), 1001).await;
 
@@ -2014,7 +2021,7 @@ async fn signaling_discovery_acl_denied() {
         credential: client_ok.credential.clone(),
         payload: Some(actr_protocol::actr_to_signaling::Payload::DiscoveryRequest(
             actr_protocol::DiscoveryRequest {
-                manufacturer: Some("acme".into()),
+                publisher: Some("acme".into()),
                 limit: Some(10),
             },
         )),
@@ -2058,7 +2065,7 @@ async fn signaling_rejects_expired_credential() {
         &log_path,
     )
     .await;
-    wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
+    wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
     ensure_realm(&tmp.path().join("data"), 1001).await;
 
@@ -2114,7 +2121,7 @@ async fn signaling_route_candidates_with_acl() {
         &log_path,
     )
     .await;
-    wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
+    wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
     ensure_realm(&tmp.path().join("data"), 1001).await;
 
@@ -2123,7 +2130,7 @@ async fn signaling_route_candidates_with_acl() {
         rules: vec![AclRule {
             permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "acme".into(),
+                publisher: "acme".into(),
                 name: "client-sdp".into(),
                 version: "1.0.0".to_string(),
             },
@@ -2143,7 +2150,7 @@ async fn signaling_route_candidates_with_acl() {
             actr_protocol::actr_to_signaling::Payload::RouteCandidatesRequest(
                 actr_protocol::RouteCandidatesRequest {
                     target_type: ActrType {
-                        manufacturer: "acme".into(),
+                        publisher: "acme".into(),
                         name: "svc-rtp".into(),
                         version: "1.0.0".to_string(),
                     },
@@ -2205,7 +2212,7 @@ async fn signaling_route_candidates_acl_denied() {
         &log_path,
     )
     .await;
-    wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
+    wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
     ensure_realm(&tmp.path().join("data"), 1001).await;
 
@@ -2222,7 +2229,7 @@ async fn signaling_route_candidates_acl_denied() {
             actr_protocol::actr_to_signaling::Payload::RouteCandidatesRequest(
                 actr_protocol::RouteCandidatesRequest {
                     target_type: ActrType {
-                        manufacturer: "acme".into(),
+                        publisher: "acme".into(),
                         name: "svc-deny-route".into(),
                         version: "1.0.0".to_string(),
                     },
@@ -2276,7 +2283,7 @@ async fn signaling_route_candidates_respects_limit_and_sorting() {
         rules: vec![AclRule {
             permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "acme".into(),
+                publisher: "acme".into(),
                 name: "client-route".into(),
                 version: "1.0.0".to_string(),
             },
@@ -2330,7 +2337,7 @@ async fn signaling_route_candidates_respects_limit_and_sorting() {
             actr_protocol::actr_to_signaling::Payload::RouteCandidatesRequest(
                 actr_protocol::RouteCandidatesRequest {
                     target_type: ActrType {
-                        manufacturer: "acme".into(),
+                        publisher: "acme".into(),
                         name: "svc-route".into(),
                         version: "1.0.0".to_string(),
                     },
@@ -2402,7 +2409,7 @@ async fn signaling_route_candidates_prefers_exact_fingerprint() {
         rules: vec![AclRule {
             permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "acme".into(),
+                publisher: "acme".into(),
                 name: "client-fp".into(),
                 version: "1.0.0".to_string(),
             },
@@ -2457,7 +2464,7 @@ async fn signaling_route_candidates_prefers_exact_fingerprint() {
             actr_protocol::actr_to_signaling::Payload::RouteCandidatesRequest(
                 actr_protocol::RouteCandidatesRequest {
                     target_type: ActrType {
-                        manufacturer: "acme".into(),
+                        publisher: "acme".into(),
                         name: "svc-fp-exact".into(),
                         version: "1.0.0".to_string(),
                     },
@@ -2523,7 +2530,7 @@ async fn signaling_get_service_spec_returns_spec() {
         &log_path,
     )
     .await;
-    wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
+    wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
     ensure_realm(&tmp.path().join("data"), 1001).await;
 
@@ -2635,7 +2642,7 @@ async fn signaling_subscribe_and_unsubscribe_actr_up() {
             actr_protocol::actr_to_signaling::Payload::SubscribeActrUpRequest(
                 actr_protocol::SubscribeActrUpRequest {
                     target_type: ActrType {
-                        manufacturer: "acme".into(),
+                        publisher: "acme".into(),
                         name: "svc-subject".into(),
                         version: "1.0.0".to_string(),
                     },
@@ -2668,7 +2675,7 @@ async fn signaling_subscribe_and_unsubscribe_actr_up() {
             actr_protocol::actr_to_signaling::Payload::UnsubscribeActrUpRequest(
                 actr_protocol::UnsubscribeActrUpRequest {
                     target_type: ActrType {
-                        manufacturer: "acme".into(),
+                        publisher: "acme".into(),
                         name: "svc-subject".into(),
                         version: "1.0.0".to_string(),
                     },
@@ -2707,7 +2714,7 @@ async fn signaling_subscribe_receives_actr_up_and_unsubscribe_stops() {
 
     // Subscribe to service type
     let target_type = ActrType {
-        manufacturer: "acme".into(),
+        publisher: "acme".into(),
         name: "svc-presence".into(),
         version: "1.0.0".to_string(),
     };
@@ -2738,7 +2745,7 @@ async fn signaling_subscribe_receives_actr_up_and_unsubscribe_stops() {
         rules: vec![AclRule {
             permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "acme".into(),
+                publisher: "acme".into(),
                 name: "subscriber".into(),
                 version: "1.0.0".to_string(),
             },
@@ -2813,7 +2820,7 @@ async fn signaling_route_candidates_compatibility_cache_hit() {
     let acl = Acl {
         rules: vec![AclRule {
             from_type: ActrType {
-                manufacturer: "mfg".into(),
+                publisher: "mfg".into(),
                 name: "client-fp-cache".into(),
                 version: "1.0.0".to_string(),
             },
@@ -2871,7 +2878,7 @@ async fn signaling_route_candidates_compatibility_cache_hit() {
         payload: Some(actr_protocol::actr_to_signaling::Payload::RouteCandidatesRequest(
             actr_protocol::RouteCandidatesRequest {
                 target_type: ActrType {
-                    manufacturer: "mfg".into(),
+                    publisher: "mfg".into(),
                     name: "svc-compat".into(),
                     version: "1.0.0".to_string(),
                 },
@@ -2916,7 +2923,7 @@ async fn signaling_route_candidates_compatibility_cache_hit() {
         payload: Some(actr_protocol::actr_to_signaling::Payload::RouteCandidatesRequest(
             actr_protocol::RouteCandidatesRequest {
                 target_type: ActrType {
-                    manufacturer: "mfg".into(),
+                    publisher: "mfg".into(),
                     name: "svc-compat".into(),
                     version: "1.0.0".to_string(),
                 },
@@ -2968,7 +2975,7 @@ async fn signaling_concurrent_registration_keeps_unique_route_candidates() {
         rules: vec![AclRule {
             permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "acme".into(),
+                publisher: "acme".into(),
                 name: "client-concurrent".into(),
                 version: "1.0.0".to_string(),
             },
@@ -3006,7 +3013,7 @@ async fn signaling_concurrent_registration_keeps_unique_route_candidates() {
             actr_protocol::actr_to_signaling::Payload::RouteCandidatesRequest(
                 actr_protocol::RouteCandidatesRequest {
                     target_type: ActrType {
-                        manufacturer: "acme".into(),
+                        publisher: "acme".into(),
                         name: "svc-concurrent".into(),
                         version: "1.0.0".to_string(),
                     },
@@ -3078,7 +3085,7 @@ async fn signaling_actr_relay_role_assignment() {
         &log_path,
     )
     .await;
-    wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
+    wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
     ensure_realm(&tmp.path().join("data"), 1001).await;
 
@@ -3087,7 +3094,7 @@ async fn signaling_actr_relay_role_assignment() {
         rules: vec![AclRule {
             permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "acme".into(),
+                publisher: "acme".into(),
                 name: "client-offer".into(),
                 version: "1.0.0".to_string(),
             },
@@ -3153,10 +3160,10 @@ async fn signaling_rejects_register_request_via_ws() {
 
     let (mut write, mut read, _ok) = ws_register(port, "acme", "dup-client", None).await;
 
-    // Sending RegisterRequest via WS should return 410 (migrated to AIS HTTP)
+    // Sending RegisterRequest via WS should return 410 (migrated to Issuer HTTP)
     let register_req = RegisterRequest {
         actr_type: ActrType {
-            manufacturer: "acme".into(),
+            publisher: "acme".into(),
             name: "dup-client".into(),
             version: "1.0.0".to_string(),
         },
@@ -3166,12 +3173,12 @@ async fn signaling_rejects_register_request_via_ws() {
         service: None,
         ws_address: None,
         manifest_raw: None,
-        mfr_signature: None,
+        publisher_signature: None,
         target: None,
         auth_mode: None,
-        manufacturer_auth_signature: None,
-        manufacturer_auth_signed_at: None,
-        manufacturer_auth_nonce: None,
+        publisher_auth_signature: None,
+        publisher_auth_signed_at: None,
+        publisher_auth_nonce: None,
     };
     let env = make_envelope(signaling_envelope::Flow::PeerToServer(
         actr_protocol::PeerToSignaling {
@@ -3187,8 +3194,8 @@ async fn signaling_rejects_register_request_via_ws() {
                 Some(register_response::Result::Error(err)) => {
                     assert_eq!(err.code, 410, "WS register should return 410 Gone");
                     assert!(
-                        err.message.contains("/ais/register"),
-                        "error should direct to AIS HTTP, got: {}",
+                        err.message.contains("/issuer/register"),
+                        "error should direct to Issuer HTTP, got: {}",
                         err.message,
                     );
                 }
@@ -3212,7 +3219,7 @@ async fn signaling_unregister_removes_actor_from_route_candidates() {
         rules: vec![AclRule {
             permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "acme".into(),
+                publisher: "acme".into(),
                 name: "client-unreg".into(),
                 version: "1.0.0".to_string(),
             },
@@ -3231,7 +3238,7 @@ async fn signaling_unregister_removes_actor_from_route_candidates() {
                 actr_protocol::actr_to_signaling::Payload::RouteCandidatesRequest(
                     actr_protocol::RouteCandidatesRequest {
                         target_type: ActrType {
-                            manufacturer: "acme".into(),
+                            publisher: "acme".into(),
                             name: "svc-unreg".into(),
                             version: "1.0.0".to_string(),
                         },
@@ -3347,7 +3354,7 @@ async fn signaling_relay_rejects_invalid_credential() {
         rules: vec![AclRule {
             permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "acme".into(),
+                publisher: "acme".into(),
                 name: "relay-src-auth".into(),
                 version: "1.0.0".to_string(),
             },
@@ -3406,7 +3413,7 @@ async fn signaling_relay_acl_denied_in_same_realm() {
         rules: vec![AclRule {
             permission: Permission::Deny as i32,
             from_type: ActrType {
-                manufacturer: "acme".into(),
+                publisher: "acme".into(),
                 name: "relay-src-deny".into(),
                 version: "1.0.0".to_string(),
             },
@@ -3460,7 +3467,7 @@ async fn signaling_relay_forwards_ice_candidate_payload() {
         rules: vec![AclRule {
             permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "acme".into(),
+                publisher: "acme".into(),
                 name: "relay-src-forward".into(),
                 version: "1.0.0".to_string(),
             },
@@ -3527,7 +3534,7 @@ async fn signaling_relay_to_missing_target_reports_failure_and_source_stays_usab
         rules: vec![AclRule {
             permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "acme".into(),
+                publisher: "acme".into(),
                 name: "relay-src-missing-target".into(),
                 version: "1.0.0".to_string(),
             },
@@ -3624,7 +3631,7 @@ async fn signaling_disconnect_removes_actor_from_route_candidates() {
         rules: vec![AclRule {
             permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "acme".into(),
+                publisher: "acme".into(),
                 name: "client-disconnect".into(),
                 version: "1.0.0".to_string(),
             },
@@ -3677,7 +3684,7 @@ async fn signaling_malformed_binary_removes_actor_from_route_candidates() {
         rules: vec![AclRule {
             permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "acme".into(),
+                publisher: "acme".into(),
                 name: "client-malformed".into(),
                 version: "1.0.0".to_string(),
             },
@@ -3743,7 +3750,7 @@ async fn service_registry_persists_across_restart() {
         &log_path,
     )
     .await;
-    wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
+    wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
     ensure_realm(&data_dir, 1001).await;
 
@@ -3751,7 +3758,7 @@ async fn service_registry_persists_across_restart() {
         rules: vec![AclRule {
             permission: Permission::Allow as i32,
             from_type: ActrType {
-                manufacturer: "acme".into(),
+                publisher: "acme".into(),
                 name: "client".into(),
                 version: "1.0.0".to_string(),
             },
@@ -3790,7 +3797,7 @@ async fn service_registry_persists_across_restart() {
         &log_path2,
     )
     .await;
-    wait_for_health(&format!("{base}/ais/health"), &mut child2, &log_path2).await;
+    wait_for_health(&format!("{base}/issuer/health"), &mut child2, &log_path2).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child2, &log_path2).await;
     ensure_realm(&data_dir, 1001).await;
 
@@ -3858,7 +3865,7 @@ async fn service_unregister_success_is_durable_across_restart() {
         &log_path,
     )
     .await;
-    wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
+    wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
     ensure_realm(&data_dir, 1001).await;
 
@@ -3920,7 +3927,7 @@ async fn service_unregister_success_is_durable_across_restart() {
         &log_path2,
     )
     .await;
-    wait_for_health(&format!("{base}/ais/health"), &mut child2, &log_path2).await;
+    wait_for_health(&format!("{base}/issuer/health"), &mut child2, &log_path2).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child2, &log_path2).await;
     ensure_realm(&data_dir, 1001).await;
 

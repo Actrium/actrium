@@ -275,7 +275,7 @@ mod tests {
             realm: actr_protocol::Realm { realm_id: 1 },
             serial_number: 123,
             r#type: actr_protocol::ActrType {
-                manufacturer: "test".to_string(),
+                publisher: "test".to_string(),
                 name: "node".to_string(),
                 version: "1.0.0".to_string(),
             },

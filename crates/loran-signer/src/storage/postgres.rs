@@ -454,7 +454,7 @@ mod tests {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(5432),
-            database: std::env::var("POSTGRES_DB").unwrap_or_else(|_| "ks_test".to_string()),
+            database: std::env::var("POSTGRES_DB").unwrap_or_else(|_| "signer_test".to_string()),
             username: std::env::var("POSTGRES_USER").unwrap_or_else(|_| "postgres".to_string()),
             password: std::env::var("POSTGRES_PASSWORD").unwrap_or_else(|_| "postgres".to_string()),
             pool_size: 5,
@@ -574,7 +574,7 @@ mod tests {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(5432),
-            database: std::env::var("POSTGRES_DB").unwrap_or_else(|_| "ks_test".to_string()),
+            database: std::env::var("POSTGRES_DB").unwrap_or_else(|_| "signer_test".to_string()),
             username: std::env::var("POSTGRES_USER").unwrap_or_else(|_| "postgres".to_string()),
             password: std::env::var("POSTGRES_PASSWORD").unwrap_or_else(|_| "postgres".to_string()),
             pool_size: 5,
@@ -611,7 +611,7 @@ mod tests {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(5432),
-            database: std::env::var("POSTGRES_DB").unwrap_or_else(|_| "ks_test".to_string()),
+            database: std::env::var("POSTGRES_DB").unwrap_or_else(|_| "signer_test".to_string()),
             username: std::env::var("POSTGRES_USER").unwrap_or_else(|_| "postgres".to_string()),
             password: std::env::var("POSTGRES_PASSWORD").unwrap_or_else(|_| "postgres".to_string()),
             pool_size: 5,

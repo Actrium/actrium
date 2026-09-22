@@ -6,12 +6,12 @@ path = "__PACKAGE_PATH__"
 [signaling]
 url = "ws://127.0.0.1:__HTTP_PORT__/signaling/ws"
 
-[ais_endpoint]
-# Mount AIS at the `/ais/*` prefix; the bare-root form parses with a
+[issuer_endpoint]
+# Mount Issuer at the `/issuer/*` prefix; the bare-root form parses with a
 # trailing slash and yields `http://host//register` once Hyper formats
 # `{endpoint}/register`. mock-actrix exposes the same routes under both
-# `/` and `/ais/*`, so pinning the prefix here is safe.
-url = "http://127.0.0.1:__HTTP_PORT__/ais"
+# `/` and `/issuer/*`, so pinning the prefix here is safe.
+url = "http://127.0.0.1:__HTTP_PORT__/issuer"
 
 [deployment]
 realm_id = __REALM_ID__
@@ -45,4 +45,4 @@ type = "polyglot:TsDriver:0.1.0"
 
 [[trust]]
 kind = "static"
-pubkey_b64 = "__MFR_PUBKEY__"
+pubkey_b64 = "__PUBLISHER_PUBKEY__"

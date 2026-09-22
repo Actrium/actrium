@@ -4,12 +4,12 @@ use actr_protocol::Realm;
 fn sample_context(realm_secret: Option<&str>) -> DiscoveryContext {
     DiscoveryContext {
         package_actr_type: ActrType {
-            manufacturer: "acme".to_string(),
+            publisher: "acme".to_string(),
             name: "cli-client".to_string(),
             version: "1.0.0".to_string(),
         },
         signaling_url: Url::parse("ws://localhost:8081/signaling/ws").unwrap(),
-        ais_endpoint: "http://localhost:8081/ais".to_string(),
+        issuer_endpoint: "http://localhost:8081/issuer".to_string(),
         realm: Realm { realm_id: 1001 },
         realm_secret: realm_secret.map(str::to_string),
     }
@@ -19,7 +19,7 @@ fn sample_actor_id() -> ActrId {
     ActrId {
         serial_number: 42,
         r#type: ActrType {
-            manufacturer: "acme".to_string(),
+            publisher: "acme".to_string(),
             name: "echo".to_string(),
             version: "1.0.0".to_string(),
         },
@@ -69,7 +69,7 @@ fn cli_discovery_register_request_uses_linked_auth_mode() {
 
     assert_eq!(request.auth_mode, Some(RegisterAuthMode::Linked as i32));
     assert_eq!(request.manifest_raw, None);
-    assert_eq!(request.mfr_signature, None);
+    assert_eq!(request.publisher_signature, None);
     assert_eq!(request.target, None);
     assert_eq!(request.actr_type.name, "cli-client");
     assert_eq!(request.realm.realm_id, 1001);
@@ -90,7 +90,7 @@ fn cli_discovery_requires_realm_secret() {
 fn lookup_name_accepts_registry_key_service_name_and_full_actor_type() {
     let entry = discovery_response::TypeEntry {
         actr_type: ActrType {
-            manufacturer: "acme".to_string(),
+            publisher: "acme".to_string(),
             name: "EchoService".to_string(),
             version: "1.0.0".to_string(),
         },

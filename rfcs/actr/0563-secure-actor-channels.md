@@ -125,7 +125,7 @@ transcript hash (BLAKE3) is what signatures and the KDF consume.
 
 ### 3. Handshake protocol — recommended: a SIGMA-derived pattern
 
-Actr already issues per-Actor Ed25519 credentials through a trusted issuer (AIS,
+Actr already issues per-Actor Ed25519 credentials through a trusted issuer (Issuer,
 `crates/loran-signaling/`), and `IdentityClaims`/`AIdCredential` already carry
 `realm_id`, `actor_id`, and `expires_at` (`crates/actr-protocol/proto/actr.proto:64-90`).
 A SIGMA-style mutually-authenticated Diffie-Hellman exchange composes cleanly:
@@ -154,9 +154,9 @@ No new cryptographic primitive is introduced. The design reuses:
   and the pure-function `AIdCredentialVerifier`
   (`crates/loran-platform/src/aid/credential/verifier.rs:13-78`) for Ed25519
   signature verification and claims decoding;
-- `AisKeyCache` (`crates/actr-hyper/src/key_cache.rs:1-99`), already wired into the
+- `IssuerKeyCache` (`crates/actr-hyper/src/key_cache.rs:1-99`), already wired into the
   WebSocket gate (`crates/actr-hyper/src/wire/websocket/gate.rs:319-374`), to resolve
-  AIS signing keys on the WebRTC side too.
+  Issuer signing keys on the WebRTC side too.
 
 The peer-signed transcript is verified with the peer's `AIdCredential`, and
 `claims.actor_id` must equal the asserted peer `ActorId`. This moves the binding
@@ -209,7 +209,7 @@ that §1 enforces.
 A new `PeerBinding` message, signed by each Actor over `{ source ActorId, target
 ActorId, exchange id, nonces, local DTLS fingerprint }`, is relayed through
 signaling alongside `ActrRelay`. The receiver verifies it locally using
-`AisKeyCache` and the peer `AIdCredential`, and rejects any mismatch. Signaling
+`IssuerKeyCache` and the peer `AIdCredential`, and rejects any mismatch. Signaling
 still relays the message but cannot forge it (it holds no Actor signing key).
 This requires exposing the local DTLS fingerprint to the Actr layer — currently
 not surfaced; the `PeerConnection` wrapper at
@@ -267,7 +267,7 @@ fails closed:
   review. `Noise_XX` offers a similar mutually-authenticated forward-secret
   handshake with a smaller analysis surface and existing implementations. The
   argument for SIGMA is its explicit MAC-then-verify identity-protection ordering
-  and its clean composition with a pre-existing external PKI (AIS-issued
+  and its clean composition with a pre-existing external PKI (issuer-issued
   `AIdCredential`s), which maps directly onto the Actor credential model. The
   argument for Noise is implementation maturity and a single well-studied state
   machine. This RFC recommends SIGMA but defers the final choice to review.

@@ -29,8 +29,8 @@ backend = "sqlite"
 key_ttl_seconds = 3600
 [services.signer.storage.sqlite]
 
-[services.ais]
-[services.ais.server]
+[services.issuer]
+[services.issuer.server]
 worker_id = 0
 token_ttl_secs = 3600
 # Development-only 32-byte renewal-token key.

@@ -6,8 +6,8 @@ path = "/Users/kaito/Project/Actrium/actrium/examples/actr/rust/echo-actr/dist/a
 [signaling]
 url = "ws://localhost:8081/signaling/ws"
 
-[ais_endpoint]
-url = "http://localhost:8081/ais"
+[issuer_endpoint]
+url = "http://localhost:8081/issuer"
 
 [deployment]
 realm_id = 1001
@@ -35,4 +35,4 @@ type = "acme:package-echo-client-guest:0.1.0"
 
 [[trust]]
 kind = "registry"
-endpoint = "http://localhost:8081/ais"
+endpoint = "http://localhost:8081/issuer"

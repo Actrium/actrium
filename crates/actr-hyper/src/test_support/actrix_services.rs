@@ -202,7 +202,7 @@ impl ActrixTestServices {
         self.turn_addr
     }
 
-    /// Generate the same time-limited HMAC credential format Actrix AIS
+    /// Generate the same time-limited HMAC credential format Actrix Issuer
     /// issues to the production TURN authenticator.
     pub fn turn_credential(&self, actor_id: &ActrId) -> TurnCredential {
         let expires_at = SystemTime::now()
@@ -230,7 +230,7 @@ impl ActrixTestServices {
         }
     }
 
-    /// Produce a short-lived AId credential signed exactly as AIS credentials
+    /// Produce a short-lived AId credential signed exactly as Issuer credentials
     /// are signed. The corresponding public key is installed in Actrix's
     /// production validator during fixture startup.
     pub fn aid_credential(&self, actor_id: &ActrId) -> AIdCredential {

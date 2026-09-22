@@ -225,7 +225,7 @@ provision_e2e_publisher() {
     chmod 600 "$PROVISIONED_KEYCHAIN" 2>/dev/null || true
     jq '{public_key}' "$PROVISIONED_KEYCHAIN" >"$PROVISIONED_PUBLIC_KEY"
 
-    python3 - "$db_path" "$MANUFACTURER" "$PROVISIONED_KEYCHAIN" <<'PY'
+    python3 - "$db_path" "$PUBLISHER" "$PROVISIONED_KEYCHAIN" <<'PY'
 import base64
 import hashlib
 import json
@@ -258,7 +258,7 @@ connection.execute("PRAGMA foreign_keys = ON")
 with connection:
     connection.execute(
         """
-        INSERT INTO mfr
+        INSERT INTO publisher
             (name, public_key, key_id, descriptor_json, contact, status,
              created_at, updated_at, verified_at, key_expires_at)
         VALUES (?, ?, ?, ?, 'e2e@local.invalid', 'active', ?, ?, ?, ?)
@@ -276,7 +276,7 @@ with connection:
 connection.close()
 PY
 
-    success "Provisioned E2E publisher ${MANUFACTURER}; private key remains in the test workspace"
+    success "Provisioned E2E publisher ${PUBLISHER}; private key remains in the test workspace"
 }
 
 render_runtime_configs() {
@@ -318,29 +318,29 @@ login_admin() {
     success "Admin API login succeeded"
 }
 
-warmup_ais_key() {
-    section "🔑 Warming up AIS signing key"
+warmup_issuer_key() {
+    section "🔑 Warming up Issuer signing key"
     [ -n "${ADMIN_TOKEN:-}" ] || login_admin
-    local current_key_file="$RUN_DIR/ais-current-key.json"
-    local rotate_file="$RUN_DIR/ais-rotate-key.json"
+    local current_key_file="$RUN_DIR/issuer-current-key.json"
+    local rotate_file="$RUN_DIR/issuer-rotate-key.json"
     local attempt=0
 
     while [ $attempt -lt 60 ]; do
-        if curl -fsS "http://127.0.0.1:${HTTP_PORT}/ais/current-key" >"$current_key_file" 2>/dev/null \
+        if curl -fsS "http://127.0.0.1:${HTTP_PORT}/issuer/current-key" >"$current_key_file" 2>/dev/null \
             && [ "$(jq -r '.status // "missing"' "$current_key_file" 2>/dev/null)" = "success" ]; then
-            success "AIS signing key is ready"
+            success "Issuer signing key is ready"
             return 0
         fi
 
         curl -fsS -X POST \
             -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-            "http://127.0.0.1:${HTTP_PORT}/admin/api/services/ais/keys/rotate" \
+            "http://127.0.0.1:${HTTP_PORT}/admin/api/services/issuer/keys/rotate" \
             >"$rotate_file" 2>/dev/null || true
         sleep 1
         attempt=$((attempt + 1))
     done
 
-    fail "AIS signing key warmup timed out"
+    fail "Issuer signing key warmup timed out"
 }
 
 ensure_realm() {

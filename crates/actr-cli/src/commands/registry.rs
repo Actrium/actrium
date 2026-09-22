@@ -1,4 +1,4 @@
-//! `actr registry` — remote service registry interactions (AIS / signaling).
+//! `actr registry` — remote service registry interactions (Issuer / signaling).
 //!
 //! Subcommands:
 //!   - `discover`    — find services available on the network
@@ -166,12 +166,12 @@ async fn execute_publish(args: &RegistryPublishArgs) -> Result<()> {
     let kc_signing_key = ed25519_dalek::SigningKey::from_bytes(&kc_arr);
     let kc_key_id = actr_pack::compute_key_id(&kc_signing_key.verifying_key().to_bytes());
 
-    // Reject cross-manufacturer publishing (issue #425): a keychain that
-    // declares a `manufacturer` binding may only publish packages for that
-    // same manufacturer.
-    crate::commands::package_build::ensure_manufacturer_matches(
-        keychain.get("manufacturer").and_then(|v| v.as_str()),
-        &manifest.manufacturer,
+    // Reject cross-publisher publishing (issue #425): a keychain that
+    // declares a `publisher` binding may only publish packages for that
+    // same publisher.
+    crate::commands::package_build::ensure_publisher_matches(
+        keychain.get("publisher").and_then(|v| v.as_str()),
+        &manifest.publisher,
     )?;
 
     match manifest.signing_key_id {
@@ -195,7 +195,7 @@ async fn execute_publish(args: &RegistryPublishArgs) -> Result<()> {
     let sig_b64 = base64::engine::general_purpose::STANDARD.encode(&sig_raw);
 
     println!("📦 Publishing package: {}", manifest.actr_type_str());
-    println!("   publisher:    {}", manifest.manufacturer);
+    println!("   publisher:    {}", manifest.publisher);
     println!("   name:         {}", manifest.name);
     println!("   version:      {}", manifest.version);
     println!("   target:       {}", manifest.binary.target);
@@ -222,7 +222,7 @@ async fn execute_publish(args: &RegistryPublishArgs) -> Result<()> {
 
     let endpoint = args
         .endpoint
-        .trim_end_matches("/ais")
+        .trim_end_matches("/issuer")
         .trim_end_matches('/')
         .to_string();
 
@@ -233,7 +233,7 @@ async fn execute_publish(args: &RegistryPublishArgs) -> Result<()> {
     println!("🔑 Requesting publish nonce...");
     let nonce_resp = client
         .post(&nonce_url)
-        .json(&serde_json::json!({ "publisher": manifest.manufacturer }))
+        .json(&serde_json::json!({ "publisher": manifest.publisher }))
         .send()
         .await
         .with_context(|| format!("Failed to request nonce from: {}", nonce_url))?;
@@ -258,7 +258,7 @@ async fn execute_publish(args: &RegistryPublishArgs) -> Result<()> {
         .with_context(|| "Invalid nonce base64 from server")?;
 
     let signable_body = SignablePublishBody {
-        publisher: &manifest.manufacturer,
+        publisher: &manifest.publisher,
         name: &manifest.name,
         version: &manifest.version,
         target: &manifest.binary.target,
@@ -278,7 +278,7 @@ async fn execute_publish(args: &RegistryPublishArgs) -> Result<()> {
         let nonce_hex = hex::encode(&nonce_bytes);
         let payload = format!(
             "ACTR-PUBLISH-V2\npublisher={}\nmethod=POST\npath=/registry/packages/publish\nnonce={}\nbody_sha256={}",
-            manifest.manufacturer, nonce_hex, body_hash
+            manifest.publisher, nonce_hex, body_hash
         );
         let sig = kc_signing_key.sign(payload.as_bytes());
         base64::engine::general_purpose::STANDARD.encode(sig.to_bytes())
@@ -289,7 +289,7 @@ async fn execute_publish(args: &RegistryPublishArgs) -> Result<()> {
     println!("📡 Publishing to: {}", publish_url);
 
     let publish_body_bytes = serde_json::to_vec(&FinalPublishBody {
-        publisher: &manifest.manufacturer,
+        publisher: &manifest.publisher,
         name: &manifest.name,
         version: &manifest.version,
         target: &manifest.binary.target,

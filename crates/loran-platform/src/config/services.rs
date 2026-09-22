@@ -1,6 +1,6 @@
 //! Service configuration collection
 
-use super::ais::AisConfig;
+use super::issuer::IssuerServiceConfig;
 use super::packages::PackagesConfig;
 use super::signaling::SignalingConfig;
 use serde::{Deserialize, Serialize};
@@ -39,9 +39,9 @@ pub struct ServicesConfig {
     #[serde(default)]
     pub signer: Option<signer::SignerServiceConfig>,
 
-    /// AIS (Actor Identity Service) configuration
+    /// Issuer (Actor Identity Service) configuration
     #[serde(default)]
-    pub ais: Option<AisConfig>,
+    pub issuer: Option<IssuerServiceConfig>,
 
     /// Signaling service configuration
     #[serde(default)]

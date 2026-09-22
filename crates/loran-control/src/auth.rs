@@ -3,9 +3,10 @@ use actrix_proto::{
     DeleteConfigOverrideResponse, DeleteRealmRequest, DeleteRealmResponse, GetConfigRequest,
     GetConfigResponse, GetNodeInfoRequest, GetNodeInfoResponse, GetRealmRequest, GetRealmResponse,
     ListConfigOverridesRequest, ListConfigOverridesResponse, ListRealmsRequest, ListRealmsResponse,
-    NodeAdminService, NonceCredential, RotateAisSigningKeyRequest, RotateAisSigningKeyResponse,
-    SetConfigOverrideRequest, SetConfigOverrideResponse, ShutdownRequest, ShutdownResponse,
-    UpdateConfigRequest, UpdateConfigResponse, UpdateRealmRequest, UpdateRealmResponse,
+    NodeAdminService, NonceCredential, RotateIssuerSigningKeyRequest,
+    RotateIssuerSigningKeyResponse, SetConfigOverrideRequest, SetConfigOverrideResponse,
+    ShutdownRequest, ShutdownResponse, UpdateConfigRequest, UpdateConfigResponse,
+    UpdateRealmRequest, UpdateRealmResponse,
 };
 use nonce_auth::{CredentialVerifier, NonceError, storage::NonceStorage};
 use std::sync::Arc;
@@ -222,12 +223,12 @@ where
         self.inner.delete_config_override(request).await
     }
 
-    async fn rotate_ais_signing_key(
+    async fn rotate_issuer_signing_key(
         &self,
-        request: Request<RotateAisSigningKeyRequest>,
-    ) -> Result<Response<RotateAisSigningKeyResponse>, Status> {
+        request: Request<RotateIssuerSigningKeyRequest>,
+    ) -> Result<Response<RotateIssuerSigningKeyResponse>, Status> {
         self.verify_body(request.get_ref()).await?;
-        self.inner.rotate_ais_signing_key(request).await
+        self.inner.rotate_issuer_signing_key(request).await
     }
 }
 
@@ -399,13 +400,13 @@ impl CredentialPayload for DeleteConfigOverrideRequest {
     }
 }
 
-impl CredentialPayload for RotateAisSigningKeyRequest {
+impl CredentialPayload for RotateIssuerSigningKeyRequest {
     fn credential(&self) -> &NonceCredential {
         &self.credential
     }
 
     fn auth_payload(&self, node_id: &str) -> String {
-        format!("rotate_ais_signing_key:{node_id}")
+        format!("rotate_issuer_signing_key:{node_id}")
     }
 }
 
@@ -496,13 +497,13 @@ mod tests {
     }
 
     #[test]
-    fn rotate_ais_signing_key_payload_is_canonical() {
-        let req = RotateAisSigningKeyRequest {
+    fn rotate_issuer_signing_key_payload_is_canonical() {
+        let req = RotateIssuerSigningKeyRequest {
             credential: dummy_credential(),
         };
         assert_eq!(
             req.auth_payload("actrix-node"),
-            "rotate_ais_signing_key:actrix-node"
+            "rotate_issuer_signing_key:actrix-node"
         );
         // No client-controlled mutable body fields, so no digest is appended.
         assert_eq!(req.body_digest(), "");

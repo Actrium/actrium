@@ -5,7 +5,7 @@
 #   ││││└─ Signaling (00001 = 1)
 #   │││└── STUN      (00010 = 2)
 #   ││└─── TURN      (00100 = 4)
-#   │└──── AIS       (01000 = 8)
+#   │└──── Issuer       (01000 = 8)
 #   └───── Signer    (10000 = 16)
 #
 # All services are controlled by this bitmask. No individual enabled fields are needed.
@@ -17,7 +17,7 @@
 #   4  (0b00100) = TURN only
 #   2  (0b00010) = STUN only
 #   1  (0b00001) = Signaling only
-#   8  (0b01000) = AIS only
+#   8  (0b01000) = Issuer only
 #   16 (0b10000) = Signer only
 enable = 31
 
@@ -180,12 +180,12 @@ key_ttl_seconds = 3600
 
 [services.signer.storage.sqlite]
 
-# AIS (Actor Identity Service) Configuration (optional)
+# Issuer (Actor Identity Service) Configuration (optional)
 # Service enablement is controlled by the bitmask (enable field)
-# Set ENABLE_AIS bit (8) in the enable field to enable this service
-[services.ais]
+# Set ENABLE_ISSUER bit (8) in the enable field to enable this service
+[services.issuer]
 
-[services.ais.server]
+[services.issuer.server]
 # Stable allocation for this single node. A future multi-node deployment must
 # assign a distinct worker_id (0..31) to each concurrent issuer.
 worker_id = 0
@@ -202,8 +202,8 @@ worker_id = 0
 # REQUIRED. Generate: openssl rand -base64 48
 renewal_token_secret = "<generate-distinct-renewal-token-secret-openssl-rand-base64-48>"
 
-# AIS automatically uses the local Signer if enabled, or configure one explicitly:
-# [services.ais.dependencies.signer]
+# Issuer automatically uses the local Signer if enabled, or configure one explicitly:
+# [services.issuer.dependencies.signer]
 # endpoint = "https://signer.internal.example:8443"
 
 # Publisher Registry configuration (optional)
@@ -247,8 +247,8 @@ ws_path = "/signaling"
 # [services.signaling.dependencies.signer]
 # endpoint = "https://signer.internal.example:8443"  # (optional, gRPC endpoint)
 #
-# [services.signaling.dependencies.ais]
-# endpoint = "http://remote-ais:8080"  # (optional)
+# [services.signaling.dependencies.issuer]
+# endpoint = "http://remote-issuer:8080"  # (optional)
 
 # ============================================================================
 # Control Plane (always enabled, shared with main HTTP port)

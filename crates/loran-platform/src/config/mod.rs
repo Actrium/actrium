@@ -3,11 +3,11 @@
 //! This module is the "single source of truth" for Actrix auxiliary service configuration.
 //! All configuration item definitions, documentation, and default values are managed here uniformly.
 
-pub mod ais;
 pub mod authority;
 pub mod bind;
 pub mod config_store;
 pub mod control;
+pub mod issuer;
 pub mod packages;
 pub mod registry;
 pub mod resolver;
@@ -17,10 +17,10 @@ pub mod signer;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub mod turn;
 
-pub use crate::config::ais::AisConfig;
 pub use crate::config::authority::AuthorityConfig;
 pub use crate::config::bind::BindConfig;
 pub use crate::config::control::{AdminUiConfig, ControlConfig, ControlHead};
+pub use crate::config::issuer::IssuerServiceConfig;
 pub use crate::config::packages::{PackageTargetConfig, PackagesConfig};
 pub use crate::config::services::ServicesConfig;
 pub use crate::config::signaling::SignalingConfig;
@@ -114,10 +114,10 @@ fn collect_present_secrets(config: &ActrixConfig) -> Vec<(&'static str, &str)> {
             }
         }
     }
-    if let Some(ais) = config.services.ais.as_ref() {
-        let renewal = ais.server.renewal_token_secret.as_str();
+    if let Some(issuer) = config.services.issuer.as_ref() {
+        let renewal = issuer.server.renewal_token_secret.as_str();
         if !renewal.is_empty() {
-            secrets.push(("services.ais.server.renewal_token_secret", renewal));
+            secrets.push(("services.issuer.server.renewal_token_secret", renewal));
         }
     }
     if !config.control.grpc_api.shared_secret.is_empty() {
@@ -222,7 +222,7 @@ pub struct ActrixConfig {
     /// - Bit 0 (1): Signaling service
     /// - Bit 1 (2): STUN service
     /// - Bit 2 (4): TURN service
-    /// - Bit 3 (8): AIS (Actor Identity Service)
+    /// - Bit 3 (8): Issuer (Actor Identity Service)
     /// - Bit 4 (16): Signer
     ///
     /// Examples:
@@ -309,7 +309,7 @@ pub struct ActrixConfig {
 
     /// Actrix internal service communication shared secret
     ///
-    /// Used for internal communication authentication between Actrix services, such as between AIS and Signer.
+    /// Used for internal communication authentication between Actrix services, such as between Issuer and Signer.
     /// This is a system-level internal authentication key, used only for inter-service communication, not for external business.
     ///
     /// Notes:
@@ -562,7 +562,7 @@ impl MonitoringConfig {
 }
 
 fn default_enable() -> u8 {
-    31 // Signaling(1) + STUN(2) + TURN(4) + AIS(8) + Signer(16)
+    31 // Signaling(1) + STUN(2) + TURN(4) + Issuer(8) + Signer(16)
 }
 
 fn default_recording_service_name() -> String {
@@ -611,7 +611,7 @@ impl Default for ActrixConfig {
 pub const ENABLE_SIGNALING: u8 = 0b00001;
 pub const ENABLE_STUN: u8 = 0b00010;
 pub const ENABLE_TURN: u8 = 0b00100;
-pub const ENABLE_AIS: u8 = 0b01000;
+pub const ENABLE_ISSUER: u8 = 0b01000;
 pub const ENABLE_SIGNER: u8 = 0b10000;
 
 impl ActrixConfig {
@@ -632,11 +632,11 @@ impl ActrixConfig {
         self.enable & ENABLE_TURN != 0
     }
 
-    /// Check whether the AIS (AId Issue Service) identity authentication service is enabled
+    /// Check whether the Issuer (AId Issue Service) identity authentication service is enabled
     ///
-    /// Service is enabled if the ENABLE_AIS bit is set in the enable bitmask.
-    pub fn is_ais_enabled(&self) -> bool {
-        self.enable & ENABLE_AIS != 0
+    /// Service is enabled if the ENABLE_ISSUER bit is set in the enable bitmask.
+    pub fn is_issuer_enabled(&self) -> bool {
+        self.enable & ENABLE_ISSUER != 0
     }
 
     /// Check whether the Signer key service is enabled
@@ -697,7 +697,7 @@ impl ActrixConfig {
             .unwrap_or_else(|| "localhost".to_string())
     }
 
-    /// Endpoint that co-located clients (AIS, Signaling) should dial to reach
+    /// Endpoint that co-located clients (Issuer, Signaling) should dial to reach
     /// the local Signer gRPC surface on its dedicated listener.
     ///
     /// For the loopback plaintext default this is
@@ -752,7 +752,7 @@ impl ActrixConfig {
     /// Get the Actrix internal service communication shared secret
     ///
     /// This key is used for authenticated communication between Actrix internal services,
-    /// such as service calls between AIS and Signer.
+    /// such as service calls between Issuer and Signer.
     ///
     /// Note: This key is for internal service communication only and must not be used for external business.
     pub fn get_actrix_shared_key(&self) -> &str {
@@ -935,9 +935,9 @@ impl ActrixConfig {
             &mut errors,
         );
 
-        // AIS always issues the TURN credential carried by RegisterOk, so the
-        // Realm/provider secret is required whenever either AIS or TURN runs.
-        if self.is_turn_enabled() || self.is_ais_enabled() {
+        // Issuer always issues the TURN credential carried by RegisterOk, so the
+        // Realm/provider secret is required whenever either Issuer or TURN runs.
+        if self.is_turn_enabled() || self.is_issuer_enabled() {
             validate_secret_hygiene("turn.turn_secret", &self.turn.turn_secret, 32, &mut errors);
         }
 
@@ -1076,31 +1076,33 @@ impl ActrixConfig {
             }
         }
 
-        // Validate AIS configuration (if enabled)
-        if self.is_ais_enabled() {
+        // Validate Issuer configuration (if enabled)
+        if self.is_issuer_enabled() {
             // Check whether Signer configuration is available (explicit config or auto default)
-            if let Some(ref ais) = self.services.ais {
-                if ais.server.worker_id > 31 {
+            if let Some(ref issuer) = self.services.issuer {
+                if issuer.server.worker_id > 31 {
                     errors.push(
-                        "services.ais.server.worker_id must be in the range 0..=31".to_string(),
+                        "services.issuer.server.worker_id must be in the range 0..=31".to_string(),
                     );
                 }
-                if ais.get_signer_client_config(self).is_none() {
+                if issuer.get_signer_client_config(self).is_none() {
                     errors.push(
-                        "AIS service is enabled but no Signer available: \
-                        either configure services.ais.dependencies.signer or enable local Signer service"
+                        "Issuer service is enabled but no Signer available: \
+                        either configure services.issuer.dependencies.signer or enable local Signer service"
                             .to_string(),
                     );
                 }
                 // Validate renewal_token_secret configuration.
-                if ais.server.renewal_token_secret.is_empty() {
-                    errors.push("services.ais.server.renewal_token_secret is required".to_string());
+                if issuer.server.renewal_token_secret.is_empty() {
+                    errors.push(
+                        "services.issuer.server.renewal_token_secret is required".to_string(),
+                    );
                 } else {
                     // Placeholder check runs on the pre-decode string so example
                     // markers are caught even when the value is not valid base64.
-                    if looks_like_placeholder_secret(&ais.server.renewal_token_secret) {
+                    if looks_like_placeholder_secret(&issuer.server.renewal_token_secret) {
                         errors.push(
-                            "services.ais.server.renewal_token_secret must not use a documented placeholder or example value"
+                            "services.issuer.server.renewal_token_secret must not use a documented placeholder or example value"
                                 .to_string(),
                         );
                     }
@@ -1110,8 +1112,8 @@ impl ActrixConfig {
                     // low-entropy gate on the raw string. It is a hard error in
                     // prod and a warning in dev, so shipped low-entropy example
                     // values still let local development boot.
-                    if looks_like_low_entropy_secret(&ais.server.renewal_token_secret) {
-                        let msg = "services.ais.server.renewal_token_secret has too few distinct characters; use a high-entropy random value";
+                    if looks_like_low_entropy_secret(&issuer.server.renewal_token_secret) {
+                        let msg = "services.issuer.server.renewal_token_secret has too few distinct characters; use a high-entropy random value";
                         if self.env == "prod" {
                             errors.push(msg.to_string());
                         } else {
@@ -1120,28 +1122,28 @@ impl ActrixConfig {
                     }
                     match base64::Engine::decode(
                         &base64::engine::general_purpose::STANDARD,
-                        &ais.server.renewal_token_secret,
+                        &issuer.server.renewal_token_secret,
                     ) {
                         Ok(decoded) if decoded.len() >= 32 => {}
                         Ok(decoded) => {
                             errors.push(format!(
-                                "services.ais.server.renewal_token_secret must decode to \
+                                "services.issuer.server.renewal_token_secret must decode to \
                                  at least 32 bytes, got {} byte(s)",
                                 decoded.len()
                             ));
                         }
                         Err(e) => {
                             errors.push(format!(
-                                "services.ais.server.renewal_token_secret is not valid \
+                                "services.issuer.server.renewal_token_secret is not valid \
                                  base64: {e}"
                             ));
                         }
                     }
                 }
             } else {
-                // AIS bitmask is set but services.ais configuration is missing
+                // Issuer bitmask is set but services.issuer configuration is missing
                 errors.push(
-                    "AIS service is enabled (ENABLE_AIS bit is set) but services.ais configuration is missing".to_string(),
+                    "Issuer service is enabled (ENABLE_ISSUER bit is set) but services.issuer configuration is missing".to_string(),
                 );
             }
         }
@@ -1158,11 +1160,11 @@ impl ActrixConfig {
                 );
                 }
 
-                if signaling.dependencies.ais.is_none()
-                    && !(self.is_ais_enabled() && self.services.ais.is_some())
+                if signaling.dependencies.issuer.is_none()
+                    && !(self.is_issuer_enabled() && self.services.issuer.is_some())
                 {
                     errors.push(
-                    "Signaling dependencies.ais is not configured; enable AIS (bitmask + services.ais) to use local defaults"
+                    "Signaling dependencies.issuer is not configured; enable Issuer (bitmask + services.issuer) to use local defaults"
                         .to_string(),
                 );
                 }
@@ -1207,10 +1209,10 @@ impl ActrixConfig {
             // client endpoints this node dials. Loopback targets are exempt, and
             // the auto-discovered local-service fallbacks already point at
             // 127.0.0.1, so only operator-configured remote endpoints are gated.
-            if let Some(ref ais) = self.services.ais {
-                if let Some(ref signer) = ais.dependencies.signer {
+            if let Some(ref issuer) = self.services.issuer {
+                if let Some(ref signer) = issuer.dependencies.signer {
                     validate_prod_endpoint_tls(
-                        "services.ais.dependencies.signer.endpoint",
+                        "services.issuer.dependencies.signer.endpoint",
                         &signer.endpoint,
                         Some(signer.enable_tls),
                         &mut errors,
@@ -1226,10 +1228,10 @@ impl ActrixConfig {
                         &mut errors,
                     );
                 }
-                if let Some(ref ais) = signaling.dependencies.ais {
+                if let Some(ref issuer) = signaling.dependencies.issuer {
                     validate_prod_endpoint_tls(
-                        "services.signaling.dependencies.ais.endpoint",
-                        &ais.endpoint,
+                        "services.signaling.dependencies.issuer.endpoint",
+                        &issuer.endpoint,
                         None,
                         &mut errors,
                     );
@@ -1308,8 +1310,8 @@ mod tests {
     use super::*;
     use ::signer::SignerServiceConfig;
 
-    fn valid_ais_server_config() -> ais::AisServerConfig {
-        ais::AisServerConfig {
+    fn valid_issuer_server_config() -> issuer::IssuerServerConfig {
+        issuer::IssuerServerConfig {
             // High-entropy base64 secret decoding to 32 bytes; distinct from the
             // other test secrets so it passes the CFG-06 entropy and reuse gates.
             renewal_token_secret: "b2x+ISzUdwmiUR+Oe7w/KF+L6K9tbkRHhTfM2E83r/k=".to_string(),
@@ -1365,7 +1367,7 @@ mod tests {
                 "Rust example config should have no hard validation errors, got: {hard:?}"
             );
         }
-        assert_eq!(cfg.services.ais.as_ref().unwrap().server.worker_id, 0);
+        assert_eq!(cfg.services.issuer.as_ref().unwrap().server.worker_id, 0);
         assert_eq!(cfg.services.publisher_registry.nonce_retain_secs, 86_400);
     }
 
@@ -1378,7 +1380,7 @@ mod tests {
         assert!(config.is_signaling_enabled());
         assert!(config.is_stun_enabled());
         assert!(config.is_turn_enabled());
-        assert!(config.is_ais_enabled());
+        assert!(config.is_issuer_enabled());
         assert!(config.is_signer_enabled());
         assert_eq!(config.recording.service_name, "actrix");
         assert!(config.recording.sink.is_none());
@@ -1529,28 +1531,28 @@ mod tests {
         config.services.signaling = None;
         assert!(config.is_signaling_enabled());
 
-        // Test AIS service: bitmask-only control
+        // Test Issuer service: bitmask-only control
         config.enable = 0;
-        config.services.ais = Some(AisConfig {
-            server: valid_ais_server_config(),
-            dependencies: ais::AisDependencies::default(),
+        config.services.issuer = Some(IssuerServiceConfig {
+            server: valid_issuer_server_config(),
+            dependencies: issuer::IssuerDependencies::default(),
         });
-        assert!(!config.is_ais_enabled());
+        assert!(!config.is_issuer_enabled());
 
         // Case 2: Bitmask set -> enabled (regardless of services.* config)
-        config.enable = ENABLE_AIS;
-        assert!(config.is_ais_enabled());
+        config.enable = ENABLE_ISSUER;
+        assert!(config.is_issuer_enabled());
 
         // Case 3: Bitmask set, with services.* config -> still enabled
-        config.services.ais = Some(AisConfig {
-            server: valid_ais_server_config(),
-            dependencies: ais::AisDependencies::default(),
+        config.services.issuer = Some(IssuerServiceConfig {
+            server: valid_issuer_server_config(),
+            dependencies: issuer::IssuerDependencies::default(),
         });
-        assert!(config.is_ais_enabled());
+        assert!(config.is_issuer_enabled());
 
         // Case 4: Bitmask set, no services.* config -> enabled
-        config.services.ais = None;
-        assert!(config.is_ais_enabled());
+        config.services.issuer = None;
+        assert!(config.is_issuer_enabled());
 
         // Test Signer service: bitmask-only control
         config.enable = 0;
@@ -1584,42 +1586,42 @@ mod tests {
     }
 
     #[test]
-    fn test_ais_auto_ks_config() {
+    fn test_issuer_auto_signer_config() {
         let mut config = ActrixConfig {
-            enable: ENABLE_SIGNER | ENABLE_AIS,
+            enable: ENABLE_SIGNER | ENABLE_ISSUER,
             ..ActrixConfig::default()
         };
 
-        // Scenario 1: Local Signer enabled, AIS does not configure a Signer client, should auto-use local Signer
-        config.enable = ENABLE_SIGNER | ENABLE_AIS; // Enable both Signer and AIS via bitmask
+        // Scenario 1: Local Signer enabled, Issuer does not configure a Signer client, should auto-use local Signer
+        config.enable = ENABLE_SIGNER | ENABLE_ISSUER; // Enable both Signer and Issuer via bitmask
         config.services.signer = Some(SignerServiceConfig {
             ..Default::default()
         });
 
-        config.services.ais = Some(AisConfig {
-            server: valid_ais_server_config(),
-            dependencies: ais::AisDependencies { signer: None }, // Signer not configured
+        config.services.issuer = Some(IssuerServiceConfig {
+            server: valid_issuer_server_config(),
+            dependencies: issuer::IssuerDependencies { signer: None }, // Signer not configured
         });
 
         // Should be able to get the auto-generated Signer configuration
-        let ks_config = config
+        let signer_config = config
             .services
-            .ais
+            .issuer
             .as_ref()
             .unwrap()
             .get_signer_client_config(&config);
-        assert!(ks_config.is_some());
-        let ks_config = ks_config.unwrap();
+        assert!(signer_config.is_some());
+        let signer_config = signer_config.unwrap();
         // SGN-02: Signer gRPC runs on its own dedicated listener, defaulting to
         // the HTTP port + 1 (8080 + 1 = 8081) when [bind.signer] is omitted.
-        assert_eq!(ks_config.endpoint, "http://127.0.0.1:8081");
+        assert_eq!(signer_config.endpoint, "http://127.0.0.1:8081");
 
         // Scenario 2: Explicitly configured Signer client, should use the explicit configuration
-        config.services.ais = Some(AisConfig {
-            server: valid_ais_server_config(),
-            dependencies: ais::AisDependencies {
+        config.services.issuer = Some(IssuerServiceConfig {
+            server: valid_issuer_server_config(),
+            dependencies: issuer::IssuerDependencies {
                 signer: Some(crate::config::signer::SignerClientConfig {
-                    endpoint: "http://remote-ks:8080".to_string(),
+                    endpoint: "http://remote-signer:8080".to_string(),
                     timeout_seconds: 10,
                     enable_tls: false,
                     tls_domain: None,
@@ -1630,35 +1632,35 @@ mod tests {
             },
         });
 
-        let ks_config = config
+        let signer_config = config
             .services
-            .ais
+            .issuer
             .as_ref()
             .unwrap()
             .get_signer_client_config(&config);
-        assert!(ks_config.is_some());
-        let ks_config = ks_config.unwrap();
-        assert_eq!(ks_config.endpoint, "http://remote-ks:8080"); // Uses explicit configuration
+        assert!(signer_config.is_some());
+        let signer_config = signer_config.unwrap();
+        assert_eq!(signer_config.endpoint, "http://remote-signer:8080"); // Uses explicit configuration
 
         // Scenario 3: No local Signer and no explicit configuration, should return None
         config.services.signer = None;
-        config.services.ais = Some(AisConfig {
-            server: valid_ais_server_config(),
-            dependencies: ais::AisDependencies { signer: None },
+        config.services.issuer = Some(IssuerServiceConfig {
+            server: valid_issuer_server_config(),
+            dependencies: issuer::IssuerDependencies { signer: None },
         });
-        config.enable = ENABLE_AIS; // Enable AIS via bitmask
+        config.enable = ENABLE_ISSUER; // Enable Issuer via bitmask
 
-        let ks_config = config
+        let signer_config = config
             .services
-            .ais
+            .issuer
             .as_ref()
             .unwrap()
             .get_signer_client_config(&config);
-        assert!(ks_config.is_none());
+        assert!(signer_config.is_none());
     }
 
     #[test]
-    fn test_signaling_auto_ks_config() {
+    fn test_signaling_auto_signer_config() {
         let mut config = ActrixConfig {
             enable: ENABLE_SIGNER | ENABLE_SIGNALING,
             ..ActrixConfig::default()
@@ -1674,45 +1676,45 @@ mod tests {
             server: signaling::SignalingServerConfig::default(),
             dependencies: signaling::SignalingDependencies {
                 signer: None,
-                ais: None,
+                issuer: None,
             },
         });
 
         // Signaling should be able to get the auto-generated Signer configuration
-        let ks_config = config
+        let signer_config = config
             .services
             .signaling
             .as_ref()
             .unwrap()
             .get_signer_client_config(&config);
-        assert!(ks_config.is_some());
-        let ks_config = ks_config.unwrap();
+        assert!(signer_config.is_some());
+        let signer_config = signer_config.unwrap();
         // SGN-02: Signer gRPC runs on its own dedicated listener, defaulting to
         // the HTTP port + 1 (8080 + 1 = 8081) when [bind.signer] is omitted.
-        assert_eq!(ks_config.endpoint, "http://127.0.0.1:8081");
+        assert_eq!(signer_config.endpoint, "http://127.0.0.1:8081");
     }
 
     #[test]
     fn test_validate_bitmask_consistency() {
         let mut config = ActrixConfig {
-            enable: ENABLE_AIS,
+            enable: ENABLE_ISSUER,
             ..ActrixConfig::default()
         };
 
-        // Case 1: AIS bitmask set but services.ais config missing - should warn
-        config.enable = ENABLE_AIS;
-        config.services.ais = None;
+        // Case 1: Issuer bitmask set but services.issuer config missing - should warn
+        config.enable = ENABLE_ISSUER;
+        config.services.issuer = None;
 
         let result = config.validate();
         assert!(result.is_err());
         let errors = result.unwrap_err();
         assert!(errors.iter().any(|e| e.contains(
-            "AIS service is enabled (ENABLE_AIS bit is set) but services.ais configuration is missing"
+            "Issuer service is enabled (ENABLE_ISSUER bit is set) but services.issuer configuration is missing"
         )));
 
         // Case 2: Signer bitmask set but services.signer config missing - should warn
         config.enable = ENABLE_SIGNER;
-        config.services.ais = None;
+        config.services.issuer = None;
         config.services.signer = None;
 
         let result = config.validate();
@@ -1735,13 +1737,13 @@ mod tests {
         }));
 
         // Case 4: Signaling enabled with config present - should pass (if other validations pass)
-        // Note: Unlike AIS, Signaling validation does not check Signer availability
+        // Note: Unlike Issuer, Signaling validation does not check Signer availability
         config.enable = ENABLE_SIGNALING;
         config.services.signaling = Some(SignalingConfig {
             server: signaling::SignalingServerConfig::default(),
             dependencies: signaling::SignalingDependencies {
                 signer: None,
-                ais: None,
+                issuer: None,
             },
         });
         config.services.signer = None; // No local Signer
@@ -1763,10 +1765,10 @@ mod tests {
         }
 
         // Case 5: Bitmask set and services.* config present - should pass (if other validations pass)
-        config.enable = ENABLE_AIS | ENABLE_SIGNER;
-        config.services.ais = Some(AisConfig {
-            server: valid_ais_server_config(),
-            dependencies: ais::AisDependencies {
+        config.enable = ENABLE_ISSUER | ENABLE_SIGNER;
+        config.services.issuer = Some(IssuerServiceConfig {
+            server: valid_issuer_server_config(),
+            dependencies: issuer::IssuerDependencies {
                 signer: Some(crate::config::signer::SignerClientConfig {
                     endpoint: "http://127.0.0.1:8080".to_string(),
                     timeout_seconds: 10,
@@ -1814,7 +1816,7 @@ mod tests {
             dependencies: signaling::SignalingDependencies::default(),
         });
         config.services.signer = None;
-        config.services.ais = None;
+        config.services.issuer = None;
 
         let result = config.validate();
         assert!(result.is_err());
@@ -1827,14 +1829,14 @@ mod tests {
         assert!(
             errors
                 .iter()
-                .any(|e| e.contains("Signaling dependencies.ais is not configured"))
+                .any(|e| e.contains("Signaling dependencies.issuer is not configured"))
         );
     }
 
     #[test]
     fn test_signaling_dependencies_accept_local_services_when_enabled() {
         let mut config = ActrixConfig {
-            enable: ENABLE_SIGNALING | ENABLE_SIGNER | ENABLE_AIS,
+            enable: ENABLE_SIGNALING | ENABLE_SIGNER | ENABLE_ISSUER,
             ..ActrixConfig::default()
         };
         config.control.admin_ui.password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E".to_string();
@@ -1846,9 +1848,9 @@ mod tests {
         config.services.signer = Some(SignerServiceConfig {
             ..Default::default()
         });
-        config.services.ais = Some(AisConfig {
-            server: valid_ais_server_config(),
-            dependencies: ais::AisDependencies::default(),
+        config.services.issuer = Some(IssuerServiceConfig {
+            server: valid_issuer_server_config(),
+            dependencies: issuer::IssuerDependencies::default(),
         });
 
         let result = config.validate();

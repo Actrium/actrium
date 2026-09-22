@@ -189,7 +189,7 @@ ensure_project_keychain_config() {
 
     mkdir -p "$config_dir"
     cat > "$config_path" << TOML
-[mfr]
+[publisher]
 keychain = "$signing_key"
 TOML
 }
@@ -449,7 +449,7 @@ echo ""
 echo -e "${BLUE}📦 Building client-guest cdylib package...${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-CLIENT_GUEST_MANUFACTURER="acme"
+CLIENT_GUEST_PUBLISHER="acme"
 CLIENT_GUEST_NAME="package-echo-client-guest"
 CLIENT_GUEST_VERSION="0.1.0"
 CLIENT_GUEST_TARGET="$(rustc -vV | awk '/host:/ {print $2}')"
@@ -501,7 +501,7 @@ target = "$CLIENT_GUEST_TARGET"
 TOML
 
 CLIENT_GUEST_DEV_KEY="$PACKAGE_ECHO_DIR/dev-key.json"
-CLIENT_GUEST_PACKAGE_NAME="${CLIENT_GUEST_MANUFACTURER}-${CLIENT_GUEST_NAME}-${CLIENT_GUEST_VERSION}-cdylib.actr"
+CLIENT_GUEST_PACKAGE_NAME="${CLIENT_GUEST_PUBLISHER}-${CLIENT_GUEST_NAME}-${CLIENT_GUEST_VERSION}-cdylib.actr"
 CLIENT_GUEST_PACKAGE="$CLIENT_GUEST_DIST_DIR/$CLIENT_GUEST_PACKAGE_NAME"
 CLIENT_GUEST_PUBLIC_KEY="$CLIENT_GUEST_DIST_DIR/public-key.json"
 
@@ -633,14 +633,14 @@ echo ""
 echo "🔑 Setting up realms in actrix..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Poll until the AIS signing key is ready.
+# Poll until the Issuer signing key is ready.
 # Strategy: call the admin-only key-rotate endpoint each iteration until
-# /ais/current-key returns success. The signer gRPC service may take a few
+# /issuer/current-key returns success. The signer gRPC service may take a few
 # seconds to initialize after actrix starts.
 NONCE_DB="$WORKSPACE_ROOT/database/nonce.db"
 MAX_KEY_WAIT=60
 KEY_COUNTER=0
-echo "Warming up actrix AIS signing key (up to ${MAX_KEY_WAIT}s)..."
+echo "Warming up actrix Issuer signing key (up to ${MAX_KEY_WAIT}s)..."
 jq_status() {
     # Extract .status from JSON, returning "missing" on any error.
     local json="$1"
@@ -659,10 +659,10 @@ admin_login() {
 }
 
 while [ $KEY_COUNTER -lt $MAX_KEY_WAIT ]; do
-    # Check if /ais/current-key already has a valid key
-    CURRENT_KEY_JSON=$(curl -sf "${ACTRIX_HTTP_URL}/ais/current-key" 2>/dev/null || true)
+    # Check if /issuer/current-key already has a valid key
+    CURRENT_KEY_JSON=$(curl -sf "${ACTRIX_HTTP_URL}/issuer/current-key" 2>/dev/null || true)
     if [ "$(jq_status "$CURRENT_KEY_JSON")" = "success" ]; then
-        echo -e "${GREEN}✅ Actrix AIS signing key ready${NC}"
+        echo -e "${GREEN}✅ Actrix Issuer signing key ready${NC}"
         break
     fi
 
@@ -671,12 +671,12 @@ while [ $KEY_COUNTER -lt $MAX_KEY_WAIT ]; do
         && admin_login; then
         ROTATE_RESP=$(curl -sf -X POST \
             -H "Authorization: Bearer ${ACTRIX_ADMIN_TOKEN}" \
-            "${ACTRIX_HTTP_URL}/admin/api/services/ais/keys/rotate" 2>/dev/null || true)
+            "${ACTRIX_HTTP_URL}/admin/api/services/issuer/keys/rotate" 2>/dev/null || true)
         if [ "$(jq_status "$ROTATE_RESP")" = "success" ]; then
             # Re-check immediately after successful rotation
-            CURRENT_KEY_JSON=$(curl -sf "${ACTRIX_HTTP_URL}/ais/current-key" 2>/dev/null || true)
+            CURRENT_KEY_JSON=$(curl -sf "${ACTRIX_HTTP_URL}/issuer/current-key" 2>/dev/null || true)
             if [ "$(jq_status "$CURRENT_KEY_JSON")" = "success" ]; then
-                echo -e "${GREEN}✅ Actrix AIS signing key ready${NC}"
+                echo -e "${GREEN}✅ Actrix Issuer signing key ready${NC}"
                 break
             fi
         fi
@@ -686,7 +686,7 @@ while [ $KEY_COUNTER -lt $MAX_KEY_WAIT ]; do
     KEY_COUNTER=$((KEY_COUNTER + 1))
 done
 if [ $KEY_COUNTER -eq $MAX_KEY_WAIT ]; then
-    echo -e "${RED}❌ AIS key warmup timed out after ${MAX_KEY_WAIT}s${NC}"
+    echo -e "${RED}❌ Issuer key warmup timed out after ${MAX_KEY_WAIT}s${NC}"
     grep -aEn "GenerateSigningKey|Authentication failed" "$LOG_DIR/actrix.log" || true
     exit 1
 fi
@@ -712,36 +712,36 @@ done
 
 echo -e "${GREEN}✅ Realms setup completed (realm IDs: $SERVER_REALM, $CLIENT_REALM)${NC}"
 
-# ── Step 2.6: Register MFR manufacturer identity ────────────────────────
+# ── Step 2.6: Register publisher identity ────────────────────────
 
 echo ""
-echo "🏷️  Registering MFR manufacturer 'actrium' with public key..."
+echo "🏷️  Registering publisher 'actrium' with public key..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 NOW=$(date +%s)
 EXPIRES_AT=$((NOW + 86400 * 365))
-MFR_PUBKEY=$(jq -r '.public_key' "$PUBLIC_KEY_PATH")
+PUBLISHER_PUBKEY=$(jq -r '.public_key' "$PUBLIC_KEY_PATH")
 
-if [ -z "$MFR_PUBKEY" ]; then
+if [ -z "$PUBLISHER_PUBKEY" ]; then
     echo -e "${RED}❌ Failed to extract public_key from $PUBLIC_KEY_PATH${NC}"
     exit 1
 fi
 
-MFR_KEY_ID=$(printf '%s' "$MFR_PUBKEY" | base64 -d | openssl dgst -sha256 -r | awk '{print "mfr-" substr($1, 1, 16)}')
+PUBLISHER_KEY_ID=$(printf '%s' "$PUBLISHER_PUBKEY" | base64 -d | openssl dgst -sha256 -r | awk '{print "publisher-" substr($1, 1, 16)}')
 
-if [ -z "$MFR_KEY_ID" ]; then
+if [ -z "$PUBLISHER_KEY_ID" ]; then
     echo -e "${RED}❌ Failed to compute key_id from $PUBLIC_KEY_PATH${NC}"
     exit 1
 fi
 
 sqlite3 "$ACTRIX_DB" << SQL
-INSERT OR IGNORE INTO mfr
+INSERT OR IGNORE INTO publisher
     (name, public_key, key_id, contact, status, created_at, updated_at, verified_at, key_expires_at)
-VALUES ('actrium', '$MFR_PUBKEY', '$MFR_KEY_ID', 'examples@actrium.local', 'active',
+VALUES ('actrium', '$PUBLISHER_PUBKEY', '$PUBLISHER_KEY_ID', 'examples@actrium.local', 'active',
         $NOW, $NOW, $NOW, $EXPIRES_AT);
-UPDATE mfr
-   SET public_key     = '$MFR_PUBKEY',
-       key_id         = '$MFR_KEY_ID',
+UPDATE publisher
+   SET public_key     = '$PUBLISHER_PUBKEY',
+       key_id         = '$PUBLISHER_KEY_ID',
        status         = 'active',
        updated_at     = $NOW,
        verified_at    = $NOW,
@@ -751,12 +751,12 @@ UPDATE mfr
  WHERE name = 'actrium';
 SQL
 
-echo -e "${GREEN}✅ MFR manufacturer 'actrium' registered (key_id: $MFR_KEY_ID, pubkey: ${MFR_PUBKEY:0:20}...)${NC}"
+echo -e "${GREEN}✅ publisher 'actrium' registered (key_id: $PUBLISHER_KEY_ID, pubkey: ${PUBLISHER_PUBKEY:0:20}...)${NC}"
 
 # ── Step 2.7: Publish package via actr registry publish ──────────────────
 
 echo ""
-echo "📡 Publishing package to MFR (challenge-response flow)..."
+echo "📡 Publishing package to publisher (challenge-response flow)..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr --features wasm-engine -- registry publish \
@@ -773,42 +773,42 @@ fi
 
 echo -e "${GREEN}✅ Package published via challenge-response nonce flow${NC}"
 
-# ── Step 2.8: Seed client identity for AIS Path 1 lookup ─────────────────
+# ── Step 2.8: Seed client identity for Issuer Path 1 lookup ─────────────────
 
 echo ""
-echo "🪪 Seeding client package identity for AIS lookup..."
+echo "🪪 Seeding client package identity for Issuer lookup..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-CLIENT_MANUFACTURER="acme"
+CLIENT_PUBLISHER="acme"
 CLIENT_NAME="package-echo-client-app"
 CLIENT_VERSION="0.1.0"
-CLIENT_TYPE_STR="$CLIENT_MANUFACTURER:$CLIENT_NAME:$CLIENT_VERSION"
+CLIENT_TYPE_STR="$CLIENT_PUBLISHER:$CLIENT_NAME:$CLIENT_VERSION"
 
 sqlite3 "$ACTRIX_DB" << SQL
-INSERT OR IGNORE INTO mfr
+INSERT OR IGNORE INTO publisher
     (name, public_key, key_id, contact, status, created_at, updated_at, verified_at)
-VALUES ('$CLIENT_MANUFACTURER', '', '', 'examples@actrium.local', 'active', $NOW, $NOW, $NOW);
+VALUES ('$CLIENT_PUBLISHER', '', '', 'examples@actrium.local', 'active', $NOW, $NOW, $NOW);
 
-INSERT OR REPLACE INTO mfr_package
-    (mfr_id, manufacturer, name, version, type_str, target, manifest, signature, status, published_at, revoked_at)
-SELECT id, '$CLIENT_MANUFACTURER', '$CLIENT_NAME', '$CLIENT_VERSION', '$CLIENT_TYPE_STR', 'native', '', '', 'active', $NOW, NULL
-  FROM mfr
- WHERE name = '$CLIENT_MANUFACTURER';
+INSERT OR REPLACE INTO publisher_package
+    (publisher_id, publisher, name, version, type_str, target, manifest, signature, status, published_at, revoked_at)
+SELECT id, '$CLIENT_PUBLISHER', '$CLIENT_NAME', '$CLIENT_VERSION', '$CLIENT_TYPE_STR', 'native', '', '', 'active', $NOW, NULL
+  FROM publisher
+ WHERE name = '$CLIENT_PUBLISHER';
 SQL
 
 echo -e "${GREEN}✅ Client package identity seeded: $CLIENT_TYPE_STR${NC}"
 
-# ── Step 2.7: Seed client-guest MFR package metadata ────────────────────
+# ── Step 2.7: Seed client-guest publisher package metadata ────────────────────
 
 echo ""
-echo "🏷️  Seeding client-guest MFR package metadata..."
+echo "🏷️  Seeding client-guest publisher package metadata..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 python3 - \
     "$ACTRIX_DB" \
     "$CLIENT_GUEST_PACKAGE" \
     "$CLIENT_GUEST_PUBLIC_KEY" \
-    "$CLIENT_GUEST_MANUFACTURER" \
+    "$CLIENT_GUEST_PUBLISHER" \
     "$CLIENT_GUEST_NAME" \
     "$CLIENT_GUEST_VERSION" \
     "$CLIENT_GUEST_TARGET" <<'PY'
@@ -824,7 +824,7 @@ import zipfile
     db_path,
     package_path,
     public_key_path,
-    manufacturer,
+    publisher,
     name,
     version,
     target,
@@ -834,28 +834,28 @@ key_expires_at = now + 365 * 24 * 3600
 
 with open(public_key_path, "r", encoding="utf-8") as fh:
     public_key = json.load(fh)["public_key"]
-key_id = "mfr-" + hashlib.sha256(base64.b64decode(public_key)).hexdigest()[:16]
+key_id = "publisher-" + hashlib.sha256(base64.b64decode(public_key)).hexdigest()[:16]
 
 with zipfile.ZipFile(package_path, "r") as zf:
     manifest = zf.read("manifest.toml").decode("utf-8")
     signature = base64.b64encode(zf.read("manifest.sig")).decode("ascii")
 
-type_str = f"{manufacturer}:{name}:{version}"
+type_str = f"{publisher}:{name}:{version}"
 
 conn = sqlite3.connect(db_path)
 try:
     cur = conn.cursor()
     cur.execute(
         """
-        INSERT OR IGNORE INTO mfr
+        INSERT OR IGNORE INTO publisher
             (name, public_key, key_id, contact, status, created_at, updated_at, verified_at, key_expires_at)
         VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)
         """,
-        (manufacturer, public_key, key_id, "examples@actrium.local", now, now, now, key_expires_at),
+        (publisher, public_key, key_id, "examples@actrium.local", now, now, now, key_expires_at),
     )
     cur.execute(
         """
-        UPDATE mfr
+        UPDATE publisher
            SET public_key = ?,
                key_id = ?,
                status = 'active',
@@ -866,21 +866,21 @@ try:
                revoked_at = NULL
          WHERE name = ?
         """,
-        (public_key, key_id, now, now, key_expires_at, manufacturer),
+        (public_key, key_id, now, now, key_expires_at, publisher),
     )
-    cur.execute("SELECT id FROM mfr WHERE name = ?", (manufacturer,))
+    cur.execute("SELECT id FROM publisher WHERE name = ?", (publisher,))
     row = cur.fetchone()
     if row is None:
-        raise RuntimeError(f"failed to seed manufacturer {manufacturer}")
-    mfr_id = row[0]
+        raise RuntimeError(f"failed to seed publisher {publisher}")
+    publisher_id = row[0]
 
     cur.execute(
         """
-        INSERT INTO mfr_package
-            (mfr_id, manufacturer, name, version, type_str, target, manifest, signature, status, published_at, revoked_at)
+        INSERT INTO publisher_package
+            (publisher_id, publisher, name, version, type_str, target, manifest, signature, status, published_at, revoked_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, NULL)
-        ON CONFLICT(manufacturer, name, version, target) DO UPDATE SET
-            mfr_id = excluded.mfr_id,
+        ON CONFLICT(publisher, name, version, target) DO UPDATE SET
+            publisher_id = excluded.publisher_id,
             type_str = excluded.type_str,
             manifest = excluded.manifest,
             signature = excluded.signature,
@@ -888,16 +888,16 @@ try:
             published_at = excluded.published_at,
             revoked_at = NULL
         """,
-        (mfr_id, manufacturer, name, version, type_str, target, manifest, signature, now),
+        (publisher_id, publisher, name, version, type_str, target, manifest, signature, now),
     )
     conn.commit()
 finally:
     conn.close()
 
-print(f"Seeded MFR package metadata for {type_str}")
+print(f"Seeded publisher package metadata for {type_str}")
 PY
 
-echo -e "${GREEN}✅ MFR package metadata seeded for client-guest package${NC}"
+echo -e "${GREEN}✅ publisher package metadata seeded for client-guest package${NC}"
 
 # ── Step 3: Build host binaries ──────────────────────────────────────────
 
@@ -929,15 +929,15 @@ path = "$ACTR_PACKAGE"
 [signaling]
 url = "${ACTRIX_WS_URL}/signaling/ws"
 
-[ais_endpoint]
-url = "${ACTRIX_HTTP_URL}/ais"
+[issuer_endpoint]
+url = "${ACTRIX_HTTP_URL}/issuer"
 
 [deployment]
 realm_id = 1001
 
 [[trust]]
 kind = "registry"
-endpoint = "${ACTRIX_HTTP_URL}/ais"
+endpoint = "${ACTRIX_HTTP_URL}/issuer"
 
 [discovery]
 visible = true
@@ -969,7 +969,7 @@ fi
 (
     # `actr run` resolves `.actr/config.toml` from its working directory.
     # Run from the package project so a stale user-global keychain cannot
-    # override this demo's manufacturer signing key.
+    # override this demo's publisher signing key.
     cd "$ECHO_ACTR_DIR"
     RUST_LOG="${RUST_LOG:-info}" \
         "$ACTR_CLI_BIN" run -c "$SERVER_ACTR_CONFIG"
@@ -1186,8 +1186,8 @@ if { [ "$CLIENT_MODE" = "http" ] && { [ "$RECEIVED_REPLY" = "Echo: $TEST_INPUT" 
     echo "   1. $BACKEND artifact built from $ECHO_ACTR_DIR"
     echo "   2. signed .actr package created (key: $SIGNING_KEY)"
     echo "   3. actr registry publish → registered via challenge-response nonce"
-    echo "   4. Hyper (TRUST_MODE=production) fetched pubkey from MFR, verified .actr"
-    echo "   5. AIS issued credential (Path 1: published package lookup)"
+    echo "   4. Hyper (TRUST_MODE=production) fetched pubkey from publisher, verified .actr"
+    echo "   5. Issuer issued credential (Path 1: published package lookup)"
     echo "   6. Client ↔ server echo confirmed via WebRTC"
     echo ""
     echo "Client output:"

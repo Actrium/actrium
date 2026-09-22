@@ -101,10 +101,10 @@ check_dependencies() {
     echo ""
 }
 
-# ── mock-actrix (signaling + AIS server) ──
+# ── mock-actrix (signaling + Issuer server) ──
 
 build_or_find_mock_actrix() {
-    log_step "Checking mock-actrix (signaling + AIS server)..."
+    log_step "Checking mock-actrix (signaling + Issuer server)..."
     MOCK_ACTRIX_CMD=""
 
     if [ -x "$ACTR_ROOT/target/debug/mock-actrix" ]; then
@@ -175,7 +175,7 @@ start_mock_actrix() {
 # ── Realm setup ──
 
 setup_realm() {
-    log_step "Setting up realm (AIS identity)..."
+    log_step "Setting up realm (Issuer identity)..."
 
     # realm_id is hardcoded in config.ts files
     local REALM_ID=2368266035

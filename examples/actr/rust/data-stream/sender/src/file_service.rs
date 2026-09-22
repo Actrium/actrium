@@ -30,7 +30,7 @@ impl MyFileService {
 
         let mut receiver_id_cell = self.receiver_id.lock().await;
         let target_type = ActrType {
-            manufacturer: "acme".to_string(),
+            publisher: "acme".to_string(),
             name: "FileTransferService".to_string(),
             version: "1.0.0".to_string(),
         };

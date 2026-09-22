@@ -57,7 +57,7 @@ class ManifestTest {
         val pkgType = manifest.packageType()
 
         assertEquals(path.pathString, resolver.packageTypePath)
-        assertEquals("acme", pkgType.manufacturer)
+        assertEquals("acme", pkgType.publisher)
         assertEquals("test-actor", pkgType.name)
         assertEquals("1.0.0", pkgType.version)
     }
@@ -87,7 +87,7 @@ class ManifestTest {
 
         val pkgType = manifest.packageType()
 
-        assertEquals("acme", pkgType.manufacturer)
+        assertEquals("acme", pkgType.publisher)
         assertEquals("test-actor", pkgType.name)
         assertEquals("1.0.0", pkgType.version)
     }
@@ -100,7 +100,7 @@ class ManifestTest {
         val pkgType = resolveManifestPackageActrType(path, resolver)
 
         assertEquals(path.pathString, resolver.packageTypePath)
-        assertEquals("acme", pkgType.manufacturer)
+        assertEquals("acme", pkgType.publisher)
         assertEquals("test-actor", pkgType.name)
         assertEquals("1.0.0", pkgType.version)
     }
@@ -113,7 +113,7 @@ class ManifestTest {
         val pkgType = resolveManifestPackageActrType(file, resolver)
 
         assertEquals(file.absolutePath, resolver.packageTypePath)
-        assertEquals("acme", pkgType.manufacturer)
+        assertEquals("acme", pkgType.publisher)
         assertEquals("test-actor", pkgType.name)
     }
 
@@ -140,7 +140,7 @@ class ManifestTest {
 
         val depType = manifest.resolveDependency("EchoService")
 
-        assertEquals("acme", depType.manufacturer)
+        assertEquals("acme", depType.publisher)
         assertEquals("EchoService", depType.name)
         assertEquals("1.0.0", depType.version)
     }
@@ -152,7 +152,7 @@ class ManifestTest {
 
         val depType = manifest.resolveDependency("DataStreamServer")
 
-        assertEquals("acme", depType.manufacturer)
+        assertEquals("acme", depType.publisher)
         assertEquals("DataStreamServer", depType.name)
         assertEquals("2.0.1", depType.version)
     }
@@ -165,7 +165,7 @@ class ManifestTest {
         val depType = resolveManifestDependency(path, "EchoService", resolver)
 
         assertEquals(path.pathString to "EchoService", resolver.dependencyRequest)
-        assertEquals("acme", depType.manufacturer)
+        assertEquals("acme", depType.publisher)
         assertEquals("EchoService", depType.name)
         assertEquals("1.0.0", depType.version)
     }
@@ -178,7 +178,7 @@ class ManifestTest {
         val depType = resolveManifestDependency(file, "EchoService", resolver)
 
         assertEquals(file.absolutePath to "EchoService", resolver.dependencyRequest)
-        assertEquals("acme", depType.manufacturer)
+        assertEquals("acme", depType.publisher)
         assertEquals("EchoService", depType.name)
     }
 

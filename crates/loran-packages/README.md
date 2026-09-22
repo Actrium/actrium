@@ -4,10 +4,10 @@
 `actr-packages/1` protocol role. It maps opaque Actr URI Targets to immutable
 package release metadata and serves the corresponding `.actr` artifacts.
 
-The component is independent of authority discovery and MFR:
+The component is independent of authority discovery and publisher:
 
 - `/.well-known/actr` advertises its endpoint with `rel=packages`;
-- MFR manages publishers, keys, signing authority, and publication audit;
+- the Publisher Registry manages publishers, keys, signing authority, and publication audit;
 - `loran-packages` resolves Targets and distributes package bytes.
 
 The default Loran daemon mounts the component at `/actr/packages`. A deployment

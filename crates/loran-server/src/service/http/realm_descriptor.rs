@@ -148,8 +148,8 @@ async fn realm_descriptor(State(state): State<Arc<DescriptorState>>) -> Response
         authority: AuthorityDescriptor {
             issuer: format!("actr:realm:{}:authority", realm.id),
             audience: "actr.signaling",
-            registration: format!("{origin}/ais/register"),
-            signing_keys: format!("{origin}/ais/signing-pubkey"),
+            registration: format!("{origin}/issuer/register"),
+            signing_keys: format!("{origin}/issuer/signing-pubkey"),
         },
         providers: vec![provider],
         publisher_registry: format!("{origin}/registry"),

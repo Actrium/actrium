@@ -215,6 +215,8 @@ jobs:
           python-version: "3.11"
       - name: Test schema v1 migration
         run: python -m unittest scripts/loran/tests/test_migrate_schema_v1.py -v
+      - name: Test schema v2 migration
+        run: python -m unittest scripts/loran/tests/test_migrate_schema_v2.py -v
 
   rust:
     name: Rust

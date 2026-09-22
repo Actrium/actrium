@@ -5,7 +5,7 @@ use crate::commands::initialize::{self, InitContext};
 use crate::config::resolver::resolve_effective_cli_config;
 use crate::core::{Command, CommandContext, CommandResult, ComponentType};
 use crate::error::{ActrCliError, Result};
-use crate::template::{DEFAULT_MANUFACTURER, EchoRole, ProjectTemplateName};
+use crate::template::{DEFAULT_PUBLISHER, EchoRole, ProjectTemplateName};
 use async_trait::async_trait;
 use clap::Args;
 use std::io::{self, Write};
@@ -39,9 +39,9 @@ pub struct InitCommand {
     #[arg(long)]
     pub role: Option<EchoRole>,
 
-    /// Manufacturer for generated actor types (overrides CLI config default: acme)
+    /// Publisher for generated actor types (overrides CLI config default: acme)
     #[arg(long)]
-    manufacturer: Option<String>,
+    publisher: Option<String>,
 }
 
 #[async_trait]
@@ -80,30 +80,30 @@ impl InitCommand {
 
         let echo_role = self.resolve_template_role()?;
 
-        // Resolve effective manufacturer from CLI args and config
-        let manufacturer_owned = self.effective_manufacturer(&cli_config)?;
-        let manufacturer = manufacturer_owned.as_str();
+        // Resolve effective publisher from CLI args and config
+        let publisher_owned = self.effective_publisher(&cli_config)?;
+        let publisher = publisher_owned.as_str();
 
-        // role=both requires custom manufacturer to avoid conflicts with public 'acme' services
-        if matches!(echo_role, Some(EchoRole::Both)) && manufacturer == DEFAULT_MANUFACTURER {
+        // role=both requires custom publisher to avoid conflicts with public 'acme' services
+        if matches!(echo_role, Some(EchoRole::Both)) && publisher == DEFAULT_PUBLISHER {
             return Err(ActrCliError::InvalidProject(
-                "role=both requires a custom manufacturer to avoid conflicts with public 'acme' services.\n\
-                 Use: --manufacturer <your-org-name>".to_string(),
+                "role=both requires a custom publisher to avoid conflicts with public 'acme' services.\n\
+                 Use: --publisher <your-org-name>".to_string(),
             ));
         }
 
-        // role=service with default manufacturer will register under the default manufacturer,
+        // role=service with default publisher will register under the default publisher,
         // which may conflict with public services on the same signaling server.
         if matches!(echo_role, Some(EchoRole::Service))
             && self.template == ProjectTemplateName::Echo
-            && manufacturer == DEFAULT_MANUFACTURER
+            && publisher == DEFAULT_PUBLISHER
         {
             let svc_name = "EchoService";
             println!(
-                "⚠️  Warning: using default manufacturer 'acme' with role=service will register\n\
+                "⚠️  Warning: using default publisher 'acme' with role=service will register\n\
                  this service as 'acme:{svc_name}', which conflicts with the public {svc_name}\n\
                  on the same signaling server and may cause interference.\n\
-                 Consider using a custom manufacturer: --manufacturer <your-org-name>"
+                 Consider using a custom publisher: --publisher <your-org-name>"
             );
         }
 
@@ -114,8 +114,7 @@ impl InitCommand {
                     "role=both is only supported for the echo template".to_string(),
                 ));
             }
-            self.execute_both(&name, &signaling_url, manufacturer)
-                .await?;
+            self.execute_both(&name, &signaling_url, publisher).await?;
             return Ok(());
         }
 
@@ -160,7 +159,7 @@ impl InitCommand {
             template: self.template,
             is_current_dir: project_dir == Path::new("."),
             echo_role,
-            manufacturer: manufacturer.to_string(),
+            publisher: publisher.to_string(),
             is_both: false,
         };
 
@@ -239,27 +238,27 @@ impl InitCommand {
         }
     }
 
-    /// Resolve the effective manufacturer, applying precedence:
+    /// Resolve the effective publisher, applying precedence:
     /// CLI flag > CLI config default. Ensures the result is non-empty.
-    pub fn effective_manufacturer(
+    pub fn effective_publisher(
         &self,
         cli_config: &crate::config::resolver::EffectiveCliConfig,
     ) -> Result<String> {
-        let effective_manufacturer = cli_config.mfr.manufacturer.clone();
+        let effective_publisher = cli_config.publisher.name.clone();
 
-        let manufacturer_owned: String = match &self.manufacturer {
+        let publisher_owned: String = match &self.publisher {
             Some(m) => m.clone(),
-            None => effective_manufacturer,
+            None => effective_publisher,
         };
 
-        let manufacturer = manufacturer_owned.trim();
-        if manufacturer.is_empty() {
+        let publisher = publisher_owned.trim();
+        if publisher.is_empty() {
             return Err(ActrCliError::InvalidProject(
-                "Manufacturer cannot be empty".to_string(),
+                "Publisher cannot be empty".to_string(),
             ));
         }
 
-        Ok(manufacturer.to_string())
+        Ok(publisher.to_string())
     }
 
     fn resolve_project_info(&self, name: &str) -> Result<(PathBuf, String)> {
@@ -337,12 +336,7 @@ impl InitCommand {
     }
 
     /// Execute initialization when role=both: generate echo-app and echo-service projects.
-    async fn execute_both(
-        &self,
-        name: &str,
-        signaling_url: &str,
-        manufacturer: &str,
-    ) -> Result<()> {
+    async fn execute_both(&self, name: &str, signaling_url: &str, publisher: &str) -> Result<()> {
         let (parent_dir, _ignored_project_name) = self.resolve_project_info(name)?;
 
         // Determine concrete subdirectories for app and service.
@@ -402,7 +396,7 @@ impl InitCommand {
             template: self.template,
             is_current_dir: false,
             echo_role: Some(EchoRole::App),
-            manufacturer: manufacturer.to_string(),
+            publisher: publisher.to_string(),
             is_both: true,
         };
 
@@ -414,7 +408,7 @@ impl InitCommand {
             template: self.template,
             is_current_dir: false,
             echo_role: Some(EchoRole::Service),
-            manufacturer: manufacturer.to_string(),
+            publisher: publisher.to_string(),
             is_both: true,
         };
 

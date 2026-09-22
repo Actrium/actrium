@@ -158,13 +158,13 @@ function verifiedPackageActrType(extracted) {
   } catch (error) {
     throw new Error('[SW] Verified package manifest JSON is invalid: ' + String(error));
   }
-  const fields = ['manufacturer', 'name', 'version'];
+  const fields = ['publisher', 'name', 'version'];
   for (const field of fields) {
     if (typeof manifest[field] !== 'string' || manifest[field].trim() === '') {
       throw new Error(`[SW] Verified package manifest is missing ${field}`);
     }
   }
-  return `${manifest.manufacturer}:${manifest.name}:${manifest.version}`;
+  return `${manifest.publisher}:${manifest.name}:${manifest.version}`;
 }
 
 let wasmReady = false;
@@ -228,7 +228,7 @@ function emitSwLog(level, message, detail) {
 // (kebab-case, from serde with `#[serde(rename = "...")]`).
 //
 // sw-host's `actr_id_to_js` emits `{ realm: { realmId }, serialNumber,
-// type: { manufacturer, name, version } }` (camelCase, the WBG guest's
+// type: { publisher, name, version } }` (camelCase, the WBG guest's
 // `serde-wasm-bindgen` shape).
 // actr-web-abi `ActrId` deserialises from `{ realm: { "realm-id" },
 // "serial-number", type: {...} }`.
@@ -329,7 +329,7 @@ function installActrHostGlobals() {
   };
 
   self.actrHostDiscover = async function (requestId, targetType) {
-    // `targetType` is `ActrType { manufacturer, name, version }` —
+    // `targetType` is `ActrType { publisher, name, version }` —
     // identical shape on both sides.
     try {
       const id = await wasm_bindgen.host_discover_async(requestId, targetType);

@@ -146,7 +146,7 @@ private struct DynamicWorkloadTests {
             credential: nil,
             mailbox: nil
         )
-        let actorType = ActrType(manufacturer: "acme", name: "EchoApp", version: "0.1.0")
+        let actorType = ActrType(publisher: "acme", name: "EchoApp", version: "0.1.0")
         let remoteConfigURL = try #require(URL(string: "https://example.com/actr.toml"))
         let mobileObserver = MobileLifecycleObserverProbe()
 
@@ -180,7 +180,7 @@ private struct DynamicWorkloadTests {
             credential: nil,
             mailbox: nil
         )
-        let actorType = ActrType(manufacturer: "acme", name: "EchoApp", version: "0.1.0")
+        let actorType = ActrType(publisher: "acme", name: "EchoApp", version: "0.1.0")
         let tempDir = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
@@ -219,8 +219,8 @@ private func writeLinkedWorkloadConfig(in tempDir: URL) throws -> URL {
     [signaling]
     url = "ws://127.0.0.1:8081/signaling/ws"
 
-    [ais_endpoint]
-    url = "http://127.0.0.1:8081/ais"
+    [issuer_endpoint]
+    url = "http://127.0.0.1:8081/issuer"
 
     [deployment]
     realm_id = 1

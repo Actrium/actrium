@@ -43,14 +43,14 @@ fn echo_guest_wasm() -> Vec<u8> {
 /// wasm backend) go through [`build_actr_package_with_target`].
 fn build_actr_package(
     binary: &[u8],
-    manufacturer: &str,
+    publisher: &str,
     name: &str,
     version: &str,
     signing_key: &SigningKey,
 ) -> Vec<u8> {
     build_actr_package_with_target(
         binary,
-        manufacturer,
+        publisher,
         name,
         version,
         "wasm32-wasip1",
@@ -60,7 +60,7 @@ fn build_actr_package(
 
 fn build_actr_package_with_target(
     binary: &[u8],
-    manufacturer: &str,
+    publisher: &str,
     name: &str,
     version: &str,
     target: &str,
@@ -75,7 +75,7 @@ fn build_actr_package_with_target(
         None
     };
     let manifest = actr_pack::PackageManifest {
-        manufacturer: manufacturer.to_string(),
+        publisher: publisher.to_string(),
         name: name.to_string(),
         version: version.to_string(),
         binary: actr_pack::BinaryEntry {
@@ -118,7 +118,7 @@ async fn actr_package_roundtrip() {
     let verifying_key = signing_key.verifying_key();
 
     let wasm = minimal_wasm();
-    let package = build_actr_package(&wasm, "test-mfr", "MyActor", "1.2.3", &signing_key);
+    let package = build_actr_package(&wasm, "test-publisher", "MyActor", "1.2.3", &signing_key);
 
     let dir = TempDir::new().unwrap();
     let hyper = Hyper::new(dev_config_with_key(&dir, &verifying_key))
@@ -129,7 +129,7 @@ async fn actr_package_roundtrip() {
         .verify_package(&WorkloadPackage::new(package))
         .await
         .unwrap();
-    assert_eq!(verified.manifest.manufacturer, "test-mfr");
+    assert_eq!(verified.manifest.publisher, "test-publisher");
     assert_eq!(verified.manifest.name, "MyActor");
     assert_eq!(verified.manifest.version, "1.2.3");
 }
@@ -139,7 +139,7 @@ async fn actr_package_tampered_binary() {
     let signing_key = SigningKey::generate(&mut OsRng);
     let verifying_key = signing_key.verifying_key();
 
-    let package = build_actr_package(b"original wasm", "mfr", "A", "1.0", &signing_key);
+    let package = build_actr_package(b"original wasm", "publisher", "A", "1.0", &signing_key);
 
     // Tamper: find "original wasm" in the ZIP and modify it
     let mut tampered = package.clone();
@@ -164,7 +164,7 @@ async fn actr_package_wrong_key() {
     let wrong_key = SigningKey::generate(&mut OsRng);
     let wrong_verifying = wrong_key.verifying_key();
 
-    let package = build_actr_package(b"wasm", "mfr", "A", "1.0", &signing_key);
+    let package = build_actr_package(b"wasm", "publisher", "A", "1.0", &signing_key);
 
     let dir = TempDir::new().unwrap();
     let hyper = Hyper::new(dev_config_with_key(&dir, &wrong_verifying))
@@ -200,7 +200,7 @@ async fn load_workload_package_selects_wasm_backend() {
     // `wasm32-wasip2` — the target actr settled on in Phase 1.
     let package = build_actr_package_with_target(
         &echo_guest_wasm(),
-        "test-mfr",
+        "test-publisher",
         "Echo",
         "1.0.0",
         "wasm32-wasip2",
@@ -234,7 +234,7 @@ async fn load_workload_package_rejects_legacy_core_module() {
     // Build a legacy-style package: wasm target, no kind marker.
     let package = build_actr_package(
         &minimal_wasm(),
-        "legacy-mfr",
+        "legacy-publisher",
         "LegacyEcho",
         "0.1.0",
         &signing_key,
@@ -268,7 +268,7 @@ async fn load_workload_package_rejects_invalid_target() {
     let verifying_key = signing_key.verifying_key();
 
     let manifest = actr_pack::PackageManifest {
-        manufacturer: "test-mfr".to_string(),
+        publisher: "test-publisher".to_string(),
         name: "BrokenActor".to_string(),
         version: "1.0.0".to_string(),
         binary: actr_pack::BinaryEntry {

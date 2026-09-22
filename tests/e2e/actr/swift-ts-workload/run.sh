@@ -12,7 +12,7 @@ HTTP_PORT=8081
 ICE_PORT=3478
 REALM_ID=""
 ADMIN_PASSWORD="e2e-test-password"
-MANUFACTURER="${MANUFACTURER:-e2e.actrium.test}"
+PUBLISHER="${PUBLISHER:-e2e.actrium.test}"
 ACTRIX_BIN="${ACTRIX_BIN:-}"
 ACTR_CLI_MANIFEST="$REPO_ROOT/crates/actr-cli/Cargo.toml"
 ACTRIX_CONFIG_TEMPLATE="$SCRIPT_DIR/../package-runtime-echo/config/actrix.toml"
@@ -36,15 +36,15 @@ TMP_SERVICE_DIR="$TMP_SERVICE_ROOT/swift-ts-workload-actr-$RANDOM"
 TMP_APP_DIR="$TMP_SERVICE_ROOT/swift-ts-workload-app-$RANDOM"
 ACTRIX_CONFIG_PATH="$RUN_DIR/actrix.toml"
 SERVER_RUNTIME_PATH="$RUN_DIR/server-runtime.toml"
-SERVICE_KEYCHAIN="$TMP_SERVICE_DIR/packaging/keys/mfr.keychain.json"
+SERVICE_KEYCHAIN="$TMP_SERVICE_DIR/packaging/keys/publisher.keychain.json"
 SERVICE_PUBLIC_KEY="$TMP_SERVICE_DIR/public-key.json"
-PROVISIONED_KEYCHAIN="$RUN_DIR/mfr.keychain.json"
-PROVISIONED_PUBLIC_KEY="$RUN_DIR/mfr-public-key.json"
+PROVISIONED_KEYCHAIN="$RUN_DIR/publisher.keychain.json"
+PROVISIONED_PUBLIC_KEY="$RUN_DIR/publisher-public-key.json"
 SWIFTTSAPP_ACTRIX_CONFIG="$TMP_APP_DIR/actr.toml"
 HOST_TARGET="$(rustc -vV | awk '/host:/ {print $2}')"
 SWIFTTSAPP_PACKAGE_MANIFEST="$RUN_DIR/swift_ts_workload_app-package-manifest.toml"
 SWIFTTSAPP_MARKER_BINARY="$RUN_DIR/swift_ts_workload_app-linked-identity.bin"
-SWIFTTSAPP_PACKAGE="$DIST_DIR/${MANUFACTURER}-SwiftTsWorkloadApp-0.1.0-${HOST_TARGET}.actr"
+SWIFTTSAPP_PACKAGE="$DIST_DIR/${PUBLISHER}-SwiftTsWorkloadApp-0.1.0-${HOST_TARGET}.actr"
 APP_STDOUT_LOG="$LOG_DIR/app.stdout.log"
 APP_STDERR_LOG="$LOG_DIR/app.stderr.log"
 APP_BUNDLE_ID="io.actrium.SwiftTsWorkloadApp"
@@ -264,7 +264,7 @@ capture_diagnostics() {
             sqlite3 "$db_path" ".tables" 2>/dev/null || true
             echo "--- Service registry ---"
             sqlite3 "$db_path" \
-                "SELECT actor_realm_id, actor_manufacturer, actor_device_name, service_name, status, last_heartbeat_at FROM service_registry;" \
+                "SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status, last_heartbeat_at FROM service_registry;" \
                 2>/dev/null || true
         } >"$diag_dir/signaling-cache.txt" 2>/dev/null || true
     fi
@@ -450,13 +450,13 @@ write_project_keychain_config() {
     local keychain_path="$2"
     mkdir -p "$project_dir/.actr"
     cat >"$project_dir/.actr/config.toml" <<EOF
-[mfr]
-manufacturer = "$MANUFACTURER"
+[publisher]
+publisher = "$PUBLISHER"
 keychain = "$keychain_path"
 
 [network]
 signaling_url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
-ais_endpoint = "http://127.0.0.1:${HTTP_PORT}/ais"
+issuer_endpoint = "http://127.0.0.1:${HTTP_PORT}/issuer"
 realm_id = $REALM_ID
 realm_secret = "$REALM_SECRET"
 EOF
@@ -485,7 +485,7 @@ message StartProbeResponse {
 EOF
 }
 
-provision_mfr_keychain() {
+provision_publisher_keychain() {
     provision_e2e_publisher
 }
 
@@ -503,7 +503,7 @@ scaffold_service_guest() {
             --role service \
             --project-name "DuplexEchoService" \
             --signaling "ws://127.0.0.1:${HTTP_PORT}/signaling/ws" \
-            --manufacturer "$MANUFACTURER" \
+            --publisher "$PUBLISHER" \
             "."
     )
 
@@ -527,10 +527,10 @@ scaffold_service_guest() {
     perl -i -pe 's{^name = "EchoService"$}{name = "DuplexEchoService"}' \
         "$TMP_SERVICE_DIR/manifest.toml"
 
-    # The echo template ACL rule "${MANUFACTURER}:echo-client-app" lacks a version,
-    # which the actr CLI rejects (expects manufacturer:name:version). Point the ACL
+    # The echo template ACL rule "${PUBLISHER}:echo-client-app" lacks a version,
+    # which the actr CLI rejects (expects publisher:name:version). Point the ACL
     # at the SwiftTsWorkloadApp client identity instead.
-    perl -i -pe "s{^type = \"${MANUFACTURER}:echo-client-app\"\$}{type = \"${MANUFACTURER}:SwiftTsWorkloadApp:0.1.0\"}" \
+    perl -i -pe "s{^type = \"${PUBLISHER}:echo-client-app\"\$}{type = \"${PUBLISHER}:SwiftTsWorkloadApp:0.1.0\"}" \
         "$TMP_SERVICE_DIR/manifest.toml"
 
     # The echo service template manifest has no [binary] section. The TS workload
@@ -570,7 +570,7 @@ EOF
 
 build_service_package() {
     section "📦 Building and publishing the TS server package"
-    SERVICE_PACKAGE="$DIST_DIR/${MANUFACTURER}-DuplexEchoService-${SERVICE_VERSION}-wasm32-wasip2.actr"
+    SERVICE_PACKAGE="$DIST_DIR/${PUBLISHER}-DuplexEchoService-${SERVICE_VERSION}-wasm32-wasip2.actr"
 
     (
         cd "$TMP_SERVICE_DIR"
@@ -603,7 +603,7 @@ edition = 1
 
 [package]
 name = "SwiftTsWorkloadApp"
-manufacturer = "${MANUFACTURER}"
+publisher = "${PUBLISHER}"
 version = "0.1.0"
 description = "Actrium SwiftTsWorkloadApp linked runtime identity marker"
 
@@ -637,7 +637,7 @@ render_swift_ts_workload_app_config() {
         "__HOST__=127.0.0.1" \
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
-        "__MANUFACTURER__=$MANUFACTURER" \
+        "__PUBLISHER__=$PUBLISHER" \
         "__REALM_ID__=$REALM_ID" \
         "__REALM_SECRET__=$REALM_SECRET"
     success "SwiftTsWorkloadApp actr.toml rendered"
@@ -718,7 +718,7 @@ scaffold_swift_ts_workload_app() {
             --template empty \
             --project-name "SwiftTsWorkloadApp" \
             --signaling "ws://127.0.0.1:${HTTP_PORT}/signaling/ws" \
-            --manufacturer "$MANUFACTURER" \
+            --publisher "$PUBLISHER" \
             "."
     )
 
@@ -728,7 +728,7 @@ scaffold_swift_ts_workload_app() {
 
     cp "$SCRIPT_DIR/manifest.toml" "$TMP_APP_DIR/manifest.toml"
     perl -i -pe \
-        "s{manufacturer = \"actrium\"}{manufacturer = \"${MANUFACTURER}\"}; s{actrium:}{${MANUFACTURER}:}g" \
+        "s{publisher = \"actrium\"}{publisher = \"${PUBLISHER}\"}; s{actrium:}{${PUBLISHER}:}g" \
         "$TMP_APP_DIR/manifest.toml"
     write_swift_ts_workload_app_project_yml
     rm -f "$TMP_APP_DIR/protos/local/local.proto"
@@ -865,8 +865,8 @@ path = "${SERVICE_PACKAGE}"
 [signaling]
 url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
 
-[ais_endpoint]
-url = "http://127.0.0.1:${HTTP_PORT}/ais"
+[issuer_endpoint]
+url = "http://127.0.0.1:${HTTP_PORT}/issuer"
 
 [deployment]
 realm_id = ${REALM_ID}
@@ -874,7 +874,7 @@ realm_secret = "${REALM_SECRET}"
 
 [[trust]]
 kind = "registry"
-endpoint = "http://127.0.0.1:${HTTP_PORT}/ais"
+endpoint = "http://127.0.0.1:${HTTP_PORT}/issuer"
 
 [discovery]
 visible = true
@@ -894,7 +894,7 @@ turn_urls = ["turn:127.0.0.1:${ICE_PORT}"]
 
 [[acl.rules]]
 permission = "allow"
-type = "${MANUFACTURER}:SwiftTsWorkloadApp:0.1.0"
+type = "${PUBLISHER}:SwiftTsWorkloadApp:0.1.0"
 EOF
 
     # Isolate hyper runtime state per-run so stale global state in
@@ -944,19 +944,19 @@ check_service_ready() {
 
     local db_path="$SQLITE_DIR/signaling_cache.db"
     # The TS workload is a large JS-on-wasm component. On cold macOS runners,
-    # Wasmtime component compilation happens before AIS/signaling registration
+    # Wasmtime component compilation happens before Issuer/signaling registration
     # and can take several minutes even with fast compile enabled.
     local timeout="${SERVICE_READY_TIMEOUT_SECONDS:-900}"
     if ! wait_for_service_registration \
         "$db_path" \
         "$REALM_ID" \
-        "$MANUFACTURER" \
+        "$PUBLISHER" \
         "DuplexEchoService" \
         "$timeout"; then
         echo "Service registrations observed before timeout:" >&2
         if [ -f "$db_path" ]; then
             sqlite3 "$db_path" \
-                "SELECT actor_realm_id, actor_manufacturer, actor_device_name, service_name, status, last_heartbeat_at FROM service_registry;" \
+                "SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status, last_heartbeat_at FROM service_registry;" \
                 >&2 2>/dev/null || true
         else
             echo "  signaling_cache.db not found at $db_path" >&2
@@ -966,12 +966,12 @@ check_service_ready() {
     fi
 
     sqlite3 "$db_path" "
-        SELECT actor_realm_id, actor_manufacturer, actor_device_name, service_name, status
+        SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status
         FROM service_registry
         WHERE actor_realm_id = ${REALM_ID}
-          AND actor_manufacturer = '${MANUFACTURER}'
+          AND actor_publisher = '${PUBLISHER}'
           AND actor_device_name = 'DuplexEchoService'
-          AND service_name = '${MANUFACTURER}:DuplexEchoService'
+          AND service_name = '${PUBLISHER}:DuplexEchoService'
           AND status = 'Available';
     " 2>/dev/null | while read -r line; do
         echo "  $line"
@@ -998,7 +998,7 @@ install_and_launch_app() {
     # may return before the app exits when detached from the terminal, so do not
     # treat the wrapper process as the app lifetime.
     SIMCTL_CHILD_ACTR_SWIFTTSAPP_AUTO_STREAM_COUNT=3 \
-    SIMCTL_CHILD_ACTR_SWIFTTSAPP_TARGET_TYPE="${MANUFACTURER}:DuplexEchoService:1.0.0" \
+    SIMCTL_CHILD_ACTR_SWIFTTSAPP_TARGET_TYPE="${PUBLISHER}:DuplexEchoService:1.0.0" \
     xcrun simctl launch \
         "${launch_args[@]}" \
         "$DEVICE_UDID" \
@@ -1066,9 +1066,9 @@ render_runtime_configs
 build_local_actr_cli
 start_actrix
 login_admin
-warmup_ais_key
+warmup_issuer_key
 ensure_realm
-provision_mfr_keychain
+provision_publisher_keychain
 
 # Phase 2: Build service package and publish identities
 scaffold_service_guest

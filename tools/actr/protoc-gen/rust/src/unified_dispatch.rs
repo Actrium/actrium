@@ -1052,7 +1052,7 @@ mod tests {
         let dispatcher_gen = UnifiedDispatcherGenerator::new(&spec, &owners, &reply_modes);
         let code = dispatcher_gen.generate(&methods).unwrap();
         assert!(
-            !code.contains("manufacturer"),
+            !code.contains("publisher"),
             "generated actr_dispatch.rs must not embed ActrType fields; got:\n{code}"
         );
         assert!(

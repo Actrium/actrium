@@ -13,8 +13,8 @@ const BASE_CONFIG_TOML: &str = r#"
 edition = 1
 [signaling]
 url = "ws://localhost:8081/signaling/ws"
-[ais_endpoint]
-url = "http://localhost:8081/ais"
+[issuer_endpoint]
+url = "http://localhost:8081/issuer"
 [deployment]
 realm_id = 1
 "#;
@@ -195,7 +195,7 @@ async fn node_from_config_file_accepts_top_level_registry_anchor() {
         &path,
         format!(
             "{BASE_CONFIG_TOML}[hyper]\ndata_dir = \"{data_dir}\"\n\
-                 [[trust]]\nkind = \"registry\"\nendpoint = \"http://localhost:8081/ais\"\n"
+                 [[trust]]\nkind = \"registry\"\nendpoint = \"http://localhost:8081/issuer\"\n"
         ),
     )
     .unwrap();
@@ -219,7 +219,7 @@ async fn node_from_config_file_allows_linked_actor_type_override() {
     .unwrap();
 
     let actor_type = actr_protocol::ActrType {
-        manufacturer: "acme".to_string(),
+        publisher: "acme".to_string(),
         name: "EchoApp".to_string(),
         version: "0.1.0".to_string(),
     };

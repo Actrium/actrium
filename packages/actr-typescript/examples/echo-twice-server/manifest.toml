@@ -3,7 +3,7 @@ exports = ["./proto/echo-twice.proto"]
 
 [package]
 name = "EchoTwiceService"
-manufacturer = "acme"
+publisher = "acme"
 description = "EchoTwice Server Example"
 
 [system.signaling]

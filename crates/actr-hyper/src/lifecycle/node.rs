@@ -6,11 +6,11 @@
 //! it indirectly through `Node<S>` → `ActrRef` transitions.
 
 use crate::actr_ref::{ActrRef, ActrRefShared};
-use crate::ais_client::AisClient;
 use crate::context::{
     BootstrapContextBuilder, RuntimeContext, build_alias_map, build_dependency_fingerprints,
 };
 use crate::inbound::{DataChunkRegistry, MediaFrameRegistry};
+use crate::issuer_client::IssuerClient;
 use crate::lifecycle::credential_manager::{
     CredentialManager, HardRebindHandles, RegistrationContext,
 };
@@ -2678,12 +2678,14 @@ impl Inner {
         )
     }
 
-    /// Attach a credential already issued by AIS so that `start()` can skip
+    /// Attach a credential already issued by Issuer so that `start()` can skip
     /// the signaling registration step.
     ///
     /// Called by the Hyper layer between `Hyper::register()` and `Hyper::start()`.
     pub fn set_preregistered_credential(&mut self, register_ok: register_response::RegisterOk) {
-        tracing::debug!("Pre-registered credential attached; start() will skip AIS registration");
+        tracing::debug!(
+            "Pre-registered credential attached; start() will skip Issuer registration"
+        );
         self.preregistered_credential = Some(register_ok);
     }
 
@@ -2746,30 +2748,30 @@ impl Inner {
         };
 
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 1. Obtain registration info (Hyper pre-injected or AIS HTTP)
+        // 1. Obtain registration info (Hyper pre-injected or Issuer HTTP)
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         let register_ok = if let Some(injected) = self.preregistered_credential.take() {
             tracing::info!(
-                "Using Hyper pre-injected registration credential; skipping AIS registration"
+                "Using Hyper pre-injected registration credential; skipping Issuer registration"
             );
             injected
         } else {
-            let ais_endpoint = &self.config.ais_endpoint;
+            let issuer_endpoint = &self.config.issuer_endpoint;
             tracing::info!(
-                ais_endpoint = %ais_endpoint,
-                "Registering actor with AIS via HTTP"
+                issuer_endpoint = %issuer_endpoint,
+                "Registering actor with Issuer via HTTP"
             );
-            let mut ais = AisClient::new(ais_endpoint);
+            let mut issuer = IssuerClient::new(issuer_endpoint);
             if let Some(ref secret) = self.config.realm_secret {
-                ais = ais.with_realm_secret(secret);
+                issuer = issuer.with_realm_secret(secret);
             }
-            let resp = ais
+            let resp = issuer
                 .register_linked(register_request.clone())
                 .await
-                .map_err(|e| ActrError::Unavailable(format!("AIS registration failed: {e}")))?;
+                .map_err(|e| ActrError::Unavailable(format!("Issuer registration failed: {e}")))?;
             match resp.result {
                 Some(register_response::Result::Success(ok)) => {
-                    tracing::info!("✅ AIS HTTP registration successful");
+                    tracing::info!("✅ Issuer HTTP registration successful");
                     ok
                 }
                 Some(register_response::Result::Error(error)) => {
@@ -2777,12 +2779,12 @@ impl Inner {
                         severity = 10,
                         error_category = "registration_error",
                         error_code = error.code,
-                        "❌ AIS registration failed: code={}, message={}",
+                        "❌ Issuer registration failed: code={}, message={}",
                         error.code,
                         error.message
                     );
                     return Err(ActrError::Unavailable(format!(
-                        "AIS registration rejected: {} (code: {})",
+                        "Issuer registration rejected: {} (code: {})",
                         error.message, error.code
                     )));
                 }
@@ -2790,10 +2792,10 @@ impl Inner {
                     tracing::error!(
                         severity = 10,
                         error_category = "registration_error",
-                        "❌ AIS registration response missing result"
+                        "❌ Issuer registration response missing result"
                     );
                     return Err(ActrError::Unavailable(
-                        "Invalid AIS registration response: missing result".to_string(),
+                        "Invalid Issuer registration response: missing result".to_string(),
                     ));
                 }
             }
@@ -2959,7 +2961,7 @@ impl Inner {
             credential_manager = CredentialManager::new(
                 session_state.clone(),
                 registration_context,
-                self.config.ais_endpoint.clone(),
+                self.config.issuer_endpoint.clone(),
                 self.config.realm_secret.clone(),
             );
 
@@ -3005,7 +3007,7 @@ impl Inner {
 
             // Fire `on_credential_renewed` at initial registration: the
             // credential is considered "renewed" from "nothing" to the
-            // value just issued by AIS. Subsequent renewals fire the
+            // value just issued by Issuer. Subsequent renewals fire the
             // same hook from `lifecycle::heartbeat`.
             if let Some(expires_at) = &register_ok.credential_expires_at {
                 if let Some(new_expiry) =
@@ -3188,7 +3190,7 @@ impl Inner {
                     )
                     .with_media_registry(media_frame_registry.clone()),
                 );
-                // AIS rotates the HMAC TURN credential together with the actor
+                // Issuer rotates the HMAC TURN credential together with the actor
                 // credential. Apply the new value to live v0.20 sessions via
                 // set_configuration(); every future Factory build also reads
                 // the same shared provider, so idle/new generations cannot
@@ -3526,25 +3528,25 @@ impl Inner {
                     "🔌 WebSocket direct-connect mode enabled, binding port {}",
                     listen_port
                 );
-                use crate::key_cache::AisKeyCache;
+                use crate::key_cache::IssuerKeyCache;
                 use crate::wire::websocket::gate::WsAuthContext;
                 use crate::wire::websocket::{WebSocketGate, WebSocketServer};
 
-                // Build AisKeyCache and seed it with the signing key from the registration response
-                let ais_key_cache = AisKeyCache::new();
+                // Build IssuerKeyCache and seed it with the signing key from the registration response
+                let issuer_key_cache = IssuerKeyCache::new();
                 if !register_ok.signing_pubkey.is_empty() {
-                    match ais_key_cache
+                    match issuer_key_cache
                         .seed(register_ok.signing_key_id, &register_ok.signing_pubkey)
                         .await
                     {
                         Ok(()) => tracing::info!(
                             key_id = register_ok.signing_key_id,
-                            "🔑 AisKeyCache seeded from RegisterOk"
+                            "🔑 IssuerKeyCache seeded from RegisterOk"
                         ),
                         Err(e) => tracing::warn!(
                             key_id = register_ok.signing_key_id,
                             error = ?e,
-                            "AisKeyCache seed failed; WebSocket will reject all inbound connections"
+                            "IssuerKeyCache seed failed; WebSocket will reject all inbound connections"
                         ),
                     }
                 } else {
@@ -3554,7 +3556,7 @@ impl Inner {
                 }
 
                 let auth_ctx = WsAuthContext {
-                    ais_key_cache,
+                    issuer_key_cache,
                     actor_id: actor_id.clone(),
                     credential_state: credential_state.clone(),
                     signaling_client: self.signaling_client.clone(),
@@ -3637,7 +3639,7 @@ impl Inner {
                 } else {
                     Duration::from_secs(30)
                 };
-                let ais_endpoint_for_heartbeat = self.config.ais_endpoint.clone();
+                let issuer_endpoint_for_heartbeat = self.config.issuer_endpoint.clone();
                 let realm_secret_for_heartbeat = self.config.realm_secret.clone();
                 let heartbeat_handle = tokio::spawn(crate::lifecycle::heartbeat::heartbeat_task(
                     shutdown,
@@ -3647,7 +3649,7 @@ impl Inner {
                     mailbox_for_heartbeat,
                     heartbeat_interval,
                     register_request_for_heartbeat,
-                    ais_endpoint_for_heartbeat,
+                    issuer_endpoint_for_heartbeat,
                     realm_secret_for_heartbeat,
                     Some(credential_manager_for_heartbeat),
                     node_hook_callback.clone(),

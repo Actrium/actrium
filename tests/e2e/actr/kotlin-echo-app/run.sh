@@ -23,7 +23,7 @@ source "$SCRIPT_DIR/../kotlin-lib/lib/kotlin-app.sh"
 HTTP_PORT=8081
 ICE_PORT=3478
 ADMIN_PASSWORD="e2e-test-password"
-MANUFACTURER="e2e.actrium.test"
+PUBLISHER="e2e.actrium.test"
 ACTR_CLI_MANIFEST="$REPO_ROOT/crates/actr-cli/Cargo.toml"
 ACTRIX_CONFIG_TEMPLATE="$REPO_ROOT/tests/e2e/actr/package-runtime-echo/config/actrix.toml"
 E2E_TARGET_ROOT="$REPO_ROOT/target/e2e-cache/kotlin-echo-app"
@@ -53,10 +53,10 @@ TMP_SERVICE_DIR="$TMP_SERVICE_ROOT/echo-actr-$RANDOM"
 TMP_APP_DIR="$RUN_DIR/app"
 ACTRIX_CONFIG_PATH="$RUN_DIR/actrix.toml"
 SERVER_RUNTIME_PATH="$RUN_DIR/server-runtime.toml"
-SERVICE_KEYCHAIN="$TMP_SERVICE_DIR/packaging/keys/mfr.keychain.json"
+SERVICE_KEYCHAIN="$TMP_SERVICE_DIR/packaging/keys/publisher.keychain.json"
 SERVICE_PUBLIC_KEY="$TMP_SERVICE_DIR/public-key.json"
-PROVISIONED_KEYCHAIN="$RUN_DIR/mfr.keychain.json"
-PROVISIONED_PUBLIC_KEY="$RUN_DIR/mfr-public-key.json"
+PROVISIONED_KEYCHAIN="$RUN_DIR/publisher.keychain.json"
+PROVISIONED_PUBLIC_KEY="$RUN_DIR/publisher-public-key.json"
 
 mkdir -p "$SQLITE_DIR" "$LOG_DIR" "$DIST_DIR" "$TMP_SERVICE_ROOT" "$TMP_APP_DIR" "$E2E_TARGET_ROOT"
 
@@ -79,7 +79,7 @@ scaffold_echo_service() {
     run_actr init \
         -l rust --template echo --role service \
         --signaling "ws://127.0.0.1:${HTTP_PORT}/signaling/ws" \
-        --manufacturer "$MANUFACTURER" \
+        --publisher "$PUBLISHER" \
         "$TMP_SERVICE_DIR"
 
     append_workspace_patch "$TMP_SERVICE_DIR/Cargo.toml"
@@ -106,16 +106,16 @@ scaffold_echo_service() {
 # Write the client manifest.toml — per actr-kt-migration §2.1 this file carries
 # ONLY [package] (app ActrType) + [dependencies]. Connection config + ACL live in
 # actr.toml (render_linked_client_config). [package].name is the app actor name so
-# resolveManifestPackageActrType yields ${MANUFACTURER}:${APP_ACTOR}:${APP_VERSION}.
+# resolveManifestPackageActrType yields ${PUBLISHER}:${APP_ACTOR}:${APP_VERSION}.
 write_client_manifest() {
     section "📝 Writing Kotlin client manifest.toml"
-    local acl_type="${MANUFACTURER}:${SERVICE_ACTOR}:${SERVICE_VERSION}"
+    local acl_type="${PUBLISHER}:${SERVICE_ACTOR}:${SERVICE_VERSION}"
     cat >"$TMP_APP_DIR/manifest.toml" <<EOF
 edition = 1
 
 [package]
 name = "${APP_ACTOR}"
-manufacturer = "${MANUFACTURER}"
+publisher = "${PUBLISHER}"
 version = "${APP_VERSION}"
 description = "Actrium Kotlin EchoApp e2e client"
 
@@ -166,8 +166,8 @@ HOST_TARGET="$(rustc -vV | awk '/host:/ {print $2}')"
 
 section "🧪 Kotlin EchoApp E2E"
 echo "Run directory:  $RUN_DIR"
-echo "Service actor:  ${MANUFACTURER}:${SERVICE_ACTOR}"
-echo "App actor:      ${MANUFACTURER}:${APP_ACTOR}:${APP_VERSION}"
+echo "Service actor:  ${PUBLISHER}:${SERVICE_ACTOR}"
+echo "App actor:      ${PUBLISHER}:${APP_ACTOR}:${APP_VERSION}"
 echo "Actrix binary:  $ACTRIX_BIN"
 echo "Host target:    $HOST_TARGET"
 
@@ -185,7 +185,7 @@ HOST_IP="$(detect_host_lan_ip)"
 export HOST_IP
 section "🌐 Host LAN IP for emulator connectivity: $HOST_IP"
 render_runtime_configs
-# The shared template's enable=25 = SIGNALING|AIS|SIGNER (STUN/TURN bits NOT set),
+# The shared template's enable=25 = SIGNALING|Issuer|SIGNER (STUN/TURN bits NOT set),
 # so actrix logs "ICE service (STUN/TURN) is disabled" and never starts the STUN/TURN server.
 # The Android emulator needs STUN+TURN (direct ICE can't cross the QEMU NAT), so
 # add ENABLE_STUN(2) + ENABLE_TURN(4) → enable=31.
@@ -200,9 +200,9 @@ build_local_actr_cli
 build_local_actrix
 start_actrix
 login_admin
-warmup_ais_key
+warmup_issuer_key
 ensure_realm
-provision_mfr_keychain
+provision_publisher_keychain
 
 # Phase 2: scaffold + publish the Rust EchoService + the client identity.
 scaffold_echo_service
@@ -210,14 +210,14 @@ build_and_publish_service "$TMP_SERVICE_DIR" "$SERVICE_ACTOR" "$SERVICE_VERSION"
 publish_app_package_identity "$APP_ACTOR" "$APP_VERSION"
 
 # Phase 3: start the EchoService host and wait for registration.
-run_server_host "$SERVICE_PACKAGE" "${MANUFACTURER}:${APP_ACTOR}:${APP_VERSION}" "kotlin-echo-server"
+run_server_host "$SERVICE_PACKAGE" "${PUBLISHER}:${APP_ACTOR}:${APP_VERSION}" "kotlin-echo-server"
 check_service_ready "$SERVICE_ACTOR"
 
 # Phase 4: scaffold the Kotlin client, wire local AAR, seed protos, gen.
 # No `actr deps install` is needed: codegen and the linked runtime both source
 # the alias mapping from manifest.toml.
 scaffold_kotlin_app echo "$APP_ACTOR" "$TMP_APP_DIR" \
-    "ws://10.0.2.2:${HTTP_PORT}/signaling/ws" "$MANUFACTURER"
+    "ws://10.0.2.2:${HTTP_PORT}/signaling/ws" "$PUBLISHER"
 write_client_manifest
 seed_client_protos
 substitute_local_aar "$TMP_APP_DIR"
@@ -225,7 +225,7 @@ run_kotlin_gen "$TMP_APP_DIR" "$APPLICATION_ID"
 
 # Phase 5: linked-mode client config + instrumentation test.
 render_linked_client_config "$TMP_APP_DIR" "$APPLICATION_ID" \
-    "${MANUFACTURER}:${SERVICE_ACTOR}:${SERVICE_VERSION}"
+    "${PUBLISHER}:${SERVICE_ACTOR}:${SERVICE_VERSION}"
 write_instrumentation_test
 
 # Phase 6: run the instrumentation test on the emulator.

@@ -44,7 +44,7 @@ The plugin supports several parameters passed via `--actrframework-swift_out`:
 | `ProtoSource`  | `Local`    | Global mode for all files (`Local` or `Remote`).             |
 | `LocalFile`    |            | Specify a single `.proto` file as the local service handler. |
 | `RemoteFiles`  |            | Colon-separated list of files to force as `Remote`.          |
-| `Manufacturer` | `acme`     | Manufacturer name used for `ActrType` in remote forwarding.  |
+| `Publisher` | `acme`     | Publisher name used for `ActrType` in remote forwarding.  |
 | `Visibility`   | `Internal` | Access modifier for generated code (`Public` or `Internal`). |
 
 ### Smart Defaults

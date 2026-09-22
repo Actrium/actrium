@@ -801,7 +801,7 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
     config_path
 }
 
-fn write_ks_without_http_or_https_bind_config(dir: &Path, ice_port: u16) -> PathBuf {
+fn write_signer_without_http_or_https_bind_config(dir: &Path, ice_port: u16) -> PathBuf {
     let data_dir = dir.join("data");
     fs::create_dir_all(&data_dir).expect("create data dir");
     let config_path = dir.join("config.toml");
@@ -845,7 +845,7 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
     config_path
 }
 
-fn write_prod_ks_without_https_bind_config(dir: &Path, port: u16) -> PathBuf {
+fn write_prod_signer_without_https_bind_config(dir: &Path, port: u16) -> PathBuf {
     let data_dir = dir.join("data");
     fs::create_dir_all(&data_dir).expect("create data dir");
     let config_path = dir.join("config.toml");
@@ -895,13 +895,17 @@ password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9Cj
     config_path
 }
 
-fn write_ks_https_only_with_missing_tls_files_config(dir: &Path, port: u16, env: &str) -> PathBuf {
+fn write_signer_https_only_with_missing_tls_files_config(
+    dir: &Path,
+    port: u16,
+    env: &str,
+) -> PathBuf {
     let cert_path = dir.join("missing-cert.pem");
     let key_path = dir.join("missing-key.pem");
-    write_ks_https_only_config(dir, port, env, &cert_path, &key_path)
+    write_signer_https_only_config(dir, port, env, &cert_path, &key_path)
 }
 
-fn write_ks_https_only_config(
+fn write_signer_https_only_config(
     dir: &Path,
     port: u16,
     env: &str,
@@ -996,7 +1000,7 @@ async fn wait_for_health(url: &str, child: &mut Child, log_path: &Path) {
     // not the shared HTTP base. These process configs omit [bind.signer], so the
     // Signer uses the loopback default of HTTP port + 1. Derive that endpoint for
     // the gRPC readiness probe (the /signer/health HTTP route stays on base).
-    let ks_grpc_endpoint = if is_signer_health {
+    let signer_grpc_endpoint = if is_signer_health {
         let base = url.trim_end_matches("/signer/health");
         let http_port: u16 = base
             .rsplit(':')
@@ -1015,7 +1019,7 @@ async fn wait_for_health(url: &str, child: &mut Child, log_path: &Path) {
 
         if is_signer_health {
             let config = GrpcClientConfig {
-                endpoint: ks_grpc_endpoint
+                endpoint: signer_grpc_endpoint
                     .as_ref()
                     .expect("signer grpc endpoint should exist")
                     .clone(),
@@ -1263,7 +1267,7 @@ async fn wait_for_control_grpc(
     }
 }
 
-async fn wait_for_ks_grpc_client(
+async fn wait_for_signer_grpc_client(
     endpoint: &str,
     shared_key: &str,
     child: &mut Child,
@@ -1455,7 +1459,7 @@ async fn actrix_starts_serves_health_and_shuts_down() {
     wait_for_health(&health_url, &mut child, &log_path).await;
     // SGN-02: dial the dedicated Signer listener (HTTP port + 1 by default).
     let grpc_endpoint = format!("http://127.0.0.1:{}", port + 1);
-    let mut grpc_client = wait_for_ks_grpc_client(
+    let mut grpc_client = wait_for_signer_grpc_client(
         &grpc_endpoint,
         TEST_ACTRIX_SHARED_KEY,
         &mut child,
@@ -1470,7 +1474,7 @@ async fn actrix_starts_serves_health_and_shuts_down() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_ks_grpc_health_and_key_lifecycle() {
+async fn actrix_signer_grpc_health_and_key_lifecycle() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_minimal_config(tmp.path(), port);
@@ -1482,7 +1486,7 @@ async fn actrix_ks_grpc_health_and_key_lifecycle() {
     // SGN-02: dial the dedicated Signer listener (HTTP port + 1 by default).
     let grpc_endpoint = format!("http://127.0.0.1:{}", port + 1);
 
-    let mut grpc_client = wait_for_ks_grpc_client(
+    let mut grpc_client = wait_for_signer_grpc_client(
         &grpc_endpoint,
         TEST_ACTRIX_SHARED_KEY,
         &mut child,
@@ -1529,7 +1533,7 @@ async fn actrix_ks_grpc_health_and_key_lifecycle() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_ks_grpc_rejects_invalid_shared_secret() {
+async fn actrix_signer_grpc_rejects_invalid_shared_secret() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_minimal_config(tmp.path(), port);
@@ -1540,7 +1544,7 @@ async fn actrix_ks_grpc_rejects_invalid_shared_secret() {
     wait_for_health(&health_url, &mut child, &log_path).await;
     // SGN-02: dial the dedicated Signer listener (HTTP port + 1 by default).
     let grpc_endpoint = format!("http://127.0.0.1:{}", port + 1);
-    let _ready_client = wait_for_ks_grpc_client(
+    let _ready_client = wait_for_signer_grpc_client(
         &grpc_endpoint,
         TEST_ACTRIX_SHARED_KEY,
         &mut child,
@@ -1585,7 +1589,7 @@ async fn actrix_ks_grpc_rejects_invalid_shared_secret() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_ks_grpc_health_and_key_lifecycle_with_valid_kek() {
+async fn actrix_signer_grpc_health_and_key_lifecycle_with_valid_kek() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_minimal_config_with_signer_kek(tmp.path(), port, TEST_VALID_KEK_HEX);
@@ -1597,7 +1601,7 @@ async fn actrix_ks_grpc_health_and_key_lifecycle_with_valid_kek() {
     // SGN-02: dial the dedicated Signer listener (HTTP port + 1 by default).
     let grpc_endpoint = format!("http://127.0.0.1:{}", port + 1);
 
-    let mut grpc_client = wait_for_ks_grpc_client(
+    let mut grpc_client = wait_for_signer_grpc_client(
         &grpc_endpoint,
         TEST_ACTRIX_SHARED_KEY,
         &mut child,
@@ -1630,7 +1634,7 @@ async fn actrix_ks_grpc_health_and_key_lifecycle_with_valid_kek() {
 
 #[tokio::test]
 #[serial]
-async fn actrix_exits_when_ks_kek_is_invalid() {
+async fn actrix_exits_when_signer_kek_is_invalid() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_minimal_config_with_signer_kek(tmp.path(), port, "invalid-kek");
@@ -2306,7 +2310,7 @@ async fn actrix_exits_when_control_grpc_shared_secret_is_invalid() {
 async fn actrix_exits_when_http_service_has_no_http_or_https_bind_config() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let ice_port = choose_port();
-    let config_path = write_ks_without_http_or_https_bind_config(tmp.path(), ice_port);
+    let config_path = write_signer_without_http_or_https_bind_config(tmp.path(), ice_port);
     let log_path = tmp.path().join("actrix-no-http-bind.log");
     let mut child = spawn_actrix(&config_path, &log_path);
 
@@ -2340,7 +2344,7 @@ async fn actrix_exits_when_http_service_has_no_http_or_https_bind_config() {
 async fn actrix_exits_in_production_without_https_bind_config() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
-    let config_path = write_prod_ks_without_https_bind_config(tmp.path(), port);
+    let config_path = write_prod_signer_without_https_bind_config(tmp.path(), port);
     let log_path = tmp.path().join("actrix-prod-no-https.log");
     let mut child = spawn_actrix(&config_path, &log_path);
 
@@ -2374,7 +2378,8 @@ async fn actrix_exits_in_production_without_https_bind_config() {
 async fn actrix_exits_when_dev_https_fallback_tls_files_are_missing() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
-    let config_path = write_ks_https_only_with_missing_tls_files_config(tmp.path(), port, "dev");
+    let config_path =
+        write_signer_https_only_with_missing_tls_files_config(tmp.path(), port, "dev");
     let log_path = tmp.path().join("actrix-dev-https-missing-tls.log");
     let mut child = spawn_actrix(&config_path, &log_path);
 
@@ -2410,7 +2415,8 @@ async fn actrix_exits_when_dev_https_fallback_tls_files_are_missing() {
 async fn actrix_exits_when_prod_https_tls_files_are_missing() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
-    let config_path = write_ks_https_only_with_missing_tls_files_config(tmp.path(), port, "prod");
+    let config_path =
+        write_signer_https_only_with_missing_tls_files_config(tmp.path(), port, "prod");
     let log_path = tmp.path().join("actrix-prod-https-missing-tls.log");
     let mut child = spawn_actrix(&config_path, &log_path);
 
@@ -2447,7 +2453,8 @@ async fn actrix_serves_https_health_in_dev_when_only_https_bind_is_configured() 
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let (cert_path, key_path) = write_test_tls_cert_pair(tmp.path());
-    let config_path = write_ks_https_only_config(tmp.path(), port, "dev", &cert_path, &key_path);
+    let config_path =
+        write_signer_https_only_config(tmp.path(), port, "dev", &cert_path, &key_path);
     let log_path = tmp.path().join("actrix-dev-https.log");
     let mut child = spawn_actrix(&config_path, &log_path);
 
@@ -2476,7 +2483,8 @@ async fn actrix_serves_https_health_in_prod_with_valid_tls_config() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let (cert_path, key_path) = write_test_tls_cert_pair(tmp.path());
-    let config_path = write_ks_https_only_config(tmp.path(), port, "prod", &cert_path, &key_path);
+    let config_path =
+        write_signer_https_only_config(tmp.path(), port, "prod", &cert_path, &key_path);
     let log_path = tmp.path().join("actrix-prod-https.log");
     let mut child = spawn_actrix(&config_path, &log_path);
 

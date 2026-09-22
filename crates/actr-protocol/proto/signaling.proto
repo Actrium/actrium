@@ -27,7 +27,7 @@ message SignalingEnvelope {
   }
 }
 
-// Signing key lookup (actor queries AIS public key by key_id for offline verification)
+// Signing key lookup (actor queries Issuer public key by key_id for offline verification)
 message GetSigningKeyRequest  { required uint32 key_id = 1; }
 message GetSigningKeyResponse { required uint32 key_id = 1; required bytes pubkey = 2; }
 

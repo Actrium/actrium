@@ -6,17 +6,17 @@ path = "__PACKAGE_PATH__"
 [signaling]
 url = "ws://127.0.0.1:8081/signaling/ws"
 
-[ais_endpoint]
-url = "http://127.0.0.1:8081/ais"
+[issuer_endpoint]
+url = "http://127.0.0.1:8081/issuer"
 
 [deployment]
 realm_id = __REALM_ID__
 realm_secret = "__REALM_SECRET__"
 
 [[trust]]
-# RegistryTrust fetches MFR pubkeys at {endpoint}/mfr/{name}/verifying_key,
-# which lives at the actrix base (MfrService mounts /mfr), NOT under /ais.
-# [ais_endpoint] above keeps the /ais suffix because /register is mounted there.
+# RegistryTrust fetches publisher pubkeys at {endpoint}/publisher-registry/{name}/verifying_key,
+# which lives at the actrix base (PublisherRegistryService mounts /publisher), NOT under /issuer.
+# [issuer_endpoint] above keeps the /issuer suffix because /register is mounted there.
 kind = "registry"
 endpoint = "http://127.0.0.1:8081"
 

@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("\n✅ Manifest configuration successfully parsed and validated!");
-    println!("  (Runtime fields like signaling_url, realm, ais_endpoint are in actr.toml)");
+    println!("  (Runtime fields like signaling_url, realm, issuer_endpoint are in actr.toml)");
 
     Ok(())
 }

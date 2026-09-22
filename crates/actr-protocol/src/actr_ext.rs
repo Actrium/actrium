@@ -32,8 +32,8 @@ fn validate_actor_namespace(value: &str) -> Result<(), ActrIdError> {
     Ok(())
 }
 
-/// Validate a legacy `ActrType` manufacturer parsed from the
-/// `manufacturer:name:version` colon form.
+/// Validate a legacy `ActrType` publisher parsed from the
+/// `publisher:name:version` colon form.
 ///
 /// This is deliberately more permissive than [`validate_actor_namespace`]: DNS
 /// labels may start with a digit, and historical/linked-workload namespaces
@@ -42,7 +42,7 @@ fn validate_actor_namespace(value: &str) -> Result<(), ActrIdError> {
 /// still rejected, as is any character outside ASCII alphanumeric and `-_.`.
 /// Security-sensitive entry points use the strict [`ActrType::validate`]
 /// (Name-based) gate rather than this parser-level check.
-fn validate_legacy_manufacturer(value: &str) -> Result<(), ActrIdError> {
+fn validate_legacy_publisher(value: &str) -> Result<(), ActrIdError> {
     let mut chars = value.chars();
     let Some(first) = chars.next() else {
         return Err(ActrIdError::InvalidComponent(format!(
@@ -82,7 +82,7 @@ pub enum ActrIdError {
     #[error("Invalid component in actor identity: {0}")]
     InvalidComponent(String),
 
-    #[error("Invalid actor type format: '{0}'. Expected: <manufacturer>:<name>:<version>")]
+    #[error("Invalid actor type format: '{0}'. Expected: <publisher>:<name>:<version>")]
     InvalidTypeFormat(String),
 }
 
@@ -90,7 +90,7 @@ impl ActrType {
     /// Canonical program identity used by registries and `actr://` URLs:
     /// `publisher/program@version`.
     pub fn to_program_identity(&self) -> String {
-        format!("{}/{}@{}", self.manufacturer, self.name, self.version)
+        format!("{}/{}@{}", self.publisher, self.name, self.version)
     }
 
     /// Parse the canonical `publisher/program@version` registry identity.
@@ -142,7 +142,7 @@ impl ActrType {
         // server-side identity strings and logs.
         validate_version(version)?;
         Ok(Self {
-            manufacturer: publisher.to_string(),
+            publisher: publisher.to_string(),
             name: program.to_string(),
             version: version.to_string(),
         })
@@ -150,27 +150,27 @@ impl ActrType {
 
     /// Convert to stable string representation.
     ///
-    /// Always returns `"manufacturer:name:version"`.
+    /// Always returns `"publisher:name:version"`.
     pub fn to_string_repr(&self) -> String {
         debug_assert!(
             !self.version.is_empty(),
             "ActrType.version must be non-empty"
         );
 
-        format!("{}:{}:{}", self.manufacturer, self.name, self.version)
+        format!("{}:{}:{}", self.publisher, self.name, self.version)
     }
 
     /// Validate the identity fields against the protocol naming rules.
     ///
-    /// `manufacturer`/`name` reuse [`Name`]; `version` uses its own 1–64 byte
+    /// `publisher`/`name` reuse [`Name`]; `version` uses its own 1–64 byte
     /// ASCII allowlist (see [`validate_version`]). Because [`ActrType`] is a
     /// protobuf type with public fields, callers can construct invalid values
     /// without going through a parser — so every security-sensitive entry point
-    /// (package verification, registry lookup, AIS registration, storage
+    /// (package verification, registry lookup, Issuer registration, storage
     /// namespace derivation) must call `validate()` before trusting the identity.
     pub fn validate(&self) -> Result<(), ActrIdError> {
-        Name::new(self.manufacturer.clone())
-            .map_err(|e| ActrIdError::InvalidComponent(format!("Invalid manufacturer: {e}")))?;
+        Name::new(self.publisher.clone())
+            .map_err(|e| ActrIdError::InvalidComponent(format!("Invalid publisher: {e}")))?;
         Name::new(self.name.clone())
             .map_err(|e| ActrIdError::InvalidComponent(format!("Invalid type name: {e}")))?;
         validate_version(&self.version)
@@ -179,29 +179,29 @@ impl ActrType {
     /// Parse from string representation.
     ///
     /// Accepts:
-    /// - `"manufacturer:name:version"` — with version (required)
+    /// - `"publisher:name:version"` — with version (required)
     ///
     /// Returns `Err(ActrIdError::InvalidTypeFormat)` if version is absent,
     /// as `ActrType.version` is now a required field.
     pub fn from_string_repr(s: &str) -> Result<Self, ActrIdError> {
-        // Require exactly 3 segments: manufacturer, name, version
+        // Require exactly 3 segments: publisher, name, version
         let parts: Vec<&str> = s.splitn(4, ':').collect();
-        let (manufacturer, name, version) = match parts.as_slice() {
+        let (publisher, name, version) = match parts.as_slice() {
             [_, _] => {
                 return Err(ActrIdError::InvalidTypeFormat(format!(
-                    "{s} (version is required, expected <manufacturer>:<name>:<version>)"
+                    "{s} (version is required, expected <publisher>:<name>:<version>)"
                 )));
             }
             [m, n, v] => (*m, *n, *v),
             _ => return Err(ActrIdError::InvalidTypeFormat(s.to_string())),
         };
 
-        validate_legacy_manufacturer(manufacturer)?;
+        validate_legacy_publisher(publisher)?;
         Name::new(name.to_string())
             .map_err(|e| ActrIdError::InvalidComponent(format!("Invalid type name: {e}")))?;
         validate_version(version)?;
         Ok(ActrType {
-            manufacturer: manufacturer.to_string(),
+            publisher: publisher.to_string(),
             name: name.to_string(),
             version: version.to_string(),
         })
@@ -214,7 +214,7 @@ impl ActrType {
 /// must be ASCII alphanumeric; interior characters are limited to ASCII
 /// alphanumeric plus `.` `_` `-` `+`. This forbids the protocol separators
 /// `:` `@` `/` as well as `\`, whitespace, and control characters, so a valid
-/// version can never corrupt the `manufacturer:name:version` or
+/// version can never corrupt the `publisher:name:version` or
 /// `<serial>@<realm>/<type>` string forms.
 fn validate_version(version: &str) -> Result<(), ActrIdError> {
     if version.is_empty() {
@@ -308,7 +308,7 @@ mod tests {
             realm: Realm { realm_id: 101 },
             serial_number: 0x1a2b3c,
             r#type: ActrType {
-                manufacturer: "apps.example.com".to_string(),
+                publisher: "apps.example.com".to_string(),
                 name: "echo-service".to_string(),
                 version: "1.0.0".to_string(),
             },
@@ -320,7 +320,7 @@ mod tests {
         let parsed = ActrId::from_string_repr(&s).unwrap();
         assert_eq!(parsed.realm.realm_id, original.realm.realm_id);
         assert_eq!(parsed.serial_number, original.serial_number);
-        assert_eq!(parsed.r#type.manufacturer, original.r#type.manufacturer);
+        assert_eq!(parsed.r#type.publisher, original.r#type.publisher);
         assert_eq!(parsed.r#type.name, original.r#type.name);
         assert_eq!(parsed.r#type.version, original.r#type.version);
     }
@@ -356,7 +356,7 @@ mod tests {
             realm: Realm { realm_id: 7 },
             serial_number: 42,
             r#type: ActrType {
-                manufacturer: "local".to_string(),
+                publisher: "local".to_string(),
                 name: "scratchpad".to_string(),
                 version: "1".to_string(),
             },
@@ -403,7 +403,7 @@ mod tests {
     fn test_actr_type_roundtrip_with_version() {
         let s = "acme:echo:1.2.3";
         let ty = ActrType::from_string_repr(s).unwrap();
-        assert_eq!(ty.manufacturer, "acme");
+        assert_eq!(ty.publisher, "acme");
         assert_eq!(ty.name, "echo");
         assert_eq!(ty.version.as_str(), "1.2.3");
         assert_eq!(ty.to_string_repr(), s);
@@ -436,7 +436,7 @@ mod tests {
         // DNS labels may start with a digit; the legacy ActrType namespace
         // parser must not reintroduce the old "starts with a letter" rule.
         assert!(ActrType::from_string_repr("1acme:echo:1.0.0").is_ok());
-        // Invalid manufacturer
+        // Invalid publisher
         assert!(matches!(
             ActrType::from_string_repr("_acme:echo:1.0.0"),
             Err(ActrIdError::InvalidComponent(_))
@@ -452,9 +452,9 @@ mod tests {
         ));
     }
 
-    fn ty(manufacturer: &str, name: &str, version: &str) -> ActrType {
+    fn ty(publisher: &str, name: &str, version: &str) -> ActrType {
         ActrType {
-            manufacturer: manufacturer.to_string(),
+            publisher: publisher.to_string(),
             name: name.to_string(),
             version: version.to_string(),
         }
@@ -470,7 +470,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_rejects_bad_manufacturer_name() {
+    fn test_validate_rejects_bad_publisher_name() {
         assert!(ty("", "echo", "1.0.0").validate().is_err());
         assert!(ty("1acme", "echo", "1.0.0").validate().is_err()); // digit start (Name)
         assert!(ty("acme", "echo!", "1.0.0").validate().is_err());
@@ -516,7 +516,7 @@ mod tests {
             let s = t.to_string_repr();
             let parsed = ActrType::from_string_repr(&s)
                 .unwrap_or_else(|e| panic!("round-trip failed for {s}: {e}"));
-            assert_eq!(parsed.manufacturer, t.manufacturer);
+            assert_eq!(parsed.publisher, t.publisher);
             assert_eq!(parsed.name, t.name);
             assert_eq!(parsed.version, t.version);
         }

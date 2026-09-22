@@ -9,6 +9,6 @@ exports = []
 
 [package]
 name = "RustDriver"
-manufacturer = "polyglot"
+publisher = "polyglot"
 version = "0.1.0"
 description = "polyglot-echo Rust driver"

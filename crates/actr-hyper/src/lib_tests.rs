@@ -98,17 +98,17 @@ async fn verify_package_rejects_invalid_identity_from_custom_provider() {
     );
 }
 
-// ─── AIS integration tests (mockito mock server) ────────────────────────
+// ─── Issuer integration tests (mockito mock server) ────────────────────────
 
 /// Helper: build a [`VerifiedPackage`] for tests.
 ///
 /// Uses the canonical `actr_pack::PackageManifest` shape wrapped with empty
-/// manifest_raw / sig_raw placeholders — bootstrap tests don't touch AIS's
+/// manifest_raw / sig_raw placeholders — bootstrap tests don't touch Issuer's
 /// re-verification path, so those bytes are not inspected.
 fn fake_manifest() -> VerifiedPackage {
     VerifiedPackage {
         manifest: actr_pack::PackageManifest {
-            manufacturer: "test-mfr".to_string(),
+            publisher: "test-publisher".to_string(),
             name: "TestActor".to_string(),
             version: "0.1.0".to_string(),
             binary: actr_pack::BinaryEntry {
@@ -158,7 +158,7 @@ fn fake_register_response_bytes() -> Vec<u8> {
         realm: Realm { realm_id: 1 },
         serial_number: 42,
         r#type: ActrType {
-            manufacturer: "test-mfr".to_string(),
+            publisher: "test-publisher".to_string(),
             name: "TestActor".to_string(),
             version: "0.1.0".to_string(),
         },
@@ -212,7 +212,7 @@ fn linked_runtime_config(dir: &TempDir) -> actr_config::RuntimeConfig {
         package: actr_config::PackageInfo {
             name: "LinkedActor".to_string(),
             actr_type: actr_protocol::ActrType {
-                manufacturer: "test-mfr".to_string(),
+                publisher: "test-publisher".to_string(),
                 name: "LinkedActor".to_string(),
                 version: "0.1.0".to_string(),
             },
@@ -222,7 +222,7 @@ fn linked_runtime_config(dir: &TempDir) -> actr_config::RuntimeConfig {
         },
         signaling_url: url::Url::parse("ws://localhost:8081/signaling/ws").unwrap(),
         realm: Realm { realm_id: 7 },
-        ais_endpoint: "http://localhost:8081/ais".to_string(),
+        issuer_endpoint: "http://localhost:8081/issuer".to_string(),
         realm_secret: Some("test-realm-secret".to_string()),
         visible_in_discovery: true,
         acl: test_acl(),
@@ -254,7 +254,7 @@ fn linked_register_request_uses_linked_auth_mode() {
 
     assert_eq!(req.auth_mode, Some(RegisterAuthMode::Linked as i32));
     assert_eq!(req.manifest_raw, None);
-    assert_eq!(req.mfr_signature, None);
+    assert_eq!(req.publisher_signature, None);
     assert_eq!(req.ws_address.as_deref(), Some("ws://127.0.0.1:9100"));
 }
 
@@ -264,14 +264,14 @@ async fn with_actor_type_overrides_pending_runtime_metadata() {
     let hyper = Hyper::new(dev_config(&dir)).await.unwrap();
     let node = Node::from_hyper(hyper, linked_runtime_config(&dir)).with_actor_type(
         actr_protocol::ActrType {
-            manufacturer: "acme".into(),
+            publisher: "acme".into(),
             name: "UnifiedActor".into(),
             version: "1.0.0".into(),
         },
     );
 
     let actr_type = node.runtime_config().actr_type();
-    assert_eq!(actr_type.manufacturer, "acme");
+    assert_eq!(actr_type.publisher, "acme");
     assert_eq!(actr_type.name, "UnifiedActor");
     assert_eq!(actr_type.version, "1.0.0");
 }
@@ -281,7 +281,7 @@ async fn linked_manifest_identity_rejects_actor_type_override() {
     let dir = TempDir::new().unwrap();
     let hyper = Hyper::new(dev_config(&dir)).await.unwrap();
     let manifest_type = actr_protocol::ActrType {
-        manufacturer: "acme".into(),
+        publisher: "acme".into(),
         name: "ManifestActor".into(),
         version: "1.0.0".into(),
     };
@@ -303,7 +303,7 @@ async fn linked_manifest_identity_rejects_actor_type_override() {
         config_dir: dir.path().to_path_buf(),
     };
     let requested_type = actr_protocol::ActrType {
-        manufacturer: "other".into(),
+        publisher: "other".into(),
         name: "Override".into(),
         version: "9.9.9".into(),
     };
@@ -359,7 +359,7 @@ fn fake_dynclib_manifest() -> PackageManifest {
         }
     );
     PackageManifest {
-        manufacturer: "test-mfr".to_string(),
+        publisher: "test-publisher".to_string(),
         name: "DynActor".to_string(),
         version: "1.0.0".to_string(),
         binary: actr_pack::BinaryEntry {
@@ -467,7 +467,7 @@ fn ensure_dynclib_cache_path_handles_concurrent_creation() {
     );
 }
 
-/// Package bootstrap always authenticates with the MFR manifest and does
+/// Package bootstrap always authenticates with the publisher manifest and does
 /// not read or write legacy PSK keys.
 #[tokio::test]
 async fn bootstrap_package_uses_manifest_auth() {
@@ -511,15 +511,15 @@ async fn bootstrap_package_uses_manifest_auth() {
     );
 }
 
-/// AIS errors should propagate as HyperError::AisBootstrapFailed.
+/// Issuer errors should propagate as HyperError::IssuerBootstrapFailed.
 #[tokio::test]
-async fn bootstrap_ais_error_propagates() {
+async fn bootstrap_issuer_error_propagates() {
     use actr_protocol::{ErrorResponse, RegisterResponse, register_response};
 
     let error_resp = RegisterResponse {
         result: Some(register_response::Result::Error(ErrorResponse {
             code: 403,
-            message: "manufacturer not trusted".to_string(),
+            message: "publisher not trusted".to_string(),
         })),
     }
     .encode_to_vec();
@@ -543,23 +543,23 @@ async fn bootstrap_ais_error_propagates() {
         .await;
 
     assert!(
-        matches!(result, Err(HyperError::AisBootstrapFailed(_))),
-        "AIS errors should propagate as AisBootstrapFailed, got: {:?}",
+        matches!(result, Err(HyperError::IssuerBootstrapFailed(_))),
+        "Issuer errors should propagate as IssuerBootstrapFailed, got: {:?}",
         result
     );
 }
 
-/// A rejected AIS registration must not create the per-actor database
+/// A rejected Issuer registration must not create the per-actor database
 /// (issue #350 acceptance; repeated rejected identities must not accumulate
 /// empty databases). The store is opened only after a successful response.
 #[tokio::test]
-async fn bootstrap_ais_rejection_creates_no_database() {
+async fn bootstrap_issuer_rejection_creates_no_database() {
     use actr_protocol::{ErrorResponse, RegisterResponse, register_response};
 
     let error_resp = RegisterResponse {
         result: Some(register_response::Result::Error(ErrorResponse {
             code: 403,
-            message: "manufacturer not trusted".to_string(),
+            message: "publisher not trusted".to_string(),
         })),
     }
     .encode_to_vec();
@@ -581,7 +581,7 @@ async fn bootstrap_ais_rejection_creates_no_database() {
     let result = hyper
         .bootstrap_credential(&manifest, &server.url(), 1, test_service_spec(), test_acl())
         .await;
-    assert!(matches!(result, Err(HyperError::AisBootstrapFailed(_))));
+    assert!(matches!(result, Err(HyperError::IssuerBootstrapFailed(_))));
 
     // The would-be database path must not exist after a rejected registration.
     let namespace = storage_namespace_for(&manifest.manifest).unwrap();
@@ -605,7 +605,7 @@ fn runtime_config_with_ws(port: Option<u16>, host: Option<&str>) -> actr_config:
         package: actr_config::PackageInfo {
             name: "linked".into(),
             actr_type: ActrType {
-                manufacturer: "mfr".into(),
+                publisher: "publisher".into(),
                 name: "Linked".into(),
                 version: "1.0.0".into(),
             },
@@ -615,7 +615,7 @@ fn runtime_config_with_ws(port: Option<u16>, host: Option<&str>) -> actr_config:
         },
         signaling_url: url::Url::parse("ws://127.0.0.1:9/signaling/ws").unwrap(),
         realm: Realm { realm_id: 1 },
-        ais_endpoint: "http://127.0.0.1:9/ais".into(),
+        issuer_endpoint: "http://127.0.0.1:9/issuer".into(),
         realm_secret: None,
         visible_in_discovery: true,
         acl: None,
@@ -690,7 +690,7 @@ fn is_compatible_native_target_validates_host_triple() {
 #[test]
 fn detect_binary_kind_rejects_unsupported_target() {
     let manifest = actr_pack::PackageManifest {
-        manufacturer: "m".into(),
+        publisher: "m".into(),
         name: "n".into(),
         version: "1.0.0".into(),
         binary: actr_pack::BinaryEntry {
@@ -718,7 +718,7 @@ fn linked_dependency_metadata_loads_from_explicit_manifest_and_ignores_lock() {
         dir.path().join("manifest.toml"),
         r#"[package]
 name = "LinkedClient"
-manufacturer = "acme"
+publisher = "acme"
 version = "1.0.0"
 
 [dependencies]
@@ -751,7 +751,7 @@ echo = { actr_type = "acme:EchoActor:1.0.0", service = "EchoService:service_sema
     let mut duplicate_alias_manifest = manifest.clone();
     let mut duplicate = duplicate_alias_manifest.dependencies[0].clone();
     duplicate.actr_type = Some(ActrType {
-        manufacturer: "acme".into(),
+        publisher: "acme".into(),
         name: "OtherEchoActor".into(),
         version: "1.0.0".into(),
     });
@@ -768,7 +768,7 @@ echo = { actr_type = "acme:EchoActor:1.0.0", service = "EchoService:service_sema
         dir.path().join("manifest.toml"),
         r#"[package]
 name = "LinkedClient"
-manufacturer = "acme"
+publisher = "acme"
 version = "1.0.0"
 
 [dependencies]
@@ -790,7 +790,7 @@ echo = {}
         dir.path().join("manifest.toml"),
         r#"[package]
 name = "LinkedClient"
-manufacturer = "acme"
+publisher = "acme"
 version = "1.0.0"
 
 [dependencies]

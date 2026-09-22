@@ -1,7 +1,7 @@
 //! `actr:` URI parsing and normalization.
 //!
 //! The public URI identifies an authority and an opaque target. Runtime Actor
-//! identities (realm, manufacturer, type, version, and instance) are resolved
+//! identities (realm, publisher, type, version, and instance) are resolved
 //! later and are deliberately not encoded into fixed URI positions.
 
 use serde::{Deserialize, Serialize};

@@ -7,8 +7,8 @@
 //!   handles `PeerToSignaling(RegisterRequest)`,
 //!   `ActrToSignaling(Ping|RouteCandidatesRequest|Unregister|...)` and
 //!   `ActrRelay` forwarding.
-//! - HTTP AIS endpoints at `/ais/register` + `/register` (protobuf body).
-//! - HTTP MFR registry endpoints at `/ais/registry/publishers/{name}/verifying-key` +
+//! - HTTP Issuer endpoints at `/issuer/register` + `/register` (protobuf body).
+//! - HTTP Publisher Registry registry endpoints at `/issuer/registry/publishers/{name}/verifying-key` +
 //!   `/registry/publishers/{name}/verifying-key` for package verification.
 //! - HTTP publish endpoints at `/registry/packages/nonce` + `/registry/packages/publish` used by
 //!   `actr pkg publish`.
@@ -16,7 +16,7 @@
 //!   `register.sh` that used `sqlite3` directly on actrix.db).
 //!
 //! All state lives in memory and is shared between the WS and HTTP surfaces so
-//! an MFR that was registered via `POST /admin/publisher` is immediately visible to
+//! an Publisher Registry that was registered via `POST /admin/publisher` is immediately visible to
 //! `GET /registry/publishers/{name}/verifying-key`, etc.
 
 pub mod http;
@@ -31,9 +31,9 @@ use ed25519_dalek::{SigningKey, VerifyingKey};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
-pub use state::{MfrEntry, MockState, PackageEntry, RealmEntry};
+pub use state::{MockState, PackageEntry, PublisherEntry, RealmEntry};
 
-/// Mock actrix server with WebSocket signaling and HTTP AIS/MFR endpoints.
+/// Mock actrix server with WebSocket signaling and HTTP Issuer/Publisher Registry endpoints.
 ///
 /// WebSocket and HTTP share a single TCP listener (axum's WS upgrade handler)
 /// so callers only need one port.
@@ -69,14 +69,14 @@ impl MockActrixServer {
         let port = listener.local_addr()?.port();
 
         // Deterministic keys so tests can reproduce signatures.
-        let ais_signing_key = SigningKey::from_bytes(&[42u8; 32]);
-        let mfr_signing_key = SigningKey::from_bytes(&[43u8; 32]);
+        let issuer_signing_key = SigningKey::from_bytes(&[42u8; 32]);
+        let publisher_signing_key = SigningKey::from_bytes(&[43u8; 32]);
 
         let cancel = tokio_util::sync::CancellationToken::new();
         let state = Arc::new(MockState::new(
-            ais_signing_key,
+            issuer_signing_key,
             1,
-            mfr_signing_key,
+            publisher_signing_key,
             cancel.clone(),
         ));
 
@@ -134,9 +134,9 @@ impl MockActrixServer {
     }
 
     /// HTTP base URL (e.g. `http://127.0.0.1:PORT`). This is what callers pass
-    /// to `AisClient::new()` / `MfrCertCache::new()`; the server accepts both
-    /// `/register` and `/ais/register` so it also works when callers append
-    /// `/ais` to the endpoint.
+    /// to `IssuerClient::new()` / `PublisherCertCache::new()`; the server accepts both
+    /// `/register` and `/issuer/register` so it also works when callers append
+    /// `/issuer` to the endpoint.
     pub fn http_url(&self) -> String {
         format!("http://127.0.0.1:{}", self.port)
     }
@@ -158,21 +158,21 @@ impl MockActrixServer {
         self.port
     }
 
-    /// Deterministic AIS signing key (`SigningKey::from_bytes(&[42u8; 32])`).
+    /// Deterministic Issuer signing key (`SigningKey::from_bytes(&[42u8; 32])`).
     ///
     /// Used by tests that need to pre-verify credentials issued by the mock.
-    pub fn ais_signing_key(&self) -> &SigningKey {
-        self.state.ais_signing_key()
+    pub fn issuer_signing_key(&self) -> &SigningKey {
+        self.state.issuer_signing_key()
     }
 
-    /// Deterministic built-in MFR signing key
+    /// Deterministic built-in Publisher Registry signing key
     /// (`SigningKey::from_bytes(&[43u8; 32])`).
     ///
-    /// This is the key the mock will hand out as the default manufacturer's
-    /// verifying key when no MFR is explicitly registered via
-    /// [`add_mfr`](Self::add_mfr).
-    pub fn mfr_signing_key(&self) -> &SigningKey {
-        self.state.builtin_mfr_signing_key()
+    /// This is the key the mock will hand out as the default publisher's
+    /// verifying key when no Publisher Registry is explicitly registered via
+    /// [`add_publisher`](Self::add_publisher).
+    pub fn publisher_signing_key(&self) -> &SigningKey {
+        self.state.builtin_publisher_signing_key()
     }
 
     /// Register a realm. `name` is advisory; `id` must match `realm_id` in the
@@ -181,19 +181,21 @@ impl MockActrixServer {
         self.state.add_realm(id, name.to_string()).await;
     }
 
-    /// Register a manufacturer. The `verifying_key` will be returned by
+    /// Register a publisher. The `verifying_key` will be returned by
     /// `GET /registry/publishers/{name}/verifying-key`.
-    pub async fn add_mfr(&self, name: &str, verifying_key: VerifyingKey) {
-        self.state.add_mfr(name.to_string(), verifying_key).await;
+    pub async fn add_publisher(&self, name: &str, verifying_key: VerifyingKey) {
+        self.state
+            .add_publisher(name.to_string(), verifying_key)
+            .await;
     }
 
-    /// Register a package (manufacturer + name + version + target). Used by
+    /// Register a package (publisher + name + version + target). Used by
     /// tests that want to pre-seed the registry without going through
     /// `POST /registry/packages/publish`.
-    pub async fn add_package(&self, manufacturer: &str, name: &str, version: &str, target: &str) {
+    pub async fn add_package(&self, publisher: &str, name: &str, version: &str, target: &str) {
         self.state
             .add_package(PackageEntry {
-                manufacturer: manufacturer.to_string(),
+                publisher: publisher.to_string(),
                 name: name.to_string(),
                 version: version.to_string(),
                 target: target.to_string(),
@@ -350,7 +352,7 @@ fn build_router(state: Arc<MockState>) -> Router {
     use axum::routing::{get, post};
     use tower_http::cors::{Any, CorsLayer};
 
-    let ais_routes = Router::new()
+    let issuer_routes = Router::new()
         .route("/register", post(http::register_handler))
         .route("/renew", post(http::renew_handler))
         .route(
@@ -370,8 +372,8 @@ fn build_router(state: Arc<MockState>) -> Router {
         .route("/", get(signaling::ws_upgrade_handler))
         .route("/signaling/health", get(http::health_handler))
         .route("/health", get(http::health_handler))
-        // AIS endpoints at the root (for callers that use the root URL as
-        // their AIS endpoint base).
+        // Issuer endpoints at the root (for callers that use the root URL as
+        // their Issuer endpoint base).
         .route("/register", post(http::register_handler))
         .route("/renew", post(http::renew_handler))
         .route(
@@ -385,15 +387,18 @@ fn build_router(state: Arc<MockState>) -> Router {
         .route("/registry/packages/publish", post(http::publish_handler))
         // Admin seeding API (replaces register.sh sqlite3 INSERTs).
         .route("/admin/realms", post(http::admin_realm_handler))
-        .route("/admin/publisher", post(http::admin_mfr_handler))
+        .route(
+            "/admin/publisher",
+            post(http::admin_publisher_registry_handler),
+        )
         .route("/admin/packages", post(http::admin_package_handler))
         .route("/admin/state", get(http::admin_state_handler))
         .with_state(state)
-        // AIS routes mounted under `/ais/*` for callers whose configured AIS
-        // endpoint is e.g. `http://localhost:8081/ais`.
-        .merge(Router::new().nest("/ais", ais_routes))
+        // Issuer routes mounted under `/issuer/*` for callers whose configured Issuer
+        // endpoint is e.g. `http://localhost:8081/issuer`.
+        .merge(Router::new().nest("/issuer", issuer_routes))
         // Permissive CORS so browser-resident Service Workers (served from
-        // e.g. `http://localhost:5173`) can POST to AIS / MFR endpoints.
+        // e.g. `http://localhost:5173`) can POST to Issuer / Publisher Registry endpoints.
         // Dev-only; a production signaling stack would restrict origins.
         .layer(
             CorsLayer::new()

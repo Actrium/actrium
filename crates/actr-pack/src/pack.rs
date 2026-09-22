@@ -137,7 +137,7 @@ mod tests {
 
     fn test_manifest() -> PackageManifest {
         PackageManifest {
-            manufacturer: "test-mfr".to_string(),
+            publisher: "test-publisher".to_string(),
             name: "TestActor".to_string(),
             version: "1.0.0".to_string(),
             binary: BinaryEntry {
@@ -188,7 +188,7 @@ mod tests {
         };
         let package = pack(&opts).unwrap();
         let result = crate::verify::verify(&package, &verifying_key).unwrap();
-        assert_eq!(result.manifest.manufacturer, "test-mfr");
+        assert_eq!(result.manifest.publisher, "test-publisher");
         assert_eq!(result.manifest.name, "TestActor");
         assert_eq!(result.manifest.version, "1.0.0");
     }

@@ -8,7 +8,7 @@ const iceServers = import.meta.env.VITE_ACTRIX_STUN_URL
     : [];
 
 export const runtimeConfig: SwRuntimeConfig = {
-    ais_endpoint: `${actrixHttpUrl}/ais`,
+    issuer_endpoint: `${actrixHttpUrl}/issuer`,
     signaling_url:
         import.meta.env.VITE_ACTRIX_SIGNALING_URL ||
         `${actrixHttpUrl.replace(/^http/, 'ws')}/signaling/ws`,

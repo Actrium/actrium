@@ -33,7 +33,7 @@ exports = []
 
 [package]
 name = "test-service"
-manufacturer = "test-company"
+publisher = "test-company"
 description = "A test service"
 
 [dependencies]
@@ -50,9 +50,9 @@ test = "cargo test"
 
     // Verify basic fields
     assert_eq!(config.package.name, "test-service");
-    assert_eq!(config.package.actr_type.manufacturer, "test-company");
+    assert_eq!(config.package.actr_type.publisher, "test-company");
     assert_eq!(config.package.actr_type.name, "test-service");
-    // ManifestConfig does not carry runtime fields (realm, signaling_url, ais_endpoint)
+    // ManifestConfig does not carry runtime fields (realm, signaling_url, issuer_endpoint)
     // — those live in RuntimeConfig (parsed from actr.toml).
 
     // Verify scripts

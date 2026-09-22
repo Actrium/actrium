@@ -47,7 +47,7 @@ class UnifiedWorkload(
     private val selfId = ActrId(
         realm = Realm(realmId = realmId),
         serialNumber = System.currentTimeMillis().toULong(),
-        type = ActrType(manufacturer = "actro", name = "UnifiedActor", version = "")
+        type = ActrType(publisher = "actro", name = "UnifiedActor", version = "")
     )
 
     override suspend fun onStart(ctx: ContextBridge) {

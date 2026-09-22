@@ -53,7 +53,7 @@ Rust T3/T5 证据与仍需外部设备/系统环境完成的门禁，不能把�
    直接视为 offerer：
    - offerer/answerer 以 Actrix 返回给两端的 `RoleAssignment` 为准；
    - 无显式角色偏好时，Actrix 按
-     `(realm_id, serial_number, manufacturer, name)` 的逆序确定 offerer；
+     `(realm_id, serial_number, publisher, name)` 的逆序确定 offerer；
    - 角色定向用例必须通过测试 `ActrId` 或 `webrtc_role=answer` 偏好得到目标角色，
      不能在测试端伪造 `RoleAssignment`；
    - 只有专门的 glare 用例才允许双方同时发起。

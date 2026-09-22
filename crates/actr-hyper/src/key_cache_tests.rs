@@ -41,7 +41,7 @@ impl KeyFetcher for MockFetcher {
         self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         match &self.response {
             Some(r) => Ok(r.clone()),
-            None => Err(HyperError::AisBootstrapFailed("mock fetch error".into())),
+            None => Err(HyperError::IssuerBootstrapFailed("mock fetch error".into())),
         }
     }
 }
@@ -50,31 +50,31 @@ impl KeyFetcher for MockFetcher {
 
 #[tokio::test]
 async fn seed_valid_32_bytes_succeeds() {
-    let cache = AisKeyCache::new();
+    let cache = IssuerKeyCache::new();
     assert!(cache.seed(1, &verifying_key_bytes(1)).await.is_ok());
 }
 
 #[tokio::test]
 async fn seed_31_bytes_returns_error() {
-    let cache = AisKeyCache::new();
+    let cache = IssuerKeyCache::new();
     assert!(cache.seed(1, &[0u8; 31]).await.is_err());
 }
 
 #[tokio::test]
 async fn seed_33_bytes_returns_error() {
-    let cache = AisKeyCache::new();
+    let cache = IssuerKeyCache::new();
     assert!(cache.seed(1, &[0u8; 33]).await.is_err());
 }
 
 #[tokio::test]
 async fn seed_empty_returns_error() {
-    let cache = AisKeyCache::new();
+    let cache = IssuerKeyCache::new();
     assert!(cache.seed(1, &[]).await.is_err());
 }
 
 #[tokio::test]
 async fn seed_twice_same_key_id_is_idempotent() {
-    let cache = AisKeyCache::new();
+    let cache = IssuerKeyCache::new();
     let bytes = verifying_key_bytes(2);
     cache.seed(1, &bytes).await.unwrap();
     cache.seed(1, &bytes).await.unwrap(); // should not error
@@ -92,7 +92,7 @@ async fn seed_twice_same_key_id_is_idempotent() {
 
 #[tokio::test]
 async fn cache_hit_does_not_call_fetcher() {
-    let cache = AisKeyCache::new();
+    let cache = IssuerKeyCache::new();
     let bytes = verifying_key_bytes(3);
     cache.seed(1, &bytes).await.unwrap();
 
@@ -104,7 +104,7 @@ async fn cache_hit_does_not_call_fetcher() {
 
 #[tokio::test]
 async fn cache_hit_returns_correct_key() {
-    let cache = AisKeyCache::new();
+    let cache = IssuerKeyCache::new();
     let bytes = verifying_key_bytes(4);
     cache.seed(7, &bytes).await.unwrap();
 
@@ -117,7 +117,7 @@ async fn cache_hit_returns_correct_key() {
 
 #[tokio::test]
 async fn cache_miss_calls_fetcher_and_caches_result() {
-    let cache = AisKeyCache::new();
+    let cache = IssuerKeyCache::new();
     let bytes = verifying_key_bytes(5);
     let mock = MockFetcher::ok(5, bytes.to_vec());
 
@@ -134,7 +134,7 @@ async fn cache_miss_calls_fetcher_and_caches_result() {
 
 #[tokio::test]
 async fn cache_miss_fetcher_failure_returns_error() {
-    let cache = AisKeyCache::new();
+    let cache = IssuerKeyCache::new();
     let mock = MockFetcher::err();
     let result = cache.get_or_fetch(9, &mock).await;
     assert!(result.is_err());
@@ -143,7 +143,7 @@ async fn cache_miss_fetcher_failure_returns_error() {
 
 #[tokio::test]
 async fn cache_miss_fetcher_returns_31_byte_pubkey_returns_error() {
-    let cache = AisKeyCache::new();
+    let cache = IssuerKeyCache::new();
     let mock = MockFetcher::ok(3, vec![0u8; 31]);
     let result = cache.get_or_fetch(3, &mock).await;
     assert!(result.is_err(), "invalid pubkey length should return error");
@@ -151,7 +151,7 @@ async fn cache_miss_fetcher_returns_31_byte_pubkey_returns_error() {
 
 #[tokio::test]
 async fn different_key_ids_cached_independently() {
-    let cache = AisKeyCache::new();
+    let cache = IssuerKeyCache::new();
     cache.seed(1, &verifying_key_bytes(10)).await.unwrap();
     cache.seed(2, &verifying_key_bytes(20)).await.unwrap();
 

@@ -4,7 +4,7 @@
 //!
 //! # Authentication Flow
 //!
-//! 1. AIS generates a Realm/provider/audience/Actor scoped username, and uses
+//! 1. Issuer generates a Realm/provider/audience/Actor scoped username, and uses
 //!    `base64(HMAC-SHA1(turn_secret, username))` as the password.
 //! 2. The client authenticates with the TURN server using (username, password)
 //! 3. The TURN server computes MD5(username:realm:password) as the long-term credential key

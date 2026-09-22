@@ -5,7 +5,7 @@
 至少覆盖：
 
 1. Signer：并发签名、verifying-key 查询、SQLite/KEK 成本；
-2. AIS：新实例注册、稳定实例 renewal、拒绝路径；
+2. Issuer：新实例注册、稳定实例 renewal、拒绝路径；
 3. Signaling：连接/断线重连、presence、不同 frame 大小与消息率；
 4. STUN：Binding PPS 与畸形 datagram；
 5. TURN：allocation/permission、双向 relay、带宽、端口耗尽与 auth cache；

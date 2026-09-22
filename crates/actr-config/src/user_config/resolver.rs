@@ -2,8 +2,8 @@
 
 use super::loader::{global_config_path, load_cli_config, local_config_path};
 use super::schema::{
-    CacheConfig, CliConfig, CodegenConfig, InstallConfig, MfrConfig, NetworkConfig, StorageConfig,
-    UiConfig,
+    CacheConfig, CliConfig, CodegenConfig, InstallConfig, NetworkConfig, PublisherConfig,
+    StorageConfig, UiConfig,
 };
 use crate::error::Result;
 use std::path::PathBuf;
@@ -11,7 +11,7 @@ use std::path::PathBuf;
 /// Fully-resolved user config with all defaults applied.
 #[derive(Debug, Clone)]
 pub struct EffectiveCliConfig {
-    pub mfr: EffectiveMfrConfig,
+    pub publisher: EffectivePublisherConfig,
     pub codegen: EffectiveCodegenConfig,
     pub cache: EffectiveCacheConfig,
     pub ui: EffectiveUiConfig,
@@ -20,8 +20,8 @@ pub struct EffectiveCliConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct EffectiveMfrConfig {
-    pub manufacturer: String,
+pub struct EffectivePublisherConfig {
+    pub name: String,
     pub keychain: Option<String>,
 }
 
@@ -50,7 +50,7 @@ pub struct EffectiveUiConfig {
 #[derive(Debug, Clone)]
 pub struct EffectiveNetworkConfig {
     pub signaling_url: String,
-    pub ais_endpoint: String,
+    pub issuer_endpoint: String,
     pub realm_id: Option<u32>,
     pub realm_secret: Option<String>,
 }
@@ -86,9 +86,9 @@ fn merge_configs(base: Option<CliConfig>, overlay: Option<CliConfig>) -> CliConf
         (None, Some(o)) => o,
         (Some(b), Some(o)) => CliConfig {
             version: o.version.or(b.version),
-            mfr: MfrConfig {
-                manufacturer: o.mfr.manufacturer.or(b.mfr.manufacturer),
-                keychain: o.mfr.keychain.or(b.mfr.keychain),
+            publisher: PublisherConfig {
+                name: o.publisher.name.or(b.publisher.name),
+                keychain: o.publisher.keychain.or(b.publisher.keychain),
             },
             codegen: CodegenConfig {
                 language: o.codegen.language.or(b.codegen.language),
@@ -111,7 +111,7 @@ fn merge_configs(base: Option<CliConfig>, overlay: Option<CliConfig>) -> CliConf
             },
             network: NetworkConfig {
                 signaling_url: o.network.signaling_url.or(b.network.signaling_url),
-                ais_endpoint: o.network.ais_endpoint.or(b.network.ais_endpoint),
+                issuer_endpoint: o.network.issuer_endpoint.or(b.network.issuer_endpoint),
                 realm_id: o.network.realm_id.or(b.network.realm_id),
                 realm_secret: o.network.realm_secret.or(b.network.realm_secret),
             },
@@ -125,10 +125,10 @@ fn merge_configs(base: Option<CliConfig>, overlay: Option<CliConfig>) -> CliConf
 
 fn apply_defaults(cfg: CliConfig) -> EffectiveCliConfig {
     EffectiveCliConfig {
-        mfr: EffectiveMfrConfig {
-            manufacturer: cfg.mfr.manufacturer.unwrap_or_else(|| "acme".to_string()),
+        publisher: EffectivePublisherConfig {
+            name: cfg.publisher.name.unwrap_or_else(|| "acme".to_string()),
             keychain: cfg
-                .mfr
+                .publisher
                 .keychain
                 .map(|path| expand_tilde(path).to_string_lossy().to_string()),
         },
@@ -156,10 +156,10 @@ fn apply_defaults(cfg: CliConfig) -> EffectiveCliConfig {
                 .network
                 .signaling_url
                 .unwrap_or_else(|| "ws://localhost:8081/signaling/ws".to_string()),
-            ais_endpoint: cfg
+            issuer_endpoint: cfg
                 .network
-                .ais_endpoint
-                .unwrap_or_else(|| "http://localhost:8081/ais".to_string()),
+                .issuer_endpoint
+                .unwrap_or_else(|| "http://localhost:8081/issuer".to_string()),
             realm_id: cfg.network.realm_id.or(Some(1)),
             realm_secret: cfg.network.realm_secret,
         },

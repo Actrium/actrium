@@ -25,7 +25,7 @@ fn main() {
             "--plugin=protoc-gen-actrframework={}",
             plugin.display()
         ))
-        .arg("--actrframework_opt=manufacturer=actrium,LocalFiles=echo.proto")
+        .arg("--actrframework_opt=publisher=actrium,LocalFiles=echo.proto")
         .arg(format!("--actrframework_out={}", out_dir.display()))
         .arg(proto_file)
         .status()

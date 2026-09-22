@@ -508,7 +508,7 @@ fn empty_snapshot_pipeline(
     let manifest_path = project_root.join("manifest.toml");
     std::fs::write(
         &manifest_path,
-        "edition = 1\n[package]\nname = \"Empty\"\nmanufacturer = \"acme\"\nversion = \"1.0.0\"\n",
+        "edition = 1\n[package]\nname = \"Empty\"\npublisher = \"acme\"\nversion = \"1.0.0\"\n",
     )
     .unwrap();
     let config: Arc<dyn ConfigManager> =

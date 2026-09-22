@@ -54,8 +54,8 @@ pub struct RawPackageConfig {
     /// Package name (also used as the actor type name)
     pub name: String,
 
-    /// Manufacturer identifier (e.g., "acme")
-    pub manufacturer: String,
+    /// Publisher identifier (e.g., "acme")
+    pub publisher: String,
 
     /// Semantic version (e.g., "1.0.0"). Defaults to empty string if not specified.
     #[serde(default)]
@@ -123,7 +123,7 @@ impl RawPackageConfig {
         Ok(crate::config::PackageInfo {
             name: self.name.clone(),
             actr_type: actr_protocol::ActrType {
-                manufacturer: self.manufacturer.clone(),
+                publisher: self.publisher.clone(),
                 name: self.name,
                 version: self.version,
             },
@@ -145,7 +145,7 @@ pub enum RawDependency {
     /// echo = { actr_type = "acme:echo-service:1.0.0", service = "EchoService:abc1f3d" }
     /// ```
     Specified {
-        /// Full ActrType string: "manufacturer:name:version"
+        /// Full ActrType string: "publisher:name:version"
         #[serde(rename = "actr_type")]
         actr_type: String,
 
@@ -169,7 +169,7 @@ pub struct RawSystemConfig {
     pub signaling: RawSignalingConfig,
 
     #[serde(default)]
-    pub ais_endpoint: RawAisEndpointConfig,
+    pub issuer_endpoint: RawIssuerEndpointConfig,
 
     #[serde(default)]
     pub deployment: RawDeploymentConfig,
@@ -223,7 +223,7 @@ pub struct RawSignalingConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct RawAisEndpointConfig {
+pub struct RawIssuerEndpointConfig {
     #[serde(default)]
     pub url: Option<String>,
 }
@@ -233,13 +233,13 @@ pub struct RawDeploymentConfig {
     #[serde(default)]
     pub realm_id: Option<u32>,
 
-    /// Realm secret for AIS registration authentication
+    /// Realm secret for Issuer registration authentication
     #[serde(default)]
     pub realm_secret: Option<String>,
 
-    /// AIS (Actor Identity Service) HTTP endpoint, e.g. `"http://ais.example.com:8080"`.
+    /// Issuer HTTP endpoint, e.g. `"http://issuer.example.com:8080"`.
     #[serde(default)]
-    pub ais_endpoint: Option<String>,
+    pub issuer_endpoint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -369,8 +369,29 @@ impl FromStr for ManifestRawConfig {
     type Err = crate::error::ConfigError;
 
     fn from_str(s: &str) -> Result<Self> {
+        reject_legacy_publisher_key(s)?;
         toml::from_str(s).map_err(Into::into)
     }
+}
+
+const LEGACY_PUBLISHER_KEY: &str = "manufacturer";
+
+/// Rejects manifests that still use the retired `[package]` publisher key,
+/// pointing at the rename instead of reporting a generic missing field.
+fn reject_legacy_publisher_key(s: &str) -> Result<()> {
+    let Ok(value) = s.parse::<toml::Table>() else {
+        return Ok(());
+    };
+    let legacy = value
+        .get("package")
+        .and_then(toml::Value::as_table)
+        .is_some_and(|package| package.contains_key(LEGACY_PUBLISHER_KEY));
+    if legacy {
+        return Err(crate::error::ConfigError::ValidationError(format!(
+            "`package.{LEGACY_PUBLISHER_KEY}` is no longer supported; rename it to `package.publisher`"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -385,7 +406,7 @@ exports = ["proto/test.proto"]
 
 [package]
 name = "test-service"
-manufacturer = "acme"
+publisher = "acme"
 
 [dependencies]
 user-service = {}
@@ -406,7 +427,7 @@ run = "cargo run"
         let toml_content = r#"
 [package]
 name = "test"
-manufacturer = "acme"
+publisher = "acme"
 [dependencies]
 user-service = {}
 "#;
@@ -420,7 +441,7 @@ user-service = {}
         let toml_content = r#"
 [package]
 name = "test"
-manufacturer = "acme"
+publisher = "acme"
 [dependencies]
 shared = { actr_type = "acme:logging-service:1.0.0", service = "LoggingService:abc123", realm = 9999 }
 "#;
@@ -445,7 +466,7 @@ shared = { actr_type = "acme:logging-service:1.0.0", service = "LoggingService:a
         let toml_content = r#"
 [package]
 name = "test"
-manufacturer = "acme"
+publisher = "acme"
 [dependencies]
 shared = { actr_type = "acme:logging-service:1.0.0" }
 "#;
@@ -456,5 +477,18 @@ shared = { actr_type = "acme:logging-service:1.0.0" }
         } else {
             panic!("Expected Specified");
         }
+    }
+
+    #[test]
+    fn test_rejects_legacy_publisher_key() {
+        let toml_content = r#"
+[package]
+name = "echo"
+manufacturer = "acme"
+"#;
+        let error = ManifestRawConfig::from_str(toml_content).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("package.manufacturer"), "{message}");
+        assert!(message.contains("package.publisher"), "{message}");
     }
 }

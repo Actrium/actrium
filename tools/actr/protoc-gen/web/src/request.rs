@@ -20,7 +20,7 @@ pub struct WebCodegenRequest {
 
     // ── Package info ──
     pub package_name: String,
-    pub manufacturer: String,
+    pub publisher: String,
     pub actr_name: String,
     #[serde(default)]
     pub version: String,
@@ -34,9 +34,9 @@ pub struct WebCodegenRequest {
     pub realm_id: u32,
     pub visible_in_discovery: bool,
 
-    /// AIS (Actor Identity Service) HTTP endpoint
+    /// Issuer HTTP endpoint
     #[serde(default)]
-    pub ais_endpoint: String,
+    pub issuer_endpoint: String,
 
     /// Whether to force relay (TURN-only) for ICE transport
     #[serde(default)]
@@ -77,7 +77,7 @@ pub struct DependencyInfo {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ActrTypeInfo {
-    pub manufacturer: String,
+    pub publisher: String,
     pub name: String,
     #[serde(default)]
     pub version: String,
@@ -161,7 +161,7 @@ impl WebCodegenRequest {
         types
     }
 
-    /// Get the target actr type for peer discovery (manufacturer:name:version).
+    /// Get the target actr type for peer discovery (publisher:name:version).
     ///
     /// For an actor that imports a remote service, the target is the
     /// declared dependency. For an actor that only exports services, the
@@ -179,15 +179,15 @@ impl WebCodegenRequest {
                 .and_then(|d| {
                     d.actr_type
                         .as_ref()
-                        .map(|t| format!("{}:{}:{}", t.manufacturer, t.name, t.version))
+                        .map(|t| format!("{}:{}:{}", t.publisher, t.name, t.version))
                 })
                 .unwrap_or_default()
         }
     }
 
-    /// Get client actr type (this actor's type) — manufacturer:name:version
+    /// Get client actr type (this actor's type) — publisher:name:version
     pub fn client_actr_type(&self) -> String {
-        format!("{}:{}:{}", self.manufacturer, self.actr_name, self.version)
+        format!("{}:{}:{}", self.publisher, self.actr_name, self.version)
     }
 
     /// Get crate/WASM module name (snake_case)

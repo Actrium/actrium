@@ -6,8 +6,8 @@ path = "release/acme-EchoService-0.2.0-wasm32-unknown-unknown.actr"
 [signaling]
 url = "ws://localhost:8081/signaling/ws"
 
-[ais_endpoint]
-url = "http://localhost:8081/ais"
+[issuer_endpoint]
+url = "http://localhost:8081/issuer"
 
 [deployment]
 realm_id = 2368266035
@@ -37,4 +37,4 @@ host = "0.0.0.0"
 
 [[trust]]
 kind = "static"
-pubkey_b64 = "__MFR_PUBKEY_PLACEHOLDER__"
+pubkey_b64 = "__PUBLISHER_PUBKEY_PLACEHOLDER__"

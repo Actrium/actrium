@@ -16,7 +16,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use platform::config::ActrixConfig;
 use recording_pipeline::init_recording_pipeline;
 use service::{
-    AisService, ServiceContainer, ServiceManager, SignalingService, StunService, TurnService,
+    IssuerService, ServiceContainer, ServiceManager, SignalingService, StunService, TurnService,
 };
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
@@ -382,10 +382,10 @@ impl ApplicationLauncher {
             service_manager.add_service(ServiceContainer::signaling(signaling_service));
         }
 
-        if config.is_ais_enabled() {
-            platform::recording::info!("  - AIS Service (/ais)");
-            let ais_service = AisService::new(&config);
-            service_manager.add_service(ServiceContainer::ais(ais_service));
+        if config.is_issuer_enabled() {
+            platform::recording::info!("  - Issuer Service (/issuer)");
+            let issuer_service = IssuerService::new(&config);
+            service_manager.add_service(ServiceContainer::issuer(issuer_service));
         }
 
         if config.is_signer_enabled() {
@@ -431,9 +431,9 @@ impl ApplicationLauncher {
                 if config.is_signer_enabled() {
                     platform::recording::info!("  - {}/signer.v1.Signer/<Method>", http_url);
                 }
-                if config.is_ais_enabled() {
-                    platform::recording::info!("  - {}/ais/health", http_url);
-                    platform::recording::info!("  - {}/ais/register (POST protobuf)", http_url);
+                if config.is_issuer_enabled() {
+                    platform::recording::info!("  - {}/issuer/health", http_url);
+                    platform::recording::info!("  - {}/issuer/register (POST protobuf)", http_url);
                 }
                 if config.admin_ui_enabled() {
                     platform::recording::info!("  - {}/admin", http_url);

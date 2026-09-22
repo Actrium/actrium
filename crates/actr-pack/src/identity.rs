@@ -6,7 +6,7 @@
 //! ([`actr_protocol::ActrType::validate`]), and derives the opaque
 //! [`StorageNamespaceId`] used as the on-disk storage location.
 //!
-//! The raw `manufacturer`/`name`/`version` strings are **never** used as
+//! The raw `publisher`/`name`/`version` strings are **never** used as
 //! filesystem path components; the only path component derived from the identity
 //! is the lowercase-hex SHA-256 of a domain-separated, length-prefixed encoding.
 //! This makes the storage path immune to `..` traversal, absolute/drive/UNC
@@ -30,7 +30,7 @@ const NAMESPACE_DOMAIN: &[u8] = b"actr-storage-namespace\0v1";
 /// namespace source.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ValidatedActorIdentity {
-    manufacturer: String,
+    publisher: String,
     name: String,
     version: String,
 }
@@ -70,20 +70,20 @@ impl ValidatedActorIdentity {
     /// identity-validity rule across parsing, verification, and storage.
     pub fn from_manifest(manifest: &PackageManifest) -> Result<Self, actr_protocol::ActrIdError> {
         let actr_type = ActrType {
-            manufacturer: manifest.manufacturer.clone(),
+            publisher: manifest.publisher.clone(),
             name: manifest.name.clone(),
             version: manifest.version.clone(),
         };
         actr_type.validate()?;
         Ok(Self {
-            manufacturer: manifest.manufacturer.clone(),
+            publisher: manifest.publisher.clone(),
             name: manifest.name.clone(),
             version: manifest.version.clone(),
         })
     }
 
-    pub fn manufacturer(&self) -> &str {
-        &self.manufacturer
+    pub fn publisher(&self) -> &str {
+        &self.publisher
     }
     pub fn name(&self) -> &str {
         &self.name
@@ -102,7 +102,7 @@ impl ValidatedActorIdentity {
     pub fn namespace_id(&self) -> StorageNamespaceId {
         let mut hasher = Sha256::new();
         hasher.update(NAMESPACE_DOMAIN);
-        update_field(&mut hasher, 1, self.manufacturer.as_bytes());
+        update_field(&mut hasher, 1, self.publisher.as_bytes());
         update_field(&mut hasher, 2, self.name.as_bytes());
         update_field(&mut hasher, 3, self.version.as_bytes());
         StorageNamespaceId(hasher.finalize().into())
@@ -121,9 +121,9 @@ mod tests {
     use super::*;
     use crate::manifest::{BinaryEntry, ManifestMetadata, PackageManifest};
 
-    fn manifest(manufacturer: &str, name: &str, version: &str) -> PackageManifest {
+    fn manifest(publisher: &str, name: &str, version: &str) -> PackageManifest {
         PackageManifest {
-            manufacturer: manufacturer.to_string(),
+            publisher: publisher.to_string(),
             name: name.to_string(),
             version: version.to_string(),
             binary: BinaryEntry {
@@ -155,7 +155,7 @@ mod tests {
             ValidatedActorIdentity::from_manifest(&manifest("evilco", "Loader", "../../victim"))
                 .is_err()
         );
-        // digit-start manufacturer (Name rule)
+        // digit-start publisher (Name rule)
         assert!(
             ValidatedActorIdentity::from_manifest(&manifest("1acme", "echo", "1.0.0")).is_err()
         );

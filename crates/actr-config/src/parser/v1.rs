@@ -119,11 +119,11 @@ impl ParserV1 {
             .ok_or(ConfigError::MissingField("signaling.url"))?;
         let signaling_url = Url::parse(signaling_url_str).map_err(ConfigError::InvalidUrl)?;
 
-        let ais_endpoint = raw
-            .ais_endpoint
+        let issuer_endpoint = raw
+            .issuer_endpoint
             .url
             .as_ref()
-            .ok_or(ConfigError::MissingField("ais_endpoint.url"))
+            .ok_or(ConfigError::MissingField("issuer_endpoint.url"))
             .and_then(|url| Url::parse(url).map_err(ConfigError::InvalidUrl))?;
 
         let self_realm = Realm {
@@ -192,7 +192,7 @@ impl ParserV1 {
             package,
             signaling_url,
             realm: self_realm,
-            ais_endpoint: ais_endpoint.to_string(),
+            issuer_endpoint: issuer_endpoint.to_string(),
             realm_secret: raw.deployment.realm_secret,
             visible_in_discovery: raw.discovery.visible.unwrap_or(true),
             acl,
@@ -221,10 +221,10 @@ impl ParserV1 {
     }
 
     fn parse_package(&self, raw: &RawPackageConfig) -> Result<PackageInfo> {
-        Name::new(raw.manufacturer.clone()).map_err(|e| {
+        Name::new(raw.publisher.clone()).map_err(|e| {
             ConfigError::InvalidActrType(format!(
-                "Invalid manufacturer name '{}': {}",
-                raw.manufacturer, e
+                "Invalid publisher name '{}': {}",
+                raw.publisher, e
             ))
         })?;
 
@@ -233,7 +233,7 @@ impl ParserV1 {
         })?;
 
         let actr_type = ActrType {
-            manufacturer: raw.manufacturer.clone(),
+            publisher: raw.publisher.clone(),
             name: raw.name.clone(),
             version: raw.version.clone(),
         };
@@ -384,25 +384,25 @@ impl ParserV1 {
         })
     }
 
-    /// Parse an ActrType string: `"manufacturer:name:version"`.
+    /// Parse an ActrType string: `"publisher:name:version"`.
     ///
     /// Note: `version` is required.
     fn parse_actr_type(&self, s: &str) -> Result<ActrType> {
         let parts: Vec<&str> = s.splitn(4, ':').collect();
-        let (manufacturer, name, version) = match parts.as_slice() {
+        let (publisher, name, version) = match parts.as_slice() {
             [m, n, v] => (*m, *n, *v),
             _ => {
                 return Err(ConfigError::InvalidActrType(format!(
-                    "Invalid actor type '{}': expected 'manufacturer:name:version'",
+                    "Invalid actor type '{}': expected 'publisher:name:version'",
                     s
                 )));
             }
         };
 
-        Name::new(manufacturer.to_string()).map_err(|e| {
+        Name::new(publisher.to_string()).map_err(|e| {
             ConfigError::InvalidActrType(format!(
-                "Invalid manufacturer '{}' in '{}': {}",
-                manufacturer, s, e
+                "Invalid publisher '{}' in '{}': {}",
+                publisher, s, e
             ))
         })?;
         Name::new(name.to_string()).map_err(|e| {
@@ -416,7 +416,7 @@ impl ParserV1 {
         }
 
         Ok(ActrType {
-            manufacturer: manufacturer.to_string(),
+            publisher: publisher.to_string(),
             name: name.to_string(),
             version: version.to_string(),
         })
@@ -456,7 +456,7 @@ impl ParserV1 {
                 }
             };
 
-            // type (required): "manufacturer:name:version"
+            // type (required): "publisher:name:version"
             let type_str = rule_table
                 .get("type")
                 .and_then(|v| v.as_str())
@@ -677,7 +677,7 @@ exports = ["proto/test.proto"]
 
 [package]
 name = "test-service"
-manufacturer = "acme"
+publisher = "acme"
 
 [dependencies]
 user-service = {}
@@ -715,7 +715,7 @@ edition = 1
 
 [package]
 name = "test"
-manufacturer = "acme"
+publisher = "acme"
 version = "1.0.0"
 
 [dependencies]
@@ -736,7 +736,7 @@ shared = { actr_type = "acme:logging-service:1.0.0", service = "LoggingService:a
         assert_eq!(dep.actr_type.as_ref().unwrap().name, "logging-service");
         assert_eq!(dep.service.as_ref().unwrap().name, "LoggingService");
         assert_eq!(dep.service.as_ref().unwrap().fingerprint, "abc123");
-        // ManifestConfig does not carry runtime fields (realm, signaling_url, ais_endpoint)
+        // ManifestConfig does not carry runtime fields (realm, signaling_url, issuer_endpoint)
         // cross_realm_dependencies() is a ManifestConfig method based on dependency realm IDs
         assert!(!config.dependencies.is_empty());
     }
@@ -748,7 +748,7 @@ edition = 1
 
 [package]
 name = "test"
-manufacturer = "acme"
+publisher = "acme"
 "#;
 
         let tmpdir = TempDir::new().unwrap();
@@ -760,19 +760,19 @@ manufacturer = "acme"
         let config = parser.parse_manifest(raw).unwrap();
 
         assert_eq!(config.package.name, "test");
-        assert_eq!(config.package.actr_type.manufacturer, "acme");
-        // ManifestConfig does not carry runtime fields (realm, signaling_url, ais_endpoint)
+        assert_eq!(config.package.actr_type.publisher, "acme");
+        // ManifestConfig does not carry runtime fields (realm, signaling_url, issuer_endpoint)
     }
 
     #[test]
     fn test_validate_actr_type_name() {
-        // Test invalid manufacturer name (starts with number)
+        // Test invalid publisher name (starts with number)
         let toml_content = r#"
 edition = 1
 
 [package]
 name = "test"
-manufacturer = "1acme"
+publisher = "1acme"
 "#;
 
         let tmpdir = TempDir::new().unwrap();
@@ -797,7 +797,7 @@ edition = 1
 
 [package]
 name = "test-"
-manufacturer = "acme"
+publisher = "acme"
 "#;
 
         let tmpdir = TempDir::new().unwrap();
@@ -821,7 +821,7 @@ edition = 1
 
 [package]
 name = "test"
-manufacturer = "acme"
+publisher = "acme"
 version = "1.0.0"
 
 [binary]
@@ -867,7 +867,7 @@ edition = 1
 
 [package]
 name = "test"
-manufacturer = "acme"
+publisher = "acme"
 
 [build]
 tool = "cargo"
@@ -893,7 +893,7 @@ edition = 1
 
 [package]
 name = "test"
-manufacturer = "acme"
+publisher = "acme"
 "#;
 
         let tmpdir = TempDir::new().unwrap();
@@ -905,7 +905,7 @@ manufacturer = "acme"
             .unwrap();
         // ManifestConfig fields are present; no execution_mode field exists on ManifestConfig
         assert_eq!(config.package.name, "test");
-        assert_eq!(config.package.actr_type.manufacturer, "acme");
+        assert_eq!(config.package.actr_type.publisher, "acme");
     }
 
     #[test]
@@ -1042,8 +1042,8 @@ ice_udp_mux_port = 3478
 [signaling]
 url = "ws://localhost:8081/signaling/ws"
 
-[ais_endpoint]
-url = "http://localhost:8081/ais"
+[issuer_endpoint]
+url = "http://localhost:8081/issuer"
 
 [deployment]
 realm_id = 1
@@ -1056,7 +1056,7 @@ ca_cert_path = "certs/collector-ca.pem"
         let package = PackageInfo {
             name: "test".to_string(),
             actr_type: ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: "test".to_string(),
                 version: "1.0.0".to_string(),
             },
@@ -1079,7 +1079,7 @@ ca_cert_path = "certs/collector-ca.pem"
         PackageInfo {
             name: "test".to_string(),
             actr_type: ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: "test".to_string(),
                 version: "1.0.0".to_string(),
             },
@@ -1101,8 +1101,8 @@ ca_cert_path = "certs/collector-ca.pem"
 [signaling]
 url = "ws://localhost:8081/signaling/ws"
 
-[ais_endpoint]
-url = "http://localhost:8081/ais"
+[issuer_endpoint]
+url = "http://localhost:8081/issuer"
 
 [deployment]
 realm_id = 1
@@ -1167,7 +1167,7 @@ realm_id = 1
         // (An omitted/empty version is allowed — it contributes nothing unsafe.)
         for bad_version in ["../../../outside", "1/0", "a\\b", "1 0"] {
             let toml_content = format!(
-                "edition = 1\n\n[package]\nname = \"Echo\"\nmanufacturer = \"acme\"\nversion = \"{bad_version}\"\n"
+                "edition = 1\n\n[package]\nname = \"Echo\"\npublisher = \"acme\"\nversion = \"{bad_version}\"\n"
             );
             fs::write(&config_path, &toml_content).unwrap();
             let raw = ManifestRawConfig::from_file(&config_path).unwrap();

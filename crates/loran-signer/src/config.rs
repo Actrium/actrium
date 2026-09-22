@@ -56,7 +56,7 @@ pub struct SignerServiceConfig {
     /// KEK environment variable name.
     ///
     /// Reads the KEK from the named environment variable, which is safer than
-    /// an inline value. For example: kek_env = "ACTRIX_KS_KEK".
+    /// an inline value. For example: kek_env = "ACTRIX_SIGNER_KEK".
     #[serde(default)]
     pub kek_env: Option<String>,
 
@@ -171,13 +171,13 @@ mod tests {
     use crate::storage::{SqliteConfig, StorageBackend};
 
     #[test]
-    fn test_default_ks_service_config() {
+    fn test_default_signer_service_config() {
         let config = SignerServiceConfig::default();
         assert_eq!(config.storage.backend, StorageBackend::Sqlite);
     }
 
     #[test]
-    fn test_serialize_ks_service_config() {
+    fn test_serialize_signer_service_config() {
         let config = SignerServiceConfig {
             storage: StorageConfig {
                 backend: StorageBackend::Sqlite,

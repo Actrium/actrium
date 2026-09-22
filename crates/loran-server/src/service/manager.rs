@@ -7,7 +7,7 @@ use super::{HttpRouterService, IceService, http::build_control_router};
 use crate::service::container::ServiceContainer;
 use crate::service::grpc::build_signer_grpc_router;
 use crate::service::http::{
-    AisService, PublisherRegistryService, SignalingService, build_realm_descriptor_router,
+    IssuerService, PublisherRegistryService, SignalingService, build_realm_descriptor_router,
 };
 use crate::service::ice::{StunService, TurnService};
 use anyhow::Result;
@@ -24,7 +24,7 @@ mod resource_type {
     pub const STUN: i32 = 1;
     pub const TURN: i32 = 2;
     pub const SIGNALING: i32 = 3;
-    pub const AIS: i32 = 4;
+    pub const ISSUER: i32 = 4;
     pub const SIGNER: i32 = 5;
     pub const PUBLISHER_REGISTRY: i32 = 6;
 
@@ -34,7 +34,7 @@ mod resource_type {
             super::ServiceType::Stun => STUN,
             super::ServiceType::Turn => TURN,
             super::ServiceType::Signaling => SIGNALING,
-            super::ServiceType::Ais => AIS,
+            super::ServiceType::Issuer => ISSUER,
             super::ServiceType::Signer => SIGNER,
             super::ServiceType::PublisherRegistry => PUBLISHER_REGISTRY,
         }
@@ -160,7 +160,7 @@ impl ServiceManager {
         map.insert(resource_type::STUN, Arc::new(ServiceCounters::new()));
         map.insert(resource_type::TURN, Arc::new(ServiceCounters::new()));
         map.insert(resource_type::SIGNALING, Arc::new(ServiceCounters::new()));
-        map.insert(resource_type::AIS, Arc::new(ServiceCounters::new()));
+        map.insert(resource_type::ISSUER, Arc::new(ServiceCounters::new()));
         map.insert(resource_type::SIGNER, Arc::new(ServiceCounters::new()));
         Arc::new(map)
     }
@@ -194,9 +194,9 @@ impl ServiceManager {
                 self.config.is_signaling_enabled(),
             ),
             (
-                "AIS Service",
-                ServiceType::Ais,
-                self.config.is_ais_enabled(),
+                "Issuer Service",
+                ServiceType::Issuer,
+                self.config.is_issuer_enabled(),
             ),
             (
                 "Signer Service",
@@ -318,22 +318,27 @@ impl ServiceManager {
             }
         }
 
-        // Create the AIS state (shared issuer) before the control router so
-        // the control plane and the public /ais router hold the same issuer.
-        // On failure the /ais routes are simply not mounted, matching the
-        // previous behavior where AisService::build_router failed.
-        let ais_state = if self.config.is_ais_enabled() {
-            let ais_config = self.config.services.ais.clone();
-            match ais_config {
-                Some(ais_config) => {
-                    let counters = self.service_counters.get(&(resource_type::AIS)).cloned();
-                    match ais::create_ais_state(&ais_config, &self.config, cancel.clone(), counters)
-                        .await
+        // Create the Issuer state (shared issuer) before the control router so
+        // the control plane and the public /issuer router hold the same issuer.
+        // On failure the /issuer routes are simply not mounted, matching the
+        // previous behavior where IssuerService::build_router failed.
+        let issuer_state = if self.config.is_issuer_enabled() {
+            let issuer_config = self.config.services.issuer.clone();
+            match issuer_config {
+                Some(issuer_config) => {
+                    let counters = self.service_counters.get(&(resource_type::ISSUER)).cloned();
+                    match issuer::create_issuer_state(
+                        &issuer_config,
+                        &self.config,
+                        cancel.clone(),
+                        counters,
+                    )
+                    .await
                     {
                         Ok(state) => Some(state),
                         Err(e) => {
                             platform::recording::error!(
-                                "Failed to build router for service 'AIS Service': {:?}",
+                                "Failed to build router for service 'Issuer Service': {:?}",
                                 e
                             );
                             None
@@ -342,7 +347,7 @@ impl ServiceManager {
                 }
                 None => {
                     platform::recording::error!(
-                        "Failed to build router for service 'AIS Service': AIS config not found"
+                        "Failed to build router for service 'Issuer Service': Issuer config not found"
                     );
                     None
                 }
@@ -361,7 +366,7 @@ impl ServiceManager {
             self.jwt_secret.clone(),
             config_store,
             self.metrics_store.clone(),
-            ais_state.as_ref().map(|state| state.issuer.clone()),
+            issuer_state.as_ref().map(|state| state.issuer.clone()),
         )
         .await?;
         self.jwt_secret = Some(jwt_secret);
@@ -403,10 +408,10 @@ impl ServiceManager {
             }
         }
 
-        if self.config.is_ais_enabled() {
-            if let Some(state) = ais_state.clone() {
-                let mut svc = AisService::with_state(&self.config, state);
-                if let Some(ctr) = self.service_counters.get(&(resource_type::AIS)) {
+        if self.config.is_issuer_enabled() {
+            if let Some(state) = issuer_state.clone() {
+                let mut svc = IssuerService::with_state(&self.config, state);
+                if let Some(ctr) = self.service_counters.get(&(resource_type::ISSUER)) {
                     svc.set_counters(ctr.clone());
                 }
                 match svc.build_router().await {
@@ -714,8 +719,8 @@ impl ServiceManager {
         self.signer_bg_cancel = Some(signer_cancel.clone());
 
         // Build the rate-limited Signer gRPC router.
-        let ks_counters = self.service_counters.get(&(resource_type::SIGNER)).cloned();
-        let router = build_signer_grpc_router(&self.config, ks_counters, signer_cancel)
+        let signer_counters = self.service_counters.get(&(resource_type::SIGNER)).cloned();
+        let router = build_signer_grpc_router(&self.config, signer_counters, signer_cancel)
             .await
             .map_err(|e| {
                 anyhow::anyhow!("Failed to build gRPC router for service 'Signer Service': {e:?}")
@@ -1177,7 +1182,7 @@ impl ServiceManager {
         for service in &mut self.services {
             let result = match service {
                 ServiceContainer::Signaling(s) => s.on_stop().await.map_err(|e| e.to_string()),
-                ServiceContainer::Ais(s) => s.on_stop().await.map_err(|e| e.to_string()),
+                ServiceContainer::Issuer(s) => s.on_stop().await.map_err(|e| e.to_string()),
                 ServiceContainer::PublisherRegistry(s) => {
                     s.on_stop().await.map_err(|e| e.to_string())
                 }

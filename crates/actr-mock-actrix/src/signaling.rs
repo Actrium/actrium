@@ -95,7 +95,7 @@ async fn handle_connection(
     // client_id so relays can reach it.
     //
     // If the actor was *not* previously HTTP-registered, lazily create a
-    // registry stub. Production AIS bootstraps via HTTP first; integration
+    // registry stub. Production Issuer bootstraps via HTTP first; integration
     // tests skip that step and connect WS directly with a synthetic credential.
     // Auto-binding restores parity with the legacy mock-signaling broadcast
     // fallback without weakening the rebind diagnostic below.
@@ -109,7 +109,7 @@ async fn handle_connection(
                     // TD-004 defensive WARN: overwriting a non-empty client_id
                     // means a second WS is rebinding the same registry row;
                     // the previous session silently loses its relay binding.
-                    // Useful for spotting AIS credential reuse across tabs.
+                    // Useful for spotting Issuer credential reuse across tabs.
                     if !entry.client_id.is_empty() && entry.client_id != client_id {
                         rebound_from = Some(entry.client_id.clone());
                     }
@@ -284,7 +284,7 @@ async fn handle_peer_to_server(
 
             tracing::info!(
                 serial = register_ok.actr_id.serial_number,
-                manufacturer = req.actr_type.manufacturer,
+                publisher = req.actr_type.publisher,
                 name = req.actr_type.name,
                 "mock-actrix: registered actor (ws)"
             );
@@ -295,7 +295,7 @@ async fn handle_peer_to_server(
 /// Build a `RegisterOk` for the given `RegisterRequest`.
 ///
 /// This is the shared code path used by both the WS signaling handler and the
-/// `POST /register` HTTP handler (so `AisClient::register_with_manifest`
+/// `POST /register` HTTP handler (so `IssuerClient::register_with_manifest`
 /// and the WebSocket bootstrap always see identical responses).
 pub async fn build_register_ok(
     req: &RegisterRequest,
@@ -321,11 +321,11 @@ pub async fn build_register_ok(
         expires_at: chrono::Utc::now().timestamp() as u64 + 86400,
     };
     let claims_bytes = claims.encode_to_vec();
-    let signature = state.ais_signing_key().sign(&claims_bytes);
-    let verifying_key = state.ais_signing_key().verifying_key();
+    let signature = state.issuer_signing_key().sign(&claims_bytes);
+    let verifying_key = state.issuer_signing_key().verifying_key();
 
     let credential = AIdCredential {
-        key_id: state.ais_signing_key_id(),
+        key_id: state.issuer_signing_key_id(),
         claims: claims_bytes.into(),
         signature: signature.to_bytes().to_vec().into(),
     };
@@ -350,7 +350,7 @@ pub async fn build_register_ok(
         }),
         signaling_heartbeat_interval_secs: 30,
         signing_pubkey: verifying_key.to_bytes().to_vec().into(),
-        signing_key_id: state.ais_signing_key_id(),
+        signing_key_id: state.issuer_signing_key_id(),
         renewal_token: Some(mock_renewal_token(serial).into()),
         renewal_token_expires_at: Some(prost_types::Timestamp {
             seconds: chrono::Utc::now().timestamp() + 86400,
@@ -413,7 +413,7 @@ async fn handle_actr_to_server(
             tracing::info!(
                 count = candidates.len(),
                 skipped_unbound,
-                target_type = format!("{}.{}", req.target_type.manufacturer, req.target_type.name),
+                target_type = format!("{}.{}", req.target_type.publisher, req.target_type.name),
                 "mock-actrix: route candidates response"
             );
 
@@ -465,7 +465,7 @@ async fn handle_actr_to_server(
         }
 
         actr_to_signaling::Payload::GetSigningKeyRequest(req) => {
-            let verifying_key = state.ais_signing_key().verifying_key();
+            let verifying_key = state.issuer_signing_key().verifying_key();
             send_response(
                 sender_id,
                 envelope,
@@ -489,9 +489,9 @@ async fn handle_actr_to_server(
             let entries: Vec<_> = registry
                 .iter()
                 .filter(|e| {
-                    req.manufacturer
+                    req.publisher
                         .as_ref()
-                        .is_none_or(|m| &e.actr_type.manufacturer == m)
+                        .is_none_or(|m| &e.actr_type.publisher == m)
                 })
                 .map(|e| {
                     let fingerprint = e
@@ -1010,7 +1010,7 @@ mod tests {
             realm: Realm { realm_id: 7 },
             serial_number: serial,
             r#type: ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: name.to_string(),
                 version: "0.1.0".to_string(),
             },
@@ -1021,7 +1021,7 @@ mod tests {
         RegisteredActor {
             actr_id: actor(serial, name),
             actr_type: ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: name.to_string(),
                 version: "0.1.0".to_string(),
             },
@@ -1045,7 +1045,7 @@ mod tests {
         let state = test_state();
         let req = RegisterRequest {
             actr_type: ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: "EchoService".to_string(),
                 version: "0.1.0".to_string(),
             },
@@ -1055,12 +1055,12 @@ mod tests {
             service: None,
             ws_address: None,
             manifest_raw: None,
-            mfr_signature: None,
+            publisher_signature: None,
             target: None,
             auth_mode: None,
-            manufacturer_auth_signature: None,
-            manufacturer_auth_signed_at: None,
-            manufacturer_auth_nonce: None,
+            publisher_auth_signature: None,
+            publisher_auth_signed_at: None,
+            publisher_auth_nonce: None,
         };
 
         let ok = build_register_ok(&req, &state).await;
@@ -1108,7 +1108,7 @@ mod tests {
     fn route_candidates_skip_unbound_history_rows() {
         let source = actor(10, "echo-client-app");
         let target_type = ActrType {
-            manufacturer: "acme".to_string(),
+            publisher: "acme".to_string(),
             name: "EchoService".to_string(),
             version: "0.1.0".to_string(),
         };

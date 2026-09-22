@@ -1,6 +1,6 @@
 //! Actor Identity Token management module
 //!
-//! Provides Actor Identity Token verification (issuing has been moved to the ais crate)
+//! Provides Actor Identity Token verification (issuing has been moved to the issuer crate)
 
 pub mod error;
 pub mod validator;

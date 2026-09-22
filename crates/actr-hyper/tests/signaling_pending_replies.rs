@@ -72,7 +72,7 @@ fn test_signaling_config(url: &str) -> SignalingConfig {
 fn route_candidates_request() -> RouteCandidatesRequest {
     RouteCandidatesRequest {
         target_type: ActrType {
-            manufacturer: "acme".to_string(),
+            publisher: "acme".to_string(),
             name: "StreamEchoServer".to_string(),
             version: "1.0.0".to_string(),
         },

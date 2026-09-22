@@ -99,7 +99,7 @@ ensure_project_keychain_config() {
 
     mkdir -p "$config_dir"
     cat > "$config_path" <<EOF
-[mfr]
+[publisher]
 keychain = "$signing_key"
 EOF
 }
@@ -149,7 +149,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
     --template echo \
     --role service \
     --signaling ws://localhost:8081/signaling/ws \
-    --manufacturer actrium \
+    --publisher actrium \
     "$TMP_ECHO_ACTR_DIR"
 
 if [[ -e "$TMP_ECHO_ACTR_DIR/src/generated" ]]; then

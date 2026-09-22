@@ -1251,7 +1251,7 @@ public protocol ContextBridgeProtocol: AnyObject, Sendable {
      * Discover an actor of the specified type
      *
      * # Arguments
-     * - `target_type`: Actor type to discover (manufacturer + name)
+     * - `target_type`: Actor type to discover (publisher + name)
      *
      * # Returns
      * The ActrId of a discovered actor
@@ -1484,7 +1484,7 @@ open func claimReply() async throws {
      * Discover an actor of the specified type
      *
      * # Arguments
-     * - `target_type`: Actor type to discover (manufacturer + name)
+     * - `target_type`: Actor type to discover (publisher + name)
      *
      * # Returns
      * The ActrId of a discovered actor
@@ -2633,17 +2633,17 @@ public func FfiConverterTypeActrId_lower(_ value: ActrId) -> RustBuffer {
 
 
 /**
- * Actor type (manufacturer + name + version)
+ * Actor type (publisher + name + version)
  */
 public struct ActrType: Equatable, Hashable {
-    public var manufacturer: String
+    public var publisher: String
     public var name: String
     public var version: String
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(manufacturer: String, name: String, version: String) {
-        self.manufacturer = manufacturer
+    public init(publisher: String, name: String, version: String) {
+        self.publisher = publisher
         self.name = name
         self.version = version
     }
@@ -2664,14 +2664,14 @@ public struct FfiConverterTypeActrType: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ActrType {
         return
             try ActrType(
-                manufacturer: FfiConverterString.read(from: &buf), 
+                publisher: FfiConverterString.read(from: &buf), 
                 name: FfiConverterString.read(from: &buf), 
                 version: FfiConverterString.read(from: &buf)
         )
     }
 
     public static func write(_ value: ActrType, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.manufacturer, into: &buf)
+        FfiConverterString.write(value.publisher, into: &buf)
         FfiConverterString.write(value.name, into: &buf)
         FfiConverterString.write(value.version, into: &buf)
     }
@@ -7895,7 +7895,7 @@ public func setLogCallback(callback: LogCallback?)  {try! rustCall() {
  * Parses the manifest, looks up the dependency by alias, and returns its
  * `actr_type` field as a structured `ActrType` record. This is the canonical
  * way for linked-runtime hosts (iOS, Android) to discover which remote actor
- * type a dependency resolves to, without hardcoding `"manufacturer:name:version"`
+ * type a dependency resolves to, without hardcoding `"publisher:name:version"`
  * strings in application code.
  */
 public func resolveManifestDependency(manifestPath: String, dependencyAlias: String)throws  -> ActrType  {
@@ -7926,7 +7926,7 @@ public func resolveManifestDependencyAliasList(manifestPath: String)throws  -> [
  * Parses the manifest and returns the `[package]` block's actr_type fields
  * as a structured `ActrType` record. Linked-runtime hosts (iOS, Android) use
  * this to determine their own actor type without hardcoding
- * `"manufacturer:name:version"` strings.
+ * `"publisher:name:version"` strings.
  */
 public func resolveManifestPackageActrType(manifestPath: String)throws  -> ActrType  {
     return try  FfiConverterTypeActrType_lift(try rustCallWithError(FfiConverterTypeActrError_lift) {

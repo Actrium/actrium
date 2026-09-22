@@ -13,8 +13,8 @@ graph LR
 
     subgraph actrix
         WS[WebSocket Signaling]
-        AIS[AIS Registration]
-        REG[MFR Package Registry]
+        Issuer[Issuer Registration]
+        REG[Publisher Package Registry]
     end
 
     subgraph Host Process
@@ -22,8 +22,8 @@ graph LR
     end
 
     EA -->|discover| WS
-    EA -->|register| AIS
-    ES -->|register| AIS
+    EA -->|register| Issuer
+    ES -->|register| Issuer
     ES -->|publish| REG
     EA -->|WebRTC RPC| ES
     ES -->|echo reply| EA
@@ -45,7 +45,7 @@ sequenceDiagram
     CI->>AX: health check
     CI->>AX: admin login
     CI->>AX: create realm → realm_id + realm_secret
-    CI->>AX: register MFR + approve
+    CI->>AX: register publisher + approve
 
     CI->>CLI: actr init --template echo --role service
     CLI-->>CI: scaffold echo-service
@@ -59,7 +59,7 @@ sequenceDiagram
 
     CI->>CLI: actr run (EchoService host)
     ES->>AX: WebSocket signaling connect
-    ES->>AX: AIS register
+    ES->>AX: Issuer register
     CI->>CI: check_service_ready (process alive, signaling health, cache populated)
     CI->>CLI: actr deps install && actr gen -l swift
     CI->>SIM: xcodegen generate
@@ -70,7 +70,7 @@ sequenceDiagram
     CI->>SIM: simctl launch (AUTO_SEND=1)
 
     SIM->>AX: WebSocket signaling connect
-    SIM->>AX: AIS register
+    SIM->>AX: Issuer register
     SIM->>AX: discover EchoService
     SIM->>ES: WebRTC RPC: LocalEcho → EchoService
     ES-->>SIM: echo reply

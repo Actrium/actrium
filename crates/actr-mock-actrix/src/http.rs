@@ -1,6 +1,6 @@
 //! HTTP handlers for the mock actrix server.
 //!
-//! Covers the REST endpoints that `actr-hyper` (`AisClient`, `MfrCertCache`)
+//! Covers the REST endpoints that `actr-hyper` (`IssuerClient`, `PublisherCertCache`)
 //! and the `actr` CLI (`pkg publish`) talk to, plus admin seeding routes
 //! used by integration test scripts.
 
@@ -21,7 +21,7 @@ use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 
 use crate::signaling;
-use crate::state::{MfrEntry, MockState, PackageEntry, RegisteredActor};
+use crate::state::{MockState, PackageEntry, PublisherEntry, RegisteredActor};
 
 // ---------------------------------------------------------------------------
 // Health
@@ -32,10 +32,10 @@ pub async fn health_handler() -> impl IntoResponse {
 }
 
 // ---------------------------------------------------------------------------
-// AIS `/register` — protobuf in, protobuf out.
+// Issuer `/register` — protobuf in, protobuf out.
 // ---------------------------------------------------------------------------
 
-/// `POST /register` and `POST /ais/register`.
+/// `POST /register` and `POST /issuer/register`.
 ///
 /// Shares the credential/ID allocation path with the WebSocket signaling
 /// handler via [`signaling::build_register_ok`].
@@ -72,7 +72,7 @@ pub async fn register_handler(
 
     tracing::info!(
         serial = register_ok.actr_id.serial_number,
-        manufacturer = req.actr_type.manufacturer,
+        publisher = req.actr_type.publisher,
         name = req.actr_type.name,
         "mock-actrix: registered actor (http)"
     );
@@ -87,10 +87,10 @@ pub async fn register_handler(
 }
 
 // ---------------------------------------------------------------------------
-// AIS `/renew` — protobuf in, protobuf out.
+// Issuer `/renew` — protobuf in, protobuf out.
 // ---------------------------------------------------------------------------
 
-/// `POST /ais/renew` and `POST /renew`.
+/// `POST /issuer/renew` and `POST /renew`.
 ///
 /// Validates the renewal token against the actor's expected mock renewal token
 /// (derived from the serial number), then re-issues credentials with the same
@@ -138,12 +138,12 @@ pub async fn renew_handler(
         acl: None,
         ws_address: None,
         manifest_raw: None,
-        mfr_signature: None,
+        publisher_signature: None,
         target: None,
         auth_mode: Some(actr_protocol::RegisterAuthMode::Package as i32),
-        manufacturer_auth_signature: None,
-        manufacturer_auth_signed_at: None,
-        manufacturer_auth_nonce: None,
+        publisher_auth_signature: None,
+        publisher_auth_signed_at: None,
+        publisher_auth_nonce: None,
     };
 
     let mut register_ok = signaling::build_register_ok(&fake_req, &state).await;
@@ -174,12 +174,12 @@ pub async fn renew_handler(
 }
 
 // ---------------------------------------------------------------------------
-// MFR verifying key — `GET /registry/publishers/{name}/verifying-key?key_id=X`
+// Publisher Registry verifying key — `GET /registry/publishers/{name}/verifying-key?key_id=X`
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
 pub struct VerifyingKeyQuery {
-    // AIS allows callers to pin a specific key_id; we don't key-rotate in the
+    // Issuer allows callers to pin a specific key_id; we don't key-rotate in the
     // mock but we accept the parameter for protocol compatibility.
     pub key_id: Option<String>,
 }
@@ -194,12 +194,12 @@ pub async fn verifying_key_handler(
     Path(name): Path<String>,
     Query(_query): Query<VerifyingKeyQuery>,
 ) -> Result<Response, ApiError> {
-    let key = match state.mfr_verifying_key(&name).await {
+    let key = match state.publisher_verifying_key(&name).await {
         Some(k) => k,
         None => {
-            tracing::warn!(manufacturer = %name, "mock-actrix: MFR not registered");
+            tracing::warn!(publisher = %name, "mock-actrix: Publisher Registry not registered");
             return Err(ApiError::not_found(format!(
-                "manufacturer '{name}' not registered"
+                "publisher '{name}' not registered"
             )));
         }
     };
@@ -267,13 +267,13 @@ pub async fn publish_handler(
     }
 
     // Note: the mock deliberately does not verify the ed25519 signature
-    // against the MFR's registered pubkey. Real actrix does; leaving this as
+    // against the Publisher Registry's registered pubkey. Real actrix does; leaving this as
     // a trust-on-first-publish flow keeps the mock simple for CLI e2e tests.
     let _ = req.nonce_sig;
     let _ = req.proto_files;
 
     let entry = PackageEntry {
-        manufacturer: req.publisher.clone(),
+        publisher: req.publisher.clone(),
         name: req.name.clone(),
         version: req.version.clone(),
         target: req.target.clone(),
@@ -324,16 +324,16 @@ pub async fn admin_realm_handler(
 }
 
 #[derive(Debug, Deserialize)]
-pub struct AdminMfrRequest {
+pub struct AdminPublisherRequest {
     pub name: String,
     pub pubkey_b64: String,
     #[serde(default)]
     pub contact: Option<String>,
 }
 
-pub async fn admin_mfr_handler(
+pub async fn admin_publisher_registry_handler(
     State(state): State<Arc<MockState>>,
-    Json(req): Json<AdminMfrRequest>,
+    Json(req): Json<AdminPublisherRequest>,
 ) -> Result<Json<AdminOk>, ApiError> {
     let key_bytes = base64::engine::general_purpose::STANDARD
         .decode(req.pubkey_b64.trim())
@@ -344,15 +344,15 @@ pub async fn admin_mfr_handler(
     let verifying_key = VerifyingKey::from_bytes(&arr)
         .map_err(|e| ApiError::bad_request(format!("invalid ed25519 pubkey: {e}")))?;
 
-    state.mfrs.write().await.insert(
+    state.publishers.write().await.insert(
         req.name.clone(),
-        MfrEntry {
+        PublisherEntry {
             name: req.name.clone(),
             verifying_key,
             contact: req.contact,
         },
     );
-    tracing::info!(name = %req.name, "mock-actrix: MFR seeded via /admin/publisher");
+    tracing::info!(name = %req.name, "mock-actrix: Publisher Registry seeded via /admin/publisher");
     Ok(Json(AdminOk { ok: true }))
 }
 
@@ -374,7 +374,7 @@ pub async fn admin_package_handler(
 ) -> Json<AdminOk> {
     state
         .add_package(PackageEntry {
-            manufacturer: req.publisher,
+            publisher: req.publisher,
             name: req.name,
             version: req.version,
             target: req.target,
@@ -394,13 +394,13 @@ pub struct AdminStateSnapshot {
 
 pub async fn admin_state_handler(State(state): State<Arc<MockState>>) -> Json<AdminStateSnapshot> {
     let realms: Vec<u32> = state.realms.read().await.keys().copied().collect();
-    let publishers: Vec<String> = state.mfrs.read().await.keys().cloned().collect();
+    let publishers: Vec<String> = state.publishers.read().await.keys().cloned().collect();
     let packages: Vec<String> = state
         .packages
         .read()
         .await
         .iter()
-        .map(|p| format!("{}/{}@{}#{}", p.manufacturer, p.name, p.version, p.target))
+        .map(|p| format!("{}/{}@{}#{}", p.publisher, p.name, p.version, p.target))
         .collect();
     Json(AdminStateSnapshot {
         realms,

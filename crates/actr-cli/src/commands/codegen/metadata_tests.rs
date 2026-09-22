@@ -130,7 +130,7 @@ exports = []
 
 [package]
 name = "DataStreamApp"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.1.0"
 
 [dependencies]
@@ -141,8 +141,8 @@ ask = { actr_type = "acme:NestedAsk:1.0.0" }
 [system.signaling]
 url = "ws://127.0.0.1:8080"
 
-[system.ais_endpoint]
-url = "http://127.0.0.1:8080/ais"
+[system.issuer_endpoint]
+url = "http://127.0.0.1:8080/issuer"
 
 [system.deployment]
 realm_id = 1001

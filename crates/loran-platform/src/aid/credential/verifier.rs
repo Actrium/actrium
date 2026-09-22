@@ -2,7 +2,7 @@
 //!
 //! Responsible for verifying the Ed25519 signature of AId Credential and decoding IdentityClaims.
 //! Compared to the old ECIES decryption approach, the new scheme uses asymmetric signature verification:
-//! - claims are plaintext proto bytes, signed by the AIS Ed25519 private key
+//! - claims are plaintext proto bytes, signed by the Issuer Ed25519 private key
 //! - The verifier only needs the corresponding verifying key (public key) to complete verification
 
 use super::error::AidError;
@@ -13,7 +13,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 /// AId Credential verifier
 ///
 /// Provides pure-function Ed25519 signature verification with no internal state.
-/// The verifying_key is provided by the caller, typically from the signing_pubkey in the AIS registration response or the local key cache.
+/// The verifying_key is provided by the caller, typically from the signing_pubkey in the Issuer registration response or the local key cache.
 pub struct AIdCredentialVerifier;
 
 impl AIdCredentialVerifier {
@@ -27,7 +27,7 @@ impl AIdCredentialVerifier {
     ///
     /// # Arguments
     /// * `credential` - AIdCredential to verify, with fields key_id / claims / signature
-    /// * `verifying_key` - Ed25519 public key provided by the caller (from AIS registration response or key cache)
+    /// * `verifying_key` - Ed25519 public key provided by the caller (from Issuer registration response or key cache)
     ///
     /// # Returns
     /// * `Ok(IdentityClaims)` - Signature is valid and not expired, returns decoded identity claims

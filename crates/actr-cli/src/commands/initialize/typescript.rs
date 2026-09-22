@@ -17,7 +17,7 @@ impl ProjectInitializer for TypeScriptInitializer {
         let mut template_context = TemplateContext::new(
             &context.project_name,
             &context.signaling_url,
-            &context.manufacturer,
+            &context.publisher,
             context.template.to_service_name(),
             is_service,
         );

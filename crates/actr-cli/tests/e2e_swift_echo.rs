@@ -85,7 +85,7 @@ struct EchoServiceCLI {
         let cwd = FileManager.default.currentDirectoryPath
         let configPath = (cwd as NSString).appendingPathComponent("actr.e2e.toml")
         let actorType = ActrType(
-            manufacturer: "acme",
+            publisher: "acme",
             name: "EchoService",
             version: "1.0.0"
         )
@@ -147,7 +147,7 @@ struct EchoAppCLI {
         let cwd = FileManager.default.currentDirectoryPath
         let configPath = (cwd as NSString).appendingPathComponent("actr.e2e.toml")
         let actorType = ActrType(
-            manufacturer: "acme",
+            publisher: "acme",
             name: "EchoApp",
             version: "1.0.0"
         )
@@ -178,9 +178,9 @@ fn write_linked_runtime_config(project_dir: &Path) {
         .as_str()
         .expect("manifest system.signaling.url")
         .to_string();
-    let ais_url = parsed["system"]["ais_endpoint"]["url"]
+    let issuer_url = parsed["system"]["issuer_endpoint"]["url"]
         .as_str()
-        .expect("manifest system.ais_endpoint.url")
+        .expect("manifest system.issuer_endpoint.url")
         .to_string();
     let realm_id = parsed["system"]["deployment"]["realm_id"]
         .as_integer()
@@ -190,7 +190,7 @@ fn write_linked_runtime_config(project_dir: &Path) {
     fs::create_dir_all(&data_dir).expect("create linked runtime data dir");
 
     let config = format!(
-        "edition = 1\n\n[signaling]\nurl = \"{signaling_url}\"\n\n[ais_endpoint]\nurl = \"{ais_url}\"\n\n[deployment]\nrealm_id = {realm_id}\n\n[hyper]\ndata_dir = \"{}\"\n\n[hyper.trust]\nkind = \"dev_only\"\n",
+        "edition = 1\n\n[signaling]\nurl = \"{signaling_url}\"\n\n[issuer_endpoint]\nurl = \"{issuer_url}\"\n\n[deployment]\nrealm_id = {realm_id}\n\n[hyper]\ndata_dir = \"{}\"\n\n[hyper.trust]\nkind = \"dev_only\"\n",
         data_dir.display(),
     );
 
@@ -297,7 +297,7 @@ fn swift_echo_e2e_service_and_app() {
             "both",
             "--signaling",
             &signaling_base,
-            "--manufacturer",
+            "--publisher",
             "swift-e2e",
             "e2e-swift",
         ],

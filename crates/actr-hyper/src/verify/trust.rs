@@ -5,9 +5,9 @@
 //! enough for me to execute?". How it answers is up to the provider:
 //!
 //! - [`StaticTrust`] — one pre-configured Ed25519 public key, accepts any
-//!   manufacturer. Offline / air-gapped deployments.
-//! - [`RegistryTrust`] — fetch MFR public keys from an AIS HTTP registry by
-//!   `(manufacturer, signing_key_id)`, cached locally.
+//!   publisher. Offline / air-gapped deployments.
+//! - [`RegistryTrust`] — fetch publisher public keys from an Issuer HTTP registry by
+//!   `(publisher, signing_key_id)`, cached locally.
 //! - [`ChainTrust`] — try a list of providers in order; first success wins.
 //!
 //! Both built-in Ed25519-based providers delegate to [`actr_pack::verify`]
@@ -24,7 +24,7 @@ use async_trait::async_trait;
 use ed25519_dalek::VerifyingKey;
 
 use crate::error::{HyperError, HyperResult};
-use crate::verify::cert_cache::MfrCertCache;
+use crate::verify::cert_cache::PublisherCertCache;
 
 /// Verifier for `.actr` package signatures.
 ///
@@ -117,10 +117,10 @@ fn parse_pubkey(bytes: &[u8]) -> HyperResult<VerifyingKey> {
 // ── StaticTrust ──────────────────────────────────────────────────────────────
 
 /// Pre-configured single Ed25519 public key. Accepts packages from any
-/// manufacturer as long as they verify against this key.
+/// publisher as long as they verify against this key.
 ///
 /// Intended for dev / air-gapped / self-hosted deployments where the
-/// manufacturer's public key is shipped alongside the package (typically as
+/// publisher's public key is shipped alongside the package (typically as
 /// `public-key.json`) instead of queried from a registry.
 #[derive(Debug, Clone)]
 pub struct StaticTrust {
@@ -196,7 +196,7 @@ fn validate_key_id_for_lookup(key_id: &str) -> HyperResult<()> {
     Ok(())
 }
 
-/// Resolve manufacturer public keys from an AIS HTTP registry and verify
+/// Resolve publisher public keys from an Issuer HTTP registry and verify
 /// Ed25519 signatures against them. Internal cache with configurable TTL
 /// (default 1h).
 ///
@@ -204,13 +204,13 @@ fn validate_key_id_for_lookup(key_id: &str) -> HyperResult<()> {
 /// errors out — rebuild with the latest `actr build` to embed one.
 #[derive(Debug, Clone)]
 pub struct RegistryTrust {
-    cache: Arc<MfrCertCache>,
+    cache: Arc<PublisherCertCache>,
 }
 
 impl RegistryTrust {
     pub fn new(endpoint: impl Into<String>) -> Self {
         Self {
-            cache: MfrCertCache::new(endpoint),
+            cache: PublisherCertCache::new(endpoint),
         }
     }
 
@@ -243,7 +243,7 @@ impl RegistryTrust {
 
         let pubkey = self
             .cache
-            .get_or_fetch(&pack_manifest.manufacturer, Some(key_id))
+            .get_or_fetch(&pack_manifest.publisher, Some(key_id))
             .await?;
 
         match max_entry_bytes {

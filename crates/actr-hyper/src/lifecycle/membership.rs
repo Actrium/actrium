@@ -42,7 +42,7 @@ pub(crate) enum MembershipResolution {
     Published,
     /// A prior request already advanced beyond the reported revision.
     Superseded,
-    /// AIS was temporarily unavailable. The supervisor applies its normal
+    /// Issuer was temporarily unavailable. The supervisor applies its normal
     /// reconnect backoff; a later auth rejection is a new on-demand trigger.
     Deferred,
     /// The realm denied membership. No automatic re-probe is scheduled.
@@ -118,7 +118,7 @@ impl MembershipHandle {
 
     /// Submit an on-demand trigger and wait until the controller has either
     /// published, deferred, denied, or shut down. Signaling uses the result to
-    /// avoid parking forever after a transient AIS failure.
+    /// avoid parking forever after a transient Issuer failure.
     pub(crate) async fn resolve(
         &self,
         verdict: AuthVerdict,
