@@ -129,7 +129,7 @@ fn sign_credential_with_timestamp(psk: &str, payload: &str, ts: u64) -> NonceCre
 
 #[tokio::test]
 async fn test_grpc_health_and_key_lifecycle() {
-    let psk = "test-ks-grpc-psk";
+    let psk = "test-signer-grpc-psk";
     let server = start_grpc_server(psk, 3600, 3600).await;
     let mut client = connect_client(&server.endpoint).await;
 
@@ -200,7 +200,7 @@ async fn test_grpc_health_and_key_lifecycle() {
 
 #[tokio::test]
 async fn test_grpc_generate_rejects_invalid_signature() {
-    let psk = "test-ks-grpc-psk";
+    let psk = "test-signer-grpc-psk";
     let server = start_grpc_server(psk, 3600, 3600).await;
     let mut client = connect_client(&server.endpoint).await;
 
@@ -244,7 +244,7 @@ async fn test_grpc_sign_authentication_binds_exact_message() {
 
 #[tokio::test]
 async fn test_grpc_generate_rejects_replay_nonce() {
-    let psk = "test-ks-grpc-psk";
+    let psk = "test-signer-grpc-psk";
     let server = start_grpc_server(psk, 3600, 3600).await;
     let mut client = connect_client(&server.endpoint).await;
 
@@ -265,7 +265,7 @@ async fn test_grpc_generate_rejects_replay_nonce() {
 
 #[tokio::test]
 async fn test_grpc_sign_nonexistent_key_returns_not_found() {
-    let psk = "test-ks-grpc-psk";
+    let psk = "test-signer-grpc-psk";
     let server = start_grpc_server(psk, 3600, 3600).await;
     let mut client = connect_client(&server.endpoint).await;
 
@@ -284,7 +284,7 @@ async fn test_grpc_sign_nonexistent_key_returns_not_found() {
 
 #[tokio::test]
 async fn test_grpc_rejects_stale_timestamp() {
-    let psk = "test-ks-grpc-psk";
+    let psk = "test-signer-grpc-psk";
     let server = start_grpc_server(psk, 3600, 3600).await;
     let mut client = connect_client(&server.endpoint).await;
 
@@ -299,7 +299,7 @@ async fn test_grpc_rejects_stale_timestamp() {
 
 #[tokio::test]
 async fn test_grpc_sign_expired_key_returns_failed_precondition() {
-    let psk = "test-ks-grpc-psk";
+    let psk = "test-signer-grpc-psk";
     let server = start_grpc_server(psk, 1, 0).await;
     let mut client = connect_client(&server.endpoint).await;
 
@@ -326,8 +326,8 @@ async fn test_grpc_sign_expired_key_returns_failed_precondition() {
 }
 
 #[tokio::test]
-async fn test_ks_grpc_client_end_to_end() {
-    let psk = "test-ks-grpc-psk";
+async fn test_signer_grpc_client_end_to_end() {
+    let psk = "test-signer-grpc-psk";
     let server = start_grpc_server(psk, 3600, 90).await;
 
     let mut client = GrpcClient::new(&GrpcClientConfig {
@@ -374,7 +374,7 @@ async fn test_ks_grpc_client_end_to_end() {
 }
 
 #[tokio::test]
-async fn test_ks_grpc_client_rejects_wrong_shared_secret() {
+async fn test_signer_grpc_client_rejects_wrong_shared_secret() {
     let server = start_grpc_server("correct-secret", 3600, 60).await;
 
     let mut client = GrpcClient::new(&GrpcClientConfig {
@@ -407,10 +407,10 @@ async fn test_ks_grpc_client_rejects_wrong_shared_secret() {
 }
 
 #[tokio::test]
-async fn test_ks_grpc_client_rejects_invalid_endpoint() {
+async fn test_signer_grpc_client_rejects_invalid_endpoint() {
     let result = GrpcClient::new(&GrpcClientConfig {
         endpoint: "not-a-valid-endpoint".to_string(),
-        actrix_shared_key: "test-ks-grpc-psk".to_string(),
+        actrix_shared_key: "test-signer-grpc-psk".to_string(),
         timeout_seconds: 1,
         enable_tls: false,
         tls_domain: None,
@@ -433,7 +433,7 @@ async fn test_ks_grpc_client_rejects_invalid_endpoint() {
 }
 
 #[tokio::test]
-async fn test_ks_grpc_client_fails_when_server_unreachable() {
+async fn test_signer_grpc_client_fails_when_server_unreachable() {
     let listener =
         std::net::TcpListener::bind("127.0.0.1:0").expect("bind temporary local listener");
     let addr = listener.local_addr().expect("read temporary listener addr");
@@ -441,7 +441,7 @@ async fn test_ks_grpc_client_fails_when_server_unreachable() {
 
     let result = GrpcClient::new(&GrpcClientConfig {
         endpoint: format!("http://{addr}"),
-        actrix_shared_key: "test-ks-grpc-psk".to_string(),
+        actrix_shared_key: "test-signer-grpc-psk".to_string(),
         timeout_seconds: 1,
         enable_tls: false,
         tls_domain: None,

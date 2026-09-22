@@ -223,7 +223,7 @@ mod tracing_lifetime_tests {
                 realm: actr_protocol::Realm { realm_id: 1 },
                 serial_number: 1,
                 r#type: actr_protocol::ActrType {
-                    manufacturer: "test".into(),
+                    publisher: "test".into(),
                     name: "node".into(),
                     version: "1".into(),
                 },

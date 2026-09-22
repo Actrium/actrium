@@ -3,8 +3,8 @@ edition = 1
 [signaling]
 url = "ws://127.0.0.1:__HTTP_PORT__/signaling/ws"
 
-[ais_endpoint]
-url = "http://127.0.0.1:__HTTP_PORT__/ais"
+[issuer_endpoint]
+url = "http://127.0.0.1:__HTTP_PORT__/issuer"
 
 [deployment]
 realm_id = __REALM_ID__
@@ -37,4 +37,4 @@ type = "polyglot:TsDriver:0.1.0"
 
 [[trust]]
 kind = "static"
-pubkey_b64 = "__MFR_PUBKEY__"
+pubkey_b64 = "__PUBLISHER_PUBKEY__"

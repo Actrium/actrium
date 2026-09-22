@@ -5,7 +5,7 @@ import { ActrRef } from './ref';
 describe('ActrRef wrapper', () => {
   it('forwards dependency aliases to the native runtime', async () => {
     const resolved = {
-      manufacturer: 'acme',
+      publisher: 'acme',
       name: 'EchoService',
       version: '1.0.0',
     };

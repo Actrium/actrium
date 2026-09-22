@@ -52,7 +52,7 @@ graph TD
 
 #### a) Actor ID 扩展 (`actor_ext.rs`)
 
-为 `ActrId` 提供了字符串表示的互相转换能力，格式定义为：`<serial_number>@<realm_id>:<manufacturer>+<name>`。
+为 `ActrId` 提供了字符串表示的互相转换能力，格式定义为：`<serial_number>@<realm_id>:<publisher>+<name>`。
 
 ```rust
 use actr_protocol::{ActrId, ActrType, Realm};
@@ -62,7 +62,7 @@ let id = ActrId {
     realm: Realm { realm_id: 101 },
     serial_number: 0x1a2b3c,
     r#type: ActrType {
-        manufacturer: "acme".to_string(),
+        publisher: "acme".to_string(),
         name: "echo-service".to_string(),
     },
 };
@@ -77,7 +77,7 @@ assert_eq!(id.serial_number, parsed_id.serial_number);
 #### b) URI 解析 (`uri.rs`)
 
 提供 authority-based `actr://<authority>/<opaque-target>` URI 的解析、规范化和构建功能。
-公开 URI 不把 realm、manufacturer、version 或运行中 Actor identity 固定到 path 位置。
+公开 URI 不把 realm、publisher、version 或运行中 Actor identity 固定到 path 位置。
 
 ```rust
 use std::str::FromStr;

@@ -6,7 +6,7 @@ const VALID_MANIFEST: &str = r#"edition = 1
 
 [package]
 name = "echo-service"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.1.0"
 description = "Echo service"
 
@@ -105,7 +105,7 @@ async fn update_dependency_preserves_actr_type_and_migrates_legacy_service_field
     let body = r#"edition = 1
 [package]
 name = "svc"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.1.0"
 
 [dependencies]
@@ -141,7 +141,7 @@ async fn update_dependency_prefers_existing_canonical_service_over_legacy_fields
     let body = r#"edition = 1
 [package]
 name = "svc"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.1.0"
 
 [dependencies]

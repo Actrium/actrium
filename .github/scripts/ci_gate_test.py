@@ -102,6 +102,10 @@ def test_actrix_schema_migration_is_a_required_gate() -> None:
         "python -m unittest scripts/loran/tests/test_migrate_schema_v1.py -v"
         in migration_job
     )
+    assert (
+        "python -m unittest scripts/loran/tests/test_migrate_schema_v2.py -v"
+        in migration_job
+    )
     assert "      - actrix_migration" in workflow
     assert "ACTRIX_MIGRATION_RESULT" in workflow
     assert (
@@ -715,7 +719,7 @@ def _create_service_registry(db_path: Path) -> None:
             """
             CREATE TABLE service_registry (
                 actor_realm_id INTEGER NOT NULL,
-                actor_manufacturer TEXT NOT NULL,
+                actor_publisher TEXT NOT NULL,
                 actor_device_name TEXT NOT NULL,
                 service_name TEXT NOT NULL,
                 status TEXT NOT NULL,
@@ -754,7 +758,7 @@ def test_service_readiness_rejects_missing_or_unrelated_registration() -> None:
             connection.execute(
                 """
                 INSERT INTO service_registry
-                    (actor_realm_id, actor_manufacturer, actor_device_name,
+                    (actor_realm_id, actor_publisher, actor_device_name,
                      service_name, status, last_heartbeat_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
@@ -867,8 +871,8 @@ def test_swift_datastream_e2e_builds_custom_proto_flow_from_empty() -> None:
     main_flow = run_sh.split("# ──── Main ────", 1)[1]
     assert main_flow.index("run_server_host") < main_flow.index("build_datastream_app")
     assert main_flow.index("check_service_ready") < main_flow.index("build_datastream_app")
-    assert "__MANUFACTURER__:DuplexStreamService:1.0.0" in actr_toml
-    assert 'ActrType(manufacturer: manufacturer, name: "DataStreamApp", version: "0.1.0")' in actr_service
+    assert "__PUBLISHER__:DuplexStreamService:1.0.0" in actr_toml
+    assert 'ActrType(publisher: publisher, name: "DataStreamApp", version: "0.1.0")' in actr_service
     assert 'let expectedLines = (1...count).map { "received: echo: hello \\($0)" }' in actr_service
 
 

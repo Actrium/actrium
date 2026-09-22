@@ -158,12 +158,12 @@ class WorkloadDslTest {
         }
 
     private fun actorId(
-        manufacturer: String,
+        publisher: String,
         name: String,
     ): ActrId =
         ActrId(
             realm = Realm(7u),
             serialNumber = 42uL,
-            type = ActrType(manufacturer, name, "1.0.0"),
+            type = ActrType(publisher, name, "1.0.0"),
         )
 }

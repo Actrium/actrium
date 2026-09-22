@@ -382,7 +382,7 @@ T18 诊断 (4 轮 spike)
 
 ## 4. 测试基础设施
 
-### 4.1 mock-actrix：自包含信令 / AIS / MFR
+### 4.1 mock-actrix：自包含信令 / Issuer / publisher
 
 **Before**：浏览器 e2e 必须依赖外部 `actrix` 二进制（peer 仓库 `../../actrix`）+ `sqlite3` 种数据。CI 需要预装这俩。
 
@@ -392,9 +392,9 @@ T18 诊断 (4 轮 spike)
    ┌─────────────────────────────────────────┐
    │ mock-actrix (cargo run -p actr-mock-actrix)
    │                                         │
-   │  HTTP   : :8081/admin/* (seed realm/MFR/pkg)
-   │  HTTP   : :8081/ais     (Authority Info Service)
-   │  HTTP   : :8081/mfr     (Manufacturer Registry)
+   │  HTTP   : :8081/admin/* (seed realm/publisher/pkg)
+   │  HTTP   : :8081/issuer     (Authority Info Service)
+   │  HTTP   : :8081/publisher-registry (Publisher Registry)
    │  WS     : :8081/signaling/ws (signaling)
    └─────────────────────────────────────────┘
    零 sqlite，零外部依赖，e2e 自包含

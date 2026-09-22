@@ -123,14 +123,14 @@ async fn test_wait_for_detached_runtime_ready_returns_initializing_on_timeout() 
     let _ = child.wait();
 }
 
-/// The manufacturer re-signing provider must (a) mint a fresh random nonce on
-/// every call — so hard rebind never replays the nonce AIS consumed on the
+/// The publisher re-signing provider must (a) mint a fresh random nonce on
+/// every call — so hard rebind never replays the nonce Issuer consumed on the
 /// first registration — and (b) re-read the private key from the keychain
 /// file on every call, never caching it in memory.
 #[test]
-fn keychain_manufacturer_auth_provider_mints_fresh_proof_and_reloads_key() {
-    use super::KeychainManufacturerAuthProvider;
-    use actr_hyper::ManufacturerAuthProvider;
+fn keychain_publisher_auth_provider_mints_fresh_proof_and_reloads_key() {
+    use super::KeychainPublisherAuthProvider;
+    use actr_hyper::PublisherAuthProvider;
     use actr_protocol::ActrType;
     use base64::Engine as _;
     use base64::engine::general_purpose::STANDARD as B64;
@@ -153,11 +153,11 @@ fn keychain_manufacturer_auth_provider_mints_fresh_proof_and_reloads_key() {
     let original_seed = [0x11u8; 32];
     write_key(&key_path, original_seed);
 
-    let provider = KeychainManufacturerAuthProvider {
+    let provider = KeychainPublisherAuthProvider {
         key_path: key_path.clone(),
     };
     let actr_type = ActrType {
-        manufacturer: "acme".into(),
+        publisher: "acme".into(),
         name: "svc".into(),
         version: "1.0.0".into(),
     };
@@ -191,16 +191,15 @@ fn keychain_manufacturer_auth_provider_mints_fresh_proof_and_reloads_key() {
         .sign(7, &actr_type, "wasm32-wasip1", manifest)
         .unwrap();
     let manifest_sha256 = hex::encode(Sha256::digest(manifest));
-    let payload = actr_protocol::build_manufacturer_register_payload(
-        actr_protocol::ManufacturerRegisterPayload {
+    let payload =
+        actr_protocol::build_publisher_register_payload(actr_protocol::PublisherRegisterPayload {
             realm_id: 7,
             actr_type: &actr_type,
             target: "wasm32-wasip1",
             manifest_sha256_hex: &manifest_sha256,
-            manufacturer_auth_signed_at: auth_c.signed_at,
-            manufacturer_auth_nonce: &auth_c.nonce,
-        },
-    );
+            publisher_auth_signed_at: auth_c.signed_at,
+            publisher_auth_nonce: &auth_c.nonce,
+        });
     let signature = Signature::from_slice(&auth_c.signature).unwrap();
     rotated_key
         .verifying_key()
@@ -216,14 +215,14 @@ fn keychain_manufacturer_auth_provider_mints_fresh_proof_and_reloads_key() {
     );
 }
 
-/// A keychain that declares a `manufacturer` binding may only register a
-/// package for that same manufacturer. Cross-manufacturer registration signing
+/// A keychain that declares a `publisher` binding may only register a
+/// package for that same publisher. Cross-publisher registration signing
 /// must be rejected before the proof is minted (issue #425). Unbound
 /// keychains continue to register freely for backward compatibility.
 #[test]
-fn keychain_manufacturer_auth_provider_rejects_cross_manufacturer_binding() {
-    use super::KeychainManufacturerAuthProvider;
-    use actr_hyper::ManufacturerAuthProvider;
+fn keychain_publisher_auth_provider_rejects_cross_publisher_binding() {
+    use super::KeychainPublisherAuthProvider;
+    use actr_hyper::PublisherAuthProvider;
     use actr_protocol::ActrType;
     use base64::Engine as _;
     use base64::engine::general_purpose::STANDARD as B64;
@@ -234,12 +233,12 @@ fn keychain_manufacturer_auth_provider_rejects_cross_manufacturer_binding() {
 
     let dir = TempDir::new().unwrap();
     let key_path = dir.path().join("keychain.json");
-    let write_bound_key = |path: &Path, mfr: &str| {
+    let write_bound_key = |path: &Path, publisher: &str| {
         let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
         let json = serde_json::json!({
             "private_key": B64.encode(signing_key.to_bytes()),
             "public_key": B64.encode(signing_key.verifying_key().to_bytes()),
-            "manufacturer": mfr,
+            "publisher": publisher,
         });
         fs::write(path, json.to_string()).unwrap();
     };
@@ -252,16 +251,16 @@ fn keychain_manufacturer_auth_provider_rejects_cross_manufacturer_binding() {
         fs::write(path, json.to_string()).unwrap();
     };
 
-    let provider = KeychainManufacturerAuthProvider {
+    let provider = KeychainPublisherAuthProvider {
         key_path: key_path.clone(),
     };
     let acme = ActrType {
-        manufacturer: "acme".into(),
+        publisher: "acme".into(),
         name: "svc".into(),
         version: "1.0.0".into(),
     };
     let rival = ActrType {
-        manufacturer: "rival".into(),
+        publisher: "rival".into(),
         ..acme.clone()
     };
     let manifest = b"manifest-bytes";
@@ -276,11 +275,11 @@ fn keychain_manufacturer_auth_provider_rejects_cross_manufacturer_binding() {
         .unwrap_err();
     let msg = format!("{err}");
     assert!(
-        msg.contains("manufacturer mismatch"),
-        "expected manufacturer mismatch, got: {msg}"
+        msg.contains("publisher mismatch"),
+        "expected publisher mismatch, got: {msg}"
     );
 
-    // Unbound keychain → registers any manufacturer (backward compatible).
+    // Unbound keychain → registers any publisher (backward compatible).
     write_unbound_key(&key_path);
     assert!(
         provider.sign(7, &rival, "wasm32-wasip1", manifest).is_ok(),

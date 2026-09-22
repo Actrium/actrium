@@ -24,7 +24,7 @@ const BASE_URL = 'https://localhost:8443';
 
 export default function () {
   // 1. Health Check
-  let healthRes = http.get(`${BASE_URL}/ks/health`, {
+  let healthRes = http.get(`${BASE_URL}/signer/health`, {
     tags: { name: 'HealthCheck' },
   });
 

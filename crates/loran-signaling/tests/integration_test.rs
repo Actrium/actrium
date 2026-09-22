@@ -138,7 +138,7 @@ fn create_test_actr_id(serial: u64) -> actr_protocol::ActrId {
         serial_number: serial,
         realm: Realm { realm_id: 1001 },
         r#type: ActrType {
-            manufacturer: "test".to_string(),
+            publisher: "test".to_string(),
             name: "device".to_string(),
             version: "1.0.0".to_string(),
         },

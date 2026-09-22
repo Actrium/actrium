@@ -1,6 +1,6 @@
 [package]
 name = "blocked-greeter-client"
-manufacturer = "acme"
+publisher = "acme"
 version = "1.0.0"
 description = "Blocked Greeter Client (should be denied by ACL)"
 authors = ["Actr Dev Team"]

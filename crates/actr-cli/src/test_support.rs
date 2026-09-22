@@ -12,7 +12,7 @@ use rusqlite::Connection;
 use tempfile::TempDir;
 
 pub const LOCAL_E2E_REALM_ID: u32 = 1001;
-const KS_GRPC_PORT: u16 = 50052;
+const SIGNER_GRPC_PORT: u16 = 50052;
 const E2E_RENEWAL_TOKEN_SECRET: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
 pub fn actr_bin() -> PathBuf {
@@ -89,7 +89,7 @@ pub fn cargo_build(dir: &Path) {
     assert_success(&out, &format!("cargo build in {}", dir.display()));
 }
 
-pub fn random_manufacturer() -> String {
+pub fn random_publisher() -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -101,15 +101,15 @@ pub fn align_project_with_local_actrix(project_dir: &Path) -> Result<()> {
     rewrite_project_realm_id(project_dir, LOCAL_E2E_REALM_ID)
 }
 
-pub fn pin_echo_service_dependency_version(project_dir: &Path, manufacturer: &str) -> Result<()> {
+pub fn pin_echo_service_dependency_version(project_dir: &Path, publisher: &str) -> Result<()> {
     let actr_toml_path = project_dir.join("manifest.toml");
     let content = fs::read_to_string(&actr_toml_path)
         .with_context(|| format!("failed to read {}", actr_toml_path.display()))?;
 
-    // Newer Rust echo template renders the dependency with manufacturer
-    // already inlined as `EchoService = { actr_type = "<mfr>:EchoService:1.0.0" }`.
+    // Newer Rust echo template renders the dependency with publisher
+    // already inlined as `EchoService = { actr_type = "<record>:EchoService:1.0.0" }`.
     // Detect that case and skip — no pinning needed.
-    let already_rendered = format!("EchoService = {{ actr_type = \"{manufacturer}:");
+    let already_rendered = format!("EchoService = {{ actr_type = \"{publisher}:");
     if content.contains(&already_rendered) {
         return Ok(());
     }
@@ -120,11 +120,11 @@ pub fn pin_echo_service_dependency_version(project_dir: &Path, manufacturer: &st
     let placeholders: &[(&str, String)] = &[
         (
             "EchoService = {}",
-            format!("EchoService = {{ actr_type = \"{manufacturer}:EchoService:1.0.0\" }}"),
+            format!("EchoService = {{ actr_type = \"{publisher}:EchoService:1.0.0\" }}"),
         ),
         (
             "echo-service = {}",
-            format!("echo-service = {{ actr_type = \"{manufacturer}:EchoService:1.0.0\" }}"),
+            format!("echo-service = {{ actr_type = \"{publisher}:EchoService:1.0.0\" }}"),
         ),
     ];
 
@@ -366,7 +366,7 @@ pub struct LocalActrix {
 
 impl LocalActrix {
     pub fn start() -> Result<Self> {
-        ensure_ks_port_available()?;
+        ensure_signer_port_available()?;
         let actrix_bin = ensure_actrix_binary()?;
 
         let state_dir = TempDir::new().context("failed to create actrix state dir")?;
@@ -468,7 +468,7 @@ impl LocalRustEchoService {
                 "echo",
                 "--role",
                 "service",
-                "--manufacturer",
+                "--publisher",
                 "acme",
                 "--signaling",
                 signaling_ws_url,
@@ -626,28 +626,30 @@ fn ensure_realm_exists(sqlite_dir: &Path, realm_id: u32) -> Result<()> {
 
 fn write_package_runtime_config(project_dir: &Path, signaling_ws_url: &str) -> Result<PathBuf> {
     let cli_config = crate::config::resolver::resolve_effective_cli_config()?;
-    let key_path =
-        crate::commands::package_build::resolve_key_path(None, cli_config.mfr.keychain.as_deref())?;
+    let key_path = crate::commands::package_build::resolve_key_path(
+        None,
+        cli_config.publisher.keychain.as_deref(),
+    )?;
     let package_path = find_built_package(project_dir)?;
 
     let runtime_root = project_dir.join(".actr-e2e-runtime");
     let data_dir = runtime_root.join("hyper");
     fs::create_dir_all(&data_dir)
         .with_context(|| format!("failed to create {}", data_dir.display()))?;
-    let ais_url = signaling_ws_url
+    let issuer_url = signaling_ws_url
         .trim_end_matches("/signaling/ws")
         .trim_end_matches("/signaling")
         .trim_end_matches("/ws");
-    let ais_url = if let Some(rest) = ais_url.strip_prefix("ws://") {
-        format!("http://{rest}/ais")
-    } else if let Some(rest) = ais_url.strip_prefix("wss://") {
-        format!("https://{rest}/ais")
+    let issuer_url = if let Some(rest) = issuer_url.strip_prefix("ws://") {
+        format!("http://{rest}/issuer")
+    } else if let Some(rest) = issuer_url.strip_prefix("wss://") {
+        format!("https://{rest}/issuer")
     } else {
-        format!("{ais_url}/ais")
+        format!("{issuer_url}/issuer")
     };
 
     let runtime_config = format!(
-        "edition = 1\n\n[signaling]\nurl = \"{signaling_ws_url}\"\n\n[ais_endpoint]\nurl = \"{ais_url}\"\n\n[deployment]\nrealm_id = {LOCAL_E2E_REALM_ID}\n\n[package]\npath = \"{}\"\n\n[hyper]\ndata_dir = \"{}\"\n\n[[trust]]\nkind = \"static\"\npubkey_file = \"{}\"\n",
+        "edition = 1\n\n[signaling]\nurl = \"{signaling_ws_url}\"\n\n[issuer_endpoint]\nurl = \"{issuer_url}\"\n\n[deployment]\nrealm_id = {LOCAL_E2E_REALM_ID}\n\n[package]\npath = \"{}\"\n\n[hyper]\ndata_dir = \"{}\"\n\n[[trust]]\nkind = \"static\"\npubkey_file = \"{}\"\n",
         normalize_path_for_toml(&package_path),
         normalize_path_for_toml(&data_dir),
         normalize_path_for_toml(&key_path),
@@ -682,18 +684,20 @@ fn find_built_package(project_dir: &Path) -> Result<PathBuf> {
 
 fn publish_local_package(package_path: &Path, signaling_ws_url: &str) -> Result<()> {
     let cli_config = crate::config::resolver::resolve_effective_cli_config()?;
-    let key_path =
-        crate::commands::package_build::resolve_key_path(None, cli_config.mfr.keychain.as_deref())?;
-    let ais_url = signaling_ws_url
+    let key_path = crate::commands::package_build::resolve_key_path(
+        None,
+        cli_config.publisher.keychain.as_deref(),
+    )?;
+    let issuer_url = signaling_ws_url
         .trim_end_matches("/signaling/ws")
         .trim_end_matches("/signaling")
         .trim_end_matches("/ws");
-    let ais_url = if let Some(rest) = ais_url.strip_prefix("ws://") {
-        format!("http://{rest}/ais")
-    } else if let Some(rest) = ais_url.strip_prefix("wss://") {
-        format!("https://{rest}/ais")
+    let issuer_url = if let Some(rest) = issuer_url.strip_prefix("ws://") {
+        format!("http://{rest}/issuer")
+    } else if let Some(rest) = issuer_url.strip_prefix("wss://") {
+        format!("https://{rest}/issuer")
     } else {
-        format!("{ais_url}/ais")
+        format!("{issuer_url}/issuer")
     };
 
     let out = Command::new(actr_bin())
@@ -705,7 +709,7 @@ fn publish_local_package(package_path: &Path, signaling_ws_url: &str) -> Result<
             "--keychain",
             key_path.to_string_lossy().as_ref(),
             "--endpoint",
-            &ais_url,
+            &issuer_url,
         ])
         .output()
         .context("failed to invoke actr registry publish")?;
@@ -729,9 +733,9 @@ fn drain_stream(
     }
 }
 
-fn ensure_ks_port_available() -> Result<()> {
-    let probe = TcpListener::bind(("127.0.0.1", KS_GRPC_PORT))
-        .with_context(|| format!("port {KS_GRPC_PORT} is already in use"))?;
+fn ensure_signer_port_available() -> Result<()> {
+    let probe = TcpListener::bind(("127.0.0.1", SIGNER_GRPC_PORT))
+        .with_context(|| format!("port {SIGNER_GRPC_PORT} is already in use"))?;
     drop(probe);
     Ok(())
 }
@@ -913,9 +917,9 @@ turn_secret = "actrix-e2e-turn-secret-0123456789abcdef"
 
 [services.signer]
 
-[services.ais]
+[services.issuer]
 
-[services.ais.server]
+[services.issuer.server]
 renewal_token_secret = "{renewal_secret}"
 
 [services.signaling]

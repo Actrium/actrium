@@ -21,7 +21,7 @@ pub struct TurnConfig {
     /// TURN shared secret (HMAC time-limited credentials)
     ///
     /// Used to generate and verify TURN time-limited credentials (coturn --use-auth-secret compatible format).
-    /// AIS uses this secret to generate TurnCredential; the TURN server uses the same secret for verification.
+    /// Issuer uses this secret to generate TurnCredential; the TURN server uses the same secret for verification.
     #[serde(default)]
     pub turn_secret: String,
 }

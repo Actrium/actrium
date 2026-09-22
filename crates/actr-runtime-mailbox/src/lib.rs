@@ -24,7 +24,7 @@
 //!         realm: Realm { realm_id: 1 },
 //!         serial_number: 1000,
 //!         r#type: ActrType {
-//!             manufacturer: "example".to_string(),
+//!             publisher: "example".to_string(),
 //!             name: "TestActor".to_string(),
 //!             version: "1.0.0".to_string(),
 //!         },

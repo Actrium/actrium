@@ -24,7 +24,7 @@ fn invocation_context(language: &str) -> InvocationContext {
             realm: Realm { realm_id: 1 },
             serial_number: 1,
             r#type: ActrType {
-                manufacturer: "actr-ci".to_string(),
+                publisher: "actr-ci".to_string(),
                 name: format!("{language}-echo-workload"),
                 version: "0.1.0".to_string(),
             },

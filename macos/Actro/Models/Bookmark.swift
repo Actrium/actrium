@@ -8,7 +8,7 @@ struct Bookmark: Identifiable, Codable, Equatable, Hashable {
     var appId: String?          // App identifier from ACTR package
     var createdAt: Date
     var lastUsedAt: Date?
-    var manufacturer: String?   // App manufacturer/developer
+    var publisher: String?   // App publisher/developer
     var notes: String?          // User notes
     var favicon: String?        // SF Symbol name or custom icon
     var tags: [Tag]             // Associated tags
@@ -20,7 +20,7 @@ struct Bookmark: Identifiable, Codable, Equatable, Hashable {
         appId: String? = nil,
         createdAt: Date = Date(),
         lastUsedAt: Date? = nil,
-        manufacturer: String? = nil,
+        publisher: String? = nil,
         notes: String? = nil,
         favicon: String? = nil,
         tags: [Tag] = []
@@ -31,7 +31,7 @@ struct Bookmark: Identifiable, Codable, Equatable, Hashable {
         self.appId = appId
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
-        self.manufacturer = manufacturer
+        self.publisher = publisher
         self.notes = notes
         self.favicon = favicon
         self.tags = tags
@@ -50,12 +50,12 @@ struct Bookmark: Identifiable, Codable, Equatable, Hashable {
 
 extension Bookmark {
     /// Create a bookmark from a Tab
-    static func from(tab: Tab, manufacturer: String? = nil) -> Bookmark {
+    static func from(tab: Tab, publisher: String? = nil) -> Bookmark {
         Bookmark(
             title: tab.title.isEmpty ? "Untitled" : tab.title,
             appURL: tab.url,
             appId: tab.resolvedAppId,
-            manufacturer: manufacturer,
+            publisher: publisher,
             favicon: "star.fill" // Default icon
         )
     }

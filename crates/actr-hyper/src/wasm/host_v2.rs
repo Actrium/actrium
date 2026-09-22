@@ -407,7 +407,7 @@ fn proto_realm_to_wit(r: &Realm) -> WitRealm {
 
 fn wit_actr_type_to_proto(t: &WitActrType) -> ActrType {
     ActrType {
-        manufacturer: t.manufacturer.clone(),
+        publisher: t.publisher.clone(),
         name: t.name.clone(),
         version: t.version.clone(),
     }
@@ -415,7 +415,7 @@ fn wit_actr_type_to_proto(t: &WitActrType) -> ActrType {
 
 fn proto_actr_type_to_wit(t: &ActrType) -> WitActrType {
     WitActrType {
-        manufacturer: t.manufacturer.clone(),
+        publisher: t.publisher.clone(),
         name: t.name.clone(),
         version: t.version.clone(),
     }

@@ -430,7 +430,7 @@ export const ACTR_CONFIG_CONTRACT = {
     },
   },
   clientActrType: {
-    manufacturer: 'actro',
+    publisher: 'actro',
     name: 'actro',
   },
   dependencyName: 'bid-service',
@@ -465,7 +465,7 @@ export type ActrServiceEndpointConfig = {
 export type ActrTomlConfig = {
   app_id: string;
   key_id: string;
-  manufacturer: string;
+  publisher: string;
   name: string;
   authority_services: readonly unknown[];
   signaling_services: readonly ActrServiceEndpointConfig[];
@@ -475,7 +475,7 @@ export type ActrTomlConfig = {
 };
 
 export type ActrLockTomlConfig = {
-  manufacturer: string;
+  publisher: string;
   name: string;
 };
 
@@ -531,11 +531,11 @@ license = "${ACTR_CONFIG_CONTRACT.package.license}"
 tags = ["${ACTR_CONFIG_CONTRACT.package.tags.dev}", "${ACTR_CONFIG_CONTRACT.package.tags.client}"]
 
 [package.actr_type]
-manufacturer = "${ACTR_CONFIG_CONTRACT.clientActrType.manufacturer}"
+publisher = "${ACTR_CONFIG_CONTRACT.clientActrType.publisher}"
 name = "${ACTR_CONFIG_CONTRACT.clientActrType.name}"
 
 [dependencies]
-${ACTR_CONFIG_CONTRACT.dependencyName} = { actr_type = "${config.manufacturer}+${config.name}" }
+${ACTR_CONFIG_CONTRACT.dependencyName} = { actr_type = "${config.publisher}+${config.name}" }
 
 [system.signaling]
 url = "${signalingUrl}"
@@ -565,7 +565,7 @@ test = "${ACTR_CONFIG_CONTRACT.scripts.test}"
 
 [[acl.rules]]
 permission = "${ACTR_CONFIG_CONTRACT.acl.allow}"
-types = ["${config.manufacturer}+${config.name}"]
+types = ["${config.publisher}+${config.name}"]
 `;
 }
 
@@ -576,7 +576,7 @@ generated_at = "${ACTR_CONFIG_CONTRACT.lock.generatedAt}"
 
 [[dependency]]
 name = "${ACTR_CONFIG_CONTRACT.lock.dependencyName}"
-actr_type = "${config.manufacturer}+${config.name}"
+actr_type = "${config.publisher}+${config.name}"
 fingerprint = "${ACTR_CONFIG_CONTRACT.lock.dependencyFingerprint}"
 cached_at = "${ACTR_CONFIG_CONTRACT.lock.cachedAt}"
 

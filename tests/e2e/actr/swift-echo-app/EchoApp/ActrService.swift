@@ -28,7 +28,7 @@ final class ActrService: ObservableObject {
 
         do {
             let manifestURL = try materializeRuntimeConfig()
-            let actorType = ActrType(manufacturer: "actrium", name: "EchoApp", version: "0.1.0")
+            let actorType = ActrType(publisher: "actrium", name: "EchoApp", version: "0.1.0")
 
             let handler = LocalEchoServiceHandlerImpl()
             let workload = Actr.dynamicWorkload(

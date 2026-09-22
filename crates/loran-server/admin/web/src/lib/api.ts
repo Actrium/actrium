@@ -293,11 +293,11 @@ export const api = {
       { method: "POST" },
     ),
 
-  getAisKeys: () =>
-    request<{ keys: KeyEntry[] }>("/services/ais/keys"),
+  getIssuerKeys: () =>
+    request<{ keys: KeyEntry[] }>("/services/issuer/keys"),
 
-  rotateAisKey: () =>
-    request<{ status: string; new_key_id: number }>("/services/ais/keys/rotate", {
+  rotateIssuerKey: () =>
+    request<{ status: string; new_key_id: number }>("/services/issuer/keys/rotate", {
       method: "POST",
     }),
 

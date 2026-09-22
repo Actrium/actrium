@@ -17,6 +17,6 @@ pub mod schema {
 
 pub use resolver::{EffectiveCliConfig, resolve_effective_cli_config};
 pub use schema::{
-    CacheConfig, CliConfig, CodegenConfig, InstallConfig, MfrConfig, NetworkConfig, StorageConfig,
-    UiConfig,
+    CacheConfig, CliConfig, CodegenConfig, InstallConfig, NetworkConfig, PublisherConfig,
+    StorageConfig, UiConfig,
 };

@@ -2,7 +2,7 @@ edition = 1
 
 [package]
 name = "EchoWorkloadC"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.1.0"
 description = "C echo workload for actr:workload@0.7.0, authored with wit-bindgen c."
 authors = ["Actr Dev Team"]

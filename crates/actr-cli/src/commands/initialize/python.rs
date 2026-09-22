@@ -24,7 +24,7 @@ impl ProjectInitializer for PythonInitializer {
         let mut template_context = TemplateContext::new(
             &context.project_name,
             &context.signaling_url,
-            &context.manufacturer,
+            &context.publisher,
             service_name,
             true,
         );

@@ -76,13 +76,22 @@ impl ServiceRegistryStorage {
 
     /// Initialize database schema
     async fn init_schema(&self) -> Result<()> {
+        // Migration: rename the publisher column of pre-actr-package/2 tables
+        // before the statements below reference it. Ignored when the table is
+        // new or already migrated.
+        let _ = sqlx::query(
+            "ALTER TABLE service_registry RENAME COLUMN actor_manufacturer TO actor_publisher",
+        )
+        .execute(&self.pool)
+        .await;
+
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS service_registry (
                 -- ActorId fields
                 actor_serial_number INTEGER NOT NULL,
                 actor_realm_id INTEGER NOT NULL,
-                actor_manufacturer TEXT NOT NULL,
+                actor_publisher TEXT NOT NULL,
                 actor_device_name TEXT NOT NULL,
                 actor_version TEXT NOT NULL,
 
@@ -186,7 +195,7 @@ impl ServiceRegistryStorage {
         sqlx::query(
             r#"
             INSERT INTO service_registry (
-                actor_serial_number, actor_realm_id, actor_manufacturer, actor_device_name,
+                actor_serial_number, actor_realm_id, actor_publisher, actor_device_name,
                 actor_version,
                 service_name, message_types, capabilities_json, status,
                 service_spec_blob, acl_blob,
@@ -208,7 +217,7 @@ impl ServiceRegistryStorage {
             )
             ON CONFLICT(actor_serial_number, actor_realm_id, service_name)
             DO UPDATE SET
-                actor_manufacturer = excluded.actor_manufacturer,
+                actor_publisher = excluded.actor_publisher,
                 actor_device_name = excluded.actor_device_name,
                 actor_version = excluded.actor_version,
                 message_types = excluded.message_types,
@@ -231,7 +240,7 @@ impl ServiceRegistryStorage {
         )
         .bind(service.actor_id.serial_number as i64)
         .bind(actor_realm.realm_id as i64)
-        .bind(&actor_type.manufacturer)
+        .bind(&actor_type.publisher)
         .bind(&actor_type.name)
         .bind(&actor_type.version)
         .bind(&service.service_name)
@@ -328,7 +337,7 @@ impl ServiceRegistryStorage {
         let rows = sqlx::query(
             r#"
             SELECT
-                actor_serial_number, actor_realm_id, actor_manufacturer, actor_device_name,
+                actor_serial_number, actor_realm_id, actor_publisher, actor_device_name,
                 actor_version,
                 service_name, message_types, capabilities_json, status,
                 service_spec_blob, acl_blob,
@@ -383,7 +392,7 @@ impl ServiceRegistryStorage {
         let rows = sqlx::query(
             r#"
             SELECT
-                actor_serial_number, actor_realm_id, actor_manufacturer, actor_device_name,
+                actor_serial_number, actor_realm_id, actor_publisher, actor_device_name,
                 actor_version,
                 service_name, message_types, capabilities_json, status,
                 service_spec_blob, acl_blob,
@@ -395,7 +404,7 @@ impl ServiceRegistryStorage {
             FROM service_registry
             WHERE actor_serial_number = ?1
               AND actor_realm_id = ?2
-              AND actor_manufacturer = ?3
+              AND actor_publisher = ?3
               AND actor_device_name = ?4
               AND actor_version = ?5
               AND expires_at > ?6
@@ -404,7 +413,7 @@ impl ServiceRegistryStorage {
         )
         .bind(actor_id.serial_number as i64)
         .bind(actor_id.realm.realm_id as i64)
-        .bind(&actor_id.r#type.manufacturer)
+        .bind(&actor_id.r#type.publisher)
         .bind(&actor_id.r#type.name)
         .bind(&actor_id.r#type.version)
         .bind(now as i64)
@@ -469,7 +478,7 @@ impl ServiceRegistryStorage {
                 realm_id: row.get::<i64, _>("actor_realm_id") as u32,
             },
             r#type: actr_protocol::ActrType {
-                manufacturer: row.get("actor_manufacturer"),
+                publisher: row.get("actor_publisher"),
                 name: row.get("actor_device_name"),
                 version: actor_version,
             },
@@ -610,7 +619,7 @@ mod tests {
             serial_number: serial,
             realm: Realm { realm_id: 1001 },
             r#type: ActrType {
-                manufacturer: "test-mfg".to_string(),
+                publisher: "test-mfg".to_string(),
                 name: "test-device".to_string(),
                 version: "1.0.0".to_string(),
             },
@@ -728,7 +737,8 @@ mod tests {
             .await
             .unwrap();
 
-        // Recreate the pre-#389 schema (22 columns, no actor_version)
+        // Recreate the pre-#389 schema (22 columns, no actor_version, and the
+        // publisher column under its retired name)
         sqlx::query("DROP TABLE service_registry")
             .execute(&storage.pool)
             .await

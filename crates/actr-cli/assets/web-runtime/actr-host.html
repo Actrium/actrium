@@ -911,7 +911,7 @@
                 document.getElementById('serviceName').textContent = cfg.package.full_type ? ('echo.' + cfg.package.actr_name || cfg.package.name || cfg.package.full_type) : '—';
 
                 const swRuntimeConfig = {
-                    ais_endpoint: cfg.ais_endpoint,
+                    issuer_endpoint: cfg.issuer_endpoint,
                     signaling_url: cfg.signaling_url,
                     realm_id: cfg.realm_id,
                     client_actr_type: cfg.package.full_type,

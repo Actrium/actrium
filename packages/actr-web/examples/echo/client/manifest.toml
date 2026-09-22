@@ -1,13 +1,13 @@
 # NOTE: This manifest is kept for web platform config reference.
 # For actr pkg build, use client-guest/manifest.toml instead.
-# For runtime config (signaling, AIS, WebRTC, ACL), use client-actr.toml.
+# For runtime config (signaling, Issuer, WebRTC, ACL), use client-actr.toml.
 
 edition = 1
 exports = []
 
 [package]
 name = "echo-client-app"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.1.0"
 description = "Echo Client App"
 authors = ["Actr Dev Team"]

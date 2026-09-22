@@ -7,7 +7,7 @@ edition = 1
 
 [package]
 name = "EchoApp"
-manufacturer = "e2e.actrium.test"
+publisher = "e2e.actrium.test"
 version = "0.1.0"
 description = "Actrium EchoApp — iOS linked runtime"
 

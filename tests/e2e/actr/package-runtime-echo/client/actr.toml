@@ -3,8 +3,8 @@ edition = 1
 [signaling]
 url = "ws://127.0.0.1:8081/signaling/ws"
 
-[ais_endpoint]
-url = "http://127.0.0.1:8081/ais"
+[issuer_endpoint]
+url = "http://127.0.0.1:8081/issuer"
 
 [deployment]
 realm_id = 1001

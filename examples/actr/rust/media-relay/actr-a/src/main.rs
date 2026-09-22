@@ -50,7 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 3.1 Discover remote actr-b
     let target_type = ActrType {
-        manufacturer: "actr-example".to_string(),
+        publisher: "actr-example".to_string(),
         name: "media_relay.RelayService".to_string(),
         version: "1.0.0".to_string(),
     };

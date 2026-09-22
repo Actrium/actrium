@@ -1288,7 +1288,7 @@ async fn response_send_timeout_submits_recovery_hint_to_current_peer() {
         realm: actr_protocol::Realm { realm_id: 1 },
         serial_number: 9001,
         r#type: ActrType {
-            manufacturer: "test".to_string(),
+            publisher: "test".to_string(),
             name: "response-path".to_string(),
             version: "1.0.0".to_string(),
         },
@@ -1419,7 +1419,7 @@ fn dedup_test_config(dir: &tempfile::TempDir) -> actr_config::RuntimeConfig {
         package: actr_config::PackageInfo {
             name: "DedupTellActor".to_string(),
             actr_type: actr_protocol::ActrType {
-                manufacturer: "test-mfr".to_string(),
+                publisher: "test-publisher".to_string(),
                 name: "DedupTellActor".to_string(),
                 version: "0.1.0".to_string(),
             },
@@ -1429,7 +1429,7 @@ fn dedup_test_config(dir: &tempfile::TempDir) -> actr_config::RuntimeConfig {
         },
         signaling_url: url::Url::parse("ws://127.0.0.1:9/signaling/ws").unwrap(),
         realm: actr_protocol::Realm { realm_id: 7 },
-        ais_endpoint: "http://127.0.0.1:9/ais".to_string(),
+        issuer_endpoint: "http://127.0.0.1:9/issuer".to_string(),
         realm_secret: None,
         visible_in_discovery: false,
         acl: None,
@@ -1829,7 +1829,7 @@ fn explicit_envelope(request_id: &str) -> RpcEnvelope {
 
 fn component_package_manifest_for_test() -> actr_pack::PackageManifest {
     actr_pack::PackageManifest {
-        manufacturer: "test".to_string(),
+        publisher: "test".to_string(),
         name: "ComponentEcho".to_string(),
         version: "0.1.0".to_string(),
         binary: actr_pack::BinaryEntry {

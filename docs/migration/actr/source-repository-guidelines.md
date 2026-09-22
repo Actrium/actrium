@@ -54,7 +54,7 @@ match exactly.
 - Run `rustfmt` (same options used by `actr gen`) before committing: `cargo fmt --all`.
 - Keep comments concise and purposeful; prefer English for inline docs even when user-facing docs are localized.
 - When logging/returning/tracing `ActrId`, always use `ActrId::to_string_repr()` (applies to logs, errors, and tracing spans, including `#[instrument]` fields).
-- When logging/returning/tracing `ActrType`, always use `ActrType::to_string_repr()` instead of manual manufacturer/name formatting.
+- When logging/returning/tracing `ActrType`, always use `ActrType::to_string_repr()` instead of manual publisher/name formatting.
 
 ## Testing Guidelines
 - Unit tests live beside implementation files; integration tests belong in `tests/` when present.

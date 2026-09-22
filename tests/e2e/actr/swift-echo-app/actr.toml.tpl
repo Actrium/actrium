@@ -5,13 +5,13 @@
 # package, binary, and build sections are intentionally omitted.
 #
 # The actor type is defined in Swift code:
-#     ActrType(manufacturer: "e2e.actrium.test", name: "EchoApp", version: "0.1.0")
+#     ActrType(publisher: "e2e.actrium.test", name: "EchoApp", version: "0.1.0")
 
 [signaling]
 url = "ws://__HOST__:__HTTP_PORT__/signaling/ws"
 
-[ais_endpoint]
-url = "http://__HOST__:__HTTP_PORT__/ais"
+[issuer_endpoint]
+url = "http://__HOST__:__HTTP_PORT__/issuer"
 
 [deployment]
 # Replace this with the REALM_ID returned by actrix CreateRealm/Admin UI.

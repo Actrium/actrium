@@ -25,7 +25,7 @@ pub(crate) fn realm_from_wit(r: &wit_types::Realm) -> Realm {
 
 pub(crate) fn actr_type_to_wit(t: &ActrType) -> wit_types::ActrType {
     wit_types::ActrType {
-        manufacturer: t.manufacturer.clone(),
+        publisher: t.publisher.clone(),
         name: t.name.clone(),
         version: t.version.clone(),
     }
@@ -33,7 +33,7 @@ pub(crate) fn actr_type_to_wit(t: &ActrType) -> wit_types::ActrType {
 
 pub(crate) fn actr_type_from_wit(t: &wit_types::ActrType) -> ActrType {
     ActrType {
-        manufacturer: t.manufacturer.clone(),
+        publisher: t.publisher.clone(),
         name: t.name.clone(),
         version: t.version.clone(),
     }

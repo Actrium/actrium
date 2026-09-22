@@ -753,7 +753,7 @@ private struct ToolbarContentView: View {
                 Button(action: {
                     NSLog("🔘 [Toolbar] Bookmark button tapped, isBookmarked=\(isBookmarked)")
                     if !isBookmarked, let tab = viewModel.currentTab {
-                        let bookmark = Bookmark.from(tab: tab, manufacturer: nil)
+                        let bookmark = Bookmark.from(tab: tab, publisher: nil)
                         bookmarkVM.addBookmark(bookmark)
                     }
                     showingBookmarkPopover = true

@@ -244,12 +244,12 @@ async fn build_container(
 
         let discovery_context = DiscoveryContext {
             package_actr_type: actr_protocol::ActrType {
-                manufacturer: "cli".into(),
+                publisher: "cli".into(),
                 name: "registry-discover".into(),
                 version: "0.0.0".into(),
             },
             signaling_url: cfg.endpoint.clone(),
-            ais_endpoint: cfg.endpoint.to_string(),
+            issuer_endpoint: cfg.endpoint.to_string(),
             realm: actr_protocol::Realm {
                 realm_id: cfg.realm_id as u32,
             },
@@ -303,14 +303,14 @@ async fn build_container(
         )
     })?;
 
-    let ais_endpoint = effective_cli.network.ais_endpoint.clone();
+    let issuer_endpoint = effective_cli.network.issuer_endpoint.clone();
     let realm_id = effective_cli.network.realm_id.unwrap_or(1);
     let realm_secret = effective_cli.network.realm_secret.clone();
 
     let discovery_context = DiscoveryContext {
         package_actr_type: config.package.actr_type.clone(),
         signaling_url,
-        ais_endpoint,
+        issuer_endpoint,
         realm: actr_protocol::Realm { realm_id },
         realm_secret,
     };

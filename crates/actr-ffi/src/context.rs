@@ -266,7 +266,7 @@ impl ContextBridge {
     /// Discover an actor of the specified type
     ///
     /// # Arguments
-    /// - `target_type`: Actor type to discover (manufacturer + name)
+    /// - `target_type`: Actor type to discover (publisher + name)
     ///
     /// # Returns
     /// The ActrId of a discovered actor

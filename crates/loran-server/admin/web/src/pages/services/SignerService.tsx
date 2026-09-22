@@ -77,7 +77,7 @@ function IssuanceDiagram() {
       <text x="228" y="40" className="sgn-chip-caption">background refresh</text>
 
       <rect x="36" y={nodeY} width="136" height={nodeH} rx="14" fill="#eef2ff" stroke="#6366f1" strokeWidth="1.6" filter="url(#sgn-shadow)" />
-      <text x="104" y={nodeY + 24} textAnchor="middle" className="sgn-node-title" fill="#3730a3">AIS</text>
+      <text x="104" y={nodeY + 24} textAnchor="middle" className="sgn-node-title" fill="#3730a3">Issuer</text>
       <text x="104" y={nodeY + 42} textAnchor="middle" className="sgn-node-subtitle" fill="#6366f1">refresh controller</text>
 
       <rect x="240" y={nodeY} width="154" height={nodeH} rx="14" fill="#fffbeb" stroke="#d97706" strokeWidth="1.6" filter="url(#sgn-shadow)" />
@@ -90,8 +90,8 @@ function IssuanceDiagram() {
       <text x="317" y={storageY + 23} textAnchor="middle" fontSize="7.8" fill="#c2410c">private keys never leave process</text>
 
       <rect x="472" y={nodeY} width="146" height={nodeH} rx="14" fill="#f8fafc" stroke="#94a3b8" strokeWidth="1.3" filter="url(#sgn-shadow)" />
-      <text x="545" y={nodeY + 24} textAnchor="middle" fontSize="11.2" fontWeight="600" fill="#334155">ais_keys.db</text>
-      <text x="545" y={nodeY + 42} textAnchor="middle" className="sgn-node-subtitle" fill="#64748b">AIS private verifier cache</text>
+      <text x="545" y={nodeY + 24} textAnchor="middle" fontSize="11.2" fontWeight="600" fill="#334155">issuer_keys.db</text>
+      <text x="545" y={nodeY + 42} textAnchor="middle" className="sgn-node-subtitle" fill="#64748b">Issuer private verifier cache</text>
 
       <rect x="642" y={nodeY} width="166" height={nodeH} rx="14" fill="#f0fdf4" stroke="#22c55e" strokeWidth="1.3" filter="url(#sgn-shadow)" />
       <text x="725" y={nodeY + 24} textAnchor="middle" fontSize="11.2" fontWeight="600" fill="#166534">signaling_key_cache.db</text>
@@ -128,7 +128,7 @@ function IssuanceDiagram() {
       <text x="108" y={bPanelY + 96} textAnchor="middle" className="sgn-node-subtitle" fill="#2563eb">requests registration</text>
 
       <rect x="258" y={bPanelY + 54} width="240" height={nodeH} rx="14" fill="#eef2ff" stroke="#6366f1" strokeWidth="1.6" filter="url(#sgn-shadow)" />
-      <text x="378" y={bPanelY + 74} textAnchor="middle" className="sgn-node-title" fill="#3730a3">AIS</text>
+      <text x="378" y={bPanelY + 74} textAnchor="middle" className="sgn-node-title" fill="#3730a3">Issuer</text>
       <text x="378" y={bPanelY + 90} textAnchor="middle" className="sgn-chip-caption" fill="#6366f1">verify publisher • build claims • select active key</text>
       <text x="378" y={bPanelY + 102} textAnchor="middle" className="sgn-chip-caption" fill="#6366f1">call Sign RPC • assemble credential bundle</text>
 
@@ -156,7 +156,7 @@ function IssuanceDiagram() {
       <text x="450" y={bPanelY + 144} textAnchor="middle" fontSize="9.5" fontWeight="600" fill="#166534">Response bundle</text>
       <text x="450" y={bPanelY + 157} textAnchor="middle" className="sgn-detail-text" fill="#16a34a">AIdCredential + TurnCredential + Verifier + KeyID</text>
 
-      <text x="450" y={bPanelY + 188} textAnchor="middle" className="sgn-muted">AIS ↔ Signer transport: cluster-private gRPC with nonce-auth</text>
+      <text x="450" y={bPanelY + 188} textAnchor="middle" className="sgn-muted">Issuer ↔ Signer transport: cluster-private gRPC with nonce-auth</text>
     </svg>
   );
 }
@@ -243,7 +243,7 @@ function VerificationDiagram() {
           </>
         );
       })()}
-      <text x="450" y={cPanelY + cPanelH - 18} textAnchor="middle" className="sgn-muted">AIS propagates verifying keys to shared store; Signaling verifies locally without calling Signer</text>
+      <text x="450" y={cPanelY + cPanelH - 18} textAnchor="middle" className="sgn-muted">Issuer propagates verifying keys to shared store; Signaling verifies locally without calling Signer</text>
 
       {/* ── Sub-panel D: TURN path ── */}
       <rect x={panelX} y={dPanelY} width={panelW} height={dPanelH} rx="16" className="sgn-panel" stroke="#fed7aa" />
@@ -290,7 +290,7 @@ function VerificationDiagram() {
           </>
         );
       })()}
-      <text x="450" y={dPanelY + dPanelH - 18} textAnchor="middle" className="sgn-muted">AIS issues TurnCredential; TURN validates independently without Ed25519 state</text>
+      <text x="450" y={dPanelY + dPanelH - 18} textAnchor="middle" className="sgn-muted">Issuer issues TurnCredential; TURN validates independently without Ed25519 state</text>
     </svg>
   );
 }
@@ -420,7 +420,7 @@ export function SignerService() {
   return (
     <ServicePageLayout
       title="Signer Service"
-      description="Signing Oracle — generates Ed25519 key pairs and signs on behalf of AIS; private keys never leave the process"
+      description="Signing Oracle — generates Ed25519 key pairs and signs on behalf of Issuer; private keys never leave the process"
     >
       {error && !data && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -449,13 +449,13 @@ export function SignerService() {
           <div className="rounded-xl border border-gray-100 bg-white px-4 py-4">
             <p className="text-sm font-semibold text-gray-700">1. Signing boundary</p>
             <p className="mt-1.5 text-xs text-gray-500">
-              AIS requests Signer to generate keys and sign payloads. Private Ed25519 keys stay inside Signer's configured storage backend.
+              Issuer requests Signer to generate keys and sign payloads. Private Ed25519 keys stay inside Signer's configured storage backend.
             </p>
           </div>
           <div className="rounded-xl border border-gray-100 bg-white px-4 py-4">
             <p className="text-sm font-semibold text-gray-700">2. Verifier distribution</p>
             <p className="mt-1.5 text-xs text-gray-500">
-              AIS persists the verifier into local <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">ais_keys.db</code> and shared <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">signaling_key_cache.db</code> so Signaling verifies locally.
+              Issuer persists the verifier into local <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">issuer_keys.db</code> and shared <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">signaling_key_cache.db</code> so Signaling verifies locally.
             </p>
           </div>
           <div className="rounded-xl border border-gray-100 bg-white px-4 py-4">
@@ -471,7 +471,7 @@ export function SignerService() {
         <div className="mt-10">
           <h3 style={sectionTitleStyle}>1. Credential Issuance</h3>
           <p className="mt-1" style={sectionSubtitleStyle}>
-            AIS refreshes verifier material in the background, then signs each register flow through cluster-private RPC.
+            Issuer refreshes verifier material in the background, then signs each register flow through cluster-private RPC.
           </p>
           <div className="mt-4 w-full rounded-[24px] border border-blue-100 bg-white p-4 sm:p-6 shadow-[0_8px_30px_rgba(15,23,42,0.04)]">
             <IssuanceDiagram />
@@ -493,7 +493,7 @@ export function SignerService() {
         <div className="mt-10">
           <h3 style={sectionTitleStyle}>3. Credential Bundle</h3>
           <p className="mt-1" style={sectionSubtitleStyle}>
-            AIS returns two credential families together: Ed25519-backed identity material and the separate TURN HMAC credential.
+            Issuer returns two credential families together: Ed25519-backed identity material and the separate TURN HMAC credential.
           </p>
           <div className="mt-4 w-full rounded-[24px] border border-violet-100 bg-white p-4 sm:p-6 shadow-[0_8px_30px_rgba(15,23,42,0.04)]">
             <div className="grid gap-4 sm:grid-cols-2">
@@ -532,10 +532,10 @@ export function SignerService() {
           <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">Key concepts</p>
           <ul className="mt-3 space-y-2 text-[12px] text-gray-500 list-disc pl-5">
             <li className="leading-relaxed">
-              <strong className="text-gray-700 font-semibold">Signer boundary</strong> — private Ed25519 keys stay inside Signer's storage backend; AIS only receives the verifying key, expiry metadata, and signatures.
+              <strong className="text-gray-700 font-semibold">Signer boundary</strong> — private Ed25519 keys stay inside Signer's storage backend; Issuer only receives the verifying key, expiry metadata, and signatures.
             </li>
             <li className="leading-relaxed">
-              <strong className="text-gray-700 font-semibold">Local verification</strong> — AIS persists verifying keys into shared KeyCache; Signaling verifies AIdCredentials locally by <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">key_id</code> without a Signer round-trip.
+              <strong className="text-gray-700 font-semibold">Local verification</strong> — Issuer persists verifying keys into shared KeyCache; Signaling verifies AIdCredentials locally by <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">key_id</code> without a Signer round-trip.
             </li>
             <li className="leading-relaxed">
               <strong className="text-gray-700 font-semibold">TURN is separate</strong> — TURN does not use KeyCache or Ed25519; it independently validates the HMAC-SHA1 credential derived from <code className="rounded bg-gray-100 px-1 py-0.5 text-[11px]">turn_secret</code>.

@@ -7,7 +7,7 @@ exports = ["protos/local/echo.proto"]
 
 [package]
 name = "EchoService"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.2.0"
 description = "Generated EchoService workload authored in TypeScript"
 authors = ["Actr Dev Team"]

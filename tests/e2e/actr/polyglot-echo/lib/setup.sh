@@ -4,21 +4,21 @@
 # Sourced by run.sh after argument parsing. Drives:
 #   1. Build local actr CLI + mock-actrix.
 #   2. Start mock-actrix on $HTTP_PORT.
-#   3. Generate a fresh MFR keypair and seed it via /admin/mfr.
+#   3. Generate a fresh publisher keypair and seed it via /admin/publisher-registry.
 #   4. Seed the realm via /admin/realms.
 #   5. Scaffold a Rust echo service (cdylib) via `actr init`, build, publish.
 #   6. Render server- and client-runtime configs from templates.
 #   7. Launch the server via `actr run`; export readiness state for the caller.
 #
 # Caller is responsible for:
-#   - Defining: SCRIPT_DIR (run.sh's dir), REPO_ROOT, MANUFACTURER, RUN_DIR,
+#   - Defining: SCRIPT_DIR (run.sh's dir), REPO_ROOT, PUBLISHER, RUN_DIR,
 #     STATE_DIR, LOG_DIR, DIST_DIR, HTTP_PORT, ICE_PORT, REALM_ID.
 #   - Sourcing lib/common.sh first.
 #
 # After setup.sh completes the following globals are exported:
 #   ACTR_CLI_BIN     — path to the locally built actr binary
 #   MOCK_ACTRIX_BIN  — path to the locally built mock-actrix binary
-#   MFR_PUBKEY       — base64 ed25519 verifying key (seeded into mock-actrix)
+#   PUBLISHER_PUBKEY       — base64 ed25519 verifying key (seeded into mock-actrix)
 #   SERVICE_VERSION  — version field from the scaffolded service manifest
 #   SERVICE_PACKAGE  — path to the signed `.actr` server package
 #   SERVER_RUNTIME   — path to the rendered server-runtime.toml
@@ -34,7 +34,7 @@ set -euo pipefail
 : "${HTTP_PORT:=18181}"
 : "${ICE_PORT:=13478}"
 : "${REALM_ID:=4242}"
-: "${MANUFACTURER:=polyglot}"
+: "${PUBLISHER:=polyglot}"
 
 # Cache directories live under target/ so cargo-cache picks them up.
 : "${E2E_CACHE_ROOT:=$REPO_ROOT/target/e2e-cache/polyglot-echo}"
@@ -46,8 +46,8 @@ mkdir -p "$LOG_DIR" "$DIST_DIR" "$STATE_DIR" "$E2E_CACHE_ROOT"
 
 ACTR_CLI_BIN=""
 MOCK_ACTRIX_BIN=""
-MFR_PUBKEY=""
-MFR_KEY_FILE="$RUN_DIR/dev-key.json"
+PUBLISHER_PUBKEY=""
+PUBLISHER_KEY_FILE="$RUN_DIR/dev-key.json"
 SERVICE_VERSION=""
 SERVICE_PACKAGE=""
 SERVER_RUNTIME="$RUN_DIR/server-runtime.toml"
@@ -106,25 +106,25 @@ start_mock_actrix() {
     success "mock-actrix is healthy on http://127.0.0.1:${HTTP_PORT}"
 }
 
-generate_mfr_key() {
-    section "🔑 Generating MFR keychain"
-    run_actr pkg keygen --output "$MFR_KEY_FILE" --force >/dev/null
-    MFR_PUBKEY="$(json_field "$MFR_KEY_FILE" '.public_key')"
-    [ -n "$MFR_PUBKEY" ] || fail "Failed to read MFR pubkey from $MFR_KEY_FILE"
-    success "MFR pubkey: $MFR_PUBKEY"
+generate_publisher_key() {
+    section "🔑 Generating publisher keychain"
+    run_actr pkg keygen --output "$PUBLISHER_KEY_FILE" --force >/dev/null
+    PUBLISHER_PUBKEY="$(json_field "$PUBLISHER_KEY_FILE" '.public_key')"
+    [ -n "$PUBLISHER_PUBKEY" ] || fail "Failed to read publisher pubkey from $PUBLISHER_KEY_FILE"
+    success "publisher pubkey: $PUBLISHER_PUBKEY"
 }
 
-seed_realm_and_mfr() {
-    section "🪪 Seeding realm + MFR via mock-actrix admin"
+seed_realm_and_publisher() {
+    section "🪪 Seeding realm + publisher via mock-actrix admin"
     curl -fsS -X POST "http://127.0.0.1:${HTTP_PORT}/admin/realms" \
         -H 'content-type: application/json' \
         --data "{\"id\": ${REALM_ID}, \"name\": \"polyglot-echo\"}" >/dev/null
     success "realm ${REALM_ID} seeded"
 
-    curl -fsS -X POST "http://127.0.0.1:${HTTP_PORT}/admin/mfr" \
+    curl -fsS -X POST "http://127.0.0.1:${HTTP_PORT}/admin/publisher-registry" \
         -H 'content-type: application/json' \
-        --data "{\"name\": \"${MANUFACTURER}\", \"pubkey_b64\": \"${MFR_PUBKEY}\", \"contact\": \"polyglot-echo@local\"}" >/dev/null
-    success "MFR ${MANUFACTURER} seeded"
+        --data "{\"name\": \"${PUBLISHER}\", \"pubkey_b64\": \"${PUBLISHER_PUBKEY}\", \"contact\": \"polyglot-echo@local\"}" >/dev/null
+    success "publisher ${PUBLISHER} seeded"
 }
 
 scaffold_service() {
@@ -135,11 +135,11 @@ scaffold_service() {
         --template echo \
         --role service \
         --signaling "ws://127.0.0.1:${HTTP_PORT}/signaling/ws" \
-        --manufacturer "$MANUFACTURER" \
+        --publisher "$PUBLISHER" \
         "$TMP_SERVICE_DIR"
 
     append_workspace_patch "$TMP_SERVICE_DIR/Cargo.toml" "$REPO_ROOT"
-    cp "$MFR_KEY_FILE" "$SERVICE_KEYCHAIN"
+    cp "$PUBLISHER_KEY_FILE" "$SERVICE_KEYCHAIN"
     write_project_keychain_config "$TMP_SERVICE_DIR" "$SERVICE_KEYCHAIN"
 
     (
@@ -158,7 +158,7 @@ scaffold_service() {
         ' "$TMP_SERVICE_DIR/manifest.toml"
     )"
     [ -n "$SERVICE_VERSION" ] || fail "Unable to detect scaffolded service version"
-    SERVICE_TYPE="${MANUFACTURER}:EchoService:${SERVICE_VERSION}"
+    SERVICE_TYPE="${PUBLISHER}:EchoService:${SERVICE_VERSION}"
     success "scaffolded service: ${SERVICE_TYPE}"
 }
 
@@ -166,7 +166,7 @@ build_service_package() {
     section "📦 Building + publishing service package"
     local host_target
     host_target="$(rustc -vV | awk '/host:/ {print $2}')"
-    SERVICE_PACKAGE="$DIST_DIR/${MANUFACTURER}-EchoService-${SERVICE_VERSION}-${host_target}.actr"
+    SERVICE_PACKAGE="$DIST_DIR/${PUBLISHER}-EchoService-${SERVICE_VERSION}-${host_target}.actr"
 
     (
         cd "$TMP_SERVICE_DIR"
@@ -192,7 +192,7 @@ render_client_runtime_config() {
         "__ICE_PORT__=$ICE_PORT" \
         "__REALM_ID__=$REALM_ID" \
         "__SERVICE_TYPE__=$SERVICE_TYPE" \
-        "__MFR_PUBKEY__=$MFR_PUBKEY"
+        "__PUBLISHER_PUBKEY__=$PUBLISHER_PUBKEY"
     success "client runtime: $CLIENT_RUNTIME"
 }
 
@@ -208,7 +208,7 @@ render_runtime_configs() {
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
         "__REALM_ID__=$REALM_ID" \
-        "__MFR_PUBKEY__=$MFR_PUBKEY"
+        "__PUBLISHER_PUBKEY__=$PUBLISHER_PUBKEY"
     success "server runtime: $SERVER_RUNTIME"
 
     render_client_runtime_config
@@ -248,14 +248,14 @@ setup_polyglot_echo() {
     build_actr_cli
     build_mock_actrix
     start_mock_actrix
-    generate_mfr_key
-    seed_realm_and_mfr
+    generate_publisher_key
+    seed_realm_and_publisher
     scaffold_service
     build_service_package
     render_runtime_configs
     start_server
 
-    export ACTR_CLI_BIN MOCK_ACTRIX_BIN MFR_PUBKEY SERVICE_VERSION
+    export ACTR_CLI_BIN MOCK_ACTRIX_BIN PUBLISHER_PUBKEY SERVICE_VERSION
     export SERVICE_PACKAGE SERVER_RUNTIME CLIENT_RUNTIME SERVICE_TYPE
     export MOCK_PID SERVER_PID
 }
@@ -263,7 +263,7 @@ setup_polyglot_echo() {
 # ── Common pre-server bootstrap (shared by all --server forms) ──────────────
 #
 # All non-cdylib server forms (linked-*, wasm-*) need the same prelude:
-#   mock-actrix up + MFR seeded + client-runtime config rendered.
+#   mock-actrix up + publisher seeded + client-runtime config rendered.
 # They differ only in how the EchoService workload itself is brought up
 # (linked binary vs cdylib package vs wasm component).
 #
@@ -280,19 +280,19 @@ setup_common_prelude() {
     build_actr_cli
     build_mock_actrix
     start_mock_actrix
-    generate_mfr_key
-    seed_realm_and_mfr
+    generate_publisher_key
+    seed_realm_and_publisher
     SERVICE_VERSION="1.0.0"
-    SERVICE_TYPE="${MANUFACTURER}:EchoService:${SERVICE_VERSION}"
+    SERVICE_TYPE="${PUBLISHER}:EchoService:${SERVICE_VERSION}"
 
     # Set up the service keychain (signing key for `actr build` + publish).
     # Only the cdylib path creates this in scaffold_service today; other
     # forms that drive `actr build` directly (wasm-rust) need it too.
-    cp "$MFR_KEY_FILE" "$SERVICE_KEYCHAIN"
+    cp "$PUBLISHER_KEY_FILE" "$SERVICE_KEYCHAIN"
 
     render_client_runtime_config
 
-    export ACTR_CLI_BIN MOCK_ACTRIX_BIN MFR_PUBKEY SERVICE_VERSION
+    export ACTR_CLI_BIN MOCK_ACTRIX_BIN PUBLISHER_PUBKEY SERVICE_VERSION
     export CLIENT_RUNTIME SERVICE_TYPE MOCK_PID SERVICE_KEYCHAIN
 }
 
@@ -353,7 +353,7 @@ render_linked_rust_runtime() {
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
         "__REALM_ID__=$REALM_ID" \
-        "__MFR_PUBKEY__=$MFR_PUBKEY"
+        "__PUBLISHER_PUBKEY__=$PUBLISHER_PUBKEY"
     success "linked-rust server runtime: $LINKED_RUST_RUNTIME"
 }
 
@@ -449,7 +449,7 @@ build_wasm_rust_server() {
         export CARGO_TARGET_WASM32_WASIP2_RUSTFLAGS="-Cdebuginfo=0"
         CARGO_TARGET_DIR="$WASM_RUST_TARGET_DIR" run_actr build \
             --manifest-path manifest.toml \
-            --key "$MFR_KEY_FILE" \
+            --key "$PUBLISHER_KEY_FILE" \
             --output "$WASM_RUST_PACKAGE"
     ) >"$LOG_DIR/wasm-rust-build.log" 2>&1 || {
         cat "$LOG_DIR/wasm-rust-build.log" >&2
@@ -472,7 +472,7 @@ start_wasm_rust_server() {
     section "🚀 Starting wasm-rust EchoService host (actr run)"
 
     # Reuse the cdylib server-runtime template (same shape: package path +
-    # signaling/AIS endpoints).  Set SERVICE_PACKAGE so the existing
+    # signaling/Issuer endpoints).  Set SERVICE_PACKAGE so the existing
     # render_runtime_configs helper picks the wasm package.
     SERVICE_PACKAGE="$WASM_RUST_PACKAGE"
     SERVER_RUNTIME="$RUN_DIR/wasm-rust-runtime.toml"
@@ -483,7 +483,7 @@ start_wasm_rust_server() {
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
         "__REALM_ID__=$REALM_ID" \
-        "__MFR_PUBKEY__=$MFR_PUBKEY"
+        "__PUBLISHER_PUBKEY__=$PUBLISHER_PUBKEY"
     success "wasm-rust server runtime: $SERVER_RUNTIME"
 
     SERVICE_KEYCHAIN_FOR_SERVER="$SERVICE_KEYCHAIN"
@@ -519,7 +519,7 @@ start_wasm_rust_server() {
 # `actr run`.
 #
 # Prerequisites: setup_polyglot_echo must have run first (mock-actrix up,
-# MFR seeded, ais_endpoint available in CLIENT_RUNTIME template).
+# publisher seeded, issuer_endpoint available in CLIENT_RUNTIME template).
 #
 # Exports after completion:
 #   STREAM_SERVER_PID     — pid of the running stream server binary
@@ -554,7 +554,7 @@ render_stream_server_runtime() {
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
         "__REALM_ID__=$REALM_ID" \
-        "__MFR_PUBKEY__=$MFR_PUBKEY"
+        "__PUBLISHER_PUBKEY__=$PUBLISHER_PUBKEY"
     success "stream server runtime: $STREAM_SERVER_RUNTIME"
 }
 

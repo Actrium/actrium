@@ -31,8 +31,8 @@ impl KeyFetcher for SignalingKeyFetcher {
             .get_signing_key(self.actor_id.clone(), self.credential.clone(), key_id)
             .await
             .map_err(|e| {
-                tracing::warn!(key_id, error = ?e, "SignalingKeyFetcher: failed to fetch AIS public key via signaling");
-                crate::error::HyperError::AisBootstrapFailed(format!(
+                tracing::warn!(key_id, error = ?e, "SignalingKeyFetcher: failed to fetch Issuer public key via signaling");
+                crate::error::HyperError::IssuerBootstrapFailed(format!(
                     "signaling get_signing_key failed: {e:?}"
                 ))
             })

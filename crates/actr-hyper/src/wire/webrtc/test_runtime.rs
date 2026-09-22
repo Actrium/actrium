@@ -771,7 +771,7 @@ mod directed_tests {
             realm: Realm { realm_id: 1 },
             serial_number,
             r#type: ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: "node".to_string(),
                 version: "1.0.0".to_string(),
             },

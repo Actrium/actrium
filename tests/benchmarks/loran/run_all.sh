@@ -11,7 +11,7 @@ echo "Results directory: $RESULTS_DIR"
 echo
 
 # Check if service is running
-if ! curl -k -s https://localhost:8443/ks/health > /dev/null 2>&1; then
+if ! curl -k -s https://localhost:8443/signer/health > /dev/null 2>&1; then
     echo "❌ Service is not running, please start actrix first"
     exit 1
 fi
@@ -23,7 +23,7 @@ echo
 echo "1️⃣  Health Check benchmark..."
 if command -v wrk &> /dev/null; then
     wrk -t4 -c100 -d30s --latency \
-        https://localhost:8443/ks/health \
+        https://localhost:8443/signer/health \
         > "$RESULTS_DIR/wrk_health.txt" 2>&1
 
     echo "  ✅ Done"
@@ -48,21 +48,21 @@ else
 fi
 echo
 
-# === 3. KS gRPC benchmark ===
-echo "3️⃣  KS gRPC benchmark..."
+# === 3. Signer gRPC benchmark ===
+echo "3️⃣  Signer gRPC benchmark..."
 if command -v ghz &> /dev/null; then
-    cd crates/ks
+    cd crates/signer
     ghz --insecure \
         --proto proto/keyserver.proto \
-        --call ks.v1.KeyServer/HealthCheck \
-        -d '{"service":"ks"}' \
+        --call signer.v1.KeyServer/HealthCheck \
+        -d '{"service":"signer"}' \
         -c 50 -n 10000 \
         localhost:50052 \
-        > "$RESULTS_DIR/ghz_ks_health.txt" 2>&1
+        > "$RESULTS_DIR/ghz_signer_health.txt" 2>&1
     cd ../..
 
     echo "  ✅ Done"
-    grep "Requests/sec" "$RESULTS_DIR/ghz_ks_health.txt" || true
+    grep "Requests/sec" "$RESULTS_DIR/ghz_signer_health.txt" || true
 else
     echo "  ⚠️  ghz not installed, skipping"
     echo "     Install: go install github.com/bojand/ghz/cmd/ghz@latest"

@@ -8,9 +8,9 @@ fn ctx() -> RuntimeContext {
     runtime_context_with_host_transport(ActrId::default(), Arc::new(HostTransport::new()))
 }
 
-fn actr_type(mfr: &str, name: &str, ver: &str) -> ActrType {
+fn actr_type(publisher: &str, name: &str, ver: &str) -> ActrType {
     ActrType {
-        manufacturer: mfr.into(),
+        publisher: publisher.into(),
         name: name.into(),
         version: ver.into(),
     }

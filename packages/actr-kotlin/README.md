@@ -279,7 +279,7 @@ node.withStartedActor { ref ->
 ```kotlin
 // ActrType
 val type = actrType("acme", "EchoService", "1.0.0")
-val type = actrType { manufacturer = "acme"; name = "EchoService"; version = "1.0.0" }
+val type = actrType { publisher = "acme"; name = "EchoService"; version = "1.0.0" }
 
 // ActrId
 val id = actrId { realm = 2281844430u; serialNumber = 1uL; type = "acme:EchoService:1.0.0" }

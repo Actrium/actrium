@@ -84,7 +84,7 @@ fn write_exported_proto(output_dir: &Path, name: &str, content: &str) -> Result<
     actr registry discover --list-only\n\n  \
     # Discover services on a remote actrix server (standalone, no local project needed)\n  \
     actr registry discover --list-only \\\n    \
-    --endpoint http://124.71.231.251:9080/ais \\\n    \
+    --endpoint http://124.71.231.251:9080/issuer \\\n    \
     --realm-id 33554433 \\\n    \
     --realm-secret rs_xxx"
 )]
@@ -105,7 +105,7 @@ pub struct DiscoveryCommand {
     #[arg(long)]
     pub list_only: bool,
 
-    /// Standalone mode: actrix AIS endpoint URL (e.g. http://124.71.231.251:9080/ais)
+    /// Standalone mode: actrix Issuer endpoint URL (e.g. http://124.71.231.251:9080/issuer)
     ///
     /// When specified together with --realm-id and --realm-secret, runs in standalone
     /// mode that doesn't require a local project's manifest.toml / actr.toml.

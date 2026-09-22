@@ -942,11 +942,11 @@ impl ServiceRegistry {
     /// Get all services (for service discovery)
     ///
     /// # Arguments
-    /// - `manufacturer`: Optional manufacturer filter
+    /// - `publisher`: Optional publisher filter
     ///
     /// # Returns
     /// List of all matching service instances
-    pub fn discover_all(&self, manufacturer: Option<&str>) -> Vec<&ServiceInfo> {
+    pub fn discover_all(&self, publisher: Option<&str>) -> Vec<&ServiceInfo> {
         let mut results = Vec::new();
 
         for services in self.services.values() {
@@ -956,9 +956,9 @@ impl ServiceRegistry {
                     continue;
                 }
 
-                // Filter by manufacturer
-                if let Some(mfr) = manufacturer
-                    && service.actor_id.r#type.manufacturer != mfr
+                // Filter by publisher
+                if let Some(publisher) = publisher
+                    && service.actor_id.r#type.publisher != publisher
                 {
                     continue;
                 }
@@ -987,8 +987,8 @@ impl ServiceRegistry {
                     continue;
                 }
 
-                // Exact match ActrType (manufacturer + name + version)
-                if service.actor_id.r#type.manufacturer == target_type.manufacturer
+                // Exact match ActrType (publisher + name + version)
+                if service.actor_id.r#type.publisher == target_type.publisher
                     && service.actor_id.r#type.name == target_type.name
                     && service.actor_id.r#type.version == target_type.version
                 {
@@ -1074,11 +1074,11 @@ impl ServiceRegistry {
 
         let from_type = format!(
             "{}:{}:{}",
-            from_actor.r#type.manufacturer, from_actor.r#type.name, from_actor.r#type.version
+            from_actor.r#type.publisher, from_actor.r#type.name, from_actor.r#type.version
         );
         let to_type = format!(
             "{}:{}:{}",
-            to_actor.r#type.manufacturer, to_actor.r#type.name, to_actor.r#type.version
+            to_actor.r#type.publisher, to_actor.r#type.name, to_actor.r#type.version
         );
 
         ActorAcl::can_discover(from_realm, to_realm, &from_type, &to_type).await
@@ -1120,7 +1120,7 @@ mod tests {
         ActrId {
             serial_number: serial,
             r#type: ActrType {
-                manufacturer: "test".to_string(),
+                publisher: "test".to_string(),
                 name: "test".to_string(),
                 version: "1.0.0".to_string(),
             },
@@ -1128,11 +1128,11 @@ mod tests {
         }
     }
 
-    fn create_actor_id(serial: u64, realm_id: u32, manufacturer: &str, name: &str) -> ActrId {
+    fn create_actor_id(serial: u64, realm_id: u32, publisher: &str, name: &str) -> ActrId {
         ActrId {
             serial_number: serial,
             r#type: ActrType {
-                manufacturer: manufacturer.to_string(),
+                publisher: publisher.to_string(),
                 name: name.to_string(),
                 version: "1.0.0".to_string(),
             },
@@ -1594,7 +1594,7 @@ mod tests {
         let actor_id1 = ActrId {
             serial_number: 1,
             r#type: ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: "worker".to_string(),
                 version: "1.0.0".to_string(),
             },
@@ -1604,7 +1604,7 @@ mod tests {
         let actor_id2 = ActrId {
             serial_number: 2,
             r#type: ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: "worker".to_string(),
                 version: "1.0.0".to_string(),
             },
@@ -1614,7 +1614,7 @@ mod tests {
         let actor_id3 = ActrId {
             serial_number: 3,
             r#type: ActrType {
-                manufacturer: "other".to_string(),
+                publisher: "other".to_string(),
                 name: "service".to_string(),
                 version: "1.0.0".to_string(),
             },
@@ -1649,26 +1649,28 @@ mod tests {
             .unwrap();
 
         let target_type = ActrType {
-            manufacturer: "acme".to_string(),
+            publisher: "acme".to_string(),
             name: "worker".to_string(),
             version: "1.0.0".to_string(),
         };
 
         let results = registry.find_by_actr_type(&target_type);
         assert_eq!(results.len(), 2);
-        assert!(results.iter().all(
-            |s| s.actor_id.r#type.manufacturer == "acme" && s.actor_id.r#type.name == "worker"
-        ));
+        assert!(
+            results.iter().all(
+                |s| s.actor_id.r#type.publisher == "acme" && s.actor_id.r#type.name == "worker"
+            )
+        );
     }
 
     #[test]
-    fn test_discover_all_with_manufacturer_filter() {
+    fn test_discover_all_with_publisher_filter() {
         let mut registry = ServiceRegistry::new();
 
         let actor_id1 = ActrId {
             serial_number: 1,
             r#type: ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: "service1".to_string(),
                 version: "1.0.0".to_string(),
             },
@@ -1678,7 +1680,7 @@ mod tests {
         let actor_id2 = ActrId {
             serial_number: 2,
             r#type: ActrType {
-                manufacturer: "vendor".to_string(),
+                publisher: "vendor".to_string(),
                 name: "service2".to_string(),
                 version: "1.0.0".to_string(),
             },
@@ -1697,10 +1699,10 @@ mod tests {
         let all = registry.discover_all(None);
         assert_eq!(all.len(), 2);
 
-        // Filter by manufacturer
+        // Filter by publisher
         let acme_only = registry.discover_all(Some("acme"));
         assert_eq!(acme_only.len(), 1);
-        assert_eq!(acme_only[0].actor_id.r#type.manufacturer, "acme");
+        assert_eq!(acme_only[0].actor_id.r#type.publisher, "acme");
     }
 
     /// Disabled under the single-Realm v1 production profile: the `realm`
@@ -1758,10 +1760,10 @@ mod tests {
             ServiceRegistry::check_discovery_acl(&from_wrong_realm, &to_target).await?;
         assert!(!denied_wrong_realm);
 
-        let from_wrong_manufacturer = create_actor_id(4, source_realm, "other", "edge");
-        let denied_wrong_manufacturer =
-            ServiceRegistry::check_discovery_acl(&from_wrong_manufacturer, &to_target).await?;
-        assert!(!denied_wrong_manufacturer);
+        let from_wrong_publisher = create_actor_id(4, source_realm, "other", "edge");
+        let denied_wrong_publisher =
+            ServiceRegistry::check_discovery_acl(&from_wrong_publisher, &to_target).await?;
+        assert!(!denied_wrong_publisher);
 
         Ok(())
     }
@@ -1769,7 +1771,7 @@ mod tests {
     /// Reproduce Ghost Candidates Bug:
     ///
     /// Real scenario: after actrix restart, restore_from_storage() loads ActorId A (serial=xxx1)
-    /// into memory. Then a new service process starts, AIS assigns a new ActorId B (serial=xxx2),
+    /// into memory. Then a new service process starts, Issuer assigns a new ActorId B (serial=xxx2),
     /// and calls register_service_full(). Without deduplication, both A (ghost) and B (real)
     /// coexist in memory under the same service_name.
     ///
@@ -1780,7 +1782,7 @@ mod tests {
         let mut registry = ServiceRegistry::new();
 
         let actr_type = ActrType {
-            manufacturer: "acme".to_string(),
+            publisher: "acme".to_string(),
             name: "EchoService".to_string(),
             version: "0.0.1".to_string(),
         };
@@ -1792,7 +1794,7 @@ mod tests {
             r#type: actr_type.clone(),
         };
 
-        // ActorId B: new service process registration, new serial assigned by AIS
+        // ActorId B: new service process registration, new serial assigned by Issuer
         let actor_id_b = ActrId {
             serial_number: 22222, // new serial, different from A
             realm: actr_protocol::Realm { realm_id: 1 },
@@ -1821,7 +1823,7 @@ mod tests {
             "After first registration (ActorId A) there should be only 1 candidate"
         );
 
-        // Second registration: simulate a new service process starting, AIS assigns new ActorId B, calls register_service_full
+        // Second registration: simulate a new service process starting, Issuer assigns new ActorId B, calls register_service_full
         // Memory already has A (ghost), B is pushed directly -> produces 2 entries
         registry
             .register_service_full(
@@ -1856,7 +1858,7 @@ mod tests {
         let actor_id = ActrId {
             serial_number: 1,
             r#type: ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: "worker".to_string(),
                 version: "1.0.0".to_string(),
             },
@@ -1873,7 +1875,7 @@ mod tests {
             .unwrap();
 
         let target_type = ActrType {
-            manufacturer: "acme".to_string(),
+            publisher: "acme".to_string(),
             name: "worker".to_string(),
             version: "2.0.0".to_string(),
         };
@@ -1890,7 +1892,7 @@ mod tests {
                 realm_id: 33_554_433,
             },
             r#type: ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: "BotService".to_string(),
                 version: "4.0.0".to_string(),
             },

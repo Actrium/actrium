@@ -13,7 +13,7 @@ fn local_actrix_config_includes_valid_renewal_token_secret() {
     let secret_line = content
         .lines()
         .find(|line| line.trim_start().starts_with("renewal_token_secret = "))
-        .expect("AIS renewal_token_secret should be configured");
+        .expect("Issuer renewal_token_secret should be configured");
     let secret = secret_line
         .split_once('=')
         .expect("secret assignment should contain '='")

@@ -14,8 +14,8 @@ export type WorkerType = 'service-worker' | 'web-worker';
  * then forwarded to WASM register_client().
  */
 export interface SwRuntimeConfig {
-  /** AIS (Actor Identity Service) endpoint URL (e.g. http://host:port/ais) */
-  ais_endpoint: string;
+  /** Issuer endpoint URL (e.g. http://host:port/issuer) */
+  issuer_endpoint: string;
 
   /** Signaling WebSocket URL (e.g. wss://host:port/signaling/ws) */
   signaling_url: string;
@@ -23,10 +23,10 @@ export interface SwRuntimeConfig {
   /** Deployment realm ID */
   realm_id: number;
 
-  /** This actor's type (manufacturer:name:version) */
+  /** This actor's type (publisher:name:version) */
   client_actr_type: string;
 
-  /** Target actor type for peer discovery (manufacturer:name:version) */
+  /** Target actor type for peer discovery (publisher:name:version) */
   /** Optional legacy default target. New workloads resolve dependency aliases at call time. */
   target_actr_type?: string;
 
@@ -64,7 +64,7 @@ export interface SwRuntimeConfig {
 /** Trust anchor config, matching `actr_config::TrustAnchor` in `actr_config`. */
 export type TrustAnchor =
   | {
-      /** Pre-shared Ed25519 public key; accepts any manufacturer. */
+      /** Pre-shared Ed25519 public key; accepts any publisher. */
       kind: 'static';
       /** Base64 (standard) of the 32-byte Ed25519 public key. */
       pubkey_b64?: string;
@@ -74,7 +74,7 @@ export type TrustAnchor =
       pubkey_file?: string;
     }
   | {
-      /** Look up MFR public keys via AIS HTTP registry. Not yet implemented
+      /** Look up publisher public keys via Issuer HTTP registry. Not yet implemented
        *  in the browser SW; a registry-only config fails closed. */
       kind: 'registry';
       endpoint: string;

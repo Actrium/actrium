@@ -255,13 +255,13 @@ SECRET_HASH=$(printf '%s' "$REALM_SECRET" | shasum -a 256 | awk '{print $1}')
 echo "   realm_id=$REALM_ID secret_hash=${SECRET_HASH:0:16}..."
 
 sqlite3 "$ACTRIX_DB" <<EOF
-INSERT OR REPLACE INTO mfr (name, public_key, status, created_at, verified_at) VALUES ('acme', '', 'verified', strftime('%s','now'), strftime('%s','now'));
-INSERT OR REPLACE INTO mfr_package (mfr_id, manufacturer, name, version, type_str, manifest, signature, status, published_at)
-  SELECT id, 'acme', 'EchoService', '1.0.0', 'acme:EchoService:1.0.0', '{}', '', 'active', strftime('%s','now') FROM mfr WHERE name='acme'
-  ON CONFLICT(manufacturer, name, version) DO UPDATE SET status='active';
-INSERT OR REPLACE INTO mfr_package (mfr_id, manufacturer, name, version, type_str, manifest, signature, status, published_at)
-  SELECT id, 'acme', 'echo-client-app', '1.0.0', 'acme:echo-client-app:1.0.0', '{}', '', 'active', strftime('%s','now') FROM mfr WHERE name='acme'
-  ON CONFLICT(manufacturer, name, version) DO UPDATE SET status='active';
+INSERT OR REPLACE INTO publisher (name, public_key, status, created_at, verified_at) VALUES ('acme', '', 'verified', strftime('%s','now'), strftime('%s','now'));
+INSERT OR REPLACE INTO publisher_package (publisher_id, publisher, name, version, type_str, manifest, signature, status, published_at)
+  SELECT id, 'acme', 'EchoService', '1.0.0', 'acme:EchoService:1.0.0', '{}', '', 'active', strftime('%s','now') FROM publisher WHERE name='acme'
+  ON CONFLICT(publisher, name, version) DO UPDATE SET status='active';
+INSERT OR REPLACE INTO publisher_package (publisher_id, publisher, name, version, type_str, manifest, signature, status, published_at)
+  SELECT id, 'acme', 'echo-client-app', '1.0.0', 'acme:echo-client-app:1.0.0', '{}', '', 'active', strftime('%s','now') FROM publisher WHERE name='acme'
+  ON CONFLICT(publisher, name, version) DO UPDATE SET status='active';
 INSERT OR REPLACE INTO realm (id, name, status, enabled, created_at, secret_current) VALUES ($REALM_ID, 'MutilActr Realm', 'Active', 1, strftime('%s','now'), '$SECRET_HASH');
 DELETE FROM actoracl WHERE realm_id = $REALM_ID;
 INSERT INTO actoracl (realm_id, source_realm_id, from_type, to_type, access)

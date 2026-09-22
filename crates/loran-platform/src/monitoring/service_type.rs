@@ -12,7 +12,7 @@ pub enum ServiceType {
     Stun,
     Turn,
     Signaling,
-    Ais,
+    Issuer,
     Signer,
     PublisherRegistry,
 }
@@ -24,7 +24,7 @@ impl From<ServiceType> for ResourceType {
             ServiceType::Stun => ResourceType::Stun,
             ServiceType::Turn => ResourceType::Turn,
             ServiceType::Signaling => ResourceType::Signaling,
-            ServiceType::Ais => ResourceType::Ais,
+            ServiceType::Issuer => ResourceType::Issuer,
             ServiceType::Signer => ResourceType::Signer,
             ServiceType::PublisherRegistry => ResourceType::PublisherRegistry,
         }

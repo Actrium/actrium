@@ -3,7 +3,7 @@
 //! Manages the lifecycle of various auxiliary services
 //! # Service Management Abstraction
 //!
-//! Provides a generic service management abstraction for managing Signer, AIS, Signaling, STUN/TURN, and other services.
+//! Provides a generic service management abstraction for managing Signer, Issuer, Signaling, STUN/TURN, and other services.
 //!
 //! ## Core Concepts
 //!
@@ -27,7 +27,7 @@ use std::fmt::Debug;
 use url::Url;
 
 // Re-export service implementations
-pub use http::{AisService, PublisherRegistryService, SignalingService};
+pub use http::{IssuerService, PublisherRegistryService, SignalingService};
 pub use ice::{StunService, TurnService};
 
 // Re-export core components

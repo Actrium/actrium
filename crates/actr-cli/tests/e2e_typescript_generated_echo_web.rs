@@ -261,8 +261,8 @@ path = "{}"
 [signaling]
 url = "{}"
 
-[ais_endpoint]
-url = "{}/ais"
+[issuer_endpoint]
+url = "{}/issuer"
 
 [deployment]
 realm_id = {}

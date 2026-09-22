@@ -1,4 +1,4 @@
-//! Identity claims used by AIS credentials.
+//! Identity claims used by Issuer credentials.
 
 use serde::{Deserialize, Serialize};
 

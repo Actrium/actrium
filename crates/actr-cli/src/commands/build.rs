@@ -40,7 +40,7 @@ pub struct BuildCommand {
     #[arg(long, short = 'o', value_name = "FILE")]
     pub output: Option<PathBuf>,
 
-    /// Signing key file (overrides config mfr.keychain)
+    /// Signing key file (overrides config publisher.keychain)
     #[arg(long, short = 'k', value_name = "FILE")]
     pub key: Option<PathBuf>,
 
@@ -111,7 +111,10 @@ async fn execute_build(args: &BuildCommand) -> Result<()> {
     }
 
     let cli_config = crate::config::resolver::resolve_effective_cli_config()?;
-    let key_path = resolve_key_path(args.key.as_deref(), cli_config.mfr.keychain.as_deref())?;
+    let key_path = resolve_key_path(
+        args.key.as_deref(),
+        cli_config.publisher.keychain.as_deref(),
+    )?;
     let resources = authenticated_wasm_bindgen_resources(&binary.path, &effective_target)?;
 
     let summary = build_package(PackageBuildInput {

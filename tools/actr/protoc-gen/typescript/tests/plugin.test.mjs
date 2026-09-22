@@ -156,7 +156,7 @@ service RemoteService {
     dispatcher,
     /callRaw\(target, routeKey, payload, timeoutMs, PayloadType\.RpcSignal\)/,
   );
-  assert.doesNotMatch(dispatcher, /remoteTargets|manufacturer|ActrType\s*\{/);
+  assert.doesNotMatch(dispatcher, /remoteTargets|publisher|ActrType\s*\{/);
 });
 
 test("explicit local routes use the Reply handle", () => {

@@ -134,18 +134,18 @@ pub fn resolve_key_path(custom: Option<&Path>, config_keychain: Option<&str>) ->
     }
 
     anyhow::bail!(
-        "No signing key configured.\nSpecify --key, or set mfr.keychain in your CLI config."
+        "No signing key configured.\nSpecify --key, or set publisher.keychain in your CLI config."
     )
 }
 
-/// Load an MFR signing key from a keychain JSON file, returning the key
-/// alongside the optional `manufacturer` binding recorded in the keychain.
+/// Load an publisher signing key from a keychain JSON file, returning the key
+/// alongside the optional `publisher` binding recorded in the keychain.
 ///
-/// A keychain that carries a `manufacturer` field is bound to that
-/// manufacturer; callers must verify it matches the package manufacturer
-/// before signing (see [`ensure_manufacturer_matches`]). Keychains without the
+/// A keychain that carries a `publisher` field is bound to that
+/// publisher; callers must verify it matches the package publisher
+/// before signing (see [`ensure_publisher_matches`]). Keychains without the
 /// field remain unbound for backward compatibility.
-pub fn load_signing_key_with_manufacturer(key_path: &Path) -> Result<(SigningKey, Option<String>)> {
+pub fn load_signing_key_with_publisher(key_path: &Path) -> Result<(SigningKey, Option<String>)> {
     if !key_path.exists() {
         anyhow::bail!(
             "Key file not found: {}\nRun `actr pkg keygen` to generate a key first.",
@@ -155,8 +155,8 @@ pub fn load_signing_key_with_manufacturer(key_path: &Path) -> Result<(SigningKey
 
     let content = std::fs::read_to_string(key_path)?;
     let json: serde_json::Value = serde_json::from_str(&content)?;
-    let manufacturer = json
-        .get("manufacturer")
+    let publisher = json
+        .get("publisher")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     let private_b64 = json["private_key"]
@@ -166,33 +166,33 @@ pub fn load_signing_key_with_manufacturer(key_path: &Path) -> Result<(SigningKey
     let key_arr: [u8; 32] = private_bytes
         .try_into()
         .map_err(|_| anyhow::anyhow!("private_key must be exactly 32 bytes"))?;
-    Ok((SigningKey::from_bytes(&key_arr), manufacturer))
+    Ok((SigningKey::from_bytes(&key_arr), publisher))
 }
 
-/// Enforce that a keychain's bound manufacturer matches the package
-/// manufacturer. No-op when the keychain carries no `manufacturer` field
+/// Enforce that a keychain's bound publisher matches the package
+/// publisher. No-op when the keychain carries no `publisher` field
 /// (backward-compatible: legacy keychains remain usable and only log a warning
 /// advising that binding the keychain is recommended).
-pub fn ensure_manufacturer_matches(
-    keychain_manufacturer: Option<&str>,
-    package_manufacturer: &str,
+pub fn ensure_publisher_matches(
+    keychain_publisher: Option<&str>,
+    package_publisher: &str,
 ) -> Result<()> {
-    match keychain_manufacturer {
-        Some(kc_mfr) if kc_mfr == package_manufacturer => Ok(()),
-        Some(kc_mfr) => anyhow::bail!(
-            "Manufacturer mismatch: keychain is bound to '{}' but the package manufacturer is '{}'. \
-             Rebind the keychain with `actr pkg keygen --manufacturer {} --force` or use a matching keychain.",
-            kc_mfr,
-            package_manufacturer,
-            package_manufacturer,
+    match keychain_publisher {
+        Some(kc_publisher) if kc_publisher == package_publisher => Ok(()),
+        Some(kc_publisher) => anyhow::bail!(
+            "Publisher mismatch: keychain is bound to '{}' but the package publisher is '{}'. \
+             Rebind the keychain with `actr pkg keygen --publisher {} --force` or use a matching keychain.",
+            kc_publisher,
+            package_publisher,
+            package_publisher,
         ),
         None => {
             tracing::warn!(
-                "Keychain has no 'manufacturer' binding; the package manufacturer '{}' is not \
-                 verified against the signing key. Run `actr pkg keygen --manufacturer {}` to \
-                 bind the keychain and prevent cross-manufacturer signing.",
-                package_manufacturer,
-                package_manufacturer,
+                "Keychain has no 'publisher' binding; the package publisher '{}' is not \
+                 verified against the signing key. Run `actr pkg keygen --publisher {}` to \
+                 bind the keychain and prevent cross-publisher signing.",
+                package_publisher,
+                package_publisher,
             );
             Ok(())
         }
@@ -242,7 +242,7 @@ fn default_package_file_name(config_path: &Path, target: &str) -> Result<String>
     })?;
     let file_name = format!(
         "{}-{}-{}-{}.actr",
-        config.package.actr_type.manufacturer,
+        config.package.actr_type.publisher,
         config.package.actr_type.name,
         config.package.actr_type.version,
         target
@@ -262,7 +262,7 @@ fn default_package_file_name(config_path: &Path, target: &str) -> Result<String>
 }
 
 pub fn build_package(input: PackageBuildInput) -> Result<PackageBuildSummary> {
-    let (signing_key, keychain_manufacturer) = load_signing_key_with_manufacturer(&input.key_path)?;
+    let (signing_key, keychain_publisher) = load_signing_key_with_publisher(&input.key_path)?;
     let verifying_key = signing_key.verifying_key();
 
     let config = ConfigParser::from_manifest_file(&input.config_path).with_context(|| {
@@ -272,12 +272,12 @@ pub fn build_package(input: PackageBuildInput) -> Result<PackageBuildSummary> {
         )
     })?;
 
-    // Reject cross-manufacturer signing before any packaging work: a keychain
-    // that declares a `manufacturer` binding may only sign packages for that
-    // same manufacturer (issue #425).
-    ensure_manufacturer_matches(
-        keychain_manufacturer.as_deref(),
-        &config.package.actr_type.manufacturer,
+    // Reject cross-publisher signing before any packaging work: a keychain
+    // that declares a `publisher` binding may only sign packages for that
+    // same publisher (issue #425).
+    ensure_publisher_matches(
+        keychain_publisher.as_deref(),
+        &config.package.actr_type.publisher,
     )?;
 
     let binary_bytes = std::fs::read(&input.binary_path)
@@ -307,7 +307,7 @@ pub fn build_package(input: PackageBuildInput) -> Result<PackageBuildSummary> {
     let lock_file = validated_packaged_lock(&config)?;
 
     let manifest = actr_pack::PackageManifest {
-        manufacturer: config.package.actr_type.manufacturer.clone(),
+        publisher: config.package.actr_type.publisher.clone(),
         name: config.package.actr_type.name.clone(),
         version: config.package.actr_type.version.clone(),
         binary: actr_pack::BinaryEntry {
@@ -386,20 +386,20 @@ mod tests {
         fs::write(
             &path,
             format!(
-                "edition = 1\n\n[package]\nname = \"Echo\"\nmanufacturer = \"acme\"\nversion = \"{version}\"\n"
+                "edition = 1\n\n[package]\nname = \"Echo\"\npublisher = \"acme\"\nversion = \"{version}\"\n"
             ),
         )
         .unwrap();
         path
     }
 
-    fn write_keychain(path: &Path, manufacturer: Option<&str>) -> SigningKey {
+    fn write_keychain(path: &Path, publisher: Option<&str>) -> SigningKey {
         let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
-        let json = match manufacturer {
-            Some(mfr) => serde_json::json!({
+        let json = match publisher {
+            Some(publisher) => serde_json::json!({
                 "private_key": B64.encode(signing_key.to_bytes()),
                 "public_key": B64.encode(signing_key.verifying_key().to_bytes()),
-                "manufacturer": mfr,
+                "publisher": publisher,
             }),
             None => serde_json::json!({
                 "private_key": B64.encode(signing_key.to_bytes()),
@@ -411,40 +411,40 @@ mod tests {
     }
 
     #[test]
-    fn load_signing_key_with_manufacturer_reads_optional_binding() {
+    fn load_signing_key_with_publisher_reads_optional_binding() {
         let dir = TempDir::new().unwrap();
         let key_path = dir.path().join("k.json");
 
-        // Bound keychain → manufacturer is returned.
+        // Bound keychain → publisher is returned.
         write_keychain(&key_path, Some("acme"));
-        let (_, mfr) = load_signing_key_with_manufacturer(&key_path).unwrap();
-        assert_eq!(mfr.as_deref(), Some("acme"));
+        let (_, publisher) = load_signing_key_with_publisher(&key_path).unwrap();
+        assert_eq!(publisher.as_deref(), Some("acme"));
 
         // Unbound keychain → None (backward compatible).
         write_keychain(&key_path, None);
-        let (_, mfr) = load_signing_key_with_manufacturer(&key_path).unwrap();
-        assert!(mfr.is_none());
+        let (_, publisher) = load_signing_key_with_publisher(&key_path).unwrap();
+        assert!(publisher.is_none());
     }
 
     #[test]
-    fn ensure_manufacturer_matches_passes_when_equal_or_unbound() {
+    fn ensure_publisher_matches_passes_when_equal_or_unbound() {
         // Bound + matching → ok.
-        assert!(ensure_manufacturer_matches(Some("acme"), "acme").is_ok());
+        assert!(ensure_publisher_matches(Some("acme"), "acme").is_ok());
         // Unbound → ok (legacy keychain, warns only).
-        assert!(ensure_manufacturer_matches(None, "acme").is_ok());
+        assert!(ensure_publisher_matches(None, "acme").is_ok());
     }
 
     #[test]
-    fn ensure_manufacturer_matches_rejects_cross_manufacturer() {
-        let err = ensure_manufacturer_matches(Some("acme"), "other").unwrap_err();
+    fn ensure_publisher_matches_rejects_cross_publisher() {
+        let err = ensure_publisher_matches(Some("acme"), "other").unwrap_err();
         let msg = format!("{err}");
-        assert!(msg.contains("Manufacturer mismatch"), "got: {msg}");
+        assert!(msg.contains("Publisher mismatch"), "got: {msg}");
         assert!(msg.contains("acme"), "got: {msg}");
         assert!(msg.contains("other"), "got: {msg}");
     }
 
     #[test]
-    fn build_package_rejects_manufacturer_mismatch_before_packaging() {
+    fn build_package_rejects_publisher_mismatch_before_packaging() {
         let dir = TempDir::new().unwrap();
         let manifest_path = write_manifest(&dir, "1.0.0");
         let key_path = dir.path().join("bound-other.json");
@@ -459,11 +459,11 @@ mod tests {
             target: "wasm32-wasip1".to_string(),
             resources: vec![],
         }) {
-            Ok(_) => panic!("expected a manufacturer mismatch error"),
+            Ok(_) => panic!("expected a publisher mismatch error"),
             Err(e) => e,
         };
         let msg = format!("{err}");
-        assert!(msg.contains("Manufacturer mismatch"), "got: {msg}");
+        assert!(msg.contains("Publisher mismatch"), "got: {msg}");
         // Must fail before touching the (non-existent) binary.
         assert!(
             !dir.path().join("dist").exists(),
@@ -542,7 +542,7 @@ mod tests {
 
 [package]
 name = "EchoClient"
-manufacturer = "acme"
+publisher = "acme"
 version = "1.0.0"
 
 [dependencies]

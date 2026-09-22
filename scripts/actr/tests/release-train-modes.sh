@@ -1650,11 +1650,11 @@ EOF
     crates/loran-signer/Cargo.toml \
     crates/loran-platform/Cargo.toml \
     crates/loran-control/Cargo.toml \
-    crates/loran-mfr/Cargo.toml \
+    crates/loran-publisher-registry/Cargo.toml \
     crates/loran-signaling/Cargo.toml \
     crates/loran-stun/Cargo.toml \
     crates/loran-turn/Cargo.toml \
-    crates/loran-ais/Cargo.toml \
+    crates/loran-issuer/Cargo.toml \
     crates/loran-sdk/Cargo.toml \
     crates/loran-server/Cargo.toml \
     packages/actr-typescript/Cargo.toml \
@@ -1803,11 +1803,11 @@ test_update_versions_rewrites_prerelease_embedded_versions() {
     crates/loran-signer/Cargo.toml \
     crates/loran-platform/Cargo.toml \
     crates/loran-control/Cargo.toml \
-    crates/loran-mfr/Cargo.toml \
+    crates/loran-publisher-registry/Cargo.toml \
     crates/loran-signaling/Cargo.toml \
     crates/loran-stun/Cargo.toml \
     crates/loran-turn/Cargo.toml \
-    crates/loran-ais/Cargo.toml \
+    crates/loran-issuer/Cargo.toml \
     crates/loran-sdk/Cargo.toml \
     crates/loran-server/Cargo.toml \
     packages/actr-typescript/Cargo.toml \
@@ -2304,11 +2304,11 @@ actrix-proto
 actrix-signer
 actrix-platform
 actrix-admin
-actrix-mfr
+actrix-publisher-registry
 actrix-signaling
 actrix-stun
 actrix-turn
-actrix-ais
+actrix-issuer
 actrix-sdk
 actrix
 EOF

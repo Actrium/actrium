@@ -97,7 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
     
     let server_type = ActrType {
-        manufacturer: "acme".to_string(),
+        publisher: "acme".to_string(),
         name: "greeter.GreeterService".to_string(),
         version: "1.0.0".to_string(),
     };

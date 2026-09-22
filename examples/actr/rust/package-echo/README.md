@@ -9,7 +9,7 @@ This example demonstrates:
 1. **Build**: Compile echo-actr package (WASM or native cdylib) and package it as a signed `.actr` archive
 2. **Sign**: Create signed `.actr` archive using `actr build` (cdylib) or `actr build` (wasm)
 3. **Verify**: Validate package signature with `actr pkg verify`
-4. **Publish**: Register package with MFR (Manufacturer Registry) via `actr pkg publish`
+4. **Publish**: Register package with Publisher Registry via `actr pkg publish`
 5. **Run**: Host server loads the package and exposes the echo service
 6. **Discover**: Client discovers the service via Actrix signaling server
 7. **Connect**: Establish WebRTC connection and exchange messages
@@ -32,7 +32,7 @@ This example demonstrates:
 ┌─────────────────┐       ┌──────────────────┐
 │     Actrix      │◄─────►│ package-echo     │
 │  (signaling +   │       │    server        │
-│   MFR + AIS)    │       │  (loads .actr)   │
+│   publisher + Issuer)    │       │  (loads .actr)   │
 └────────┬────────┘       └──────────────────┘
          │                         ▲
          │ WebRTC signaling        │ WebRTC data
@@ -254,7 +254,7 @@ Two backends are supported via the `--backend` flag:
 
 ### Step 2.5-2.7: Setup Infrastructure
 - Creates realms in the Loran database
-- Registers MFR manufacturer identity with public key
+- Registers publisher identity with public key
 - Publishes the package via `actr registry publish` (challenge-response flow)
 - Seeds client package metadata
 
@@ -263,7 +263,7 @@ Two backends are supported via the `--backend` flag:
 - Generates `../logs/server-actr.toml` with the current package path
 - Runs `actr run -c ../logs/server-actr.toml`
 - Loads `.actr` package in production trust mode
-- Registers with AIS and obtains credential
+- Registers with Issuer and obtains credential
 
 When using `start_tmp_echo_actr.sh`, the same flow runs against its isolated `tmp_server-actr.toml`.
 
@@ -295,7 +295,7 @@ tail -f logs/actrix.log
 
 | Port | Protocol | Service | Purpose |
 |------|----------|---------|---------|
-| 8081 | TCP | Actrix HTTP | Signaling, AIS, MFR |
+| 8081 | TCP | Actrix HTTP | Signaling, Issuer, publisher |
 | 3478 | UDP | Actrix ICE/TURN | WebRTC connectivity |
 | 49152-65535 | UDP | TURN relay | WebRTC data channels |
 

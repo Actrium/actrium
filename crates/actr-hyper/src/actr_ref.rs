@@ -13,7 +13,7 @@
 //!     .await?
 //!     .attach(&package)
 //!     .await?
-//!     .register(&ais_endpoint)
+//!     .register(&issuer_endpoint)
 //!     .await?
 //!     .start()
 //!     .await?;

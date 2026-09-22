@@ -50,7 +50,7 @@ use actr_web_abi::types as wit;
 
 fn actr_type_from_wit(t: &wit::ActrType) -> actr_protocol::ActrType {
     actr_protocol::ActrType {
-        manufacturer: t.manufacturer.clone(),
+        publisher: t.publisher.clone(),
         name: t.name.clone(),
         version: t.version.clone(),
     }
@@ -68,7 +68,7 @@ fn actr_id_from_wit(id: &wit::ActrId) -> ActrId {
 
 fn actr_type_to_wit(t: &actr_protocol::ActrType) -> wit::ActrType {
     wit::ActrType {
-        manufacturer: t.manufacturer.clone(),
+        publisher: t.publisher.clone(),
         name: t.name.clone(),
         version: t.version.clone(),
     }

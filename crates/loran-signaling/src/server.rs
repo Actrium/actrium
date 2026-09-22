@@ -17,7 +17,7 @@
 //!   - Multi-factor ranking: power reserve, mailbox backlog, geographic distance, client stickiness
 //!   - Exact match priority strategy
 //! - ✅ Presence subscription (`SubscribeActrUpRequest` / `ActrUpEvent`)
-//! - ❌ Credential refresh has been migrated to AIS HTTP
+//! - ❌ Credential refresh has been migrated to Issuer HTTP
 //! - ✅ Load metric storage (`handle_ping()` - stored in ServiceRegistry for load balancing)
 //!
 //! ## Pending Features (optional enhancements)
@@ -66,7 +66,7 @@ use tracing::instrument;
 fn type_key(actor_type: &ActrType) -> String {
     format!(
         "{}:{}:{}",
-        actor_type.manufacturer, actor_type.name, actor_type.version
+        actor_type.publisher, actor_type.name, actor_type.version
     )
 }
 
@@ -441,7 +441,7 @@ pub async fn handle_websocket_connection(
     // Register actor in service registry for discovery/routing (only when URL identity is provided)
     if let Some(actor_id_for_registry) = actor_id_for_registry {
         {
-            // Load pending service_spec and ws_address from DB (written by AIS during registration)
+            // Load pending service_spec and ws_address from DB (written by Issuer during registration)
             let (service_spec, ws_address) = {
                 let db = platform::storage::db::get_database();
                 let pool = db.get_pool();
@@ -467,7 +467,7 @@ pub async fn handle_websocket_connection(
 
             let service_name = format!(
                 "{}:{}",
-                actor_id_for_registry.r#type.manufacturer, actor_id_for_registry.r#type.name
+                actor_id_for_registry.r#type.publisher, actor_id_for_registry.r#type.name
             );
             let mut registry = server.service_registry.write().await;
             if let Err(e) = registry.register_service_full(
@@ -890,14 +890,14 @@ async fn handle_peer_to_server(
 ) -> Result<(), Box<dyn std::error::Error>> {
     match peer_to_server.payload {
         Some(peer_to_signaling::Payload::RegisterRequest(_)) => {
-            // Registration has been migrated to AIS HTTP; signaling no longer relays registration requests
+            // Registration has been migrated to Issuer HTTP; signaling no longer relays registration requests
             platform::recording::warn!(
-                "⚠️  RegisterRequest rejected: use /ais/register HTTP endpoint instead"
+                "⚠️  RegisterRequest rejected: use /issuer/register HTTP endpoint instead"
             );
             send_register_error(
                 client_id,
                 410,
-                "Registration via signaling is no longer supported; use /ais/register HTTP endpoint",
+                "Registration via signaling is no longer supported; use /issuer/register HTTP endpoint",
                 server,
                 request_envelope_id,
             )
@@ -933,7 +933,7 @@ async fn send_register_error(
         realm: Realm { realm_id: 0 },
         serial_number: 0,
         r#type: ActrType {
-            manufacturer: "temp".to_string(),
+            publisher: "temp".to_string(),
             name: "temp".to_string(),
             version: "1.0.0".to_string(),
         },
@@ -1655,7 +1655,7 @@ fn actor_order_key(id: &ActrId) -> (u32, u64, String, String) {
     (
         id.realm.realm_id,
         id.serial_number,
-        id.r#type.manufacturer.clone(),
+        id.r#type.publisher.clone(),
         id.r#type.name.clone(),
     )
 }
@@ -2023,15 +2023,15 @@ async fn handle_discovery_request(
     request_envelope_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     platform::recording::info!(
-        "🔍 Processing Discovery request from Actor {}: manufacturer={:?}, limit={}",
+        "🔍 Processing Discovery request from Actor {}: publisher={:?}, limit={}",
         source.to_string_repr(),
-        req.manufacturer.as_deref().unwrap_or("*"),
+        req.publisher.as_deref().unwrap_or("*"),
         req.limit.unwrap_or(64)
     );
 
     // Query all services from ServiceRegistry
     let registry = server.service_registry.read().await;
-    let services = registry.discover_all(req.manufacturer.as_deref());
+    let services = registry.discover_all(req.publisher.as_deref());
     let total_count = services.len(); // Save count before moving
 
     // Apply ACL filtering (if ACL is enabled)
@@ -2151,7 +2151,7 @@ async fn handle_route_candidates_request(
     platform::recording::info!(
         "🎯 Processing RouteCandidates request from Actor {}: target_type={}/{}",
         source.to_string_repr(),
-        req.target_type.manufacturer,
+        req.target_type.publisher,
         req.target_type.name,
     );
 
@@ -2189,14 +2189,14 @@ async fn handle_route_candidates_request(
     if candidates.is_empty() {
         platform::recording::info!(
             "⚠️  No service instances found for type {}/{}",
-            req.target_type.manufacturer,
+            req.target_type.publisher,
             req.target_type.name
         );
     } else {
         platform::recording::info!(
             "📋 Found {} candidate instances for type {}/{}",
             total_candidates,
-            req.target_type.manufacturer,
+            req.target_type.publisher,
             req.target_type.name
         );
     }
@@ -2429,7 +2429,7 @@ async fn handle_subscribe_actr_up(
     platform::recording::info!(
         "📢 Actor {} subscribed to service up events: target_type={}/{}",
         source.to_string_repr(),
-        req.target_type.manufacturer,
+        req.target_type.publisher,
         req.target_type.name
     );
 
@@ -2469,7 +2469,7 @@ async fn handle_unsubscribe_actr_up(
     platform::recording::info!(
         "🔕 Actor {} unsubscribed from service up events: target_type={}/{}",
         source.to_string_repr(),
-        req.target_type.manufacturer,
+        req.target_type.publisher,
         req.target_type.name
     );
 
@@ -2482,7 +2482,7 @@ async fn handle_unsubscribe_actr_up(
         platform::recording::warn!(
             "Actor {} was not subscribed to {}/{}",
             source.to_string_repr(),
-            req.target_type.manufacturer,
+            req.target_type.publisher,
             req.target_type.name
         );
     }
@@ -2548,7 +2548,7 @@ mod tests {
             serial_number: serial,
             realm: Realm { realm_id: 1001 },
             r#type: ActrType {
-                manufacturer: "test".to_string(),
+                publisher: "test".to_string(),
                 name: "device".to_string(),
                 version: "1.0.0".to_string(),
             },

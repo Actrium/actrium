@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 pub struct SignerClientConfig {
     /// Signer service address.
     ///
-    /// gRPC endpoint, e.g. "http://127.0.0.1:8080" or "https://ks.example.com:8443".
+    /// gRPC endpoint, e.g. "http://127.0.0.1:8080" or "https://signer.example.com:8443".
     pub endpoint: String,
 
     /// Request timeout, in seconds.

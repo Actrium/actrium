@@ -5,7 +5,7 @@
 
 use crate::error::Result;
 use crate::raw::{
-    RawAisEndpointConfig, RawDeploymentConfig, RawDiscoveryConfig, RawObservabilityConfig,
+    RawDeploymentConfig, RawDiscoveryConfig, RawIssuerEndpointConfig, RawObservabilityConfig,
     RawSignalingConfig, RawStorageConfig, RawWebRtcConfig, RawWebSocketConfig,
 };
 use serde::{Deserialize, Serialize};
@@ -37,9 +37,9 @@ pub struct RuntimeRawConfig {
     #[serde(default)]
     pub signaling: RawSignalingConfig,
 
-    /// AIS (Actor Identity Service) endpoint
+    /// Issuer endpoint
     #[serde(default)]
-    pub ais_endpoint: RawAisEndpointConfig,
+    pub issuer_endpoint: RawIssuerEndpointConfig,
 
     /// Deployment parameters (realm, etc.)
     #[serde(default)]
@@ -103,7 +103,7 @@ pub struct RuntimeRawConfig {
     /// # or
     /// [[trust]]
     /// kind = "registry"
-    /// endpoint = "http://ais.example.com/ais"
+    /// endpoint = "http://issuer.example.com/issuer"
     /// ```
     #[serde(default)]
     pub trust: Vec<crate::config::TrustAnchor>,
@@ -270,8 +270,8 @@ edition = 1
 [signaling]
 url = "ws://localhost:8081/signaling/ws"
 
-[ais_endpoint]
-url = "http://localhost:8081/ais"
+[issuer_endpoint]
+url = "http://localhost:8081/issuer"
 
 [deployment]
 realm_id = 33554432
@@ -315,8 +315,8 @@ test = "cargo test"
         let config = RuntimeRawConfig::from_str(toml_content).unwrap();
         assert_eq!(config.edition, 1);
         assert_eq!(
-            config.ais_endpoint.url.as_deref(),
-            Some("http://localhost:8081/ais")
+            config.issuer_endpoint.url.as_deref(),
+            Some("http://localhost:8081/issuer")
         );
         assert_eq!(
             config.deployment.realm_secret.as_deref(),

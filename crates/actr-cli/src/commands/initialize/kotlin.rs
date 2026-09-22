@@ -82,11 +82,11 @@ impl KotlinInitializer {
                 context.signaling_url.clone(),
             ),
             (
-                "{{AIS_ENDPOINT_URL}}".to_string(),
-                derive_ais_endpoint_url(&context.signaling_url),
+                "{{ISSUER_ENDPOINT_URL}}".to_string(),
+                derive_issuer_endpoint_url(&context.signaling_url),
             ),
             ("{{SIGNALING_HOST}}".to_string(), signaling_host),
-            ("{{MANUFACTURER}}".to_string(), context.manufacturer.clone()),
+            ("{{PUBLISHER}}".to_string(), context.publisher.clone()),
         ];
 
         let fixtures_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures");
@@ -198,11 +198,11 @@ impl KotlinInitializer {
                 context.signaling_url.clone(),
             ),
             (
-                "{{AIS_ENDPOINT_URL}}".to_string(),
-                derive_ais_endpoint_url(&context.signaling_url),
+                "{{ISSUER_ENDPOINT_URL}}".to_string(),
+                derive_issuer_endpoint_url(&context.signaling_url),
             ),
             ("{{SIGNALING_HOST}}".to_string(), signaling_host),
-            ("{{MANUFACTURER}}".to_string(), context.manufacturer.clone()),
+            ("{{PUBLISHER}}".to_string(), context.publisher.clone()),
         ];
 
         let fixtures_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures");
@@ -309,7 +309,7 @@ fn extract_signaling_host(signaling_url: &str) -> String {
         .to_string()
 }
 
-fn derive_ais_endpoint_url(signaling_url: &str) -> String {
+fn derive_issuer_endpoint_url(signaling_url: &str) -> String {
     let trimmed = signaling_url.trim_end_matches('/');
     if trimmed.is_empty() {
         return String::new();
@@ -324,13 +324,13 @@ fn derive_ais_endpoint_url(signaling_url: &str) -> String {
     };
 
     if let Some(prefix) = normalized.strip_suffix("/signaling/ws") {
-        format!("{prefix}/ais")
+        format!("{prefix}/issuer")
     } else if let Some(prefix) = normalized.strip_suffix("/signaling") {
-        format!("{prefix}/ais")
+        format!("{prefix}/issuer")
     } else if let Some(prefix) = normalized.strip_suffix("/ws") {
-        format!("{prefix}/ais")
+        format!("{prefix}/issuer")
     } else {
-        format!("{normalized}/ais")
+        format!("{normalized}/issuer")
     }
 }
 

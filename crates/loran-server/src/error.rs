@@ -21,7 +21,7 @@ pub enum Error {
     Base(Box<platform::error::BaseError>),
 
     // ========== Service errors ==========
-    // Identity error type removed because AIS service has been removed.
+    // Identity error type removed because Issuer service has been removed.
     // TODO: The new signaling crate does not export SignalingError, temporarily disabled.
     // /// Signaling service error
     // #[error("Signaling service error: {0}")]

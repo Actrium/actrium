@@ -13,9 +13,9 @@ pub struct CliConfig {
     /// Config file format version (for future migration)
     pub version: Option<u32>,
 
-    /// Manufacturer identity settings (MFR)
+    /// Publisher identity settings (publisher)
     #[serde(default)]
-    pub mfr: MfrConfig,
+    pub publisher: PublisherConfig,
 
     /// Code generation settings
     #[serde(default)]
@@ -54,18 +54,19 @@ impl CliConfig {
             }
         }
 
-        if let Some(ref manufacturer) = self.mfr.manufacturer {
-            if manufacturer.trim().is_empty() {
+        if let Some(ref publisher) = self.publisher.name {
+            if publisher.trim().is_empty() {
                 return Err(ConfigError::ValidationError(
-                    "mfr.manufacturer cannot be empty".to_string(),
+                    "publisher.name cannot be empty".to_string(),
                 ));
             }
         }
 
-        if let Some(ref keychain) = self.mfr.keychain {
+        if let Some(ref keychain) = self.publisher.keychain {
             if keychain.trim().is_empty() {
                 return Err(ConfigError::ValidationError(
-                    "mfr.keychain cannot be empty string (omit the field instead)".to_string(),
+                    "publisher.keychain cannot be empty string (omit the field instead)"
+                        .to_string(),
                 ));
             }
         }
@@ -117,15 +118,15 @@ impl CliConfig {
             }
         }
 
-        if let Some(ref url) = self.network.ais_endpoint {
+        if let Some(ref url) = self.network.issuer_endpoint {
             if url.trim().is_empty() {
                 return Err(ConfigError::ValidationError(
-                    "network.ais_endpoint cannot be empty".to_string(),
+                    "network.issuer_endpoint cannot be empty".to_string(),
                 ));
             }
             if !url.starts_with("http://") && !url.starts_with("https://") {
                 return Err(ConfigError::ValidationError(format!(
-                    "network.ais_endpoint '{}' must start with http:// or https://",
+                    "network.issuer_endpoint '{}' must start with http:// or https://",
                     url
                 )));
             }
@@ -152,12 +153,12 @@ impl CliConfig {
     }
 }
 
-/// Manufacturer identity settings (MFR).
+/// Publisher identity settings.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct MfrConfig {
-    /// Default manufacturer for generated actor types (e.g., "acme")
-    pub manufacturer: Option<String>,
+pub struct PublisherConfig {
+    /// Default publisher name for generated actor types (e.g., "acme")
+    pub name: Option<String>,
 
     /// Path to the signing keychain JSON file (supports `~` expansion)
     pub keychain: Option<String>,
@@ -220,8 +221,8 @@ pub struct NetworkConfig {
     /// Signaling server URL for CLI discovery
     pub signaling_url: Option<String>,
 
-    /// AIS endpoint for CLI discovery
-    pub ais_endpoint: Option<String>,
+    /// Issuer endpoint for CLI discovery
+    pub issuer_endpoint: Option<String>,
 
     /// Realm ID for CLI temporary actor registration
     pub realm_id: Option<u32>,

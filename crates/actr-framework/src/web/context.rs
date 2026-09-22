@@ -115,7 +115,7 @@ impl WebContext {
 
 fn actr_type_to_wit(t: &ActrType) -> wit::ActrType {
     wit::ActrType {
-        manufacturer: t.manufacturer.clone(),
+        publisher: t.publisher.clone(),
         name: t.name.clone(),
         version: t.version.clone(),
     }
@@ -123,7 +123,7 @@ fn actr_type_to_wit(t: &ActrType) -> wit::ActrType {
 
 fn actr_type_from_wit(t: &wit::ActrType) -> ActrType {
     ActrType {
-        manufacturer: t.manufacturer.clone(),
+        publisher: t.publisher.clone(),
         name: t.name.clone(),
         version: t.version.clone(),
     }

@@ -1,16 +1,16 @@
 # Actrium Actor Package manifest
 
 Actrium does not define a separate application archive. It consumes the shared
-`actr-package/1` `.actr` format and requires a `keel.guest/1` workload.
+`actr-package/2` `.actr` format and requires a `keel.guest/1` workload.
 
 Every package contains a root `manifest.toml`, a raw Ed25519 `manifest.sig`, and
 only payloads declared by `[[files]]`. A minimal Actrium Guest manifest is:
 
 ```toml
-format = "actr-package/1"
+format = "actr-package/2"
 
 [actor]
-manufacturer = "acme"
+publisher = "acme"
 name = "notes"
 version = "1.0.0"
 

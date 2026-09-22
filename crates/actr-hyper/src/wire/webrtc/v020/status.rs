@@ -245,7 +245,7 @@ mod tests {
             realm: actr_protocol::Realm { realm_id: 1 },
             serial_number: 1,
             r#type: actr_protocol::ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: "node".to_string(),
                 version: "1.0.0".to_string(),
             },
@@ -267,7 +267,7 @@ mod tests {
             realm: actr_protocol::Realm { realm_id: 1 },
             serial_number: 2,
             r#type: actr_protocol::ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: "node".to_string(),
                 version: "1.0.0".to_string(),
             },
@@ -303,7 +303,7 @@ mod tests {
             realm: actr_protocol::Realm { realm_id: 1 },
             serial_number: 3,
             r#type: actr_protocol::ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: "node".to_string(),
                 version: "1.0.0".to_string(),
             },

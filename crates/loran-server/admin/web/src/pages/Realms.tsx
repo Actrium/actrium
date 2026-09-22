@@ -199,7 +199,7 @@ export function Realms() {
       <HowItWorks storageKey="realms">
         <p className="text-xs text-gray-500 mb-4">
           The v1 production profile hosts exactly one Realm per Actrix instance. The Realm
-          registration secret is an administrator/host capability: AIS verifies it on every
+          registration secret is an administrator/host capability: Issuer verifies it on every
           registration, and guest workloads must never receive it directly.
         </p>
         <SingleRealmDiagram />
@@ -225,7 +225,7 @@ export function Realms() {
             </li>
             <li>
               <strong className="text-gray-600">Realm secret</strong> — every realm has a secret
-              issued at creation. Actors must present it at registration; AIS verifies the
+              issued at creation. Actors must present it at registration; Issuer verifies the
               hash before issuing credentials. Secrets can be rotated with a 4h dual-validity window.
             </li>
             <li>

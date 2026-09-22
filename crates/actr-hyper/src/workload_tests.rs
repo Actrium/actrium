@@ -17,7 +17,7 @@ fn make_id(serial: u64) -> ActrId {
         realm: Realm { realm_id: 1 },
         serial_number: serial,
         r#type: ActrType {
-            manufacturer: "test".to_string(),
+            publisher: "test".to_string(),
             name: "UnitTestActor".to_string(),
             version: "0.0.1".to_string(),
         },

@@ -306,7 +306,7 @@ mod tests {
             realm: Realm { realm_id: 1 },
             serial_number: 1000,
             r#type: ActrType {
-                manufacturer: "test".to_string(),
+                publisher: "test".to_string(),
                 name: "TestActor".to_string(),
                 version: "1.0.0".to_string(),
             },

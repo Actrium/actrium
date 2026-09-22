@@ -49,7 +49,7 @@ pub fn caller(serial: u64) -> Option<ActrId> {
         realm: Realm { realm_id: 1 },
         serial_number: serial,
         r#type: ActrType {
-            manufacturer: "test".to_string(),
+            publisher: "test".to_string(),
             name: "fixture".to_string(),
             version: "0.2.0".to_string(),
         },

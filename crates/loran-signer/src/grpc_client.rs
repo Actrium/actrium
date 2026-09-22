@@ -19,7 +19,7 @@ use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity
 pub struct GrpcClientConfig {
     /// Signer service address (gRPC endpoint)
     ///
-    /// Example: "http://127.0.0.1:8080" or "https://ks.example.com:8443"
+    /// Example: "http://127.0.0.1:8080" or "https://signer.example.com:8443"
     pub endpoint: String,
 
     /// Actrix shared key (for authentication)
@@ -346,7 +346,7 @@ mod tests {
     #[test]
     fn test_tls_config_validation() {
         let config = GrpcClientConfig {
-            endpoint: "https://ks.example.com:8443".to_string(),
+            endpoint: "https://signer.example.com:8443".to_string(),
             actrix_shared_key: "test-key".to_string(),
             timeout_seconds: 30,
             enable_tls: true,
@@ -363,11 +363,11 @@ mod tests {
     #[test]
     fn test_mtls_partial_config() {
         let config = GrpcClientConfig {
-            endpoint: "https://ks.example.com:8443".to_string(),
+            endpoint: "https://signer.example.com:8443".to_string(),
             actrix_shared_key: "test-key".to_string(),
             timeout_seconds: 30,
             enable_tls: true,
-            tls_domain: Some("ks.example.com".to_string()),
+            tls_domain: Some("signer.example.com".to_string()),
             ca_cert: None,
             client_cert: Some("/path/to/cert.pem".to_string()),
             client_key: None, // missing client_key

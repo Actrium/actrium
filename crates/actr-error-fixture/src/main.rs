@@ -4,7 +4,7 @@
 //! a single JSON line to stdout:
 //!
 //! ```json
-//! {"port":PORT,"mfr_pubkey_b64":"BASE64","realm_id":1}
+//! {"port":PORT,"publisher_pubkey_b64":"BASE64","realm_id":1}
 //! ```
 //!
 //! The calling test process reads that line, writes temp config files,
@@ -95,9 +95,9 @@ async fn main() -> anyhow::Result<()> {
     // ── 1. Start mock-actrix + find a free port for the server's WS listener ───
     let mock = MockActrixServer::start().await?;
     let port = mock.port();
-    let mfr_key = mock.mfr_signing_key();
-    let mfr_pubkey_b64 =
-        base64::engine::general_purpose::STANDARD.encode(mfr_key.verifying_key().as_bytes());
+    let publisher_key = mock.publisher_signing_key();
+    let publisher_pubkey_b64 =
+        base64::engine::general_purpose::STANDARD.encode(publisher_key.verifying_key().as_bytes());
 
     // Allocate a free port for the fixture server's direct WebSocket listener.
     // Binding to port 0 lets the OS pick an unused port; we retrieve it then
@@ -132,7 +132,7 @@ exports = []
 
 [package]
 name = "ErrorFixture"
-manufacturer = "test"
+publisher = "test"
 version = "0.2.0"
 description = "Fixture service for error-mapping tests"
 "#;
@@ -148,8 +148,8 @@ path = "{manifest_path}"
 [signaling]
 url = "ws://127.0.0.1:{port}/signaling/ws"
 
-[ais_endpoint]
-url = "http://127.0.0.1:{port}/ais"
+[issuer_endpoint]
+url = "http://127.0.0.1:{port}/issuer"
 
 [deployment]
 realm_id = 1
@@ -173,13 +173,13 @@ advertised_host = "127.0.0.1"
 {acl_section}
 [[trust]]
 kind = "static"
-pubkey_b64 = "{mfr_pubkey_b64}"
+pubkey_b64 = "{publisher_pubkey_b64}"
 "#,
         manifest_path = manifest_path.display(),
         port = port,
         ws_port = ws_port,
         acl_section = acl_section,
-        mfr_pubkey_b64 = mfr_pubkey_b64,
+        publisher_pubkey_b64 = publisher_pubkey_b64,
     );
 
     std::fs::write(&runtime_path, &runtime_toml)?;
@@ -189,10 +189,10 @@ pubkey_b64 = "{mfr_pubkey_b64}"
     let init = Node::from_config_file(&runtime_path)
         .await?
         .with_actor_type(manifest.package.actr_type.clone());
-    let ais_endpoint = init.runtime_config().ais_endpoint.to_string();
+    let issuer_endpoint = init.runtime_config().issuer_endpoint.to_string();
 
     let attached = init.link(FixtureWorkload).await?;
-    let registered = attached.register(&ais_endpoint).await?;
+    let registered = attached.register(&issuer_endpoint).await?;
     let actr_ref = registered.start().await?;
 
     let actor_id = actr_ref.actor_id();
@@ -203,10 +203,10 @@ pubkey_b64 = "{mfr_pubkey_b64}"
     let ready = serde_json::json!({
         "port": port,
         "ws_port": ws_port,
-        "mfr_pubkey_b64": mfr_pubkey_b64,
+        "publisher_pubkey_b64": publisher_pubkey_b64,
         "realm_id": 1,
         "actr_type": {
-            "manufacturer": "test",
+            "publisher": "test",
             "name": "ErrorFixture",
             "version": "0.2.0"
         }

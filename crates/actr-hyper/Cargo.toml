@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Hyper — Actor platform infrastructure: sandbox, transport, scheduler, WASM engine, signing, AIS bootstrap, persistence & crypto primitives"
+description = "Hyper — Actor platform infrastructure: sandbox, transport, scheduler, WASM engine, signing, Issuer bootstrap, persistence & crypto primitives"
 keywords = ["actor", "sandbox", "webassembly", "transport", "platform"]
 categories = ["asynchronous", "cryptography", "network-programming"]
 

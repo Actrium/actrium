@@ -22,7 +22,7 @@ async function main() {
   try {
     const [serverId] = await actorRef.discover(
       {
-        manufacturer: 'actrium',
+        publisher: 'actrium',
         name: 'EchoService',
         version: process.env.ECHO_ACTR_VERSION ?? '0.2.1-beta',
       } satisfies ActrType,

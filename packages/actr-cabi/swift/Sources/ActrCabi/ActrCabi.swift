@@ -331,7 +331,7 @@ public final class ActrCabiNode: @unchecked Sendable {
 
     /// Set the identity the linked workload registers with.
     ///
-    /// `actorType` must use the `manufacturer:name:version` representation.
+    /// `actorType` must use the `publisher:name:version` representation.
     /// Call after `fromConfig(path:)` and before `linkWorkload(name:)`;
     /// without this call the node registers with the placeholder identity
     /// `local:Client:0.0.0`, which actrix ACL filtering rejects. On failure
@@ -422,7 +422,7 @@ public final class ActrCabiNode: @unchecked Sendable {
         }
     }
 
-    public func register(aisEndpoint: String? = nil) async throws {
+    public func register(issuerEndpoint: String? = nil) async throws {
         let attachedHandle = try withLockedState { state -> UnsafeMutableRawPointer in
             guard case let .attached(handle) = state else {
                 throw ActrCabiError.invalidState(expected: "attached")
@@ -434,12 +434,12 @@ public final class ActrCabiNode: @unchecked Sendable {
 
         do {
             let registeredHandle = try await withHandle { callback, userData in
-                if let aisEndpoint {
-                    aisEndpoint.withCString { endpointPtr in
+                if let issuerEndpoint {
+                    issuerEndpoint.withCString { endpointPtr in
                         _ = actr_node_register(
                             attachedHandle,
                             endpointPtr,
-                            aisEndpoint.utf8.count,
+                            issuerEndpoint.utf8.count,
                             callback,
                             userData
                         )

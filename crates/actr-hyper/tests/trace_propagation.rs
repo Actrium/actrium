@@ -91,7 +91,7 @@ impl Context for MockCtx {
             realm: actr_protocol::Realm { realm_id: 1 },
             serial_number: 99,
             r#type: actr_protocol::ActrType {
-                manufacturer: "test".to_string(),
+                publisher: "test".to_string(),
                 name: "trace-echo".to_string(),
                 version: "0.1.0".to_string(),
             },
@@ -221,7 +221,7 @@ impl InprocHarness {
             realm: actr_protocol::Realm { realm_id: 1 },
             serial_number: 77,
             r#type: actr_protocol::ActrType {
-                manufacturer: "test".to_string(),
+                publisher: "test".to_string(),
                 name: "trace-target".to_string(),
                 version: "0.1.0".to_string(),
             },

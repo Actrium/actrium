@@ -26,14 +26,14 @@ export class ActrRef {
   /**
    * Discover actors of the given type.
    *
-   * @param targetType - Target actor type (manufacturer + name)
+   * @param targetType - Target actor type (publisher + name)
    * @param count - Number of actors to discover
    * @returns List of actor IDs
    *
    * @example
    * ```typescript
    * const servers = await actorRef.discover(
-   *   { manufacturer: 'acme', name: 'EchoTwiceService' },
+   *   { publisher: 'acme', name: 'EchoTwiceService' },
    *   1
    * );
    * ```

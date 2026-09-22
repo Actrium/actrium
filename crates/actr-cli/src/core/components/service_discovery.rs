@@ -2,7 +2,7 @@ use crate::core::{
     AvailabilityStatus, HealthStatus, ProtoFile, ServiceDetails, ServiceDiscovery, ServiceFilter,
     ServiceInfo,
 };
-use actr_hyper::AisClient;
+use actr_hyper::IssuerClient;
 use actr_protocol::{
     AIdCredential, ActrId, ActrToSignaling, ActrType, DiscoveryRequest, ErrorResponse,
     GetServiceSpecRequest, Realm, RegisterAuthMode, RegisterRequest, SIGNALING_ENVELOPE_VERSION,
@@ -47,8 +47,8 @@ pub struct DiscoveryContext {
     /// Signaling server URL
     pub signaling_url: Url,
 
-    /// AIS endpoint URL
-    pub ais_endpoint: String,
+    /// Issuer endpoint URL
+    pub issuer_endpoint: String,
 
     /// Realm for temporary actor registration
     pub realm: Realm,
@@ -101,7 +101,7 @@ impl NetworkServiceDiscovery {
 
         // TODO: add filter support
         let request = DiscoveryRequest {
-            manufacturer: None,
+            publisher: None,
             limit: None,
         };
         let payload = actr_to_signaling::Payload::DiscoveryRequest(request);
@@ -155,21 +155,22 @@ impl NetworkServiceDiscovery {
         let realm_secret = self.required_realm_secret()?.to_string();
         let register_request = self.build_linked_register_request();
 
-        let ais_client = AisClient::new(&self.context.ais_endpoint).with_realm_secret(realm_secret);
+        let issuer_client =
+            IssuerClient::new(&self.context.issuer_endpoint).with_realm_secret(realm_secret);
 
-        let register_response = ais_client
+        let register_response = issuer_client
             .register_linked(register_request)
             .await
-            .map_err(|err| anyhow!("AIS HTTP registration failed: {err}"))?;
+            .map_err(|err| anyhow!("Issuer HTTP registration failed: {err}"))?;
 
         let (actr_id, credential) = match register_response.result {
             Some(register_response::Result::Success(success)) => {
                 (success.actr_id, success.credential)
             }
             Some(register_response::Result::Error(error)) => {
-                return Err(Self::as_error("AIS registration failed", &error));
+                return Err(Self::as_error("Issuer registration failed", &error));
             }
-            None => return Err(anyhow!("AIS registration response is missing result")),
+            None => return Err(anyhow!("Issuer registration response is missing result")),
         };
 
         let signaling_request = Self::build_signaling_request_with_identity(
@@ -417,12 +418,12 @@ impl NetworkServiceDiscovery {
             acl: None,
             ws_address: None,
             manifest_raw: None,
-            mfr_signature: None,
+            publisher_signature: None,
             target: None,
             auth_mode: Some(RegisterAuthMode::Linked as i32),
-            manufacturer_auth_signature: None,
-            manufacturer_auth_signed_at: None,
-            manufacturer_auth_nonce: None,
+            publisher_auth_signature: None,
+            publisher_auth_signed_at: None,
+            publisher_auth_nonce: None,
         }
     }
 }

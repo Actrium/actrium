@@ -106,7 +106,7 @@ extension ActrBridge {
                 } catch {
                     throw ActrError.StateError(msg: "Invalid actorType format: \(actorType)")
                 }
-                let targetType = ActrType(manufacturer: actorTypeInfo.manufacturer, name: actorTypeInfo.name)
+                let targetType = ActrType(publisher: actorTypeInfo.publisher, name: actorTypeInfo.name)
                 
                 let system = try await ActrSystem.from(tomlConfig: configPath)
                 let handler = AskLocalServiceHandlerImpl(targetType)

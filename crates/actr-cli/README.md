@@ -42,7 +42,7 @@ Groups are named after **what the subcommand operates on**:
 
 - `deps` — local dependency manifest / lockfile
 - `pkg` — a local `.actr` package file (sign, verify, keygen)
-- `registry` — the remote registry / AIS (discover, publish, fingerprint)
+- `registry` — the remote registry / Issuer (discover, publish, fingerprint)
 - `dlq` — the Dead Letter Queue
 
 **Do not** group by workflow phase (`build`, `release`, `ops`, etc.) — those

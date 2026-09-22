@@ -59,8 +59,8 @@ platform = { path = "../loran-platform", package = "actrix-platform", version = 
 signaling = { path = "../loran-signaling", package = "actrix-signaling", version = "0.10.3" }
 stun = { path = "../loran-stun", package = "actrix-stun", version = "0.10.3" }
 turn = { path = "../loran-turn", package = "actrix-turn", version = "0.10.3" }
-ais = { path = "../loran-ais", package = "actrix-ais", version = "0.10.3" }
-actrix-mfr = { path = "../loran-mfr", version = "0.10.3" }
+issuer = { path = "../loran-issuer", package = "actrix-issuer", version = "0.10.3" }
+actrix-publisher-registry = { path = "../loran-publisher-registry", version = "0.10.3" }
 signer = { path = "../loran-signer", package = "actrix-signer", version = "0.10.3" }
 rand = "0.9.1"
 futures = "0.3.31"

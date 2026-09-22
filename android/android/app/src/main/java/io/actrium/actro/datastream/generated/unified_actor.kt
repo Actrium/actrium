@@ -46,7 +46,7 @@ object RemoteServiceRegistry {
      * actro+app_server
      */
     val remoteRoutes: Map<String, ActrType> = mapOf(
-        "ask.Ask" to ActrType(manufacturer = "actro", name = "app_server", version = "")
+        "ask.Ask" to ActrType(publisher = "actro", name = "app_server", version = "")
     )
 
     /**

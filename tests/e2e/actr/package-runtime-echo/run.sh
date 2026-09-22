@@ -11,11 +11,11 @@ HTTP_PORT=8081
 ICE_PORT=3478
 REALM_ID=""
 ADMIN_PASSWORD="e2e-test-password"
-MANUFACTURER="e2e.actrium.test"
+PUBLISHER="e2e.actrium.test"
 # The client guest is a realm consumer, not a verified publisher: it keeps a
-# non-dotted manufacturer so its linked (realm-secret) registrations satisfy
-# AIS-01, which reserves DNS-style names for package identities.
-CLIENT_MANUFACTURER="e2e-actrium-local"
+# non-dotted publisher so its linked (realm-secret) registrations satisfy
+# Issuer-01, which reserves DNS-style names for package identities.
+CLIENT_PUBLISHER="e2e-actrium-local"
 CLIENT_GUEST_VERSION="0.1.0"
 ACTRIX_BIN="${ACTRIX_BIN:-}"
 ACTR_CLI_MANIFEST="$REPO_ROOT/crates/actr-cli/Cargo.toml"
@@ -56,11 +56,11 @@ fi
 
 # MODE selects which registration path is exercised:
 #   path1                (default) published package + runner proof, Path 1, full echo round-trip
-#   path1-with-keychain  published package + configured mfr.keychain (Path 1 with runner proof)
+#   path1-with-keychain  published package + configured publisher.keychain (Path 1 with runner proof)
 #   path2-happy          unpublished package + runner proof → Path 2 success
 #   path2-no-proof       unpublished package, no keychain → Path 2 rejection
 #   path2-wrong-key      unpublished package, runner proof signed by unrelated key → rejection
-#   rotation             unpublished package, MFR key retired (pass) then revoked (reject)
+#   rotation             unpublished package, Publisher Registry key retired (pass) then revoked (reject)
 MODE="${MODE:-path1}"
 case "$MODE" in
     path1|path1-with-keychain|path2-happy|path2-no-proof|path2-wrong-key|rotation) ;;
@@ -89,11 +89,11 @@ ACTRIX_CONFIG_PATH="$RUN_DIR/actrix.toml"
 SERVER_RUNTIME_PATH="$RUN_DIR/server-runtime.toml"
 CLIENT_RUNTIME_PATH="$RUN_DIR/client-runtime.toml"
 ACTRIX_DB="$SQLITE_DIR/actrix.db"
-SERVICE_KEYCHAIN="$TMP_SERVICE_DIR/packaging/keys/mfr.keychain.json"
+SERVICE_KEYCHAIN="$TMP_SERVICE_DIR/packaging/keys/publisher.keychain.json"
 SERVICE_PUBLIC_KEY="$TMP_SERVICE_DIR/public-key.json"
-PROVISIONED_KEYCHAIN="$RUN_DIR/mfr.keychain.json"
-PROVISIONED_PUBLIC_KEY="$RUN_DIR/mfr-public-key.json"
-CLIENT_GUEST_PACKAGE="$DIST_DIR/${CLIENT_MANUFACTURER}-pkg-runtime-echo-client-guest-${CLIENT_GUEST_VERSION}-cdylib.actr"
+PROVISIONED_KEYCHAIN="$RUN_DIR/publisher.keychain.json"
+PROVISIONED_PUBLIC_KEY="$RUN_DIR/publisher-public-key.json"
+CLIENT_GUEST_PACKAGE="$DIST_DIR/${CLIENT_PUBLISHER}-pkg-runtime-echo-client-guest-${CLIENT_GUEST_VERSION}-cdylib.actr"
 CLIENT_GUEST_PUBLIC_KEY="$DIST_DIR/public-key.json"
 
 mkdir -p "$SQLITE_DIR" "$LOG_DIR" "$DIST_DIR" "$TMP_SERVICE_ROOT" "$E2E_TARGET_ROOT"
@@ -145,7 +145,7 @@ build_local_actr_cli() {
 
 # Build actrix from the branch source into a cache dir and use it, rather than
 # trusting an `actrix` found on PATH (which may be a stale install that doesn't
-# serve the /mfr public routes or accept the current config schema). A caller
+# serve the /publisher-registry public routes or accept the current config schema). A caller
 # (CI) may pre-set ACTRIX_BIN to skip the build.
 build_local_actrix() {
     if [ -n "${ACTRIX_BIN:-}" ] && [ -x "$ACTRIX_BIN" ]; then
@@ -201,29 +201,29 @@ login_admin() {
     success "Admin API login succeeded"
 }
 
-warmup_ais_key() {
-    section "🔑 Warming up AIS signing key"
+warmup_issuer_key() {
+    section "🔑 Warming up Issuer signing key"
     [ -n "${ADMIN_TOKEN:-}" ] || login_admin
-    local current_key_file="$RUN_DIR/ais-current-key.json"
-    local rotate_file="$RUN_DIR/ais-rotate-key.json"
+    local current_key_file="$RUN_DIR/issuer-current-key.json"
+    local rotate_file="$RUN_DIR/issuer-rotate-key.json"
     local attempt=0
 
     while [ $attempt -lt 60 ]; do
-        if curl -fsS "http://127.0.0.1:${HTTP_PORT}/ais/current-key" >"$current_key_file" 2>/dev/null \
+        if curl -fsS "http://127.0.0.1:${HTTP_PORT}/issuer/current-key" >"$current_key_file" 2>/dev/null \
             && [ "$(jq -r '.status // "missing"' "$current_key_file" 2>/dev/null)" = "success" ]; then
-            success "AIS signing key is ready"
+            success "Issuer signing key is ready"
             return 0
         fi
 
         curl -fsS -X POST \
             -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-            "http://127.0.0.1:${HTTP_PORT}/admin/api/services/ais/keys/rotate" \
+            "http://127.0.0.1:${HTTP_PORT}/admin/api/services/issuer/keys/rotate" \
             >"$rotate_file" 2>/dev/null || true
         sleep 1
         attempt=$((attempt + 1))
     done
 
-    fail "AIS signing key warmup timed out"
+    fail "Issuer signing key warmup timed out"
 }
 
 ensure_realm() {
@@ -289,12 +289,12 @@ write_project_keychain_config() {
     local keychain_path="$2"
     mkdir -p "$project_dir/.actr"
     cat >"$project_dir/.actr/config.toml" <<EOF
-[mfr]
+[publisher]
 keychain = "$keychain_path"
 EOF
 }
 
-provision_mfr_keychain() {
+provision_publisher_keychain() {
     provision_e2e_publisher
 }
 
@@ -305,7 +305,7 @@ scaffold_service_guest() {
         --template echo \
         --role service \
         --signaling "ws://127.0.0.1:${HTTP_PORT}/signaling/ws" \
-        --manufacturer "$MANUFACTURER" \
+        --publisher "$PUBLISHER" \
         "$TMP_SERVICE_DIR"
 
     append_workspace_patch "$TMP_SERVICE_DIR/Cargo.toml"
@@ -338,7 +338,7 @@ scaffold_service_guest() {
 
 build_service_package() {
     section "📦 Building the server package"
-    SERVICE_PACKAGE="$DIST_DIR/${MANUFACTURER}-EchoService-${SERVICE_VERSION}-${HOST_TARGET}.actr"
+    SERVICE_PACKAGE="$DIST_DIR/${PUBLISHER}-EchoService-${SERVICE_VERSION}-${HOST_TARGET}.actr"
 
     (
         cd "$TMP_SERVICE_DIR"
@@ -398,7 +398,7 @@ version = 1
 
 [network]
 signaling_url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
-ais_endpoint = "http://127.0.0.1:${HTTP_PORT}/ais"
+issuer_endpoint = "http://127.0.0.1:${HTTP_PORT}/issuer"
 realm_id = $REALM_ID
 realm_secret = "$REALM_SECRET"
 EOF
@@ -455,26 +455,26 @@ with zipfile.ZipFile(package_path, "r") as zf:
     signature = base64.b64encode(zf.read("manifest.sig")).decode("ascii")
 
 manifest_data = tomllib.loads(manifest)
-manufacturer = manifest_data["publisher"]
+publisher = manifest_data["publisher"]
 name = manifest_data["name"]
 version = manifest_data["version"]
 target = manifest_data.get("binary", {}).get("target", "cdylib")
-type_str = f"{manufacturer}:{name}:{version}"
+type_str = f"{publisher}:{name}:{version}"
 
 conn = sqlite3.connect(db_path)
 try:
     cur = conn.cursor()
     cur.execute(
         """
-        INSERT OR IGNORE INTO mfr
+        INSERT OR IGNORE INTO publisher
             (name, public_key, key_id, contact, status, created_at, updated_at, verified_at, key_expires_at)
         VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)
         """,
-        (manufacturer, public_key, key_id, "e2e@local.actr", now, now, now, key_expires_at),
+        (publisher, public_key, key_id, "e2e@local.actr", now, now, now, key_expires_at),
     )
     cur.execute(
         """
-        UPDATE mfr
+        UPDATE publisher
            SET public_key = ?,
                key_id = ?,
                status = 'active',
@@ -485,17 +485,17 @@ try:
                revoked_at = NULL
          WHERE name = ?
         """,
-        (public_key, key_id, now, now, key_expires_at, manufacturer),
+        (public_key, key_id, now, now, key_expires_at, publisher),
     )
-    cur.execute("SELECT id FROM mfr WHERE name = ?", (manufacturer,))
-    mfr_id = cur.fetchone()[0]
+    cur.execute("SELECT id FROM publisher WHERE name = ?", (publisher,))
+    publisher_id = cur.fetchone()[0]
     cur.execute(
         """
-        INSERT INTO mfr_package
-            (mfr_id, manufacturer, name, version, type_str, target, manifest, signature, status, published_at, revoked_at)
+        INSERT INTO publisher_package
+            (publisher_id, publisher, name, version, type_str, target, manifest, signature, status, published_at, revoked_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, NULL)
-        ON CONFLICT(manufacturer, name, version, target) DO UPDATE SET
-            mfr_id = excluded.mfr_id,
+        ON CONFLICT(publisher, name, version, target) DO UPDATE SET
+            publisher_id = excluded.publisher_id,
             type_str = excluded.type_str,
             manifest = excluded.manifest,
             signature = excluded.signature,
@@ -503,7 +503,7 @@ try:
             published_at = excluded.published_at,
             revoked_at = NULL
         """,
-        (mfr_id, manufacturer, name, version, type_str, target, manifest, signature, now),
+        (publisher_id, publisher, name, version, type_str, target, manifest, signature, now),
     )
     conn.commit()
 finally:
@@ -527,7 +527,7 @@ run_client_and_assert() {
     render_client_runtime_config
     CARGO_TARGET_DIR="$WORKSPACE_TARGET_DIR" cargo build --manifest-path "$SCRIPT_DIR/client/Cargo.toml" >/dev/null
 
-    # The client host registers its packaged workload with AIS, which (AIS-02)
+    # The client host registers its packaged workload with Issuer, which (Issuer-02)
     # requires a runner possession proof of the signing key — pass the same
     # publisher keychain that signed the client package. The isolated HOME only
     # keeps the hyper data dir away from the developer's ~/.actr.
@@ -595,14 +595,14 @@ mk_isolated_env() {
     printf '%s\t%s\n' "$home_dir" "$hyper_dir"
 }
 
-# Write the mfr.keychain into the GLOBAL config of an isolated HOME (CWD-independent,
+# Write the publisher.keychain into the GLOBAL config of an isolated HOME (CWD-independent,
 # since resolve_effective_cli_config reads ~/.actr/config.toml via dirs::home_dir()).
 write_global_keychain_config() {
     local home_dir="$1"
     local keychain_path="$2"
     mkdir -p "$home_dir/.actr"
     cat >"$home_dir/.actr/config.toml" <<EOF
-[mfr]
+[publisher]
 keychain = "$keychain_path"
 EOF
 }
@@ -620,16 +620,16 @@ assert_no_keychain_config() {
     success "Confirmed no keychain config present (provider will be None)"
 }
 
-# P0-2: assert no active mfr_package row for type_str+target, so the request
+# P0-2: assert no active publisher_package row for type_str+target, so the request
 # cannot accidentally pass via Path 1.
 assert_no_active_package() {
     local type_str="$1"
     local target="$2"
     local count
     count="$(sqlite3 "$ACTRIX_DB" \
-        "SELECT COUNT(*) FROM mfr_package WHERE type_str='$type_str' AND target='$target' AND status='active';" 2>/dev/null || echo 0)"
+        "SELECT COUNT(*) FROM publisher_package WHERE type_str='$type_str' AND target='$target' AND status='active';" 2>/dev/null || echo 0)"
     if [ "$count" != "0" ]; then
-        fail "Precondition violated: $count active mfr_package row(s) for type_str=$type_str target=$target (Path 1 would shadow Path 2)"
+        fail "Precondition violated: $count active publisher_package row(s) for type_str=$type_str target=$target (Path 1 would shadow Path 2)"
     fi
     success "Confirmed no active published package for $type_str / $target"
 }
@@ -670,7 +670,7 @@ expect_server_started() {
             fail "Server host exited before becoming ready (expected success)"
         fi
         if grep -q "ActrNode started" "$LOG_DIR/$log_name" 2>/dev/null; then
-            success "Server host started (AIS registration succeeded)"
+            success "Server host started (Issuer registration succeeded)"
             return 0
         fi
         sleep 1
@@ -680,16 +680,16 @@ expect_server_started() {
 }
 
 # Poll for expected rejection: server must exit non-zero and log a rejection.
-# Rejection can happen at two stages: AIS registration ("Failed to register with
-# AIS") for missing/wrong runner proof, or earlier at package attach
-# ("Failed to attach package: untrusted manufacturer") when the MFR key is
+# Rejection can happen at two stages: Issuer registration ("Failed to register with
+# Issuer") for missing/wrong runner proof, or earlier at package attach
+# ("Failed to attach package: untrusted publisher") when the Publisher Registry key is
 # revoked and cert_cache cannot fetch the pubkey.
 expect_server_rejected() {
     local log_name="${1:-server.log}"
     local attempt=0
     while [ $attempt -lt 30 ]; do
         if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-            if grep -qE "Failed to register with AIS|Failed to attach package|untrusted manufacturer" "$LOG_DIR/$log_name" 2>/dev/null; then
+            if grep -qE "Failed to register with Issuer|Failed to attach package|untrusted publisher" "$LOG_DIR/$log_name" 2>/dev/null; then
                 success "Server host rejected as expected"
                 return 0
             fi
@@ -715,11 +715,11 @@ stop_server() {
 
 # Assert actrix.log carries the Path 2 success marker (and NOT the Path 1 marker),
 # proving registration really went through Path 2. Path 2 logs
-# "Publisher Registry manifest and manufacturer signature verification passed"
+# "Publisher Registry manifest and publisher signature verification passed"
 # (issuer.rs); Path 1 logs "Publisher Registry table lookup passed", so the two
 # markers are mutually exclusive.
 assert_path2_taken() {
-    if ! grep -q "manifest and manufacturer signature verification passed" "$LOG_DIR/actrix.log" 2>/dev/null; then
+    if ! grep -q "manifest and publisher signature verification passed" "$LOG_DIR/actrix.log" 2>/dev/null; then
         fail "Path 2 success marker not found in actrix.log (did it take Path 1?)"
     fi
     if grep -q "Publisher Registry table lookup passed" "$LOG_DIR/actrix.log" 2>/dev/null; then
@@ -734,13 +734,13 @@ assert_path2_taken() {
 # a target/manifest-hash matching regression), a published package with a
 # configured keychain would still succeed via Path 2 and the mode would stay
 # green without actually exercising Path 1. Path 1 logs "Publisher Registry
-# table lookup passed" (issuer.rs); Path 2 logs "...manifest and manufacturer
+# table lookup passed" (issuer.rs); Path 2 logs "...manifest and publisher
 # signature verification passed", so the two markers are mutually exclusive.
 assert_path1_taken() {
     if ! grep -q "Publisher Registry table lookup passed" "$LOG_DIR/actrix.log" 2>/dev/null; then
         fail "Path 1 success marker not found in actrix.log (did registration fall through to Path 2, or was the registry lookup missed?)"
     fi
-    if grep -q "Publisher Registry manifest and manufacturer signature verification passed" "$LOG_DIR/actrix.log" 2>/dev/null; then
+    if grep -q "Publisher Registry manifest and publisher signature verification passed" "$LOG_DIR/actrix.log" 2>/dev/null; then
         fail "Path 2 marker found in actrix.log (should have taken Path 1; the runner proof must resolve through the registry lookup, not the Path 2 signature branch)"
     fi
     success "Confirmed registration went through Path 1"
@@ -760,7 +760,7 @@ stop_actrix() {
 
 mode_path1_full_echo() {
     # Original happy path: publish → run server → client echo round-trip.
-    # AIS-02: a published package registers via Path 1 only with a runner
+    # Issuer-02: a published package registers via Path 1 only with a runner
     # possession proof of the publisher's current signing key, so the server
     # host receives the keychain through its isolated HOME.
     publish_service_package
@@ -789,7 +789,7 @@ mode_path1_with_keychain() {
     IFS=$'\t' read -r home_dir hyper_dir <<<"$env"
     write_global_keychain_config "$home_dir" "$SERVICE_KEYCHAIN"
     start_server_isolated "$home_dir" "$hyper_dir" "server.log"
-    # AIS-02: a published package succeeds via Path 1 only with the runner
+    # Issuer-02: a published package succeeds via Path 1 only with the runner
     # possession proof. Assert Path 1 was actually taken (not a silent fallback
     # to Path 2, which would also succeed here because the keychain holds key A).
     expect_server_started "server.log"
@@ -799,7 +799,7 @@ mode_path1_with_keychain() {
 
 mode_path2_happy() {
     section "🧪 MODE=path2-happy (unpublished package + runner proof → Path 2 success)"
-    local type_str="${MANUFACTURER}:EchoService:${SERVICE_VERSION}"
+    local type_str="${PUBLISHER}:EchoService:${SERVICE_VERSION}"
     assert_no_active_package "$type_str" "$HOST_TARGET"
     local env
     env="$(mk_isolated_env "p2h")"
@@ -814,7 +814,7 @@ mode_path2_happy() {
 
 mode_path2_no_proof() {
     section "🧪 MODE=path2-no-proof (unpublished package, no keychain → Path 2 rejection)"
-    local type_str="${MANUFACTURER}:EchoService:${SERVICE_VERSION}"
+    local type_str="${PUBLISHER}:EchoService:${SERVICE_VERSION}"
     assert_no_active_package "$type_str" "$HOST_TARGET"
     local env
     env="$(mk_isolated_env "p2np")"
@@ -824,7 +824,7 @@ mode_path2_no_proof() {
     start_server_isolated "$home_dir" "$hyper_dir" "server.log"
     expect_server_rejected "server.log"
     # The no-proof rejection is deterministic: with no keychain the runtime
-    # sends manifest_raw + mfr_signature but no manufacturer_auth_* triple, so
+    # sends manifest_raw + publisher_signature but no publisher_auth_* triple, so
     # Path 2 must emit this marker before rejecting. Make it a hard assertion so
     # a rejection at the wrong stage (e.g. attach-time) cannot pass this mode.
     if ! grep -q "unpublished package requires" "$LOG_DIR/actrix.log" 2>/dev/null; then
@@ -835,7 +835,7 @@ mode_path2_no_proof() {
 
 mode_path2_wrong_key() {
     section "🧪 MODE=path2-wrong-key (runner proof signed by unrelated key → rejection)"
-    local type_str="${MANUFACTURER}:EchoService:${SERVICE_VERSION}"
+    local type_str="${PUBLISHER}:EchoService:${SERVICE_VERSION}"
     assert_no_active_package "$type_str" "$HOST_TARGET"
 
     local env
@@ -857,7 +857,7 @@ mode_path2_wrong_key() {
 
 mode_rotation() {
     section "🧪 MODE=rotation (retired key passes, revoked key rejects)"
-    local type_str="${MANUFACTURER}:EchoService:${SERVICE_VERSION}"
+    local type_str="${PUBLISHER}:EchoService:${SERVICE_VERSION}"
     assert_no_active_package "$type_str" "$HOST_TARGET"
 
     # The manifest's signing_key_id (key A) — needed to find the history_id after rotation.
@@ -872,15 +872,15 @@ PY
     [ -n "$signing_key_id" ] || fail "Could not read signing_key_id from manifest"
 
     # Look up the publisher fixture row.
-    local mfr_id
-    mfr_id="$(sqlite3 "$ACTRIX_DB" "SELECT id FROM mfr WHERE name='${MANUFACTURER}';")"
-    [ -n "$mfr_id" ] || fail "Could not resolve mfr_id for ${MANUFACTURER}"
+    local publisher_id
+    publisher_id="$(sqlite3 "$ACTRIX_DB" "SELECT id FROM publisher WHERE name='${PUBLISHER}';")"
+    [ -n "$publisher_id" ] || fail "Could not resolve publisher_id for ${PUBLISHER}"
 
     # --- Phase 1: rotate A→B (A archived as retired), then run with keychain A. ---
     section "🔄 Phase 1: rotate key (A → retired), expect Path 2 success"
-    local rotation_keychain="$RUN_DIR/mfr-rotation-b.keychain.json"
+    local rotation_keychain="$RUN_DIR/publisher-rotation-b.keychain.json"
     run_actr pkg keygen --output "$rotation_keychain" --force >/dev/null
-    python3 - "$ACTRIX_DB" "$MANUFACTURER" "$rotation_keychain" <<'PY'
+    python3 - "$ACTRIX_DB" "$PUBLISHER" "$rotation_keychain" <<'PY'
 import base64
 import hashlib
 import json
@@ -897,27 +897,27 @@ connection = sqlite3.connect(db_path, timeout=30)
 connection.execute("PRAGMA foreign_keys = ON")
 with connection:
     row = connection.execute(
-        "SELECT id, key_id, public_key, COALESCE(verified_at, created_at) FROM mfr WHERE name = ?",
+        "SELECT id, key_id, public_key, COALESCE(verified_at, created_at) FROM publisher WHERE name = ?",
         (publisher,),
     ).fetchone()
     if row is None:
         raise SystemExit(f"publisher fixture not found: {publisher}")
-    mfr_id, old_key_id, old_public_key, old_created_at = row
+    publisher_id, old_key_id, old_public_key, old_created_at = row
     connection.execute(
         """
-        INSERT INTO mfr_key_history
-            (mfr_id, key_id, public_key, status, created_at, retired_at)
+        INSERT INTO publisher_key_history
+            (publisher_id, key_id, public_key, status, created_at, retired_at)
         VALUES (?, ?, ?, 'retired', ?, ?)
         """,
-        (mfr_id, old_key_id, old_public_key, old_created_at, now),
+        (publisher_id, old_key_id, old_public_key, old_created_at, now),
     )
     connection.execute(
         """
-        UPDATE mfr
+        UPDATE publisher
         SET public_key = ?, key_id = ?, key_expires_at = ?, updated_at = ?
         WHERE id = ?
         """,
-        (public_key, key_id, now + 365 * 86400, now, mfr_id),
+        (public_key, key_id, now + 365 * 86400, now, publisher_id),
     )
 connection.close()
 PY
@@ -936,7 +936,7 @@ PY
     section "🚫 Phase 2: revoke retired key A, expect rejection"
     local revoked_rows
     revoked_rows="$(sqlite3 "$ACTRIX_DB" \
-        "UPDATE mfr_key_history SET status='revoked' WHERE mfr_id=${mfr_id} AND key_id='${signing_key_id}'; SELECT changes();")"
+        "UPDATE publisher_key_history SET status='revoked' WHERE publisher_id=${publisher_id} AND key_id='${signing_key_id}'; SELECT changes();")"
     [ "$revoked_rows" = "1" ] || fail "Could not revoke historical key ${signing_key_id}"
 
     # Re-confirm no published package row, so rejection comes from KeyRevoked, not Path 1.
@@ -967,15 +967,15 @@ build_local_actr_cli
 build_local_actrix
 # Modes that assert which path was taken need the debug-level Path 1 / Path 2
 # verification markers ("Publisher Registry table lookup passed" /
-# "...manifest and manufacturer signature verification passed") in actrix.log.
+# "...manifest and publisher signature verification passed") in actrix.log.
 case "$MODE" in
     path1-with-keychain|path2-happy|rotation) export ACTRIX_RUST_LOG="info,actrix::observability=debug" ;;
 esac
 start_actrix
 login_admin
-warmup_ais_key
+warmup_issuer_key
 ensure_realm
-provision_mfr_keychain
+provision_publisher_keychain
 scaffold_service_guest
 build_service_package
 

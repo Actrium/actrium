@@ -43,7 +43,7 @@ impl From<ActrPackageManifest> for ActrPackageManifestInfo {
             description: extension.and_then(|value| value.description.clone()),
             app_id: Some(format!(
                 "{}+{}",
-                manifest.actor.manufacturer, manifest.actor.name
+                manifest.actor.publisher, manifest.actor.name
             )),
             icon: extension.and_then(|value| value.icon.clone()),
             entry: manifest.workload.entry,
@@ -337,7 +337,7 @@ pub struct ActrBridgeContractInfo {
 
 #[derive(Debug, Clone)]
 pub struct ActrActorTypeInfo {
-    pub manufacturer: String,
+    pub publisher: String,
     pub name: String,
     pub version: String,
 }
@@ -435,7 +435,7 @@ pub struct CoreBookmarkRowInfo {
     pub app_id: Option<String>,
     pub created_at_seconds: i64,
     pub last_used_at_seconds: Option<i64>,
-    pub manufacturer: Option<String>,
+    pub publisher: Option<String>,
     pub notes: Option<String>,
     pub favicon: Option<String>,
 }
@@ -448,7 +448,7 @@ pub struct CoreBookmarkInfo {
     pub app_id: Option<String>,
     pub created_at_seconds: i64,
     pub last_used_at_seconds: Option<i64>,
-    pub manufacturer: Option<String>,
+    pub publisher: Option<String>,
     pub notes: Option<String>,
     pub favicon: Option<String>,
 }
@@ -659,7 +659,7 @@ pub enum CoreError {
     UnknownSystemAppType(String),
     #[error("unknown app source type `{0}`")]
     UnknownAppSourceType(String),
-    #[error("invalid Actr actor type `{0}`, expected `manufacturer+name`")]
+    #[error("invalid Actr actor type `{0}`, expected `publisher+name`")]
     InvalidActrActorType(String),
 }
 
@@ -2016,7 +2016,7 @@ pub fn core_bookmark_from_row(row: CoreBookmarkRowInfo) -> CoreBookmarkInfo {
         app_id: row.app_id,
         created_at_seconds: row.created_at_seconds,
         last_used_at_seconds: row.last_used_at_seconds,
-        manufacturer: row.manufacturer,
+        publisher: row.publisher,
         notes: row.notes,
         favicon: row.favicon,
     }
@@ -2030,7 +2030,7 @@ pub fn core_bookmark_insert_params(bookmark: CoreBookmarkInfo) -> Vec<CoreSqlVal
         sql_optional_text(bookmark.app_id),
         sql_integer(bookmark.created_at_seconds),
         sql_optional_integer(bookmark.last_used_at_seconds),
-        sql_optional_text(bookmark.manufacturer),
+        sql_optional_text(bookmark.publisher),
         sql_optional_text(bookmark.notes),
         sql_optional_text(bookmark.favicon),
     ]
@@ -2042,7 +2042,7 @@ pub fn core_bookmark_update_params(bookmark: CoreBookmarkInfo) -> Vec<CoreSqlVal
         sql_optional_text(bookmark.app_url),
         sql_optional_text(bookmark.app_id),
         sql_optional_integer(bookmark.last_used_at_seconds),
-        sql_optional_text(bookmark.manufacturer),
+        sql_optional_text(bookmark.publisher),
         sql_optional_text(bookmark.notes),
         sql_optional_text(bookmark.favicon),
         sql_text(bookmark.id),
@@ -2765,7 +2765,7 @@ pub fn actr_bridge_contract() -> ActrBridgeContractInfo {
 pub fn parse_actr_actor_type(raw: String) -> Result<ActrActorTypeInfo, CoreError> {
     bridge::parse_actr_actor_type(&raw)
         .map(|actor_type| ActrActorTypeInfo {
-            manufacturer: actor_type.manufacturer,
+            publisher: actor_type.publisher,
             name: actor_type.name,
             version: actor_type.version,
         })
@@ -2885,9 +2885,9 @@ mod tests {
     fn ffi_manifest_info_flattens_host_fields() {
         let info = parse_actr_package_manifest(
             r##"
-                format = "actr-package/1"
+                format = "actr-package/2"
                 [actor]
-                manufacturer = "demo"
+                publisher = "demo"
                 name = "app"
                 version = "1.0.0"
                 [workload]
@@ -2905,7 +2905,7 @@ mod tests {
                 theme-color = "#111111"
                 [signature]
                 algorithm = "ed25519"
-                key-id = "mfr-test"
+                key-id = "publisher-test"
                 [[files]]
                 path = "workload/guest.js"
                 role = "workload"
@@ -3663,7 +3663,7 @@ mod tests {
 
     #[test]
     fn ffi_schema_exports_version_tables_and_tag_seed() {
-        assert_eq!(core_schema_version(), 1);
+        assert_eq!(core_schema_version(), 2);
         assert!(core_schema_table_names().contains(&"tab_sessions".to_string()));
         assert!(
             core_schema_statements()
@@ -3680,7 +3680,7 @@ mod tests {
                 .into_iter()
                 .map(|tag| tag.name)
                 .collect::<Vec<_>>(),
-            vec!["App", "Manufacturer", "LastUsed", "Frequent"]
+            vec!["App", "Publisher", "LastUsed", "Frequent"]
         );
         assert_eq!(default_tag_colors().len(), 10);
         assert_eq!(default_tag_colors()[0], "#FF3B30");
@@ -3770,7 +3770,7 @@ mod tests {
             app_id: Some("docs".to_string()),
             created_at_seconds: 1_700_000_001,
             last_used_at_seconds: Some(1_700_000_002),
-            manufacturer: Some("Actrium".to_string()),
+            publisher: Some("Actrium".to_string()),
             notes: Some("Pinned".to_string()),
             favicon: Some("star.fill".to_string()),
         });
@@ -3875,7 +3875,7 @@ mod tests {
             app_id: Some("docs".to_string()),
             created_at_seconds: 1_700_000_011,
             last_used_at_seconds: Some(1_700_000_012),
-            manufacturer: Some("Actrium".to_string()),
+            publisher: Some("Actrium".to_string()),
             notes: None,
             favicon: Some("star.fill".to_string()),
         };
@@ -4415,7 +4415,7 @@ mod tests {
     fn ffi_parse_actr_actor_type_returns_sdk_parts() {
         let actor_type = parse_actr_actor_type(" actro + app_server ".to_string()).unwrap();
 
-        assert_eq!(actor_type.manufacturer, "actro");
+        assert_eq!(actor_type.publisher, "actro");
         assert_eq!(actor_type.name, "app_server");
         assert_eq!(actor_type.version, "");
     }
@@ -4562,9 +4562,9 @@ mod tests {
     fn ffi_integrity_plan_normalizes_manifest_integrity() {
         let plan = create_actr_integrity_plan(
             r##"
-                format = "actr-package/1"
+                format = "actr-package/2"
                 [actor]
-                manufacturer = "demo"
+                publisher = "demo"
                 name = "app"
                 version = "1.0.0"
                 [workload]
@@ -4578,7 +4578,7 @@ mod tests {
                 api = "^1"
                 [signature]
                 algorithm = "ed25519"
-                key-id = "mfr-test"
+                key-id = "publisher-test"
                 [[files]]
                 path = "dist/main.js"
                 role = "workload"
@@ -4604,9 +4604,9 @@ mod tests {
     fn ffi_integrity_plan_rejects_unsafe_paths() {
         let error = create_actr_integrity_plan(
             r##"
-                format = "actr-package/1"
+                format = "actr-package/2"
                 [actor]
-                manufacturer = "demo"
+                publisher = "demo"
                 name = "app"
                 version = "1.0.0"
                 [workload]
@@ -4620,7 +4620,7 @@ mod tests {
                 api = "^1"
                 [signature]
                 algorithm = "ed25519"
-                key-id = "mfr-test"
+                key-id = "publisher-test"
                 [[files]]
                 path = "../secret"
                 role = "workload"

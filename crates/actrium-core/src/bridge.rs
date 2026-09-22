@@ -123,7 +123,7 @@ pub mod user_info_bridge_contract {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActrActorType {
-    pub manufacturer: String,
+    pub publisher: String,
     pub name: String,
     #[serde(default)]
     pub version: String,
@@ -132,15 +132,15 @@ pub struct ActrActorType {
 pub fn parse_actr_actor_type(raw: &str) -> Option<ActrActorType> {
     let trimmed = raw.trim();
     let mut parts = trimmed.split('+');
-    let manufacturer = parts.next()?.trim();
+    let publisher = parts.next()?.trim();
     let name = parts.next()?.trim();
 
-    if parts.next().is_some() || manufacturer.is_empty() || name.is_empty() {
+    if parts.next().is_some() || publisher.is_empty() || name.is_empty() {
         return None;
     }
 
     Some(ActrActorType {
-        manufacturer: manufacturer.to_string(),
+        publisher: publisher.to_string(),
         name: name.to_string(),
         version: String::new(),
     })
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn parse_actr_actor_type_splits_existing_wire_format() {
         let actor_type = parse_actr_actor_type(" actro + app_server ").unwrap();
-        assert_eq!(actor_type.manufacturer, "actro");
+        assert_eq!(actor_type.publisher, "actro");
         assert_eq!(actor_type.name, "app_server");
         assert_eq!(actor_type.version, "");
     }

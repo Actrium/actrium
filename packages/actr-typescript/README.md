@@ -36,7 +36,7 @@ async function main() {
   const actorRef = await node.start();
 
   const [serverId] = await actorRef.discover(
-    { manufacturer: 'actrium', name: 'EchoService', version: '0.2.1-beta' },
+    { publisher: 'actrium', name: 'EchoService', version: '0.2.1-beta' },
     1,
   );
 
@@ -104,7 +104,7 @@ name = "my-actor"
 description = "My Actor"
 
 [package.actor]
-manufacturer = "actr"
+publisher = "actr"
 name = "my-actor"
 
 ```
@@ -115,7 +115,7 @@ edition = 1
 
 [network]
 signaling_url = "ws://localhost:8081/signaling/ws"
-ais_endpoint = "http://localhost:8080"
+issuer_endpoint = "http://localhost:8080"
 
 [network.realm]
 realm_id = 1

@@ -11,7 +11,7 @@
 ## 一、结论
 
 漏洞真实存在：`.actr` 签名只证明 manifest 的来源和完整性，不证明
-`manufacturer`、`name`、`version` 适合参与宿主机文件路径。当前 Hyper 将这三个
+`publisher`、`name`、`version` 适合参与宿主机文件路径。当前 Hyper 将这三个
 未经语义校验的字符串插入 `storage_path_template`，最终由
 `ActorStore::open()` 创建目录和 SQLite 数据库，签名者因此可以通过 `..`、绝对路径
 或平台路径语义逃出预期 Actor 命名空间。
@@ -30,9 +30,9 @@
 1. 哈希命名空间是本次修复的必做项，不再拆成可选 PR-B。
 2. 文件系统存储必须配置明确的 `storage_root`；移除任意 Actor 路径模板。
 3. `PlatformProvider` 改为接收强类型 `StorageNamespace`，用编译错误强制自定义 provider 适配，避免裸字符串静默改变语义。
-4. manufacturer/name 复用协议层 `Name` 规则，version 使用明确且唯一的协议规则；所有入口共用 `ActrType::validate()`。
+4. publisher/name 复用协议层 `Name` 规则，version 使用明确且唯一的协议规则；所有入口共用 `ActrType::validate()`。
 5. 身份校验必须接入内置 verifier、自定义 `TrustProvider`、Registry key lookup 和最终存储入口。
-6. 保持现有「开库 → AIS 注册 → 写入公钥」顺序，不把开库延迟到 AIS 成功之后。
+6. 保持现有「开库 → Issuer 注册 → 写入公钥」顺序，不把开库延迟到 Issuer 成功之后。
 7. symlink 防护在“storage root 由 Actr 独占、攻击者不能并发改写”的威胁模型内完成；更强的同 UID 本地攻击不在本 Issue 内宣称完全解决。
 8. 公开安全入口改为 `ActorStore::open_under()`；接收任意路径的 raw open 不再作为 public API。
 9. 复用现有 `HyperError::InvalidManifest`，不新增公开 enum 变体。
@@ -41,7 +41,7 @@
 
 | 审查项 | 判断 | 本文收口方式 |
 |---|---|---|
-| P1：storage 身份规则与 `Name` / `ActrType` 不自洽 | 存在；数字开头、超过 32 UTF-8 字节等值会形成“storage 合法、协议非法”。`x..y` 和满足 `Name` 的 Unicode 本身仍合法 | manufacturer/name 复用 `Name`，version 单独定义；所有入口调用 `ActrType::validate()` |
+| P1：storage 身份规则与 `Name` / `ActrType` 不自洽 | 存在；数字开头、超过 32 UTF-8 字节等值会形成“storage 合法、协议非法”。`x..y` 和满足 `Name` 的 Unicode 本身仍合法 | publisher/name 复用 `Name`，version 单独定义；所有入口调用 `ActrType::validate()` |
 | P2：“协议分隔符”未明确 | 存在；`:` 会破坏 `ActrType` 三段表示，`@`、`/` 还参与 `ActrId` 表示 | 明确三个字段统一禁止 `:`、`@`、`/`，并加入 round-trip 测试 |
 | P3：`PlatformProvider` 签名不变会造成静默语义破坏 | 存在；旧 provider 可能继续把 opaque ID 当路径 | 改为强类型 `StorageNamespace`，有意让旧实现编译失败并显式迁移 |
 | P4：public `ActorStore::open(path)` 可绕过安全入口 | 存在；仅加 `open_under()` 或 `#[doc(hidden)]` 都不能关闭 bypass | public API 只保留 `open_under()`；raw open 删除或降为 crate-private |
@@ -68,7 +68,7 @@
 恶意或泄露密钥的签名者可以构造：
 
 ```toml
-manufacturer = "evilco"
+publisher = "evilco"
 name = "Loader"
 version = "../../victim"
 ```
@@ -109,9 +109,9 @@ native-hosted WASM 尤其重要：WASM guest 的沙箱能力不应被 manifest �
 |---|---|---|
 | Manifest 类型 | `crates/actr-pack/src/manifest.rs:5-8` | 三个身份字段都是无约束 `String` |
 | TOML 解析 | `PackageManifest::from_toml()` | 只反序列化，无身份语义校验 |
-| 协议身份解析 | `crates/actr-protocol/src/actr_ext.rs:55-82` | `from_string_repr()` 对 manufacturer/name 使用 `Name`，package 路径未复用，存在两套合法性规则 |
+| 协议身份解析 | `crates/actr-protocol/src/actr_ext.rs:55-82` | `from_string_repr()` 对 publisher/name 使用 `Name`，package 路径未复用，存在两套合法性规则 |
 | 内置验签 | `crates/actr-pack/src/verify.rs:111-268` | 验签、哈希后原样返回身份 |
-| Registry key lookup | `crates/actr-hyper/src/verify/trust.rs:193-220` | 验签前使用原始 `manufacturer` 获取公钥 |
+| Registry key lookup | `crates/actr-hyper/src/verify/trust.rs:193-220` | 验签前使用原始 `publisher` 获取公钥 |
 | 自定义 verifier | `TrustProvider::verify_package*()` | provider 可以直接返回未经身份校验的 `VerifiedPackage` |
 | Workload attach | `load_workload_package_inner()` | provider 返回后立即进入 binary 检测和 workload 加载 |
 | Namespace 解析 | `crates/actr-hyper/src/config.rs:735-820` | 字符串替换后直接 `PathBuf::from` |
@@ -216,9 +216,9 @@ Hyper 不再把 canonical filesystem path 传给自定义 provider，也不对 p
   │
   ├─ 安全打开 ActorStore / platform secret store
   │
-  ├─ AIS 注册
+  ├─ Issuer 注册
   │
-  └─ 持久化 AIS signing key
+  └─ 持久化 Issuer signing key
 ```
 
 ---
@@ -228,9 +228,9 @@ Hyper 不再把 canonical filesystem path 传给自定义 provider，也不对 p
 ### 4.1 协议唯一身份规则与 namespace ID
 
 身份合法性首先是协议约束，不应由 storage 层另起一套规则。当前
-`ActrType::from_string_repr()` 已通过 `Name::new()` 校验 manufacturer/name，因此新增
+`ActrType::from_string_repr()` 已通过 `Name::new()` 校验 publisher/name，因此新增
 唯一的 `ActrType::validate()`，让字符串解析、package verification、Registry lookup 和
-AIS registration 共用。
+Issuer registration 共用。
 
 在 `crates/actr-protocol/src/actr_ext.rs` 增加：
 
@@ -239,8 +239,8 @@ pub const MAX_ACTR_VERSION_BYTES: usize = 64;
 
 impl ActrType {
     pub fn validate(&self) -> Result<(), ActrIdError> {
-        Name::new(self.manufacturer.clone()).map_err(|error| {
-            ActrIdError::InvalidComponent(format!("Invalid manufacturer: {error}"))
+        Name::new(self.publisher.clone()).map_err(|error| {
+            ActrIdError::InvalidComponent(format!("Invalid publisher: {error}"))
         })?;
         Name::new(self.name.clone()).map_err(|error| {
             ActrIdError::InvalidComponent(format!("Invalid type name: {error}"))
@@ -281,7 +281,7 @@ fn validate_version(version: &str) -> Result<(), ActrIdError> {
 
 协议规则明确为：
 
-- manufacturer/name 完全复用现有 `Name`：
+- publisher/name 完全复用现有 `Name`：
   - 非空；
   - 当前实现按 UTF-8 **字节数**限制为 32；
   - 字母开头、字母数字结尾；
@@ -293,7 +293,7 @@ fn validate_version(version: &str) -> Result<(), ActrIdError> {
   - 因此明确禁止 `:`、`/`、`@`、`\`、空白和控制字符。
 
 注意 `Name` 的 32 上限按 UTF-8 **字节**计、不是字符：一个 CJK 字符占 3 字节，因此
-manufacturer/name 实际只能容纳约 10 个汉字。发布前的身份扫描必须按字节核算（见第八节），
+publisher/name 实际只能容纳约 10 个汉字。发布前的身份扫描必须按字节核算（见第八节），
 避免把「32 字符」误读为可写 32 个汉字而漏判不合规包。
 
 协议分隔符必须在实现和测试中钉死，不能只写成“拒绝协议分隔符”：
@@ -301,7 +301,7 @@ manufacturer/name 实际只能容纳约 10 个汉字。发布前的身份扫描�
 - `ActrType` 的字段分隔符是 `:`，因此三个字段都禁止 `:`；
 - `ActrId` 还使用 `@` 和 `/`。当前 parser 对 version 中的 `@`、`/` 在部分场景可以
   round-trip，但本方案不保留这种偶然行为，三个字段统一禁止 `@`、`/`；
-- manufacturer/name 由 `Name` 的 allowlist 自然拒绝上述字符，version 由自己的
+- publisher/name 由 `Name` 的 allowlist 自然拒绝上述字符，version 由自己的
   allowlist 拒绝；`\` 同样在三个字段中非法。
 
 这里不强制 SemVer，以保留 `v1` 等既有协议表示；如果产品决定 package version 必须是
@@ -318,11 +318,11 @@ ActrType 可注册
 ```
 
 `Name` 本身允许合法 Unicode alphanumeric，也允许 `x..y`；本方案不额外拒绝它们。
-数字开头和超过 32 UTF-8 字节的 manufacturer/name 则在所有入口一致拒绝。
+数字开头和超过 32 UTF-8 字节的 publisher/name 则在所有入口一致拒绝。
 
 `ActrType` 是 protobuf 数据类型，字段仍然公开，Rust 代码可以绕过 parser 手工构造非法
 值。因此 `to_string_repr()` 成功不能被当作“已经校验”的证明；所有安全敏感入口必须先
-调用 `validate()`，或只接收 `ValidatedActorIdentity`。尤其是 AIS 生成 ACL key 前的
+调用 `validate()`，或只接收 `ValidatedActorIdentity`。尤其是 Issuer 生成 ACL key 前的
 `to_string_repr()` 调用，必须由注册入口校验保护。可以为新调用方补充
 `try_to_string_repr()`，但不能用它替代入口校验。
 
@@ -331,7 +331,7 @@ ActrType 可注册
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ValidatedActorIdentity {
-    manufacturer: String,
+    publisher: String,
     name: String,
     version: String,
 }
@@ -364,7 +364,7 @@ impl ValidatedActorIdentity {
     pub fn namespace_id(&self) -> StorageNamespaceId {
         let mut hasher = Sha256::new();
         hasher.update(b"actr-storage-namespace\0v1");
-        update_field(&mut hasher, 1, self.manufacturer.as_bytes());
+        update_field(&mut hasher, 1, self.publisher.as_bytes());
         update_field(&mut hasher, 2, self.name.as_bytes());
         update_field(&mut hasher, 3, self.version.as_bytes());
         StorageNamespaceId(hasher.finalize().into())
@@ -410,7 +410,7 @@ ValidatedActorIdentity::from_manifest(&manifest).map_err(|error| {
 
 ### 4.3 RegistryTrust：获取公钥前安全预检
 
-`RegistryTrust` 必须在验签前读取 `manufacturer` 和 `signing_key_id` 来选择公钥，这是
+`RegistryTrust` 必须在验签前读取 `publisher` 和 `signing_key_id` 来选择公钥，这是
 必要的 locator，不代表该 manifest 已经可信。
 
 在 `get_or_fetch()` 前：
@@ -419,15 +419,15 @@ ValidatedActorIdentity::from_manifest(&manifest).map_err(|error| {
 2. 对 key ID 做独立的长度、控制字符和 lookup 格式预检；
 3. 使用 URL API 添加 path segment 和 query pair；
 4. 不再用 `format!()` 拼 URL；
-5. 证书缓存 key 改为结构化 tuple，而不是 `manufacturer:key_id` 字符串拼接。
+5. 证书缓存 key 改为结构化 tuple，而不是 `publisher:key_id` 字符串拼接。
 
 示意：
 
 ```rust
-let mut url = reqwest::Url::parse(&self.ais_endpoint)?;
+let mut url = reqwest::Url::parse(&self.issuer_endpoint)?;
 url.path_segments_mut()
-    .map_err(|_| HyperError::Config("AIS endpoint cannot be a base URL".into()))?
-    .extend(["mfr", manufacturer, "verifying_key"]);
+    .map_err(|_| HyperError::Config("Issuer endpoint cannot be a base URL".into()))?
+    .extend(["publisher-registry", publisher, "verifying_key"]);
 url.query_pairs_mut().append_pair("key_id", key_id);
 ```
 
@@ -465,10 +465,10 @@ async fn verify_package_for_hyper(
 这保证自定义 provider 即使没有调用 `actr_pack::verify()`，其返回值也会在
 `detect_binary_kind()` 和 workload 加载之前被 Hyper 拒绝。
 
-AIS 是独立服务端信任边界，不能只依赖 Hyper 已经校验。AIS register handler 在处理
+Issuer 是独立服务端信任边界，不能只依赖 Hyper 已经校验。Issuer register handler 在处理
 外部请求、生成 ActrId 或写 ACL 前也必须调用 `request.actr_type.validate()`；当前
-`crates/loran-ais/src/handlers.rs` 中以 `to_string_repr()` 生成 ACL key 的代码只能位于
-该校验之后。这样即使请求绕过 Hyper 直接到达 AIS，也不会写入以后无法由
+`crates/loran-issuer/src/handlers.rs` 中以 `to_string_repr()` 生成 ACL key 的代码只能位于
+该校验之后。这样即使请求绕过 Hyper 直接到达 Issuer，也不会写入以后无法由
 `from_string_repr()` 解析的 key。
 
 ### 4.5 Storage 配置：移除任意路径模板
@@ -503,7 +503,7 @@ storage_root = /mnt/ssd/actr
 不再支持：
 
 ```text
-storage_path_template = /mnt/ssd/{manufacturer}/{name}/{version}
+storage_path_template = /mnt/ssd/{publisher}/{name}/{version}
 ```
 
 旧配置必须显式报错，不能静默忽略。`HyperSection` 当前没有
@@ -794,24 +794,24 @@ VFS。该能力应单独跟踪，本文不声称已完全覆盖。
 1. 身份校验并计算 namespace
 2. 安全打开 ActorStore / platform secret store
 3. 构造 RegisterRequest
-4. AIS 注册
-5. 检查 AIS 响应
+4. Issuer 注册
+5. 检查 Issuer 响应
 6. store.batch(signing_pubkey, signing_key_id)
 7. 返回 RegisterOk
 ```
 
 原因：
 
-- 开库、目录权限、SQLite、WAL 任一失败时，不向 AIS 创建状态；
-- AIS 成功后的本地失败点仍只有 `store.batch`；
-- 若把开库移动到 AIS 之后，AIS 已签发 ActrId/renewal token 后又可能因目录或 SQLite
-  失败而返回整体失败；重试会产生新的 ActrId/token，因为当前 AIS 注册不是幂等的。
+- 开库、目录权限、SQLite、WAL 任一失败时，不向 Issuer 创建状态；
+- Issuer 成功后的本地失败点仍只有 `store.batch`；
+- 若把开库移动到 Issuer 之后，Issuer 已签发 ActrId/renewal token 后又可能因目录或 SQLite
+  失败而返回整体失败；重试会产生新的 ActrId/token，因为当前 Issuer 注册不是幂等的。
 
-AIS 明确拒绝时可能留下一个空的 hashed-v1 store。这不是 Issue #350 的越权风险；在
+Issuer 明确拒绝时可能留下一个空的 hashed-v1 store。这不是 Issue #350 的越权风险；在
 “不保留旧数据”的前提下，可由诊断/清理工具删除未包含有效初始化标记的空 store。
 
-原验收项“AIS 拒绝不建库”应从本 Issue 移除或改为单独需求。如果必须保留，必须先给
-AIS 注册增加稳定 idempotency key，并保证重试返回同一逻辑 ActrId，再考虑延迟开库。
+原验收项“Issuer 拒绝不建库”应从本 Issue 移除或改为单独需求。如果必须保留，必须先给
+Issuer 注册增加稳定 idempotency key，并保证重试返回同一逻辑 ActrId，再考虑延迟开库。
 
 ### 4.9 错误处理
 
@@ -835,13 +835,13 @@ Pack 层复用现有 `PackError::InvalidPackage`，不为本修复扩大公开�
 
 ### 5.1 身份与 namespace hash
 
-- manufacturer/name 与 `Name::new()` 一致：
+- publisher/name 与 `Name::new()` 一致：
   - 接受 `acme`、`EchoService`、`x..y` 和满足 `Name` 规则的 Unicode；
   - 拒绝 `1acme`、空字符串、超过 32 UTF-8 字节、非法首尾字符；
 - version 接受 `1.0.0`、`1.0.0-rc.1`、`1.0.0+build`、`v1`；
 - version 拒绝空、超过 64 字节、`: / @ \`、空白、控制字符和非法首尾字符；
 - `ActrType::validate()` 与 `to_string_repr()/from_string_repr()` 对所有接受值 round-trip；
-- package、Registry 和 AIS 对同一组合法/非法身份给出一致结果；
+- package、Registry 和 Issuer 对同一组合法/非法身份给出一致结果；
 - 相同 identity 每次生成相同 hash；
 - `("ab", "c")` 与 `("a", "bc")` 不同，证明长度前缀无拼接歧义；
 - `Evil` 与 `evil` 不同；
@@ -887,10 +887,10 @@ Windows 增加 symlink/junction/reparse-point 对应测试；无权限创建 sym
 
 ### 5.5 Bootstrap 与 platform
 
-- storage root 不可写/SQLite open 失败：断言 AIS 未收到请求；
-- AIS 明确拒绝：允许留下空 store，但不得写入 signing key；
-- AIS 成功：signing key 正确持久化；
-- `store.batch` 失败：明确记录 AIS 部分成功状态；
+- storage root 不可写/SQLite open 失败：断言 Issuer 未收到请求；
+- Issuer 明确拒绝：允许留下空 store，但不得写入 signing key；
+- Issuer 成功：signing key 正确持久化；
+- `store.batch` 失败：明确记录 Issuer 部分成功状态；
 - fake platform provider 使用新的 `StorageNamespace` 方法签名并检查 version/digest；
 - 自定义 provider fixture 必须修改后才能编译，证明不存在裸 `&str` 静默兼容；
 - `StorageNamespace::opaque_key()` 输出 `actr-storage:v1:<hash>`，但 native provider
@@ -910,7 +910,7 @@ Windows 增加 symlink/junction/reparse-point 对应测试；无权限创建 sym
 | 默认存储路径 | 改为 `{storage_root}/actors/v1/<hash>/store.sqlite3` |
 | 旧 `storage_path_template` 配置 | 启动时显式报错；外置存储必须改配 `storage_root` |
 | `HyperConfig` struct literal | 新增/移除公开字段可能导致外部 Rust 代码重新编译失败 |
-| package 身份规则 | manufacturer/name 必须满足 `Name`；version 必须满足新的 1–64 字节 ASCII allowlist；不合规的已有 `.actr` 包会被拒绝 |
+| package 身份规则 | publisher/name 必须满足 `Name`；version 必须满足新的 1–64 字节 ASCII allowlist；不合规的已有 `.actr` 包会被拒绝 |
 | 自定义 `PlatformProvider` | `secret_store(&str)` 改为 `secret_store(&StorageNamespace)`；实现方必须重新编译并显式适配 |
 | provider-backed 旧数据 | namespace key 改为 hashed-v1；本文不要求 provider 回读或迁移旧 key 下的数据 |
 | `ActorStore` 调用方 | public `ActorStore::open(path)` 被移除或降为 crate-private；外部代码改用 `open_under()` |
@@ -938,7 +938,7 @@ fix!(hyper): isolate actor storage with verified hashed namespaces
 - “零迁移且路径不变”；
 - “WASM 不受影响”；
 - “`SQLITE_OPEN_NOFOLLOW` 单独解决全部 symlink”；
-- “AIS 拒绝一定没有任何文件系统对象”；
+- “Issuer 拒绝一定没有任何文件系统对象”；
 - “自定义 PlatformProvider 不需要重新编译或行为适配”；
 - “已有 `.actr` 包只要签名有效就一定继续可用”；
 - “保留 public raw open 不影响安全边界”。
@@ -964,7 +964,7 @@ Native host 加载的 WASM 包仍经过 Hyper 的 package verification 和 Actor
 | 2 | `:`、`@`、`/` 的处理没有解释空间 | 三字段统一拒绝并覆盖 round-trip 测试 |
 | 3 | 内置包验证强制身份校验 | `actr_pack::verify*()` 返回前校验 |
 | 4 | 自定义 TrustProvider 不能绕过 | Hyper 统一 provider 后置校验 |
-| 5 | 非法身份在 Registry lookup、workload、AIS 和文件系统操作前拒绝 | lookup 预检 + `verify_package_for_hyper()` + 注册入口复检 |
+| 5 | 非法身份在 Registry lookup、workload、Issuer 和文件系统操作前拒绝 | lookup 预检 + `verify_package_for_hyper()` + 注册入口复检 |
 | 6 | manifest 身份无法控制文件路径分量 | 文件路径只使用固定文本和 SHA-256 hex |
 | 7 | Unix/Windows 路径穿越无效 | 原始身份不进入路径 |
 | 8 | 大小写/Unicode 文件系统折叠不共享 namespace | 原始 UTF-8 身份映射为独立 hash |
@@ -973,15 +973,15 @@ Native host 加载的 WASM 包仍经过 Hyper 的 package verification 和 Actor
 | 11 | PlatformProvider 语义变化不会静默发生 | trait 接收强类型 `StorageNamespace`，旧实现编译失败 |
 | 12 | raw ActorStore open 不能绕过 root-aware 入口 | public API 只提供 `open_under()` |
 | 13 | symlink 在声明的 root 独占威胁模型内被拒绝 | secure root + ancestor check + SQLite NOFOLLOW |
-| 14 | 开库失败不产生 AIS 注册状态 | 保持开库先于 AIS |
+| 14 | 开库失败不产生 Issuer 注册状态 | 保持开库先于 Issuer |
 | 15 | 错误 API 不新增公开枚举分支 | 复用 `InvalidManifest` |
 
-原 Issue 若仍把“AIS 拒绝不建库”列为硬验收，合并前必须：
+原 Issue 若仍把“Issuer 拒绝不建库”列为硬验收，合并前必须：
 
 - 修改该验收项；或
-- 先完成 AIS 注册幂等化。
+- 先完成 Issuer 注册幂等化。
 
-不能仅通过交换开库和 AIS 调用顺序来宣称满足一致性要求。
+不能仅通过交换开库和 Issuer 调用顺序来宣称满足一致性要求。
 
 对于自定义 `TrustProvider`，Hyper 无法约束 provider 在返回前是否自行发起网络请求；
 Hyper 的保证从 provider 返回边界开始。内置 `RegistryTrust` 则通过验签前完整身份预检
@@ -994,7 +994,7 @@ Hyper 的保证从 provider 返回边界开始。内置 `RegistryTrust` 则通�
 ### crates/actr-protocol
 
 - [ ] 在 `ActrType` 上新增唯一的 `validate()`
-- [ ] manufacturer/name 复用 `Name::new()`，不复制规则
+- [ ] publisher/name 复用 `Name::new()`，不复制规则
 - [ ] 为 version 实现 1–64 UTF-8 字节、ASCII allowlist 的唯一 validator
 - [ ] `ActrType::from_string_repr()` 构造后调用同一个 `validate()`
 - [ ] 明确记录 `:`、`@`、`/` 在三个字段中都非法
@@ -1017,11 +1017,11 @@ Hyper 的保证从 provider 返回边界开始。内置 `RegistryTrust` 则通�
 - [ ] `Hyper::verify_package()` 改走统一入口
 - [ ] `load_workload_package_inner()` 改走统一入口
 - [ ] `RegistryTrust` 在 key lookup 前做 locator 预检
-- [ ] `MfrCertCache` 使用 URL builder，不字符串拼接 URL
+- [ ] `PublisherCertCache` 使用 URL builder，不字符串拼接 URL
 - [ ] cert cache key 改为结构化 key
 - [ ] 增加 fake custom provider 绕过测试
 
-### actrix/AIS
+### actrix/Issuer
 
 - [ ] register handler 在生成 ActrId、ACL key 或持久化状态前调用 `ActrType::validate()`
 - [ ] `handlers.rs` 的 `to_string_repr()` ACL key 只使用已校验的 ActrType
@@ -1041,7 +1041,7 @@ Hyper 的保证从 provider 返回边界开始。内置 `RegistryTrust` 则通�
 - [ ] canonical root 只保存于 `HyperInner`
 - [ ] `SecureStorageRoot::path_for()` 唯一实现 `actors/v1/<hash>/store.sqlite3`
 - [ ] `resolve_storage_path()` 与 bootstrap 共用相同推导函数
-- [ ] 保持 ActorStore open 在 AIS register 之前
+- [ ] 保持 ActorStore open 在 Issuer register 之前
 - [ ] 复用 `HyperError::InvalidManifest`
 
 ### platform/storage
@@ -1073,7 +1073,7 @@ Hyper 的保证从 provider 返回边界开始。内置 `RegistryTrust` 则通�
 - [ ] 同时扫描配置文件与 CLI 中的 ActrType 字符串：`from_string_repr()` 现在会走 `validate_version()`，写法不规范的 version（含空格、非 ASCII 等）将从「能解析」变为「报错」
 - [ ] 盘点下游自定义 provider、`ActorStore::open(path)` 和模板配置调用方
 - [ ] 更新配置示例和 release notes，突出身份规则、provider trait 和 ActorStore API 变更
-- [ ] 在 Issue #350 同步修订 AIS 拒绝验收项
+- [ ] 在 Issue #350 同步修订 Issuer 拒绝验收项
 - [ ] 发布前确认部署方接受旧 ActorStore 和 provider-backed namespace 数据重置
 
 ---
@@ -1083,7 +1083,7 @@ Hyper 的保证从 provider 返回边界开始。内置 `RegistryTrust` 则通�
 1. **同 UID 本地并发攻击**：若攻击者能并发替换 storage root 内目录，portable
    canonicalize + open 仍可能有 TOCTOU；需要 capability filesystem 或 SQLite VFS。
 2. **可信 dynclib**：dynclib 本身拥有宿主代码执行能力，路径修复不会把它变成沙箱。
-3. **AIS 注册幂等性**：当前注册成功后 `store.batch` 失败仍可能形成部分成功；这是既有
+3. **Issuer 注册幂等性**：当前注册成功后 `store.batch` 失败仍可能形成部分成功；这是既有
    分布式一致性问题，应单独设计。
 4. **旧路径恢复**：本文明确不提供 fallback；任何自动读取旧路径都会重新引入迁移和
    路径安全问题。
@@ -1105,6 +1105,6 @@ Hyper 的保证从 provider 返回边界开始。内置 `RegistryTrust` 则通�
 - `crates/actr-hyper/src/storage/db.rs`
 - `crates/actr-platform-traits/src/platform.rs`
 - `crates/actr-platform-native/src/platform.rs`
-- `crates/loran-ais/src/handlers.rs`
+- `crates/loran-issuer/src/handlers.rs`
 - CWE-22: Improper Limitation of a Pathname to a Restricted Directory
 - CWE-73: External Control of File Name or Path

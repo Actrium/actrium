@@ -26,7 +26,7 @@ pub struct ClientConfig {
     /// Signer service address
     ///
     /// Full URL of the Signer service, including protocol, host, and port.
-    /// e.g. "http://127.0.0.1:8090" or "https://ks.example.com"
+    /// e.g. "http://127.0.0.1:8090" or "https://signer.example.com"
     pub endpoint: String,
 
     /// PSK (Pre-Shared Key) - used for authentication

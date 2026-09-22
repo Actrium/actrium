@@ -38,7 +38,7 @@ private final class RecordingActrContext: ActrContext, @unchecked Sendable {
     let selfId = Actr.ActrId(
         realm: Actr.Realm(realmId: 1),
         serialNumber: 7,
-        type: Actr.ActrType(manufacturer: "test", name: "Recorder", version: "1.0.0")
+        type: Actr.ActrType(publisher: "test", name: "Recorder", version: "1.0.0")
     )
     let callerId: Actr.ActrId? = nil
     let requestId = "request-1"

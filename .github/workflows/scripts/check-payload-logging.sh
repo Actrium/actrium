@@ -30,7 +30,7 @@ PAYLOAD_VARS='envelope|payload|message|data|body'
 # The macro-name prefix is `tracing::` OR bare: several crates/actr-hyper modules
 # import the macros via `use tracing::{debug, info, warn, ...}` and call them
 # unqualified (`info!(...)`), so anchoring on the FQN alone leaves ~45 call
-# sites in security-sensitive files (ais_client.rs, storage/db.rs, ...) outside
+# sites in security-sensitive files (issuer_client.rs, storage/db.rs, ...) outside
 # the guard's view. This is safe because crates/actr-hyper does NOT pull in the `log`
 # crate's macros, so a bare `info!(...)` here can only resolve to `tracing`. If
 # that assumption ever changes (a `use log::{...}` lands in crates/actr-hyper), this

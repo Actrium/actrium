@@ -82,7 +82,7 @@ declare module 'actr:workload/host@0.7.0' {
   };
 
   export type ActrType = {
-    manufacturer: string;
+    publisher: string;
     name: string;
     version: string;
   };

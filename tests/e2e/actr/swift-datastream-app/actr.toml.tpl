@@ -5,13 +5,13 @@
 # package, binary, and build sections are intentionally omitted.
 #
 # The actor type is defined in Swift code:
-#     ActrType(manufacturer: "__MANUFACTURER__", name: "DataStreamApp", version: "0.1.0")
+#     ActrType(publisher: "__PUBLISHER__", name: "DataStreamApp", version: "0.1.0")
 
 [signaling]
 url = "ws://__HOST__:__HTTP_PORT__/signaling/ws"
 
-[ais_endpoint]
-url = "http://__HOST__:__HTTP_PORT__/ais"
+[issuer_endpoint]
+url = "http://__HOST__:__HTTP_PORT__/issuer"
 
 [deployment]
 # Replace this with the REALM_ID returned by actrix CreateRealm/Admin UI.
@@ -36,8 +36,8 @@ turn_urls = ["turn:__HOST__:__ICE_PORT__"]
 
 [[acl.rules]]
 permission = "allow"
-type = "__MANUFACTURER__:DuplexStreamService:1.0.0"
+type = "__PUBLISHER__:DuplexStreamService:1.0.0"
 
 [[acl.rules]]
 permission = "allow"
-type = "__MANUFACTURER__:DataStreamApp:0.1.0"
+type = "__PUBLISHER__:DataStreamApp:0.1.0"

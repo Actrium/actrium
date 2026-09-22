@@ -271,16 +271,16 @@ TURN-relayed WebRTC, `false` for direct P2P, and `null` for WebSocket.
 
 #### ActrType
 
-Actor type identifier (manufacturer:name:version).
+Actor type identifier (publisher:name:version).
 
 ```kotlin
 // Factory functions
-fun actrType(manufacturer: String, name: String, version: String): ActrType
+fun actrType(publisher: String, name: String, version: String): ActrType
 inline fun actrType(builder: ActrTypeBuilder.() -> Unit): ActrType
 fun String.toActrType(): ActrType
 
 // Extensions
-fun ActrType.toTypeString(): String          // "manufacturer:name:version"
+fun ActrType.toTypeString(): String          // "publisher:name:version"
 fun ActrType.matches(typeString: String): Boolean
 ```
 
@@ -326,7 +326,7 @@ fun realm(id: Int): Realm
 ### Manifest
 
 Typed access to `actr.toml` manifest files — resolve package identity and dependency
-types without hardcoding `"manufacturer:name:version"` strings.
+types without hardcoding `"publisher:name:version"` strings.
 
 #### Manifest class
 
@@ -554,7 +554,7 @@ The low-level API is in `io.actrium.actr` and consists of UniFFI-generated bindi
 
 | Struct | Fields |
 |--------|--------|
-| `ActrType` | `manufacturer: String`, `name: String`, `version: String` |
+| `ActrType` | `publisher: String`, `name: String`, `version: String` |
 | `ActrId` | `realm: Realm`, `serialNumber: ULong`, `type: ActrType` |
 | `Realm` | `realmId: UInt` |
 | `DataChunk` | `streamId: String`, `sequence: ULong`, `payload: ByteArray`, `metadata: List<MetadataEntry>`, `timestampMs: Long?` |

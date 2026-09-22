@@ -262,7 +262,7 @@ class ClientActivity : AppCompatActivity() {
                 Log.i(TAG, "Manifest path: $manifestPath")
 
                 val actorType = resolveActorType(manifestPath)
-                Log.i(TAG, "Actor type from manifest: ${actorType.manufacturer}:${actorType.name}:${actorType.version}")
+                Log.i(TAG, "Actor type from manifest: ${actorType.publisher}:${actorType.name}:${actorType.version}")
 
                 // Host-side transport hooks: signaling + per-peer WebRTC state
                 // drive status text only. They are not a send/retry mechanism.

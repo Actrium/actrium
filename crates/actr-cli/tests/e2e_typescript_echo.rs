@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use actr_cli::test_support as e2e_support;
 use actr_cli::test_support::{
     LocalActrix, LoggedProcess, align_project_with_local_actrix, assert_success,
-    pin_echo_service_dependency_version, random_manufacturer,
+    pin_echo_service_dependency_version, random_publisher,
 };
 use tempfile::TempDir;
 
@@ -118,7 +118,7 @@ fn typescript_echo_e2e_service_and_app() {
 
     let actrix = LocalActrix::start().expect("failed to start local actrix");
     let tmp = TempDir::new().unwrap();
-    let mfr = random_manufacturer();
+    let publisher = random_publisher();
 
     let out = run_actr(
         &[
@@ -131,8 +131,8 @@ fn typescript_echo_e2e_service_and_app() {
             "both",
             "--signaling",
             &actrix.signaling_ws_url,
-            "--manufacturer",
-            &mfr,
+            "--publisher",
+            &publisher,
             "e2e-ts",
         ],
         tmp.path(),
@@ -145,7 +145,7 @@ fn typescript_echo_e2e_service_and_app() {
     assert!(app_dir.exists(), "echo-app dir should exist");
     align_project_with_local_actrix(&svc_dir).expect("failed to set local realm for service");
     align_project_with_local_actrix(&app_dir).expect("failed to set local realm for app");
-    pin_echo_service_dependency_version(&app_dir, &mfr)
+    pin_echo_service_dependency_version(&app_dir, &publisher)
         .expect("failed to pin app echo dependency version");
     assert_generated_actr_dependency(&svc_dir);
     assert_generated_actr_dependency(&app_dir);
