@@ -76,7 +76,7 @@ async fn generate_signing_key_via_http(
 
 #[tokio::test]
 async fn test_http_health_and_key_lifecycle() {
-    let psk = "test-ks-psk";
+    let psk = "test-signer-psk";
     let server = start_test_server(psk).await;
     let client = reqwest::Client::new();
 
@@ -135,7 +135,7 @@ async fn test_http_health_and_key_lifecycle() {
 
 #[tokio::test]
 async fn test_http_generate_rejects_invalid_signature() {
-    let psk = "test-ks-psk";
+    let psk = "test-signer-psk";
     let server = start_test_server(psk).await;
     let client = reqwest::Client::new();
 
@@ -155,7 +155,7 @@ async fn test_http_generate_rejects_invalid_signature() {
 
 #[tokio::test]
 async fn test_http_generate_replay_is_rejected() {
-    let psk = "test-ks-psk";
+    let psk = "test-signer-psk";
     let server = start_test_server(psk).await;
     let client = reqwest::Client::new();
 
@@ -175,7 +175,7 @@ async fn test_http_generate_replay_is_rejected() {
 
 #[tokio::test]
 async fn test_http_generate_timestamp_out_of_window() {
-    let psk = "test-ks-psk";
+    let psk = "test-signer-psk";
     let server = start_test_server(psk).await;
     let client = reqwest::Client::new();
 
@@ -191,7 +191,7 @@ async fn test_http_generate_timestamp_out_of_window() {
 
 #[tokio::test]
 async fn test_http_sign_rejects_invalid_signature() {
-    let psk = "test-ks-psk";
+    let psk = "test-signer-psk";
     let server = start_test_server(psk).await;
     let client = reqwest::Client::new();
 
@@ -260,7 +260,7 @@ async fn test_http_sign_authentication_binds_exact_message_and_path_key() {
 
 #[tokio::test]
 async fn test_http_sign_nonexistent_key_returns_not_found() {
-    let psk = "test-ks-psk";
+    let psk = "test-signer-psk";
     let server = start_test_server(psk).await;
     let client = reqwest::Client::new();
 

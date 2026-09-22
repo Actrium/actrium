@@ -379,7 +379,7 @@ mod tests {
             actor_id: ActrId {
                 serial_number: serial,
                 r#type: ActrType {
-                    manufacturer: "test".to_string(),
+                    publisher: "test".to_string(),
                     name: name.to_string(),
                     version: "1.0.0".to_string(),
                 },

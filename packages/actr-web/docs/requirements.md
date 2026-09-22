@@ -56,7 +56,7 @@ Framework contributors may work directly with `crates/sw-host`, `packages/web-sd
 - Stream subscription support.
 - Typed code generation for browser clients where generated bindings exist.
 - WebRTC-based peer connectivity.
-- Signaling and AIS integration through local or remote actrix-compatible services.
+- Signaling and Issuer integration through local or remote actrix-compatible services.
 - IndexedDB-backed mailbox support where persistence is required.
 - Separation between State Path and Fast Path processing.
 - Service Worker based guest loading through `actor.sw.js`.

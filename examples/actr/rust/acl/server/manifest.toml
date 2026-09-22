@@ -1,6 +1,6 @@
 [package]
 name = "greeter.GreeterService"
-manufacturer = "acme"
+publisher = "acme"
 version = "1.0.0"
 description = "ACL Protected Greeter Server"
 authors = ["Actr Dev Team"]

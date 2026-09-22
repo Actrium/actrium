@@ -100,8 +100,8 @@ final class ActrService: ObservableObject {
             let manifestURL = try materializeRuntimeConfig()
 
             // Read publisher domain from environment or use the local E2E identity.
-            let manufacturer = ProcessInfo.processInfo.environment["ACTR_MANUFACTURER"] ?? "e2e.actrium.test"
-            let actorType = ActrType(manufacturer: manufacturer, name: "DataStreamApp", version: "0.1.0")
+            let publisher = ProcessInfo.processInfo.environment["ACTR_PUBLISHER"] ?? "e2e.actrium.test"
+            let actorType = ActrType(publisher: publisher, name: "DataStreamApp", version: "0.1.0")
 
             let handler = ProbeHandlerImpl(service: self)
             let workload = Actr.dynamicWorkload(

@@ -25,7 +25,7 @@ fn test_actor_id(serial_number: u64) -> ActrId {
         realm: Realm { realm_id: 1 },
         serial_number,
         r#type: ActrType {
-            manufacturer: "acme".to_string(),
+            publisher: "acme".to_string(),
             name: "node".to_string(),
             version: "1.0.0".to_string(),
         },
@@ -876,7 +876,7 @@ fn test_realm_secret_actor_id(serial_number: u64) -> ActrId {
         realm: Realm { realm_id: 7 },
         serial_number,
         r#type: ActrType {
-            manufacturer: "demo2".to_string(),
+            publisher: "demo2".to_string(),
             name: "DuplexStreamService".to_string(),
             version: "1.0.0".to_string(),
         },
@@ -982,7 +982,7 @@ impl SignalingClient for FakeSignalingClient {
 }
 
 #[tokio::test]
-async fn re_registration_sends_realm_secret_to_ais() {
+async fn re_registration_sends_realm_secret_to_issuer() {
     let mut server = mockito::Server::new_async().await;
     let new_actor_id = test_realm_secret_actor_id(42);
     let register_response = RegisterResponse {

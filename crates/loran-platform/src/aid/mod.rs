@@ -1,6 +1,6 @@
 //! Actor Identity management module
 //!
-//! Provides Actor Identity Token verification based on aid proto (issuing has been moved to the ais crate)
+//! Provides Actor Identity Token verification based on aid proto (issuing has been moved to the issuer crate)
 
 pub mod credential;
 pub mod identity_claims;

@@ -233,7 +233,7 @@ mod tests {
 
     fn manifest_with_resources(resources: Vec<crate::manifest::ResourceEntry>) -> PackageManifest {
         PackageManifest {
-            manufacturer: "test".to_string(),
+            publisher: "test".to_string(),
             name: "fixture".to_string(),
             version: "0.1.0".to_string(),
             binary: BinaryEntry {

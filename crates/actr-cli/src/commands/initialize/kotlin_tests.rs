@@ -21,20 +21,20 @@ fn extract_signaling_host_parses_all_variants() {
 }
 
 #[test]
-fn derive_ais_endpoint_no_suffix_uses_slash_ais() {
+fn derive_issuer_endpoint_no_suffix_uses_slash_issuer() {
     assert_eq!(
-        derive_ais_endpoint_url("ws://example.com:8080/signaling/ws"),
-        "http://example.com:8080/ais"
+        derive_issuer_endpoint_url("ws://example.com:8080/signaling/ws"),
+        "http://example.com:8080/issuer"
     );
     assert_eq!(
-        derive_ais_endpoint_url("wss://example.com/signaling"),
-        "https://example.com/ais"
+        derive_issuer_endpoint_url("wss://example.com/signaling"),
+        "https://example.com/issuer"
     );
     assert_eq!(
-        derive_ais_endpoint_url("http://example.com/ws"),
-        "http://example.com/ais"
+        derive_issuer_endpoint_url("http://example.com/ws"),
+        "http://example.com/issuer"
     );
-    assert!(derive_ais_endpoint_url("").is_empty());
+    assert!(derive_issuer_endpoint_url("").is_empty());
 }
 
 #[test]

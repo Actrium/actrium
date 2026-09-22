@@ -3211,7 +3211,7 @@ public interface ContextBridgeInterface {
      * Discover an actor of the specified type
      *
      * # Arguments
-     * - `target_type`: Actor type to discover (manufacturer + name)
+     * - `target_type`: Actor type to discover (publisher + name)
      *
      * # Returns
      * The ActrId of a discovered actor
@@ -3508,7 +3508,7 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
      * Discover an actor of the specified type
      *
      * # Arguments
-     * - `target_type`: Actor type to discover (manufacturer + name)
+     * - `target_type`: Actor type to discover (publisher + name)
      *
      * # Returns
      * The ActrId of a discovered actor
@@ -5363,10 +5363,10 @@ public object FfiConverterTypeActrId: FfiConverterRustBuffer<ActrId> {
 
 
 /**
- * Actor type (manufacturer + name + version)
+ * Actor type (publisher + name + version)
  */
 data class ActrType (
-    var `manufacturer`: kotlin.String
+    var `publisher`: kotlin.String
     , 
     var `name`: kotlin.String
     , 
@@ -5394,13 +5394,13 @@ public object FfiConverterTypeActrType: FfiConverterRustBuffer<ActrType> {
     }
 
     override fun allocationSize(value: ActrType) = (
-            FfiConverterString.allocationSize(value.`manufacturer`) +
+            FfiConverterString.allocationSize(value.`publisher`) +
             FfiConverterString.allocationSize(value.`name`) +
             FfiConverterString.allocationSize(value.`version`)
     )
 
     override fun write(value: ActrType, buf: ByteBuffer) {
-            FfiConverterString.write(value.`manufacturer`, buf)
+            FfiConverterString.write(value.`publisher`, buf)
             FfiConverterString.write(value.`name`, buf)
             FfiConverterString.write(value.`version`, buf)
     }
@@ -9184,7 +9184,7 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
          * Parses the manifest, looks up the dependency by alias, and returns its
          * `actr_type` field as a structured `ActrType` record. This is the canonical
          * way for linked-runtime hosts (iOS, Android) to discover which remote actor
-         * type a dependency resolves to, without hardcoding `"manufacturer:name:version"`
+         * type a dependency resolves to, without hardcoding `"publisher:name:version"`
          * strings in application code.
          */
     @Throws(ActrException::class) fun `resolveManifestDependency`(`manifestPath`: kotlin.String, `dependencyAlias`: kotlin.String): ActrType {
@@ -9222,7 +9222,7 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
          * Parses the manifest and returns the `[package]` block's actr_type fields
          * as a structured `ActrType` record. Linked-runtime hosts (iOS, Android) use
          * this to determine their own actor type without hardcoding
-         * `"manufacturer:name:version"` strings.
+         * `"publisher:name:version"` strings.
          */
     @Throws(ActrException::class) fun `resolveManifestPackageActrType`(`manifestPath`: kotlin.String): ActrType {
             return FfiConverterTypeActrType.lift(

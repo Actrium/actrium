@@ -26,7 +26,7 @@
 - ✅ 兼容性缓存单元测试（5 个测试）
 - ✅ 地理距离计算测试（5 个测试）
 - ✅ Presence 管理测试（5 个测试）
-- ✅ AIS 客户端配置测试（2 个测试）
+- ✅ Issuer 客户端配置测试（2 个测试）
 
 #### ⏳ 待实施（P1）
 - 完整的 WebSocket 集成测试
@@ -60,7 +60,7 @@
 // 客户端发送
 SignalingEnvelope {
     flow: PeerToSignaling(RegisterRequest {
-        actr_type: ActrType { manufacturer, name, version },
+        actr_type: ActrType { publisher, name, version },
         realm: Realm { realm_id },
         service_spec: Option,
         acl: Option,
@@ -88,7 +88,7 @@ SignalingEnvelope {
 - ⏳ Credential 验证（如果启用）
 - ⏳ 注销清理
 
-**实现复杂度**: 高（需要 AIS 集成或 mock）
+**实现复杂度**: 高（需要 Issuer 集成或 mock）
 
 ---
 
@@ -291,7 +291,7 @@ tokio-tungstenite = "0.27"  # WebSocket 客户端
    - 创建测试辅助工具
 
 6. ⏳ **添加 Actor 注册流程测试** (4-8 小时)
-   - Mock AIS 客户端
+   - Mock Issuer 客户端
    - 或使用测试 Token
 
 7. ⏳ **添加心跳和信令中继测试** (4-6 小时)
@@ -336,7 +336,7 @@ cargo clippy -p signaling
 | compatibility_cache | 5 | 兼容性缓存操作和过期清理 |
 | geo | 5 | Haversine 距离计算 |
 | presence | 5 | Presence 订阅和统计 |
-| ais_client | 2 | AIS 客户端配置 |
+| issuer_client | 2 | Issuer 客户端配置 |
 | **总计** | **54** | **全部通过** |
 
 ### 未来的集成测试

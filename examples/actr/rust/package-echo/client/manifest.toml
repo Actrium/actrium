@@ -1,6 +1,6 @@
 [package]
 name = "package-echo-client-guest"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.1.0"
 description = "Package Echo Client Host — loads client-guest package"
 authors = ["Actr Dev Team"]

@@ -30,7 +30,7 @@ async fn main() -> Result<()> {
 
     // via/throughsignalingservice[...]discover WsEchoService
     let target_type = ActrType {
-        manufacturer: "acme".to_string(),
+        publisher: "acme".to_string(),
         name: "WsEchoService".to_string(),
         version: "1.0.0".to_string(),
     };

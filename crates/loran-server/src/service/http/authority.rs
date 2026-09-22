@@ -94,8 +94,8 @@ fn authority_composition(
         services
             .push(ServiceLink::new("discovery", &signaling_href).with_protocol("actr-discovery/1"));
     }
-    if config.is_ais_enabled() {
-        services.push(ServiceLink::new("identity", format!("{origin}/ais")));
+    if config.is_issuer_enabled() {
+        services.push(ServiceLink::new("identity", format!("{origin}/issuer")));
     }
     if config.is_ice_enabled() {
         services.push(
@@ -206,7 +206,7 @@ mod tests {
         config.enable = platform::config::ENABLE_SIGNALING
             | platform::config::ENABLE_STUN
             | platform::config::ENABLE_TURN
-            | platform::config::ENABLE_AIS;
+            | platform::config::ENABLE_ISSUER;
         config.bind.http.as_mut().unwrap().port = 8081;
         config.bind.http.as_mut().unwrap().advertised_port = Some(8081);
         config.bind.ice.advertised_ip = "127.0.0.1".to_string();

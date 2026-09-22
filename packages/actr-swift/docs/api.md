@@ -269,11 +269,11 @@ public struct ActrId: Equatable, Hashable {
 
 #### `ActrType`
 
-Actor type identifier (manufacturer + name).
+Actor type identifier (publisher + name).
 
 ```swift
 public struct ActrType: Equatable, Hashable {
-    public var manufacturer: String
+    public var publisher: String
     public var name: String
 }
 ```

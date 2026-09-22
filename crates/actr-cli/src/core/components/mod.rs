@@ -76,7 +76,7 @@ pub struct MethodDefinition {
 #[derive(Debug, Clone)]
 pub struct ServiceInfo {
     /// Registry discovery key/display name. Actrix currently emits its
-    /// internal `manufacturer:ActrTypeName` service key here.
+    /// internal `publisher:ActrTypeName` service key here.
     ///
     /// Do not persist this as a manifest service reference; use
     /// [`Self::dependency_service_name`] instead.

@@ -61,9 +61,9 @@ impl ActrNode {
             .link(TypeScriptBindingWorkload)
             .await
             .map_err(crate::error::hyper_error_to_napi)?;
-        let ais_endpoint = attached.ais_endpoint().to_string();
+        let issuer_endpoint = attached.issuer_endpoint().to_string();
         let registered = attached
-            .register(&ais_endpoint)
+            .register(&issuer_endpoint)
             .await
             .map_err(crate::error::hyper_error_to_napi)?;
 

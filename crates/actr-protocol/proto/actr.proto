@@ -7,7 +7,7 @@ import "google/protobuf/timestamp.proto";
 // ===========================================================================
 // Basic Components
 //   Realm (Security Realm)
-//   ActrType (manufacturer + name + version)
+//   ActrType (publisher + name + version)
 //   ActrId (Realm + serial number + type)
 //   ServiceSpec (fingerprint + proto bundle + tags)
 //   ActrNode (ActrId + ServiceSpec)
@@ -17,7 +17,7 @@ message Realm {
 }
 
 message ActrType {
-  required string manufacturer = 1;
+  required string publisher = 1;
   required string name = 2;
   // Version string (e.g., "1.0.0", "v2", "stable"). Not required to follow
   // semantic versioning, but must be present.
@@ -61,7 +61,7 @@ message ServiceLocation {
 // AId Credential
 // ============================================================================
 
-// Actor identity claims, encoded as plaintext protobuf and signed by AIS with Ed25519.
+// Actor identity claims, encoded as plaintext protobuf and signed by Issuer with Ed25519.
 message IdentityClaims {
   required uint32 realm_id   = 1;
   required string actor_id   = 2;
@@ -186,9 +186,9 @@ message RegisterRequest {
   // Raw manifest bytes (original `actr.toml` from the `.actr` package) for Publisher signature verification.
   optional bytes manifest_raw = 10;
   // Ed25519 signature over the manifest contents produced by the Publisher, 64 bytes.
-  optional bytes mfr_signature = 11;
+  optional bytes publisher_signature = 11;
   // Target platform (e.g. "wasm32-wasip1", "x86_64-unknown-linux-gnu").
-  // Extracted from manifest binary.target for AIS lookup path verification.
+  // Extracted from manifest binary.target for Issuer lookup path verification.
   optional string target = 13;
   // Explicit authentication source. Omitted/UNSPECIFIED is treated as PACKAGE
   // for backward compatibility with older package clients.
@@ -197,17 +197,17 @@ message RegisterRequest {
   reserved 12;
   reserved "psk_token";
 
-  // Ed25519 signature over the ACTR-MANUFACTURER-REGISTER-V1 payload.
+  // Ed25519 signature over the ACTR-PUBLISHER-REGISTER-V1 payload.
   // A package launcher produces this fresh proof with the Publisher key that signed
   // manifest_raw, binding the running package to its Publisher.
   // Required only for unpublished Package Path 2 registrations.
-  optional bytes manufacturer_auth_signature = 15;
-  // Unix seconds included in the manufacturer signature payload.
-  // AIS accepts only a short time window to prevent long-lived replay.
-  optional uint64 manufacturer_auth_signed_at = 16;
-  // Random nonce included in the manufacturer signature payload.
-  // AIS atomically consumes it to prevent replay inside the time window.
-  optional bytes manufacturer_auth_nonce = 17;
+  optional bytes publisher_auth_signature = 15;
+  // Unix seconds included in the publisher signature payload.
+  // Issuer accepts only a short time window to prevent long-lived replay.
+  optional uint64 publisher_auth_signed_at = 16;
+  // Random nonce included in the publisher signature payload.
+  // Issuer atomically consumes it to prevent replay inside the time window.
+  optional bytes publisher_auth_nonce = 17;
 }
 
 message RegisterResponse {
@@ -219,9 +219,9 @@ message RegisterResponse {
     optional google.protobuf.Timestamp credential_expires_at = 4;
     // Operational advice: heartbeat interval for subsequent Signaling Server connection
     required uint32        signaling_heartbeat_interval_secs = 5;
-    required bytes         signing_pubkey                   = 6; // AIS Ed25519 verifying key, 32 bytes
+    required bytes         signing_pubkey                   = 6; // Issuer Ed25519 verifying key, 32 bytes
     required uint32        signing_key_id                   = 7;
-    // Bearer token bound to actr_id and used by POST /ais/renew.
+    // Bearer token bound to actr_id and used by POST /issuer/renew.
     optional bytes         renewal_token                    = 12;
     // Renewal token expiration timestamp.
     optional google.protobuf.Timestamp renewal_token_expires_at = 13;
@@ -255,20 +255,20 @@ message RenewCredentialResponse {
 
 // Re-issue credentials for an existing actor when its renewal token can no
 // longer be used. The nested registration request re-authenticates the workload
-// (manufacturer proof for packages, realm authorization for linked workloads),
+// (publisher proof for packages, realm authorization for linked workloads),
 // while actr_id identifies the stable runtime identity that must be preserved.
 message ReissueCredentialRequest {
   required ActrId actr_id = 1;
   required RegisterRequest registration = 2;
   // Proof that the caller owns exactly this actr_id: the raw renewal token
-  // most recently issued to that actor (possibly expired). AIS matches its
+  // most recently issued to that actor (possibly expired). Issuer matches its
   // hash against the issuer-recorded token bindings for actr_id and rejects
   // the reissue when no binding matches, so a workload cannot mint
   // credentials for another same-realm/type actor or an arbitrary serial.
   optional bytes renewal_proof = 3;
   // Client-generated UUID (16 raw bytes) identifying this logical write.
   // Retries MUST reuse both this value and the exact request body, including
-  // the manufacturer proof nested in registration.
+  // the publisher proof nested in registration.
   required bytes attempt_id = 4;
 }
 
@@ -368,7 +368,7 @@ message RouteCandidatesResponse {
 // =========================================================================
 // List (ActrType x fingerprint) combinations present on the network.
 message DiscoveryRequest {
-  optional string manufacturer = 1;
+  optional string publisher = 1;
   optional uint32 limit = 2 [default = 64];
 }
 

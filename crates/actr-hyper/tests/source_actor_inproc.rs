@@ -548,7 +548,7 @@ fn test_actor_id() -> ActrId {
         realm: actr_protocol::Realm { realm_id: 1 },
         serial_number: 42,
         r#type: actr_protocol::ActrType {
-            manufacturer: "test".to_string(),
+            publisher: "test".to_string(),
             name: "double-service".to_string(),
             version: "0.1.0".to_string(),
         },

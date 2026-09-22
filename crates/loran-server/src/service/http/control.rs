@@ -19,7 +19,7 @@ use tokio::sync::broadcast;
 /// When `None`, a new random secret is generated.  Pass the same secret on
 /// reload to avoid invalidating active admin sessions.
 ///
-/// `ais_issuer` is the issuer backing the public `/ais` router when AIS is
+/// `aid_issuer` is the issuer backing the public `/issuer` router when Issuer is
 /// enabled, so the control plane can trigger authenticated key rotation on
 /// the live issuer.
 ///
@@ -34,7 +34,7 @@ pub async fn build_control_router(
     jwt_secret: Option<Vec<u8>>,
     config_store: Arc<ConfigOverrideStore>,
     metrics_store: MetricsStore,
-    ais_issuer: Option<Arc<ais::AIdIssuer>>,
+    aid_issuer: Option<Arc<issuer::AIdIssuer>>,
 ) -> Result<(Router, Vec<u8>)> {
     let mut router = Router::new();
     // Discard any carried-over secret that is empty or too short: an empty key
@@ -53,7 +53,7 @@ pub async fn build_control_router(
             if jwt.is_empty() { None } else { Some(jwt) },
             config_store.clone(),
             metrics_store,
-            ais_issuer.clone(),
+            aid_issuer.clone(),
         )
         .await?;
         router = router.merge(admin_router);
@@ -67,7 +67,7 @@ pub async fn build_control_router(
             shutdown_tx,
             config_store,
             !admin_ui_enabled,
-            ais_issuer,
+            aid_issuer,
         )
         .await?;
         router = router.merge(grpc_router);
@@ -89,7 +89,7 @@ async fn build_admin_ui_router(
     jwt_secret: Option<Vec<u8>>,
     config_store: Arc<ConfigOverrideStore>,
     metrics_store: MetricsStore,
-    ais_issuer: Option<Arc<ais::AIdIssuer>>,
+    aid_issuer: Option<Arc<issuer::AIdIssuer>>,
 ) -> Result<(Router, Vec<u8>)> {
     // Read raw TOML content for L1 detection
     let toml_content = tokio::fs::read_to_string(&config_path)
@@ -111,8 +111,8 @@ async fn build_admin_ui_router(
         .with_toml_content(toml_content)
         .with_config_path(config_path);
 
-    if let Some(issuer) = ais_issuer {
-        service = service.with_ais_issuer(issuer);
+    if let Some(issuer) = aid_issuer {
+        service = service.with_aid_issuer(issuer);
     }
 
     let shutdown_tx_for_handler = shutdown_tx.clone();
@@ -156,21 +156,21 @@ async fn build_admin_ui_router(
     });
 
     // Build Publisher Registry management router.
-    let mfr_router = {
-        use actrix_mfr::{
-            MfrManager,
-            handlers::{MfrState, create_admin_router},
+    let publisher_registry_router = {
+        use actrix_publisher_registry::{
+            PublisherRegistryManager,
+            handlers::{PublisherRegistryState, create_admin_router},
         };
         let pool = platform::storage::db::get_database().get_pool().clone();
-        let manager = MfrManager::new(pool);
-        let mfr_state = MfrState {
+        let manager = PublisherRegistryManager::new(pool);
+        let publisher_registry_state = PublisherRegistryState {
             manager: Arc::new(manager),
         };
-        create_admin_router(mfr_state)
+        create_admin_router(publisher_registry_state)
     };
 
     Ok((
-        build_admin_api_router(state, Some(mfr_router)),
+        build_admin_api_router(state, Some(publisher_registry_router)),
         jwt_secret_clone,
     ))
 }
@@ -181,7 +181,7 @@ async fn build_grpc_api_router(
     shutdown_tx: broadcast::Sender<()>,
     config_store: Arc<ConfigOverrideStore>,
     include_admin_index_and_alias: bool,
-    ais_issuer: Option<Arc<ais::AIdIssuer>>,
+    aid_issuer: Option<Arc<issuer::AIdIssuer>>,
 ) -> Result<Router> {
     let grpc_cfg = &config.control.grpc_api;
     let shared_secret = Arc::new(
@@ -207,8 +207,8 @@ async fn build_grpc_api_router(
         .with_override_store(config_store)
         .with_running_config(config.clone());
 
-    if let Some(issuer) = ais_issuer {
-        service = service.with_ais_issuer(issuer);
+    if let Some(issuer) = aid_issuer {
+        service = service.with_aid_issuer(issuer);
     }
 
     let shutdown_tx_for_handler = shutdown_tx.clone();

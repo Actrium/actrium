@@ -336,7 +336,7 @@ fn get_default_value_for_field_with_context(field_name: &str, section_prefix: &s
         "realm" => "\"actrix.local\"".to_string(),
         "path" => {
             if section_prefix.contains("services.signer.storage.sqlite") {
-                "\"ks.db\"".to_string()
+                "\"signer.db\"".to_string()
             } else {
                 "\"\"".to_string()
             }

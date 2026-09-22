@@ -206,7 +206,7 @@ let config: ActorConfig = toml::from_str(r#"
 let request = RegisterRequest {
     realm: Realm { realm_id: 1 },
     actr_type: ActrType {
-        manufacturer: "my-company".to_string(),
+        publisher: "my-company".to_string(),
         name: "my-service".to_string(),
     },
     geo_location: Some(config.geo_location),

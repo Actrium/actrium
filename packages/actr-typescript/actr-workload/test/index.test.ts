@@ -21,7 +21,7 @@ function testActorId(serialNumber: number | bigint = 7n): ActrId {
     realm: { realmId: 42 },
     serialNumber,
     type: {
-      manufacturer: 'acme',
+      publisher: 'acme',
       name: 'EchoService',
       version: '1.0.0',
     },

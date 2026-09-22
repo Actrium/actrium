@@ -44,7 +44,7 @@ internal sealed class ActrService
             RuntimeLog.Info($"ACTR LinkWorkload {WorkloadName}");
             await node.LinkWorkload(WorkloadName);
             RuntimeLog.Info("ACTR Register");
-            await node.Register(null);    // local mode: use the node's configured AIS endpoint
+            await node.Register(null);    // local mode: use the node's configured Issuer endpoint
             RuntimeLog.Info("ACTR Start");
             await node.Start();
             _node = node;

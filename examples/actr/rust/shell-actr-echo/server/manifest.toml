@@ -1,6 +1,6 @@
 [package]
 name = "EchoService"
-manufacturer = "acme"
+publisher = "acme"
 version = "1.0.0"
 description = "Echo Real Server"
 authors = ["Actr Dev Team"]

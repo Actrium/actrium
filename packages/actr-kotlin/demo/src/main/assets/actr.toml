@@ -9,8 +9,8 @@
 [signaling]
 url = "ws://124.71.231.251:9080/signaling/ws"
 
-[ais_endpoint]
-url = "http://124.71.231.251:9080/ais"
+[issuer_endpoint]
+url = "http://124.71.231.251:9080/issuer"
 
 [deployment]
 realm_id = 33554434

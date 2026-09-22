@@ -239,7 +239,7 @@ fn invocation_context(request_id: &str) -> InvocationContext {
             realm: actr_protocol::Realm { realm_id: 1 },
             serial_number: 1,
             r#type: actr_protocol::ActrType {
-                manufacturer: "test".to_string(),
+                publisher: "test".to_string(),
                 name: "host-state".to_string(),
                 version: "0.1.0".to_string(),
             },

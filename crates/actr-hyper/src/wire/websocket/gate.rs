@@ -9,13 +9,13 @@
 //! | Concern | WebRtcGate | WebSocketGate |
 //! |---------|-----------|---------------|
 //! | Transport | WebRTC DataChannel | WebSocket (TCP) |
-//! | Sender auth | actrix signaling verifies credential | Local Ed25519 verification (AisKeyCache) |
+//! | Sender auth | actrix signaling verifies credential | Local Ed25519 verification (IssuerKeyCache) |
 //! | Message aggregation | `WebRtcCoordinator.receive_message()` | Per-connection `DataLane` reading |
 
 use super::connection::WebSocketConnection;
 use super::server::InboundWsConn;
 use crate::inbound::DataChunkRegistry;
-use crate::key_cache::AisKeyCache;
+use crate::key_cache::IssuerKeyCache;
 use crate::lifecycle::CredentialState;
 use crate::transport::WsSink;
 use crate::transport::correlation::PendingRequestsMap;
@@ -44,8 +44,8 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 /// - Connections that fail verification are dropped without starting lane readers
 /// - Connections without credentials are treated as verification failures
 pub(crate) struct WsAuthContext {
-    /// AIS signing public key cache (local hit verifies directly, miss fetches via signaling)
-    pub(crate) ais_key_cache: Arc<AisKeyCache>,
+    /// Issuer signing public key cache (local hit verifies directly, miss fetches via signaling)
+    pub(crate) issuer_key_cache: Arc<IssuerKeyCache>,
     /// Local ActrId (needed when requesting public key from signaling on cache miss)
     pub(crate) actor_id: ActrId,
     /// Local credential state (needed for signaling authentication on cache miss)
@@ -320,9 +320,9 @@ impl WebSocketGate {
             credential: local_credential,
         };
 
-        // Get verifying key for key_id from AisKeyCache (local hit or fetch from signaling)
+        // Get verifying key for key_id from IssuerKeyCache (local hit or fetch from signaling)
         let verifying_key = match auth_ctx
-            .ais_key_cache
+            .issuer_key_cache
             .get_or_fetch(credential.key_id, &fetcher)
             .await
         {
@@ -365,7 +365,7 @@ impl WebSocketGate {
             }
         };
 
-        // AIS TTLs are configurable and claims do not carry an issued-at
+        // Issuer TTLs are configurable and claims do not carry an issued-at
         // value, so only the signed absolute expiry can be evaluated here.
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

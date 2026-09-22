@@ -10,15 +10,15 @@ class ActrTypeTest {
     @Test
     fun `toActrType parses canonical colon format`() {
         val type = "acme:EchoService:1.0.0".toActrType()
-        assertEquals("acme", type.manufacturer)
+        assertEquals("acme", type.publisher)
         assertEquals("EchoService", type.name)
         assertEquals("1.0.0", type.version)
     }
 
     @Test
-    fun `toActrType parses with complex manufacturer name`() {
+    fun `toActrType parses with complex publisher name`() {
         val type = "demo2:EchoService:2.0.1".toActrType()
-        assertEquals("demo2", type.manufacturer)
+        assertEquals("demo2", type.publisher)
         assertEquals("EchoService", type.name)
         assertEquals("2.0.1", type.version)
     }
@@ -26,7 +26,7 @@ class ActrTypeTest {
     @Test
     fun `toActrType parses with semver version`() {
         val type = "actrium:DataStreamConcurrentServer:0.1.0-beta".toActrType()
-        assertEquals("actrium", type.manufacturer)
+        assertEquals("actrium", type.publisher)
         assertEquals("DataStreamConcurrentServer", type.name)
         assertEquals("0.1.0-beta", type.version)
     }
@@ -70,7 +70,7 @@ class ActrTypeTest {
     @Test
     fun `actrType factory creates ActrType from positional args`() {
         val type = actrType("demo2", "EchoService", "2.0.0")
-        assertEquals("demo2", type.manufacturer)
+        assertEquals("demo2", type.publisher)
         assertEquals("EchoService", type.name)
         assertEquals("2.0.0", type.version)
     }
@@ -80,20 +80,20 @@ class ActrTypeTest {
     @Test
     fun `actrType builder creates ActrType from DSL block`() {
         val type = actrType {
-            manufacturer = "acme"
+            publisher = "acme"
             name = "EchoService"
             version = "1.0.0"
         }
-        assertEquals("acme", type.manufacturer)
+        assertEquals("acme", type.publisher)
         assertEquals("EchoService", type.name)
         assertEquals("1.0.0", type.version)
     }
 
     @Test
-    fun `actrType builder rejects blank manufacturer`() {
+    fun `actrType builder rejects blank publisher`() {
         assertFailsWith<IllegalArgumentException> {
             actrType {
-                manufacturer = ""
+                publisher = ""
                 name = "EchoService"
                 version = "1.0.0"
             }
@@ -104,7 +104,7 @@ class ActrTypeTest {
     fun `actrType builder rejects blank name`() {
         assertFailsWith<IllegalArgumentException> {
             actrType {
-                manufacturer = "acme"
+                publisher = "acme"
                 name = ""
                 version = "1.0.0"
             }
@@ -115,7 +115,7 @@ class ActrTypeTest {
     fun `actrType builder rejects blank version`() {
         assertFailsWith<IllegalArgumentException> {
             actrType {
-                manufacturer = "acme"
+                publisher = "acme"
                 name = "EchoService"
                 version = ""
             }
@@ -127,11 +127,11 @@ class ActrTypeTest {
     @Test
     fun `ActrType fields match canonical string representation`() {
         val type = actrType("demo2", "EchoService", "1.0.0")
-        val canonical = "${type.manufacturer}:${type.name}:${type.version}"
+        val canonical = "${type.publisher}:${type.name}:${type.version}"
         assertEquals("demo2:EchoService:1.0.0", canonical)
 
         val parsed = canonical.toActrType()
-        assertEquals(type.manufacturer, parsed.manufacturer)
+        assertEquals(type.publisher, parsed.publisher)
         assertEquals(type.name, parsed.name)
         assertEquals(type.version, parsed.version)
     }

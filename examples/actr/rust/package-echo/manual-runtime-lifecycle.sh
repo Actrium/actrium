@@ -267,7 +267,7 @@ esac
 PACKAGE_BUILD_CONFIG="$(mktemp "${TMPDIR:-/tmp}/package-echo-build.XXXXXX.toml")"
 cat > "$PACKAGE_BUILD_CONFIG" <<EOF
 [package]
-manufacturer = "actrium"
+publisher = "actrium"
 name = "EchoService"
 version = "$PACKAGE_VERSION"
 description = "Signed Echo guest actor distributed as an ActrPackage"
@@ -370,9 +370,9 @@ done
 ACTRIX_DB="$(detect_actrix_db || true)"
 [[ -n "$ACTRIX_DB" && -f "$ACTRIX_DB" ]] || fail "Actrix database not found after startup"
 
-section "🔑 Warm Up AIS"
+section "🔑 Warm Up Issuer"
 
-ais_status() {
+issuer_status() {
     local body="$1"
     python3 - <<'PY' "$body"
 import json
@@ -399,25 +399,25 @@ admin_login() {
 }
 
 for _ in $(seq 1 60); do
-    CURRENT_KEY_JSON="$(curl -sf "http://localhost:8081/ais/current-key" 2>/dev/null || true)"
-    if [[ "$(ais_status "$CURRENT_KEY_JSON")" == "success" ]]; then
+    CURRENT_KEY_JSON="$(curl -sf "http://localhost:8081/issuer/current-key" 2>/dev/null || true)"
+    if [[ "$(issuer_status "$CURRENT_KEY_JSON")" == "success" ]]; then
         break
     fi
 
     if [[ -f "$WORKSPACE_ROOT/database/nonce.db" ]] && admin_login; then
         curl -sf -X POST \
             -H "Authorization: Bearer ${ACTRIX_ADMIN_TOKEN}" \
-            "http://localhost:8081/admin/api/services/ais/keys/rotate" >/dev/null 2>&1 || true
+            "http://localhost:8081/admin/api/services/issuer/keys/rotate" >/dev/null 2>&1 || true
     fi
     sleep 1
 done
 
-CURRENT_KEY_JSON="$(curl -sf "http://localhost:8081/ais/current-key" 2>/dev/null || true)"
-[[ "$(ais_status "$CURRENT_KEY_JSON")" == "success" ]] || fail "AIS signing key warmup timed out"
+CURRENT_KEY_JSON="$(curl -sf "http://localhost:8081/issuer/current-key" 2>/dev/null || true)"
+[[ "$(issuer_status "$CURRENT_KEY_JSON")" == "success" ]] || fail "Issuer signing key warmup timed out"
 
-section "📡 Register MFR And Publish Package"
+section "📡 Register publisher And Publish Package"
 
-MFR_PUBKEY="$(python3 - <<'PY' "$PUBLIC_KEY_PATH"
+PUBLISHER_PUBKEY="$(python3 - <<'PY' "$PUBLIC_KEY_PATH"
 import json
 import pathlib
 import sys
@@ -427,14 +427,14 @@ print(data["public_key"])
 PY
 )"
 
-MFR_KEY_ID="$(python3 - <<'PY' "$MFR_PUBKEY"
+PUBLISHER_KEY_ID="$(python3 - <<'PY' "$PUBLISHER_PUBKEY"
 import base64
 import hashlib
 import sys
 
 pubkey = base64.b64decode(sys.argv[1])
 digest = hashlib.sha256(pubkey).hexdigest()
-print(f"mfr-{digest[:16]}")
+print(f"publisher-{digest[:16]}")
 PY
 )"
 
@@ -446,14 +446,14 @@ INSERT OR IGNORE INTO realm
     (id, name, status, enabled, created_at, secret_current)
 VALUES (1001, 'package-echo-realm', 'Active', 1, strftime('%s','now'), '');
 
-INSERT OR IGNORE INTO mfr
+INSERT OR IGNORE INTO publisher
     (name, public_key, key_id, contact, status, created_at, updated_at, verified_at, key_expires_at)
-VALUES ('actrium', '$MFR_PUBKEY', '$MFR_KEY_ID', 'examples@actrium.local', 'active',
+VALUES ('actrium', '$PUBLISHER_PUBKEY', '$PUBLISHER_KEY_ID', 'examples@actrium.local', 'active',
         $NOW, $NOW, $NOW, $EXPIRES_AT);
 
-UPDATE mfr
-   SET public_key     = '$MFR_PUBKEY',
-       key_id         = '$MFR_KEY_ID',
+UPDATE publisher
+   SET public_key     = '$PUBLISHER_PUBKEY',
+       key_id         = '$PUBLISHER_KEY_ID',
        status         = 'active',
        updated_at     = $NOW,
        verified_at    = $NOW,

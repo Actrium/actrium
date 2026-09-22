@@ -154,7 +154,7 @@ class ServerActivity : AppCompatActivity() {
             try {
                 val runtimeConfigPath = copyAssetToInternalStorage("actr.toml")
                 val actorType =
-                    ActrType(manufacturer = "actrium", name = "EchoService", version = "1.0.0")
+                    ActrType(publisher = "actrium", name = "EchoService", version = "1.0.0")
                 val workload = dynamicWorkload(EchoServerWorkload())
                 val system =
                     linkedWithMonitoring(

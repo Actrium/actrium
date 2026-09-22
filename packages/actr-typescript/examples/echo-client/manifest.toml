@@ -3,7 +3,7 @@ exports = []
 
 [package]
 name = "echo-client-app"
-manufacturer = "acme"
+publisher = "acme"
 description = "Echo Client Example"
 
 [dependencies]

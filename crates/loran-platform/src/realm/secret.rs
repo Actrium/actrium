@@ -1,6 +1,6 @@
 //! Realm secret management
 //!
-//! Used for Admin allocation and AIS validation of realm secrets.
+//! Used for Admin allocation and Issuer validation of realm secrets.
 //! Secret data is stored directly in the secret_current / secret_previous fields of the Realm table.
 
 use super::{Realm, RealmError};
@@ -9,7 +9,7 @@ use chrono::Utc;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 
-/// HTTP header for passing the realm secret from signaling to AIS
+/// HTTP header for passing the realm secret from signaling to Issuer
 pub const REALM_SECRET_HEADER: &str = "x-actrix-realm-secret";
 
 /// Default grace window for the old secret (4 hours)

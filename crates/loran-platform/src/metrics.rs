@@ -38,7 +38,7 @@ lazy_static! {
         "Number of active WebSocket connections"
     ).unwrap();
 
-    /// Token issuance count (AIS)
+    /// Token issuance count (Issuer)
     pub static ref TOKENS_ISSUED: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_tokens_issued_total", "Total number of tokens issued")
             .namespace("actrix"),

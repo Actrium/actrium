@@ -12,7 +12,7 @@ HTTP_PORT=8081
 ICE_PORT=3478
 REALM_ID=""
 ADMIN_PASSWORD="e2e-test-password"
-MANUFACTURER="${MANUFACTURER:-e2e.actrium.test}"
+PUBLISHER="${PUBLISHER:-e2e.actrium.test}"
 ACTRIX_BIN="${ACTRIX_BIN:-}"
 ACTR_CLI_MANIFEST="$REPO_ROOT/crates/actr-cli/Cargo.toml"
 ACTRIX_CONFIG_TEMPLATE="$SCRIPT_DIR/../package-runtime-echo/config/actrix.toml"
@@ -37,15 +37,15 @@ TMP_SERVICE_DIR="$TMP_SERVICE_ROOT/datastream-actr-$RANDOM"
 TMP_APP_DIR="$TMP_SERVICE_ROOT/datastream-app-$RANDOM"
 ACTRIX_CONFIG_PATH="$RUN_DIR/actrix.toml"
 SERVER_RUNTIME_PATH="$RUN_DIR/server-runtime.toml"
-SERVICE_KEYCHAIN="$TMP_SERVICE_DIR/packaging/keys/mfr.keychain.json"
+SERVICE_KEYCHAIN="$TMP_SERVICE_DIR/packaging/keys/publisher.keychain.json"
 SERVICE_PUBLIC_KEY="$TMP_SERVICE_DIR/public-key.json"
-PROVISIONED_KEYCHAIN="$RUN_DIR/mfr.keychain.json"
-PROVISIONED_PUBLIC_KEY="$RUN_DIR/mfr-public-key.json"
+PROVISIONED_KEYCHAIN="$RUN_DIR/publisher.keychain.json"
+PROVISIONED_PUBLIC_KEY="$RUN_DIR/publisher-public-key.json"
 DATASTREAMAPP_ACTRIX_CONFIG="$TMP_APP_DIR/actr.toml"
 HOST_TARGET="$(rustc -vV | awk '/host:/ {print $2}')"
 DATASTREAMAPP_PACKAGE_MANIFEST="$RUN_DIR/datastreamapp-package-manifest.toml"
 DATASTREAMAPP_MARKER_BINARY="$RUN_DIR/datastreamapp-linked-identity.bin"
-DATASTREAMAPP_PACKAGE="$DIST_DIR/${MANUFACTURER}-DataStreamApp-0.1.0-${HOST_TARGET}.actr"
+DATASTREAMAPP_PACKAGE="$DIST_DIR/${PUBLISHER}-DataStreamApp-0.1.0-${HOST_TARGET}.actr"
 APP_STDOUT_LOG="$LOG_DIR/app.stdout.log"
 APP_STDERR_LOG="$LOG_DIR/app.stderr.log"
 APP_BUNDLE_ID="io.actrium.DataStreamApp"
@@ -265,7 +265,7 @@ capture_diagnostics() {
             sqlite3 "$db_path" ".tables" 2>/dev/null || true
             echo "--- Service registry ---"
             sqlite3 "$db_path" \
-                "SELECT actor_realm_id, actor_manufacturer, actor_device_name, service_name, status, last_heartbeat_at FROM service_registry;" \
+                "SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status, last_heartbeat_at FROM service_registry;" \
                 2>/dev/null || true
         } >"$diag_dir/signaling-cache.txt" 2>/dev/null || true
     fi
@@ -474,13 +474,13 @@ write_project_keychain_config() {
     local keychain_path="$2"
     mkdir -p "$project_dir/.actr"
     cat >"$project_dir/.actr/config.toml" <<EOF
-[mfr]
-manufacturer = "$MANUFACTURER"
+[publisher]
+publisher = "$PUBLISHER"
 keychain = "$keychain_path"
 
 [network]
 signaling_url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
-ais_endpoint = "http://127.0.0.1:${HTTP_PORT}/ais"
+issuer_endpoint = "http://127.0.0.1:${HTTP_PORT}/issuer"
 realm_id = $REALM_ID
 realm_secret = "$REALM_SECRET"
 EOF
@@ -556,7 +556,7 @@ message StartProbeResponse {
 EOF
 }
 
-provision_mfr_keychain() {
+provision_publisher_keychain() {
     provision_e2e_publisher
 }
 
@@ -609,7 +609,7 @@ exports = ["protos/local/duplex_stream.proto"]
 
 [package]
 name = "DuplexStreamService"
-manufacturer = "${MANUFACTURER}"
+publisher = "${PUBLISHER}"
 version = "1.0.0"
 description = "Actrium DuplexStreamService workload package for Swift DataStreamApp E2E"
 authors = []
@@ -1043,7 +1043,7 @@ scaffold_service_guest() {
             --template empty \
             --project-name "DuplexStreamService" \
             --signaling "ws://127.0.0.1:${HTTP_PORT}/signaling/ws" \
-            --manufacturer "$MANUFACTURER" \
+            --publisher "$PUBLISHER" \
             "."
     )
 
@@ -1079,7 +1079,7 @@ scaffold_service_guest() {
 
 build_service_package() {
     section "📦 Building and publishing the server package"
-    SERVICE_PACKAGE="$DIST_DIR/${MANUFACTURER}-DuplexStreamService-${SERVICE_VERSION}-${HOST_TARGET}.actr"
+    SERVICE_PACKAGE="$DIST_DIR/${PUBLISHER}-DuplexStreamService-${SERVICE_VERSION}-${HOST_TARGET}.actr"
 
     (
         cd "$TMP_SERVICE_DIR"
@@ -1111,7 +1111,7 @@ edition = 1
 
 [package]
 name = "DataStreamApp"
-manufacturer = "${MANUFACTURER}"
+publisher = "${PUBLISHER}"
 version = "0.1.0"
 description = "Actrium DataStreamApp linked runtime identity marker"
 
@@ -1145,7 +1145,7 @@ render_datastreamapp_config() {
         "__HOST__=127.0.0.1" \
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
-        "__MANUFACTURER__=$MANUFACTURER" \
+        "__PUBLISHER__=$PUBLISHER" \
         "__REALM_ID__=$REALM_ID" \
         "__REALM_SECRET__=$REALM_SECRET"
     success "DataStreamApp actr.toml rendered"
@@ -1158,12 +1158,12 @@ exports = ["protos/local/probe.proto"]
 
 [package]
 name = "DataStreamApp"
-manufacturer = "${MANUFACTURER}"
+publisher = "${PUBLISHER}"
 version = "0.1.0"
 description = "Actrium DataStreamApp iOS linked runtime"
 
 [dependencies]
-duplex_stream = { actr_type = "${MANUFACTURER}:DuplexStreamService:1.0.0" }
+duplex_stream = { actr_type = "${PUBLISHER}:DuplexStreamService:1.0.0" }
 EOF
 }
 
@@ -1242,7 +1242,7 @@ scaffold_datastream_app() {
             --template empty \
             --project-name "DataStreamApp" \
             --signaling "ws://127.0.0.1:${HTTP_PORT}/signaling/ws" \
-            --manufacturer "$MANUFACTURER" \
+            --publisher "$PUBLISHER" \
             "."
     )
 
@@ -1386,8 +1386,8 @@ path = "${SERVICE_PACKAGE}"
 [signaling]
 url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
 
-[ais_endpoint]
-url = "http://127.0.0.1:${HTTP_PORT}/ais"
+[issuer_endpoint]
+url = "http://127.0.0.1:${HTTP_PORT}/issuer"
 
 [deployment]
 realm_id = ${REALM_ID}
@@ -1395,7 +1395,7 @@ realm_secret = "${REALM_SECRET}"
 
 [[trust]]
 kind = "registry"
-endpoint = "http://127.0.0.1:${HTTP_PORT}/ais"
+endpoint = "http://127.0.0.1:${HTTP_PORT}/issuer"
 
 [discovery]
 visible = true
@@ -1415,7 +1415,7 @@ turn_urls = ["turn:127.0.0.1:${ICE_PORT}"]
 
 [[acl.rules]]
 permission = "allow"
-type = "${MANUFACTURER}:DataStreamApp:0.1.0"
+type = "${PUBLISHER}:DataStreamApp:0.1.0"
 EOF
 
     RUST_LOG="${RUST_LOG:-info}" \
@@ -1460,13 +1460,13 @@ check_service_ready() {
     if ! wait_for_service_registration \
         "$db_path" \
         "$REALM_ID" \
-        "$MANUFACTURER" \
+        "$PUBLISHER" \
         "DuplexStreamService" \
         "$timeout"; then
         echo "Service registrations observed before timeout:" >&2
         if [ -f "$db_path" ]; then
             sqlite3 "$db_path" \
-                "SELECT actor_realm_id, actor_manufacturer, actor_device_name, service_name, status, last_heartbeat_at FROM service_registry;" \
+                "SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status, last_heartbeat_at FROM service_registry;" \
                 >&2 2>/dev/null || true
         else
             echo "  signaling_cache.db not found at $db_path" >&2
@@ -1476,12 +1476,12 @@ check_service_ready() {
     fi
 
     sqlite3 "$db_path" "
-        SELECT actor_realm_id, actor_manufacturer, actor_device_name, service_name, status
+        SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status
         FROM service_registry
         WHERE actor_realm_id = ${REALM_ID}
-          AND actor_manufacturer = '${MANUFACTURER}'
+          AND actor_publisher = '${PUBLISHER}'
           AND actor_device_name = 'DuplexStreamService'
-          AND service_name = '${MANUFACTURER}:DuplexStreamService'
+          AND service_name = '${PUBLISHER}:DuplexStreamService'
           AND status = 'Available';
     " 2>/dev/null | while read -r line; do
         echo "  $line"
@@ -1508,8 +1508,8 @@ install_and_launch_app() {
     # may return before the app exits when detached from the terminal, so do not
     # treat the wrapper process as the app lifetime.
     SIMCTL_CHILD_ACTR_DATASTREAMAPP_AUTO_STREAM_COUNT=3 \
-    SIMCTL_CHILD_ACTR_MANUFACTURER="${MANUFACTURER}" \
-    SIMCTL_CHILD_ACTR_DATASTREAMAPP_TARGET_TYPE="${MANUFACTURER}:DuplexStreamService:1.0.0" \
+    SIMCTL_CHILD_ACTR_PUBLISHER="${PUBLISHER}" \
+    SIMCTL_CHILD_ACTR_DATASTREAMAPP_TARGET_TYPE="${PUBLISHER}:DuplexStreamService:1.0.0" \
     xcrun simctl launch \
         "${launch_args[@]}" \
         "$DEVICE_UDID" \
@@ -1577,9 +1577,9 @@ render_runtime_configs
 build_local_actr_cli
 start_actrix
 login_admin
-warmup_ais_key
+warmup_issuer_key
 ensure_realm
-provision_mfr_keychain
+provision_publisher_keychain
 
 # Phase 2: Build service package and publish identities
 scaffold_service_guest

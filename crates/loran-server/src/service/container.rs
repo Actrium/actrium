@@ -3,8 +3,8 @@
 //! Manages the container and lifecycle of various services
 //! Service container module - encapsulates different service types
 
-use super::{AisService, PublisherRegistryService, SignalingService, StunService, TurnService};
 use super::{HttpRouterService, IceService};
+use super::{IssuerService, PublisherRegistryService, SignalingService, StunService, TurnService};
 use axum::Router;
 use platform::ServiceInfo;
 use url::Url;
@@ -14,7 +14,7 @@ use url::Url;
 #[allow(clippy::large_enum_variant)]
 pub enum ServiceContainer {
     Signaling(SignalingService),
-    Ais(AisService),
+    Issuer(IssuerService),
     #[allow(dead_code)]
     PublisherRegistry(PublisherRegistryService),
     Stun(StunService),
@@ -27,9 +27,9 @@ impl ServiceContainer {
         Self::Signaling(service)
     }
 
-    /// Create an AIS service container
-    pub fn ais(service: AisService) -> Self {
-        Self::Ais(service)
+    /// Create an Issuer service container
+    pub fn issuer(service: IssuerService) -> Self {
+        Self::Issuer(service)
     }
 
     /// Create a Publisher Registry service container
@@ -52,7 +52,7 @@ impl ServiceContainer {
     pub fn service_type(&self) -> &'static str {
         match self {
             ServiceContainer::Signaling(_) => "Signaling",
-            ServiceContainer::Ais(_) => "AIS",
+            ServiceContainer::Issuer(_) => "Issuer",
             ServiceContainer::PublisherRegistry(_) => "Publisher Registry",
             ServiceContainer::Stun(_) => "STUN",
             ServiceContainer::Turn(_) => "TURN",
@@ -62,7 +62,7 @@ impl ServiceContainer {
     pub fn info(&self) -> &ServiceInfo {
         match self {
             ServiceContainer::Signaling(service) => service.info(),
-            ServiceContainer::Ais(service) => service.info(),
+            ServiceContainer::Issuer(service) => service.info(),
             ServiceContainer::PublisherRegistry(service) => service.info(),
             ServiceContainer::Stun(service) => service.info(),
             ServiceContainer::Turn(service) => service.info(),
@@ -73,7 +73,7 @@ impl ServiceContainer {
         matches!(
             self,
             ServiceContainer::Signaling(_)
-                | ServiceContainer::Ais(_)
+                | ServiceContainer::Issuer(_)
                 | ServiceContainer::PublisherRegistry(_)
         )
     }
@@ -87,7 +87,7 @@ impl ServiceContainer {
     pub fn route_prefix(&self) -> Option<&str> {
         match self {
             ServiceContainer::Signaling(service) => Some(service.route_prefix()),
-            ServiceContainer::Ais(service) => Some(service.route_prefix()),
+            ServiceContainer::Issuer(service) => Some(service.route_prefix()),
             ServiceContainer::PublisherRegistry(service) => Some(service.route_prefix()),
             _ => None,
         }
@@ -98,7 +98,7 @@ impl ServiceContainer {
     pub async fn build_router(&mut self) -> Option<Result<Router, anyhow::Error>> {
         match self {
             ServiceContainer::Signaling(service) => Some(service.build_router().await),
-            ServiceContainer::Ais(service) => Some(service.build_router().await),
+            ServiceContainer::Issuer(service) => Some(service.build_router().await),
             ServiceContainer::PublisherRegistry(service) => Some(service.build_router().await),
             _ => None,
         }
@@ -108,7 +108,7 @@ impl ServiceContainer {
     pub async fn on_start(&mut self, base_url: Url) -> Option<Result<(), anyhow::Error>> {
         match self {
             ServiceContainer::Signaling(service) => Some(service.on_start(base_url).await),
-            ServiceContainer::Ais(service) => Some(service.on_start(base_url).await),
+            ServiceContainer::Issuer(service) => Some(service.on_start(base_url).await),
             ServiceContainer::PublisherRegistry(service) => Some(service.on_start(base_url).await),
             _ => None,
         }

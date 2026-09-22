@@ -10,8 +10,8 @@ them together:
 - `/.well-known/actr` publishes the authority descriptor;
 - `loran-packages` resolves opaque Targets and serves content-addressed `.actr`
   artifacts;
-- MFR manages publisher identity, signing authority, and publication audit;
-- signaling, AIS, and ICE remain independent runtime services.
+- the Publisher Registry manages publisher identity, signing authority, and publication audit;
+- signaling, Issuer, and ICE remain independent runtime services.
 
 Package distribution is configured under `[services.packages]`, not inside an
 Actor package. This keeps the mapping from a stable Target to a deployed

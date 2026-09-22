@@ -53,7 +53,7 @@ export function useActrConnection({
     return ActrConnectionManager.getOrCreate({
       appId,
       tabId,
-      actorType: `${config?.server_actor_type?.manufacturer}+${config?.server_actor_type?.name}`,
+      actorType: `${config?.server_actor_type?.publisher}+${config?.server_actor_type?.name}`,
       // actorType: 'bot+bot-service'
     });
   }, [appId, config]);
@@ -67,15 +67,15 @@ export function useActrConnection({
     if (!connection.isConnected()) {
       const runInit = async () => {
         try {
-          const { manufacturer, name } = config.server_actor_type || {};
+          const { publisher, name } = config.server_actor_type || {};
 
           // 1. Yes. RN Side Generate TOML String
           const tomlString = generateActrToml({
             ...config,
-            manufacturer,
+            publisher,
             name,
           });
-          const lockTomlString = generateActrLockToml({ manufacturer, name });
+          const lockTomlString = generateActrLockToml({ publisher, name });
 
           // 2. Generate Profile
           const fileName = `Actr.toml`;

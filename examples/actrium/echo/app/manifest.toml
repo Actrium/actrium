@@ -1,7 +1,7 @@
-format = "actr-package/1"
+format = "actr-package/2"
 
 [actor]
-manufacturer = "actrium"
+publisher = "actrium"
 name = "echo-ui"
 version = "0.1.0"
 

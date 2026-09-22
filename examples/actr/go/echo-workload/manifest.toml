@@ -15,7 +15,7 @@ edition = 1
 
 [package]
 name = "EchoWorkloadGo"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.1.0"
 description = "Go echo workload for the async actr:workload@0.7.0 Component Model ABI"
 license = "Apache-2.0"

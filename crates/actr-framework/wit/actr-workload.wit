@@ -49,10 +49,10 @@ interface types {
         realm-id: u32,
     }
 
-    // Three-part actor type coordinate (manufacturer, name, semantic
+    // Three-part actor type coordinate (publisher, name, semantic
     // version string). Mirrors actr_protocol::ActrType.
     record actr-type {
-        manufacturer: string,
+        publisher: string,
         name: string,
         version: string,
     }

@@ -580,16 +580,16 @@ async fn cleanup_signer_keys(State(state): State<Arc<AdminApiState>>) -> impl In
     }
 }
 
-async fn get_ais_keys(State(state): State<Arc<AdminApiState>>) -> impl IntoResponse {
-    match state.service.get_ais_keys_direct().await {
+async fn get_issuer_keys(State(state): State<Arc<AdminApiState>>) -> impl IntoResponse {
+    match state.service.get_issuer_keys_direct().await {
         Ok(keys) => (StatusCode::OK, Json(json!({"keys": keys}))).into_response(),
         Err(status) => grpc_status_to_response(status),
     }
 }
 
-/// Rotate the AIS signing key through the shared issuer (JWT-protected).
-async fn rotate_ais_key(State(state): State<Arc<AdminApiState>>) -> impl IntoResponse {
-    match state.service.rotate_ais_signing_key_direct().await {
+/// Rotate the Issuer signing key through the shared issuer (JWT-protected).
+async fn rotate_issuer_key(State(state): State<Arc<AdminApiState>>) -> impl IntoResponse {
+    match state.service.rotate_issuer_signing_key_direct().await {
         Ok(new_key_id) => (
             StatusCode::OK,
             Json(json!({"status": "success", "new_key_id": new_key_id})),
@@ -790,7 +790,10 @@ async fn serve_spa() -> impl IntoResponse {
 
 // ── Router builder ─────────────────────────────────────────────
 
-pub fn build_admin_api_router(state: Arc<AdminApiState>, mfr_router: Option<Router>) -> Router {
+pub fn build_admin_api_router(
+    state: Arc<AdminApiState>,
+    publisher_registry_router: Option<Router>,
+) -> Router {
     let authed_api = Router::new()
         .route("/admin/api/capabilities", get(get_admin_capabilities))
         .route("/admin/api/node", get(get_node_info))
@@ -833,8 +836,11 @@ pub fn build_admin_api_router(state: Arc<AdminApiState>, mfr_router: Option<Rout
             "/admin/api/services/signer/keys/cleanup",
             post(cleanup_signer_keys),
         )
-        .route("/admin/api/services/ais/keys", get(get_ais_keys))
-        .route("/admin/api/services/ais/keys/rotate", post(rotate_ais_key))
+        .route("/admin/api/services/issuer/keys", get(get_issuer_keys))
+        .route(
+            "/admin/api/services/issuer/keys/rotate",
+            post(rotate_issuer_key),
+        )
         .route("/admin/api/services/{name}", get(get_service_detail))
         .route("/admin/api/network/probe/{port}", get(probe_port))
         .route("/admin/api/metrics/timeseries", get(get_metrics_timeseries));
@@ -847,9 +853,9 @@ pub fn build_admin_api_router(state: Arc<AdminApiState>, mfr_router: Option<Rout
         .with_state(state.clone());
 
     // Nest Publisher Registry management behind Admin authentication.
-    let authed_mfr = mfr_router.map(|mfr| {
+    let authed_publisher_registry = publisher_registry_router.map(|publisher| {
         Router::new()
-            .nest("/admin/api/publishers", mfr)
+            .nest("/admin/api/publishers", publisher)
             .layer(middleware::from_fn_with_state(
                 state.clone(),
                 auth_middleware,
@@ -868,8 +874,8 @@ pub fn build_admin_api_router(state: Arc<AdminApiState>, mfr_router: Option<Rout
         .layer(middleware::from_fn(admin_security_headers));
 
     let combined = public.merge(authed_api).merge(spa);
-    if let Some(mfr) = authed_mfr {
-        combined.merge(mfr)
+    if let Some(publisher) = authed_publisher_registry {
+        combined.merge(publisher)
     } else {
         combined
     }

@@ -16,7 +16,7 @@ use tokio::sync::{Notify, Semaphore};
 
 pub const WAIT: Duration = Duration::from_secs(20);
 
-/// Start the production node with a fixture registration result. Only the AIS
+/// Start the production node with a fixture registration result. Only the Issuer
 /// issuance step is supplied by the test; startup, credentials, lifecycle,
 /// PeerGate, Mailbox, workload dispatch and response delivery remain real.
 async fn start_node_with_fixture_registration(
@@ -193,7 +193,7 @@ impl Nodes {
                 },
                 signaling_url: services.signaling_url().parse().unwrap(),
                 realm: id.realm,
-                ais_endpoint: "http://127.0.0.1:1/ais".into(),
+                issuer_endpoint: "http://127.0.0.1:1/issuer".into(),
                 realm_secret: None,
                 visible_in_discovery: true,
                 acl: None,

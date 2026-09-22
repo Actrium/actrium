@@ -7,7 +7,7 @@ mod typescript;
 
 use crate::commands::SupportedLanguage;
 use crate::error::{ActrCliError, Result};
-use crate::template::{DEFAULT_MANUFACTURER, EchoRole, ProjectTemplateName, TemplateContext};
+use crate::template::{DEFAULT_PUBLISHER, EchoRole, ProjectTemplateName, TemplateContext};
 use crate::utils::read_fixture_text;
 use handlebars::Handlebars;
 use kotlin::KotlinInitializer;
@@ -64,7 +64,7 @@ pub fn create_local_proto(
     let template_content = read_fixture_text(&template_path)?;
 
     // Create template context
-    let template_context = TemplateContext::new(project_name, "", DEFAULT_MANUFACTURER, "", false);
+    let template_context = TemplateContext::new(project_name, "", DEFAULT_PUBLISHER, "", false);
     let handlebars = Handlebars::new();
 
     // Render template

@@ -453,9 +453,9 @@ dependencies = [
  "actr-protocol",
  "actr-runtime",
  "actr-runtime-mailbox",
- "actrix-ais",
- "actrix-mfr",
+ "actrix-issuer",
  "actrix-platform",
+ "actrix-publisher-registry",
  "actrix-sdk",
  "actrix-signaling",
  "actrix-signer",
@@ -528,7 +528,7 @@ dependencies = [
 name = "actrix-admin"
 version = "0.10.3"
 dependencies = [
- "actrix-ais",
+ "actrix-issuer",
  "actrix-platform",
  "actrix-proto",
  "chrono",
@@ -547,12 +547,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "actrix-ais"
+name = "actrix-issuer"
 version = "0.10.3"
 dependencies = [
  "actr-protocol",
- "actrix-mfr",
  "actrix-platform",
+ "actrix-publisher-registry",
  "actrix-signer",
  "aes-gcm",
  "anyhow",
@@ -583,31 +583,6 @@ dependencies = [
  "tower_governor",
  "tracing",
  "uuid",
-]
-
-[[package]]
-name = "actrix-mfr"
-version = "0.10.3"
-dependencies = [
- "actrix-platform",
- "axum",
- "base64",
- "chrono",
- "ed25519-dalek",
- "hex",
- "rand 0.8.6",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "serial_test",
- "sha2",
- "sqlx",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "toml 0.8.23",
- "tracing",
- "url",
 ]
 
 [[package]]
@@ -668,6 +643,31 @@ dependencies = [
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
+]
+
+[[package]]
+name = "actrix-publisher-registry"
+version = "0.10.3"
+dependencies = [
+ "actrix-platform",
+ "axum",
+ "base64",
+ "chrono",
+ "ed25519-dalek",
+ "hex",
+ "rand 0.8.6",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "url",
 ]
 
 [[package]]

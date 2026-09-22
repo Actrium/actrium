@@ -781,7 +781,7 @@ suspend fun linkedWithMonitoring(
 /**
  * Discover actors of the specified type using a type string.
  *
- * @param typeString Actor type in "manufacturer:name:version" format (e.g., "acme:EchoService:1.0.0")
+ * @param typeString Actor type in "publisher:name:version" format (e.g., "acme:EchoService:1.0.0")
  * @param count Maximum number of candidates to return (default: 1)
  * @return List of discovered actor IDs
  */
@@ -793,7 +793,7 @@ suspend fun ActrRef.discover(
 /**
  * Discover a single actor of the specified type.
  *
- * @param typeString Actor type in "manufacturer:name:version" format
+ * @param typeString Actor type in "publisher:name:version" format
  * @return The first discovered actor ID, or null if none found
  */
 suspend fun ActrRef.discoverOne(typeString: String): ActrId? = discover(typeString, 1u).firstOrNull()

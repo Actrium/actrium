@@ -17,7 +17,7 @@ use tracing::{debug, error, info, warn};
 /// Parses the manifest, looks up the dependency by alias, and returns its
 /// `actr_type` field as a structured `ActrType` record. This is the canonical
 /// way for linked-runtime hosts (iOS, Android) to discover which remote actor
-/// type a dependency resolves to, without hardcoding `"manufacturer:name:version"`
+/// type a dependency resolves to, without hardcoding `"publisher:name:version"`
 /// strings in application code.
 #[uniffi::export]
 pub fn resolve_manifest_dependency(
@@ -47,7 +47,7 @@ pub fn resolve_manifest_dependency(
     })?;
 
     Ok(ActrType {
-        manufacturer: proto_type.manufacturer.clone(),
+        publisher: proto_type.publisher.clone(),
         name: proto_type.name.clone(),
         version: proto_type.version.clone(),
     })
@@ -58,7 +58,7 @@ pub fn resolve_manifest_dependency(
 /// Parses the manifest and returns the `[package]` block's actr_type fields
 /// as a structured `ActrType` record. Linked-runtime hosts (iOS, Android) use
 /// this to determine their own actor type without hardcoding
-/// `"manufacturer:name:version"` strings.
+/// `"publisher:name:version"` strings.
 #[uniffi::export]
 pub fn resolve_manifest_package_actr_type(manifest_path: String) -> ActrResult<ActrType> {
     let manifest = actr_config::ConfigParser::from_manifest_file(&manifest_path).map_err(|e| {
@@ -69,7 +69,7 @@ pub fn resolve_manifest_package_actr_type(manifest_path: String) -> ActrResult<A
 
     let proto_type = &manifest.package.actr_type;
     Ok(ActrType {
-        manufacturer: proto_type.manufacturer.clone(),
+        publisher: proto_type.publisher.clone(),
         name: proto_type.name.clone(),
         version: proto_type.version.clone(),
     })
@@ -222,11 +222,11 @@ async fn new_from_package_file_inner(
     if let Some(observers) = observers {
         attached = attached.with_hook_observer(observers.as_ref().clone());
     }
-    let ais_endpoint = attached.ais_endpoint().to_string();
-    let registered = attached.register(&ais_endpoint).await.map_err(|e| {
-        error!("AIS registration failed: {}", e);
+    let issuer_endpoint = attached.issuer_endpoint().to_string();
+    let registered = attached.register(&issuer_endpoint).await.map_err(|e| {
+        error!("Issuer registration failed: {}", e);
         ActrError::Internal {
-            msg: format!("AIS registration failed: {e}"),
+            msg: format!("Issuer registration failed: {e}"),
         }
     })?;
 
@@ -654,11 +654,11 @@ async fn load_linked_init(
 }
 
 async fn register_linked_node(attached: Node<actr_hyper::Attached>) -> ActrResult<Arc<ActrNode>> {
-    let ais_endpoint = attached.ais_endpoint().to_string();
-    let registered = attached.register(&ais_endpoint).await.map_err(|e| {
-        error!("AIS registration failed: {}", e);
+    let issuer_endpoint = attached.issuer_endpoint().to_string();
+    let registered = attached.register(&issuer_endpoint).await.map_err(|e| {
+        error!("Issuer registration failed: {}", e);
         ActrError::Internal {
-            msg: format!("AIS registration failed: {e}"),
+            msg: format!("Issuer registration failed: {e}"),
         }
     })?;
 
@@ -730,8 +730,8 @@ mod tests {
                 "edition = 1\n\
                  [signaling]\n\
                  url = \"{}\"\n\
-                 [ais_endpoint]\n\
-                 url = \"{}/ais\"\n\
+                 [issuer_endpoint]\n\
+                 url = \"{}/issuer\"\n\
                  [deployment]\n\
                  realm_id = 1\n\
                  [hyper]\n\
@@ -755,7 +755,7 @@ mod tests {
 
 [package]
 name = "LinkedProbe"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.1.0"
 
 [dependencies]
@@ -809,7 +809,7 @@ echo = { actr_type = "acme:EchoService:1.0.0" }
         assert_eq!(
             resolved,
             crate::types::ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: "EchoService".to_string(),
                 version: "1.0.0".to_string(),
             }
@@ -841,7 +841,7 @@ echo = { actr_type = "acme:EchoService:1.0.0" }
         ActrNode::new_from_linked_workload(
             config_path.display().to_string(),
             ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: "RuntimeNetworkEventProbe".to_string(),
                 version: "0.1.0".to_string(),
             },

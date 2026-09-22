@@ -3,18 +3,18 @@ exports = []
 
 [package]
 name = "echo-client-app"
-manufacturer = "{{MANUFACTURER}}"
+publisher = "{{PUBLISHER}}"
 description = "An Actrium Android client"
 authors = []
 
 [dependencies]
-EchoService = { actr_type = "{{MANUFACTURER}}:EchoService:1.0.0" }
+EchoService = { actr_type = "{{PUBLISHER}}:EchoService:1.0.0" }
 
 [system.signaling]
 url = "{{SIGNALING_URL}}"
 
-[system.ais_endpoint]
-url = "{{AIS_ENDPOINT_URL}}"
+[system.issuer_endpoint]
+url = "{{ISSUER_ENDPOINT_URL}}"
 
 [system.webrtc]
 stun_urls = ["stun:{{SIGNALING_HOST}}:3478"]
@@ -33,7 +33,7 @@ visible = false
 [[acl.rules]]
 permission = "allow"
 principals = [
-    { actr_type = { manufacturer = "{{MANUFACTURER}}", name = "EchoService", version = "1.0.0" } },
+    { actr_type = { publisher = "{{PUBLISHER}}", name = "EchoService", version = "1.0.0" } },
 ]
 
 [scripts]

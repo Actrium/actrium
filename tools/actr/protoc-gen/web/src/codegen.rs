@@ -95,7 +95,7 @@ fn generate_inner(req: &WebCodegenRequest) -> Result<Vec<PathBuf>, String> {
 // ═══════════════════════════════════════════════════════════════════
 
 fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
-    let manufacturer = &req.manufacturer;
+    let publisher = &req.publisher;
     let actr_name = &req.actr_name;
     let signaling_url = &req.signaling_url;
     let realm_id = req.realm_id;
@@ -111,7 +111,7 @@ fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
         if let Some(ref at) = dep.actr_type {
             dep_entries.push(format!(
                 "  '{}': {{ actr_type: '{}:{}:{}' }},",
-                dep.alias, at.manufacturer, at.name, at.version
+                dep.alias, at.publisher, at.name, at.version
             ));
         } else {
             dep_entries.push(format!("  '{}': {{}},", dep.alias));
@@ -165,11 +165,11 @@ fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
     let version = &req.version;
     out.push_str("/** ActrType */\n");
     out.push_str(&format!("export const {type_export_name} = {{\n"));
-    out.push_str(&format!("  manufacturer: '{manufacturer}',\n"));
+    out.push_str(&format!("  publisher: '{publisher}',\n"));
     out.push_str(&format!("  name: '{actr_name}',\n"));
     out.push_str(&format!("  version: '{version}',\n"));
     out.push_str(&format!(
-        "  fullType: '{manufacturer}:{actr_name}:{version}',\n"
+        "  fullType: '{publisher}:{actr_name}:{version}',\n"
     ));
     out.push_str("} as const;\n\n");
 
@@ -205,8 +205,11 @@ fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
     out.push_str("  },\n");
     out.push_str("  deployment: {\n");
     out.push_str(&format!("    realm_id: {realm_id},\n"));
-    if !req.ais_endpoint.is_empty() {
-        out.push_str(&format!("    ais_endpoint: '{}',\n", req.ais_endpoint));
+    if !req.issuer_endpoint.is_empty() {
+        out.push_str(&format!(
+            "    issuer_endpoint: '{}',\n",
+            req.issuer_endpoint
+        ));
     }
     out.push_str("  },\n");
     out.push_str("  discovery: {\n");
@@ -290,8 +293,8 @@ fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
     out.push_str("// ── runtimeConfig (passed to Service Worker WASM registration) ──\n\n");
     out.push_str("/**\n * Service Worker runtime config\n * Passed from main thread to Service Worker via DOM_PORT_INIT\n */\n");
     out.push_str("export const runtimeConfig: SwRuntimeConfig = {\n");
-    if !req.ais_endpoint.is_empty() {
-        out.push_str(&format!("  ais_endpoint: '{}',\n", req.ais_endpoint));
+    if !req.issuer_endpoint.is_empty() {
+        out.push_str(&format!("  issuer_endpoint: '{}',\n", req.issuer_endpoint));
     }
     out.push_str("  signaling_url: system.signaling.url,\n");
     out.push_str("  realm_id: system.deployment.realm_id,\n");
@@ -305,7 +308,9 @@ fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
     out.push_str(&format!("  package_url: '{package_url}',\n"));
     out.push_str(&format!("  runtime_wasm_url: '{runtime_wasm_url}',\n"));
     out.push_str("  // Trust anchors — pubkey_b64 is substituted by deploy tooling.\n");
-    out.push_str("  trust: [{ kind: 'static', pubkey_b64: '__MFR_PUBKEY_PLACEHOLDER__' }],\n");
+    out.push_str(
+        "  trust: [{ kind: 'static', pubkey_b64: '__PUBLISHER_PUBKEY_PLACEHOLDER__' }],\n",
+    );
     out.push_str("};\n\n");
 
     // ActorClientConfig
@@ -400,14 +405,14 @@ fn gen_actor_ref(service: &ServiceInfo, req: &WebCodegenRequest) -> Result<Strin
     let actr_type = service.actr_type.as_deref().unwrap_or("");
     if !actr_type.is_empty() {
         let parts: Vec<&str> = actr_type.splitn(2, ':').collect();
-        let (mfr, name) = if parts.len() == 2 {
+        let (publisher, name) = if parts.len() == 2 {
             (parts[0], parts[1])
         } else {
             ("", actr_type)
         };
         out.push_str("/**\n * ActrType definition\n */\n");
         out.push_str(&format!("export const {service_name}ActrType = {{\n"));
-        out.push_str(&format!("  manufacturer: '{mfr}',\n"));
+        out.push_str(&format!("  publisher: '{publisher}',\n"));
         out.push_str(&format!("  name: '{name}',\n"));
         out.push_str("};\n\n");
     }

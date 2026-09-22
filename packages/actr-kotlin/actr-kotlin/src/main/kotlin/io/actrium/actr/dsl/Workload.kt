@@ -76,7 +76,7 @@ open class SimpleWorkload(
      * Create a SimpleWorkload from a type string.
      *
      * @param realmId The realm ID
-     * @param typeString Actor type in "manufacturer:name:version" format
+     * @param typeString Actor type in "publisher:name:version" format
      */
     constructor(
         realmId: UInt,
@@ -90,7 +90,7 @@ open class SimpleWorkload(
     /** Create a SimpleWorkload with named parameters. */
     constructor(
         realm: UInt,
-        manufacturer: String,
+        publisher: String,
         name: String,
         version: String,
         onStartHandler: suspend (ActrContext) -> Unit = {},
@@ -99,7 +99,7 @@ open class SimpleWorkload(
         onErrorHandler: suspend (ActrContext, ErrorEvent) -> Unit = { _, _ -> },
     ) : this(
         realm,
-        ActrType(manufacturer = manufacturer, name = name, version = version),
+        ActrType(publisher = publisher, name = name, version = version),
         onStartHandler,
         onStopHandler,
         onReadyHandler,
@@ -234,13 +234,13 @@ class WorkloadBuilder {
         _type = actrType
     }
 
-    /** Set the actor type with manufacturer, name, and version. */
+    /** Set the actor type with publisher, name, and version. */
     fun type(
-        manufacturer: String,
+        publisher: String,
         name: String,
         version: String,
     ) {
-        _type = ActrType(manufacturer = manufacturer, name = name, version = version)
+        _type = ActrType(publisher = publisher, name = name, version = version)
     }
 
     /**

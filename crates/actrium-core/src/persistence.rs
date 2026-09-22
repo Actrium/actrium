@@ -1,4 +1,4 @@
-pub const CORE_SCHEMA_VERSION: u32 = 1;
+pub const CORE_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SchemaMigration {
@@ -20,7 +20,7 @@ pub const DEFAULT_TAGS: &[DefaultTag] = &[
         is_system: true,
     },
     DefaultTag {
-        name: "Manufacturer",
+        name: "Publisher",
         color: "#5856D6",
         is_system: true,
     },
@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS bookmarks (
     app_id TEXT,
     created_at INTEGER NOT NULL,
     last_used_at INTEGER,
-    manufacturer TEXT,
+    publisher TEXT,
     notes TEXT,
     favicon TEXT
 )
@@ -162,10 +162,25 @@ CREATE TABLE IF NOT EXISTS vault_items (
     "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('core_schema_version', '1')",
 ];
 
-pub const MIGRATIONS: &[SchemaMigration] = &[SchemaMigration {
-    version: CORE_SCHEMA_VERSION,
-    statements: V1_STATEMENTS,
-}];
+/// Renames the retired publisher column and system tag in databases created
+/// before schema version 2. Hosts replay every statement on startup and
+/// tolerate failures, so the column rename is a no-op on fresh databases.
+const V2_STATEMENTS: &[&str] = &[
+    "ALTER TABLE bookmarks RENAME COLUMN manufacturer TO publisher",
+    "UPDATE tags SET name = 'Publisher' WHERE name = 'Manufacturer' AND is_system = 1",
+    "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('core_schema_version', '2')",
+];
+
+pub const MIGRATIONS: &[SchemaMigration] = &[
+    SchemaMigration {
+        version: 1,
+        statements: V1_STATEMENTS,
+    },
+    SchemaMigration {
+        version: CORE_SCHEMA_VERSION,
+        statements: V2_STATEMENTS,
+    },
+];
 
 pub mod query {
     pub mod history {
@@ -219,13 +234,13 @@ WHERE bt.bookmark_id = ?
 
     pub mod bookmarks {
         pub const INSERT_BOOKMARK: &str = r#"
-INSERT INTO bookmarks (id, title, app_url, app_id, created_at, last_used_at, manufacturer, notes, favicon)
+INSERT INTO bookmarks (id, title, app_url, app_id, created_at, last_used_at, publisher, notes, favicon)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 "#;
 
         pub const UPDATE_BOOKMARK: &str = r#"
 UPDATE bookmarks SET title = ?, app_url = ?, app_id = ?, last_used_at = ?,
-manufacturer = ?, notes = ?, favicon = ? WHERE id = ?
+publisher = ?, notes = ?, favicon = ? WHERE id = ?
 "#;
 
         pub const DELETE_BY_ID: &str = "DELETE FROM bookmarks WHERE id = ?";
@@ -392,7 +407,7 @@ mod tests {
             names,
             vec![
                 "App",
-                "Manufacturer",
+                "Publisher",
                 "LastUsed",
                 "Frequent",
                 "Work",
@@ -405,7 +420,7 @@ mod tests {
 
     #[test]
     fn schema_version_is_recorded_by_latest_migration() {
-        assert_eq!(CORE_SCHEMA_VERSION, 1);
+        assert_eq!(CORE_SCHEMA_VERSION, 2);
         assert_eq!(MIGRATIONS.last().unwrap().version, CORE_SCHEMA_VERSION);
         assert!(
             schema_statements()

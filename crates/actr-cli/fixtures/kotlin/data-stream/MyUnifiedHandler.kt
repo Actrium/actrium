@@ -101,7 +101,7 @@ class MyUnifiedHandler : UnifiedHandler {
         try {
             // Resolve the manifest dependency alias, then discover the server.
             val serverType = ctx.resolveDependency("StreamEchoServer")
-            Log.i(TAG, "🌐 discovering server type: ${serverType.manufacturer}/${serverType.name}")
+            Log.i(TAG, "🌐 discovering server type: ${serverType.publisher}/${serverType.name}")
             val serverId = ctx.discover(serverType)
             Log.i(TAG, "🎯 discovered server: ${serverId.serialNumber}")
 

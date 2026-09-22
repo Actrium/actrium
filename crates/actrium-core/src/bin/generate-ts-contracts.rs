@@ -449,7 +449,7 @@ fn render_actr_config_helpers() -> String {
     }},
   }},
   clientActrType: {{
-    manufacturer: '{client_actr_manufacturer}',
+    publisher: '{client_actr_publisher}',
     name: '{client_actr_name}',
   }},
   dependencyName: '{dependency_name}',
@@ -484,7 +484,7 @@ export type ActrServiceEndpointConfig = {{
 export type ActrTomlConfig = {{
   app_id: string;
   key_id: string;
-  manufacturer: string;
+  publisher: string;
   name: string;
   authority_services: readonly unknown[];
   signaling_services: readonly ActrServiceEndpointConfig[];
@@ -494,7 +494,7 @@ export type ActrTomlConfig = {{
 }};
 
 export type ActrLockTomlConfig = {{
-  manufacturer: string;
+  publisher: string;
   name: string;
 }};
 
@@ -550,11 +550,11 @@ license = "${{ACTR_CONFIG_CONTRACT.package.license}}"
 tags = ["${{ACTR_CONFIG_CONTRACT.package.tags.dev}}", "${{ACTR_CONFIG_CONTRACT.package.tags.client}}"]
 
 [package.actr_type]
-manufacturer = "${{ACTR_CONFIG_CONTRACT.clientActrType.manufacturer}}"
+publisher = "${{ACTR_CONFIG_CONTRACT.clientActrType.publisher}}"
 name = "${{ACTR_CONFIG_CONTRACT.clientActrType.name}}"
 
 [dependencies]
-${{ACTR_CONFIG_CONTRACT.dependencyName}} = {{ actr_type = "${{config.manufacturer}}+${{config.name}}" }}
+${{ACTR_CONFIG_CONTRACT.dependencyName}} = {{ actr_type = "${{config.publisher}}+${{config.name}}" }}
 
 [system.signaling]
 url = "${{signalingUrl}}"
@@ -584,7 +584,7 @@ test = "${{ACTR_CONFIG_CONTRACT.scripts.test}}"
 
 [[acl.rules]]
 permission = "${{ACTR_CONFIG_CONTRACT.acl.allow}}"
-types = ["${{config.manufacturer}}+${{config.name}}"]
+types = ["${{config.publisher}}+${{config.name}}"]
 `;
 }}
 
@@ -595,7 +595,7 @@ generated_at = "${{ACTR_CONFIG_CONTRACT.lock.generatedAt}}"
 
 [[dependency]]
 name = "${{ACTR_CONFIG_CONTRACT.lock.dependencyName}}"
-actr_type = "${{config.manufacturer}}+${{config.name}}"
+actr_type = "${{config.publisher}}+${{config.name}}"
 fingerprint = "${{ACTR_CONFIG_CONTRACT.lock.dependencyFingerprint}}"
 cached_at = "${{ACTR_CONFIG_CONTRACT.lock.cachedAt}}"
 
@@ -612,7 +612,7 @@ fingerprint = ""
         package_license = quote_ts(config::PACKAGE_LICENSE),
         package_tag_dev = quote_ts(config::PACKAGE_TAG_DEV),
         package_tag_client = quote_ts(config::PACKAGE_TAG_CLIENT),
-        client_actr_manufacturer = quote_ts(config::CLIENT_ACTR_MANUFACTURER),
+        client_actr_publisher = quote_ts(config::CLIENT_ACTR_PUBLISHER),
         client_actr_name = quote_ts(config::CLIENT_ACTR_NAME),
         dependency_name = quote_ts(config::DEPENDENCY_NAME),
         default_signaling_url = quote_ts(config::DEFAULT_SIGNALING_URL),

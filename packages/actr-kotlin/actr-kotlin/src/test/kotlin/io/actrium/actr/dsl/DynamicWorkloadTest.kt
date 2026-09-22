@@ -72,7 +72,7 @@ class DynamicWorkloadTest {
     @Test
     fun `actrType factory produces correct type for EchoService`() {
         val serverType = ActrType("acme", "EchoService", "1.0.0")
-        assertEquals("acme", serverType.manufacturer)
+        assertEquals("acme", serverType.publisher)
         assertEquals("EchoService", serverType.name)
         assertEquals("1.0.0", serverType.version)
     }
@@ -80,7 +80,7 @@ class DynamicWorkloadTest {
     @Test
     fun `actrType factory produces correct type for UnifiedActor`() {
         val clientType = ActrType("acme", "UnifiedActor", "1.0.0")
-        assertEquals("acme", clientType.manufacturer)
+        assertEquals("acme", clientType.publisher)
         assertEquals("UnifiedActor", clientType.name)
         assertEquals("1.0.0", clientType.version)
     }

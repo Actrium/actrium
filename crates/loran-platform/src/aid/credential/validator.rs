@@ -1,7 +1,7 @@
 //! AId Credential verifier
 //!
 //! Verifies AId Credential based on Ed25519 signatures:
-//! - claims are plaintext proto bytes, signed by the AIS Ed25519 private key
+//! - claims are plaintext proto bytes, signed by the Issuer Ed25519 private key
 //! - The verifier looks up the corresponding VerifyingKey by key_id via `key_cache` to complete verification
 
 use super::error::AidError;
@@ -77,9 +77,9 @@ impl AIdCredentialValidator {
         Ok(result.map(|(verifying_key, _expires_at)| verifying_key.as_bytes().to_vec()))
     }
 
-    /// Write the Ed25519 verifying key into the global KeyCache (called by the AIS issuer)
+    /// Write the Ed25519 verifying key into the global KeyCache (called by the issuer)
     ///
-    /// AIS calls this method after loading or refreshing the signing key, so that signaling and other services can verify credentials.
+    /// Issuer calls this method after loading or refreshing the signing key, so that signaling and other services can verify credentials.
     /// If the KeyCache is not yet initialized (`init` not called), this method is a no-op (non-fatal).
     pub async fn populate_key(
         key_id: u32,
@@ -92,7 +92,7 @@ impl AIdCredentialValidator {
 
     /// Persistently write the Ed25519 verifying key to the SQLite DB; does not require KeyCache to be initialized.
     ///
-    /// Used by the AIS issuer to write keys before `init` is called, ensuring that subsequent `init` calls can read the key from the DB.
+    /// Used by the issuer to write keys before `init` is called, ensuring that subsequent `init` calls can read the key from the DB.
     /// If the global KeyCache is already initialized, also updates the in-memory cache.
     pub async fn persist_key(
         sqlite_path: &std::path::Path,

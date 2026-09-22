@@ -1,6 +1,6 @@
 [package]
 name = "RelayService"
-manufacturer = "actr-example"
+publisher = "actr-example"
 version = "1.0.0"
 description = "Media Relay Receiver - receives media frames via RPC"
 authors = ["Actr Dev Team"]

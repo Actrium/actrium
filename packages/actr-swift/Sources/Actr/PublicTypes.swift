@@ -18,19 +18,19 @@ public struct Realm: Equatable, Hashable, Sendable {
 }
 
 public struct ActrType: Equatable, Hashable, Sendable {
-    public var manufacturer: String
+    public var publisher: String
     public var name: String
     public var version: String
 
-    public init(manufacturer: String, name: String, version: String) {
-        self.manufacturer = manufacturer
+    public init(publisher: String, name: String, version: String) {
+        self.publisher = publisher
         self.name = name
         self.version = version
     }
 
     init(bridge: ActrBindings.ActrType) {
         self.init(
-            manufacturer: bridge.manufacturer,
+            publisher: bridge.publisher,
             name: bridge.name,
             version: bridge.version
         )
@@ -38,7 +38,7 @@ public struct ActrType: Equatable, Hashable, Sendable {
 
     var bridge: ActrBindings.ActrType {
         ActrBindings.ActrType(
-            manufacturer: manufacturer,
+            publisher: publisher,
             name: name,
             version: version
         )

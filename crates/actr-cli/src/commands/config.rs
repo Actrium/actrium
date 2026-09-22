@@ -17,8 +17,8 @@ use toml::Value;
 
 /// All known schema field paths — used to validate `set` keys.
 const KNOWN_KEYS: &[&str] = &[
-    "mfr.manufacturer",
-    "mfr.keychain",
+    "publisher.name",
+    "publisher.keychain",
     "codegen.language",
     "codegen.output",
     "codegen.clean_before_generate",
@@ -30,7 +30,7 @@ const KNOWN_KEYS: &[&str] = &[
     "ui.color",
     "ui.non_interactive",
     "network.signaling_url",
-    "network.ais_endpoint",
+    "network.issuer_endpoint",
     "network.realm_id",
     "network.realm_secret",
     "storage.hyper_data_dir",
@@ -60,14 +60,14 @@ pub struct ConfigCommand {
 pub enum ConfigSubcommand {
     /// Set a configuration key to a value
     Set {
-        /// Configuration key (e.g., mfr.manufacturer)
+        /// Configuration key (e.g., publisher.name)
         key: String,
         /// Value to assign
         value: String,
     },
     /// Get the current value of a configuration key
     Get {
-        /// Configuration key (e.g., mfr.manufacturer)
+        /// Configuration key (e.g., publisher.name)
         key: String,
     },
     /// List all known schema fields with current effective values
@@ -79,7 +79,7 @@ pub enum ConfigSubcommand {
     },
     /// Remove a configuration key
     Unset {
-        /// Configuration key to remove (e.g., mfr.manufacturer)
+        /// Configuration key to remove (e.g., publisher.name)
         key: String,
     },
     /// Validate syntax and schema of all config files
@@ -256,11 +256,11 @@ impl ConfigCommand {
             .unwrap_or_else(|_| Value::String(raw_value.to_string()));
 
         match key {
-            "mfr.manufacturer" => {
-                config.mfr.manufacturer = Some(value_to_string(&parsed_value)?);
+            "publisher.name" => {
+                config.publisher.name = Some(value_to_string(&parsed_value)?);
             }
-            "mfr.keychain" => {
-                config.mfr.keychain = Some(value_to_string(&parsed_value)?);
+            "publisher.keychain" => {
+                config.publisher.keychain = Some(value_to_string(&parsed_value)?);
             }
             "codegen.language" => {
                 config.codegen.language = Some(value_to_string(&parsed_value)?);
@@ -283,8 +283,8 @@ impl ConfigCommand {
             "network.signaling_url" => {
                 config.network.signaling_url = Some(value_to_string(&parsed_value)?);
             }
-            "network.ais_endpoint" => {
-                config.network.ais_endpoint = Some(value_to_string(&parsed_value)?);
+            "network.issuer_endpoint" => {
+                config.network.issuer_endpoint = Some(value_to_string(&parsed_value)?);
             }
             "network.realm_id" => {
                 config.network.realm_id = Some(value_to_u32(&parsed_value, key)?);
@@ -321,14 +321,14 @@ impl ConfigCommand {
     /// Remove a key from a `CliConfig` struct.
     fn unset_key_from_config(config: &mut CliConfig, key: &str) -> Result<bool> {
         let was_set = match key {
-            "mfr.manufacturer" => {
-                let had = config.mfr.manufacturer.is_some();
-                config.mfr.manufacturer = None;
+            "publisher.name" => {
+                let had = config.publisher.name.is_some();
+                config.publisher.name = None;
                 had
             }
-            "mfr.keychain" => {
-                let had = config.mfr.keychain.is_some();
-                config.mfr.keychain = None;
+            "publisher.keychain" => {
+                let had = config.publisher.keychain.is_some();
+                config.publisher.keychain = None;
                 had
             }
             "codegen.language" => {
@@ -366,9 +366,9 @@ impl ConfigCommand {
                 config.network.signaling_url = None;
                 had
             }
-            "network.ais_endpoint" => {
-                let had = config.network.ais_endpoint.is_some();
-                config.network.ais_endpoint = None;
+            "network.issuer_endpoint" => {
+                let had = config.network.issuer_endpoint.is_some();
+                config.network.issuer_endpoint = None;
                 had
             }
             "network.realm_id" => {
@@ -467,10 +467,14 @@ impl ConfigCommand {
         // Resolve effective config to show all fields with current values
         let effective = resolve_effective_cli_config()?;
         let lines: Vec<String> = vec![
-            format!("mfr.manufacturer = {}", effective.mfr.manufacturer),
+            format!("publisher.name = {}", effective.publisher.name),
             format!(
-                "mfr.keychain = {}",
-                effective.mfr.keychain.as_deref().unwrap_or("<not set>")
+                "publisher.keychain = {}",
+                effective
+                    .publisher
+                    .keychain
+                    .as_deref()
+                    .unwrap_or("<not set>")
             ),
             format!("codegen.language = {}", effective.codegen.language),
             format!("codegen.output = {}", effective.codegen.output),
@@ -489,7 +493,10 @@ impl ConfigCommand {
                 "network.signaling_url = {}",
                 effective.network.signaling_url
             ),
-            format!("network.ais_endpoint = {}", effective.network.ais_endpoint),
+            format!(
+                "network.issuer_endpoint = {}",
+                effective.network.issuer_endpoint
+            ),
             format!(
                 "network.realm_id = {}",
                 effective

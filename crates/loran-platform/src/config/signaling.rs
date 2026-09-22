@@ -203,19 +203,19 @@ pub struct SignalingDependencies {
     #[serde(default)]
     pub signer: Option<SignerClientConfig>,
 
-    /// AIS client configuration (optional, for Credential refresh)
+    /// Issuer client configuration (optional, for Credential refresh)
     ///
-    /// If not configured but AIS is needed, it will auto-detect the local AIS service:
-    /// - If the AIS service is enabled (ENABLE_AIS bit is set), use localhost:AIS_PORT
+    /// If not configured but Issuer is needed, it will auto-detect the local Issuer service:
+    /// - If the Issuer service is enabled (ENABLE_ISSUER bit is set), use localhost:ISSUER_PORT
     /// - Otherwise return None
     #[serde(default)]
-    pub ais: Option<AisClientConfig>,
+    pub issuer: Option<IssuerClientConfig>,
 }
 
-/// AIS client configuration
+/// Issuer client configuration
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct AisClientConfig {
-    /// AIS service endpoint URL
+pub struct IssuerClientConfig {
+    /// Issuer service endpoint URL
     pub endpoint: String,
     /// Request timeout (seconds)
     #[serde(default = "default_timeout")]
@@ -298,25 +298,25 @@ impl SignalingConfig {
         None
     }
 
-    /// Get the AIS client configuration
+    /// Get the Issuer client configuration
     ///
     /// Supports smart defaults:
-    /// 1. If dependencies.ais is explicitly configured, return it directly
-    /// 2. If the local AIS service is enabled, return configuration pointing to the local AIS
+    /// 1. If dependencies.issuer is explicitly configured, return it directly
+    /// 2. If the local Issuer service is enabled, return configuration pointing to the local Issuer
     /// 3. Otherwise return None
-    pub fn get_ais_client_config(
+    pub fn get_issuer_client_config(
         &self,
         global_config: &super::ActrixConfig,
-    ) -> Option<AisClientConfig> {
+    ) -> Option<IssuerClientConfig> {
         // Prefer explicit configuration
-        if let Some(ref ais_config) = self.dependencies.ais {
-            return Some(ais_config.clone());
+        if let Some(ref issuer_config) = self.dependencies.issuer {
+            return Some(issuer_config.clone());
         }
 
-        // Fallback: check if local AIS service is enabled
-        if global_config.is_ais_enabled() && global_config.services.ais.is_some() {
-            // Auto-generate client configuration pointing to local AIS
-            // AIS as an HTTP router service shares the same HTTP/HTTPS port
+        // Fallback: check if local Issuer service is enabled
+        if global_config.is_issuer_enabled() && global_config.services.issuer.is_some() {
+            // Auto-generate client configuration pointing to local Issuer
+            // Issuer as an HTTP router service shares the same HTTP/HTTPS port
             let http_cfg = global_config.bind.http.as_ref();
             let port = http_cfg.map(|h| h.port).unwrap_or(8080);
             let protocol = if http_cfg.is_some_and(|h| h.is_tls()) {
@@ -325,7 +325,7 @@ impl SignalingConfig {
                 "http"
             };
 
-            return Some(AisClientConfig {
+            return Some(IssuerClientConfig {
                 endpoint: format!("{protocol}://127.0.0.1:{port}"),
                 timeout_seconds: 30,
             });

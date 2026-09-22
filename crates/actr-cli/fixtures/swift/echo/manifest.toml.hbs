@@ -3,7 +3,7 @@ exports = []
 
 [package]
 name = "echo-client-app"
-manufacturer = "{{MANUFACTURER}}"
+publisher = "{{PUBLISHER}}"
 version = "1.0.0"
 description = "Echo client app"
 authors = ["Actr-Team"]
@@ -12,7 +12,7 @@ tags = ["dev", "client"]
 
 [dependencies]
 {{#if IS_BOTH}}
-EchoService = { actr_type = "{{MANUFACTURER}}:EchoService:1.0.0" }
+EchoService = { actr_type = "{{PUBLISHER}}:EchoService:1.0.0" }
 {{else}}
-EchoService = { actr_type = "{{MANUFACTURER}}:EchoService:1.0.0" }
+EchoService = { actr_type = "{{PUBLISHER}}:EchoService:1.0.0" }
 {{/if}}

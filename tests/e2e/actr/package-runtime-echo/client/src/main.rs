@@ -1,6 +1,6 @@
 //! Package Runtime Echo Client Host.
 //!
-//! Loads a local client guest package, registers with AIS, then dispatches
+//! Loads a local client guest package, registers with Issuer, then dispatches
 //! stdin lines to the guest which proxies requests to the remote EchoService.
 
 pub mod echo {
@@ -59,21 +59,21 @@ fn runtime_config_path() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("actr.toml"))
 }
 
-/// [`actr_hyper::ManufacturerAuthProvider`] backed by the keychain file named
+/// [`actr_hyper::PublisherAuthProvider`] backed by the keychain file named
 /// in `CLIENT_GUEST_KEYCHAIN_PATH`. Mirrors the CLI's keychain provider: the
 /// private key is re-read on every sign call and never kept resident.
-struct KeychainManufacturerAuthProvider {
+struct KeychainPublisherAuthProvider {
     key_path: PathBuf,
 }
 
-impl actr_hyper::ManufacturerAuthProvider for KeychainManufacturerAuthProvider {
+impl actr_hyper::PublisherAuthProvider for KeychainPublisherAuthProvider {
     fn sign(
         &self,
         realm_id: u32,
         actr_type: &actr_protocol::ActrType,
         target: &str,
         manifest_raw: &[u8],
-    ) -> std::result::Result<actr_hyper::ManufacturerRegistrationAuth, actr_hyper::HyperError> {
+    ) -> std::result::Result<actr_hyper::PublisherRegistrationAuth, actr_hyper::HyperError> {
         let content = std::fs::read_to_string(&self.key_path)
             .map_err(|e| actr_hyper::HyperError::Runtime(format!("read keychain: {e}")))?;
         let json: serde_json::Value = serde_json::from_str(&content)
@@ -88,7 +88,7 @@ impl actr_hyper::ManufacturerAuthProvider for KeychainManufacturerAuthProvider {
             actr_hyper::HyperError::Runtime("private_key must be exactly 32 bytes".into())
         })?;
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&key_arr);
-        actr_hyper::ManufacturerRegistrationAuth::sign(
+        actr_hyper::PublisherRegistrationAuth::sign(
             &signing_key,
             realm_id,
             actr_type,
@@ -98,11 +98,11 @@ impl actr_hyper::ManufacturerAuthProvider for KeychainManufacturerAuthProvider {
     }
 }
 
-fn keychain_provider_from_env() -> Option<std::sync::Arc<dyn actr_hyper::ManufacturerAuthProvider>> {
+fn keychain_provider_from_env() -> Option<std::sync::Arc<dyn actr_hyper::PublisherAuthProvider>> {
     env::var("CLIENT_GUEST_KEYCHAIN_PATH").ok().map(|path| {
-        std::sync::Arc::new(KeychainManufacturerAuthProvider {
+        std::sync::Arc::new(KeychainPublisherAuthProvider {
             key_path: PathBuf::from(path),
-        }) as std::sync::Arc<dyn actr_hyper::ManufacturerAuthProvider>
+        }) as std::sync::Arc<dyn actr_hyper::PublisherAuthProvider>
     })
 }
 
@@ -143,7 +143,7 @@ async fn main() -> Result<()> {
     let package_info = actr_config::PackageInfo {
         name: manifest.name.clone(),
         actr_type: actr_protocol::ActrType {
-            manufacturer: manifest.manufacturer.clone(),
+            publisher: manifest.publisher.clone(),
             name: manifest.name,
             version: manifest.version,
         },
@@ -164,9 +164,9 @@ async fn main() -> Result<()> {
         .map(|v| v == "production")
         .unwrap_or(false)
     {
-        let ais_endpoint =
-            env::var("AIS_ENDPOINT").unwrap_or_else(|_| "http://127.0.0.1:8081/ais".to_string());
-        let base_endpoint = ais_endpoint.trim_end_matches("/ais").to_string();
+        let issuer_endpoint =
+            env::var("ISSUER_ENDPOINT").unwrap_or_else(|_| "http://127.0.0.1:8081/issuer".to_string());
+        let base_endpoint = issuer_endpoint.trim_end_matches("/issuer").to_string();
         Arc::new(RegistryTrust::new(base_endpoint))
     } else {
         Arc::new(StaticTrust::new(load_package_public_key()?).context("invalid pubkey")?)
@@ -174,16 +174,16 @@ async fn main() -> Result<()> {
 
     let hyper = Hyper::new(HyperConfig::new(&hyper_data_dir, trust)).await?;
 
-    let ais_endpoint =
-        env::var("AIS_ENDPOINT").unwrap_or_else(|_| "http://127.0.0.1:8081/ais".to_string());
+    let issuer_endpoint =
+        env::var("ISSUER_ENDPOINT").unwrap_or_else(|_| "http://127.0.0.1:8081/issuer".to_string());
 
-    // AIS-02: package registration needs a runner possession proof of the
+    // Issuer-02: package registration needs a runner possession proof of the
     // publisher signing key; the keychain arrives via env from the e2e runner.
-    let manufacturer_provider = keychain_provider_from_env();
+    let publisher_provider = keychain_provider_from_env();
     let actr_ref = actr_hyper::Node::from_hyper(hyper, config)
         .attach(&package)
         .await?
-        .register_with_manufacturer_auth(&ais_endpoint, manufacturer_provider)
+        .register_with_publisher_auth(&issuer_endpoint, publisher_provider)
         .await?
         .start()
         .await?;

@@ -14,7 +14,7 @@ import type { ActorClientConfig, SwRuntimeConfig, TrustAnchor } from '@actrium/a
 
 export interface RuntimeConfigJson {
     signaling_url: string;
-    ais_endpoint: string;
+    issuer_endpoint: string;
     realm_id: number;
     visible: boolean;
     force_relay: boolean;
@@ -22,7 +22,7 @@ export interface RuntimeConfigJson {
     turn_urls: string[];
     package: {
         name: string;
-        manufacturer: string;
+        publisher: string;
         actr_name: string;
         version: string;
         full_type: string;
@@ -63,8 +63,8 @@ function requireConfig(): RuntimeConfigJson {
 
 /** ActrType info (available after initConfig) */
 export const actrType = {
-    get manufacturer() {
-        return requireConfig().package.manufacturer;
+    get publisher() {
+        return requireConfig().package.publisher;
     },
     get name() {
         return requireConfig().package.actr_name;
@@ -88,8 +88,8 @@ export const system = {
         get realm_id() {
             return requireConfig().realm_id;
         },
-        get ais_endpoint() {
-            return requireConfig().ais_endpoint;
+        get issuer_endpoint() {
+            return requireConfig().issuer_endpoint;
         },
     },
     discovery: {
@@ -126,7 +126,7 @@ export const acl = {
 export function buildRuntimeConfig(): SwRuntimeConfig {
     const c = requireConfig();
     return {
-        ais_endpoint: c.ais_endpoint,
+        issuer_endpoint: c.issuer_endpoint,
         signaling_url: c.signaling_url,
         realm_id: c.realm_id,
         client_actr_type: c.package.full_type,

@@ -159,16 +159,16 @@ async fn main() -> Result<()> {
         .await
         .with_context(|| format!("failed to load runtime config {}", runtime_toml.display()))?
         .with_actor_type(manifest.package.actr_type.clone());
-    let ais_endpoint = init.runtime_config().ais_endpoint.to_string();
+    let issuer_endpoint = init.runtime_config().issuer_endpoint.to_string();
 
     let attached = init
         .link(EchoWorkload)
         .await
         .context("failed to link echo workload")?;
     let registered = attached
-        .register(&ais_endpoint)
+        .register(&issuer_endpoint)
         .await
-        .context("failed to register with AIS")?;
+        .context("failed to register with Issuer")?;
     let actr_ref = registered.start().await.context("failed to start node")?;
 
     info!(actor_id = ?actr_ref.actor_id(), "linked-rust echo server registered");

@@ -76,7 +76,7 @@ through, and retries time out. So local macOS is not a reliable reproducer for t
 CI is the source of truth.
 
 Two config notes (both handled by `run.sh`, flagged as repo-level debt):
-- The shared actrix template's `enable = 25` = SIGNALING|AIS|SIGNER — the STUN(2)/TURN(4) bits
+- The shared actrix template's `enable = 25` = SIGNALING|Issuer|SIGNER — the STUN(2)/TURN(4) bits
   are unset, so actrix ships with STUN/TURN disabled. This suite needs TURN (the emulator can't
   do direct ICE to the host), so `run.sh` bumps it to `enable = 31`. Cleaner: parameterize the
   shared template instead of the in-place `perl` rewrite (review finding #1, follow-up).

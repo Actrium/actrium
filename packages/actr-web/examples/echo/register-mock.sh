@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# register-mock.sh — Seed realm + MFR + publish web echo .actr packages
+# register-mock.sh — Seed realm + publisher + publish web echo .actr packages
 #                    against a running `mock-actrix` instance.
 #
 # Unlike register.sh, this does NOT touch SQLite. It drives the mock's
@@ -19,8 +19,8 @@ ACTR_ROOT="$(cd "$PROJECT_ROOT/../.." && pwd)"
 
 ENDPOINT="${ENDPOINT:-http://127.0.0.1:8081}"
 RELEASE_DIR="$SCRIPT_DIR/release"
-MFR_KEY_FILE="$RELEASE_DIR/dev-key.json"
-MFR_NAME="acme"
+PUBLISHER_KEY_FILE="$RELEASE_DIR/dev-key.json"
+PUBLISHER_NAME="acme"
 
 SERVER_ACTR_PACKAGE="$RELEASE_DIR/acme-EchoService-0.2.0-wasm32-unknown-unknown.actr"
 CLIENT_ACTR_PACKAGE="$RELEASE_DIR/acme-echo-client-app-0.1.0-wasm32-unknown-unknown.actr"
@@ -67,16 +67,16 @@ echo "  actr:     $ACTR_CMD"
 
 # --- Preflight ---
 
-[ -f "$MFR_KEY_FILE" ] || { echo -e "${RED}Missing $MFR_KEY_FILE${NC}"; exit 1; }
+[ -f "$PUBLISHER_KEY_FILE" ] || { echo -e "${RED}Missing $PUBLISHER_KEY_FILE${NC}"; exit 1; }
 [ -f "$SERVER_ACTR_PACKAGE" ] || { echo -e "${RED}Missing server package${NC}"; exit 1; }
 [ -f "$CLIENT_ACTR_PACKAGE" ] || { echo -e "${RED}Missing client package${NC}"; exit 1; }
 
 if command -v jq >/dev/null 2>&1; then
-    MFR_PUBKEY=$(jq -r '.public_key' "$MFR_KEY_FILE")
+    PUBLISHER_PUBKEY=$(jq -r '.public_key' "$PUBLISHER_KEY_FILE")
 else
-    MFR_PUBKEY=$(python3 -c "import json; print(json.load(open('$MFR_KEY_FILE'))['public_key'])")
+    PUBLISHER_PUBKEY=$(python3 -c "import json; print(json.load(open('$PUBLISHER_KEY_FILE'))['public_key'])")
 fi
-[ -n "$MFR_PUBKEY" ] || { echo -e "${RED}Failed to read MFR pubkey${NC}"; exit 1; }
+[ -n "$PUBLISHER_PUBKEY" ] || { echo -e "${RED}Failed to read publisher pubkey${NC}"; exit 1; }
 
 # --- Step 1: Create realms via /admin/realms ---
 
@@ -94,18 +94,18 @@ done
 
 echo -e "${GREEN}realms ready: $SERVER_REALM, $CLIENT_REALM${NC}"
 
-# --- Step 2: Register MFR via /admin/mfr ---
+# --- Step 2: Register publisher via /admin/publisher-registry ---
 
 echo ""
-echo "Step 2: Registering MFR '$MFR_NAME'..."
+echo "Step 2: Registering publisher '$PUBLISHER_NAME'..."
 
-curl -fsS -X POST "$ENDPOINT/admin/mfr" \
+curl -fsS -X POST "$ENDPOINT/admin/publisher-registry" \
     -H 'content-type: application/json' \
-    --data "{\"name\": \"$MFR_NAME\", \"pubkey_b64\": \"$MFR_PUBKEY\", \"contact\": \"dev@example.com\"}" >/dev/null
+    --data "{\"name\": \"$PUBLISHER_NAME\", \"pubkey_b64\": \"$PUBLISHER_PUBKEY\", \"contact\": \"dev@example.com\"}" >/dev/null
 
-echo -e "${GREEN}MFR '$MFR_NAME' registered${NC}"
+echo -e "${GREEN}publisher '$PUBLISHER_NAME' registered${NC}"
 
-# --- Step 3: Publish packages via `actr registry publish` (hits /mfr/pkg/* routes) ---
+# --- Step 3: Publish packages via `actr registry publish` (hits /publisher-registry/pkg/* routes) ---
 
 echo ""
 echo "Step 3: Publishing packages..."
@@ -119,7 +119,7 @@ for PKG_LABEL in server client; do
 
     if "$ACTR_CMD" registry publish \
         --package "$PKG_FILE" \
-        --keychain "$MFR_KEY_FILE" \
+        --keychain "$PUBLISHER_KEY_FILE" \
         --endpoint "$ENDPOINT"; then
         echo -e "${GREEN}$PKG_LABEL package published${NC}"
     else
@@ -128,15 +128,15 @@ for PKG_LABEL in server client; do
     fi
 done
 
-# --- Step 4: Inject MFR pubkey into config files ---
+# --- Step 4: Inject publisher pubkey into config files ---
 
 echo ""
-echo "Step 4: Injecting MFR pubkey into config files..."
+echo "Step 4: Injecting publisher pubkey into config files..."
 
-sed_inplace "s|__MFR_PUBKEY_PLACEHOLDER__|${MFR_PUBKEY}|g" "$SERVER_ACTR_TOML"
-sed_inplace "s|__MFR_PUBKEY_PLACEHOLDER__|${MFR_PUBKEY}|g" "$CLIENT_ACTR_TOML"
+sed_inplace "s|__PUBLISHER_PUBKEY_PLACEHOLDER__|${PUBLISHER_PUBKEY}|g" "$SERVER_ACTR_TOML"
+sed_inplace "s|__PUBLISHER_PUBKEY_PLACEHOLDER__|${PUBLISHER_PUBKEY}|g" "$CLIENT_ACTR_TOML"
 
-echo -e "${GREEN}MFR pubkey injected${NC}"
+echo -e "${GREEN}publisher pubkey injected${NC}"
 
 # --- Step 5: Sanity-check state ---
 

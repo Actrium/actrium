@@ -22,26 +22,26 @@ use std::time::{Duration, Instant};
 
 lazy_static! {
     /// Signer service metrics
-    static ref KS_KEYS_GENERATED: IntCounterVec = IntCounterVec::new(
+    static ref SIGNER_KEYS_GENERATED: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_keys_generated_total", "Total number of keys generated")
             .namespace("actrix"),
         &["key_type"]
     ).unwrap();
 
-    static ref KS_REQUEST_DURATION: HistogramVec = HistogramVec::new(
+    static ref SIGNER_REQUEST_DURATION: HistogramVec = HistogramVec::new(
         HistogramOpts::new("actrix_request_duration_seconds", "HTTP request duration in seconds")
             .namespace("actrix")
             .buckets(vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0]),
         &["service", "method", "path", "status"]
     ).unwrap();
 
-    static ref KS_REQUESTS_TOTAL: IntCounterVec = IntCounterVec::new(
+    static ref SIGNER_REQUESTS_TOTAL: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_requests_total", "Total number of HTTP requests")
             .namespace("actrix"),
         &["service", "method", "path", "status"]
     ).unwrap();
 
-    static ref KS_AUTH_FAILURES: IntCounterVec = IntCounterVec::new(
+    static ref SIGNER_AUTH_FAILURES: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_auth_failures_total", "Total number of authentication failures")
             .namespace("actrix"),
         &["service", "reason"]
@@ -50,10 +50,10 @@ lazy_static! {
 
 /// Register Signer metrics to the global registry
 pub fn register_signer_metrics(registry: &prometheus::Registry) -> Result<(), prometheus::Error> {
-    registry.register(Box::new(KS_KEYS_GENERATED.clone()))?;
-    registry.register(Box::new(KS_REQUEST_DURATION.clone()))?;
-    registry.register(Box::new(KS_REQUESTS_TOTAL.clone()))?;
-    registry.register(Box::new(KS_AUTH_FAILURES.clone()))?;
+    registry.register(Box::new(SIGNER_KEYS_GENERATED.clone()))?;
+    registry.register(Box::new(SIGNER_REQUEST_DURATION.clone()))?;
+    registry.register(Box::new(SIGNER_REQUESTS_TOTAL.clone()))?;
+    registry.register(Box::new(SIGNER_AUTH_FAILURES.clone()))?;
     Ok(())
 }
 
@@ -172,7 +172,7 @@ impl SignerState {
 /// Create SignerState from Signer config
 ///
 /// Note: Nonce storage must be provided by the caller to avoid circular dependencies
-/// between ks and platform crates.
+/// between signer and platform crates.
 pub async fn create_signer_state<N: NonceStorage + Send + Sync + 'static>(
     service_config: &crate::config::SignerServiceConfig,
     nonce_storage: N,
@@ -246,15 +246,15 @@ async fn generate_signing_key_handler(
             SignerError::Authentication(_) => "invalid_signature",
             _ => "unknown",
         };
-        KS_AUTH_FAILURES
+        SIGNER_AUTH_FAILURES
             .with_label_values(&["signer", reason])
             .inc();
 
         let duration = start_time.elapsed().as_secs_f64();
-        KS_REQUEST_DURATION
+        SIGNER_REQUEST_DURATION
             .with_label_values(&["signer", "POST", "/generate-signing-key", "401"])
             .observe(duration);
-        KS_REQUESTS_TOTAL
+        SIGNER_REQUESTS_TOTAL
             .with_label_values(&["signer", "POST", "/generate-signing-key", "401"])
             .inc();
 
@@ -276,7 +276,7 @@ async fn generate_signing_key_handler(
     app_state.maybe_cleanup_expired_keys().await;
 
     // Record key generation metric
-    KS_KEYS_GENERATED.with_label_values(&["ed25519"]).inc();
+    SIGNER_KEYS_GENERATED.with_label_values(&["ed25519"]).inc();
 
     let response = GenerateSigningKeyResponse {
         key_id: key_pair.key_id,
@@ -286,10 +286,10 @@ async fn generate_signing_key_handler(
     };
 
     let duration = start_time.elapsed().as_secs_f64();
-    KS_REQUEST_DURATION
+    SIGNER_REQUEST_DURATION
         .with_label_values(&["signer", "POST", "/generate-signing-key", "200"])
         .observe(duration);
-    KS_REQUESTS_TOTAL
+    SIGNER_REQUESTS_TOTAL
         .with_label_values(&["signer", "POST", "/generate-signing-key", "200"])
         .inc();
 
@@ -326,15 +326,15 @@ async fn sign_handler(
             SignerError::Authentication(_) => "invalid_signature",
             _ => "unknown",
         };
-        KS_AUTH_FAILURES
+        SIGNER_AUTH_FAILURES
             .with_label_values(&["signer", reason])
             .inc();
 
         let duration = start_time.elapsed().as_secs_f64();
-        KS_REQUEST_DURATION
+        SIGNER_REQUEST_DURATION
             .with_label_values(&["signer", "POST", "/sign", "401"])
             .observe(duration);
-        KS_REQUESTS_TOTAL
+        SIGNER_REQUESTS_TOTAL
             .with_label_values(&["signer", "POST", "/sign", "401"])
             .inc();
 
@@ -366,10 +366,10 @@ async fn sign_handler(
                 key_record.expires_at
             );
             let duration = start_time.elapsed().as_secs_f64();
-            KS_REQUEST_DURATION
+            SIGNER_REQUEST_DURATION
                 .with_label_values(&["signer", "POST", "/sign", "410"])
                 .observe(duration);
-            KS_REQUESTS_TOTAL
+            SIGNER_REQUESTS_TOTAL
                 .with_label_values(&["signer", "POST", "/sign", "410"])
                 .inc();
             return Err(SignerError::KeyExpired(key_id));
@@ -389,10 +389,10 @@ async fn sign_handler(
     let response = SignResponse { signature };
 
     let duration = start_time.elapsed().as_secs_f64();
-    KS_REQUEST_DURATION
+    SIGNER_REQUEST_DURATION
         .with_label_values(&["signer", "POST", "/sign", "200"])
         .observe(duration);
-    KS_REQUESTS_TOTAL
+    SIGNER_REQUESTS_TOTAL
         .with_label_values(&["signer", "POST", "/sign", "200"])
         .inc();
 

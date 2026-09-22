@@ -15,17 +15,17 @@ pub enum HyperError {
     #[error("binary hash mismatch: package integrity check failed")]
     BinaryHashMismatch,
 
-    /// MFR signature verification failed
+    /// publisher signature verification failed
     #[error("signature verification failed: {0}")]
     SignatureVerificationFailed(String),
 
-    /// MFR certificate is untrusted (not registered with actrix or revoked)
-    #[error("untrusted manufacturer: {0}")]
-    UntrustedManufacturer(String),
+    /// publisher certificate is untrusted (not registered with actrix or revoked)
+    #[error("untrusted publisher: {0}")]
+    UntrustedPublisher(String),
 
-    /// AIS registration bootstrap failed
-    #[error("AIS bootstrap failed: {0}")]
-    AisBootstrapFailed(String),
+    /// Issuer registration bootstrap failed
+    #[error("Issuer bootstrap failed: {0}")]
+    IssuerBootstrapFailed(String),
 
     /// Storage layer error
     #[error("storage error: {0}")]

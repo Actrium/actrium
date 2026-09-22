@@ -8,7 +8,7 @@ RUN_ROOT="${ACTR_E2E_RUN_ROOT:-$REPO_ROOT/target/e2e-cache/typescript-stream/$RU
 LOG_DIR="$RUN_ROOT/logs"
 REALM_ID="${ACTR_E2E_REALM_ID:-2368266035}"
 REALM_SECRET="${ACTR_E2E_REALM_SECRET:-typescript-stream-e2e-secret}"
-MANUFACTURER="demo1"
+PUBLISHER="demo1"
 
 ACTR_BIN="${ACTR_BIN:-$REPO_ROOT/target/release/actr}"
 MOCK_ACTRIX_BIN="${MOCK_ACTRIX_BIN:-$REPO_ROOT/target/release/mock-actrix}"
@@ -112,13 +112,13 @@ write_cli_config() {
   local project="$1"
   mkdir -p "$project/.actr"
   cat >"$project/.actr/config.toml" <<EOF_CFG
-[mfr]
-manufacturer = "$MANUFACTURER"
+[publisher]
+name = "$PUBLISHER"
 keychain = "$RUN_ROOT/dev-key.json"
 
 [network]
 signaling_url = "$SIGNALING_WS"
-ais_endpoint = "$AIS_ENDPOINT"
+issuer_endpoint = "$ISSUER_ENDPOINT"
 realm_id = $REALM_ID
 realm_secret = "$REALM_SECRET"
 
@@ -138,8 +138,8 @@ edition = 1
 [signaling]
 url = "$SIGNALING_WS"
 
-[ais_endpoint]
-url = "$AIS_ENDPOINT"
+[issuer_endpoint]
+url = "$ISSUER_ENDPOINT"
 
 [deployment]
 realm_id = $REALM_ID
@@ -345,7 +345,7 @@ exports = ["protos/local/echo.proto"]
 
 [package]
 name = "EchoService"
-manufacturer = "demo1"
+publisher = "demo1"
 version = "1.0.0"
 description = "Actor-RTC TypeScript EchoService provider"
 authors = []
@@ -456,7 +456,7 @@ exports = ["protos/local/relay.proto"]
 
 [package]
 name = "RelayService"
-manufacturer = "demo1"
+publisher = "demo1"
 version = "1.0.0"
 description = "Actor-RTC RelayService workload package"
 authors = []
@@ -602,7 +602,7 @@ static STREAM_RESULTS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new(
 
 fn echo_type() -> ActrType {
     ActrType {
-        manufacturer: "demo1".to_string(),
+        publisher: "demo1".to_string(),
         name: "EchoService".to_string(),
         version: "1.0.0".to_string(),
     }
@@ -802,7 +802,7 @@ exports = []
 
 [package]
 name = "ClientApp"
-manufacturer = "demo1"
+publisher = "demo1"
 version = "1.0.0"
 description = "Package-backed Rust relay client app"
 authors = []
@@ -908,16 +908,16 @@ async fn main() -> Result<()> {
     let package = WorkloadPackage::from_path(&package_path)
         .with_context(|| format!("failed to read {}", package_path.display()))?;
 
-    let ais_endpoint = runtime.ais_endpoint.clone();
+    let issuer_endpoint = runtime.issuer_endpoint.clone();
     eprintln!("client phase: attach/register/start");
     let actr_ref = tokio::time::timeout(OP_TIMEOUT, async {
         Node::from_hyper(hyper, runtime.clone())
             .attach(&package)
             .await
             .context("failed to attach local guest package")?
-            .register(&ais_endpoint)
+            .register(&issuer_endpoint)
             .await
-            .context("failed to register with AIS")?
+            .context("failed to register with Issuer")?
             .start()
             .await
             .context("failed to start app node")
@@ -926,7 +926,7 @@ async fn main() -> Result<()> {
     .context("timed out during attach/register/start")??;
 
     let relay_type = ActrType {
-        manufacturer: "demo1".to_string(),
+        publisher: "demo1".to_string(),
         name: "RelayService".to_string(),
         version: "1.0.0".to_string(),
     };
@@ -1106,7 +1106,7 @@ PY
 )}"
 MOCK_HTTP="http://127.0.0.1:$MOCK_PORT"
 SIGNALING_WS="ws://127.0.0.1:$MOCK_PORT/signaling/ws"
-AIS_ENDPOINT="$MOCK_HTTP/ais"
+ISSUER_ENDPOINT="$MOCK_HTTP/issuer"
 
 log "Start mock-actrix on $MOCK_PORT"
 NO_COLOR=1 "$MOCK_ACTRIX_BIN" --port "$MOCK_PORT" >"$LOG_DIR/mock-actrix.log" 2>&1 &
@@ -1126,12 +1126,12 @@ PUBLIC_KEY="$(jq -r '.public_key' "$RUN_ROOT/dev-key.json")"
 curl -fsS -X POST "$MOCK_HTTP/admin/realms" \
   -H 'content-type: application/json' \
   -d "{\"id\":$REALM_ID,\"name\":\"typescript-stream-e2e\"}" >/dev/null
-curl -fsS -X POST "$MOCK_HTTP/admin/mfr" \
+curl -fsS -X POST "$MOCK_HTTP/admin/publisher-registry" \
   -H 'content-type: application/json' \
-  -d "{\"name\":\"$MANUFACTURER\",\"pubkey_b64\":\"$PUBLIC_KEY\",\"contact\":\"e2e@local.actr\"}" >/dev/null
+  -d "{\"name\":\"$PUBLISHER\",\"pubkey_b64\":\"$PUBLIC_KEY\",\"contact\":\"e2e@local.actr\"}" >/dev/null
 
 log "Generate TypeScript EchoService template"
-(cd "$RUN_ROOT" && "$ACTR_BIN" init echo-service-ts -l typescript --role service --manufacturer "$MANUFACTURER" --signaling "$MOCK_HTTP")
+(cd "$RUN_ROOT" && "$ACTR_BIN" init echo-service-ts -l typescript --role service --publisher "$PUBLISHER" --signaling "$MOCK_HTTP")
 write_cli_config "$TS_ECHO"
 write_ts_echo_project_overrides
 (cd "$TS_ECHO" && run_logged "ts echo deps install" "$ACTR_BIN" deps install)

@@ -24,7 +24,7 @@ use zip::write::SimpleFileOptions;
 /// build a PackageManifest, serialize via to_toml(), sign the manifest bytes.
 /// Returns (manifest_toml_string, 64-byte raw signature, manifest struct).
 fn simulate_sign(
-    manufacturer: &str,
+    publisher: &str,
     name: &str,
     version: &str,
     target: &str,
@@ -50,7 +50,7 @@ fn simulate_sign(
 
     // Build PackageManifest (same structure as sign command)
     let manifest = PackageManifest {
-        manufacturer: manufacturer.to_string(),
+        publisher: publisher.to_string(),
         name: name.to_string(),
         version: version.to_string(),
         binary: BinaryEntry {
@@ -81,7 +81,7 @@ fn simulate_sign(
 /// Simulate the `actr build` workflow using actr_pack::pack.
 /// Returns the .actr package bytes.
 fn simulate_build(
-    manufacturer: &str,
+    publisher: &str,
     name: &str,
     version: &str,
     target: &str,
@@ -93,7 +93,7 @@ fn simulate_build(
     let key_id = actr_pack::compute_key_id(&verifying_key.to_bytes());
 
     let manifest = PackageManifest {
-        manufacturer: manufacturer.to_string(),
+        publisher: publisher.to_string(),
         name: name.to_string(),
         version: version.to_string(),
         binary: BinaryEntry {
@@ -223,7 +223,7 @@ fn sign_output_passes_verification() {
     );
 
     let verified = result.unwrap();
-    assert_eq!(verified.manifest.manufacturer, "acme");
+    assert_eq!(verified.manifest.publisher, "acme");
     assert_eq!(verified.manifest.name, "EchoService");
     assert_eq!(verified.manifest.version, "1.0.0");
 }

@@ -104,7 +104,7 @@ fn init_rust_echo_app(parent: &std::path::Path, name: &str) -> std::path::PathBu
             "app",
             "--signaling",
             "wss://actrix1.develenv.com",
-            "--manufacturer",
+            "--publisher",
             "acme",
             name,
         ],
@@ -126,7 +126,7 @@ fn init_rust_echo_service(parent: &std::path::Path, name: &str) -> std::path::Pa
             "service",
             "--signaling",
             "wss://actrix1.develenv.com",
-            "--manufacturer",
+            "--publisher",
             "acme",
             name,
         ],
@@ -148,7 +148,7 @@ fn init_rust_empty_service(parent: &std::path::Path, name: &str) -> std::path::P
             "service",
             "--signaling",
             "wss://actrix1.develenv.com",
-            "--manufacturer",
+            "--publisher",
             "acme",
             name,
         ],
@@ -170,7 +170,7 @@ fn init_rust_echo_both(parent: &std::path::Path, name: &str) -> std::path::PathB
             "both",
             "--signaling",
             "wss://actrix1.develenv.com",
-            "--manufacturer",
+            "--publisher",
             "example",
             name,
         ],
@@ -273,8 +273,8 @@ fn rust_echo_app_scaffold() {
         "main.rs should attach the local guest package through Node"
     );
     assert!(
-        main.contains(".register(&ais_endpoint)"),
-        "main.rs should register with AIS"
+        main.contains(".register(&issuer_endpoint)"),
+        "main.rs should register with Issuer"
     );
     assert!(
         main.contains("let response = actr_ref"),

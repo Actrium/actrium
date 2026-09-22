@@ -17,7 +17,7 @@
 //!
 //! let actor_a_id = ActrId { /* ... */ };
 //! let user_service_type = ActrType {
-//!     manufacturer: "acme".to_string(),
+//!     publisher: "acme".to_string(),
 //!     name: "user-service".to_string(),
 //!     version: "1.0.0".to_string(),
 //! };
@@ -67,7 +67,7 @@ impl PresenceManager {
         platform::recording::info!(
             "Actor {} subscribed to {}/{} online events",
             subscriber.to_string_repr(),
-            target_type.manufacturer,
+            target_type.publisher,
             target_type.name
         );
 
@@ -101,7 +101,7 @@ impl PresenceManager {
         platform::recording::info!(
             "Actor {} unsubscribed from {}/{} online events",
             subscriber.to_string_repr(),
-            target_type.manufacturer,
+            target_type.publisher,
             target_type.name
         );
 
@@ -134,7 +134,7 @@ impl PresenceManager {
         } else {
             platform::recording::warn!(
                 "Type {}/{} has no subscriptions",
-                target_type.manufacturer,
+                target_type.publisher,
                 target_type.name
             );
             false
@@ -289,11 +289,11 @@ impl PresenceManager {
 
         let from_type = format!(
             "{}:{}:{}",
-            from_actor.r#type.manufacturer, from_actor.r#type.name, from_actor.r#type.version
+            from_actor.r#type.publisher, from_actor.r#type.name, from_actor.r#type.version
         );
         let to_type = format!(
             "{}:{}:{}",
-            to_actor.r#type.manufacturer, to_actor.r#type.name, to_actor.r#type.version
+            to_actor.r#type.publisher, to_actor.r#type.name, to_actor.r#type.version
         );
 
         ActorAcl::can_discover(from_realm, to_realm, &from_type, &to_type).await
@@ -309,7 +309,7 @@ mod tests {
         ActrId {
             serial_number: serial,
             r#type: ActrType {
-                manufacturer: "test".to_string(),
+                publisher: "test".to_string(),
                 name: "test-actor".to_string(),
                 version: "1.0.0".to_string(),
             },
@@ -319,7 +319,7 @@ mod tests {
 
     fn create_test_actor_type(name: &str) -> ActrType {
         ActrType {
-            manufacturer: "test".to_string(),
+            publisher: "test".to_string(),
             name: name.to_string(),
             version: "1.0.0".to_string(),
         }

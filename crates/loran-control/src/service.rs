@@ -8,7 +8,7 @@ use actrix_proto::{
     DeleteRealmRequest, DeleteRealmResponse, GetConfigRequest, GetConfigResponse,
     GetNodeInfoRequest, GetNodeInfoResponse, GetRealmRequest, GetRealmResponse,
     ListConfigOverridesRequest, ListConfigOverridesResponse, ListRealmsRequest, ListRealmsResponse,
-    RealmInfo, RotateAisSigningKeyRequest, RotateAisSigningKeyResponse, ServiceStatus,
+    RealmInfo, RotateIssuerSigningKeyRequest, RotateIssuerSigningKeyResponse, ServiceStatus,
     SetConfigOverrideRequest, SetConfigOverrideResponse, ShutdownRequest, ShutdownResponse,
     SystemMetrics, UpdateConfigRequest, UpdateConfigResponse, UpdateRealmRequest,
     UpdateRealmResponse,
@@ -82,9 +82,9 @@ pub struct AdminApiService {
     toml_content: Option<String>,
     /// Path to config.toml on disk.
     config_path: Option<PathBuf>,
-    /// Shared AIS issuer (present when AIS is enabled on this node). The same
-    /// Arc backs the public /ais router, so rotation here affects live traffic.
-    ais_issuer: Option<Arc<ais::AIdIssuer>>,
+    /// Shared issuer (present when Issuer is enabled on this node). The same
+    /// Arc backs the public /issuer router, so rotation here affects live traffic.
+    aid_issuer: Option<Arc<issuer::AIdIssuer>>,
 }
 
 impl AdminApiService {
@@ -111,7 +111,7 @@ impl AdminApiService {
             running_config: None,
             toml_content: None,
             config_path: None,
-            ais_issuer: None,
+            aid_issuer: None,
         })
     }
 
@@ -178,11 +178,11 @@ impl AdminApiService {
         self
     }
 
-    /// Attach the shared AIS issuer so key rotation can be triggered through
-    /// the control plane. Must be the same issuer that backs the public /ais
+    /// Attach the shared issuer so key rotation can be triggered through
+    /// the control plane. Must be the same issuer that backs the public /issuer
     /// router; callers construct it once per router build.
-    pub fn with_ais_issuer(mut self, issuer: Arc<ais::AIdIssuer>) -> Self {
-        self.ais_issuer = Some(issuer);
+    pub fn with_aid_issuer(mut self, issuer: Arc<issuer::AIdIssuer>) -> Self {
+        self.aid_issuer = Some(issuer);
         self
     }
 
@@ -369,7 +369,7 @@ impl AdminApiService {
             "stun" => cfg.is_stun_enabled(),
             "turn" => cfg.is_turn_enabled(),
             "signaling" => cfg.is_signaling_enabled(),
-            "ais" => cfg.is_ais_enabled(),
+            "issuer" => cfg.is_issuer_enabled(),
             "signer" => cfg.is_signer_enabled(),
             _ => false,
         };
@@ -423,11 +423,11 @@ impl AdminApiService {
                     },
                     "dependencies": {
                         "signer": s.dependencies.signer.as_ref().map(|k| serde_json::json!({"endpoint": k.endpoint})),
-                        "ais": s.dependencies.ais.as_ref().map(|a| serde_json::json!({"endpoint": a.endpoint})),
+                        "issuer": s.dependencies.issuer.as_ref().map(|a| serde_json::json!({"endpoint": a.endpoint})),
                     }
                 })
             }),
-            "ais" => cfg.services.ais.as_ref().map(|a| {
+            "issuer" => cfg.services.issuer.as_ref().map(|a| {
                 serde_json::json!({
                     "token_ttl_secs": a.server.token_ttl_secs,
                     "signaling_heartbeat_interval_secs": a.server.signaling_heartbeat_interval_secs,
@@ -585,11 +585,11 @@ impl AdminApiService {
     }
 
     /// Query Signer keys from the SQLite database.
-    pub async fn get_signer_keys_direct(&self) -> GrpcResult<KsKeysResult> {
+    pub async fn get_signer_keys_direct(&self) -> GrpcResult<SignerKeysResult> {
         let cfg = self.require_running_config()?;
         let db_path = cfg.sqlite_path.join("signer_keys.db");
         if !db_path.exists() {
-            return Ok(KsKeysResult {
+            return Ok(SignerKeysResult {
                 keys: vec![],
                 total_count: 0,
             });
@@ -639,15 +639,15 @@ impl AdminApiService {
             })
             .collect();
 
-        Ok(KsKeysResult { keys, total_count })
+        Ok(SignerKeysResult { keys, total_count })
     }
 
     /// Cleanup expired Signer keys.
-    pub async fn cleanup_signer_keys_direct(&self) -> GrpcResult<KsCleanupResult> {
+    pub async fn cleanup_signer_keys_direct(&self) -> GrpcResult<SignerCleanupResult> {
         let cfg = self.require_running_config()?;
         let db_path = cfg.sqlite_path.join("signer_keys.db");
         if !db_path.exists() {
-            return Ok(KsCleanupResult {
+            return Ok(SignerCleanupResult {
                 deleted: 0,
                 remaining: 0,
                 tolerance_seconds: 0,
@@ -688,17 +688,17 @@ impl AdminApiService {
             .map(|r| r.0)
             .unwrap_or(0);
 
-        Ok(KsCleanupResult {
+        Ok(SignerCleanupResult {
             deleted: result.rows_affected(),
             remaining,
             tolerance_seconds: tolerance,
         })
     }
 
-    /// Query AIS keys from the SQLite database.
-    pub async fn get_ais_keys_direct(&self) -> GrpcResult<Vec<KeyInfo>> {
+    /// Query Issuer keys from the SQLite database.
+    pub async fn get_issuer_keys_direct(&self) -> GrpcResult<Vec<KeyInfo>> {
         let cfg = self.require_running_config()?;
-        let db_path = cfg.sqlite_path.join("ais_keys.db");
+        let db_path = cfg.sqlite_path.join(issuer::ISSUER_KEY_STORAGE_FILE);
         if !db_path.exists() {
             return Ok(vec![]);
         }
@@ -742,23 +742,23 @@ impl AdminApiService {
         }
     }
 
-    /// Rotate the AIS signing key through the shared issuer.
+    /// Rotate the Issuer signing key through the shared issuer.
     ///
-    /// Requires the AIS issuer to be attached via [`AdminApiService::with_ais_issuer`];
-    /// otherwise the node does not run AIS and rotation is meaningless.
-    pub async fn rotate_ais_signing_key_direct(&self) -> GrpcResult<u32> {
+    /// Requires the issuer to be attached via [`AdminApiService::with_aid_issuer`];
+    /// otherwise the node does not run Issuer and rotation is meaningless.
+    pub async fn rotate_issuer_signing_key_direct(&self) -> GrpcResult<u32> {
         let issuer = self
-            .ais_issuer
+            .aid_issuer
             .as_ref()
-            .ok_or_else(|| Status::failed_precondition("AIS is not enabled on this node"))?;
+            .ok_or_else(|| Status::failed_precondition("Issuer is not enabled on this node"))?;
 
-        platform::recording::info!("AIS signing key rotation requested via control plane");
+        platform::recording::info!("Issuer signing key rotation requested via control plane");
         let new_key_id = issuer
             .rotate_key()
             .await
-            .map_err(|e| Status::internal(format!("AIS key rotation failed: {e}")))?;
+            .map_err(|e| Status::internal(format!("Issuer key rotation failed: {e}")))?;
         platform::recording::info!(
-            "AIS signing key rotation completed, new key_id: {}",
+            "Issuer signing key rotation completed, new key_id: {}",
             new_key_id
         );
         Ok(new_key_id)
@@ -1200,7 +1200,7 @@ pub struct ConfigFileContent {
     pub path: String,
 }
 
-/// Key info (shared by Signer and AIS).
+/// Key info (shared by Signer and Issuer).
 #[derive(Debug, Clone, Serialize)]
 pub struct KeyInfo {
     pub key_id: i64,
@@ -1227,14 +1227,14 @@ pub struct RealmSecretRotationResult {
 
 /// Signer keys query result.
 #[derive(Debug, Clone, Serialize)]
-pub struct KsKeysResult {
+pub struct SignerKeysResult {
     pub keys: Vec<KeyInfo>,
     pub total_count: i64,
 }
 
 /// Signer cleanup result.
 #[derive(Debug, Clone, Serialize)]
-pub struct KsCleanupResult {
+pub struct SignerCleanupResult {
     pub deleted: u64,
     pub remaining: i64,
     pub tolerance_seconds: u64,
@@ -1246,7 +1246,7 @@ fn service_name_to_type_id(name: &str) -> Option<i32> {
         "stun" => Some(1),
         "turn" => Some(2),
         "signaling" => Some(3),
-        "ais" => Some(4),
+        "issuer" => Some(4),
         "signer" => Some(5),
         _ => None,
     }
@@ -1577,14 +1577,14 @@ impl NodeAdminService for AdminApiService {
         }
     }
 
-    async fn rotate_ais_signing_key(
+    async fn rotate_issuer_signing_key(
         &self,
-        _request: Request<RotateAisSigningKeyRequest>,
-    ) -> GrpcResult<Response<RotateAisSigningKeyResponse>> {
-        self.rotate_ais_signing_key_direct()
+        _request: Request<RotateIssuerSigningKeyRequest>,
+    ) -> GrpcResult<Response<RotateIssuerSigningKeyResponse>> {
+        self.rotate_issuer_signing_key_direct()
             .await
             .map(|new_key_id| {
-                Response::new(RotateAisSigningKeyResponse {
+                Response::new(RotateIssuerSigningKeyResponse {
                     success: true,
                     error_message: None,
                     new_key_id: Some(new_key_id),
@@ -1598,7 +1598,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn rotate_ais_signing_key_without_issuer_fails_precondition() {
+    async fn rotate_issuer_signing_key_without_issuer_fails_precondition() {
         let service = AdminApiService::new(
             "node-1",
             "node-1",
@@ -1609,7 +1609,7 @@ mod tests {
         .expect("create admin api service");
 
         let status = service
-            .rotate_ais_signing_key_direct()
+            .rotate_issuer_signing_key_direct()
             .await
             .expect_err("rotation without an attached issuer must fail");
         assert_eq!(status.code(), tonic::Code::FailedPrecondition);

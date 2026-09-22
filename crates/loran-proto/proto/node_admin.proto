@@ -29,9 +29,9 @@ service NodeAdminService {
   rpc SetConfigOverride(SetConfigOverrideRequest) returns (SetConfigOverrideResponse);
   rpc DeleteConfigOverride(DeleteConfigOverrideRequest) returns (DeleteConfigOverrideResponse);
 
-  // ------------ AIS key control ------------
-  // Rotates the AIS signing key. Requires AIS to be enabled on this node.
-  rpc RotateAisSigningKey(RotateAisSigningKeyRequest) returns (RotateAisSigningKeyResponse);
+  // ------------ Issuer key control ------------
+  // Rotates the Issuer signing key. Requires Issuer to be enabled on this node.
+  rpc RotateIssuerSigningKey(RotateIssuerSigningKeyRequest) returns (RotateIssuerSigningKeyResponse);
 }
 
 // ============================================================================
@@ -229,14 +229,14 @@ message DeleteConfigOverrideResponse {
 }
 
 // ============================================================================
-// AIS key control
+// Issuer key control
 // ============================================================================
 
-message RotateAisSigningKeyRequest {
+message RotateIssuerSigningKeyRequest {
   required NonceCredential credential = 1;  // Authentication credential
 }
 
-message RotateAisSigningKeyResponse {
+message RotateIssuerSigningKeyResponse {
   required bool success = 1;                // Operation result
   optional string error_message = 2;        // Error message on failure
   optional uint32 new_key_id = 3;           // New signing key id after rotation

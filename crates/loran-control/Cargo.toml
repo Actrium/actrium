@@ -27,7 +27,7 @@ sqlx = { workspace = true }
 
 platform = { path = "../loran-platform", package = "actrix-platform", version = "0.10.3" }
 actrix-proto = { path = "../loran-proto", version = "0.10.3" }
-actrix-ais = { path = "../loran-ais", version = "0.10.3" }
+actrix-issuer = { path = "../loran-issuer", version = "0.10.3" }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.30", features = ["signal"] }

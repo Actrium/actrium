@@ -1,6 +1,6 @@
 [package]
 name = "echo-client-app"
-manufacturer = "acme"
+publisher = "acme"
 version = "1.0.0"
 description = "Echo Client App"
 authors = ["Actr Dev Team"]

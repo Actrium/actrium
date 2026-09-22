@@ -332,13 +332,13 @@ impl MobileRtcPairHarness {
         let a_key = (
             a.realm.realm_id,
             a.serial_number,
-            a.r#type.manufacturer.as_str(),
+            a.r#type.publisher.as_str(),
             a.r#type.name.as_str(),
         );
         let b_key = (
             b.realm.realm_id,
             b.serial_number,
-            b.r#type.manufacturer.as_str(),
+            b.r#type.publisher.as_str(),
             b.r#type.name.as_str(),
         );
         // The fixture registers no explicit `webrtc_role=answer` preference,

@@ -1,6 +1,6 @@
-//! AIS signing public key cache
+//! Issuer signing public key cache
 //!
-//! Provides a local SQLite cache for the verifier, avoiding repeated retrieval of Ed25519 public keys from AIS registration responses.
+//! Provides a local SQLite cache for the verifier, avoiding repeated retrieval of Ed25519 public keys from Issuer registration responses.
 //! Cache entries are indexed by key_id, storing the corresponding Ed25519 verifying key (32 bytes) and expiration time.
 
 use crate::aid::credential::error::AidError;
@@ -13,9 +13,9 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// AIS signing public key cache manager
+/// Issuer signing public key cache manager
 ///
-/// Caches AIS Ed25519 verifying keys, indexed by key_id.
+/// Caches Issuer Ed25519 verifying keys, indexed by key_id.
 /// Used by signaling and other services to look up the corresponding public key by key_id when verifying AIdCredential.
 #[derive(Debug, Clone)]
 pub struct KeyCache {
@@ -50,7 +50,7 @@ impl KeyCache {
         cache.init_tables().await?;
 
         crate::recording::info!(
-            "AIS public key cache initialized, database: {}",
+            "Issuer public key cache initialized, database: {}",
             cache_db_file.as_ref().display()
         );
         Ok(cache)
@@ -80,7 +80,7 @@ impl KeyCache {
                 AidError::DecodeFailure(format!("failed to create key_cache index: {e}"))
             })?;
 
-        crate::recording::debug!("AIS public key cache database tables ready");
+        crate::recording::debug!("Issuer public key cache database tables ready");
         Ok(())
     }
 
@@ -104,7 +104,7 @@ impl KeyCache {
             .await
             .map_err(|e| {
                 crate::recording::error!(
-                    "Failed to query AIS public key cache: key_id={}, {}",
+                    "Failed to query Issuer public key cache: key_id={}, {}",
                     key_id,
                     e
                 );
@@ -123,7 +123,7 @@ impl KeyCache {
                 // Cache entry expired, delete and return None
                 if expires_at > 0 && (expires_at as u64) <= now {
                     crate::recording::debug!(
-                        "AIS public key cache expired, deleting: key_id={}",
+                        "Issuer public key cache expired, deleting: key_id={}",
                         key_id
                     );
                     let _ = sqlx::query("DELETE FROM key_cache WHERE key_id = ?1")
@@ -149,11 +149,11 @@ impl KeyCache {
                     AidError::DecodeFailure(format!("invalid Ed25519 verifying key: {e}"))
                 })?;
 
-                crate::recording::debug!("AIS public key cache hit: key_id={}", key_id);
+                crate::recording::debug!("Issuer public key cache hit: key_id={}", key_id);
                 Ok(Some((verifying_key, expires_at as u64)))
             }
             None => {
-                crate::recording::debug!("AIS public key cache miss: key_id={}", key_id);
+                crate::recording::debug!("Issuer public key cache miss: key_id={}", key_id);
                 Ok(None)
             }
         }
@@ -187,7 +187,7 @@ impl KeyCache {
         .map_err(|e| AidError::DecodeFailure(format!("failed to write key cache: {e}")))?;
 
         crate::recording::debug!(
-            "AIS public key written to cache: key_id={}, expires_at={}",
+            "Issuer public key written to cache: key_id={}, expires_at={}",
             key_id,
             expires_at
         );
@@ -210,7 +210,7 @@ impl KeyCache {
         let deleted = result.rows_affected() as u32;
         if deleted > 0 {
             crate::recording::info!(
-                "AIS public key cache: cleaned up {} expired records",
+                "Issuer public key cache: cleaned up {} expired records",
                 deleted
             );
         }
@@ -244,14 +244,14 @@ impl KeyCache {
         };
 
         if should_cleanup {
-            crate::recording::debug!("Triggering scheduled AIS public key cache cleanup");
+            crate::recording::debug!("Triggering scheduled Issuer public key cache cleanup");
             match self.cleanup_expired_keys().await {
                 Ok(n) if n > 0 => crate::recording::info!(
-                    "AIS public key cache cleanup complete, deleted {} entries",
+                    "Issuer public key cache cleanup complete, deleted {} entries",
                     n
                 ),
                 Ok(_) => {}
-                Err(e) => crate::recording::error!("AIS public key cache cleanup failed: {}", e),
+                Err(e) => crate::recording::error!("Issuer public key cache cleanup failed: {}", e),
             }
             let mut last = self.last_cleanup_time.lock().unwrap();
             *last = now;

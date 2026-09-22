@@ -184,15 +184,15 @@ fn write_actr_toml_local_only(root: &Path) {
         r#"edition = 1
 [package]
 name = "LocalService"
-manufacturer = "acme"
+publisher = "acme"
 version="0.0.1"
 [dependencies]
 
 [system.signaling]
 url = "wss://localhost:8080"
 
-[system.ais_endpoint]
-url = "https://localhost:8080/ais"
+[system.issuer_endpoint]
+url = "https://localhost:8080/issuer"
 
 [system.deployment]
 realm_id = 1
@@ -207,7 +207,7 @@ fn write_actr_toml_with_remote(root: &Path) {
         r#"edition = 1
 [package]
 name = "RemoteApp"
-manufacturer = "acme"
+publisher = "acme"
 version="0.0.1"
 [dependencies]
 echo-service = { actr_type = "acme:EchoService:0.0.1" }
@@ -215,8 +215,8 @@ echo-service = { actr_type = "acme:EchoService:0.0.1" }
 [system.signaling]
 url = "wss://localhost:8080"
 
-[system.ais_endpoint]
-url = "https://localhost:8080/ais"
+[system.issuer_endpoint]
+url = "https://localhost:8080/issuer"
 
 [system.deployment]
 realm_id = 1
@@ -231,7 +231,7 @@ fn write_actr_toml_both(root: &Path) {
         r#"edition = 1
 [package]
 name = "BothService"
-manufacturer = "acme"
+publisher = "acme"
 version = "0.0.1"
 [dependencies]
 echo-service = { actr_type = "acme:EchoService:0.0.1" }
@@ -239,8 +239,8 @@ echo-service = { actr_type = "acme:EchoService:0.0.1" }
 [system.signaling]
 url = "wss://localhost:8080"
 
-[system.ais_endpoint]
-url = "https://localhost:8080/ais"
+[system.issuer_endpoint]
+url = "https://localhost:8080/issuer"
 
 [system.deployment]
 realm_id = 1
@@ -255,7 +255,7 @@ fn write_actr_toml_both_with_two_remotes(root: &Path) {
         r#"edition = 1
 [package]
 name = "BothTwoRemotesService"
-manufacturer = "acme"
+publisher = "acme"
 version="0.0.1"
 [dependencies]
 echo-service = { actr_type = "acme:EchoService:0.0.1" }
@@ -264,8 +264,8 @@ profile-service = { actr_type = "acme:ProfileService:0.0.1" }
 [system.signaling]
 url = "wss://localhost:8080"
 
-[system.ais_endpoint]
-url = "https://localhost:8080/ais"
+[system.issuer_endpoint]
+url = "https://localhost:8080/issuer"
 
 [system.deployment]
 realm_id = 1

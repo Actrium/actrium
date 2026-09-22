@@ -10,7 +10,7 @@ RPS/P99/内存数字已删除，避免把愿望写成证据。
 - SQLite journal/synchronous 配置与数据规模；
 - Signaling 并发连接、消息大小和发送率；
 - TURN allocation、permission、relay bandwidth 和端口范围；
-- AIS 注册/renewal 与 Signer 操作比例；
+- Issuer 注册/renewal 与 Signer 操作比例；
 - P50/P95/P99、错误率、资源峰值和持续时间；
 - 限流、连接洪泛、畸形流量和恢复后的行为。
 

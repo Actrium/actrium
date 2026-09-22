@@ -48,11 +48,11 @@ readonly ACTRIX_CRATES=(
   "actrix-signer"
   "actrix-platform"
   "actrix-admin"
-  "actrix-mfr"
+  "actrix-publisher-registry"
   "actrix-signaling"
   "actrix-stun"
   "actrix-turn"
-  "actrix-ais"
+  "actrix-issuer"
   "actrix-sdk"
   "actrix"
 )
@@ -1057,11 +1057,11 @@ package_files = [
     repo / "crates/loran-signer/Cargo.toml",
     repo / "crates/loran-platform/Cargo.toml",
     repo / "crates/loran-control/Cargo.toml",
-    repo / "crates/loran-mfr/Cargo.toml",
+    repo / "crates/loran-publisher-registry/Cargo.toml",
     repo / "crates/loran-signaling/Cargo.toml",
     repo / "crates/loran-stun/Cargo.toml",
     repo / "crates/loran-turn/Cargo.toml",
-    repo / "crates/loran-ais/Cargo.toml",
+    repo / "crates/loran-issuer/Cargo.toml",
     repo / "crates/loran-sdk/Cargo.toml",
     repo / "crates/loran-server/Cargo.toml",
     repo / "packages/actr-typescript/Cargo.toml",
@@ -1839,11 +1839,11 @@ stage_release_version_files() {
     crates/loran-signer/Cargo.toml \
     crates/loran-platform/Cargo.toml \
     crates/loran-control/Cargo.toml \
-    crates/loran-mfr/Cargo.toml \
+    crates/loran-publisher-registry/Cargo.toml \
     crates/loran-signaling/Cargo.toml \
     crates/loran-stun/Cargo.toml \
     crates/loran-turn/Cargo.toml \
-    crates/loran-ais/Cargo.toml \
+    crates/loran-issuer/Cargo.toml \
     crates/loran-sdk/Cargo.toml \
     crates/loran-server/Cargo.toml \
     tools/actr/protoc-gen/swift/Sources/framework-codegen-swift/main.swift \

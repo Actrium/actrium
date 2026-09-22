@@ -30,9 +30,9 @@ turn_secret = "e2e-turn-secret-0123456789abcdef"
 
 [services.signer]
 
-[services.ais]
+[services.issuer]
 
-[services.ais.server]
+[services.issuer.server]
 renewal_token_secret = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 worker_id = 0
 

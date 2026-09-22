@@ -31,7 +31,7 @@ use super::address::{LocalAddressProvider, LocalAddressResolver};
 use super::event_handler::WebRtcEventHandler;
 use super::runtime::RtcRuntimeConfig;
 
-/// Supplies the latest AIS-issued TURN credential when a fresh
+/// Supplies the latest issuer-issued TURN credential when a fresh
 /// `PeerConnection` configuration is materialized.
 ///
 /// The URL/policy configuration is process-stable, while the HMAC TURN
@@ -141,7 +141,7 @@ impl PeerConnectionFactory {
         self
     }
 
-    /// Read AIS-issued TURN credentials at build time instead of freezing the
+    /// Read issuer-issued TURN credentials at build time instead of freezing the
     /// credential that happened to exist when the node started.
     pub(crate) fn with_turn_credential_provider(
         mut self,
@@ -161,7 +161,7 @@ impl PeerConnectionFactory {
 
     /// Materialize the complete configuration for a new generation.
     ///
-    /// TURN URLs from `actr.toml` intentionally carry no static password: AIS
+    /// TURN URLs from `actr.toml` intentionally carry no static password: Issuer
     /// returns a time-limited HMAC credential during registration/renewal. The
     /// v0.20 builder validates TURN credentials synchronously, so an empty
     /// username/password must be rejected here with the native typed error
@@ -368,7 +368,7 @@ mod tests {
             realm: actr_protocol::Realm { realm_id: 1 },
             serial_number,
             r#type: actr_protocol::ActrType {
-                manufacturer: "acme".to_string(),
+                publisher: "acme".to_string(),
                 name: "node".to_string(),
                 version: "1.0.0".to_string(),
             },
@@ -434,7 +434,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn current_ais_turn_credential_is_injected_for_each_build() {
+    async fn current_issuer_turn_credential_is_injected_for_each_build() {
         let state = CredentialState::new(
             AIdCredential::default(),
             None,

@@ -37,7 +37,7 @@ fn test_actr_id() -> ActrId {
         realm: Realm { realm_id: 1 },
         serial_number: 1,
         r#type: ActrType {
-            manufacturer: "test".to_string(),
+            publisher: "test".to_string(),
             name: "fixture".to_string(),
             version: "0.1.0".to_string(),
         },

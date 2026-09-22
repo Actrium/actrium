@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-const ACTRIX_SCHEMA_VERSION: i64 = 1;
+const ACTRIX_SCHEMA_VERSION: i64 = 2;
 
 /// Database manager
 #[derive(Clone)]
@@ -173,7 +173,7 @@ impl Database {
         .execute(&mut *tx)
         .await?;
 
-        // Pending registration data: AIS writes, signaling reads on WS connect
+        // Pending registration data: Issuer writes, signaling reads on WS connect
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS pending_registration (
                 realm_id INTEGER NOT NULL,
@@ -227,10 +227,10 @@ impl Database {
         // NULL preserves the distinction between legacy rows and verified Linked registrations.
         add_column_if_missing(&mut tx, "issued_actor_identity", "auth_mode", "INTEGER").await?;
 
-        // Publisher Registry (Manufacturer Registry) tables
+        // Publisher Registry tables
         // name is the canonical HTTPS publisher domain.
         sqlx::query(
-            "CREATE TABLE IF NOT EXISTS mfr (
+            "CREATE TABLE IF NOT EXISTS publisher (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 name         TEXT    NOT NULL UNIQUE,
                 public_key   TEXT    NOT NULL DEFAULT '',
@@ -251,9 +251,9 @@ impl Database {
 
         // HTTPS publisher descriptor challenge for identity verification.
         sqlx::query(
-            "CREATE TABLE IF NOT EXISTS mfr_challenge (
+            "CREATE TABLE IF NOT EXISTS publisher_challenge (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                mfr_id      INTEGER NOT NULL REFERENCES mfr(id),
+                publisher_id      INTEGER NOT NULL REFERENCES publisher(id),
                 token       TEXT    NOT NULL,
                 verify_url  TEXT    NOT NULL DEFAULT '',
                 expires_at  INTEGER NOT NULL,
@@ -265,10 +265,10 @@ impl Database {
         .await?;
 
         sqlx::query(
-            "CREATE TABLE IF NOT EXISTS mfr_package (
+            "CREATE TABLE IF NOT EXISTS publisher_package (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                mfr_id       INTEGER NOT NULL REFERENCES mfr(id),
-                manufacturer TEXT    NOT NULL,
+                publisher_id       INTEGER NOT NULL REFERENCES publisher(id),
+                publisher TEXT    NOT NULL,
                 name         TEXT    NOT NULL,
                 version      TEXT    NOT NULL,
                 type_str     TEXT    NOT NULL,
@@ -280,27 +280,29 @@ impl Database {
                 status       TEXT    NOT NULL DEFAULT 'active',
                 published_at INTEGER NOT NULL,
                 revoked_at   INTEGER,
-                UNIQUE(manufacturer, name, version, target)
+                UNIQUE(publisher, name, version, target)
             )",
         )
         .execute(&mut *tx)
         .await?;
 
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_mfr_package_type ON mfr_package(type_str)")
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_publisher_package_type ON publisher_package(type_str)",
+        )
+        .execute(&mut *tx)
+        .await?;
 
         sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_mfr_package_mfr ON mfr_package(mfr_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_publisher_package_publisher ON publisher_package(publisher_id, status)",
         )
         .execute(&mut *tx)
         .await?;
 
         // Publisher Registry key history: stores retired public keys for JWKS-style rotation
         sqlx::query(
-            "CREATE TABLE IF NOT EXISTS mfr_key_history (
+            "CREATE TABLE IF NOT EXISTS publisher_key_history (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                mfr_id       INTEGER NOT NULL REFERENCES mfr(id),
+                publisher_id       INTEGER NOT NULL REFERENCES publisher(id),
                 key_id       TEXT    NOT NULL,
                 public_key   TEXT    NOT NULL,
                 status       TEXT    NOT NULL DEFAULT 'retired',
@@ -311,15 +313,15 @@ impl Database {
         .execute(&mut *tx)
         .await?;
 
-        // UNIQUE so a given (mfr_id, key_id) can be archived at most once. This
+        // UNIQUE so a given (publisher_id, key_id) can be archived at most once. This
         // backs the application-layer blacklist that forbids reinstating a
         // previously used publisher key: even a code path that skipped the check
         // cannot create a second history row for the same key. Normal forward
         // rotation always archives a distinct outgoing key, so this never fires
         // on the healthy path.
         sqlx::query(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_mfr_key_history_lookup
-             ON mfr_key_history(mfr_id, key_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_publisher_key_history_lookup
+             ON publisher_key_history(publisher_id, key_id)",
         )
         .execute(&mut *tx)
         .await?;
@@ -327,9 +329,9 @@ impl Database {
         // Publish nonce table for challenge-response authentication on
         // /registry/packages/publish.
         sqlx::query(
-            "CREATE TABLE IF NOT EXISTS mfr_publish_nonce (
+            "CREATE TABLE IF NOT EXISTS publisher_publish_nonce (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                mfr_id     INTEGER NOT NULL REFERENCES mfr(id),
+                publisher_id     INTEGER NOT NULL REFERENCES publisher(id),
                 nonce      BLOB    NOT NULL UNIQUE,
                 status     TEXT    NOT NULL DEFAULT 'pending',
                 created_at INTEGER NOT NULL,
@@ -340,37 +342,37 @@ impl Database {
         .await?;
 
         sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_mfr_publish_nonce_expires
-             ON mfr_publish_nonce(expires_at)",
+            "CREATE INDEX IF NOT EXISTS idx_publisher_publish_nonce_expires
+             ON publisher_publish_nonce(expires_at)",
         )
         .execute(&mut *tx)
         .await?;
 
-        // AIS unpublished package manufacturer-proof nonce table. AIS inserts
-        // after manufacturer_auth_signature verification; the unique index is the
+        // Issuer unpublished package publisher-proof nonce table. Issuer inserts
+        // after publisher_auth_signature verification; the unique index is the
         // replay guard.
         sqlx::query(
-            "CREATE TABLE IF NOT EXISTS ais_manufacturer_auth_nonce (
+            "CREATE TABLE IF NOT EXISTS issuer_publisher_auth_nonce (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                manufacturer TEXT    NOT NULL,
+                publisher TEXT    NOT NULL,
                 key_id       TEXT    NOT NULL,
                 nonce        BLOB    NOT NULL,
                 created_at   INTEGER NOT NULL,
                 expires_at   INTEGER NOT NULL,
-                UNIQUE(manufacturer, key_id, nonce)
+                UNIQUE(publisher, key_id, nonce)
             )",
         )
         .execute(&mut *tx)
         .await?;
 
         sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_ais_manufacturer_auth_nonce_expires
-             ON ais_manufacturer_auth_nonce(expires_at)",
+            "CREATE INDEX IF NOT EXISTS idx_issuer_publisher_auth_nonce_expires
+             ON issuer_publisher_auth_nonce(expires_at)",
         )
         .execute(&mut *tx)
         .await?;
 
-        // AIS renewal token table — only stores SHA-256(token), never the raw token.
+        // Issuer renewal token table — only stores SHA-256(token), never the raw token.
         //
         // `delivered_at` marks whether the response carrying this successor token
         // was committed to the reissue response cache (same transaction). NULL
@@ -378,7 +380,7 @@ impl Database {
         // replay guard relaxes to the binding grace window for that case so the
         // client can retry. Non-NULL means the proof is fully spent.
         sqlx::query(
-            "CREATE TABLE IF NOT EXISTS ais_renewal_token (
+            "CREATE TABLE IF NOT EXISTS issuer_renewal_token (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 actor_id TEXT NOT NULL,
                 token_hash BLOB NOT NULL UNIQUE,
@@ -390,30 +392,30 @@ impl Database {
         .execute(&mut *tx)
         .await?;
 
-        add_column_if_missing(&mut tx, "ais_renewal_token", "delivered_at", "INTEGER").await?;
+        add_column_if_missing(&mut tx, "issuer_renewal_token", "delivered_at", "INTEGER").await?;
 
         sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_ais_renewal_token_actor
-             ON ais_renewal_token(actor_id)",
+            "CREATE INDEX IF NOT EXISTS idx_issuer_renewal_token_actor
+             ON issuer_renewal_token(actor_id)",
         )
         .execute(&mut *tx)
         .await?;
 
         sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_ais_renewal_token_expires
-             ON ais_renewal_token(expires_at)",
+            "CREATE INDEX IF NOT EXISTS idx_issuer_renewal_token_expires
+             ON issuer_renewal_token(expires_at)",
         )
         .execute(&mut *tx)
         .await?;
 
         // /reissue idempotent response cache. Keyed by an authenticated request hash so a lost-
         // response retry of the same attempt decrypts and replays the exact
-        // credential AIS signed on the first attempt instead of re-signing. The
+        // credential Issuer signed on the first attempt instead of re-signing. The
         // nonce consume, this cache write, and the `delivered_at` mark on the
         // successor row all commit in one BEGIN IMMEDIATE transaction, so a
         // response is either durable for replay or none of the side effects land.
         sqlx::query(
-            "CREATE TABLE IF NOT EXISTS ais_reissue_response_cache (
+            "CREATE TABLE IF NOT EXISTS issuer_reissue_response_cache (
                 nonce_hash BLOB PRIMARY KEY,
                 response_ciphertext BLOB NOT NULL,
                 expires_at INTEGER NOT NULL,
@@ -424,8 +426,8 @@ impl Database {
         .await?;
 
         sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_ais_reissue_response_cache_expires
-             ON ais_reissue_response_cache(expires_at)",
+            "CREATE INDEX IF NOT EXISTS idx_issuer_reissue_response_cache_expires
+             ON issuer_reissue_response_cache(expires_at)",
         )
         .execute(&mut *tx)
         .await?;

@@ -2,12 +2,12 @@
 //!
 //! Mirrors the bindings/* link-only registration shape (no client-guest
 //! package): construct a `Node<Init>` from a runtime config, attach a no-op
-//! workload, register with mock-actrix's AIS, then drive a single typed
+//! workload, register with mock-actrix's Issuer, then drive a single typed
 //! `EchoService.Echo` round-trip.
 //!
 //! Read by `run.sh --client rust`. Inputs:
 //!   --actr-toml <path>   runtime config (rendered from the shared template)
-//!   --service-type "<mfr>:<name>:<ver>"  triple to discover
+//!   --service-type "<publisher>:<name>:<ver>"  triple to discover
 //!   --scenario <echo|server-stream|bidi>  test scenario (default: echo)
 //!   [message]            payload to echo (defaults to "polyglot-rust")
 
@@ -182,10 +182,10 @@ fn parse_args() -> Result<DriverArgs> {
     let service_type_str = service_type.ok_or_else(|| anyhow!("missing --service-type"))?;
     let parts: Vec<&str> = service_type_str.splitn(3, ':').collect();
     if parts.len() != 3 {
-        bail!("--service-type must be 'manufacturer:name:version', got {service_type_str}");
+        bail!("--service-type must be 'publisher:name:version', got {service_type_str}");
     }
     let service_type = ActrType {
-        manufacturer: parts[0].to_string(),
+        publisher: parts[0].to_string(),
         name: parts[1].to_string(),
         version: parts[2].to_string(),
     };
@@ -444,16 +444,16 @@ async fn main() -> Result<()> {
                 args.runtime_toml.display()
             )
         })?;
-    let ais_endpoint = init.runtime_config().ais_endpoint.to_string();
+    let issuer_endpoint = init.runtime_config().issuer_endpoint.to_string();
 
     let attached = init
         .link(LinkOnlyWorkload)
         .await
         .context("failed to link no-op workload")?;
     let registered = attached
-        .register(&ais_endpoint)
+        .register(&issuer_endpoint)
         .await
-        .context("failed to register with AIS")?;
+        .context("failed to register with Issuer")?;
     let actr_ref = registered.start().await.context("failed to start node")?;
 
     info!(actor_id = ?actr_ref.actor_id(), "rust driver registered");
@@ -462,10 +462,10 @@ async fn main() -> Result<()> {
     let target_type = match args.scenario {
         Scenario::Echo => args.service_type.clone(),
         Scenario::ServerStream | Scenario::Bidi => {
-            // The stream service has the same manufacturer/version but
+            // The stream service has the same publisher/version but
             // a different name — EchoStreamService vs EchoService.
             ActrType {
-                manufacturer: args.service_type.manufacturer.clone(),
+                publisher: args.service_type.publisher.clone(),
                 name: "EchoStreamService".to_string(),
                 version: args.service_type.version.clone(),
             }

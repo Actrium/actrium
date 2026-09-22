@@ -15,8 +15,8 @@ pub use auth::{AuthService, CredentialPayload};
 pub use error::{AdminError, Result as AdminResult};
 pub use realm::realm_to_proto;
 pub use service::{
-    AdminApiService, ConfigFileContent, HealthInfo, KeyInfo, KsCleanupResult, KsKeysResult,
-    PlatformDetail, RealmSecretRotationResult, ServiceDetail,
+    AdminApiService, ConfigFileContent, HealthInfo, KeyInfo, PlatformDetail,
+    RealmSecretRotationResult, ServiceDetail, SignerCleanupResult, SignerKeysResult,
 };
 
 // Re-export commonly used proto types from actrix-proto.

@@ -94,7 +94,7 @@ export interface ActrId {
 }
 
 export interface ActrType {
-  manufacturer: string;
+  publisher: string;
   name: string;
   version: string;
 }

@@ -26,7 +26,7 @@ enum ResourceType {
   STUN = 1;
   TURN = 2;
   SIGNALING = 3;
-  AIS = 4;
+  ISSUER = 4;
   SIGNER = 5;
   PUBLISHER_REGISTRY = 6;
 }

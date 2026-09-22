@@ -8,7 +8,7 @@ use url::Url;
 /// Manifest configuration — parsed from `manifest.toml`.
 ///
 /// Carries workload package metadata, proto exports, dependencies, ACL, and scripts.
-/// Does **not** contain runtime fields like `signaling_url`, `realm`, or `ais_endpoint`
+/// Does **not** contain runtime fields like `signaling_url`, `realm`, or `issuer_endpoint`
 /// — those belong to [`RuntimeConfig`] parsed from `actr.toml`.
 #[derive(Debug, Clone)]
 pub struct ManifestConfig {
@@ -43,7 +43,7 @@ pub struct ManifestConfig {
 /// Runtime configuration — parsed from `actr.toml`.
 ///
 /// Carries all deployment and networking settings needed by the actor runtime.
-/// Required fields (`signaling_url`, `realm`, `ais_endpoint`) are **non-Option**;
+/// Required fields (`signaling_url`, `realm`, `issuer_endpoint`) are **non-Option**;
 /// the parser validates their presence before construction.
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
@@ -57,11 +57,11 @@ pub struct RuntimeConfig {
     /// Owning Realm (Security Realm)
     pub realm: Realm,
 
-    /// AIS (Actor Identity Service) HTTP endpoint
-    pub ais_endpoint: String,
+    /// Issuer HTTP endpoint
+    pub issuer_endpoint: String,
 
     // ── Optional runtime fields ──
-    /// Realm secret for AIS registration authentication
+    /// Realm secret for Issuer registration authentication
     pub realm_secret: Option<String>,
 
     /// Whether visible in service discovery
@@ -135,7 +135,7 @@ pub struct RuntimeConfig {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TrustAnchor {
-    /// Pre-shared Ed25519 public key. Accepts any manufacturer.
+    /// Pre-shared Ed25519 public key. Accepts any publisher.
     Static {
         /// Path to a JSON file containing `public_key` (base64-encoded 32-byte key).
         /// Resolved relative to the `actr.toml` directory during parsing.
@@ -146,9 +146,9 @@ pub enum TrustAnchor {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pubkey_b64: Option<String>,
     },
-    /// Look up MFR public keys from an AIS HTTP endpoint.
+    /// Look up publisher public keys from an Issuer HTTP endpoint.
     Registry {
-        /// AIS HTTP endpoint, e.g. `"http://localhost:8081/ais"`.
+        /// Issuer HTTP endpoint, e.g. `"http://localhost:8081/issuer"`.
         endpoint: String,
     },
 }
@@ -234,7 +234,7 @@ pub struct Dependency {
     /// Owning Realm
     pub realm: Realm,
 
-    /// Actor type (manufacturer:name:version)
+    /// Actor type (publisher:name:version)
     pub actr_type: Option<ActrType>,
 
     /// Strict service reference for exact fingerprint matching.
@@ -492,9 +492,9 @@ impl RuntimeConfig {
 // ============================================================================
 
 impl PackageInfo {
-    /// Get manufacturer (ActrType.manufacturer)
-    pub fn manufacturer(&self) -> &str {
-        &self.actr_type.manufacturer
+    /// Get publisher (ActrType.publisher)
+    pub fn publisher(&self) -> &str {
+        &self.actr_type.publisher
     }
 
     /// Get type name (ActrType.name)
@@ -565,7 +565,7 @@ mod tests {
             package: PackageInfo {
                 name: "test-service".to_string(),
                 actr_type: ActrType {
-                    manufacturer: "acme".to_string(),
+                    publisher: "acme".to_string(),
                     name: "test-service".to_string(),
                     version: "1.0.0".to_string(),
                 },
@@ -579,7 +579,7 @@ mod tests {
                     alias: "user-service".to_string(),
                     realm: Realm { realm_id: 1001 },
                     actr_type: Some(ActrType {
-                        manufacturer: "acme".to_string(),
+                        publisher: "acme".to_string(),
                         name: "user-service".to_string(),
                         version: "2.1.0".to_string(),
                     }),
@@ -592,7 +592,7 @@ mod tests {
                     alias: "shared-logger".to_string(),
                     realm: Realm { realm_id: 9999 },
                     actr_type: Some(ActrType {
-                        manufacturer: "common".to_string(),
+                        publisher: "common".to_string(),
                         name: "logging-service".to_string(),
                         version: "1.0.0".to_string(),
                     }),
@@ -627,7 +627,7 @@ mod tests {
             package: PackageInfo {
                 name: "test-service".to_string(),
                 actr_type: ActrType {
-                    manufacturer: "acme".to_string(),
+                    publisher: "acme".to_string(),
                     name: "test-service".to_string(),
                     version: "1.0.0".to_string(),
                 },
@@ -637,7 +637,7 @@ mod tests {
             },
             signaling_url: Url::parse("ws://localhost:8081").unwrap(),
             realm: Realm { realm_id: 1001 },
-            ais_endpoint: "http://localhost:8081/ais".to_string(),
+            issuer_endpoint: "http://localhost:8081/issuer".to_string(),
             realm_secret: None,
             visible_in_discovery: true,
             acl: None,

@@ -1,6 +1,6 @@
 [package]
 name = "allowed-greeter-client"
-manufacturer = "acme"
+publisher = "acme"
 version = "1.0.0"
 description = "Allowed Greeter Client (should pass ACL)"
 authors = ["Actr Dev Team"]

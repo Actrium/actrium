@@ -14,7 +14,7 @@ fn test_actor_id(serial: u64) -> ActrId {
         realm: Realm { realm_id: 1 },
         serial_number: serial,
         r#type: ActrType {
-            manufacturer: "test".to_string(),
+            publisher: "test".to_string(),
             name: "node".to_string(),
             version: "1.0.0".to_string(),
         },
@@ -67,7 +67,7 @@ fn past_ts() -> u64 {
         - 1
 }
 
-// --- mock SignalingClient (same as ais_key_cache tests, inlined to avoid module dependency) ---
+// --- mock SignalingClient (same as issuer_key_cache tests, inlined to avoid module dependency) ---
 
 struct NullSignaling;
 
@@ -151,7 +151,7 @@ impl crate::wire::SignalingClient for NullSignaling {
 /// Construct WsAuthContext with pre-seeded public key (key_id already in cache, no signaling needed)
 async fn make_auth_ctx(sk: &SigningKey, key_id: u32, local_actor: ActrId) -> WsAuthContext {
     let pubkey_bytes = sk.verifying_key().as_bytes().to_vec();
-    let cache = AisKeyCache::new();
+    let cache = IssuerKeyCache::new();
     cache.seed(key_id, &pubkey_bytes).await.unwrap();
 
     let local_credential = AIdCredential {
@@ -162,7 +162,7 @@ async fn make_auth_ctx(sk: &SigningKey, key_id: u32, local_actor: ActrId) -> WsA
     let cred_state = crate::lifecycle::CredentialState::new(local_credential, None, None);
 
     WsAuthContext {
-        ais_key_cache: cache,
+        issuer_key_cache: cache,
         actor_id: local_actor,
         credential_state: cred_state,
         signaling_client: Arc::new(NullSignaling),
@@ -306,14 +306,14 @@ async fn verify_credential_unknown_key_id_returns_none() {
     let sk = signing_key(8);
     let actor = test_actor_id(106);
     // `key_id=99` is not in cache, so `NullSignaling` returns an error.
-    let cache = AisKeyCache::new();
+    let cache = IssuerKeyCache::new();
     let local_credential = AIdCredential {
         key_id: 1,
         claims: bytes::Bytes::new(),
         signature: bytes::Bytes::from(vec![0u8; 64]),
     };
     let ctx = WsAuthContext {
-        ais_key_cache: cache,
+        issuer_key_cache: cache,
         actor_id: test_actor_id(999),
         credential_state: crate::lifecycle::CredentialState::new(local_credential, None, None),
         signaling_client: Arc::new(NullSignaling),

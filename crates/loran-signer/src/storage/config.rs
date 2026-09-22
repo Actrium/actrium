@@ -100,7 +100,7 @@ impl Default for PostgresConfig {
         Self {
             host: "localhost".to_string(),
             port: 5432,
-            database: "actrix_ks".to_string(),
+            database: "actrix_signer".to_string(),
             username: "actrix".to_string(),
             password: "".to_string(),
             pool_size: default_postgres_pool_size(),

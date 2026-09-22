@@ -2,7 +2,7 @@ type ActrId = {
   realm: { realmId: number };
   serialNumber: bigint;
   type: {
-    manufacturer: string;
+    publisher: string;
     name: string;
     version: string;
   };
@@ -142,7 +142,7 @@ export async function resolveDependency(
 ): Promise<ActrType> {
   record(ctxToken, 'resolveDependency');
   return {
-    manufacturer: 'test',
+    publisher: 'test',
     name: alias,
     version: '1.0.0',
   };
