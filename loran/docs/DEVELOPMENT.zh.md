@@ -1,4 +1,7 @@
-# Actrix 开发指南
+# Loran 开发指南
+
+> 下文命令与目录树中的 `actrix` 为代码中沿用的历史名（Cargo package、二进制、目录），
+> 见 [GLOSSARY](GLOSSARY.zh.md)「历史名称对照」；现行 crate 布局以 [CRATES](CRATES.zh.md) 为准。
 
 ## 快速开始
 
@@ -33,7 +36,7 @@ cargo build --release --features opentelemetry
 cargo test
 
 # 特定 crate
-cargo test -p ks
+cargo test -p actrix-signer
 cargo test -p turn
 
 # 带日志
@@ -63,12 +66,12 @@ actrix/
 │   ├── platform/               # 共享基础库（lifecycle/cfg/state/auth/events）
 │   │   ├── config/             # 配置系统
 │   │   ├── storage/            # SQLite 抽象
-│   │   └── aid/                # Actor ID 相关
+│   │   └── aid/                # ActorId 相关
 │   ├── control/                # 控制面协议实现（package: admin）
 │   ├── sdk/                    # 统一导出门面（package: actrix-sdk）
 │   └── services/               # 业务服务集合
-│       ├── ais/                # 身份服务
-│       ├── ks/                 # 密钥服务
+│       ├── issuer/             # Issuer（现 crates/loran-issuer）
+│       ├── signer/             # Issuer Signer（现 crates/loran-signer）
 │       ├── signaling/          # 信令服务
 │       ├── stun/               # STUN 服务器
 │       └── turn/               # TURN 服务器（含 LRU 认证缓存）
@@ -227,7 +230,7 @@ impl ActrixConfig {
 RUST_LOG=debug cargo run -p actrix
 
 # 特定模块
-RUST_LOG=actrix::service=debug,ks=trace cargo run -p actrix
+RUST_LOG=actrix::service=debug,actrix_signer=trace cargo run -p actrix
 
 # 仅错误
 RUST_LOG=error cargo run -p actrix

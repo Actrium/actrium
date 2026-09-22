@@ -1,4 +1,4 @@
-# Actrix Realm v1 配置
+# Loran Realm v1 配置
 
 本文描述当前实现的单 Realm、单节点、SQLite profile。目标契约下一个实例承载多个
 Realm，配置中与之相关的差异在对应小节标注，完整差异见
@@ -34,13 +34,13 @@ actrix_shared_key = "<generate-with-openssl-rand-hex-32>"
 | 0 | 1 | Signaling |
 | 1 | 2 | STUN |
 | 2 | 4 | TURN |
-| 3 | 8 | AIS |
-| 4 | 16 | Signer |
+| 3 | 8 | Issuer（配置键 `issuer`） |
+| 4 | 16 | Issuer Signer（配置键 `signer`） |
 
 `enable = 31` 是 v1 推荐 all-in-one profile。Publisher Registry 与管理面挂在
 共享 HTTP listener 上，不由该位掩码关闭。
 
-`env = "prod"` 会启用严格校验：HTTPS 证书、非占位 secret、Signer KEK 和
+`env = "prod"` 会启用严格校验：HTTPS 证书、非占位 secret、Issuer Signer KEK 和
 Argon2id 管理密码 hash 缺一不可。`location_tag` 只用于观测；v1 不用它做
 多区域路由或 HA。
 
@@ -63,7 +63,7 @@ advertised_port = 3478
 ```
 
 HTTP 与 ICE 端口均可配置，并会精确出现在 Realm descriptor 中（目标契约：出现在
-待签 Realm Profile 的 provider 端点中）。防火墙必须放行
+待签 Realm Profile 的 Realm Provider 端点中）。防火墙必须放行
 HTTP/TCP、ICE/UDP 以及 TURN relay port range。`advertised_ip` 必须是客户端可达
 地址，不能用监听通配地址代替。
 
@@ -79,12 +79,12 @@ turn_secret = "<generate-with-openssl-rand-base64-48>"
 `[turn].realm` 是 TURN 长期凭据算法中的认证域字符串（TURN REALM），与 Actr Realm
 不是一回事，不随 Actr Realm 数量变化。
 
-`turn_secret` 同时供 AIS 签发和 TURN 验证时效凭证，必须按 provider 独立、稳定保存。
-目标契约下它作为 provider 主密钥，每个 Actr Realm 的 TURN secret 由它按 Realm 引用
-与 provider ID 经 HKDF 派生，不在配置中逐个声明。直接替换会使尚未过期的 TURN credential 失效，因此轮换必须作为显式
+`turn_secret` 同时供 Issuer 签发和 TURN 验证时效凭证，必须按 Realm Provider 独立、稳定保存。
+目标契约下它作为 Realm Provider 主密钥，每个 Actr Realm 的 TURN secret 由它按 Realm 名
+与 Realm Provider ID 经 HKDF 派生，不在配置中逐个声明。直接替换会使尚未过期的 TURN credential 失效，因此轮换必须作为显式
 维护操作。relay range 不得包含特权端口，起始值不得大于结束值。
 
-## Signer
+## Issuer Signer
 
 ```toml
 [services.signer]
@@ -100,15 +100,15 @@ key_ttl_seconds = 3600
 
 首版推荐 SQLite。生产环境必须从 `kek_file`、`kek_env` 或 `kek` 提供 KEK；
 推荐前两者。KEK 与 Realm secret、TURN secret、renewal secret 不得复用。
-Signer 可以留在 all-in-one 进程；需要更强隔离时可使用现有 TLS/mTLS gRPC
+Issuer Signer 可以留在 all-in-one 进程；需要更强隔离时可使用现有 TLS/mTLS gRPC
 客户端配置部署为独立安全边界。
 
-## AIS
+## Issuer
 
 ```toml
-[services.ais]
+[services.issuer]
 
-[services.ais.server]
+[services.issuer.server]
 worker_id = 0
 token_ttl_secs = 3600
 renewal_token_ttl_secs = 86400
@@ -116,7 +116,7 @@ renewal_rotation_window_secs = 21600
 renewal_token_secret = "<generate-with-openssl-rand-base64-48>"
 ```
 
-单节点使用固定 `worker_id`，范围是 `0..31`。未来若出现并发 issuer，必须由部署
+单节点使用固定 `worker_id`，范围是 `0..31`。未来若出现并发 Issuer，必须由部署
 系统为每个活动节点分配不同 worker ID；v1 不实现自动租约。renewal secret 的
 Base64 解码结果至少 32 字节，并须跨重启稳定，否则 Service Actor 无法保持实例身份。
 
@@ -131,8 +131,8 @@ ws_path = "/signaling"
 
 连接与消息限流均有安全默认值，可在
 `services.signaling.server.rate_limit` 下显式调整。生产修改前必须用目标连接数、
-消息大小和重连模式压测。Signaling 自动使用本地 AIS/Signer；外置依赖应配置在
-`dependencies.ais` 与 `dependencies.signer`，并使用 TLS/mTLS。
+消息大小和重连模式压测。Signaling 自动使用本地 Issuer/Issuer Signer；外置依赖应配置
+在 `dependencies.issuer` 与 `dependencies.signer`，并使用 TLS/mTLS。
 
 ## Publisher Registry
 
@@ -142,7 +142,7 @@ nonce_retain_secs = 86400
 ```
 
 该值决定已使用或过期发布 nonce 的审计保留期，不改变 nonce 的一次性语义。
-Publisher ID 是域名；registry 通过 HTTPS descriptor 验证域名控制权。
+Publisher ID 是域名；当前实现通过 HTTPS descriptor 验证域名控制权，目标契约见架构契约第 7 节。
 
 ## 管理面
 
@@ -157,14 +157,14 @@ enabled = false
 ```
 
 Admin UI 密码只接受 Argon2id PHC hash，明文密码字段不存在。当前实现推荐只启用 Admin
-UI，由系统管理员 provision 唯一 Realm；目标契约下 Realm 由命名空间 key 签名的请求
-创建，Admin UI 用于实例运营。`grpc_api` 是 supervisor 集成接口；启用后
+UI，由系统管理员 provision 唯一 Realm；目标契约下 Realm 由经 Realm 签名 key 持有方授权的
+Realm 管理请求创建，Admin UI 用于实例运营。`grpc_api` 是 supervisor 集成接口；启用后
 需要独立的 hex shared secret，并会改变 Realm 写入归属，不属于首版默认部署。
 
 ## Recording 与监控
 
 `recording` 支持 stderr、文件与 OTLP sink，并将 observability、audit、security、
-operations 分成独立 channel。secret、credential、Authorization、WebSocket 身份
+operations 分成独立 channel。secret、Actor credential、Authorization、WebSocket 身份
 材料不得写入普通日志。
 
 `/health` 与 `/metrics` 可用 CIDR allowlist 或 htpasswd 保护。公网生产环境不要在
@@ -178,16 +178,17 @@ Realm 不在 TOML 中声明。
 唯一约束阻止第二个 Realm；运行时不提供硬删除/替换。
 
 目标契约：一个实例承载多个 Realm，默认不限制数量；需要独占部署时可配置
-`max_realms = 1`（该字段尚未实现）。Realm 经命名空间 key 签名的创建请求与 Profile
-验证后激活，收到 retired Profile 时退役并写入 tombstone。provider ID（provider 的规范化
-DNS authority，取代当前常量 `actrix-official`）、按命名空间与按 Realm 的配额同样属于
+`max_realms = 1`（该字段尚未实现）。Realm 经持有方授权的创建请求与 Realm
+Profile 验证后激活，收到退役 Realm Profile 时退役并写入 Realm Provider tombstone。Realm
+Provider ID（Realm Provider 的规范化 DNS authority，取代当前常量）、按 Realm 域名与按
+Realm 的配额同样属于
 待实现配置。
 
 旧 SQLite 必须停机后运行：
 
 ```bash
-python3 scripts/migrate_schema_v1.py /var/lib/actrix/actrix.db --dry-run
-python3 scripts/migrate_schema_v1.py /var/lib/actrix/actrix.db
+python3 scripts/loran/migrate_schema_v1.py /var/lib/actrix/actrix.db --dry-run
+python3 scripts/loran/migrate_schema_v1.py /var/lib/actrix/actrix.db
 ```
 
 详见[架构契约](REALM_V1_ARCHITECTURE.zh.md)和

@@ -1,6 +1,6 @@
 # 13. Actro Privacy tags and diagrams are assembled
 
-> Security syntax [docs/security](../../security/README.zh.md) is the same as the first sentence. Actro How to get the model down to Tab, Front, Host and data. This chapter is changed in case of conflict without changing the current security model.
+> Security syntax [docs/security](../../security/README.zh.md) is the same as the first sentence. Actro How to get the model down to Tab, Front, Actr Host and data. This chapter is changed in case of conflict without changing the current security model.
 
 Mature:`Specified`.
 
@@ -52,7 +52,7 @@ EncGraph    = actrium/graph/v1 Normative JSON(Sorted) ActorId With a positive si
 
 Do not enter the chart: only unimplemented installed Programcommons without effective reliance Realm ActorCross Principal Actor. Cross Principal Or invalid. Actor The export is still on the starter's score. `CONTROLLED`.
 
-Not Actor Target (screen, file,Workspace, HTTPS APIYes Host Forced remittance.TLS The host name only shows that it is sent to the domain, and does not prove that the field does not leak. Target categories are not selected by the declarant: they can be presented Actr Endpoint of identity must be pressed Actor Target rating and acceptance of cross-country Principal Rule, not rewritten. HTTPS Remittances bypass rating; export maintained when category cannot be determined `UNKNOWN`. User trusts a meta-syntax term "Accepts data out of the security range". Only transfers to the end-secret. TURN No graph.
+Not Actor Target (screen, file,Workspace, HTTPS APIYes Actr Host Forced remittance.TLS The host name only shows that it is sent to the domain, and does not prove that the field does not leak. Target categories are not selected by the declarant: they can be presented Actr Endpoint of identity must be pressed Actor Target rating and acceptance of cross-country Principal Rule, not rewritten. HTTPS Remittances bypass rating; export maintained when category cannot be determined `UNKNOWN`. User trusts a meta-syntax term "Accepts data out of the security range". Only transfers to the end-secret. TURN No graph.
 
 Front The final conclusions of the nodal points are:
 
@@ -60,7 +60,7 @@ Front The final conclusions of the nodal points are:
 R_A(Front) = join(Actro Host Platform facts, Keel Guest The export facts)
 ```
 
-Host I can do it. Guest The exit that can't be done is still this. Actor The exit. It's not just a comment. Guest.
+Actr Host I can do it. Guest The exit that can't be done is still this. Actor The exit. It's not just a comment. Guest.
 
 ## 4. State change
 
@@ -79,7 +79,7 @@ Add a new node: First, you can hang the relevant side and then transmit the appl
 
 ### 5.1 WASM
 
-Judgement `CONTROLLED` At least at the same time: the product is consistent with the certified package;import enumerable; none ambient File System / socket / Process API; capacity is fully passed Host;valid declaration is Manifest ∪ Host ∪ Environmental inclusivities; each Actor Targeted maps are also evaluated; each non- Actor Remittances are recognized by strategy; evidence is not expired.
+Judgement `CONTROLLED` At least at the same time: the product is consistent with the certified package;import enumerable; none ambient File System / socket / Process API; capacity is fully passed Actr Host;valid declaration is Manifest ∪ Actr Host ∪ Environmental inclusivities; each Actor Targeted maps are also evaluated; each non- Actor Remittances are recognized by strategy; evidence is not expired.
 
 The measures are:
 
@@ -102,9 +102,9 @@ The platform remains the same:v1 WASM Green; third parties in-process Native Not
 
 ### 5.4 Actro Native Front Host
 
-We can't put the platform on the ground. Host The verdict is unknown, or all. Tab Never green.Host The conclusions are drawn from official signatures, installation integrity, version strategy and equipment certification; the same is true of yellow or red when installation cannot be verified or the version cancelled. Front Process as a whole.
+We can't put the platform on the ground. Actr Host The verdict is unknown, or all. Tab Never green.Host The conclusions are drawn from official signatures, installation integrity, version strategy and equipment certification; the same is true of yellow or red when installation cannot be verified or the version cancelled. Front Process as a whole.
 
-Host Yes. Guest Issued as evidence or as a certifier `ActorAssurance`, but **issuer ≠ subject**: Host No self-signed final conclusions may be drawn.
+Actr Host Yes. Guest Issued as evidence or as a certifier `ActorAssurance`, but **issuer ≠ subject**: Actr Host No self-signed final conclusions may be drawn.
 
 ### 5.5 External HTTPS
 
@@ -136,7 +136,7 @@ From the old draft `Privacy Mark` / `GraphRoot` / `epoch` The material correspon
 | Apply Privacy Mark | `ApplicationAssurance` colour; presentation still required `Ready` |
 | privacyGraphId + epoch | `structureId` + `ApplicationStateId` |
 | GraphRoot | None.Front Positioning Only |
-| Host Auto-Sign Mark | Prohibition of final conclusions as assessed |
+| Actr Host Auto-Sign Mark | Prohibition of final conclusions as assessed |
 
 Icon (field names can be used) schema Repository version, not less semantic than the following table:
 

@@ -8,7 +8,7 @@
 
 - Actr 有精确 `ActorId` 寻址；
 - Actr 有按 `ActrType` 发现；
-- Actr 有 Realm、ACL、signaling、WebRTC、TURN；
+- Actr 有 Realm、连接 ACL、signaling、WebRTC、TURN；
 - Actr 有 Linked、NativeCdylib 和 WASM workload；
 - Actr `.actr` 已有签名、hash、资源和依赖锁；
 - Keel 已有 Host/Guest、Bridge、契约、JS sandbox 和原生组件树；
@@ -18,7 +18,7 @@
 
 1. Service ActorId 的持久身份；
 2. Publisher domain 与 package key 的正式信任链；
-3. Realm 命名空间、按实例创建的 Realm Profile 与 Provider 委派；
+3. Realm 域名与签名 key、按实例创建的 Realm Profile 与 Realm Provider 委派；
 4. Program/Service/Workspace 分离；
 5. 固定 Front Native Host 和受控 Keel Guest；
 6. `actr://` 的创建/连接事务；
@@ -65,7 +65,7 @@ flowchart LR
 - `actr://` URI schema 与测试向量；
 - Publisher Profile/Release schema；
 - Actro manifest extension schema；
-- Realm 命名空间（authority descriptor 的 `realm_namespace` 成员与 core relation `realms`，已在 Actr Authority Discovery §4.3–4.4 定义）与 Realm Profile schema；
+- Realm 签名 key（authority descriptor 的 `realm_signing_keys` 成员与 core relation `realms`，已在 Actr Authority Discovery §4.3–4.4 定义）与 Realm Profile schema；
 - persistent Actor identity lifecycle ADR；
 - Front–Service session proto；
 - ActorAssurance / ApplicationAssurance / EncGraph schema；
@@ -87,18 +87,18 @@ flowchart LR
 ### Actr 必改
 
 1. Actor长期 key 模型；
-2. ActorId 文本和 wire model 以可验证的 Realm 引用（命名空间 + 本地名）取代数值 realm_id；
+2. ActorId 文本和 wire model 改为 `<serial>.<label>@<domain>`：以可验证的 Realm 名取代数值 realm_id，并把 Actor 类型移到注册与 credential；
 3. 新建与 reclaim ActorId 两条注册路径；
 4. ActorId、renewal/identity state 持久化；
 5. hard re-auth 保持同一 ActorId；
-6. Realm 内 serial 永不复用；
+6. Realm 内 Actor serial 永不复用；
 7. current endpoint/presence 与 logical ActorId 分离；
-8. Realm 命名空间描述、命名空间 key 签名的 Realm Profile 和 issuer key discovery；
+8. Realm 签名 key、由其签名的 Realm Profile 和 Realm issuer key discovery；
 9. Actor credential 绑定 public key，并以 transcript/SDP challenge 证明私钥持有；
 10. signaling 一次性 ticket/header；
-11. Provider 委派与 failover；一个 Provider 承载多个 Realm，Realm 创建经命名空间 key 签名授权；
+11. Realm Provider 委派与 failover；一个 Realm Provider 承载多个 Realm，Realm 创建经 Realm 签名 key 签名授权；
 12. per-Realm/TURN-pool key id 与轮换；
-13. Publisher/manufacturer DNS 长度和规范化；
+13. Publisher DNS 长度和规范化；
 14. Actor store namespace 接受 instance identity；
 15. 验证者身份与签名 `ActorAssurance`；
 16. Actor spawn/call/stream/egress edge 观测；
@@ -108,7 +108,7 @@ flowchart LR
 
 - `Dest::Peer(ActrId)` 精确寻址；
 - `ActrType + fingerprint` 发现；
-- Realm default-deny ACL；
+- Realm default-deny 连接 ACL；
 - workload lifecycle hooks；
 - `.actr` verification；
 - WebRTC state/fast path。
@@ -116,10 +116,10 @@ flowchart LR
 ### 退出条件
 
 - 同一 Service 在进程重启、credential 续期、hard re-auth、signaling failover 后 ID 不变；
-- Realm 可以在同一 Provider 内替换 signaling endpoint，Realm 引用与 ActorId 不变；
+- Realm 可以在同一 Realm Provider 内替换 signaling endpoint，Realm 名与 ActorId 不变；
 - ActorId reclaim 有 key proof 和冲突保护；
 - legacy ephemeral identity 路径不会被 Actro Service 使用；
-- Host 能为实际 workload 和 Actor edge 生成可验证 evidence，恶意 Actor 不能隐藏受控调用边。
+- Actr Host 能为实际 workload 和 Actor edge 生成可验证 evidence，恶意 Actor 不能隐藏受控调用边。
 
 ## 5. P1-B：Publisher 与 package
 
@@ -139,7 +139,7 @@ flowchart LR
 
 ### Actr package 改动
 
-- manufacturer 允许规范化 Publisher domain；
+- publisher 字段允许规范化 Publisher 域名；
 - manifest 增加向后兼容的 `[actro]` section；
 - verifier 输出 typed Actro metadata；
 - binary 只允许支持 kind；
@@ -169,7 +169,7 @@ flowchart LR
 
 ### Keel
 
-- 支持 Host 从已验证 bytes 加载；
+- 支持 Actr Host 从已验证 bytes 加载；
 - fixed QuickJS provider config；
 - 实现并验证真实 Native QuickJS `JS_SetInterruptHandler`/deadline；
 - 把 per-Guest heap limit 传入 runtime，并实现可信 heap 诊断；
@@ -210,7 +210,7 @@ flowchart LR
 - exclusive writer lease；
 - stop/start/archive/trash/restore/purge；
 - snapshot/restore；
-- local 命名空间与每实例 local Realm；
+- 本机伪域名 `<installation-id>.actr.alt` 与每实例本机 Realm；
 - platform runtime adapters；
 - Service subtree privacy aggregate；
 - Actor/terminal egress evidence。
@@ -254,9 +254,9 @@ flowchart LR
 
 ### 交付物
 
-- 命名空间信任与按实例创建联网 Realm；
-- 经邀请加入实例 Realm 与 membership；
-- signaling Provider failover；
+- 域名信任与按实例创建联网 Realm；
+- 经 Realm 邀请加入实例 Realm 并取得 Realm membership；
+- signaling Realm Provider failover；
 - P2P/TURN；
 - 从自描述 ActorId 解析 portable URI Realm；
 - Actor/peer handshake；
@@ -271,7 +271,7 @@ flowchart LR
 - 无权限不能因知道 ActorId 而连接；
 - signaling 不能冒充 Actor；
 - TURN 使用短期 credential；
-- Provider failover 不换 ActorId。
+- Realm Provider failover 不换 ActorId。
 
 ## 10. P4：Hardening 与 Public Beta
 
@@ -293,11 +293,11 @@ flowchart LR
 - 网络切换；
 - 移动端 suspend/kill；
 - package cache corruption；
-- 命名空间 key 与 Realm issuer key rotation；
+- Realm 签名 key 与 Realm issuer key rotation；
 - 大规模 Tab/Service；
 - 长时间 lease；
 - 迁移/回滚；
-- 多 Host 撤销传播、混合快照拒绝和 optional dependency 隔离。
+- 多 Actr Host 撤销传播、混合快照拒绝和 optional dependency 隔离。
 
 ### 产品
 
@@ -342,12 +342,12 @@ flowchart LR
 | Service WASM 能力不足 | 高 | capability broker 与 ABI先做最小闭环 |
 | Workspace 多写损坏 | 高 | v1 exclusive writer |
 | URI Create 被滥用 | 中 | 确认、幂等、限流、配额 |
-| Realm/Provider 过度中心化 | 中 | profile 委派、多 Provider、自托管 |
+| Realm Provider 过度中心化 | 中 | Realm Profile 委派、多 Realm Provider、自托管 |
 | 包格式扩展分叉 | 中 | 直接扩展 `.actr`，不套第二层包 |
 | 多平台 Host 行为漂移 | 中 |共享 schema/golden tests，fixed sandbox |
 | Version/ActorType 升级复杂 | 中 | v1 显式新 Actor 迁移 |
 | Marketplace 被误当信任根 | 中 | UI 和协议分离身份/审核 |
-| Actor 自报不泄露或隐瞒下游 | 高 | Host 闭合有效声明并发现入边；自报只作声明；禁止自签最终结论 |
+| Actor 自报不泄露或隐瞒下游 | 高 | Actr Host 闭合有效声明并发现入边；自报只作声明；禁止自签最终结论 |
 | 隐私图动态变化导致短暂绿色误报 | 高 | 变化即挂起、未 Ready 不展示绿、世代拦住旧数据 |
 | 大图/循环造成 DoS | 中 | 无向连通分量去重、节点边上限、增量最弱项，超限不得绿 |
 | Native Capsule 平台语义漂移 | 高 | 固定 conformance profile；约束缺失即 fail closed 或保持未知 |
@@ -361,7 +361,7 @@ flowchart LR
 - Service WASM Host API 使用 WIT 的具体版本；
 - Front–Service业务 contract 从 Proto 如何生成 Keel TS schema；
 - helper process 的平台实现顺序；
-- 本地 Realm `local_name` 的自动生成格式；
+- 本机 Realm `label` 的自动生成格式；
 - snapshot envelope 的具体编码与版本协商；
 - Marketplace 透明日志供应商；
 - 企业私有 CA 的策略格式；
@@ -375,21 +375,21 @@ flowchart LR
 - 是否给 stateful Service 做 LB：否；
 - Workspace 是否由 Service 绑定：是；
 - Publisher 是否用域名：是；
-- Front Publisher 是否能写 Host：否；
+- Front Publisher 是否能写 Actr Host：否；
 - 无 service 是否创建：是；
 - 有 service 失败是否创建替代：否；
 - Marketplace 是否命名权威：否；
 - 信令是否「无实权」：否；
 - Realm 与物理信令是否一一绑定：否；
 - Realm 是否对应应用实例：是，Create 新建 Realm；
-- 一个 Provider 是否承载多个 Realm：是。
+- 一个 Realm Provider 是否承载多个 Realm：是。
 
 ## 14. 最小纵切
 
 第一个可演示纵切只做：
 
 1. macOS；
-2. local 命名空间下的本地 Realm；
+2. 本机 Realm；
 3. 一个签名 `.actr` WASM Service；
 4. 包内一个 Keel JS Guest；
 5. managed Workspace；

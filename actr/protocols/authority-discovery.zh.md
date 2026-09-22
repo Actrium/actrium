@@ -38,8 +38,8 @@ discovery document 仅适用于取得它的确切 HTTPS origin，不会自动适
 版本 1 不定义 `/.well-known/actr` 下的额外 path component，任何规范都不得为这类子路径
 赋予含义。特定于某个 Realm 或某个 publisher 的信息不通过子路径发现：descriptor 可以携带
 第 4.4、4.5 节定义的签名成员，并由 `realms` relation（第 4.3 节）定位
-[Actr Realm Profile](realm-profile.zh.md) 定义的 Realm Profile。因此一个 authority 可以
-作为多个 Realm 的命名空间。需要独立控制 discovery document 的部署应使用不同的 Actr
+[Actr Realm Profile](realm-profile.zh.md) 定义的 Realm Profile。因此一个域名可以
+命名多个 Realm。需要独立控制 discovery document 的部署应使用不同的 Actr
 authority，通常是不同的 hostname。
 
 ## 3. 请求
@@ -136,13 +136,13 @@ request 时使用的 authority 一致。redirect 不改变此绑定关系。
 | Relation | 用途 |
 | --- | --- |
 | `signaling` | 建立 Actor 连通性并交换 session negotiation 消息。 |
-| `identity` | 解析 identity、key 和 authentication metadata。在 provider 自有 Realm 命名空间中，其 `href` 也是账号登录的 OAuth 2.0 issuer（[Actr Realm Profile](realm-profile.zh.md) 第 7.3 节）。 |
+| `identity` | 解析 identity、key 和 authentication metadata。该 authority 作为 Realm Provider 时，其 `href` 也是 Realm Provider 账号登录所用的 OAuth 2.0 授权服务器标识（issuer identifier，RFC 8414）（[Actr Realm Profile](realm-profile.zh.md) 第 7.3 节）。 |
 | `discovery` | Actor 启动后，按依赖、contract 和 capability 发现可用的 Actor instance。 |
 | `ice-config` | 按 [Actr ICE Configuration](ice-configuration.zh.md) 获取 ICE server 配置，并在授权后取得短期 TURN credential。 |
 | `contracts` | 获取公开的 Actor contract 和 interface description。 |
-| `packages` | 将公开 URI Target 解析为入口 Actor Package 发布，并取得 `.actr` artifact。 |
-| `realms` | 获取该 authority 命名空间下各 Realm 的签名 Realm Profile，见 [Actr Realm Profile](realm-profile.zh.md)。protocol 值为 `actr-realm-profile/1`。 |
-| `realm-management` | 接受该 authority 作为 provider 所服务 Realm 的管理请求（`POST`），见 [Actr Realm Profile](realm-profile.zh.md) 第 8 节。protocol 值为 `actr-realm-management/1`。 |
+| `packages` | 将公开 URI Target 解析为入口 Actor Package 发布，并取得 `.actr` artifact。这是可变的部署映射；程序的哪些 release 可信，由 Publisher Profile 中签名的 `program_resolver` 决定（第 4.5 节）。 |
+| `realms` | 从存放位置获取以该域名命名的各 Realm 的签名 Realm Profile，见 [Actr Realm Profile](realm-profile.zh.md)。protocol 值为 `actr-realm-profile/1`。 |
+| `realm-management` | 接受该 authority 作为 Realm Provider 所服务 Realm 的 Realm 管理请求（`POST`），见 [Actr Realm Profile](realm-profile.zh.md) 第 8 节。protocol 值为 `actr-realm-management/1`。 |
 
 extension relation 值 **MUST** 是由扩展作者控制的 absolute URI，以避免与短 core
 relation name 冲突。
@@ -151,52 +151,52 @@ descriptor **MUST NOT** 包含 access token、password、长期 TURN credential�
 或用户专属数据。特别地，`ice-config` 只标识一个 endpoint；它不会在这份公开文档中嵌入
 私有 TURN credential。
 
-descriptor 携带 `realm_namespace` 或 `realms` 时，其 `signaling`、`identity`、`ice-config`
-link 服务于 authority 自身，至多作为创建新 Realm 时的 provider 建议，从不服务该命名空间下
-的 Realm：客户端 **MUST** 只通过已有 Realm 的有效 Profile 指定的 provider 访问该 Realm；
-Profile 取不到、无效或已退役时，**MUST NOT** 回退到这些 link。
+descriptor 的 `signaling`、`ice-config` link 服务于 authority 自身，与以该域名命名的
+Realm 无关。客户端 **MUST** 只通过 Realm 已接受 Realm Profile 指定的 Realm
+Provider 访问该 Realm；Realm Profile 取不到、无效或已退役时，**MUST NOT** 使用包括这些
+link 在内的任何其他 Realm Provider。
 
-### 4.4 `realm_namespace`
+### 4.4 `realm_signing_keys`
 
-`realm_namespace` 是可选 member。存在时，该 authority 不含端口的 DNS 名称即一个 Realm
-命名空间，写作 `dns:<host>`。带显式端口或以 IP literal 为 host 的 authority **MUST NOT**
+`realm_signing_keys` 是可选 member。存在时，该 authority 不含端口的 DNS 名称即 Realm 名
+`<label>@<host>` 中的域名。带显式端口或以 IP literal 为 host 的 authority **MUST NOT**
 携带该 member；出现时客户端 **MUST** 忽略。
 
-该 member 公布命名空间 key，即该命名空间下所有 Realm 的长期信任根：
+该 member 公布 Realm 签名 key，即以该域名命名的所有 Realm 的长期信任根：
 
 ```json
-"realm_namespace": {
+"realm_signing_keys": {
   "sequence": 3,
   "keys": [
-    { "id": "ns-2026-1", "algorithm": "Ed25519", "public_key": "<base64>", "status": "active" },
-    { "id": "ns-2025-1", "algorithm": "Ed25519", "public_key": "<base64>", "status": "retired" }
+    { "id": "rs-2026-1", "algorithm": "Ed25519", "public_key": "<base64>", "status": "active" },
+    { "id": "rs-2025-1", "algorithm": "Ed25519", "public_key": "<base64>", "status": "retired" }
   ],
   "rotations": [
-    { "from": "ns-2025-1", "to": "ns-2026-1", "sequence": 2, "signature": "<base64>" }
+    { "from": "rs-2025-1", "to": "rs-2026-1", "sequence": 2, "signature": "<base64>" }
   ],
-  "signature": { "key_id": "ns-2026-1", "algorithm": "Ed25519", "value": "<base64>" }
+  "signature": { "key_id": "rs-2026-1", "algorithm": "Ed25519", "value": "<base64>" }
 }
 ```
 
 - `sequence` 是非负整数，该 member 每次变更都递增。
-- `keys` 列出命名空间 key。每个 key 有唯一 `id`、`algorithm`（版本 1 只定义 `Ed25519`）、
+- `keys` 列出 Realm 签名 key。每个 key 有唯一 `id`、`algorithm`（版本 1 只定义 `Ed25519`）、
   base64 `public_key` 与 `status`。`active` key 用于签名；`retired` key 不再签名，但它
   此前所做的签名（如已有 Realm Profile 上的）仍然有效。由于签名不带可信时间，`retired`
   不提供安全保证；吊销 key 必须将其移除。从 `keys` 中移除某个 key 即吊销
-  它：它签过的任何内容都不再被接受，因此命名空间所有者应移除可能泄露的 key，并重签受影响
+  它：它签过的任何内容都不再被接受，因此域名所有者应移除可能泄露的 key，并重签受影响
   的 Profile。至少一个 key **MUST** 为 `active`。
-- `rotations` 是轮换链。每一项由 `from` 指向的 key 对
+- `rotations` 是 Realm 签名 key 轮换链。每一项由 `from` 指向的 key 对
   `{"from": ..., "to": ..., "public_key": ..., "sequence": ...}` 的 JCS 形式签名，
   其中 `public_key` 取自 `keys` 中 `to` 对应的 key，`sequence` 是引入它的那次 member
   `sequence`；`signature` 为该 detached 签名。
 - `signature` 是某个 `active` key 对去掉 `signature` 后的该 member 按 RFC 8785 JCS
   规范化结果所做的 detached Ed25519 签名，覆盖 `sequence`。
 
-首次接受命名空间依赖 HTTPS（Web PKI）或企业策略预置的命名空间 key pin。此后，已固定该
-命名空间的客户端或 provider 把曾接受过的每个 key 都视为已固定，并且：
+首次接受某域名的 Realm 签名 key 依赖 HTTPS（Web PKI）或企业策略预置的 key pin。此后，
+已固定该域名的客户端或 Realm Provider 把曾接受过的每个 key 都视为已固定，并且：
 
 - **MUST** 拒绝 `signature` 验证失败的 member；
-- **MUST** 忽略 `from` 不在当前 `keys` 中的轮换项；这类轮换项不使 member 无效，只有尚未
+- **MUST** 忽略 `from` 不在当前 `keys` 中的 Realm 签名 key 轮换项；这类轮换项不使 member 无效，只有尚未
   接受的 key 才需要可验证的链；
 - **MUST** 只通过从已固定 key 出发的有效轮换链接受尚未接受的 key，且每个新轮换项的
   `sequence` 高于已接受的 member `sequence`；
@@ -205,7 +205,7 @@ Profile 取不到、无效或已退役时，**MUST NOT** 回退到这些 link。
 - **MUST** 把签名 key 无法链接到已固定 key 的 member 视为身份变化：不做 `sequence`
   比较，要求用户或运营者重新确认信任，确认后以新 member 的 `sequence` 为基线。
 
-该 member **MUST NOT** 列出命名空间下的 Realm，避免从 descriptor 枚举 Realm 名。
+该 member **MUST NOT** 列出以该域名命名的 Realm，避免从 descriptor 枚举 Realm 名。
 
 ### 4.5 `publisher`
 
@@ -218,19 +218,21 @@ Publisher Profile 使用 snake_case member 名与 `"schema": "actr.publisher/v1"
 格式、key 角色与轮换规则留给 Actor Package 规范定义（第 10 节）。在 descriptor 层面：
 
 - `domain` **MUST** 等于 `authority` 的 host；
-- `program_resolver` 必填，给出程序 release 元数据的 HTTPS 基址，没有默认位置；
-- Profile 由 `active` 的 profile signing key 签名，只凭自身签名验证，与 HTTPS 通道无关；
+- `program_resolver` 必填，给出把 `publisher/program@version` 映射到 release 元数据的
+  HTTPS 基址，没有默认位置。它位于签名 Publisher Profile 内，因此决定可信 release 的发布位置；未签名
+  的 `packages` relation 只把公开 URI Target 映射到入口 Package；
+- Publisher Profile 由 `active` 的 Publisher Profile 签名 key 签名，只凭自身签名验证，与 HTTPS 通道无关；
 - HTTPS（或企业 pin）只提供域名与 publisher key 之间的首次绑定；
-- 接受首个 Profile 后，sequence 与轮换校验按 Actor Package 规范执行，不受 descriptor
+- 接受首个 Publisher Profile 后，sequence 与轮换校验按 Actor Package 规范执行，不受 descriptor
   的 HTTP 缓存语义影响。
 
-登记 publisher 的 provider 使用 `register_publisher` 请求：复用
-[Actr Realm Profile](realm-profile.zh.md) 第 8 节的 provider 管理信封，由 `active` 的
-profile signing key 签名，而不是在公开 descriptor 中放置 challenge。
+登记 publisher 的 Realm Provider 使用 `register_publisher` 请求：采用
+[Actr Realm Profile](realm-profile.zh.md) 第 8 节的 Actr 管理信封，由 `active` 的
+Publisher Profile 签名 key 签名，而不是在公开 descriptor 中放置 challenge。
 
 ### 4.6 签名部分与未签名部分
 
-descriptor 整体仍是由 HTTPS 保护、未签名的公开文档。`realm_namespace` 与 `publisher`
+descriptor 整体仍是由 HTTPS 保护、未签名的公开文档。`realm_signing_keys` 与 `publisher`
 只凭各自的签名验证；其中一个的有效签名不为任何其他 member 提供认证。第 6 节的文档大小
 上限适用于包含签名 member 在内的整个 descriptor。
 
@@ -271,7 +273,7 @@ Access-Control-Allow-Origin: *
 ## 7. 版本与兼容性
 
 兼容修订可以增加 optional member、新的 URI-valued extension relation 或澄清，而无需更改
-`version`。`realms` relation 以及 `realm_namespace`、`publisher` member 都属于这类新增：
+`version`。`realms` relation 以及 `realm_signing_keys`、`publisher` member 都属于这类新增：
 未实现它们的客户端直接忽略。若修订改变现有 member 含义，或使原本有效的 descriptor 失效，则需要新的
 descriptor version。
 
@@ -309,7 +311,7 @@ Related information: none
 - 定义各 service protocol 及其允许使用的 URI scheme；
 - 决定是否需要 service ordering、priority 或 failover metadata；
 - 在 Actor Package 规范中定义 `actr.publisher/v1` Publisher Profile 格式；
-- 为 `realm_namespace` 的轮换链 payload 定义机器可读 schema，并增加签名 test vector；
+- 为 `realm_signing_keys` 的轮换链 payload 定义机器可读 schema，并增加签名 test vector；
 - 定义受限的 Realm 创建委派 key（版本 1 不提供）；
 - 增加 interoperability fixture 和 negative test case；
 - 确立 IANA 登记使用的长期公开规范地址和项目联系人。

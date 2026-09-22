@@ -4,7 +4,7 @@ Language: **English** | [简体中文](ice-configuration.zh.md)
 
 Status: initial `actr-ice-config/1` draft.
 
-The `ice-config` service relation points to an HTTP endpoint from which a Host
+The `ice-config` service relation points to an HTTP endpoint from which an Actr Host
 obtains the STUN and TURN configuration for its authority. The public authority
 descriptor contains only this endpoint; it never embeds TURN passwords.
 
@@ -31,7 +31,7 @@ use HTTPS. A successful response conforms to
 ```
 
 An anonymous response may publish STUN URLs and TURN locations without a
-credential. A Host must authenticate through the authority's identity flow
+credential. An Actr Host must authenticate through the authority's identity flow
 before using TURN when credentials are required. Credentials returned here are
 short-lived and the response must use private, correspondingly short caching.
 
@@ -40,5 +40,5 @@ WebRTC ICE URL, transport, and local network policy. The endpoint must not issue
 credentials solely because the caller knows an `actr:` URI.
 
 Loran currently exposes its configured STUN/TURN locations at this endpoint;
-AIS registration and renewal remain the authority for Actor-bound, time-limited
+Issuer registration and renewal remain the authority for Actor-bound, time-limited
 TURN credentials.

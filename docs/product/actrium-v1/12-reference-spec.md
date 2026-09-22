@@ -10,13 +10,13 @@
 actr://notes.example/team-notes@1.4.2
 ```
 
-Create under a given namespace (creates a new Realm; without `namespace` the instance is created in the local `local` namespace):
+Create under a given domain (creates a new Realm; without `domain` the instance gets a local Realm):
 
 ```text
-actr://notes.example/team-notes@1.4.2?namespace=acme.com
+actr://notes.example/team-notes@1.4.2?domain=acme.com
 ```
 
-A Create URI does not carry a `local_name`. By default Actro generates the new Realm's `local_name` at random (a short lowercase base32 string with no program name), and the human-readable name goes into the Realm Profile's `display_name`; by default the example above yields a Realm reference such as `k7m2q9xh~dns:acme.com`. The user may explicitly choose a readable `local_name` on the confirmation page; `notes` in the Attach example below is such an explicitly chosen name.
+A Create URI does not carry a `label`. By default Actro generates the new Realm's `label` at random (a short lowercase base32 string with no program name), and the human-readable name goes into the Realm Profile's `display_name`; by default the example above yields a Realm name such as `k7m2q9xh@acme.com`. The user may explicitly choose a readable `label` on the confirmation page; `notes` in the Attach example below is such an explicitly chosen name.
 
 ### Create + Guest route
 
@@ -27,18 +27,18 @@ actr://notes.example/team-notes@1.4.2/today?filter=assigned
 ### Attach
 
 ```text
-actr://notes.example/team-notes@1.4.2/today?service=2af01%40notes~dns%3Aacme.com%2Fnotes.example%3Ateam-notes%3A1.4.2
+actr://notes.example/team-notes@1.4.2/today?service=2af01.notes%40acme.com
 ```
 
-After decoded v1 ActorId:
+The decoded v1 ActorId:
 
 ```text
-2af01@notes~dns:acme.com/notes.example:team-notes:1.4.2
+2af01.notes@acme.com
 ```
 
-Here `notes~dns:acme.com` is the Realm reference: the Realm with local name `notes` in namespace `dns:acme.com`, i.e. one application instance.
+Here `notes@acme.com` is the Realm name: the Realm with Realm label `notes` under the Realm domain `acme.com`, i.e. one application instance. The ActorId only says which Actor in which Realm; the program identity `publisher/program@version` is carried by registration and the Actor credential, not by the ActorId.
 
-The current Actr legacy form `2af01@42/notes.example:team-notes:1.4.2` lacks a Realm reference; it can only be completed by an explicit import flow and cannot be used as a portable Attach URI. The earlier draft `2af01@42~dns:team.example/...` is withdrawn.
+The current Actr legacy form `2af01@42/notes.example:team-notes:1.4.2` lacks a Realm name and embeds the program type; it can only be rewritten by an explicit import flow and cannot be used as a portable Attach URI. The earlier draft `2af01@42~dns:team.example/...` is withdrawn.
 
 ### Development
 
@@ -150,7 +150,7 @@ Release It's... `signature` Also excluded. JCS payload Outside and by Publisher 
 Indications:
 
 ```toml
-manufacturer = "notes.example"
+publisher = "notes.example"
 name = "team-notes"
 version = "1.4.2"
 signature_algorithm = "ed25519"
@@ -202,7 +202,7 @@ data_classes = ["public", "private", "secret"]
 default_unknown_action = "block-private-and-secret"
 
 [[actro.privacy.actor_egress]]
-actr_type = "notes.example:index-worker:1.4.2"
+actr_type = "notes.example/index-worker@1.4.2"
 required = false
 data_classes = ["private"]
 
@@ -328,17 +328,17 @@ Concurrent process `NativeCdylib` Do not use the profileAnd I can't judge him fo
 
 Actro This document cannot be trusted; the results of the installation must be consistent with it.
 
-## 6. Realm Namespace and Realm Profile
+## 6. Realm Signing Keys and Realm Profile
 
-### 6.1 Namespace: authority descriptor extension
+### 6.1 Realm signing keys: authority descriptor extension
 
-A DNS Realm namespace is an Actr authority. The namespace descriptor lives in that authority's descriptor:
+A domain publishes its Realm signing keys in the descriptor of that domain (the Actr authority without a port):
 
 ```text
 https://acme.com/.well-known/actr
 ```
 
-Sample (the `realm_namespace` member and the `realms` relation are defined in Actr Authority Discovery §4.3–4.4):
+Sample (the `realm_signing_keys` member and the `realms` relation are defined in Actr Authority Discovery §4.3–4.4):
 
 ```json
 {
@@ -361,17 +361,17 @@ Sample (the `realm_namespace` member and the `realms` relation are defined in Ac
       "protocol": "actr-realm-profile/1"
     }
   ],
-  "realm_namespace": {
+  "realm_signing_keys": {
     "sequence": 3,
     "keys": [
       {
-        "id": "ns-2026-1",
+        "id": "rs-2026-1",
         "algorithm": "Ed25519",
         "public_key": "<base64>",
         "status": "active"
       },
       {
-        "id": "ns-2025-1",
+        "id": "rs-2025-1",
         "algorithm": "Ed25519",
         "public_key": "<base64>",
         "status": "retired"
@@ -379,14 +379,14 @@ Sample (the `realm_namespace` member and the `realms` relation are defined in Ac
     ],
     "rotations": [
       {
-        "from": "ns-2025-1",
-        "to": "ns-2026-1",
+        "from": "rs-2025-1",
+        "to": "rs-2026-1",
         "sequence": 2,
         "signature": "<base64>"
       }
     ],
     "signature": {
-      "key_id": "ns-2026-1",
+      "key_id": "rs-2026-1",
       "algorithm": "Ed25519",
       "value": "<base64>"
     }
@@ -394,11 +394,11 @@ Sample (the `realm_namespace` member and the `realms` relation are defined in Ac
 }
 ```
 
-`realm_namespace.keys` is the long-term trust root of every Realm in the namespace; each entry in `rotations` is signed by its `from` key over the JCS form of `{from, to, public_key, sequence}`, where `sequence` is the member `sequence` that introduced it; removing a key from `keys` revokes every Profile it signed; `realm_namespace.signature` is made by an `active` key over the JCS canonical form of the member with `signature` removed, covering `sequence`. The rest of the descriptor is unsigned and does not list Realms. The signaling, ice-config and other entries in `services` are the authority's default Provider and serve only as a suggestion when creating a new Realm; a specific Realm is delegated solely by its Profile, and clients must not fall back to the default Provider when the Profile is unavailable, invalid or retired. The Provider's own descriptor (`https://provider.example/.well-known/actr`) advertises its management request endpoint with a `realm-management` link (protocol `actr-realm-management/1`).
+`realm_signing_keys.keys` is the long-term trust root of every Realm under the domain; each entry in `rotations` is signed by its `from` key over the JCS form of `{from, to, public_key, sequence}`, where `sequence` is the member `sequence` that introduced it; removing a key from `keys` revokes every Realm Profile it signed; `realm_signing_keys.signature` is made by an `active` key over the JCS canonical form of the member with `signature` removed, covering `sequence`. The rest of the descriptor is unsigned and does not list Realms. The signaling, ice-config and other entries in `services` serve the authority itself and have nothing to do with the Realms under the domain; a Realm is reached only through the Realm Provider named in its Realm Profile, and clients must not use any other Realm Provider when the Realm Profile is unavailable, invalid or retired. The Realm Provider's own descriptor (`https://provider.example/.well-known/actr`) advertises its Realm management request endpoint with a `realm-management` link (protocol `actr-realm-management/1`).
 
 ### 6.2 Realm Profile
 
-The entry point is the `realms` relation `href` plus the local name:
+The entry point is the `realms` relation `href` plus the `label`:
 
 ```text
 https://realms.provider.example/acme.com/k7m2q9xh
@@ -411,13 +411,11 @@ Sample:
   "schema": "actr.realm/v1",
   "sequence": 31,
   "realm": {
-    "namespace": "dns:acme.com",
-    "local_name": "k7m2q9xh",
+    "name": "k7m2q9xh@acme.com",
     "display_name": "Acme Notes",
     "status": "active"
   },
   "issuer": {
-    "id": "actr:realm:k7m2q9xh~dns:acme.com:authority",
     "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
     "keys": [
       {
@@ -459,30 +457,27 @@ Sample:
   },
   "issued_at": "2026-07-29T00:00:00Z",
   "signature": {
-    "key_id": "ns-2026-1",
+    "key_id": "rs-2026-1",
     "algorithm": "Ed25519",
     "value": "<base64>"
   }
 }
 ```
 
-`signature` is made by an `active` key from `realm_namespace`; the hosting location does not affect validity, and an existing Profile signed by a key that is later retired stays valid until a higher `sequence` supersedes it. Profiles do not expire; rollback protection relies only on `sequence`. `provider.id` is the Provider's normalized DNS authority and is immutable for the Realm's lifetime. Multiple signaling endpoints sharing a `control_plane_id` are replicas or failover entries of the same Provider presence/control plane, not v1 federation. Rotating issuer keys or changing endpoints within the same Provider publishes a Profile with a higher `sequence`; retirement publishes a new Profile with `status` set to `retired`, which stays valid forever.
+`signature` is made by an `active` key from `realm_signing_keys`, and the Actor credential issuer is `realm.name`; the storage location does not affect validity, and an existing Realm Profile signed by a key that is later retired stays valid until a higher `sequence` supersedes it. Realm Profiles do not expire; rollback protection relies only on `sequence`. `provider.id` is the Realm Provider's normalized DNS authority and is immutable for the Realm's lifetime. Multiple signaling endpoints sharing a `control_plane_id` are replicas or failover entries of the same Realm Provider presence/control plane, not v1 federation. Rotating Realm issuer keys or changing endpoints within the same Realm Provider publishes a Realm Profile with a higher `sequence`; retirement publishes a new Realm Profile with `status` set to `retired`, which stays valid forever.
 
 ## 7. Service Inventory Record
 
 ```json
 {
-  "actorId": "2af01@notes~dns:acme.com/notes.example:team-notes:1.4.2",
+  "actorId": "2af01.notes@acme.com",
   "program": {
     "publisher": "notes.example",
     "name": "team-notes",
     "version": "1.4.2",
     "packageDigest": "sha256:..."
   },
-  "realm": {
-    "namespace": "dns:acme.com",
-    "localName": "notes"
-  },
+  "realm": "notes@acme.com",
   "workspaceId": "ws_01...",
   "runtime": {
     "placement": "local",
@@ -515,7 +510,7 @@ Other Organiser actor private key, Workspace credential or signaling/TURN token.
   },
   "capability": "host:clipboard.write",
   "scope": {
-    "serviceActorId": "2af01@notes~dns:acme.com/notes.example:team-notes:1.4.2",
+    "serviceActorId": "2af01.notes@acme.com",
     "workspaceId": "ws_01..."
   },
   "decision": "allow-while-open",
@@ -595,7 +590,8 @@ URI_VERSION_INVALID
 URI_RESERVED_DUPLICATE
 URI_ACTOR_ID_INVALID
 URI_ACTOR_TYPE_MISMATCH
-URI_NAMESPACE_INVALID
+URI_DOMAIN_INVALID
+URI_DOMAIN_NOT_ALLOWED
 URI_REALM_REQUIRED
 URI_REALM_MISMATCH
 URI_LOCAL_REALM_FOREIGN
@@ -625,16 +621,17 @@ SERVICE_IMPORT_FORBIDDEN
 ### Realm/Identity
 
 ```text
-REALM_NAMESPACE_INVALID
-REALM_NAMESPACE_UNTRUSTED
-REALM_NAMESPACE_KEY_CHANGED
+REALM_KEYS_INVALID
+REALM_DOMAIN_UNTRUSTED
+REALM_SIGNING_KEY_CHANGED
+REALM_PROFILE_UNAVAILABLE
 REALM_PROFILE_INVALID
 REALM_PROVIDER_MISMATCH
 REALM_PROFILE_ROLLBACK
 REALM_RETIRED
 REALM_LOGIN_REQUIRED
 REALM_MEMBERSHIP_REVOKED
-DEVICE_REVOKED
+CLIENT_REVOKED
 INVITE_EXPIRED
 INVITE_ALREADY_USED
 INVITE_REVOKED
@@ -823,30 +820,33 @@ closed
 
 | Terminology | Definitions |
 |---|---|
-| Actro | Actrium Program Browser and Host Platform |
+| Actro | Actrium program browser and hosting product; provides an Actr Host and more |
+| Actr Host | The host that runs Actors (as opposed to a Guest); Actro is one product that provides an Actr Host |
 | Actr | Actor Communications, identity, discovery and workload runtime Frame |
 | Keel | Sandbox dynamic raw UI It's... Host/Guest runtime |
-| Program | Publisher Program in Namespace |
+| Program | A program published by a Publisher |
 | Program Release | `publisher/program@version` Corresponding Non-Variable Packages |
-| Publisher | To regularize DNS Issuer of domain name identification |
+| Publisher | A publisher identified by a normalized DNS domain |
 | `.actr` package | Actr Signature workload packages;in Actro with Service with Keel Guest Resources |
 | Tab | User Interactive Container |
 | Front Actor | Every one. resident app Tab the short life cycle,Actro Fixed Native workload Actor |
 | Keel Guest | Publisher Only custom front-office code |
 | Primary Service | Front The only thing bound up is a status business. Actor |
 | Auxiliary Actor | By Primary Service Organization of the background Actor |
-| ActorId | Persistent, cryptographically bound, exact Actor identity carrying a Realm reference |
-| ActrType | publisher/manufacturer + name/program + version |
+| ActorId | `<serial>.<realm name>`: persistent, cryptographically bound, exact Actor identity without the program type |
+| ActrType | `publisher/program@version`, carried by registration and the Actor credential |
 | Workspace | Service Operational data held capability |
-| Realm | Logical trust and governance domain of one application instance: Actor identity, admission, ACL and Provider delegation |
-| Realm namespace | Namespace of Realms: `dns:<domain>` (an Actr authority without port) or `local:<installation-id>`; holds the namespace key |
-| Realm reference | `<local_name>~dns:<domain>` or `<local_name>~local:<installation-id>` |
-| Realm Profile | Per-Realm document signed by the namespace key, delegating issuer and Provider |
-| Provider | Shared infrastructure hosting many Realms (signaling, STUN/TURN, issuer) |
+| Realm | Logical trust and governance domain of one application instance: Actor identity, admission, connection ACL and Realm Provider delegation |
+| Realm name | `<label>@<domain>`; `domain` is a DNS domain, or `<installation-id>.actr.alt` for a local Realm |
+| Realm signing key | Key a Realm domain publishes in the descriptor's `realm_signing_keys` to sign Realm Profiles; the holder is the domain owner, who may delegate custody to a Realm Provider |
+| Realm Profile | Per-Realm document signed by a Realm signing key, delegating the Issuer and Realm Provider |
+| Realm Provider | Operator of shared infrastructure hosting many Realms (signaling, STUN/TURN, Issuer); bound at Realm creation and never changed |
+| Realm client key | The key one member's client installation uses in one Realm; separate per Realm, individually revocable |
+| Actr management envelope | Realm management request format signed by a Realm signing key (bound to `provider_id`, at most 5 minutes, nonce); reused by `register_publisher` |
 | Signaling | presence, Discovery and WebRTC Consultation and control |
 | STUN | NAT Map found |
 | TURN | P2P Controlled flow relays in unattractive times |
-| Capability | Host Explicitly granted Guest/Service The minimum capacity |
+| Capability | Actr Host Explicitly granted Guest/Service The minimum capacity |
 | Package digest | Exact Program Release The unchangeable print. |
 | Attachment lease | Front Use Service Short term conference lease |
 | Marketplace | Program detection, audit and cancellation of information services, no Publisher Name Authority |
@@ -854,7 +854,7 @@ closed
 | ActorAssurance | The certifier is accurate. `ActorStateId` and the prohibition of self-signatures |
 | ApplicationAssurance | Convergence of current readiness |
 | Ready | Quick-scenes current and all members ACTIVE;presupposing colours |
-| Native Capsule | In independence OS sandbox Running, open only Host brokered IPC It's... Native workload |
+| Native Capsule | A Native workload running in its own OS sandbox that exposes only Actr Host brokered IPC |
 
 ## 13. Norms and practice references
 

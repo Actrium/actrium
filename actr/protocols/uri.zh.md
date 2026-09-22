@@ -17,7 +17,7 @@
 `actr:` URI 不是直接的 signaling、WebSocket、WebRTC、STUN 或 TURN 传输地址。
 authority 通过 [Actr Authority Discovery](authority-discovery.zh.md) 委派这些网络地址。
 
-本文不将 Actr realm、manufacturer、Actor type、version 或 serial number 固定在 target
+本文不将 Actr realm、publisher、Actor type、version 或 serial number 固定在 target
 reference 的特定 path 位置。target reference 保持不透明，并按
 [Actr Package Resolution](package-resolution.zh.md) 解析成一个入口 Actor Package 的发布
 引用。
@@ -71,10 +71,9 @@ authority 是 Actr 目标稳定的管理及信任边界，也是 authority disco
 origin。未写端口时，authority discovery 使用 HTTPS 默认端口；写明端口时，其 HTTPS
 origin 使用该端口。
 
-Realm 不是 URI authority 的一部分。不含端口的 DNS authority 同时可以作为 Realm 命名
-空间：域名提供全局唯一、归属可验证的名称，其下每个 Realm 是一个应用实例，由本地名标识
-（第 7.1 节）。因此一个 authority 可以作为多个 Realm 的命名空间，而自身无需运行任何 Actr
-基础设施。
+Realm 不是 URI authority 的一部分。不含端口的 DNS authority 同时可以作为 Realm 名中的
+域名：域名提供全局唯一、归属可验证的名称，其下每个 Realm 是一个应用实例，由 Realm label 标识
+（第 7.1 节）。因此一个域名可以命名多个 Realm，而自身无需运行任何 Actr 基础设施。
 
 通用 URI 语法中的 `userinfo` 在这里被禁止，因此 Actr URI 不会使用
 `actr://user@example.com/...` 这样的形式。
@@ -93,7 +92,7 @@ actr://example.com/actors/echo
 空 target reference 标识 authority 本身。非空 target reference 由该 authority 公布的
 Package service 解释，并解析成一个入口 Actor Package 的发布引用。通用 Actr URI parser
 **MUST** 保留规范化后的 segment 序列，且 **MUST NOT** 根据固定 path 位置推断 realm、
-manufacturer、version、Actor identity 或仓库文件路径。
+publisher、version、Actor identity 或仓库文件路径。
 
 target reference **MUST NOT** 解析成已经运行的 Actor instance、signaling endpoint 或当前
 会话。authority 也 **MUST NOT** 要求客户端把 target reference 直接拼接到 Package service
@@ -120,8 +119,8 @@ UTF-8，再按 RFC 3986 进行 percent-encoding。
 6. 按 Package Resolution 协议把完整 target reference 提交给该服务，并取得不可变的
    Package 发布引用；客户端不得把 target 当作 URL path 直接拼接。
 7. 从 Package service 指示的地址取得根 `.actr`，验证 Package identity、version、digest、
-   发布者签名、Workload Profile 和 Host 要求。
-8. Host 支持且本地策略允许时，安装并启动该入口 Actor；否则返回明确的 unsupported-profile、
+   发布者签名、Workload Profile 和 Actr Host 要求。
+8. Actr Host 支持且本地策略允许时，安装并启动该入口 Actor；否则返回明确的 unsupported-profile、
    capability-denied 或其他安装错误。
 9. Actor 启动后，再按 manifest、contract 和 runtime 协议发现并连接其依赖的 Actor instance。
 
@@ -171,8 +170,8 @@ IPv6 literal **SHOULD** 使用 RFC 5952 的规范文本形式。
 
 ## 7. 与 Actor Package 和 Actor instance 的关系
 
-Actr runtime 可以使用包含 Realm 引用、serial number、publisher、Actor type 和 version
-的结构化 identity。这些 identity 不是 Actr URI，也从不放入 URI authority。
+Actr runtime 以第 7.2 节的 ActorId 标识 Actor。ActorId 不是 Actr URI，也从不放入 URI
+authority。
 
 非空 target reference 只解析成一个入口 Actor Package 的发布引用。该引用至少需要最终绑定：
 
@@ -186,65 +185,76 @@ target reference 本身可以保持长期稳定，而其解析结果可以按 au
 新的版本。一次具体解析得到的 Package 发布引用必须是不可变的，以便客户端验证、缓存和
 重现安装结果。
 
-Host 使用 Package、部署配置和新分配的身份创建 Actor instance。该实例需要联系其他 Actor
+Actr Host 使用 Package、部署配置和新分配的身份创建 Actor instance。该实例需要联系其他 Actor
 时，使用 manifest 中的依赖、contract 和运行时发现协议；不会把依赖实例当成新的浏览器
 导航 Target。例如，用户打开 `actr://example.com/echo` 后，Actrium 可以取得并启动带
 `keel.guest/1` Workload 的 Echo UI；Echo UI 随后发现 Echo Server Actor，用户不需要也不应
 在地址栏打开 `actr://example.com/echo/server`。
 
-### 7.1 Realm 引用
+### 7.1 Realm 名
 
-Realm 是一个应用实例的信任与治理域，由命名空间和本地名命名：
+Realm 是一个应用实例的信任边界，其名字是某个 Realm 域名下的 Realm label：
 
 ```abnf
-realm-ref       = local-name "~" realm-namespace
-realm-namespace = "dns:" dns-name / "local:" installation-id
-local-name      = let-dig [ *61( let-dig / "-" ) let-dig ]
+realm-name      = label "@" domain
+domain          = dns-name / installation-id ".actr.alt"
+label           = let-dig [ *61( let-dig / "-" ) let-dig ]
 let-dig         = %x61-7A / DIGIT              ; 小写 a-z 与 0-9
 installation-id = 26( %x61-7A / %x32-37 )      ; 小写 base32，a-z 与 2-7
 ```
 
-- `dns-name` 按第 5 节规范化：小写 IDNA A-label，不含端口、userinfo 或 path。
-  `dns:<dns-name>` 与不含端口的 Actr authority `actr://<dns-name>` 是同一个命名空间，其
-  命名空间 key 由 [Actr Authority Discovery](authority-discovery.zh.md) 公布。带显式端口
-  或以 IP literal 为 host 的 authority 不是 Realm 命名空间。
-- `local:<installation-id>` 是某个 Actr Host 安装的命名空间。`installation-id` 按
-  [Actr Realm Profile](realm-profile.zh.md) 的规则由安装根 key 派生。本机 Realm 引用只在
-  该安装上可用。
-- `local-name` 使用 DNS label 规则：1 到 63 个字符，由小写 ASCII 字母、数字和 `-` 组成，
-  不以 `-` 开头或结尾。它在命名空间内唯一，创建后不可修改，Realm 退役后永不复用。Host
-  默认生成随机本地名（第 9 节）；可读名称需显式选择。
+- `dns-name` 按第 5 节规范化：小写 IDNA A-label，不含端口、userinfo 或 path。它与不含
+  端口的 Actr authority `actr://<dns-name>` 同名，其 Realm 签名 key 由
+  [Actr Authority Discovery](authority-discovery.zh.md) 公布。带显式端口或以 IP literal
+  为 host 的 authority 不能作为 Realm 名中的域名。
+- `<installation-id>.actr.alt` 是某个 Actr Host 安装的伪域名，位于 RFC 9476 `.alt` 后缀
+  之下，永不经 DNS 解析。`installation-id` 是安装时生成的 128 位随机数，按小写 base32
+  编码。这种本机 Realm 名只在该安装上可用（[Actr Realm Profile](realm-profile.zh.md)
+  第 2.2 节）。
+- `label` 使用 DNS label 规则：1 到 63 个字符，由小写 ASCII 字母、数字和 `-` 组成，不以
+  `-` 开头或结尾。它在所属域名内唯一，创建后不可修改，Realm 退役后永不复用。Actr Host 默认
+  生成随机 Realm label（第 9 节）；可读 label 需显式选择。
 
 示例：
 
 ```text
-k7m2q9xh~dns:acme.com                ; 默认随机本地名
-notes~dns:acme.com                   ; 显式选择的可读名称
-h3x8p2wq~local:<installation-id>
+k7m2q9xh@acme.com                                ; 默认随机 label
+notes@acme.com                                   ; 显式选择的可读 label
+h3x8p2wq@<installation-id>.actr.alt              ; 本机 Realm
 ```
 
-Realm 引用在规范化后按字符串精确比较。解析 Realm 引用是纯语法操作，没有网络副作用；
-把 DNS Realm 引用解析为经过验证的 Realm Profile 由 Actr Realm Profile 定义。
+Realm 名恰好含一个 `@`：左边是 label，右边是域名。Realm 名在规范化后按字符串精确比较。
+解析 Realm 名是纯语法操作，没有网络副作用；把 DNS 域名下的 Realm 名解析为经过验证的
+Realm Profile 由 Actr Realm Profile 定义。
 
-### 7.2 Actor identity 文本形式
+Realm 名形似电子邮件地址，但不是邮件地址。Actr Host **MUST NOT** 把它渲染为 `mailto:` 链接或
+当作邮件地址处理，应显示为实例地址。它从不出现在 `actr://` 的 authority 中（那里禁止
+userinfo，见第 3 节）。Realm 名或 ActorId 放进 URI 时是数据：承载方 **MUST** 把 `@`
+percent-encode 为 `%40`（如 `?service=2af01.k7m2q9xh%40acme.com`），解析方使用前先解码。
 
-持久 Actor identity 的文本形式为：
+### 7.2 ActorId
 
-```text
-<serial_hex>@<realm-ref>/<publisher>:<program>:<version>
+持久 Actor 身份（ActorId）的文本形式为：
+
+```abnf
+actor-id        = serial "." realm-name
+serial          = 1*( DIGIT / %x61-66 )        ; 小写十六进制
 ```
 
-例如 `2af01@k7m2q9xh~dns:acme.com/notes.example:team-notes:1.4.2`。`serial_hex` 是该 Realm
-issuer 签发的小写十六进制序列号。provider 内部的数值 realm 标识 **MUST NOT** 出现在该
-形式中。Actor identity 不是 Actr URI；在 URI 中携带时，由承载协议将其作为数据做
-percent-encoding。
+例如 `2af01.k7m2q9xh@acme.com`。`serial` 是 Actor serial：由该 Realm 的 Issuer 签发的小写十六进制序列号。
+唯一的 `@` 左边的局部部分像 DNS 名一样从具体到一般：先是 Actor，再是其 Realm label。
+解析时先在 `@` 处拆分，再在局部部分的第一个 `.` 处拆分；label 不含 `.`，因此拆分无歧义。
+去掉 `<serial>.` 即得 Realm 名。
+ActorId 只回答「哪个 Realm 里的哪个 Actor」，不包含程序身份（`publisher/program@version`），
+程序身份由 Actor 注册与 Actor credential 携带。Realm Provider 内部的数值 realm 标识
+**MUST NOT** 出现在 ActorId 中。ActorId 不是 Actr URI。
 
 ## 8. 旧 URI 迁移
 
 现有 Actr prototype 曾接受以下历史格式：
 
 ```text
-actr://<realm>:<manufacturer>+<name>@<version>
+actr://<realm>:<publisher>+<name>@<version>
 ```
 
 例如：
@@ -271,9 +281,8 @@ information，把 `1.0.0` 解释为 host。因此它不符合本规范。
 - 客户端必须对发现到的端点执行 scheme 和网络策略，以防止 downgrade 和 SSRF 攻击。
 - 显示软件应在视觉上突出 authority，并考虑国际化域名的同形异义风险。
 - 授权发生在 Package 解析、取得或安装时；仅持有 Actr URI 并不授予访问权。
-- Realm 引用与 Actor identity 在分享时会暴露 Realm 命名空间和本地名。Host 创建 Realm
-  时 **SHOULD** 默认生成随机本地名，把人类可读的名称放在 Realm Profile 的
-  `display_name` 中。
+- Realm 名与 ActorId 在分享时会暴露 Realm 域名与 Realm label。Actr Host 创建 Realm 时
+  **SHOULD** 默认生成随机 Realm label，把人类可读的名称放在 Realm Profile 的 `display_name` 中。
 
 ## 10. IANA 考虑
 
@@ -297,6 +306,7 @@ discovery。
 - [RFC 5952：A Recommendation for IPv6 Address Text Representation](https://www.rfc-editor.org/rfc/rfc5952.html)
 - [RFC 7595：Guidelines and Registration Procedures for URI Schemes](https://www.rfc-editor.org/rfc/rfc7595.html)
 - [RFC 8615：Well-Known Uniform Resource Identifiers](https://www.rfc-editor.org/rfc/rfc8615.html)
+- [RFC 9476：The .alt Special-Use Top-Level Domain](https://www.rfc-editor.org/rfc/rfc9476.html)
 
 ## 12. 待完成工作
 
@@ -304,6 +314,6 @@ discovery。
 
 - 完成 Package Resolution 的 HTTP 请求、响应和错误格式；
 - 规定私有 Package target 的授权质询；
-- 冻结携带 Realm 引用的 Actor identity 二进制编码；
+- 冻结 ActorId 的二进制编码；
 - 增加 parser、规范化、等价性及 legacy migration 测试向量；
 - 确立 IANA 登记使用的长期公开规范地址和项目联系人。

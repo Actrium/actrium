@@ -1,13 +1,13 @@
-# `/ais/reissue` 30 天过期证明宽限期 —— 威胁模型与安全评审
+# `/issuer/reissue` 30 天过期证明宽限期 —— 威胁模型与安全评审
 
 ## 背景
 
-节点通过一次性注册（`POST /ais/register`）拿到身份 `ActrId` 与一组凭证，之后靠 renewal token（续期令牌）走 `POST /ais/renew` 软续期。当续期令牌本身已经失效（例如节点长时间离线、超过续期令牌 TTL），软续期不再可用，此时的兜底路径是 `POST /ais/reissue`：**在不分配新序列号的前提下，为既有的稳定身份重新签发凭证**。
+节点通过一次性注册（`POST /issuer/register`）拿到身份 `ActrId` 与一组凭证，之后靠 renewal token（续期令牌）走 `POST /issuer/renew` 软续期。当续期令牌本身已经失效（例如节点长时间离线、超过续期令牌 TTL），软续期不再可用，此时的兜底路径是 `POST /issuer/reissue`：**在不分配新序列号的前提下，为既有的稳定身份重新签发凭证**。
 
-`/reissue` 的持有证明（possession proof）是节点最后一次拿到的 renewal token。为了让「长时间离线」的节点仍能找回自己的稳定身份，AIS 对这份证明放宽了时效：
+`/reissue` 的持有证明（possession proof）是节点最后一次拿到的 renewal token。为了让「长时间离线」的节点仍能找回自己的稳定身份，Issuer 对这份证明放宽了时效：
 
 ```
-// crates/loran-ais/src/renewal.rs
+// crates/loran-issuer/src/renewal.rs
 pub const REISSUE_BINDING_GRACE_SECS: i64 = 30 * 86_400; // 30 天
 ```
 
@@ -31,12 +31,12 @@ pub const REISSUE_BINDING_GRACE_SECS: i64 = 30 * 86_400; // 30 天
 ## 三、把风险约束在可接受范围内的边界与缓解
 
 1. **reissue 不是「只凭令牌」就能通过。** `/reissue` 仍然要求完整的注册认证（`verify_registration_identity`）：
-   - 包注册（Package）需要制造商签名证明（manufacturer proof），且原 nonce 已被首次注册消费、必须重新签名，无法重放；
+   - 包注册（Package）需要 publisher 签名证明，且原 nonce 已被首次注册消费、必须重新签名，无法重放；
    - 源关联注册（Linked）需要 realm secret。
 
    也就是说，**单靠一份泄露的旧 renewal token 不足以完成 reissue**——攻击者还必须突破注册层认证。宽限期放大的是「令牌 + 注册认证同时被攻破」这一复合条件下的时间窗口，而不是单一令牌的独立权限。
 
-2. **持有证明按序列号逐一绑定（per-actor binding）。** 证明的哈希必须匹配 AIS 为**这个确切 `ActrId`** 记录的绑定（`find_binding_token_expiry(actor_id, hash)`）。因此一份证明只能恢复它自己对应的那一个序列号，**不能**跨 actor 铸造凭证、也不能为任意序列号签发（缺失/未知/不匹配的证明一律拒绝）。这把「一次泄露」的影响面限制在单个身份，而非整个 realm 或同类型的其他 actor。
+2. **持有证明按序列号逐一绑定（per-actor binding）。** 证明的哈希必须匹配 Issuer 为**这个确切 `ActrId`** 记录的绑定（`find_binding_token_expiry(actor_id, hash)`）。因此一份证明只能恢复它自己对应的那一个序列号，**不能**跨 actor 铸造凭证、也不能为任意序列号签发（缺失/未知/不匹配的证明一律拒绝）。这把「一次泄露」的影响面限制在单个身份，而非整个 realm 或同类型的其他 actor。
 
 3. **宽限期是有界的，且到期即回收。** 超过 30 天，绑定记录被 `gc_expired_tokens` 删除，身份不再可 reissue。攻击窗口不会无限累积。
 
@@ -53,7 +53,7 @@ pub const REISSUE_BINDING_GRACE_SECS: i64 = 30 * 86_400; // 30 天
 - **残余风险：** 在「注册认证凭据 + 过期不足 30 天的 renewal token」被同时窃取的复合场景下，攻击者可在最长 30 天窗口内以该身份重新接入。这属于「凭证 + 认证双重泄露」量级的风险，其影响被逐序列号绑定限制在单个身份。
 - **建议（后续工作，非本 PR 阻塞项）：**
   1. 将宽限期做成**可配置**（按部署的安全等级调节，甚至可设为 0 关闭），而非固定 30 天硬编码；
-  2. 探索把恢复绑定到**更强的设备侧证明**（device-held key / 硬件密钥），使「仅泄露旧令牌」在任何窗口内都不足以恢复；
+  2. 探索把恢复绑定到**更强的客户端侧证明**（客户端持有的 key / 硬件密钥），使「仅泄露旧令牌」在任何窗口内都不足以恢复；
   3. 为 reissue 成功事件补充审计日志与告警，便于检测异常恢复。
 
 ## 五、签署请求

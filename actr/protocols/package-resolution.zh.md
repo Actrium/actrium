@@ -50,7 +50,7 @@ Accept: application/json
 ```
 
 `target` 必须且只能出现一次。它的值是去掉前导 `/` 的完整规范化 Target，并按 HTTP query
-value 编码。服务端将其视为不透明值，不得假设其中 segment 表示 manufacturer、version、
+value 编码。服务端将其视为不透明值，不得假设其中 segment 表示 publisher、version、
 realm、文件路径或 Actor identity。
 
 解析操作安全且幂等，服务端应提供明确的 HTTP 缓存指令。公开 Target 可以匿名解析；私有
@@ -78,10 +78,10 @@ Target 可以使用常规 HTTP 认证与授权，但秘密信息不能进入 `ac
 - `version` 是响应格式版本，本草案固定为 `1`；
 - `target` 必须与请求中解码后的完整 Target 完全一致；
 - `href` 是本次解析选中不可变 artifact 的绝对地址；
-- `media_type` 为 `application/zip`，因为 `actr-package/1` 是 ZIP container；
+- `media_type` 为 `application/zip`，因为 `actr-package/2` 是 ZIP container；
 - `sha256` 覆盖 artifact 下载响应的全部字节；
 - `size` 是预期 artifact 字节数；
-- `profile` 是可选提示，可用于提前检查 Host 兼容性，但签名后的 Package manifest 才是
+- `profile` 是可选提示，可用于提前检查 Actr Host 兼容性，但签名后的 Package manifest 才是
   权威信息。
 
 客户端必须忽略未知字段，并拒绝不支持的版本、Target 不匹配、畸形 URL、无效 digest 或
@@ -93,7 +93,7 @@ Target 可以使用常规 HTTP 认证与授权，但秘密信息不能进入 `ac
 
 客户端必须限制下载大小，验证 `size` 和 `sha256`，然后才能把字节交给 Actor Package
 verifier。传输完整性不能代替 manifest signature、publisher trust、Workload Profile、
-Host API 和 capability policy 验证。
+Actr Host API 和 capability policy 验证。
 
 Artifact URL 应采用内容寻址，因此可以使用长期 immutable cache。Loran 把选中的 digest
 写入下载 URL；如果当前配置的文件已不再匹配该 digest，下载请求会被拒绝。
@@ -108,10 +108,10 @@ Artifact URL 应采用内容寻址，因此可以使用长期 immutable cache。
 
 错误 body 不是成功的 Package Resolution document。
 
-## 7. Host 行为
+## 7. Actr Host 行为
 
-Target 成功解析不代表当前 Host 一定兼容。例如 Actrium 可以接受 `keel.guest/1`，而
-Wasmtime Host 接受 `actr.component/1`。不兼容的 Host 应报告 unsupported profile，不能把
+Target 成功解析不代表当前 Actr Host 一定兼容。例如 Actrium 可以接受 `keel.guest/1`，而
+Wasmtime Host 接受 `actr.component/1`。不兼容的 Actr Host 应报告 unsupported profile，不能把
 服务器 workload 当作可浏览页面。
 
 Echo 的预期顺序是：
@@ -133,8 +133,8 @@ Loran 的 `loran-packages` 组件负责 Target resolution 和 artifact download�
 `rel=packages` 发布，也可以把 Package service 指向另一 Loran 节点、对象存储 gateway 或
 CDN-backed implementation。
 
-MFR 继续负责 publisher identity、key、signing authority 和 publication audit。即使二者可
-部署到同一进程，MFR 也不会因此成为 artifact store。
+Publisher Registry 继续负责 publisher identity、key、signing authority 和 publication audit。即使二者可
+部署到同一进程，Publisher Registry 也不会因此成为 artifact store。
 
 ## 9. 安全考虑
 

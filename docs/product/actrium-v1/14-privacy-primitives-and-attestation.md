@@ -4,7 +4,7 @@
 
 ## 1. Objective
 
-The application of green cannot come from a single technology or a single manufacturer, but must come from a combination of verifiable and avoidable private language:
+The application of green cannot come from a single technology or a single hardware vendor, but must come from a combination of verifiable and avoidable private language:
 
 ```text
 Declaration (what do you want to allow)
@@ -23,7 +23,7 @@ This chapter answers:
 - “Actor Network-wide encryption”(a) Specific guarantees of what;
 - WASM, Native Capsule with Confidential Computing (b) Which issues are addressed separately;
 - Agent Use CPU, GPU, NPU or how to prove the operating environment when the edge is calculated;
-- Different manufacturers show how to map to be uniform. Actro claims;
+- Different hardware vendors' evidence is mapped to uniform Actro claims;
 - When the key will be released;
 - How many pieces of evidence enter? `ActorAssurance` the facts of the case (art.`CONTROLLED / UNKNOWN / UNCONTROLLED`).
 
@@ -74,9 +74,9 @@ Only not. payload It's... signaling/TURN/relay Not the data execution end. They 
 |---|---|---|---|
 | Actor Secure Channel | Internet bugging, tampering, replaying,relay | payload Decrypted only by a certified endpoint | The endpoint will not be leaked after it's confirmed. |
 | `.actr` Signature and provenance | CDN, mirror alteration, supply chain replacement | Run artifact Sources and digest | artifact There's no bad logic in itself. |
-| WASM capability sandbox | Malicious./Error workload | importsRAM BORDERS AND POSSIBLE EXPORTS | Host/kernels don't peek; recipients of exports are allowed to abuse |
+| WASM capability sandbox | Malicious./Error workload | importsRAM BORDERS AND POSSIBLE EXPORTS | Actr Host/kernels don't peek; recipients of exports are allowed to abuse |
 | Native Capsule | Third parties native workload | native Process cannot be bypassed broker Use of original resources | Zero kernel loophole; and WASM Same portable, verifiable |
-| TEE / Confidential Computing | Cloud Administrator, Host,Hypervisor Waiting for infrastructure competition | Specifies the execution of the boundary data in use Hardware quarantine. | workload It's not a spontaneous leak. |
+| TEE / Confidential Computing | Cloud administrators, host machines, hypervisors Waiting for infrastructure competition | Specifies the execution of the boundary data in use Hardware quarantine. | workload It's not a spontaneous leak. |
 | Remote Attestation | Fake operating environment, error version | Some Attester It gives an acceptable view of the state of the environment. Evidence | The state automatically meets business policy |
 | KMS / Key Broker | Unrecognized environment pre-empted | ♪ Just by ♪ appraisal , and the data key is available for the example. | After obtaining the key workload Behavior security |
 | Workspace encryption | Disk, snapshot, backup leak. | Static data cannot be read without key | The data of the run-time is not leaked after decryption |
@@ -138,7 +138,7 @@ Map:
 
 Presentation: All `CONTROLLED` and `Ready` And the tunnel works. → Green; no red and unknown → yellow; any `UNCONTROLLED` → red;cut face not ready → Do not show the colour.
 
-Not all of them. ActorAll data is mandatory. CCFor example. public Data allows in normal WASM Host (a) Run up;secret The organizational strategy for data can be requested `compute_confidentiality=pass`.
+Not all of them. ActorAll data is mandatory. CCFor example. public Data allows in normal WASM Actr Host (a) Run up;secret The organizational strategy for data can be requested `compute_confidentiality=pass`.
 
 ### 4.1 The main green mark:Application Instance Snapshot
 
@@ -186,7 +186,7 @@ package_digest = "sha256:..."
 
 [[actro.privacy_contract.actor_role]]
 role = "primary-service"
-actr_type = "notes.example:team-notes-service:1.4.2"
+actr_type = "notes.example/team-notes-service@1.4.2"
 cardinality = "1"
 required = true
 
@@ -202,7 +202,7 @@ data_classes = ["private"]
 capabilities = ["actor.call:infer.v1"]
 ```
 
-The statement is not a statement, but a statement. Host Top-level ability to deliver:
+The statement is not a statement, but a statement. Actr Host Top-level ability to deliver:
 
 ```text
 Effective Capability =
@@ -258,7 +258,7 @@ Changed structural identity or current status (and thus the old conclusion lapse
 - Actor workload/config/Host/compute/accelerator assurance Changes;
 - Add or Expand Actor edge, data class, purpose, terminal;
 - audit/log/telemetry sink, field, reading subject or retention Changes;
-- Workspace/storage/provider Changes;
+- Workspace or Workspace Provider changes;
 - capability or declassification Expansion.
 
 No changes to the structure of the map (which may still be re-evaluated because of the expiry of the evidence):
@@ -361,7 +361,7 @@ roles
 
 Current situation of the parties `ActorStateId` We must enter the union. transcript and certified in two-way: only for the field MAC Not enough to resist the old state of greeting again. [Security agreement](../../security/03-protocol.zh.md) §3 and form model F-CHAN-01One of them. `ActorStateId` The old channel cannot carry the application data after the change and must be reshocked for the new state.
 
-Actor Host It has to be proven that it is. Actor key & Temporary Sessions key. If the target runs in TEE , the temporary decryption key must be TEE internal generation, or by TEE Safely held and entered attestation Evidence/Result.
+Actor Actr Host It has to be proven that it is. Actor key & Temporary Sessions key. If the target runs in TEE , the temporary decryption key must be TEE internal generation, or by TEE Safely held and entered attestation Evidence/Result.
 
 ### 6.3 Data Face
 
@@ -409,7 +409,7 @@ CC The goal is to protect data in use, which makes code and data hardware-suppor
 Its main value is to remove or diminish the powers of the following subjects from the privacy and trust borders:
 
 - Cloud Platform Administrator;
-- Host OS / Hypervisor;
+- Actr Host OS / Hypervisor;
 - Co-permit Other VM(a) The container or process;
 - Some physical and equipment attackers.
 
@@ -430,11 +430,11 @@ workload_confinement = pass
 egress_closure = pass
 ```
 
-I am not a writer.WASM The lockdown doesn't prove that the cloudkeeper can't read normal. Host Memory.
+I am not a writer.WASM The lockdown doesn't prove that the cloudkeeper can't read normal. Actr Host Memory.
 
 ### 7.3 Canonical Compute Claims
 
-Different. TEE/CC backend Must map to unified claims, not expose a manufacturer's boolean value:
+Different. TEE/CC backend Must map to unified claims, not expose a hardware vendor's boolean value:
 
 ```json
 {
@@ -470,9 +470,9 @@ Actro Use of standard remote proof of role:
 
 | Role | Actro Entities in | Duties |
 |---|---|---|
-| Attester | Host TEEequipment, equipment,GPU/NPUTrustable launcher | Generates about Target Environment It's... Evidence |
+| Attester | Actr Host TEEequipment, equipment,GPU/NPUTrustable launcher | Generates about Target Environment It's... Evidence |
 | Verifier | Realm/Organizations/Locally. Verifier with vendor adapter | Validation of signatures, chain of certificates, values measured, reference values, withdrawals and freshness |
-| Relying Party | Data release Actor Host, Privacy Agent, Key Broker | Based on Attestation Result and local policy - Make a decision on the authorization. |
+| Relying Party | Data release Actor Actr Host, Privacy Agent, Key Broker | Based on Attestation Result and local policy - Make a decision on the authorization. |
 
 A strict distinction is required:
 
@@ -553,7 +553,7 @@ private/secret Data recommended for adoption:
 9. Result Due,TCB Withdrawal or withdrawal graph When change re-attest/rekey
 ```
 
-It didn't pass. appraisal , the key cannot be released to normal first. Host, again Host Forward TEE.
+It didn't pass. appraisal , the key cannot be released to normal first. Actr Host, again Actr Host Forward TEE.
 
 ## 10. GPU, NPU And the isomeric force.
 
@@ -596,7 +596,7 @@ The blogger says that the government is not a party to the law, but that it is n
 }
 ```
 
-If accelerator No equipment level certification, or CPU→The equipment will be transferred in normal. Host/Driver-exposure express:
+If accelerator No equipment level certification, or CPU→The equipment will be transferred in normal. Actr Host/Driver-exposure express:
 
 ```text
 compute_confidentiality = indeterminate
@@ -626,7 +626,7 @@ Every one. adapter It is important to state that:
 - Test vector and negative test;
 - adapter Sign, version and undo.
 
-The manufacturer's publicity material can only be used to detect capabilityIt can't be. `CONTROLLED` basis. Only when all the public or organizationally validated authentication interfaces, reference values, certificate chains and repetitious negative testing are available production profile.
+A hardware vendor's marketing material can only be used to detect capabilityIt can't be. `CONTROLLED` basis. Only when all the public or organizationally validated authentication interfaces, reference values, certificate chains and repetitious negative testing are available production profile.
 
 ## 11. Workspace With static data
 
@@ -673,19 +673,19 @@ operator_visibility = "authorized-security-admin"
 encrypted = true
 ```
 
-Host It has to be a log. capabilityfields schema, target, encryption, retention period, reading the subject and exporting behavior into the private map. payload, prompt, Workspace Content, model input output or stable user identifiers must be genuine data class Re-evaluate, not all.“Audit”Go around the strategy.
+Actr Host It has to be a log. capabilityfields schema, target, encryption, retention period, reading the subject and exporting behavior into the private map. payload, prompt, Workspace Content, model input output or stable user identifiers must be genuine data class Re-evaluate, not all.“Audit”Go around the strategy.
 
 Attestation Could not close temporary folder: %s workload/Environment,Host broker It can be proved that only statements are issued. audit capability; it can't just be based on“The server has an audit log.”Proves that the server has no other hidden records.
 
 - WASM/Native confinement It proves that it didn't go around. broker (b) Other log exports;
-- CC Prove it. Host/Cloud managers cannot read and record their memory outside the border;
+- CC Prove it. Actr Host/Cloud managers cannot read and record their memory outside the border;
 - audit sink Their own storage, administrator and exporter continue to be closed node or Certified Privacy Domain;
-- Undeclared logs,Host Class specified or unproven retention And make the facts `UNKNOWN` or `UNCONTROLLED`.
+- Undeclared logs,Actr Host Class specified or unproven retention And make the facts `UNKNOWN` or `UNCONTROLLED`.
 
 Yeah. LLM Server and GPU/NPU In particular, a distinction is made between:
 
 - accelerator Attestation Usually prove the identity of the equipment, the solid,CC mode - state of equipment, not automatically certifying the upper layer LLM Server No, I didn't. prompt/response Writing logs;
-- If the log is accessed through a controlled file, object storage, network or Actor capability The government is not going to be able to get out of the border.Host We must observe. audit edge;
+- If logs leave the attested boundary through a controlled file, object storage, the network or an Actor capability, the Actr Host must observe an audit edge;
 - If log logic is measured workload The government is not a party to the law.workload/config digest It's a proof.“Which log code and configuration is running”But it's still closed. egress And trust. Verifier The blogger says that the government is not in a position to prove that there are no other words.
 - If it is, opaque Third parties LLM APIExternal calls cannot be made by the only means GPU Proof of technical testing for internal retention; reliance only Certified Privacy Domain Yeah. retention/audit Yes. scope Proof. No such certificate is available. `UNKNOWN`.
 
@@ -699,7 +699,7 @@ Therefore, the high-sensitivity data also requires:
 
 - Input, Internal Values and Output schema - Yeah. data class;
 - Cross-category output requires a visible declassification capability;
-- Host (a) Validation of structure, size, objectives and uses;
+- Actr Host (a) Validation of structure, size, objectives and uses;
 - Aggregation query can be requested k-anonymity(i) Disparity of privacy budget or minimum sample number;
 - model inference Clear prompt, embedding, cache, tool result and telemetry Classification of the
 - - Yes, high bandwidth. covert channel (b) Quotas, speed rates and call shape limits;
@@ -822,7 +822,7 @@ Actro / Actr Privacy Control Plane
 └── Audit & Transparency Log
 ```
 
-An organisation (the Realm namespace holder) or a Provider it delegates to may operate or delegate Verifier, Reference Value, Revocation and Key Broker services, but it is not the only global root of trust; an individual instance Realm only chooses in its own policy which Verifiers to trust. Organisations and local Actro can choose their own Verifier and appraisal policy.
+The Realm signing key holder (the owner of the Realm domain) or a Realm Provider it delegates to may operate or delegate Verifier, Reference Value, Revocation and Key Broker services, but it is not the only global root of trust; an individual instance Realm only chooses in its own policy which Verifiers to trust. Organisations and local Actro can choose their own Verifier and appraisal policy.
 
 ## 16. Failed and Undo
 
@@ -905,7 +905,7 @@ PRIVACY_AUDIT_SINK_NOT_DECLARED
 - WASM egress closure;
 - Workspace envelope encryption;
 - package provenance;
-- Non-auto-signed `ActorAssurance`(Host assessable Guest, no sign-in Host);
+- Non-auto-signed `ActorAssurance`(Actr Host assessable Guest, no sign-in Actr Host);
 - No request. CC It's... public/private policy.
 
 ### P2: Confidential CPU
@@ -921,7 +921,7 @@ PRIVACY_AUDIT_SINK_NOT_DECLARED
 - CPU+GPU/NPU composite attestation;
 - driver/device/firmware/reference values;
 - secure device assignment/link/memory claims;
-- Different manufacturers adapter conformance suite.
+- Conformance suite for each hardware vendor adapter.
 
 ### P4: Advanced output privacy
 

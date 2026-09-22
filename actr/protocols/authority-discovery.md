@@ -43,8 +43,8 @@ and no specification may assign meaning to such subpaths. Information that is
 specific to one Realm or to one publisher is not discovered through subpaths.
 Instead, the descriptor MAY carry the signed members defined in Section 4.4
 and Section 4.5, and the `realms` relation (Section 4.3) locates the Realm
-Profiles defined by [Actr Realm Profile](realm-profile.md). One authority can
-therefore serve as the namespace of many Realms. A deployment that requires
+Profiles defined by [Actr Realm Profile](realm-profile.md). One domain can
+therefore name many Realms. A deployment that requires
 independently controlled discovery documents should use distinct Actr
 authorities, normally distinct hostnames.
 
@@ -149,13 +149,13 @@ Version 1 defines these core relations:
 | Relation | Purpose |
 | --- | --- |
 | `signaling` | Establish Actor connectivity and exchange session negotiation messages. |
-| `identity` | Resolve identities, keys, and authentication metadata. In a provider-owned Realm namespace, its `href` is also the OAuth 2.0 issuer for account sign-in ([Actr Realm Profile](realm-profile.md), Section 7.3). |
+| `identity` | Resolve identities, keys, and authentication metadata. When this authority acts as a Realm Provider, its `href` is also the OAuth 2.0 authorization server identifier (issuer identifier, RFC 8414) for Realm Provider account sign-in ([Actr Realm Profile](realm-profile.md), Section 7.3). |
 | `discovery` | Resolve Actor targets and capabilities. |
 | `ice-config` | Obtain ICE server configuration and, after authorization, short-lived TURN credentials as defined by [Actr ICE Configuration](ice-configuration.md). |
 | `contracts` | Obtain public Actor contract and interface descriptions. |
-| `packages` | Resolve a public URI Target to an entry Actor Package and retrieve its `.actr` artifact. |
-| `realms` | Retrieve signed Realm Profiles for Realms in this authority's namespace, as defined by [Actr Realm Profile](realm-profile.md). The protocol value is `actr-realm-profile/1`. |
-| `realm-management` | Accept provider management requests (`POST`) for Realms this authority serves as a provider, as defined by [Actr Realm Profile](realm-profile.md), Section 8. The protocol value is `actr-realm-management/1`. |
+| `packages` | Resolve a public URI Target to an entry Actor Package and retrieve its `.actr` artifact. This is a mutable deployment mapping; which releases of a program are trustworthy is decided by the signed `program_resolver` of the Publisher Profile (Section 4.5). |
+| `realms` | Retrieve signed Realm Profiles for Realms named under this domain from where they are stored, as defined by [Actr Realm Profile](realm-profile.md). The protocol value is `actr-realm-profile/1`. |
+| `realm-management` | Accept Realm management requests (`POST`) for Realms this authority serves as a Realm Provider, as defined by [Actr Realm Profile](realm-profile.md), Section 8. The protocol value is `actr-realm-management/1`. |
 
 Extension relation values **MUST** be absolute URIs controlled by the extension
 author. This avoids collisions with short core relation names.
@@ -165,49 +165,48 @@ credentials, private keys, or user-specific data. In particular,
 `ice-config` identifies an endpoint; it does not embed private TURN
 credentials in this public document.
 
-When the descriptor carries `realm_namespace` or `realms`, its `signaling`,
-`identity` and `ice-config` links serve the authority itself and, at most,
-suggest a provider for creating new Realms. They never serve a Realm in this
-namespace: a client **MUST** reach an existing Realm only through the provider
-named by that Realm's valid Profile, and **MUST NOT** fall back to these links
-when the Profile is unavailable, invalid, or retired.
+The `signaling` and `ice-config` links of a descriptor serve the authority
+itself; they have nothing to do with the Realms named under the domain. A client **MUST** reach a Realm only through the Realm Provider named
+by that Realm's accepted Realm Profile and **MUST NOT** use any other Realm
+Provider, including these links, when the Realm Profile is unavailable,
+invalid, or retired.
 
-### 4.4 `realm_namespace`
+### 4.4 `realm_signing_keys`
 
-`realm_namespace` is an optional member. When present, the authority's DNS
-name, without a port, is a Realm namespace written `dns:<host>`. An authority
-with an explicit port or an IP-literal host **MUST NOT** carry this member, and
-clients **MUST** ignore it in that case.
+`realm_signing_keys` is an optional member. When present, the authority's DNS
+name, without a port, is the domain of Realms named `<label>@<host>`. An
+authority with an explicit port or an IP-literal host **MUST NOT** carry this
+member, and clients **MUST** ignore it in that case.
 
-The member publishes the namespace keys, which are the long-term trust root of
-every Realm in the namespace:
+The member publishes the Realm signing keys, which are the long-term trust
+root of every Realm named under the domain:
 
 ```json
-"realm_namespace": {
+"realm_signing_keys": {
   "sequence": 3,
   "keys": [
-    { "id": "ns-2026-1", "algorithm": "Ed25519", "public_key": "<base64>", "status": "active" },
-    { "id": "ns-2025-1", "algorithm": "Ed25519", "public_key": "<base64>", "status": "retired" }
+    { "id": "rs-2026-1", "algorithm": "Ed25519", "public_key": "<base64>", "status": "active" },
+    { "id": "rs-2025-1", "algorithm": "Ed25519", "public_key": "<base64>", "status": "retired" }
   ],
   "rotations": [
-    { "from": "ns-2025-1", "to": "ns-2026-1", "sequence": 2, "signature": "<base64>" }
+    { "from": "rs-2025-1", "to": "rs-2026-1", "sequence": 2, "signature": "<base64>" }
   ],
-  "signature": { "key_id": "ns-2026-1", "algorithm": "Ed25519", "value": "<base64>" }
+  "signature": { "key_id": "rs-2026-1", "algorithm": "Ed25519", "value": "<base64>" }
 }
 ```
 
 - `sequence` is a non-negative integer that increases with every change to the
   member.
-- `keys` lists the namespace keys. Each key has a unique `id`, `algorithm`
+- `keys` lists the Realm signing keys. Each key has a unique `id`, `algorithm`
   (version 1 defines only `Ed25519`), a base64 `public_key`, and `status`. An
   `active` key signs; a `retired` key no longer signs, but signatures it made
   earlier, such as on existing Realm Profiles, stay valid. Because signatures
   carry no trusted time, `retired` gives no security guarantee; revoking a key
   requires removing it. Removing a key from
-  `keys` revokes it: nothing it signed is accepted any longer, so a namespace
+  `keys` revokes it: nothing it signed is accepted any longer, so a domain
   owner removes a key that may be compromised and re-signs the affected
   Profiles. At least one key **MUST** be `active`.
-- `rotations` lists the rotation chain. In each entry, the key named by `from`
+- `rotations` lists the Realm signing key rotation chain. In each entry, the key named by `from`
   signs the JCS form of
   `{"from": ..., "to": ..., "public_key": ..., "sequence": ...}`, where
   `public_key` is that of the `to` key in `keys` and `sequence` is the member
@@ -217,12 +216,12 @@ every Realm in the namespace:
   RFC 8785 JCS canonical form of the member with `signature` removed. It
   covers `sequence`.
 
-The first acceptance of a namespace relies on HTTPS (Web PKI) or on a namespace
-key pinned by enterprise policy. After that, a client or provider that has
-pinned the namespace treats every key it has ever accepted as pinned, and:
+The first acceptance of a domain's Realm signing keys relies on HTTPS (Web PKI)
+or on a key pinned by enterprise policy. After that, a client or Realm Provider that
+has pinned the domain treats every key it has ever accepted as pinned, and:
 
 - **MUST** reject a member whose `signature` does not verify;
-- **MUST** ignore rotation entries whose `from` key is not in the current
+- **MUST** ignore Realm signing key rotation entries whose `from` key is not in the current
   `keys`; such entries do not invalidate the member, and a verifiable chain is
   required only for keys not yet accepted;
 - **MUST** accept a key it has not yet accepted only through a valid rotation
@@ -237,7 +236,7 @@ pinned the namespace treats every key it has ever accepted as pinned, and:
   or operator to confirm trust again, and after confirmation uses the new
   member's `sequence` as its baseline.
 
-The member **MUST NOT** list the Realms in the namespace, so that Realm names
+The member **MUST NOT** list the Realms named under the domain, so that Realm names
 cannot be enumerated from the descriptor.
 
 ### 4.5 `publisher`
@@ -255,24 +254,28 @@ rules are left to the Actor Package specification (Section 10). At the
 descriptor level:
 
 - `domain` **MUST** equal the host of `authority`;
-- `program_resolver` is required and names the HTTPS base URL for program
-  release metadata; there is no default location;
-- the Profile is signed by an active profile signing key and verified by its
-  own signature, independently of the HTTPS channel;
+- `program_resolver` is required and names the HTTPS base URL that maps
+  `publisher/program@version` to release metadata; there is no default
+  location. Because it sits inside the signed Publisher Profile, it fixes where
+  trustworthy releases are published, whereas the unsigned `packages`
+  relation only maps public URI Targets to entry packages;
+- the Publisher Profile is signed by an active Publisher Profile signing key
+  and verified by its own signature, independently of the HTTPS channel;
 - HTTPS (or an enterprise pin) provides only the first-contact binding between
   the domain and the publisher's keys;
-- after the first Profile is accepted, sequence and rotation checks follow the
+- after the first Publisher Profile is accepted, sequence and rotation checks follow the
   Actor Package specification, not the descriptor's HTTP caching.
 
-A provider that registers publishers does so through a `register_publisher`
-request that reuses the provider management envelope of
+A Realm Provider that registers publishers does so through a
+`register_publisher` request in the Actr management envelope of
 [Actr Realm Profile](realm-profile.md), Section 8, signed by an active
-profile signing key, not through a challenge placed in the public descriptor.
+Publisher Profile signing key, not through a challenge placed in the public
+descriptor.
 
 ### 4.6 Signed and unsigned parts
 
 The descriptor as a whole remains an unsigned public document protected by
-HTTPS. `realm_namespace` and `publisher` are verified only by their own
+HTTPS. `realm_signing_keys` and `publisher` are verified only by their own
 signatures, and a valid signature on one of them does not authenticate any
 other member. The document size limit in Section 6 applies to the whole
 descriptor, including signed members.
@@ -322,7 +325,7 @@ Credentialed cross-origin discovery is not defined by this specification.
 
 Compatible revisions may add optional members, new URI-valued extension
 relations, or clarification without changing `version`. The `realms` relation
-and the `realm_namespace` and `publisher` members are such additions: clients
+and the `realm_signing_keys` and `publisher` members are such additions: clients
 that do not implement them ignore them. A revision that
 changes the meaning of an existing member or makes a previously valid
 descriptor invalid requires a new descriptor version.
@@ -363,7 +366,7 @@ This initial draft deliberately leaves the following work open:
 - decide whether service ordering, priority, or failover metadata is needed;
 - specify the `actr.publisher/v1` Publisher Profile format in the Actor
   Package specification;
-- define the rotation-chain payload of `realm_namespace` in a machine-readable
+- define the rotation-chain payload of `realm_signing_keys` in a machine-readable
   schema and add signing test vectors;
 - define delegated Realm-creation keys, which version 1 does not provide;
 - add interoperability fixtures and negative test cases;

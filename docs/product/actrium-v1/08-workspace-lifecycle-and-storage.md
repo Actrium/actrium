@@ -4,7 +4,7 @@
 
 Core rules:
 
-> Service Actor Tie Workspace, Front Actor Only pass Service ActorId (a) Connection;Front I don't need to know. Workspace ♪ And the path,Provider credential Or lock.
+> Service Actor Tie Workspace, Front Actor Only pass Service ActorId (a) Connection;Front I don't need to know. Workspace ♪ And the path,Workspace Provider credential Or lock.
 
 This is not an addition to abstraction, but rather a consolidation of local files, cloud dishes, databases and remote warehouses. Service Available capability.
 
@@ -40,7 +40,7 @@ It shall not include:
 - bookmark/security-scoped token;
 - cloud OAuth token;
 - encryption key;
-- Provider internal id(unless it is not per se sensitive and contractually required).
+- Workspace Provider internal id(unless it is not per se sensitive and contractually required).
 
 ## 3. Workspace Statement
 
@@ -51,7 +51,7 @@ Workspace From the cross-sectioned field description:
 | requirement | `none` / `optional` / `required` | Is there a user need WorkspaceAnd when must it be bound? |
 | provisioning | `managed` / `user-selected` | By Actro Create, or choose by the user |
 | access | `read-only` / `read-write` | Service Visiting capacity acquired |
-| providers | Group Provider Type | Allow `managed-store`, `local-folder`, `cloud-drive` Waiting for it to happen |
+| providers | Group Workspace Provider Type | Allow `managed-store`, `local-folder`, `cloud-drive` Waiting for it to happen |
 
 `requirement=none` Time Service The example is still available for private use store, but not available for users Workspace.`requirement=required` with `provisioning=managed` It can come at once. It means creation. Service Time Actro Automatically create a requirement Workspace.
 
@@ -59,7 +59,7 @@ Writing parallel strategy:
 
 - `exclusive-writer`: v1 Default;
 - `shared-readers`: Multiple Service (a) Readable;
-- `versioned-collaboration`: Future by Provider/Procedural agreement is achieved;
+- `versioned-collaboration`: Future by Workspace Provider/Procedural agreement is achieved;
 - Ban multiple writtens if not declared Service Tie Same Workspace.
 
 ## 4. Service Life cycle
@@ -112,7 +112,7 @@ Create is a Zen etc. for the user; internal must be used durable saga Submitted 
 - permission grant;
 - Service Inventory record.
 
-Any failure compensates for non-submission of resources; issued successfully ActorId I can't pretend after that.“Roll back to the ground.”, must keep a record of restoration or tombstone, and cannot be re-used.
+Any failure compensates for uncommitted resources; once an ActorId has been issued, it must not pretend to "fully roll back": it must keep a recovery record or a local instance tombstone, and the identity must never be reused.
 
 ### 4.2 Running
 
@@ -152,7 +152,7 @@ Mobile platforms or energy-saving strategies are temporarily frozen:
 ### 4.6 Deleted
 
 - Undo Actor credential;
-- Permanent reservation ActorId tombstone;
+- Keep a local instance tombstone (including the ActorId) permanently;
 - Remove instance store and key;
 - Workspace Default not to delete;
 - Workspace The deletion requires independent and explicit confirmation;
@@ -180,11 +180,10 @@ Local creation must be used durable intent:
 
 ```text
 CreationIntent
-├── creation_intent_id
+├── idempotency_key
 ├── source_uri
 ├── program_release + digest
-├── realm_namespace
-├── realm_local_name
+├── realm_name
 ├── workspace_selection
 ├── requested_permissions
 ├── stage
@@ -244,7 +243,7 @@ The following entry is the only entry. OS Keychain/Keystore/Credential Locker:
 
 - device private key;
 - Service Actor private key;
-- Realm refresh material;
+- Realm client keys;
 - Workspace Provider credential;
 - TURN/signaling ticket(Unusual memory only);
 - encryption keys.
@@ -261,7 +260,7 @@ program_release
 
 service
   actor_id, actor_id_hash, publisher, program, version, digest,
-  realm_namespace, realm_local_name, workspace_id, runtime_location,
+  realm_name, workspace_id, runtime_location,
   lifecycle_state, desired_state, reachability, health,
   attachment_state, placement, created_at, last_opened_at
 
@@ -291,17 +290,17 @@ privacy_aggregate
 creation_intent
   intent_id, uri, stage, result_actor_id, timestamps
 
-realm_namespace
-  namespace, namespace_keys, namespace_sequence, authority_descriptor_digest
+realm_domain
+  domain, signing_keys, signing_keys_sequence, authority_descriptor_digest
 
 realm
-  namespace, local_name, profile_digest, profile_sequence, provider_id,
-  issuer_keys, membership_ref, device_key_ref
+  realm_name, profile_digest, profile_sequence, provider_id,
+  issuer_keys, membership_ref, client_key_ref
 ```
 
 Service Table to Complete ActorId (a) Be the business key;`actor_id_hash` Only for indexing and directories.
 
-`realm_namespace` records each trusted Realm namespace (a DNS namespace is an authority: the `realm_namespace` member in `https://<domain>/.well-known/actr`, defined in Actr Authority Discovery §4.4) together with its pinned namespace keys (`namespace_keys`, every key ever accepted) and accepted `sequence` (`namespace_sequence`), which are refreshed with the Profiles so that removed keys revoke the Profiles they signed; `realm` records each instance Realm, where `profile_sequence` and `provider_id` are used to reject rolled-back Profiles and Profiles naming a different Provider (both empty for a local Realm, which has no Profile), and `device_key_ref` points to that Realm's own device key (never reused across Realms). Neither uses the numeric realm_id, which is only a provider-internal handle.
+`realm_domain` records each trusted Realm domain with its Realm signing keys (from the `realm_signing_keys` member in `https://<domain>/.well-known/actr`, defined in Actr Authority Discovery §4.4): the pinned keys (`signing_keys`, every key ever accepted) and the accepted `sequence` (`signing_keys_sequence`), which are refreshed with the Realm Profiles so that removed keys revoke the Realm Profiles they signed; `realm` records each instance Realm, where `profile_sequence` and `provider_id` are used to reject rolled-back Realm Profiles and Realm Profiles naming a different Realm Provider (both empty for a local Realm, which has no Realm Profile), and `client_key_ref` points to that Realm's own Realm client key (never reused across Realms). Neither uses the numeric realm_id, which is only an internal handle of the Realm Provider.
 
 `ApplicationAssurance` It's a derivative of the current cut, no. Service . Cache expired,Tab Recalculation must be made after reconstruction, state or chart changes; presentation must also be made `Ready`Original attestation token Prefer to the long-term encryption cache or memory, and complete remote scaling, not for convenience UI The project is being implemented in the United States and is being implemented in the United States.
 
@@ -332,7 +331,7 @@ Can not blindly sync:
 - Actor private key;
 - Workspace credential;
 - (a) Absolute local path;
-- Unprotected Provider token.
+- Unprotected Workspace Provider token.
 
 If Service It only exists in one device, another. Inventory Record Display“Far/Host devices offline”, instead of trying to copy identity locally.
 
@@ -342,12 +341,12 @@ If Service It only exists in one device, another. Inventory Record Display“Far
 
 Actro Workspace broker Inspection:
 
-- Same provider locator Did you write it? lease;
-- Provider Whether or not to support overwriting;
+- Whether the same Workspace Provider locator already has a write lease;
+- Workspace Provider Whether or not to support overwriting;
 - Current Service (a) The availability of competence;
 - Symbolic links, path crossing and security domain;
 - Storage quotas;
-- Provider Online status.
+- Workspace Provider Online status.
 
 ### 9.2 Run-time
 
@@ -358,7 +357,7 @@ Actro Workspace broker Inspection:
 - quota;
 - write lease heartbeat;
 - After the crash lease Restore/Expiry;
-- Provider The conflict was clearly reported.
+- Workspace Provider The conflict was clearly reported.
 
 ### 9.3 Retie
 
@@ -367,7 +366,7 @@ Workspace Do not change silently. Re-knit process:
 1. (a) Stop new business writing;
 2. (b) Generate consistent snapshots;
 3. User Select New Workspace;
-4. Verify New Provider;
+4. Verify New Workspace Provider;
 5. Migration/Import;
 6. Atomic Switch binding;
 7. (a) Retain roll-back points;
@@ -378,7 +377,7 @@ Workspace Do not change silently. Re-knit process:
 Snapshot Two floors:
 
 - Service workload state;
-- Workspace/Provider state.
+- Workspace and Workspace Provider state.
 
 Manifest To be declared snapshot schema version. The restoration must verify:
 
@@ -398,7 +397,7 @@ Backup Actor Identity must be:
 
 ## 11. Service Upgrade
 
-v1 Unmodified `ActorId.type.version` The corresponding workload.
+v1 never modifies a Service's Program Release (its Actor type version) in place.
 
 Upgrade is migration:
 
@@ -420,13 +419,13 @@ Advantages:
 - New and old contract (a) Be able to coexist;
 - URI I won't claim to be old. ActorId Has become a new type.
 
-The new Service Actor is created in the same Realm as the original instance: the instance has not changed, Realm membership and ACL carry over, and only the ActorId changes under the rules above.
+The new Service Actor is created in the same Realm as the original instance: the instance has not changed, Realm membership and application permissions carry over, and only the ActorId changes under the rules above.
 
 The disadvantage is... ActorId Changes;Actro Update local collections and current Tab. Old links can be used to hint when local migration records are saved“Example moved”; other devices only see old examples offline/archivedUnless it's old Service Signing migration tips continue to be provided during rollback.Realm Level alias/redirect It's a follow-up capability, not here. v1 Quietly achieved.
 
 ## 12. Service Relocation of equipment
 
-Host migration within the same Realm and the same Program Release may keep the ActorId. A Realm is permanently bound to its Provider; changing operators means creating a new instance on the new Provider and migrating under the rules in this section. Migrating to another Realm (including from the local namespace to a DNS namespace) must produce a new ActorId:
+Machine migration within the same Realm and the same Program Release may keep the ActorId. A Realm is permanently bound to its Realm Provider; changing operators means creating a new instance on the new Realm Provider and migrating under the rules in this section. Migrating to another Realm (including from a local Realm to a Realm under a domain) must produce a new ActorId:
 
 1. Access migration lease;
 2. (b) Stop the new request from the old host;
@@ -463,14 +462,14 @@ Workspace If it was a local directory of used equipment, it would have to be mov
 - User Select“Run on use only”;
 - Not to limit failure to a system Actor Not there.
 
-Products UI It has to be distinguished.“Stopped”“Suspended”“Host offline”and“Actor not found”.
+Products UI It has to be distinguished.“Stopped”“Suspended”“Actr Host offline”and“Actor not found”.
 
 ## 14. Delete and recoverability
 
 Remove in two Service Phase and an independent data action:
 
 1. **Move to Wastebin**: Stop and hide Service,Reserve Actor key, credentialExamples store/snapshot with WorkspaceBinding;defaults 30 Same as in days ActorId Restore.
-2. **Cleared**: Unidentify, delete key and examples of private data, permanent tombstone; Not recoverable.
+2. **Cleared**: revoke the identity, delete keys and instance-private data, and record a permanent local instance tombstone; not recoverable.
 3. **Delete Workspace**: Always a stand-alone high-risk action, not by default with the first two steps.
 
-Before removal, list the private data of the example to be deleted, the external data to be retained Workspace And the consequences of recovery.Workspace If the document is explicitly deleted by the user, priority should be given to access Provider/OS Recycler; audit records do not contain business content.
+Before removal, list the private data of the example to be deleted, the external data to be retained Workspace And the consequences of recovery.Workspace If the document is explicitly deleted by the user, priority should be given to access Workspace Provider/OS Recycler; audit records do not contain business content.
