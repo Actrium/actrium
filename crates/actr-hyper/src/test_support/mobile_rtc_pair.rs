@@ -381,12 +381,22 @@ impl MobileRtcPairHarness {
         let (a_to_b, b_to_a) = match (a_to_b, b_to_a) {
             (Ok(a_to_b), Ok(b_to_a)) => (a_to_b, b_to_a),
             (a_to_b, b_to_a) => {
-                let a_to_b = a_to_b
-                    .map(|state| format!("{state:#?}"))
-                    .unwrap_or_else(|diagnostics| diagnostics);
-                let b_to_a = b_to_a
-                    .map(|state| format!("{state:#?}"))
-                    .unwrap_or_else(|diagnostics| diagnostics);
+                // A succeeded direction only needs a compact summary; the failing
+                // side carries the full diagnostics.
+                let compact = |state: actr_framework::WebRtcPeerState| {
+                    format!(
+                        "sendable={} status={:?} pc_generation={} revision={} \
+                         network_path={:?} unavailable_reason={:?}",
+                        state.sendable,
+                        state.status,
+                        state.pc_generation,
+                        state.revision,
+                        state.network_path,
+                        state.unavailable_reason,
+                    )
+                };
+                let a_to_b = a_to_b.map(compact).unwrap_or_else(|d| d);
+                let b_to_a = b_to_a.map(compact).unwrap_or_else(|d| d);
                 let trace = self.signaling_trace();
                 let recent = &trace[trace.len().saturating_sub(32)..];
                 panic!(

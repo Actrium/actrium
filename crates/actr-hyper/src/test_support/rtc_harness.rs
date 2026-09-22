@@ -543,28 +543,42 @@ impl TestRtcControl {
                 let mut peer_set = self.manager.subscribe_peers();
                 loop {
                     phase = "looking up controller";
-                    if let Some(controller) = self.manager.get_controller(peer).await {
-                        let mut rx = controller.subscribe_public();
-                        loop {
-                            let state = rx.borrow().clone();
-                            if predicate(&state) {
-                                return state;
+                    // Keep watching a closing controller's public state, as the
+                    // pre-diagnostics `subscribe` path did. Only an active
+                    // controller exposes the internal snapshot.
+                    let (mut rx, controller) = match self.manager.get_controller(peer).await {
+                        Some(controller) => (controller.subscribe_public(), Some(controller)),
+                        None => match self.manager.subscribe_public(peer).await {
+                            Some(rx) => (rx, None),
+                            None => {
+                                phase = "waiting for peer registry change";
+                                peer_set
+                                    .changed()
+                                    .await
+                                    .expect("manager peer registry watch closed");
+                                continue;
                             }
-                            if observations.len() == OBSERVATION_LIMIT {
-                                observations.pop_front();
-                            }
-                            // The public predicate remains the oracle. The internal
-                            // snapshot adds role, ICE generation and overflow counters;
-                            // it may be newer, so report both revisions explicitly.
-                            observations.push_back((
-                                started.elapsed(),
-                                state,
-                                controller.snapshot(),
-                            ));
-                            phase = "waiting for public state change";
-                            if rx.changed().await.is_err() {
-                                break;
-                            }
+                        },
+                    };
+                    loop {
+                        let state = rx.borrow().clone();
+                        if predicate(&state) {
+                            return state;
+                        }
+                        if observations.len() == OBSERVATION_LIMIT {
+                            observations.pop_front();
+                        }
+                        // The public predicate remains the oracle. The internal
+                        // snapshot adds role, ICE generation and overflow counters;
+                        // it may be newer, so report both revisions explicitly.
+                        observations.push_back((
+                            started.elapsed(),
+                            state,
+                            controller.as_ref().map(|c| c.snapshot()),
+                        ));
+                        phase = "waiting for public state change";
+                        if rx.changed().await.is_err() {
+                            break;
                         }
                     }
                     phase = "waiting for peer registry change";
