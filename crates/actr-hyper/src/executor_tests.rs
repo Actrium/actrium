@@ -913,3 +913,41 @@ async fn dispatch_with_cancelled_scope_replies_timeout_without_running_guest() {
         "runner must keep serving commands after scoped cancellation"
     );
 }
+
+#[tokio::test]
+async fn stream_retirement_keeps_started_delivery_reply_alive() {
+    // Manually receive the command to hold guest entry open after admission.
+    let (tx, mut rx) = mpsc::channel(1);
+    let join = tokio::spawn(std::future::pending::<()>());
+    let runner = ActorHandle {
+        tx,
+        abort: join.abort_handle(),
+        join: std::sync::Mutex::new(Some(join)),
+        intake_open: RwLock::new(true),
+    };
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let host = noop_host_abi();
+    let mut delivery = Box::pin(runner.dispatch_data_chunk_until_cancelled(
+        DataChunk::default(),
+        ActrId::default(),
+        test_invocation(),
+        &host,
+        &cancel,
+    ));
+    assert!(futures_util::poll!(delivery.as_mut()).is_pending());
+    let ActorCmd::DataChunk {
+        admission, reply, ..
+    } = rx.recv().await.unwrap()
+    else {
+        panic!("expected a data chunk command");
+    };
+    assert!(admission.try_start());
+    cancel.cancel();
+    assert!(futures_util::poll!(delivery.as_mut()).is_pending());
+    assert!(
+        !reply.is_closed(),
+        "active guest call must retain its reply receiver"
+    );
+    reply.send(Ok(())).unwrap();
+    delivery.await.unwrap();
+}

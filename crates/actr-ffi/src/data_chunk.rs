@@ -163,21 +163,18 @@ impl DataChunkSinkBridge {
             });
         }
         let mut guard = self.inner.lock().await;
-        if self.closed.load(Ordering::Acquire) {
-            return Err(ActrError::InvalidArgument {
-                msg: "DataChunkSinkBridge is closed".into(),
-            });
-        }
+        // Taking a place in the FIFO lock queue accepts this send. A later
+        // close must drain it even if it has not acquired the lock yet.
         guard.send(chunk.into()).await.map_err(Into::into)
     }
 
     /// Stop accepting new sends, wait for already accepted sends to finish,
     /// and close. Idempotent.
     pub async fn close(&self) -> ActrResult<()> {
-        if self.closed.swap(true, Ordering::AcqRel) {
-            return Ok(());
-        }
-        // Waits behind any accepted in-flight send, then flushes.
+        self.closed.store(true, Ordering::Release);
+        // Every close waits for teardown, including concurrent callers and a
+        // retry after a previous close future was cancelled.
+        // Waits behind all accepted sends, then flushes.
         let mut guard = self.inner.lock().await;
         guard.close().await.map_err(Into::into)
     }
@@ -282,6 +279,49 @@ mod tests {
             let event = bridge.next().await.unwrap().unwrap();
             assert_eq!(event.chunk.sequence, seq);
         }
+    }
+
+    #[tokio::test]
+    async fn sink_close_drains_queued_sends_and_survives_cancelled_close() {
+        let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (release, wait) = tokio::sync::oneshot::channel::<()>();
+        let mut wait = Some(wait);
+        let send_fn: actr_framework::SendDataChunkFn = {
+            let sent = sent.clone();
+            Box::new(move |chunk| {
+                let wait = wait.take();
+                let sent = sent.clone();
+                Box::pin(async move {
+                    if let Some(wait) = wait {
+                        wait.await.unwrap();
+                    }
+                    sent.lock().unwrap().push(chunk.sequence);
+                    Ok(())
+                })
+            })
+        };
+        let bridge = DataChunkSinkBridge::new(
+            DataChunkSink::new("s".into(), PayloadType::StreamReliable, send_fn).unwrap(),
+        );
+        let mut first = Box::pin(bridge.send(bridge_chunk("s", 1)));
+        let mut queued = Box::pin(bridge.send(bridge_chunk("s", 2)));
+        assert!(futures_util::poll!(first.as_mut()).is_pending());
+        assert!(futures_util::poll!(queued.as_mut()).is_pending());
+        let mut closing = Box::pin(bridge.close());
+        assert!(futures_util::poll!(closing.as_mut()).is_pending());
+        let mut repeated = Box::pin(bridge.close());
+        assert!(futures_util::poll!(repeated.as_mut()).is_pending());
+        drop(closing);
+        assert!(matches!(
+            bridge.send(bridge_chunk("s", 3)).await,
+            Err(ActrError::InvalidArgument { .. })
+        ));
+        release.send(()).unwrap();
+        first.await.unwrap();
+        queued.await.unwrap();
+        repeated.await.unwrap();
+        assert_eq!(*sent.lock().unwrap(), vec![1, 2]);
+        bridge.close().await.unwrap();
     }
 
     #[tokio::test(flavor = "current_thread")]

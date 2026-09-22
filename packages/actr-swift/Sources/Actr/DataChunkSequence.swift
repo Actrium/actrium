@@ -78,7 +78,15 @@ public struct DataChunkSequence: AsyncSequence, Sendable {
                 )
             }
             do {
-                guard let event = try await bridge.next() else {
+                let bridge = self.bridge
+                let event = try await withTaskCancellationHandler {
+                    try await bridge.next()
+                } onCancel: {
+                    // Use an independent task: cleanup must still run after the
+                    // consuming task's pending UniFFI future is cancelled.
+                    Task { try? await bridge.close() }
+                }
+                guard let event else {
                     finished = true
                     return nil
                 }

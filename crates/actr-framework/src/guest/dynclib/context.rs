@@ -65,16 +65,10 @@ pub fn dispatch_registered_stream(payload: GuestDataChunkV1) -> ActorResult<()> 
             ActrError::NotFound(format!("stream subscription for '{stream_id2}' is gone"))
         })
     };
-    let result = crate::guest::dynclib::block_on(bridge_token, fut)?;
-    if result.is_err() {
-        // The receiver was dropped without close() (best-effort Drop path
-        // abandons the async host unregister). Remove the stale entry so the
-        // host tears down its side.
-        if let Ok(mut senders) = stream_senders().lock() {
-            senders.remove(&stream_id);
-        }
-    }
-    result
+    // Stream Drop already removed this subscription's sender. A replacement
+    // may now own the same ID, so failure must not remove it. Returning the
+    // error causes the host forwarder to retire its own subscription.
+    crate::guest::dynclib::block_on(bridge_token, fut)?
 }
 
 #[doc(hidden)]
@@ -325,10 +319,20 @@ impl Context for DynclibContext {
             let payload = HostRegisterStreamV1 {
                 stream_id: stream_id.clone(),
             };
-            let reply = self.invoke_frame(payload.to_frame().map_err(abi_error_to_actr)?)?;
-            if reply.status != abi::code::SUCCESS {
+            let registration = payload
+                .to_frame()
+                .map_err(abi_error_to_actr)
+                .and_then(|frame| self.invoke_frame(frame))
+                .and_then(|reply| {
+                    if reply.status == abi::code::SUCCESS {
+                        Ok(())
+                    } else {
+                        Err(reply_to_actr_error(reply))
+                    }
+                });
+            if let Err(error) = registration {
                 senders.remove(&stream_id);
-                return Err(reply_to_actr_error(reply));
+                return Err(error);
             }
         }
 
@@ -478,5 +482,59 @@ impl Context for DynclibContext {
         Err(ActrError::NotImplemented(
             "WebRTC media tracks are not supported in dynclib environment".into(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    unsafe extern "C" fn retain(_: u64) -> i32 {
+        abi::code::SUCCESS
+    }
+    unsafe extern "C" fn release(_: u64) {}
+    unsafe extern "C" fn free(_: *mut u8, _: usize) {}
+    unsafe extern "C" fn log(_: u64, _: u8, _: *const u8, _: usize) {}
+    unsafe extern "C" fn failed_invoke(
+        token: u64,
+        _: *const u8,
+        _: usize,
+        _: *mut *mut u8,
+        _: *mut usize,
+    ) -> i32 {
+        if token == 1 {
+            abi::code::UNSUPPORTED_OP
+        } else {
+            // SUCCESS with no reply exercises the reply decoding error path.
+            abi::code::SUCCESS
+        }
+    }
+
+    static FAILING_HOST: HostVTable = HostVTable {
+        retain_context: retain,
+        release_context: release,
+        invoke: failed_invoke,
+        free_host_buf: free,
+        log,
+    };
+
+    #[tokio::test]
+    async fn failed_registration_releases_local_reservation() {
+        for token in [1, 2] {
+            let ctx = DynclibContext {
+                vtable: &FAILING_HOST,
+                bridge_token: token,
+                retained: false,
+                self_id: Default::default(),
+                caller_id: None,
+                request_id: String::new(),
+            };
+            let stream_id = format!("failed-registration-{token}");
+            for _ in 0..2 {
+                let result = ctx.data_chunks(stream_id.clone(), Default::default()).await;
+                assert!(result.is_err());
+                assert!(!stream_senders().lock().unwrap().contains_key(&stream_id));
+            }
+        }
     }
 }

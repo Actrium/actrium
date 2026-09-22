@@ -2284,6 +2284,7 @@ async fn run_barrier(
             BarrierNext::Continue
         }
         ActorCmd::DataChunk {
+            admission,
             chunk,
             sender,
             invocation,
@@ -2291,7 +2292,7 @@ async fn run_barrier(
             span,
             reply,
         } => {
-            if reply.is_closed() {
+            if reply.is_closed() || !admission.try_start() {
                 return BarrierNext::Continue;
             }
             let permit = match acquire_invocation(&limits) {

@@ -1342,7 +1342,8 @@ async fn host_operation_handler(
             let stale = stream_forwarders
                 .lock()
                 .expect("stream forwarders poisoned")
-                .remove(&stream_id);
+                .get(&stream_id)
+                .cloned();
             if let Some(stale) = stale {
                 retire_stream_forwarder(&stale).await;
             }
@@ -1419,12 +1420,17 @@ async fn host_operation_handler(
                             })
                         })
                     };
-                    // Self-lock elimination: the forwarder fires later (on
-                    // chunk arrival), never during the dispatch that
-                    // registered it, so appending a DataChunk command to the
-                    // runner's channel and awaiting it cannot deadlock.
+                    // A serial invocation can unregister while this delivery
+                    // is queued behind it. Cancel only queued delivery; once
+                    // guest code starts its reply must stay alive.
                     if let Err(error) = workload_dispatch
-                        .dispatch_data_chunk(chunk, sender, invocation, &call_executor)
+                        .dispatch_data_chunk_until_cancelled(
+                            chunk,
+                            sender,
+                            invocation,
+                            &call_executor,
+                            &cancel,
+                        )
                         .await
                     {
                         tracing::warn!(
@@ -1434,6 +1440,7 @@ async fn host_operation_handler(
                         break;
                     }
                 }
+                stream.close().await;
                 // Remove only our own entry: a re-registration may already
                 // have installed a newer forwarder for this stream.
                 {
@@ -1445,7 +1452,6 @@ async fn host_operation_handler(
                         guard.remove(&stream_id);
                     }
                 }
-                stream.close().await;
                 let _ = done_tx.send(true);
             });
 
@@ -1456,7 +1462,8 @@ async fn host_operation_handler(
             let forwarder = stream_forwarders
                 .lock()
                 .expect("stream forwarders poisoned")
-                .remove(&req.stream_id);
+                .get(&req.stream_id)
+                .cloned();
             if let Some(forwarder) = forwarder {
                 // Wait for the forwarder to close the stream and unregister it
                 // from the DataChunk registry, so an immediate re-register of
@@ -1617,7 +1624,8 @@ async fn stream_callback_host_operation_handler(
             let forwarder = stream_forwarders
                 .lock()
                 .expect("stream forwarders poisoned")
-                .remove(&req.stream_id);
+                .get(&req.stream_id)
+                .cloned();
             if let Some(forwarder) = forwarder {
                 // Cancel only, never await: this nested handler runs inside
                 // the forwarder's own dispatch, so waiting for its teardown

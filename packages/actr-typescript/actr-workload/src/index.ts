@@ -257,6 +257,7 @@ export function defineWorkload(workload: Workload): Workload {
 }
 
 const streamQueues = new Map<string, BoundedQueue<DataChunkEvent>>();
+const closingStreams = new Set<string>();
 
 // Optional `AsyncLocalStorage` for the Node (vitest / non-component) path. The
 // StarlingMonkey wasm guest has no `node:async_hooks`, so in a real component
@@ -548,9 +549,14 @@ export class DataChunkStream implements AsyncIterable<DataChunkEvent> {
       this.closePromise = (async () => {
         this.queue.close();
         streamQueues.delete(this.streamId);
-        const liveCtx = getCurrentInvocationCtx();
-        if (liveCtx) {
-          await hostUnregisterStream(resolveCtxToken(liveCtx), this.streamId);
+        closingStreams.add(this.streamId);
+        try {
+          const liveCtx = getCurrentInvocationCtx();
+          if (liveCtx) {
+            await hostUnregisterStream(resolveCtxToken(liveCtx), this.streamId);
+          }
+        } finally {
+          closingStreams.delete(this.streamId);
         }
       })();
     }
@@ -630,9 +636,6 @@ export class DataChunkSink {
   }
 
   async close(): Promise<void> {
-    if (this.closed) {
-      return;
-    }
     this.closed = true;
     await this.tail;
   }
@@ -640,7 +643,7 @@ export class DataChunkSink {
 
 /**
  * Subscribe to inbound DataChunks for a stream ID. Registration happens at
- * call time (host-side first, so no delivery can be missed); only one active
+ * call time, reserving the ID until host registration finishes; only one active
  * subscription is allowed per stream ID within one actor/context instance.
  */
 export async function dataChunks(
@@ -654,16 +657,20 @@ export async function dataChunks(
       `capacity must be a positive integer, got ${capacity}`,
     );
   }
-  if (streamQueues.has(streamId)) {
+  if (streamQueues.has(streamId) || closingStreams.has(streamId)) {
     throw new Error(`stream '${streamId}' already has an active subscription`);
   }
-  // Register host-side first so the runner queues any DataChunk delivery behind
-  // this invocation; installing the guest queue immediately after the awaited
-  // import cannot miss a delivery, and avoids retaining a guest queue when
-  // host registration fails.
-  await hostRegisterStream(resolveCtxToken(ctx), streamId);
+  // Reserve the ID before yielding so concurrent registrations cannot replace
+  // each other's host forwarder or guest queue.
   const queue = new BoundedQueue<DataChunkEvent>(capacity);
   streamQueues.set(streamId, queue);
+  try {
+    await hostRegisterStream(resolveCtxToken(ctx), streamId);
+  } catch (error) {
+    streamQueues.delete(streamId);
+    queue.close();
+    throw error;
+  }
   return new DataChunkStream(streamId, queue);
 }
 

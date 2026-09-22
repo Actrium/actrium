@@ -523,14 +523,13 @@ pub async fn run_on_mailbox_backpressure<W: Workload>(
 pub async fn run_on_data_chunk(
     chunk: wit_types::DataChunk,
     sender: wit_types::ActrId,
-    inv: wit_types::InvocationCtx,
+    _inv: wit_types::InvocationCtx,
 ) -> Result<(), wit_types::ActrError> {
     // The stream queue receives (chunk, sender) only; the invocation-ctx is
-    // used for its live ctx-token (host-side teardown on a dead subscription)
-    // and for contract uniformity. The host temporarily aliases the
+    // accepted for contract uniformity. The host temporarily aliases the
     // registering context's retired token to this DataChunk invocation's live
     // bridge while the delivery runs.
-    super::context::dispatch_registered_stream(chunk, sender, inv.ctx_token)
+    super::context::dispatch_registered_stream(chunk, sender)
         .await
         .map_err(actr_error_to_wit)
 }

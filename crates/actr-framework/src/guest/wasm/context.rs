@@ -176,7 +176,6 @@ thread_local! {
 pub(crate) async fn dispatch_registered_stream(
     chunk: wit_types::DataChunk,
     sender: wit_types::ActrId,
-    ctx_token: u64,
 ) -> ActorResult<()> {
     let chunk = data_chunk_from_wit(chunk);
     let sender = actr_id_from_wit(&sender);
@@ -195,19 +194,12 @@ pub(crate) async fn dispatch_registered_stream(
                     wit_bindgen::yield_async().await;
                     Ok(())
                 }
-                // The receiver was dropped without close() (best-effort Drop
-                // path abandons the async host unregister). Remove the stale
-                // entry and tear down the host registration with THIS live
-                // invocation's token.
-                Err(_) => {
-                    STREAM_SENDERS.with(|senders| {
-                        senders.borrow_mut().remove(&stream_id);
-                    });
-                    let _ = wit_host::unregister_stream(ctx_token, stream_id.clone()).await;
-                    Err(ActrError::NotFound(format!(
-                        "stream subscription for '{stream_id}' is gone"
-                    )))
-                }
+                // Stream Drop already removed the old sender. A replacement
+                // may now own this ID; only the host forwarder that receives
+                // this error should retire its own subscription.
+                Err(_) => Err(ActrError::NotFound(format!(
+                    "stream subscription for '{stream_id}' is gone"
+                ))),
             }
         }
         None => Err(ActrError::NotFound(format!(
@@ -329,30 +321,29 @@ impl Context for WasmContext {
                 "stream '{stream_id}' already has an active subscription"
             )));
         }
-        // Register host-side first. The runner queues DataChunk delivery behind
-        // this invocation, so installing the guest queue immediately after
-        // the awaited import cannot miss a delivery; this ordering also avoids
-        // retaining a guest queue when host registration fails.
-        wit_host::register_stream(self.ctx_token, stream_id.clone())
-            .await
-            .map_err(wit_actr_error_to_proto)?;
+        // Reserve locally before the host import yields. Concurrent guest
+        // invocations must not replace a registration that is still pending.
         let (tx, rx) = futures_channel::mpsc::channel(capacity);
         STREAM_SENDERS.with(|senders| {
             senders.borrow_mut().insert(stream_id.clone(), tx);
         });
-        let cancel_stream_id = stream_id;
+        let cancel_stream_id = stream_id.clone();
         // Cancel-only closer: the async host unregister import would need a
         // live invocation token, but close()/drop may run in an invocation
         // where the registering token is already retired. Host-side teardown
-        // happens instead on the next on-data-chunk delivery, which calls the
-        // unregister import with that invocation's live token (see
-        // dispatch_registered_stream).
+        // happens instead when the next on-data-chunk delivery returns an
+        // error and the host forwarder retires its subscription.
         let closer = crate::StreamCloser::new(Box::new(move || {
             STREAM_SENDERS.with(|senders| {
                 senders.borrow_mut().remove(&cancel_stream_id);
             });
         }));
-        Ok(crate::DataChunkStream::from_parts(rx, closer))
+        let stream = crate::DataChunkStream::from_parts(rx, closer);
+        // The stream's Drop rolls back the reservation on error or cancellation.
+        wit_host::register_stream(self.ctx_token, stream_id)
+            .await
+            .map_err(wit_actr_error_to_proto)?;
+        Ok(stream)
     }
 
     async fn data_chunk_sink(

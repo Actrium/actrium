@@ -289,6 +289,80 @@ describe('@actrium/actr-workload', () => {
     await reopened.close();
   });
 
+  it('reserves the stream ID until host unregistration finishes', async () => {
+    const { host, runtime } = await loadRuntime();
+    const ctx = testInvocationCtx(16n);
+    const stream = await runtime.dataChunks('stream-1', undefined, ctx);
+    let finish!: () => void;
+    vi.spyOn(host, 'unregisterStream').mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const closing = runtime.withInvocationCtx(ctx, () => stream.close());
+    await expect(
+      runtime.dataChunks('stream-1', undefined, ctx),
+    ).rejects.toThrow('already has an active subscription');
+    await expect(
+      runtime.__dispatchDataChunk(testChunk(), testActorId(), ctx),
+    ).rejects.toThrow('No stream subscription');
+    finish();
+    await closing;
+    const reopened = await runtime.dataChunks('stream-1', undefined, ctx);
+    await reopened.close();
+  });
+
+  it('releases the stream ID if host unregistration fails', async () => {
+    const { host, runtime } = await loadRuntime();
+    const ctx = testInvocationCtx(16n);
+    const stream = await runtime.dataChunks('stream-1', undefined, ctx);
+    vi.spyOn(host, 'unregisterStream').mockRejectedValueOnce(
+      new Error('failed'),
+    );
+    await expect(
+      runtime.withInvocationCtx(ctx, () => stream.close()),
+    ).rejects.toThrow('failed');
+    const reopened = await runtime.dataChunks('stream-1', undefined, ctx);
+    await reopened.close();
+  });
+
+  it('reserves the stream ID while host registration is pending', async () => {
+    const { host, runtime } = await loadRuntime();
+    const ctx = testInvocationCtx(16n);
+    let finish!: () => void;
+    const registration = vi
+      .spyOn(host, 'registerStream')
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      );
+    const first = runtime.dataChunks('stream-1', undefined, ctx);
+    await expect(
+      runtime.dataChunks('stream-1', undefined, ctx),
+    ).rejects.toThrow('already has an active subscription');
+    expect(registration).toHaveBeenCalledTimes(1);
+    finish();
+    const stream = await first;
+    const iterator = stream[Symbol.asyncIterator]();
+    await runtime.__dispatchDataChunk(testChunk(), testActorId(), ctx);
+    expect((await iterator.next()).value.chunk.streamId).toBe('stream-1');
+    await stream.close();
+  });
+
+  it('releases a stream ID when host registration fails', async () => {
+    const { host, runtime } = await loadRuntime();
+    const ctx = testInvocationCtx(16n);
+    vi.spyOn(host, 'registerStream').mockRejectedValueOnce(new Error('failed'));
+    await expect(
+      runtime.dataChunks('stream-1', undefined, ctx),
+    ).rejects.toThrow('failed');
+    const stream = await runtime.dataChunks('stream-1', undefined, ctx);
+    await stream.close();
+  });
+
   it('rejects zero capacity', async () => {
     const { runtime } = await loadRuntime();
     await expect(
@@ -468,6 +542,36 @@ describe('@actrium/actr-workload', () => {
     await expect(
       sink.send(testChunk({ streamId: 'other-stream' })),
     ).rejects.toThrow('does not match sink streamId');
+  });
+
+  it('every sink close waits for accepted sends', async () => {
+    const { host, runtime } = await loadRuntime();
+    let finish!: () => void;
+    vi.spyOn(host, 'sendDataChunk').mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const sink = await runtime.dataChunkSink(
+      { peer: testActorId() },
+      'stream-1',
+      runtime.PayloadType.StreamReliable,
+      testInvocationCtx(16n),
+    );
+    const send = sink.send(testChunk());
+    await Promise.resolve();
+    const firstClose = sink.close();
+    let secondClosed = false;
+    const secondClose = sink.close().then(() => {
+      secondClosed = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(secondClosed).toBe(false);
+    finish();
+    await Promise.all([send, firstClose, secondClose]);
+    expect(secondClosed).toBe(true);
   });
 
   it('serializes sink sends and rejects sends after close', async () => {

@@ -1041,6 +1041,25 @@ fn stream_listeners() -> &'static std::sync::Mutex<StreamListenerMap> {
     LISTENERS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 
+async fn stop_stream_listener(ref_key: usize, stream_id: String) {
+    // Keep the entry discoverable until the listener itself finishes teardown.
+    // Every concurrent unlisten must wait for the same completion signal.
+    let listener = stream_listeners()
+        .lock()
+        .unwrap()
+        .get(&(ref_key, stream_id))
+        .cloned();
+    if let Some(listener) = listener {
+        listener.cancel.cancel();
+        let mut done = listener.done.clone();
+        while !*done.borrow() {
+            if done.changed().await.is_err() {
+                break;
+            }
+        }
+    }
+}
+
 /// Subscribe the node to one inbound data stream and forward every chunk to
 /// the registered host stream sink. Async — registration result via
 /// `callback`. One listener per `stream_id`: a second `listen` for the same
@@ -1188,29 +1207,42 @@ pub unsafe extern "C" fn actr_stream_unlisten(
         let ref_key = ref_handle as usize;
         runtime::spawn_guarded(
             async move {
-                let listener = stream_listeners()
-                    .lock()
-                    .unwrap()
-                    .remove(&(ref_key, stream_id));
-                if let Some(listener) = listener {
-                    // Report SUCCESS only after the listener task has closed
-                    // the stream and unregistered it from the runtime, so an
-                    // immediate re-listen cannot be rejected as a duplicate.
-                    listener.cancel.cancel();
-                    let mut done = listener.done.clone();
-                    while !*done.borrow() {
-                        // A dropped sender (task died without signaling)
-                        // counts as retired.
-                        if done.changed().await.is_err() {
-                            break;
-                        }
-                    }
-                }
+                stop_stream_listener(ref_key, stream_id).await;
                 callback(SUCCESS, std::ptr::null(), 0, ud as *mut c_void);
             },
             move |code| emit_void_error(code, "actr-cabi task failed", callback, ud as *mut c_void),
         )
     })
+}
+
+#[cfg(test)]
+mod stream_listener_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn concurrent_unlisten_waits_for_listener_teardown() {
+        let key = (usize::MAX, "concurrent-unlisten".to_owned());
+        let (done_tx, done_rx) = tokio::sync::watch::channel(false);
+        let entry = std::sync::Arc::new(StreamListener {
+            cancel: tokio_util::sync::CancellationToken::new(),
+            done: done_rx,
+        });
+        stream_listeners()
+            .lock()
+            .unwrap()
+            .insert(key.clone(), entry.clone());
+        let mut first = Box::pin(stop_stream_listener(key.0, key.1.clone()));
+        assert!(futures_util::poll!(first.as_mut()).is_pending());
+        assert!(entry.cancel.is_cancelled());
+        let mut second = Box::pin(stop_stream_listener(key.0, key.1.clone()));
+        assert!(futures_util::poll!(second.as_mut()).is_pending());
+
+        // The listener removes its entry only after closing the subscription.
+        stream_listeners().lock().unwrap().remove(&key);
+        done_tx.send(true).unwrap();
+        first.await;
+        second.await;
+    }
 }
 // ── ActrRef: shutdown ────────────────────────────────────────────────────────
 

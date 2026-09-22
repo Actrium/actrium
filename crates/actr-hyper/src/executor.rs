@@ -103,6 +103,39 @@ impl LifecyclePhase {
     }
 }
 
+/// Arbitrates stream teardown against entry into guest code. Cancelling a
+/// queued chunk is safe; abandoning an active guest call would poison its runner.
+#[derive(Default)]
+pub(crate) struct DataChunkAdmission(std::sync::atomic::AtomicU8);
+
+impl DataChunkAdmission {
+    const QUEUED: u8 = 0;
+    const RUNNING: u8 = 1;
+    const CANCELLED: u8 = 2;
+
+    pub(crate) fn try_start(&self) -> bool {
+        self.0
+            .compare_exchange(
+                Self::QUEUED,
+                Self::RUNNING,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .is_ok()
+    }
+
+    fn cancel_queued(&self) -> bool {
+        self.0
+            .compare_exchange(
+                Self::QUEUED,
+                Self::CANCELLED,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .is_ok()
+    }
+}
+
 /// One unit of serialized work handed to the runner. Every variant carries
 /// fully-owned arguments plus the caller's `tracing::Span` (so the guest call
 /// stays a child of the caller's span across the task boundary) and a reply
@@ -117,6 +150,7 @@ pub(crate) enum ActorCmd {
         reply: oneshot::Sender<ActorResult<Bytes>>,
     },
     DataChunk {
+        admission: Arc<DataChunkAdmission>,
         chunk: DataChunk,
         sender: ActrId,
         invocation: InvocationContext,
@@ -279,17 +313,52 @@ impl ActorHandle {
         invocation: InvocationContext,
         host_abi: &HostAbiFn,
     ) -> ActorResult<()> {
+        self.dispatch_data_chunk_until_cancelled(
+            chunk,
+            sender,
+            invocation,
+            host_abi,
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+    }
+
+    /// Retire queued stream deliveries without cancelling guest code that has
+    /// already started. This lets a serial invocation unregister a stream even
+    /// when one of its deliveries is queued behind that same invocation.
+    pub(crate) async fn dispatch_data_chunk_until_cancelled(
+        &self,
+        chunk: DataChunk,
+        sender: ActrId,
+        invocation: InvocationContext,
+        host_abi: &HostAbiFn,
+        cancel: &tokio_util::sync::CancellationToken,
+    ) -> ActorResult<()> {
         let host_abi = host_abi.clone();
         let span = tracing::Span::current();
-        self.call_admitted(move |reply| ActorCmd::DataChunk {
+        let admission = Arc::new(DataChunkAdmission::default());
+        let command_admission = admission.clone();
+        let delivery = self.call_admitted(move |reply| ActorCmd::DataChunk {
+            admission: command_admission,
             chunk,
             sender,
             invocation,
             host_abi,
             span,
             reply,
-        })
-        .await
+        });
+        tokio::pin!(delivery);
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => {
+                if admission.cancel_queued() {
+                    return Ok(());
+                }
+                // Entry won the race: keep its reply alive until completion.
+                delivery.await
+            }
+            result = &mut delivery => result,
+        }
     }
 
     /// Dispatch an observation hook into a package-backed workload. Mirrors the
@@ -554,6 +623,7 @@ async fn run_loop(mut workload: Workload, mut rx: mpsc::Receiver<ActorCmd>) {
                 let _ = reply.send(result);
             }
             ActorCmd::DataChunk {
+                admission,
                 chunk,
                 sender,
                 invocation,
@@ -561,6 +631,9 @@ async fn run_loop(mut workload: Workload, mut rx: mpsc::Receiver<ActorCmd>) {
                 span,
                 mut reply,
             } => {
+                if !admission.try_start() {
+                    continue;
+                }
                 let Some(result) = run_until_reply_closed(
                     guarded(
                         "data_chunk",
@@ -888,7 +961,12 @@ async fn run_barrier(handle: &Arc<dyn LinkedWorkloadHandle>, cmd: ActorCmd) -> B
         }
         // Linked stream callbacks register directly on RuntimeContext; the ABI
         // stream command is not applicable (mirrors `dispatch_data_chunk`).
-        ActorCmd::DataChunk { reply, .. } => {
+        ActorCmd::DataChunk {
+            admission, reply, ..
+        } => {
+            if !admission.try_start() {
+                return BarrierOutcome::Continue;
+            }
             let _ = reply.send(Err(ActrError::NotImplemented(
                 "linked workload stream callbacks are registered directly on RuntimeContext"
                     .to_string(),

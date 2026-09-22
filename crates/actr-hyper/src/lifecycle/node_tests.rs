@@ -3280,4 +3280,148 @@ async fn a_peer_type_lasts_until_its_last_connection_closes() {
     shutdown.cancel();
     follow.await.unwrap();
     manager.close_all().await;
+
+#[tokio::test(flavor = "current_thread")]
+async fn unregister_retires_chunk_queued_behind_active_serial_invocation() {
+    let (ctx, _) = harness().await;
+    let (events, mut observed) = tokio::sync::mpsc::unbounded_channel();
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let runner = Arc::new(crate::executor::spawn_runner(Workload::Linked(Arc::new(
+        ShutdownOrderHandle {
+            events,
+            release_first: release.clone(),
+        },
+    ))));
+    let first = tokio::spawn(shutdown_order_dispatch(
+        runner.clone(),
+        ctx.clone(),
+        "first",
+    )());
+    assert_eq!(
+        next_shutdown_event(&mut observed).await,
+        ShutdownOrderEvent::FirstStarted
+    );
+
+    let forwarders: StreamForwarders = Default::default();
+    let register = || {
+        HostOperation::RegisterStream(HostRegisterStreamV1 {
+            stream_id: "queued-stream".into(),
+        })
+    };
+    assert!(matches!(
+        host_operation_handler(
+            ctx.clone(),
+            weak_runner(&runner),
+            forwarders.clone(),
+            register()
+        )
+        .await,
+        HostOperationResult::Done
+    ));
+    ctx.data_chunk_registry_for_test()
+        .invoke_for_test(
+            actr_protocol::DataChunk {
+                stream_id: "queued-stream".into(),
+                ..Default::default()
+            },
+            ActrId::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    // On the current-thread runtime, let the forwarder enqueue delivery while
+    // the runner remains parked in the first dispatch.
+    tokio::task::yield_now().await;
+    let result = tokio::time::timeout(
+        Duration::from_secs(5),
+        host_operation_handler(
+            ctx.clone(),
+            weak_runner(&runner),
+            forwarders.clone(),
+            HostOperation::UnregisterStream(HostUnregisterStreamV1 {
+                stream_id: "queued-stream".into(),
+            }),
+        ),
+    )
+    .await
+    .expect("unregister must not wait for the active invocation to return");
+    assert!(matches!(result, HostOperationResult::Done));
+    assert!(matches!(
+        host_operation_handler(
+            ctx.clone(),
+            weak_runner(&runner),
+            forwarders.clone(),
+            register()
+        )
+        .await,
+        HostOperationResult::Done
+    ));
+    release.add_permits(1);
+    first.await.unwrap().unwrap();
+    assert_eq!(
+        next_shutdown_event(&mut observed).await,
+        ShutdownOrderEvent::FirstFinished
+    );
+    shutdown_order_dispatch(runner.clone(), ctx.clone(), "second")()
+        .await
+        .unwrap();
+    assert_eq!(
+        next_shutdown_event(&mut observed).await,
+        ShutdownOrderEvent::SecondStarted
+    );
+    host_operation_handler(
+        ctx,
+        weak_runner(&runner),
+        forwarders,
+        HostOperation::UnregisterStream(HostUnregisterStreamV1 {
+            stream_id: "queued-stream".into(),
+        }),
+    )
+    .await;
+    runner.shutdown().await;
+}
+
+#[tokio::test]
+async fn concurrent_unregister_waits_for_the_same_forwarder_teardown() {
+    let (ctx, runner) = harness().await;
+    let forwarders: StreamForwarders = Default::default();
+    let (done, wait) = tokio::sync::watch::channel(false);
+    let entry = Arc::new(StreamForwarder {
+        cancel: CancellationToken::new(),
+        done: wait,
+    });
+    forwarders
+        .lock()
+        .unwrap()
+        .insert("closing".into(), entry.clone());
+    let unregister = || {
+        HostOperation::UnregisterStream(HostUnregisterStreamV1 {
+            stream_id: "closing".into(),
+        })
+    };
+    // Callback-originated close cannot await its own delivery, but it must
+    // leave teardown discoverable for subsequent external callers.
+    let result =
+        stream_callback_host_operation_handler(ctx.clone(), forwarders.clone(), unregister()).await;
+    assert!(matches!(result, HostOperationResult::Done));
+    assert!(entry.cancel.is_cancelled());
+    let mut first = Box::pin(host_operation_handler(
+        ctx.clone(),
+        weak_runner(&runner),
+        forwarders.clone(),
+        unregister(),
+    ));
+    let mut second = Box::pin(host_operation_handler(
+        ctx,
+        weak_runner(&runner),
+        forwarders.clone(),
+        unregister(),
+    ));
+    assert!(futures_util::poll!(first.as_mut()).is_pending());
+    assert!(futures_util::poll!(second.as_mut()).is_pending());
+    forwarders.lock().unwrap().remove("closing");
+    done.send(true).unwrap();
+    assert!(matches!(first.await, HostOperationResult::Done));
+    assert!(matches!(second.await, HostOperationResult::Done));
+    runner.shutdown().await;
 }
