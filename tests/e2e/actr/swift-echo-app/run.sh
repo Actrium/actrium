@@ -279,9 +279,9 @@ capture_diagnostics() {
             echo "=== signaling_cache.db ==="
             echo "--- Tables ---"
             sqlite3 "$db_path" ".tables" 2>/dev/null || true
-            echo "--- Service registry ---"
+            echo "--- Actor registry ---"
             sqlite3 "$db_path" \
-                "SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status, last_heartbeat_at FROM service_registry;" \
+                "SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status, last_heartbeat_at FROM actor_registry;" \
                 2>/dev/null || true
         } >"$diag_dir/signaling-cache.txt" 2>/dev/null || true
     fi
@@ -910,7 +910,7 @@ check_service_ready() {
         echo "Service registrations observed before timeout:" >&2
         if [ -f "$db_path" ]; then
             sqlite3 "$db_path" \
-                "SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status, last_heartbeat_at FROM service_registry;" \
+                "SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status, last_heartbeat_at FROM actor_registry;" \
                 >&2 2>/dev/null || true
         else
             echo "  signaling_cache.db not found at $db_path" >&2
@@ -921,7 +921,7 @@ check_service_ready() {
 
     sqlite3 "$db_path" "
         SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status
-        FROM service_registry
+        FROM actor_registry
         WHERE actor_realm_id = ${REALM_ID}
           AND actor_publisher = '${PUBLISHER}'
           AND actor_device_name = 'EchoService'

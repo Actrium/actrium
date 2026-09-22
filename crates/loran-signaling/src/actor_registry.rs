@@ -1,4 +1,4 @@
-//! Service registry implementation
+//! Actor registry implementation
 //!
 //! Responsible for managing all registered services and providing service discovery
 //!
@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::service_registry_storage::ServiceRegistryStorage;
+use crate::actor_registry_storage::ActorRegistryStorage;
 
 /// Service expiry threshold (seconds) - a service is considered expired if no heartbeat is received within this time
 pub const SERVICE_EXPIRY_THRESHOLD_SECS: u64 = 60;
@@ -139,9 +139,9 @@ pub struct ServiceMetrics {
     pub error_rate: f64,
 }
 
-/// Service registry
+/// Actor registry
 #[derive(Debug, Default)]
-pub struct ServiceRegistry {
+pub struct ActorRegistry {
     /// Service map: service_name -> list of service instances
     services: HashMap<String, Vec<ServiceInfo>>,
     /// Message type index: message_type -> list of service names
@@ -149,10 +149,10 @@ pub struct ServiceRegistry {
     /// Actor ID index: actor_id -> list of services
     actor_index: HashMap<ActrId, Vec<String>>,
     /// SQLite persistence cache (optional)
-    storage: Option<Arc<ServiceRegistryStorage>>,
+    storage: Option<Arc<ActorRegistryStorage>>,
 }
 
-impl ServiceRegistry {
+impl ActorRegistry {
     pub fn new() -> Self {
         Self::default()
     }
@@ -199,8 +199,8 @@ impl ServiceRegistry {
     }
 
     /// Set persistence storage (called at startup)
-    pub fn set_storage(&mut self, storage: Arc<ServiceRegistryStorage>) {
-        platform::recording::info!("ServiceRegistry enabling SQLite persistence cache");
+    pub fn set_storage(&mut self, storage: Arc<ActorRegistryStorage>) {
+        platform::recording::info!("ActorRegistry enabling SQLite persistence cache");
         self.storage = Some(storage);
     }
 
@@ -440,8 +440,8 @@ impl ServiceRegistry {
         })
     }
 
-    /// Get ServiceRegistryStorage reference (for querying proto specs during compatibility negotiation)
-    pub fn get_storage(&self) -> Option<Arc<ServiceRegistryStorage>> {
+    /// Get ActorRegistryStorage reference (for querying proto specs during compatibility negotiation)
+    pub fn get_storage(&self) -> Option<Arc<ActorRegistryStorage>> {
         self.storage.clone()
     }
 
@@ -1181,7 +1181,7 @@ mod tests {
 
     #[test]
     fn test_service_registration() {
-        let mut registry = ServiceRegistry::new();
+        let mut registry = ActorRegistry::new();
         let actor_id = create_test_actor_id(1);
 
         let result = registry.register_service(
@@ -1200,7 +1200,7 @@ mod tests {
 
     #[test]
     fn test_service_discovery() {
-        let mut registry = ServiceRegistry::new();
+        let mut registry = ActorRegistry::new();
         let actor_id1 = create_test_actor_id(1);
         let actor_id2 = create_test_actor_id(2);
 
@@ -1234,7 +1234,7 @@ mod tests {
 
     #[test]
     fn test_service_unregister() {
-        let mut registry = ServiceRegistry::new();
+        let mut registry = ActorRegistry::new();
         let actor_id = create_test_actor_id(1);
 
         registry
@@ -1261,7 +1261,7 @@ mod tests {
 
     #[test]
     fn test_unregister_nonexistent_service() {
-        let mut registry = ServiceRegistry::new();
+        let mut registry = ActorRegistry::new();
         let actor_id = create_test_actor_id(1);
 
         // Note: in the current implementation, unregistering a nonexistent service name returns Ok(())
@@ -1289,7 +1289,7 @@ mod tests {
 
     #[test]
     fn test_service_status_update() {
-        let mut registry = ServiceRegistry::new();
+        let mut registry = ActorRegistry::new();
         let actor_id = create_test_actor_id(1);
 
         registry
@@ -1324,7 +1324,7 @@ mod tests {
 
     #[test]
     fn test_load_metrics_update() {
-        let mut registry = ServiceRegistry::new();
+        let mut registry = ActorRegistry::new();
         let actor_id = create_test_actor_id(1);
 
         registry
@@ -1350,7 +1350,7 @@ mod tests {
 
     #[test]
     fn test_discover_by_service_name() {
-        let mut registry = ServiceRegistry::new();
+        let mut registry = ActorRegistry::new();
         let actor_id1 = create_test_actor_id(1);
         let actor_id2 = create_test_actor_id(2);
 
@@ -1382,7 +1382,7 @@ mod tests {
 
     #[test]
     fn test_unregister_actor() {
-        let mut registry = ServiceRegistry::new();
+        let mut registry = ActorRegistry::new();
         let actor_id = create_test_actor_id(1);
 
         // Register multiple services
@@ -1418,7 +1418,7 @@ mod tests {
 
     #[test]
     fn test_service_with_capabilities() {
-        let mut registry = ServiceRegistry::new();
+        let mut registry = ActorRegistry::new();
         let actor_id = create_test_actor_id(1);
 
         let mut tags = HashMap::new();
@@ -1451,7 +1451,7 @@ mod tests {
 
     #[test]
     fn test_discover_by_requirements() {
-        let mut registry = ServiceRegistry::new();
+        let mut registry = ActorRegistry::new();
         let actor_id1 = create_test_actor_id(1);
         let actor_id2 = create_test_actor_id(2);
 
@@ -1515,7 +1515,7 @@ mod tests {
 
     #[test]
     fn test_service_stats() {
-        let mut registry = ServiceRegistry::new();
+        let mut registry = ActorRegistry::new();
         let actor_id1 = create_test_actor_id(1);
         let actor_id2 = create_test_actor_id(2);
 
@@ -1550,7 +1550,7 @@ mod tests {
 
     #[test]
     fn test_register_service_full_with_spec_and_acl() {
-        let mut registry = ServiceRegistry::new();
+        let mut registry = ActorRegistry::new();
         let actor_id = create_test_actor_id(1);
 
         let service_spec = actr_protocol::ServiceSpec {
@@ -1589,7 +1589,7 @@ mod tests {
 
     #[test]
     fn test_find_by_actr_type() {
-        let mut registry = ServiceRegistry::new();
+        let mut registry = ActorRegistry::new();
 
         let actor_id1 = ActrId {
             serial_number: 1,
@@ -1665,7 +1665,7 @@ mod tests {
 
     #[test]
     fn test_discover_all_with_publisher_filter() {
-        let mut registry = ServiceRegistry::new();
+        let mut registry = ActorRegistry::new();
 
         let actor_id1 = ActrId {
             serial_number: 1,
@@ -1752,17 +1752,17 @@ mod tests {
 
         let from_allowed = create_actor_id(1, source_realm, "acme", "edge");
         let to_target = create_actor_id(2, target_realm, "acme", "worker");
-        let allowed = ServiceRegistry::check_discovery_acl(&from_allowed, &to_target).await?;
+        let allowed = ActorRegistry::check_discovery_acl(&from_allowed, &to_target).await?;
         assert!(allowed);
 
         let from_wrong_realm = create_actor_id(3, other_realm, "acme", "edge");
         let denied_wrong_realm =
-            ServiceRegistry::check_discovery_acl(&from_wrong_realm, &to_target).await?;
+            ActorRegistry::check_discovery_acl(&from_wrong_realm, &to_target).await?;
         assert!(!denied_wrong_realm);
 
         let from_wrong_publisher = create_actor_id(4, source_realm, "other", "edge");
         let denied_wrong_publisher =
-            ServiceRegistry::check_discovery_acl(&from_wrong_publisher, &to_target).await?;
+            ActorRegistry::check_discovery_acl(&from_wrong_publisher, &to_target).await?;
         assert!(!denied_wrong_publisher);
 
         Ok(())
@@ -1779,7 +1779,7 @@ mod tests {
     /// Expected (after fix): find_by_actr_type returns 1 candidate (only B).
     #[test]
     fn test_ghost_candidates_double_register_same_actor_id() {
-        let mut registry = ServiceRegistry::new();
+        let mut registry = ActorRegistry::new();
 
         let actr_type = ActrType {
             publisher: "acme".to_string(),
@@ -1853,7 +1853,7 @@ mod tests {
 
     #[test]
     fn test_find_by_actr_type_requires_exact_version() {
-        let mut registry = ServiceRegistry::new();
+        let mut registry = ActorRegistry::new();
 
         let actor_id = ActrId {
             serial_number: 1,
@@ -1918,13 +1918,13 @@ mod tests {
         };
 
         let storage = Arc::new(
-            ServiceRegistryStorage::new(":memory:", Some(3600))
+            ActorRegistryStorage::new(":memory:", Some(3600))
                 .await
                 .unwrap(),
         );
         storage.save_service(&service).await.unwrap();
 
-        let mut registry = ServiceRegistry::new();
+        let mut registry = ActorRegistry::new();
         registry.set_storage(storage);
 
         assert!(

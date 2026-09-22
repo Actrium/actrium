@@ -3733,7 +3733,7 @@ async fn signaling_malformed_binary_removes_actor_from_route_candidates() {
 #[tokio::test]
 #[serial]
 #[ignore = "Flaky test after actrix restart, maybe due to ACL rules persistence"]
-async fn service_registry_persists_across_restart() {
+async fn actor_registry_persists_across_restart() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let data_dir = tmp.path().join("data");
     let port = choose_port();

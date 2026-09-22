@@ -298,7 +298,7 @@ check_service_ready() {
         "$db_path" "$REALM_ID" "$PUBLISHER" "$service_actor" "$timeout"; then
         echo "Service registrations observed before timeout:" >&2
         [ -f "$db_path" ] && sqlite3 "$db_path" \
-            "SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status FROM service_registry;" \
+            "SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status FROM actor_registry;" \
             >&2 2>/dev/null || true
         tail -n 120 "$LOG_DIR/server.log" >&2 2>/dev/null || true
         fail "${service_actor} did not register with signaling within ${timeout}s"
@@ -523,7 +523,7 @@ capture_kotlin_diagnostics() {
     local db_path="$SQLITE_DIR/signaling_cache.db"
     if [ -f "$db_path" ]; then
         sqlite3 "$db_path" \
-            "SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status FROM service_registry;" \
+            "SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status FROM actor_registry;" \
             >"$diag_dir/signaling-cache.txt" 2>/dev/null || true
     fi
     for log in "$LOG_DIR"/*.log; do

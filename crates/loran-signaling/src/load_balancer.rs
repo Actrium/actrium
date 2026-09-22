@@ -12,7 +12,7 @@
 //! # Usage example
 //! ```ignore
 //! use signaling::load_balancer::LoadBalancer;
-//! use signaling::service_registry::ServiceInfo;
+//! use signaling::actor_registry::ServiceInfo;
 //! use actr_protocol::route_candidates_request::node_selection_criteria::NodeRankingFactor;
 //!
 //! let mut candidates: Vec<ServiceInfo> = vec![]; // get candidate list
@@ -30,7 +30,7 @@
 //! // Returns a ranked list of candidate ActrIds
 //! ```
 
-use crate::service_registry::ServiceInfo;
+use crate::actor_registry::ServiceInfo;
 use actr_protocol::{
     ActrId, ServiceAvailabilityState, ServiceDependencyState,
     route_candidates_request::{NodeSelectionCriteria, node_selection_criteria::NodeRankingFactor},
@@ -388,7 +388,7 @@ mod tests {
             service_name: name.to_string(),
             message_types: vec![],
             capabilities: None,
-            status: crate::service_registry::ServiceStatus::Available,
+            status: crate::actor_registry::ServiceStatus::Available,
             last_heartbeat_time_secs: 0,
             service_spec: None,
             acl: None,
@@ -673,7 +673,7 @@ mod tests {
 
     #[test]
     fn test_sort_by_distance_with_client_location() {
-        use crate::service_registry::ServiceLocation;
+        use crate::actor_registry::ServiceLocation;
 
         // Client location: Beijing (39.9042, 116.4074)
         let client_location = Some((39.9042, 116.4074));

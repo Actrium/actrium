@@ -6,7 +6,7 @@
 //!
 //! ## Core modules
 //! - [`server`]: WebSocket server and protocol handling
-//! - [`service_registry`][]: Service registration and discovery
+//! - [`actor_registry`][]: Service registration and discovery
 //!
 //! ## Extension modules
 //! - [`presence`] - Presence subscription management
@@ -14,13 +14,13 @@
 //! - [`geo`] - Geographic location and distance calculation
 #![deny(clippy::disallowed_macros)]
 
+pub mod actor_registry;
+pub mod actor_registry_storage;
 pub mod geo;
 pub mod load_balancer;
 pub mod presence;
 pub mod ratelimit;
 pub mod server;
-pub mod service_registry;
-pub mod service_registry_storage;
 #[cfg(feature = "opentelemetry")]
 pub mod trace;
 
@@ -33,6 +33,7 @@ pub use axum_router::{
 };
 
 // Re-export commonly used types
+pub use actor_registry::{ActorRegistry, ServiceInfo};
 pub use load_balancer::LoadBalancer;
 pub use presence::PresenceManager;
 pub use ratelimit::TargetRateLimiter;
@@ -40,7 +41,6 @@ pub use server::{
     ClientConnection, ClientEgress, SignalingQueueMetrics, SignalingQueueMetricsSnapshot,
     SignalingServer, SignalingServerHandle,
 };
-pub use service_registry::{ServiceInfo, ServiceRegistry};
 
 // Export WebSocket handler
 pub use server::handle_websocket_connection;
