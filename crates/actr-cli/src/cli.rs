@@ -89,7 +89,7 @@ pub enum Commands {
     Deps(DepsArgs),
     /// Local package operations (sign, verify, keygen)
     Pkg(PkgArgs),
-    /// Remote service registry (discover, publish, fingerprint)
+    /// Remote Actor Registry (discover, publish, fingerprint)
     Registry(RegistryArgs),
     /// Dead Letter Queue inspection and remediation
     Dlq(DlqArgs),

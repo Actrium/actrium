@@ -18,7 +18,7 @@
 //!   - Exact match priority strategy
 //! - ✅ Presence subscription (`SubscribeActrUpRequest` / `ActrUpEvent`)
 //! - ❌ Credential refresh has been migrated to Issuer HTTP
-//! - ✅ Load metric storage (`handle_ping()` - stored in ServiceRegistry for load balancing)
+//! - ✅ Load metric storage (`handle_ping()` - stored in ActorRegistry for load balancing)
 //!
 //! ## Pending Features (optional enhancements)
 //!
@@ -54,9 +54,9 @@ use uuid::Uuid;
 // Axum WebSocket
 use axum::extract::ws::{Message as WsMessage, WebSocket};
 
+use crate::actor_registry::ActorRegistry;
 use crate::load_balancer::LoadBalancer;
 use crate::presence::PresenceManager;
-use crate::service_registry::ServiceRegistry;
 #[cfg(feature = "opentelemetry")]
 use crate::trace::{extract_trace_context, inject_trace_context};
 use tracing::Instrument;
@@ -254,8 +254,8 @@ pub struct SignalingServer {
     pub clients: Arc<RwLock<HashMap<String, ClientConnection>>>,
     /// Index for looking up client_id by ActorId
     pub actor_id_index: Arc<RwLock<HashMap<ActrId, String>>>,
-    /// Service registry
-    pub service_registry: Arc<RwLock<ServiceRegistry>>,
+    /// Actor registry
+    pub actor_registry: Arc<RwLock<ActorRegistry>>,
     /// Presence subscription manager
     pub presence_manager: Arc<RwLock<PresenceManager>>,
     /// Connection rate limiter
@@ -299,7 +299,7 @@ struct StaleClient {
 pub struct SignalingServerHandle {
     pub clients: Arc<RwLock<HashMap<String, ClientConnection>>>,
     pub actor_id_index: Arc<RwLock<HashMap<ActrId, String>>>,
-    pub service_registry: Arc<RwLock<ServiceRegistry>>,
+    pub actor_registry: Arc<RwLock<ActorRegistry>>,
     pub presence_manager: Arc<RwLock<PresenceManager>>,
     pub connection_rate_limiter: Option<Arc<crate::ratelimit::ConnectionRateLimiter>>,
     pub message_rate_limiter: Option<Arc<crate::ratelimit::MessageRateLimiter>>,
@@ -363,7 +363,7 @@ impl SignalingServer {
         Self {
             clients: Arc::new(RwLock::new(HashMap::new())),
             actor_id_index: Arc::new(RwLock::new(HashMap::new())),
-            service_registry: Arc::new(RwLock::new(ServiceRegistry::new())),
+            actor_registry: Arc::new(RwLock::new(ActorRegistry::new())),
             presence_manager: Arc::new(RwLock::new(PresenceManager::new())),
             connection_rate_limiter: None, // Initialized in axum_router based on config
             message_rate_limiter: None,    // Initialized in axum_router based on config
@@ -438,7 +438,7 @@ pub async fn handle_websocket_connection(
 
     close_stale_clients(stale_clients, &server).await;
 
-    // Register actor in service registry for discovery/routing (only when URL identity is provided)
+    // Register actor in actor registry for discovery/routing (only when URL identity is provided)
     if let Some(actor_id_for_registry) = actor_id_for_registry {
         {
             // Load pending service_spec and ws_address from DB (written by Issuer during registration)
@@ -469,7 +469,7 @@ pub async fn handle_websocket_connection(
                 "{}:{}",
                 actor_id_for_registry.r#type.publisher, actor_id_for_registry.r#type.name
             );
-            let mut registry = server.service_registry.write().await;
+            let mut registry = server.actor_registry.write().await;
             if let Err(e) = registry.register_service_full(
                 actor_id_for_registry.clone(),
                 service_name,
@@ -479,7 +479,7 @@ pub async fn handle_websocket_connection(
                 None,
                 ws_address,
             ) {
-                platform::recording::warn!("Failed to register actor in service registry: {}", e);
+                platform::recording::warn!("Failed to register actor in actor registry: {}", e);
             }
         }
         // Notify presence subscribers about the new actor
@@ -1091,8 +1091,8 @@ async fn handle_ping(
         }
     );
 
-    // Store load metrics in ServiceRegistry
-    let mut registry = server.service_registry.write().await;
+    // Store load metrics in ActorRegistry
+    let mut registry = server.actor_registry.write().await;
     if let Err(e) = registry.update_load_metrics(
         &source,
         ping.availability,
@@ -1204,7 +1204,7 @@ async fn handle_unregister(
     // The storage DELETE must complete before Success is acknowledged: the
     // peer treats UnregisterOk as "the removal survives a server restart".
     let durable = server
-        .service_registry
+        .actor_registry
         .write()
         .await
         .unregister_actor_durable(&source)
@@ -1991,7 +1991,7 @@ async fn cleanup_client(client_id: &str, server: &SignalingServerHandle, mode: C
                     replacement_client_id
                 );
             } else {
-                let mut registry = server.service_registry.write().await;
+                let mut registry = server.actor_registry.write().await;
                 match mode {
                     CleanupMode::ConnectionClosed => {
                         registry.unregister_actor_memory_only(&actor_id);
@@ -2029,8 +2029,8 @@ async fn handle_discovery_request(
         req.limit.unwrap_or(64)
     );
 
-    // Query all services from ServiceRegistry
-    let registry = server.service_registry.read().await;
+    // Query all services from ActorRegistry
+    let registry = server.actor_registry.read().await;
     let services = registry.discover_all(req.publisher.as_deref());
     let total_count = services.len(); // Save count before moving
 
@@ -2155,13 +2155,13 @@ async fn handle_route_candidates_request(
         req.target_type.name,
     );
 
-    // Query all instances matching target_type from ServiceRegistry
-    let registry = server.service_registry.read().await;
+    // Query all instances matching target_type from ActorRegistry
+    let registry = server.actor_registry.read().await;
     let candidates_raw = registry.find_by_actr_type(&req.target_type);
     drop(registry);
 
     // Filter out ghost candidates with no active WebSocket connection.
-    // ServiceRegistry may briefly retain offline entries due to network disruptions,
+    // ActorRegistry may briefly retain offline entries due to network disruptions,
     // Cross-checking against the clients map eliminates them.
     let connected_actor_ids: std::collections::HashSet<ActrId> = {
         let clients = server.clients.read().await;
@@ -2321,9 +2321,9 @@ async fn handle_get_service_spec_request(
         service_name
     );
 
-    // Find matching ServiceSpec in ServiceRegistry by spec name
+    // Find matching ServiceSpec in ActorRegistry by spec name
     let result = server
-        .service_registry
+        .actor_registry
         .read()
         .await
         .discover_by_spec_name(service_name)
@@ -2606,7 +2606,7 @@ mod tests {
         SignalingServerHandle {
             clients: server.clients.clone(),
             actor_id_index: server.actor_id_index.clone(),
-            service_registry: server.service_registry.clone(),
+            actor_registry: server.actor_registry.clone(),
             presence_manager: server.presence_manager.clone(),
             connection_rate_limiter: server.connection_rate_limiter.clone(),
             message_rate_limiter: server.message_rate_limiter.clone(),
@@ -2618,7 +2618,7 @@ mod tests {
 
     async fn register_test_service(server: &SignalingServerHandle, actor_id: &ActrId) {
         server
-            .service_registry
+            .actor_registry
             .write()
             .await
             .register_service(
@@ -2720,7 +2720,7 @@ mod tests {
         );
         assert_eq!(
             server
-                .service_registry
+                .actor_registry
                 .read()
                 .await
                 .discover_by_service_name("test_service")
@@ -2750,7 +2750,7 @@ mod tests {
 
         assert_eq!(
             server
-                .service_registry
+                .actor_registry
                 .read()
                 .await
                 .discover_by_service_name("test_service")

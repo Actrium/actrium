@@ -24,7 +24,7 @@ wait_for_service_registration() {
             service_count="$(
                 sqlite3 "$db_path" "
                     SELECT COUNT(*)
-                    FROM service_registry
+                    FROM actor_registry
                     WHERE actor_realm_id = ${realm_id}
                       AND actor_publisher = '${publisher}'
                       AND actor_device_name = '${actor_name}'

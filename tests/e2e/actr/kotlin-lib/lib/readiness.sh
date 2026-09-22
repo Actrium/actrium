@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# readiness.sh — poll actrix service_registry until a service registers.
+# readiness.sh — poll actrix actor_registry until a service registers.
 # Language-agnostic (pure sqlite). Shared by the Kotlin e2e suites.
 # Sourced alongside package-runtime-echo/lib/common.sh.
 
@@ -28,7 +28,7 @@ wait_for_service_registration() {
             service_count="$(
                 sqlite3 "$db_path" "
                     SELECT COUNT(*)
-                    FROM service_registry
+                    FROM actor_registry
                     WHERE actor_realm_id = ${realm_id}
                       AND actor_publisher = '${publisher}'
                       AND actor_device_name = '${actor_name}'

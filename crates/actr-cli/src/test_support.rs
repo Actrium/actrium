@@ -413,7 +413,7 @@ impl LocalActrix {
     }
 
     /// Restart actrix using the same state directory and ports.
-    /// The SQLite database is preserved so service registry can be restored.
+    /// The SQLite database is preserved so the Actor Registry can be restored.
     pub fn restart(&mut self) -> Result<()> {
         self.kill();
         // Brief pause to let the OS release the port

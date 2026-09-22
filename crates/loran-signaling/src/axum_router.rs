@@ -91,8 +91,8 @@ pub async fn create_signaling_router_with_config_and_counters(
         .unwrap_or_default();
     let mut server = SignalingServer::with_egress_config(egress_config);
 
-    // Initialize ServiceRegistry persistent cache (for restart recovery)
-    let cache_ttl_secs = crate::service_registry_storage::DEFAULT_SERVICE_TTL_SECS;
+    // Initialize ActorRegistry persistent cache (for restart recovery)
+    let cache_ttl_secs = crate::actor_registry_storage::DEFAULT_SERVICE_TTL_SECS;
 
     if !config.sqlite_path.exists() {
         std::fs::create_dir_all(&config.sqlite_path).with_context(|| {
@@ -104,7 +104,7 @@ pub async fn create_signaling_router_with_config_and_counters(
     }
     let cache_db_file = config.sqlite_path.join("signaling_cache.db");
 
-    match crate::service_registry_storage::ServiceRegistryStorage::new(
+    match crate::actor_registry_storage::ActorRegistryStorage::new(
         &cache_db_file,
         Some(cache_ttl_secs),
     )
@@ -113,13 +113,13 @@ pub async fn create_signaling_router_with_config_and_counters(
         Ok(storage) => {
             let storage_arc = Arc::new(storage);
             platform::recording::info!(
-                "✅ ServiceRegistry cache initialized at: {}",
+                "✅ ActorRegistry cache initialized at: {}",
                 cache_db_file.display()
             );
 
-            // Set storage on ServiceRegistry
+            // Set storage on ActorRegistry
             {
-                let mut registry = server.service_registry.write().await;
+                let mut registry = server.actor_registry.write().await;
                 registry.set_storage(storage_arc.clone());
 
                 // Restore service list from cache
@@ -170,20 +170,20 @@ pub async fn create_signaling_router_with_config_and_counters(
             });
         }
         Err(e) => {
-            platform::recording::warn!("⚠️  Failed to initialize ServiceRegistry cache: {:?}", e);
+            platform::recording::warn!("⚠️  Failed to initialize ActorRegistry cache: {:?}", e);
             platform::recording::warn!(
                 "    Service discovery will work but won't survive restarts"
             );
         }
     }
 
-    // Start the periodic cleanup task for the ServiceRegistry memory table (cleanup expired services, avoid stale connections)
+    // Start the periodic cleanup task for the ActorRegistry memory table (cleanup expired services, avoid stale connections)
     {
-        let registry_for_cleanup = server.service_registry.clone();
+        let registry_for_cleanup = server.actor_registry.clone();
         let cancel_for_registry = cancel.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(
-                crate::service_registry::CLEANUP_INTERVAL_SECS,
+                crate::actor_registry::CLEANUP_INTERVAL_SECS,
             ));
             loop {
                 tokio::select! {
@@ -363,7 +363,7 @@ async fn handle_websocket(
     let server_handle = SignalingServerHandle {
         clients: state.server.clients.clone(),
         actor_id_index: state.server.actor_id_index.clone(),
-        service_registry: state.server.service_registry.clone(),
+        actor_registry: state.server.actor_registry.clone(),
         presence_manager: state.server.presence_manager.clone(),
         connection_rate_limiter: state.server.connection_rate_limiter.clone(),
         message_rate_limiter: state.server.message_rate_limiter.clone(),
