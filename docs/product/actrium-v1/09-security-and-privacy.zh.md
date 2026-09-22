@@ -41,7 +41,7 @@ flowchart LR
     SH -->|credentials/transport| R
 ```
 
-受信 Host 仍可能有漏洞；“受信”表示它在平台可信计算基内，不表示无需审计。
+受信 Host 仍可能有漏洞；「受信」表示它在平台可信计算基内，不表示无需审计。
 
 ## 3. 资产
 
@@ -50,6 +50,7 @@ flowchart LR
 - Workspace 内容；
 - Actor 长期私钥；
 - Realm membership/refresh material；
+- 本机安装根 key（派生 `installation-id`）；
 - Service 状态与 snapshot；
 - Provider credential；
 - 用户身份和 ACL；
@@ -61,6 +62,7 @@ flowchart LR
 - ActorId；
 - Program/Service 使用记录；
 - Realm membership；
+- Realm 引用（暴露命名空间与实例名）；
 - IP、在线时间、连接图；
 - Workspace 显示名和位置；
 - 权限授予；
@@ -102,6 +104,7 @@ flowchart LR
 | URL 批量创建 | 确认、creation intent 幂等、来源限流和配额 |
 | URL 泄露权限 | ActorId 非 capability，URI 无 token |
 | Actor 冒充 | Realm credential、Actor key proof、challenge |
+| 伪造或回滚 Realm Profile | Profile 必须由已固定的命名空间 key 签名；首次信任经 Web PKI 或企业 pin；命名空间 key 变化须有有效轮换链；`sequence` 单调、`provider.id` 不可变、已退役 Realm 拒绝；Profile 不过期，客户端定期刷新；取不到、验不过或已退役的 Profile 时不得回退到 authority descriptor 中的默认 provider |
 | 客户端伪装成官方 Actro Front | Service 默认不信任客户端实现；受管场景另验 platform/runtime attestation |
 | 恶意 Actor 自报「不泄露」 | 被评估者不得自签最终 `ActorAssurance`；有效声明由 Host 闭合 |
 | Service 隐瞒辅助 Actor | 无根图须发现入边；漏评不得绿 |
@@ -112,7 +115,7 @@ flowchart LR
 | 云管理员或 Hypervisor 读取 Agent 明文 | secret policy 要求 TEE/CC；通过远程证明后才释放数据密钥 |
 | 合法 TEE 证明被转发到恶意实例 | Evidence 绑定 nonce、Actor/runtime、workload digest、policy、audience 和 ephemeral key |
 | 只有 CPU TEE、GPU/NPU 仍暴露明文 | CPU+Guest+driver+IOMMU/link+device firmware/memory composite attestation |
-| 厂商自报“支持机密计算” | versioned Verifier adapter、vendor trust root、Reference Values、Endorsements、TCB 撤销与负向测试 |
+| 厂商自报「支持机密计算」 | versioned Verifier adapter、vendor trust root、Reference Values、Endorsements、TCB 撤销与负向测试 |
 | CC 内恶意 workload 主动外泄 | CC 不替代 WASM/Native confinement、egress closure 与 output control |
 | 合法 Actor 响应偷带 secret | data-class schema、declassification capability、输出大小/目标/用途 gate |
 | 新 Actor 先收数据后验证 | pending edge 同步 gate；Mark 通过前不发送业务 payload |
@@ -219,7 +222,7 @@ Service:
 
 ### 7.3 组件控制
 
-组件 props 不是“普通 UI 数据”就自动安全。Actro 必须检查：
+组件 props 不是「普通 UI 数据」就自动安全。Actro 必须检查：
 
 - URL 和 header；
 - 文件/asset reference；
@@ -243,7 +246,7 @@ Service:
 | S3 OS process isolation | 桌面长期目标 | helper process/AppContainer/XPC |
 | T1 Trusted Native | Actro 第一方/企业 | 原生 workload，高信任 |
 
-不得把 S1 文案写成“进程级隔离”。QuickJS 是 C 引擎，Host/Bridge/组件层漏洞仍可能跨越语言沙箱。
+不得把 S1 文案写成「进程级隔离」。QuickJS 是 C 引擎，Host/Bridge/组件层漏洞仍可能跨越语言沙箱。
 
 ## 9. Service workload 安全
 
@@ -319,9 +322,10 @@ ActorType、Host 版本和 package digest 的客户端声明不构成 runtime at
 
 | Secret | 存储 | 暴露范围 |
 |---|---|---|
-| Device key | OS secure storage | Identity Manager |
+| Device key（每个 Realm 独立，由设备根 key 按 Realm 引用派生或独立生成） | OS secure storage | Identity Manager |
 | Service Actor key | OS secure storage | Service runtime bootstrap |
 | Realm refresh material | OS secure storage | Realm Manager |
+| 安装根 key（派生 `installation-id`） | OS secure storage | Realm Manager |
 | signaling ticket | 内存 | signaling client，一次性 |
 | TURN credential | 内存 | ICE stack，短期 |
 | Workspace credential | OS secure storage | Workspace broker |
@@ -375,7 +379,7 @@ ActorType、Host 版本和 package digest 的客户端声明不构成 runtime at
 
 - Actro Host 安全更新可要求重启 Front；
 - package 撤销按等级处理；
-- Realm key 撤销立即影响新连接；
+- Realm issuer key 或命名空间 key 撤销立即影响新连接；
 - 已建立 session 最迟在 credential/lease 到期终止；
 - compromised Publisher key 的历史可信版本按签名时间和撤销范围判断；
 - emergency blocklist 必须签名、过期、可审计；
@@ -392,7 +396,9 @@ Actro 不应默认建立中心化账户或同步服务。用户数据流向取�
 - Publisher API；
 - Marketplace。
 
-安装页和安全中心必须提供“数据会去哪里”的分层说明，而不是一个总隐私开关。
+安装页和安全中心必须提供「数据会去哪里」的分层说明，而不是一个总隐私开关。
+
+Realm 引用随 ActorId 出现在分享 URI 中，会暴露 Realm 命名空间与 `local_name`。Actro 默认为实例生成完全随机的 `local_name`（不含程序名或用户输入），可读名称放在 `display_name`，不进入 ActorId；用户显式选择可读 `local_name` 时，确认页和分享前 UI 应提示它会随链接暴露。设备在每个 Realm 使用独立的设备 key，不跨 Realm 复用，不同实例无法据此关联同一设备。在 Provider 自有命名空间自助创建时以 Provider 账号登录；Provider 能关联同一账号创建的实例（它本来就是签名方），实例成员看不到账号。
 
 ## 17. 安全开发要求
 
@@ -401,7 +407,7 @@ Actro 不应默认建立中心化账户或同步服务。用户数据流向取�
 - WASM import validation；
 - archive extraction property tests；
 - session replay/lease tests；
-- Realm key rotation/rollback tests；
+- 命名空间 key 轮换链、Realm Profile `sequence` 回滚与 issuer key 轮换 tests；
 - signaling/TURN credential leakage tests；
 - capability policy differential tests；
 - 多 Tab 资源隔离故障注入；

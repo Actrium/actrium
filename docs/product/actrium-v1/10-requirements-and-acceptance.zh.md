@@ -25,17 +25,18 @@
 | FR-URI-004 | Attach 失败不得 LB、降级版本或创建替代实例。 |
 | FR-URI-005 | ActorId type 必须与 URI coordinate 完全匹配。 |
 | FR-URI-006 | 创建成功必须 replace 为带 `service` 的 URI。 |
-| FR-URI-007 | portable Attach URI 必须携带可解析 Realm authority。 |
+| FR-URI-007 | portable Attach URI 必须携带可解析的 Realm 引用（DNS 命名空间 + 本地名）。 |
 | FR-URI-008 | URI 不得包含 credential、session secret、Workspace secret 或 bearer invite。 |
 | FR-URI-009 | 正式 Publisher authority 不得含端口；开发来源使用 `actr-dev://`。 |
 | FR-URI-010 | Parser 必须实施 IDNA、重复保留参数、非法编码和控制字符检查。 |
+| FR-URI-011 | Create URI 必须用 `namespace` 参数选择 Realm 命名空间，省略时使用本机 local 命名空间；`realm` 参数只允许用于 legacy Attach 导入。 |
 
 ### 1.3 Program Catalog 与分发
 
 | ID | 需求 |
 |---|---|
 | FR-PKG-001 | Program Catalog 与 Service Inventory 必须分开。 |
-| FR-PKG-002 | coordinate 必须通过 Publisher HTTPS well-known 路径解析。 |
+| FR-PKG-002 | coordinate 必须经 Publisher authority descriptor（`/.well-known/actr`）中 `publisher` 成员声明的 `program_resolver` 解析。 |
 | FR-PKG-003 | 每个精确 coordinate 必须固定 package digest。 |
 | FR-PKG-004 | `.actr` 必须校验 Publisher key、manifest signature 和所有文件 hash。 |
 | FR-PKG-005 | 必须拒绝 zip traversal、超限文件数、解压总量和压缩炸弹。 |
@@ -89,10 +90,10 @@
 
 | ID | 需求 |
 |---|---|
-| FR-NET-001 | Actro 必须内置 signaling client 和本地 Realm，不写死唯一全球服务器。 |
-| FR-NET-002 | Realm Profile 必须通过 HTTPS 和签名验证。 |
+| FR-NET-001 | Actro 必须内置 signaling client 和本机 local Realm 命名空间，不写死唯一全球服务器。 |
+| FR-NET-002 | Realm 命名空间描述（authority descriptor 的 `realm_namespace` 成员，已在 Actr Authority Discovery §4.4 定义）必须通过 HTTPS 获取；Realm Profile 必须由已信任的命名空间 key 签名，其有效性不取决于获取位置。 |
 | FR-NET-003 | 一个 Realm 必须可委派多个 signaling/TURN endpoint。 |
-| FR-NET-004 | v1 Front 与 Primary Service 必须处于同一 Realm。 |
+| FR-NET-004 | v1 Front 与 Primary Service 必须处于同一 Realm，即同一应用实例的 Realm；类型发现只在本 Realm 内进行。 |
 | FR-NET-005 | Actor credential 必须绑定 ActorId、Actor key、ActorType、Realm 和有效期。 |
 | FR-NET-006 | Service identity 必须支持凭长期 key reclaim 同一 ActorId。 |
 | FR-NET-007 | signaling credential 不得放入长期 URL query。 |
@@ -101,10 +102,14 @@
 | FR-NET-010 | endpoint 可以使用非标准端口，但必须来自可信 Profile/Publisher metadata。 |
 | FR-NET-011 | Service offline 必须是可区分状态，不能退化为同类型发现。 |
 | FR-NET-012 | v1 的多个 signaling endpoint 只能作为同一 Realm 控制面的 failover，不支持隐式跨控制面 federation。 |
-| FR-NET-013 | Local Realm ActorId 必须绑定 installation authority，禁止复制为跨设备 portable link。 |
+| FR-NET-013 | Local Realm ActorId 必须使用 `local:<installation-id>` 命名空间，禁止复制为跨设备 portable link。 |
 | FR-NET-014 | Service 不得仅凭 Front 自报的 ActorType、Host 版本或 digest 授予高风险权限；需要时必须验证独立 attestation。 |
-| FR-NET-015 | Realm bootstrap 必须固定 HTTPS 443，并以 Profile continuity key、序号、有效期和轮换链防回滚。 |
-| FR-NET-016 | Actro 必须提供 Realm 加入、重新认证、设备撤销、离开和 key 变化处置流程。 |
+| FR-NET-015 | Realm 命名空间 bootstrap（`https://<domain>/.well-known/actr`）必须固定 HTTPS 443，并以命名空间 key 轮换链与 Realm Profile 序号防回滚（Realm Profile 不设过期时间）。 |
+| FR-NET-016 | Actro 必须提供命名空间信任、经邀请加入实例 Realm、重新认证、设备撤销、离开和命名空间 key 变化处置流程。 |
+| FR-NET-017 | Create Intent 必须在所选命名空间下新建一个 Realm；`local_name` 在命名空间内唯一、创建后不可修改、退役后不复用。 |
+| FR-NET-018 | Service 升级为新 Program Release 时，新 Service Actor 必须创建在同一 Realm；迁移到另一个 Realm 必须产生新 ActorId。 |
+| FR-NET-019 | 取不到、验不过或已退役的 Realm Profile 时，Actro 不得改用 authority descriptor 中的默认 provider 与该 Realm 通信；默认 provider 只用于创建新 Realm 时的建议。 |
+| FR-NET-020 | Create 指向的命名空间必须已受信，或在 Create 确认页完成首次信任；v1 个人用户只能在 local 或 Provider 自有命名空间自助创建 Realm，组织命名空间的创建请求与 Profile 必须由组织的命名空间 key 签名工具/服务代签。 |
 
 ### 1.7 Permission、安全与隐私
 
@@ -122,7 +127,7 @@
 | FR-SEC-010 | 遥测必须默认关闭；用户或管理员启用后仍必须最小化敏感标识。 |
 | FR-SEC-011 | 撤销 grant 必须立即失效对应 capability handle，并终止或降权活跃会话。 |
 | FR-SEC-012 | Service 邀请必须一次性、可过期、可撤销，且不得作为 bearer secret 进入实例 URI。 |
-| FR-SEC-013 | Service ACL 至少支持 owner/editor/viewer 角色，并把 Realm membership 与实例授权分开。 |
+| FR-SEC-013 | Service ACL 至少支持 owner/editor/viewer 角色，并把 Realm membership 与实例授权分开：membership 只决定能否进入该实例的网络（取得 Actor credential、连接 signaling、Attach 握手的前提），实例内角色与权限仍由 Service ACL 与会话授权决定。 |
 | FR-SEC-014 | 应用颜色必须与 lifecycle、reachability、health 和 enforcement 分字段表达。 |
 | FR-SEC-015 | 应用图必须是无根有效依赖连通分量，并包含全部有效 `Transfer(ActorId)` 成员。 |
 | FR-SEC-016 | 通道有效且 `Ready` 时，展示颜色必须取全部节点结论的最弱项。 |
@@ -216,7 +221,7 @@
 | NFR-REL-003 | Attach 失败路径中替代实例创建次数为 0。 |
 | NFR-REL-004 | package cache 写入必须原子，断电后旧版本仍可验证。 |
 | NFR-REL-005 | Front crash 不得损坏 Service store 或 Workspace。 |
-| NFR-REL-006 | signaling Provider 切换不得改变 ActorId。 |
+| NFR-REL-006 | 同一 Provider 内 signaling endpoint 故障切换不得改变 ActorId。 |
 | NFR-REL-007 | lease 网络抖动测试不得产生两个同时有效的 exclusive attachment。 |
 | NFR-REL-008 | beta 的 crash-free app session 必须达到 99.5%，stable 必须达到 99.9%。 |
 
@@ -320,7 +325,7 @@
 **When** 第二设备 Attach<br>
 **Then** Service 返回 occupied；未授权情况下不得建立第二个 active attachment。
 
-### AC-011：Realm Provider 切换
+### AC-011：signaling endpoint 故障切换
 
 **Given** signaling A 故障、Profile 声明 signaling B<br>
 **When** Actor 重连<br>
@@ -382,8 +387,8 @@
 
 ### AC-021：Profile 回滚
 
-**Given** 本地已接受 sequence 31 的 Realm/Profile continuity key history<br>
-**When** endpoint 返回仍有效但 sequence 30 的 Profile，或未经旧 key 授权的新 root<br>
+**Given** 本地已固定命名空间 key 轮换链，并接受 sequence 31 的 Realm Profile<br>
+**When** endpoint 返回仍有效但 sequence 30 的 Profile，或由未经旧命名空间 key 授权的新 key 签名的 Profile<br>
 **Then** 以稳定安全错误拒绝，不切换 issuer/signaling endpoint。
 
 ### AC-022：邀请不是 URL 权限
@@ -560,6 +565,36 @@
 **When** Host 获取 Attestation、Reference Values 并向 Shell 展示降级 diff<br>
 **Then** 最小控制面可以通信，但挂起节点及其依赖方不得处理应用数据；旧状态的 payload 不能通过。
 
+### AC-051：Create 新建 Realm
+
+**Given** 用户已信任命名空间 `team.example`<br>
+**When** 打开 `actr://notes.example/team-notes@1.4.2?namespace=team.example` 并确认创建<br>
+**Then** 在 `team.example` 下新建一个 Realm（如 `k7m2q9xh~dns:team.example`），Service ActorId 携带该 Realm 引用；再次创建得到另一个 Realm，而不是复用前者。
+
+### AC-052：Realm 与 Provider 绑定
+
+**Given** 已接受某 Realm 的 Profile，随后收到一份命名空间 key 签名有效、`sequence` 更高但 `provider.id` 不同的 Profile<br>
+**When** Service 与 Front 重连<br>
+**Then** 拒绝该 Profile 并报 `REALM_PROVIDER_MISMATCH`，不连接新 Provider；同一 Provider 内轮换 issuer key 的更高 `sequence` Profile 正常生效，Realm 引用与 ActorId 不变。
+
+### AC-053：已退役 Realm
+
+**Given** 命名空间发布了 `status = retired` 的 Realm Profile<br>
+**When** 打开该 Realm 下的实例 URI<br>
+**Then** 以稳定错误拒绝连接；同一 `local_name` 不能被重新用于新 Realm。
+
+### AC-054：Profile 不可用不回退
+
+**Given** 实例 Realm 的 Profile 无法获取或签名验证失败，而该域名的 authority descriptor 在 `services` 中声明了默认 provider<br>
+**When** 用户打开该实例 URI<br>
+**Then** 显示 Realm 不可达或安全错误，不连接默认 provider，也不创建替代实例。
+
+### AC-055：Create 事务失败与重试
+
+**Given** 用户在组织命名空间下确认 Create<br>
+**When** 组织签名服务不可达，或 provider 激活 Realm 失败，随后用户以同一 `idempotency_key` 重试<br>
+**Then** 失败时不产生 Service Actor；重试继续同一个 pending Realm（同一 `local_name`，provider 以 `(namespace, local_name, 请求方)` 识别），不重复创建 Realm；过期的 pending Realm 被自动清理。
+
 ## 4. 兼容性验收矩阵
 
 每个发布候选至少覆盖：
@@ -628,7 +663,7 @@ URI/Program opened
 
 - 使用每个平台公布的 reference hardware、固定 package fixture 和可复现网络 profile；
 - 每项至少 30 次冷/热运行，报告 p50、p95、样本数和失败率；
-- “可交互”定义为 Guest 首屏 commit 完成、输入 handler 已注册且 Primary Service contract 可调用；
+- 「可交互」定义为 Guest 首屏 commit 完成、输入 handler 已注册且 Primary Service contract 可调用；
 - 远端指标分别报告 direct 与 TURN，不把 DNS、登录或用户授权时间混入 Attach；
 - 发布报告保留原始匿名测量和构建 digest，以便回归比较。
 
@@ -654,7 +689,7 @@ URI/Program opened
 ### v1 Stable
 
 - 所有 MUST 需求通过；
-- AC-001 至 AC-050 自动化或可重复验证；
+- AC-001 至 AC-055 自动化或可重复验证；
 - 安全审计高危项清零；
 - crash-free 和恢复指标达到发布阈值；
 - 协议版本与兼容承诺发布；
@@ -668,7 +703,7 @@ URI/Program opened
 | Tab/Front/Service 统一模型 | FR-SH-001—006、FR-FRONT-001 | AC-002、AC-008—010 | P2-A、P3-A |
 | 精确、持久 Actor 身份 | FR-SVC-001—003、FR-NET-005—006 | AC-009、AC-011、AC-019 | P1-A |
 | Publisher 与包供应链 | FR-PKG-002—014 | AC-005、AC-016、AC-021 | P1-B |
-| Realm/信令有权但受限 | FR-NET-001—016 | AC-011、AC-012、AC-020—023 | P1-A、P3-B |
+| Realm/信令有权但受限 | FR-NET-001—020、FR-URI-011 | AC-011、AC-012、AC-020—023、AC-051—055 | P1-A、P3-B |
 | Workspace 不被 UI/删除误伤 | FR-SVC-005—016、FR-SEC-009 | AC-013—015、AC-023 | P2-B |
 | Guest 可运行但不越界 | FR-FRONT-002—010、NFR-SEC-001—004 | AC-006、AC-007 | P2-A、P4 |
 | 应用实例隐私快照与动态图重评 | FR-SEC-014—059、NFR-SEC-007—014 | AC-024—050 | P0、P1-A、P2、P3-A、P4 |

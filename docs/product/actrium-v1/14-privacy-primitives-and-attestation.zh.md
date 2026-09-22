@@ -20,7 +20,7 @@ Privacy Graph Aggregation（整条 Actor 数据路径是否成立）
 
 本章回答：
 
-- “Actor 网络全过程加密”具体保证什么；
+- 「Actor 网络全过程加密」具体保证什么；
 - WASM、Native Capsule 与 Confidential Computing 分别解决什么问题；
 - Agent 使用 CPU、GPU、NPU 或边缘算力时如何证明运行环境；
 - 不同厂商证明如何映射为统一 Actro claims；
@@ -29,7 +29,7 @@ Privacy Graph Aggregation（整条 Actor 数据路径是否成立）
 
 ## 2. 准确的产品承诺
 
-### 2.1 不使用“数据始终是密文”
+### 2.1 不使用「数据始终是密文」
 
 普通计算必须在某个执行边界内使用明文。除非使用 FHE、MPC 等专用密码学计算，Actro 不应声称数据在每个时刻都是密文。
 
@@ -37,7 +37,7 @@ Privacy Graph Aggregation（整条 Actor 数据路径是否成立）
 
 > 数据在受保护链路和受保护存储上以密文存在；明文只应出现在身份已知、边界满足要求的处理环境中。绿色只保证当前就绪切面，新配置只约束新数据。
 
-“全生命周期保护”分为：
+「全生命周期保护」分为：
 
 | 数据状态 | 主要机制 |
 |---|---|
@@ -46,7 +46,7 @@ Privacy Graph Aggregation（整条 Actor 数据路径是否成立）
 | in use | WASM/Native confinement；高敏数据按 policy 要求 TEE/CC |
 | on output | 类型化结果、数据标签、declassification、速率/聚合/审计 |
 
-### 2.2 “网络全过程加密”的边界
+### 2.2 「网络全过程加密」的边界
 
 Actr 必须保证每一条网络 Actor edge：
 
@@ -66,7 +66,7 @@ Actor A ── encrypted edge ── Actor B ── encrypted edge ── Actor 
 
 如果 B 要处理数据，B 就是明文执行端，也是隐私闭包中的必要 Actor。A→C 不能因为两段链路都加密，就跳过对 B 的评估。
 
-只有不处理 payload 的 signaling/TURN/relay 才不是数据执行端。它们仍可能看见 IP、时序、包长和连接关系，因此“payload 加密”不等于“元数据匿名”。
+只有不处理 payload 的 signaling/TURN/relay 才不是数据执行端。它们仍可能看见 IP、时序、包长和连接关系，因此「payload 加密」不等于「元数据匿名」。
 
 ## 3. 隐私原语矩阵
 
@@ -212,7 +212,7 @@ Effective Capability =
   ∩ Instance Grant
 ```
 
-未声明 Actor role、edge、audit sink、terminal、文件、网络或计算能力不得获得 handle。运行时不能用“先连接、再报告”扩张 Contract。
+未声明 Actor role、edge、audit sink、terminal、文件、网络或计算能力不得获得 handle。运行时不能用「先连接、再报告」扩张 Contract。
 
 Contract 的作用是让所有图变化在 capability 创建前可拦截。它是边界，不是应用绿色本身。
 
@@ -398,7 +398,7 @@ Actor Host 必须证明持有 Actor key 和临时会话 key。若目标运行在
 }
 ```
 
-“TLS 已连接”本身不足以生成 Actor channel `pass`；还必须完成 Actor 身份与 runtime/session 绑定。
+「TLS 已连接」本身不足以生成 Actor channel `pass`；还必须完成 Actor 身份与 runtime/session 绑定。
 
 ## 7. Confidential Computing
 
@@ -516,11 +516,11 @@ Actor A
 
 上游 policy 信任该 Verifier 和 profile 时，可以把整个子图作为一个已证明节点参与 meet，不再递归扩散内部 unknown。这不是消灭未知，而是把内部验证责任封装到一个明确、可撤销的信任主体。
 
-Service 自签“我安全”不能形成 Assured Edge。只有用户/组织/Realm policy 已信任的 Verifier、证书 scope 与当前 endpoint/session 均匹配时才可以。
+Service 自签「我安全」不能形成 Assured Edge。只有用户/组织/Realm policy 已信任的 Verifier、证书 scope 与当前 endpoint/session 均匹配时才可以。
 
 ## 9. Attestation 与会话/密钥绑定
 
-### 9.1 必须防止“证明是真的，连接是假的”
+### 9.1 必须防止「证明是真的，连接是假的」
 
 合法 Evidence 如果没有绑定当前 session，攻击者可能把另一个正常 TEE 的证明转发过来，再把数据导向不受保护环境。
 
@@ -673,9 +673,9 @@ operator_visibility = "authorized-security-admin"
 encrypted = true
 ```
 
-Host 必须把日志 capability、字段 schema、目标、加密、保留期、读取主体和导出行为纳入隐私图。能记录 payload、prompt、Workspace 内容、模型输入输出或稳定用户标识时，必须按其真实 data class 重新评估，不能统称“审计”绕过策略。
+Host 必须把日志 capability、字段 schema、目标、加密、保留期、读取主体和导出行为纳入隐私图。能记录 payload、prompt、Workspace 内容、模型输入输出或稳定用户标识时，必须按其真实 data class 重新评估，不能统称「审计」绕过策略。
 
-Attestation 可以证明正在运行包含某日志配置的 workload/环境，Host broker 可以证明只发放了声明的 audit capability；它不能仅凭“服务器有审计日志”证明服务器没有其他隐蔽记录。因此：
+Attestation 可以证明正在运行包含某日志配置的 workload/环境，Host broker 可以证明只发放了声明的 audit capability；它不能仅凭「服务器有审计日志」证明服务器没有其他隐蔽记录。因此：
 
 - WASM/Native confinement 证明没有绕过 broker 的其他日志出口；
 - CC 证明 Host/云管理员不能在边界外读取内存并偷偷记录；
@@ -686,14 +686,14 @@ Attestation 可以证明正在运行包含某日志配置的 workload/环境，H
 
 - accelerator Attestation 通常证明设备身份、固件、CC mode 和设备状态，不自动证明上层 LLM Server 没有把 prompt/response 写入日志；
 - 若日志通过受控文件、对象存储、网络或 Actor capability 离开被证明边界，Host 必须观察到 audit edge；
-- 若日志逻辑位于被度量 workload 内，workload/config digest 可以证明“运行的是哪套日志代码与配置”，但仍要结合封闭 egress 和可信 Verifier 才能证明没有其他口子；
+- 若日志逻辑位于被度量 workload 内，workload/config digest 可以证明「运行的是哪套日志代码与配置」，但仍要结合封闭 egress 和可信 Verifier 才能证明没有其他口子；
 - 若是 opaque 第三方 LLM API，外部调用方不能仅凭 GPU 证明技术性检测其内部留存；只能依赖 Certified Privacy Domain 对 retention/audit 的有 scope 证明。没有该证明该项为 `UNKNOWN`。
 
-所以“服务器留了审计日志”不是天然对外可感知。只有日志出口被 capability 化，或者整个服务边界对日志/retention 提供了可验证 aggregate，它才进入 Actro 可证明的隐私图。
+所以「服务器留了审计日志」不是天然对外可感知。只有日志出口被 capability 化，或者整个服务边界对日志/retention 提供了可验证 aggregate，它才进入 Actro 可证明的隐私图。
 
 ## 12. 输出与二次泄露
 
-“没有原始 socket”不能防止 workload 把 secret 塞入一个合法 Actor 响应。
+「没有原始 socket」不能防止 workload 把 secret 塞入一个合法 Actor 响应。
 
 因此高敏数据还需要：
 
@@ -822,7 +822,7 @@ Actro / Actr Privacy Control Plane
 └── Audit & Transparency Log
 ```
 
-Realm 可以运营或委派 Verifier、Reference Value、Revocation 和 Key Broker 服务，但它不是唯一全球信任根。组织和本地 Actro 可以选择自己的 Verifier 与 appraisal policy。
+组织（Realm 命名空间持有者）或其委派的 Provider 可以运营或委派 Verifier、Reference Value、Revocation 和 Key Broker 服务，但它不是唯一全球信任根；单个实例 Realm 只在自己的 policy 中选择信任哪些 Verifier。组织和本地 Actro 可以选择自己的 Verifier 与 appraisal policy。
 
 ## 16. 失败与撤销
 

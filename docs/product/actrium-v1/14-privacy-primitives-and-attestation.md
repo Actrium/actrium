@@ -822,7 +822,7 @@ Actro / Actr Privacy Control Plane
 └── Audit & Transparency Log
 ```
 
-Realm It can be operated or commissioned Verifier, Reference Value, Revocation and Key Broker Service, but it's not the only global trust. Organization and local. Actro You can choose your own. Verifier with appraisal policy.
+An organisation (the Realm namespace holder) or a Provider it delegates to may operate or delegate Verifier, Reference Value, Revocation and Key Broker services, but it is not the only global root of trust; an individual instance Realm only chooses in its own policy which Verifiers to trust. Organisations and local Actro can choose their own Verifier and appraisal policy.
 
 ## 16. Failed and Undo
 

@@ -26,6 +26,8 @@ curl --fail --cacert /etc/actrix/pki/ca.pem \
 - 新指标使用 `actrix_` namespace；
 - Signer 不再使用 `ks` 作为新 label；
 - Realm、Actor ID、Publisher、credential、nonce 或 secret 不得成为高基数/敏感 label；
+  目标契约下一个实例承载大量 Realm，Realm 引用与命名空间尤其不得作为 label，按
+  Realm 的状态、配额与挂起情况只以聚合计数暴露；
 - path label 必须模板化，不能包含用户输入或 ID；
 - 认证失败只记录有限枚举 reason。
 

@@ -1,6 +1,9 @@
 # Actrix Realm v1 API 边界
 
-状态：首版契约。本文只描述当前实现，不承诺旧 KS/MFR HTTP API 兼容。
+状态：本文只描述当前实现，不承诺旧 KS/MFR HTTP API 兼容。当前实现仍是一个实例
+一个 Realm；目标契约是一个实例承载多个 Realm（命名空间 + 本地名），与本文不同的
+部分以「目标契约」标注，完整差异见
+[`REALM_V1_ARCHITECTURE.zh.md`](REALM_V1_ARCHITECTURE.zh.md) 第 9 节。
 
 ## 传输与认证规则
 
@@ -11,7 +14,11 @@
   两个 header，因此改用 `actr.v1`、`actr.id.<base64url>` 和
   `actr.credential.<base64url-protobuf>` 子协议项；服务器验证全部身份后只协商返回
   `actr.v1`，避免把凭证暴露为页面可读的已选子协议。
-- Realm 管理、Publisher 管理和配置变更只允许系统管理员调用。
+- 当前实现：Realm 管理、Publisher 管理和配置变更只允许系统管理员调用。目标契约：
+  Realm 生命周期还可由命名空间 key 签名的请求管理，单个 Realm 的 secret、ACL、成员
+  与状态可由作用域为该 Realm 的管理 token 管理。`create_realm`、`activate_realm`、
+  `reissue_admin_token` 以 `POST` 发往 Actrix authority descriptor 中的 `realm-management`
+  service link（Actr Realm Profile 第 8 节）。
 - Signer 是内部信任平面；规范入口是同一 HTTP/2 监听器上的 gRPC，
   不是公开 REST 密钥下载服务。
 
@@ -19,8 +26,16 @@
 
 `GET /.well-known/actr/realm.json`
 
-成功时返回当前实例唯一 Active Realm 的 v1 descriptor，包括 issuer、官方 provider、
-Signaling/TURN audience 与 endpoint。没有且仅有一个可用 Realm 时返回 `503`，不猜测。
+当前实现：成功时返回当前实例唯一 Active Realm 的 v1 descriptor，包括 issuer、官方
+provider、Signaling/TURN audience 与 endpoint。没有且仅有一个可用 Realm 时返回
+`503`，不猜测。
+
+目标契约：移除该路径。它与 `actr/protocols/authority-discovery`「`/.well-known/actr`
+下不定义子路径」冲突，也无法表达多个 Realm。Realm 的发现改为命名空间域名的
+authority descriptor（`https://<domain>/.well-known/actr` 中的 `realm_namespace` 成员
+与 `realms` relation，已在 Actr Authority Discovery §4.3–4.4 定义），Realm Profile 位于
+`<realms href>/<local_name>`，由命名空间 key 签名。Actrix 仅在 `realms` relation 指向
+本 provider 时托管 Profile。
 
 ## Authority（AIS）
 
@@ -30,8 +45,10 @@ Signaling/TURN audience 与 endpoint。没有且仅有一个可用 Realm 时返�
 注册能力，不得下发给 Rill Guest。签发的 identity claims 固定包含：
 
 - `protocol_version = 1`
-- `issuer = actr:realm:<realm_id>:authority`
-- `provider = actrix-official`
+- `issuer = actr:realm:<realm_id>:authority`（目标契约：`actr:realm:<realm-ref>:authority`，
+  例如 `actr:realm:notes~dns:acme.com:authority`）
+- `provider = actrix-official`（当前实现的常量；目标契约：provider 的规范化 DNS authority，
+  例如 `provider.example`）
 - `audience = actr.signaling`
 - Realm、完整 Actor ID 与过期时间
 
@@ -39,7 +56,8 @@ Signaling/TURN audience 与 endpoint。没有且仅有一个可用 Realm 时返�
 
 `GET /signaling/ws` 升级到 WebSocket。身份只从原生 upgrade headers 或上述浏览器
 子协议项读取；连接身份、credential actor 与每条 envelope 的 source 必须完全一致。
-单帧最大 1 MiB，并执行连接/消息速率限制。
+单帧最大 1 MiB，并执行连接/消息速率限制。目标契约下，每条 envelope 还须属于连接
+绑定的 Realm，发现只返回同 Realm 的 Actor，速率限制同时按 Realm 计。
 
 ## Publisher Registry
 
@@ -72,16 +90,29 @@ v1 JSON 统一使用 Publisher 术语：
 列名和 crate 名不构成 API。
 
 管理路由前缀：`/admin/api/publishers`，受 Admin JWT 保护。Publisher ID 是规范化 HTTPS
-域名；控制权通过固定路径
-`https://<publisher>/.well-known/actr/publisher.json` 的 v1 descriptor 证明。包的长期
+域名。当前实现通过固定路径 `https://<publisher>/.well-known/actr/publisher.json` 的 v1
+descriptor 证明控制权；目标契约中该路径移除（与 authority-discovery「`/.well-known/actr`
+下不定义子路径」冲突），改为读取 `https://<publisher>/.well-known/actr` authority
+descriptor 中带签名的可选成员 `publisher`（已在 Actr Authority Discovery §4.5 定义），
+并以 Profile signing key 签名的 `register_publisher` 请求登记，公开文档中不再放
+challenge；当前 descriptor 结构为预发布格式，与目标不兼容。包的长期
 真实性由 publisher key、signature 与 digest 决定，下载 origin/registry 不是信任根。
 
-Actor ID 的字符串形式为：
+Actor ID 的字符串形式，当前实现为：
 
 `<serial-hex>@<realm-id>/<publisher-or-linked-namespace>/<program>@<version>`
 
+目标契约为：
+
+`<serial_hex>@<realm-ref>/<publisher>:<program>:<version>`
+
+例如 `2af01@notes~dns:acme.com/notes.example:team-notes:1.4.2`；数值 realm_id 只作
+provider 内部句柄。
+
 可下载 package 的 Publisher 必须是规范 DNS 域名；linked/local workload 可以使用
-宿主管理的非 DNS namespace，但不能借此进入 Publisher Registry。
+宿主管理的非 DNS namespace，但不能借此进入 Publisher Registry。这里的 namespace 是程序类型
+的命名空间，与 Realm 命名空间（Actor ID 中 Realm 引用的 `dns:`/`local:` 部分）不是同一
+概念，见 [GLOSSARY](GLOSSARY.zh.md)。
 
 ## Signer
 
@@ -97,8 +128,13 @@ nonce-auth request message；`Sign` 的认证 payload 同时绑定 protocol、`k
 - `POST /admin/api/auth/login`
 - 其余 `/admin/api/**` 需要 `Authorization: Bearer <JWT>`
 
-首版每实例只允许一个 Realm。在线 API 可以首次 provision、读取、更新和轮换 Realm
-secret，但不提供硬删除或替换另一个 Realm；替换属于停机迁移/重建操作。
+当前实现：每实例只允许一个 Realm。在线 API 可以首次 provision、读取、更新和轮换
+Realm secret，但不提供硬删除或替换另一个 Realm；替换属于停机迁移/重建操作。
+
+目标契约：每实例承载多个 Realm。创建需命名空间 key 签名，并经 Profile 验证后才从
+`pending` 转为 `active`；退役由命名空间所有者发布 retired Profile 触发，Actrix 在单一
+事务中撤销该 Realm 的状态并写入 `(namespace, local_name)` tombstone，本地名与
+`realm_id` 均不复用。
 
 ## Schema migration
 
@@ -108,7 +144,9 @@ secret，但不提供硬删除或替换另一个 Realm；替换属于停机迁�
 python3 actrix/scripts/migrate_schema_v1.py /path/to/actrix.db
 ```
 
-脚本先创建备份，并拒绝多 Realm 或无法安全映射的旧 publisher 数据。
+脚本先创建备份，并拒绝多 Realm 或无法安全映射的旧 publisher 数据。目标契约下，旧
+Realm 须由实例运营者显式映射到命名空间与本地名，并由命名空间 key 签署 Profile 后
+才能激活。
 
 完整信任边界与发布门槛见
 [`REALM_V1_ARCHITECTURE.zh.md`](REALM_V1_ARCHITECTURE.zh.md) 和

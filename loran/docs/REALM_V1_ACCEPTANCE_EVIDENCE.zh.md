@@ -3,14 +3,19 @@
 状态：实现与自动验证清单，不是独立安全认证。评审者必须在报告中记录实际审查的
 commit；本文件引用的 PR 状态会继续变化。
 
+说明：下表证据针对当前实现（一个实例一个 Realm）。架构契约已改为一个实例承载多个
+Realm（命名空间 + 本地名，见 `REALM_V1_ARCHITECTURE.zh.md`）。标注「已被新契约取代」
+的行保留为当前代码的证据，但不再是 v1 目标；新契约的验收项列在「多 Realm 契约待验收」
+一节，尚无自动证据。
+
 ## 目标到证据的映射
 
 | 目标 | 实现边界 | 自动证据 | 状态 |
 |---|---|---|---|
-| 单 Realm per instance | `platform/src/storage/db.rs` 的 singleton Realm 约束；Admin API 不提供在线硬删除/替换 | platform Realm/schema tests；Actrix full-stack 非预置 Realm 拒绝测试 | 已自动验证 |
+| 单 Realm per instance | `platform/src/storage/db.rs` 的 singleton Realm 约束；Admin API 不提供在线硬删除/替换 | platform Realm/schema tests；Actrix full-stack 非预置 Realm 拒绝测试 | 已自动验证；已被新契约取代 |
 | 单节点、SQLite 优先 | v1 默认只依赖 SQLite；worker ID 由管理员显式配置；不声明 HA | 配置验证、MSRV 全构建、SQLite schema gate/migration tests | 已自动验证 |
-| 系统管理员是管理根 | Argon2id Admin 登录、受保护 Realm/Publisher/rotation API；Guest 不持有注册能力 | Admin API/config negative tests | 已自动验证 |
-| Realm Descriptor | `/.well-known/actr/realm.json` 发布唯一 Realm、issuer、provider 和 endpoint | descriptor/config/full-stack tests | 已自动验证 |
+| 系统管理员是管理根 | Argon2id Admin 登录、受保护 Realm/Publisher/rotation API；Guest 不持有注册能力 | Admin API/config negative tests | 已自动验证；「唯一管理根」部分已被新契约的三类管理权限取代 |
+| Realm Descriptor | `/.well-known/actr/realm.json` 发布唯一 Realm、issuer、provider 和 endpoint | descriptor/config/full-stack tests | 已自动验证；已被新契约取代（该路径与 authority-discovery 冲突，改为命名空间 key 签名的 Realm Profile） |
 | HTTPS 域名 Publisher | 规范化域名、WebPKI、DNS pinning、禁 redirect/私网地址；Ed25519 key、digest、rotation、revocation | `actrix-mfr` publisher/manager/package tests | 已自动验证 |
 | Actor 实例身份 | Realm + Snowflake serial + 出生 `ActrType`；稳定 Service 通过 renewal possession proof 保持 ID | AIS issuer/renewal tests、持久 issuance ledger tests | 已自动验证 |
 | Credential 生命周期 | version、issuer、Realm、provider、audience、Actor、endpoint 和 expiry 绑定；连接 source 再绑定 | Signer/AIS/Signaling negative tests；过期、错 Realm、错 source、错连接回归 | 已自动验证 |
@@ -40,6 +45,25 @@ python3 -m unittest actrix/scripts/tests/test_migrate_schema_v1.py -v
 
 浏览器 relay-only fixture、外部 TURN/STUN 矩阵和原始证据保存方法见
 `TURN_STUN_INTEROP_TESTING.zh.md`。
+
+## 多 Realm 契约待验收
+
+以下目标来自架构契约第 3、5、6 节，代码尚未实现，均无自动证据：
+
+| 目标 | 需要的证据 | 状态 |
+|---|---|---|
+| 一个实例承载多个 Realm | 移除单例约束后的 schema tests；`(namespace, local_name)` 唯一与 tombstone 不复用 | 未实现 |
+| 命名空间授权创建 | 未签名、签名 key 不在 `realm_namespace` 轮换链中、他人命名空间的创建请求均被拒绝 | 未实现 |
+| Profile 激活与持续校验 | 只有委派到本 provider 的 Profile 才激活；`provider.id` 改变、签名 key 被移除或 `sequence` 回滚时丢弃相应 Profile 并挂起；retired Profile 触发退役事务 | 未实现 |
+| authority descriptor 获取安全 | 重定向超过 5 次、非 HTTPS 跳转、`authority` 绑定不符被拒绝；每跳 SSRF/DNS rebinding、超限 body 负向测试 | 未实现 |
+| 签名信封 | `provider_id` 不符、过期、超过 5 分钟有效期、nonce 重放的请求被拒绝；同一请求方重复创建返回原 pending Realm，不同请求方同名或命中 active/tombstone 返回冲突；`activate_realm` 验证签名 Profile 后返回一次性管理 token | 未实现 |
+| provider 自有命名空间自助创建 | OAuth 2.0 + PKCE 账号认证、按账号计配额、管理权绑定账号、登录后重签管理 token | 未实现 |
+| Publisher 签名注册 | 读取 descriptor `publisher` 成员，`register_publisher` 请求验签，拒绝非 `active` Profile signing key | 未实现 |
+| 跨 Realm 隔离 | 两个 Realm 使用相同 Actor 类型与相同 serial 候选时，credential、presence、TURN、ACL 与管理接口互不相通 | 未实现 |
+| issuer 与 Actor ID 带 Realm 引用 | `actr:realm:<realm-ref>:authority` 与新 Actor ID 文本/wire 格式的正负向测试 | 未实现 |
+| 管理作用域 | 单 Realm 管理 token 越权访问被拒绝且不泄露其他 Realm 是否存在；重签后旧 token 立即失效 | 未实现 |
+| 按 Realm 派生 TURN secret | 不同 Realm 的 TURN credential 不能互用 | 未实现 |
+| 配额 | 按命名空间与按 Realm 的配额与 pending TTL | 未实现 |
 
 ## 尚不能由作者自证关闭的门槛
 

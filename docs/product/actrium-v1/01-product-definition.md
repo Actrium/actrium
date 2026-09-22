@@ -46,7 +46,7 @@ Core tasks:
 - Selection Workspace And create an example;
 - Work will continue later from history, collection or exemplification library;
 - There are examples of connections on another device;
-- Clear as to who the program comes from, where it connects to. RealmThe authorities have been granted.
+- Know clearly who the program comes from, which Realm (and namespace) the instance belongs to, and which permissions have been granted.
 
 ### 3.2 Program Developer
 
@@ -63,11 +63,13 @@ Core tasks:
 
 ### 3.3 Publisher / Organisational Administrator
 
-Maintain signature keys, versions, withdrawal messages and recommendations through domain name publishing procedures Realm.
+Publish programs through a domain and maintain signing keys, versions, revocation information and a recommended Provider. Realms are created per instance, so a Publisher cannot recommend a particular Realm in advance.
 
-### 3.4 Realm Administrator
+### 3.4 Namespace Administrator and Realm Owner
 
-Managing membership,Actor Access,ACLLetters./TURN Assignment, key rotation and audit.
+The namespace administrator (usually organisational IT) holds the Realm namespace key, publishes the namespace descriptor, and operates the organisation's signing tool or service: after authenticating members under the organisation's own policy, it signs Realm creation requests and Profiles under that namespace on their behalf; the administrator also decides which Provider to delegate to and is responsible for namespace key rotation. In v1, individual users can only self-serve Realm creation in the local namespace or a Provider-owned namespace.
+
+The Realm owner is the creator of an application instance and manages that instance Realm's membership, Actor admission, ACL, invitations, device revocation and audit.
 
 ### 3.5 Marketplace Operator
 
@@ -77,7 +79,7 @@ Provide information on process discovery, classification, audit, risk labelling 
 
 ### 4.1 New instance
 
-> As a user, I typed or clicked on one `service` Parameters `actr://` Address,Actro The program should be validated, the permissions displayed and the Workspace Select, create a local Service, and rephrase the address to reconnect. Service - The address.
+> As a user, when I type or click an `actr://` address without a `service` parameter, Actro should first validate the program, show permissions and the Workspace and Realm namespace choices, create a new Realm under the chosen namespace (the local namespace by default) with a Service inside it, and then rewrite the address into one that reconnects to that Service.
 
 ### 4.2 Connection already exists
 
@@ -97,7 +99,7 @@ Provide information on process discovery, classification, audit, risk labelling 
 
 ### 4.6 Realm With Network
 
-> As a user, I don't need to fill in a letter and TURN Address;Actro Based on trusted Realm Profile Select the endpoint and short-term certificate, while showing me the current Realm And connect.
+> As a user, I don't need to fill in signaling and TURN addresses; Actro selects endpoints and short-lived credentials from a Realm Profile signed by a trusted namespace key, while showing me the current instance's Realm, its namespace and connection status.
 
 ### 4.7 More Actor Privacy status
 
@@ -155,7 +157,8 @@ v1 Do not:
 - Service Transparent load balance of examples;
 - (b) Multi-person real-time collaboration agreements;
 - In situ no sense replaces running Service workload;
-- Cross Realm Automatic Federation and Global Actor Search;
+- Automatic cross-Realm (cross-instance) federation and global Actor search;
+- Namespace-level SSO or member directory;
 - Open Anonymous TURN;
 - Only by Marketplace System clearance is granted when the marking is reviewed;
 - Commitments on mobile platforms 24×7 Local Backstage Service Online.
@@ -202,7 +205,7 @@ One controlled node cannot offset another unknown or uncontrolled node; there is
 - Fixed Native Front Host + Keel JS Guest;
 - Local Service Create, stop, start, connect, recycle and clear;
 - Workspace (a) Tie;
-- Realm ProfileIdentities, correspondence and TURN Short-term documentation;
+- Realm namespace descriptors, per-instance Realms and their Profiles, identity, signaling and TURN short-lived credentials;
 - `ActorAssurance` / `ApplicationAssurance`, no root-dependent maps, the weakest items to be gathered `Ready` (a) Demonstration;
 - (a) Competence, quotas, audits and error pages;
 - Local development sources.
