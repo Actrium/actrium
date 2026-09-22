@@ -515,7 +515,7 @@ start_wasm_rust_server() {
 # (tests/e2e/actr/polyglot-echo/server/).  The streaming server runs as a *linked
 # workload* (not a cdylib package) so that RuntimeContext's DataChunk APIs
 # are available.  It registers directly with mock-actrix under
-# polyglot:EchoStreamService:1.0.0 without going through `actr build` /
+# polyglot/EchoStreamService@1.0.0 without going through `actr build` /
 # `actr run`.
 #
 # Prerequisites: setup_polyglot_echo must have run first (mock-actrix up,
@@ -524,11 +524,11 @@ start_wasm_rust_server() {
 # Exports after completion:
 #   STREAM_SERVER_PID     — pid of the running stream server binary
 #   STREAM_SERVER_RUNTIME — path to the rendered stream-server runtime config
-#   STREAM_SERVICE_TYPE   — "polyglot:EchoStreamService:1.0.0"
+#   STREAM_SERVICE_TYPE   — "polyglot/EchoStreamService@1.0.0"
 
 STREAM_SERVER_PID=""
 STREAM_SERVER_RUNTIME=""
-STREAM_SERVICE_TYPE="polyglot:EchoStreamService:1.0.0"
+STREAM_SERVICE_TYPE="polyglot/EchoStreamService@1.0.0"
 : "${STREAM_SERVER_TARGET_DIR:=$E2E_CACHE_ROOT/stream-server}"
 
 build_stream_server_binary() {

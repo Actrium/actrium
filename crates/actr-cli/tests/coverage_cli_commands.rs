@@ -489,7 +489,7 @@ fn deps_install_rejects_actr_type_without_alias() {
     write_manifest_with_proto(tmp.path());
 
     let no_alias = run_actr(
-        &["deps", "install", "--actr-type", "acme:Echo:1.0.0"],
+        &["deps", "install", "--actr-type", "acme/Echo@1.0.0"],
         tmp.path(),
         &home,
     );
@@ -552,7 +552,7 @@ generated_at = "2026-08-06T00:00:00Z"
 [[dependency]]
 name = "echo"
 alias = "echo"
-actr_type = "acme:EchoService:1.0.0"
+actr_type = "acme/EchoService@1.0.0"
 fingerprint = "{svc_fp}"
 cached_at = "2026-08-06T00:00:00Z"
 
@@ -654,7 +654,7 @@ generated_at = "2026-08-06T00:00:00Z"
 [[dependency]]
 name = "remote-echo"
 alias = "remote-echo"
-actr_type = "acme:EchoService:1.0.0"
+actr_type = "acme/EchoService@1.0.0"
 fingerprint = "service_semantic:stale"
 cached_at = "2026-08-06T00:00:00Z"
 
@@ -1302,7 +1302,7 @@ publisher = "acme"
 version = "0.1.0"
 
 [dependencies]
-echo = { actr_type = "acme:EchoService:1.0.0", service = "EchoService:service_semantic:echo" }
+echo = { actr_type = "acme/EchoService@1.0.0", service = "EchoService:service_semantic:echo" }
 "#,
     )
     .expect("write manifest");
@@ -1315,7 +1315,7 @@ generated_at = "2026-08-06T00:00:00Z"
 [[dependency]]
 name = "EchoService"
 alias = "echo"
-actr_type = "acme:EchoService:1.0.0"
+actr_type = "acme/EchoService@1.0.0"
 fingerprint = "service_semantic:echo"
 cached_at = "2026-08-06T00:00:00Z"
 

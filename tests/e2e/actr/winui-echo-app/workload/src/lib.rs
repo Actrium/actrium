@@ -2,7 +2,7 @@
 //!
 //! Mirrors `tests/e2e/actr/swift-echo-app/EchoApp/ActrService.swift`'s
 //! `LocalEchoServiceHandlerImpl`: on each inbound call it discovers the remote
-//! `actrium:EchoService:1.0.0` and forwards the raw payload to
+//! `actrium/EchoService@1.0.0` and forwards the raw payload to
 //! `echo.EchoService.Echo`, returning the raw `EchoResponse` bytes.
 //!
 //! The C# WinUI host cannot reach a remote actor directly — the actr-cabi C
@@ -29,7 +29,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 
 /// The remote EchoService actr type the app forwards to.
-const ECHO_SERVICE_TYPE: &str = "actrium:EchoService:1.0.0";
+const ECHO_SERVICE_TYPE: &str = "actrium/EchoService@1.0.0";
 /// Remote route key for `EchoService.Echo` (package.Service.Method).
 const ECHO_ROUTE_KEY: &str = "echo.EchoService.Echo";
 /// Call timeout for the forwarded RPC.

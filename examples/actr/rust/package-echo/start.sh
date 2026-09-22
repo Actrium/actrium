@@ -782,7 +782,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 CLIENT_PUBLISHER="acme"
 CLIENT_NAME="package-echo-client-app"
 CLIENT_VERSION="0.1.0"
-CLIENT_TYPE_STR="$CLIENT_PUBLISHER:$CLIENT_NAME:$CLIENT_VERSION"
+CLIENT_TYPE_STR="$CLIENT_PUBLISHER/$CLIENT_NAME@$CLIENT_VERSION"
 
 sqlite3 "$ACTRIX_DB" << SQL
 INSERT OR IGNORE INTO publisher
@@ -840,7 +840,7 @@ with zipfile.ZipFile(package_path, "r") as zf:
     manifest = zf.read("manifest.toml").decode("utf-8")
     signature = base64.b64encode(zf.read("manifest.sig")).decode("ascii")
 
-type_str = f"{publisher}:{name}:{version}"
+type_str = f"{publisher}/{name}@{version}"
 
 conn = sqlite3.connect(db_path)
 try:
@@ -957,7 +957,7 @@ turn_urls = ["turn:localhost:${ACTRIX_ICE_PORT}"]
 
 [[acl.rules]]
 permission = "allow"
-type = "acme:package-echo-client-guest:0.1.0"
+type = "acme/package-echo-client-guest@0.1.0"
 TOML
 
 ACTR_CLI_BIN="$WORKSPACE_TARGET_DIR/debug/actr"

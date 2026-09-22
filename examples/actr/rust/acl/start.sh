@@ -152,17 +152,17 @@ INSERT OR REPLACE INTO publisher_package (publisher_id, publisher, name, version
   SELECT id, 'acme', 'greeter.GreeterService', '1.0.0', 'acme:greeter.GreeterService:1.0.0', '{}', '', 'active', strftime('%s','now') FROM publisher WHERE name='acme'
   ON CONFLICT(publisher, name, version) DO UPDATE SET status='active';
 INSERT OR REPLACE INTO publisher_package (publisher_id, publisher, name, version, type_str, manifest, signature, status, published_at)
-  SELECT id, 'acme', 'allowed-greeter-client', '1.0.0', 'acme:allowed-greeter-client:1.0.0', '{}', '', 'active', strftime('%s','now') FROM publisher WHERE name='acme'
+  SELECT id, 'acme', 'allowed-greeter-client', '1.0.0', 'acme/allowed-greeter-client@1.0.0', '{}', '', 'active', strftime('%s','now') FROM publisher WHERE name='acme'
   ON CONFLICT(publisher, name, version) DO UPDATE SET status='active';
 INSERT OR REPLACE INTO publisher_package (publisher_id, publisher, name, version, type_str, manifest, signature, status, published_at)
-  SELECT id, 'acme', 'blocked-greeter-client', '1.0.0', 'acme:blocked-greeter-client:1.0.0', '{}', '', 'active', strftime('%s','now') FROM publisher WHERE name='acme'
+  SELECT id, 'acme', 'blocked-greeter-client', '1.0.0', 'acme/blocked-greeter-client@1.0.0', '{}', '', 'active', strftime('%s','now') FROM publisher WHERE name='acme'
   ON CONFLICT(publisher, name, version) DO UPDATE SET status='active';
 INSERT OR REPLACE INTO realm (id, name, status, enabled, created_at, secret_current) VALUES ($REALM_ID, 'ACL Demo Realm', 'Active', 1, strftime('%s','now'), '$SECRET_HASH');
 DELETE FROM actoracl WHERE realm_id = $REALM_ID;
 INSERT INTO actoracl (realm_id, source_realm_id, from_type, to_type, access)
-VALUES ($REALM_ID, $REALM_ID, 'acme:allowed-greeter-client:1.0.0', 'acme:greeter.GreeterService:1.0.0', 1);
+VALUES ($REALM_ID, $REALM_ID, 'acme/allowed-greeter-client@1.0.0', 'acme:greeter.GreeterService:1.0.0', 1);
 INSERT INTO actoracl (realm_id, source_realm_id, from_type, to_type, access)
-VALUES ($REALM_ID, $REALM_ID, 'acme:greeter.GreeterService:1.0.0', 'acme:allowed-greeter-client:1.0.0', 1);
+VALUES ($REALM_ID, $REALM_ID, 'acme:greeter.GreeterService:1.0.0', 'acme/allowed-greeter-client@1.0.0', 1);
 EOF
 
 echo -e "${GREEN}✅ Realm and ACL setup completed${NC}"

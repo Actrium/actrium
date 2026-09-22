@@ -41,7 +41,7 @@ async fn compute_service_fingerprint_echoes_service_fingerprint() {
         name: "echo".into(),
         tags: vec![],
         fingerprint: "deadbeef".into(),
-        actr_type: actr_protocol::ActrType::from_string_repr("acme:Echo:1.0.0").unwrap(),
+        actr_type: actr_protocol::ActrType::from_string_repr("acme/Echo@1.0.0").unwrap(),
         published_at: None,
         description: None,
         methods: vec![],

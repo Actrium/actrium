@@ -11,4 +11,4 @@ tags = ["dev", "example", "client-guest"]
 exports = []
 
 [dependencies]
-EchoService = { actr_type = "actrium:EchoService:0.2.2" }
+EchoService = { actr_type = "actrium/EchoService@0.2.2" }

@@ -5,7 +5,7 @@
 # and ports, then read directly as runtime configuration by the C# host's
 # ActrCabiNode.FromConfig.
 #
-# The actor type is declared in manifest.toml (actrium:EchoApp:0.1.0).
+# The actor type is declared in manifest.toml (actrium/EchoApp@0.1.0).
 
 [signaling]
 url = "ws://__HOST__:__HTTP_PORT__/signaling/ws"
@@ -42,4 +42,4 @@ turn_urls = ["turn:__ICE_HOST__:__ICE_PORT__"]
 
 [[acl.rules]]
 permission = "allow"
-type = "actrium:EchoService:1.0.0"
+type = "actrium/EchoService@1.0.0"

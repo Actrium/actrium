@@ -1460,7 +1460,7 @@ async fn inner_shares_prebuilt_alias_map_with_all_runtime_contexts() {
     let workload = Workload::Linked(Arc::new(DummyLinkedHandle) as Arc<dyn LinkedWorkloadHandle>);
     let aliases = HashMap::from([(
         "sensor".to_string(),
-        actr_protocol::ActrType::from_string_repr("acme:Sensor:1.0.0").unwrap(),
+        actr_protocol::ActrType::from_string_repr("acme/Sensor@1.0.0").unwrap(),
     )]);
     let sensor_type = aliases["sensor"].clone();
     let inner = Inner::build(
@@ -1509,7 +1509,7 @@ async fn inner_shares_prebuilt_alias_map_with_all_runtime_contexts() {
             .get("sensor")
             .map(actr_protocol::ActrType::to_string_repr)
             .as_deref(),
-        Some("acme:Sensor:1.0.0")
+        Some("acme/Sensor@1.0.0")
     );
 }
 

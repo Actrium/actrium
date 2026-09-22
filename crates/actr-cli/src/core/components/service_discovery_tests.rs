@@ -111,7 +111,7 @@ fn lookup_name_accepts_registry_key_service_name_and_full_actor_type() {
     ));
     assert!(NetworkServiceDiscovery::matches_lookup_name(
         &entry,
-        "acme:EchoService:1.0.0"
+        "acme/EchoService@1.0.0"
     ));
     assert!(!NetworkServiceDiscovery::matches_lookup_name(
         &entry,

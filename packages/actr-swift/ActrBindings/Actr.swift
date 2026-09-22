@@ -7895,7 +7895,7 @@ public func setLogCallback(callback: LogCallback?)  {try! rustCall() {
  * Parses the manifest, looks up the dependency by alias, and returns its
  * `actr_type` field as a structured `ActrType` record. This is the canonical
  * way for linked-runtime hosts (iOS, Android) to discover which remote actor
- * type a dependency resolves to, without hardcoding `"publisher:name:version"`
+ * type a dependency resolves to, without hardcoding `"publisher/program@version"`
  * strings in application code.
  */
 public func resolveManifestDependency(manifestPath: String, dependencyAlias: String)throws  -> ActrType  {
@@ -7926,7 +7926,7 @@ public func resolveManifestDependencyAliasList(manifestPath: String)throws  -> [
  * Parses the manifest and returns the `[package]` block's actr_type fields
  * as a structured `ActrType` record. Linked-runtime hosts (iOS, Android) use
  * this to determine their own actor type without hardcoding
- * `"publisher:name:version"` strings.
+ * `"publisher/program@version"` strings.
  */
 public func resolveManifestPackageActrType(manifestPath: String)throws  -> ActrType  {
     return try  FfiConverterTypeActrType_lift(try rustCallWithError(FfiConverterTypeActrError_lift) {

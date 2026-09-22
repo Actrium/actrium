@@ -3,7 +3,9 @@
 
 Schema v2 retires the historical service names: the Publisher Registry tables
 lose their `mfr` prefix, the Issuer tables lose their `ais` prefix, and the
-publisher columns lose their `manufacturer`/`mfr_id` names.
+publisher columns lose their `manufacturer`/`mfr_id` names. Stored Actor type
+strings move from the retired `publisher:name:version` form to the canonical
+`publisher/program@version` form.
 
 Actrix must be stopped. Like the v1 tool, the whole run uses a single
 connection: it writes a timestamped SQLite backup and then holds one
@@ -15,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -87,6 +90,26 @@ INDEX_RENAMES = (
 )
 
 
+# (table, column) holding an Actor type string.
+TYPE_COLUMNS = (
+    ("actoracl", "from_type"),
+    ("actoracl", "to_type"),
+    ("issued_actor_identity", "actor_type"),
+    ("publisher_package", "type_str"),
+)
+
+COLON_TYPE = re.compile(r"^([^:/@]+):([^:/@]+):([^:/@]+)$")
+
+
+def canonical_type(value: str) -> str:
+    """Return ``publisher/program@version`` for a retired colon-form type."""
+    match = COLON_TYPE.match(value)
+    if not match:
+        return value
+    publisher, program, version = match.groups()
+    return f"{publisher}/{program}@{version}"
+
+
 def tables(db: sqlite3.Connection) -> set[str]:
     return {
         row[0]
@@ -138,6 +161,19 @@ def apply_migration(db: sqlite3.Connection) -> None:
             db.execute(f"ALTER TABLE {table} RENAME COLUMN {old} TO {new}")
     for _, create in INDEX_RENAMES:
         db.execute(create)
+    present = tables(db)
+    for table, column in TYPE_COLUMNS:
+        if table not in present or column not in columns(db, table):
+            continue
+        rows = db.execute(
+            f"SELECT rowid, {column} FROM {table} WHERE {column} LIKE '%:%:%'"
+        ).fetchall()
+        for rowid, value in rows:
+            updated = canonical_type(value)
+            if updated != value:
+                db.execute(
+                    f"UPDATE {table} SET {column} = ? WHERE rowid = ?", (updated, rowid)
+                )
     db.execute(f"PRAGMA user_version = {TARGET_VERSION}")
 
     failures = db.execute("PRAGMA foreign_key_check").fetchall()

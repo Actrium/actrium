@@ -31,7 +31,7 @@ turn_urls = ["turn:localhost:3478"]
 
 [[acl.rules]]
 permission = "allow"
-type = "acme:package-echo-client-guest:0.1.0"
+type = "acme/package-echo-client-guest@0.1.0"
 
 [[trust]]
 kind = "registry"

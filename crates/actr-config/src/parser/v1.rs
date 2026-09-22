@@ -384,20 +384,21 @@ impl ParserV1 {
         })
     }
 
-    /// Parse an ActrType string: `"publisher:name:version"`.
+    /// Parse an ActrType string: `"publisher/program@version"`.
     ///
     /// Note: `version` is required.
     fn parse_actr_type(&self, s: &str) -> Result<ActrType> {
-        let parts: Vec<&str> = s.splitn(4, ':').collect();
-        let (publisher, name, version) = match parts.as_slice() {
-            [m, n, v] => (*m, *n, *v),
-            _ => {
-                return Err(ConfigError::InvalidActrType(format!(
-                    "Invalid actor type '{}': expected 'publisher:name:version'",
-                    s
-                )));
-            }
+        let expected = || {
+            ConfigError::InvalidActrType(format!(
+                "Invalid actor type '{}': expected 'publisher/program@version'",
+                s
+            ))
         };
+        let (publisher, name_version) = s.split_once('/').ok_or_else(expected)?;
+        let (name, version) = name_version.rsplit_once('@').ok_or_else(expected)?;
+        if name.contains('/') {
+            return Err(expected());
+        }
 
         Name::new(publisher.to_string()).map_err(|e| {
             ConfigError::InvalidActrType(format!(
@@ -456,7 +457,7 @@ impl ParserV1 {
                 }
             };
 
-            // type (required): "publisher:name:version"
+            // type (required): "publisher/program@version"
             let type_str = rule_table
                 .get("type")
                 .and_then(|v| v.as_str())
@@ -719,7 +720,7 @@ publisher = "acme"
 version = "1.0.0"
 
 [dependencies]
-shared = { actr_type = "acme:logging-service:1.0.0", service = "LoggingService:abc123", realm = 9999 }
+shared = { actr_type = "acme/logging-service@1.0.0", service = "LoggingService:abc123", realm = 9999 }
 "#;
 
         let tmpdir = TempDir::new().unwrap();

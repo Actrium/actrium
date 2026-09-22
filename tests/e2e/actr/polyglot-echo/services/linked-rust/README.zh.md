@@ -2,7 +2,7 @@
 
 ## 形态
 
-EchoService 实现编译为普通 Rust 可执行二进制（不是 cdylib）。可执行启动后**直接 link `actr-hyper`**，构造 `Node`，注入 `EchoWorkload`，向 mock-actrix 注册 `polyglot:EchoService:1.0.0`。同样的客户端 driver（rust/ts/python/swift）通过 `discover` + `call` 调到这里。
+EchoService 实现编译为普通 Rust 可执行二进制（不是 cdylib）。可执行启动后**直接 link `actr-hyper`**，构造 `Node`，注入 `EchoWorkload`，向 mock-actrix 注册 `polyglot/EchoService@1.0.0`。同样的客户端 driver（rust/ts/python/swift）通过 `discover` + `call` 调到这里。
 
 与 cdylib 路径的对比：
 - **不需要** `actr build` 打包

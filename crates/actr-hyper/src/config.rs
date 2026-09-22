@@ -442,7 +442,7 @@ pub(crate) async fn node_from_config_file_with_package(
     // `RuntimeConfig` requires a PackageInfo. When the caller has one
     // already (bindings come in here with the manifest's `[package]`),
     // honour it so the node registers under the real actr_type. Without
-    // an explicit one, fall back to the historical `local:Client:0.0.0`
+    // an explicit one, fall back to the historical `local/Client@0.0.0`
     // placeholder so callers without a sibling manifest still work.
     let package_info = package_info.unwrap_or_else(|| actr_config::PackageInfo {
         name: "client".to_string(),

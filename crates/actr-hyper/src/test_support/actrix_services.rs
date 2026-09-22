@@ -71,7 +71,7 @@ async fn initialize_signaling_database() -> anyhow::Result<PathBuf> {
             )
             .await?;
 
-            let actor_type = "acme:node:1.0.0".to_string();
+            let actor_type = "acme/node@1.0.0".to_string();
             if platform::ActorAcl::get_by_types(1, 1, &actor_type, &actor_type)
                 .await?
                 .is_none()

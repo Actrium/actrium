@@ -8,7 +8,7 @@ description = "An Actrium Android DataStream client"
 authors = []
 
 [dependencies]
-StreamEchoServer = { actr_type = "{{PUBLISHER}}:StreamEchoServer:1.0.0" }
+StreamEchoServer = { actr_type = "{{PUBLISHER}}/StreamEchoServer@1.0.0" }
 
 [system.signaling]
 url = "{{SIGNALING_URL}}"

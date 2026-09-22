@@ -5,7 +5,7 @@
 #
 # The actor type is resolved at runtime via resolveManifestPackageActrType()
 # (or Manifest.from(path).packageType()), matching the Swift pattern:
-#   let actorType = try ActrType.fromStringRepr("actrium:EchoApp:0.1.0")
+#   let actorType = try ActrType.fromStringRepr("actrium/EchoApp@0.1.0")
 
 edition = 1
 
@@ -16,5 +16,5 @@ version = "0.1.0"
 description = "Actrium EchoApp — Android linked runtime"
 
 [dependencies]
-echo = { actr_type = "actrium:EchoService:1.0.0" }
-stream = { actr_type = "actrium:DuplexStreamService:1.0.0" }
+echo = { actr_type = "actrium/EchoService@1.0.0" }
+stream = { actr_type = "actrium/DuplexStreamService@1.0.0" }

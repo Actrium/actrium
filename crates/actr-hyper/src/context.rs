@@ -1031,7 +1031,7 @@ impl Context for RuntimeContext {
             ));
         }
 
-        let service_name = format!("{}:{}", target_type.publisher, target_type.name);
+        let service_name = format!("{}/{}", target_type.publisher, target_type.name);
 
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // Step 1: Get fingerprint from manifest.lock.toml (when available)

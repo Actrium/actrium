@@ -546,7 +546,7 @@ publisher = "acme"
 version = "1.0.0"
 
 [dependencies]
-echo = { actr_type = "acme:EchoService:1.0.0", service = "EchoService:service_semantic:echo" }
+echo = { actr_type = "acme/EchoService@1.0.0", service = "EchoService:service_semantic:echo" }
 "#,
         )
         .unwrap();
@@ -569,7 +569,7 @@ generated_at = "2026-08-06T00:00:00Z"
 [[dependency]]
 name = "EchoService"
 alias = "echo"
-actr_type = "acme:EchoService:1.0.0"
+actr_type = "acme/EchoService@1.0.0"
 fingerprint = "service_semantic:echo"
 cached_at = "2026-08-06T00:00:00Z"
 

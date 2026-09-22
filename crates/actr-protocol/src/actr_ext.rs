@@ -32,17 +32,17 @@ fn validate_actor_namespace(value: &str) -> Result<(), ActrIdError> {
     Ok(())
 }
 
-/// Validate a legacy `ActrType` publisher parsed from the
-/// `publisher:name:version` colon form.
+/// Validate the publisher of an `ActrType` parsed by
+/// [`ActrType::from_string_repr`].
 ///
 /// This is deliberately more permissive than [`validate_actor_namespace`]: DNS
-/// labels may start with a digit, and historical/linked-workload namespaces
-/// may use interior underscores, so the legacy parser must not reintroduce the
-/// old "starts with a letter" rule. A leading or trailing `-`, `_`, or `.` is
+/// labels may start with a digit, and linked-workload namespaces may use
+/// interior underscores, so the general parser must not reintroduce the old
+/// "starts with a letter" rule. A leading or trailing `-`, `_`, or `.` is
 /// still rejected, as is any character outside ASCII alphanumeric and `-_.`.
 /// Security-sensitive entry points use the strict [`ActrType::validate`]
 /// (Name-based) gate rather than this parser-level check.
-fn validate_legacy_publisher(value: &str) -> Result<(), ActrIdError> {
+fn validate_type_publisher(value: &str) -> Result<(), ActrIdError> {
     let mut chars = value.chars();
     let Some(first) = chars.next() else {
         return Err(ActrIdError::InvalidComponent(format!(
@@ -82,7 +82,7 @@ pub enum ActrIdError {
     #[error("Invalid component in actor identity: {0}")]
     InvalidComponent(String),
 
-    #[error("Invalid actor type format: '{0}'. Expected: <publisher>:<name>:<version>")]
+    #[error("Invalid actor type format: '{0}'. Expected: <publisher>/<program>@<version>")]
     InvalidTypeFormat(String),
 }
 
@@ -148,16 +148,17 @@ impl ActrType {
         })
     }
 
-    /// Convert to stable string representation.
+    /// Convert to the stable string representation.
     ///
-    /// Always returns `"publisher:name:version"`.
+    /// Always returns the canonical `"publisher/program@version"` form, the
+    /// same text as [`ActrType::to_program_identity`].
     pub fn to_string_repr(&self) -> String {
         debug_assert!(
             !self.version.is_empty(),
             "ActrType.version must be non-empty"
         );
 
-        format!("{}:{}:{}", self.publisher, self.name, self.version)
+        self.to_program_identity()
     }
 
     /// Validate the identity fields against the protocol naming rules.
@@ -176,27 +177,31 @@ impl ActrType {
         validate_version(&self.version)
     }
 
-    /// Parse from string representation.
+    /// Parse from the string representation `"publisher/program@version"`.
     ///
-    /// Accepts:
-    /// - `"publisher:name:version"` — with version (required)
-    ///
-    /// Returns `Err(ActrIdError::InvalidTypeFormat)` if version is absent,
-    /// as `ActrType.version` is now a required field.
+    /// Unlike [`ActrType::from_program_identity`], the publisher does not have
+    /// to be a DNS domain, so linked and local workloads can use it too. The
+    /// retired `publisher:name:version` colon form is rejected with a hint.
     pub fn from_string_repr(s: &str) -> Result<Self, ActrIdError> {
-        // Require exactly 3 segments: publisher, name, version
-        let parts: Vec<&str> = s.splitn(4, ':').collect();
-        let (publisher, name, version) = match parts.as_slice() {
-            [_, _] => {
+        let Some((publisher, program_version)) = s.split_once('/') else {
+            if s.contains(':') {
                 return Err(ActrIdError::InvalidTypeFormat(format!(
-                    "{s} (version is required, expected <publisher>:<name>:<version>)"
+                    "{s} (the publisher:name:version form is no longer supported; \
+                     write <publisher>/<program>@<version>)"
                 )));
             }
-            [m, n, v] => (*m, *n, *v),
-            _ => return Err(ActrIdError::InvalidTypeFormat(s.to_string())),
+            return Err(ActrIdError::InvalidTypeFormat(s.to_string()));
         };
+        let Some((name, version)) = program_version.rsplit_once('@') else {
+            return Err(ActrIdError::InvalidTypeFormat(format!(
+                "{s} (version is required, expected <publisher>/<program>@<version>)"
+            )));
+        };
+        if publisher.is_empty() || name.is_empty() || name.contains('/') {
+            return Err(ActrIdError::InvalidTypeFormat(s.to_string()));
+        }
 
-        validate_legacy_publisher(publisher)?;
+        validate_type_publisher(publisher)?;
         Name::new(name.to_string())
             .map_err(|e| ActrIdError::InvalidComponent(format!("Invalid type name: {e}")))?;
         validate_version(version)?;
@@ -214,7 +219,7 @@ impl ActrType {
 /// must be ASCII alphanumeric; interior characters are limited to ASCII
 /// alphanumeric plus `.` `_` `-` `+`. This forbids the protocol separators
 /// `:` `@` `/` as well as `\`, whitespace, and control characters, so a valid
-/// version can never corrupt the `publisher:name:version` or
+/// version can never corrupt the `publisher/program@version` or
 /// `<serial>@<realm>/<type>` string forms.
 fn validate_version(version: &str) -> Result<(), ActrIdError> {
     if version.is_empty() {
@@ -401,19 +406,18 @@ mod tests {
 
     #[test]
     fn test_actr_type_roundtrip_with_version() {
-        let s = "acme:echo:1.2.3";
+        let s = "acme/echo@1.2.3";
         let ty = ActrType::from_string_repr(s).unwrap();
         assert_eq!(ty.publisher, "acme");
         assert_eq!(ty.name, "echo");
         assert_eq!(ty.version.as_str(), "1.2.3");
         assert_eq!(ty.to_string_repr(), s);
+        assert_eq!(ty.to_string(), s);
     }
 
     #[test]
     fn test_actr_type_without_version_is_error() {
-        // Version is now required; two-segment strings must fail
-        let s = "acme:echo-service";
-        let result = ActrType::from_string_repr(s);
+        let result = ActrType::from_string_repr("acme/echo-service");
         assert!(
             matches!(result, Err(ActrIdError::InvalidTypeFormat(_))),
             "Expected InvalidTypeFormat, got: {:?}",
@@ -422,32 +426,46 @@ mod tests {
     }
 
     #[test]
+    fn test_actr_type_rejects_retired_colon_form() {
+        let result = ActrType::from_string_repr("acme:echo:1.2.3");
+        match result {
+            Err(ActrIdError::InvalidTypeFormat(message)) => {
+                assert!(
+                    message.contains("<publisher>/<program>@<version>"),
+                    "{message}"
+                );
+            }
+            other => panic!("expected InvalidTypeFormat, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_actr_type_invalid_format() {
-        // Single segment (no colon) — invalid
+        // Missing '/' and '@'
         assert!(matches!(
             ActrType::from_string_repr("acme-echo"),
             Err(ActrIdError::InvalidTypeFormat(_))
         ));
-        // Too many segments (4+)
+        // Extra path segment
         assert!(matches!(
-            ActrType::from_string_repr("a:b:c:d"),
+            ActrType::from_string_repr("a/b/c@1"),
             Err(ActrIdError::InvalidTypeFormat(_))
         ));
-        // DNS labels may start with a digit; the legacy ActrType namespace
-        // parser must not reintroduce the old "starts with a letter" rule.
-        assert!(ActrType::from_string_repr("1acme:echo:1.0.0").is_ok());
+        // DNS labels may start with a digit; the ActrType namespace parser
+        // must not reintroduce the old "starts with a letter" rule.
+        assert!(ActrType::from_string_repr("1acme/echo@1.0.0").is_ok());
         // Invalid publisher
         assert!(matches!(
-            ActrType::from_string_repr("_acme:echo:1.0.0"),
+            ActrType::from_string_repr("_acme/echo@1.0.0"),
             Err(ActrIdError::InvalidComponent(_))
         ));
         // Invalid name
         assert!(matches!(
-            ActrType::from_string_repr("acme:echo!:1.0.0"),
+            ActrType::from_string_repr("acme/echo!@1.0.0"),
             Err(ActrIdError::InvalidComponent(_))
         ));
         assert!(matches!(
-            ActrType::from_string_repr("acme:echo:"),
+            ActrType::from_string_repr("acme/echo@"),
             Err(ActrIdError::InvalidComponent(_))
         ));
     }

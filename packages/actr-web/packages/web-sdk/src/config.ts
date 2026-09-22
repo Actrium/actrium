@@ -23,10 +23,10 @@ export interface SwRuntimeConfig {
   /** Deployment realm ID */
   realm_id: number;
 
-  /** This actor's type (publisher:name:version) */
+  /** This actor's type (publisher/program@version) */
   client_actr_type: string;
 
-  /** Target actor type for peer discovery (publisher:name:version) */
+  /** Target actor type for peer discovery (publisher/program@version) */
   /** Optional legacy default target. New workloads resolve dependency aliases at call time. */
   target_actr_type?: string;
 

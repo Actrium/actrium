@@ -76,7 +76,7 @@ open class SimpleWorkload(
      * Create a SimpleWorkload from a type string.
      *
      * @param realmId The realm ID
-     * @param typeString Actor type in "publisher:name:version" format
+     * @param typeString Actor type in "publisher/program@version" format
      */
     constructor(
         realmId: UInt,

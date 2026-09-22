@@ -59,7 +59,7 @@ pub struct PkgPackArgs {
     #[arg(long, default_value = ".", value_name = "DIR")]
     pub payload_root: PathBuf,
 
-    /// Path to Publisher Registry signing key file (overrides config record.keychain).
+    /// Path to Publisher Registry signing key file (overrides config publisher.keychain).
     #[arg(long, short = 'k', value_name = "FILE")]
     pub key: Option<PathBuf>,
 
@@ -289,7 +289,7 @@ fn execute_keygen(args: &PkgKeygenArgs) -> Result<()> {
         .with_context(|| format!("Failed to write {}", global_path.display()))?;
     println!();
     println!(
-        "✅ Global config updated: record.keychain = {}",
+        "✅ Global config updated: publisher.keychain = {}",
         key_path.display()
     );
 

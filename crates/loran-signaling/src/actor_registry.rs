@@ -1072,14 +1072,8 @@ impl ActorRegistry {
         let from_realm = from_actor.realm.realm_id;
         let to_realm = to_actor.realm.realm_id;
 
-        let from_type = format!(
-            "{}:{}:{}",
-            from_actor.r#type.publisher, from_actor.r#type.name, from_actor.r#type.version
-        );
-        let to_type = format!(
-            "{}:{}:{}",
-            to_actor.r#type.publisher, to_actor.r#type.name, to_actor.r#type.version
-        );
+        let from_type = from_actor.r#type.to_string_repr();
+        let to_type = to_actor.r#type.to_string_repr();
 
         ActorAcl::can_discover(from_realm, to_realm, &from_type, &to_type).await
     }
@@ -1739,13 +1733,13 @@ mod tests {
         let _ = target_realm_entity.save().await;
         let _ = other_realm_entity.save().await;
 
-        let _ = ActorAcl::delete_by_target(target_realm, "acme:worker:1.0.0").await?;
+        let _ = ActorAcl::delete_by_target(target_realm, "acme/worker@1.0.0").await?;
 
         let mut acl = ActorAcl::new_with_source_realm(
             target_realm,
             Some(source_realm),
-            "acme:edge:1.0.0".to_string(),
-            "acme:worker:1.0.0".to_string(),
+            "acme/edge@1.0.0".to_string(),
+            "acme/worker@1.0.0".to_string(),
             true,
         );
         let _ = acl.save().await?;

@@ -187,7 +187,7 @@ impl ActorPackageManifest {
 
     pub fn actor_type(&self) -> String {
         format!(
-            "{}:{}:{}",
+            "{}/{}@{}",
             self.actor.publisher, self.actor.name, self.actor.version
         )
     }

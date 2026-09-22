@@ -45,7 +45,7 @@ impl ActrNode {
         // Accept the manifest.toml path, resolve its sibling actr.toml,
         // and feed the manifest's [package] into Hyper so the node
         // registers under the real actr_type instead of the
-        // `local:Client:0.0.0` placeholder that `from_config_file`
+        // `local/Client@0.0.0` placeholder that `from_config_file`
         // would otherwise synthesise. TypeScript bindings link a
         // minimal static-lib workload here; this surface exposes
         // discovery and outbound calls, not TS-defined service hosting.

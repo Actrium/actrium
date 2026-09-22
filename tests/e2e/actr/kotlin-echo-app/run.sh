@@ -106,10 +106,10 @@ scaffold_echo_service() {
 # Write the client manifest.toml — per actr-kt-migration §2.1 this file carries
 # ONLY [package] (app ActrType) + [dependencies]. Connection config + ACL live in
 # actr.toml (render_linked_client_config). [package].name is the app actor name so
-# resolveManifestPackageActrType yields ${PUBLISHER}:${APP_ACTOR}:${APP_VERSION}.
+# resolveManifestPackageActrType yields ${PUBLISHER}/${APP_ACTOR}@${APP_VERSION}.
 write_client_manifest() {
     section "📝 Writing Kotlin client manifest.toml"
-    local acl_type="${PUBLISHER}:${SERVICE_ACTOR}:${SERVICE_VERSION}"
+    local acl_type="${PUBLISHER}/${SERVICE_ACTOR}@${SERVICE_VERSION}"
     cat >"$TMP_APP_DIR/manifest.toml" <<EOF
 edition = 1
 
@@ -167,7 +167,7 @@ HOST_TARGET="$(rustc -vV | awk '/host:/ {print $2}')"
 section "🧪 Kotlin EchoApp E2E"
 echo "Run directory:  $RUN_DIR"
 echo "Service actor:  ${PUBLISHER}:${SERVICE_ACTOR}"
-echo "App actor:      ${PUBLISHER}:${APP_ACTOR}:${APP_VERSION}"
+echo "App actor:      ${PUBLISHER}/${APP_ACTOR}@${APP_VERSION}"
 echo "Actrix binary:  $ACTRIX_BIN"
 echo "Host target:    $HOST_TARGET"
 
@@ -210,7 +210,7 @@ build_and_publish_service "$TMP_SERVICE_DIR" "$SERVICE_ACTOR" "$SERVICE_VERSION"
 publish_app_package_identity "$APP_ACTOR" "$APP_VERSION"
 
 # Phase 3: start the EchoService host and wait for registration.
-run_server_host "$SERVICE_PACKAGE" "${PUBLISHER}:${APP_ACTOR}:${APP_VERSION}" "kotlin-echo-server"
+run_server_host "$SERVICE_PACKAGE" "${PUBLISHER}/${APP_ACTOR}@${APP_VERSION}" "kotlin-echo-server"
 check_service_ready "$SERVICE_ACTOR"
 
 # Phase 4: scaffold the Kotlin client, wire local AAR, seed protos, gen.
@@ -225,7 +225,7 @@ run_kotlin_gen "$TMP_APP_DIR" "$APPLICATION_ID"
 
 # Phase 5: linked-mode client config + instrumentation test.
 render_linked_client_config "$TMP_APP_DIR" "$APPLICATION_ID" \
-    "${PUBLISHER}:${SERVICE_ACTOR}:${SERVICE_VERSION}"
+    "${PUBLISHER}/${SERVICE_ACTOR}@${SERVICE_VERSION}"
 write_instrumentation_test
 
 # Phase 6: run the instrumentation test on the emulator.

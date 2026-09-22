@@ -1163,7 +1163,7 @@ version = "0.1.0"
 description = "Actrium DataStreamApp iOS linked runtime"
 
 [dependencies]
-duplex_stream = { actr_type = "${PUBLISHER}:DuplexStreamService:1.0.0" }
+duplex_stream = { actr_type = "${PUBLISHER}/DuplexStreamService@1.0.0" }
 EOF
 }
 
@@ -1415,7 +1415,7 @@ turn_urls = ["turn:127.0.0.1:${ICE_PORT}"]
 
 [[acl.rules]]
 permission = "allow"
-type = "${PUBLISHER}:DataStreamApp:0.1.0"
+type = "${PUBLISHER}/DataStreamApp@0.1.0"
 EOF
 
     RUST_LOG="${RUST_LOG:-info}" \
@@ -1509,7 +1509,7 @@ install_and_launch_app() {
     # treat the wrapper process as the app lifetime.
     SIMCTL_CHILD_ACTR_DATASTREAMAPP_AUTO_STREAM_COUNT=3 \
     SIMCTL_CHILD_ACTR_PUBLISHER="${PUBLISHER}" \
-    SIMCTL_CHILD_ACTR_DATASTREAMAPP_TARGET_TYPE="${PUBLISHER}:DuplexStreamService:1.0.0" \
+    SIMCTL_CHILD_ACTR_DATASTREAMAPP_TARGET_TYPE="${PUBLISHER}/DuplexStreamService@1.0.0" \
     xcrun simctl launch \
         "${launch_args[@]}" \
         "$DEVICE_UDID" \

@@ -842,7 +842,7 @@ impl Node {
     /// This is the path the language bindings use: they already parsed
     /// `manifest.toml` to find the runtime config dir and want their
     /// `[package]` honoured rather than collapsed to the
-    /// `local:Client:0.0.0` placeholder that `from_config_file` synthesises.
+    /// `local/Client@0.0.0` placeholder that `from_config_file` synthesises.
     pub async fn from_config_with_package(
         path: impl AsRef<std::path::Path>,
         package_info: actr_config::PackageInfo,

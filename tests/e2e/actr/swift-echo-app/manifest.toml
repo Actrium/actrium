@@ -12,4 +12,4 @@ version = "0.1.0"
 description = "Actrium EchoApp — iOS linked runtime"
 
 [dependencies]
-echo = { actr_type = "e2e.actrium.test:EchoService:1.0.0" }
+echo = { actr_type = "e2e.actrium.test/EchoService@1.0.0" }

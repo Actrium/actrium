@@ -11,9 +11,9 @@ tags = ["dev", "service"]
 
 [dependencies]
 {{#if IS_BOTH}}
-EchoService = { actr_type = "{{PUBLISHER}}:EchoService:1.0.0" }
+EchoService = { actr_type = "{{PUBLISHER}}/EchoService@1.0.0" }
 {{else}}
-EchoService = { actr_type = "{{PUBLISHER}}:EchoService:1.0.0" }
+EchoService = { actr_type = "{{PUBLISHER}}/EchoService@1.0.0" }
 {{/if}}
 
 [system.signaling]
@@ -46,4 +46,4 @@ dev = "npm run dev"
 
 [[acl.rules]]
 permission = "allow"
-type = "{{PUBLISHER}}:EchoService:1.0.0"
+type = "{{PUBLISHER}}/EchoService@1.0.0"

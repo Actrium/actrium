@@ -9,4 +9,4 @@ tags = ["dev", "client"]
 exports = []
 
 [dependencies]
-EchoService = { actr_type = "acme:EchoService:1.0.0" }
+EchoService = { actr_type = "acme/EchoService@1.0.0" }
