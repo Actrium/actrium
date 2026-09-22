@@ -34,11 +34,11 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::UNIX_EPOCH;
 
 thread_local! {
-    /// Parked `test/captured-context-stream` subscription + its captured
-    /// context, type-erased because the dispatcher is generic over `C:
-    /// Context` (the same `C` is used for register and drain within one
-    /// test).
-    static PARKED_STREAM: std::cell::RefCell<Option<Box<dyn std::any::Any>>> =
+    /// Parked `test/captured-context-stream` subscription. Consumed by the
+    /// later `test/drain-parked-stream` invocation (the resident
+    /// run_concurrent region retires spawned subtasks, so consumption is
+    /// driven by explicit dispatches rather than a detached task).
+    static PARKED_STREAM: std::cell::RefCell<Option<actr_framework::DataChunkStream>> =
         const { std::cell::RefCell::new(None) };
 }
 
@@ -341,19 +341,16 @@ impl MessageDispatcher for DoubleDispatcher {
                     )
                     .await?;
                 PARKED_STREAM.with(|slot| {
-                    *slot.borrow_mut() = Some(Box::new(incoming));
+                    *slot.borrow_mut() = Some(incoming);
                 });
                 Ok(Bytes::new())
             }
             "test/drain-parked-stream" => {
                 let taken = PARKED_STREAM.with(|slot| slot.borrow_mut().take());
-                let Some(boxed) = taken else {
+                let Some(mut incoming) = taken else {
                     return Err(ActrError::Internal(
                         "no parked stream; call test/park-stream-context first".into(),
                     ));
-                };
-                let Ok(mut incoming) = boxed.downcast::<actr_framework::DataChunkStream>() else {
-                    return Err(ActrError::Internal("parked stream type mismatch".into()));
                 };
                 use futures_util::StreamExt;
                 let mut drained = 0u64;

@@ -1030,17 +1030,14 @@ struct StreamListener {
     done: tokio::sync::watch::Receiver<bool>,
 }
 
+type StreamListenerMap = std::collections::HashMap<(usize, String), std::sync::Arc<StreamListener>>;
+
 /// Cancellation handles of active stream listeners, keyed by
 /// `(ref_handle, stream_id)`. `actr_stream_listen` inserts one entry per
 /// subscription; `actr_stream_unlisten` cancels it and waits for teardown.
-fn stream_listeners() -> &'static std::sync::Mutex<
-    std::collections::HashMap<(usize, String), std::sync::Arc<StreamListener>>,
-> {
-    static LISTENERS: std::sync::OnceLock<
-        std::sync::Mutex<
-            std::collections::HashMap<(usize, String), std::sync::Arc<StreamListener>>,
-        >,
-    > = std::sync::OnceLock::new();
+fn stream_listeners() -> &'static std::sync::Mutex<StreamListenerMap> {
+    static LISTENERS: std::sync::OnceLock<std::sync::Mutex<StreamListenerMap>> =
+        std::sync::OnceLock::new();
     LISTENERS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 
