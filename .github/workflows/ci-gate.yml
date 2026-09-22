@@ -846,14 +846,10 @@ jobs:
           ACTR_XCFRAMEWORK_TARGETS: macos
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: |
-          ACTR_BINDINGS_PATH=dist/ActrBindings \
-          ACTR_BINARY_PATH=dist/ActrFFI.xcframework \
           ./build-xcframework.sh
       - name: Build Swift bindings package
         working-directory: packages/actr-swift
         run: |
-          ACTR_BINDINGS_PATH=dist/ActrBindings \
-          ACTR_BINARY_PATH=dist/ActrFFI.xcframework \
           swift build
       - name: Pre-build mock-actrix
         run: cargo build -p actr-mock-actrix --bin mock-actrix
