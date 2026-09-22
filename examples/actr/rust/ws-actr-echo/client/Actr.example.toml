@@ -27,7 +27,7 @@ tracing_service_name = "ws-echo-client-app"
 
 [[acl.rules]]
 permission = "allow"
-type = "acme:WsEchoService:1.0.0"
+type = "acme/WsEchoService@1.0.0"
 
 [scripts]
 dev = "cargo run"

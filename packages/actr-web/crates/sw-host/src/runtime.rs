@@ -1270,7 +1270,7 @@ impl SwRuntime {
     /// The identity fields and `client_id` are hashed into the opaque namespace
     /// using a domain-separated, tagged, length-prefixed encoding, so distinct
     /// field splits never collide — e.g. `("acme:Echo:1_a", "b")` vs
-    /// `("acme:Echo:1", "a_b")` would map to the same string under a
+    /// `("acme/Echo@1", "a_b")` would map to the same string under a
     /// delimiter-joined encoding. Per-tab partitioning is preserved while the raw
     /// identity stays out of any storage-location string.
     fn build_cred_kv_namespace(client_actr_type: &ActrType, client_id: &str) -> StorageNamespace {
@@ -4124,7 +4124,7 @@ mod cred_ns_tests {
 
     #[test]
     fn cred_kv_namespace_avoids_delimiter_ambiguity() {
-        // ("acme:Echo:1_a", "b") vs ("acme:Echo:1", "a_b") produce the SAME string
+        // ("acme:Echo:1_a", "b") vs ("acme/Echo@1", "a_b") produce the SAME string
         // under a delimiter-joined encoding; the length-prefixed encoding must
         // keep them distinct.
         let a = SwRuntime::build_cred_kv_namespace(&ty("acme", "Echo", "1_a"), "b");

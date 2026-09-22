@@ -94,7 +94,7 @@ fn test_ctx() -> InvocationContext {
 fn test_config() -> InitPayloadV1 {
     InitPayloadV1 {
         version: version::V1,
-        actr_type: "test:fixture:0.1.0".to_string(),
+        actr_type: "test/fixture@0.1.0".to_string(),
         credential: Vec::new(),
         actor_id: Vec::new(),
         realm_id: 1,

@@ -182,7 +182,7 @@ fn parse_args() -> Result<DriverArgs> {
     let service_type_str = service_type.ok_or_else(|| anyhow!("missing --service-type"))?;
     let parts: Vec<&str> = service_type_str.splitn(3, ':').collect();
     if parts.len() != 3 {
-        bail!("--service-type must be 'publisher:name:version', got {service_type_str}");
+        bail!("--service-type must be 'publisher/program@version', got {service_type_str}");
     }
     let service_type = ActrType {
         publisher: parts[0].to_string(),

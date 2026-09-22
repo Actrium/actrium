@@ -38,12 +38,12 @@ kind = "dev_only"
 
 [[acl.rules]]
 permission = "allow"
-type = "acme:EchoApp:0.1.0"
+type = "acme/EchoApp@0.1.0"
 
 [[acl.rules]]
 permission = "allow"
-type = "actrium:EchoService:1.0.0"
+type = "actrium/EchoService@1.0.0"
 
 [[acl.rules]]
 permission = "allow"
-type = "actrium:DuplexStreamService:1.0.0"
+type = "actrium/DuplexStreamService@1.0.0"

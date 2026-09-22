@@ -446,7 +446,7 @@ pub unsafe extern "C" fn actr_node_from_config(
 ///
 /// Returns a replacement `ActrNodeInitHandle`, or null when the input actor
 /// type is invalid or the supplied handle is stale or has the wrong state. The
-/// actor type must be `publisher:name:version` and satisfies the protocol
+/// actor type must be `publisher/program@version` and satisfies the protocol
 /// identity validation rules.
 ///
 /// # Safety

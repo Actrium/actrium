@@ -31,7 +31,7 @@
   "plugin_version" : "0.4.16",
   "remote_services" : [
     {
-      "actr_type" : "e2e.actrium.test:EchoService:1.0.0",
+      "actr_type" : "e2e.actrium.test/EchoService@1.0.0",
       "client_type" : "EchoServiceClient",
       "methods" : [
         {

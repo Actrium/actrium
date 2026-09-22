@@ -528,9 +528,9 @@ scaffold_service_guest() {
         "$TMP_SERVICE_DIR/manifest.toml"
 
     # The echo template ACL rule "${PUBLISHER}:echo-client-app" lacks a version,
-    # which the actr CLI rejects (expects publisher:name:version). Point the ACL
+    # which the actr CLI rejects (expects publisher/program@version). Point the ACL
     # at the SwiftTsWorkloadApp client identity instead.
-    perl -i -pe "s{^type = \"${PUBLISHER}:echo-client-app\"\$}{type = \"${PUBLISHER}:SwiftTsWorkloadApp:0.1.0\"}" \
+    perl -i -pe "s{^type = \"${PUBLISHER}:echo-client-app\"\$}{type = \"${PUBLISHER}/SwiftTsWorkloadApp@0.1.0\"}" \
         "$TMP_SERVICE_DIR/manifest.toml"
 
     # The echo service template manifest has no [binary] section. The TS workload
@@ -894,7 +894,7 @@ turn_urls = ["turn:127.0.0.1:${ICE_PORT}"]
 
 [[acl.rules]]
 permission = "allow"
-type = "${PUBLISHER}:SwiftTsWorkloadApp:0.1.0"
+type = "${PUBLISHER}/SwiftTsWorkloadApp@0.1.0"
 EOF
 
     # Isolate hyper runtime state per-run so stale global state in
@@ -998,7 +998,7 @@ install_and_launch_app() {
     # may return before the app exits when detached from the terminal, so do not
     # treat the wrapper process as the app lifetime.
     SIMCTL_CHILD_ACTR_SWIFTTSAPP_AUTO_STREAM_COUNT=3 \
-    SIMCTL_CHILD_ACTR_SWIFTTSAPP_TARGET_TYPE="${PUBLISHER}:DuplexEchoService:1.0.0" \
+    SIMCTL_CHILD_ACTR_SWIFTTSAPP_TARGET_TYPE="${PUBLISHER}/DuplexEchoService@1.0.0" \
     xcrun simctl launch \
         "${launch_args[@]}" \
         "$DEVICE_UDID" \

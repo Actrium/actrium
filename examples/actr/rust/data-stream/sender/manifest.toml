@@ -9,4 +9,4 @@ tags = ["dev", "example"]
 exports = []
 
 [dependencies]
-FileTransferService = { actr_type = "acme:FileTransferService:1.0.0" }
+FileTransferService = { actr_type = "acme/FileTransferService@1.0.0" }

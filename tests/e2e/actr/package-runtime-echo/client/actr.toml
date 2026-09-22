@@ -27,4 +27,4 @@ turn_urls = ["turn:127.0.0.1:3478"]
 
 [[acl.rules]]
 permission = "allow"
-type = "e2e.actrium.test:EchoService:1.0.0"
+type = "e2e.actrium.test/EchoService@1.0.0"

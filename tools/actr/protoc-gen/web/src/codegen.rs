@@ -169,7 +169,7 @@ fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
     out.push_str(&format!("  name: '{actr_name}',\n"));
     out.push_str(&format!("  version: '{version}',\n"));
     out.push_str(&format!(
-        "  fullType: '{publisher}:{actr_name}:{version}',\n"
+        "  fullType: '{publisher}/{actr_name}@{version}',\n"
     ));
     out.push_str("} as const;\n\n");
 

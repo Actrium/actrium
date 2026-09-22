@@ -177,7 +177,7 @@ crontab -e
 
 ### migrate_schema_v2.py - 数据库 schema v1 → v2
 
-schema v2 退役历史服务名：Publisher Registry 表去掉 `mfr` 前缀（`mfr` → `publisher`、`mfr_package` → `publisher_package` 等），Issuer 表去掉 `ais` 前缀（`ais_renewal_token` → `issuer_renewal_token` 等），`mfr_id`/`manufacturer` 列改为 `publisher_id`/`publisher`。
+schema v2 退役历史服务名：Publisher Registry 表去掉 `mfr` 前缀（`mfr` → `publisher`、`mfr_package` → `publisher_package` 等），Issuer 表去掉 `ais` 前缀（`ais_renewal_token` → `issuer_renewal_token` 等），`mfr_id`/`manufacturer` 列改为 `publisher_id`/`publisher`；已存储的 Actor 类型字符串（ACL 规则等）从 `publisher:name:version` 改写为 `publisher/program@version`。
 
 Actrix 启动时只接受当前 schema 版本；升级前先停止 Actrix，再执行（未版本化的库先运行 `migrate_schema_v1.py`）：
 

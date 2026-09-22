@@ -859,7 +859,7 @@ turn_urls = ["turn:127.0.0.1:${ICE_PORT}"]
 
 [[acl.rules]]
 permission = "allow"
-type = "${PUBLISHER}:EchoApp:0.1.0"
+type = "${PUBLISHER}/EchoApp@0.1.0"
 EOF
 
     RUST_LOG="${RUST_LOG:-info}" \

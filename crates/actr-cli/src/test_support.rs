@@ -107,9 +107,9 @@ pub fn pin_echo_service_dependency_version(project_dir: &Path, publisher: &str) 
         .with_context(|| format!("failed to read {}", actr_toml_path.display()))?;
 
     // Newer Rust echo template renders the dependency with publisher
-    // already inlined as `EchoService = { actr_type = "<record>:EchoService:1.0.0" }`.
+    // already inlined as `EchoService = { actr_type = "<publisher>/EchoService@1.0.0" }`.
     // Detect that case and skip — no pinning needed.
-    let already_rendered = format!("EchoService = {{ actr_type = \"{publisher}:");
+    let already_rendered = format!("EchoService = {{ actr_type = \"{publisher}/");
     if content.contains(&already_rendered) {
         return Ok(());
     }
@@ -120,11 +120,11 @@ pub fn pin_echo_service_dependency_version(project_dir: &Path, publisher: &str) 
     let placeholders: &[(&str, String)] = &[
         (
             "EchoService = {}",
-            format!("EchoService = {{ actr_type = \"{publisher}:EchoService:1.0.0\" }}"),
+            format!("EchoService = {{ actr_type = \"{publisher}/EchoService@1.0.0\" }}"),
         ),
         (
             "echo-service = {}",
-            format!("echo-service = {{ actr_type = \"{publisher}:EchoService:1.0.0\" }}"),
+            format!("echo-service = {{ actr_type = \"{publisher}/EchoService@1.0.0\" }}"),
         ),
     ];
 

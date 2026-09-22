@@ -9,7 +9,7 @@ class ActrTypeTest {
 
     @Test
     fun `toActrType parses canonical colon format`() {
-        val type = "acme:EchoService:1.0.0".toActrType()
+        val type = "acme/EchoService@1.0.0".toActrType()
         assertEquals("acme", type.publisher)
         assertEquals("EchoService", type.name)
         assertEquals("1.0.0", type.version)
@@ -17,7 +17,7 @@ class ActrTypeTest {
 
     @Test
     fun `toActrType parses with complex publisher name`() {
-        val type = "demo2:EchoService:2.0.1".toActrType()
+        val type = "demo2/EchoService@2.0.1".toActrType()
         assertEquals("demo2", type.publisher)
         assertEquals("EchoService", type.name)
         assertEquals("2.0.1", type.version)
@@ -25,7 +25,7 @@ class ActrTypeTest {
 
     @Test
     fun `toActrType parses with semver version`() {
-        val type = "actrium:DataStreamConcurrentServer:0.1.0-beta".toActrType()
+        val type = "actrium/DataStreamConcurrentServer@0.1.0-beta".toActrType()
         assertEquals("actrium", type.publisher)
         assertEquals("DataStreamConcurrentServer", type.name)
         assertEquals("0.1.0-beta", type.version)
@@ -61,7 +61,7 @@ class ActrTypeTest {
 
     @Test
     fun `toActrType handles version with dots and dashes`() {
-        val type = "acme:MyService:1.2.3-beta.4".toActrType()
+        val type = "acme/MyService@1.2.3-beta.4".toActrType()
         assertEquals("1.2.3-beta.4", type.version)
     }
 
@@ -127,8 +127,8 @@ class ActrTypeTest {
     @Test
     fun `ActrType fields match canonical string representation`() {
         val type = actrType("demo2", "EchoService", "1.0.0")
-        val canonical = "${type.publisher}:${type.name}:${type.version}"
-        assertEquals("demo2:EchoService:1.0.0", canonical)
+        val canonical = "${type.publisher}/${type.name}@${type.version}"
+        assertEquals("demo2/EchoService@1.0.0", canonical)
 
         val parsed = canonical.toActrType()
         assertEquals(type.publisher, parsed.publisher)

@@ -14,5 +14,5 @@ description = "Android Echo Client"
 license = "Apache-2.0"
 
 [dependencies]
-EchoService = { actr_type = "acme:EchoService:1.0.0" }
-DataStreamConcurrentServer = { actr_type = "acme:DataStreamConcurrentServer:1.0.0" }
+EchoService = { actr_type = "acme/EchoService@1.0.0" }
+DataStreamConcurrentServer = { actr_type = "acme/DataStreamConcurrentServer@1.0.0" }

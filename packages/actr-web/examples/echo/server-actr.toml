@@ -29,7 +29,7 @@ turn_urls = ["turn:localhost:3478"]
 
 [[acl.rules]]
 permission = "allow"
-type = "acme:echo-client-app:0.1.0"
+type = "acme/echo-client-app@0.1.0"
 
 [web]
 port = 5174

@@ -368,7 +368,7 @@ async fn seed_active_package_with_key(
     .bind(now)
     .execute(pool)
     .await
-    .expect("seed publisher_record package");
+    .expect("seed publisher package");
 
     manifest
 }
@@ -2114,7 +2114,7 @@ async fn seed_publisher_with_key(
         .bind(publisher_name)
         .fetch_one(pool)
         .await
-        .expect("get publisher_record id");
+        .expect("get publisher id");
 
     (publisher_id, key_id)
 }

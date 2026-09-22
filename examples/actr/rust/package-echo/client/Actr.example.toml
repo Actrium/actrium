@@ -29,4 +29,4 @@ turn_urls = ["turn:localhost:3478"]
 
 [[acl.rules]]
 permission = "allow"
-type = "actrium:EchoService:0.2.1"
+type = "actrium/EchoService@0.2.1"

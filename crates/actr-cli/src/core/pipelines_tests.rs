@@ -6,12 +6,12 @@ fn dependency_lookup_key_prefers_actr_type_over_name() {
     let spec = DependencySpec {
         alias: "echo".into(),
         name: "echo-service".into(),
-        actr_type: Some(actr_protocol::ActrType::from_string_repr("acme:Echo:1.0.0").unwrap()),
+        actr_type: Some(actr_protocol::ActrType::from_string_repr("acme/Echo@1.0.0").unwrap()),
         fingerprint: None,
     };
     assert_eq!(
         ValidationPipeline::dependency_lookup_key(&spec),
-        "acme:Echo:1.0.0"
+        "acme/Echo@1.0.0"
     );
 
     let spec = DependencySpec {
@@ -32,7 +32,7 @@ fn manifest_service_name_does_not_use_registry_index_key() {
         name: "acme:EchoService".into(),
         tags: vec![],
         fingerprint: "service_semantic:echo".into(),
-        actr_type: actr_protocol::ActrType::from_string_repr("acme:EchoService:1.0.0").unwrap(),
+        actr_type: actr_protocol::ActrType::from_string_repr("acme/EchoService@1.0.0").unwrap(),
         published_at: None,
         description: None,
         methods: vec![],
@@ -85,7 +85,7 @@ fn resolved_dependency(alias: &str, name: &str, actr_type: &str) -> ResolvedDepe
 
 #[test]
 fn lock_snapshot_uses_alias_paths_and_contains_only_supplied_manifest_entries() {
-    let current = resolved_dependency("echo", "EchoService", "acme:EchoActor:1.0.0");
+    let current = resolved_dependency("echo", "EchoService", "acme/EchoActor@1.0.0");
     let lock = build_lock_snapshot(&[current]).unwrap();
 
     assert_eq!(lock.dependencies.len(), 1);
@@ -97,14 +97,14 @@ fn lock_snapshot_uses_alias_paths_and_contains_only_supplied_manifest_entries() 
 
 #[test]
 fn lock_snapshot_rejects_two_aliases_for_one_actor_type() {
-    let first = resolved_dependency("echo", "EchoService", "acme:EchoActor:1.0.0");
-    let second = resolved_dependency("echo-again", "OtherService", "acme:EchoActor:1.0.0");
+    let first = resolved_dependency("echo", "EchoService", "acme/EchoActor@1.0.0");
+    let second = resolved_dependency("echo-again", "OtherService", "acme/EchoActor@1.0.0");
 
     let error = build_lock_snapshot(&[first, second])
         .unwrap_err()
         .to_string();
     assert!(
-        error.contains("actr_type `acme:EchoActor:1.0.0`"),
+        error.contains("actr_type `acme/EchoActor@1.0.0`"),
         "{error}"
     );
 }
@@ -118,7 +118,7 @@ generated_at = "2026-01-01T00:00:00Z"
 
 [[dependency]]
 name = "removed-service"
-actr_type = "acme:Removed:1.0.0"
+actr_type = "acme/Removed@1.0.0"
 fingerprint = "service_semantic:removed"
 cached_at = "2026-01-01T00:00:00Z"
 
@@ -128,7 +128,7 @@ fingerprint = "semantic:removed"
 "#
     .parse()
     .unwrap();
-    let current = resolved_dependency("echo", "EchoService", "acme:EchoActor:1.0.0");
+    let current = resolved_dependency("echo", "EchoService", "acme/EchoActor@1.0.0");
 
     let rebuilt = rebuild_lock_snapshot(Some(&legacy), &[current]).unwrap();
 
@@ -181,8 +181,8 @@ fn filesystem_backup_restores_lock_and_proto_cache() {
 
 #[test]
 fn lock_snapshot_keeps_same_registry_name_isolated_by_alias() {
-    let first = resolved_dependency("primary", "shared-service", "acme:Primary:1.0.0");
-    let second = resolved_dependency("secondary", "shared-service", "acme:Secondary:1.0.0");
+    let first = resolved_dependency("primary", "shared-service", "acme/Primary@1.0.0");
+    let second = resolved_dependency("secondary", "shared-service", "acme/Secondary@1.0.0");
 
     let lock = build_lock_snapshot(&[first, second]).unwrap();
 
@@ -195,7 +195,7 @@ fn lock_snapshot_keeps_same_registry_name_isolated_by_alias() {
 
 #[test]
 fn discovered_fingerprint_must_match_manifest_pin() {
-    let dependency = resolved_dependency("echo", "EchoService", "acme:EchoActor:1.0.0");
+    let dependency = resolved_dependency("echo", "EchoService", "acme/EchoActor@1.0.0");
     assert!(validate_discovered_fingerprint(&dependency.spec, "service_semantic:echo").is_ok());
 
     let error = validate_discovered_fingerprint(&dependency.spec, "service_semantic:changed")
@@ -307,7 +307,7 @@ impl ServiceDiscovery for MockServiceDiscovery {
                     name: "echo".into(),
                     tags: vec![],
                     fingerprint: "fp-echo".into(),
-                    actr_type: actr_protocol::ActrType::from_string_repr("acme:Echo:1.0.0")
+                    actr_type: actr_protocol::ActrType::from_string_repr("acme/Echo@1.0.0")
                         .unwrap(),
                     published_at: None,
                     description: None,

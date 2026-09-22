@@ -12,19 +12,21 @@ import io.actrium.actr.Realm
 // ============================================================================
 
 /**
- * Create an ActrType from a string in "publisher:name:version" format.
+ * Create an ActrType from a string in "publisher/program@version" format.
  *
- * @param typeString Type string like "acme:EchoService:1.0.0"
+ * @param typeString Type string like "acme/EchoService@1.0.0"
  * @return ActrType with parsed publisher, name, and version
  * @throws IllegalArgumentException if format is invalid
  */
 fun String.toActrType(): ActrType {
-    val parts = this.split(":", limit = 3)
-    require(parts.size == 3) {
-        "ActrType string must be in 'publisher:name:version' format, got: $this"
+    val slash = indexOf('/')
+    val at = lastIndexOf('@')
+    require(slash > 0 && at > slash + 1 && indexOf('/', slash + 1) == -1) {
+        "ActrType string must be in 'publisher/program@version' format, got: $this"
     }
-    require(parts[2].isNotBlank()) { "ActrType version must not be blank" }
-    return ActrType(publisher = parts[0], name = parts[1], version = parts[2])
+    val version = substring(at + 1)
+    require(version.isNotBlank()) { "ActrType version must not be blank" }
+    return ActrType(publisher = substring(0, slash), name = substring(slash + 1, at), version = version)
 }
 
 /**
@@ -74,7 +76,7 @@ class ActrTypeBuilder {
 // ============================================================================
 
 /** Convert ActrType to string representation. */
-fun ActrType.toTypeString(): String = "$publisher:$name:$version"
+fun ActrType.toTypeString(): String = "$publisher/$name@$version"
 
 /** Check if this type matches a type string. */
 fun ActrType.matches(typeString: String): Boolean {
@@ -94,7 +96,7 @@ fun ActrType.matches(typeString: String): Boolean {
  * val id = actrId {
  *     realm = 2281844430u
  *     serialNumber = 12345uL
- *     type = "acme:EchoService:1.0.0"
+ *     type = "acme/EchoService@1.0.0"
  * }
  * ```
  */
@@ -143,10 +145,11 @@ val ActrId.realmId: UInt
     get() = realm.realmId
 
 /** Get a short string representation. */
-fun ActrId.toShortString(): String = "${type.publisher}:${type.name}@${serialNumber.toString(16)}"
+fun ActrId.toShortString(): String = "${serialNumber.toString(16)}@${type.publisher}/${type.name}"
 
 /** Get a full string representation. */
-fun ActrId.toFullString(): String = "${type.publisher}:${type.name}@${serialNumber.toString(16)}:${realm.realmId}"
+fun ActrId.toFullString(): String =
+    "${serialNumber.toString(16)}@${realm.realmId}/${type.publisher}/${type.name}@${type.version}"
 
 // ============================================================================
 // DataChunk Builders

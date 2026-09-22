@@ -15,7 +15,7 @@ internal sealed class ActrService
 {
     private const string WorkloadName = "cabi.EchoApp";
     private const string BundleId = "actr.e2e.echo-app";
-    private const string ActorType = "actrium:EchoApp:0.1.0";
+    private const string ActorType = "actrium/EchoApp@0.1.0";
     private const string LocalRouteKey = "cabi.EchoApp.Echo";
     private const string LocalPrefix = "winui-local:";   // mirrors Swift's "swift-local:"
     private const long CallTimeoutMs = 30_000;
@@ -48,7 +48,7 @@ internal sealed class ActrService
             RuntimeLog.Info("ACTR Start");
             await node.Start();
             _node = node;
-            Status = "Ready: actrium:EchoApp:0.1.0 (cabi.EchoApp workload)";
+            Status = "Ready: actrium/EchoApp@0.1.0 (cabi.EchoApp workload)";
             RuntimeLog.Info("ACTR node ready");
         }
         catch (Exception e)

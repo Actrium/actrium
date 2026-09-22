@@ -64,10 +64,7 @@ use tracing::Instrument;
 use tracing::instrument;
 
 fn type_key(actor_type: &ActrType) -> String {
-    format!(
-        "{}:{}:{}",
-        actor_type.publisher, actor_type.name, actor_type.version
-    )
+    actor_type.to_string_repr()
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -12,4 +12,4 @@ version = "0.1.0"
 description = "Actrium DataStreamApp — iOS linked runtime"
 
 [dependencies]
-duplex_stream = { actr_type = "e2e.actrium.test:DuplexStreamService:1.0.0" }
+duplex_stream = { actr_type = "e2e.actrium.test/DuplexStreamService@1.0.0" }

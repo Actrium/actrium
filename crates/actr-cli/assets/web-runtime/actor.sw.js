@@ -164,7 +164,7 @@ function verifiedPackageActrType(extracted) {
       throw new Error(`[SW] Verified package manifest is missing ${field}`);
     }
   }
-  return `${manifest.publisher}:${manifest.name}:${manifest.version}`;
+  return `${manifest.publisher}/${manifest.name}@${manifest.version}`;
 }
 
 let wasmReady = false;

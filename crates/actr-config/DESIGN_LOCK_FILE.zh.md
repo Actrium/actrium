@@ -69,7 +69,7 @@ generated_at = "2025-01-15T10:30:00Z"
 [[dependency]]
 name = "UserService"
 alias = "users"
-actr_type = "acme:UserActor:1.0.0"
+actr_type = "acme/UserActor@1.0.0"
 description = "User management service"
 fingerprint = "service_semantic:a1b2c3d4e5f6"
 published_at = 1705315800
@@ -94,7 +94,7 @@ v2 lock 显式保存 manifest 中的 alias，runtime 直接使用
 
 ```toml
 [dependencies]
-echo = { service = "EchoService:service_semantic:abc123", actr_type = "acme:EchoActor:1.0.0" }
+echo = { service = "EchoService:service_semantic:abc123", actr_type = "acme/EchoActor@1.0.0" }
 # ↑ alias       ↑ 严格服务引用中的 service name       ↑ 完整 ActrType
 ```
 
@@ -102,7 +102,7 @@ echo = { service = "EchoService:service_semantic:abc123", actr_type = "acme:Echo
 |------|------|------|------|
 | `alias` | manifest.toml / manifest.lock.toml | 应用依赖名 | 生成 dispatcher 和 `Context::resolve_dependency` 的唯一查找键 |
 | `name` | 严格 service 引用 / manifest.lock.toml | 服务引用或显示元数据 | 可用于安装期发现与指纹校验，不是 runtime 依赖身份 |
-| `actr_type` | manifest.toml / manifest.lock.toml | Actor 类型身份 | 规范格式如 `"acme:EchoActor:1.0.0"`，用于 runtime 路由发现 |
+| `actr_type` | manifest.toml / manifest.lock.toml | Actor 类型身份 | 规范格式如 `"acme/EchoActor@1.0.0"`，用于 runtime 路由发现 |
 
 信令注册中心内部的 service key 属于服务端索引实现，不写入 lock，也不参与
 runtime 的 alias 解析。
@@ -136,7 +136,7 @@ name = "EchoService"
 # alias 是应用代码使用的依赖键
 alias = "echo"
 # actr_type 是 runtime 路由使用的完整 Actor 类型
-actr_type = "acme:EchoActor:1.0.0"
+actr_type = "acme/EchoActor@1.0.0"
 fingerprint = "service_semantic:..."
 ```
 
@@ -165,7 +165,7 @@ pub struct LockedDependency {
     /// Required source-level dependency key from manifest.toml
     pub alias: String,
 
-    /// Canonical actor type (e.g., "acme:UserActor:1.0.0")
+    /// Canonical actor type (e.g., "acme/UserActor@1.0.0")
     pub actr_type: String,
 
     /// Service description
@@ -353,7 +353,7 @@ let spec_meta = ServiceSpecMeta {
 
 let dep = LockedDependency::new(
     "users".to_string(),
-    "acme:UserActor:1.0.0".to_string(),
+    "acme/UserActor@1.0.0".to_string(),
     spec_meta,
 );
 

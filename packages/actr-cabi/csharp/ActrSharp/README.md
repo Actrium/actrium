@@ -42,7 +42,7 @@ Console.WriteLine($"abi={info.AbiVersion} actr={info.ActrVersion} bundle={info.B
 
 var node = new ActrCabiNode();
 await node.FromConfig("actr.toml");               // Node<Init>
-node.WithActorType("actrium:EchoApp:0.1.0");      // sets the Issuer actor identity
+node.WithActorType("actrium/EchoApp@0.1.0");      // sets the Issuer actor identity
 await node.LinkWorkload("cabi.EchoApp");          // actr_workload_create → Node::link
 await node.Register();                            // Node::register (actrix Issuer)
 await node.Start();                               // Node::start → ActrRef

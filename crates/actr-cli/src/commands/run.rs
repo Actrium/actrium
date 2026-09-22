@@ -916,7 +916,7 @@ impl RunCommand {
             })
             .collect();
 
-        let full_type = format!("{}:{}:{}", publisher, actr_name, version);
+        let full_type = format!("{}/{}@{}", publisher, actr_name, version);
 
         // Extract web-specific fields
         let web = raw.web.as_ref();

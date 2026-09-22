@@ -24,8 +24,8 @@ service_name = "echo-real-client-app"
 
 [[acl.rules]]
 permission = "allow"
-# Allow server with actr_type = "acme:EchoService:1.0.0"
-type = "acme:EchoService:1.0.0"
+# Allow server with actr_type = "acme/EchoService@1.0.0"
+type = "acme/EchoService@1.0.0"
 
 [scripts]
 dev = "cargo run"

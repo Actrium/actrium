@@ -9184,7 +9184,7 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
          * Parses the manifest, looks up the dependency by alias, and returns its
          * `actr_type` field as a structured `ActrType` record. This is the canonical
          * way for linked-runtime hosts (iOS, Android) to discover which remote actor
-         * type a dependency resolves to, without hardcoding `"publisher:name:version"`
+         * type a dependency resolves to, without hardcoding `"publisher/program@version"`
          * strings in application code.
          */
     @Throws(ActrException::class) fun `resolveManifestDependency`(`manifestPath`: kotlin.String, `dependencyAlias`: kotlin.String): ActrType {
@@ -9222,7 +9222,7 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
          * Parses the manifest and returns the `[package]` block's actr_type fields
          * as a structured `ActrType` record. Linked-runtime hosts (iOS, Android) use
          * this to determine their own actor type without hardcoding
-         * `"publisher:name:version"` strings.
+         * `"publisher/program@version"` strings.
          */
     @Throws(ActrException::class) fun `resolveManifestPackageActrType`(`manifestPath`: kotlin.String): ActrType {
             return FfiConverterTypeActrType.lift(

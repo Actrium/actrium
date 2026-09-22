@@ -271,7 +271,7 @@ TURN-relayed WebRTC, `false` for direct P2P, and `null` for WebSocket.
 
 #### ActrType
 
-Actor type identifier (publisher:name:version).
+Actor type identifier (publisher/program@version).
 
 ```kotlin
 // Factory functions
@@ -280,7 +280,7 @@ inline fun actrType(builder: ActrTypeBuilder.() -> Unit): ActrType
 fun String.toActrType(): ActrType
 
 // Extensions
-fun ActrType.toTypeString(): String          // "publisher:name:version"
+fun ActrType.toTypeString(): String          // "publisher/program@version"
 fun ActrType.matches(typeString: String): Boolean
 ```
 
@@ -326,7 +326,7 @@ fun realm(id: Int): Realm
 ### Manifest
 
 Typed access to `actr.toml` manifest files — resolve package identity and dependency
-types without hardcoding `"publisher:name:version"` strings.
+types without hardcoding `"publisher/program@version"` strings.
 
 #### Manifest class
 

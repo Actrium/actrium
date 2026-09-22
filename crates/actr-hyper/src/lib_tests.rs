@@ -722,7 +722,7 @@ publisher = "acme"
 version = "1.0.0"
 
 [dependencies]
-echo = { actr_type = "acme:EchoActor:1.0.0", service = "EchoService:service_semantic:echo" }
+echo = { actr_type = "acme/EchoActor@1.0.0", service = "EchoService:service_semantic:echo" }
 "#,
     )
     .unwrap();
@@ -741,7 +741,7 @@ echo = { actr_type = "acme:EchoActor:1.0.0", service = "EchoService:service_sema
             .get("echo")
             .map(ActrType::to_string_repr)
             .as_deref(),
-        Some("acme:EchoActor:1.0.0")
+        Some("acme/EchoActor@1.0.0")
     );
     assert_eq!(
         metadata.fingerprints.values().next().map(String::as_str),
@@ -794,8 +794,8 @@ publisher = "acme"
 version = "1.0.0"
 
 [dependencies]
-echo = { actr_type = "acme:EchoActor:1.0.0" }
-echo_copy = { actr_type = "acme:EchoActor:1.0.0" }
+echo = { actr_type = "acme/EchoActor@1.0.0" }
+echo_copy = { actr_type = "acme/EchoActor@1.0.0" }
 "#,
     )
     .unwrap();

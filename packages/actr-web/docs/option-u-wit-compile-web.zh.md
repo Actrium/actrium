@@ -216,7 +216,7 @@ use actr_web_abi::guest as host;
 
 async fn handle_echo(msg: &[u8]) -> Result<Vec<u8>, ActorError> {
     host::log(INFO, "echo handler");
-    let peer = host::discover(0, "acme:EchoService:0.1.0").await;
+    let peer = host::discover(0, "acme/EchoService@0.1.0").await;
     host::call_raw(&peer, msg.to_vec()).await
 }
 ```

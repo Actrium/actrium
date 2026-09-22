@@ -299,7 +299,7 @@ public final class ActrCabiNode: @unchecked Sendable {
 
     /// Build a node from a config file.
     ///
-    /// The node carries the placeholder identity `local:Client:0.0.0` until
+    /// The node carries the placeholder identity `local/Client@0.0.0` until
     /// `withActorType(_:)` overrides it. Linked apps that rely on
     /// ACL-filtered discovery must call `withActorType(_:)` between this
     /// method and `linkWorkload(name:)`.
@@ -331,10 +331,10 @@ public final class ActrCabiNode: @unchecked Sendable {
 
     /// Set the identity the linked workload registers with.
     ///
-    /// `actorType` must use the `publisher:name:version` representation.
+    /// `actorType` must use the `publisher/program@version` representation.
     /// Call after `fromConfig(path:)` and before `linkWorkload(name:)`;
     /// without this call the node registers with the placeholder identity
-    /// `local:Client:0.0.0`, which actrix ACL filtering rejects. On failure
+    /// `local/Client@0.0.0`, which actrix ACL filtering rejects. On failure
     /// the node is reset and must be rebuilt with `fromConfig(path:)`.
     public func withActorType(_ actorType: String) throws {
         let initHandle = try withLockedState { state -> UnsafeMutableRawPointer in

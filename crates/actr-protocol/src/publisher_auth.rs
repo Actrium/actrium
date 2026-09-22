@@ -65,7 +65,7 @@ mod tests {
             "ACTR-PUBLISHER-REGISTER-V1\n\
              auth_mode=package\n\
              realm=7\n\
-             actr_type=acme:echo:1.2.3\n\
+             actr_type=acme/echo@1.2.3\n\
              target=x86_64-unknown-linux-gnu\n\
              manifest_sha256=abc123\n\
              publisher_auth_signed_at=1782200000\n\

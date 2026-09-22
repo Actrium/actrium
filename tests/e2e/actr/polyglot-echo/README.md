@@ -19,8 +19,8 @@ server is deployed.
 
 Each client driver registers under its own actr_type via
 `Node::from_config_with_package`, which reads the `[package]` from the
-driver's `manifest.toml` (Rust → `polyglot:RustDriver:0.1.0`, TS →
-`polyglot:TsDriver:0.1.0`) instead of the bare `local:Client:0.0.0`
+driver's `manifest.toml` (Rust → `polyglot/RustDriver@0.1.0`, TS →
+`polyglot/TsDriver@0.1.0`) instead of the bare `local/Client@0.0.0`
 placeholder that `from_config_file` would otherwise synthesise. The
 server allow-lists those triples in `config/server-runtime.toml.tpl`
 (and the linked-rust / stream-server templates); adding a language
