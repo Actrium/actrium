@@ -9,6 +9,8 @@ mod swift;
 mod traits;
 mod typescript;
 
+use std::path::{Path, PathBuf};
+
 pub use crate::commands::SupportedLanguage;
 use crate::error::Result;
 pub use dispatch_spec::{
@@ -60,6 +62,36 @@ pub(crate) fn parse_plugin_version(output: &str) -> Option<String> {
         .split_whitespace()
         .find(|part| part.chars().next().is_some_and(|ch| ch.is_ascii_digit()))
         .map(str::to_string)
+}
+
+/// Locates a workspace-local protoc plugin directory (e.g.
+/// `tools/actr/protoc-gen/kotlin`) for the developer shortcut.
+///
+/// Debug builds only: published binaries skip the shortcut because the
+/// compile-time checkout never exists on user machines, and discovery walks
+/// up from the current directory instead. Debug binaries compiled inside a
+/// checkout keep working when invoked from unrelated project directories via
+/// the `CARGO_MANIFEST_DIR` fallback.
+pub(crate) fn find_workspace_plugin_dir(tool_dir: &str) -> Result<Option<PathBuf>> {
+    if !cfg!(debug_assertions) {
+        return Ok(None);
+    }
+
+    if let Some(plugin_dir) = plugin_dir_from(&std::env::current_dir()?, tool_dir) {
+        return Ok(Some(plugin_dir));
+    }
+
+    Ok(plugin_dir_from(
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+        tool_dir,
+    ))
+}
+
+fn plugin_dir_from(start: &Path, tool_dir: &str) -> Option<PathBuf> {
+    start
+        .ancestors()
+        .find(|path| path.join("Cargo.toml").is_file() && path.join(tool_dir).is_dir())
+        .map(|root| root.join(tool_dir))
 }
 
 pub async fn execute_codegen(language: SupportedLanguage, context: &GenContext) -> Result<()> {
