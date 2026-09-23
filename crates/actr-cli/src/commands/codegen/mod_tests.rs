@@ -263,3 +263,62 @@ fn returns_none_when_plugin_output_has_no_version_token() {
     // versions.
     assert_eq!(parse_plugin_version("v1.2.3"), None);
 }
+
+#[test]
+fn plugin_dir_from_walks_up_to_workspace_root() {
+    let tmp = TempDir::new().unwrap();
+    let workspace = tmp.path().join("workspace");
+    let plugin_dir = workspace.join("tools/actr/protoc-gen/kotlin");
+    std::fs::create_dir_all(&plugin_dir).unwrap();
+    std::fs::write(workspace.join("Cargo.toml"), "[workspace]\n").unwrap();
+
+    let nested = workspace.join("crates/app");
+    std::fs::create_dir_all(&nested).unwrap();
+
+    assert_eq!(
+        plugin_dir_from(&nested, "tools/actr/protoc-gen/kotlin"),
+        Some(plugin_dir.clone())
+    );
+    assert_eq!(
+        plugin_dir_from(&workspace, "tools/actr/protoc-gen/kotlin"),
+        Some(plugin_dir)
+    );
+}
+
+#[test]
+fn plugin_dir_from_requires_cargo_toml_and_tool_dir() {
+    let tmp = TempDir::new().unwrap();
+
+    // Tool dir without a workspace Cargo.toml alongside it.
+    let orphan = tmp.path().join("orphan/tools/actr/protoc-gen/kotlin");
+    std::fs::create_dir_all(&orphan).unwrap();
+    assert_eq!(
+        plugin_dir_from(&orphan, "tools/actr/protoc-gen/kotlin"),
+        None
+    );
+
+    // Workspace Cargo.toml without the tool dir.
+    let bare = tmp.path().join("bare");
+    std::fs::create_dir_all(&bare).unwrap();
+    std::fs::write(bare.join("Cargo.toml"), "[workspace]\n").unwrap();
+    assert_eq!(plugin_dir_from(&bare, "tools/actr/protoc-gen/kotlin"), None);
+}
+
+#[test]
+fn workspace_plugin_dir_resolves_in_this_checkout() {
+    // Test binaries are debug builds, so the discovery runs; tests execute
+    // with the crate directory as CWD and the manifest fallback also points
+    // inside this workspace.
+    let plugin_dir = find_workspace_plugin_dir("tools/actr/protoc-gen/kotlin")
+        .unwrap()
+        .expect("debug build should find the workspace plugin dir");
+    assert_eq!(
+        plugin_dir,
+        plugin_dir_from(
+            &std::env::current_dir().unwrap(),
+            "tools/actr/protoc-gen/kotlin"
+        )
+        .expect("crate CWD sits inside the workspace")
+    );
+    assert!(plugin_dir.join("build.gradle.kts").is_file());
+}
