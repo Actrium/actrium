@@ -11,12 +11,12 @@ and the Realm management requests a Realm Provider accepts.
 ## 1. Scope
 
 A Realm is the trust boundary of one application instance. Creating an
-application instance creates a new Realm. A Realm is named `<label>@<domain>`,
+application instance creates a new Realm. A Realm is named `<realm_id>@<domain>`,
 for example `k7m2q9xh@acme.com`; the syntax is defined in
-[Actr URI](uri.md), Section 7.1.
+[Actr URI](uri.md), Section 5.1.
 
-A Realm Profile is a signed, public document that says which Issuer and which
-Realm Provider serve a Realm. A Realm signing key of the Realm domain signs
+A Realm Profile is a signed, public document that says which package the
+instance runs and which Issuer and which Realm Provider serve the Realm. A Realm signing key of the Realm domain signs
 it, so the Realm Profile can be stored anywhere: on the domain's own static
 hosting, at a Realm Provider, or embedded in a Realm invitation. Where it was
 fetched from does not affect its validity.
@@ -42,8 +42,7 @@ domain there is no Realm, except for local Realms (Section 2.2).
 
 ### 2.1 DNS domains
 
-A DNS Realm domain is the same name as the port-less Actr authority
-`actr://<domain>`. Its owner is the **Realm signing key holder**: its Ed25519
+A DNS Realm domain is the domain in `actr://<domain>`. Its owner is the **Realm signing key holder**: its Ed25519
 Realm signing keys are the long-term trust root of every Realm under the
 domain. Their publication, rotation, and rollback protection are defined by
 [Actr Authority Discovery](authority-discovery.md), Section 4.4. A domain
@@ -72,20 +71,21 @@ padding.
 
 Actr Hosts **MUST NOT** resolve `.actr.alt` names through DNS or send them to
 any Realm Provider. Local Realms have no Realm Profile, no Realm Provider, and
-no Realm management requests; the Actr Host keeps a local record for each one.
+no Realm management requests; the Actr Host keeps a local record for each one, holding at least the package
+the instance runs (download address or local file, plus SHA-256).
 A local Realm name is usable only on that installation. The rest of this
 document applies to DNS Realm domains only.
 
 ## 3. Locating a Realm Profile
 
-For a Realm name `<label>@<domain>`, an Actr Host:
+For a Realm name `<realm_id>@<domain>`, an Actr Host:
 
 1. obtains and verifies the authority descriptor of `actr://<domain>` and its
    `realm_signing_keys` member, as defined by Actr Authority Discovery;
 2. selects the service links with `rel` `realms` and protocol
    `actr-realm-profile/1`;
 3. for each link in document order, removes any trailing `/` from `href` and
-   sends `GET <href>/<label>` with `Accept: application/json`, stopping at the
+   sends `GET <href>/<realm_id>` with `Accept: application/json`, stopping at the
    first response that yields a valid Profile.
 
 A `realms` href **MUST NOT** contain a query or fragment. It **MAY** point to
@@ -117,6 +117,10 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
     "name": "k7m2q9xh@acme.com",
     "display_name": "Acme Notes",
     "status": "active"
+  },
+  "package": {
+    "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+    "sha256": "<64 hex>"
   },
   "issuer": {
     "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
@@ -154,6 +158,8 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
 | `realm.name` | The Realm name. It **MUST** equal the name being resolved. |
 | `realm.display_name` | Human-readable title. It is not an identifier. |
 | `realm.status` | `active` or `retired`. |
+| `package.href` | HTTPS download address of the package the instance runs; it may be anywhere. |
+| `package.sha256` | SHA-256 of all bytes of that package, in lowercase hexadecimal. |
 | `issuer.url` | Registration and verification endpoint of the Issuer. |
 | `issuer.keys` | Realm issuer public keys used to verify Actor credentials. |
 | `provider.id` | Realm Provider ID: the Realm Provider's canonical DNS authority. It never changes during the Realm's life. |
@@ -162,6 +168,8 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
 | `policy` | Join policy of the Realm. |
 | `issued_at` | RFC 3339 time the Realm Profile was signed. It is informational; Realm Profiles do not expire. |
 | `signature` | Detached signature by a Realm signing key. |
+
+When `realm.status` is `active`, the Realm Profile **MUST** include `package`.
 
 A Realm Profile **MUST NOT** contain secrets, private keys, access tokens,
 member lists, or user-specific data. Actr Hosts **MUST** ignore unknown
@@ -195,6 +203,14 @@ A retired Realm Profile (`status` `retired`) is permanent. After accepting
 it, an Actr Host **MUST** stop using the Realm.
 
 ## 6. Using a Realm
+
+An Actr Host downloads `package.href` with an HTTPS GET that carries no
+credentials, **MUST** check `package.sha256`, and verifies the package
+signature as in [Actor Package](actor-package.zh.md) (Chinese only); if any
+check fails, it does not run the package. The Actor type declared in the
+package manifest is the instance's program: the instance's Service is the one
+Actor in this Realm with that Actor type; finding none or more than one is an
+error.
 
 An Actr Host reaches a Realm only through the Issuer and Realm Provider named
 by its accepted Realm Profile. Actor credentials for the Realm name the Realm
@@ -255,8 +271,9 @@ pending Realm that is not activated in time expires and is removed.
 
 ### 7.2 Updates
 
-A higher-sequence Realm Profile may change the Realm issuer keys, the Realm
-Provider's endpoints, `display_name`, and `policy`. It **MUST NOT** change
+A higher-sequence Realm Profile may change `package` (upgrading the program),
+the Realm issuer keys, the Realm Provider's endpoints, `display_name`, and
+`policy`. It **MUST NOT** change
 `provider.id`.
 
 ### 7.3 Authorization by the key holder
@@ -307,7 +324,7 @@ and can only be recreated elsewhere.
 If every Realm signing private key of a domain is lost, existing Realms can no
 longer receive new Realm Profiles. The domain owner may publish a new Realm
 signing key, which Actr Hosts treat as an identity change (Actr Authority
-Discovery, Section 4.4), and create new Realms under new Realm labels. Keeping
+Discovery, Section 4.4), and create new Realms under new RealmIds. Keeping
 the lost keys listed as `retired` lets existing Realms keep working with their
 current Realm Profiles.
 
@@ -320,7 +337,7 @@ Discovery, Section 4.3):
 
 | `op` | Purpose |
 | --- | --- |
-| `create_realm` | Create a pending Realm and return its unsigned first Realm Profile. |
+| `create_realm` | Create a pending Realm and return its unsigned first Realm Profile (its `package` taken from the request). |
 | `activate_realm` | Submit the signed first Realm Profile in `profile`; the response carries the Realm admin token once. |
 | `reissue_admin_token` | Issue a new Realm admin token and invalidate the old one. |
 
@@ -337,6 +354,7 @@ The payload of a `create_realm` request is:
 {
   "op": "create_realm",
   "realm": "k7m2q9xh@acme.com",
+  "package": { "href": "https://cdn.notes.example/team-notes-1.4.2.actr", "sha256": "<64 hex>" },
   "provider_id": "provider.example",
   "requester": "<opaque member id>",
   "nonce": "<random>",
@@ -391,12 +409,12 @@ quotas per Realm domain and per Realm.
   attacker who blocks Realm Profile retrieval from redirecting Actr Hosts to
   an unauthorized Realm Provider.
 - The authority descriptor does not list Realms, but a Realm name reveals its
-  Realm domain and Realm label wherever it is shared. Actr Hosts **SHOULD**
-  generate a random Realm label by default and keep the readable title in
+  Realm domain and RealmId wherever it is shared. Actr Hosts **SHOULD**
+  generate a random RealmId by default and keep the readable title in
   `display_name`.
 - Realm names and ActorIds look like email addresses. Actr Hosts **MUST NOT**
   render them as `mailto:` links and should display them as instance
-  addresses ([Actr URI](uri.md), Section 7.1).
+  addresses ([Actr URI](uri.md), Section 5.1).
 - Actr Hosts cannot see that a domain owner delegated custody of its Realm
   signing keys to a Realm Provider; for such Realms they show the Realm domain
   as the trust root. This is an accepted limitation.
@@ -420,7 +438,7 @@ quotas per Realm domain and per Realm.
 
 - Define machine-readable JSON Schemas for `actr.realm/v1` and Realm
   management requests, with signing test vectors.
-- Define delegated creation keys with scoped Realm label prefixes and lifetimes.
+- Define delegated creation keys with scoped RealmId prefixes and lifetimes.
 
 ## 11. References
 

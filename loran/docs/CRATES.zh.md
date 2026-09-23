@@ -13,7 +13,7 @@ Loran 位于 Actr workspace 内，crate 版本与 workspace 同步。本文只�
 | `crates/loran-stun` | `actrix-stun` | RFC 5389 Binding 与 NAT 地址发现 |
 | `crates/loran-turn` | `actrix-turn` | scoped long-term credential、allocation、permission、relay 与配额 |
 | `crates/loran-publisher-registry` | `actrix-publisher-registry` | Publisher Registry：publisher 身份、Publisher 签名权限与发布审计 |
-| `crates/loran-packages` | `loran-packages` | Target 解析与 `.actr` artifact 分发 |
+| `crates/loran-packages` | `loran-packages` | `.actr` 包托管（Realm Profile 的 `package.href` 可指向它）；当前代码仍含已从协议删除的 Target 解析，随代码轮移除 |
 | `crates/loran-proto` | `actrix-proto` | 管理/控制面的 protobuf 契约 |
 | `crates/loran-control` | `actrix-admin` | 管理控制服务实现 |
 | `crates/loran-sdk` | `actrix-sdk` | Loran 组件的内部聚合导出 |
@@ -40,8 +40,8 @@ loran-server
 
 - SQLite `user_version` 必须等于 schema v2；
 - 当前实现：数据库层强制每实例最多一个 Realm。目标契约：移除单例约束，改为
-  Realm 名唯一（含 Realm Provider tombstone），所有按 Realm 分区的状态以内部
-  `realm_id` 为外键；
+  Realm 名唯一（含 Realm Provider tombstone），所有按 Realm 分区的状态以数值 Realm 句柄
+  `realm_handle` 为外键；
 - Actor credential validation 检查 protocol version、issuer、Realm Provider、audience、Realm、
   Actor 和过期时间；目标契约下 issuer 即 Realm 名，且 Realm 必须为 `active`；
 - 配置未知字段和生产不安全值 fail closed。

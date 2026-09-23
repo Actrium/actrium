@@ -8,7 +8,7 @@
 
 ## 1. 一句话定义
 
-Actro 是 Actrium 世界的「程序浏览器」：用户在 resident app Tab 中运行由 Keel Guest 描述的原生界面，每个 resident app Tab 由一个受信任的 Front Actor 承载，并通过一个明确的 Service Actor 访问程序状态、Workspace 与 Actor 网络。
+Actro 是 Actrium 世界的「程序浏览器」：用户在 resident app Tab 中运行由 Keel Guest 描述的原生界面，每个 resident app Tab 由一个受信任的 Front Actor 承载，并通过该实例的 Service 访问程序状态、Workspace 与 Actor 网络。
 
 ## 2. 总体结论
 
@@ -22,7 +22,7 @@ Tab
     │   ├── Capability Broker
     │   └── Actr Client
     ├── Publisher 提供的 Keel Guest
-    └── Primary Service Actor ── Workspace
+    └── Service ── Workspace
 ```
 
 它的主要价值不是少画几层，而是让每一层只承担一种职责：
@@ -30,15 +30,16 @@ Tab
 - Tab 是用户交互会话。
 - Front Actor 是受 Actro 控制的前台安全边界。
 - Keel Guest 是程序开发者唯一可定制的前台代码。
-- Service Actor 是有状态程序实例，也是 Front 进入 Actor 世界的唯一主入口。
+- 每个实例有一个 Service，持有状态；Front 只连它。
 - Workspace 由 Service 持有，Front 不碰路径、密钥或底层存储。
-- `ActorId` 形如 `<serial>.<label>@<domain>`，自带 Realm 名并精确标识 Service 实例，不含程序类型；已知 `ActorId` 时不得再负载均衡。
+- 应用实例就是 Realm，地址是 Realm 链接 `actr://<Realm 域名>/<realm_id>`；程序从哪里下载写在 Realm Profile 里。
+- `ActorId` 形如 `<serial>.<realm_id>@<domain>`，自带 Realm 名，不含程序类型；已知 `ActorId` 时不得再负载均衡。
 - `publisher/program@version` 精确标识不可变的程序版本。
 - Realm 对应一个应用实例，管该实例的身份、准入与网络入口；域名只用来给 Realm 命名；信令和 TURN 是 Realm 委派的共享基础设施。
 
 但它依赖三项必须先补齐的基础能力：
 
-1. **持久、可解析的 ActorId**：Service Actor 重启、断网、凭据续期或迁移后必须保留同一 `ActorId`，并能由 ID 得到 Realm 名。当前 Actr 的 hard rebind 可能换 ID，且 ID 只带 Realm Provider 内部的数值 Realm，不能直接作为长期、可分享 URL 语义。
+1. **持久、可解析的 ActorId**：Service 重启、断网、凭据续期或迁移后必须保留同一 `ActorId`，并能由 ID 得到 Realm 名。当前 Actr 的 hard rebind 可能换 ID，且 ID 只带 Realm Provider 内部的数值 Realm，不能直接作为长期、可分享 URL 语义。
 2. **域名 Publisher**：Actr 的 publisher 语义与长度限制需要调整，使规范化 DNS 域名成为程序发布者身份。
 3. **真正封闭的 Front Host**：Actro 必须在 Keel 之前完成包校验，并以 capability、组件白名单、资源配额和确定的沙箱后端限制 Guest；不能把远端 URL 直接交给 Keel 加载。
 
@@ -47,23 +48,23 @@ Tab
 | 编号 | 决策 |
 |---|---|
 | D-001 | 每个处于加载、运行或前台暂停状态的应用 Tab 恰好运行一个 Front Actor；被 Shell 丢弃但仍保留的 dormant Tab 可以没有 live Actor。 |
-| D-002 | 每个 Front Actor 在运行态恰好绑定一个 Primary Service Actor。创建/连接过程中允许暂时为零。 |
+| D-002 | 每个 Front Actor 在运行态恰好绑定该实例的 Service。创建/连接过程中允许暂时为零。 |
 | D-003 | 「1:1」是 live Front 视角的唯一绑定，不是 Service 与历史 Tab 的永久双射；Service 独立存活并可被新 Front 重连。 |
-| D-004 | v1 默认采用独占交互会话；同一 Service URL 在本机再次打开时优先聚焦已有 Tab。共享会话是后续显式能力。 |
-| D-005 | Service 绑定零个或一个 Workspace；需要多 Actor 的程序由 Primary Service 在后台编排。 |
+| D-004 | v1 默认采用独占交互会话；同一实例的链接在本机再次打开时优先聚焦已有 Tab。共享会话是后续显式能力。 |
+| D-005 | Service 绑定零个或一个 Workspace；需要多 Actor 的程序由 Service 在同一 Realm 内编排。 |
 | D-006 | Front workload 由 Actro 原生提供，Publisher 不能替换 Actr Host；Publisher 只能提供 Keel Guest、资源、声明与 Service workload。 |
 | D-007 | v1 第三方 Front Guest 只开放 Keel JS Guest，并固定使用具备硬超时和堆上限的 QuickJS 后端。 |
 | D-008 | 一个 Actro Program Release 是一个签名 `.actr` 包：Service workload 是可执行主体，Keel Guest 是受签名保护的包资源。 |
-| D-009 | `actr://publisher/program@version` 表示创建；增加 `service=<ActorId>` 表示只连接，不得失败后偷偷新建。 |
-| D-010 | Publisher 身份是规范化域名，不含端口；经可信 Publisher Profile 委派的实际 HTTPS、WSS、STUN、TURN 端点可以显式使用端口。 |
+| D-009 | 链接只指向实例：`actr://<Realm 域名>/<realm_id>`，Realm 域名声明 `links` 时也可写成 https 形式；打开链接只连接该实例，不得失败后偷偷新建。新建实例是 Actro 内的本地操作，不是链接。 |
+| D-010 | Publisher 身份是规范化域名，不含端口；Publisher Profile 只用来验证包签名，下载地址不属于 Publisher 身份，可以在任何位置。 |
 | D-011 | Marketplace 是发现、审核与撤销信息源，不是 Publisher 命名权威；域名与包签名才是来源链。 |
-| D-012 | v1 ActorId 必须包含可验证的 Realm 名（`<label>@<domain>`，如 `notes@acme.com`），程序类型不在 ActorId 中；它是公开地址和密码学身份，不是 bearer token，知道 URL 不等于有权连接。 |
+| D-012 | v1 ActorId 必须包含可验证的 Realm 名（`<realm_id>@<domain>`，如 `notes@acme.com`），程序类型不在 ActorId 中；它是公开地址和密码学身份，不是 bearer token，知道地址不等于有权连接。 |
 | D-013 | Realm 是逻辑信任域，对应一个应用实例，可委派多个信令/TURN 服务；Realm 与某个物理信令进程不是一回事，一个 Realm Provider 承载多个 Realm；Realm 在创建时绑定一个 Realm Provider，此后不可更换。 |
 | D-014 | Service 实例固定到精确版本与包 digest；v1 升级通过显式迁移创建新 Actor，而不是原地替换 workload。 |
-| D-015 | Actor credential 证明 Actor key、身份和 claims，不自动证明对端真的运行官方 Actro Host；Service 必须把 Front 当作不受信客户端独立授权。 |
+| D-015 | Actor credential 证明 Actor key、身份和 claims，不证明对端实际运行的代码。应用如何据此授权属于应用写法，见[应用开发建议](app-development-guidance.zh.md)。 |
 | D-016 | Workspace 的 requirement、provisioning、access 和允许的 Workspace Provider（`providers`）是独立维度，不能混成一个枚举。 |
 | D-017 | 删除分为可恢复的 Trashed 与不可恢复的 Purged/Deleted；删除 Workspace 始终是独立动作。 |
-| D-018 | Publisher 与 Realm 域名的 bootstrap 固定使用 HTTPS 443（即 `https://<domain>/.well-known/actr` authority descriptor）；Realm Profile 来自 core relation `realms` 声明的 HTTPS 位置（可带端口）；经验证 Realm Profile 委派的实际 endpoint 可以带端口。`realm_signing_keys` 成员与 `realms` relation 已在 Actr Authority Discovery §4.3–4.4 定义；取不到或验不过 Realm Profile 时不得使用 Realm Profile 以外的任何 Realm Provider。 |
+| D-018 | Publisher 与 Realm 域名的 bootstrap 固定使用 HTTPS 443（即 `https://<domain>/.well-known/actr`）；Realm Profile 来自 `realms` 声明的 HTTPS 位置（可带端口），其中给出实例运行的包与 Realm Provider 端点（可带端口）。取不到或验不过 Realm Profile 时不得使用 Realm Profile 以外的任何 Realm Provider。 |
 | D-019 | 应用保障按无根有效依赖图汇聚；通道有效且 `Ready` 时，展示颜色取全部节点结论的最弱项。Front 只定位，不是图根。 |
 | D-020 | `ActorAssurance` 由验证者签发，`issuer ≠ subject`。Actr Host 可评 Guest、可提供证据，不得自签自己的最终结论。 |
 | D-021 | 顶层只分绿 / 黄 / 红；切面未就绪时显示无法建立，不是第四色。未知不是已确认泄漏，但绝不能显示为绿。 |
@@ -91,7 +92,7 @@ Tab
 1. [产品定义](01-product-definition.md)：为什么做、为谁做、做什么、不做什么。
 2. [领域模型](02-domain-model.md)：Tab、Front、Service、Workspace、Program、Realm 的关系。
 3. [用户体验](03-user-experience.md)：从地址栏到程序库、实例库与错误恢复。
-4. [URI 与解析规范](04-uri-and-resolution.md)：`actr://` 的语法、创建/连接语义和规范化。
+4. [Realm 链接与地址栏](04-uri-and-resolution.md)：实例地址怎样显示、打开、保存和分享。
 5. [程序包与 HTTPS 分发](05-program-package-and-distribution.md)：域名 Publisher、`.actr` 包、市场与更新。
 6. [运行时与 Front–Service 协议](06-runtime-and-protocol.md)：Native Host、Keel Guest、能力边界与会话协议。
 7. [Realm、信令、TURN 与身份](07-realm-network-and-identity.md)：信任链、网络发现和端口政策。
@@ -102,6 +103,8 @@ Tab
 12. [参考协议与样例](12-reference-spec.md)：Manifest、Publisher/Realm Profile、握手消息和术语。
 13. [Actro 隐私标记与图汇聚](13-privacy-state-and-aggregation.md)：把现行安全模型落到 Tab / Front / Actr Host。
 14. [隐私原语、远程证明与可信算力](14-privacy-primitives-and-attestation.md)：全过程加密、WASM/CC 分工、RATS、密钥释放与 CPU/GPU/NPU 组合证明。
+
+另有非规范性的[应用开发建议](app-development-guidance.zh.md)：写 Service 时的授权与信任建议，不属于平台规则。
 
 ## 5. 规范用语
 
@@ -120,7 +123,7 @@ Tab
 1. **安全与隐私语义**：[docs/security](../../architecture/security/actrium/README.zh.md)；
 2. 本 README 中不与上条冲突的产品决策；
 3. [需求与验收标准](10-requirements-and-acceptance.md)中的 MUST/FR/NFR；
-4. URI、分发、运行时、Realm、Workspace 及本章未覆盖的产品专题；
+4. 链接、分发、运行时、Realm、Workspace 及本章未覆盖的产品专题；
 5. [参考协议](12-reference-spec.md)中的示意字段；
 6. 产品叙事、用户流程和交付计划。
 
@@ -136,7 +139,7 @@ Tab
 
 已验证的关键事实包括：
 
-- Actr 当前 `ActrId` 文本形式为 `<serial_hex>@<realm_id>/<publisher>:<program>:<version>`；目标格式为 `<serial>.<label>@<domain>`：以 Realm 名取代数值 realm_id，并把程序类型移到注册与 Actor credential 中。
+- Actr 当前 `ActrId` 文本形式为 `<serial_hex>@<realm_id>/<publisher>:<program>:<version>`；目标格式为 `<serial>.<realm_id>@<domain>`：以 Realm 名取代数值 realm_id，并把程序类型移到注册与 Actor credential 中。
 - Actr 已支持 `Dest::Peer(ActrId)` 精确寻址和按 `ActrType` 发现，两者可以清晰分工。
 - `.actr` 已具备 Ed25519 manifest 签名、SHA-256 文件绑定和资源；依赖锁按 workload/构建流程可选。
 - Keel 的 Host/Guest 边界与白名单模块机制适合承载 Front，但其 `Engine.loadBundle(URL)` 本身不是可信分发系统。

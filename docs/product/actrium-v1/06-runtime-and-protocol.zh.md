@@ -22,7 +22,7 @@ flowchart TB
         NW --> CB
     end
 
-    subgraph Service["Primary Service Actor"]
+    subgraph Service["Service"]
         SW["Signed WASM Service Workload"]
         SB["Service Host Broker"]
         WS["Workspace Capability"]
@@ -35,7 +35,7 @@ flowchart TB
     PM --> CB
     RM --> NW
     SM --> Service
-    CB -->|"Typed PrimaryService capability"| SW
+    CB -->|"Typed Service capability"| SW
 ```
 
 ## 2. Front Actor
@@ -48,8 +48,7 @@ Front 使用 Actr linked/native workload：
 - Publisher package 中不携带；
 - 每个 resident app Tab 创建一个逻辑 Front Actor 实例；
 - 负责 Actor 注册、身份、连接、会话、Keel Engine 和 Host capability；
-- Actor credential 只能证明 Actor key、ActorId、Actor 类型与 issuer claims，不能单独证明实际运行代码；
-- Service 必须把 Front 当作不受信客户端，独立实施 principal、应用权限、业务命令和 Workspace 授权。
+- Actor credential 只能证明 Actor key、ActorId、Actor 类型与 issuer claims，不能单独证明对端实际运行的代码（应用如何应对见[应用开发建议](app-development-guidance.zh.md)）。
 
 「Native workload」在这里表示 Actr Host 由平台原生提供，不表示 Guest 可以提供 native code。
 
@@ -63,7 +62,7 @@ actrium/actro-front@1.0.0
 
 它描述 Host runtime，不伪装成 Program 的 Service ActrType。Attach handshake 由 Actr Host 额外声明：
 
-- Program Release coordinate；
+- Program Release；
 - package digest；
 - Guest digest；
 - Front Host API；
@@ -71,9 +70,9 @@ actrium/actro-front@1.0.0
 - protocol fingerprint；
 - local tab session nonce。
 
-这些字段由正常 Actro Host 从已验证 package 构造，Guest 无法覆盖；但对远端 Service 而言它们仍是客户端声明，只用于兼容性协商，不能替代业务授权或远程 attestation。
+这些字段由 Actro Host 从已验证 package 构造，Guest 无法覆盖；对远端而言它们是客户端声明，用于兼容性协商。
 
-受管 Realm 可以把平台 app attestation、发行签名或企业设备证明纳入 credential。若 Service policy 要求「官方 Actro runtime」，Attach 必须验证该证明；没有证明时不得假定 Actor 类型等于真实运行时。
+平台提供可选的远端证明：受管 Realm 可以把平台 app attestation、发行签名或企业设备证明纳入 credential，供需要的 Service 验证。
 
 ### 2.3 Front 生命周期
 
@@ -97,7 +96,7 @@ Allocated
 - capability 在 Guest 执行前完成；
 - close/crash 先撤销 session capability，再销毁 Engine；
 - background `pause` 不等于 Service detach；
-- 内存回收后的 Front 可以从 URI 和 Service 状态重建。
+- 内存回收后的 Front 可以从 Realm 链接和 Service 状态重建。
 
 ## 3. Keel v1 基线
 
@@ -206,12 +205,12 @@ named event
 
 不把跨边界函数 subscription、任意 callback 或通用 RemoteRef 作为长期公共协议。
 
-### 5.2 Primary Service capability
+### 5.2 Service capability
 
 Guest 获得的唯一 Actor 入口：
 
 ```typescript
-interface PrimaryService {
+interface Service {
   call<Route extends CallRoute>(
     route: Route,
     input: InputOf<Route>
@@ -257,24 +256,24 @@ Actr Host 在内部固定 target 为当前 Service ActorId。Guest 不可传 tar
 6. rate/resource limit；
 7. audit policy。
 
-## 6. Service Actor
+## 6. Service
 
 ### 6.1 主 façade
 
-Primary Service：
+Service：
 
 - 是 Front 唯一业务入口；
 - 验证 Attach session；
 - 持有 Workspace；
 - 将 Guest 意图转成业务命令；
 - 负责幂等、授权、审计和并发；
-- 可以调用或管理辅助 Actor。
+- 可以调用或管理 Realm 内的其他 Actor。
 
 前台简化不限制后台拓扑：
 
 ```text
 Front
-  → Primary Service
+  → Service
       ├── Index Actor
       ├── Sync Actor
       ├── Media Actor
@@ -298,12 +297,11 @@ Service workload 的依赖和网络能力必须在 package manifest 中声明。
 
 ### 6.3 同 Realm 要求
 
-Realm 对应一个应用实例，因此 Front 与 Primary Service 天然在同一 Realm；Primary Service 编排的 Auxiliary Actor 也在该 Realm 内：
+Realm 对应一个应用实例，因此 Front 与 Service 天然在同一 Realm；Service 编排的其他 Actor 也在该 Realm 内：
 
 - Front 在 Attach 前取得该实例的 Realm membership（通常经 Realm 邀请加入）；
 - 连接 ACL 决定 Front type 能否连接 Service type；
-- Service 再进行用户/实例级授权；
-- 类型发现只在本 Realm（本实例的 Actor）内进行；
+- 类型发现只在本 Realm（本实例的 Actor）内进行，Front 也按包的 Actor 类型找到 Service；
 - 跨实例（跨 Realm）调用由 Service 后台处理：Service 的宿主按目标 Realm 的加入策略在该 Realm 取得客户端身份；Front 不直接联邦，v1 没有 federation。
 
 这显著缩小信任和错误面。
@@ -405,7 +403,7 @@ Service 按顺序检查：
 3. Front Actor type；若 policy 要求可信 runtime，再验证独立的 platform/runtime attestation；
 4. challenge/nonce 防重放；
 5. target Service ActorId；
-6. Program coordinate（兼容性声明）；
+6. Program Release（兼容性声明）；
 7. package digest（兼容性声明；无 attestation 时不是远端代码证明）；
 8. protocol fingerprint；
 9. Principal/Device/Workspace 应用权限；
@@ -455,8 +453,6 @@ Actr Host 必须附加不可由 Guest覆盖的 metadata：
 - deadline；
 - idempotency key（适用时）。
 
-Service 不能信任 Guest payload 中自报的用户、Workspace 或权限字段。
-Service 同样不能仅凭 Front 自报的 Actr Host 版本、package digest 或 Actor 类型授予高权限。
 
 ## 11. 生命周期协议
 

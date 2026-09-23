@@ -2,49 +2,23 @@
 
 > 本文件给出可讨论的 v1 wire shape。字段名和 endpoint path 在 P0 schema 冻结前可以调整；对象边界、身份与安全语义不得改变。
 
-## 1. URI 样例
+## 1. Realm 链接样例
 
-### Create
-
-```text
-actr://notes.example/team-notes@1.4.2
-```
-
-在指定域名下创建（新建一个 Realm；省略 `domain` 时创建为本机 Realm）：
+语法见 [Actr URI](../../../actr/protocols/uri.zh.md)。
 
 ```text
-actr://notes.example/team-notes@1.4.2?domain=acme.com
+actr://acme.com/k7m2q9xh                         ; 打开实例 k7m2q9xh@acme.com
+actr://acme.com/notes/today?filter=assigned      ; 显式可读 RealmId，带页面路径与 query
+https://acme.com/i/k7m2q9xh                      ; https 形式，acme.com 声明了 links: ["/i/"]
+actr://acme.com/2af01.k7m2q9xh                   ; 实例里的某个 Actor（ActorId 2af01.k7m2q9xh@acme.com）
+actr://<installation-id>.actr.alt/h3x8p2wq       ; 本机 Realm，不可分享
 ```
 
-Create URI 不携带 `label`。新 Realm 的 `label` 默认由 Actro 随机生成（base32 小写短串，不含程序名），可读名称写入 Realm Profile 的 `display_name`；上例默认得到的 Realm 名形如 `k7m2q9xh@acme.com`。用户可在确认页显式改用可读 `label`，下文 Attach 样例中的 `notes` 即此类显式选择的名字。
+RealmId 默认由 Actro 随机生成（base32 小写短串，不含程序名），可读名称写入 Realm Profile 的 `display_name`；用户可在新建确认页显式改用可读 RealmId，如上例的 `notes`。
 
-### Create + Guest route
+实例里的 Actor 以 ActorId 标识，例如 `2af01.k7m2q9xh@acme.com`：去掉 `2af01.` 即 Realm 名。它的链接形式是 `actr://acme.com/2af01.k7m2q9xh`；程序升级替换 Actor 后这类链接失效，分享时默认用实例链接。程序身份 `publisher/program@version` 由包 manifest 与 Actor credential 携带。
 
-```text
-actr://notes.example/team-notes@1.4.2/today?filter=assigned
-```
-
-### Attach
-
-```text
-actr://notes.example/team-notes@1.4.2/today?service=2af01.notes%40acme.com
-```
-
-解码后的 v1 ActorId：
-
-```text
-2af01.notes@acme.com
-```
-
-其中 `notes@acme.com` 是 Realm 名：Realm 域名 `acme.com` 下 Realm label 为 `notes` 的 Realm，即一个应用实例。ActorId 只标识「哪个 Realm 里的哪个 Actor」；程序身份 `publisher/program@version` 由注册与 Actor credential 携带，不在 ActorId 中。
-
-当前 Actr 的 legacy `2af01@42/notes.example:team-notes:1.4.2` 缺 Realm 名且内嵌程序类型，只能通过显式导入流程改写，不能作为 portable Attach URI。早期草案 `2af01@42~dns:team.example/...` 已作废。
-
-### Development
-
-```text
-actr-dev://localhost:7443/team-notes@0.0.0-dev
-```
+旧格式（`actr://notes.example/team-notes@1.4.2?service=…`、只含数值 Realm 句柄的 `2af01@42/notes.example:team-notes:1.4.2`）一律拒绝，只能经显式迁移工具导入。
 
 ## 2. Publisher Profile
 
@@ -54,7 +28,7 @@ Publisher Profile 是 authority descriptor 的可选成员 `publisher`（已在 
 https://notes.example/.well-known/actr
 ```
 
-样例（`publisher` 成员使用 snake_case；`domain` 必须与 `authority` 的主机名一致；`program_resolver` 必填，没有默认值）：
+样例（`publisher` 成员使用 snake_case；`domain` 必须与 `authority` 的主机名一致）：
 
 ```json
 {
@@ -62,16 +36,14 @@ https://notes.example/.well-known/actr
   "authority": "actr://notes.example",
   "services": [
     {
-      "rel": "packages",
-      "href": "https://packages.notes.example/actr/packages",
-      "protocol": "actr-packages/1"
+      "rel": "contracts",
+      "href": "https://notes.example/actr/contracts"
     }
   ],
   "publisher": {
     "schema": "actr.publisher/v1",
     "sequence": 17,
     "domain": "notes.example",
-    "program_resolver": "https://notes.example/actrium/programs/",
     "profile_signing_keys": [
       {
         "id": "publisher-root-1",
@@ -112,38 +84,18 @@ https://notes.example/.well-known/actr
 
 `publisher.signature` 对象本身不进入 payload；`publisher` 成员的其余 JSON 按 RFC 8785 JCS 规范化后做 detached Ed25519 验证。`sequence` 必须单调递增。descriptor 中 `publisher` 以外的部分不签名，不参与 Publisher 信任判断。
 
-## 3. Release metadata
+## 3. 包下载
 
-入口：
-
-```text
-https://notes.example/actrium/programs/team-notes/1.4.2/release.json
-```
-
-样例：
+实例运行哪个包，写在其 Realm Profile 的 `package` 中（样例见 §6.2）：
 
 ```json
-{
-  "schemaVersion": 1,
-  "publisher": "notes.example",
-  "program": "team-notes",
-  "version": "1.4.2",
-  "packageUrl": "https://cdn.notes.example/actr/team-notes/1.4.2/package.actr",
-  "packageSha256": "f6d4...64hex",
-  "packageSize": 4829012,
-  "signingKeyId": "ed25519:2026-q2",
-  "publishedAt": "2026-06-01T10:00:00Z",
-  "status": "active",
-  "metadataExpiresAt": "2026-08-01T00:00:00Z",
-  "signature": {
-    "keyId": "ed25519:2026-q2",
-    "algorithm": "Ed25519",
-    "value": "<base64>"
-  }
+"package": {
+  "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+  "sha256": "<64 hex>"
 }
 ```
 
-Release 的 `signature` 同样排除在 JCS payload 外，并由 Publisher Profile 授权的 signing key 验证。
+Actro 按 [Realm Profile 协议](../../../actr/protocols/realm-profile.zh.md)第 6 节下载 `href`（不带 credential 的 HTTPS GET）、核对 `sha256`，再用 Publisher Profile（§2）中的包签名 key 验证 manifest 签名；manifest 声明的 Actor 类型即该实例的程序。下载地址可以在任何位置（Publisher CDN、Loran 包托管、对象存储），不是信任源。
 
 ## 4. `.actr` Manifest
 
@@ -332,7 +284,7 @@ Actro 不能只信这个文件；安装分析结果必须与它一致。
 
 ### 6.1 Realm 签名 key：authority descriptor 扩展
 
-域名的 Realm 签名 key 发布在该域名（不含端口的 Actr authority）的 descriptor 中：
+域名的 Realm 签名 key 发布在该域名的 descriptor 中：
 
 ```text
 https://acme.com/.well-known/actr
@@ -361,6 +313,7 @@ https://acme.com/.well-known/actr
       "protocol": "actr-realm-profile/1"
     }
   ],
+  "links": ["/i/"],
   "realm_signing_keys": {
     "sequence": 3,
     "keys": [
@@ -394,11 +347,11 @@ https://acme.com/.well-known/actr
 }
 ```
 
-`realm_signing_keys.keys` 是该域名下所有 Realm 的长期信任根；`rotations` 中每一项由 `from` key 对 `{from, to, public_key, sequence}` 的 JCS 形式签名，`sequence` 为引入该轮换时的成员 `sequence`；从 `keys` 移除某个 key 即吊销它签过的全部 Realm Profile；`realm_signing_keys.signature` 由某个 `active` key 对去掉 `signature` 后的该成员 JCS 规范化结果签名，覆盖 `sequence`。descriptor 其余部分不签名，也不列出 Realm 清单。`services` 中的 signaling、ice-config 等服务于该 authority 自身，与该域名下的 Realm 无关；访问 Realm 只使用其 Realm Profile 指定的 Realm Provider，Realm Profile 不可用、无效或退役时不得使用任何其他 Realm Provider。Realm Provider 自身的 descriptor（`https://provider.example/.well-known/actr`）另以 `realm-management` link（protocol `actr-realm-management/1`）公布管理请求端点。
+`realm_signing_keys.keys` 是该域名下所有 Realm 的长期信任根；`rotations` 中每一项由 `from` key 对 `{from, to, public_key, sequence}` 的 JCS 形式签名，`sequence` 为引入该轮换时的成员 `sequence`；从 `keys` 移除某个 key 即吊销它签过的全部 Realm Profile；`realm_signing_keys.signature` 由某个 `active` key 对去掉 `signature` 后的该成员 JCS 规范化结果签名，覆盖 `sequence`。descriptor 其余部分不签名，也不列出 Realm 清单。`links` 声明 `https://acme.com/i/<realm_id>…` 是 Realm 链接的 https 形式（Actr Authority Discovery §4.6），前缀由域名自选，没有默认值。`services` 中的 signaling、ice-config 等服务于该 authority 自身，与该域名下的 Realm 无关；访问 Realm 只使用其 Realm Profile 指定的 Realm Provider，Realm Profile 不可用、无效或退役时不得使用任何其他 Realm Provider。Realm Provider 自身的 descriptor（`https://provider.example/.well-known/actr`）另以 `realm-management` link（protocol `actr-realm-management/1`）公布管理请求端点。
 
 ### 6.2 Realm Profile
 
-入口为 `realms` relation 的 `href` 加 `label`：
+入口为 `realms` relation 的 `href` 加 `realm_id`：
 
 ```text
 https://realms.provider.example/acme.com/k7m2q9xh
@@ -414,6 +367,10 @@ https://realms.provider.example/acme.com/k7m2q9xh
     "name": "k7m2q9xh@acme.com",
     "display_name": "Acme Notes",
     "status": "active"
+  },
+  "package": {
+    "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+    "sha256": "<64 hex>"
   },
   "issuer": {
     "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
@@ -464,20 +421,20 @@ https://realms.provider.example/acme.com/k7m2q9xh
 }
 ```
 
-`signature` 由 `realm_signing_keys` 中的 `active` key 签署；Actor credential 的 issuer 即 `realm.name`，存放位置不影响有效性；由后来退役的 key 签发的既有 Realm Profile 在被更高 `sequence` 取代前仍有效。Realm Profile 不设过期时间，回滚保护只靠 `sequence`；`provider.id` 是 Realm Provider 的规范化 DNS authority，在 Realm 生命周期内不可变。多个 signaling endpoint 共享 `control_plane_id`，表示它们是同一 Realm Provider presence/control plane 的副本或故障切换入口，而不是 v1 federation。同一 Realm Provider 下轮换 Realm issuer key 或变更端点时发布更高 `sequence` 的 Realm Profile；退役时发布 `status` 为 `retired` 的新 Realm Profile，永久有效。
+`signature` 由 `realm_signing_keys` 中的 `active` key 签署；Actor credential 的 issuer 即 `realm.name`，存放位置不影响有效性；由后来退役的 key 签发的既有 Realm Profile 在被更高 `sequence` 取代前仍有效。Realm Profile 不设过期时间，回滚保护只靠 `sequence`；`provider.id` 是 Realm Provider 的规范化 DNS authority，在 Realm 生命周期内不可变。多个 signaling endpoint 共享 `control_plane_id`，表示它们是同一 Realm Provider presence/control plane 的副本或故障切换入口，而不是 v1 federation。`package` 给出该实例运行的包（§3），升级程序即发布 `package` 不同、`sequence` 更高的 Realm Profile。同一 Realm Provider 下轮换 Realm issuer key 或变更端点时同样发布更高 `sequence` 的 Realm Profile；退役时发布 `status` 为 `retired` 的新 Realm Profile，永久有效。
 
 ## 7. Service Inventory Record
 
 ```json
 {
-  "actorId": "2af01.notes@acme.com",
+  "realm": "notes@acme.com",
+  "serviceActorId": "2af01.notes@acme.com",
   "program": {
     "publisher": "notes.example",
     "name": "team-notes",
     "version": "1.4.2",
     "packageDigest": "sha256:..."
   },
-  "realm": "notes@acme.com",
   "workspaceId": "ws_01...",
   "runtime": {
     "placement": "local",
@@ -582,18 +539,9 @@ Guest 不获得 Actor 图、原始 evidence、attestation token 或被隐藏的 
 
 ```text
 URI_SCHEME_INVALID
-URI_PUBLISHER_INVALID
-URI_PORT_NOT_ALLOWED
-URI_PROGRAM_INVALID
-URI_VERSION_REQUIRED
-URI_VERSION_INVALID
-URI_RESERVED_DUPLICATE
-URI_ACTOR_ID_INVALID
-URI_ACTOR_TYPE_MISMATCH
 URI_DOMAIN_INVALID
-URI_DOMAIN_NOT_ALLOWED
-URI_REALM_REQUIRED
-URI_REALM_MISMATCH
+URI_LABEL_INVALID
+URI_LEGACY_FORM
 URI_LOCAL_REALM_FOREIGN
 ```
 
@@ -604,8 +552,6 @@ PUBLISHER_PROFILE_INVALID
 PUBLISHER_PROFILE_EXPIRED
 PUBLISHER_PROFILE_ROLLBACK
 PUBLISHER_IDENTITY_CHANGED
-RELEASE_NOT_FOUND
-RELEASE_SIGNATURE_INVALID
 PACKAGE_DOWNLOAD_FAILED
 PACKAGE_DIGEST_MISMATCH
 PACKAGE_EQUIVOCATION
@@ -648,6 +594,7 @@ SERVICE_SUSPENDED
 SERVICE_OFFLINE
 SERVICE_UNREACHABLE
 SERVICE_NOT_FOUND
+SERVICE_ACTOR_TYPE_MISMATCH
 SERVICE_MIGRATING
 SERVICE_TRASHED
 SERVICE_DELETED

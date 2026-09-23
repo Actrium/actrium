@@ -14,9 +14,9 @@
       "const": 1
     },
     "authority": {
-      "description": "Canonical Actr authority URI with no target, query, fragment, or user information.",
+      "description": "Canonical actr: URI of the domain, actr://<domain>, with no port, path, query, fragment, or user information.",
       "type": "string",
-      "pattern": "^actr://[^@/?#]+/?$"
+      "pattern": "^actr://[^@/?#:]+$"
     },
     "services": {
       "description": "Public service endpoints advertised by this authority.",
@@ -31,12 +31,11 @@
       "$ref": "#/$defs/realm_signing_keys"
     },
     "publisher": {
-      "description": "Optional signed Publisher Profile carried inline (snake_case, schema actr.publisher/v1). Its full format is left to the Actor Package specification; it is verified by its own signature. 'domain' must equal the authority host and 'program_resolver' is required.",
+      "description": "Optional signed Publisher Profile carried inline (snake_case, schema actr.publisher/v1). Its full format is left to the Actor Package specification; it is verified by its own signature. 'domain' must equal the authority host.",
       "type": "object",
       "required": [
         "schema",
         "domain",
-        "program_resolver",
         "signature"
       ],
       "properties": {
@@ -47,16 +46,20 @@
           "type": "string",
           "minLength": 1
         },
-        "program_resolver": {
-          "type": "string",
-          "format": "uri",
-          "pattern": "^https://"
-        },
         "signature": {
           "$ref": "#/$defs/detached_signature"
         }
       },
       "additionalProperties": true
+    },
+    "links": {
+      "description": "Optional https path prefixes that are Realm links: https://<domain><prefix><realm_id>... corresponds to actr://<domain>/<realm_id>.... No default; clients convert only what is declared here.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^/([^/?#]+/)+$"
+      }
     }
   },
   "additionalProperties": true,
@@ -78,7 +81,6 @@
                 "discovery",
                 "ice-config",
                 "contracts",
-                "packages",
                 "realms",
                 "realm-management"
               ]
@@ -125,7 +127,7 @@
       "additionalProperties": true
     },
     "realm_signing_keys": {
-      "description": "Realm signing keys for Realms named <label>@<authority host>. Only valid on port-less DNS authorities. Signed as a whole by an active key over the JCS form without 'signature'.",
+      "description": "Realm signing keys for Realms named <realm_id>@<domain>. Signed as a whole by an active key over the JCS form without 'signature'.",
       "type": "object",
       "required": [
         "sequence",

@@ -9,7 +9,7 @@ Actro 必须保证：
 1. 用户知道运行的代码来自哪个 Publisher、哪个不可变版本；
 2. Publisher Guest 不能替换或扩展受信 Front Host；
 3. Guest 只能使用声明且授权的 capability；
-4. Front 只能把业务请求发给绑定的 Primary Service；
+4. Front 只能把业务请求发给绑定的 Service；
 5. ActorId 被密码学 credential 证明，而不是信令服务器口头声明；
 6. Workspace secret、Actor key 和 session secret 不进入 URI；
 7. 信令/TURN 被视为有元数据与可用性权力的基础设施；
@@ -86,13 +86,13 @@ flowchart LR
 
 | 威胁 | 控制 |
 |---|---|
-| 同版本异包 | coordinate→digest 固定、包签名、equivocation hard fail |
+| 同版本异包 | Realm Profile 固定 package SHA-256、包签名、equivocation hard fail |
 | CDN/缓存篡改 | HTTPS + package digest + Ed25519 |
 | Zip slip/zip bomb | 路径拒绝、文件数/总量/压缩比限制、原子解压 |
 | Guest require 任意模块 | 构建与安装双重白名单、runtime resolver fail-closed |
 | Guest 直接联网 | 无默认 fetch/socket；`host:net` capability + allowlist |
 | Image 隐式联网/自带 header | ActroSafeImage 只用 asset id 或受控 URL |
-| Guest 调任意 Actor | 只暴露固定 PrimaryService capability |
+| Guest 调任意 Actor | 只暴露固定 Service capability |
 | Guest 伪造用户/权限 | Actr Host 附加不可覆盖的 session metadata |
 | Guest 无限循环 | QuickJS interrupt timeout、可销毁 runtime |
 | Guest 内存耗尽 | per-Guest heap cap、payload/render limits |
@@ -100,13 +100,13 @@ flowchart LR
 | Service 逃逸 | WASM Component、import allowlist、fuel/memory/I/O quota |
 | Workspace 路径穿越 | brokered root handle、路径规范化、symlink policy |
 | 多 Service 同时写 | exclusive writer lease |
-| URL 批量创建 | 确认、creation intent 幂等、来源限流和配额 |
-| URL 泄露权限 | ActorId 非 capability，URI 不含任何 token |
+| 批量创建实例 | 用户确认、creation intent 幂等、来源限流和配额 |
+| 链接泄露权限 | Realm 链接与 ActorId 都不是凭证，URI 不含任何 token |
 | Actor 冒充 | Actor credential、Actor key proof、challenge |
 | 伪造或回滚 Realm Profile | Realm Profile 必须由已固定的 Realm 签名 key 签名；首次信任经 Web PKI 或企业 pin；Realm 签名 key 变化须有有效轮换链；`sequence` 单调、`provider.id` 不可变、已退役 Realm 拒绝；Realm Profile 不过期，客户端定期刷新；取不到、验不过或已退役的 Realm Profile 时不得使用 Realm Profile 以外的任何 Realm Provider |
-| 客户端伪装成官方 Actro Front | Service 默认不信任客户端实现；受管场景另验 platform/runtime attestation |
+| 客户端伪装成官方 Actro Front | Actor credential 不证明对端代码；平台提供可选的 platform/runtime attestation |
 | 恶意 Actor 自报「不泄露」 | 被评估者不得自签最终 `ActorAssurance`；有效声明由 Actr Host 闭合 |
-| Service 隐瞒辅助 Actor | 无根图须发现入边；漏评不得绿 |
+| Service 隐瞒 Realm 内的其他 Actor | 无根图须发现入边；漏评不得绿 |
 | WASM 声明与实际出口不同 | 比较 manifest、imports、有效声明和实际边；确认未声明出口则为 `UNCONTROLLED` |
 | 同进程 Native 绕过 broker | 第三方 NativeCdylib 保持 `UNKNOWN` 或确认后为 `UNCONTROLLED`；不得洗绿 |
 | signaling/TURN 观察或篡改 payload | Actor Secure Envelope、双向身份与 transcript 绑定；relay 不持有 payload key |
@@ -295,10 +295,10 @@ Publisher package endpoint 可使用 CDN，但 CDN URL 不自动成为 Guest net
 - session metadata 由 Actr Host 添加；
 - lease 到期后消息拒绝；
 - replay/idempotency key 窗口明确；
-- `service` URI mismatch 直接失败；
+- Service 的 Actor 类型与 Realm Profile 所指包不一致时直接失败；
 - Service offline 不 fallback。
 
-Actor 类型、Actr Host 版本和 package digest 的客户端声明不构成 runtime attestation；Service 的数据权限与业务授权不能依赖这些自报字段。
+平台事实边界：Actor credential 证明 Actor key、身份与 claims，不证明对端实际运行的代码；Actor 类型、Actr Host 版本和 package digest 的客户端声明也不构成 runtime attestation。应用如何应对见[应用开发建议](app-development-guidance.zh.md)。
 
 ## 12. Workspace 安全
 
@@ -322,7 +322,7 @@ Actor 类型、Actr Host 版本和 package digest 的客户端声明不构成 ru
 | Secret | 存储 | 暴露范围 |
 |---|---|---|
 | Realm 客户端 key（每个 Realm 独立生成，Actro 内部如何生成不对外规定） | OS secure storage | Identity Manager |
-| Service Actor key | OS secure storage | Service runtime bootstrap |
+| Service key | OS secure storage | Service runtime bootstrap |
 | renewal token（Actor credential 续期用，绑定 Realm 客户端 key） | OS secure storage | Realm Manager |
 | signaling ticket | 内存 | signaling client，一次性 |
 | TURN credential | 内存 | ICE stack，短期 |
@@ -396,7 +396,7 @@ Actro 不应默认建立中心化账户或同步服务。用户数据流向取�
 
 安装页和安全中心必须提供「数据会去哪里」的分层说明，而不是一个总隐私开关。
 
-Realm 名随 ActorId 出现在分享 URI 中，会暴露 Realm 域名与 Realm label（`label`）。Actro 默认为实例生成完全随机的 `label`（不含程序名或用户输入），可读名称放在 `display_name`，不进入 ActorId；用户显式选择可读 `label` 时，确认页和分享前 UI 应提示它会随链接暴露。Realm 名与 ActorId 形似邮件地址（`k7m2q9xh@acme.com`），Actro 不得把它们渲染为 `mailto:` 链接，应明确标示为实例地址。每个 Realm 使用独立的 Realm 客户端 key，不跨 Realm 复用，不同实例无法据此关联同一客户端。对 Realm Provider 域名下的 Realm，用户以 Realm Provider 账号登录创建；Realm Provider 能关联同一账号创建的实例（它本来就是签名方），实例成员看不到账号。
+Realm 名出现在分享的 Realm 链接中，会暴露 Realm 域名与 RealmId（`realm_id`）。Actro 默认为实例生成完全随机的 RealmId（不含程序名或用户输入），可读名称放在 `display_name`，不进入 ActorId；用户显式选择可读 RealmId 时，确认页和分享前 UI 应提示它会随链接暴露。Realm 名与 ActorId 形似邮件地址（`k7m2q9xh@acme.com`），Actro 不得把它们渲染为 `mailto:` 链接，应明确标示为实例地址。每个 Realm 使用独立的 Realm 客户端 key，不跨 Realm 复用，不同实例无法据此关联同一客户端。对 Realm Provider 域名下的 Realm，用户以 Realm Provider 账号登录创建；Realm Provider 能关联同一账号创建的实例（它本来就是签名方），实例成员看不到账号。
 
 ## 17. 安全开发要求
 

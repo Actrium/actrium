@@ -21,7 +21,7 @@
 3. Realm 域名与签名 key、按实例创建的 Realm Profile 与 Realm Provider 委派；
 4. Program/Service/Workspace 分离；
 5. 固定 Front Native Host 和受控 Keel Guest；
-6. `actr://` 的创建/连接事务；
+6. 新建实例事务与 Realm 链接打开流程；
 7. Front–Service Attach/session 协议；
 8. 安全组件与 capability broker；
 9. per-instance storage；
@@ -52,7 +52,7 @@ flowchart LR
     G --> H
 ```
 
-持久 ActorId 是最长关键路径。它不成立时，Attach URI、历史、收藏、重启恢复和 Service Inventory 都无法兑现。
+持久 ActorId 是最长关键路径。它不成立时，打开实例、历史、收藏、重启恢复和 Service Inventory 都无法兑现。
 
 ## 3. P0：规范冻结
 
@@ -62,8 +62,8 @@ flowchart LR
 
 ### 交付物
 
-- `actr://` URI schema 与测试向量；
-- Publisher Profile/Release schema；
+- Realm 链接（`actr://` URI）与 `links` 转换的测试向量；
+- Publisher Profile schema；
 - Actro manifest extension schema；
 - Realm 签名 key（authority descriptor 的 `realm_signing_keys` 成员与 core relation `realms`，已在 Actr Authority Discovery §4.3–4.4 定义）与 Realm Profile schema；
 - persistent Actor identity lifecycle ADR；
@@ -87,7 +87,7 @@ flowchart LR
 ### Actr 必改
 
 1. Actor长期 key 模型；
-2. ActorId 文本和 wire model 改为 `<serial>.<label>@<domain>`：以可验证的 Realm 名取代数值 realm_id，并把 Actor 类型移到注册与 credential；
+2. ActorId 文本和 wire model 改为 `<serial>.<realm_id>@<domain>`：以可验证的 Realm 名取代数值 realm_id，并把 Actor 类型移到注册与 credential；
 3. 新建与 reclaim ActorId 两条注册路径；
 4. ActorId、renewal/identity state 持久化；
 5. hard re-auth 保持同一 ActorId；
@@ -126,7 +126,6 @@ flowchart LR
 ### 交付物
 
 - Publisher Profile resolver；
-- 基于 `program_resolver` 的 release resolver；
 - domain/IDNA normalizer；
 - key history/rotation store；
 - package digest pinning；
@@ -148,7 +147,7 @@ flowchart LR
 
 ### 退出条件
 
-- coordinate 可从 Publisher 域名下载一个可验证 `.actr`；
+- 按 Realm Profile 的 `package` 可下载并验证一个 `.actr`；
 - 同版本异包被稳定检测；
 - 离线缓存可重新验证；
 - package 中无法替换 Front Host。
@@ -222,7 +221,7 @@ flowchart LR
 - 回收站可用同一 ActorId 恢复，彻底清除不删 Workspace；
 - 创建任意阶段 crash 不重复；
 - 移动平台 suspended 状态可解释；
-- 必要 Auxiliary Actor 撤销能传播到 Front aggregate 并阻止相关数据路径。
+- Realm 内必要 Actor 的撤销能传播到 Front aggregate 并阻止相关数据路径。
 
 ## 8. P3-A：Shell、URI 与管理面
 
@@ -258,7 +257,7 @@ flowchart LR
 - 经 Realm 邀请加入实例 Realm 并取得 Realm membership；
 - signaling Realm Provider failover；
 - P2P/TURN；
-- 从自描述 ActorId 解析 portable URI Realm；
+- 从 Realm 链接解析 Realm 名并取得 Realm Profile；
 - Actor/peer handshake；
 - Attach challenge；
 - exclusive lease/takeover；
@@ -329,19 +328,19 @@ flowchart LR
 - 不进入新公共模型；
 - 不继续扩展双轨 API；
 - 迁移期 UI 清楚标记 legacy；
-- 最终以 Program Release + Service Actor替换。
+- 最终以 Program Release + Service 替换。
 
 ## 12. 风险清单
 
 | 风险 | 严重度 | 对策 |
 |---|---|---|
-| ActorId 无法稳定 | 阻断 | P1 先改身份；不发布 Attach URI |
+| ActorId 无法稳定 | 阻断 | P1 先改身份；不发布跨设备打开 |
 | iOS 本地后台不可持续 | 高 | 明确前台承诺；远端宿主；suspended 状态 |
 | Keel same-process sandbox 逃逸 | 高 | fixed QuickJS、最小 TCB、fuzz；规划 helper process |
 | Publisher domain 过户 | 高 | key history、digest pin、身份变化提示 |
 | Service WASM 能力不足 | 高 | capability broker 与 ABI先做最小闭环 |
 | Workspace 多写损坏 | 高 | v1 exclusive writer |
-| URI Create 被滥用 | 中 | 确认、幂等、限流、配额 |
+| 新建实例被滥用 | 中 | 确认、幂等、限流、配额 |
 | Realm Provider 过度中心化 | 中 | Realm Profile 委派、多 Realm Provider、自托管 |
 | 包格式扩展分叉 | 中 | 直接扩展 `.actr`，不套第二层包 |
 | 多平台 Host 行为漂移 | 中 |共享 schema/golden tests，fixed sandbox |
@@ -361,7 +360,7 @@ flowchart LR
 - Service WASM Host API 使用 WIT 的具体版本；
 - Front–Service业务 contract 从 Proto 如何生成 Keel TS schema；
 - helper process 的平台实现顺序；
-- 本机 Realm `label` 的自动生成格式；
+- 本机 Realm 的 RealmId 自动生成格式；
 - snapshot envelope 的具体编码与版本协商；
 - Marketplace 透明日志供应商；
 - 企业私有 CA 的策略格式；
@@ -376,12 +375,12 @@ flowchart LR
 - Workspace 是否由 Service 绑定：是；
 - Publisher 是否用域名：是；
 - Front Publisher 是否能写 Actr Host：否；
-- 无 service 是否创建：是；
-- 有 service 失败是否创建替代：否；
+- 链接是否触发新建：否，新建是 Actro 本地操作；
+- 打开实例失败是否创建替代：否；
 - Marketplace 是否命名权威：否；
 - 信令是否「无实权」：否；
 - Realm 与物理信令是否一一绑定：否；
-- Realm 是否对应应用实例：是，Create 新建 Realm；
+- Realm 是否对应应用实例：是，新建实例即新建 Realm；
 - 一个 Realm Provider 是否承载多个 Realm：是。
 
 ## 14. 最小纵切
@@ -393,10 +392,10 @@ flowchart LR
 3. 一个签名 `.actr` WASM Service；
 4. 包内一个 Keel JS Guest；
 5. managed Workspace；
-6. 无 `service` 创建；
-7. URI 改写；
+6. 从本地包新建实例；
+7. 地址栏显示 Realm 链接；
 8. 关闭/重启后同 ActorId恢复；
 9. fixed QuickJS；
-10. 只开放 PrimaryService RPC。
+10. 只开放 Service RPC。
 
 这个纵切一旦成立，后续平台和网络是在稳定模型上扩展，而不是继续试探对象关系。

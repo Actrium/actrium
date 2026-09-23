@@ -6,7 +6,7 @@
 
 判断单节点、SQLite、单一 Realm Provider profile 是否存在可导致以下结果的缺陷。评审对象
 须写明所评审的 commit 属于哪种 Realm 模型：当前实现是一个实例一个 Realm；目标
-契约是一个实例承载多个 Realm（Realm 名 `<label>@<domain>`，以 Realm 签名 key 签名的
+契约是一个实例承载多个 Realm（Realm 名 `<realm_id>@<domain>`，以 Realm 签名 key 签名的
 Realm Profile 激活），见 `REALM_V1_ARCHITECTURE.zh.md` 第 9 节。缺陷类别：
 
 - 未授权签发或冒充 Actor；

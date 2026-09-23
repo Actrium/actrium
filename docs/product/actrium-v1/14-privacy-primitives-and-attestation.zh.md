@@ -142,7 +142,7 @@ pass | indeterminate | fail | not-required
 
 ### 4.1 绿标主体：Application Instance Snapshot
 
-结论绑定当前就绪切面，而不是笼统 Program，也不是短暂 transport session。Front / Primary Service 只用于定位图，不进入 `structureDigest` 当根。
+结论绑定当前就绪切面，而不是笼统 Program，也不是短暂 transport session。Front / Service 只用于定位图，不进入 `structureDigest` 当根。
 
 ```text
 ApplicationStateDigest =

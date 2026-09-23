@@ -22,7 +22,7 @@ Tab ──定位──▶ Front Actor ──发现──▶ 无根应用图 CC(U
                          否则    → 无法建立 / 正在重新验证
 ```
 
-Front Actor 只做产品入口，不是图根。Primary Service 是 Guest 的业务 façade，不是安全根。
+Front Actor 只做产品入口，不是图根。Service 是 Guest 的业务 façade，不是安全根。
 
 内部证据维度（身份、制品、约束、计算、通道、存储、出口、输出）是评定输入。用户只看到三色；切面未就绪时不把任何颜色当成当前应用保障。
 

@@ -11,6 +11,6 @@
 - [`../CRATES.md`](../CRATES.md)
 
 任何改动都必须保持按 Realm 隔离（一个实例承载多个 Realm，每个 Realm 名为
-`<label>@<domain>`；当前代码仍强制单 Realm，见架构契约第 9 节）、credential 作用域、
+`<realm_id>@<domain>`；当前代码仍强制单 Realm，见架构契约第 9 节）、credential 作用域、
 默认拒绝、日志中不出现 secret，以及离线显式迁移。不得借旧文档中的默认 key、明文密码、
 可选认证或「仅限内网」假设恢复已移除的路径。
