@@ -1,7 +1,7 @@
 # Loran crate 导航
 
 Loran 位于 Actr workspace 内，crate 版本与 workspace 同步。本文只说明稳定职责，
-不复制易失真的函数签名或行号。Cargo package 名仍沿用 `actrix-` 前缀（见 GLOSSARY「历史名称对照」）。
+不复制易失真的函数签名或行号。Cargo package 名仍沿用 `actrix-` 前缀（见[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」）。
 
 | 目录 | package | 职责 |
 |---|---|---|

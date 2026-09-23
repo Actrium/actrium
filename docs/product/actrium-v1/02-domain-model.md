@@ -356,4 +356,4 @@ Key constraints:
 - (a) A member hangs up and shall not exhibit green;
 - Members who do not depend on the change node `LocalContinue`;
 - The new configuration will only be used for new data;
-- Full semantics [docs/security](../../security/README.zh.md) with [13](13-privacy-state-and-aggregation.md).
+- Full semantics [docs/security](../../architecture/security/actrium/README.zh.md) with [13](13-privacy-state-and-aggregation.md).

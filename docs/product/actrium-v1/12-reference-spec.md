@@ -574,7 +574,7 @@ Guest Only the minimalized user can be seen in summary:
 }
 ```
 
-Guest Not obtained Actor Figure, original evidence, attestation token Or hidden. ActorId. See the full object [13](13-privacy-state-and-aggregation.md); semantics [docs/security](../../security/README.zh.md).
+Guest Not obtained Actor Figure, original evidence, attestation token Or hidden. ActorId. See the full object [13](13-privacy-state-and-aggregation.md); semantics [docs/security](../../architecture/security/actrium/README.zh.md).
 
 ## 10. System protocol error code
 
@@ -818,43 +818,7 @@ closed
 
 ## 12. Glossary
 
-| Terminology | Definitions |
-|---|---|
-| Actro | Actrium program browser and hosting product; provides an Actr Host and more |
-| Actr Host | The host that runs Actors (as opposed to a Guest); Actro is one product that provides an Actr Host |
-| Actr | Actor Communications, identity, discovery and workload runtime Frame |
-| Keel | Sandbox dynamic raw UI It's... Host/Guest runtime |
-| Program | A program published by a Publisher |
-| Program Release | `publisher/program@version` Corresponding Non-Variable Packages |
-| Publisher | A publisher identified by a normalized DNS domain |
-| `.actr` package | Actr Signature workload packages;in Actro with Service with Keel Guest Resources |
-| Tab | User Interactive Container |
-| Front Actor | Every one. resident app Tab the short life cycle,Actro Fixed Native workload Actor |
-| Keel Guest | Publisher Only custom front-office code |
-| Primary Service | Front The only thing bound up is a status business. Actor |
-| Auxiliary Actor | By Primary Service Organization of the background Actor |
-| ActorId | `<serial>.<realm name>`: persistent, cryptographically bound, exact Actor identity without the program type |
-| ActrType | `publisher/program@version`, carried by registration and the Actor credential |
-| Workspace | Service Operational data held capability |
-| Realm | Logical trust and governance domain of one application instance: Actor identity, admission, connection ACL and Realm Provider delegation |
-| Realm name | `<label>@<domain>`; `domain` is a DNS domain, or `<installation-id>.actr.alt` for a local Realm |
-| Realm signing key | Key a Realm domain publishes in the descriptor's `realm_signing_keys` to sign Realm Profiles; the holder is the domain owner, who may delegate custody to a Realm Provider |
-| Realm Profile | Per-Realm document signed by a Realm signing key, delegating the Issuer and Realm Provider |
-| Realm Provider | Operator of shared infrastructure hosting many Realms (signaling, STUN/TURN, Issuer); bound at Realm creation and never changed |
-| Realm client key | The key one member's client installation uses in one Realm; separate per Realm, individually revocable |
-| Actr management envelope | Realm management request format signed by a Realm signing key (bound to `provider_id`, at most 5 minutes, nonce); reused by `register_publisher` |
-| Signaling | presence, Discovery and WebRTC Consultation and control |
-| STUN | NAT Map found |
-| TURN | P2P Controlled flow relays in unattractive times |
-| Capability | Actr Host Explicitly granted Guest/Service The minimum capacity |
-| Package digest | Exact Program Release The unchangeable print. |
-| Attachment lease | Front Use Service Short term conference lease |
-| Marketplace | Program detection, audit and cancellation of information services, no Publisher Name Authority |
-| Apply Graphics | Valid. `Transfer(ActorId)` The no root-connected weights formed |
-| ActorAssurance | The certifier is accurate. `ActorStateId` and the prohibition of self-signatures |
-| ApplicationAssurance | Convergence of current readiness |
-| Ready | Quick-scenes current and all members ACTIVE;presupposing colours |
-| Native Capsule | A Native workload running in its own OS sandbox that exposes only Actr Host brokered IPC |
+Terms used in these documents are defined in one place, the [glossary](../../GLOSSARY.zh.md); they are not repeated here.
 
 ## 13. Norms and practice references
 

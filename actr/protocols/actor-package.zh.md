@@ -209,7 +209,7 @@ key-id = "release-2026"
 version 时 **MUST** 拒绝，不能猜测其字段含义。`actr-package/1` 已停用：读取器 **MUST**
 拒绝 `format = "actr-package/1"` 或 `[actor]` 缺少 `publisher` 的 manifest，并返回明确指出
 需改用 `actr-package/2` 与 `publisher` 字段的错误；旧字段名不作为别名接受（历史字段名见
-Loran 术语表「历史名称对照」）。
+[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」）。
 
 ### 6.2 `[actor]`
 

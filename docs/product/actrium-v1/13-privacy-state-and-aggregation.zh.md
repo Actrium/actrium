@@ -1,6 +1,6 @@
 # 13. Actro 隐私标记与图汇聚
 
-> 安全语义以 [docs/security](../../security/README.zh.md) 为准。本章只写 Actro 如何把该模型落到 Tab、Front、Actr Host 和数据面。两者冲突时改本章，不改现行安全模型。
+> 安全语义以 [docs/security](../../architecture/security/actrium/README.zh.md) 为准。本章只写 Actro 如何把该模型落到 Tab、Front、Actr Host 和数据面。两者冲突时改本章，不改现行安全模型。
 
 成熟度：`Specified`。
 
@@ -26,7 +26,7 @@ Front Actor 只做产品入口，不是图根。Primary Service 是 Guest 的业
 
 内部证据维度（身份、制品、约束、计算、通道、存储、出口、输出）是评定输入。用户只看到三色；切面未就绪时不把任何颜色当成当前应用保障。
 
-通道、原语和远程证明见 [14](14-privacy-primitives-and-attestation.md)。完整判断与证明见 [形式模型](../../security/formal/model.zh.md)。
+通道、原语和远程证明见 [14](14-privacy-primitives-and-attestation.md)。完整判断与证明见 [形式模型](../../architecture/security/actrium/formal/model.zh.md)。
 
 ## 2. 颜色与事实
 

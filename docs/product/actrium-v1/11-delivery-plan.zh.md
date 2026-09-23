@@ -335,7 +335,7 @@ flowchart LR
 
 | 风险 | 严重度 | 对策 |
 |---|---|---|
-| ActrId 无法稳定 | 阻断 | P1 先改身份；不发布 Attach URI |
+| ActorId 无法稳定 | 阻断 | P1 先改身份；不发布 Attach URI |
 | iOS 本地后台不可持续 | 高 | 明确前台承诺；远端宿主；suspended 状态 |
 | Keel same-process sandbox 逃逸 | 高 | fixed QuickJS、最小 TCB、fuzz；规划 helper process |
 | Publisher domain 过户 | 高 | key history、digest pin、身份变化提示 |
@@ -345,7 +345,7 @@ flowchart LR
 | Realm Provider 过度中心化 | 中 | Realm Profile 委派、多 Realm Provider、自托管 |
 | 包格式扩展分叉 | 中 | 直接扩展 `.actr`，不套第二层包 |
 | 多平台 Host 行为漂移 | 中 |共享 schema/golden tests，fixed sandbox |
-| Version/ActorType 升级复杂 | 中 | v1 显式新 Actor 迁移 |
+| Version/Actor 类型升级复杂 | 中 | v1 显式新 Actor 迁移 |
 | Marketplace 被误当信任根 | 中 | UI 和协议分离身份/审核 |
 | Actor 自报不泄露或隐瞒下游 | 高 | Actr Host 闭合有效声明并发现入边；自报只作声明；禁止自签最终结论 |
 | 隐私图动态变化导致短暂绿色误报 | 高 | 变化即挂起、未 Ready 不展示绿、世代拦住旧数据 |

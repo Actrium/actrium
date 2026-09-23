@@ -1,6 +1,6 @@
 # 14. Privacy, remote certification and credible algorithms
 
-> Security syntax [docs/security](../../security/README.zh.md) This chapter only writes how the original language, certification and arithmetic enters the current assessment, without defining the colour or the root.
+> Security syntax [docs/security](../../architecture/security/actrium/README.zh.md) This chapter only writes how the original language, certification and arithmetic enters the current assessment, without defining the colour or the root.
 
 ## 1. Objective
 
@@ -33,7 +33,7 @@ This chapter answers:
 
 The normal calculation must be specified within an operational boundary. FHE, MPC The Quakers are the only ones who have a problem with the Quakers.Actro Data should not be claimed to be secret at every point.
 
-Recommended formulation and [Overview](../../security/01-overview.zh.md) Unanimously:
+Recommended formulation and [Overview](../../architecture/security/actrium/01-overview.zh.md) Unanimously:
 
 > Data exist in secret on protected links and storage; it should only be specified in a processing environment where the identity is known and the boundary meets the requirements. Green ensures only that the current level of readiness is met and the new configuration only binds new data.
 
@@ -359,7 +359,7 @@ channelNonce
 roles
 ```
 
-Current situation of the parties `ActorStateId` We must enter the union. transcript and certified in two-way: only for the field MAC Not enough to resist the old state of greeting again. [Security agreement](../../security/03-protocol.zh.md) §3 and form model F-CHAN-01One of them. `ActorStateId` The old channel cannot carry the application data after the change and must be reshocked for the new state.
+Current situation of the parties `ActorStateId` We must enter the union. transcript and certified in two-way: only for the field MAC Not enough to resist the old state of greeting again. [Security agreement](../../architecture/security/actrium/03-protocol.zh.md) §3 and form model F-CHAN-01One of them. `ActorStateId` The old channel cannot carry the application data after the change and must be reshocked for the new state.
 
 Actor Actr Host It has to be proven that it is. Actor key & Temporary Sessions key. If the target runs in TEE , the temporary decryption key must be TEE internal generation, or by TEE Safely held and entered attestation Evidence/Result.
 

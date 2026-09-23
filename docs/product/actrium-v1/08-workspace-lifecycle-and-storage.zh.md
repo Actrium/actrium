@@ -106,7 +106,7 @@ stateDiagram-v2
 - Program Release reference；
 - Actor long-term key；
 - persistent ActorId；
-- Realm credential state；
+- Actor credential state；
 - per-instance data directory；
 - WorkspaceBinding；
 - permission grant；
@@ -241,9 +241,9 @@ actro-data/
 
 以下内容只进入 OS Keychain/Keystore/Credential Locker：
 
-- device private key；
-- Service Actor private key；
 - Realm 客户端 key；
+- Service Actor private key；
+- renewal token（Actor credential 续期用）；
 - Workspace Provider credential；
 - TURN/signaling ticket（通常仅内存）；
 - encryption keys。

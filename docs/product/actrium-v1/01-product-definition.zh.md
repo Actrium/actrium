@@ -171,7 +171,7 @@ URL 有 `service` 就连接，无 `service` 就创建；失败时不改变意图
 
 ### 7.2 地址不等于权限
 
-ActorId 是定位与身份，访问权由 Realm credential、应用权限和会话授权决定。
+ActorId 是定位与身份，访问权由 Actor credential、应用权限和会话授权决定。
 
 ### 7.3 状态归 Service
 
