@@ -145,9 +145,10 @@ Pool reuse hygiene is part of the contract:
   capacity before admitting queued runs;
 - every run begins with `/v1/actions/cleanup` on its leased Endpoints and
   samples a fresh resource baseline;
-- every run uses its own realm/ActrId prefix on the shared Loran and MUST
-  verify that its TURN allocations and registrations have drained before it
-  completes;
+- Endpoint `ActrId`s and realm are provisioned for the pool and remain stable
+  across Pod rebuilds. Exclusive leases prevent two runs from sharing an
+  Endpoint; run-scoped Peer graphs are fully unwired before reuse, and the
+  Dashboard verifies any available Loran allocation/registration drain gauges;
 - the pool is rolling-rebuilt on a schedule and before operator-triggered
   `release` profile runs.
 
@@ -176,9 +177,13 @@ The WebRTC 0.21 RTC implementation contains per-peer Controllers, real
 WebRTC sessions, DataChannel lanes, signaling recovery, and network-event
 recovery. Short integration tests cannot reliably expose leaks or ordering
 races that appear only after repeated recovery, process replacement, or
-multi-peer pressure. Historical examples include ICE socket exhaustion (#270),
-background/reconnect races (#363, #383), silent peer death (#583), stalled
-signaling (#608), failed SDP delivery (#609), and stale data-plane state (#610).
+multi-peer pressure. Historical examples include [ICE socket exhaustion
+(Actrium/actr#270)](https://github.com/Actrium/actr/issues/270),
+[background/reconnect races (Actrium/actr#363 and #383)](https://github.com/Actrium/actr/issues/363),
+[silent peer death (Actrium/actr#583)](https://github.com/Actrium/actr/issues/583),
+[stalled signaling (Actrium/actr#608)](https://github.com/Actrium/actr/issues/608),
+[failed SDP delivery (Actrium/actr#609)](https://github.com/Actrium/actr/issues/609),
+and [stale data-plane state (Actrium/actr#610)](https://github.com/Actrium/actr/issues/610).
 
 This plan turns those regression themes into a reproducible long-running test in
 the available environment: GitHub Actions, a self-hosted Kubernetes cluster,
@@ -232,10 +237,10 @@ Run times:
 
 - Verify that actr Endpoints in multiple Kubernetes Pods can complete bidirectional RTC business through real Loran;
 - verify that background, foreground, logical offline, network recovery, and network-type events drive production recovery;
-- verify Soft/Hard Recovery after RTC UDP Faults, signaling Faults, in-flight requests, and DataChannel closure;
+- verify Soft/Hard Recovery after RTC UDP Faults, signaling Faults, and in-flight requests;
 - verify that one Peer failure does not block signaling, business, or the Controller of other Peers;
 - verify `pc_generation`, `transport_epoch`, `revision`, `role`, `exchange`, and stale fencing;
-- verify process restart, Pod rebuild, same-identity restart, new-`ActrId` restart, and Loran restart;
+- verify process restart, same-identity Pod rebuild, and Loran restart;
 - verify that pending work, sessions, lanes, file descriptors, sockets, RSS, and CPU do not grow continuously during long runs;
 - form a replayable, auditable test record; CI builds and deploys the
   environment, while the Dashboard starts and controls the test.
@@ -337,6 +342,7 @@ actr-N control adapter -> test-only Fault Registry
 Observation plane:
 Manager Snapshot + Hook + Fault Metrics
   + endpoint business metrics
+  + Prometheus text metrics (`/metrics` on the Endpoint HTTP listener, TCP 9090)
   + Loran metrics
   + Kubernetes/cAdvisor/procfs metrics
 ```
@@ -451,7 +457,7 @@ AI only reads evidence and provides initial attribution.
 
 | Module | Implementation | Responsibilities |
 | --- | --- | --- |
-| Actr Endpoint (`actr-N`) | Same process as the actr Node, built with `test-utils/soak` | Expose the endpoint control API and hold `NetworkEventHandle`, Fault facades, and Snapshot/Hook observers |
+| Actr Endpoint (`actr-N`) | Standalone `Actrium/actr-soak` crate, built with `real-rtc`; links the pinned `Actrium/actrium` `actr-hyper` dependency with its `test-utils` feature | `actr-soak-endpoint` hosts the production ActrNode adapter in `src/node_endpoint.rs` and `src/node_runtime.rs`, holding `NetworkEventHandle`, Fault facades, and Snapshot/Hook observers |
 | Test Workload | Test Actor/Probe Driver inside `actr-N` | Send RPC, Tell, and DataChunk through `RuntimeContext`; continuously produce bidirectional traffic |
 | Soak Dashboard | Kubernetes Deployment | Serve the UI/BFF, persist run state, and expose authenticated manual control |
 | Soak Controller | Embedded in Dashboard | Generate seed plans, call endpoint control APIs, schedule events, run the Result Evaluator, and archive artifacts |
@@ -486,33 +492,24 @@ POST /v1/peers or DELETE /v1/peers
   -> ActrNode peer establishment or teardown
   -> Peer Snapshot confirms the wired edge
 
-GET /v1/peers, /v1/events, /metrics
+GET /v1/peers, /v1/events, /metrics (same Endpoint HTTP listener, TCP 9090)
   -> Snapshot / Hook / Metrics Adapter
   -> Dashboard's embedded SoakController / Result Evaluator
 ```
 
-Implementation directories and deliverables:
+Implementation repositories and deliverables:
 
 ```text
-testing/actr-soak/
-  actr-soak-endpoint/
-  actr-soak-controller/
-  protocols/
-  workload/
-  result-evaluator/
-  artifact/
+Actrium/actr-soak (standalone repository; Cargo package `actr-soak`)
+  src/bin/actr-soak-endpoint.rs
+  src/node_endpoint.rs
+  src/node_runtime.rs
+  src/endpoint_api.rs
+  deploy/k8s/
+  deploy/docker/endpoint.Dockerfile
 
-deploy/actr-soak/
-  namespace.yaml
-  loran-statefulset.yaml
-  endpoint-statefulset.yaml
-  network-policy.yaml
-  rbac.yaml
-
-docker/actr-soak/
-  Dockerfile.endpoint
-
-.github/workflows/ci-rtc-k8s-soak.yml
+Actrium/actrium (production dependency, pinned by actr-soak)
+  crates/actr-hyper/ (`test-utils` feature supplies the test-only RTC seams)
 ```
 
 If a separate endpoint process needs current crate-private observation, add a
@@ -540,10 +537,12 @@ shell, `eval`, or arbitrary memory mutation.
 | POST | `/v1/peers` | Wire a Peer edge to a target endpoint (run-scoped, idempotent) |
 | DELETE | `/v1/peers` | Tear down Peer wiring installed by a run |
 | GET | `/v1/events` | Hook, state edges, Fault hits, and signaling trace |
-| GET | `/metrics` | Prometheus metrics |
+| GET | `/metrics` | Prometheus text metrics on the Endpoint HTTP listener (TCP 9090); bearer token applies when enabled |
 | GET | `/v1/metrics` | Optional JSON metric snapshot |
 | GET | `/v1/resources` | Process resource snapshot (RSS, FDs, sockets) |
 | GET | `/v1/diagnostics` | Endpoint diagnostics snapshot |
+| GET | `/v1/redaction-inventory` | Transient credential literals for the authenticated Dashboard redaction gate; never persist the response |
+| GET | `/v1/runtime-thresholds` | Recovery timing values read from the linked Endpoint build so plan generation does not copy stale constants |
 | POST | `/v1/observations/data-chunk` | Record a DataChunk receipt observation |
 | POST | `/v1/probes/rpc` | Send a probe through the formal RPC business path |
 | POST | `/v1/probes/data-chunk` | Send a probe through the formal DataChunk path |
@@ -555,7 +554,10 @@ shell, `eval`, or arbitrary memory mutation.
 | POST | `/v1/faults/rtc/rollback` | Roll back a prepared RTC Fault transaction |
 | POST | `/v1/faults/signaling` | Install, update, or heal a signaling Fault |
 | POST | `/v1/actions/cleanup` | Call the production cleanup entry point |
+| POST | `/v1/actions/run-start` | Begin a new run-scoped credential-redaction inventory and retain this run's credential rotations in endpoint memory |
 | POST | `/v1/actions/force-reconnect` | Call the production force-reconnect entry point |
+| POST | `/v1/actions/turn-relay` | Opt this Endpoint into relay-only ICE policy for a run; default remains disabled |
+| POST | `/v1/actions/turn-credential-rotation` | Trigger normal AIS credential renewal and report safe revision/expiry evidence |
 
 Every write request carries `run_id`, `action_id`, `deadline_ms`, and
 `expected_generation`; the endpoint control API makes `action_id` idempotent.
@@ -649,12 +651,43 @@ production path from a logical network fact to ICE/recovery.
 | `CleanupConnections` | `NetworkEventHandle` | Cleanup without automatic reconnect |
 | Duplicate/out-of-order monitor events | Source epoch/sequence | Stale fencing and deduplication |
 
-The current background-recovery threshold and recovery timeout are
-implementation configuration. Tests read the actual configuration and
-generate boundary cases; the Controller MUST NOT copy a potentially stale
-constant.
+The long-background recovery threshold is read from each leased Endpoint's
+`/v1/runtime-thresholds`. The Dashboard rejects mixed threshold values in one
+lease and the plan generator includes threshold−1 ms, the threshold, and
+threshold+1 ms in lifecycle and network startup cases. Replayed plans retain
+the threshold recorded in the source run. The Controller MUST NOT copy a
+potentially stale constant.
 
-#### 7.2 `DirectedRtcFaultRegistry`
+#### 7.2 Optional TURN relay and credential rotation
+
+TURN URLs remain configured on the Endpoint pool, but relay-only policy is
+opt-in per Dashboard run and defaults to disabled. With the option disabled,
+the production ICE policy remains `All` and the run does not force TURN use or
+rotate credentials. When enabled, the SoakController must, before wiring the
+run's Peer graph:
+
+1. call the authenticated `/v1/actions/turn-relay` control action on every
+   leased Endpoint; the Endpoint retires any previous RTC sessions and applies
+   relay-only policy to every subsequently built PeerConnection;
+2. request credential renewal through the Node's normal AIS credential
+   manager, then confirm that the TURN credential revision/expiry advanced
+   without returning credential material to the Dashboard;
+3. wire each Peer edge, run business probes, and wait for both endpoints'
+   selected candidate-pair snapshots to report `Relayed`;
+4. fail preflight if any selected path is direct or remains unknown at the
+   bounded verification deadline; never count an enabled policy by itself as
+   evidence of relay use;
+5. on completion, failure, or cancellation, disable relay-only policy and
+   retire the run's connections before returning the leased subset. If an
+   Endpoint cannot be cleaned and confirmed, quarantine it.
+
+The relay switch, credential rotation, selected-path evidence, and reset
+outcome are recorded with the run's action IDs. TURN passwords and AId
+credentials are never returned in action responses, metrics, artifacts, or
+logs. Credential rotation is a run-scoped endpoint operation and does not
+restart the shared Actrix process.
+
+#### 7.3 `DirectedRtcFaultRegistry`
 
 The Registry binds a rule to:
 
@@ -713,7 +746,7 @@ separate actions is an acceptable alternative.
 When healing, both sides return to `Pass`. A new generation does not implicitly
 inherit an old generation's Fault.
 
-#### 7.3 Fault Registry coverage boundary
+#### 7.4 Fault Registry coverage boundary
 
 Covered:
 
@@ -729,7 +762,7 @@ Not covered alone:
 - CNI, NAT, MTU, or kernel socket-buffer behavior, which require external network profiles;
 - physical wireless networking and system backgrounding, which require real devices.
 
-#### 7.4 Signaling Faults
+#### 7.5 Signaling Faults
 
 Prioritize:
 
@@ -744,15 +777,14 @@ Prioritize:
 Fault class, direction, exchange, attempt, and ordinal are written to the event
 trace for replay.
 
-#### 7.5 Pod and Loran lifecycle
+#### 7.6 Pod and Loran lifecycle
 
 Kubernetes performs:
 
 ```text
 normal deletion: grace-period=15
 forced deletion: grace-period=0
-same ActrId rebuild
-new ActrId startup
+same-identity Endpoint Pod rebuild
 Loran Pod restart
 Endpoint rolling restart
 ```
@@ -806,15 +838,23 @@ historical failure rate:
 
 | Category | Initial weight |
 | --- | ---: |
-| Normal business window | 45% |
+| Normal business window | 30% |
+| Sustained traffic | 12% |
+| Connection churn | 8% |
+| In-flight business | 5% |
 | Background/Foreground | 15% |
-| NetworkUnavailable/Available | 10% |
+| NetworkUnavailable/Available | 5% |
+| Wi-Fi/Cellular switch | 3% |
+| Duplicate/out-of-order network monitor events | 2% |
 | RTC Fault | 10% |
-| Signaling Fault | 8% |
-| In-flight business/lane closure | 5% |
-| Endpoint restart | 4% |
-| Loran restart | 2% |
-| External network Fault | 1% |
+| Signaling Fault | 6% |
+| Same-identity Endpoint restart | 3% |
+| Loran restart | 1% (exclusive profiles only; concurrent profiles sample normal business instead) |
+| External network Fault | 0% (deferred until its Kubernetes/CNI adapter exists; sample normal business instead) |
+
+The final 1% slot is an Actrix restart only for exclusive profiles; concurrent
+profiles use it for normal business so a shared Loran action cannot disturb a
+disjoint lease.
 
 Run a coverage check every 30--60 minutes so random distribution does not
 permanently miss rare events.
@@ -833,7 +873,7 @@ do not require different deployments.
 | `small` | `actr-0` ... `actr-N`, fixed ring plus random cross-Peers |
 | `multi-peer` | `actr-0` Hub plus up to 9 Leaves; the Hub may have 9 active Peers in the 10-Endpoint profile, while each Leaf has 4--8 active Peers including its Hub edge and seeded cross-Peer edges |
 | `restart` | `actr-0` ... `actr-N`, periodically rebuild identities |
-| `relay` | All connections MUST use TURN relay; the controller MUST verify relayed paths from endpoint diagnostics rather than assume them |
+| `relay` | Optional Dashboard run setting; when enabled all connections MUST use TURN relay and the controller verifies selected paths from endpoint diagnostics. Disabled by default. |
 
 Do not fully interconnect 50 Endpoints; avoid O(N^2) connections dominating
 test resources. Every profile MUST record its wired Peer graph in `plan.json`.
@@ -862,10 +902,10 @@ remain permanently unusable after recovery.
 
 | Issue/PR | Soak-test action |
 | --- | --- |
-| [#583](https://github.com/Actrium/actr/issues/583) | Remote Endpoint silent death and new `ActrId` startup |
+| [#583](https://github.com/Actrium/actr/issues/583) | Remote Endpoint silent death and same-identity Pod recovery |
 | [#608](https://github.com/Actrium/actr/issues/608) | Stalled Controller concurrent with other-Peer signaling |
 | [#609](https://github.com/Actrium/actr/issues/609) | SDP queue full, send failure, and wake-up |
-| [#610](https://github.com/Actrium/actr/issues/610) | Lane closure, old DataChannel, and later business traffic |
+| [#610](https://github.com/Actrium/actr/issues/610) | Stale data-plane state is retired by recovery and later business traffic succeeds |
 | [#604](https://github.com/Actrium/actr/issues/604) | Pair-contract concurrent recovery and repeated runs |
 | [#492](https://github.com/Actrium/actr/issues/492) | Setup/send-admission timeout |
 | [#270](https://github.com/Actrium/actr/issues/270) | Long-term ICE/UDP socket and FD trend |
@@ -1044,14 +1084,15 @@ recovery obligation = 0
 The final quiescence check is the normal pool handoff gate. Bound cleanup and
 quiescence to 30 seconds. If a failed or cancelled run does not quiesce in that
 interval, the Dashboard MUST heal run-scoped Fault leases, then delete and
-recreate each affected Endpoint Pod. A replacement returns to the idle pool
-only if it becomes Ready within 120 seconds, has a fresh process/identity
-observation, has no Fault lease or recovery obligation, and passes a clean
-baseline probe.
-If cleanup or replacement fails, the Endpoint MUST be quarantined and excluded
-from new leases; other cleaned Endpoints from that run may be released and the
-usable pool capacity updated. A lease MUST NOT be held indefinitely solely
-because an Endpoint cannot quiesce.
+recreate each affected Endpoint Pod using its existing ActrId. A replacement
+returns to the idle pool only if it becomes Ready within 120 seconds, reports
+the same provisioned `ActrId` and a fresh process incarnation, has no Peer
+wiring, pending work, Fault lease, or recovery obligation, and passes the
+Endpoint readiness check.
+If cleanup or same-identity replacement fails, the Endpoint MUST be
+quarantined and excluded from new leases; other cleaned Endpoints from that
+run may be released and the usable pool capacity updated. A lease MUST NOT be
+held indefinitely solely because an Endpoint cannot quiesce.
 
 After warm-up, use the median, P95, and linear slope of the long-run window:
 
@@ -1086,9 +1127,11 @@ actr-soak
 
 `actr-soak` is a stable deployment namespace created before runs are scheduled.
 It contains the shared Loran service, endpoint pool, Dashboard, and collectors;
-it is not created or deleted per run. Per-run realm and ActrId prefixes,
-run-scoped Fault leases, and artifact prefixes isolate concurrent runs within
-that namespace.
+it is not created or deleted per run. Stable pool identities, disjoint Endpoint
+leases, run-scoped Peer graphs and Fault actions, and per-run artifact prefixes
+isolate concurrent runs within that namespace. Pod replacement retains the
+Endpoint's provisioned ActrId; rotating identity or realm per run is out of
+scope.
 
 #### 13.2 Workloads
 
@@ -1111,20 +1154,24 @@ Loran HTTP/Signaling: TCP 8080
 Loran STUN/TURN: UDP 3478
 TURN relay range: dedicated UDP range
 Endpoint control API: TCP 9090
-Endpoint metrics: TCP 9091
+Endpoint `/metrics` and `/v1/metrics`: same TCP 9090 listener as the control API
 ```
 
-STUN/TURN and `relay bind.ice.advertised_ip` use a stable LoadBalancer,
-MetalLB, or node-reachable address. If a Pod IP is used, an Loran rebuild MUST
-re-render the address and re-register it.
+The in-cluster `actrix` Service advertises its stable ClusterIP. The deployment
+also creates an `actrix-turn-relay` ClusterIP Service with same-port UDP
+mappings for the configured relay allocation range (`49152-49407` in the
+current test deployment), so relay candidates are routable through kube-proxy.
+Actrix configuration and Service ports MUST use the same range. External TURN
+clients require a separately exposed LoadBalancer/MetalLB or node-reachable
+address and are outside this in-cluster relay profile.
 
 #### 13.4 NetworkPolicy
 
 ```text
-Dashboard -> `actr-N`:        TCP 9090 (Endpoint control API)
+Dashboard -> `actr-N`:        TCP 9090 (Endpoint Control API)
 Dashboard -> Kubernetes API:  TCP 443/6443 (Pods, Events, logs, and metrics
                               reads; approved lifecycle verbs only)
-Collector/Prometheus -> `actr-N`: TCP 9091 (Endpoint metrics scrape)
+Collector/Prometheus -> `actr-N`: TCP 9090 (`/metrics`; send the Endpoint bearer token when enabled)
 Collector/Prometheus -> Loran:   TCP metrics port (Loran metrics scrape)
 `actr-N` -> Loran:           TCP HTTP/Signaling, UDP STUN/TURN 3478
 `actr-N` <-> Loran:          TURN relay UDP range (relayed media to and from
@@ -1232,10 +1279,13 @@ change the GitHub deployment result.
 Redaction is a deterministic gate, not a best-effort filter. A dedicated
 redaction step MUST run after evidence collection and before any artifact
 upload, export, or Claude Code input is assembled. It scans logs, snapshots,
-and evidence JSON for TURN passwords, AId tokens, endpoint control tokens,
-private keys, credential-bearing URLs, and complete business payloads, using
-fixed patterns plus the per-run credential inventory recorded in the
-manifest; it is pattern-based and deterministic, with no model involvement.
+and evidence JSON for TURN usernames/passwords, AId credentials, renewal
+tokens, endpoint control tokens, private keys, credential-bearing URLs, and
+complete business payloads. The authenticated Endpoint API supplies the
+current run's credential literals directly to the Dashboard in memory; the
+gate records only the inventory count in `redaction.json`, never the literals
+or a reversible encoding. Fixed patterns plus this transient inventory make
+the scan deterministic, with no model involvement.
 The gate is part of artifact-upload acceptance:
 
 - artifacts MUST NOT leave the namespace or PVC before the gate passes, and
@@ -1251,11 +1301,12 @@ At minimum, `reproduce.sh` can:
 1. use the same main SHA and image digest;
 2. use the same `plan.json`;
 3. re-wire the same Peer graph recorded in `plan.json`, with the same configuration;
-4. replay the plan from its clean initial state so generation-advancing actions
-   establish the same generation history; a replay report MAY focus on the
-   failed action window, but execution MUST include earlier actions needed to
-   reproduce that state;
-5. output the same action IDs, generations, and Result Evaluator result.
+4. replay the plan from its clean initial state through the selected failure
+   window's end. If the operator selects an action range, execution includes
+   all preceding actions needed to recreate generation/recovery state and
+   records the selected focus range in the manifest;
+5. preserve a source action ID mapping and output the same generation history
+   and Result Evaluator signal for the focused window.
 
 #### 14.2 Workflow
 
@@ -1299,7 +1350,10 @@ Dashboard scheduler or operator trigger
 23:00 Friday China Standard Time, run for 48 hours
 ```
 
-The Dashboard run manifest is authoritative for the actual start and end times.
+The Dashboard schedules the Nightly profile every day at 23:00 CST and the
+Weekend profile Friday at 23:00 CST. Scheduled runs enter the same lease queue
+as operator-created runs, and the run manifest is authoritative for actual
+start and end times.
 
 ARC only creates the GitHub Actions Runner Pod. It does not perform RTC Faults,
 Endpoint lifecycle actions, Result Evaluator evaluation, or upload run evidence
@@ -1357,7 +1411,7 @@ AI initial attribution
 | --- | --- | ---: | --- | --- |
 | `preflight` | 1 Loran + 2 Endpoints | 10 min | Image, network, API, and artifacts | Concurrent-capable |
 | `pair-event` | 2 Endpoints | 30--60 min | Events and RTC/signaling Faults | Concurrent on disjoint subsets |
-| `process-churn` | 2 Endpoints | 30--60 min | SIGTERM, SIGKILL, and identity rebuild | Concurrent on disjoint subsets |
+| `process-churn` | 2 Endpoints | 30--60 min | SIGTERM, SIGKILL, and same-identity Pod rebuild | Concurrent on disjoint subsets |
 | `multi-peer` | Hub + 9 Leaves | 2 h | Peer isolation and concurrent recovery | Concurrent on disjoint subsets |
 | `nightly` | 2--10 Endpoints | 8 h | Long-term overnight stability | Exclusive pool |
 | `weekend` | 10--50 Endpoints | 48 h | Weekend resource and recovery soak | Exclusive pool |
@@ -1384,8 +1438,10 @@ an action is sampled for a run, that run MUST take the pool exclusively.
    restart, resource collection, and the Result Evaluator.
 5. **Phase 4: Nightly 8 hours** — add fixed-seed random events, coverage checks,
    `retry=0`, and Claude Code analysis.
-6. **Phase 5: Weekend 48 hours and external network** — add relay, credential
-   rotation, rolling restart, and NetworkPolicy/Chaos Mesh/tc-netem comparison.
+6. **Phase 5: Weekend 48 hours and external network** — add rolling restart
+   and NetworkPolicy/Chaos Mesh/tc-netem comparison. The Dashboard's optional
+   relay-only setting, credential rotation, selected-path verification, and
+   policy reset are available to any profile; relay-only is disabled by default.
 
 ### 17. Required resources, risks, and definition of done
 
@@ -1429,6 +1485,13 @@ Code OIDC.
 - RPC/DataChunk passes through `RuntimeContext`, `PeerGate`, and a real DataChannel;
 - lifecycle events pass through `NetworkEventHandle`;
 - RTC/signaling Faults have install, hit, heal, and generation evidence;
+- relay-only is disabled by default; an enabled run renews TURN credentials,
+  proves both ends of every selected Peer path are relayed, and resets the
+  policy before pool handoff;
+- the credential redaction inventory is collected from every leased Endpoint,
+  includes each observed TURN/AId/renewal credential revision, and is held only
+  in memory until the deterministic redaction gate passes; the artifact records
+  only the inventory count;
 - multi-Pod A-to-B Fault can be committed consistently on both sides;
 - Pod/Loran restart can be executed and replayed;
 - one Peer failure does not block another Peer;
@@ -1545,7 +1608,6 @@ run-scoped peer-management API; deployment-time Peer wiring is out of scope.
 ## Unresolved questions
 
 - Which Kubernetes metrics backend is available on the target cluster?
-- Should the endpoint adapter live in the actr workspace behind a `soak` feature, or in a dedicated test crate linking test-support modules?
 - What per-profile CPU, RSS, FD, Socket, pending, lane, and recovery thresholds should be accepted after preflight baselines?
 - Which object storage (PVC, MinIO, or S3-compatible storage) is approved for immutable artifacts and Claude Code input?
 - Which external network comparison profiles should be added after the deterministic phase, and how should infrastructure noise be classified?
