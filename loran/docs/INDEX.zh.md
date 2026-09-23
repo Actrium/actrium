@@ -4,7 +4,7 @@
 
 1. [`README`](../README.md)：产品边界、启动和发布门槛。
 2. [`REALM_V1_ARCHITECTURE.zh.md`](REALM_V1_ARCHITECTURE.zh.md)：规范性架构契约：Realm 对应应用实例，
-   以 Realm 名 `<label>@<domain>` 标识，一个实例承载多个 Realm；第 9 节列出与当前代码的差异。
+   以 Realm 名 `<realm_id>@<domain>` 标识，一个实例承载多个 Realm；第 9 节列出与当前代码的差异。
 3. [`THREAT_MODEL_REALM_V1.zh.md`](THREAT_MODEL_REALM_V1.zh.md)：资产、威胁、缓解与发布门槛。
 4. [`CONFIGURATION.md`](CONFIGURATION.zh.md)：单节点生产配置（当前实现单 Realm，目标契约多 Realm）。
 5. [`API.md`](API.zh.md)：公开传输与路由边界。

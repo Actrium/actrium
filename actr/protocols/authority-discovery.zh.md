@@ -9,31 +9,23 @@ Well-Known URI 登记项所引用的规范。
 
 ## 1. 范围
 
-`actr:` URI 标识某个 authority 下的 Actr 目标。authority 是组织目标的稳定名称，不一定是
-signaling、identity、discovery 或 ICE 服务的实际网络位置。
-
-Authority discovery 将该稳定 authority 映射到服务端点。它不定义 `actr:` URI 的 target
-语法、Package resolution、运行时 Actor discovery、signaling 协议、认证协议或 ICE
-configuration 响应；这些属于不同的 Actr 协议范围。URI 语法由
-[Actr URI 规范](uri.zh.md) 定义，Target 到 Package 的解析边界由
-[Actr Package Resolution](package-resolution.zh.md) 定义。
+每个域名在 `https://<domain>/.well-known/actr` 发布一份公开的 authority descriptor，说明
+该域名提供哪些 Actr 服务，并可携带 Realm 签名 key、Publisher Profile 和 Realm 链接前缀。
+它不定义运行时 Actor discovery、signaling、认证或 ICE configuration 的协议；`actr:` URI
+由 [Actr URI 规范](uri.zh.md) 定义。
 
 本文中的大写关键词 **MUST**、**MUST NOT**、**SHOULD**、**SHOULD NOT** 和 **MAY**
 按 BCP 14 解释。
 
 ## 2. Discovery URI
 
-对于 authority 为 `example.com` 的 `actr:` URI，discovery resource 为：
+对于域名 `example.com`，discovery resource 为：
 
 ```text
 https://example.com/.well-known/actr
 ```
 
-Actr authority 明确包含端口时，HTTPS origin 使用同一端口；未包含端口时，使用 HTTPS
-默认端口。
-
-discovery document 仅适用于取得它的确切 HTTPS origin，不会自动适用于父域、子域或其他
-端口。
+它使用 HTTPS 默认端口，只适用于该域名本身，不会自动适用于父域或子域。
 
 版本 1 不定义 `/.well-known/actr` 下的额外 path component，任何规范都不得为这类子路径
 赋予含义。特定于某个 Realm 或某个 publisher 的信息不通过子路径发现：descriptor 可以携带
@@ -93,13 +85,9 @@ response header，但不返回 response body。本文不定义其他 method 的�
     {
       "rel": "contracts",
       "href": "https://contracts.example.com/actr"
-    },
-    {
-      "rel": "packages",
-      "href": "https://packages.example.com/actr/packages",
-      "protocol": "actr-packages/1"
     }
-  ]
+  ],
+  "links": ["/i/"]
 }
 ```
 
@@ -114,8 +102,8 @@ JSON member name **MUST** 唯一。若 document 出现重复 member name、缺�
 
 ### 4.2 `authority`
 
-`authority` 是本文档所描述 authority 的规范 Actr authority URI。它包含 `actr` scheme 和
-authority，但不包含 target path、query、fragment 或 user information。
+`authority` 是本文档所描述域名的规范 `actr:` URI，即 `actr://<domain>`，不含 path、
+query 或 fragment。
 
 应用 Actr URI 规范的 normalization rule 后，客户端 **MUST** 验证该值与构造 discovery
 request 时使用的 authority 一致。redirect 不改变此绑定关系。
@@ -140,7 +128,6 @@ request 时使用的 authority 一致。redirect 不改变此绑定关系。
 | `discovery` | Actor 启动后，按依赖、contract 和 capability 发现可用的 Actor instance。 |
 | `ice-config` | 按 [Actr ICE Configuration](ice-configuration.zh.md) 获取 ICE server 配置，并在授权后取得短期 TURN credential。 |
 | `contracts` | 获取公开的 Actor contract 和 interface description。 |
-| `packages` | 将公开 URI Target 解析为入口 Actor Package 发布，并取得 `.actr` artifact。这是可变的部署映射；程序的哪些 release 可信，由 Publisher Profile 中签名的 `program_resolver` 决定（第 4.5 节）。 |
 | `realms` | 从存放位置获取以该域名命名的各 Realm 的签名 Realm Profile，见 [Actr Realm Profile](realm-profile.zh.md)。protocol 值为 `actr-realm-profile/1`。 |
 | `realm-management` | 接受该 authority 作为 Realm Provider 所服务 Realm 的 Realm 管理请求（`POST`），见 [Actr Realm Profile](realm-profile.zh.md) 第 8 节。protocol 值为 `actr-realm-management/1`。 |
 
@@ -158,9 +145,8 @@ link 在内的任何其他 Realm Provider。
 
 ### 4.4 `realm_signing_keys`
 
-`realm_signing_keys` 是可选 member。存在时，该 authority 不含端口的 DNS 名称即 Realm 名
-`<label>@<host>` 中的域名。带显式端口或以 IP literal 为 host 的 authority **MUST NOT**
-携带该 member；出现时客户端 **MUST** 忽略。
+`realm_signing_keys` 是可选 member。存在时，该域名即 Realm 名 `<realm_id>@<domain>` 中的
+域名。
 
 该 member 公布 Realm 签名 key，即以该域名命名的所有 Realm 的长期信任根：
 
@@ -210,7 +196,7 @@ link 在内的任何其他 Realm Provider。
 ### 4.5 `publisher`
 
 `publisher` 是可选 member，内嵌该 authority 的签名 Publisher Profile。存在时，该
-authority 不含端口的 DNS 名称即 Publisher ID。它取代独立的 publisher bootstrap 文件；
+域名即 Publisher ID。它取代独立的 publisher bootstrap 文件；
 规范 **MUST NOT** 为此另行定义 `/.well-known/actr/publisher.json` 或
 `/.well-known/actrium-publisher.json` 等 Well-Known 位置。
 
@@ -218,9 +204,6 @@ Publisher Profile 使用 snake_case member 名与 `"schema": "actr.publisher/v1"
 格式、key 角色与轮换规则留给 Actor Package 规范定义（第 10 节）。在 descriptor 层面：
 
 - `domain` **MUST** 等于 `authority` 的 host；
-- `program_resolver` 必填，给出把 `publisher/program@version` 映射到 release 元数据的
-  HTTPS 基址，没有默认位置。它位于签名 Publisher Profile 内，因此决定可信 release 的发布位置；未签名
-  的 `packages` relation 只把公开 URI Target 映射到入口 Package；
 - Publisher Profile 由 `active` 的 Publisher Profile 签名 key 签名，只凭自身签名验证，与 HTTPS 通道无关；
 - HTTPS（或企业 pin）只提供域名与 publisher key 之间的首次绑定；
 - 接受首个 Publisher Profile 后，sequence 与轮换校验按 Actor Package 规范执行，不受 descriptor
@@ -230,7 +213,17 @@ Publisher Profile 使用 snake_case member 名与 `"schema": "actr.publisher/v1"
 [Actr Realm Profile](realm-profile.zh.md) 第 8 节的 Actr 管理信封，由 `active` 的
 Publisher Profile 签名 key 签名，而不是在公开 descriptor 中放置 challenge。
 
-### 4.6 签名部分与未签名部分
+### 4.6 `links`
+
+`links` 是可选 member：路径前缀的数组，每项以 `/` 开头并以 `/` 结尾，至少含一段（不能只是 `/`），
+例如 `["/i/"]`。它声明本域名下哪些 https 路径是 Realm 链接：`https://<domain><前缀><realm_id>…`
+对应 `actr://<domain>/<realm_id>…`（[Actr URI 规范](uri.zh.md) 第 3 节）。
+
+- 前缀由域名自行选择，本规范不定义默认值。
+- Actr Host **MUST** 只按这里的声明转换 https 地址，**MUST NOT** 凭路径外观推断。
+- 多个前缀同时匹配时取最长者。
+
+### 4.7 签名部分与未签名部分
 
 descriptor 整体仍是由 HTTPS 保护、未签名的公开文档。`realm_signing_keys` 与 `publisher`
 只凭各自的签名验证；其中一个的有效签名不为任何其他 member 提供认证。第 6 节的文档大小
@@ -273,7 +266,7 @@ Access-Control-Allow-Origin: *
 ## 7. 版本与兼容性
 
 兼容修订可以增加 optional member、新的 URI-valued extension relation 或澄清，而无需更改
-`version`。`realms` relation 以及 `realm_signing_keys`、`publisher` member 都属于这类新增：
+`version`。`realms` relation 以及 `realm_signing_keys`、`publisher`、`links` member 都属于这类新增：
 未实现它们的客户端直接忽略。若修订改变现有 member 含义，或使原本有效的 descriptor 失效，则需要新的
 descriptor version。
 

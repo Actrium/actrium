@@ -1,7 +1,7 @@
 # Loran Realm v1 API 边界
 
 状态：本文只描述当前实现，不承诺旧 Issuer Signer/Publisher Registry HTTP API 兼容。当前实现仍是一个实例
-一个 Realm；目标契约是一个实例承载多个 Realm（Realm 名 `<label>@<domain>`），与本文
+一个 Realm；目标契约是一个实例承载多个 Realm（Realm 名 `<realm_id>@<domain>`），与本文
 不同的部分以「目标契约」标注，完整差异见
 [`REALM_V1_ARCHITECTURE.zh.md`](REALM_V1_ARCHITECTURE.zh.md) 第 9 节。历史名称见
 [术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」。
@@ -34,7 +34,7 @@ Signaling/TURN audience 与 endpoint。没有且仅有一个可用 Realm 时返�
 下不定义子路径」冲突，也无法表达多个 Realm。Realm 的发现改为该域名的 authority
 descriptor（`https://<domain>/.well-known/actr` 中的 `realm_signing_keys` 成员与
 `realms` relation，Actr Authority Discovery §4.3–4.4），Realm Profile 位于
-`<realms href>/<label>`，由 Realm 签名 key 签名。Loran 仅在 `realms` relation 指向
+`<realms href>/<realm_id>`，由 Realm 签名 key 签名。Loran 仅在 `realms` relation 指向
 本 Realm Provider 时提供 Realm Profile。
 
 ## Issuer
@@ -45,7 +45,7 @@ descriptor（`https://<domain>/.well-known/actr` 中的 `realm_signing_keys` 成
 注册能力，不得下发给 Rill Guest。签发的 Actor credential claims 固定包含：
 
 - `protocol_version = 1`
-- `issuer`：当前实现为由数值 realm_id 派生的字符串；目标契约为 Realm 名，例如
+- `issuer`：当前实现为由数值 Realm 句柄派生的字符串；目标契约为 Realm 名，例如
   `k7m2q9xh@acme.com`
 - `provider`：当前实现为固定常量；目标契约为 Realm Provider 的规范化 DNS authority，例如
   `provider.example`
@@ -106,10 +106,10 @@ ActorId 的字符串形式，当前实现为：
 
 目标契约为：
 
-`<serial_hex>.<label>@<domain>`
+`<serial_hex>.<realm_id>@<domain>`
 
 例如 `2af01.k7m2q9xh@acme.com`。程序类型 `publisher/program@version` 不在 ActorId 中，
-由注册与 Actor credential 携带；数值 realm_id 只作 Realm Provider 内部句柄。
+由注册与 Actor credential 携带；数值 Realm 句柄只在 Realm Provider 内部使用。
 
 可下载 package 的 publisher 必须是规范 DNS 域名；linked/local workload 可以使用
 Actr Host 管理的非 DNS publisher 值，但不能借此进入 Publisher Registry。
@@ -133,7 +133,7 @@ Realm secret，但不提供硬删除或替换另一个 Realm；替换属于停�
 
 目标契约：每实例承载多个 Realm。创建需经 Realm 签名 key 持有方授权，并经 Realm Profile
 验证后才从 `pending` 转为 `active`；退役由持有方发布退役 Realm Profile 触发，Loran 在单一
-事务中撤销该 Realm 的状态并写入以 Realm 名为键的 Realm Provider tombstone，Realm 名与 `realm_id` 均不复用。
+事务中撤销该 Realm 的状态并写入以 Realm 名为键的 Realm Provider tombstone，Realm 名与数值 Realm 句柄均不复用。
 
 ## Schema migration
 

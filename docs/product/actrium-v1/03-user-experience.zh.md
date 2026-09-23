@@ -27,11 +27,10 @@ Actro Shell
 
 回答「我已经创建了什么」：
 
-- Service ActorId；
+- 实例地址（Realm 链接）与 Realm 名；
 - 程序和精确版本；
 - Workspace 显示名；
 - Local/Remote 运行位置；
-- Realm 名（Realm label + Realm 域名）；
 - 生命周期、可达性、健康度和会话占用四组独立状态；
 - 最近打开时间和当前 Tab；
 - 启动、停止、打开、导出链接、迁移、归档、移入回收站和彻底清除等操作。
@@ -40,13 +39,13 @@ Program 与 Service 必须在 UI 和数据模型中分开。安装一个程序�
 
 ## 2. 地址栏
 
-地址栏同时表达三个问题：
+地址栏显示的是实例地址（Realm 链接，见 [04](04-uri-and-resolution.zh.md)），回答三个问题：
 
 | 信息 | 来源 | 用户问题 |
 |---|---|---|
-| `publisher/program@version` | URI 主体 | 我正在运行谁发布的哪个版本？ |
-| `service=<ActorId>` | URI 查询参数 | 我是在创建，还是连接哪个现有实例？ |
-| Realm 名 | Service ActorId；Create 时可选 `domain` 参数选择新 Realm 的域名 | 这个实例属于哪个 Realm，由哪个域名签发？ |
+| Realm 名 | 地址本身（`actr://<Realm 域名>/<realm_id>`） | 这是哪个实例？信任根是谁？ |
+| 程序（Publisher、程序名、版本） | Realm Profile 所指包的 manifest | 这个实例运行的是谁发布的哪个版本？ |
+| 页面路径 | 地址中 RealmId 之后的部分 | 我在应用里的哪一页？ |
 
 ### 2.1 安全指示
 
@@ -63,12 +62,12 @@ Program 与 Service 必须在 UI 和数据模型中分开。安装一个程序�
 
 只有 `Ready` 且应用结论为 `CONTROLLED` 才能显示绿色。黄不等于已知泄露，但同样不能显示绿色。挂起或切面过期时显示「正在重新验证 / 通信已阻断」。点击必须能看到当前策略、Actor 数、workload 种类、声明出口、最弱项、所信验证者和结论有效期。
 
-### 2.2 创建与连接的可见差异
+### 2.2 新建与打开的可见差异
 
-- 无 `service`：显示「将创建新实例」，同时显示新 Realm 将建立在哪个域名下。
-- 有 `service`：显示实例名或 ActorId 短指纹，提示「连接现有实例」。
-- 创建完成后地址栏必须立即变成带 `service` 的规范化 URI。
-- 连接失败时地址栏保持原 URI，不自动删除 `service`。
+- 新建实例在 Shell 的新建页完成，页面显示「将创建新实例」和新 Realm 所在的域名；新建页不对应任何链接，不能被收藏或分享。
+- 打开链接时显示实例名（`display_name`）与 Realm 名，提示「打开现有实例」。
+- 新建完成后地址栏立即变成新实例的规范化地址。
+- 打开失败时地址栏保持原地址。
 
 ## 3. 首次启动
 
@@ -81,7 +80,7 @@ Actro 首次启动完成以下配置：
 5. 展示 Program Catalog 和 Service Inventory 的区别；
 6. 默认关闭匿名遥测和开发模式。
 
-首次启动不创建任何 Realm；每个本机实例在创建时获得自己的本机 Realm。本机 Realm 允许离线运行本机 Front 与 Service，但其 URI 只在该 Actro 安装内可解析。跨设备连接需要先把 Service 迁移到 Realm 域名下的新 Realm，并获得新的 ActorId。
+首次启动不创建任何 Realm；每个本机实例在创建时获得自己的本机 Realm。本机 Realm 允许离线运行本机 Front 与 Service，但其地址只在该 Actro 安装内可解析。跨设备连接需要先把实例迁移到 Realm 域名下的新 Realm，得到新的地址。
 
 ## 4. 安装程序
 
@@ -89,21 +88,16 @@ Actro 首次启动完成以下配置：
 
 1. 用户打开程序详情；
 2. Actro 显示 Publisher、版本、digest、权限、Workspace 模式和市场审核状态；
-3. Actro 从 Publisher HTTPS 入口解析并下载 `.actr`；
+3. Actro 按 Marketplace 或 Publisher 给出的包地址下载 `.actr`；
 4. 校验 HTTPS、Publisher key、包签名、digest、兼容性和压缩包限制；
 5. 记录 Program Release；
 6. 只缓存程序，不自动创建 Service，除非用户点击「创建实例」。
 
-Marketplace 返回的下载地址不是最终信任源；Actro 必须回到 Publisher 可信元数据或校验已固定的 Publisher 签名和 digest。
+下载地址不是信任源；Actro 以包签名（经 Publisher Profile 验证）和 digest 为准。
 
-### 4.2 从 `actr://` URI
+### 4.2 打开链接时
 
-如果 Program Release 尚未安装：
-
-- 先进入受控安装页；
-- 显示完整来源和权限；
-- 安装成功后继续原 Create/Attach Intent；
-- 取消安装不产生 Service 或 Front Actor。
+包尚未安装时按 [04 §3](04-uri-and-resolution.zh.md) 处理：先确认、再下载验证；取消则不产生 Service 或 Front Actor。
 
 ### 4.3 本地导入
 
@@ -123,24 +117,24 @@ Marketplace 返回的下载地址不是最终信任源；Actro 必须回到 Publ
 sequenceDiagram
     actor U as 用户
     participant A as Actro Shell
-    participant P as Package Resolver
+    participant P as 包校验
     participant M as Service Manager
-    participant S as Service Actor
+    participant S as Service
     participant F as Front Actor
 
-    U->>A: 打开无 service 的 actr:// URI
-    A->>P: 解析并验证 Program Release
+    U->>A: 在 Program Catalog 点「创建实例」（或导入包、输入包地址）
+    A->>P: 下载并验证包
     P-->>A: package digest + manifest
-    A->>U: 权限、Realm 域名与 Realm label、Workspace 确认
+    A->>U: 权限、Realm 域名与 RealmId、Workspace 确认
     U-->>A: 确认创建
-    A->>M: Create(idempotency_key, package, workspace, domain, label, display_name)
+    A->>M: Create(idempotency_key, package, workspace, domain, realm_id, display_name)
     M->>M: 取得 Realm 签名 key 持有方授权
     M->>M: Realm Provider 创建 pending Realm
-    M->>M: 签名 Realm Profile 并提交激活，Realm 变为 active，取得 Realm membership
+    M->>M: 签名 Realm Profile（含 package）并提交激活，Realm 变为 active，取得 Realm membership
     M->>S: 在新 Realm 内持久化身份并启动 Service
     S-->>M: stable ActorId
     M-->>A: Service record + ActorId
-    A->>A: replace URI with service=ActorId
+    A->>A: 地址栏换成新实例的 Realm 链接（replace）
     A->>F: 启动固定 Native Front workload
     F->>S: Attach handshake
     S-->>F: session lease + contract
@@ -148,18 +142,18 @@ sequenceDiagram
     A-->>U: 显示程序
 ```
 
-### 5.2 Realm 域名与 Realm label
+### 5.2 Realm 域名与 RealmId
 
 每个新实例都会新建一个 Realm，确认页显示：
 
 - Realm 域名：默认创建本机 Realm；可选任一已信任的 Realm 域名。没有域名就不分配 Realm（本机 Realm 除外）；没有自己域名的用户使用 Realm Provider 在其域名下分配的 Realm；
-- `label`：Actro 默认生成完全随机的短串（如 `k7m2q9xh`，base32 小写），不含程序名或用户输入；可读名称写入 `display_name` 显示给用户，只在本地和 Realm Profile 中出现，不进入 ActorId；用户也可以显式改用可读的 `label`（如 `notes`），确认页提示可读名会随分享链接暴露；
+- `realm_id`：Actro 默认生成完全随机的短串（如 `k7m2q9xh`，base32 小写），不含程序名或用户输入；可读名称写入 `display_name` 显示给用户，只在本地和 Realm Profile 中出现，不进入 ActorId；用户也可以显式改用可读的 `realm_id`（如 `notes`），确认页提示可读名会随分享链接暴露；
 - 创建须经该 Realm 域名的 Realm 签名 key 持有方授权。Realm 域名等于或属于 Realm Provider ID 时，确认页提示信任根即该 Realm Provider，用户登录其 Realm Provider 账号（OAuth 2.0 + PKCE，首次登录后 Actro 保存会话），Realm 管理权绑定该账号，换机或丢失客户端后重新登录即可恢复；其他 Realm 域名由持有方的签名服务按其自身策略认证当前用户后签署 Actr 管理信封与 Realm Profile，确认页显示信任根为该 Realm 域名（受托代持对用户不可见）；
 - 授权被拒或持有方不可达时给出明确错误，不回落到其他 Realm 域名。
 
 Realm 域名尚未受信时，必须在确认页完成首次信任。
 
-`label` 创建后不可修改；同一 Realm 域名内已用过的 Realm label 不能再次使用。
+RealmId 创建后不可修改；同一 Realm 域名内已用过的 RealmId 不能再次使用。
 
 ### 5.3 Workspace 选择
 
@@ -182,37 +176,36 @@ Manifest 必须分别声明三个维度，不能把它们压进一个枚举：
 
 ### 5.4 创建幂等
 
-同一次导航事务必须携带本地持久化的 `idempotency_key`（即 Create Intent 的标识）：
+同一次新建必须携带本地持久化的 `idempotency_key`：
 
 - UI 重绘、网络重试、回退再前进和包下载重试不能重复创建；
 - 创建成功但 Front 启动失败时，Service 仍进入 Inventory，页面提供「重试连接」；
-- 用户再次显式打开同一个无 `service` URI，表示新的 Create Intent，需要再次确认；
+- 用户再次点「创建实例」表示一次新的新建，需要再次确认；
 - 外部来源短时间批量触发创建必须受配额和速率限制。
 
-Create 事务按「持有方授权 → pending Realm → 签名 Realm Profile 并提交激活 → Realm active → 创建 Service Actor」顺序执行：
+新建按「持有方授权 → pending Realm → 签名 Realm Profile 并提交激活 → Realm active → 创建 Service」顺序执行：
 
-- 在 Realm 变为 active 之前的任一步失败，都不创建 Service Actor，Inventory 中不出现半成品实例；页面说明失败在哪一步（授权被拒、Realm Provider 不可达、Realm Profile 发布失败），并提供重试；
-- 默认随机的 Realm label 在创建 Create Intent 时生成一次并随之持久化，重试不会重新生成；
-- 重试沿用同一 `idempotency_key`，继续同一个 pending Realm 与同一 `label`，不重复创建；若 Realm 已激活但响应丢失，重试只返回其状态，Realm 管理 token 用 `reissue_admin_token` 取回；
+- 在 Realm 变为 active 之前的任一步失败，都不创建 Service，Inventory 中不出现半成品实例；页面说明失败在哪一步（授权被拒、Realm Provider 不可达、Realm Profile 发布失败），并提供重试；
+- 默认随机的 RealmId 在开始新建时生成一次并随之持久化，重试不会重新生成；
+- 重试沿用同一 `idempotency_key`，继续同一个 pending Realm 与同一 RealmId，不重复创建；若 Realm 已激活但响应丢失，重试只返回其状态，Realm 管理 token 用 `reissue_admin_token` 取回；
 - 用户放弃后，pending Realm 由 Realm Provider 过期自动清理。
 
 ## 6. 连接已有实例
 
 ### 6.1 主流程
 
-1. 解析 URI；
-2. 从 Service ActorId 解析 Realm 名，获取该域名的 Realm 签名 key 与 Realm Profile 并验证签名；
-3. 验证 ActorId 中的 `ActrType` 与 URI coordinate 完全一致；
-4. 确保精确 Program Release 已安装并匹配 digest；
-5. 连接指定 ActorId；
-6. 完成双方身份和 challenge 验证；
-7. 协商 Front–Service contract；
-8. 获取独占 lease；
-9. 加载 Keel Guest。
+1. 解析 Realm 链接，得到 Realm 名；
+2. 获取该域名的 Realm 签名 key 与 Realm Profile 并验证签名；
+3. 按 Realm Profile 的 `package` 确保包已安装且 digest 一致；
+4. 经 Realm Profile 指定的 Realm Provider，在该 Realm 内找到 Actor 类型与包相同的 Service；
+5. 完成双方身份和 challenge 验证；
+6. 协商 Front–Service contract；
+7. 获取独占 lease；
+8. 加载 Keel Guest。
 
 ### 6.2 本机重复打开
 
-如果已有活跃 Tab 连接同一 ActorId：
+如果已有活跃 Tab 打开了同一实例：
 
 - 默认聚焦已有 Tab；
 - 用户显式选择「在新 Tab 打开」时，v1 提示该实例为独占会话；
@@ -233,15 +226,15 @@ Create 事务按「持有方授权 → pending Realm → 签名 Realm Profile �
 Actro UI 中有两类 Tab：
 
 - **Shell Navigation Tab**：安装、创建确认、错误详情、Program 和 Service 管理页面；它不代表应用运行，因此可以没有 Front Actor。
-- **Resident App Tab**：处于 loading、running 或 suspended 的应用页；任一时刻必须恰有一个 live Front Actor，并且 Front 完成 Attach 后恰有一个 Primary Service。
+- **Resident App Tab**：处于 loading、running 或 suspended 的应用页；任一时刻必须恰有一个 live Front Actor，并且 Front 完成 Attach 后恰有一个 Service。
 
 内存压力下被淘汰的应用页进入 dormant 状态，此时可暂时没有 Front；重新激活时必须重建 Front 并 Attach 原 Service。产品文案所说的「每个 Tab 一个 Actor」特指 resident app Tab，而不是所有 Shell 页面或磁盘中的休眠记录。
 
 ### 7.1 新建
 
-- 创建 URI：走 Create Intent。
-- 连接 URI：走 Attach Intent。
-- 从 Service Inventory 点「打开」：构造连接 URI。
+- 新建实例：打开 Shell 新建页，走第 5 节流程。
+- 打开实例链接：连接该实例。
+- 从 Service Inventory 点「打开」：使用该实例的地址。
 
 ### 7.2 刷新
 
@@ -252,7 +245,7 @@ Actro UI 中有两类 Tab：
 - 不升级版本；
 - Guest 临时 UI 状态可以丢失，业务状态不可丢失。
 
-如果地址仍处于创建前，刷新继续同一个 `idempotency_key` 或回到确认页。
+新建页上刷新时，继续同一个 `idempotency_key` 或回到确认页。
 
 ### 7.3 关闭
 
@@ -288,33 +281,28 @@ Guest 崩溃不得自动重启 Service。Service 崩溃则显示单独状态，�
 
 ## 8. 历史、收藏与分享
 
-### 8.1 两类收藏
+### 8.1 收藏
 
-Actro 必须明确区分：
-
-- **程序模板收藏**：不含 `service`，每次打开都创建新实例。
-- **实例收藏**：含 `service`，回到同一 Service。
-
-UI 文案不得都叫「收藏页面」。
+地址栏收藏的都是实例，打开即回到同一实例。想常用某个程序，在 Program Catalog 里收藏程序，从那里新建实例；两者文案不得混同。
 
 ### 8.2 历史
 
-- 创建成功后只记录规范化连接 URI；
+- 新建成功后只记录该实例的规范化地址；
 - 创建确认页可以记录为非持久导航事件，不加入同步历史；
-- ActorId 不是秘密，但历史同步设置应允许用户排除实例 URI；
+- 实例地址不是秘密，但历史同步设置应允许用户排除实例地址；
 - URL 中绝不记录 credential、Workspace path 或 Realm 邀请。
 
 ### 8.3 分享
 
-分享实例 URI只分享地址，不自动授予访问权：
+分享实例只分享地址，不自动授予访问权。Realm 域名声明了 `links` 时分享 https 形式，对方没有 Actro 也能打开说明网页；否则分享 `actr://` 形式。
 
 - 接收者仍需加入该实例的 Realm；
 - 应用权限必须允许；
 - 邀请通过该 Realm 与 Service 的独立授权流程完成；
 - bearer token 不进入 URI query 或 fragment；
-- 实例 URI 中的 ActorId 会暴露 Realm 域名与 `label`；分享私密实例前应提示这一点，若实例使用了可读 `label`，分享前应额外提示。
+- 实例地址会暴露 Realm 域名与 RealmId；分享私密实例前应提示这一点，若实例使用了可读 RealmId，分享前应额外提示。
 
-本机 Realm 实例没有 portable link。「复制链接」只能复制明确标记的本机链接；真正分享前必须迁移到 Realm 域名下的新 Realm，并获得新的 ActorId。
+本机 Realm 实例不能分享，「复制链接」禁用；要分享必须先迁移到 Realm 域名下的新 Realm，得到新的地址。
 
 ## 9. Program Catalog 体验
 
@@ -340,10 +328,9 @@ Program Catalog 只能显示 Release assurance（签名、digest、撤销、审�
 每个实例显示：
 
 - 用户名称；
-- ActorId 短指纹和复制入口；
+- Realm 名和「复制链接」入口；
 - Program Release；
 - Workspace；
-- Realm 名；
 - 本地/远端；
 - 运行状态；
 - 当前会话；
@@ -373,7 +360,7 @@ Service Inventory 可以显示最后一次观察到的应用结论与时间，�
 
 | 错误 | 用户含义 | 主要操作 |
 |---|---|---|
-| Program not found | Publisher 没有该版本 | 检查地址、选择已安装版本 |
+| Package unavailable | Realm Profile 所指的包下载失败，或 digest、签名不符 | 重试；联系实例管理员 |
 | Publisher untrusted | Publisher 域名或 key 未受信 | 查看证书/开发模式 |
 | Digest conflict | 同版本出现不同内容 | 阻止运行、查看安全报告 |
 | Package revoked | 版本被撤销 | 查看原因、隔离运行或删除 |
@@ -400,7 +387,7 @@ Service Inventory 可以显示最后一次观察到的应用结论与时间，�
 开发者模式提供：
 
 - 导入本地 `.actr`；
-- 配置 `actr-dev://` HTTPS Origin；
+- 使用 localhost 或私有 CA 上的包地址（标记为开发来源）；
 - 查看 manifest、digest、contract 与 capability；
 - 热更新 Guest，但每次变更使用新的开发 digest；
 - 启动本机 Realm 与 Service；
@@ -408,7 +395,7 @@ Service Inventory 可以显示最后一次观察到的应用结论与时间，�
 - 查看 Keel render ops、CPU、heap、timer 和 capability 调用；
 - 模拟权限拒绝、离线、TURN、Service 崩溃和 Front 重建。
 
-开发模式不改变正式 URI 和正式 Publisher 的信任规则。
+开发模式不改变正式地址和正式 Publisher 的信任规则。
 
 ## 13. 可访问性与国际化
 
@@ -452,7 +439,7 @@ Service 的最小应用权限角色为：
 5. 应用权限记录主体和角色，邀请随即失效；
 6. owner 可以撤销应用权限；下一次调用必须失败，活跃会话按策略立即终止或降权。
 
-只复制实例 URI 不改变应用权限。邀请过期、已使用、被撤销和 Realm 不匹配必须是不同错误。
+只复制实例地址不改变应用权限。邀请过期、已使用、被撤销和 Realm 不匹配必须是不同错误。
 
 ## 16. 权限授予时机
 
@@ -465,9 +452,9 @@ Service 的最小应用权限角色为：
 
 ## 17. 远端 Service 的来源与管理边界
 
-v1 的 Create Intent 只在当前 Actro 支持的本地 Service Host 上创建。远端 Service 通过以下途径进入 Inventory：
+v1 新建实例只在当前 Actro 支持的本地 Service Host 上创建。远端 Service 通过以下途径进入 Inventory：
 
-- 打开已有 Attach URI；
+- 打开已有实例的链接；
 - 接受 Service 邀请；
 - 从同一用户的加密 Inventory 同步实例地址；
 - 显式导入带签名的 Service 元数据。
@@ -478,12 +465,12 @@ Actro 只有在远端宿主另行授予 management capability 时，才能远程
 
 Guest 不能直接改写 Shell 地址栏，只能调用 `host:navigate`：
 
-- 同一 Program 内的 route/query 使用 `push` 或 `replace`，保留当前 `service`；
-- 跳转到无 `service` 的 `actr://` URI 会触发新的 Create Intent 和确认页；
-- 跳转到另一实例会触发 Attach Intent，不能把当前 capability 带过去；
+- 同一实例内的 route/query 使用 `push` 或 `replace`；
+- 跳转到另一个实例的链接即打开那个实例，不能把当前 capability 带过去；
+- Guest 不能通过链接新建实例；
 - `https://` 外链交给系统浏览器或受控 WebView，并显示目标域名；
 - route 和 query 必须受长度、字符和敏感字段策略约束；
-- back/forward 重放的是规范化 URI，不重放应用权限 token 或 RPC。
+- back/forward 重放的是规范化地址，不重放应用权限 token 或 RPC。
 
 ## 19. Publisher 开发与发布路径
 
@@ -495,10 +482,10 @@ actro init
 → build
 → validate（schema、capability、hash、沙箱兼容性）
 → sign
-→ 生成/更新 Publisher Profile 与 Release Descriptor
+→ 生成/更新 Publisher Profile
 → 上传 package
-→ 从公网按 coordinate 回读验证
+→ 按包地址回读，核对 digest 与签名
 → 可选提交 Marketplace 审核
 ```
 
-Publisher key 创建、轮换、撤销和离线 root 备份必须有明确命令与恢复说明。开发热更新只服务 `actr-dev://`，不能覆写已经发布的精确版本。
+Publisher key 创建、轮换、撤销和离线 root 备份必须有明确命令与恢复说明。开发热更新只服务开发来源，不能覆写已经发布的精确版本。

@@ -7,7 +7,7 @@
 | ID | 需求 |
 |---|---|
 | FR-SH-001 | 每个 resident app Tab 在 loading/running/suspended 期间必须恰有一个 live Front Actor；Shell 页面与 dormant Tab 可以没有 Front。 |
-| FR-SH-002 | Front Actor 完成启动后必须绑定且只绑定一个 Primary Service Actor。 |
+| FR-SH-002 | Front Actor 完成启动后必须绑定且只绑定一个 Service。 |
 | FR-SH-003 | 刷新必须重建 Front 并连接同一 Service，不得新建 Service。 |
 | FR-SH-004 | 关闭 Tab 必须撤销 session 并销毁 Front，不得停止或删除 Service。 |
 | FR-SH-005 | 后台 Tab 必须 pause Keel Engine；恢复必须 resume 或重建后 Attach。 |
@@ -19,36 +19,34 @@
 
 | ID | 需求 |
 |---|---|
-| FR-URI-001 | 必须支持 `actr://publisher/program@exact-version`。 |
-| FR-URI-002 | 无 `service` 必须解析为 Create Intent。 |
-| FR-URI-003 | 有 `service` 必须解析为 Attach Intent。 |
-| FR-URI-004 | Attach 失败不得 LB、降级版本或创建替代实例。 |
-| FR-URI-005 | `service` Actor 的 credential 中的 Actor 类型必须与 URI coordinate 完全匹配（ActorId 本身不含类型）。 |
-| FR-URI-006 | 创建成功必须 replace 为带 `service` 的 URI。 |
-| FR-URI-007 | portable Attach URI 必须携带可解析的 Realm 名（`<label>@<domain>`，domain 为 DNS 域名）。 |
-| FR-URI-008 | URI 不得包含 credential、session secret、Workspace secret 或 bearer invite。 |
-| FR-URI-009 | 正式 Publisher authority 不得含端口；开发来源使用 `actr-dev://`。 |
-| FR-URI-010 | Parser 必须实施 IDNA、重复保留参数、非法编码和控制字符检查。 |
-| FR-URI-011 | Create URI 必须用 `domain` 参数选择 Realm 域名，省略时创建本机 Realm；`realm` 参数只允许用于 legacy Attach 导入。 |
+| FR-URI-001 | 必须支持 Realm 链接 `actr://<Realm 域名>/<realm_id>[/<页面路径>][?…][#…]`；RealmId 之后的部分原样交给应用。 |
+| FR-URI-002 | 打开 Realm 链接必须取得并验证 Realm Profile，按其 `package` 下载并验证包，再在该 Realm 内按包的 Actor 类型找到 Service 并 Attach。 |
+| FR-URI-003 | Attach 失败不得 LB、降级版本、换 Realm 或创建替代实例。 |
+| FR-URI-004 | Service 的 Actor 类型必须与 Realm Profile 所指包声明的 Actor 类型一致。 |
+| FR-URI-005 | Realm 链接不得包含 credential、session secret、Workspace secret 或 bearer invite。 |
+| FR-URI-006 | Realm 链接不得含端口；开发来源只通过包地址（localhost、回环地址或私有 CA）区分。 |
+| FR-URI-007 | https 形式只能按 Realm 域名 authority descriptor 中 `links` 的声明转换，不得凭路径外观推断。 |
+| FR-URI-008 | Parser 必须实施 IDNA、非法编码和控制字符检查。 |
+| FR-URI-009 | 新建实例是 Actro 本地操作，不由链接触发；成功后地址栏显示该实例的 Realm 链接。 |
 
 ### 1.3 Program Catalog 与分发
 
 | ID | 需求 |
 |---|---|
 | FR-PKG-001 | Program Catalog 与 Service Inventory 必须分开。 |
-| FR-PKG-002 | coordinate 必须经 Publisher authority descriptor（`/.well-known/actr`）中 `publisher` 成员声明的 `program_resolver` 解析。 |
-| FR-PKG-003 | 每个精确 coordinate 必须固定 package digest。 |
+| FR-PKG-002 | package 必须来自 Realm Profile 的 `package` 或用户选定的来源，并核对 SHA-256。 |
+| FR-PKG-003 | 每个 Program Release 必须固定 package digest。 |
 | FR-PKG-004 | `.actr` 必须校验 Publisher key、manifest signature 和所有文件 hash。 |
 | FR-PKG-005 | 必须拒绝 zip traversal、超限文件数、解压总量和压缩炸弹。 |
 | FR-PKG-006 | 第三方 package 不得包含 Front Host/native plugin。 |
 | FR-PKG-007 | Guest 必须从已验证本地 bytes 加载，不得由 Keel 直接信任远端 URL。 |
-| FR-PKG-008 | 同 coordinate 不同 digest 必须 hard fail。 |
+| FR-PKG-008 | 同一 Program Release 出现不同 digest 必须 hard fail。 |
 | FR-PKG-009 | 仍被 Service 引用的 package digest 不得被缓存清理。 |
 | FR-PKG-010 | Marketplace metadata 不得覆盖 Publisher package identity。 |
 | FR-PKG-011 | 必须支持本地 `.actr` 和明确标记的开发来源。 |
 | FR-PKG-012 | 必须支持 Advisory/Block new/Quarantine/Critical block 撤销等级。 |
-| FR-PKG-013 | Publisher bootstrap 必须固定 HTTPS 443；Publisher Profile 与 Release 必须有规范化签名、序号/时效和回滚保护。 |
-| FR-PKG-014 | 官方发布工具必须支持 build、validate、sign、发布 metadata，并从公网按 coordinate 回读验证。 |
+| FR-PKG-013 | Publisher bootstrap 必须固定 HTTPS 443；Publisher Profile 必须有规范化签名、序号/时效和回滚保护。 |
+| FR-PKG-014 | 官方发布工具必须支持 build、validate、sign，并回读验证已发布包的 SHA-256 与签名。 |
 
 ### 1.4 Front/Keel
 
@@ -59,7 +57,7 @@
 | FR-FRONT-003 | 必须固定 QuickJS 并启用硬 timeout 与 heap cap。 |
 | FR-FRONT-004 | Guest 模块、capability、组件和 RemoteRef 必须白名单。 |
 | FR-FRONT-005 | Guest 不得获得默认 fetch/socket/filesystem/native module。 |
-| FR-FRONT-006 | Guest 只获得固定 target 的 PrimaryService capability。 |
+| FR-FRONT-006 | Guest 只获得固定 target 的 Service capability。 |
 | FR-FRONT-007 | 所有 Guest RPC/input/output/event 必须 schema validate。 |
 | FR-FRONT-008 | Image 和资源组件不得形成未声明网络出口。 |
 | FR-FRONT-009 | Engine close/crash 必须清理 timer、callback、listener 和 capability。 |
@@ -78,13 +76,13 @@
 | FR-SVC-007 | 创建事务必须幂等且崩溃可恢复。 |
 | FR-SVC-008 | Stop、Archive、Delete Service 与 Delete Workspace 必须是不同操作。 |
 | FR-SVC-009 | 第三方 Service 默认必须使用受限 WASM Component workload。 |
-| FR-SVC-010 | Service 可以编排辅助 Actor，但 Front 仍只绑定 Primary Service。 |
+| FR-SVC-010 | Service 可以编排 Realm 内的其他 Actor，但 Front 只绑定 Service。 |
 | FR-SVC-011 | v1 版本升级必须走新 Actor + 显式迁移。 |
 | FR-SVC-012 | Service 彻底清除后 ActorId 不得复用。 |
 | FR-SVC-013 | Workspace 必须分别声明 requirement、provisioning、access 与允许的 Workspace Provider（`providers`）。 |
 | FR-SVC-014 | 移入回收站必须保留身份与实例数据并可恢复；彻底清除必须撤销身份且不可恢复。 |
 | FR-SVC-015 | 生命周期、可达性、健康度、placement 与 attachment 状态必须分字段记录。 |
-| FR-SVC-016 | v1 Create Intent 只在当前设备的受支持本地 Actr Host 创建；远端管理必须另有宿主授予的 management capability。 |
+| FR-SVC-016 | v1 新建实例只在当前设备的受支持本地 Actr Host 创建；远端管理必须另有宿主授予的 management capability。 |
 
 ### 1.6 Realm、身份与网络
 
@@ -93,7 +91,7 @@
 | FR-NET-001 | Actro 必须内置 signaling client 和本机 Realm 支持，不写死唯一全球服务器。 |
 | FR-NET-002 | 域名的 Realm 签名 key（authority descriptor 的 `realm_signing_keys` 成员，已在 Actr Authority Discovery §4.4 定义）必须通过 HTTPS 获取；Realm Profile 必须由已信任的 Realm 签名 key 签名，其有效性不取决于获取位置。 |
 | FR-NET-003 | 一个 Realm 必须可委派多个 signaling/TURN endpoint。 |
-| FR-NET-004 | v1 Front 与 Primary Service 必须处于同一 Realm，即同一应用实例的 Realm；类型发现只在本 Realm 内进行。 |
+| FR-NET-004 | v1 Front 与 Service 必须处于同一 Realm，即同一应用实例的 Realm；类型发现只在本 Realm 内进行。 |
 | FR-NET-005 | Actor credential 必须绑定 ActorId、Actor key、Actor 类型、Realm 和有效期。 |
 | FR-NET-006 | Service identity 必须支持凭长期 key reclaim 同一 ActorId。 |
 | FR-NET-007 | signaling credential 不得放入长期 URL query。 |
@@ -102,14 +100,13 @@
 | FR-NET-010 | endpoint 可以使用非标准端口，但必须来自可信 Realm Profile 或 Publisher Profile。 |
 | FR-NET-011 | Service offline 必须是可区分状态，不能退化为同类型发现。 |
 | FR-NET-012 | v1 的多个 signaling endpoint 只能作为同一 Realm 控制面的 failover，不支持隐式跨控制面 federation。 |
-| FR-NET-013 | 本机 Realm 的 ActorId 必须使用本机伪域名 `<installation-id>.actr.alt`，禁止复制为跨设备 portable link。 |
-| FR-NET-014 | Service 不得仅凭 Front 自报的 Actor 类型、Actr Host 版本或 digest 授予高风险权限；需要时必须验证独立 attestation。 |
+| FR-NET-013 | 本机 Realm 的 ActorId 必须使用本机伪域名 `<installation-id>.actr.alt`，禁止复制为跨设备链接。 |
 | FR-NET-015 | Realm 域名 bootstrap（`https://<domain>/.well-known/actr`）必须固定 HTTPS 443，并以 Realm 签名 key 轮换链与 Realm Profile 序号防回滚（Realm Profile 不设过期时间）。 |
 | FR-NET-016 | Actro 必须提供域名信任、经 Realm 邀请加入实例 Realm、重新认证、客户端撤销、离开和 Realm 签名 key 变化处置流程。 |
-| FR-NET-017 | Create Intent 必须在所选域名下新建一个 Realm；`label` 在域名内唯一、创建后不可修改、退役后不复用。 |
-| FR-NET-018 | Service 升级为新 Program Release 时，新 Service Actor 必须创建在同一 Realm；迁移到另一个 Realm 必须产生新 ActorId。 |
+| FR-NET-017 | 新建实例必须在所选域名下新建一个 Realm；RealmId 在域名内唯一、创建后不可修改、退役后不复用。 |
+| FR-NET-018 | Service 升级为新 Program Release 时，Realm 必须发布 `package` 指向新包的 Realm Profile，新 Service 必须创建在同一 Realm；迁移到另一个 Realm 必须产生新 ActorId。 |
 | FR-NET-019 | 取不到、验不过或已退役的 Realm Profile 时，Actro 不得使用 Realm Profile 以外的任何 Realm Provider（包括 authority descriptor `services` 中的服务）与该 Realm 通信。 |
-| FR-NET-020 | Create 指向的 Realm 域名必须已受信，或在 Create 确认页完成首次信任；没有域名不分配 Realm（本机 Realm 除外）；创建须经该 Realm 域名的 Realm 签名 key 持有方授权：Realm 域名等于或属于 Realm Provider ID 时由该 Realm Provider 以 Realm Provider 账号认证用户，确认页显示其为信任根；其他 Realm 域名由持有方的签名服务签署 Actr 管理信封，确认页显示信任根为该 Realm 域名。 |
+| FR-NET-020 | 新建实例所选的 Realm 域名必须已受信，或在新建确认页完成首次信任；没有域名不分配 Realm（本机 Realm 除外）；创建须经该 Realm 域名的 Realm 签名 key 持有方授权：Realm 域名等于或属于 Realm Provider ID 时由该 Realm Provider 以 Realm Provider 账号认证用户，确认页显示其为信任根；其他 Realm 域名由持有方的签名服务签署 Actr 管理信封，确认页显示信任根为该 Realm 域名。 |
 
 ### 1.7 Permission、安全与隐私
 
@@ -267,9 +264,9 @@
 
 ### AC-001：首次创建
 
-**Given** 用户未安装 `notes.example/team-notes@1.4.2`<br>
-**When** 打开无 `service` URI并确认权限/Workspace<br>
-**Then** Actro 验证 package、只创建一个 Service、获得持久 ActorId、改写 URI、Attach 并显示 Guest。
+**Given** 用户在 Program Catalog 选中未安装的 `notes.example/team-notes@1.4.2`<br>
+**When** 新建实例并确认权限/Workspace<br>
+**Then** Actro 验证 package、只创建一个 Realm 与一个 Service、获得持久 ActorId、地址栏显示该实例的 Realm 链接、Attach 并显示 Guest。
 
 ### AC-002：刷新不重复创建
 
@@ -279,20 +276,20 @@
 
 ### AC-003：精确实例 offline
 
-**Given** Attach URI 指向 offline Service<br>
-**When** 打开 URI<br>
+**Given** Realm 链接所指实例的 Service offline<br>
+**When** 打开该链接<br>
 **Then** 本地 Inventory 已知 stopped 时显示启动入口；远端没有宿主状态证明时显示 offline/unreachable；两者均不得创建同类型实例或调用类型发现。
 
-### AC-004：URI 类型不匹配
+### AC-004：Service 类型不匹配
 
-**Given** URI coordinate 与 `service` Actor 的 credential 中的 Actor 类型不同<br>
+**Given** 对端 Service 的 credential 中的 Actor 类型与 Realm Profile 所指包的 Actor 类型不同<br>
 **When** Attach 握手<br>
-**Then** 在任何 Guest 执行前以 `URI_ACTOR_TYPE_MISMATCH` 失败，不创建替代实例。
+**Then** 在任何 Guest 执行前以 `SERVICE_ACTOR_TYPE_MISMATCH` 失败，不创建替代实例。
 
 ### AC-005：同版本异包
 
 **Given** 本地已固定 digest A<br>
-**When** Publisher 对同 coordinate 返回 digest B<br>
+**When** 同一 Program Release 出现 digest B<br>
 **Then** 以 `PACKAGE_EQUIVOCATION` 阻止安装和运行新字节，保留 A 供审计。
 
 ### AC-006：Front Guest 越权
@@ -317,7 +314,7 @@
 
 **Given** 本地 Service 已创建<br>
 **When** 完全退出并重启 Actro<br>
-**Then** Service 用同一 ActorId恢复；收藏和历史 URI 仍可连接。
+**Then** Service 用同一 ActorId恢复；收藏和历史中的 Realm 链接仍可连接。
 
 ### AC-010：独占会话
 
@@ -375,15 +372,9 @@
 
 ### AC-019：Local Realm 链接
 
-**Given** Service ActorId 使用另一安装的本机伪域名 `<installation-id>.actr.alt`<br>
+**Given** Realm 链接使用另一安装的本机伪域名 `<installation-id>.actr.alt`<br>
 **When** 当前设备打开或尝试分享<br>
-**Then** 以 `URI_LOCAL_REALM_FOREIGN` 拒绝连接，并禁用 portable share；不得把它解释为某个 DNS 域名下的 Realm。
-
-### AC-020：Front 自报官方 Actr Host
-
-**Given** 未受管客户端自报正确 Front 的 Actor 类型、Actr Host 版本和 package digest，但没有 runtime attestation<br>
-**When** Service policy 要求官方受管运行时<br>
-**Then** Attach 被拒绝；应用权限也不得仅根据这些自报字段自动授权。
+**Then** 以 `URI_LOCAL_REALM_FOREIGN` 拒绝连接，并禁用分享；不得把它解释为某个 DNS 域名下的 Realm。
 
 ### AC-021：Realm Profile 回滚
 
@@ -394,8 +385,8 @@
 ### AC-022：邀请不是 URL 权限
 
 **Given** owner 给成员签发一次性 editor 邀请<br>
-**When** 成员接受后再次使用邀请，或第三方只获得相同实例 URI<br>
-**Then** 邀请重放失败；第三方仍无应用权限；实例 URI 中不存在邀请 secret。
+**When** 成员接受后再次使用邀请，或第三方只获得相同的 Realm 链接<br>
+**Then** 邀请重放失败；第三方仍无应用权限；Realm 链接中不存在邀请 secret。
 
 ### AC-023：远端管理边界
 
@@ -403,9 +394,9 @@
 **When** 用户点击启动、停止或清除<br>
 **Then** Actro 显示需要远端宿主授权，不伪造成功、不在本地创建替代 Service。
 
-### AC-024：必要辅助 Actor 失陷
+### AC-024：必要的其他 Actor 失陷
 
-**Given** Front 与 Primary Service 当前均为绿，但一个持有应用数据的必要辅助 Actor 包被 Critical 撤销<br>
+**Given** Front 与 Service 当前均为绿，但 Realm 内一个持有应用数据的必要 Actor 的包被 Critical 撤销<br>
 **When** 撤销事件到达任一 Actr Host<br>
 **Then** 该节点为红，应用最弱项为红，相关 Actor Grant 被撤销；不得以「多数 Actor 安全」继续显示绿色。
 
@@ -423,7 +414,7 @@
 
 ### AC-027：动态依赖先验证
 
-**Given** Primary Service 运行中首次请求一个新 Actor<br>
+**Given** Service 运行中首次请求一个新 Actor<br>
 **When** 对端尚无当前 AA 或仍挂起<br>
 **Then** 不得发送应用数据；不得把应用显示为绿。
 
@@ -435,7 +426,7 @@
 
 ### AC-029：安全图成环或超限
 
-**Given** 辅助 Actor 形成调用环，或图超过策略上限<br>
+**Given** Realm 内的 Actor 形成调用环，或图超过策略上限<br>
 **When** 汇聚<br>
 **Then** 环按无向连通分量去重并稳定求值；超限返回 `GRAPH_LIMIT_EXCEEDED`，不能截断后发绿。
 
@@ -507,7 +498,7 @@
 
 ### AC-041：应用实例初始绿标
 
-**Given** 新建 Application Instance 已确定 Primary Service ActorId、Program/Workspace digest 和初始 candidate graph<br>
+**Given** 新建 Application Instance 已确定 Service ActorId、Program/Workspace digest 和初始 candidate graph<br>
 **When** 所有 Actor/Edge/Storage/Compute Evidence 满足当前 policy<br>
 **Then** Actr Host 在 `Ready` 的 `ApplicationAssurance` 为绿之后，才展示绿色并发放受保护数据的 lease。结论绑定 `structureDigest` 与当前状态根，不是 GraphRoot。
 
@@ -565,11 +556,11 @@
 **When** Actr Host 获取 Attestation、Reference Values 并向 Shell 展示降级 diff<br>
 **Then** 最小控制面可以通信，但挂起节点及其依赖方不得处理应用数据；旧状态的 payload 不能通过。
 
-### AC-051：Create 新建 Realm
+### AC-051：新建实例即新建 Realm
 
 **Given** 用户已信任域名 `team.example`<br>
-**When** 打开 `actr://notes.example/team-notes@1.4.2?domain=team.example` 并确认创建<br>
-**Then** 在 `team.example` 下新建一个 Realm（如 `k7m2q9xh@team.example`），Service ActorId 携带该 Realm 名；再次创建得到另一个 Realm，而不是复用前者。
+**When** 选择 `notes.example/team-notes@1.4.2`，以 `team.example` 为 Realm 域名新建实例并确认<br>
+**Then** 在 `team.example` 下新建一个 Realm（如 `k7m2q9xh@team.example`），其 Realm Profile 的 `package` 指向所选包，地址栏显示 `actr://team.example/k7m2q9xh`；再次新建得到另一个 Realm，而不是复用前者。
 
 ### AC-052：Realm 与 Realm Provider 绑定
 
@@ -580,20 +571,20 @@
 ### AC-053：已退役 Realm
 
 **Given** 域名所有者发布了 `status = retired` 的 Realm Profile<br>
-**When** 打开该 Realm 下的实例 URI<br>
-**Then** 以稳定错误拒绝连接；同一 `label` 不能被重新用于新 Realm。
+**When** 打开该 Realm 的 Realm 链接<br>
+**Then** 以稳定错误拒绝连接；同一 RealmId 不能被重新用于新 Realm。
 
 ### AC-054：Realm Profile 不可用不回退
 
 **Given** 实例 Realm 的 Realm Profile 无法获取或签名验证失败，而该域名的 authority descriptor 在 `services` 中声明了 signaling 等服务<br>
-**When** 用户打开该实例 URI<br>
+**When** 用户打开该实例的 Realm 链接<br>
 **Then** 显示 Realm 不可达或安全错误，不连接这些服务或任何其他 Realm Provider，也不创建替代实例。
 
-### AC-055：Create 事务失败与重试
+### AC-055：新建事务失败与重试
 
-**Given** 用户在某个 Realm 域名下确认 Create<br>
+**Given** 用户在某个 Realm 域名下确认新建实例<br>
 **When** Realm 签名 key 持有方不可达，或 Realm Provider 激活 Realm 失败，随后用户以同一 `idempotency_key` 重试<br>
-**Then** 失败时不产生 Service Actor；重试继续同一个 pending Realm（同一 `label`，Realm Provider 以 `(realm, 请求方)` 识别），不重复创建 Realm；过期的 pending Realm 被自动清理。
+**Then** 失败时不产生 Service；重试继续同一个 pending Realm（同一 RealmId，Realm Provider 以 `(realm, 请求方)` 识别），不重复创建 Realm；过期的 pending Realm 被自动清理。
 
 ## 4. 兼容性验收矩阵
 
@@ -607,7 +598,7 @@
 | Package | cached、first download、revoked、digest conflict、dev |
 | Workspace | requirement: none/optional/required；provisioning: managed/user-selected；access: read-only/read-write；local/remote/locked Workspace Provider |
 | Lifecycle | create、refresh、close、crash、restart、suspend、trash、restore、purge、migrate |
-| Privacy | Ready 切面、世代交集、LocalContinue、Program Privacy Contract、WASM 声明/未声明出口、NativeCdylib、NativeCapsule、过期 AA、红辅助节点、隐瞒依赖、Assured Actor Edge、LLM 审计汇、opaque HTTPS、图环/上限、通道绑定、CC、密钥释放、CPU+GPU/NPU 组合证明、输出控制、撤销传播 |
+| Privacy | Ready 切面、世代交集、LocalContinue、Program Privacy Contract、WASM 声明/未声明出口、NativeCdylib、NativeCapsule、过期 AA、红色的其他节点、隐瞒依赖、Assured Actor Edge、LLM 审计汇、opaque HTTPS、图环/上限、通道绑定、CC、密钥释放、CPU+GPU/NPU 组合证明、输出控制、撤销传播 |
 
 ### 4.1 平台能力承诺
 
@@ -627,7 +618,7 @@ Linux/通用服务器宿主、云端自动调度、浏览器 Web 版和跨 Realm
 ### 5.1 核心漏斗
 
 ```text
-URI/Program opened
+链接/程序打开
 → package verified
 → user approved
 → Service created or attached
@@ -663,7 +654,7 @@ URI/Program opened
 
 - 使用每个平台公布的 reference hardware、固定 package fixture 和可复现网络 profile；
 - 每项至少 30 次冷/热运行，报告 p50、p95、样本数和失败率；
-- 「可交互」定义为 Guest 首屏 commit 完成、输入 handler 已注册且 Primary Service contract 可调用；
+- 「可交互」定义为 Guest 首屏 commit 完成、输入 handler 已注册且 Service contract 可调用；
 - 远端指标分别报告 direct 与 TURN，不把 DNS、登录或用户授权时间混入 Attach；
 - 发布报告保留原始匿名测量和构建 digest，以便回归比较。
 
@@ -689,7 +680,7 @@ URI/Program opened
 ### v1 Stable
 
 - 所有 MUST 需求通过；
-- AC-001 至 AC-055 自动化或可重复验证；
+- 全部 AC 场景自动化或可重复验证；
 - 安全审计高危项清零；
 - crash-free 和恢复指标达到发布阈值；
 - 协议版本与兼容承诺发布；
@@ -699,11 +690,11 @@ URI/Program opened
 
 | 产品目标 | 主要需求 | 验收 | 交付阶段 |
 |---|---|---|---|
-| Create/Attach 无歧义 | FR-URI-002—007、FR-SVC-007 | AC-001—004 | P0、P2-B、P3-A |
+| 新建与打开无歧义 | FR-URI-001—009、FR-SVC-007 | AC-001—004 | P0、P2-B、P3-A |
 | Tab/Front/Service 统一模型 | FR-SH-001—006、FR-FRONT-001 | AC-002、AC-008—010 | P2-A、P3-A |
 | 精确、持久 Actor 身份 | FR-SVC-001—003、FR-NET-005—006 | AC-009、AC-011、AC-019 | P1-A |
 | Publisher 与包供应链 | FR-PKG-002—014 | AC-005、AC-016、AC-021 | P1-B |
-| Realm/信令有权但受限 | FR-NET-001—020、FR-URI-011 | AC-011、AC-012、AC-020—023、AC-051—055 | P1-A、P3-B |
+| Realm/信令有权但受限 | FR-NET-001—020 | AC-011、AC-012、AC-021—023、AC-051—055 | P1-A、P3-B |
 | Workspace 不被 UI/删除误伤 | FR-SVC-005—016、FR-SEC-009 | AC-013—015、AC-023 | P2-B |
 | Guest 可运行但不越界 | FR-FRONT-002—010、NFR-SEC-001—004 | AC-006、AC-007 | P2-A、P4 |
 | 应用实例隐私快照与动态图重评 | FR-SEC-014—059、NFR-SEC-007—014 | AC-024—050 | P0、P1-A、P2、P3-A、P4 |

@@ -71,7 +71,7 @@ database 文件。恢复演练应验证：
 - schema version；
 - Realm 集合与状态（当前实现：唯一 Realm）；
 - Realm/Issuer Signer/renewal/TURN secret 是否与备份匹配；
-- 已有 Service Actor 能以 possession proof 恢复同一 ID；
+- 已有 Service 能以 possession proof 恢复同一 ID；
 - Publisher 历史 key、revocation 和 package metadata 未丢失；
 - 已签发身份登记不会重用 serial。
 

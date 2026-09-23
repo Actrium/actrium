@@ -35,8 +35,7 @@ Workload 所需的可信运行环境；运行时结合包、部署配置和新�
 - 各 Workload Profile 的完整 ABI；
 - Keel capability manifest 的完整字段。
 
-这些内容由 [Actr Package Resolution](package-resolution.zh.md)、Actr runtime、Actrium 和
-Keel 的下级规范分别定义。
+这些内容由 Actr runtime、Actrium 和 Keel 的下级规范分别定义。
 
 ## 2. 术语
 
@@ -495,10 +494,8 @@ Package 只声明 Actr Host contract 和 capability 要求，不以普通 Actor 
 
 ## 10. 分发与依赖组合
 
-用户通过 `actr:` URI 启动应用时，URI 的非空 Target 首先由 authority 公布的 Package
-service 解析成一个不可变的根 Package 发布引用，再取得并验证对应 `.actr`。Target 不解析
-成已经运行的 Actor instance，也不能当作 Package service URL 的相对路径直接拼接。具体
-边界见 [Actr Package Resolution](package-resolution.zh.md)。
+用户打开 Realm 链接时，Actr Host 按该 Realm 的 Realm Profile 中 `package` 给出的地址取得根
+`.actr`，核对 SHA-256 后按本规范验证（[Actr Realm Profile](realm-profile.zh.md) 第 6 节）。
 
 用户可以只取得一个根 `.actr`。Installer 根据其 lock file 递归取得所需 Actor Package：
 
@@ -707,7 +704,6 @@ Workload Profile 时完成静态真实性验证，但必须把可执行状态报
 
 - Actor Package TOML schema 与严格字段类型；
 - `manifest.lock.toml` v1；
-- 继续定义 [Actr Package Resolution](package-resolution.zh.md) 的发布、repository 与更新协议；
 - `actr.component/1` Workload Profile；
 - `actr.native/1` Workload Profile；
 - `actr.linked/1` Workload Profile；
@@ -720,7 +716,7 @@ Workload Profile 时完成静态真实性验证，但必须把可执行状态报
 
 - [Actr URI 规范](uri.zh.md)
 - [Actr Authority Discovery](authority-discovery.zh.md)
-- [Actr Package Resolution](package-resolution.zh.md)
+- [Actr Realm Profile](realm-profile.zh.md)
 - [RFC 2119：Key words for use in RFCs to Indicate Requirement Levels](https://www.rfc-editor.org/rfc/rfc2119.html)
 - [RFC 8174：Ambiguity of Uppercase vs Lowercase in RFC 2119 Key Words](https://www.rfc-editor.org/rfc/rfc8174.html)
 - [RFC 8032：Edwards-Curve Digital Signature Algorithm](https://www.rfc-editor.org/rfc/rfc8032.html)
