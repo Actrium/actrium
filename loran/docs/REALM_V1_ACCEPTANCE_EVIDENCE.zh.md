@@ -57,7 +57,7 @@ python3 -m unittest scripts/loran/tests/test_migrate_schema_v2.py -v
 | Realm 签名 key 授权创建 | 未签名、签名 key 不在 `realm_signing_keys` 轮换链中、他人域名的创建请求均被拒绝 | 未实现 |
 | Realm Profile 激活与持续校验 | 只有委派到本 Realm Provider 的 Realm Profile 才激活；`provider.id` 改变、签名 key 被移除或 `sequence` 回滚时丢弃相应 Realm Profile 并挂起；退役 Realm Profile 触发退役事务 | 未实现 |
 | authority descriptor 获取安全 | 重定向超过 5 次、非 HTTPS 跳转、`authority` 绑定不符被拒绝；每跳 SSRF/DNS rebinding、超限 body 负向测试 | 未实现 |
-| Realm 管理请求 | `provider_id` 不符、过期、超过 5 分钟有效期、nonce 重放的请求被拒绝；同一请求方重复创建返回原 pending Realm，不同请求方同名或命中 active Realm/Realm Provider tombstone 返回冲突；`activate_realm` 验证签名 Realm Profile 后返回一次性 Realm 管理 token | 未实现 |
+| Realm 管理请求 | `provider_id` 不符、过期、超过 5 分钟有效期、nonce 重放的请求被拒绝；同一请求方重复创建返回原 pending Realm，不同请求方同名或命中 active Realm/Realm Provider tombstone 返回冲突；`publish_profile` 首次提交验证签名 Realm Profile 后返回一次性 Realm 管理 token，之后只接受 sequence 更高的版本 | 未实现 |
 | Realm Provider 持有 Realm 签名 key 时的自助创建 | Realm Provider 账号 OAuth 2.0 + PKCE 认证、按账号计配额、Realm 管理权绑定账号、登录后重签 Realm 管理 token | 未实现 |
 | Publisher 签名注册 | 读取 descriptor `publisher` 成员，`register_publisher` 请求验签，拒绝非 `active` 的 Publisher Profile 签名 key | 未实现 |
 | 跨 Realm 隔离 | 两个 Realm 使用相同 Actor 类型与相同 serial 候选时，credential、presence、TURN、连接 ACL 与管理接口互不相通 | 未实现 |

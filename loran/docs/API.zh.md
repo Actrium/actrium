@@ -17,7 +17,7 @@
   `actr.v1`，避免把凭证暴露为页面可读的已选子协议。
 - 当前实现：Realm 管理、Publisher 管理和配置变更只允许系统管理员调用。目标契约：
   Realm 生命周期还可由 Realm 管理请求管理，单个 Realm 的 secret、连接 ACL、Realm membership
-  与状态可由作用域为该 Realm 的 Realm 管理 token 管理。`create_realm`、`activate_realm`、
+  与状态可由作用域为该 Realm 的 Realm 管理 token 管理。`create_realm`、`publish_profile`、
   `reissue_admin_token` 以 `POST` 发往 Loran authority descriptor 中的 `realm-management`
   service link（Actr Realm Profile 第 8 节）。
 - Issuer Signer 是内部信任平面；规范入口是同一 HTTP/2 监听器上的 gRPC，
