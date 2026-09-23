@@ -9,8 +9,7 @@ them together:
 
 - `/.well-known/actr` publishes the authority descriptor;
 - `loran-packages` hosts content-addressed `.actr` files that a Realm Profile's
-  `package.href` may point to (the Target resolution still in the code is
-  retired from the protocol and will be removed);
+  `package.href` may point to;
 - the Publisher Registry manages publisher identity, signing authority, and
   publication audit;
 - signaling, the Issuer, and ICE remain independent runtime services.

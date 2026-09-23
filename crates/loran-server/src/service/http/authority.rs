@@ -2,10 +2,10 @@
 
 use actr_protocol::{
     AUTHORITY_DESCRIPTOR_VERSION, AuthorityDescriptor, ICE_CONFIG_PROTOCOL, IceConfiguration,
-    IceServer, PACKAGES_PROTOCOL, ServiceLink,
+    IceServer, ServiceLink, parse_authority_member,
 };
 use axum::{Json, Router, extract::State, http::header, response::IntoResponse, routing::get};
-use loran_packages::{PackageDistributor, PackageTarget};
+use loran_packages::PackageDistributor;
 use platform::config::ActrixConfig;
 use std::{path::PathBuf, sync::Arc};
 use url::Url;
@@ -46,12 +46,8 @@ fn authority_composition(
         .as_ref()
         .map(|packages| {
             let endpoint = Url::parse(&format!("{origin}/actr/packages"))?;
-            let targets = packages.targets.iter().map(|target| PackageTarget {
-                target: target.target.clone(),
-                artifact: PathBuf::from(&target.artifact),
-                profile: target.profile.clone(),
-            });
-            PackageDistributor::new(endpoint, targets).map_err(anyhow::Error::from)
+            let artifacts = packages.artifacts.iter().map(PathBuf::from);
+            PackageDistributor::new(endpoint, artifacts).map_err(anyhow::Error::from)
         })
         .transpose()?;
 
@@ -64,24 +60,18 @@ fn authority_composition(
     let authority = config.authority.uri.clone().ok_or_else(|| {
         anyhow::anyhow!("authority.uri is required when authority.enabled is true")
     })?;
-    let parsed_authority = authority
-        .parse::<actr_protocol::uri::ActrUri>()
+    let parsed_authority = parse_authority_member(&authority)
         .map_err(|error| anyhow::anyhow!("authority.uri is not a valid authority URI: {error}"))?;
-    if parsed_authority.target().is_some() {
-        anyhow::bail!("authority.uri must not contain a target");
-    }
-    let expected_authority = if default_port {
-        http.domain_name.clone()
-    } else {
-        format!("{}:{port}", http.domain_name)
-    };
+    // The authority names a domain only. Its discovery document is fetched on
+    // the default HTTPS port; an explicit bind.http port only appears in the
+    // advertised service endpoints.
     let expected_authority =
-        actr_protocol::uri::ActrUri::new(&expected_authority, None).map_err(|error| {
+        actr_protocol::uri::ActrUri::new(&http.domain_name, None).map_err(|error| {
             anyhow::anyhow!("bind.http does not form a valid Actr authority: {error}")
         })?;
     if expected_authority.authority_uri() != parsed_authority.authority_uri() {
         anyhow::bail!(
-            "authority.uri '{}' does not match advertised HTTP authority '{}'",
+            "authority.uri '{}' does not match advertised HTTP domain '{}'",
             parsed_authority.authority_uri(),
             expected_authority.authority_uri()
         );
@@ -101,13 +91,6 @@ fn authority_composition(
         services.push(
             ServiceLink::new("ice-config", format!("{origin}/actr/ice-config"))
                 .with_protocol(ICE_CONFIG_PROTOCOL),
-        );
-    }
-
-    if let Some(packages) = &packages {
-        services.push(
-            ServiceLink::new("packages", packages.endpoint().as_str())
-                .with_protocol(PACKAGES_PROTOCOL),
         );
     }
     if services.is_empty() {
@@ -144,6 +127,7 @@ fn authority_composition(
                 version: AUTHORITY_DESCRIPTOR_VERSION,
                 authority: parsed_authority.authority_uri(),
                 services,
+                links: None,
             },
             ice: IceConfiguration {
                 version: 1,
@@ -172,10 +156,10 @@ pub fn build_authority_router(config: &ActrixConfig) -> anyhow::Result<Router> {
     let (state, packages) = authority_composition(config)?;
     let mut router = Router::new();
     if let Some(packages) = packages {
-        platform::recording::info!(
-            "Adding Actr package distribution routes with {} target(s)",
-            packages.target_count()
-        );
+        platform::recording::info!("Adding Actr package hosting routes");
+        for href in packages.artifact_hrefs() {
+            platform::recording::info!("Hosting Actr package {href}");
+        }
         router = router.nest("/actr/packages", packages.router());
     }
     if let Some(state) = state {
@@ -196,9 +180,8 @@ pub fn build_authority_router(config: &ActrixConfig) -> anyhow::Result<Router> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actr_protocol::PackageResolution;
     use axum::{body::Body, body::to_bytes, http::Request, http::StatusCode};
-    use platform::config::{PackageTargetConfig, PackagesConfig, authority::AuthorityConfig};
+    use platform::config::{PackagesConfig, authority::AuthorityConfig};
     use tower::ServiceExt;
 
     fn test_config(artifact: &std::path::Path) -> ActrixConfig {
@@ -213,20 +196,24 @@ mod tests {
         config.bind.ice.advertised_port = 13478;
         config.authority = AuthorityConfig {
             enabled: true,
-            uri: Some("actr://localhost:8081".to_string()),
+            uri: Some("actr://localhost".to_string()),
         };
         config.services.packages = Some(PackagesConfig {
-            targets: vec![PackageTargetConfig {
-                target: "echo".to_string(),
-                artifact: artifact.display().to_string(),
-                profile: Some("keel.guest/1".to_string()),
-            }],
+            artifacts: vec![artifact.display().to_string()],
         });
         config
     }
 
+    /// Request path of the single artifact hosted by `config`.
+    fn artifact_uri(config: &ActrixConfig) -> String {
+        let (_, packages) = authority_composition(config).unwrap();
+        let packages = packages.unwrap();
+        let href = packages.artifact_hrefs().next().unwrap();
+        href[url::Position::BeforePath..].to_string()
+    }
+
     #[tokio::test]
-    async fn descriptor_composes_independent_package_and_runtime_services() {
+    async fn descriptor_does_not_advertise_package_hosting() {
         let directory = tempfile::tempdir().unwrap();
         let artifact = directory.path().join("echo.actr");
         std::fs::write(&artifact, b"actor package").unwrap();
@@ -235,24 +222,42 @@ mod tests {
         let (state, packages) = authority_composition(&config).unwrap();
         let state = state.unwrap();
         let packages = packages.unwrap();
-        assert_eq!(state.descriptor.authority, "actr://localhost:8081");
-        assert_eq!(
-            state.descriptor.require_service("packages").unwrap().href,
-            "http://localhost:8081/actr/packages"
-        );
+        assert_eq!(state.descriptor.authority, "actr://localhost");
+        assert!(state.descriptor.service("packages").is_none());
         assert_eq!(
             state.descriptor.require_service("signaling").unwrap().href,
             "ws://localhost:8081/signaling/ws"
         );
         assert_eq!(state.ice.ice_servers.len(), 2);
 
-        let resolution = packages.resolve("echo").await.unwrap();
-        assert_eq!(resolution.package.size, 13);
-        assert_eq!(resolution.package.profile.as_deref(), Some("keel.guest/1"));
+        let href = packages.artifact_hrefs().next().unwrap();
+        assert!(
+            href.as_str()
+                .starts_with("http://localhost:8081/actr/packages/artifact?sha256="),
+            "{href}"
+        );
+    }
+
+    #[test]
+    fn authority_uri_names_a_domain_without_port() {
+        let directory = tempfile::tempdir().unwrap();
+        let artifact = directory.path().join("echo.actr");
+        std::fs::write(&artifact, b"actor package").unwrap();
+
+        for (uri, expected) in [
+            ("actr://localhost:8081", "not a valid authority URI"),
+            ("actr://localhost/", "not a valid authority URI"),
+            ("actr://example.com", "does not match"),
+        ] {
+            let mut config = test_config(&artifact);
+            config.authority.uri = Some(uri.to_string());
+            let error = authority_composition(&config).unwrap_err().to_string();
+            assert!(error.contains(expected), "{uri}: {error}");
+        }
     }
 
     #[tokio::test]
-    async fn package_distribution_can_run_without_local_authority_discovery() {
+    async fn package_hosting_can_run_without_local_authority_discovery() {
         let directory = tempfile::tempdir().unwrap();
         let artifact = directory.path().join("echo.actr");
         std::fs::write(&artifact, b"actor package").unwrap();
@@ -264,7 +269,7 @@ mod tests {
         let response = app
             .clone()
             .oneshot(
-                Request::get("/actr/packages/resolve?target=echo")
+                Request::get(artifact_uri(&config))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -289,7 +294,7 @@ mod tests {
             env: "prod".to_string(),
             authority: AuthorityConfig {
                 enabled: true,
-                uri: Some("actr://localhost:8080".to_string()),
+                uri: Some("actr://localhost".to_string()),
             },
             ..ActrixConfig::default()
         };
@@ -303,7 +308,8 @@ mod tests {
         let artifact = directory.path().join("echo.actr");
         let artifact_bytes = b"complete actor package";
         std::fs::write(&artifact, artifact_bytes).unwrap();
-        let app = build_authority_router(&test_config(&artifact)).unwrap();
+        let config = test_config(&artifact);
+        let app = build_authority_router(&config).unwrap();
 
         let response = app
             .clone()
@@ -317,7 +323,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
         let descriptor: AuthorityDescriptor = serde_json::from_slice(&body).unwrap();
-        let uri = "actr://localhost:8081/echo"
+        let uri = "actr://localhost/echo"
             .parse::<actr_protocol::uri::ActrUri>()
             .unwrap();
         descriptor.validate_for(&uri).unwrap();
@@ -325,22 +331,10 @@ mod tests {
         let response = app
             .clone()
             .oneshot(
-                Request::get("/actr/packages/resolve?target=echo")
+                Request::get(artifact_uri(&config))
                     .body(Body::empty())
                     .unwrap(),
             )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
-        let resolution: PackageResolution = serde_json::from_slice(&body).unwrap();
-        assert_eq!(resolution.package.size, artifact_bytes.len() as u64);
-
-        let artifact_uri = Url::parse(&resolution.package.href).unwrap();
-        let request_uri = artifact_uri[url::Position::BeforePath..].to_string();
-        let response = app
-            .clone()
-            .oneshot(Request::get(request_uri).body(Body::empty()).unwrap())
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -350,7 +344,7 @@ mod tests {
         let response = app
             .clone()
             .oneshot(
-                Request::get("/actr/packages/resolve?target=missing")
+                Request::get(format!("/actr/packages/artifact?sha256={}", "0".repeat(64)))
                     .body(Body::empty())
                     .unwrap(),
             )
