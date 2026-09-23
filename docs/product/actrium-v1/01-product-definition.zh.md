@@ -145,7 +145,7 @@ Front 只看到一个 Primary Service，不代表后台只能有一个 Actor。P
 - WASM 的声明、imports、有效能力和实际出口由 Actr Host 交叉验证；
 - 只有 `Ready` 且全部节点 `CONTROLLED` 才显示绿；
 - 黄与红明确区分；挂起不得展示绿；
-- 新配置只作用于新数据；状态变化联动通道、Capability 和数据面。
+- 新配置只作用于新数据；状态变化联动通道、Actor Grant 和数据面。
 
 ## 6. 非目标
 

@@ -31,7 +31,7 @@ def allowed_effect(in_current, in_acquired):
 
 
 def cap_sid_match(current_sid, cap_sid):
-    """Capability (a) State binding;revision Participation sid, content rolls back and does not revive old documents (Thm 10)."""
+    """Actor Grant (a) State binding;revision Participation sid, content rolls back and does not revive old documents (Thm 10)."""
     return current_sid == cap_sid
 
 

@@ -120,7 +120,7 @@ Lettered Actr Host There are still possible gaps;“Lettered”It is stated that
 | New Actor Data first and then verify | pending edge Sync gate;Mark Do not send business before passing payload |
 | One down. AA Expired but green as a whole | `Ready` Require current pointer; no green display for expired |
 | I'm not sure I'm gonna be able to do this. | The limit is not to cut and turn green. |
-| Configure the old old rebirth Capability / Old conclusions | `ActorState.revision` Untouch incremental and enters the state root; roll back to get new `ActorStateId`Old bindings never match |
+| Configure the old old rebirth Capability / Old conclusions | `ActorState.revision` Untouch incremental and enters the state root; roll back to get new `ActorStateDigest`Old bindings never match |
 | Put the peer Actor It's a disguise. HTTPS ♪ Round and round ♪ Principal Rating | - I can show you. Actr Endpoint of identity must be pressed Actor Target rating; classification not determinable `UNKNOWN` |
 | Call back local clocks to revive expired evidence, conclusions or documents | Time frame for the operator and the rating / No clocks can be called back for validity checks. |
 | Letters are replayed. | One-time ticket, nonceShort period of validity |
@@ -286,7 +286,7 @@ Publisher package endpoint Available CDN, but CDN URL Not automatically Guest ne
 ## 11. Actor/Session Clear.
 
 - ActorId I have to. public key and Realm credential (a) Tie;
-- `ActorState` amend number one-to-one incremental; configuration rollback does not repeat old `ActorStateId`Old credential/Capability and will not be raised up.
+- `ActorState` amend number one-to-one incremental; configuration rollback does not repeat old `ActorStateDigest`Old credential/Capability and will not be raised up.
 - credential (b) Short-term, revocable;
 - ServiceLong term key (b) Not being stored securely;
 - signaling ticket One-time;

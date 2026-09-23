@@ -273,18 +273,18 @@ permission_grant
 
 tab_session
   tab_id, uri, service_actor_id, front_actor_id, state,
-  structure_id, application_state_id, application_color, ready
+  structure_digest, application_state_digest, application_color, ready
 
 privacy_mark_cache
   mark_id, subject_ref, issuer_ref, workload_kind, egress_digest,
   issued_at, expires_at, revocation_state, encrypted_blob_ref
 
 privacy_dependency_edge
-  structure_id, application_state_id, edge_id, source_ref, target_ref,
+  structure_digest, application_state_digest, edge_id, source_ref, target_ref,
   data_classes, target_mark_digest, decision, opened_at, closed_at
 
 privacy_aggregate
-  assurance_id, tab_id, structure_id, application_state_id, policy_digest,
+  assurance_digest, tab_id, structure_digest, application_state_digest, policy_digest,
   mark, weakest_actor_ref, evidence_root, generated_at, expires_at
 
 creation_intent

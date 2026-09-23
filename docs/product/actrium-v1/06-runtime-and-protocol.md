@@ -385,8 +385,8 @@ actro.session.v1.GetStatus
   },
   "effectiveCapabilities": ["primary-service", "host:clipboard.write"],
   "privacy": {
-    "actorStateId": "…",
-    "applicationStateId": "…",
+    "actorStateDigest": "…",
+    "applicationStateDigest": "…",
     "assuranceDigest": "sha256:...",
     "expiresAt": "2026-07-29T12:01:15Z"
   },
@@ -411,7 +411,7 @@ Service Sequenced examination:
 9. Principal/Device/Workspace application permissions;
 10. attachment policy;
 11. Current lease;
-12. Strategy, current caller 's request `ActorStateId` / AA with nonce;
+12. Strategy, current caller 's request `ActorStateDigest` / AA with nonce;
 13. Resource and speed constraints.
 
 Any identity or digest mismatch Both. hard fail, Do Not Enter“Compatible Mode”.
@@ -567,6 +567,6 @@ Front Host, Service Host, Workspace broker and Actor transport The actual data e
 - Workspace With external networks edge;
 - package, credential, Actr Host key and policy Undo.
 
-Publisher workload An expected export can be declared, but it cannot be the only source of integrity.Host Yeah. WASM Comparative statements,imports, effective capacity and practical edge, by `structureId` With Current `ActorStateId` groups; new Actor Current AA Adopted and `ACTIVE` Application data should not be received until now.Front Position the entire unroot map, with the weakest of the nodes; the display must be `Ready`.
+Publisher workload An expected export can be declared, but it cannot be the only source of integrity.Host Yeah. WASM Comparative statements,imports, effective capacity and practical edge, by `structureDigest` With Current `ActorStateDigest` groups; new Actor Current AA Adopted and `ACTIVE` Application data should not be received until now.Front Position the entire unroot map, with the weakest of the nodes; the display must be `Ready`.
 
 The conclusion must be passed on to Shell and session guardGreen. / Yellow / Red and hung must be connected Capability And the data. It can't just be... UI Decoration. New configuration only works on new data.

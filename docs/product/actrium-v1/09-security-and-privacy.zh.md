@@ -120,7 +120,7 @@ flowchart LR
 | 新 Actor 先收数据后验证 | pending edge 同步 gate；Mark 通过前不发送业务 payload |
 | 一个下游 AA 过期但整体仍绿 | `Ready` 要求当前指针；过期不得展示绿 |
 | 截断大图后误判隐私 | 超限不得截断后发绿 |
-| 配置回滚复活已废除的旧 Capability / 旧结论 | `ActorState.revision` 单调递增并进入状态根；回滚得到新 `ActorStateId`，旧绑定永久不匹配 |
+| 配置回滚复活已废除的旧 Actor Grant / 旧结论 | `ActorState.revision` 单调递增并进入状态根；回滚得到新 `ActorStateDigest`，旧绑定永久不匹配 |
 | 把对端 Actor 伪装成 HTTPS 汇绕过跨 Principal 评分 | 可出示 Actr 身份的端点必须按 Actor 目标评定；类别不可判定保持 `UNKNOWN` |
 | 回拨本地时钟复活过期证据、结论或凭证 | 执行方与评定方用于期限 / 有效期核对的时钟均不可回拨 |
 | 信令重放 | 一次性 ticket、nonce、短有效期 |
@@ -286,7 +286,7 @@ Publisher package endpoint 可使用 CDN，但 CDN URL 不自动成为 Guest net
 ## 11. Actor/Session 安全
 
 - ActorId 必须与 public key 和 Actor credential 绑定；
-- `ActorState` 修订号单调递增；配置回滚不复现旧 `ActorStateId`，旧 credential/Capability 不复活；
+- `ActorState` 修订号单调递增；配置回滚不复现旧 `ActorStateDigest`，旧 credential/Actor Grant 不复活；
 - credential 短期、可撤销；
 - Service长期 key 不出安全存储；
 - signaling ticket 一次性；

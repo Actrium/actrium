@@ -568,7 +568,7 @@ Guest 只能看到最小化的用户可见摘要：
     "ready": true,
     "policyId": "actro.consumer.default",
     "workloadKind": "wasm-component",
-    "applicationStateId": "…",
+    "applicationStateDigest": "…",
     "expiresAt": "2026-07-29T12:01:15Z"
   }
 }
