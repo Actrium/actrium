@@ -48,7 +48,7 @@ Realm Profile 激活），见 `REALM_V1_ARCHITECTURE.zh.md` 第 9 节。缺陷�
 | Publisher Registry | `crates/loran-publisher-registry/src/`（publisher 发现、`manager.rs`） | SSRF、descriptor、rotation、nonce、签名 |
 | Admin | `crates/loran-server/src/service/http/admin_api.rs` | Argon2id/JWT、Realm 唯一性（目标：Realm 管理请求与单 Realm 的 Realm 管理 token 的作用域）、审计 |
 
-评审还应确认 SDK/authoring 源码中的历史发布者字段名（见 GLOSSARY「历史名称对照」）没有
+评审还应确认 SDK/authoring 源码中的历史发布者字段名（见[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」）没有
 意外重新进入 Loran v1 的 HTTP/JSON、包清单和 ActorId 边界；源码命名迁移本身不作为安全通过的替代条件。
 
 ## 最小动态测试

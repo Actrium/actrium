@@ -2,7 +2,7 @@
 
 状态：首版目标契约。一个 Loran 实例作为共享 Realm Provider 承载多个 Realm；首版不承诺
 HA 或跨 Realm federation。当前代码仍按早先的单 Realm 契约实现，差异见第 9 节。
-历史名称（旧产品名、旧服务名）集中见 [GLOSSARY](GLOSSARY.zh.md)「历史名称对照」。
+历史名称（旧产品名、旧服务名）集中见[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」。
 
 ## 1. Realm 模型
 
@@ -68,8 +68,8 @@ TLS/mTLS gRPC 客户端配置放入独立安全边界。
 
 只需要独占部署的场景（如企业自建）可配置 `max_realms = 1`；默认不限制。
 
-Workspace 不属于 Realm 基础设施的数据模型。Workspace 与 Service Actor 是多对多
-使用关系，删除 Actor 不删除 Workspace；Workspace 密钥属于用户。这些规则由 Actro
+Workspace 不属于 Realm 基础设施的数据模型。一个 Service Actor 至多绑定一个
+Workspace，同一 Workspace 可按写入并发策略被多个 Service Actor 使用；删除 Actor 不删除 Workspace；Workspace 密钥属于用户。这些规则由 Actro
 实现，Loran 不取得目录所有权。
 
 ## 2. 信任根
@@ -104,8 +104,8 @@ Realm Provider 只持有 Realm issuer key 私钥；只有受托成为 Realm 签�
   Admin UI 配置只接受 Argon2id PHC hash，不接受明文密码；管理会话使用进程内 CSPRNG
   生成的 JWT key。
 - Realm 签名 key 持有方：通过 Realm 管理请求创建、激活 Realm 与重签 Realm 管理 token；
-  更新与退役通过发布新 Realm Profile 完成，无需在 Loran 另开账号（持有方为本 Realm
-  Provider、个人以 Realm Provider 账号操作的情形除外，见 3.6）。
+  更新与退役通过发布新 Realm Profile 完成，无需在 Loran 另开账号（Realm Provider 域名下的
+  Realm 由个人以 Realm Provider 账号操作，见 3.6）。
 - Realm 管理员：Realm 激活时签发的、作用域为单个 Realm 的 Realm 管理 token，通常交给实例
   所有者（交付与重签见 3.5）；只能看到并管理本 Realm：secret 轮换、连接 ACL、Realm
   membership 与 Realm 客户端撤销、状态变更。跨作用域访问一律拒绝，且不得通过错误信息泄露其他 Realm 是否存在。
@@ -134,15 +134,15 @@ Actro/Rill 等 Actr Host 可以持有该能力，但不得把它暴露给用户�
    Realm 管理 token（见 3.5）。若 Realm Profile 存放位置（`realms`）由本 Realm Provider
    提供，Loran 同时对外提供该 Realm Profile；否则由调用方发布到自己声明的位置。
 
-Realm 签名 key 由本 Realm Provider 持有时（3.6），Loran 自己签 Realm Profile，第 3 步在
-内部完成，激活结果直接返回给通过 Realm Provider 账号认证的用户。
+Realm Provider 域名下的 Realm（3.6）由 Loran 自己签 Realm Profile，第 3 步在内部完成，
+激活结果与 Realm 管理 token 在 `create_realm` 响应中直接返回给通过 Realm Provider 账号认证的用户。
 
 幂等与冲突：创建以 `(realm, 请求方)` 为幂等键，`realm` 为完整 Realm 名。持有方自己签名时，
 请求方是 Actr 管理信封中可选的 `requester` 字段（持有方签名服务填写的不透明成员标识，缺省
-为空）；持有方是本 Realm Provider 时，请求方是 Realm Provider 账号，Loran 忽略请求中的 `requester`。同一请求方对自己的 pending 或 active Realm 重试时返回其状态，不返回
+为空）；Realm Provider 域名下的 Realm 以 bearer token 请求，请求方是 Realm Provider 账号，Loran 忽略请求中的 `requester`。同一请求方对自己的 pending 或 active Realm 重试时返回其状态，不返回
 Realm 管理 token；不同请求方命中同名 Realm，或任何请求命中 Realm Provider tombstone，一律
 返回冲突。对已 active 的 Realm 重复 `activate_realm` 返回冲突；Realm 管理 token 丢失（包括
-持有方为本 Realm Provider 时丢失 `create_realm` 响应）只能用 `reissue_admin_token` 取回。
+Realm Provider 域名下的 Realm 丢失 `create_realm` 响应）只能用 `reissue_admin_token` 取回。
 
 只有 `active` Realm 才签发 Actor credential、接受 signaling 连接和分配 TURN。
 
@@ -178,7 +178,7 @@ v1 的 Realm 管理请求只有 `create_realm`、`activate_realm` 与 `reissue_a
 Actr 管理信封（Actr management envelope），只有 `op` 与操作字段不同（Publisher 注册复用
 同一格式，见第 7 节）。请求以 HTTPS `POST` 发往 Loran 自身 authority descriptor
 （`https://<provider_id>/.well-known/actr`）中的 `realm-management` service link（protocol
-`actr-realm-management/1`）；持有方是本 Realm Provider 时，请求携带同一 payload、不带签名，
+`actr-realm-management/1`）；对 Realm Provider 域名下的 Realm，请求携带同一 payload、不带签名，
 改由 Realm Provider 账号的 OAuth bearer token 授权：
 
 ```json
@@ -225,11 +225,11 @@ key，并写入以 Realm 名为键的 Realm Provider tombstone。若绑定的 Re
 
 ### 3.5 Realm 管理 token 的交付
 
-Realm 管理 token 在激活响应中一次性返回给发起创建的调用方，即持有方的签名工具（由其
-交给实例所有者），或持有方为本 Realm Provider 时通过 Realm Provider 账号认证的用户；
-存入安全存储。Loran 只保存 token 的哈希。
-token 丢失时重新签发，旧 token 立即失效：持有方自己签名时，由其以 Actr 管理信封发出
-`reissue_admin_token`；持有方为本 Realm Provider 时，由绑定的 Realm Provider 账号登录后
+Realm 管理 token 一次性返回给发起创建的调用方：一般在激活响应中返回给持有方的签名工具
+（由其交给实例所有者）；Realm Provider 域名下的 Realm 在 `create_realm` 响应中返回给通过
+Realm Provider 账号认证的用户；存入安全存储。Loran 只保存 Realm 管理 token 的哈希。
+Realm 管理 token 丢失时重新签发，旧 Realm 管理 token 立即失效：持有方自己签名时，由其以 Actr 管理信封发出
+`reissue_admin_token`；对 Realm Provider 域名下的 Realm，则由绑定的 Realm Provider 账号登录后
 完成，换机或丢失客户端只需重新登录。
 
 ### 3.6 Realm Provider 持有 Realm 签名 key 的情形
@@ -241,7 +241,7 @@ Provider；按 3.1 的可判定规则，客户端显示这一点。域名所有�
 代持其 Realm 签名 key；此时 Loran 以持有方签名服务的身份签发 Actr 管理信封，客户端仍显示
 信任根为 Realm 域名（受托代持不可见）。未经委托，Loran 不代持第三方域名的 Realm 签名 key。
 
-持有方是本 Realm Provider 时，个人以 Realm Provider 账号认证：OAuth 2.0 授权码 + PKCE
+对 Realm Provider 域名下的 Realm，个人以 Realm Provider 账号认证：OAuth 2.0 授权码 + PKCE
 （RFC 6749、RFC 7636）。Realm Provider 自身 descriptor（`https://<Realm Provider ID>/.well-known/actr`）
 中 `identity` service link 的 `href` 即 OAuth 授权服务器标识（issuer identifier，RFC 8414），元数据按 RFC 8414 发现；授权服务器接受
 固定公共 client ID `actr-host`（无 secret，redirect 按 RFC 8252），Actr Host 请求 scope
@@ -258,8 +258,8 @@ realm-management 等）与该域名的 `realm_signing_keys`、`realms`，是同�
 
 ### 3.7 配额
 
-按 Realm 域名与按 Realm 设配额：Realm 域名可创建的 Realm 数（持有方为本 Realm Provider
-时再按 Realm Provider 账号计）、连接数、注册
+按 Realm 域名与按 Realm 设配额：Realm 域名可创建的 Realm 数（Realm Provider 域名下的 Realm
+再按 Realm Provider 账号计）、连接数、注册
 速率、signaling 消息速率、TURN allocation 数与带宽。
 
 ## 4. 身份模型
@@ -443,7 +443,7 @@ revocation 状态。
 - `realm`：内部 `realm_id`、`name`（完整 Realm 名）、状态（`pending` | `active` |
   `suspended` | `retired`）、已接受的 Realm Profile digest 与 `sequence`、Realm issuer key id、
   pending 到期时间、请求方（`requester` 或 Realm Provider 账号）、Realm 管理 token
-  哈希及其绑定的 Realm Provider 账号（持有方为本 Realm Provider 时）；`name` 唯一，Realm
+  哈希及其绑定的 Realm Provider 账号（Realm Provider 域名下的 Realm）；`name` 唯一，Realm
   Provider tombstone 与活跃 Realm 共用该约束；
 - Realm 管理请求的 `nonce` 记录，保留到对应请求过期；
 - 其余按 Realm 分区的表（连接 ACL、已签发身份登记、Actor Registry、renewal state）以
@@ -486,7 +486,7 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   防重放、含请求方的幂等键）、待签 Realm Profile payload、Realm Profile 验证激活与周期性校验（含
   key 移除后丢弃 Realm Profile）；
 - Realm Provider ID 从当前常量改为 Realm Provider 的规范化 DNS authority；
-- 持有方为本 Realm Provider 时的 Realm Provider 账号认证（OAuth 2.0 + PKCE）、按账号配额
+- Realm Provider 域名下的 Realm 的 Realm Provider 账号认证（OAuth 2.0 + PKCE）、按账号配额
   与账号绑定的 Realm 管理权；
 - 移除 Loran 自身服务的 `/.well-known/actr/realm.json`（它与 authority-discovery
   「`/.well-known/actr` 下不定义子路径」冲突）；仅在 authority descriptor 的 `realms`

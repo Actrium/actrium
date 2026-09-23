@@ -60,7 +60,7 @@ Tab
 | D-012 | v1 ActorId 必须包含可验证的 Realm 名（`<label>@<domain>`，如 `notes@acme.com`），程序类型不在 ActorId 中；它是公开地址和密码学身份，不是 bearer token，知道 URL 不等于有权连接。 |
 | D-013 | Realm 是逻辑信任域，对应一个应用实例，可委派多个信令/TURN 服务；Realm 与某个物理信令进程不是一回事，一个 Realm Provider 承载多个 Realm；Realm 在创建时绑定一个 Realm Provider，此后不可更换。 |
 | D-014 | Service 实例固定到精确版本与包 digest；v1 升级通过显式迁移创建新 Actor，而不是原地替换 workload。 |
-| D-015 | Realm credential 证明 Actor key、身份和 claims，不自动证明对端真的运行官方 Actro Host；Service 必须把 Front 当作不受信客户端独立授权。 |
+| D-015 | Actor credential 证明 Actor key、身份和 claims，不自动证明对端真的运行官方 Actro Host；Service 必须把 Front 当作不受信客户端独立授权。 |
 | D-016 | Workspace 的 requirement、provisioning、access 和允许的 Workspace Provider（`providers`）是独立维度，不能混成一个枚举。 |
 | D-017 | 删除分为可恢复的 Trashed 与不可恢复的 Purged/Deleted；删除 Workspace 始终是独立动作。 |
 | D-018 | Publisher 与 Realm 域名的 bootstrap 固定使用 HTTPS 443（即 `https://<domain>/.well-known/actr` authority descriptor）；Realm Profile 来自 core relation `realms` 声明的 HTTPS 位置（可带端口）；经验证 Realm Profile 委派的实际 endpoint 可以带端口。`realm_signing_keys` 成员与 `realms` relation 已在 Actr Authority Discovery §4.3–4.4 定义；取不到或验不过 Realm Profile 时不得使用 Realm Profile 以外的任何 Realm Provider。 |
@@ -117,7 +117,7 @@ Tab
 
 出现冲突时按以下顺序解释：
 
-1. **安全与隐私语义**：[docs/security](../../security/README.zh.md)；
+1. **安全与隐私语义**：[docs/security](../../architecture/security/actrium/README.zh.md)；
 2. 本 README 中不与上条冲突的产品决策；
 3. [需求与验收标准](10-requirements-and-acceptance.md)中的 MUST/FR/NFR；
 4. URI、分发、运行时、Realm、Workspace 及本章未覆盖的产品专题；
@@ -132,7 +132,7 @@ Tab
 
 - [Actrium/actr](https://github.com/Actrium/actr)：Actor 模型、`ActrId` 精确寻址、Realm/连接 ACL、信令、WebRTC、`.actr` 签名包和 WASM workload。
 - [Actrium/keel](https://github.com/Actrium/keel)：Keel Host/Guest、Bridge、JS 沙箱、契约与原生组件渲染。
-- [Actro 当前架构概览](../../architecture/overview.md)：多平台 Shell、共享运行时与 Actr SDK 边界。
+- [Actro 当前架构概览](../../architecture/actrium/overview.md)：多平台 Shell、共享运行时与 Actr SDK 边界。
 
 已验证的关键事实包括：
 
@@ -142,4 +142,4 @@ Tab
 - Keel 的 Host/Guest 边界与白名单模块机制适合承载 Front，但其 `Engine.loadBundle(URL)` 本身不是可信分发系统。
 - Keel 多数「原生」沙箱仍是同一 OS 进程内的语言运行时隔离，不能宣称为浏览器级进程隔离。
 
-本文档正文统一使用 Loran、Publisher Registry、Issuer、publisher 等规范名；代码和旧文档中的历史名称集中列在 [Loran 术语表「历史名称对照」](../../../loran/docs/GLOSSARY.zh.md)。
+本文档正文统一使用 Loran、Publisher Registry、Issuer、publisher 等规范名；代码和旧文档中的历史名称集中列在 [术语表「历史名称对照」](../../GLOSSARY.zh.md)。

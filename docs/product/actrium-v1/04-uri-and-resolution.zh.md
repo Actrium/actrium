@@ -192,7 +192,7 @@ Attach 失败时：
 - 不得创建本地实例；
 - 不得自动降级版本；
 - 不得换 Realm；
-- 不得忽略 ActorType 或 contract mismatch。
+- 不得忽略 Actor 类型或 contract mismatch。
 
 ## 7. Guest route、query 与 fragment
 

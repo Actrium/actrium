@@ -1,5 +1,7 @@
 # Realm 全流程梳理与补漏记录（2026-02-24）
 
+> 历史文档：沿用撰写时的名称（如 Actrix、AIS、manufacturer），现行名称见[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」。
+
 ## 1. 目标与范围
 
 基于 `TODO-cross-realm.md` 对项目做 realm 全流程审计，重点覆盖：

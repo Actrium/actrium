@@ -80,5 +80,5 @@ python3 -m unittest scripts/loran/tests/test_migrate_schema_v2.py -v
 
 PostgreSQL Issuer Signer backend 及其需要外部数据库的 ignored tests 不属于 SQLite-first v1
 默认生产 profile。硬件/Actr Host 相关 metrics smoke test 也不作为安全通过证据。更广泛的
-发布者字段源码命名迁移（见 GLOSSARY「历史名称对照」）属于全 SDK breaking change，
+发布者字段源码命名迁移（见[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」）属于全 SDK breaking change，
 不能用 Loran 边界上的 publisher 规范化来掩盖。

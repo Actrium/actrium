@@ -153,7 +153,7 @@ Realm Profile 使用 RFC 8785 JCS 规范化 payload 和 detached Ed25519 签名�
 
 生命周期：
 
-- 创建与激活：Realm 管理请求以 `POST` 发往 Realm Provider 自身 authority descriptor（`https://<provider_id>/.well-known/actr`）的 `realm-management` link。`create_realm` 请求 Realm Provider 创建 pending Realm，响应返回待签 Realm Profile payload；Realm 签名 key 持有方签名后以 `activate_realm` 提交，其响应即激活响应，一次性返回 Realm 管理 token（持有方即该 Realm Provider 时，签名与激活在其内部完成）。Realm Provider 幂等键为 `(realm, 请求方)`：同一请求方对自己的 pending 或 active Realm 重试返回其状态（不返回 Realm 管理 token）；不同请求方命中同名 Realm，或任何请求命中 Realm Provider tombstone，一律冲突；重复 `activate_realm` 返回冲突，丢失的 Realm 管理 token 只能用 `reissue_admin_token` 取回；
+- 创建与激活：Realm 管理请求以 `POST` 发往 Realm Provider 自身 authority descriptor（`https://<provider_id>/.well-known/actr`）的 `realm-management` link。`create_realm` 请求 Realm Provider 创建 pending Realm，响应返回待签 Realm Profile payload；Realm 签名 key 持有方签名后以 `activate_realm` 提交，其响应即激活响应，一次性返回 Realm 管理 token（Realm Provider 域名下的 Realm 由该 Realm Provider 自签，签名与激活在其内部完成，Realm 管理 token 在 `create_realm` 响应中返回）。Realm Provider 幂等键为 `(realm, 请求方)`：同一请求方对自己的 pending 或 active Realm 重试返回其状态（不返回 Realm 管理 token）；不同请求方命中同名 Realm，或任何请求命中 Realm Provider tombstone，一律冲突；重复 `activate_realm` 返回冲突，丢失的 Realm 管理 token 只能用 `reissue_admin_token` 取回；
 - 更新：同一 Realm Provider 下轮换 Realm issuer key、变更端点、修改 `display_name` 或加入策略，均发布 Realm Profile sequence 更高的新 Realm Profile；
 - 退役：退役只有一条路径，即 Realm 签名 key 持有方发布 `status = retired` 的退役 Realm Profile（保持相同 `provider.id`、sequence 更高），永久有效；Realm Provider 通过周期刷新得知并写入 Realm Provider tombstone；若 Realm Provider 已停服，域名所有者把 `realms` href 改指自控存放位置并在那里发布退役 Realm Profile；域名本身属于已停服 Realm Provider 时，其中的 Realm 无法退役，只能在别处新建；
 - Realm 签名 key 全部丢失且没有可用轮换链时，该 Realm 域名下的既有 Realm 都无法再签发后续 Realm Profile。域名所有者只能发布新的 Realm 签名 key（客户端按身份变化处理、重新确认信任），并在新 Realm label 下重建实例。
@@ -194,7 +194,7 @@ Actro v1 因而要求 ActorId 自带 Realm 名，且只包含 Actor serial 与 R
 
 ActorId 类似进程 ID，只回答「哪个 Realm 里的哪个 Actor」。程序身份（Actor 类型 `publisher/program@version`）不在 ActorId 中，由注册与 Actor credential 携带；连接 ACL 与服务发现使用注册/credential 中的类型。Publisher 改域名或程序升级都不会改变 ActorId 的格式。
 
-早期草案中的 `2af01@42~dns:team.example/...`（数值 realm_id 加 authority）作废。`service` 参数本身即可定位 Realm；Attach URI 不再长期保留第二个 `realm` 参数。当前只含 `u32` 且内嵌类型的 ActrId 视为 legacy，导入时必须显式补足 Realm 名并重写成 v1 标准形式，不能猜测。
+早期草案中的 `2af01@42~dns:team.example/...`（数值 realm_id 加 authority）作废。`service` 参数本身即可定位 Realm；Attach URI 不再长期保留第二个 `realm` 参数。当前只含 `u32` 且内嵌类型的 `ActrId` 视为 legacy，导入时必须显式补足 Realm 名并重写成 v1 标准形式，不能猜测。
 
 ## 4. 信令服务器的权力边界
 
@@ -219,7 +219,7 @@ ActorId 类似进程 ID，只回答「哪个 Realm 里的哪个 Actor」。程�
 - 伪造任意 Actor 身份；
 - 解密 Actor 应用消息；
 - 修改已认证的 offer/answer 而不被发现；
-- 颁发任意 Realm credential；
+- 颁发任意 Actor credential；
 - 获得 Workspace capability；
 - 用 ActorId 绕过应用权限。
 
@@ -304,7 +304,7 @@ Credential claims 应包含：
 
 - ActorId；
 - Realm；
-- ActorType；
+- Actor 类型；
 - actor public key；
 - principal/client binding；
 - issuer/key id；
@@ -320,7 +320,7 @@ Credential claims 应包含：
 - device management claim；
 - attestation nonce 和有效期。
 
-没有这类证明时，Realm credential 不证明设备正在运行官方 Front Host，Service 必须按不受信客户端处理。
+没有这类证明时，Actor credential 不证明设备正在运行官方 Front Host，Service 必须按不受信客户端处理。
 
 ### 6.2 持久 ActorId
 
@@ -399,7 +399,7 @@ membership 与实例授权是两层：Realm membership 只决定能否进入该�
 
 1. Actr Host 生成或读取 Actor长期 key；
 2. 请求新 ActorId 或 reclaim 已有 ActorId；
-3. Issuer 验证 Realm membership、ActorType 和允许的 claim；需要受管 runtime 时另验 platform attestation；
+3. Issuer 验证 Realm membership、Actor 类型和允许的 claim；需要受管 runtime 时另验 platform attestation；
 4. Issuer 签发短期 Actor credential，携带 ActorId 与 Actor 类型；
 5. Actor 使用短期 ticket 连接 signaling；
 6. signaling 验证 issuer、audience、ActorId 和 proof。
@@ -408,7 +408,7 @@ membership 与实例授权是两层：Realm membership 只决定能否进入该�
 
 1. 信令交换已签名协商数据；
 2. WebRTC/transport 建立；
-3. 双方验证 Realm credential 与 Actor key；需要时再验证独立 runtime attestation；
+3. 双方验证 Actor credential 与 Actor key；需要时再验证独立 runtime attestation；
 4. challenge/nonce 防止重放；
 5. Front–Service Attach 再验证 Program digest 与会话的应用权限；
 6. 成功后 Guest capability 才可用。

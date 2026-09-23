@@ -1,7 +1,7 @@
 # Loran Issuer Signer v1 指南
 
 状态：首版安全契约。Issuer Signer 是 Issuer 的签名后端，代码 `crates/loran-signer`，配置
-`[services.signer]`，gRPC 包 `signer.v1`（历史名称见 GLOSSARY「历史名称对照」）。
+`[services.signer]`，gRPC 包 `signer.v1`（历史名称见[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」）。
 
 ## 职责
 

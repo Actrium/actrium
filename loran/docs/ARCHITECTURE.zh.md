@@ -10,7 +10,7 @@
 该 Realm 域名的 Realm 签名 key 为长期信任根。v1 是单节点、SQLite、单一 Realm Provider，
 不提供 HA 或跨 Realm federation。管理权限分实例运营者、Realm 管理请求与单 Realm 的 Realm
 管理 token 三类。
-历史名称见 [GLOSSARY](GLOSSARY.zh.md)「历史名称对照」。
+历史名称见[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」。
 
 当前实现：代码仍强制一个实例一个 Realm，系统管理员是唯一 Realm 管理根。本页的
 「当前实现」描述以代码为准，差异清单见
@@ -68,21 +68,22 @@ SQLite 持久化：
 - 连接 ACL、Publisher Profile/key/package metadata；
 - 配置 override 与审计需要的 nonce。
 
-Workspace 不属于 Loran。Workspace 与 Service Actor 是多对多使用关系；关闭或删除
-Actor 不删除目录；Workspace 加密密钥属于用户。这些规则由 Actro 实现。
+Workspace 不属于 Loran。一个 Service Actor 至多绑定一个 Workspace，同一 Workspace 可按
+写入并发策略被多个 Service Actor 使用；关闭或删除 Actor 不删除目录；Workspace 加密密钥属于用户。这些规则由 Actro 实现。
 
 ## 请求流
 
 ### Realm 创建（目标契约）
 
-1. 调用方提交经 Realm 签名 key 持有方授权的 `create_realm` 请求（Actr 管理信封，或持有方
-   为本 Realm Provider 时的 Realm Provider 账号 bearer token）。
+1. 调用方提交经 Realm 签名 key 持有方授权的 `create_realm` 请求（Actr 管理信封；Realm Provider
+   域名下的 Realm 则为 Realm Provider 账号的 bearer token）。
 2. Loran 按 authority-discovery 获取 `https://<domain>/.well-known/actr` 中的
    `realm_signing_keys` 并验签，创建 `pending` Realm，在 Issuer Signer 生成 Realm
    issuer key，返回待签 Realm Profile payload。
 3. 调用方签名 Realm Profile，以 `activate_realm` 提交；Loran 验证 Realm Profile 指向自己
    后转为 `active`，在响应中一次性返回 Realm 管理 token，此后才签发 Actor credential。
-   持有方为本 Realm Provider 时由 Loran 自签，个人以 Realm Provider 账号认证。
+   Realm Provider 域名下的 Realm 由 Loran 自签、无需此步，个人以 Realm Provider 账号认证，
+   Realm 管理 token 在 `create_realm` 响应中返回。
 
 ### Realm provision（当前实现）
 
@@ -154,10 +155,10 @@ relay port range。端口可配置，descriptor 发布实际 endpoint。公网�
 
 ## 源码命名
 
-历史名清理分支 `refactor/historical-name-cleanup` 已把代码中的历史名统一为 publisher、
-Publisher Registry、Issuer、Issuer Signer（旧→新对照见 GLOSSARY；proto 字段编号不变，包清单
-升为 `actr-package/2` 且不接受旧键，SQLite 表原地迁移），不使用 serde alias 或双轨解析。
-仍沿用旧名的只有 `actrix*` 包名/二进制名与 Actor Registry 的代码名，见 GLOSSARY
+历史名清理分支 `refactor/historical-name-cleanup-hardening` 已把代码中的历史名统一为
+publisher、Publisher Registry、Issuer、Issuer Signer、Actor Registry（proto 字段编号不变，
+包清单升为 `actr-package/2` 且不接受旧键，SQLite 表原地迁移），不使用 serde alias 或双轨
+解析。仍沿用旧名的只有 `actrix*` 包名/二进制名，旧→新对照见[术语表](../../docs/GLOSSARY.zh.md)
 「历史名称对照」。
 
 安全假设、P0/P1 和发布门槛见

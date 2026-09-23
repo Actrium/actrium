@@ -59,7 +59,7 @@ TLS/mTLS；Management 即使共享 listener 也必须经过独立认证中间件
 | 获取 authority descriptor/Realm Profile 时 SSRF 或 DNS rebinding | 按 authority-discovery 最多跟随 5 次重定向，每跳必须 HTTPS 并始终用原 authority 校验 `authority` 绑定；每一跳执行 SSRF 检查：拒绝非公网 IP、逐跳 DNS pinning、响应限长 64 KiB |
 | 未认证请求驱动 Realm Provider 外联或放大 | 验签前就要获取 descriptor，因此按来源与目标域名限流，并缓存获取结果（含失败） |
 | Realm 管理请求重放到其他 Realm Provider 或重复执行 | Actr 管理信封含 `provider_id`（Realm Provider 的 DNS authority，不是各部署相同的常量），必须等于接收方；有效期不超过 5 分钟；Realm Provider 在有效期内记录 `nonce` 拒绝字节级重放；创建以 `(realm, 请求方)` 幂等，不同请求方命中同名 pending、或命中同名 active Realm/Realm Provider tombstone 一律冲突；payload 经 JCS 规范化并由 `active` Realm 签名 key 签名 |
-| Realm 管理 token 泄露或丢失 | Realm 管理 token 只在激活响应中返回一次，Realm Provider 只存哈希；丢失或泄露时重新签发并使旧 token 立即失效：持有方自己签名时以 Actr 管理信封发出 `reissue_admin_token`，持有方为本 Realm Provider 时由绑定的 Realm Provider 账号登录后完成 |
+| Realm 管理 token 泄露或丢失 | Realm 管理 token 只返回一次（激活响应；Realm Provider 域名下的 Realm 为 `create_realm` 响应），Realm Provider 只存哈希；丢失或泄露时重新签发并使旧 token 立即失效：持有方自己签名时以 Actr 管理信封发出 `reissue_admin_token`，Realm Provider 域名下的 Realm 由绑定的 Realm Provider 账号登录后完成 |
 | Realm Provider 分配的域名被滥用批量创建 | 自助创建以 Realm Provider 账号认证（OAuth 2.0 + PKCE），按账号计配额；账号注册与防滥用由 Realm Provider 决定。Realm Provider 可关联同一账号创建的实例（它本来就是签名方），实例成员看不到账号 |
 | Realm 签名 key 失陷 | 攻击者可签发新 Realm Profile（替换 Realm issuer key 或端点、退役 Realm）或创建新 Realm；已接受 Realm Profile 的客户端会拒绝改换 `provider.id` 的 Realm Profile；控制：持有方从 `keys` 中移除该 key（吊销其全部签名），并用 `active` key 重签受影响的 Realm Profile；客户端与 Loran 刷新 `realm_signing_keys` 后丢弃由该 key 签名的 Realm Profile 及其 `sequence` 基线（包括攻击者发布的超大 `sequence`）。残余风险：首次接触且尚未见到新 `realm_signing_keys` 的客户端无法区分；该风险属于 Realm 签名 key 持有方的信任边界，Loran 不能单独消除 |
 | Realm 签名 key 被无轮换链替换 | 视为身份变化：不做 `sequence` 比较，Loran 挂起相关 Realm，客户端必须重新确认信任，确认后以新成员 `sequence` 为基线；不静默接受 |

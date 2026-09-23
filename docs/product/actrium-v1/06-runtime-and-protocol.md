@@ -336,7 +336,7 @@ actro.session.v1.Takeover
 actro.session.v1.GetStatus
 ```
 
-`ActorAssurance`, No Roots and `ApplicationAssurance` Use `actro.privacy.v1.*` System protocol, see [13](13-privacy-state-and-aggregation.md)semantics by [docs/security](../../security/README.zh.md) Yes.
+`ActorAssurance`, No Roots and `ApplicationAssurance` Use `actro.privacy.v1.*` System protocol, see [13](13-privacy-state-and-aggregation.md)semantics by [docs/security](../../architecture/security/actrium/README.zh.md) Yes.
 
 ### 7.1 AttachRequest
 

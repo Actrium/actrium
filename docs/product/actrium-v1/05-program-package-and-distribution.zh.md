@@ -8,7 +8,7 @@
 |---|---|---|
 | Publisher | 规范化域名 | 当前谁控制发布入口 |
 | Program Release | `publisher/program@version` + digest | 要运行哪一组不可变字节 |
-| Service Actor | ActorId + Realm credential | 当前在与哪个运行实例通信 |
+| Service Actor | ActorId + Actor credential | 当前在与哪个运行实例通信 |
 
 HTTPS 不能证明程序无恶意；Marketplace 审核不能证明网络中的 Actor 身份；Actor credential 也不能证明本地加载的 Guest 是正确版本。
 

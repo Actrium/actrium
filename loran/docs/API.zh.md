@@ -4,7 +4,7 @@
 一个 Realm；目标契约是一个实例承载多个 Realm（Realm 名 `<label>@<domain>`），与本文
 不同的部分以「目标契约」标注，完整差异见
 [`REALM_V1_ARCHITECTURE.zh.md`](REALM_V1_ARCHITECTURE.zh.md) 第 9 节。历史名称见
-[GLOSSARY](GLOSSARY.zh.md)「历史名称对照」。
+[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」。
 
 ## 传输与认证规则
 

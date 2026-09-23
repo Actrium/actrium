@@ -16,13 +16,13 @@
 - [`SERVICES.md`](SERVICES.zh.md)：服务生命周期、运维和恢复。
 - [`DEVELOPMENT.md`](DEVELOPMENT.zh.md)：构建与贡献。
 - [`CONFIG_EXAMPLES.md`](CONFIG_EXAMPLES.zh.md)：生产与本地 profile。
-- [`KS_GUIDE.md`](KS_GUIDE.zh.md)：Issuer Signer 信任边界（文件名沿用历史名称，见 GLOSSARY）。
+- [`KS_GUIDE.md`](KS_GUIDE.zh.md)：Issuer Signer 信任边界（文件名沿用历史名称，见[术语表](../../docs/GLOSSARY.zh.md)）。
 - [`TURN_STUN_INTEROP_TESTING.zh.md`](TURN_STUN_INTEROP_TESTING.zh.md)：ICE 验证。
 - [`REALM_V1_ACCEPTANCE_EVIDENCE.zh.md`](REALM_V1_ACCEPTANCE_EVIDENCE.zh.md)：目标到自动证据和外部门槛的映射。
 - [`DEPENDENCY_RISK_REGISTER.zh.md`](DEPENDENCY_RISK_REGISTER.zh.md)：依赖告警处置、例外和退出条件。
 - [`INDEPENDENT_SECURITY_REVIEW.zh.md`](INDEPENDENT_SECURITY_REVIEW.zh.md)：独立评审范围与报告模板。
 - [`prometheus-metrics.md`](prometheus-metrics.zh.md)：指标。
-- [`GLOSSARY.md`](GLOSSARY.zh.md)：术语与「历史名称对照」。
+- [术语表](../../docs/GLOSSARY.zh.md)：全仓唯一术语表，含「历史名称对照」。
 
 ## 历史资料
 

@@ -1,5 +1,7 @@
 # Issue #350 修复实施方案：阻止签名清单身份逃逸 Actor 存储命名空间
 
+> 历史文档：沿用撰写时的名称（如 Actrix、AIS、manufacturer），现行名称见[术语表](../GLOSSARY.zh.md)「历史名称对照」。
+
 - 日期：2026-07-30
 - 关联 Issue：[Actrium/actr#350 — security(hyper): prevent signed manifest identity from escaping actor storage namespaces](https://github.com/Actrium/actr/issues/350)
 - CWE：CWE-22 / CWE-73
