@@ -4,7 +4,7 @@
 
 ```mermaid
 flowchart TB
-    subgraph Shell["Actro Shell(recipted)"]
+    subgraph Shell["Actrium Shell(recipted)"]
         TRM["Tab Runtime Manager"]
         PR["Package Resolver / Verified Cache"]
         PM["Permission Manager"]
@@ -13,7 +13,7 @@ flowchart TB
     end
 
     subgraph Front["Every one. resident app Tab One. Front Actor"]
-        NW["Actro Native Linked Workload"]
+        NW["Actrium Native Linked Workload"]
         RH["Keel Host"]
         CB["Capability Broker"]
         RG["Keel JS Guest"No letter""]
@@ -44,7 +44,7 @@ flowchart TB
 
 Front Use Actr linked/native workload:
 
-- with Actro (a) Build, sign and publish together;
+- with Actrium (a) Build, sign and publish together;
 - Publisher package Not carried;
 - Every one. resident app Tab Create a Logic Front Actor Examples;
 - Responsible Actor Registering, identity, connection, session,Keel Engine and Host capability;
@@ -55,10 +55,10 @@ Front Use Actr linked/native workload:
 
 ### 2.2 Front Actor Type
 
-Front It's... ActorType Yes. Actro Type of system, e.g.:
+Front It's... ActorType Yes. Actrium Type of system, e.g.:
 
 ```text
-actrium/actro-front@1.0.0
+actrium/actrium-front@1.0.0
 ```
 
 It describes Host runtimeNot disguised. Program It's... Service ActrType.Attach handshake By Actr Host Additional declarations:
@@ -71,9 +71,9 @@ It describes Host runtimeNot disguised. Program It's... Service ActrType.Attach 
 - protocol fingerprint;
 - local tab session nonce.
 
-These fields are normal Actro Host From Authenticated package Construct,Guest Unable to overwrite; for remote Service They are still client statements, used only for compatibility consultations, and cannot be a substitute for business authorization or remote attestation.
+These fields are normal Actrium Host From Authenticated package Construct,Guest Unable to overwrite; for remote Service They are still client statements, used only for compatibility consultations, and cannot be a substitute for business authorization or remote attestation.
 
-Under control. Realm We can put the platform on. app attestation, issue of signature or business equipment certificate to be included credential♪ If ♪ Service policy Request“Official Actro runtime”, Attach The certificate must be validated; in the absence of proof, it cannot be assumed ActorType is equal to the actual run time.
+Under control. Realm We can put the platform on. app attestation, issue of signature or business equipment certificate to be included credential♪ If ♪ Service policy Request“Official Actrium runtime”, Attach The certificate must be validated; in the absence of proof, it cannot be assumed ActorType is equal to the actual run time.
 
 ### 2.3 Front Life cycle
 
@@ -107,7 +107,7 @@ v1 Official Marketplace:
 
 - `guest_runtime = "keel-js"`;
 - bundle It's self-inflicted. CommonJS;
-- Allow only React, JSX runtime, Keel Guest SDK and Actro Declaration `host:*` capability;
+- Allow only React, JSX runtime, Keel Guest SDK and Actrium Declaration `host:*` capability;
 - Prohibition of arbitrary npm/runtime require;
 - Ban evalnon-physical dynamics import and undeclared capability;
 - Build analysis must `fail-on-violation`;
@@ -129,7 +129,7 @@ v1 Not permitted Keel AutoSelect JSC/Hermes/QuickJS:
 
 Fixed QuickJS It's to make the security semantics consistent across the platform. QuickJS Yes. OS Process isolation.
 
-That's the press threshold, not the right one. Actro Current Internal Keel A given capability for a copy. If the consolidated version is ignored timeoutWrite the dead memory cap, can't report. heap Usage, or only non-stop Shell/UI Main Course Execution Guest, then formal third party Guest Don't go online.
+That's the press threshold, not the right one. Actrium Current Internal Keel A given capability for a copy. If the consolidated version is ignored timeoutWrite the dead memory cap, can't report. heap Usage, or only non-stop Shell/UI Main Course Execution Guest, then formal third party Guest Don't go online.
 
 ### 3.3 Separative caliber
 
@@ -156,9 +156,9 @@ High risk Publisher The long-term objectives are:
 - iOS Independence to the extent feasible extension/helper Or stronger. WASM runtime;
 - May be Actr Host Force terminate It's... worker.
 
-## 4. Actro Safe Component Registry
+## 4. Actrium Safe Component Registry
 
-Actro We can't just use it. Keel `DefaultComponents` Full exposure to untrustworthy. Guest.
+Actrium We can't just use it. Keel `DefaultComponents` Full exposure to untrustworthy. Guest.
 
 Each component shall have:
 
@@ -176,7 +176,7 @@ Special rules:
 - `Image` Default accept only package asset id;
 - Far Image Showdown. `host:net` capability Domain names allowlist;
 - Guest I'm not taking any of this with me. HTTP headers;
-- `WebView` is not in the default Actro Component Registry;
+- `WebView` is not in the default Actrium Component Registry;
 - The outside chain,Modal, StatusBar, file selection and system sharing must be visible capability;
 - v1 Default Disable General String RemoteRef, only the typeing method is open.
 
@@ -325,18 +325,18 @@ Native Capsule Processes must not have original Actor transport, socket, Workspa
 
 ## 7. Front–Service System Protocol
 
-Operations proto The blog is also available.Actro Define stabilization system agreements:
+Operations proto The blog is also available.Actrium Define stabilization system agreements:
 
 ```text
-actro.session.v1.Attach
-actro.session.v1.Resume
-actro.session.v1.Detach
-actro.session.v1.Heartbeat
-actro.session.v1.Takeover
-actro.session.v1.GetStatus
+actrium.session.v1.Attach
+actrium.session.v1.Resume
+actrium.session.v1.Detach
+actrium.session.v1.Heartbeat
+actrium.session.v1.Takeover
+actrium.session.v1.GetStatus
 ```
 
-`ActorAssurance`, No Roots and `ApplicationAssurance` Use `actro.privacy.v1.*` System protocol, see [13](13-privacy-state-and-aggregation.md)semantics by [docs/security](../../architecture/security/actrium/README.zh.md) Yes.
+`ActorAssurance`, No Roots and `ApplicationAssurance` Use `actrium.privacy.v1.*` System protocol, see [13](13-privacy-state-and-aggregation.md)semantics by [docs/security](../../architecture/security/actrium/README.zh.md) Yes.
 
 ### 7.1 AttachRequest
 
@@ -352,7 +352,7 @@ actro.session.v1.GetStatus
     "guestDigest": "sha256:..."
   },
   "runtime": {
-    "actroVersion": "1.0.0",
+    "actriumVersion": "1.0.0",
     "frontHostApi": "1.0",
     "keelApi": "1.0"
   },

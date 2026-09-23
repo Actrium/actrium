@@ -81,7 +81,7 @@ https://acme.com/i/k7m2q9xh/today?view=week  ⇔  actr://acme.com/k7m2q9xh/today
 - After removing the prefix, the result must be a valid `actr:` URI
   (Sections 2 and 5); otherwise the address is also just an ordinary web page.
 - A domain that declares `links` **SHOULD** serve web pages at those paths
-  that include an "Open in Actro" link to the corresponding `actr:` URI.
+  that include an "Open in Actrium" link to the corresponding `actr:` URI.
 - Local Realms have no https form.
 
 ## 4. Opening procedure

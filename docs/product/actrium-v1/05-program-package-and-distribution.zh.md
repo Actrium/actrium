@@ -26,7 +26,7 @@ Publisher 约定使用域名是合理的，因为它直接复用：
 - CDN、缓存、代理和企业网络设施；
 - 组织已有的安全响应能力。
 
-Actro 不维护另一套全局 Publisher ID 注册中心。
+Actrium 不维护另一套全局 Publisher ID 注册中心。
 
 ### 2.2 Publisher Profile
 
@@ -52,7 +52,7 @@ bootstrap URL 由 Publisher 身份域名直接导出，必须使用标准 HTTPS 
 - 安全联系地址；
 - 可选 Marketplace/透明日志声明。
 
-第一次获取时，信任来自 URL hostname 的 Web PKI，或来自企业预置的 Publisher root pin；Publisher Profile 内携带的 root 不能循环地自证可信。接受首个 Publisher Profile 后，Actro 固定 root/key history，后续 Publisher Profile 必须：
+第一次获取时，信任来自 URL hostname 的 Web PKI，或来自企业预置的 Publisher root pin；Publisher Profile 内携带的 root 不能循环地自证可信。接受首个 Publisher Profile 后，Actrium 固定 root/key history，后续 Publisher Profile 必须：
 
 - 按 RFC 8785 JCS 规范化签名 payload（`publisher` 成员去掉其 `signature` 字段），再验证 detached Ed25519 签名；
 - 携带单调递增的 `sequence`、签发时间和到期时间；
@@ -86,15 +86,15 @@ offline root 是强烈推荐的 Publisher 运维方式，但是否要求硬件/�
 
 ### 4.1 包的职责
 
-Actro Program Release 直接复用 Actr `.actr` 包：
+Actrium Program Release 直接复用 Actr `.actr` 包：
 
 - 可执行主体是 Service workload；
 - Keel Guest 作为签名包资源；
 - Front–Service proto/contract 作为签名包资源；
 - 图标、静态资源、默认配置进入资源区；
-- Actro 扩展字段声明前台入口、权限、组件、Workspace 与兼容范围。
+- Actrium 扩展字段声明前台入口、权限、组件、Workspace 与兼容范围。
 
-Actro 不再发明一个套在 `.actr` 外面的第二层安装包。
+Actrium 不再发明一个套在 `.actr` 外面的第二层安装包。
 
 ### 4.2 推荐目录
 
@@ -129,7 +129,7 @@ Manifest 签名必须绑定所有资源 hash，因此替换 Guest、contract 或
 - 未在 manifest 中列出的可执行脚本；
 - 运行时从网络替换的 Guest 入口。
 
-Publisher 只能提供 Guest 与声明；Actr Host 实现永远随 Actro 客户端发布。
+Publisher 只能提供 Guest 与声明；Actr Host 实现永远随 Actrium 客户端发布。
 
 ## 5. Service workload 政策
 
@@ -138,7 +138,7 @@ Publisher 只能提供 Guest 与声明；Actr Host 实现永远随 Actro 客户�
 v1 Marketplace 第三方 Service workload 必须是：
 
 - WebAssembly Component Model；
-- 目标 ABI 在 Actro 支持列表内；
+- 目标 ABI 在 Actrium 支持列表内；
 - 通过 import/export allowlist；
 - 带 fuel、wall-clock timeout、memory、table、stream 和 I/O 配额；
 - 所有 Workspace、网络和 Actor 能力经 Service Host broker。
@@ -147,13 +147,13 @@ v1 Marketplace 第三方 Service workload 必须是：
 
 Actr 已具备 native cdylib/linked workload 能力，但这不等于 Marketplace 应默认允许：
 
-- native workload 与 Actro 进程具有更高风险；
+- native workload 与 Actrium 进程具有更高风险；
 - iOS 等平台禁止随意下载执行本机代码；
 - 动态库存在 ABI、签名和供应链差异。
 
 因此 Native Service 只适用于：
 
-- Actro 第一方系统程序；
+- Actrium 第一方系统程序；
 - 企业受管分发；
 - 桌面开发模式；
 - 用户明确接受的 elevated trust tier。
@@ -164,7 +164,7 @@ Native workload 必须进一步区分：
 
 - `NativeCdylib`：加载进 Actr Host 地址空间；不能证明出口闭合，第三方实例不得为绿；
 - `NativeCapsule`：独立受限进程，只有在 OS sandbox、无原始网络/文件、sealed libraries 和 brokered IPC 全部生效时，才可能评为 `CONTROLLED`；
-- `NativeTrusted`：Actro 自带或企业预置 TCB，不属于开放 Marketplace trust tier。
+- `NativeTrusted`：Actrium 自带或企业预置 TCB，不属于开放 Marketplace trust tier。
 
 v1 Marketplace 仍只开放 WASM Service。Native Capsule 是桌面优先的后续能力，具体约束见[隐私标记与汇聚协议](13-privacy-state-and-aggregation.md)。
 
@@ -180,7 +180,7 @@ v1 不引入「没有 Service 的页面应用」特例。工具链为 UI-only �
 
 因此所有 app Tab 仍统一 Attach 一个 Service，差别只在它是否包含自定义逻辑。
 
-## 6. Actro Manifest 扩展
+## 6. Actrium Manifest 扩展
 
 Actr 基础 manifest 继续提供：
 
@@ -193,42 +193,42 @@ Actr 基础 manifest 继续提供：
 - proto files；
 - dependency lock。
 
-Actro 增加：
+Actrium 增加：
 
 ```toml
-[actro]
+[actrium]
 schema_version = 1
-min_actro_version = "1.0.0"
+min_actrium_version = "1.0.0"
 front_host_api = "^1.0"
 service_host_api = "^1.0"
 
-[actro.front]
+[actrium.front]
 guest_runtime = "keel-js"
 guest_entry = "ui/guest.bundle.js"
 keel_api = "^1.0"
 contract_manifest = "ui/capability-manifest.json"
 contract_digest = "sha256:..."
 
-[actro.service]
+[actrium.service]
 primary_contract = "proto/primary-service.proto"
 protocol_fingerprint = "sha256:..."
 
-[actro.service.workspace]
+[actrium.service.workspace]
 requirement = "required"
 provisioning = "user-selected"
 access = "read-write"
 providers = ["managed-store", "local-folder", "cloud-drive"]
 lease = "exclusive-writer"
 
-[actro.session]
+[actrium.session]
 attachment_policy = "exclusive"
 
-[actro.privacy]
+[actrium.privacy]
 schema_version = 1
 data_classes = ["public", "private", "secret"]
 default_unknown_action = "block-private-and-secret"
 
-[[actro.privacy.actor_egress]]
+[[actrium.privacy.actor_egress]]
 actr_type = "notes.example/index-worker@1.4.2"
 required = false
 data_classes = ["private"]
@@ -243,7 +243,7 @@ data_classes = ["private"]
 ```text
 effective capabilities =
   package requested
-  ∩ Actro Host supported
+  ∩ Actrium Host supported
   ∩ user/admin granted
   ∩ current platform allowed
   ∩ current session scope
@@ -303,7 +303,7 @@ Realm Profile package / 用户选定的包
 
 ### 8.2 Keel 加载边界
 
-Keel `Engine.loadBundle(URL)` 只是加载机制，不是安装信任机制。Actro 必须：
+Keel `Engine.loadBundle(URL)` 只是加载机制，不是安装信任机制。Actrium 必须：
 
 1. 自行下载并验证 package；
 2. 从 content-addressed cache 读取已验证 Guest bytes；
@@ -312,7 +312,7 @@ Keel `Engine.loadBundle(URL)` 只是加载机制，不是安装信任机制。Ac
 
 ## 9. 版本不可变
 
-Actro 本地以以下联合键保存：
+Actrium 本地以以下联合键保存：
 
 ```text
 (publisher, program, version, package_digest)
@@ -367,7 +367,7 @@ Marketplace 不可以：
 - 为第三方抢注其域名；
 - 静默替换 Publisher package；
 - 用市场登录身份替代 Publisher 域名；
-- 因「已审核」绕过 Actro 权限；
+- 因「已审核」绕过 Actrium 权限；
 - 把下架与 Service/Workspace 自动删除等同。
 
 ## 12. 撤销政策

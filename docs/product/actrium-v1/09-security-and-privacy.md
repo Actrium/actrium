@@ -1,10 +1,10 @@
 # 09. Security and privacy
 
-> Privacy and security [docs/security](../../architecture/security/actrium/README.zh.md) is the applicable rule. Actro Threats, privileges, sandboxes and secret management; colours and maps brought together [13](13-privacy-state-and-aggregation.md).
+> Privacy and security [docs/security](../../architecture/security/actrium/README.zh.md) is the applicable rule. Actrium Threats, privileges, sandboxes and secret management; colours and maps brought together [13](13-privacy-state-and-aggregation.md).
 
 ## 1. Security objectives
 
-Actro It is important to ensure that:
+Actrium It is important to ensure that:
 
 1. User knows which code runs from. Publisher; which unalterable version;
 2. Publisher Guest Could not close temporary folder: %s Front Host;
@@ -24,7 +24,7 @@ Actro It is important to ensure that:
 ```mermaid
 flowchart LR
     U["User/Admin"]
-    SH["Actro Shell + Native Host<br/>Lettered"]
+    SH["Actrium Shell + Native Host<br/>Lettered"]
     G["Keel Guest<br/>Untrusted."]
     SVH["Service Host Broker<br/>Lettered"]
     SW["Service WASM<br/>Limited"]
@@ -91,7 +91,7 @@ Lettered Actr Host There are still possible gaps;“Lettered”It is stated that
 | Zip slip/zip bomb | Path denied, number of files/Total/Compression ratio limit, atomic decompression |
 | Guest require Any module | Build and install double white lists,runtime resolver fail-closed |
 | Guest Direct networking | No Default fetch/socket;`host:net` capability + allowlist |
-| Image Invisible networking/Bring your own header | ActroSafeImage Only asset id Or controlled. URL |
+| Image Invisible networking/Bring your own header | ActriumSafeImage Only asset id Or controlled. URL |
 | Guest Any Actor | Only exposure to fixed PrimaryService capability |
 | Guest Counterfeiting Users/Permissions | Actr Host Attach Uncoverable session metadata |
 | Guest Infinite Cycle | QuickJS interrupt timeout,Closable runtime |
@@ -104,7 +104,7 @@ Lettered Actr Host There are still possible gaps;“Lettered”It is stated that
 | URL Discover Permissions | ActorId Not capability, URI None token |
 | Actor Counterfeit | Realm credential, Actor key proof, challenge |
 | Forged or rolled-back Realm Profile | Realm Profile must be signed by a pinned Realm signing key; first trust via Web PKI or enterprise pin; Realm signing key changes require a valid rotation chain; monotonic `sequence`, immutable `provider.id`, retired Realms rejected; Realm Profiles do not expire and clients refresh them periodically; a Realm Profile that cannot be fetched, fails verification or is retired must not lead to using any Realm Provider other than the Realm Profile's |
-| Client disguised as official Actro Front | Service Default not trusting client to achieve; controlled scenes are tested separately platform/runtime attestation |
+| Client disguised as official Actrium Front | Service Default not trusting client to achieve; controlled scenes are tested separately platform/runtime attestation |
 | Malicious. Actor "Don't leak" self-report. | The person assessed cannot sign out for final `ActorAssurance`;a valid declaration by Actr Host Close |
 | Service Concealing the support. Actor | No root map to find out; no green underage |
 | WASM Declarations differ from actual exports | Comparison manifest, imports; valid declaration and actual side; confirmation of non-declaration of export `UNCONTROLLED` |
@@ -221,7 +221,7 @@ Static scans are the issuance of diagnostics, not the complete security boundary
 
 ### 7.3 Component control
 
-Component props No, it's not.“Normal UI Data”It's automatic.Actro Must check:
+Component props No, it's not.“Normal UI Data”It's automatic.Actrium Must check:
 
 - URL and header;
 - Documentation/asset reference;
@@ -243,7 +243,7 @@ The security centre shows the actual level:
 | S1 Same-process sandbox | v1 Keel JS Guest | Independence QuickJS runtime + capability + quota |
 | S2 Worker/runtime isolation | Follow-up | Yeah. terminate worker + Independent memory movement |
 | S3 OS process isolation | Desktop Long-Term Objectives | helper process/AppContainer/XPC |
-| T1 Trusted Native | Actro First party/Enterprise | Native workloadTrust. |
+| T1 Trusted Native | Actrium First party/Enterprise | Native workloadTrust. |
 
 Don't put it in the car. S1 The case is written.“Process level segregation”.QuickJS Yes. C Engine,Actr Host/Bridge/The component layer leaks may still be crossing the language sandbox.
 
@@ -321,7 +321,7 @@ Secret classification:
 
 | Secret | Storage | Exposure range |
 |---|---|---|
-| Realm client key (generated separately per Realm; how Actro generates it internally is not specified) | OS secure storage | Identity Manager |
+| Realm client key (generated separately per Realm; how Actrium generates it internally is not specified) | OS secure storage | Identity Manager |
 | Service Actor key | OS secure storage | Service runtime bootstrap |
 | Realm client key | OS secure storage | Realm Manager |
 | signaling ticket | Memory | signaling clientOne time. |
@@ -375,7 +375,7 @@ Default does not contain:
 
 ## 15. Security update and undo
 
-- Actro Host Security update can require restart Front;
+- Actrium Host Security update can require restart Front;
 - package (a) Discontinuation of the hierarchy;
 - Revoking a Realm issuer key or Realm signing key immediately affects new connections;
 - Created session At the latest. credential/lease Term expires;
@@ -385,7 +385,7 @@ Default does not contain:
 
 ## 16. Privacy commitments
 
-Actro The user data flow depends on:
+Actrium The user data flow depends on:
 
 - Workspace Provider;
 - Service host device;
@@ -396,7 +396,7 @@ Actro The user data flow depends on:
 
 Installation pages and security centres must be available“Where will the data go?”, instead of a general privacy switch.
 
-A Realm name appears in shared URIs as part of the ActorId and reveals the Realm domain and the Realm label (`label`). By default Actro generates a fully random `label` for each instance (containing no program name or user input); the human-readable name goes into `display_name` and never enters the ActorId. When the user explicitly chooses a readable `label`, the confirmation page and the pre-sharing UI should warn that it is exposed in links. Realm names and ActorIds look like email addresses (`k7m2q9xh@acme.com`); Actro must never render them as `mailto:` links and should label them clearly as instance addresses. Each Realm uses a separate Realm client key, never reused across Realms, so different instances cannot correlate the same client by it. When the Realm signing key holder is a Realm Provider, the user signs in with a Realm Provider account to create; the Realm Provider can link the instances created by one account (it signs them anyway), but instance members never see the account.
+A Realm name appears in shared URIs as part of the ActorId and reveals the Realm domain and the Realm label (`label`). By default Actrium generates a fully random `label` for each instance (containing no program name or user input); the human-readable name goes into `display_name` and never enters the ActorId. When the user explicitly chooses a readable `label`, the confirmation page and the pre-sharing UI should warn that it is exposed in links. Realm names and ActorIds look like email addresses (`k7m2q9xh@acme.com`); Actrium must never render them as `mailto:` links and should label them clearly as instance addresses. Each Realm uses a separate Realm client key, never reused across Realms, so different instances cannot correlate the same client by it. When the Realm signing key holder is a Realm Provider, the user signs in with a Realm Provider account to create; the Realm Provider can link the instances created by one account (it signs them anyway), but instance members never see the account.
 
 ## 17. Security development requirements
 
@@ -415,7 +415,7 @@ A Realm name appears in shared URIs as part of the ActorId and reveals the Realm
 
 ## 18. Application security
 
-Applying privacy is not Publisher Self-reported a Boolean field.Actro You have to press it. [13](13-privacy-state-and-aggregation.md) and [docs/security](../../architecture/security/actrium/README.zh.md) Processing:
+Applying privacy is not Publisher Self-reported a Boolean field.Actrium You have to press it. [13](13-privacy-state-and-aggregation.md) and [docs/security](../../architecture/security/actrium/README.zh.md) Processing:
 
 - No root in the chart, by valid Actor `Transfer` (a) Formation;Front (a) Positioning only;
 - WASM Adoption of the declaration + import / Effectiveness / (b) Export closed-convey measures;

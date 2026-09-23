@@ -64,7 +64,7 @@ https://acme.com/i/k7m2q9xh/today?view=week  ⇔  actr://acme.com/k7m2q9xh/today
   **MUST NOT** 凭路径外观猜测。未声明的 https 地址就是普通网页。
 - 去掉前缀后必须是合规的 `actr:` URI（第 2、5 节），否则该地址也只是普通网页。
 - 声明了 `links` 的域名 **SHOULD** 在这些路径上提供网页，其中包含跳转到对应 `actr:` URI 的
-  「在 Actro 中打开」链接。
+  「在 Actrium 中打开」链接。
 - 本机 Realm 没有 https 形式。
 
 ## 4. 打开流程

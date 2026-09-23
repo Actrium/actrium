@@ -31,7 +31,7 @@ Realm 名 = <realm_id>@<domain>        例：k7m2q9xh@acme.com、crm@acme.com
   `k7m2q9xh@acme.com` 的域名就是 authority `actr://acme.com`。
 - 本机 Realm 使用伪域名 `<installation-id>.actr.alt`（RFC 9476 `.alt`，永不经 DNS
   解析）。`installation-id` 是安装时随机生成的 128 位值（base32 小写 26 字符）。本机
-  Realm 由 Actro 内嵌实现，只有本地记录，没有 Realm Provider、Realm Profile 与 Realm 管理请求；Loran 只
+  Realm 由 Actrium 内嵌实现，只有本地记录，没有 Realm Provider、Realm Profile 与 Realm 管理请求；Loran 只
   承载 DNS 域名下的 Realm。
 - RealmId（`realm_id`）使用 DNS label 的字符规则：`[a-z0-9-]`，1..63 字符，不以 `-` 开头或结尾；在域名内
   唯一，创建后不可修改；默认由客户端随机生成（base32 小写短串，不含程序名），可读名称
@@ -68,7 +68,7 @@ TLS/mTLS gRPC 客户端配置放入独立安全边界。
 只需要独占部署的场景（如企业自建）可配置 `max_realms = 1`；默认不限制。
 
 Workspace 不属于 Realm 基础设施的数据模型。一个 Service 至多绑定一个
-Workspace，同一 Workspace 可按写入并发策略被多个 Service 使用；删除 Actor 不删除 Workspace；Workspace 密钥属于用户。这些规则由 Actro
+Workspace，同一 Workspace 可按写入并发策略被多个 Service 使用；删除 Actor 不删除 Workspace；Workspace 密钥属于用户。这些规则由 Actrium
 实现，Loran 不取得目录所有权。
 
 ## 2. 信任根
@@ -111,7 +111,7 @@ Realm Provider 只持有 Realm issuer key 私钥；只有受托成为 Realm 签�
 
 Realm registration secret 是 Realm 管理员/可信 Actr Host 能力，不是 Guest workload
 credential。Issuer 的注册入口同时要求 Realm secret 与 package/linked 身份证明；
-Actro/Rill 等 Actr Host 可以持有该能力，但不得把它暴露给用户编写的 Rill Guest。注册请求
+Actrium/Rill 等 Actr Host 可以持有该能力，但不得把它暴露给用户编写的 Rill Guest。注册请求
 携带的连接 ACL 因此是 Actr Host 管理行为；无 ACL 时默认拒绝发现/中继。
 
 ## 3. Realm 创建与激活
@@ -301,7 +301,7 @@ Worker ID 为显式配置的 0..31 值，不再由 PID/hostname 的 5-bit hash �
 Service 仍在同一 Realm 内，Realm 链接不变。
 
 Service 可用 renewal possession proof 在重启后保持 ActorId；Tab Actor 的新建策略属于
-Actro。Tab 与 Service 不由基础设施强制 1:1，同一 Service 允许多个 Tab/窗口连接和重连。
+Actrium。Tab 与 Service 不由基础设施强制 1:1，同一 Service 允许多个 Tab/窗口连接和重连。
 
 实例的 Service 就是本 Realm 内 Actor 类型与 Realm Profile 所指包相同的 Actor。Front 通过
 Signaling 的发现在本 Realm 内按该类型找到它；Actor Registry 不另设入口角色。
@@ -329,7 +329,7 @@ GET https://<domain>/.well-known/actr
 - descriptor 中的 `signaling`、`identity`、`ice-config` 等 service 服务于该 authority
   自身，与该域名下的 Realm 无关。访问某个 Realm 只使用其 Realm Profile 指定的 Realm
   Provider：取不到、验不过或已退役的 Realm Profile 时，客户端不得使用 Realm Profile 以外的
-  任何 Realm Provider。创建时选哪个 Realm Provider 由 Actro、用户或持有方策略决定。
+  任何 Realm Provider。创建时选哪个 Realm Provider 由 Actrium、用户或持有方策略决定。
 
 协议对象字段一律使用 snake_case（如 `realm_signing_keys`、`display_name`、`public_key`、
 `key_id`、`credential_audience`）。

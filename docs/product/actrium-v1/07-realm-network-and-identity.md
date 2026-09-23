@@ -70,9 +70,9 @@ Local      = k7m2q9xh@<installation-id>.actr.alt
 ```
 
 - `domain` is a normalized DNS name (lowercase IDNA A-label, no scheme, port, userinfo or path), using the same rules as a Publisher ID;
-- For a local Realm, `domain` is `<installation-id>.actr.alt`: the `installation-id` is a 128-bit value generated at random at installation (26 lowercase base32 characters); per RFC 9476, `.alt` is never resolved through DNS, so Actro only consults local records for `.actr.alt` and never sends or resolves it; local Realms use no Realm Profile (see 5.1);
+- For a local Realm, `domain` is `<installation-id>.actr.alt`: the `installation-id` is a 128-bit value generated at random at installation (26 lowercase base32 characters); per RFC 9476, `.alt` is never resolved through DNS, so Actrium only consults local records for `.actr.alt` and never sends or resolves it; local Realms use no Realm Profile (see 5.1);
 - `label` follows DNS label rules `[a-z0-9-]`, 1..63 characters, not starting or ending with `-`; it is unique within the domain and immutable after creation;
-- By default Actro generates a fully random `label` when creating an instance (e.g. `k7m2q9xh`, lowercase base32, no program name), and the human-readable name goes into the Realm Profile's `display_name`; the user may explicitly choose a readable `label` (e.g. `notes`) on the confirmation screen. The `notes@acme.com` used throughout this document is an example of such an explicitly chosen readable name;
+- By default Actrium generates a fully random `label` when creating an instance (e.g. `k7m2q9xh`, lowercase base32, no program name), and the human-readable name goes into the Realm Profile's `display_name`; the user may explicitly choose a readable `label` (e.g. `notes`) on the confirmation screen. The `notes@acme.com` used throughout this document is an example of such an explicitly chosen readable name;
 - The Realm label of a retired Realm is never reused: the domain owner must not reuse it, and Realm Providers enforce this with Realm Provider tombstones;
 - A domain's Realm signing keys are the long-term trust root of every Realm under it.
 
@@ -160,13 +160,13 @@ Lifecycle:
 
 Creation authorization: no domain, no Realm (except local Realms). The owner of each Realm domain is the Realm signing key holder and may delegate custody of the key to a Realm Provider; creating, activating and reissuing a Realm admin token all require the holder's authorization.
 
-Actro tells the two paths apart by a single detectable condition: comparing normalized A-labels, the Realm domain equals the Realm Provider ID or ends with `"." + Realm Provider ID` (on a label boundary). Such a Realm is "a Realm under a Realm Provider's domain".
+Actrium tells the two paths apart by a single detectable condition: comparing normalized A-labels, the Realm domain equals the Realm Provider ID or ends with `"." + Realm Provider ID` (on a label boundary). Such a Realm is "a Realm under a Realm Provider's domain".
 
-- Local Realm: Actro creates it locally, with no Realm management request and no Realm Profile;
+- Local Realm: Actrium creates it locally, with no Realm management request and no Realm Profile;
 - Realm under a Realm Provider's domain: that Realm Provider authenticates the requester with a Realm Provider account (OAuth 2.0 authorization code + PKCE; the authorization server entry point is the `href` of the `identity` link in that Realm Provider's own descriptor, which is the OAuth authorization server's issuer identifier (RFC 8414); every Realm Provider accepts the fixed public client ID `actr-host`), and requests carry a bearer token; the Realm Provider counts quota per account and binds Realm admin rights to it, so a new or lost client only needs to sign in again. The Realm Provider can link the instances created by one account (it is the signer anyway); instance members never see the account. The confirmation page shows that Realm Provider as the trust root;
 - Any other Realm domain: the Realm signing key holder's signing service issues an Actr management envelope (bound to `provider_id`, valid for at most 5 minutes, with a nonce against replay); how the holder authenticates its own members is up to the holder. The confirmation page shows the Realm domain as the trust root.
 
-When a domain owner delegates custody of its Realm signing keys to a Realm Provider, nothing in the public documents says so, and Actro still shows the Realm domain as the trust root; the delegated Realm Provider provides the signing service as the holder. Such custody is invisible to users; this is an accepted limitation.
+When a domain owner delegates custody of its Realm signing keys to a Realm Provider, nothing in the public documents says so, and Actrium still shows the Realm domain as the trust root; the delegated Realm Provider provides the signing service as the holder. Such custody is invisible to users; this is an accepted limitation.
 
 Restricted "creation delegation keys" issued by a Realm signing key (limited by `label` prefix, quota and validity) are a later capability.
 
@@ -184,7 +184,7 @@ From `42` alone a new device cannot know:
 - Which signaling cluster to connect to;
 - Whether Realm 42 collides with Realm 42 on another Realm Provider.
 
-Actro v1 therefore requires the ActorId to carry its Realm name, and nothing but the Actor serial and the Realm name:
+Actrium v1 therefore requires the ActorId to carry its Realm name, and nothing but the Actor serial and the Realm name:
 
 ```text
 <serial>.<label>@<domain>
@@ -244,9 +244,9 @@ These borders depend on:
 
 It's not for preservation. Service Business status.
 
-## 5. Actro Is there an internal order?
+## 5. Actrium Is there an internal order?
 
-Actro Internal:
+Actrium Internal:
 
 - Actr signaling client;
 - Realm signing key and Realm Profile resolver;
@@ -255,7 +255,7 @@ Actro Internal:
 - Local Realm It's... loopback/embedded signaling;
 - Diagnosis and status UI.
 
-Actro Not writing death:
+Actrium Not writing death:
 
 - (a) The only global courier server;
 - (a) Single public interest organizations;
@@ -265,7 +265,7 @@ Actro Not writing death:
 
 ### 5.1 Local Realm
 
-Local instances use Realm names under the local pseudo-domain `<installation-id>.actr.alt`, with one local Realm per local instance. A local Realm has no Realm Provider and uses no Realm Profile or Realm management request; Actro keeps only a local record. For a local Front and a local Service:
+Local instances use Realm names under the local pseudo-domain `<installation-id>.actr.alt`, with one local Realm per local instance. A local Realm has no Realm Provider and uses no Realm Profile or Realm management request; Actrium keeps only a local record. For a local Front and a local Service:
 
 - Prefer in-process/loopback transport;
 - embedded signaling only handles local Realms;
@@ -280,7 +280,7 @@ Local instances use Realm names under the local pseudo-domain `<installation-id>
 A networked instance's Realm lives under a domain:
 
 - The user or an administrator first trusts the Realm domain (confirms it once and pins its Realm signing keys);
-- When an instance is created, Actro creates a new Realm under that domain; the Realm owner is the instance creator;
+- When an instance is created, Actrium creates a new Realm under that domain; the Realm owner is the instance creator;
 - Other users join this instance's Realm by Realm invitation and obtain Realm membership;
 - Actors use the Realm Provider named in the Realm Profile at runtime, which stays the same for the Realm's lifetime;
 - Updates to the Realm Profile and to `realm_signing_keys` must verify signatures, rotation chains and `sequence`.
@@ -298,7 +298,7 @@ ActorId
 + private key proof
 ```
 
-A Realm client key is the key one member's client installation uses in one Realm: it is generated separately per Realm (how Actro generates it internally is not specified) and never reused across Realms, so a single client can be revoked on its own and different instances cannot correlate the same client. The principal/client binding in the Actor credential binds that Realm client key.
+A Realm client key is the key one member's client installation uses in one Realm: it is generated separately per Realm (how Actrium generates it internally is not specified) and never reused across Realms, so a single client can be revoked on its own and different instances cannot correlate the same client. The principal/client binding in the Actor credential binds that Realm client key.
 
 Credential claims This should include:
 
@@ -316,7 +316,7 @@ Credential claims This should include:
 The alternative client certificate contains a separate:
 
 - platform app attestation;
-- Actro Issue Signature/Version;
+- Actrium Issue Signature/Version;
 - device management claim;
 - attestation nonce and the duration.
 
@@ -328,7 +328,7 @@ Service Actor Long-term private key and ActorId Generate in creation/Issued and 
 
 The following operation must be maintained ActorId:
 
-- Actro/Service process restarts;
+- Actrium/Service process restarts;
 - normal Actor credential renewal;
 - re-authentication after losing the Actor credential renewal token, as long as the same long-term key is proven;
 - signaling reconnect;
@@ -378,7 +378,7 @@ Trusting a domain (once per domain):
 
 1. Fetch `https://<domain>/.well-known/actr` per Authority Discovery and read `realm_signing_keys`;
 2. The user or an administrator confirms the Realm domain;
-3. Actro pins its Realm signing keys and creates a domain record.
+3. Actrium pins its Realm signing keys and creates a domain record.
 
 Joining an instance's Realm (once per instance):
 
@@ -387,11 +387,11 @@ Joining an instance's Realm (once per instance):
 3. The client generates a separate Realm client key for this Realm; the principal/client completes the Realm invitation or login required by that Realm's join policy;
 4. The Realm Provider registers that Realm client key, which completes client registration and grants Realm membership; no separate membership credential is issued;
 5. OS secure storage keeps the Realm client key;
-6. Actro creates the Realm record.
+6. Actrium creates the Realm record.
 
 Afterwards, every Actor credential request proves possession of the Realm client key; the Issuer issues only for Realm client keys that are registered and not revoked. Revoking a client revokes its Realm client key registration; short-lived Actor credentials already issued expire.
 
-Joining a Realm covers only that one instance; when a user uses several instances, Actro performs client registration for each Realm automatically, with a different Realm client key per Realm. Domain-level SSO/directories are a later capability and not part of v1.
+Joining a Realm covers only that one instance; when a user uses several instances, Actrium performs client registration for each Realm automatically, with a different Realm client key per Realm. Domain-level SSO/directories are a later capability and not part of v1.
 
 Membership and instance authorization are two layers: Realm membership only decides whether one can enter the instance's network, i.e. it is the prerequisite for obtaining an Actor credential, connecting to signaling and performing the Attach handshake; roles and permissions inside the instance (read/write, administration, sharing) are application permissions, decided by the application and session authorization; the Actr runtime decides who may discover and connect to whom by Actor type, which is the connection ACL. The two are never merged even though they belong to the same instance; holding membership grants no permission inside the instance.
 
@@ -531,7 +531,7 @@ No chain can replace it.
 ### 13.1 Local Realm
 
 - Fixed installed digest Offline;
-- local Actor credentials can be restored by the Actro-embedded issuer;
+- local Actor credentials can be restored by the Actrium-embedded issuer;
 - loopback No need. TURN;
 - The cancellation affects only the management of the machine.
 
@@ -566,4 +566,4 @@ Measures to minimize:
 - Support multiple Realm Provider and transparent status display;
 - The authority descriptor does not list Realms.
 
-Realm names appear in ActorIds and URLs and reveal the domain and instance name; Actro generates a fully random `label` by default so names cannot be guessed or enumerated; a user who explicitly chooses a readable name should know it is exposed when shared.
+Realm names appear in ActorIds and URLs and reveal the domain and instance name; Actrium generates a fully random `label` by default so names cannot be guessed or enumerated; a user who explicitly chooses a readable name should know it is exposed when shared.

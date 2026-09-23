@@ -2,10 +2,10 @@
 
 ## 1. Information architecture
 
-Actro The primary product sector consists of five components:
+Actrium The primary product sector consists of five components:
 
 ```text
-Actro Shell
+Actrium Shell
 ├── Tab With Address Bar
 ├── Program Catalog(Processor library)
 ├── Service Inventory(Examples repository)
@@ -72,29 +72,29 @@ Just... `Ready` And apply the conclusion to `CONTROLLED` . Yellow does not equal
 
 ## 3. First Start
 
-Actro The following configurations were completed for the first start:
+Actrium The following configurations were completed for the first start:
 
-1. Initialize Actro's key store in OS secure storage (used to generate Realm client keys);
+1. Initialize Actrium's key store in OS secure storage (used to generate Realm client keys);
 2. Generate a random `installation-id`; local Realms use the pseudo-domain `<installation-id>.actr.alt`;
 3. Set the default new position to“This machine.”, i.e. new instances get a local Realm;
 4. Allow users to later trust a Realm domain, or join other instances' Realms by Realm invitation;
 5. Presentation Program Catalog and Service Inventory (b) Distinction;
 6. Default to close anonymous telemetry and development mode.
 
-First start creates no Realm; each local instance gets its own local Realm when it is created. A local Realm allows the local Front and Service to run offline, but its URI is only resolvable within that Actro installation. Cross-device connection requires first migrating the Service to a new Realm in a domain, which yields a new ActorId.
+First start creates no Realm; each local instance gets its own local Realm when it is created. A local Realm allows the local Front and Service to run offline, but its URI is only resolvable within that Actrium installation. Cross-device connection requires first migrating the Service to a new Realm in a domain, which yields a new ActorId.
 
 ## 4. Installer
 
 ### 4.1 From Marketplace
 
 1. User-opening program details;
-2. Actro Show Publisher, version,digest, powers,Workspace (a) Modes and market audit status;
-3. Actro From Publisher HTTPS Inlet parsing and downloading `.actr`;
+2. Actrium Show Publisher, version,digest, powers,Workspace (a) Modes and market audit status;
+3. Actrium From Publisher HTTPS Inlet parsing and downloading `.actr`;
 4. Verify HTTPS, Publisher key, bag signature,digestCompatibility and compression restrictions;
 5. Records Program Release;
 6. Cache program only, not automatically created Service, unless the user clicks“Create instance”.
 
-Marketplace The downloaded address returned is not the ultimate source of trust;Actro We have to go back. Publisher Valid metadata or verifications Publisher Signature and digest.
+Marketplace The downloaded address returned is not the ultimate source of trust;Actrium We have to go back. Publisher Valid metadata or verifications Publisher Signature and digest.
 
 ### 4.2 From `actr://` URI
 
@@ -122,7 +122,7 @@ Local `.actr` Package:
 ```mermaid
 sequenceDiagram
     actor U as User
-    participant A as Actro Shell
+    participant A as Actrium Shell
     participant P as Package Resolver
     participant M as Service Manager
     participant S as Service Actor
@@ -153,8 +153,8 @@ sequenceDiagram
 Every new instance creates a new Realm. The confirmation page shows:
 
 - Realm domain: a local Realm by default; optionally any trusted Realm domain. No domain, no Realm (except local Realms); a user without a domain uses a Realm allocated by a Realm Provider under its own domain;
-- `label`: by default Actro generates a fully random short string (e.g. `k7m2q9xh`, lowercase base32) that contains no program name or user input; the human-readable name goes into `display_name`, which is shown to users and appears only locally and in the Realm Profile, never in the ActorId; the user may explicitly choose a readable `label` instead (e.g. `notes`), and the confirmation page warns that a readable name is exposed in shared links;
-- Creation must be authorized by the Realm signing key holder of that Realm domain. When the Realm domain equals or is under the Realm Provider ID, the confirmation page states that the trust root is that Realm Provider, and the user signs in with their Realm Provider account (OAuth 2.0 + PKCE; Actro keeps the session after the first sign-in); Realm admin rights are bound to that account, so signing in again restores them on a new or lost client. For any other Realm domain, the holder's signing service authenticates the current user under its own policy and signs the Actr management envelope and the Realm Profile, and the page shows the Realm domain as the trust root (delegated custody is invisible to users);
+- `label`: by default Actrium generates a fully random short string (e.g. `k7m2q9xh`, lowercase base32) that contains no program name or user input; the human-readable name goes into `display_name`, which is shown to users and appears only locally and in the Realm Profile, never in the ActorId; the user may explicitly choose a readable `label` instead (e.g. `notes`), and the confirmation page warns that a readable name is exposed in shared links;
+- Creation must be authorized by the Realm signing key holder of that Realm domain. When the Realm domain equals or is under the Realm Provider ID, the confirmation page states that the trust root is that Realm Provider, and the user signs in with their Realm Provider account (OAuth 2.0 + PKCE; Actrium keeps the session after the first sign-in); Realm admin rights are bound to that account, so signing in again restores them on a new or lost client. For any other Realm domain, the holder's signing service authenticates the current user under its own policy and signs the Actr management envelope and the Realm Profile, and the page shows the Realm domain as the trust root (delegated custody is invisible to users);
 - If authorization is refused or the holder is unreachable, a clear error is shown, without falling back to another Realm domain.
 
 If the Realm domain is not yet trusted, first-time trust must be completed on the confirmation page.
@@ -230,7 +230,7 @@ Page display:
 
 ## 7. Tab Behaviour
 
-Actro UI There are two types of them. Tab:
+Actrium UI There are two types of them. Tab:
 
 - **Shell Navigation Tab**: Install, create confirmation, error details,Program and Service managing pages;it does not represent application running, so it can not be Front Actor.
 - **Resident App Tab**: in loading, running or suspended application page; one must be present at any given time live Front ActorAnd... Front Completed Attach There's one right after. Primary Service.
@@ -290,7 +290,7 @@ Guest Collapse cannot automatically restart Service.Service The crash shows a se
 
 ### 8.1 Two types of collection
 
-Actro A clear distinction must be made between:
+Actrium A clear distinction must be made between:
 
 - **Program Template Collection**: Not included `service`, each time you open it, you create a new instance.
 - **Example Collection**: Ham `service`Back to the same Service.
@@ -421,10 +421,10 @@ Development mode does not change official URI and official Publisher Rule of tru
 
 ## 14. Realm, equipment and identity experience
 
-A Realm corresponds to a single instance, so the identity page is organized in two layers: trusted Realm domains, and joined Realms (instances). Actro's identity page supports at least:
+A Realm corresponds to a single instance, so the identity page is organized in two layers: trusted Realm domains, and joined Realms (instances). Actrium's identity page supports at least:
 
 - Trust a Realm domain: on first encountering a Realm domain, fetch the Realm signing keys from its authority descriptor (`https://<domain>/.well-known/actr`) over HTTPS, show the domain and key fingerprint, and pin it after confirmation by the user or organization policy;
-- Join a Realm: join an instance's Realm with a one-time Realm invitation, completing login, client registration and Realm membership; Actro performs client registration for each Realm automatically, without per-Realm user configuration; each Realm uses a separate Realm client key, never reused across Realms, so different instances cannot correlate the same client;
+- Join a Realm: join an instance's Realm with a one-time Realm invitation, completing login, client registration and Realm membership; Actrium performs client registration for each Realm automatically, without per-Realm user configuration; each Realm uses a separate Realm client key, never reused across Realms, so different instances cannot correlate the same client;
 - Re-accreditation:credential Pause new ones when due or when asked by the administrator Attach, preserve local data and guide recovery;
 - Client revocation: list clients, last activity time and hosted Services; revocation invalidates that client's Realm client key registration, so it can no longer obtain Actor credentials;
 - Leave Realm: this means losing access to that instance; first state the affected Service, Workspace and sharing relationships, and never silently migrate to a local Realm;
@@ -461,18 +461,18 @@ Copying the instance URI alone does not change application permissions. Expired,
 - Front The interactive capabilities of cameras, microphones, clipboard, etc., are requested on a first-time basis, optional“This session only”;
 - Administrator policy You can refuse or restrain in advance. scopeBut not in UI Concealed as user consent;
 - After a persistent grant is revoked, the Actr Host must immediately invalidate the related capability handles and end calls still using them;
-- Far Service The host-level privileges are managed by remote host(s); local Actro Only the result of the signed declaration can be shown, and no other host can be modified for the user OS Permissions.
+- Far Service The host-level privileges are managed by remote host(s); local Actrium Only the result of the signed declaration can be shown, and no other host can be modified for the user OS Permissions.
 
 ## 17. Far Service Sources and management of borders
 
-v1 It's... Create Intent Only in the current Actro Supported Local Service Host Up. Faraway Service Access through: Inventory:
+v1 It's... Create Intent Only in the current Actrium Supported Local Service Host Up. Faraway Service Access through: Inventory:
 
 - Opened already Attach URI;
 - Accept Service (a) Invitations;
 - Encryption from the same user Inventory Sync the example address;
 - Vivid import of signed Service Metadata.
 
-Actro Only a separate host at the far end management capability , and only if you are able to start, stop, migrate or clear remotely Service;or only provided Attach, request authorization and view the verifiable status.iOS/Android Go, go, go!“Long-term online”The common server host and cloud movement does not belong to the mobile side. Actro v1 Client range.
+Actrium Only a separate host at the far end management capability , and only if you are able to start, stop, migrate or clear remotely Service;or only provided Attach, request authorization and view the verifiable status.iOS/Android Go, go, go!“Long-term online”The common server host and cloud movement does not belong to the mobile side. Actrium v1 Client range.
 
 ## 18. Guest Navigation syntax
 
@@ -490,7 +490,7 @@ Guest Can't just rewrite it. Shell Address Bar, only callable `host:navigate`:
 The official tool chain should provide a repetitious process:
 
 ```text
-actro init
+actrium init
 → Prepared Keel Guest, Service Component with contract
 → build
 → validate(schema, capability, hash)

@@ -16,7 +16,7 @@ Create under a given domain (creates a new Realm; without `domain` the instance 
 actr://notes.example/team-notes@1.4.2?domain=acme.com
 ```
 
-A Create URI does not carry a `label`. By default Actro generates the new Realm's `label` at random (a short lowercase base32 string with no program name), and the human-readable name goes into the Realm Profile's `display_name`; by default the example above yields a Realm name such as `k7m2q9xh@acme.com`. The user may explicitly choose a readable `label` on the confirmation page; `notes` in the Attach example below is such an explicitly chosen name.
+A Create URI does not carry a `label`. By default Actrium generates the new Realm's `label` at random (a short lowercase base32 string with no program name), and the human-readable name goes into the Realm Profile's `display_name`; by default the example above yields a Realm name such as `k7m2q9xh@acme.com`. The user may explicitly choose a readable `label` on the confirmation page; `notes` in the Attach example below is such an explicitly chosen name.
 
 ### Create + Guest route
 
@@ -167,60 +167,60 @@ size = 1832000
 description = "Workspace-bound team notes"
 license = "Apache-2.0"
 
-[actro]
+[actrium]
 schema_version = 1
-min_actro_version = "1.0.0"
+min_actrium_version = "1.0.0"
 front_host_api = "^1.0"
 service_host_api = "^1.0"
 
-[actro.front]
+[actrium.front]
 guest_runtime = "keel-js"
 guest_entry = "ui/guest.bundle.js"
 keel_api = "^1.0"
 contract_manifest = "ui/capability-manifest.json"
 contract_digest = "sha256:<digest>"
 
-[actro.service]
+[actrium.service]
 primary_contract = "proto/primary-service.proto"
 protocol_fingerprint = "sha256:<digest>"
 
-[actro.service.workspace]
+[actrium.service.workspace]
 requirement = "required"
 provisioning = "user-selected"
 access = "read-write"
 providers = ["managed-store", "local-folder", "cloud-drive"]
 lease = "exclusive-writer"
 
-[actro.session]
+[actrium.session]
 attachment_policy = "exclusive"
 lease_seconds = 45
 heartbeat_seconds = 15
 
-[actro.privacy]
+[actrium.privacy]
 schema_version = 1
 data_classes = ["public", "private", "secret"]
 default_unknown_action = "block-private-and-secret"
 
-[[actro.privacy.actor_egress]]
+[[actrium.privacy.actor_egress]]
 actr_type = "notes.example/index-worker@1.4.2"
 required = false
 data_classes = ["private"]
 
-[actro.permissions.front]
+[actrium.permissions.front]
 capabilities = [
   "primary-service",
   "host:clipboard.write",
   "host:notifications"
 ]
 
-[actro.permissions.service]
+[actrium.permissions.service]
 capabilities = [
   "workspace:read-write",
   "net:https://api.notes.example",
   "actor:call:notes.example:index-worker:1"
 ]
 
-[actro.components]
+[actrium.components]
 allow = [
   "View",
   "Text",
@@ -231,14 +231,14 @@ allow = [
   "ImageAsset"
 ]
 
-[actro.resources.front]
+[actrium.resources.front]
 heap_bytes = 67108864
 js_turn_timeout_ms = 100
 max_render_nodes = 10000
 max_batch_ops = 5000
 max_rpc_concurrency = 32
 
-[actro.resources.service]
+[actrium.resources.service]
 memory_bytes = 268435456
 max_mailbox = 4096
 max_rpc_concurrency = 128
@@ -266,12 +266,12 @@ path = "manifest.lock.toml"
 hash = "<sha256>"
 ```
 
-Official schema It's a decision to make. Actr Foundation manifest Keep back-compatibility and ensure that `[actro]` Fields are also located manifest signature Coverage.
+Official schema It's a decision to make. Actr Foundation manifest Keep back-compatibility and ensure that `[actrium]` Fields are also located manifest signature Coverage.
 
 Native Capsule workload Additional requirements
 
 ```toml
-[actro.native_capsule]
+[actrium.native_capsule]
 profile = "privacy-closed-v1"
 network = "broker-only"
 workspace = "broker-only"
@@ -326,7 +326,7 @@ Concurrent process `NativeCdylib` Do not use the profileAnd I can't judge him fo
 }
 ```
 
-Actro This document cannot be trusted; the results of the installation must be consistent with it.
+Actrium This document cannot be trusted; the results of the installation must be consistent with it.
 
 ## 6. Realm Signing Keys and Realm Profile
 
@@ -566,7 +566,7 @@ Guest Only the minimalized user can be seen in summary:
   "privacy": {
     "color": "green",
     "ready": true,
-    "policyId": "actro.consumer.default",
+    "policyId": "actrium.consumer.default",
     "workloadKind": "wasm-component",
     "applicationStateDigest": "…",
     "expiresAt": "2026-07-29T12:01:15Z"

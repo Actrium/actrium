@@ -1,8 +1,8 @@
-# Actro Dynamic privacy chart closed loop: initial patent search and assessment
+# Actrium Dynamic privacy chart closed loop: initial patent search and assessment
 
 - Version:0.1
 - Other Organiser2026-07-30
-- Target audience:Actr Actor Network,Actro Apply host and running privacy mechanisms
+- Target audience:Actr Actor Network,Actrium Apply host and running privacy mechanisms
 - Main jurisdictional perspective: Chinese patenting of inventions, taking into account PCTUnited States and European applications
 
 > This report is a preliminary material used by the product and technology team to determine whether to enter a formal patent, not a legal opinion, nor complete, novel search, invalid retrieval or free execution (see annex).FTO) Comment. The final application scope, inventor, public day and jurisdiction strategy should be confirmed by the patent agent or lawyer.
@@ -73,7 +73,7 @@ Option:
 
 > A dynamic. Actor The private map migration and the mapping binding capacity control method applied
 
-The need for independence is appropriate“Run-time component”“Distribution of implementation modules”or“Message Processing Unit”Wait for the broader term, in the instructions, Actor, Actr and Actro As a preferred example, it is necessary to avoid the unnecessary restriction of the protection to product names or browser forms.
+The need for independence is appropriate“Run-time component”“Distribution of implementation modules”or“Message Processing Unit”Wait for the broader term, in the instructions, Actor, Actr and Actrium As a preferred example, it is necessary to avoid the unnecessary restriction of the protection to product names or browser forms.
 
 ### 2. Core status machine
 
@@ -205,13 +205,13 @@ Impact: Broad“After a combination of security techniques, decide green, yellow
 - The new summary will be used to revert to the agreement when it is consistent with the original summary;
 - The summary does not invalidate and re-introduce the cache consent at the same time.
 
-Impact: Separate claims“Re-request for consent after changes in the structure or summary of authority”The risks are high.Actro We need to rely on data plane atoms freeze, figure Epoch is different from more specific agreements such as only downgrade tips.
+Impact: Separate claims“Re-request for consent after changes in the structure or summary of authority”The risks are high.Actrium We need to rely on data plane atoms freeze, figure Epoch is different from more specific agreements such as only downgrade tips.
 
 ### 3. Disable before hint when privileges are enhanced
 
 [Chrome Extension of Permission Warning Mechanism](https://developer.chrome.com/docs/extensions/develop/concepts/permission-warnings)Specify: When adding new permissions that trigger a warning, it can be disabled first and restarted only after the user accepts the new permission.
 
-Impact:“Weaknesses in security/Pause and seek user consent for additional privileges”The logic of the product is very reasonable, but it is weaker as a single invention point.Actro The difference should be dynamic distribution. Actor Charts, operational data plane separated from control plane, map binding capacity and atomic migration.
+Impact:“Weaknesses in security/Pause and seek user consent for additional privileges”The logic of the product is very reasonable, but it is weaker as a single invention point.Actrium The difference should be dynamic distribution. Actor Charts, operational data plane separated from control plane, map binding capacity and atomic migration.
 
 ### 4. Revalidation and re-engineering of network access after status changes
 
@@ -222,7 +222,7 @@ Impact:“Weaknesses in security/Pause and seek user consent for additional priv
 - (b) Lower, discontinue or increase resource visits in accordance with the new state of affairs;
 - Non-compliance equipment can access the isolation or rehabilitation network while retaining restricted routes.
 
-Impact:“State change—Re-evaluate.—Tightening or easing access—Reservations Control/Fix Path”Early disclosure.Actro The order of submission of the chart changes must be further defined, old Epoch No operational data are carried by invalid, no leakage of candidate border data and control floors.
+Impact:“State change—Re-evaluate.—Tightening or easing access—Reservations Control/Fix Path”Early disclosure.Actrium The order of submission of the chart changes must be further defined, old Epoch No operational data are carried by invalid, no leakage of candidate border data and control floors.
 
 ### 5. Component relies on diagrams, Hash and change detection
 
@@ -278,7 +278,7 @@ Impact: Putting“Actor Create/Delete Trigger Certificate”Separate claims are 
 
 [IETF AR4SI Early draft](https://www.ietf.org/archive/id/draft-voit-rats-attestation-results-01.html)Yes. 2021 Year described Trustworthiness Vector: Vectors of multiple credible statements,Relying Party Exchange of information may be permitted or refused on this basis.
 
-Impact: Isomers certifying integration, credible certifiers, probative vectors, freshness and post-proven authorization criteria for direct compatibility, not appropriate for declaration Actro Uninvited.
+Impact: Isomers certifying integration, credible certifiers, probative vectors, freshness and post-proven authorization criteria for direct compatibility, not appropriate for declaration Actrium Uninvited.
 
 ### 11. Short-term capacity, lease and lease rates, as shown in figure or status binding Epoch
 
@@ -452,7 +452,7 @@ The United States also needs to consider the appropriateness of abstract concept
 
 This is the most pressing issue of the day.
 
-- `kookyleo/actro`, `Actrium/keel` and `Actrium/actr` It's all public. GitHub (a) Warehouses;
+- `kookyleo/actrium`, `Actrium/keel` and `Actrium/actr` It's all public. GitHub (a) Warehouses;
 - Local `docs/product/` Currently untraceed, local Git It's not even in history. `PrivacyGraphRoot`, `GraphDowngradeGrant` or“Privacy Chart”(a) Exact terms;
 - This only means that we're currently here. Git History does not show the exacts of the above, and cannot prove that it never passed through chats, presentations, meetings, emails, white papers,Issue, PR Or other warehouses are public.
 
@@ -501,7 +501,7 @@ It's suggested that we prepare a complete Chinese invention application instead 
 1. Main case: Atom data plane migration in dynamic privacy maps;
 2. Alternative: Proven log export and privacy calculation service data path;
 3. Alternative: a credible, revocable domain certificate of privacy mandate with restricted domain;
-4. Appearance or GUI: Actro Privacy status, graphic differences and delegation interface.
+4. Appearance or GUI: Actrium Privacy status, graphic differences and delegation interface.
 
 ### Phase C: A message to the agent's core
 

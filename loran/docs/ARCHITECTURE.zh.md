@@ -17,7 +17,7 @@
 [`REALM_V1_ARCHITECTURE.zh.md`](REALM_V1_ARCHITECTURE.zh.md) 第 9 节。
 
 ```text
-受信 Actr Host（Actro/Rill）
+受信 Actr Host（Actrium/Rill）
         │ Realm registration capability
         ▼
 ┌──────────────────── 单个 Loran 进程 ─────────────────────┐
@@ -69,7 +69,7 @@ SQLite 持久化：
 - 配置 override 与审计需要的 nonce。
 
 Workspace 不属于 Loran。一个 Service 至多绑定一个 Workspace，同一 Workspace 可按
-写入并发策略被多个 Service 使用；关闭或删除 Actor 不删除目录；Workspace 加密密钥属于用户。这些规则由 Actro 实现。
+写入并发策略被多个 Service 使用；关闭或删除 Actor 不删除目录；Workspace 加密密钥属于用户。这些规则由 Actrium 实现。
 
 ## 请求流
 
