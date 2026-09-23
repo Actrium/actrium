@@ -7,7 +7,7 @@
 - Superseded by:
 - Related: [#270](https://github.com/Actrium/actr/issues/270), [#363](https://github.com/Actrium/actr/issues/363), [#383](https://github.com/Actrium/actr/issues/383), [#426](https://github.com/Actrium/actr/issues/426), [#567](https://github.com/Actrium/actr/issues/567), [#581](https://github.com/Actrium/actr/issues/581), [#583](https://github.com/Actrium/actr/issues/583), [#608](https://github.com/Actrium/actr/issues/608), [#609](https://github.com/Actrium/actr/issues/609), [#610](https://github.com/Actrium/actr/issues/610), [#622](https://github.com/Actrium/actr/pull/622)
 
-- Plan status: Proposed, serving as the implementation design and release-gate baseline
+- Plan status: Proposed, serving as the implementation design and operational-validation baseline
 - Code baseline: `main`; every run fixes and records the actual checked-out commit SHA
 - RTC baseline: the WebRTC v0.20 backend enabled on the current `main`
 - Execution environment: GitHub Actions, a self-hosted Kubernetes cluster, and no physical devices
@@ -104,6 +104,14 @@ Dashboard MUST NOT control the same endpoint set at the same time. Nightly and
 Weekend profiles are submitted to the Dashboard queue (manually or by the
 Dashboard scheduler) and hold the pool exclusively while they run.
 
+The deployment workflow succeeds when the deployed Pods and Dashboard are
+healthy. That health result is sufficient for GitHub Actions to report a
+successful deployment; the workflow does not wait for a soak run, publish its
+PASS/FAIL result to GitHub, or use it as a required GitHub check. Soak runs are
+started and evaluated independently by the Dashboard. The `release` profile is
+an operator-triggered pre-release validation run, not a GitHub deployment or
+release gate.
+
 Dashboard run state is persisted to its PVC. If the Dashboard Pod restarts, an
 active run is marked `Interrupted` rather than resumed; unattended release runs
 therefore need an external scheduler and recovery policy.
@@ -145,7 +153,8 @@ Pool reuse hygiene is part of the contract:
 - every run uses its own realm/ActrId prefix on the shared Actrix and MUST
   verify that its TURN allocations and registrations have drained before it
   completes;
-- the pool is rolling-rebuilt on a schedule and before release-gate runs.
+- the pool is rolling-rebuilt on a schedule and before operator-triggered
+  `release` profile runs.
 
 Resizing the pool still requires a new CI deployment. CI MUST NOT redeploy a
 namespace while its Dashboard has an active run. The initial implementation
@@ -1087,6 +1096,7 @@ artifacts.
 | Actr Endpoint (`actr-N`) | StatefulSet | Stable ordinal; the Pod IP may change after rebuild; pool members start unwired and Peer edges are established at run start |
 | Soak Dashboard | Deployment | UI/BFF, manual control, embedded Controller, and run-state persistence |
 | Collector | Sidecar or separate Deployment | Metrics, procfs, and logs |
+| Artifact uploader | Isolated Job/worker or Dashboard worker | After evaluation and successful redaction, uploads only the run's staged evidence bundle to S3/MinIO with a short-lived run-prefix credential, then records the object location and export status in the Dashboard |
 
 The StatefulSet ordinal is only a role label; it is not a permanent identity.
 
@@ -1119,6 +1129,7 @@ Collector/Prometheus -> Actrix:   TCP metrics port (Actrix metrics scrape)
                               relay allocations; required by the relay profile)
 `actr-N` <-> `actr-N`:        WebRTC ephemeral UDP
 All Pods -> kube-dns:         TCP/UDP 53
+artifact-uploader (or inline Dashboard worker) -> approved S3/MinIO object store: TCP 443 or configured port
 Other traffic:                denied
 ```
 
@@ -1126,7 +1137,12 @@ The matrix MUST list every flow the design depends on; a missing allow rule
 fails the harness, not the SUT, and is classified INVALID_INFRASTRUCTURE. The
 Dashboard egress to the Kubernetes API MUST be scoped to the API server only,
 and the TURN relay range MUST be the configured dedicated range rather than a
-broad UDP allowance.
+broad UDP allowance. The artifact-uploader MUST be allowed to reach only the
+approved S3/MinIO object-store endpoint. Enforce the destination with an egress
+gateway or approved address allowlist when NetworkPolicy cannot select the
+object-store hostname directly. Its storage credential MUST be scoped to the
+soak artifact prefix. If a centralized log service is used, list its explicit
+destination and port instead of opening general egress.
 
 The pool model relies on the endpoint-to-endpoint UDP allowance; it MUST NOT
 be narrowed per run, because any pool member may be wired to any other by a
@@ -1183,8 +1199,21 @@ failure.
 Record the main SHA, image digest, configuration summary, seed, Pod UID,
 ActrId, process incarnation, action ID, and Collector version.
 
-After Pod deletion, artifacts MUST NOT depend on `emptyDir`; use S3/MinIO,
-PVC, or a centralized log system.
+After Pod deletion, artifacts MUST NOT depend on `emptyDir`. S3/MinIO or an
+approved S3-compatible object store is the durable archive. The Dashboard PVC
+is the run-time staging and recovery copy, retained until the object store
+confirms a complete upload. `junit.xml`, logs, snapshots, and the rest of the
+evidence bundle are stored with the run artifacts, not uploaded as a GitHub
+Actions test report.
+
+The Dashboard owns artifact export. After the Result Evaluator finishes, a
+dedicated artifact-uploader (or an equivalent isolated Dashboard worker) reads
+only that run's staged artifact directory, waits for the redaction gate to
+pass, and writes an immutable bundle under the run ID in S3/MinIO using a
+short-lived, prefix-scoped credential. It records the object-store location
+and upload status in the Dashboard run record. On upload failure, it retains
+the PVC copy and reports export as failed for operator recovery; this does not
+change the GitHub deployment result.
 
 Redaction is a deterministic gate, not a best-effort filter. A dedicated
 redaction step MUST run after evidence collection and before any artifact
@@ -1213,7 +1242,9 @@ At minimum, `reproduce.sh` can:
 
 #### 14.2 Workflow
 
-The deployment workflow deliberately contains no test execution:
+The deployment workflow deliberately contains no test execution. Pod and
+Dashboard health is its success criterion; a Dashboard soak verdict is not
+reported as a GitHub check or used to block deployment:
 
 ```text
 CI (build/deploy workflow)
@@ -1231,9 +1262,10 @@ Dashboard (operator/API)
   -> embedded SoakController performs endpoint preflight and business traffic
   -> inject lifecycle/network/RTC/signaling events
   -> collect endpoint, Actrix, and Kubernetes evidence
-  -> evaluate the Result Evaluator and persist artifacts in the Dashboard PVC
+  -> evaluate with the Result Evaluator and stage the complete artifact bundle in the Dashboard PVC
+  -> run the deterministic redaction gate, then export the redacted bundle to S3/MinIO
   -> pass the quiescence gate and return the leased subset to the pool
-  -> operator reviews logs, the Result Evaluator output, and artifacts
+  -> operator reviews the Dashboard result and opens the stored bundle for analysis
 ```
 
 Nightly profile:
@@ -1253,13 +1285,16 @@ Dashboard scheduler or operator trigger
 The Dashboard run manifest is authoritative for the actual start and end times.
 
 ARC only creates the GitHub Actions Runner Pod. It does not perform RTC Faults,
-Endpoint lifecycle actions, or Result Evaluator evaluation. The Runner needs pinned
-`kubectl`, container tools, Rust cache, and an artifact client.
+Endpoint lifecycle actions, Result Evaluator evaluation, or upload run evidence
+to GitHub. The Runner needs pinned `kubectl`, container tools, and Rust cache.
 
 ### 15. Claude Code initial analysis
 
-Claude Code runs after artifacts are uploaded and does not participate in the
-business control loop.
+An operator can retrieve the redacted bundle from S3/MinIO and analyze it
+directly in Claude (including Claude Code). A separate AI gateway or GitHub
+Actions analysis job is not required. Optional read-only automation may invoke
+Claude Code after export, but it does not participate in the business control
+loop or affect the deployment result.
 
 Inputs:
 
@@ -1309,7 +1344,7 @@ AI initial attribution
 | `multi-peer` | Hub + 9 Leaves | 2 h | Peer isolation and concurrent recovery | Concurrent on disjoint subsets |
 | `nightly` | 2--10 Endpoints | 8 h | Long-term overnight stability | Exclusive pool |
 | `weekend` | 10--50 Endpoints | 48 h | Weekend resource and recovery soak | Exclusive pool |
-| `release` | 50--100 Endpoints | 8--24 h | Release gate | Exclusive pool, fresh rolling rebuild |
+| `release` | 50--100 Endpoints | 8--24 h | Operator-triggered pre-release validation | Exclusive pool, fresh rolling rebuild |
 
 Report steady and recovery windows separately: steady windows do not inject
 destructive Faults; recovery windows periodically inject and heal them. Runs
@@ -1393,7 +1428,7 @@ Code OIDC.
 - Peer graphs are wired and torn down through the peer-management API and recorded in `plan.json`;
 - pool subsets are leased exclusively and returned only after the quiescence gate;
 - coverage profiles can run concurrently on disjoint subsets, while Nightly, Weekend, and release runs hold the pool exclusively;
-- the pool can be rolling-rebuilt on schedule and before release-gate runs without losing artifacts.
+- the pool can be rolling-rebuilt on schedule and before operator-triggered `release` profile runs without losing artifacts.
 
 ### 18. References
 
@@ -1524,4 +1559,4 @@ issue before the corresponding phase is accepted.
 - run Actrix replicas, rolling upgrades, and cross-version actr/Actrix matrices;
 - autoscale the endpoint pool from Dashboard queue depth and profile demand;
 - manage several pools across namespaces from one Dashboard;
-- feed structured Result Evaluator evidence from Dashboard-controlled runs into an issue-triage bot while keeping any release gate deterministic.
+- feed structured Result Evaluator evidence from Dashboard-controlled runs into an issue-triage bot without changing the independently defined deployment success criterion.

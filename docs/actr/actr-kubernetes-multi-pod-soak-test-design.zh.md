@@ -1,6 +1,6 @@
 # actr 浸泡测试方案
 
-- 状态：Proposed，作为实施设计和发布门禁基线
+- 状态：Proposed，作为实施设计和运行验证基线
 - 代码基线：main 分支；每次运行由 CI 固定并记录实际 checkout 的 commit SHA
 - RTC 基线：main 当前启用的 WebRTC v0.20 后端
 - 运行环境：GitHub Actions、自建 Kubernetes 集群、无真机
@@ -93,6 +93,11 @@ Dashboard 内嵌 Soak Controller，因此测试不需要 CI Job。CI 只负责�
 控制浸泡测试。Nightly/Weekend 由操作员或 Dashboard 调度器提交到 Dashboard 队列，
 运行期间独占整个池；并发与租约规则见下节。
 
+部署工作流以 Pod 和 Dashboard 健康作为成功条件；健康检查通过后，GitHub Actions
+即可报告部署成功。它不等待 soak run，不把 Result Evaluator 的 PASS/FAIL 上传到
+GitHub，也不把测试结论设为 GitHub 必需检查。测试由 Dashboard 独立启动和判定。
+`release` profile 是操作员触发的发布前验证，不是 GitHub 部署或发布门禁。
+
 Dashboard 当前运行状态写入 PVC；Dashboard Pod 重启会将正在运行的任务标记为
 Interrupted，不会自动续跑。因此 Dashboard 适合人工调试和受控长跑，正式无人值守
 长跑仍需外部调度和故障恢复策略。
@@ -158,9 +163,10 @@ soak-dashboard（操作员/API）
   → 由操作员或明确启用的生命周期控制器执行 SIGTERM、SIGKILL、Pod 重建和 Actrix 重启
   → 收集 Snapshot、Hook、Fault 命中、业务结果、Actrix 和 K8s 指标
   → 结果判定器判断业务、恢复、隔离、generation fencing 和资源收敛
-  → 将完整 artifact 和 reproduce.sh 写入 Dashboard PVC
+  → 将完整 artifact 和 reproduce.sh 暂存到 Dashboard PVC
+  → 脱敏闸门通过后，将完整工件包导出到 S3/MinIO
   → 通过 quiescence 闸门后拆除接线，把租约子集归还池中
-  → 操作员或独立只读分析器可在运行结束后导出 artifact 并调用 Claude Code
+  → 操作员从对象存储取回脱敏工件，直接在 Claude 中分析
   → 人工修复后使用原 seed 重放
 ~~~
 
@@ -995,6 +1001,7 @@ namespace 内隔离 realm、ActrId、credential、Fault、NetworkPolicy 和 arti
 | Actr Endpoint（`actr-N`） | StatefulSet | 稳定 ordinal，Pod 重建后 IP 仍可能变化；池成员启动时不接线，Peer 边在 run 启动时建立 |
 | Soak Dashboard | Deployment | UI/BFF、人工控制、内嵌 Controller 和运行状态持久化 |
 | Collector | sidecar 或独立 Deployment | metrics、procfs、日志 |
+| Artifact uploader | 独立 Job/worker 或隔离的 Dashboard worker | Result Evaluator 完成且脱敏通过后，从 PVC 暂存区上传本次 run 的完整工件包到 S3/MinIO；使用按 run 前缀授权的短期凭证，并把对象位置和上传状态写回 Dashboard |
 
 StatefulSet 的 ordinal 只用于角色标识，不把 Pod IP 当作永久身份。
 
@@ -1025,13 +1032,18 @@ Collector/Prometheus → Actrix：TCP metrics 端口（Actrix metrics 抓取）
             relay profile 必需）
 `actr-N` ↔ `actr-N`：WebRTC ephemeral UDP
 所有 Pod → kube-dns：TCP/UDP 53
+artifact-uploader（或内嵌 Dashboard worker）→ 已批准的 S3/MinIO：TCP 443 或配置的服务端口
 其他流量：拒绝
 ~~~
 
 矩阵必须列出设计依赖的每一条流量；缺少 allow 规则导致的是 harness 故障而非
 SUT 故障，归类 INVALID_INFRASTRUCTURE。Dashboard 到 Kubernetes API 的出向
 只允许指向 API server；TURN relay 端口段必须是配置的专用段，不得放宽为
-大范围 UDP 放行。
+大范围 UDP 放行。Artifact uploader 的出向只允许访问已批准的 S3/MinIO 对象存储地址，
+凭证仅能写入浸泡测试工件前缀。若 NetworkPolicy 不能按对象存储主机名选择目标，应通过
+egress gateway 或批准的地址白名单限制目的地；使用集中日志服务时也必须单独列出目标和端口。
+上传失败时保留 PVC 中的工件副本，并在 Dashboard 标记导出失败供操作员恢复；这不改变
+GitHub 部署工作流的成功结果。
 
 池模型依赖 Endpoint 之间的 UDP 放行；不得按 run 收窄，因为任何池成员都可能被
 计划接线到任何其他成员。
@@ -1081,7 +1093,14 @@ Collector：0.5 CPU / 512 MiB
 
 必须记录 main SHA、镜像 digest、配置摘要、seed、Pod UID、ActrId、process incarnation、action_id 和 collector 版本。
 
-Pod 删除后 artifact 不能依赖 emptyDir，使用 S3/MinIO、PVC 或集中日志系统。
+Pod 删除后 artifact 不能依赖 emptyDir。S3/MinIO 或批准的 S3 兼容对象存储是完整工件包的
+持久归档；Dashboard PVC 用于运行期间暂存和上传失败后的恢复副本，直到对象存储确认上传
+完整后才可清理。完整工件包包含 `junit.xml`、日志、快照和其他证据，但不作为 GitHub
+Actions 测试报告上传到 GitHub。
+
+Dashboard 负责触发工件导出。Result Evaluator 完成后，独立 uploader（或隔离的 Dashboard
+worker）只读取本次 run 的暂存目录，等待脱敏闸门通过，再使用短期、按对象前缀授权的凭证
+写入以 run ID 命名的不可变工件包，并将对象存储位置和上传状态记录到 Dashboard。
 
 脱敏是确定性闸门，不是尽力而为的过滤。独立的脱敏步骤必须在证据收集之后、
 任何 artifact 上传、导出或组装 Claude Code 输入之前运行。它扫描日志、快照和
@@ -1105,7 +1124,8 @@ reproduce.sh 至少能：
 
 ### 14.2 Workflow
 
-默认部署工作流将镜像/部署与测试执行分离：
+默认部署工作流将镜像/部署与测试执行分离。Pod 和 Dashboard 健康是部署工作流的成功
+条件；Dashboard soak 结论既不回报为 GitHub check，也不阻断部署：
 
 ~~~text
 CI（构建/部署工作流）
@@ -1123,9 +1143,10 @@ Dashboard（操作员/API）
   → 内嵌 SoakController 执行 Endpoint preflight 和业务流量
   → 注入生命周期、网络、RTC/信令事件
   → 收集 Endpoint、Actrix 和 Kubernetes 证据
-  → 执行结果判定器，将 artifact 写入 Dashboard PVC
+  → 执行结果判定器，将完整 artifact 暂存到 Dashboard PVC
+  → 执行确定性脱敏闸门，通过后上传脱敏工件到 S3/MinIO
   → 通过 quiescence 闸门，把租约子集归还池中
-  → 操作员查看日志、结果判定器输出和 artifact
+  → 操作员查看 Dashboard 结果并从对象存储取回工件
 ~~~
 
 Nightly：
@@ -1144,13 +1165,15 @@ Dashboard 调度器或操作员触发
 
 实际时间以 Dashboard 的 run manifest 为准。
 
-ARC 只负责创建 GitHub Actions Runner Pod，不负责 RTC Fault、Endpoint 生命周期或结果判定器。Runner 需要 pinned kubectl、容器工具、Rust 缓存和 artifact 客户端。
+ARC 只负责创建 GitHub Actions Runner Pod，不负责 RTC Fault、Endpoint 生命周期、结果判定器或向 GitHub 上传测试证据。Runner 需要 pinned kubectl、容器工具和 Rust 缓存。
 
 ---
 
 ## 15. Claude Code 初步分析
 
-Claude Code 在 artifact 上传后运行，不参与业务控制闭环。
+操作员可以从 S3/MinIO 取回脱敏后的 artifact，直接交给 Claude（包括 Claude Code）分析，
+不需要单独的 AI gateway 或 GitHub Actions 分析任务。也可以在导出后由只读自动化调用
+Claude Code；AI 不参与业务控制闭环，也不影响部署结果。
 
 输入：
 
@@ -1202,7 +1225,7 @@ AI 初步归因
 | multi-peer | hub + 9 leaf | 2 h | Peer 隔离、并发 recovery | 可在不相交子集上并发 |
 | nightly | 2～10 Endpoint | 8 h | 夜间长期稳定 | 独占整个池 |
 | weekend | 10～50 Endpoint | 48 h | 周末资源和恢复浸泡 | 独占整个池 |
-| release | 50～100 Endpoint | 8～24 h | 发布门禁 | 独占整个池，跑前滚动重建 |
+| release | 50～100 Endpoint | 8～24 h | 操作员触发的发布前验证 | 独占整个池，跑前滚动重建 |
 
 steady 和 recovery 分开报告：steady 不注入破坏性 Fault，recovery 周期性注入并恢复。放不进空闲池的 run 在 Dashboard 队列中等待。标注"可在不相交子集上并发"的 profile 只有在采样事件集不含 Actrix 级和其他共享基础设施动作时才能共享池（§8.2）；一旦 run 采样到这类动作，该 run 必须独占整个池。
 
