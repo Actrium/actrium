@@ -258,15 +258,16 @@ Provider. Every step is authorized by the Realm signing key holder
 1. A `create_realm` request (Section 8) goes to the chosen Realm Provider.
    The Realm Provider creates a pending Realm, prepares its Realm issuer key
    and endpoints, and returns the unsigned first Realm Profile.
-2. The Realm signing key holder signs that Realm Profile and always submits it
-   with an `activate_realm` request. The Realm Provider verifies it
-   (Section 5), activates the Realm, and returns the Realm admin token once, in
-   the `activate_realm` response. If the Realm Provider serves the `realms`
+2. The Realm signing key holder signs that Realm Profile and submits it with
+   a `publish_profile` request. The Realm Provider verifies it (Section 5),
+   activates the Realm, and returns the Realm admin token once, in that
+   response. If the Realm Provider serves the `realms`
    location, it serves the Realm Profile from then on; otherwise the domain
    owner publishes it there.
 
 For a Realm under the Realm Provider's domain, the Realm Provider signs the
-Realm Profile itself, so no `activate_realm` request is needed (Section 7.3). A
+Realm Profile itself, so no `publish_profile` request is needed at creation
+(Section 7.3). A
 pending Realm that is not activated in time expires and is removed.
 
 ### 7.2 Updates
@@ -276,9 +277,15 @@ the Realm issuer keys, the Realm Provider's endpoints, `display_name`, and
 `policy`. It **MUST NOT** change
 `provider.id`.
 
+A new Realm Profile is likewise submitted to the Realm Provider with
+`publish_profile`; if the `realms` location is not at the Realm Provider, the
+holder also publishes it there. For a Realm under the Realm Provider's domain,
+the request carries only the `package`, `display_name`, or `policy` to change,
+and the Realm Provider builds and signs the new Realm Profile.
+
 ### 7.3 Authorization by the key holder
 
-Creating and activating a Realm and reissuing its Realm admin token require
+Creating a Realm, publishing its Realm Profile, and reissuing its Realm admin token require
 the authorization of the Realm signing key holder. Version 1 defines no
 delegated creation keys. The Actr Host picks the path with the rule of
 Section 2.1:
@@ -338,7 +345,7 @@ Discovery, Section 4.3):
 | `op` | Purpose |
 | --- | --- |
 | `create_realm` | Create a pending Realm and return its unsigned first Realm Profile (its `package` taken from the request). |
-| `activate_realm` | Submit the signed first Realm Profile in `profile`; the response carries the Realm admin token once. |
+| `publish_profile` | Submit a signed Realm Profile in `profile`. The first submission activates the pending Realm and the response carries the Realm admin token once; later submissions with a higher sequence are updates (including retirement). |
 | `reissue_admin_token` | Issue a new Realm admin token and invalidate the old one. |
 
 For a Realm under the Realm Provider's domain (Section 2.1), requests carry
@@ -385,8 +392,9 @@ Authority Discovery, Section 4.5, uses it to register a publisher.
   pending or active Realm returns the Realm's state, without a Realm admin
   token. A request that names a Realm of another requester, or a retired
   Realm, fails with a conflict.
-- `activate_realm` on an already active Realm fails with a conflict. A lost
-  Realm admin token is recovered only with `reissue_admin_token`.
+- For an active Realm, `publish_profile` accepts only a higher-sequence Realm
+  Profile and no longer returns a Realm admin token. A lost Realm admin token
+  is recovered only with `reissue_admin_token`.
 
 Before accepting a signed request, a Realm Provider verifies the Realm signing
 key through Actr Authority Discovery under the same rules as Actr Hosts.

@@ -210,22 +210,25 @@ Realm Provider 由 Actr Host、用户或 key 持有方的策略选定。每一�
 
 1. 向选定的 Realm Provider 发送 `create_realm` 请求（第 8 节）。Realm Provider 创建
    pending Realm，准备其 Realm issuer key 与端点，并返回未签名的首个 Realm Profile。
-2. Realm 签名 key 持有方签署该 Realm Profile，并总是以 `activate_realm` 请求提交。Realm
-   Provider 验证（第 5 节）后激活 Realm，在 `activate_realm` 响应中一次性返回 Realm 管理
-   token。若 `realms` 位置由该 Realm Provider 提供，它此后对外提供该 Realm Profile；否则
+2. Realm 签名 key 持有方签署该 Realm Profile，以 `publish_profile` 请求提交。Realm
+   Provider 验证（第 5 节）后激活 Realm，并在这次响应中一次性返回 Realm 管理 token。若 `realms` 位置由该 Realm Provider 提供，它此后对外提供该 Realm Profile；否则
    由域名所有者发布到 `realms` 位置。
 
-对 Realm Provider 域名下的 Realm，Realm Profile 由该 Realm Provider 自己签署，无需
-`activate_realm` 请求（第 7.3 节）。未按时激活的 pending Realm 过期后被清除。
+对 Realm Provider 域名下的 Realm，Realm Profile 由该 Realm Provider 自己签署，创建时无需
+`publish_profile` 请求（第 7.3 节）。未按时激活的 pending Realm 过期后被清除。
 
 ### 7.2 更新
 
 sequence 更高的 Realm Profile 可以更改 `package`（升级程序）、Realm issuer key、Realm
 Provider 端点、`display_name` 与 `policy`，**MUST NOT** 更改 `provider.id`。
 
+新 Realm Profile 同样以 `publish_profile` 提交给 Realm Provider；`realms` 位置不在 Realm
+Provider 时，持有方还要把它发布到该位置。对 Realm Provider 域名下的 Realm，请求只携带要改的
+`package`、`display_name` 或 `policy`，由 Realm Provider 生成并签署新 Realm Profile。
+
 ### 7.3 由 key 持有方授权
 
-创建、激活 Realm 以及重新签发其 Realm 管理 token，都须经 Realm 签名 key 持有方授权。版本 1
+创建、发布 Realm Profile 以及重新签发 Realm 管理 token，都须经 Realm 签名 key 持有方授权。版本 1
 不定义创建委派 key。Actr Host 按第 2.1 节的规则选择路径：
 
 - **Realm Provider 域名下的 Realm。** Realm Provider 以 Realm Provider 账号认证请求方。
@@ -267,7 +270,7 @@ Authority Discovery 第 4.3 节）接受以下 Realm 管理请求：
 | `op` | 用途 |
 | --- | --- |
 | `create_realm` | 创建 pending Realm，返回其未签名的首个 Realm Profile（其中 `package` 取自请求）。 |
-| `activate_realm` | 在 `profile` 中提交已签名的首个 Realm Profile；响应一次性携带 Realm 管理 token。 |
+| `publish_profile` | 在 `profile` 中提交已签名的 Realm Profile：首次提交激活 pending Realm，响应一次性携带 Realm 管理 token；之后提交 sequence 更高的版本即更新（含退役）。 |
 | `reissue_admin_token` | 签发新的 Realm 管理 token，并使旧 token 失效。 |
 
 对 Realm Provider 域名下的 Realm（第 2.1 节），请求携带下述 payload（含 `provider_id`、
@@ -305,8 +308,8 @@ Authority Discovery 第 4.5 节用它登记 publisher。
   `requester` 字段（缺省为空）；bearer 请求时为 Realm Provider 账号。同一
   请求方对自己的 pending 或 active Realm 的重复请求返回该 Realm 的状态，不返回 Realm 管理
   token；指向其他请求方的 Realm 或已退役 Realm 的请求，一律返回冲突。
-- 对已 active 的 Realm 重复 `activate_realm` 返回冲突。Realm 管理 token 丢失只能用
-  `reissue_admin_token` 取回。
+- 对已 active 的 Realm，`publish_profile` 只接受 sequence 更高的 Realm Profile，且不再返回
+  Realm 管理 token。Realm 管理 token 丢失只能用 `reissue_admin_token` 取回。
 
 接受签名请求前，Realm Provider 按与 Actr Host 相同的规则，通过 Actr Authority Discovery
 验证签名用的 Realm 签名 key。由于这次抓取发生在验签之前，Realm Provider **MUST** 按来源

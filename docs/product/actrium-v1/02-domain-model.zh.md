@@ -289,7 +289,7 @@ Actro 本地数据库可以有纯存储用途的 `record_id`，但它不是网�
 4. 在该 Realm 内创建 Service，获得持久 ActorId；
 5. 用它创建 Front 会话，地址栏显示该实例的 Realm 链接。
 
-第 3–4 步是一个以 `idempotency_key` 为幂等键的事务，严格按序执行：取得持有方授权 → Realm Provider 创建 pending Realm → 签名 Realm Profile 并以 `activate_realm` 提交（Realm Provider 域名下的 Realm 无需此步）→ Realm 变为 active → 创建 Service 并取得 ActorId。任一步失败都不创建 Service；pending Realm 过期由 Realm Provider 自动清理；随机 RealmId 只生成一次，用同一 `idempotency_key` 重试时沿用它；Realm Provider 幂等键为 `(realm, 请求方)`，继续同一个 pending Realm，不重复创建；不同请求方同名或命中已有 active Realm 或 Realm Provider tombstone 时返回冲突。本机 Realm 只有本地 record 与 Service 两步。
+第 3–4 步是一个以 `idempotency_key` 为幂等键的事务，严格按序执行：取得持有方授权 → Realm Provider 创建 pending Realm → 签名 Realm Profile 并以 `publish_profile` 提交（Realm Provider 域名下的 Realm 无需此步）→ Realm 变为 active → 创建 Service 并取得 ActorId。任一步失败都不创建 Service；pending Realm 过期由 Realm Provider 自动清理；随机 RealmId 只生成一次，用同一 `idempotency_key` 重试时沿用它；Realm Provider 幂等键为 `(realm, 请求方)`，继续同一个 pending Realm，不重复创建；不同请求方同名或命中已有 active Realm 或 Realm Provider tombstone 时返回冲突。本机 Realm 只有本地 record 与 Service 两步。
 
 新实例总是新 Realm。Service 升级为新 Program Release 时，新 Service 创建在同一 Realm 内，成员与应用权限延续，ActorId 按迁移规则变化；确认切换后，Realm 才发布 `package` 指向新包的 Realm Profile。
 
