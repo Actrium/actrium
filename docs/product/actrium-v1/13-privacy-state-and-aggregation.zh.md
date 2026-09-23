@@ -1,12 +1,12 @@
-# 13. Actro 隐私标记与图汇聚
+# 13. Actrium 隐私标记与图汇聚
 
-> 安全语义以 [docs/security](../../architecture/security/actrium/README.zh.md) 为准。本章只写 Actro 如何把该模型落到 Tab、Front、Actr Host 和数据面。两者冲突时改本章，不改现行安全模型。
+> 安全语义以 [docs/security](../../architecture/security/actrium/README.zh.md) 为准。本章只写 Actrium 如何把该模型落到 Tab、Front、Actr Host 和数据面。两者冲突时改本章，不改现行安全模型。
 
 成熟度：`Specified`。
 
 ## 1. 本章回答什么
 
-Actro 地址栏上的绿 / 黄 / 红，对应一张**无根应用图**在**当前就绪切面**上的 `ApplicationAssurance`，不是 Program 名称、不是 Marketplace 审核，也不是「曾经存在一个全图同时世界」。
+Actrium 地址栏上的绿 / 黄 / 红，对应一张**无根应用图**在**当前就绪切面**上的 `ApplicationAssurance`，不是 Program 名称、不是 Marketplace 审核，也不是「曾经存在一个全图同时世界」。
 
 ```text
 Tab ──定位──▶ Front Actor ──发现──▶ 无根应用图 CC(U(D))
@@ -57,7 +57,7 @@ EncGraph    = actrium/graph/v1 规范 JSON（排序后的 ActorId 与有向边�
 Front 的最终节点结论是：
 
 ```text
-R_A(Front) = join(Actro Host 平台事实, Keel Guest 出口事实)
+R_A(Front) = join(Actrium Host 平台事实, Keel Guest 出口事实)
 ```
 
 Actr Host 能做而 Guest 不能做的出口，仍是这个 Actor 的出口。不能只评 Guest。
@@ -100,7 +100,7 @@ observed ⊆ 有效声明且被强制
 
 平台现实不变：v1 WASM 可绿；第三方 in-process Native 不能绿；desktop Capsule 实验级；iOS 第三方动态 Native 不做产品能力。
 
-### 5.4 Actro Native Front Host
+### 5.4 Actrium Native Front Host
 
 不能把平台 Actr Host 一律判未知，否则所有 Tab 永远非绿。Actr Host 结论来自官方签名、安装完整性、版本策略和设备证明；安装无法验证或版本已撤销时，同样是黄或红。被评估的是 Front 进程整体。
 
@@ -112,7 +112,7 @@ Actr Host 可以为 Guest 提供证据或作为验证者签发 `ActorAssurance`�
 
 ## 6. 声明是输入
 
-`.actr` Manifest 的 `[actro.privacy]` 与 Native Capsule profile 仍是待验证输入，不是结论。Actr Host 必须对照 imports、实际能力、实际边。发现未声明且可能行使的出口：确认则可红，无法确认则黄。
+`.actr` Manifest 的 `[actrium.privacy]` 与 Native Capsule profile 仍是待验证输入，不是结论。Actr Host 必须对照 imports、实际能力、实际边。发现未声明且可能行使的出口：确认则可红，无法确认则黄。
 
 ## 7. 谁签发结论
 
@@ -122,7 +122,7 @@ Evidence   用来核实该主张的材料
 Assurance  验证者结合状态、证据、规则和用户策略给出的结论
 ```
 
-Actro 内的 Privacy Agent 负责观测、取证、组图和向验证者提交材料。跨进程成为安全依据时，必须由验证者签名 `ActorAssurance`，精确绑定 `ActorId + ActorStateDigest`、证据指纹、策略、规则和有效期。依赖方使用前自行核验。
+Actrium 内的 Privacy Agent 负责观测、取证、组图和向验证者提交材料。跨进程成为安全依据时，必须由验证者签名 `ActorAssurance`，精确绑定 `ActorId + ActorStateDigest`、证据指纹、策略、规则和有效期。依赖方使用前自行核验。
 
 发布 `ApplicationAssurance` 前：完整发现、核对每个当前状态、每个 AA 不得强于该上下文最弱项、无挂起成员、重读当前指针。成功只说明读一致切面。
 
@@ -145,7 +145,7 @@ Actro 内的 Privacy Agent 负责观测、取证、组图和向验证者提交�
   "object": "actrium/actor-assurance/v1",
   "issuer": "verifier:…",
   "subject": { "actorId": "…", "actorStateDigest": "…" },
-  "qid": "actro.consumer.default",
+  "qid": "actrium.consumer.default",
   "ruleset": "…",
   "result": "CONTROLLED",
   "findings": [{ "effect": "Transfer(Actor(b))", "verdict": "CONTROLLED" }],
@@ -163,10 +163,10 @@ Actro 内的 Privacy Agent 负责观测、取证、组图和向验证者提交�
 名称可保留，语义按现行对象：
 
 ```text
-actro.privacy.v1.GetActorAssurance
-actro.privacy.v1.GetApplicationAssurance
-actro.privacy.v1.SubscribeChanges
-actro.privacy.v1.RequireReady
+actrium.privacy.v1.GetActorAssurance
+actrium.privacy.v1.GetApplicationAssurance
+actrium.privacy.v1.SubscribeChanges
+actrium.privacy.v1.RequireReady
 ```
 
 Attach 成功只证明直连会话。整图仍须 `Ready` 的 `ApplicationAssurance`。通道无效时不评分，直接阻断应用数据。
@@ -208,6 +208,6 @@ CHANNEL_INVALID
 
 ## 13. v1 边界
 
-支持：WASM 出口度量；Actro Host 作为平台 TCB（不得自签自己）；第三方 in-process Native 保持未知或红；合规 Capsule 按证据评；动态边先验证后传数据；世代交集；Ready 展示。
+支持：WASM 出口度量；Actrium Host 作为平台 TCB（不得自签自己）；第三方 in-process Native 保持未知或红；合规 Capsule 按证据评；动态边先验证后传数据；世代交集；Ready 展示。
 
 不承诺：业务逻辑无缺陷；opaque HTTPS 内部不泄露；无 OS sandbox 时把第三方 Native 变绿；全球隐私评分；绿色等于绝对安全。

@@ -53,7 +53,7 @@ It has to be analyzed to a fixed `.actr` package digest.Program Release Descript
 - Keel Guest (a) Entry points;
 - Front–Service (a) Contracts;
 - Capacity and components to apply;
-- Keel/Actro/Actr ABI Compatibility scope;
+- Keel/Actrium/Actr ABI Compatibility scope;
 - (a) Resource quotas;
 - Workspace (a) Modes;
 - Publisher Can not open message
@@ -76,7 +76,7 @@ Service No, it's not.“Program Type”Nor is it a freely replaceable load-balan
 
 One. resident app Tab Corresponding short life cycle interactions Actor:
 
-- workload By Actro (b) Fixed;
+- workload By Actrium (b) Fixed;
 - Inline Keel Host, Actr client, capability broker and life-cycle management;
 - Load certified Keel Guest;
 - Only binds Service ♪ I'm limited ♪ capability;
@@ -85,7 +85,7 @@ One. resident app Tab Corresponding short life cycle interactions Actor:
 
 ### 2.5 Tab
 
-Actro Shell .Tab Saves local browsing status, e.g.:
+Actrium Shell .Tab Saves local browsing status, e.g.:
 
 - Local `tab_id`;
 - Current Normalization `actr://` URI;
@@ -124,7 +124,7 @@ Realm name = <label>@<domain>                      # networked, e.g. k7m2q9xh@ac
            | <label>@<installation-id>.actr.alt    # local
 ```
 
-- The domain belongs to its owner and is used only as a naturally unique, ownership-verifiable name; it hosts no infrastructure. A local Realm uses the pseudo-domain `<installation-id>.actr.alt` (generated at random at installation, never resolved through DNS), which belongs to that Actro installation;
+- The domain belongs to its owner and is used only as a naturally unique, ownership-verifiable name; it hosts no infrastructure. A local Realm uses the pseudo-domain `<installation-id>.actr.alt` (generated at random at installation, never resolved through DNS), which belongs to that Actrium installation;
 - The domain's Realm signing keys are the long-term trust root for every Realm under it and sign each Realm Profile;
 - `label` is unique within the domain, immutable after creation, and never reused after retirement;
 - One Realm Provider (signaling, TURN, Issuer) hosts many Realms; a Realm is bound to one Realm Provider when it is created and can never switch.
@@ -160,7 +160,7 @@ The same. Service You can be multiple in time. Front Actor reconnect; this is no
 If Service It's always just one specific thing. Front Actor, and it immediately creates a contradiction:
 
 - Close Tab Back Service Whether it is necessary to delete;
-- Actro Restart New Front Actor How to connect;
+- Actrium Restart New Front Actor How to connect;
 - Front Whether the crash caused Workspace (a) Loss of ownership;
 - The following video shows the event:
 - The same example is why it is necessary to change identity after moving to new equipment.
@@ -174,7 +174,7 @@ So the simplest model is not“Two life-cycles tied to death.”and instead:
 Program Manifest Declaration:
 
 ```toml
-[actro.session]
+[actrium.session]
 attachment_policy = "exclusive"
 ```
 
@@ -230,7 +230,7 @@ It only carries a numeric `realm_id`, lacks a resolvable Realm name, and embeds 
 e.g. 2af01.notes@acme.com
 ```
 
-A local Realm looks like `2af01.h3x8p2wq@<installation-id>.actr.alt`. The numeric `realm_id` is only a internal handle of the Realm Provider and never appears in the ActorId. The final wire/text encoding is frozen by an Actr ADR, but it must not fall back to "give only a realm_id and let Actro privately guess the Realm"; importing a legacy ActorId must explicitly supply the Realm name and rewrite it.
+A local Realm looks like `2af01.h3x8p2wq@<installation-id>.actr.alt`. The numeric `realm_id` is only a internal handle of the Realm Provider and never appears in the ActorId. The final wire/text encoding is frozen by an Actr ADR, but it must not fall back to "give only a realm_id and let Actrium privately guess the Realm"; importing a legacy ActorId must explicitly supply the Realm name and rewrite it.
 
 At the same time, the semantics of its life cycle must be derived from“Current registration address”Upgrade to“Durable logic of renewable rent Actor Identity”.
 
@@ -252,13 +252,13 @@ Target model no longer oriented URL Add a public layer“Logical Service Key”.
 ServiceInstanceId → current ActorId
 ```
 
-Actro Local databases can have pure storage. `record_id`But it's not a network identity, and it's not shared. URL Medium.
+Actrium Local databases can have pure storage. `record_id`But it's not a network identity, and it's not shared. URL Medium.
 
 ## 5. Status Attribution
 
 | Status | Author of authority | Annotations |
 |---|---|---|
-| Tab Arrange, move forward./Back | Actro Shell | It's synchronous. The loss should not disrupt the business. |
+| Tab Arrange, move forward./Back | Actrium Shell | It's synchronous. The loss should not disrupt the business. |
 | Guest UI Temporary state | Front Actor / Keel Guest | suspend But a snapshot. Once the crash is over, it's allowed to rebuild. |
 | Current binding Service ActorId | Tab Session | From Regularization URI |
 | Business status | Service Actor | Not on it. Front |
@@ -266,9 +266,9 @@ Actro Local databases can have pure storage. `record_id`But it's not a network i
 | Workspace Tie | Service Actor | Front No re-tabling. |
 | Program Release metadata | Program Catalog | Here. coordinate + digest As Primary Key |
 | Actor Long-term private key | Secure Storage | Not normal SQLite |
-| Realm domain trust (Realm signing key pin) | Actro Realm Manager | Pinned after first confirmation; updated only via a signed rotation chain |
+| Realm domain trust (Realm signing key pin) | Actrium Realm Manager | Pinned after first confirmation; updated only via a signed rotation chain |
 | Realm client key | Secure Storage | Separate per Realm (i.e. per instance); registered with the Realm Provider it constitutes Realm membership; revocable |
-| Permissions granted | Actro Permission Store | Tie publisher/program/major/digest/Workspace Scope |
+| Permissions granted | Actrium Permission Store | Tie publisher/program/major/digest/Workspace Scope |
 | ActorAssurance | Authenticator (%1)issuer ≠ subject) | For accuracy `ActorStateDigest` Nodal conclusion |
 | ApplicationAssurance | Applied assessor | Consemination conclusions of current no root map cut-off; presentation required Ready |
 
@@ -278,11 +278,11 @@ The three acts must be separated:
 
 ### 6.1 Create
 
-None `service` It's... URI Yes. Create Intent.Actro:
+None `service` It's... URI Yes. Create Intent.Actrium:
 
 1. Parse and validate the Program Release;
 2. Select a Realm domain (default: a local Realm), generate a random `label` (the user may explicitly choose a readable one) and select a Workspace;
-3. Create a new Realm under that Realm domain: for a local Realm Actro only creates a local record, with no Realm Profile and no Realm management request; for any other Realm Actro obtains its Realm Profile and Realm membership, and creation must be authorized by the Realm signing key holder of that Realm domain: for a Realm under a Realm Provider's domain, that Realm Provider authenticates the user with a Realm Provider account and signs; for any other Realm, the holder's signing service signs the Actr management envelope and the Realm Profile;
+3. Create a new Realm under that Realm domain: for a local Realm Actrium only creates a local record, with no Realm Profile and no Realm management request; for any other Realm Actrium obtains its Realm Profile and Realm membership, and creation must be authorized by the Realm signing key holder of that Realm domain: for a Realm under a Realm Provider's domain, that Realm Provider authenticates the user with a Realm Provider account and signs; for any other Realm, the holder's signing service signs the Actr management envelope and the Realm Profile;
 4. Create a new Service Actor in that Realm and obtain its durable ActorId;
 5. Use the... ID Create Front Sessions;
 6. In-place Rewrite URI.
@@ -328,12 +328,12 @@ If the program needs multiple background Actors, the Primary Service discovers, 
 
 ## 8. System Program
 
-Actro Shell address bar,Tab strip, access to bullet windows and security information belongs to ShellNot normal. Tab Content.
+Actrium Shell address bar,Tab strip, access to bullet windows and security information belongs to ShellNot normal. Tab Content.
 
 History, collection,Program Catalog, Service Inventory The visible pages should be either:
 
 1. As Shell Native management panel, not in normal applications Tab(a) The contract or other contract; or
-2. As Actro Own-owned, signed systems ProgramStill in compliance Front–Service Models.
+2. As Actrium Own-owned, signed systems ProgramStill in compliance Front–Service Models.
 
 Do not expose a third party hidden form for the system page Guest Permissions. System-level capabilities must be signed at different levels and visible Host policy Granted.
 

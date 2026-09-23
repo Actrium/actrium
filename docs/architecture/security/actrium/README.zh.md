@@ -31,7 +31,7 @@ Specified → Implemented → Tested → Attested → Deployed
 | 第一次接触 | [总览与主张边界](01-overview.zh.md) |
 | 要掌握模型 | [原则、威胁与语义](02-model.zh.md) |
 | 要实现协议或 Host | [协议与执行](03-protocol.zh.md) |
-| 做 Actro 产品 / UX | [产品标记与交互](04-product.zh.md) |
+| 做 Actrium 产品 / UX | [产品标记与交互](04-product.zh.md) |
 | 做验证、审计或形式化 | [保障、证明与成熟度](05-assurance.zh.md) → [形式模型](formal/model.zh.md) |
 
 术语见[术语表](../../../GLOSSARY.zh.md)「安全与隐私模型」一节。
@@ -46,7 +46,7 @@ Specified → Implemented → Tested → Attested → Deployed
 
 ## 与产品文档的关系
 
-Actro v1 产品稿写 Tab / Front / 交付与验收，安全语义以本目录为准：
+Actrium v1 产品稿写 Tab / Front / 交付与验收，安全语义以本目录为准：
 
 - [安全与隐私](../../../product/actrium-v1/09-security-and-privacy.zh.md)
 - [隐私标记与图汇聚](../../../product/actrium-v1/13-privacy-state-and-aggregation.zh.md)

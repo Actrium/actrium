@@ -2,10 +2,10 @@
 
 ## 1. 信息架构
 
-Actro 的一级产品面由五部分组成：
+Actrium 的一级产品面由五部分组成：
 
 ```text
-Actro Shell
+Actrium Shell
 ├── Tab 与地址栏
 ├── Program Catalog（程序库）
 ├── Service Inventory（实例库）
@@ -71,29 +71,29 @@ Program 与 Service 必须在 UI 和数据模型中分开。安装一个程序�
 
 ## 3. 首次启动
 
-Actro 首次启动完成以下配置：
+Actrium 首次启动完成以下配置：
 
-1. 在 OS 安全存储中初始化 Actro 密钥存储（用于生成各 Realm 客户端 key）；
+1. 在 OS 安全存储中初始化 Actrium 密钥存储（用于生成各 Realm 客户端 key）；
 2. 随机生成 `installation-id`，本机 Realm 使用伪域名 `<installation-id>.actr.alt`；
 3. 设置默认新建位置为「本机」，即新实例使用本机 Realm；
 4. 允许用户稍后信任某个 Realm 域名，或通过 Realm 邀请加入其他实例的 Realm；
 5. 展示 Program Catalog 和 Service Inventory 的区别；
 6. 默认关闭匿名遥测和开发模式。
 
-首次启动不创建任何 Realm；每个本机实例在创建时获得自己的本机 Realm。本机 Realm 允许离线运行本机 Front 与 Service，但其地址只在该 Actro 安装内可解析。跨设备连接需要先把实例迁移到 Realm 域名下的新 Realm，得到新的地址。
+首次启动不创建任何 Realm；每个本机实例在创建时获得自己的本机 Realm。本机 Realm 允许离线运行本机 Front 与 Service，但其地址只在该 Actrium 安装内可解析。跨设备连接需要先把实例迁移到 Realm 域名下的新 Realm，得到新的地址。
 
 ## 4. 安装程序
 
 ### 4.1 从 Marketplace
 
 1. 用户打开程序详情；
-2. Actro 显示 Publisher、版本、digest、权限、Workspace 模式和市场审核状态；
-3. Actro 按 Marketplace 或 Publisher 给出的包地址下载 `.actr`；
+2. Actrium 显示 Publisher、版本、digest、权限、Workspace 模式和市场审核状态；
+3. Actrium 按 Marketplace 或 Publisher 给出的包地址下载 `.actr`；
 4. 校验 HTTPS、Publisher key、包签名、digest、兼容性和压缩包限制；
 5. 记录 Program Release；
 6. 只缓存程序，不自动创建 Service，除非用户点击「创建实例」。
 
-下载地址不是信任源；Actro 以包签名（经 Publisher Profile 验证）和 digest 为准。
+下载地址不是信任源；Actrium 以包签名（经 Publisher Profile 验证）和 digest 为准。
 
 ### 4.2 打开链接时
 
@@ -116,7 +116,7 @@ Actro 首次启动完成以下配置：
 ```mermaid
 sequenceDiagram
     actor U as 用户
-    participant A as Actro Shell
+    participant A as Actrium Shell
     participant P as 包校验
     participant M as Service Manager
     participant S as Service
@@ -147,8 +147,8 @@ sequenceDiagram
 每个新实例都会新建一个 Realm，确认页显示：
 
 - Realm 域名：默认创建本机 Realm；可选任一已信任的 Realm 域名。没有域名就不分配 Realm（本机 Realm 除外）；没有自己域名的用户使用 Realm Provider 在其域名下分配的 Realm；
-- `realm_id`：Actro 默认生成完全随机的短串（如 `k7m2q9xh`，base32 小写），不含程序名或用户输入；可读名称写入 `display_name` 显示给用户，只在本地和 Realm Profile 中出现，不进入 ActorId；用户也可以显式改用可读的 `realm_id`（如 `notes`），确认页提示可读名会随分享链接暴露；
-- 创建须经该 Realm 域名的 Realm 签名 key 持有方授权。Realm 域名等于或属于 Realm Provider ID 时，确认页提示信任根即该 Realm Provider，用户登录其 Realm Provider 账号（OAuth 2.0 + PKCE，首次登录后 Actro 保存会话），Realm 管理权绑定该账号，换机或丢失客户端后重新登录即可恢复；其他 Realm 域名由持有方的签名服务按其自身策略认证当前用户后签署 Actr 管理信封与 Realm Profile，确认页显示信任根为该 Realm 域名（受托代持对用户不可见）；
+- `realm_id`：Actrium 默认生成完全随机的短串（如 `k7m2q9xh`，base32 小写），不含程序名或用户输入；可读名称写入 `display_name` 显示给用户，只在本地和 Realm Profile 中出现，不进入 ActorId；用户也可以显式改用可读的 `realm_id`（如 `notes`），确认页提示可读名会随分享链接暴露；
+- 创建须经该 Realm 域名的 Realm 签名 key 持有方授权。Realm 域名等于或属于 Realm Provider ID 时，确认页提示信任根即该 Realm Provider，用户登录其 Realm Provider 账号（OAuth 2.0 + PKCE，首次登录后 Actrium 保存会话），Realm 管理权绑定该账号，换机或丢失客户端后重新登录即可恢复；其他 Realm 域名由持有方的签名服务按其自身策略认证当前用户后签署 Actr 管理信封与 Realm Profile，确认页显示信任根为该 Realm 域名（受托代持对用户不可见）；
 - 授权被拒或持有方不可达时给出明确错误，不回落到其他 Realm 域名。
 
 Realm 域名尚未受信时，必须在确认页完成首次信任。
@@ -223,7 +223,7 @@ Manifest 必须分别声明三个维度，不能把它们压进一个枚举：
 
 ## 7. Tab 行为
 
-Actro UI 中有两类 Tab：
+Actrium UI 中有两类 Tab：
 
 - **Shell Navigation Tab**：安装、创建确认、错误详情、Program 和 Service 管理页面；它不代表应用运行，因此可以没有 Front Actor。
 - **Resident App Tab**：处于 loading、running 或 suspended 的应用页；任一时刻必须恰有一个 live Front Actor，并且 Front 完成 Attach 后恰有一个 Service。
@@ -294,7 +294,7 @@ Guest 崩溃不得自动重启 Service。Service 崩溃则显示单独状态，�
 
 ### 8.3 分享
 
-分享实例只分享地址，不自动授予访问权。Realm 域名声明了 `links` 时分享 https 形式，对方没有 Actro 也能打开说明网页；否则分享 `actr://` 形式。
+分享实例只分享地址，不自动授予访问权。Realm 域名声明了 `links` 时分享 https 形式，对方没有 Actrium 也能打开说明网页；否则分享 `actr://` 形式。
 
 - 接收者仍需加入该实例的 Realm；
 - 应用权限必须允许；
@@ -411,7 +411,7 @@ Service Inventory 可以显示最后一次观察到的应用结论与时间，�
 Realm 对应单个实例，因此身份页按两层组织：信任的 Realm 域名，以及已加入的 Realm（实例）。至少支持：
 
 - 信任 Realm 域名：首次遇到某个 Realm 域名时，经 HTTPS 获取该域名的 authority descriptor（`https://<domain>/.well-known/actr`）中的 Realm 签名 key，展示域名与 key 指纹，由用户或组织策略确认后固定；
-- 加入 Realm：通过一次性 Realm 邀请加入某个实例的 Realm，完成登录、客户端注册和 Realm membership 获取；Actro 自动完成各 Realm 的客户端注册，不要求用户逐个配置；每个 Realm 使用独立的 Realm 客户端 key，不跨 Realm 复用，不同实例无法据此关联同一客户端；
+- 加入 Realm：通过一次性 Realm 邀请加入某个实例的 Realm，完成登录、客户端注册和 Realm membership 获取；Actrium 自动完成各 Realm 的客户端注册，不要求用户逐个配置；每个 Realm 使用独立的 Realm 客户端 key，不跨 Realm 复用，不同实例无法据此关联同一客户端；
 - 重新认证：credential 到期或管理员要求时，暂停新的 Attach，保留本地数据并引导恢复；
 - 客户端撤销：列出客户端、最后活动时间和已托管 Service；撤销后该客户端的 Realm 客户端 key 注册失效，不能再申请 Actor credential；
 - 离开 Realm：即失去对该实例的访问；先说明受影响的 Service、Workspace 与分享关系，不静默迁到本机 Realm；
@@ -448,18 +448,18 @@ Service 的最小应用权限角色为：
 - Front 的相机、麦克风、剪贴板等交互能力按首次使用即时请求，可选「仅本次会话」；
 - 管理员 policy 可以预先拒绝或约束 scope，但不能在 UI 中伪装成用户同意；
 - 撤销持久 grant 后，Actr Host 必须立即失效相关 capability handle，并结束仍在使用它的调用；
-- 远端 Service 的宿主级权限由远端宿主管理；本地 Actro 只能显示经签名声明的结果，不能替用户修改另一台宿主的 OS 权限。
+- 远端 Service 的宿主级权限由远端宿主管理；本地 Actrium 只能显示经签名声明的结果，不能替用户修改另一台宿主的 OS 权限。
 
 ## 17. 远端 Service 的来源与管理边界
 
-v1 新建实例只在当前 Actro 支持的本地 Service Host 上创建。远端 Service 通过以下途径进入 Inventory：
+v1 新建实例只在当前 Actrium 支持的本地 Service Host 上创建。远端 Service 通过以下途径进入 Inventory：
 
 - 打开已有实例的链接；
 - 接受 Service 邀请；
 - 从同一用户的加密 Inventory 同步实例地址；
 - 显式导入带签名的 Service 元数据。
 
-Actro 只有在远端宿主另行授予 management capability 时，才能远程启动、停止、迁移或清除 Service；否则只提供 Attach、请求授权和查看可验证状态。iOS/Android 上「长期在线」通常意味着连接桌面、服务器或其他远端宿主，不意味着移动端能任意创建云端进程。通用服务器宿主和云调度不属于 Actro v1 客户端范围。
+Actrium 只有在远端宿主另行授予 management capability 时，才能远程启动、停止、迁移或清除 Service；否则只提供 Attach、请求授权和查看可验证状态。iOS/Android 上「长期在线」通常意味着连接桌面、服务器或其他远端宿主，不意味着移动端能任意创建云端进程。通用服务器宿主和云调度不属于 Actrium v1 客户端范围。
 
 ## 18. Guest 导航语义
 
@@ -477,7 +477,7 @@ Guest 不能直接改写 Shell 地址栏，只能调用 `host:navigate`：
 官方工具链应提供一条可重复流程：
 
 ```text
-actro init
+actrium init
 → 编写 Keel Guest、Service Component 与 contract
 → build
 → validate（schema、capability、hash、沙箱兼容性）

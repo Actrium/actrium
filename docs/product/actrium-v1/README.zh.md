@@ -1,14 +1,14 @@
-# Actro v1 产品需求说明
+# Actrium v1 产品需求说明
 
 > 状态：目标设计草案（Target State Draft）<br>
 > 文档版本：0.1<br>
 > 日期：2026-07-29<br>
-> 适用范围：Actro、Actr、Keel 的下一阶段产品与协议设计<br>
+> 适用范围：Actrium、Actr、Keel 的下一阶段产品与协议设计<br>
 > 原则：先定义理想模型，再调整现有实现；本文不以兼容历史实现为前提
 
 ## 1. 一句话定义
 
-Actro 是 Actrium 世界的「程序浏览器」：用户在 resident app Tab 中运行由 Keel Guest 描述的原生界面，每个 resident app Tab 由一个受信任的 Front Actor 承载，并通过该实例的 Service 访问程序状态、Workspace 与 Actor 网络。
+Actrium 是 Actrium 世界的「程序浏览器」：用户在 resident app Tab 中运行由 Keel Guest 描述的原生界面，每个 resident app Tab 由一个受信任的 Front Actor 承载，并通过该实例的 Service 访问程序状态、Workspace 与 Actor 网络。
 
 ## 2. 总体结论
 
@@ -17,7 +17,7 @@ Actro 是 Actrium 世界的「程序浏览器」：用户在 resident app Tab �
 ```text
 Tab
 └── Front Actor
-    ├── Actro 固定的 Native Workload
+    ├── Actrium 固定的 Native Workload
     │   ├── Keel Host
     │   ├── Capability Broker
     │   └── Actr Client
@@ -28,7 +28,7 @@ Tab
 它的主要价值不是少画几层，而是让每一层只承担一种职责：
 
 - Tab 是用户交互会话。
-- Front Actor 是受 Actro 控制的前台安全边界。
+- Front Actor 是受 Actrium 控制的前台安全边界。
 - Keel Guest 是程序开发者唯一可定制的前台代码。
 - 每个实例有一个 Service，持有状态；Front 只连它。
 - Workspace 由 Service 持有，Front 不碰路径、密钥或底层存储。
@@ -41,7 +41,7 @@ Tab
 
 1. **持久、可解析的 ActorId**：Service 重启、断网、凭据续期或迁移后必须保留同一 `ActorId`，并能由 ID 得到 Realm 名。当前 Actr 的 hard rebind 可能换 ID，且 ID 只带 Realm Provider 内部的数值 Realm，不能直接作为长期、可分享 URL 语义。
 2. **域名 Publisher**：Actr 的 publisher 语义与长度限制需要调整，使规范化 DNS 域名成为程序发布者身份。
-3. **真正封闭的 Front Host**：Actro 必须在 Keel 之前完成包校验，并以 capability、组件白名单、资源配额和确定的沙箱后端限制 Guest；不能把远端 URL 直接交给 Keel 加载。
+3. **真正封闭的 Front Host**：Actrium 必须在 Keel 之前完成包校验，并以 capability、组件白名单、资源配额和确定的沙箱后端限制 Guest；不能把远端 URL 直接交给 Keel 加载。
 
 ## 3. 冻结的核心决策
 
@@ -52,10 +52,10 @@ Tab
 | D-003 | 「1:1」是 live Front 视角的唯一绑定，不是 Service 与历史 Tab 的永久双射；Service 独立存活并可被新 Front 重连。 |
 | D-004 | v1 默认采用独占交互会话；同一实例的链接在本机再次打开时优先聚焦已有 Tab。共享会话是后续显式能力。 |
 | D-005 | Service 绑定零个或一个 Workspace；需要多 Actor 的程序由 Service 在同一 Realm 内编排。 |
-| D-006 | Front workload 由 Actro 原生提供，Publisher 不能替换 Actr Host；Publisher 只能提供 Keel Guest、资源、声明与 Service workload。 |
+| D-006 | Front workload 由 Actrium 原生提供，Publisher 不能替换 Actr Host；Publisher 只能提供 Keel Guest、资源、声明与 Service workload。 |
 | D-007 | v1 第三方 Front Guest 只开放 Keel JS Guest，并固定使用具备硬超时和堆上限的 QuickJS 后端。 |
-| D-008 | 一个 Actro Program Release 是一个签名 `.actr` 包：Service workload 是可执行主体，Keel Guest 是受签名保护的包资源。 |
-| D-009 | 链接只指向实例：`actr://<Realm 域名>/<realm_id>`，Realm 域名声明 `links` 时也可写成 https 形式；打开链接只连接该实例，不得失败后偷偷新建。新建实例是 Actro 内的本地操作，不是链接。 |
+| D-008 | 一个 Actrium Program Release 是一个签名 `.actr` 包：Service workload 是可执行主体，Keel Guest 是受签名保护的包资源。 |
+| D-009 | 链接只指向实例：`actr://<Realm 域名>/<realm_id>`，Realm 域名声明 `links` 时也可写成 https 形式；打开链接只连接该实例，不得失败后偷偷新建。新建实例是 Actrium 内的本地操作，不是链接。 |
 | D-010 | Publisher 身份是规范化域名，不含端口；Publisher Profile 只用来验证包签名，下载地址不属于 Publisher 身份，可以在任何位置。 |
 | D-011 | Marketplace 是发现、审核与撤销信息源，不是 Publisher 命名权威；域名与包签名才是来源链。 |
 | D-012 | v1 ActorId 必须包含可验证的 Realm 名（`<realm_id>@<domain>`，如 `notes@acme.com`），程序类型不在 ActorId 中；它是公开地址和密码学身份，不是 bearer token，知道地址不等于有权连接。 |
@@ -101,7 +101,7 @@ Tab
 10. [需求与验收标准](10-requirements-and-acceptance.md)：功能需求、非功能需求和端到端验收。
 11. [交付计划与可行性](11-delivery-plan.md)：基础改造、分期、风险与退出条件。
 12. [参考协议与样例](12-reference-spec.md)：Manifest、Publisher/Realm Profile、握手消息和术语。
-13. [Actro 隐私标记与图汇聚](13-privacy-state-and-aggregation.md)：把现行安全模型落到 Tab / Front / Actr Host。
+13. [Actrium 隐私标记与图汇聚](13-privacy-state-and-aggregation.md)：把现行安全模型落到 Tab / Front / Actr Host。
 14. [隐私原语、远程证明与可信算力](14-privacy-primitives-and-attestation.md)：全过程加密、WASM/CC 分工、RATS、密钥释放与 CPU/GPU/NPU 组合证明。
 
 另有非规范性的[应用开发建议](app-development-guidance.zh.md)：写 Service 时的授权与信任建议，不属于平台规则。
@@ -114,7 +114,7 @@ Tab
 - **应该 / SHOULD**：默认应满足，偏离时必须记录理由与替代措施。
 - **可以 / MAY**：兼容实现或后续扩展。
 
-示例 JSON/TOML/协议字段用于冻结产品语义；正式 wire schema 仍需在 Actr/Actro 的 schema 仓库中版本化。
+示例 JSON/TOML/协议字段用于冻结产品语义；正式 wire schema 仍需在 Actr/Actrium 的 schema 仓库中版本化。
 
 ### 5.1 文档效力
 
@@ -135,7 +135,7 @@ Tab
 
 - [Actrium/actr](https://github.com/Actrium/actr)：Actor 模型、`ActrId` 精确寻址、Realm/连接 ACL、信令、WebRTC、`.actr` 签名包和 WASM workload。
 - [Actrium/keel](https://github.com/Actrium/keel)：Keel Host/Guest、Bridge、JS 沙箱、契约与原生组件渲染。
-- [Actro 当前架构概览](../../architecture/actrium/overview.md)：多平台 Shell、共享运行时与 Actr SDK 边界。
+- [Actrium 当前架构概览](../../architecture/actrium/overview.md)：多平台 Shell、共享运行时与 Actr SDK 边界。
 
 已验证的关键事实包括：
 

@@ -23,7 +23,7 @@ This chapter answers:
 - “Actor Network-wide encryption”(a) Specific guarantees of what;
 - WASM, Native Capsule with Confidential Computing (b) Which issues are addressed separately;
 - Agent Use CPU, GPU, NPU or how to prove the operating environment when the edge is calculated;
-- Different hardware vendors' evidence is mapped to uniform Actro claims;
+- Different hardware vendors' evidence is mapped to uniform Actrium claims;
 - When the key will be released;
 - How many pieces of evidence enter? `ActorAssurance` the facts of the case (art.`CONTROLLED / UNKNOWN / UNCONTROLLED`).
 
@@ -31,7 +31,7 @@ This chapter answers:
 
 ### 2.1 Do Not Use“The data is always a secret.”
 
-The normal calculation must be specified within an operational boundary. FHE, MPC The Quakers are the only ones who have a problem with the Quakers.Actro Data should not be claimed to be secret at every point.
+The normal calculation must be specified within an operational boundary. FHE, MPC The Quakers are the only ones who have a problem with the Quakers.Actrium Data should not be claimed to be secret at every point.
 
 Recommended formulation and [Overview](../../architecture/security/actrium/01-overview.zh.md) Unanimously:
 
@@ -179,23 +179,23 @@ Contract Freeze at least:
 Indications:
 
 ```toml
-[actro.privacy_contract]
+[actrium.privacy_contract]
 schema_version = 1
 contract_id = "notes.example/team-notes@1.4.2#privacy"
 package_digest = "sha256:..."
 
-[[actro.privacy_contract.actor_role]]
+[[actrium.privacy_contract.actor_role]]
 role = "primary-service"
 actr_type = "notes.example/team-notes-service@1.4.2"
 cardinality = "1"
 required = true
 
-[[actro.privacy_contract.actor_role]]
+[[actrium.privacy_contract.actor_role]]
 role = "ai-inference"
 cardinality = "0..n"
 required_assurance_profile = "confidential-ai-v1"
 
-[[actro.privacy_contract.edge]]
+[[actrium.privacy_contract.edge]]
 source = "primary-service"
 target = "ai-inference"
 data_classes = ["private"]
@@ -284,7 +284,7 @@ The same figure does not mean that the conclusion will never be the same. / TCB 
 Indications:
 
 ```toml
-[[actro.privacy.data_policy]]
+[[actrium.privacy.data_policy]]
 class = "public"
 required = [
   "identity",
@@ -293,7 +293,7 @@ required = [
   "egress_closure"
 ]
 
-[[actro.privacy.data_policy]]
+[[actrium.privacy.data_policy]]
 class = "private"
 required = [
   "identity",
@@ -304,7 +304,7 @@ required = [
   "egress_closure"
 ]
 
-[[actro.privacy.data_policy]]
+[[actrium.privacy.data_policy]]
 class = "secret"
 required = [
   "identity",
@@ -438,7 +438,7 @@ Different. TEE/CC backend Must map to unified claims, not expose a hardware vend
 
 ```json
 {
-  "profile": "actro.compute-assurance.v1",
+  "profile": "actrium.compute-assurance.v1",
   "environmentType": "confidential-vm",
   "platformVendor": "vendor-id",
   "platformModel": "model-id",
@@ -466,9 +466,9 @@ Don't put it in the car. vendor/product name It's self-depreciation. `pass`. Onl
 
 ## 8. RATS Role Model
 
-Actro Use of standard remote proof of role:
+Actrium Use of standard remote proof of role:
 
-| Role | Actro Entities in | Duties |
+| Role | Actrium Entities in | Duties |
 |---|---|---|
 | Attester | Actr Host TEEequipment, equipment,GPU/NPUTrustable launcher | Generates about Target Environment It's... Evidence |
 | Verifier | Realm/Organizations/Locally. Verifier with vendor adapter | Validation of signatures, chain of certificates, values measured, reference values, withdrawals and freshness |
@@ -494,7 +494,7 @@ Evidence code priority compatibility EAT/CWT/COSE;manufacturing quote/report/doc
 
 ### 8.1 Assured Actor Edge with Certified Privacy Domain
 
-Cross-organizational or large cloud services do not necessarily disclose the full internal content to the caller Actor Figure.Actro Allowing credibility Verifier Seal a closed internal sub-graph into a single, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, `CertifiedPrivacyDomain`:
+Cross-organizational or large cloud services do not necessarily disclose the full internal content to the caller Actor Figure.Actrium Allowing credibility Verifier Seal a closed internal sub-graph into a single, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, sealed, `CertifiedPrivacyDomain`:
 
 ```text
 Actor A
@@ -605,7 +605,7 @@ reason = ACCELERATOR_CONFIDENTIALITY_NOT_PROVEN
 
 ### 10.3 Vendor compatibility
 
-Actro No, no, no. Intel, AMD, Arm, NVIDIAHua Zhuo Ascend Or a cloud service is written as a fixed trust conclusion and is used:
+Actrium No, no, no. Intel, AMD, Arm, NVIDIAHua Zhuo Ascend Or a cloud service is written as a fixed trust conclusion and is used:
 
 ```text
 vendor evidence
@@ -663,7 +663,7 @@ If policy Request confidential compute:
 Servers must keep the audit log itself static Contract In-Focus storage/audit sink:
 
 ```toml
-[[actro.privacy_contract.audit_sink]]
+[[actrium.privacy_contract.audit_sink]]
 kind = "security-audit"
 fields = ["actor-pseudonym", "operation", "decision", "timestamp"]
 payload = false
@@ -689,7 +689,7 @@ Yeah. LLM Server and GPU/NPU In particular, a distinction is made between:
 - If log logic is measured workload The government is not a party to the law.workload/config digest It's a proof.“Which log code and configuration is running”But it's still closed. egress And trust. Verifier The blogger says that the government is not in a position to prove that there are no other words.
 - If it is, opaque Third parties LLM APIExternal calls cannot be made by the only means GPU Proof of technical testing for internal retention; reliance only Certified Privacy Domain Yeah. retention/audit Yes. scope Proof. No such certificate is available. `UNKNOWN`.
 
-So...“The server left an audit log.”Not natural. Only the log exits are made. capability Or the entire service boundary log./retention Authentication provided aggregateIt just entered. Actro Proven private maps.
+So...“The server left an audit log.”Not natural. Only the log exits are made. capability Or the entire service boundary log./retention Authentication provided aggregateIt just entered. Actrium Proven private maps.
 
 ## 12. Output and secondary leakage
 
@@ -802,7 +802,7 @@ Rules:
 ## 15. Control Component
 
 ```text
-Actro / Actr Privacy Control Plane
+Actrium / Actr Privacy Control Plane
 ├── Policy Registry
 │   ├── data class policy
 │   ├── organization overrides
@@ -822,7 +822,7 @@ Actro / Actr Privacy Control Plane
 └── Audit & Transparency Log
 ```
 
-The Realm signing key holder (the owner of the Realm domain) or a Realm Provider it delegates to may operate or delegate Verifier, Reference Value, Revocation and Key Broker services, but it is not the only global root of trust; an individual instance Realm only chooses in its own policy which Verifiers to trust. Organisations and local Actro can choose their own Verifier and appraisal policy.
+The Realm signing key holder (the owner of the Realm domain) or a Realm Provider it delegates to may operate or delegate Verifier, Reference Value, Revocation and Key Broker services, but it is not the only global root of trust; an individual instance Realm only chooses in its own policy which Verifiers to trust. Organisations and local Actrium can choose their own Verifier and appraisal policy.
 
 ## 16. Failed and Undo
 

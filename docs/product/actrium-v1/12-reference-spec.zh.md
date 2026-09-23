@@ -14,7 +14,7 @@ actr://acme.com/2af01.k7m2q9xh                   ; 实例里的某个 Actor（Ac
 actr://<installation-id>.actr.alt/h3x8p2wq       ; 本机 Realm，不可分享
 ```
 
-RealmId 默认由 Actro 随机生成（base32 小写短串，不含程序名），可读名称写入 Realm Profile 的 `display_name`；用户可在新建确认页显式改用可读 RealmId，如上例的 `notes`。
+RealmId 默认由 Actrium 随机生成（base32 小写短串，不含程序名），可读名称写入 Realm Profile 的 `display_name`；用户可在新建确认页显式改用可读 RealmId，如上例的 `notes`。
 
 实例里的 Actor 以 ActorId 标识，例如 `2af01.k7m2q9xh@acme.com`：去掉 `2af01.` 即 Realm 名。它的链接形式是 `actr://acme.com/2af01.k7m2q9xh`；程序升级替换 Actor 后这类链接失效，分享时默认用实例链接。程序身份 `publisher/program@version` 由包 manifest 与 Actor credential 携带。
 
@@ -95,7 +95,7 @@ https://notes.example/.well-known/actr
 }
 ```
 
-Actro 按 [Realm Profile 协议](../../../actr/protocols/realm-profile.zh.md)第 6 节下载 `href`（不带 credential 的 HTTPS GET）、核对 `sha256`，再用 Publisher Profile（§2）中的包签名 key 验证 manifest 签名；manifest 声明的 Actor 类型即该实例的程序。下载地址可以在任何位置（Publisher CDN、Loran 包托管、对象存储），不是信任源。
+Actrium 按 [Realm Profile 协议](../../../actr/protocols/realm-profile.zh.md)第 6 节下载 `href`（不带 credential 的 HTTPS GET）、核对 `sha256`，再用 Publisher Profile（§2）中的包签名 key 验证 manifest 签名；manifest 声明的 Actor 类型即该实例的程序。下载地址可以在任何位置（Publisher CDN、Loran 包托管、对象存储），不是信任源。
 
 ## 4. `.actr` Manifest
 
@@ -119,60 +119,60 @@ size = 1832000
 description = "Workspace-bound team notes"
 license = "Apache-2.0"
 
-[actro]
+[actrium]
 schema_version = 1
-min_actro_version = "1.0.0"
+min_actrium_version = "1.0.0"
 front_host_api = "^1.0"
 service_host_api = "^1.0"
 
-[actro.front]
+[actrium.front]
 guest_runtime = "keel-js"
 guest_entry = "ui/guest.bundle.js"
 keel_api = "^1.0"
 contract_manifest = "ui/capability-manifest.json"
 contract_digest = "sha256:<digest>"
 
-[actro.service]
+[actrium.service]
 primary_contract = "proto/primary-service.proto"
 protocol_fingerprint = "sha256:<digest>"
 
-[actro.service.workspace]
+[actrium.service.workspace]
 requirement = "required"
 provisioning = "user-selected"
 access = "read-write"
 providers = ["managed-store", "local-folder", "cloud-drive"]
 lease = "exclusive-writer"
 
-[actro.session]
+[actrium.session]
 attachment_policy = "exclusive"
 lease_seconds = 45
 heartbeat_seconds = 15
 
-[actro.privacy]
+[actrium.privacy]
 schema_version = 1
 data_classes = ["public", "private", "secret"]
 default_unknown_action = "block-private-and-secret"
 
-[[actro.privacy.actor_egress]]
+[[actrium.privacy.actor_egress]]
 actr_type = "notes.example/index-worker@1.4.2"
 required = false
 data_classes = ["private"]
 
-[actro.permissions.front]
+[actrium.permissions.front]
 capabilities = [
   "primary-service",
   "host:clipboard.write",
   "host:notifications"
 ]
 
-[actro.permissions.service]
+[actrium.permissions.service]
 capabilities = [
   "workspace:read-write",
   "net:https://api.notes.example",
   "actor:call:notes.example:index-worker:1"
 ]
 
-[actro.components]
+[actrium.components]
 allow = [
   "View",
   "Text",
@@ -183,14 +183,14 @@ allow = [
   "ImageAsset"
 ]
 
-[actro.resources.front]
+[actrium.resources.front]
 heap_bytes = 67108864
 js_turn_timeout_ms = 100
 max_render_nodes = 10000
 max_batch_ops = 5000
 max_rpc_concurrency = 32
 
-[actro.resources.service]
+[actrium.resources.service]
 memory_bytes = 268435456
 max_mailbox = 4096
 max_rpc_concurrency = 128
@@ -218,12 +218,12 @@ path = "manifest.lock.toml"
 hash = "<sha256>"
 ```
 
-正式 schema 需要决定如何让 Actr 基础 manifest 保持向后兼容，并确保 `[actro]` 字段也位于 manifest signature 覆盖范围内。
+正式 schema 需要决定如何让 Actr 基础 manifest 保持向后兼容，并确保 `[actrium]` 字段也位于 manifest signature 覆盖范围内。
 
 Native Capsule workload 另需：
 
 ```toml
-[actro.native_capsule]
+[actrium.native_capsule]
 profile = "privacy-closed-v1"
 network = "broker-only"
 workspace = "broker-only"
@@ -278,7 +278,7 @@ ipc = ["actr.capability.v1"]
 }
 ```
 
-Actro 不能只信这个文件；安装分析结果必须与它一致。
+Actrium 不能只信这个文件；安装分析结果必须与它一致。
 
 ## 6. Realm 签名 key 与 Realm Profile
 
@@ -523,7 +523,7 @@ Guest 只能看到最小化的用户可见摘要：
   "privacy": {
     "color": "green",
     "ready": true,
-    "policyId": "actro.consumer.default",
+    "policyId": "actrium.consumer.default",
     "workloadKind": "wasm-component",
     "applicationStateDigest": "…",
     "expiresAt": "2026-07-29T12:01:15Z"

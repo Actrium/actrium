@@ -4,7 +4,7 @@
 
 ```mermaid
 flowchart TB
-    subgraph Shell["Actro Shell（受信）"]
+    subgraph Shell["Actrium Shell（受信）"]
         TRM["Tab Runtime Manager"]
         PR["Package Resolver / Verified Cache"]
         PM["Permission Manager"]
@@ -13,7 +13,7 @@ flowchart TB
     end
 
     subgraph Front["每个 resident app Tab 一个 Front Actor"]
-        NW["Actro Native Linked Workload"]
+        NW["Actrium Native Linked Workload"]
         RH["Keel Host"]
         CB["Capability Broker"]
         RG["Keel JS Guest（不受信）"]
@@ -44,7 +44,7 @@ flowchart TB
 
 Front 使用 Actr linked/native workload：
 
-- 与 Actro 一起构建、签名和发布；
+- 与 Actrium 一起构建、签名和发布；
 - Publisher package 中不携带；
 - 每个 resident app Tab 创建一个逻辑 Front Actor 实例；
 - 负责 Actor 注册、身份、连接、会话、Keel Engine 和 Host capability；
@@ -54,10 +54,10 @@ Front 使用 Actr linked/native workload：
 
 ### 2.2 Front Actor 类型
 
-Front 的 Actor 类型是 Actro 系统类型，例如：
+Front 的 Actor 类型是 Actrium 系统类型，例如：
 
 ```text
-actrium/actro-front@1.0.0
+actrium/actrium-front@1.0.0
 ```
 
 它描述 Host runtime，不伪装成 Program 的 Service ActrType。Attach handshake 由 Actr Host 额外声明：
@@ -70,7 +70,7 @@ actrium/actro-front@1.0.0
 - protocol fingerprint；
 - local tab session nonce。
 
-这些字段由 Actro Host 从已验证 package 构造，Guest 无法覆盖；对远端而言它们是客户端声明，用于兼容性协商。
+这些字段由 Actrium Host 从已验证 package 构造，Guest 无法覆盖；对远端而言它们是客户端声明，用于兼容性协商。
 
 平台提供可选的远端证明：受管 Realm 可以把平台 app attestation、发行签名或企业设备证明纳入 credential，供需要的 Service 验证。
 
@@ -106,7 +106,7 @@ v1 正式 Marketplace：
 
 - `guest_runtime = "keel-js"`；
 - bundle 是自包含 CommonJS；
-- 仅允许 React、JSX runtime、Keel Guest SDK 和 Actro 声明的 `host:*` capability；
+- 仅允许 React、JSX runtime、Keel Guest SDK 和 Actrium 声明的 `host:*` capability；
 - 禁止任意 npm/runtime require；
 - 禁止 eval、非字面动态 import 和未声明 capability；
 - 构建分析必须 `fail-on-violation`；
@@ -128,7 +128,7 @@ v1 不允许 Keel 自动选择 JSC/Hermes/QuickJS：
 
 固定 QuickJS 是为了让安全语义跨平台一致，不代表 QuickJS 是 OS 进程隔离。
 
-以上是发布门槛，不是对 Actro 当前内置 Keel 副本的既成能力。若所集成版本忽略 timeout、写死内存上限、无法报告 heap 使用量，或只能在不可中止的 Shell/UI 主线程执行 Guest，则正式第三方 Guest 不得上线。
+以上是发布门槛，不是对 Actrium 当前内置 Keel 副本的既成能力。若所集成版本忽略 timeout、写死内存上限、无法报告 heap 使用量，或只能在不可中止的 Shell/UI 主线程执行 Guest，则正式第三方 Guest 不得上线。
 
 ### 3.3 隔离口径
 
@@ -155,9 +155,9 @@ v1 不宣称：
 - iOS 可行范围内的独立 extension/helper 或更强 WASM runtime；
 - 可由 Actr Host 强制 terminate 的 worker。
 
-## 4. Actro Component Registry
+## 4. Actrium Component Registry
 
-Actro 不能直接把通用 Keel `DefaultComponents` 全量暴露给不受信 Guest。
+Actrium 不能直接把通用 Keel `DefaultComponents` 全量暴露给不受信 Guest。
 
 每个组件必须有：
 
@@ -175,7 +175,7 @@ Actro 不能直接把通用 Keel `DefaultComponents` 全量暴露给不受信 Gu
 - `Image` 默认只接受 package asset id；
 - 远端 Image 走显式 `host:net` capability 和域名 allowlist；
 - Guest 不得自带任意 HTTP headers；
-- `WebView` 不进入默认 Actro Component Registry；
+- `WebView` 不进入默认 Actrium Component Registry；
 - 外链、Modal、StatusBar、文件选择和系统分享必须通过显式 capability；
 - v1 默认禁用通用字符串 RemoteRef，仅开放类型化方法。
 
@@ -323,18 +323,18 @@ Native Capsule 进程不得拥有原始 Actor transport、socket、Workspace pat
 
 ## 7. Front–Service 系统协议
 
-业务 proto 之外，Actro 定义稳定系统协议：
+业务 proto 之外，Actrium 定义稳定系统协议：
 
 ```text
-actro.session.v1.Attach
-actro.session.v1.Resume
-actro.session.v1.Detach
-actro.session.v1.Heartbeat
-actro.session.v1.Takeover
-actro.session.v1.GetStatus
+actrium.session.v1.Attach
+actrium.session.v1.Resume
+actrium.session.v1.Detach
+actrium.session.v1.Heartbeat
+actrium.session.v1.Takeover
+actrium.session.v1.GetStatus
 ```
 
-`ActorAssurance`、无根图和 `ApplicationAssurance` 使用 `actro.privacy.v1.*` 系统协议，见 [13](13-privacy-state-and-aggregation.md)。语义以 [docs/security](../../architecture/security/actrium/README.zh.md) 为准。
+`ActorAssurance`、无根图和 `ApplicationAssurance` 使用 `actrium.privacy.v1.*` 系统协议，见 [13](13-privacy-state-and-aggregation.md)。语义以 [docs/security](../../architecture/security/actrium/README.zh.md) 为准。
 
 ### 7.1 AttachRequest
 
@@ -350,7 +350,7 @@ actro.session.v1.GetStatus
     "guestDigest": "sha256:..."
   },
   "runtime": {
-    "actroVersion": "1.0.0",
+    "actriumVersion": "1.0.0",
     "frontHostApi": "1.0",
     "keelApi": "1.0"
   },
