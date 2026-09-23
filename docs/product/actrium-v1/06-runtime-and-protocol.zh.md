@@ -385,8 +385,8 @@ actro.session.v1.GetStatus
   },
   "effectiveCapabilities": ["primary-service", "host:clipboard.write"],
   "privacy": {
-    "actorStateId": "…",
-    "applicationStateId": "…",
+    "actorStateDigest": "…",
+    "applicationStateDigest": "…",
     "assuranceDigest": "sha256:...",
     "expiresAt": "2026-07-29T12:01:15Z"
   },
@@ -411,7 +411,7 @@ Service 按顺序检查：
 9. Principal/Device/Workspace 应用权限；
 10. attachment policy；
 11. 当前 lease；
-12. 调用方要求的策略、当前 `ActorStateId` / AA 与 nonce；
+12. 调用方要求的策略、当前 `ActorStateDigest` / AA 与 nonce；
 13. 资源和速率限制。
 
 任何身份或 digest mismatch 都是 hard fail，不进入「兼容模式」。
@@ -567,6 +567,6 @@ Front Host、Service Host、Workspace broker 和 Actor transport 必须把实际
 - Workspace 与外部网络 edge；
 - package、credential、Actr Host key 和 policy 撤销。
 
-Publisher workload 可以声明预期出口，但不能成为拓扑完整性的唯一来源。Actr Host 对 WASM 比较声明、imports、有效能力与实际边，按 `structureId` 与当前 `ActorStateId` 组图；新 Actor 在当前 AA 通过且 `ACTIVE` 前不得收到应用数据。Front 定位整张无根图，取各节点最弱项；展示还须 `Ready`。
+Publisher workload 可以声明预期出口，但不能成为拓扑完整性的唯一来源。Actr Host 对 WASM 比较声明、imports、有效能力与实际边，按 `structureDigest` 与当前 `ActorStateDigest` 组图；新 Actor 在当前 AA 通过且 `ACTIVE` 前不得收到应用数据。Front 定位整张无根图，取各节点最弱项；展示还须 `Ready`。
 
 结论变化必须传到 Shell 和 session guard。绿 / 黄 / 红与挂起必须联动 Capability 和数据面，不能只是 UI 装饰。新配置只作用于新数据。

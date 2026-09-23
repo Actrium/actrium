@@ -269,7 +269,7 @@ Actro Local databases can have pure storage. `record_id`But it's not a network i
 | Realm domain trust (Realm signing key pin) | Actro Realm Manager | Pinned after first confirmation; updated only via a signed rotation chain |
 | Realm client key | Secure Storage | Separate per Realm (i.e. per instance); registered with the Realm Provider it constitutes Realm membership; revocable |
 | Permissions granted | Actro Permission Store | Tie publisher/program/major/digest/Workspace Scope |
-| ActorAssurance | Authenticator (%1)issuer ≠ subject) | For accuracy `ActorStateId` Nodal conclusion |
+| ActorAssurance | Authenticator (%1)issuer ≠ subject) | For accuracy `ActorStateDigest` Nodal conclusion |
 | ApplicationAssurance | Applied assessor | Consemination conclusions of current no root map cut-off; presentation required Ready |
 
 ## 6. Create, detect and accurately connect

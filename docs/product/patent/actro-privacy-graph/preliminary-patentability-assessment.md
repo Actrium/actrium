@@ -7,7 +7,7 @@
 
 > This report is a preliminary material used by the product and technology team to determine whether to enter a formal patent, not a legal opinion, nor complete, novel search, invalid retrieval or free execution (see annex).FTO) Comment. The final application scope, inventor, public day and jurisdiction strategy should be confirmed by the patent agent or lawyer.
 
-> Description of terms: The present report is prepared in 2026-07-30, following the example of the current operation.[docs/security](../../../architecture/security/actrium/README.zh.md)) has been changed to the following objects, which are symmetrically mapd to:`PrivacyGraphRoot` ≈ `structureId`;`GraphEpoch` ≈ `ApplicationStateId`(Structures) + Commitments in the current state of each node); " Old Epoch "Cutting out" is the equivalent of "Cyber".`ActorStateId` The report contains a single-modification number, which permanently abolishes the old binding (renewal of content).
+> Description of terms: The present report is prepared in 2026-07-30, following the example of the current operation.[docs/security](../../../architecture/security/actrium/README.zh.md)) has been changed to the following objects, which are symmetrically mapd to:`PrivacyGraphRoot` ≈ `structureDigest`;`GraphEpoch` ≈ `ApplicationStateDigest`(Structures) + Commitments in the current state of each node); " Old Epoch "Cutting out" is the equivalent of "Cyber".`ActorStateDigest` The report contains a single-modification number, which permanently abolishes the old binding (renewal of content).
 
 ## Summary of conclusions
 

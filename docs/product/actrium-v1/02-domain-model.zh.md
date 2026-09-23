@@ -273,7 +273,7 @@ Actro 本地数据库可以有纯存储用途的 `record_id`，但它不是网�
 | Realm 域名信任（Realm 签名 key pin） | Actro Realm Manager | 首次确认后固定，按签名轮换链更新 |
 | Realm 客户端 key | 安全存储 | 按 Realm（即按实例）独立；在 Realm Provider 注册后即为 Realm membership，可撤销 |
 | 权限授予 | Actro Permission Store | 绑定 publisher/program/major/digest/Workspace 范围 |
-| ActorAssurance | 验证者（issuer ≠ subject） | 针对准确 `ActorStateId` 的节点结论 |
+| ActorAssurance | 验证者（issuer ≠ subject） | 针对准确 `ActorStateDigest` 的节点结论 |
 | ApplicationAssurance | 应用评定者 | 无根图当前切面的汇聚结论；展示还须 Ready |
 
 ## 6. 创建、发现与精确连接

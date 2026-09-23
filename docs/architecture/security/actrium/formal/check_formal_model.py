@@ -3,7 +3,7 @@
 
 Check the nature of a function already written in the instruction: trig, graphs, graphsMerkle Certification of membership,
 The relationship of judgement, the cross-section Principal Exit, suspension, up-to-date in the mailbox, fast-track clutter,
-Capability Field matching, and the authorization of the colour to accept/input risks is independent.
+Actor Grant field matching, and the authorization of the colour to accept/input risks is independent.
 
 This is not a password certificate, protocol model checker or conformity test.
 """
@@ -151,7 +151,7 @@ def merkle_verify(leaf: str, proof: Sequence[tuple[str, str]], root: str) -> boo
     return acc == root
 
 
-def actor_state_id(
+def actor_state_digest(
     actor_id: str,
     principal_id: str,
     revision: str,
@@ -160,15 +160,15 @@ def actor_state_id(
     capabilities: str,
     environment: str,
 ) -> str:
-    """revision Incremental increase by status authority: content rolls back and gets new ActorStateId."""
+    """revision Incremental increase by status authority: content rolls back and gets new ActorStateDigest."""
     return digest(
         "actrium/actor-state/v1",
         (actor_id, principal_id, revision, package, config, capabilities, environment),
     )
 
 
-def app_leaf(actor_id: str, state_id: str, assurance_id: str) -> str:
-    return digest("actrium/application-leaf/v1", (actor_id, state_id, assurance_id))
+def app_leaf(actor_id: str, state_digest: str, assurance_digest: str) -> str:
+    return digest("actrium/application-leaf/v1", (actor_id, state_digest, assurance_digest))
 
 
 _ENC_ID_ALLOWED = frozenset(
@@ -211,7 +211,7 @@ def enc_graph(
     )
 
 
-def structure_id(
+def structure_digest(
     principal_id: str,
     nodes: Sequence[str],
     edges: Sequence[tuple[str, str]],
@@ -264,8 +264,8 @@ def local_continue(
     )
 
 
-def app_state_id(
-    structure_id: str,
+def app_state_digest(
+    structure_digest: str,
     principal_id: str,
     leaves: Sequence[tuple[str, str]],
 ) -> str:
@@ -273,7 +273,7 @@ def app_state_id(
     ordered = tuple(leaf for _actor, leaf in sorted(leaves))
     return digest(
         "actrium/application-state/v1",
-        (structure_id, principal_id, merkle_root(ordered)),
+        (structure_digest, principal_id, merkle_root(ordered)),
     )
 
 
@@ -300,14 +300,14 @@ class Policy:
 
 
 def evidence_accepted(
-    item: Evidence, policy: Policy, actor_id: str, state_id: str
+    item: Evidence, policy: Policy, actor_id: str, state_digest: str
 ) -> bool:
     return (
         item.authentic
         and item.issuer in policy.trusted_issuers
         and item.issuer != actor_id
         and item.bound_actor == actor_id
-        and item.bound_state == state_id
+        and item.bound_state == state_digest
         and item.not_after > policy.now
     )
 
@@ -315,7 +315,7 @@ def evidence_accepted(
 def judge_transfer(
     *,
     actor_id: str,
-    state_id: str,
+    state_digest: str,
     target: str,
     target_kind: str,
     in_graph: bool,
@@ -333,7 +333,7 @@ def judge_transfer(
     accepted = [
         item
         for item in evidence
-        if evidence_accepted(item, policy, actor_id, state_id)
+        if evidence_accepted(item, policy, actor_id, state_digest)
         and item.claim in {"restricts", "uncontrolled"}
         and item.target == target
     ]
@@ -354,14 +354,14 @@ def judge_transfer(
 def judge_retain(
     *,
     actor_id: str,
-    state_id: str,
+    state_digest: str,
     evidence: Sequence[Evidence],
     policy: Policy,
 ) -> Verdict:
     accepted = [
         item
         for item in evidence
-        if evidence_accepted(item, policy, actor_id, state_id)
+        if evidence_accepted(item, policy, actor_id, state_digest)
         and item.claim in {"unrecoverable", "recoverable"}
     ]
     if any(item.claim == "recoverable" for item in accepted):
@@ -374,23 +374,23 @@ def judge_retain(
     return Verdict.UNKNOWN
 
 
-# --- Capability / Implementation ---
+# --- Actor Grant / Implementation ---
 
 
 @dataclass(frozen=True)
-class Capability:
+class ActorGrant:
     issuer: str
     issuer_key_holder: str
     actor_id: str
-    state_id: str
+    state_digest: str
     scope: frozenset[str]
     not_before: int
     expires_at: int
     revoked: bool = False
 
 
-def capability_accepts(
-    cap: Capability,
+def actor_grant_accepts(
+    cap: ActorGrant,
     *,
     current_actor: str,
     current_state: str,
@@ -402,7 +402,7 @@ def capability_accepts(
         cap.issuer in trusted_issuers
         and cap.issuer_key_holder == cap.issuer
         and cap.actor_id == current_actor
-        and cap.state_id == current_state
+        and cap.state_digest == current_state
         and operation in cap.scope
         and cap.not_before <= now < cap.expires_at
         and not cap.revoked
@@ -413,7 +413,7 @@ def capability_accepts(
 class ActorRuntime:
     actor_id: str
     principal_id: str
-    state_id: str
+    state_digest: str
     gate: Gate = Gate.ACTIVE
     t_max: int = 100
     keys_for: str | None = None
@@ -425,7 +425,7 @@ ADMIN = frozenset({"attest", "exit"})
 
 def exec_allowed(
     runtime: ActorRuntime,
-    cap: Capability,
+    cap: ActorGrant,
     operation: str,
     *,
     now: int,
@@ -436,16 +436,16 @@ def exec_allowed(
             return False
         if now >= runtime.t_max:
             return False
-        if runtime.keys_for != runtime.state_id:
+        if runtime.keys_for != runtime.state_digest:
             return False
     elif operation not in ADMIN:
         return False
     if operation in ADMIN:
         return runtime.actor_id == cap.actor_id
-    return capability_accepts(
+    return actor_grant_accepts(
         cap,
         current_actor=runtime.actor_id,
-        current_state=runtime.state_id,
+        current_state=runtime.state_digest,
         operation=operation,
         now=now,
         trusted_issuers=trusted_issuers,
@@ -453,7 +453,7 @@ def exec_allowed(
 
 
 def change_state(runtime: ActorRuntime, new_state: str) -> ActorRuntime:
-    runtime.state_id = new_state
+    runtime.state_digest = new_state
     runtime.gate = Gate.SUSPENDED
     runtime.keys_for = None
     return runtime
@@ -532,10 +532,10 @@ class SnapshotLeaf:
     current_sid: str
     leaf_sid: str
     assurance_sid: str
-    assurance_id: str
+    assurance_digest: str
 
 
-def publish_ok(leaves: Sequence[SnapshotLeaf], structure_id: str, principal: str):
+def publish_ok(leaves: Sequence[SnapshotLeaf], structure_digest: str, principal: str):
     if len({leaf.actor_id for leaf in leaves}) != len(leaves):
         return None  # Every one. ActorId Just a leaf.
     if any(
@@ -544,10 +544,10 @@ def publish_ok(leaves: Sequence[SnapshotLeaf], structure_id: str, principal: str
     ):
         return None
     encoded = [
-        (leaf.actor_id, app_leaf(leaf.actor_id, leaf.leaf_sid, leaf.assurance_id))
+        (leaf.actor_id, app_leaf(leaf.actor_id, leaf.leaf_sid, leaf.assurance_digest))
         for leaf in leaves
     ]
-    return app_state_id(structure_id, principal, encoded)
+    return app_state_digest(structure_digest, principal, encoded)
 
 
 # --- Inspection ---
@@ -669,7 +669,7 @@ def verify_cross_principal() -> int:
     policy = Policy(trusted_issuers=frozenset({"v"}), trusted_sinks=frozenset())
     out = judge_transfer(
         actor_id="a0",
-        state_id="s0",
+        state_digest="s0",
         target="a2",
         target_kind="actor",
         in_graph=False,
@@ -681,7 +681,7 @@ def verify_cross_principal() -> int:
     )
     unknown = judge_transfer(
         actor_id="a0",
-        state_id="s0",
+        state_digest="s0",
         target="a-missing",
         target_kind="actor",
         in_graph=False,
@@ -716,7 +716,7 @@ def verify_judgment() -> int:
     assert (
         judge_transfer(
             actor_id="a",
-            state_id="s1",
+            state_digest="s1",
             target="display://local",
             target_kind="sink",
             in_graph=False,
@@ -739,7 +739,7 @@ def verify_judgment() -> int:
         assert (
             judge_transfer(
                 actor_id="a",
-                state_id="s1",
+                state_digest="s1",
                 target="display://local",
                 target_kind="sink",
                 in_graph=False,
@@ -765,7 +765,7 @@ def verify_judgment() -> int:
     assert (
         judge_transfer(
             actor_id="a",
-            state_id="s1",
+            state_digest="s1",
             target="display://local",
             target_kind="sink",
             in_graph=False,
@@ -805,14 +805,14 @@ def verify_judgment() -> int:
         claim="unrecoverable",
         covers_recover_paths=False,
     )
-    assert judge_retain(actor_id="a", state_id="s1", evidence=(gone,), policy=policy) == (
+    assert judge_retain(actor_id="a", state_digest="s1", evidence=(gone,), policy=policy) == (
         Verdict.CONTROLLED
     )
     assert judge_retain(
-        actor_id="a", state_id="s1", evidence=(incomplete,), policy=policy
+        actor_id="a", state_digest="s1", evidence=(incomplete,), policy=policy
     ) == Verdict.UNKNOWN
     assert judge_retain(
-        actor_id="a", state_id="s1", evidence=(gone, recover), policy=policy
+        actor_id="a", state_digest="s1", evidence=(gone, recover), policy=policy
     ) == Verdict.UNCONTROLLED
     checked += 3
     return checked
@@ -833,50 +833,50 @@ def verify_merkle_and_binding() -> int:
             checked += 1
 
     base = ("actor-a", "principal-1", "0", "pkg-1", "cfg-1", "cap-1", "env-1")
-    base_state = actor_state_id(*base)
+    base_state = actor_state_digest(*base)
     for index in range(len(base)):
         changed = list(base)
         changed[index] += "-changed"
-        assert actor_state_id(*changed) != base_state
+        assert actor_state_digest(*changed) != base_state
         checked += 1
 
     # Rolling back and forth sid: the same but not the same revision Different, get different state roots.
     rolled_back = ("actor-a", "principal-1", "2", "pkg-1", "cfg-1", "cap-1", "env-1")
-    assert actor_state_id(*rolled_back) != base_state
-    assert actor_state_id(*base) == base_state
+    assert actor_state_digest(*rolled_back) != base_state
+    assert actor_state_digest(*base) == base_state
     checked += 2
 
     leaf_a = ("actor-a", app_leaf("actor-a", base_state, "aa-1"))
     leaf_b = ("actor-b", app_leaf("actor-b", "sid-b", "aa-b"))
-    app = app_state_id("structure-1", "principal-1", (leaf_a, leaf_b))
-    assert app == app_state_id("structure-1", "principal-1", (leaf_b, leaf_a))
-    assert app != app_state_id("structure-1", "principal-1", (leaf_a,))
-    assert app != app_state_id("structure-2", "principal-1", (leaf_a, leaf_b))
-    assert app != app_state_id("structure-1", "principal-2", (leaf_a, leaf_b))
+    app = app_state_digest("structure-1", "principal-1", (leaf_a, leaf_b))
+    assert app == app_state_digest("structure-1", "principal-1", (leaf_b, leaf_a))
+    assert app != app_state_digest("structure-1", "principal-1", (leaf_a,))
+    assert app != app_state_digest("structure-2", "principal-1", (leaf_a, leaf_b))
+    assert app != app_state_digest("structure-1", "principal-2", (leaf_a, leaf_b))
     spliced = ("actor-a", app_leaf("actor-a", base_state, "aa-old"))
-    assert app_state_id("structure-1", "principal-1", (spliced, leaf_b)) != app
+    assert app_state_digest("structure-1", "principal-1", (spliced, leaf_b)) != app
     checked += 5
     return checked
 
 
-def verify_capability_and_execution() -> int:
+def verify_actor_grant_and_execution() -> int:
     checked = 0
     trusted = frozenset({"issuer"})
-    cap = Capability(
+    cap = ActorGrant(
         issuer="issuer",
         issuer_key_holder="issuer",
         actor_id="a",
-        state_id="s1",
+        state_digest="s1",
         scope=frozenset({"transfer"}),
         not_before=0,
         expires_at=10,
     )
-    runtime = ActorRuntime(actor_id="a", principal_id="p", state_id="s1", keys_for="s1")
+    runtime = ActorRuntime(actor_id="a", principal_id="p", state_digest="s1", keys_for="s1")
     assert exec_allowed(runtime, cap, "transfer", now=1, trusted_issuers=trusted)
     checked += 1
 
-    forged = Capability(**{**cap.__dict__, "issuer_key_holder": "attacker", "scope": frozenset({"transfer", "retain"})})
-    assert not capability_accepts(
+    forged = ActorGrant(**{**cap.__dict__, "issuer_key_holder": "attacker", "scope": frozenset({"transfer", "retain"})})
+    assert not actor_grant_accepts(
         forged,
         current_actor="a",
         current_state="s1",
@@ -888,13 +888,13 @@ def verify_capability_and_execution() -> int:
 
     for kwargs in (
         {"actor_id": "b"},
-        {"state_id": "s0"},
+        {"state_digest": "s0"},
         {"expires_at": 1},
         {"revoked": True},
         {"scope": frozenset({"retain"})},
     ):
-        broken = Capability(**{**cap.__dict__, **kwargs})
-        assert not capability_accepts(
+        broken = ActorGrant(**{**cap.__dict__, **kwargs})
+        assert not actor_grant_accepts(
             broken,
             current_actor="a",
             current_state="s1",
@@ -907,7 +907,7 @@ def verify_capability_and_execution() -> int:
     change_state(runtime, "s2")
     assert runtime.gate is Gate.SUSPENDED
     assert not exec_allowed(runtime, cap, "transfer", now=1, trusted_issuers=trusted)
-    new_cap = Capability(**{**cap.__dict__, "state_id": "s2"})
+    new_cap = ActorGrant(**{**cap.__dict__, "state_digest": "s2"})
     assert not exec_allowed(runtime, new_cap, "transfer", now=1, trusted_issuers=trusted)
     assert exec_allowed(runtime, new_cap, "attest", now=1, trusted_issuers=trusted)
     runtime.gate = Gate.ACTIVE
@@ -966,7 +966,7 @@ def verify_enc_graph() -> int:
     assert enc_graph("p", nodes, edges) != enc_graph("q", nodes, edges)
     assert enc_graph("p", nodes, edges) != enc_graph("p", nodes, (("a", "b"),))
     assert enc_graph("p", nodes, edges) != enc_graph("p", ("a", "b"), edges)
-    assert structure_id("p", nodes, edges) == structure_id("p", ("a", "c", "b"), (("a", "b"), ("c", "a")))
+    assert structure_digest("p", nodes, edges) == structure_digest("p", ("a", "c", "b"), (("a", "b"), ("c", "a")))
     checked += 6
 
     # The identifier character set is limited (D-ENC-02: Supersets are directly rejected without any ambiguity of coding.
@@ -1079,26 +1079,26 @@ def verify_depends_and_continue() -> int:
 
 
 def verify_rollback_revision() -> int:
-    """D-ROLL-01: The content will not come back to life Capability."""
+    """D-ROLL-01: The content will not revive an old Actor Grant."""
     checked = 0
     trusted = frozenset({"issuer"})
     content = ("pkg-1", "cfg-1", "cap-1", "env-1")
-    sid_r0 = actor_state_id("a", "p", "0", *content)
-    sid_r2 = actor_state_id("a", "p", "2", *content)
+    sid_r0 = actor_state_digest("a", "p", "0", *content)
+    sid_r2 = actor_state_digest("a", "p", "2", *content)
     assert sid_r0 != sid_r2
     checked += 1
 
-    held = Capability(
+    held = ActorGrant(
         issuer="issuer",
         issuer_key_holder="issuer",
         actor_id="a",
-        state_id=sid_r0,
+        state_digest=sid_r0,
         scope=frozenset({"transfer"}),
         not_before=0,
         expires_at=10,
     )
     # When issued (revision 0) is available.
-    assert capability_accepts(
+    assert actor_grant_accepts(
         held,
         current_actor="a",
         current_state=sid_r0,
@@ -1107,7 +1107,7 @@ def verify_rollback_revision() -> int:
         trusted_issuers=trusted,
     )
     # The content returns to its original value after two changes in status (revision 2): Old vouchers still do not match.
-    assert not capability_accepts(
+    assert not actor_grant_accepts(
         held,
         current_actor="a",
         current_state=sid_r2,
@@ -1147,7 +1147,7 @@ def main() -> None:
         "cross_principal": verify_cross_principal(),
         "judgment": verify_judgment(),
         "merkle_and_binding": verify_merkle_and_binding(),
-        "capability_and_execution": verify_capability_and_execution(),
+        "actor_grant_and_execution": verify_actor_grant_and_execution(),
         "snapshot_publish": verify_snapshot_publish(),
         "enc_graph": verify_enc_graph(),
         "generation": verify_generation(),

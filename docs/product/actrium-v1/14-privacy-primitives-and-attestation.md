@@ -142,17 +142,17 @@ Not all of them. ActorAll data is mandatory. CCFor example. public Data allows i
 
 ### 4.1 The main green mark:Application Instance Snapshot
 
-Conclusion binds current readiness rather than general ProgramIt's not a short time. transport session.Front / Primary Service Only for position maps, no access `structureId` When the root.
+Conclusion binds current readiness rather than general ProgramIt's not a short time. transport session.Front / Primary Service Only for position maps, no access `structureDigest` When the root.
 
 ```text
-ApplicationStateId =
+ApplicationStateDigest =
   H(actrium/application-state/v1,
-    structureId,          # EncGraph
+    structureDigest,          # EncGraph
     principal,
-    MerkleRoot(ActorId + ActorStateId + H(ActorAssurance)))
+    MerkleRoot(ActorId + ActorStateDigest + H(ActorAssurance)))
 ```
 
-`ActorStateId` Change, evidence or strategy can make old. `ApplicationAssurance` Expiry.Tab Reconnection,direct/TURN Switch (relay never explicitly) without changing the chart.
+`ActorStateDigest` Change, evidence or strategy can make old. `ApplicationAssurance` Expiry.Tab Reconnection,direct/TURN Switch (relay never explicitly) without changing the chart.
 
 Program release It provides a static, audited state. Contract and evidence, helps to draw conclusions, but Catalog Show only "Specific Supports Which profileThe government has been working on the issue of the ‘Absorture’ in the past.
 
@@ -218,7 +218,7 @@ Contract It's the effect of changing all the maps. capability It can be stopped 
 
 ### 4.3 State change
 
-Do not submit changes in full-map distribution. Actor Local Atom Switch `ActorStateId`, synchronized with old keys, old channels and old Capability, the entry security is hung.`ActorState` The new state of affairs is also taken by the one-way revision: the configuration rolls back, abolition is durable, and old power is not restored by rollback.
+Do not submit changes in full-map distribution. Actor Local Atom Switch `ActorStateDigest`, synchronized with old keys, old channels and old Capability, the entry security is hung.`ActorState` The new state of affairs is also taken by the one-way revision: the configuration rolls back, abolition is durable, and old power is not restored by rollback.
 
 ```text
 Change → SUSPENDED → Evidence / Assessment → Resume(To have current AA)→ Try Publish
@@ -344,8 +344,8 @@ Shake hands. transcript Coverage of at least:
 protocolVersion
 sourceActorId
 targetActorId
-sourceActorStateId
-targetActorStateId
+sourceActorStateDigest
+targetActorStateDigest
 sourceRuntimeInstanceId
 targetRuntimeInstanceId
 sourceCredentialDigest
@@ -359,7 +359,7 @@ channelNonce
 roles
 ```
 
-Current situation of the parties `ActorStateId` We must enter the union. transcript and certified in two-way: only for the field MAC Not enough to resist the old state of greeting again. [Security agreement](../../architecture/security/actrium/03-protocol.zh.md) §3 and form model F-CHAN-01One of them. `ActorStateId` The old channel cannot carry the application data after the change and must be reshocked for the new state.
+Current situation of the parties `ActorStateDigest` We must enter the union. transcript and certified in two-way: only for the field MAC Not enough to resist the old state of greeting again. [Security agreement](../../architecture/security/actrium/03-protocol.zh.md) §3 and form model F-CHAN-01One of them. `ActorStateDigest` The old channel cannot carry the application data after the change and must be reshocked for the new state.
 
 Actor Actr Host It has to be proven that it is. Actor key & Temporary Sessions key. If the target runs in TEE , the temporary decryption key must be TEE internal generation, or by TEE Safely held and entered attestation Evidence/Result.
 
@@ -529,7 +529,7 @@ And so... attestation challenge At least bind:
 ```text
 fresh nonce
 + ActorId
-+ current ActorStateId
++ current ActorStateDigest
 + runtimeInstanceId
 + workload/package digest
 + policy digest
@@ -748,8 +748,8 @@ This still does not automatically support the minimization of data from any busi
     }
   ],
   "binding": {
-    "actorStateId": "…",
-    "structureId": "…"
+    "actorStateDigest": "…",
+    "structureDigest": "…"
   },
   "issuedAt": "2026-07-29T12:00:00Z",
   "expiresAt": "2026-07-29T12:05:00Z",
@@ -796,7 +796,7 @@ Rules:
 - Missing / Expiry / Unsupported Evidence Yes. `UNKNOWN`;
 - Signing failed,measurement Not matching, revocation or strategic rejection is `UNCONTROLLED`;
 - Strengths cannot offset either. required fail / indeterminate;
-- Figureworkloadchange of equipment or session material `ActorStateId` / `ApplicationStateId`;
+- Figureworkloadchange of equipment or session material `ActorStateDigest` / `ApplicationStateDigest`;
 - The old-fashioned. Attestation Result No new side can be authorized.
 
 ## 15. Control Component
@@ -836,14 +836,14 @@ The following events must trigger a re-evaluation:
 - vendor TCB advisory or key revocation;
 - organization policy Changes;
 - Workspace key rotation;
-- `ActorStateId` or `structureId` Change.
+- `ActorStateDigest` or `structureDigest` Change.
 
 Actions:
 
 ```text
 indeterminate → Stop sending new private/secret♪ Into ♪ re-attestation
 fail          → Close edge/ Withdrawn capabilityStop. key release
-recovered     → New nonceNew ResultTie it up. `ActorStateId` Channels and Keys
+recovered     → New nonceNew ResultTie it up. `ActorStateDigest` Channels and Keys
 ```
 
 It can't be because Verifier For the time being, the certificate of indefinite cache continues to be used. `expiresAt`, Attestation Result with Capability Local clock used for validity is not available——The time clock to which the operator is bound and the assessor is called back to allow the expired material to be reaccepted.

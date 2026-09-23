@@ -133,12 +133,12 @@
 | FR-SEC-016 | 通道有效且 `Ready` 时，展示颜色必须取全部节点结论的最弱项。 |
 | FR-SEC-017 | 顶层只分绿 / 黄 / 红；切面未就绪不得展示颜色；未知不得按绿处理。 |
 | FR-SEC-018 | 被评估者不得自签最终 `ActorAssurance`；有效声明由 Actr Host 闭合，结论由验证者签发。 |
-| FR-SEC-019 | `ActorAssurance` 必须签名，并绑定 `ActorId + ActorStateId`、证据指纹、策略、规则和有效期。 |
+| FR-SEC-019 | `ActorAssurance` 必须签名，并绑定 `ActorId + ActorStateDigest`、证据指纹、策略、规则和有效期。 |
 | FR-SEC-020 | 新 Actor 边必须在对端 `ACTIVE` 且当前 AA 可接受后，才能收到应用数据。 |
-| FR-SEC-021 | package、Actr Host 证据键、credential、Capability、策略或结论撤销必须向最弱项传播并同步执行点。 |
-| FR-SEC-022 | 无效依赖结束后，该 Actor 才不再进入下一份 `structureId`。 |
+| FR-SEC-021 | package、Actr Host 证据键、credential、Actor Grant、策略或结论撤销必须向最弱项传播并同步执行点。 |
+| FR-SEC-022 | 无效依赖结束后，该 Actor 才不再进入下一份 `structureDigest`。 |
 | FR-SEC-023 | 第三方 in-process NativeCdylib 不得为 `CONTROLLED`；不得靠声明、签名或静态扫描提升。 |
-| FR-SEC-024 | Attach 必须协商策略、nonce、当前 `ActorStateId` 与 `ApplicationStateId`，不得依赖 GraphRoot/epoch。 |
+| FR-SEC-024 | Attach 必须协商策略、nonce、当前 `ActorStateDigest` 与 `ApplicationStateDigest`，不得依赖 GraphRoot/epoch。 |
 | FR-SEC-025 | 完整 Actor 图必须最小披露，不得默认发送给 signaling、普通 peer 或遥测。 |
 | FR-SEC-026 | 能接触受保护数据的 opaque HTTPS 必须作为非 Actor 汇明确授权；TLS 本身不得证明其内部隐私。 |
 | FR-SEC-027 | 每条受保护 Actor 调用必须按当前状态与数据世代检查权限。 |
@@ -146,7 +146,7 @@
 | FR-SEC-029 | NativeCapsule 只有在第三方代码执行前完成独立进程 OS sandbox、关闭原始出口并只开放 brokered IPC 时，才可以评为 `CONTROLLED`。 |
 | FR-SEC-030 | 三色内部必须保留 identity、artifact provenance、workload confinement、compute confidentiality、channel security、storage protection、egress closure 和 output control 等多维事实。 |
 | FR-SEC-031 | 每条网络 Actor edge 必须具有双向认证、机密性、完整性、前向保密和防重放；signaling、TURN 与普通 relay 不得持有 payload key。 |
-| FR-SEC-032 | Actor Secure Channel 握手必须绑定两端 ActorId、当前 `ActorStateId`、runtime、credential、临时 key、目标 Service、policy、attestation result、nonce 和角色，并双向认证联合 transcript。 |
+| FR-SEC-032 | Actor Secure Channel 握手必须绑定两端 ActorId、当前 `ActorStateDigest`、runtime、credential、临时 key、目标 Service、policy、attestation result、nonce 和角色，并双向认证联合 transcript。 |
 | FR-SEC-033 | transport TLS/DTLS/QUIC 成功不能单独生成 channel security pass；必须完成 Actor 身份、运行实例和 session key 绑定。 |
 | FR-SEC-034 | Workspace、snapshot、backup、cache、index 和临时文件必须按 data class 实施 envelope encryption；ActorId 不得充当密钥。 |
 | FR-SEC-035 | Data Policy 必须按数据类别和操作声明 required assurance dimensions；非 required 维度不得使公共数据无条件 unknown。 |
@@ -159,7 +159,7 @@
 | FR-SEC-042 | 厂商原生 Evidence 必须经签名、版本化、可撤销的 Verifier adapter 映射为 canonical claims；厂商型号或营销声明不得直接映射为 pass。 |
 | FR-SEC-043 | Evidence、Attestation Result、Reference Value、Endorsement 或 TCB 状态到期/撤销时必须停止新的敏感数据与 key release，并触发 re-attestation/rekey。 |
 | FR-SEC-044 | 高敏输出跨越 data class 时必须经过显式 declassification/output policy；合法 Actor response 不得成为绕过 egress closure 的隐蔽出口。 |
-| FR-SEC-045 | 绿色必须绑定当前 `ApplicationStateId`（`structureId` + Principal + Merkle 根）且 `Ready`；不得给 Publisher 或 Program 笼统绿标。 |
+| FR-SEC-045 | 绿色必须绑定当前 `ApplicationStateDigest`（`structureDigest` + Principal + Merkle 根）且 `Ready`；不得给 Publisher 或 Program 笼统绿标。 |
 | FR-SEC-046 | Program Privacy Contract 必须静态声明允许的 Actor roles/types/profiles、cardinality、edges、data classes、capabilities、terminals、audit sinks 和 assurance requirements。 |
 | FR-SEC-047 | Actr Host 可发放的有效 capability 必须是 Contract、用户/组织 policy、Host policy 和 instance grant 的交集；未声明能力不得获得 handle。 |
 | FR-SEC-048 | 实际 Actor/runtime 图必须是 Contract graph grammar 的实例；所有 mutation 必须先形成 candidate graph，不得直接改变已获批数据图。 |
@@ -168,16 +168,16 @@
 | FR-SEC-051 | 受信 Verifier 可以为内部闭合子图签发有 scope、policy、evidence root、有效期和撤销信息的 Certified Privacy Domain aggregate；上游可以按 policy 将其作为单一节点。 |
 | FR-SEC-052 | Actor/Service 的 self-signed privacy declaration 不得形成 Assured Actor Edge；Verifier trust、certificate scope、endpoint、session 和 data class 必须全部匹配。 |
 | FR-SEC-053 | 所有审计日志必须是 Contract 中的显式 audit sink，并声明字段、payload、data class、retention、operator visibility、加密和导出规则。 |
-| FR-SEC-054 | `ActorStateId` 变化必须本地挂起并废除旧权力；不依赖者可 `LocalContinue`，但不得展示应用绿；控制面不得夹带业务数据。 |
+| FR-SEC-054 | `ActorStateDigest` 变化必须本地挂起并废除旧权力；不依赖者可 `LocalContinue`，但不得展示应用绿；控制面不得夹带业务数据。 |
 | FR-SEC-055 | 颜色未减弱且策略允许时可以自动恢复；仍须 `Ready` 才展示绿。 |
 | FR-SEC-056 | 颜色变弱时必须保持阻断并显示原因，只有风险接受后才能继续相关工作；风险接受不改颜色。 |
 | FR-SEC-057 | 风险接受不能把缺失证明提升为绿；平台硬失败和无效通道不得由用户覆盖。 |
 | FR-SEC-058 | 图结构不变但证据到期、验证者 / TCB / 凭据撤销、策略或状态指纹变化时，同样必须重评。 |
 | FR-SEC-059 | GPU/NPU Attestation 不得被解释为 LLM Server 无日志；只有被度量的日志配置、封闭 egress/audit capabilities 或可信 Certified Privacy Domain retention claim 才能评估日志口子。 |
-| FR-SEC-060 | `ActorState.revision` 必须由状态权威单调递增并进入 `ActorStateId`；内容回滚不得复现旧状态根，旧 Capability / 结论不得因回滚恢复有效。 |
+| FR-SEC-060 | `ActorState.revision` 必须由状态权威单调递增并进入 `ActorStateDigest`；内容回滚不得复现旧状态根，旧 Capability / 结论不得因回滚恢复有效。 |
 | FR-SEC-061 | 可出示 Actr 身份的端点必须按 Actor 目标评定，不得声明为 HTTPS/域名汇绕过跨 Principal 评分；目标类别不可判定时该出口保持 `UNKNOWN`；信任汇的授权界面必须呈现为「数据离开保障范围」。 |
 | FR-SEC-062 | 执行方与评定方用于期限、证据与凭证有效期核对的本地时钟均不可回拨。 |
-| FR-SEC-063 | `EncGraph` 标识符必须落在受限 ASCII 字符集；`ApplicationStateId` 叶子必须按 `ActorId` 排序且每个 `ActorId` 恰好一个叶子。 |
+| FR-SEC-063 | `EncGraph` 标识符必须落在受限 ASCII 字符集；`ApplicationStateDigest` 叶子必须按 `ActorId` 排序且每个 `ActorId` 恰好一个叶子。 |
 
 ## 2. 非功能需求
 
@@ -407,7 +407,7 @@
 
 **Given** Front 与 Primary Service 当前均为绿，但一个持有应用数据的必要辅助 Actor 包被 Critical 撤销<br>
 **When** 撤销事件到达任一 Actr Host<br>
-**Then** 该节点为红，应用最弱项为红，相关 Capability 被撤销；不得以「多数 Actor 安全」继续显示绿色。
+**Then** 该节点为红，应用最弱项为红，相关 Actor Grant 被撤销；不得以「多数 Actor 安全」继续显示绿色。
 
 ### AC-025：证据未知不是安全
 
@@ -418,7 +418,7 @@
 ### AC-026：可选功能安全隔离
 
 **Given** 可选索引 Actor 变为 `UNKNOWN`<br>
-**When** Actr Host 拒绝其边、撤销 Capability、确认不再持有受保护数据并换 `structureId`<br>
+**When** Actr Host 拒绝其边、撤销 Capability、确认不再持有受保护数据并换 `structureDigest`<br>
 **Then** 索引功能禁用；隔离完成前不得展示绿；移出图并重新 `Ready` 后剩余图可以再绿。
 
 ### AC-027：动态依赖先验证
@@ -509,7 +509,7 @@
 
 **Given** 新建 Application Instance 已确定 Primary Service ActorId、Program/Workspace digest 和初始 candidate graph<br>
 **When** 所有 Actor/Edge/Storage/Compute Evidence 满足当前 policy<br>
-**Then** Actr Host 在 `Ready` 的 `ApplicationAssurance` 为绿之后，才展示绿色并发放受保护数据的 lease。结论绑定 `structureId` 与当前状态根，不是 GraphRoot。
+**Then** Actr Host 在 `Ready` 的 `ApplicationAssurance` 为绿之后，才展示绿色并发放受保护数据的 lease。结论绑定 `structureDigest` 与当前状态根，不是 GraphRoot。
 
 ### AC-042：声明就是能力边界
 

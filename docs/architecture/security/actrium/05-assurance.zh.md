@@ -33,7 +33,7 @@
 | Host 对声明外效果的完整中介 | 有效声明不是闭合上限 |
 | Native / VM / TEE 实际能力被约束或保守补全 | 只能保持黄或红 |
 | 状态权威原子切换并废除旧密钥 / 效果 | 状态变化定理不成立 |
-| 握手真实绑定双方 `ActorId + ActorStateId` | 通道不能视为有效 |
+| 握手真实绑定双方 `ActorId + ActorStateDigest` | 通道不能视为有效 |
 | 无根图能发现完整入边和出边 | 可能漏评 Actor |
 | Evidence Profile 覆盖日志、调试、管理员和 GPU 路径 | 相应事实保持未知 |
 | 非 Actor 目标可判定、可强制且策略可识别 | Transfer 不能判受控 |
@@ -42,7 +42,7 @@
 | 规范编码、哈希、签名和算法迁移无歧义；`EncGraph` 遵守 `actrium/graph/v1` | 抗拼接、抗重放失效 |
 | 应用数据打上取得世代，执行点按交集强制 | 旧数据可走新出口，Thm 18 不成立 |
 | 同一评定上下文取最弱项，禁止挑选较绿验证者 | 用户可被导向虚假绿色 |
-| 状态权威维护单调 `revision` 并进入 `ActorStateId` | 内容回滚复活旧 Capability／旧结论，Thm 10 退化 |
+| 状态权威维护单调 `revision` 并进入 `ActorStateDigest` | 内容回滚复活旧 Actor Grant／旧结论，Thm 10 退化 |
 | 目标分类可判定：Actr 端点不得伪装为域名 / API 目标 | 跨 Principal 出口经 TrustedSinks 洗绿 |
 | `host_environment_state_fingerprint` 覆盖所有可影响 Transfer／Retain 事实的环境维度 | 同 sid 内环境漂移（管理员权限、调试器、日志配置）不可见，绿色失真 |
 | 期限使用执行方本地不可回拨时钟 | 失联上界和对端时钟串用 |
@@ -79,7 +79,7 @@
 
 安全相关改动在进入实现前，必须能指出：新增了哪些 Actor、能力或 TCB，失败时由谁阻断，以及对应的负向测试。说不清「谁执行失败关闭」，不得进入实现。
 
-共享安全语义（身份规范化、Capability 验证、通道绑定、`EncGraph`、图聚合、数据世代、Assurance 核验）应集中在可测试的核心实现里，由各平台消费，而不是各端各拼一套结论。
+共享安全语义（身份规范化、Actor Grant 验证、通道绑定、`EncGraph`、图聚合、数据世代、Assurance 核验）应集中在可测试的核心实现里，由各平台消费，而不是各端各拼一套结论。
 
 发布材料必须带作用域和成熟度。没有 `Tested` / `Attested` / `Deployed` 证据的能力，对外只能写成目标或实验。紧急撤销针对信任根、发布键、验证者和实例，不靠改文案把红改成绿。
 

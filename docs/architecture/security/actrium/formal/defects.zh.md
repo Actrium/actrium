@@ -22,9 +22,9 @@
 | D-AVAIL-01 | 「不依赖变化 Actor」未形式化。 | `Depends`／`LocalContinue`；Thm 20 |
 | D-CLOCK-01 | 主 STS 曾用全局 `now` 调度。 | 规范改为本地 \(now_a\)；对抗性时钟穷举 + Thm 21；主 STS 不再携带全局时钟。硬件抗回拨仍是 A8 |
 | D-CONF-01 | 多份 AA 可挑选较绿的发布。 | A13／E-Join-AA：同一上下文取最弱项 |
-| D-ROLL-01 | `ActorStateId` 纯内容寻址：配置 A→B→A 回滚复现旧 sid，被「状态变化废除」的旧 Capability／AA 在有效期内自动复活，Thm 10 隐含「状态不回访」假设。 | 单调修订号 \(rev_a\) 进入 \(sid\)；Change 严格加一；回滚穷举（sts rollback 模型）+ `verify_rollback_revision` |
+| D-ROLL-01 | `ActorStateDigest` 纯内容寻址：配置 A→B→A 回滚复现旧 sid，被「状态变化废除」的旧 Actor Grant／AA 在有效期内自动复活，Thm 10 隐含「状态不回访」假设。 | 单调修订号 \(rev_a\) 进入 \(sid\)；Change 严格加一；回滚穷举（sts rollback 模型）+ `verify_rollback_revision` |
 | D-CLASS-01 | 目标分类（Actor vs 非 Actor）由声明方自选：把对端 Actor 改写为域名 sink 可绕过跨 Principal 禁令（Thm 8），落入 TrustedSinks 判绿。 | §3.2 分类规则：可出示 Actr 身份的端点必须按 Actor 目标评定；类别不可判定停 \(\mathbf U\)；`ACTR-SEC-CAP-013` |
-| D-ENC-02 | `EncGraph` 未约束字符串转义与字符集，跨语言可产生歧义字节；参考脚本按叶子哈希排序而规范按 ActorId 排序，两者互不兼容。 | 标识符限定 `[a-z0-9._:-]`，超出拒绝；`app_state_id` 改按 ActorId 排序；发布要求 ActorId 叶子唯一 |
+| D-ENC-02 | `EncGraph` 未约束字符串转义与字符集，跨语言可产生歧义字节；参考脚本按叶子哈希排序而规范按 ActorId 排序，两者互不兼容。 | 标识符限定 `[a-z0-9._:-]`，超出拒绝；`app_state_digest` 改按 ActorId 排序；发布要求 ActorId 叶子唯一 |
 | F-STS-02 | 主 STS 允许同 sid 改能力声明（违反 §2.2），又用「全局原子抹除旧快照」补偿——两处失真互相掩护，单独修任何一处即触发不变量违例。 | sid 建模含修订号与 h_cap；Change 不再抹除快照，旧副本由 Ready 指针核对拒绝 |
 | F-STS-03 | 时钟专用穷举没有任何迁移能置违例标志，守卫即模型，失效守卫仍 PASS（空洞）。 | 重写为对抗性尝试模型：回拨尝试与过期执行尝试由共享守卫放行/拒绝；变异回归证明可检出 |
 | F-STS-04 | 有界搜索触及状态上限时静默截断并报 PASS。 | 触顶显式 FAIL 并输出 `truncated` |

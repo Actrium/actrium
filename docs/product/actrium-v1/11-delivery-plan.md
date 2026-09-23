@@ -102,7 +102,7 @@ Turn the syntax of the product in this document into a cross-storey testable con
 14. Actor store namespace Accept instance identity;
 15. Authenticator identification and signature `ActorAssurance`;
 16. Actor spawn/call/stream/egress edge Observation;
-17. `ActorStateId` / `ApplicationStateId` Subscriptions and withdrawals of dissemination system protocols.
+17. `ActorStateDigest` / `ApplicationStateDigest` Subscriptions and withdrawals of dissemination system protocols.
 
 ### Must keep
 

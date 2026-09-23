@@ -7,7 +7,7 @@
 credential、request、registry、invitation 等）必须带限定前缀，前缀为其所属专名（Realm、
 Actor、Publisher、Workspace、Issuer、Actr）；有歧义处一律写全称。schema 字段名、JSON
 成员、ABNF 规则名、配置键、`op` 与状态枚举值保持简短，正文引用时用反引号，首次出现带
-全称（如「Realm label（`label`）」）。状态词、sequence、rotation 附着宿主（active Realm、
+全称（如「Realm label（`label`）」）。由内容计算得出的标识叫 Digest（如 ActorStateDigest、Package digest），分配得出的才叫 Id（如 ActorId）。状态词、sequence、rotation 附着宿主（active Realm、
 active key、Realm Profile sequence）。其他 credential 一律带主语（Actor credential、TURN
 credential、Workspace Provider credential）。正文用规范名，代码类型名（`ActrId`、`ActrType`）
 只在指代代码时使用。
@@ -64,6 +64,7 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | Tab | Actro Shell 中的用户交互容器；Tab record 可在 Front Actor 回收后继续存在（dormant Tab）。 |
 | Attach | Front 连接已有 Primary Service 的握手：验证 Actor 类型、Program digest 与会话的应用权限，取得 Attachment lease。 |
 | Attachment lease | Front 使用 Service 的短期会话租约（v1 默认 `exclusive`）。 |
+| capability | Actr Host 在本机明确授予 Guest/Service 的最小受控能力或句柄（如 `host:*` capability、Workspace capability、session capability），由 Actr Host 执行，不跨边界签名；与安全模型的 Actor Grant 不同。 |
 | Workspace | Service 的持久数据边界：由 Actr Host 托管、经 Workspace Provider 存储的 capability，不是简单文件路径。一个 Service 至多绑定一个 Workspace；同一 Workspace 可按写入并发策略（默认 `exclusive-writer`，另有 `shared-readers` 等）被多个 Service 使用。Workspace 不自动是 Actor，同一 Principal 也不自动获得授权。删除 Service 默认不删除 Workspace。Workspace 不属于 Loran 的 Realm 基础设施；其存储方 Workspace Provider 与 Realm Provider 不是同一概念。 |
 | Native Capsule | 在独立 OS sandbox 中运行、只开放 Actr Host brokered IPC 的 Native workload。 |
 
@@ -158,33 +159,34 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | Actor 实例（安全模型） | `(节点应用 + 实例配置) + 宿主环境`；节点应用包括 Workload、Host 软件、Manifest 和装载闭包。 |
 | Host 软件 | 与 Workload 一起构成节点应用、提供 API 与执行点的软件。 |
 | 宿主环境 | 软件包之外的 OS、硬件、TEE、管理员边界等。 |
-| ActorState / ActorStateId | Actor 实例事实的不可变原子记录及其内容根；含单调修订号，内容回滚不复现旧根。 |
+| ActorState / ActorStateDigest | ActorState 是 Actor 实例事实的不可变原子记录（`actor_id`、`principal_id`、单调修订号，以及软件包、实例配置、有效能力声明、宿主环境四个子指纹）；ActorStateDigest 是对它计算的内容摘要，充当该状态的唯一标识，与 ActorId 成对使用。修订号进入摘要，内容回滚也得到新摘要。证据、策略、评定结果与在线状态不进入 ActorState。 |
 | 有效能力声明 | Actor 当前实际可能造成的全部规范效果的闭合上限，是安全计算的唯一能力清单；Manifest 只是输入。 |
 | Transfer / Retain | V1 仅有的两种规范效果：`Transfer(target)` 指应用信息可能被边界外目标取得；`Retain` 指临时使用边界结束后仍能恢复应用信息。 |
-| Capability | 权力来源直接签发给目标 `ActorId + ActorStateId` 的自包含授权，决定某个动作现在能不能做；不裁剪有效能力声明，也不是安全结论。产品文档中的 capability（如 Workspace capability）指 Actr Host 明确授予 Guest/Service 的最小能力。 |
+| Actor Grant | 权力来源直接签发给目标 `ActorId + ActorStateDigest` 的自包含签名授权（V1 不允许转授权），决定某个动作现在能不能做；不裁剪有效能力声明，也不是安全结论。`ActorStateDigest` 一变即不再匹配，须对新状态重新签发。 |
 | 数据输入授权 | 决定麦克风、摄像头、文件等数据是否进入应用；与颜色正交。 |
 | 风险接受 | 用户了解当前黄 / 红事实后允许继续运行；只影响运行许可，不改事实和颜色。 |
 | Claim / Evidence | 待验证陈述，以及用来核实它的材料。 |
 | Verifier（验证者） | 按规则、证据和用户策略核实状态的一方。 |
 | TrustPolicy | 版本化的信任与行为模式规则。 |
-| 评定上下文 | `ActorStateId` + 策略版本 + 规则集；同一上下文内多份结论取最弱项。 |
-| ActorAssurance | 验证者针对准确 `ActorStateId`，在特定证据、策略、规则和有效期下给出的节点结论；禁止自签。 |
+| 评定上下文 | `ActorStateDigest` + 策略版本 + 规则集；同一上下文内多份结论取最弱项。 |
+| ActorAssurance | 验证者针对准确 `ActorStateDigest`，在特定证据、策略、规则和有效期下给出的节点结论；禁止自签。 |
 | Actr Host 证据键 | Actr Host 为 workload 出口闭包提供证据时使用的独立、可验证 key；本机 Realm 只绑定当前安装，联网 Realm 可绑定 Realm 客户端 key。Actor 长期 key 不能冒充它。 |
 | 应用图（ApplicationStructure） | 由有效 `Transfer(ActorId)` 依赖形成的无根最大连通组；在线与否、是否通信不改变成员。 |
-| EncGraph | 应用图的规范字节编码；对带标签节点 / 边集合单射。 |
+| EncGraph / structureDigest | EncGraph 是应用图的规范字节编码，对带标签节点 / 边集合单射；structureDigest 是其摘要 `H("actrium/structure/v1", EncGraph(G))`，成员或边变化即改变。 |
 | Depends / LocalContinue | 无向有效依赖；不依赖变化节点时允许局部继续，但不得展示应用绿色。 |
-| ApplicationStateId / ApplicationAssurance | 应用当前状态承诺，及其在当前就绪切面上的汇聚结论。 |
+| ApplicationStateDigest / ApplicationAssurance | ApplicationStateDigest 是应用当前状态的承诺摘要，覆盖 structureDigest、Principal 以及每个 `ActorId + ActorStateDigest + H(ActorAssurance)`；ApplicationAssurance 是它在当前就绪切面上的汇聚结论。 |
 | Ready | 已发布快照仍对应当前指针，且全部图成员 `ACTIVE`；展示颜色的前提。 |
 | 状态权威 | 某修订期内唯一可认证的当前状态发布者。 |
 | 保障挂起 | `ASSURANCE_SUSPENDED`：隔离应用数据，但不等于停机。 |
-| 有效 Actr 通道 | 端到端加密、完整性、双向绑定双方 `ActorId + ActorStateId` 的通道。 |
+| 有效 Actr 通道 | 端到端加密、完整性、双向绑定双方 `ActorId + ActorStateDigest` 的通道。 |
 | TCB | 失陷会破坏相应保障的组件集合。 |
 | CONTROLLED / UNKNOWN / UNCONTROLLED | 出口事实（不是产品第四色）：出口受不可绕过控制且命中可信行为模式 / 缺少足够依据 / 已确认存在越界泄漏能力或 `Retain`。`UNCONTROLLED` 表示能力存在，不等于已观测到泄漏。 |
 | 绿 / 黄 / 红 | Actro 顶层隐私标记；绿只保证当前就绪切面。 |
-| 数据世代 | 应用数据取得时的 `ActorStateId`；旧数据适用「取得时声明 ∩ 当前声明」。 |
+| 数据世代 | 应用数据取得时的 `ActorStateDigest`；旧数据适用「取得时声明 ∩ 当前声明」。 |
 
 几组不要混用的词：
 
+- **Actor Grant** 是权力来源签名、绑定 `ActorId + ActorStateDigest` 的授权；**capability** 是 Actr Host 在本机发放、由 Host 执行的受控能力。
 - **TCB** 是「必须信赖它」；**CONTROLLED** 是「当前这项出口有充分证据」。
 - **Security** 是广义安全属性；**Privacy** 是谁能接触、保留和输出数据；**Assurance** 是凭什么相信某属性在给定作用域成立。绿黄红优先表达隐私保障。
 - **加密** 保护途中或静态介质；端点拿到明文后能做什么，由能力和执行点决定。
@@ -226,3 +228,5 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | Actor credential | Realm credential | 产品文档早期用语 |
 | Actor credential（含 Realm membership 证明） | Realm membership credential | 本契约早期草稿用语：并入 Actor credential，membership 即已注册未撤销的 Realm 客户端 key |
 | Realm Provider | provider | 本契约早期草稿用语（泛词） |
+| ActorStateDigest、ApplicationStateDigest、structureDigest | ActorStateId、ApplicationStateId、structureId | 安全模型早期用语；按「摘要类标识叫 Digest」统一，代码与字段同步改为 `*_digest` |
+| Actor Grant | Capability（安全模型中的签名授权） | 安全模型早期用语；形式模型代码类 `Capability` → `ActorGrant` |
