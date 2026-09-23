@@ -7,7 +7,7 @@
 //! RTC runtime/socket layer, so network tests do not depend on the removed
 //! 0.14 coordinator or callback adapter.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -501,28 +501,11 @@ impl TestRtcControl {
         peer: &ActrId,
         timeout: Duration,
     ) -> actr_framework::WebRtcPeerState {
-        crate::timer::timeout(crate::timer::ids::WEBRTC_PEER_SENDABLE, timeout, async {
-            let mut peer_set = self.manager.subscribe_peers();
-            loop {
-                if let Some(mut rx) = self.subscribe(peer).await {
-                    loop {
-                        let state = rx.borrow().clone();
-                        if state.sendable {
-                            return state;
-                        }
-                        if rx.changed().await.is_err() {
-                            break;
-                        }
-                    }
-                }
-                peer_set
-                    .changed()
-                    .await
-                    .expect("manager peer registry watch closed");
-            }
-        })
-        .await
-        .unwrap_or_else(|_| panic!("peer {peer} did not become sendable within {timeout:?}"))
+        self.wait_state_diagnosed(peer, timeout, |state| state.sendable)
+            .await
+            .unwrap_or_else(|diagnostics| {
+                panic!("peer {peer} did not become sendable within {timeout:?}: {diagnostics}")
+            })
     }
 
     /// Await a snapshot satisfying a test predicate. The latest snapshot is
@@ -536,28 +519,84 @@ impl TestRtcControl {
     where
         F: Fn(&actr_framework::WebRtcPeerState) -> bool,
     {
-        crate::timer::timeout(crate::timer::ids::WEBRTC_PEER_SENDABLE, timeout, async {
-            let mut peer_set = self.manager.subscribe_peers();
-            loop {
-                if let Some(mut rx) = self.subscribe(peer).await {
+        self.wait_state_diagnosed(peer, timeout, predicate)
+            .await
+            .ok()
+    }
+
+    /// Like `wait_state`, but retain bounded observations for failure reports.
+    /// Capture evidence inside the original deadline: diagnosing a timeout
+    /// must not wait for another manager lock or a controller response.
+    pub(crate) async fn wait_state_diagnosed<F>(
+        &self,
+        peer: &ActrId,
+        timeout: Duration,
+        predicate: F,
+    ) -> Result<actr_framework::WebRtcPeerState, String>
+    where
+        F: Fn(&actr_framework::WebRtcPeerState) -> bool,
+    {
+        const OBSERVATION_LIMIT: usize = 8;
+        let started = tokio::time::Instant::now();
+        let mut observations = VecDeque::with_capacity(OBSERVATION_LIMIT);
+        let mut phase = "looking up controller";
+        let result =
+            crate::timer::timeout(crate::timer::ids::WEBRTC_PEER_SENDABLE, timeout, async {
+                let mut peer_set = self.manager.subscribe_peers();
+                loop {
+                    phase = "looking up controller";
+                    // Keep watching a closing controller's public state, as the
+                    // pre-diagnostics `subscribe` path did. Only an active
+                    // controller exposes the internal snapshot.
+                    let (mut rx, controller) = match self.manager.get_controller(peer).await {
+                        Some(controller) => (controller.subscribe_public(), Some(controller)),
+                        None => match self.manager.subscribe_public(peer).await {
+                            Some(rx) => (rx, None),
+                            None => {
+                                phase = "waiting for peer registry change";
+                                peer_set
+                                    .changed()
+                                    .await
+                                    .expect("manager peer registry watch closed");
+                                continue;
+                            }
+                        },
+                    };
                     loop {
                         let state = rx.borrow().clone();
                         if predicate(&state) {
                             return state;
                         }
+                        if observations.len() == OBSERVATION_LIMIT {
+                            observations.pop_front();
+                        }
+                        // The public predicate remains the oracle. The internal
+                        // snapshot adds role, ICE generation and overflow counters;
+                        // it may be newer, so report both revisions explicitly.
+                        observations.push_back((
+                            started.elapsed(),
+                            state,
+                            controller.as_ref().map(|c| c.snapshot()),
+                        ));
+                        phase = "waiting for public state change";
                         if rx.changed().await.is_err() {
                             break;
                         }
                     }
+                    phase = "waiting for peer registry change";
+                    peer_set
+                        .changed()
+                        .await
+                        .expect("manager peer registry watch closed");
                 }
-                peer_set
-                    .changed()
-                    .await
-                    .expect("manager peer registry watch closed");
-            }
+            })
+            .await;
+        result.map_err(|_| {
+            format!(
+                "peer={peer}, budget={timeout:?}, phase={phase}, recent observations \
+                 (elapsed, public state, controller snapshot; oldest first)={observations:#?}"
+            )
         })
-        .await
-        .ok()
     }
 
     pub async fn generation(&self, peer: &ActrId) -> Option<u64> {
