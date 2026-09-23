@@ -914,6 +914,19 @@ impl DefaultNetworkEventProcessor {
         self.ensure_signaling_healthy_once_typed(reason, action_id)
             .await?;
 
+        // A node-wide cleanup closed passive inbound admission so messages
+        // from the retired signaling generation could not recreate
+        // controllers behind terminal cleanup. That fence must not outlive the
+        // generation it fenced: this restore has just installed a fresh one,
+        // so a passive RoleAssignment/Offer arriving on it is legitimate.
+        // Without this an endpoint that remains the answerer can never
+        // rebuild after a cleanup (for example: manual cleanup, reconnect,
+        // then the peer initiates — the peer's role assignment is dropped and
+        // the edge never comes up).
+        if let Some(manager) = self.rtc_manager.as_ref() {
+            manager.reopen_all_inbound_admission();
+        }
+
         if let Some(session) = &self.session_state
             && session.phase().await == SessionPhase::Rebinding
         {
@@ -1036,12 +1049,9 @@ impl DefaultNetworkEventProcessor {
             .await
             .map_err(|error| NetworkRecoveryError::from_opaque("ForceReconnect cleanup", error))?;
         // cleanup_connections disconnected signaling and drained the old
-        // inbound queue before close_all suppressed the retired peers. A new
-        // signaling generation must accept passive RoleAssignment/Offer again;
-        // otherwise an endpoint that remains the answerer can never rebuild.
-        if let Some(manager) = self.rtc_manager.as_ref() {
-            manager.reopen_all_inbound_admission();
-        }
+        // inbound queue before close_all suppressed the retired peers; the
+        // shared restore below reopens passive inbound admission together
+        // with the fresh signaling generation.
         self.restore_signaling_and_webrtc_from_network_event_typed("ForceReconnect", action_id)
             .await
     }

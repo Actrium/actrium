@@ -2504,4 +2504,44 @@ mod inv33_peer_coverage {
             .expect("restore completes");
         assert_eq!(report, EffectReport::PURE);
     }
+
+    /// A node-wide cleanup fences passive inbound admission so messages from
+    /// the retired signaling generation cannot recreate controllers behind a
+    /// terminal cleanup. That fence must not outlive the generation it
+    /// fenced: once the lifecycle owner installs a fresh signaling generation
+    /// (Restore), a peer-initiated offer is legitimate again — otherwise an
+    /// endpoint that remains the answerer can never rebuild after a cleanup.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn restore_reopens_passive_inbound_admission_after_node_wide_cleanup() {
+        let manager = manager();
+        let peer = peer_id(704);
+        manager.ensure_controller(peer.clone()).await;
+        manager.close_all().await;
+
+        let mut offer = RTCSessionDescription::default();
+        offer.sdp_type = webrtc::peer_connection::RTCSdpType::Offer;
+        manager
+            .handle_incoming_offer(peer.clone(), offer.clone())
+            .await;
+        assert!(
+            manager.get_controller(&peer).await.is_none(),
+            "a node-wide cleanup must fence passive inbound until a new signaling generation is installed"
+        );
+
+        let processor = DefaultNetworkEventProcessor::new(Arc::new(
+            ForceReconnectFakeSignalingClient::new(false),
+        ))
+        .with_rtc_manager(Some(manager.clone()));
+        processor
+            .process_network_recovery_effect_for_action(NetworkRecoveryAction::Restore, 4301)
+            .await
+            .expect("restore completes");
+
+        manager.handle_incoming_offer(peer.clone(), offer).await;
+        assert!(
+            manager.get_controller(&peer).await.is_some(),
+            "a fresh signaling generation must admit a passive answerer again"
+        );
+        assert!(manager.close_peer(&peer).await);
+    }
 }
