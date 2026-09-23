@@ -133,12 +133,12 @@
 | FR-SEC-016 | The passage is valid and `Ready` , the colour must be displayed to take the weakest of all nodes. |
 | FR-SEC-017 | The top floor is green only. / Yellow / Red; no colours to be displayed when cut face is not ready; unknowns not to be greened. |
 | FR-SEC-018 | The person assessed cannot sign out for final `ActorAssurance`;a valid declaration by Actr Host Closed, conclusions issued by the certifying officer. |
-| FR-SEC-019 | `ActorAssurance` You have to sign and tie. `ActorId + ActorStateId`The evidence fingerprints, strategies, rules and validity period. |
+| FR-SEC-019 | `ActorAssurance` You have to sign and tie. `ActorId + ActorStateDigest`The evidence fingerprints, strategies, rules and validity period. |
 | FR-SEC-020 | New Actor The side must be on the other side `ACTIVE` And for the time being AA Only after acceptance can applied data be received. |
 | FR-SEC-021 | package, Actr Host Evidence keys,credential, CapabilityThe strategy or conclusion must be communicated to the weakest and synchronized with the implementation point. |
-| FR-SEC-022 | After the invalid dependency, Actor I'm not going to go to the next one. `structureId`. |
+| FR-SEC-022 | After the invalid dependency, Actor I'm not going to go to the next one. `structureDigest`. |
 | FR-SEC-023 | Third parties in-process NativeCdylib No way. `CONTROLLED`;no declaration, signature or static scanning may be used to upgrade. |
-| FR-SEC-024 | Attach We have to negotiate strategies.nonceCurrent `ActorStateId` with `ApplicationStateId`, can't rely on GraphRoot/epoch. |
+| FR-SEC-024 | Attach We have to negotiate strategies.nonceCurrent `ActorStateDigest` with `ApplicationStateDigest`, can't rely on GraphRoot/epoch. |
 | FR-SEC-025 | Complete Actor Figure must be minimally disclosed and sent by default signalingNormal peer Or telemetry. |
 | FR-SEC-026 | Access to protected data opaque HTTPS I have to be right. Actor Clear delegation of authority;TLS It cannot prove its internal privacy. |
 | FR-SEC-027 | Every one of them protected Actor The call must be checked with data generation permission according to current status. |
@@ -146,7 +146,7 @@
 | FR-SEC-029 | NativeCapsule Independent process only completed before third-party code execution OS sandbox♪ Close the original exit and open it only ♪ brokered IPC ♪ And then you can be rated ♪ `CONTROLLED`. |
 | FR-SEC-030 | The three colors must be kept inside. identity, artifact provenance, workload confinement, compute confidentiality, channel security, storage protection, egress closure and output control Wait for the multidimensional facts. |
 | FR-SEC-031 | Every network Actor edge (a) Must have two-way authentication, confidentiality, integrity, forward confidentiality and re-allocation;signaling, TURN & Normal relay Not held payload key. |
-| FR-SEC-032 | Actor Secure Channel The handshake must be tied to both ends. ActorIdCurrent `ActorStateId`, runtime, credentialTemporary keyObjectives Service, policy, attestation result, nonce and role, and two-way authentication transcript. |
+| FR-SEC-032 | Actor Secure Channel The handshake must be tied to both ends. ActorIdCurrent `ActorStateDigest`, runtime, credentialTemporary keyObjectives Service, policy, attestation result, nonce and role, and two-way authentication transcript. |
 | FR-SEC-033 | transport TLS/DTLS/QUIC Success cannot be generated alone channel security pass;must be completed Actor Identity, examples of operations and session key Tie. |
 | FR-SEC-034 | Workspace, snapshot, backup, cache, index And the temporary documents must be pressed. data class Implementation envelope encryption;ActorId Do not act as a key. |
 | FR-SEC-035 | Data Policy Must be declared by data type and operation required assurance dimensions;n required The dimensions must not make public data unconditional. unknown. |
@@ -159,7 +159,7 @@
 | FR-SEC-042 | Vendors Evidence Required to be signed, formatted, avoidable Verifier adapter Map to canonical claims; a hardware vendor's model name or marketing claim shall not be directly mapped pass. |
 | FR-SEC-043 | Evidence, Attestation Result, Reference Value, Endorsement or TCB Status due/New sensitive data and data must be stopped when they are withdrawn key release, and trigger re-attestation/rekey. |
 | FR-SEC-044 | High-sensitivity output crossing data class It must be visible. declassification/output policy;legal Actor response You can't be a bypass. egress closure The hidden exit. |
-| FR-SEC-045 | Green must bind the current `ApplicationStateId`(`structureId` + Principal + Merkle Roots) and `Ready`;not to be given Publisher or Program General green marker. |
+| FR-SEC-045 | Green must bind the current `ApplicationStateDigest`(`structureDigest` + Principal + Merkle Roots) and `Ready`;not to be given Publisher or Program General green marker. |
 | FR-SEC-046 | Program Privacy Contract It's a static declaration. Actor roles/types/profiles, cardinality, edges, data classes, capabilities, terminals, audit sinks and assurance requirements. |
 | FR-SEC-047 | Actr Host Validity available capability It must be. ContractUsers/Organizations policy, Host policy and instance grant "of the people of the country; no capacity to acquire without declaration handle. |
 | FR-SEC-048 | Actual Actor/runtime The figure must be Contract graph grammar examples; all mutation It has to be formed first. candidate graph, the approved data chart cannot be directly altered. |
@@ -168,16 +168,16 @@
 | FR-SEC-051 | Lettered Verifier You can issue internal closed sub-maps. scope, policy, evidence rootand cancellation of information Certified Privacy Domain aggregate;upstreamable policy As a single node. |
 | FR-SEC-052 | Actor/Service It's... self-signed privacy declaration No formation. Assured Actor Edge;Verifier trust, certificate scope, endpoint, session and data class Must be all matched. |
 | FR-SEC-053 | All audit logs must be Contract In-Focus audit sinkand declare fields,payload, data class, retention, operator visibility, encryption and export rules. |
-| FR-SEC-054 | `ActorStateId` Change must take place locally and abolish old power; those who do not depend can `LocalContinue`, but not green; control side shall not be bound by operational data. |
+| FR-SEC-054 | `ActorStateDigest` Change must take place locally and abolish old power; those who do not depend can `LocalContinue`, but not green; control side shall not be bound by operational data. |
 | FR-SEC-055 | Colours are not weakened and can be restored automatically when the strategy allows; still required `Ready` It's just green. |
 | FR-SEC-056 | Weak colours must be kept in the process and the reasons for them must be shown, and only when the risk is accepted can the work continue; the risk is accepted without changing the colour. |
 | FR-SEC-057 | Risk acceptance cannot raise the missing certificate to green; the platform ' s hard failure and the ineffective channel cannot be covered by the user. |
 | FR-SEC-058 | The figure remains unchanged but the evidence expires, the person certifying it / TCB / The same is true for the withdrawal of evidence, for the change of strategy or state fingerprints. |
 | FR-SEC-059 | GPU/NPU Attestation It's not to be interpreted as LLM Server No log; only measured log configuration, closed egress/audit capabilities Or credible. Certified Privacy Domain retention claim The blog is a tool for assessing the blog. |
-| FR-SEC-060 | `ActorState.revision` It has to be added and entered by the state authority. `ActorStateId`;results rolling cannot reproduce old root, old Capability / The conclusion must not be restored to effect by rollback. |
+| FR-SEC-060 | `ActorState.revision` It has to be added and entered by the state authority. `ActorStateDigest`;results rolling cannot reproduce old root, old Capability / The conclusion must not be restored to effect by rollback. |
 | FR-SEC-061 | - I can show you. Actr Endpoint of identity must be pressed Actor Target assessment, not to be declared HTTPS/Domain names round and round Principal Rating; maintaining the export when the target category is not determinable `UNKNOWN`; the authorized interface for the trust pool must be "data exits" |
 | FR-SEC-062 | The local clocks used by the executing party and the rating party for the period, the evidence and the validity of the certificate are not retrievable. |
-| FR-SEC-063 | `EncGraph` The identifier must be set in a restricted area. ASCII Character set;`ApplicationStateId` The leaves must be pressed. `ActorId` Sort and Each `ActorId` Just a leaf. |
+| FR-SEC-063 | `EncGraph` The identifier must be set in a restricted area. ASCII Character set;`ApplicationStateDigest` The leaves must be pressed. `ActorId` Sort and Each `ActorId` Just a leaf. |
 
 ## 2. Unfunctional requirements
 
@@ -418,7 +418,7 @@ Any increase must be subject to the Platform ' s cap and authority policy.
 ### AC-026: optional functional security isolation
 
 **Given** Optional Index Actor And become `UNKNOWN`<br>
-**When** Actr Host Rejecting the side, withdrawing it. Capability, confirm that protected data are no longer in possession and exchange `structureId`<br>
+**When** Actr Host Rejecting the side, withdrawing it. Capability, confirm that protected data are no longer in possession and exchange `structureDigest`<br>
 **Then** index functionality disabled; green cannot be displayed until isolation is completed; map out and reset `Ready` The rest of the picture can be green again.
 
 ### AC-027: Dynamic dependence first verify
@@ -509,7 +509,7 @@ Any increase must be subject to the Platform ' s cap and authority policy.
 
 **Given** New Application Instance Established Primary Service ActorId, Program/Workspace digest And initial candidate graph<br>
 **When** All Actor/Edge/Storage/Compute Evidence Meet current policy<br>
-**Then** Actr Host Yes. `Ready` It's... `ApplicationAssurance` Show green and release protected data only after green lease. Conclusions `structureId` With the current state root, no. GraphRoot.
+**Then** Actr Host Yes. `Ready` It's... `ApplicationAssurance` Show green and release protected data only after green lease. Conclusions `structureDigest` With the current state root, no. GraphRoot.
 
 ### AC-042: Declaration is the limit of power
 

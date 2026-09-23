@@ -568,7 +568,7 @@ Guest Only the minimalized user can be seen in summary:
     "ready": true,
     "policyId": "actro.consumer.default",
     "workloadKind": "wasm-component",
-    "applicationStateId": "…",
+    "applicationStateDigest": "…",
     "expiresAt": "2026-07-29T12:01:15Z"
   }
 }

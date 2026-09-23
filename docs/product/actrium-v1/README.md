@@ -76,10 +76,10 @@ But it relies on three basic capabilities that must be completed first:
 | D-028 | Remote certification is used Attester, Verifier, Relying Party (b) Division of labour;Evidence Not a trust conclusion. The final authorization is local. data policy Decision. |
 | D-029 | private/secret Decrypt key only if required attestation Enclosed to pass Evidence Binding interim implementation environment key. |
 | D-030 | Use GPU/NPU It's... Actor It has to be done. CPU, Guest, driverequipment, equipment,firmware, IOMMU/link/memory ; when any of the specified links cannot be proved compute confidentiality Yes unknown. |
-| D-031 | Green binding current readiness face (`ApplicationStateId` + `ApplicationAssurance` + `Ready`No, it's not. Program The whole version, not a short one. transport session. |
+| D-031 | Green binding current readiness face (`ApplicationStateDigest` + `ApplicationAssurance` + `Ready`No, it's not. Program The whole version, not a short one. transport session. |
 | D-032 | Program Privacy Contract Still. Actor The static upper boundary of graphs and capabilities is limited to candidate maps and does not produce greens directly. |
-| D-033 | Initial diagrams must be evaluated before release of protected data or decryption key; conclusions bound to the current `ActorStateId`, `structureId`The government has also been involved in the development of the project. |
-| D-034 | `ActorStateId` Locally hangs and abolishes old powers when changes occur; members who do not depend on the change nodes can `LocalContinue`, but not green applications. |
+| D-033 | Initial diagrams must be evaluated before release of protected data or decryption key; conclusions bound to the current `ActorStateDigest`, `structureDigest`The government has also been involved in the development of the project. |
+| D-034 | `ActorStateDigest` Locally hangs and abolishes old powers when changes occur; members who do not depend on the change nodes can `LocalContinue`, but not green applications. |
 | D-035 | The colour is not weakened and automatically recovers; the weakness is maintained and the risk acceptance is requested (no colour changes); the user cannot overwhelm the channel when it is not valid or when the platform is touched by a hard bottom line. |
 | D-036 | Lettered Verifier You can put it inside. Actor Subchart Envelope As Certified Privacy Domainand through Assured Actor Edge Provided scopeand cancellations aggregate;symbol invalid. |
 | D-037 | Audit log is visible storage/audit sink, must declare fields, data categories, targets, read subjects and retention;LLM/GPU Attestation It can't prove it. Server No separate logs are kept. |

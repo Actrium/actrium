@@ -142,17 +142,17 @@ pass | indeterminate | fail | not-required
 
 ### 4.1 绿标主体：Application Instance Snapshot
 
-结论绑定当前就绪切面，而不是笼统 Program，也不是短暂 transport session。Front / Primary Service 只用于定位图，不进入 `structureId` 当根。
+结论绑定当前就绪切面，而不是笼统 Program，也不是短暂 transport session。Front / Primary Service 只用于定位图，不进入 `structureDigest` 当根。
 
 ```text
-ApplicationStateId =
+ApplicationStateDigest =
   H(actrium/application-state/v1,
-    structureId,          # EncGraph
+    structureDigest,          # EncGraph
     principal,
-    MerkleRoot(ActorId + ActorStateId + H(ActorAssurance)))
+    MerkleRoot(ActorId + ActorStateDigest + H(ActorAssurance)))
 ```
 
-`ActorStateId` 变化、证据或策略变化，都会使旧 `ApplicationAssurance` 失效。Tab 重连、direct/TURN 切换（中继始终无明文）不改图。
+`ActorStateDigest` 变化、证据或策略变化，都会使旧 `ApplicationAssurance` 失效。Tab 重连、direct/TURN 切换（中继始终无明文）不改图。
 
 Program release 可以提供经过审核的静态 Contract 和 evidence，帮助形成结论，但 Catalog 只能显示「支持哪些可验证 profile」，不能代替当前切面。
 
@@ -218,7 +218,7 @@ Contract 的作用是让所有图变化在 capability 创建前可拦截。它�
 
 ### 4.3 状态变化
 
-不做全图分布式提交。变化 Actor 本地原子切换 `ActorStateId`，同步废除旧密钥、旧通道和旧 Capability，进入保障挂起。事件可以丢失。`ActorState` 含单调修订号：配置回滚也得到新状态根，废除是持久的，旧权力不因回滚复活。
+不做全图分布式提交。变化 Actor 本地原子切换 `ActorStateDigest`，同步废除旧密钥、旧通道和旧 Actor Grant，进入保障挂起。事件可以丢失。`ActorState` 含单调修订号：配置回滚也得到新状态根，废除是持久的，旧权力不因回滚复活。
 
 ```text
 Change → SUSPENDED → 取证 / 评定 → Resume（须有当前 AA）→ 尝试 Publish
@@ -344,8 +344,8 @@ Actr 网络应同时提供：
 protocolVersion
 sourceActorId
 targetActorId
-sourceActorStateId
-targetActorStateId
+sourceActorStateDigest
+targetActorStateDigest
 sourceRuntimeInstanceId
 targetRuntimeInstanceId
 sourceCredentialDigest
@@ -359,7 +359,7 @@ channelNonce
 roles
 ```
 
-双方当前 `ActorStateId` 必须进入联合 transcript 并被双向认证：只对本方字段做 MAC 不足以抵抗旧状态问候重放（见 [安全协议](../../architecture/security/actrium/03-protocol.zh.md) §3 与形式模型 F-CHAN-01）。任一方 `ActorStateId` 变化后，旧通道不得承载应用数据，须针对新状态重新握手。
+双方当前 `ActorStateDigest` 必须进入联合 transcript 并被双向认证：只对本方字段做 MAC 不足以抵抗旧状态问候重放（见 [安全协议](../../architecture/security/actrium/03-protocol.zh.md) §3 与形式模型 F-CHAN-01）。任一方 `ActorStateDigest` 变化后，旧通道不得承载应用数据，须针对新状态重新握手。
 
 Actor Actr Host 必须证明持有 Actor key 和临时会话 key。若目标运行在 TEE 中，临时解密公钥必须由 TEE 内生成，或被 TEE 安全持有，并进入 attestation Evidence/Result。
 
@@ -529,7 +529,7 @@ Service 自签「我安全」不能形成 Assured Edge。只有用户/组织/Rea
 ```text
 fresh nonce
 + ActorId
-+ current ActorStateId
++ current ActorStateDigest
 + runtimeInstanceId
 + workload/package digest
 + policy digest
@@ -748,8 +748,8 @@ Attestation 可以证明正在运行包含某日志配置的 workload/环境，H
     }
   ],
   "binding": {
-    "actorStateId": "…",
-    "structureId": "…"
+    "actorStateDigest": "…",
+    "structureDigest": "…"
   },
   "issuedAt": "2026-07-29T12:00:00Z",
   "expiresAt": "2026-07-29T12:05:00Z",
@@ -796,7 +796,7 @@ EdgePrivacy(e, d) = meet(
 - 缺失 / 过期 / 不支持的 Evidence 是 `UNKNOWN`；
 - 签名失败、measurement 不匹配、撤销或策略明确拒绝是 `UNCONTROLLED`；
 - 强项不能抵消任一 required fail / indeterminate；
-- 图、workload、设备或会话材料变化会换 `ActorStateId` / `ApplicationStateId`；
+- 图、workload、设备或会话材料变化会换 `ActorStateDigest` / `ApplicationStateDigest`；
 - 绑旧状态的 Attestation Result 不能授权新边。
 
 ## 15. 控制面组件
@@ -836,17 +836,17 @@ Realm 签名 key 持有方（Realm 域名所有者）或其委派的 Realm Provi
 - vendor TCB advisory 或 key revocation；
 - organization policy 变化；
 - Workspace key rotation；
-- `ActorStateId` 或 `structureId` 变化。
+- `ActorStateDigest` 或 `structureDigest` 变化。
 
 动作：
 
 ```text
 indeterminate → 停止发送新的 private/secret，进入 re-attestation
 fail          → 关闭 edge、撤销 capability、停止 key release
-recovered     → 新 nonce、新 Result、绑新 `ActorStateId` 的通道与密钥
+recovered     → 新 nonce、新 Result、绑新 `ActorStateDigest` 的通道与密钥
 ```
 
-不能因 Verifier 暂时不可用而继续沿用无限期缓存证明。核对 `expiresAt`、Attestation Result 与 Capability 有效期所用的本地时钟不可回拨——执行方与评定方同受此约束，可被回拨的时钟会让过期材料重新被接受。
+不能因 Verifier 暂时不可用而继续沿用无限期缓存证明。核对 `expiresAt`、Attestation Result 与 Actor Grant 有效期所用的本地时钟不可回拨——执行方与评定方同受此约束，可被回拨的时钟会让过期材料重新被接受。
 
 ## 17. 稳定错误码
 

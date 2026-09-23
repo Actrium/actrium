@@ -15,7 +15,7 @@ Tab ──定位──▶ Front Actor ──发现──▶ 无根应用图 CC(U
                          ActorAssurance（每节点，禁止自签）
                                       │
                                       ▼
-                    ApplicationStateId + ApplicationAssurance
+                    ApplicationStateDigest + ApplicationAssurance
                                       │
                                       ▼
                          Ready？ → 展示绿 / 黄 / 红
@@ -46,7 +46,7 @@ Front Actor 只做产品入口，不是图根。Primary Service 是 Guest 的业
 图由有效 `Transfer(ActorId)` 形成：目标可解析、双方同一 Principal、声明与状态当前有效。丢掉无效边后忽略方向，取连通分量。循环合法，必须发现入边。
 
 ```text
-structureId = H("actrium/structure/v1", EncGraph)
+structureDigest = H("actrium/structure/v1", EncGraph)
 EncGraph    = actrium/graph/v1 规范 JSON（排序后的 ActorId 与有向边）
 ```
 
@@ -64,7 +64,7 @@ Actr Host 能做而 Guest 不能做的出口，仍是这个 Actor 的出口。�
 
 ## 4. 状态变化
 
-不做全图分布式提交。顺序：本地提交新 `ActorStateId` → 废除旧权力 → 保障挂起 → 异步重建切面。`ActorState` 含状态权威维护的单调修订号：配置回滚也得到新状态根，被废除的旧 Capability、通道与结论不会因回滚复活。
+不做全图分布式提交。顺序：本地提交新 `ActorStateDigest` → 废除旧权力 → 保障挂起 → 异步重建切面。`ActorState` 含状态权威维护的单调修订号：配置回滚也得到新状态根，被废除的旧 Actor Grant、通道与结论不会因回滚复活。
 
 ```text
 Depends(b, a)           := 无向有效依赖边
@@ -122,7 +122,7 @@ Evidence   用来核实该主张的材料
 Assurance  验证者结合状态、证据、规则和用户策略给出的结论
 ```
 
-Actro 内的 Privacy Agent 负责观测、取证、组图和向验证者提交材料。跨进程成为安全依据时，必须由验证者签名 `ActorAssurance`，精确绑定 `ActorId + ActorStateId`、证据指纹、策略、规则和有效期。依赖方使用前自行核验。
+Actro 内的 Privacy Agent 负责观测、取证、组图和向验证者提交材料。跨进程成为安全依据时，必须由验证者签名 `ActorAssurance`，精确绑定 `ActorId + ActorStateDigest`、证据指纹、策略、规则和有效期。依赖方使用前自行核验。
 
 发布 `ApplicationAssurance` 前：完整发现、核对每个当前状态、每个 AA 不得强于该上下文最弱项、无挂起成员、重读当前指针。成功只说明读一致切面。
 
@@ -134,7 +134,7 @@ Actro 内的 Privacy Agent 负责观测、取证、组图和向验证者提交�
 | --- | --- |
 | Actor Privacy Mark | `ActorAssurance` 的节点结论 |
 | 应用 Privacy Mark | `ApplicationAssurance` 的颜色；展示还须 `Ready` |
-| privacyGraphId + epoch | `structureId` + `ApplicationStateId` |
+| privacyGraphId + epoch | `structureDigest` + `ApplicationStateDigest` |
 | GraphRoot | 无。Front 只定位 |
 | Actr Host 自签 Mark | 禁止作为被评估者的最终结论 |
 
@@ -144,7 +144,7 @@ Actro 内的 Privacy Agent 负责观测、取证、组图和向验证者提交�
 {
   "object": "actrium/actor-assurance/v1",
   "issuer": "verifier:…",
-  "subject": { "actorId": "…", "actorStateId": "…" },
+  "subject": { "actorId": "…", "actorStateDigest": "…" },
   "qid": "actro.consumer.default",
   "ruleset": "…",
   "result": "CONTROLLED",
@@ -154,9 +154,9 @@ Actro 内的 Privacy Agent 负责观测、取证、组图和向验证者提交�
 }
 ```
 
-`ApplicationAssurance` 承诺 `structureId`、Principal、Merkle 根（叶子绑定 `ActorId + ActorStateId + H(AA)`）。成员证明对数路径。
+`ApplicationAssurance` 承诺 `structureDigest`、Principal、Merkle 根（叶子绑定 `ActorId + ActorStateDigest + H(AA)`）。成员证明对数路径。
 
-边握手仍须在发送应用数据前核验对端 `gate=ACTIVE`、当前 AA、通道绑定双方当前 `ActorId + ActorStateId`。`minimumTarget` 用节点结论，不用旧 Mark 名。
+边握手仍须在发送应用数据前核验对端 `gate=ACTIVE`、当前 AA、通道绑定双方当前 `ActorId + ActorStateDigest`。`minimumTarget` 用节点结论，不用旧 Mark 名。
 
 ## 9. 系统协议
 

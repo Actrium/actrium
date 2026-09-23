@@ -76,10 +76,10 @@ Tab
 | D-028 | 远程证明采用 Attester、Verifier、Relying Party 分工；Evidence 不是信任结论，最终授权由本地 data policy 决定。 |
 | D-029 | private/secret 的解密密钥只能在所需 attestation 通过后封装给与 Evidence 绑定的临时执行环境 key。 |
 | D-030 | 使用 GPU/NPU 的 Actor 必须进行 CPU、Guest、driver、设备、firmware、IOMMU/link/memory 的组合证明；任一明文环节无法证明时 compute confidentiality 为 unknown。 |
-| D-031 | 绿色绑定当前就绪切面（`ApplicationStateId` + `ApplicationAssurance` + `Ready`），不是 Program 全部版本，也不是短暂 transport session。 |
+| D-031 | 绿色绑定当前就绪切面（`ApplicationStateDigest` + `ApplicationAssurance` + `Ready`），不是 Program 全部版本，也不是短暂 transport session。 |
 | D-032 | Program Privacy Contract 仍是 Actor 图语法和能力的静态上界，只约束候选图，不直接产生绿色。 |
-| D-033 | 初始图必须在释放受保护数据或解密密钥前完成评估；结论绑定当前 `ActorStateId`、`structureId`、策略和证据。 |
-| D-034 | `ActorStateId` 变化时本地挂起并废除旧权力；不依赖变化节点的成员可 `LocalContinue`，但不得展示应用绿。 |
+| D-033 | 初始图必须在释放受保护数据或解密密钥前完成评估；结论绑定当前 `ActorStateDigest`、`structureDigest`、策略和证据。 |
+| D-034 | `ActorStateDigest` 变化时本地挂起并废除旧权力；不依赖变化节点的成员可 `LocalContinue`，但不得展示应用绿。 |
 | D-035 | 颜色未减弱可自动恢复；变弱则保持阻断并请求风险接受（不改颜色）；通道无效或触碰平台硬底线时用户不能覆盖。 |
 | D-036 | 受信 Verifier 可以把内部 Actor 子图封装为 Certified Privacy Domain，并通过 Assured Actor Edge 提供有 scope、有效期和撤销的 aggregate；自签声明无效。 |
 | D-037 | 审计日志是显式 storage/audit sink，必须声明字段、数据类别、目标、读取主体和 retention；LLM/GPU Attestation 本身不能证明 Server 没有另行留存日志。 |

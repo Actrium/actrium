@@ -15,7 +15,7 @@ Tab ──Positioning──▶ Front Actor ──Found──▶ No root applicat
                          ActorAssurance(Node, no self-signature)
                                       │
                                       ▼
-                    ApplicationStateId + ApplicationAssurance
+                    ApplicationStateDigest + ApplicationAssurance
                                       │
                                       ▼
                          Ready? → Show green / Yellow / Red
@@ -46,7 +46,7 @@ Data belts get generations. The new configuration only works on new data; old da
 Figure valid `Transfer(ActorId)` Formation: the target can be deciphered, the same as the other Principal, the declaration and state are currently valid. Drop the invalid side and ignore the direction and take the connect points. The loop is legal and you must find the side.
 
 ```text
-structureId = H("actrium/structure/v1", EncGraph)
+structureDigest = H("actrium/structure/v1", EncGraph)
 EncGraph    = actrium/graph/v1 Normative JSON(Sorted) ActorId With a positive side)
 ```
 
@@ -64,7 +64,7 @@ Actr Host I can do it. Guest The exit that can't be done is still this. Actor Th
 
 ## 4. State change
 
-Do not submit in full-chart-distribution. Order: Locally submit new `ActorStateId` → Abolition of old power → Guaranteed Hanging → The hiking re-establishes the face.`ActorState` Unarranged revision number with state authority: The configuration rolls also have a new root, the old one that was abolished CapabilityThe path and conclusions will not be resurrected by a rollback.
+Do not submit in full-chart-distribution. Order: Locally submit new `ActorStateDigest` → Abolition of old power → Guaranteed Hanging → The hiking re-establishes the face.`ActorState` Unarranged revision number with state authority: The configuration rolls also have a new root, the old one that was abolished CapabilityThe path and conclusions will not be resurrected by a rollback.
 
 ```text
 Depends(b, a)           := No-go-effective dependency edges
@@ -122,7 +122,7 @@ Evidence   Material used to verify the claim
 Assurance  Conclusions given by the certifying officer in combination with state, evidence, rules and user strategies
 ```
 
-Actro Inside Privacy Agent The person must sign the certificate when the cross-process becomes the basis of security. `ActorAssurance`, be precise. `ActorId + ActorStateId`The relying party has used the test itself.
+Actro Inside Privacy Agent The person must sign the certificate when the cross-process becomes the basis of security. `ActorAssurance`, be precise. `ActorId + ActorStateDigest`The relying party has used the test itself.
 
 Release `ApplicationAssurance` Before: Full discovery, check for each current state, each AA The result is only a consistent reading.
 
@@ -134,7 +134,7 @@ From the old draft `Privacy Mark` / `GraphRoot` / `epoch` The material correspon
 | --- | --- |
 | Actor Privacy Mark | `ActorAssurance` Nodal conclusion |
 | Apply Privacy Mark | `ApplicationAssurance` colour; presentation still required `Ready` |
-| privacyGraphId + epoch | `structureId` + `ApplicationStateId` |
+| privacyGraphId + epoch | `structureDigest` + `ApplicationStateDigest` |
 | GraphRoot | None.Front Positioning Only |
 | Actr Host Auto-Sign Mark | Prohibition of final conclusions as assessed |
 
@@ -144,7 +144,7 @@ Icon (field names can be used) schema Repository version, not less semantic than
 {
   "object": "actrium/actor-assurance/v1",
   "issuer": "verifier:…",
-  "subject": { "actorId": "…", "actorStateId": "…" },
+  "subject": { "actorId": "…", "actorStateDigest": "…" },
   "qid": "actro.consumer.default",
   "ruleset": "…",
   "result": "CONTROLLED",
@@ -154,9 +154,9 @@ Icon (field names can be used) schema Repository version, not less semantic than
 }
 ```
 
-`ApplicationAssurance` Commitments `structureId`, Principal, Merkle Root (leaf bound) `ActorId + ActorStateId + H(AA)`. The members certify logarithmic paths.
+`ApplicationAssurance` Commitments `structureDigest`, Principal, Merkle Root (leaf bound) `ActorId + ActorStateDigest + H(AA)`. The members certify logarithmic paths.
 
-The handshake must still check the peer before sending the application data `gate=ACTIVE`Current AAThe tunnel is bound by the two parties. `ActorId + ActorStateId`.`minimumTarget` Node conclusion, no old one. Mark Name.
+The handshake must still check the peer before sending the application data `gate=ACTIVE`Current AAThe tunnel is bound by the two parties. `ActorId + ActorStateDigest`.`minimumTarget` Node conclusion, no old one. Mark Name.
 
 ## 9. System Protocol
 

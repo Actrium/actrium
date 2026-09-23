@@ -102,7 +102,7 @@ flowchart LR
 14. Actor store namespace 接受 instance identity；
 15. 验证者身份与签名 `ActorAssurance`；
 16. Actor spawn/call/stream/egress edge 观测；
-17. `ActorStateId` / `ApplicationStateId` 订阅和撤销传播系统协议。
+17. `ActorStateDigest` / `ApplicationStateDigest` 订阅和撤销传播系统协议。
 
 ### 必须保留
 
