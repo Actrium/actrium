@@ -80,7 +80,7 @@ Workspace 不属于 Loran。一个 Service 至多绑定一个 Workspace，同一
 2. Loran 按 authority-discovery 获取 `https://<domain>/.well-known/actr` 中的
    `realm_signing_keys` 并验签，创建 `pending` Realm，在 Issuer Signer 生成 Realm
    issuer key，返回待签 Realm Profile payload。
-3. 调用方签名 Realm Profile，以 `activate_realm` 提交；Loran 验证 Realm Profile 指向自己
+3. 调用方签名 Realm Profile，以 `publish_profile` 提交；Loran 验证 Realm Profile 指向自己
    后转为 `active`，在响应中一次性返回 Realm 管理 token，此后才签发 Actor credential。
    Realm Provider 域名下的 Realm 由 Loran 自签、无需此步，个人以 Realm Provider 账号认证，
    Realm 管理 token 在 `create_realm` 响应中返回。

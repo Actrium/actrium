@@ -102,8 +102,8 @@ Realm Provider 只持有 Realm issuer key 私钥；只有受托成为 Realm 签�
 - 实例运营者：Loran 实例唯一的系统管理根，管理 Realm Provider 配置与全部 Realm 生命周期。
   Admin UI 配置只接受 Argon2id PHC hash，不接受明文密码；管理会话使用进程内 CSPRNG
   生成的 JWT key。
-- Realm 签名 key 持有方：通过 Realm 管理请求创建、激活 Realm 与重签 Realm 管理 token；
-  更新与退役通过发布新 Realm Profile 完成，无需在 Loran 另开账号（Realm Provider 域名下的
+- Realm 签名 key 持有方：通过 Realm 管理请求创建 Realm、发布 Realm Profile（首次即激活，
+  之后即更新或退役）与重签 Realm 管理 token，无需在 Loran 另开账号（Realm Provider 域名下的
   Realm 由个人以 Realm Provider 账号操作，见 3.6）。
 - Realm 管理员：Realm 激活时签发的、作用域为单个 Realm 的 Realm 管理 token，通常交给实例
   所有者（交付与重签见 3.5）；只能看到并管理本 Realm：secret 轮换、连接 ACL、Realm
@@ -126,10 +126,10 @@ Actro/Rill 等 Actr Host 可以持有该能力，但不得把它暴露给用户�
    其中的 key 验证请求签名；通过后创建 `pending` Realm，在 Issuer Signer 中生成该 Realm
    的 Realm issuer key，在响应中返回待签 Realm Profile payload（`package`、Realm issuer
    key、端点、`provider.id`）；
-3. 调用方用 Realm 签名 key 签名 Realm Profile，**总是**以 `activate_realm` 请求（同一格式，
+3. 调用方用 Realm 签名 key 签名 Realm Profile，**总是**以 `publish_profile` 请求（同一格式，
    携带签名 Realm Profile）提交给 Loran；
 4. Loran 验证 Realm Profile 签名，并确认其中的 Realm issuer key 与 Realm Provider 端点正是
-   自己，Realm 转为 `active`。`activate_realm` 的响应即激活响应，一次性返回该 Realm 的
+   自己，Realm 转为 `active`。`publish_profile` 的响应即激活响应，一次性返回该 Realm 的
    Realm 管理 token（见 3.5）。若 Realm Profile 存放位置（`realms`）由本 Realm Provider
    提供，Loran 同时对外提供该 Realm Profile；否则由调用方发布到自己声明的位置。
 
@@ -140,7 +140,7 @@ Realm Provider 域名下的 Realm（3.6）由 Loran 自己签 Realm Profile，�
 请求方是 Actr 管理信封中可选的 `requester` 字段（持有方签名服务填写的不透明成员标识，缺省
 为空）；Realm Provider 域名下的 Realm 以 bearer token 请求，请求方是 Realm Provider 账号，Loran 忽略请求中的 `requester`。同一请求方对自己的 pending 或 active Realm 重试时返回其状态，不返回
 Realm 管理 token；不同请求方命中同名 Realm，或任何请求命中 Realm Provider tombstone，一律
-返回冲突。对已 active 的 Realm 重复 `activate_realm` 返回冲突；Realm 管理 token 丢失（包括
+返回冲突。对已 active 的 Realm，`publish_profile` 只接受 sequence 更高的 Realm Profile，不再返回 Realm 管理 token；Realm 管理 token 丢失（包括
 Realm Provider 域名下的 Realm 丢失 `create_realm` 响应）只能用 `reissue_admin_token` 取回。
 
 只有 `active` Realm 才签发 Actor credential、接受 signaling 连接和分配 TURN。
@@ -173,7 +173,7 @@ descriptor 获取结果（含失败）。
 
 ### 3.2 Realm 管理请求
 
-v1 的 Realm 管理请求只有 `create_realm`、`activate_realm` 与 `reissue_admin_token`，共用
+v1 的 Realm 管理请求只有 `create_realm`、`publish_profile` 与 `reissue_admin_token`，共用
 Actr 管理信封（Actr management envelope），只有 `op` 与操作字段不同（Publisher 注册复用
 同一格式，见第 7 节）。请求以 HTTPS `POST` 发往 Loran 自身 authority descriptor
 （`https://<provider_id>/.well-known/actr`）中的 `realm-management` service link（protocol
@@ -216,7 +216,8 @@ Realm Profile。若已接受 Realm Profile 的签名 key 已从 `keys` 中移除
 
 ### 3.4 退役
 
-退役只有一条路径：Realm 签名 key 持有方发布 `status = retired` 的新 Realm Profile（即退役
+退役只有一条路径：Realm 签名 key 持有方发布 `status = retired` 的新 Realm Profile（以
+`publish_profile` 提交，并发布到 `realms` 位置；即退役
 Realm Profile，永久有效；保持相同 `provider.id`，`sequence` 更高）。Loran 通过 3.3 的周期校验得知后，在单一事务中撤销
 Actor credential、renewal token、presence、Actor Registry 记录与连接 ACL，退役 Realm issuer
 key，并写入以 Realm 名为键的 Realm Provider tombstone。若绑定的 Realm Provider 已停服，
@@ -488,7 +489,7 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
 - 新增 `realm_domain` 表；`realm` 表增加 `name`、`pending`/`suspended`/`retired` 状态、
   Realm Profile digest 与 `sequence`；
 - 实现 authority descriptor 获取（含逐跳 SSRF 检查的重定向处理、限流与结果缓存）与
-  `realm_signing_keys` 验签、Realm 管理请求（`create_realm`、`activate_realm`、
+  `realm_signing_keys` 验签、Realm 管理请求（`create_realm`、`publish_profile`、
   `reissue_admin_token`、`register_publisher`；`provider_id` 绑定、5 分钟有效期、nonce
   防重放、含请求方的幂等键）、待签 Realm Profile payload、Realm Profile 验证激活与周期性校验（含
   key 移除后丢弃 Realm Profile）；

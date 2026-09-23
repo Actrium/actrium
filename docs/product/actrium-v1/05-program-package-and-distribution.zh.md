@@ -403,7 +403,7 @@ v1 升级：
 3. 旧 Service 生成迁移快照；
 4. 显式交接 Workspace lease；
 5. 新 Service 导入并验证；
-6. 用户确认切换，随后发布 `package` 指向新包的 Realm Profile；
+6. 用户确认切换，随后以 `publish_profile` 发布 `package` 指向新包的 Realm Profile；
 7. 旧 Service 保留回滚窗口后归档；回滚即再发布一份指回旧包、`sequence` 更高的 Realm Profile。
 
 这样避免 ActorId 中版本与实际 workload 不一致，也让失败回滚可解释。
