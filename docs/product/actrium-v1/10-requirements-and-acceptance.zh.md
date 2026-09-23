@@ -27,7 +27,7 @@
 | FR-URI-006 | Realm 链接不得含端口；开发来源只通过包地址（localhost、回环地址或私有 CA）区分。 |
 | FR-URI-007 | https 形式只能按 Realm 域名 authority descriptor 中 `links` 的声明转换，不得凭路径外观推断。 |
 | FR-URI-008 | Parser 必须实施 IDNA、非法编码和控制字符检查。 |
-| FR-URI-009 | 新建实例是 Actro 本地操作，不由链接触发；成功后地址栏显示该实例的 Realm 链接。 |
+| FR-URI-009 | 新建实例是 Actrium 本地操作，不由链接触发；成功后地址栏显示该实例的 Realm 链接。 |
 
 ### 1.3 Program Catalog 与分发
 
@@ -52,7 +52,7 @@
 
 | ID | 需求 |
 |---|---|
-| FR-FRONT-001 | Front Host 必须随 Actro 发布且 Publisher 不可替换。 |
+| FR-FRONT-001 | Front Host 必须随 Actrium 发布且 Publisher 不可替换。 |
 | FR-FRONT-002 | v1 正式 Guest 只支持 Keel JS Guest。 |
 | FR-FRONT-003 | 必须固定 QuickJS 并启用硬 timeout 与 heap cap。 |
 | FR-FRONT-004 | Guest 模块、capability、组件和 RemoteRef 必须白名单。 |
@@ -88,7 +88,7 @@
 
 | ID | 需求 |
 |---|---|
-| FR-NET-001 | Actro 必须内置 signaling client 和本机 Realm 支持，不写死唯一全球服务器。 |
+| FR-NET-001 | Actrium 必须内置 signaling client 和本机 Realm 支持，不写死唯一全球服务器。 |
 | FR-NET-002 | 域名的 Realm 签名 key（authority descriptor 的 `realm_signing_keys` 成员，已在 Actr Authority Discovery §4.4 定义）必须通过 HTTPS 获取；Realm Profile 必须由已信任的 Realm 签名 key 签名，其有效性不取决于获取位置。 |
 | FR-NET-003 | 一个 Realm 必须可委派多个 signaling/TURN endpoint。 |
 | FR-NET-004 | v1 Front 与 Service 必须处于同一 Realm，即同一应用实例的 Realm；类型发现只在本 Realm 内进行。 |
@@ -102,10 +102,10 @@
 | FR-NET-012 | v1 的多个 signaling endpoint 只能作为同一 Realm 控制面的 failover，不支持隐式跨控制面 federation。 |
 | FR-NET-013 | 本机 Realm 的 ActorId 必须使用本机伪域名 `<installation-id>.actr.alt`，禁止复制为跨设备链接。 |
 | FR-NET-015 | Realm 域名 bootstrap（`https://<domain>/.well-known/actr`）必须固定 HTTPS 443，并以 Realm 签名 key 轮换链与 Realm Profile 序号防回滚（Realm Profile 不设过期时间）。 |
-| FR-NET-016 | Actro 必须提供域名信任、经 Realm 邀请加入实例 Realm、重新认证、客户端撤销、离开和 Realm 签名 key 变化处置流程。 |
+| FR-NET-016 | Actrium 必须提供域名信任、经 Realm 邀请加入实例 Realm、重新认证、客户端撤销、离开和 Realm 签名 key 变化处置流程。 |
 | FR-NET-017 | 新建实例必须在所选域名下新建一个 Realm；RealmId 在域名内唯一、创建后不可修改、退役后不复用。 |
 | FR-NET-018 | Service 升级为新 Program Release 时，Realm 必须发布 `package` 指向新包的 Realm Profile，新 Service 必须创建在同一 Realm；迁移到另一个 Realm 必须产生新 ActorId。 |
-| FR-NET-019 | 取不到、验不过或已退役的 Realm Profile 时，Actro 不得使用 Realm Profile 以外的任何 Realm Provider（包括 authority descriptor `services` 中的服务）与该 Realm 通信。 |
+| FR-NET-019 | 取不到、验不过或已退役的 Realm Profile 时，Actrium 不得使用 Realm Profile 以外的任何 Realm Provider（包括 authority descriptor `services` 中的服务）与该 Realm 通信。 |
 | FR-NET-020 | 新建实例所选的 Realm 域名必须已受信，或在新建确认页完成首次信任；没有域名不分配 Realm（本机 Realm 除外）；创建须经该 Realm 域名的 Realm 签名 key 持有方授权：Realm 域名等于或属于 Realm Provider ID 时由该 Realm Provider 以 Realm Provider 账号认证用户，确认页显示其为信任根；其他 Realm 域名由持有方的签名服务签署 Actr 管理信封，确认页显示信任根为该 Realm 域名。 |
 
 ### 1.7 Permission、安全与隐私
@@ -266,7 +266,7 @@
 
 **Given** 用户在 Program Catalog 选中未安装的 `notes.example/team-notes@1.4.2`<br>
 **When** 新建实例并确认权限/Workspace<br>
-**Then** Actro 验证 package、只创建一个 Realm 与一个 Service、获得持久 ActorId、地址栏显示该实例的 Realm 链接、Attach 并显示 Guest。
+**Then** Actrium 验证 package、只创建一个 Realm 与一个 Service、获得持久 ActorId、地址栏显示该实例的 Realm 链接、Attach 并显示 Guest。
 
 ### AC-002：刷新不重复创建
 
@@ -310,10 +310,10 @@
 **When** 关闭 Tab<br>
 **Then** Front/session 销毁，Service/Workspace/ActorId 保留并可从 Inventory 重开。
 
-### AC-009：Actro 重启
+### AC-009：Actrium 重启
 
 **Given** 本地 Service 已创建<br>
-**When** 完全退出并重启 Actro<br>
+**When** 完全退出并重启 Actrium<br>
 **Then** Service 用同一 ActorId恢复；收藏和历史中的 Realm 链接仍可连接。
 
 ### AC-010：独占会话
@@ -392,7 +392,7 @@
 
 **Given** Inventory 中的远端 Service 只授予 Attach、未授予 host management<br>
 **When** 用户点击启动、停止或清除<br>
-**Then** Actro 显示需要远端宿主授权，不伪造成功、不在本地创建替代 Service。
+**Then** Actrium 显示需要远端宿主授权，不伪造成功、不在本地创建替代 Service。
 
 ### AC-024：必要的其他 Actor 失陷
 
@@ -611,7 +611,7 @@
 | local-folder Workspace | 支持 | 支持 | security-scoped provider | SAF/provider |
 | 远端 Actr Host 管理 | 有 management capability 时 | 有 management capability 时 | 有 management capability 时 | 有 management capability 时 |
 
-Linux/通用服务器宿主、云端自动调度、浏览器 Web 版和跨 Realm federation 不属于 Actro v1 客户端承诺；它们可以作为独立 Actr Host 后续定义。
+Linux/通用服务器宿主、云端自动调度、浏览器 Web 版和跨 Realm federation 不属于 Actrium v1 客户端承诺；它们可以作为独立 Actr Host 后续定义。
 
 ## 5. 产品指标
 

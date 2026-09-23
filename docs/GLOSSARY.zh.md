@@ -19,12 +19,12 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | Actrium | 整个产品与仓库：本地优先的应用运行平台。 |
 | Actr | Actor 通信、身份、发现与 workload 运行时框架，以及 `actr://` URI、authority discovery 等协议（`actr/protocols/`）。 |
 | Actr Host / Guest | Actr Host 是创建 Actor 实例、提供 mailbox、transport、storage、clock、UI 等受控能力并装载 Workload 的可信宿主软件（实现 Actr 运行时），与在其中运行的 Guest（workload guest）相对。Actr Host 是运行环境，不是远端 Actor。 |
-| Actro | Actrium 的用户端产品：程序浏览器与宿主，提供 Actr Host 能力及更多功能（运行应用实例、管理 Realm 客户端 key、完成 Create/Attach 等）。不是 Actr Host 的同义词。 |
-| Actro Shell | Actro 中 Tab 之外的产品外壳：地址栏、Tab strip、权限弹窗等。 |
-| Program Catalog | Actro 中回答「我可以运行什么」的目录：已安装程序、Marketplace 收藏、本地导入等，每个程序带版本、digest、来源与更新状态。 |
-| Service Inventory | Actro 中回答「我已经创建了什么」的清单：以 Realm 名为键（升级时不变），记录当前 Service 的 ActorId、程序版本、Workspace、运行位置以及生命周期、可达性、健康度、会话占用四组状态。 |
+| Actrium | 用户端产品：程序浏览器与宿主，提供 Actr Host 能力及更多功能（运行应用实例、管理 Realm 客户端 key、新建实例、打开 Realm 链接等）。不是 Actr Host 的同义词。 |
+| Actrium Shell | Actrium 中 Tab 之外的产品外壳：地址栏、Tab strip、权限弹窗等。 |
+| Program Catalog | Actrium 中回答「我可以运行什么」的目录：已安装程序、Marketplace 收藏、本地导入等，每个程序带版本、digest、来源与更新状态。 |
+| Service Inventory | Actrium 中回答「我已经创建了什么」的清单：以 Realm 名为键（升级时不变），记录当前 Service 的 ActorId、程序版本、Workspace、运行位置以及生命周期、可达性、健康度、会话占用四组状态。 |
 | Keel | 沙箱化动态原生 UI 的 Host/Guest 运行时。 |
-| Actro Component Registry | Actro 内可供 Keel Guest 使用的组件注册表；与 Actor Registry、Publisher Registry 无关。 |
+| Actrium Component Registry | Actrium 内可供 Keel Guest 使用的组件注册表；与 Actor Registry、Publisher Registry 无关。 |
 | Loran | 默认/参考服务端套件，即 Realm Provider 运行的软件：Signaling、STUN/TURN、Issuer、Issuer Signer、Publisher Registry、包分发与管理。代码在 `crates/loran-*`。 |
 | Issuer | 为 Realm 签发 Actor 身份的服务（一个 Issuer 服务承载多个 Realm；代码 `crates/loran-issuer`，路由 `/issuer`，配置 `[services.issuer]`）：验证注册证明，分配 Actor serial，经 Issuer Signer 签发短期 Actor credential。不是用户目录，也不拥有 Workspace。 |
 | └ Issuer Signer | Issuer 的签名后端（代码 `crates/loran-signer`，配置 `[services.signer]`，其他服务经 `dependencies.signer` 访问，gRPC 包 `signer.v1`）：持有各 Realm 的 Realm issuer key 私钥（每个 Realm 一把），为 Issuer 签名，并向 Signaling 提供公钥用于验证 Actor credential。没有下载私钥的 API。可与 Issuer 同进程；生产环境建议独立部署在安全边界或 HSM 内，使主进程失陷不泄露私钥。存储加密 KEK 经 `ACTRIX_SIGNER_KEK` 提供。 |
@@ -41,7 +41,7 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | Program | Publisher 发布的程序。 |
 | Program Release | `publisher/program@version` 对应的不可变发布，对应一个固定的 Package digest（整个 `.actr` 的 SHA-256）。 |
 | Actor 类型（程序身份） | 唯一文本形式 `publisher/program@version`，表示不可变的程序版本，不表示某个 Actor 实例；由注册请求声明、写入 Actor credential 与 Actor Registry，供连接 ACL 与发现使用，不在 ActorId 中。linked/local workload 可使用 Actr Host 管理的非 DNS publisher 值，不能借此进入 Publisher Registry。代码类型名为 `ActrType`。 |
-| Actor Package（`.actr`） | Actr 签名 workload 包，格式 `actr-package/2`，manifest `[actor]` 以 `publisher`、`name`、`version` 标识 Actor 类型，按 manifest 签名与 digest 验证；在 Actro 中同时携带 Service 与 Keel Guest 资源。 |
+| Actor Package（`.actr`） | Actr 签名 workload 包，格式 `actr-package/2`，manifest `[actor]` 以 `publisher`、`name`、`version` 标识 Actor 类型，按 manifest 签名与 digest 验证；在 Actrium 中同时携带 Service 与 Keel Guest 资源。 |
 | Package digest | 精确 Program Release 的不可变内容指纹。 |
 | Workload | Actor 内的业务计算：处理 Actor message、生命周期事件和允许的 Actr Host 调用。 |
 | Workload Profile | 带版本的执行约定（如 `keel.guest/1`），规定 Actr Host 如何解释 Workload entry、建立 ABI、映射 message 与生命周期，以及允许哪些 profile 专有 manifest 字段。 |
@@ -54,10 +54,10 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | --- | --- |
 | Actor | 运行中的程序实体，由 ActorId 标识；安全模型中唯一的规范节点和宏观通信、执行边界。 |
 | Service | 实例的 Service：每个 Realm 恰好一个，随 Realm 创建；有持久 ActorId，固定运行 Realm Profile 所指的包，持有实例状态与 Workspace，生命周期独立于 Tab，可本地或远端运行。Front 只连它；它是本 Realm 内唯一与包同类型的 Actor，Front 按类型找到它。同一 Realm 内的其他 Actor 由它编排，不另设类别名。 |
-| Front Actor | 每个 resident app Tab 的短生命周期、Actro 固定的 Native workload Actor。 |
-| Front Host | Front Actor 的受信原生宿主部分：随 Actro 发布，Publisher 不可替换或扩展；负责 Actor 注册、身份、连接、会话、Keel Engine 与 Host capability，Keel Guest 运行其上。 |
+| Front Actor | 每个 resident app Tab 的短生命周期、Actrium 固定的 Native workload Actor。 |
+| Front Host | Front Actor 的受信原生宿主部分：随 Actrium 发布，Publisher 不可替换或扩展；负责 Actor 注册、身份、连接、会话、Keel Engine 与 Host capability，Keel Guest 运行其上。 |
 | Keel Guest | Publisher 唯一可定制的前台代码，运行于 Keel。 |
-| Tab | Actro Shell 中的用户交互容器；Tab record 可在 Front Actor 回收后继续存在（dormant Tab）。 |
+| Tab | Actrium Shell 中的用户交互容器；Tab record 可在 Front Actor 回收后继续存在（dormant Tab）。 |
 | Attach | Front 连接本实例 Service 的握手：核对对方 Actor 类型与包一致，取得 Attachment lease。 |
 | Attachment lease | Front 使用 Service 的短期会话租约（v1 默认 `exclusive`）。 |
 | capability | Actr Host 在本机明确授予 Guest/Service 的最小受控能力或句柄（如 `host:*` capability、Workspace capability、session capability），由 Actr Host 执行，不跨边界签名；与安全模型的 Actor Grant 不同。 |
@@ -74,7 +74,7 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | RealmId（`realm_id`） | Realm 名中 `@` 之前的部分，在所属域名内唯一，是分配得出的标识（字符规则同 DNS label：1–63 个小写字母、数字或 `-`）。默认随机生成，创建时可显式选择可读的 RealmId；创建后不可修改，退役后永不复用。完整身份始终是 Realm 名。 |
 | display_name | 给人看的实例名称，写在 Realm Profile 中，不进入 ActorId。 |
 | 本机 Realm | 域名为本机伪域名 `<installation-id>.actr.alt`（RFC 9476，永不经 DNS 解析）的 Realm：只有本地记录，没有 Realm Profile，不经过 Realm Provider，其他设备无法解析。 |
-| installation-id | Actro 安装时随机生成的 128 位标识（base32 小写 26 字符），只用于本机伪域名。 |
+| installation-id | Actrium 安装时随机生成的 128 位标识（base32 小写 26 字符），只用于本机伪域名。 |
 | Realm Provider 域名下的 Realm | 在规范化 A-label 上比较，Realm 域名等于其 Realm Profile 的 Realm Provider ID，或以 `"."` 加该 ID 结尾（按 label 边界）的 Realm。只有它：显示 Realm Provider 为信任根；由 Realm Provider 自签 Realm Profile，无需 `publish_profile`；Realm 管理请求用 Realm Provider 账号授权。其他 Realm 一律显示 Realm 域名为信任根，走 Actr 管理信封。 |
 | ActorId | Actor 实例的持久身份，与 Actor 长期 key 绑定，类似进程 ID：`<serial>.<realm_id>@<domain>`，如 `2af01.k7m2q9xh@acme.com`。单个 `@`，左边按 DNS 顺序从具体到一般，去掉 `<serial>.` 即 Realm 名；URI 中 `@` 写作 `%40`。不含程序类型，不是 Workspace、用户或可变服务别名。代码类型名为 `ActrId`；当前实现仍为数值 `realm_id` + Actor serial + 程序类型（见「当前实现专有」）。 |
 | Actor serial | ActorId 中由该 Realm 的 Issuer 分配的序列号，文本形式为小写十六进制（当前实现为 54-bit Snowflake）。 |
@@ -111,7 +111,7 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | 实例运营者 | Loran 实例唯一的系统管理根，管理 Realm Provider 配置与全部 Realm 生命周期。 |
 | Realm 管理员 | 持有某 Realm 的 Realm 管理 token 的一方（通常是实例所有者），只能看到并管理本 Realm。 |
 | Realm Provider tombstone | Realm Provider 本地以 Realm 名为键的已退役/已用记录，防止 RealmId 复用；与退役 Realm Profile（公开、签名）不同。 |
-| 本机实例 tombstone | Actro 清除实例后的本地记录。 |
+| 本机实例 tombstone | Actrium 清除实例后的本地记录。 |
 
 ## 7. 成员、客户端与权限
 
@@ -130,7 +130,7 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | 术语 | 定义 |
 | --- | --- |
 | Realm 链接（`actr://` URI） | 应用实例或其中某个 Actor 的地址：`actr://<Realm 域名>/<realm_id>[/<页面路径>]` 指向实例，`actr://<Realm 域名>/<serial>.<realm_id>[…]` 指向该 ActorId 的 Actor（第一段即 Realm 名或 ActorId 在 `@` 左边的部分）。页面路径、query、fragment 原样交给应用。https 形式是 `https://<Realm 域名><links 前缀>…`，设备上没有 Actr Host 时打开普通网页；本机 Realm 没有 https 形式。URI 不携带任何秘密。 |
-| 新建实例（Create） | Actro 内的本地操作：从 Program Catalog、Marketplace、本地文件或包地址选包，选 Realm 域名 → 持有方授权 → pending Realm → 签名 Realm Profile（含 `package`）并以 `publish_profile` 提交（Realm Provider 域名下的 Realm 无需此步）→ active Realm → 创建 Service。成功后地址栏显示该实例的 Realm 链接。 |
+| 新建实例（Create） | Actrium 内的本地操作：从 Program Catalog、Marketplace、本地文件或包地址选包，选 Realm 域名 → 持有方授权 → pending Realm → 签名 Realm Profile（含 `package`）并以 `publish_profile` 提交（Realm Provider 域名下的 Realm 无需此步）→ active Realm → 创建 Service。成功后地址栏显示该实例的 Realm 链接。 |
 | Create 幂等键（`idempotency_key`） | 新建实例的本地持久化标识：重试时继续同一个 pending Realm 与同一 RealmId。Realm Provider 侧幂等键为 `(realm, 请求方)`，请求方是 Actr 管理信封中的 `requester`，bearer 请求时是 Realm Provider 账号。 |
 | Realm 邀请 | 加入某个实例 Realm 的一次性凭证，携带 Realm 名，可内嵌 Realm Profile。 |
 
@@ -175,7 +175,7 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | 有效 Actr 通道 | 端到端加密、完整性、双向绑定双方 `ActorId + ActorStateDigest` 的通道。 |
 | TCB | 失陷会破坏相应保障的组件集合。 |
 | CONTROLLED / UNKNOWN / UNCONTROLLED | 出口事实（不是产品第四色）：出口受不可绕过控制且命中可信行为模式 / 缺少足够依据 / 已确认存在越界泄漏能力或 `Retain`。`UNCONTROLLED` 表示能力存在，不等于已观测到泄漏。 |
-| 绿 / 黄 / 红 | Actro 顶层隐私标记；绿只保证当前就绪切面。 |
+| 绿 / 黄 / 红 | Actrium 顶层隐私标记；绿只保证当前就绪切面。 |
 | 数据世代 | 应用数据取得时的 `ActorStateDigest`；旧数据适用「取得时声明 ∩ 当前声明」。 |
 
 几组不要混用的词：
@@ -206,6 +206,7 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 
 | 规范名 | 历史名 | 说明 |
 | --- | --- | --- |
+| Actrium（用户端产品） | Actro | 用户端产品改用项目名；已安装应用的 bundle id、Keychain 服务名等为兼容升级保留旧值 |
 | Loran | Actrix | 服务端套件旧名；发布的 Rust 包与二进制仍名 `actrix*`（如 `crates/loran-server` 的包名与二进制名 `actrix`，以及包 `actrix-issuer`、`actrix-publisher-registry`），默认数据库文件仍为 `actrix.db`，示例配置为 `actrix.example.toml`，指标前缀 `actrix_` |
 | Issuer | Authority、AIS（Actor Identity Service） | 目录 `crates/loran-ais` → `crates/loran-issuer`；包 `actrix-ais` → `actrix-issuer`；路由 `/ais` → `/issuer`；配置 `[services.ais]` → `[services.issuer]`；Actr.toml `ais_endpoint` → `issuer_endpoint`；表 `ais_renewal_token`、`ais_reissue_response_cache`、`ais_manufacturer_auth_nonce` → `issuer_renewal_token`、`issuer_reissue_response_cache`、`issuer_publisher_auth_nonce`（schema v2 离线迁移）；管理路由 `/admin/api/services/ais/keys` → `/admin/api/services/issuer/keys`；key 存储 `ais_keys.db` → `issuer_keys.db`（启动时迁移） |
 | Issuer Signer | KS、Key Server | gRPC 包 `ks.v1` → `signer.v1`；配置 `[services.ks]`、`dependencies.ks` → `[services.signer]`、`dependencies.signer`；环境变量 `ACTRIX_KS_KEK` → `ACTRIX_SIGNER_KEK`；示例 `ks.db` → `signer.db`；Postgres 默认库 `actrix_ks` → `actrix_signer`；指标 static `KS_*` → `SIGNER_*`（导出的指标名仍为 `actrix_*`） |
@@ -228,6 +229,6 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | ActorStateDigest、ApplicationStateDigest、structureDigest | ActorStateId、ApplicationStateId、structureId | 安全模型早期用语；按「摘要类标识叫 Digest」统一，代码与字段同步改为 `*_digest` |
 | Service | Primary Service、Service Actor | 产品文档早期用语；Realm 即实例后不再区分主次 |
 | Realm 内的其他 Actor | Auxiliary Actor | 产品文档早期用语 |
-| Realm 链接 | Create URI、Attach URI、`actr://<publisher>/<program>@<version>`、`service`/`domain`/`realm` 链接参数 | 产品文档早期用语；新建实例改为 Actro 本地操作 |
+| Realm 链接 | Create URI、Attach URI、`actr://<publisher>/<program>@<version>`、`service`/`domain`/`realm` 链接参数 | 产品文档早期用语；新建实例改为 Actrium 本地操作 |
 | （已删除） | Package Resolution、`packages` relation、`program_resolver`、`actr-packages/1` | 程序从哪来改由 Realm Profile 的 `package` 给出 |
 | Actor Grant | Capability（安全模型中的签名授权） | 安全模型早期用语；形式模型代码类 `Capability` → `ActorGrant` |

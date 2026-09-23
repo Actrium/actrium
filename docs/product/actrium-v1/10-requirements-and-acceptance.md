@@ -54,7 +54,7 @@
 
 | ID | Requirements |
 |---|---|
-| FR-FRONT-001 | Front Host It has to be. Actro and Publisher Cannot be replaced. |
+| FR-FRONT-001 | Front Host It has to be. Actrium and Publisher Cannot be replaced. |
 | FR-FRONT-002 | v1 Official Guest Support only Keel JS Guest. |
 | FR-FRONT-003 | It has to be fixed. QuickJS & Enable hard timeout with heap cap. |
 | FR-FRONT-004 | Guest Modules,capabilityComponent and RemoteRef It must be white. |
@@ -90,7 +90,7 @@
 
 | ID | Requirements |
 |---|---|
-| FR-NET-001 | Actro must embed a signaling client and local Realm support, and must not hard-code a single global server. |
+| FR-NET-001 | Actrium must embed a signaling client and local Realm support, and must not hard-code a single global server. |
 | FR-NET-002 | A domain's Realm signing keys (the `realm_signing_keys` member of the authority descriptor, defined in Actr Authority Discovery §4.4) must be fetched over HTTPS; a Realm Profile must be signed by a trusted Realm signing key, and its validity does not depend on where it was fetched from. |
 | FR-NET-003 | One. Realm There must be more than one assignment signaling/TURN endpoint. |
 | FR-NET-004 | In v1 the Front and the Primary Service must be in the same Realm, i.e. the Realm of the same application instance; type discovery only happens within that Realm. |
@@ -105,10 +105,10 @@
 | FR-NET-013 | A local Realm ActorId must use the local pseudo-domain `<installation-id>.actr.alt` and must not be copied as a cross-device portable link. |
 | FR-NET-014 | Service I can't just do it. Front Self-reported. ActorType, Actr Host Version or digest High-risk delegation of authority; independence must be validated when required attestation. |
 | FR-NET-015 | Realm domain bootstrap (`https://<domain>/.well-known/actr`) must always use HTTPS 443, and rollback is prevented by the Realm signing key rotation chain plus the Realm Profile sequence number (Realm Profiles do not expire). |
-| FR-NET-016 | Actro must provide flows for trusting a domain, joining an instance Realm by Realm invitation, re-authentication, client revocation, leaving and handling Realm signing key changes. |
+| FR-NET-016 | Actrium must provide flows for trusting a domain, joining an instance Realm by Realm invitation, re-authentication, client revocation, leaving and handling Realm signing key changes. |
 | FR-NET-017 | A Create Intent must create a new Realm under the chosen domain; `label` is unique within the domain, immutable after creation and never reused after retirement. |
 | FR-NET-018 | When a Service is upgraded to a new Program Release, the new Service Actor must be created in the same Realm; migrating to another Realm must produce a new ActorId. |
-| FR-NET-019 | When a Realm Profile cannot be fetched, fails verification or is retired, Actro must not talk to that Realm through any Realm Provider other than the Realm Profile's (including the services in the authority descriptor). |
+| FR-NET-019 | When a Realm Profile cannot be fetched, fails verification or is retired, Actrium must not talk to that Realm through any Realm Provider other than the Realm Profile's (including the services in the authority descriptor). |
 | FR-NET-020 | The Realm domain targeted by Create must already be trusted, or first trust must be completed on the Create confirmation page; no domain, no Realm (except local Realms); creation must be authorized by the Realm signing key holder of that Realm domain : when the Realm domain equals or is under the Realm Provider ID, that Realm Provider authenticates the user with a Realm Provider account and the confirmation page shows it as the trust root; for any other Realm domain, the holder's signing service signs an Actr management envelope and the page shows the Realm domain as the trust root. |
 
 ### 1.7 PermissionSecurity and privacy
@@ -269,7 +269,7 @@ Any increase must be subject to the Platform ' s cap and authority policy.
 
 **Given** User not installed `notes.example/team-notes@1.4.2`<br>
 **When** Open None `service` URIand confirm the authority/Workspace<br>
-**Then** Actro Authentication package, create only one Service♪ Getting a hold of yourself ♪ ActorIdRewriting URI, Attach Show Guest.
+**Then** Actrium Authentication package, create only one Service♪ Getting a hold of yourself ♪ ActorIdRewriting URI, Attach Show Guest.
 
 ### AC-002: Refresh without duplicate creation
 
@@ -313,10 +313,10 @@ Any increase must be subject to the Platform ' s cap and authority policy.
 **When** Close Tab<br>
 **Then** Front/session Destroyed,Service/Workspace/ActorId Reservations and from Inventory Reopen.
 
-### AC-009: Actro Restart
+### AC-009: Actrium Restart
 
 **Given** Local Service Created<br>
-**When** Quit completely and restart Actro<br>
+**When** Quit completely and restart Actrium<br>
 **Then** Service Use the same ActorIdrestoring;collection and history URI Still connected.
 
 ### AC-010: Monarchy session
@@ -401,7 +401,7 @@ Any increase must be subject to the Platform ' s cap and authority policy.
 
 **Given** Inventory Far end in Service Only granted AttachNot awarded host management<br>
 **When** User click to start, stop or clear<br>
-**Then** Actro Shows that remote host authorization is required, that no successful forgery, no local substitution is required Service.
+**Then** Actrium Shows that remote host authorization is required, that no successful forgery, no local substitution is required Service.
 
 ### AC-024: Necessary support Actor Lost.
 
@@ -620,7 +620,7 @@ Each published candidate should be covered at least:
 | local-folder Workspace | Support | Support | security-scoped provider | SAF/provider |
 | Far Actr Host Management | Yes. management capability Time | Yes. management capability Time | Yes. management capability Time | Yes. management capability Time |
 
-Linux/General server host, cloud automatic movement, browser Web Version & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & / Realm federation Not Actro v1 Client commitments; they can be independent Actr Host Subsequent definition.
+Linux/General server host, cloud automatic movement, browser Web Version & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & / Realm federation Not Actrium v1 Client commitments; they can be independent Actr Host Subsequent definition.
 
 ## 5. Product indicators
 

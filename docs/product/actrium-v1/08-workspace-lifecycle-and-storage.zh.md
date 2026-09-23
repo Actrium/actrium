@@ -49,11 +49,11 @@ Workspace 由互相正交的字段描述：
 | 维度 | 值 | 含义 |
 |---|---|---|
 | requirement | `none` / `optional` / `required` | 是否需要用户 Workspace，以及何时必须绑定 |
-| provisioning | `managed` / `user-selected` | 由 Actro 创建，还是由用户选择 |
+| provisioning | `managed` / `user-selected` | 由 Actrium 创建，还是由用户选择 |
 | access | `read-only` / `read-write` | Service 获得的访问能力 |
 | providers | 一组 Workspace Provider 类型 | 允许 `managed-store`、`local-folder`、`cloud-drive` 等实现 |
 
-`requirement=none` 时 Service 仍可使用实例私有 store，但不能获得用户 Workspace。`requirement=required` 与 `provisioning=managed` 可以同时出现，含义是创建 Service 时由 Actro 自动创建一个必需 Workspace。
+`requirement=none` 时 Service 仍可使用实例私有 store，但不能获得用户 Workspace。`requirement=required` 与 `provisioning=managed` 可以同时出现，含义是创建 Service 时由 Actrium 自动创建一个必需 Workspace。
 
 写入并发策略：
 
@@ -169,7 +169,7 @@ Deleted 是彻底清除后的终态，不可恢复。恢复窗口只属于 Trash
 | Tab 后台 | pause/suspend | 继续或平台 suspend | 不变 |
 | Tab 关闭 | destroy | 不变 | 不变 |
 | Front crash | destroy/recreate | 不变 | 不变 |
-| Actro 重启 | 重建 | 恢复同一 ActorId | 不变 |
+| Actrium 重启 | 重建 | 恢复同一 ActorId | 不变 |
 | Service stop | detach | stopped | 不变 |
 | Service trash | detach | trashed，可恢复 | 不变 |
 | Service purge | detach | deleted，不可恢复 | 默认保留 |
@@ -217,7 +217,7 @@ Prepared
 当前 Actr 若只按 `ActrType` 建数据目录，会让同类型多个 Service 冲突。目标目录必须按稳定 ActorId 隔离：
 
 ```text
-actro-data/
+actrium-data/
 ├── programs/
 │   └── sha256/<package-digest>/
 ├── services/
@@ -230,7 +230,7 @@ actro-data/
 ├── workspaces/
 │   └── <workspace-id>/...
 └── db/
-    └── actro.sqlite
+    └── actrium.sqlite
 ```
 
 目录名使用 ActorId hash，避免 `/`、`:`、长度和大小写问题；`instance.json` 保存完整标准 ActorId。
@@ -337,7 +337,7 @@ realm
 
 ### 9.1 绑定时
 
-Actro Workspace broker 检查：
+Actrium Workspace broker 检查：
 
 - 同一 Workspace Provider locator 是否已有写 lease；
 - Workspace Provider 是否支持多写；
@@ -446,7 +446,7 @@ Workspace 如果本来是旧设备本地目录，必须单独迁移或保持远�
 
 ### iOS
 
-- 本地 Service 主要承诺 Actro 前台期间可用；
+- 本地 Service 主要承诺 Actrium 前台期间可用；
 - 后台任务受系统时限；
 - 不承诺持续 signaling presence；
 - 长期在线实例应托管在桌面、服务器或支持的远端宿主；

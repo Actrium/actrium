@@ -49,11 +49,11 @@ Workspace From the cross-sectioned field description:
 | Dimensions | Value | Meaning |
 |---|---|---|
 | requirement | `none` / `optional` / `required` | Is there a user need WorkspaceAnd when must it be bound? |
-| provisioning | `managed` / `user-selected` | By Actro Create, or choose by the user |
+| provisioning | `managed` / `user-selected` | By Actrium Create, or choose by the user |
 | access | `read-only` / `read-write` | Service Visiting capacity acquired |
 | providers | Group Workspace Provider Type | Allow `managed-store`, `local-folder`, `cloud-drive` Waiting for it to happen |
 
-`requirement=none` Time Service The example is still available for private use store, but not available for users Workspace.`requirement=required` with `provisioning=managed` It can come at once. It means creation. Service Time Actro Automatically create a requirement Workspace.
+`requirement=none` Time Service The example is still available for private use store, but not available for users Workspace.`requirement=required` with `provisioning=managed` It can come at once. It means creation. Service Time Actrium Automatically create a requirement Workspace.
 
 Writing parallel strategy:
 
@@ -169,7 +169,7 @@ Deleted Recover window only Trashed, cannot undo the private key and credential 
 | Tab Backstage. | pause/suspend | Continue or Platform suspend | No change. |
 | Tab Close | destroy | No change. | No change. |
 | Front crash | destroy/recreate | No change. | No change. |
-| Actro Restart | Reconstruction | Restore Same ActorId | No change. |
+| Actrium Restart | Reconstruction | Restore Same ActorId | No change. |
 | Service stop | detach | stopped | No change. |
 | Service trash | detach | trashed, recoverable | No change. |
 | Service purge | detach | deletedIt's not gonna come back. | Default Reservations |
@@ -219,7 +219,7 @@ Rule restored:
 Current Actr If you press only `ActrType` Build a directory of data that allows multiple entries of the same type Service Conflict. Target catalogue must be stable. ActorId Segregation:
 
 ```text
-actro-data/
+actrium-data/
 ├── programs/
 │   └── sha256/<package-digest>/
 ├── services/
@@ -232,7 +232,7 @@ actro-data/
 ├── workspaces/
 │   └── <workspace-id>/...
 └── db/
-    └── actro.sqlite
+    └── actrium.sqlite
 ```
 
 Directory Name Use ActorId hashAvoid `/`, `:`(b) Length and case problems;`instance.json` Save Complete Standard ActorId.
@@ -339,7 +339,7 @@ If Service It only exists in one device, another. Inventory Record Display“Far
 
 ### 9.1 Time-bound
 
-Actro Workspace broker Inspection:
+Actrium Workspace broker Inspection:
 
 - Whether the same Workspace Provider locator already has a write lease;
 - Workspace Provider Whether or not to support overwriting;
@@ -421,7 +421,7 @@ Advantages:
 
 The new Service Actor is created in the same Realm as the original instance: the instance has not changed, Realm membership and application permissions carry over, and only the ActorId changes under the rules above.
 
-The disadvantage is... ActorId Changes;Actro Update local collections and current Tab. Old links can be used to hint when local migration records are saved“Example moved”; other devices only see old examples offline/archivedUnless it's old Service Signing migration tips continue to be provided during rollback.Realm Level alias/redirect It's a follow-up capability, not here. v1 Quietly achieved.
+The disadvantage is... ActorId Changes;Actrium Update local collections and current Tab. Old links can be used to hint when local migration records are saved“Example moved”; other devices only see old examples offline/archivedUnless it's old Service Signing migration tips continue to be provided during rollback.Realm Level alias/redirect It's a follow-up capability, not here. v1 Quietly achieved.
 
 ## 12. Service Relocation of equipment
 
@@ -449,7 +449,7 @@ Workspace If it was a local directory of used equipment, it would have to be mov
 
 ### iOS
 
-- Local Service Key commitments Actro Available during the front desk;
+- Local Service Key commitments Actrium Available during the front desk;
 - (a) Back-office tasks are subject to a system time frame;
 - No commitment to continue signaling presence;
 - Long-term online examples should host remote host(s) on desktop, server or supported;

@@ -1,10 +1,10 @@
 # 09. 安全与隐私
 
-> 隐私与保障语义以 [docs/security](../../architecture/security/actrium/README.zh.md) 为准。本章写 Actro 威胁、权限、沙箱和秘密管理；颜色与图汇聚见 [13](13-privacy-state-and-aggregation.md)。
+> 隐私与保障语义以 [docs/security](../../architecture/security/actrium/README.zh.md) 为准。本章写 Actrium 威胁、权限、沙箱和秘密管理；颜色与图汇聚见 [13](13-privacy-state-and-aggregation.md)。
 
 ## 1. 安全目标
 
-Actro 必须保证：
+Actrium 必须保证：
 
 1. 用户知道运行的代码来自哪个 Publisher、哪个不可变版本；
 2. Publisher Guest 不能替换或扩展受信 Front Host；
@@ -24,7 +24,7 @@ Actro 必须保证：
 ```mermaid
 flowchart LR
     U["User/Admin"]
-    SH["Actro Shell + Native Host<br/>受信"]
+    SH["Actrium Shell + Native Host<br/>受信"]
     G["Keel Guest<br/>不受信"]
     SVH["Service Host Broker<br/>受信"]
     SW["Service WASM<br/>受限"]
@@ -91,7 +91,7 @@ flowchart LR
 | Zip slip/zip bomb | 路径拒绝、文件数/总量/压缩比限制、原子解压 |
 | Guest require 任意模块 | 构建与安装双重白名单、runtime resolver fail-closed |
 | Guest 直接联网 | 无默认 fetch/socket；`host:net` capability + allowlist |
-| Image 隐式联网/自带 header | ActroSafeImage 只用 asset id 或受控 URL |
+| Image 隐式联网/自带 header | ActriumSafeImage 只用 asset id 或受控 URL |
 | Guest 调任意 Actor | 只暴露固定 Service capability |
 | Guest 伪造用户/权限 | Actr Host 附加不可覆盖的 session metadata |
 | Guest 无限循环 | QuickJS interrupt timeout、可销毁 runtime |
@@ -104,7 +104,7 @@ flowchart LR
 | 链接泄露权限 | Realm 链接与 ActorId 都不是凭证，URI 不含任何 token |
 | Actor 冒充 | Actor credential、Actor key proof、challenge |
 | 伪造或回滚 Realm Profile | Realm Profile 必须由已固定的 Realm 签名 key 签名；首次信任经 Web PKI 或企业 pin；Realm 签名 key 变化须有有效轮换链；`sequence` 单调、`provider.id` 不可变、已退役 Realm 拒绝；Realm Profile 不过期，客户端定期刷新；取不到、验不过或已退役的 Realm Profile 时不得使用 Realm Profile 以外的任何 Realm Provider |
-| 客户端伪装成官方 Actro Front | Actor credential 不证明对端代码；平台提供可选的 platform/runtime attestation |
+| 客户端伪装成官方 Actrium Front | Actor credential 不证明对端代码；平台提供可选的 platform/runtime attestation |
 | 恶意 Actor 自报「不泄露」 | 被评估者不得自签最终 `ActorAssurance`；有效声明由 Actr Host 闭合 |
 | Service 隐瞒 Realm 内的其他 Actor | 无根图须发现入边；漏评不得绿 |
 | WASM 声明与实际出口不同 | 比较 manifest、imports、有效声明和实际边；确认未声明出口则为 `UNCONTROLLED` |
@@ -221,7 +221,7 @@ Service:
 
 ### 7.3 组件控制
 
-组件 props 不是「普通 UI 数据」就自动安全。Actro 必须检查：
+组件 props 不是「普通 UI 数据」就自动安全。Actrium 必须检查：
 
 - URL 和 header；
 - 文件/asset reference；
@@ -243,7 +243,7 @@ Service:
 | S1 Same-process sandbox | v1 Keel JS Guest | 独立 QuickJS runtime + capability + quota |
 | S2 Worker/runtime isolation | 后续 | 可 terminate worker + 独立内存调度 |
 | S3 OS process isolation | 桌面长期目标 | helper process/AppContainer/XPC |
-| T1 Trusted Native | Actro 第一方/企业 | 原生 workload，高信任 |
+| T1 Trusted Native | Actrium 第一方/企业 | 原生 workload，高信任 |
 
 不得把 S1 文案写成「进程级隔离」。QuickJS 是 C 引擎，Actr Host/Bridge/组件层漏洞仍可能跨越语言沙箱。
 
@@ -321,7 +321,7 @@ Publisher package endpoint 可使用 CDN，但 CDN URL 不自动成为 Guest net
 
 | Secret | 存储 | 暴露范围 |
 |---|---|---|
-| Realm 客户端 key（每个 Realm 独立生成，Actro 内部如何生成不对外规定） | OS secure storage | Identity Manager |
+| Realm 客户端 key（每个 Realm 独立生成，Actrium 内部如何生成不对外规定） | OS secure storage | Identity Manager |
 | Service key | OS secure storage | Service runtime bootstrap |
 | renewal token（Actor credential 续期用，绑定 Realm 客户端 key） | OS secure storage | Realm Manager |
 | signaling ticket | 内存 | signaling client，一次性 |
@@ -375,7 +375,7 @@ Publisher package endpoint 可使用 CDN，但 CDN URL 不自动成为 Guest net
 
 ## 15. 安全更新与撤销
 
-- Actro Host 安全更新可要求重启 Front；
+- Actrium Host 安全更新可要求重启 Front；
 - package 撤销按等级处理；
 - Realm issuer key 或 Realm 签名 key 撤销立即影响新连接；
 - 已建立 session 最迟在 credential/lease 到期终止；
@@ -385,7 +385,7 @@ Publisher package endpoint 可使用 CDN，但 CDN URL 不自动成为 Guest net
 
 ## 16. 隐私承诺
 
-Actro 不应默认建立中心化账户或同步服务。用户数据流向取决于：
+Actrium 不应默认建立中心化账户或同步服务。用户数据流向取决于：
 
 - Workspace Provider；
 - Service 宿主；
@@ -396,7 +396,7 @@ Actro 不应默认建立中心化账户或同步服务。用户数据流向取�
 
 安装页和安全中心必须提供「数据会去哪里」的分层说明，而不是一个总隐私开关。
 
-Realm 名出现在分享的 Realm 链接中，会暴露 Realm 域名与 RealmId（`realm_id`）。Actro 默认为实例生成完全随机的 RealmId（不含程序名或用户输入），可读名称放在 `display_name`，不进入 ActorId；用户显式选择可读 RealmId 时，确认页和分享前 UI 应提示它会随链接暴露。Realm 名与 ActorId 形似邮件地址（`k7m2q9xh@acme.com`），Actro 不得把它们渲染为 `mailto:` 链接，应明确标示为实例地址。每个 Realm 使用独立的 Realm 客户端 key，不跨 Realm 复用，不同实例无法据此关联同一客户端。对 Realm Provider 域名下的 Realm，用户以 Realm Provider 账号登录创建；Realm Provider 能关联同一账号创建的实例（它本来就是签名方），实例成员看不到账号。
+Realm 名出现在分享的 Realm 链接中，会暴露 Realm 域名与 RealmId（`realm_id`）。Actrium 默认为实例生成完全随机的 RealmId（不含程序名或用户输入），可读名称放在 `display_name`，不进入 ActorId；用户显式选择可读 RealmId 时，确认页和分享前 UI 应提示它会随链接暴露。Realm 名与 ActorId 形似邮件地址（`k7m2q9xh@acme.com`），Actrium 不得把它们渲染为 `mailto:` 链接，应明确标示为实例地址。每个 Realm 使用独立的 Realm 客户端 key，不跨 Realm 复用，不同实例无法据此关联同一客户端。对 Realm Provider 域名下的 Realm，用户以 Realm Provider 账号登录创建；Realm Provider 能关联同一账号创建的实例（它本来就是签名方），实例成员看不到账号。
 
 ## 17. 安全开发要求
 
@@ -415,7 +415,7 @@ Realm 名出现在分享的 Realm 链接中，会暴露 Realm 域名与 RealmId�
 
 ## 18. 应用保障
 
-应用隐私不是 Publisher 自报的一个布尔字段。Actro 必须按 [13](13-privacy-state-and-aggregation.md) 和 [docs/security](../../architecture/security/actrium/README.zh.md) 处理：
+应用隐私不是 Publisher 自报的一个布尔字段。Actrium 必须按 [13](13-privacy-state-and-aggregation.md) 和 [docs/security](../../architecture/security/actrium/README.zh.md) 处理：
 
 - 图无根，由有效 Actor `Transfer` 形成；Front 只定位；
 - WASM 通过声明 + import / 有效能力 / 出口闭包度量；

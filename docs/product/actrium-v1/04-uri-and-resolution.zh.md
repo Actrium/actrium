@@ -2,7 +2,7 @@
 
 ## 1. 目标
 
-一个应用实例就是一个 Realm，它的地址就是 Realm 链接。本章只讲 Actro 怎样显示、打开、保存和
+一个应用实例就是一个 Realm，它的地址就是 Realm 链接。本章只讲 Actrium 怎样显示、打开、保存和
 分享这个地址；链接语法、https 形式与打开流程以 [Actr URI](../../../actr/protocols/uri.zh.md)
 为准，这里不重复。
 
@@ -22,13 +22,13 @@ https://acme.com/i/k7m2q9xh/today?view=week        ; acme.com 声明了 links: [
 - RealmId 之后的路径、query 和 fragment 原样交给应用，用于页面内定位，不影响打开哪个实例；
 - 第一段写成 `<serial>.<realm_id>`（如 `actr://acme.com/2af01.k7m2q9xh`）时指向该实例里的某个 Actor：打开流程相同，只是直接连接这个 Actor 而不按类型查找，它的类型必须与包相同；程序升级替换 Actor 后这类链接失效，所以分享时默认用实例链接；
 - https 形式只在 Realm 域名的 `/.well-known/actr` 用 `links` 声明了前缀时成立；设备上没有
-  Actro 时，同一地址打开的是该域名提供的网页，网页上有「在 Actro 中打开」；
+  Actrium 时，同一地址打开的是该域名提供的网页，网页上有「在 Actrium 中打开」；
 - 本机 Realm 的地址形如 `actr://<installation-id>.actr.alt/h3x8p2wq`，只在本安装有效，没有
   https 形式。
 
 ## 3. 打开
 
-Actro 按 Actr URI 第 4 节打开链接：取得并验证 Realm Profile → 按其中的 `package` 下载并验证
+Actrium 按 Actr URI 第 4 节打开链接：取得并验证 Realm Profile → 按其中的 `package` 下载并验证
 包 → 启动前台 → 连接该实例的 Service。
 
 产品层面的要求：
@@ -39,7 +39,7 @@ Actro 按 Actr URI 第 4 节打开链接：取得并验证 Realm Profile → 按
 - **失败即停**：Realm Profile 取不到、验不过或已退役，包的 SHA-256 或签名不符，都停止打开，
   不改用其他 Realm Provider，不换包，不新建实例。
 - **没有成员身份时**：进入加入流程（例如 Realm 邀请），不静默失败。
-- 用户可以选择「在浏览器中打开」https 链接；在同一域名的网页内跳转时，Actro 不强制接管。
+- 用户可以选择「在浏览器中打开」https 链接；在同一域名的网页内跳转时，Actrium 不强制接管。
 - 链接不能预授任何权限；未知的 query 只交给应用，不影响安装或权限页面。
 
 ## 4. 地址栏、历史、收藏与复制链接
@@ -51,7 +51,7 @@ Actro 按 Actr URI 第 4 节打开链接：取得并验证 Realm Profile → 按
 - 「复制链接」：Realm 域名声明了 `links` 时复制 https 形式，否则复制 `actr://` 形式；
 - 本机 Realm 禁用「复制链接」，不能伪造域名。
 
-新建实例本身不是链接，而是 Actro 内的本地操作，见[用户体验](03-user-experience.zh.md)第 5 节。
+新建实例本身不是链接，而是 Actrium 内的本地操作，见[用户体验](03-user-experience.zh.md)第 5 节。
 
 ## 5. 开发来源
 

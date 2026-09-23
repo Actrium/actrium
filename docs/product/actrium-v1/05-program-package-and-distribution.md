@@ -26,7 +26,7 @@ Publisher The agreement to use a domain name is reasonable because it is directl
 - CDN, cache, agent and enterprise network facilities;
 - The organization has a security response capacity.
 
-Actro Do not maintain another global set Publisher ID Registration centre.
+Actrium Do not maintain another global set Publisher ID Registration centre.
 
 ### 2.2 Publisher Profile
 
@@ -53,7 +53,7 @@ The `publisher` member uses snake_case field names and contains at least:
 - a security contact address;
 - optional Marketplace/transparency log statements.
 
-On first retrieval, trust comes from the Web PKI of the URL hostname, or from an enterprise-provisioned Publisher root pin; a root carried inside the Publisher Profile cannot vouch for itself. After accepting the first Publisher Profile, Actro pins the root/key history, and every later Publisher Profile must:
+On first retrieval, trust comes from the Web PKI of the URL hostname, or from an enterprise-provisioned Publisher root pin; a root carried inside the Publisher Profile cannot vouch for itself. After accepting the first Publisher Profile, Actrium pins the root/key history, and every later Publisher Profile must:
 
 - be signed over an RFC 8785 JCS canonicalized payload (the `publisher` member with its `signature` field removed), verified as a detached Ed25519 signature;
 - carry a monotonically increasing `sequence`, an issue time and an expiry time;
@@ -124,15 +124,15 @@ Promise. `publisher/program@version` A valid download with certainty. `.actr` wo
 
 ### 4.1 Duties of the Mission
 
-Actro Program Release Directly reuse Actr `.actr` Package:
+Actrium Program Release Directly reuse Actr `.actr` Package:
 
 - The main subject to execute is Primary Service workload;
 - Keel Guest (b) As a signature bag resource;
 - Front–Service proto/contract (b) As a signature bag resource;
 - Icons, static resources, default configurations into the resource area;
-- Actro Extension field states front desk entrances, privileges, components,Workspace Compatibility.
+- Actrium Extension field states front desk entrances, privileges, components,Workspace Compatibility.
 
-Actro No more inventions of a charade `.actr` The second-floor installation package outside.
+Actrium No more inventions of a charade `.actr` The second-floor installation package outside.
 
 ### 4.2 Recommended Directory
 
@@ -167,7 +167,7 @@ A formal third party package shall not contain:
 - Not here. manifest The list of enforceable scripts;
 - Replaced from network on run Guest The entrance.
 
-Publisher Only if you're available. Guest (a) With the declaration;Actr Host "and will always be." Actro Client release.
+Publisher Only if you're available. Guest (a) With the declaration;Actr Host "and will always be." Actrium Client release.
 
 ## 5. Service workload Policy
 
@@ -176,7 +176,7 @@ Publisher Only if you're available. Guest (a) With the declaration;Actr Host "an
 v1 Marketplace Third parties Service workload It must be:
 
 - WebAssembly Component Model;
-- Objective ABI Yes. Actro Supports the list;
+- Objective ABI Yes. Actrium Supports the list;
 - Pass. import/export allowlist;
 - - Yeah. fuel, wall-clock timeout, memory, table, stream and I/O Quotas;
 - All WorkspaceNetworks and networks Actor Capacity Service Host broker.
@@ -185,13 +185,13 @@ v1 Marketplace Third parties Service workload It must be:
 
 Actr Existing native cdylib/linked workload Capability, but it's not equal to Marketplace By default, allow:
 
-- native workload with Actro (a) The process is more risky;
+- native workload with Actrium (a) The process is more risky;
 - iOS The platform will not allow any random downloads of the machine code;
 - Dynamic inventory in ABI, signature and supply chain differences.
 
 And so... Native Service Only for:
 
-- Actro (a) The first party system;
+- Actrium (a) The first party system;
 - (b) Corporate distribution;
 - Desktop development mode;
 - User explicitly accepted elevated trust tier.
@@ -202,7 +202,7 @@ Native workload A further distinction must be made:
 
 - `NativeCdylib`: Load Actr Host Address space; no export closure can be shown and no third-party examples may be green;
 - `NativeCapsule`: the process of independence restricted, only OS sandboxNo original network/Documentation,sealed libraries and brokered IPC It's possible to rate it as all effective. `CONTROLLED`;
-- `NativeTrusted`: Actro Home or enterprise preset TCBIt's not open. Marketplace trust tier.
+- `NativeTrusted`: Actrium Home or enterprise preset TCBIt's not open. Marketplace trust tier.
 
 v1 Marketplace It's still open. WASM Service.Native Capsule It is the desktop priority follow-up capability, as specified in the table.[Privacy tags and condensation protocols](13-privacy-state-and-aggregation.md).
 
@@ -218,7 +218,7 @@ v1 Do Not Include“No, I don't. Service Page Application”Special case. The to
 
 ♪ So all ♪ app Tab Still unified. Attach One. Primary Service, the difference is business only Service Whether or not to include a custom logic.
 
-## 6. Actro Manifest Extension
+## 6. Actrium Manifest Extension
 
 Actr Foundation manifest Continue to provide:
 
@@ -231,42 +231,42 @@ Actr Foundation manifest Continue to provide:
 - proto files;
 - dependency lock.
 
-Actro Add:
+Actrium Add:
 
 ```toml
-[actro]
+[actrium]
 schema_version = 1
-min_actro_version = "1.0.0"
+min_actrium_version = "1.0.0"
 front_host_api = "^1.0"
 service_host_api = "^1.0"
 
-[actro.front]
+[actrium.front]
 guest_runtime = "keel-js"
 guest_entry = "ui/guest.bundle.js"
 keel_api = "^1.0"
 contract_manifest = "ui/capability-manifest.json"
 contract_digest = "sha256:..."
 
-[actro.service]
+[actrium.service]
 primary_contract = "proto/primary-service.proto"
 protocol_fingerprint = "sha256:..."
 
-[actro.service.workspace]
+[actrium.service.workspace]
 requirement = "required"
 provisioning = "user-selected"
 access = "read-write"
 providers = ["managed-store", "local-folder", "cloud-drive"]
 lease = "exclusive-writer"
 
-[actro.session]
+[actrium.session]
 attachment_policy = "exclusive"
 
-[actro.privacy]
+[actrium.privacy]
 schema_version = 1
 data_classes = ["public", "private", "secret"]
 default_unknown_action = "block-private-and-secret"
 
-[[actro.privacy.actor_egress]]
+[[actrium.privacy.actor_egress]]
 actr_type = "notes.example/index-worker@1.4.2"
 required = false
 data_classes = ["private"]
@@ -281,7 +281,7 @@ The package says:“Applications”, not actually authorized:
 ```text
 effective capabilities =
   package requested
-  ∩ Actro Host supported
+  ∩ Actrium Host supported
   ∩ user/admin granted
   ∩ current platform allowed
   ∩ current session scope
@@ -344,7 +344,7 @@ No one can fail to give a part of it to you. Keel or Service runtime.
 
 ### 8.2 Keel Loading Borders
 
-Keel `Engine.loadBundle(URL)` It is simply a loading mechanism, not a trust mechanism.Actro It is necessary to:
+Keel `Engine.loadBundle(URL)` It is simply a loading mechanism, not a trust mechanism.Actrium It is necessary to:
 
 1. Download and authenticate on your own package;
 2. From content-addressed cache Read certified Guest bytes;
@@ -353,7 +353,7 @@ Keel `Engine.loadBundle(URL)` It is simply a loading mechanism, not a trust mech
 
 ## 9. Version is unchangeable
 
-Actro Locally saves with the following joint keys:
+Actrium Locally saves with the following joint keys:
 
 ```text
 (publisher, program, version, package_digest)
@@ -408,7 +408,7 @@ Marketplace You can't:
 - Squat domain names on behalf of third parties;
 - Silent Replace Publisher package;
 - Replace with market-entry identity Publisher Domain names;
-- Because“Audited”Around Actro (a) Competence;
+- Because“Audited”Around Actrium (a) Competence;
 - Put the lower shelf with Service/Workspace Automatically deletes the equivalent.
 
 ## 12. Avoidance policy
