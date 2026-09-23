@@ -226,7 +226,7 @@ Service 的 ActorId 必须满足：
 <serial_hex>@<realm_id>/<publisher>:<program>:<version>
 ```
 
-它只有数值 Realm 句柄（当前代码的 `realm_id`），缺少可解析的 Realm 名，还把程序类型嵌在身份里。v1 必须改造 ActorId 数据模型与标准 formatter，使 Realm 可从 ActorId 本身解析，并把类型移出身份：
+它只有 Loran 内部的数值 `realm_id`，缺少可解析的 Realm 名，还把程序类型嵌在身份里。v1 必须改造 ActorId 数据模型与标准 formatter，使 Realm 可从 ActorId 本身解析，并把类型移出身份：
 
 ```text
 <serial>.<realm_id>@<domain>

@@ -18,7 +18,7 @@ RealmId 默认由 Actro 随机生成（base32 小写短串，不含程序名）�
 
 实例里的 Actor 以 ActorId 标识，例如 `2af01.k7m2q9xh@acme.com`：去掉 `2af01.` 即 Realm 名。它的链接形式是 `actr://acme.com/2af01.k7m2q9xh`；程序升级替换 Actor 后这类链接失效，分享时默认用实例链接。程序身份 `publisher/program@version` 由包 manifest 与 Actor credential 携带。
 
-旧格式（`actr://notes.example/team-notes@1.4.2?service=…`、只含数值 Realm 句柄的 `2af01@42/notes.example:team-notes:1.4.2`）一律拒绝，只能经显式迁移工具导入。
+旧格式（`actr://notes.example/team-notes@1.4.2?service=…`、只含数值 `realm_id` 的 `2af01@42/notes.example:team-notes:1.4.2`）一律拒绝，只能经显式迁移工具导入。
 
 ## 2. Publisher Profile
 

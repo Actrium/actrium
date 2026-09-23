@@ -40,8 +40,8 @@ loran-server
 
 - SQLite `user_version` 必须等于 schema v2；
 - 当前实现：数据库层强制每实例最多一个 Realm。目标契约：移除单例约束，改为
-  Realm 名唯一（含 Realm Provider tombstone），所有按 Realm 分区的状态以数值 Realm 句柄
-  `realm_handle` 为外键；
+  Realm 名唯一（含 Realm Provider tombstone），所有按 Realm 分区的状态以完整 Realm 名
+  `realm` 为键；
 - Actor credential validation 检查 protocol version、issuer、Realm Provider、audience、Realm、
   Actor 和过期时间；目标契约下 issuer 即 Realm 名，且 Realm 必须为 `active`；
 - 配置未知字段和生产不安全值 fail closed。
