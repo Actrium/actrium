@@ -1,7 +1,7 @@
 # Loran 开发指南
 
 > 下文命令与目录树中的 `actrix` 为代码中沿用的历史名（Cargo package、二进制、目录），
-> 见 [GLOSSARY](GLOSSARY.zh.md)「历史名称对照」；现行 crate 布局以 [CRATES](CRATES.zh.md) 为准。
+> 见[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」；现行 crate 布局以 [CRATES](CRATES.zh.md) 为准。
 
 ## 快速开始
 

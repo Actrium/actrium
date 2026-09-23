@@ -117,7 +117,7 @@ Example: JSON/TOML/Protocol fields for freezing product syntax; official wire sc
 
 In the event of a conflict, the following order of interpretation is given:
 
-1. **Semantics of security and privacy**: [docs/security](../../security/README.zh.md);
+1. **Semantics of security and privacy**: [docs/security](../../architecture/security/actrium/README.zh.md);
 2. Ben. README (a) Decision-making on products not in conflict with the preceding article;
 3. [Demand and acceptance criteria](10-requirements-and-acceptance.md)Medium MUST/FR/NFR;
 4. URI, distribution, running time,Realm, Workspace and product topics not covered by this chapter;
@@ -132,7 +132,7 @@ This design is based on the following publicly available feasibility but is not 
 
 - [Actrium/actr](https://github.com/Actrium/actr): Actor model, precise `ActrId` addressing, Realm/connection ACL, signaling, WebRTC, signed `.actr` packages and WASM workloads.
 - [Actrium/keel](https://github.com/Actrium/keel): Keel Host/Guest, Bridge, JS Sandboxes, contracts and raw components rendered.
-- [Actro Overview of the current structure](../../architecture/overview.md): Multiplatforms Shell, share running time with Actr SDK Borders.
+- [Actro Overview of the current structure](../../architecture/actrium/overview.md): Multiplatforms Shell, share running time with Actr SDK Borders.
 
 Key facts that have been verified include:
 
@@ -142,4 +142,4 @@ Key facts that have been verified include:
 - Keel It's... Host/Guest Border and White List module mechanism suitable for carrying FrontBut it's... `Engine.loadBundle(URL)` It is not a credible distribution system in itself.
 - Most Keel "native" sandboxes are still language-runtime isolation inside one OS process and cannot be claimed as browser-grade process isolation.
 
-These documents use the canonical names Loran, Publisher Registry, Issuer and publisher throughout; historical names found in code and older documents are listed in one place, the "历史名称对照" (historical names) section of the [Loran glossary](../../../loran/docs/GLOSSARY.zh.md).
+These documents use the canonical names Loran, Publisher Registry, Issuer and publisher throughout; historical names found in code and older documents are listed in one place, the "历史名称对照" (historical names) section of the [glossary](../../GLOSSARY.zh.md).

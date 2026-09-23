@@ -48,14 +48,14 @@ Front 使用 Actr linked/native workload：
 - Publisher package 中不携带；
 - 每个 resident app Tab 创建一个逻辑 Front Actor 实例；
 - 负责 Actor 注册、身份、连接、会话、Keel Engine 和 Host capability；
-- Realm credential 只能证明 Actor key、ActorId、ActorType 与 issuer claims，不能单独证明实际运行代码；
+- Actor credential 只能证明 Actor key、ActorId、Actor 类型与 issuer claims，不能单独证明实际运行代码；
 - Service 必须把 Front 当作不受信客户端，独立实施 principal、应用权限、业务命令和 Workspace 授权。
 
 「Native workload」在这里表示 Actr Host 由平台原生提供，不表示 Guest 可以提供 native code。
 
 ### 2.2 Front Actor 类型
 
-Front 的 ActorType 是 Actro 系统类型，例如：
+Front 的 Actor 类型是 Actro 系统类型，例如：
 
 ```text
 actrium/actro-front@1.0.0
@@ -73,7 +73,7 @@ actrium/actro-front@1.0.0
 
 这些字段由正常 Actro Host 从已验证 package 构造，Guest 无法覆盖；但对远端 Service 而言它们仍是客户端声明，只用于兼容性协商，不能替代业务授权或远程 attestation。
 
-受管 Realm 可以把平台 app attestation、发行签名或企业设备证明纳入 credential。若 Service policy 要求「官方 Actro runtime」，Attach 必须验证该证明；没有证明时不得假定 ActorType 等于真实运行时。
+受管 Realm 可以把平台 app attestation、发行签名或企业设备证明纳入 credential。若 Service policy 要求「官方 Actro runtime」，Attach 必须验证该证明；没有证明时不得假定 Actor 类型等于真实运行时。
 
 ### 2.3 Front 生命周期
 
@@ -156,7 +156,7 @@ v1 不宣称：
 - iOS 可行范围内的独立 extension/helper 或更强 WASM runtime；
 - 可由 Actr Host 强制 terminate 的 worker。
 
-## 4. Actro Safe Component Registry
+## 4. Actro Component Registry
 
 Actro 不能直接把通用 Keel `DefaultComponents` 全量暴露给不受信 Guest。
 
@@ -336,7 +336,7 @@ actro.session.v1.Takeover
 actro.session.v1.GetStatus
 ```
 
-`ActorAssurance`、无根图和 `ApplicationAssurance` 使用 `actro.privacy.v1.*` 系统协议，见 [13](13-privacy-state-and-aggregation.md)。语义以 [docs/security](../../security/README.zh.md) 为准。
+`ActorAssurance`、无根图和 `ApplicationAssurance` 使用 `actro.privacy.v1.*` 系统协议，见 [13](13-privacy-state-and-aggregation.md)。语义以 [docs/security](../../architecture/security/actrium/README.zh.md) 为准。
 
 ### 7.1 AttachRequest
 
@@ -400,7 +400,7 @@ Guest 不接触 Actor credential、challenge key 或原始 session secret。
 
 Service 按顺序检查：
 
-1. 发送方 Realm credential；
+1. 发送方 Actor credential；
 2. caller ActorId 与 credential claim；
 3. Front Actor type；若 policy 要求可信 runtime，再验证独立的 platform/runtime attestation；
 4. challenge/nonce 防重放；
@@ -456,7 +456,7 @@ Actr Host 必须附加不可由 Guest覆盖的 metadata：
 - idempotency key（适用时）。
 
 Service 不能信任 Guest payload 中自报的用户、Workspace 或权限字段。
-Service 同样不能仅凭 Front 自报的 Actr Host 版本、package digest 或 ActorType 授予高权限。
+Service 同样不能仅凭 Front 自报的 Actr Host 版本、package digest 或 Actor 类型授予高权限。
 
 ## 11. 生命周期协议
 

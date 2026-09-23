@@ -1,6 +1,6 @@
 # 14. 隐私原语、远程证明与可信算力
 
-> 安全语义以 [docs/security](../../security/README.zh.md) 为准。本章只写原语、证明和算力如何进入现行评定，不另定义颜色或图根。
+> 安全语义以 [docs/security](../../architecture/security/actrium/README.zh.md) 为准。本章只写原语、证明和算力如何进入现行评定，不另定义颜色或图根。
 
 ## 1. 目标
 
@@ -33,7 +33,7 @@ Privacy Graph Aggregation（整条 Actor 数据路径是否成立）
 
 普通计算必须在某个执行边界内使用明文。除非使用 FHE、MPC 等专用密码学计算，Actro 不应声称数据在每个时刻都是密文。
 
-推荐表述与 [总览](../../security/01-overview.zh.md) 一致：
+推荐表述与 [总览](../../architecture/security/actrium/01-overview.zh.md) 一致：
 
 > 数据在受保护链路和受保护存储上以密文存在；明文只应出现在身份已知、边界满足要求的处理环境中。绿色只保证当前就绪切面，新配置只约束新数据。
 
@@ -334,7 +334,7 @@ Actr 网络应同时提供：
 - 即使 signaling、TURN、代理或某段 transport 被替换，relay 仍不能获得 payload；
 - 把密码学端点绑定到 `ActorId + runtimeInstanceId`；
 - 把 privacy policy、attestation result 和具体 session 绑定在一起；
-- 防止仅凭一张合法 Realm credential 把流量引到另一 workload。
+- 防止仅凭一张合法 Actor credential 把流量引到另一 workload。
 
 ### 6.2 Handshake 绑定
 
@@ -359,7 +359,7 @@ channelNonce
 roles
 ```
 
-双方当前 `ActorStateId` 必须进入联合 transcript 并被双向认证：只对本方字段做 MAC 不足以抵抗旧状态问候重放（见 [安全协议](../../security/03-protocol.zh.md) §3 与形式模型 F-CHAN-01）。任一方 `ActorStateId` 变化后，旧通道不得承载应用数据，须针对新状态重新握手。
+双方当前 `ActorStateId` 必须进入联合 transcript 并被双向认证：只对本方字段做 MAC 不足以抵抗旧状态问候重放（见 [安全协议](../../architecture/security/actrium/03-protocol.zh.md) §3 与形式模型 F-CHAN-01）。任一方 `ActorStateId` 变化后，旧通道不得承载应用数据，须针对新状态重新握手。
 
 Actor Actr Host 必须证明持有 Actor key 和临时会话 key。若目标运行在 TEE 中，临时解密公钥必须由 TEE 内生成，或被 TEE 安全持有，并进入 attestation Evidence/Result。
 

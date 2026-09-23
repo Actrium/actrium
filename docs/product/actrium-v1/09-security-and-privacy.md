@@ -1,6 +1,6 @@
 # 09. Security and privacy
 
-> Privacy and security [docs/security](../../security/README.zh.md) is the applicable rule. Actro Threats, privileges, sandboxes and secret management; colours and maps brought together [13](13-privacy-state-and-aggregation.md).
+> Privacy and security [docs/security](../../architecture/security/actrium/README.zh.md) is the applicable rule. Actro Threats, privileges, sandboxes and secret management; colours and maps brought together [13](13-privacy-state-and-aggregation.md).
 
 ## 1. Security objectives
 
@@ -415,7 +415,7 @@ A Realm name appears in shared URIs as part of the ActorId and reveals the Realm
 
 ## 18. Application security
 
-Applying privacy is not Publisher Self-reported a Boolean field.Actro You have to press it. [13](13-privacy-state-and-aggregation.md) and [docs/security](../../security/README.zh.md) Processing:
+Applying privacy is not Publisher Self-reported a Boolean field.Actro You have to press it. [13](13-privacy-state-and-aggregation.md) and [docs/security](../../architecture/security/actrium/README.zh.md) Processing:
 
 - No root in the chart, by valid Actor `Transfer` (a) Formation;Front (a) Positioning only;
 - WASM Adoption of the declaration + import / Effectiveness / (b) Export closed-convey measures;

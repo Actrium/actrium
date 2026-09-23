@@ -94,7 +94,7 @@
 | FR-NET-002 | 域名的 Realm 签名 key（authority descriptor 的 `realm_signing_keys` 成员，已在 Actr Authority Discovery §4.4 定义）必须通过 HTTPS 获取；Realm Profile 必须由已信任的 Realm 签名 key 签名，其有效性不取决于获取位置。 |
 | FR-NET-003 | 一个 Realm 必须可委派多个 signaling/TURN endpoint。 |
 | FR-NET-004 | v1 Front 与 Primary Service 必须处于同一 Realm，即同一应用实例的 Realm；类型发现只在本 Realm 内进行。 |
-| FR-NET-005 | Actor credential 必须绑定 ActorId、Actor key、ActorType、Realm 和有效期。 |
+| FR-NET-005 | Actor credential 必须绑定 ActorId、Actor key、Actor 类型、Realm 和有效期。 |
 | FR-NET-006 | Service identity 必须支持凭长期 key reclaim 同一 ActorId。 |
 | FR-NET-007 | signaling credential 不得放入长期 URL query。 |
 | FR-NET-008 | TURN 必须使用短期、限 audience、可轮换 credential。 |
@@ -103,7 +103,7 @@
 | FR-NET-011 | Service offline 必须是可区分状态，不能退化为同类型发现。 |
 | FR-NET-012 | v1 的多个 signaling endpoint 只能作为同一 Realm 控制面的 failover，不支持隐式跨控制面 federation。 |
 | FR-NET-013 | 本机 Realm 的 ActorId 必须使用本机伪域名 `<installation-id>.actr.alt`，禁止复制为跨设备 portable link。 |
-| FR-NET-014 | Service 不得仅凭 Front 自报的 ActorType、Actr Host 版本或 digest 授予高风险权限；需要时必须验证独立 attestation。 |
+| FR-NET-014 | Service 不得仅凭 Front 自报的 Actor 类型、Actr Host 版本或 digest 授予高风险权限；需要时必须验证独立 attestation。 |
 | FR-NET-015 | Realm 域名 bootstrap（`https://<domain>/.well-known/actr`）必须固定 HTTPS 443，并以 Realm 签名 key 轮换链与 Realm Profile 序号防回滚（Realm Profile 不设过期时间）。 |
 | FR-NET-016 | Actro 必须提供域名信任、经 Realm 邀请加入实例 Realm、重新认证、客户端撤销、离开和 Realm 签名 key 变化处置流程。 |
 | FR-NET-017 | Create Intent 必须在所选域名下新建一个 Realm；`label` 在域名内唯一、创建后不可修改、退役后不复用。 |
@@ -381,7 +381,7 @@
 
 ### AC-020：Front 自报官方 Actr Host
 
-**Given** 未受管客户端自报正确 Front ActorType、Actr Host 版本和 package digest，但没有 runtime attestation<br>
+**Given** 未受管客户端自报正确 Front 的 Actor 类型、Actr Host 版本和 package digest，但没有 runtime attestation<br>
 **When** Service policy 要求官方受管运行时<br>
 **Then** Attach 被拒绝；应用权限也不得仅根据这些自报字段自动授权。
 

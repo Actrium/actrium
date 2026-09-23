@@ -1,6 +1,6 @@
 # 13. Actro Privacy tags and diagrams are assembled
 
-> Security syntax [docs/security](../../security/README.zh.md) is the same as the first sentence. Actro How to get the model down to Tab, Front, Actr Host and data. This chapter is changed in case of conflict without changing the current security model.
+> Security syntax [docs/security](../../architecture/security/actrium/README.zh.md) is the same as the first sentence. Actro How to get the model down to Tab, Front, Actr Host and data. This chapter is changed in case of conflict without changing the current security model.
 
 Mature:`Specified`.
 
@@ -26,7 +26,7 @@ The Front Actor is the product entry point, not the graph root. The Primary Serv
 
 The internal evidence dimension (identity, product, restraint, computing, access, storage, export, output) is the rating input. Users see only three colours; no colour is considered to be the current application security when the cut is not ready.
 
-Channels, original language and remote certification are available. [14](14-privacy-primitives-and-attestation.md). The complete judgment and proof is in the [Form Model](../../security/formal/model.zh.md).
+Channels, original language and remote certification are available. [14](14-privacy-primitives-and-attestation.md). The complete judgment and proof is in the [Form Model](../../architecture/security/actrium/formal/model.zh.md).
 
 ## 2. Colours and Facts
 

@@ -302,7 +302,7 @@ UI 文案不得都叫「收藏页面」。
 - 创建成功后只记录规范化连接 URI；
 - 创建确认页可以记录为非持久导航事件，不加入同步历史；
 - ActorId 不是秘密，但历史同步设置应允许用户排除实例 URI；
-- URL 中绝不记录 credential、Workspace path 或邀请 token。
+- URL 中绝不记录 credential、Workspace path 或 Realm 邀请。
 
 ### 8.3 分享
 
@@ -483,7 +483,7 @@ Guest 不能直接改写 Shell 地址栏，只能调用 `host:navigate`：
 - 跳转到另一实例会触发 Attach Intent，不能把当前 capability 带过去；
 - `https://` 外链交给系统浏览器或受控 WebView，并显示目标域名；
 - route 和 query 必须受长度、字符和敏感字段策略约束；
-- back/forward 重放的是规范化 URI，不重放权限 token 或 RPC。
+- back/forward 重放的是规范化 URI，不重放应用权限 token 或 RPC。
 
 ## 19. Publisher 开发与发布路径
 

@@ -574,7 +574,7 @@ Guest 只能看到最小化的用户可见摘要：
 }
 ```
 
-Guest 不获得 Actor 图、原始 evidence、attestation token 或被隐藏的 ActorId。完整对象见 [13](13-privacy-state-and-aggregation.md)；语义见 [docs/security](../../security/README.zh.md)。
+Guest 不获得 Actor 图、原始 evidence、attestation token 或被隐藏的 ActorId。完整对象见 [13](13-privacy-state-and-aggregation.md)；语义见 [docs/security](../../architecture/security/actrium/README.zh.md)。
 
 ## 10. 系统协议错误码
 
@@ -818,43 +818,7 @@ closed
 
 ## 12. 术语表
 
-| 术语 | 定义 |
-|---|---|
-| Actro | Actrium 程序浏览器与宿主产品，提供 Actr Host 及更多能力 |
-| Actr | Actor 通信、身份、发现和 workload runtime 框架 |
-| Actr Host | 运行 Actor 的宿主（与 Guest 相对）；Actro 是提供 Actr Host 的产品之一 |
-| Keel | 沙箱化动态原生 UI 的 Host/Guest runtime |
-| Program | Publisher 发布的程序 |
-| Program Release | `publisher/program@version` 对应的不可变包 |
-| Publisher | 以规范化 DNS 域名标识的发布者 |
-| `.actr` package | Actr 签名 workload 包；在 Actro 中同时携带 Service 与 Keel Guest 资源 |
-| Tab | 用户交互容器 |
-| Front Actor | 每个 resident app Tab 的短生命周期、Actro 固定 Native workload Actor |
-| Keel Guest | Publisher 唯一可定制的前台代码 |
-| Primary Service | Front 唯一绑定的有状态业务 Actor |
-| Auxiliary Actor | 由 Primary Service 编排的后台 Actor |
-| ActorId | `<serial>.<label>@<domain>`：持久且密码学绑定的精确 Actor 身份，不含程序类型 |
-| ActrType | `publisher/program@version`，由注册与 Actor credential 携带 |
-| Workspace | Service 持有的业务数据 capability |
-| Realm | 一个应用实例的逻辑信任与治理域：Actor 身份、准入、连接 ACL 和 Realm Provider 委派 |
-| Realm 名 | `<label>@<domain>`；`domain` 为 DNS 域名，本机 Realm 为 `<installation-id>.actr.alt` |
-| Realm 签名 key | Realm 域名在 descriptor 的 `realm_signing_keys` 中公布、用于签署 Realm Profile 的 key；持有方即域名所有者，可委托 Realm Provider 代持 |
-| Realm Profile | 由 Realm 签名 key 签名、委派 Issuer 与 Realm Provider 的每 Realm 文档 |
-| Realm Provider | 承载大量 Realm 的共享基础设施运营方（signaling、STUN/TURN、Issuer）；Realm 创建时绑定，此后不变 |
-| Realm 客户端 key | 某成员的某个客户端安装在某个 Realm 中的 key，按 Realm 独立，可单独吊销 |
-| Actr 管理信封 | Realm 签名 key 签署的 Realm 管理请求格式（绑定 `provider_id`、≤5 分钟、nonce）；`register_publisher` 复用 |
-| Signaling | presence、发现与 WebRTC 协商控制面 |
-| STUN | NAT 映射发现 |
-| TURN | P2P 不可达时的受控流量中继 |
-| Capability | Actr Host 明确授予 Guest/Service 的最小能力 |
-| Package digest | 精确 Program Release 的不可变内容指纹 |
-| Attachment lease | Front 使用 Service 的短期会话租约 |
-| Marketplace | 程序发现、审核和撤销信息服务，不是 Publisher 命名权威 |
-| 应用图 | 有效 `Transfer(ActorId)` 形成的无根连通分量 |
-| ActorAssurance | 验证者针对准确 `ActorStateId` 的节点结论；禁止自签 |
-| ApplicationAssurance | 当前就绪切面的汇聚结论 |
-| Ready | 快照当前且全部成员 ACTIVE；展示颜色的前提 |
-| Native Capsule | 在独立 OS sandbox 中运行、只开放 Actr Host brokered IPC 的 Native workload |
+本文档使用的术语统一定义在[术语表](../../GLOSSARY.zh.md)，此处不再重复。
 
 ## 13. 规范与实现参考
 

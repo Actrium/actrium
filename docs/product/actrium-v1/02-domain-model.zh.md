@@ -219,7 +219,7 @@ Service ActorId 必须满足：
 - 凭据正常续期、hard re-auth、信令切换、进程重启和运行位置迁移时保持不变；
 - 与 Actor 长期密钥绑定；
 - 可以解析为当前在线地址，也可以明确报告 offline；
-- ActorType 不是 ID 的组成部分：它由注册与 Actor credential 携带，且必须与 Program Release 相同。
+- Actor 类型不是 ID 的组成部分：它由注册与 Actor credential 携带，且必须与 Program Release 相同。
 
 当前 Actr 的 legacy 文本形式是：
 
@@ -250,7 +250,7 @@ ActorId 可以进入地址栏、历史和收藏，但不能单独授予访问权
 
 ### 4.4 不增加公共 ServiceInstanceId
 
-目标模型不再向 URL 增加一层公共「逻辑服务键」。如果 ActrId 不能稳定，就应修复 ActrId，而不是让所有上层长期维护：
+目标模型不再向 URL 增加一层公共「逻辑服务键」。如果 ActorId 不能稳定，就应修复 ActorId，而不是让所有上层长期维护：
 
 ```text
 ServiceInstanceId → current ActorId
@@ -360,4 +360,4 @@ Front ──定位──▶ CC(U(有效 Transfer(ActorId)))
 - 任一成员挂起，不得展示绿；
 - 不依赖变化节点的成员可 `LocalContinue`；
 - 新配置只作用于新数据；
-- 完整语义见 [docs/security](../../security/README.zh.md) 与 [13](13-privacy-state-and-aggregation.md)。
+- 完整语义见 [docs/security](../../architecture/security/actrium/README.zh.md) 与 [13](13-privacy-state-and-aggregation.md)。

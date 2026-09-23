@@ -65,7 +65,7 @@ The repository includes a complete set of design and development documents. A pr
 
 #### **Appendix**
 
-*   **[Glossary](./docs/appendix-a-glossary.zh.md)**
+*   **[Glossary](../../docs/GLOSSARY.zh.md)**
 
 ---
 

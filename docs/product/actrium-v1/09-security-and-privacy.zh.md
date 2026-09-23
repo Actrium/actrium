@@ -1,6 +1,6 @@
 # 09. 安全与隐私
 
-> 隐私与保障语义以 [docs/security](../../security/README.zh.md) 为准。本章写 Actro 威胁、权限、沙箱和秘密管理；颜色与图汇聚见 [13](13-privacy-state-and-aggregation.md)。
+> 隐私与保障语义以 [docs/security](../../architecture/security/actrium/README.zh.md) 为准。本章写 Actro 威胁、权限、沙箱和秘密管理；颜色与图汇聚见 [13](13-privacy-state-and-aggregation.md)。
 
 ## 1. 安全目标
 
@@ -49,7 +49,7 @@ flowchart LR
 
 - Workspace 内容；
 - Actor 长期私钥；
-- Realm membership/refresh material；
+- Realm membership 与 renewal token；
 - Service 状态与 snapshot；
 - Workspace Provider credential；
 - 用户身份和应用权限；
@@ -101,8 +101,8 @@ flowchart LR
 | Workspace 路径穿越 | brokered root handle、路径规范化、symlink policy |
 | 多 Service 同时写 | exclusive writer lease |
 | URL 批量创建 | 确认、creation intent 幂等、来源限流和配额 |
-| URL 泄露权限 | ActorId 非 capability，URI 无 token |
-| Actor 冒充 | Realm credential、Actor key proof、challenge |
+| URL 泄露权限 | ActorId 非 capability，URI 不含任何 token |
+| Actor 冒充 | Actor credential、Actor key proof、challenge |
 | 伪造或回滚 Realm Profile | Realm Profile 必须由已固定的 Realm 签名 key 签名；首次信任经 Web PKI 或企业 pin；Realm 签名 key 变化须有有效轮换链；`sequence` 单调、`provider.id` 不可变、已退役 Realm 拒绝；Realm Profile 不过期，客户端定期刷新；取不到、验不过或已退役的 Realm Profile 时不得使用 Realm Profile 以外的任何 Realm Provider |
 | 客户端伪装成官方 Actro Front | Service 默认不信任客户端实现；受管场景另验 platform/runtime attestation |
 | 恶意 Actor 自报「不泄露」 | 被评估者不得自签最终 `ActorAssurance`；有效声明由 Actr Host 闭合 |
@@ -285,7 +285,7 @@ Publisher package endpoint 可使用 CDN，但 CDN URL 不自动成为 Guest net
 
 ## 11. Actor/Session 安全
 
-- ActorId 必须与 public key 和 Realm credential 绑定；
+- ActorId 必须与 public key 和 Actor credential 绑定；
 - `ActorState` 修订号单调递增；配置回滚不复现旧 `ActorStateId`，旧 credential/Capability 不复活；
 - credential 短期、可撤销；
 - Service长期 key 不出安全存储；
@@ -298,7 +298,7 @@ Publisher package endpoint 可使用 CDN，但 CDN URL 不自动成为 Guest net
 - `service` URI mismatch 直接失败；
 - Service offline 不 fallback。
 
-ActorType、Actr Host 版本和 package digest 的客户端声明不构成 runtime attestation；Service 的数据权限与业务授权不能依赖这些自报字段。
+Actor 类型、Actr Host 版本和 package digest 的客户端声明不构成 runtime attestation；Service 的数据权限与业务授权不能依赖这些自报字段。
 
 ## 12. Workspace 安全
 
@@ -323,7 +323,7 @@ ActorType、Actr Host 版本和 package digest 的客户端声明不构成 runti
 |---|---|---|
 | Realm 客户端 key（每个 Realm 独立生成，Actro 内部如何生成不对外规定） | OS secure storage | Identity Manager |
 | Service Actor key | OS secure storage | Service runtime bootstrap |
-| Realm 客户端 key | OS secure storage | Realm Manager |
+| renewal token（Actor credential 续期用，绑定 Realm 客户端 key） | OS secure storage | Realm Manager |
 | signaling ticket | 内存 | signaling client，一次性 |
 | TURN credential | 内存 | ICE stack，短期 |
 | Workspace credential | OS secure storage | Workspace broker |
@@ -396,7 +396,7 @@ Actro 不应默认建立中心化账户或同步服务。用户数据流向取�
 
 安装页和安全中心必须提供「数据会去哪里」的分层说明，而不是一个总隐私开关。
 
-Realm 名随 ActorId 出现在分享 URI 中，会暴露 Realm 域名与 Realm label（`label`）。Actro 默认为实例生成完全随机的 `label`（不含程序名或用户输入），可读名称放在 `display_name`，不进入 ActorId；用户显式选择可读 `label` 时，确认页和分享前 UI 应提示它会随链接暴露。Realm 名与 ActorId 形似邮件地址（`k7m2q9xh@acme.com`），Actro 不得把它们渲染为 `mailto:` 链接，应明确标示为实例地址。每个 Realm 使用独立的 Realm 客户端 key，不跨 Realm 复用，不同实例无法据此关联同一客户端。Realm 签名 key 持有方是 Realm Provider 时，用户以 Realm Provider 账号登录创建；Realm Provider 能关联同一账号创建的实例（它本来就是签名方），实例成员看不到账号。
+Realm 名随 ActorId 出现在分享 URI 中，会暴露 Realm 域名与 Realm label（`label`）。Actro 默认为实例生成完全随机的 `label`（不含程序名或用户输入），可读名称放在 `display_name`，不进入 ActorId；用户显式选择可读 `label` 时，确认页和分享前 UI 应提示它会随链接暴露。Realm 名与 ActorId 形似邮件地址（`k7m2q9xh@acme.com`），Actro 不得把它们渲染为 `mailto:` 链接，应明确标示为实例地址。每个 Realm 使用独立的 Realm 客户端 key，不跨 Realm 复用，不同实例无法据此关联同一客户端。对 Realm Provider 域名下的 Realm，用户以 Realm Provider 账号登录创建；Realm Provider 能关联同一账号创建的实例（它本来就是签名方），实例成员看不到账号。
 
 ## 17. 安全开发要求
 
@@ -415,7 +415,7 @@ Realm 名随 ActorId 出现在分享 URI 中，会暴露 Realm 域名与 Realm l
 
 ## 18. 应用保障
 
-应用隐私不是 Publisher 自报的一个布尔字段。Actro 必须按 [13](13-privacy-state-and-aggregation.md) 和 [docs/security](../../security/README.zh.md) 处理：
+应用隐私不是 Publisher 自报的一个布尔字段。Actro 必须按 [13](13-privacy-state-and-aggregation.md) 和 [docs/security](../../architecture/security/actrium/README.zh.md) 处理：
 
 - 图无根，由有效 Actor `Transfer` 形成；Front 只定位；
 - WASM 通过声明 + import / 有效能力 / 出口闭包度量；

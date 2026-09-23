@@ -7,7 +7,7 @@
 
 > 本报告是产品与技术团队用于决定是否进入正式专利工作的初步材料，不是法律意见，也不是完整的新颖性检索、无效检索或自由实施（FTO）意见。最终申请范围、发明人、公开日和法域策略应由专利代理师或律师确认。
 
-> 术语说明：本报告写于 2026-07-30，沿用当时的实施例命名。现行安全模型（[docs/security](../../security/README.zh.md)）已改用以下对应对象，语义映射为：`PrivacyGraphRoot` ≈ `structureId`；`GraphEpoch` ≈ `ApplicationStateId`（结构 + 各节点当前状态根的承诺）；「旧 Epoch 能力冻结」对应「`ActorStateId` 含单调修订号，状态变化持久废除旧绑定（内容回滚不复活）」。报告中的机制分析不受命名差异影响；正式申请文件撰写时应以现行模型词汇为准。
+> 术语说明：本报告写于 2026-07-30，沿用当时的实施例命名。现行安全模型（[docs/security](../../../architecture/security/actrium/README.zh.md)）已改用以下对应对象，语义映射为：`PrivacyGraphRoot` ≈ `structureId`；`GraphEpoch` ≈ `ApplicationStateId`（结构 + 各节点当前状态根的承诺）；「旧 Epoch 能力冻结」对应「`ActorStateId` 含单调修订号，状态变化持久废除旧绑定（内容回滚不复活）」。报告中的机制分析不受命名差异影响；正式申请文件撰写时应以现行模型词汇为准。
 
 ## 一、结论摘要
 
