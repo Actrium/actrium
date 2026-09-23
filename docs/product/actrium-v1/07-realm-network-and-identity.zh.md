@@ -76,7 +76,7 @@ Realm 名 = <realm_id>@<domain>
 - 已退役 Realm 的 RealmId 永不复用：域名所有者不得复用，Realm Provider 以 Realm Provider tombstone 强制；
 - 域名的 Realm 签名 key 是该域名下所有 Realm 的长期信任根。
 
-数值 Realm 句柄（当前代码的 `realm_id`，代码轮改名为 `realm_handle`）只是 Realm Provider 内部的数据库句柄，不是 Realm 身份，不出现在 ActorId、Realm Profile 或跨 Realm Provider 的比较中。
+当前代码里的数值 `realm_id` 只是 Loran 内部的数据库主键，不是 Realm 身份。目标契约以完整 Realm 名为键，随 ActorId 格式迁移移除它。
 
 ### 2.3 Realm、Publisher 与 Realm Provider
 

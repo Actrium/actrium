@@ -68,7 +68,7 @@ Actro 按 Actr URI 第 4 节打开链接：取得并验证 Realm Profile → 按
 以下格式一律拒绝，只能通过显式迁移工具导入：
 
 - `actr://<publisher>/<program>@<version>[?service=<ActorId>]`（早期产品草案的 Create/Attach URI）；
-- 只含数值 Realm 句柄的旧 ActorId；
+- 只含数值 `realm_id` 的旧 ActorId；
 - `actr://<realm>:<publisher>+<name>@<version>`（早期原型）。
 
 ## 7. 错误码

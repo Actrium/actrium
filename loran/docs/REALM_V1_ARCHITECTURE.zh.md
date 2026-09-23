@@ -289,9 +289,9 @@ Realm 客户端 key，这就是 Realm membership。此后每次申请 Actor cred
 key 注册，已签发的短期 Actor credential 到期失效（或按既有撤销机制提前失效）。renewal token
 属于 Actor credential 续期，同样绑定该 Realm 客户端 key。
 
-Loran 内部使用数值 Realm 句柄（u32）作为数据库主键和索引句柄；当前代码字段名为 `realm_id`，代码轮改名为 `realm_handle`，把 `realm_id` 让给 RealmId。它只在单个 Realm
-Provider 内有意义，不是身份：不得出现在对外 Actor credential、Realm Profile、ActorId 或
-跨 Realm Provider 的比较中。
+当前代码以数值 `realm_id`（u32）作为数据库主键，并把它嵌在 ActorId 与 credential issuer 中。
+目标契约直接以完整 Realm 名（`realm`）为键：它唯一、不可变、退役后不复用，不需要另一个数字；
+数值 `realm_id` 随 ActorId 格式迁移移除。
 
 Worker ID 为显式配置的 0..31 值，不再由 PID/hostname 的 5-bit hash 猜测。单节点
 默认 0；未来并发 Issuer 必须由部署租约分配不同 worker ID。SQLite 的
@@ -397,15 +397,15 @@ Provider 主密钥经 HKDF 以 Realm 名和 Realm Provider ID 派生。第三方
 | Discovery 越界 | Discovery 与 RouteCandidates 只返回同 Realm 的 Actor；v1 不做跨 Realm 发现 |
 | 管理越权 | Realm 管理请求只作用于签名 key 所属 Realm 域名；Realm 管理 token 作用域在服务端逐请求检查；列表接口只返回作用域内的 Realm |
 | 未激活或已挂起的 Realm 被使用 | 只有 `active` Realm 签发 Actor credential、接受连接与分配 TURN |
-| 删除后残留 | 退役在单一事务中撤销 Actor credential、renewal token、presence、Actor Registry 记录与连接 ACL，退役 Realm issuer key，并写入以 Realm 名为键的 Realm Provider tombstone；数值 Realm 句柄由 AUTOINCREMENT 保证不复用 |
+| 删除后残留 | 退役在单一事务中撤销 Actor credential、renewal token、presence、Actor Registry 记录与连接 ACL，退役 Realm issuer key，并写入以 Realm 名为键的 Realm Provider tombstone |
 | 资源挤占 | 按 Realm 域名与按 Realm 配额 |
 | 进程失陷影响全部 Realm | 首版接受 all-in-one 部署的此项风险；生产建议把 Issuer Signer 放入独立安全边界，使主进程失陷不泄露 Realm issuer key 私钥 |
 
 跨 Realm 混淆必须有专门的回归测试：两个 Realm 使用相同 Actor 类型、相同 Actor serial
 候选时，Actor credential、presence、TURN、连接 ACL 与管理接口均不得互通。
 
-v1 的连接 ACL 只作用于同一 Realm 内的 Actor 类型。ACL 数据模型保留 `source_realm_handle`
-维度供后续跨 Realm 规则使用；v1 管理接口拒绝非空的 `source_realm_handle`。实例内的应用权限
+v1 的连接 ACL 只作用于同一 Realm 内的 Actor 类型。ACL 数据模型保留 `source_realm`
+维度供后续跨 Realm 规则使用；v1 管理接口拒绝非空的 `source_realm`。实例内的应用权限
 （读写、管理、分享）由应用决定，不属于 Loran。
 
 ## 7. Publisher 发现
@@ -448,14 +448,14 @@ Package Resolution、`packages` relation 与 `program_resolver` 已从协议中�
 
 - `realm_domain`：`domain`、已接受的 authority descriptor digest、`realm_signing_keys`
   的 `sequence` 与 key 集合、最近校验时间；
-- `realm`：数值 Realm 句柄 `realm_handle`、`name`（完整 Realm 名）、状态（`pending` | `active` |
+- `realm`：以完整 Realm 名 `realm` 为主键、状态（`pending` | `active` |
   `suspended` | `retired`）、已接受的 Realm Profile digest 与 `sequence`、Realm issuer key id、
   pending 到期时间、请求方（`requester` 或 Realm Provider 账号）、Realm 管理 token
-  哈希及其绑定的 Realm Provider 账号（Realm Provider 域名下的 Realm）；`name` 唯一，Realm
-  Provider tombstone 与活跃 Realm 共用该约束；
+  哈希及其绑定的 Realm Provider 账号（Realm Provider 域名下的 Realm）；Realm Provider tombstone 与活跃 Realm
+  共用该主键约束；
 - Realm 管理请求的 `nonce` 记录，保留到对应请求过期；
 - 其余按 Realm 分区的表（连接 ACL、已签发身份登记、Actor Registry、renewal state）以
-  `realm_handle` 为外键。
+  `realm` 为键。
 
 Actor Registry 把持久元数据与在线状态分开：注册在 SQLite 写入完成后才成功；
 Loran 重启恢复的记录可继续提供 ServiceSpec，但在原 Actor 认证重连前不能进入
@@ -506,7 +506,7 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
 - ActorId 目标格式 `<serial_hex>.<realm_id>@<domain>`：proto `ActrId.realm` 由 u32 改为字符串
   Realm 名，并从 `ActrId` 移出 `type`；`RegisterOk` 与 Actor credential 显式携带 Actor
   类型；连接 ACL（`AclRule`）与发现改用注册/Actor credential 中的类型匹配；
-- Actor credential issuer 从当前由数值 Realm 句柄派生的字符串改为 Realm 名，Realm Profile 不再有
+- Actor credential issuer 从当前由数值 `realm_id` 派生的字符串改为 Realm 名，Realm Profile 不再有
   issuer 标识字段；
 - 实现 Realm 管理 token 及其一次性交付与重签、按 Realm 域名与按 Realm 配额、由
   退役 Realm Profile 触发的 Realm 退役事务与 Realm Provider tombstone；

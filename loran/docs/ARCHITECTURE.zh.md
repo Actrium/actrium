@@ -41,7 +41,7 @@ Realm Provider、audience 与 endpoint scope。
 - 每个 Realm 的 Realm issuer key（Ed25519）签发短期 Actor credential；Realm issuer key 由
   Realm 签名 key 签名的 Realm Profile 委派，Loran 未经委托不持有第三方域名的 Realm 签名 key。
 - ActorId 表示实例身份，目标形式为 `<serial_hex>.<realm_id>@<domain>`，不含程序类型；
-  程序类型由注册与 Actor credential 携带。当前实现仍使用数值 Realm 句柄（代码中的 `realm_id`）并内嵌程序类型。
+  程序类型由注册与 Actor credential 携带。当前实现仍使用数值 `realm_id` 并内嵌程序类型。
 - Service 通过 renewal possession proof 在重启后保留 ID。
 - 程序身份规范写作 `publisher/program@version`。
 - Publisher 是规范化 DNS 域名。当前实现通过
