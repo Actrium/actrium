@@ -802,7 +802,7 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@1.98.0
         with:
-          targets: aarch64-apple-darwin
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
       - name: Install protoc
         uses: arduino/setup-protoc@v3
@@ -882,6 +882,16 @@ jobs:
       - name: Build Swift codegen package
         working-directory: tools/actr/protoc-gen/swift
         run: swift build
+      # The ActriumCore/ActriumVault packages reference local XCFrameworks whose
+      # binaries are git-ignored; build them so a clean checkout can be tested.
+      - name: Build Actrium Rust bindings for Apple packages
+        run: scripts/actrium/build-actrium-rust-bindings.sh apple-macos
+      - name: Test Apple platform packages
+        run: |
+          swift test --package-path packages/actrium-platform/apple/ActriumCore
+          # ActriumVault has no test target; a plain build still proves the
+          # package resolves its local XCFramework from a clean checkout.
+          swift build --package-path packages/actrium-platform/apple/ActriumVault
 
   kotlin:
     name: Kotlin

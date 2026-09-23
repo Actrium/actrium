@@ -4,13 +4,13 @@ set -euo pipefail
 fail=0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ACTRIUM_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-REPO_ROOT="$(cd "$ACTRIUM_DIR/../../.." && pwd)"
+REPO_ROOT="$(cd "$ACTRIUM_DIR/.." && pwd)"
 RUNTIME_DIR="${ACTRIUM_RUNTIME_PATH:-$REPO_ROOT/packages/actrium}"
 
 echo "[log-check] Checking Swift print(...) usage..."
-if rg -n "\bprint\s*\(" Actrium --glob '!**/Pods/**' >/dev/null 2>&1; then
+if rg -n "\bprint\s*\(" "$ACTRIUM_DIR/Actrium" --glob '!**/Pods/**' >/dev/null 2>&1; then
   echo "[log-check] ERROR: Found Swift print(...) usage in Actrium/"
-  rg -n "\bprint\s*\(" Actrium --glob '!**/Pods/**' || true
+  rg -n "\bprint\s*\(" "$ACTRIUM_DIR/Actrium" --glob '!**/Pods/**' || true
   fail=1
 else
   echo "[log-check] OK: no Swift print(...)"
