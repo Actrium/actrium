@@ -372,15 +372,43 @@ impl MobileRtcPairHarness {
             self.harness
                 .peer(self.a_serial)
                 .rtc
-                .wait_state(&b_id, timeout, |state| state.sendable),
+                .wait_state_diagnosed(&b_id, timeout, |state| state.sendable),
             self.harness
                 .peer(self.b_serial)
                 .rtc
-                .wait_state(&a_id, timeout, |state| state.sendable),
+                .wait_state_diagnosed(&a_id, timeout, |state| state.sendable),
         );
+        let (a_to_b, b_to_a) = match (a_to_b, b_to_a) {
+            (Ok(a_to_b), Ok(b_to_a)) => (a_to_b, b_to_a),
+            (a_to_b, b_to_a) => {
+                // A succeeded direction only needs a compact summary; the failing
+                // side carries the full diagnostics.
+                let compact = |state: actr_framework::WebRtcPeerState| {
+                    format!(
+                        "sendable={} status={:?} pc_generation={} revision={} \
+                         network_path={:?} unavailable_reason={:?}",
+                        state.sendable,
+                        state.status,
+                        state.pc_generation,
+                        state.revision,
+                        state.network_path,
+                        state.unavailable_reason,
+                    )
+                };
+                let a_to_b = a_to_b.map(compact).unwrap_or_else(|d| d);
+                let b_to_a = b_to_a.map(compact).unwrap_or_else(|d| d);
+                let trace = self.signaling_trace();
+                let recent = &trace[trace.len().saturating_sub(32)..];
+                panic!(
+                    "pair did not become sendable within {timeout:?}: \
+                     A->B={a_to_b}; B->A={b_to_a}; \
+                     recent signaling (oldest first)={recent:#?}"
+                );
+            }
+        };
         let snapshot = PairSnapshot {
-            a_to_b: a_to_b.expect("A did not become sendable to B"),
-            b_to_a: b_to_a.expect("B did not become sendable to A"),
+            a_to_b,
+            b_to_a,
             role_a: self
                 .harness
                 .peer(self.a_serial)
