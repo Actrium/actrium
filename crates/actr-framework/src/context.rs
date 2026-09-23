@@ -205,9 +205,38 @@ pub trait Context: Clone + MaybeSendSync + 'static {
     /// Register a DataChunk callback for a specific stream
     ///
     /// When a DataChunk with matching stream_id arrives, the registered callback will be invoked.
-    /// Delivery is FIFO and run-to-completion for one stream. Different streams
-    /// use independent inbound workers, although a serial-only workload backend
-    /// may still serialize their final guest callbacks.
+    ///
+    /// # Dispatch semantics
+    ///
+    /// Chunks of one stream are delivered to the callback **serially,
+    /// run-to-completion**: the previous chunk's callback future fully
+    /// resolves before the next chunk's callback starts, strictly in arrival
+    /// order. Different streams use independent inbound workers, although a
+    /// serial-only workload backend may still serialize their final guest
+    /// callbacks.
+    ///
+    /// # Never await a later chunk of the same stream
+    ///
+    /// Because dispatch is serial per stream, a callback that blocks waiting
+    /// for a chunk that has not been delivered yet **self-deadlocks**: the
+    /// awaited chunk's callback is queued behind the still-running callback,
+    /// so neither can make progress. An end-of-stream handler polling for
+    /// stragglers is the classic trigger. Finalize **outside** the stream
+    /// callback instead:
+    ///
+    /// - a separate RPC the sender invokes after the last chunk — the
+    ///   `EndTransfer` pattern in
+    ///   `examples/actr/rust/data-stream/receiver/src/file_transfer_service.rs`, or
+    /// - a detached task (`tokio::spawn`) that watches shared reassembly state.
+    ///
+    /// # Ordering and reassembly
+    ///
+    /// [`DataChunk::sequence`] is the authoritative reassembly key. Same-stream
+    /// chunks are dispatched in send order per payload-type lane (do not mix
+    /// payload types within one stream), but chunks can still be missing:
+    /// [`PayloadType::StreamLatencyFirst`] drops under pressure, and a
+    /// reconnect can lose in-flight reliable chunks. Reassemble and detect
+    /// gaps by `sequence`; do not assume contiguous arrival.
     ///
     /// # Parameters
     ///
