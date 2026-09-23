@@ -10,14 +10,11 @@ IANA `actr` Well-Known URI registration.
 
 ## 1. Scope
 
-An `actr:` URI identifies an Actr target under an authority. The authority is
-the stable name that organizes the target; it is not necessarily the network
-location of the signaling, identity, discovery, or ICE services.
-
-Authority discovery maps that stable authority to service endpoints. It does
-not define the `actr:` URI target syntax, Actor resolution, signaling protocol,
-authentication protocol, or ICE configuration response. Those are separate
-Actr protocol concerns. The URI syntax is defined by the
+Each domain publishes one public authority descriptor at
+`https://<domain>/.well-known/actr`. It states which Actr services the domain
+offers and may carry Realm signing keys, a Publisher Profile, and Realm link
+prefixes. It does not define runtime Actor discovery, signaling,
+authentication, or ICE configuration protocols; `actr:` URIs are defined by the
 [Actr URI specification](uri.md).
 
 The keywords **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are
@@ -25,18 +22,14 @@ to be interpreted as described by BCP 14 when they appear in uppercase.
 
 ## 2. Discovery URI
 
-For an `actr:` URI whose authority is `example.com`, the discovery resource is:
+For the domain `example.com`, the discovery resource is:
 
 ```text
 https://example.com/.well-known/actr
 ```
 
-If the Actr authority explicitly contains a port, the same port is used by the
-HTTPS origin. If it does not contain a port, the default HTTPS port is used.
-
-The discovery document applies only to the exact HTTPS origin from which it is
-obtained. It does not automatically apply to parent domains, subdomains, or
-other ports.
+It uses the default HTTPS port and applies only to that domain, not
+automatically to parent domains or subdomains.
 
 Version 1 defines no additional path components below `/.well-known/actr`,
 and no specification may assign meaning to such subpaths. Information that is
@@ -101,13 +94,9 @@ Example:
     {
       "rel": "contracts",
       "href": "https://contracts.example.com/actr"
-    },
-    {
-      "rel": "packages",
-      "href": "https://packages.example.com/actr/packages",
-      "protocol": "actr-packages/1"
     }
-  ]
+  ],
+  "links": ["/i/"]
 }
 ```
 
@@ -124,9 +113,8 @@ in a new Well-Known URI suffix such as `actr-v2`.
 
 ### 4.2 `authority`
 
-`authority` is the canonical Actr authority URI described by the document. It
-contains the `actr` scheme and authority, but no target path, query, fragment,
-or user information.
+`authority` is the canonical `actr:` URI of the domain described by the
+document, that is `actr://<domain>`, with no path, query, or fragment.
 
 After applying the normalization rules from the Actr URI specification, a
 client **MUST** verify that this value matches the authority used to construct
@@ -150,10 +138,9 @@ Version 1 defines these core relations:
 | --- | --- |
 | `signaling` | Establish Actor connectivity and exchange session negotiation messages. |
 | `identity` | Resolve identities, keys, and authentication metadata. When this authority acts as a Realm Provider, its `href` is also the OAuth 2.0 authorization server identifier (issuer identifier, RFC 8414) for Realm Provider account sign-in ([Actr Realm Profile](realm-profile.md), Section 7.3). |
-| `discovery` | Resolve Actor targets and capabilities. |
+| `discovery` | After an Actor starts, discover available Actor instances by dependency, contract, and capability. |
 | `ice-config` | Obtain ICE server configuration and, after authorization, short-lived TURN credentials as defined by [Actr ICE Configuration](ice-configuration.md). |
 | `contracts` | Obtain public Actor contract and interface descriptions. |
-| `packages` | Resolve a public URI Target to an entry Actor Package and retrieve its `.actr` artifact. This is a mutable deployment mapping; which releases of a program are trustworthy is decided by the signed `program_resolver` of the Publisher Profile (Section 4.5). |
 | `realms` | Retrieve signed Realm Profiles for Realms named under this domain from where they are stored, as defined by [Actr Realm Profile](realm-profile.md). The protocol value is `actr-realm-profile/1`. |
 | `realm-management` | Accept Realm management requests (`POST`) for Realms this authority serves as a Realm Provider, as defined by [Actr Realm Profile](realm-profile.md), Section 8. The protocol value is `actr-realm-management/1`. |
 
@@ -173,10 +160,8 @@ invalid, or retired.
 
 ### 4.4 `realm_signing_keys`
 
-`realm_signing_keys` is an optional member. When present, the authority's DNS
-name, without a port, is the domain of Realms named `<label>@<host>`. An
-authority with an explicit port or an IP-literal host **MUST NOT** carry this
-member, and clients **MUST** ignore it in that case.
+`realm_signing_keys` is an optional member. When present, the domain is the
+domain of Realm names `<realm_id>@<domain>`.
 
 The member publishes the Realm signing keys, which are the long-term trust
 root of every Realm named under the domain:
@@ -242,8 +227,7 @@ cannot be enumerated from the descriptor.
 ### 4.5 `publisher`
 
 `publisher` is an optional member that carries the authority's signed
-Publisher Profile inline. When present, the authority's DNS name, without a
-port, is the Publisher ID. It replaces standalone publisher bootstrap files;
+Publisher Profile inline. When present, the domain is the Publisher ID. It replaces standalone publisher bootstrap files;
 specifications **MUST NOT** define other Well-Known locations such as
 `/.well-known/actr/publisher.json` or `/.well-known/actrium-publisher.json`
 for this purpose.
@@ -254,11 +238,6 @@ rules are left to the Actor Package specification (Section 10). At the
 descriptor level:
 
 - `domain` **MUST** equal the host of `authority`;
-- `program_resolver` is required and names the HTTPS base URL that maps
-  `publisher/program@version` to release metadata; there is no default
-  location. Because it sits inside the signed Publisher Profile, it fixes where
-  trustworthy releases are published, whereas the unsigned `packages`
-  relation only maps public URI Targets to entry packages;
 - the Publisher Profile is signed by an active Publisher Profile signing key
   and verified by its own signature, independently of the HTTPS channel;
 - HTTPS (or an enterprise pin) provides only the first-contact binding between
@@ -272,7 +251,20 @@ A Realm Provider that registers publishers does so through a
 Publisher Profile signing key, not through a challenge placed in the public
 descriptor.
 
-### 4.6 Signed and unsigned parts
+### 4.6 `links`
+
+`links` is an optional member: an array of path prefixes, each starting and
+ending with `/` and containing at least one segment (not just `/`), for
+example `["/i/"]`. It declares which https paths under this
+domain are Realm links: `https://<domain><prefix><realm_id>…` corresponds to
+`actr://<domain>/<realm_id>…` ([Actr URI specification](uri.md), Section 3).
+
+- The domain chooses its prefixes; this specification defines no default.
+- An Actr Host **MUST** convert https addresses only as declared here and
+  **MUST NOT** infer from how a path looks.
+- When several prefixes match, the longest one wins.
+
+### 4.7 Signed and unsigned parts
 
 The descriptor as a whole remains an unsigned public document protected by
 HTTPS. `realm_signing_keys` and `publisher` are verified only by their own
@@ -325,7 +317,7 @@ Credentialed cross-origin discovery is not defined by this specification.
 
 Compatible revisions may add optional members, new URI-valued extension
 relations, or clarification without changing `version`. The `realms` relation
-and the `realm_signing_keys` and `publisher` members are such additions: clients
+and the `realm_signing_keys`, `publisher`, and `links` members are such additions: clients
 that do not implement them ignore them. A revision that
 changes the meaning of an existing member or makes a previously valid
 descriptor invalid requires a new descriptor version.

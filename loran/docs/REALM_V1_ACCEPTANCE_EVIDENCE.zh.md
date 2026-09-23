@@ -4,7 +4,7 @@
 commit；本文件引用的 PR 状态会继续变化。
 
 说明：下表证据针对当前实现（一个实例一个 Realm）。架构契约已改为一个实例承载多个
-Realm（Realm 名 `<label>@<domain>`，见 `REALM_V1_ARCHITECTURE.zh.md`）。标注「已被新契约取代」
+Realm（Realm 名 `<realm_id>@<domain>`，见 `REALM_V1_ARCHITECTURE.zh.md`）。标注「已被新契约取代」
 的行保留为当前代码的证据，但不再是 v1 目标；新契约的验收项列在「多 Realm 契约待验收」
 一节，尚无自动证据。
 
@@ -61,7 +61,7 @@ python3 -m unittest scripts/loran/tests/test_migrate_schema_v2.py -v
 | Realm Provider 持有 Realm 签名 key 时的自助创建 | Realm Provider 账号 OAuth 2.0 + PKCE 认证、按账号计配额、Realm 管理权绑定账号、登录后重签 Realm 管理 token | 未实现 |
 | Publisher 签名注册 | 读取 descriptor `publisher` 成员，`register_publisher` 请求验签，拒绝非 `active` 的 Publisher Profile 签名 key | 未实现 |
 | 跨 Realm 隔离 | 两个 Realm 使用相同 Actor 类型与相同 serial 候选时，credential、presence、TURN、连接 ACL 与管理接口互不相通 | 未实现 |
-| issuer 与 ActorId 使用 Realm 名 | credential issuer 为 Realm 名；ActorId `<serial_hex>.<label>@<domain>` 文本/wire 格式（不含类型、类型由 credential 携带）的正负向测试 | 未实现 |
+| issuer 与 ActorId 使用 Realm 名 | credential issuer 为 Realm 名；ActorId `<serial_hex>.<realm_id>@<domain>` 文本/wire 格式（不含类型、类型由 credential 携带）的正负向测试 | 未实现 |
 | 管理作用域 | 单 Realm 的 Realm 管理 token 越权访问被拒绝且不泄露其他 Realm 是否存在；重签后旧 token 立即失效 | 未实现 |
 | 按 Realm 派生 TURN secret | 不同 Realm 的 TURN credential 不能互用 | 未实现 |
 | 配额 | 按域名与按 Realm 的配额与 pending TTL | 未实现 |

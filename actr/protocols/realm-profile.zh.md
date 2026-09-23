@@ -10,10 +10,10 @@
 ## 1. 范围
 
 Realm 是一个应用实例的信任边界。创建一个应用实例就创建一个新的 Realm。Realm 名写作
-`<label>@<domain>`，例如 `k7m2q9xh@acme.com`，语法见 [Actr URI](uri.zh.md) 第 7.1 节。
+`<realm_id>@<domain>`，例如 `k7m2q9xh@acme.com`，语法见 [Actr URI](uri.zh.md) 第 5.1 节。
 
-Realm Profile 是一份签名的公开文档，说明由哪个 Issuer 和哪个 Realm Provider 服务该
-Realm。它由该 Realm 域名的 Realm 签名 key 签署，因此可以存放在任何地方：域名自己的静态
+Realm Profile 是一份签名的公开文档，说明该实例运行哪个包，以及由哪个 Issuer 和哪个
+Realm Provider 服务该 Realm。它由该 Realm 域名的 Realm 签名 key 签署，因此可以存放在任何地方：域名自己的静态
 托管、Realm Provider，或内嵌在 Realm 邀请中。取得它的位置不影响其有效性。
 
 Realm 在整个生命周期内只由一个 Realm Provider 服务。Realm Provider 是由某个运营方运行的
@@ -33,7 +33,7 @@ Realm 并迁移应用数据，旧 Realm 退役。
 
 ### 2.1 DNS 域名
 
-DNS Realm 域名与不含端口的 Actr authority `actr://<domain>` 同名。域名所有者即
+DNS Realm 域名即 `actr://<domain>` 中的域名。域名所有者即
 **Realm 签名 key 持有方**：其 Ed25519 Realm 签名 key 是该域名下所有 Realm 的长期信任根，
 发布、轮换与回滚保护由 [Actr Authority Discovery](authority-discovery.zh.md) 第 4.4 节
 定义。域名只需公布一次 Realm 签名 key；创建 Realm 不改动域名托管的任何内容。
@@ -55,18 +55,19 @@ Realm**。只有这种情况下，Actr Host 显示该 Realm Provider 为信任�
 
 Actr Host **MUST NOT** 通过 DNS 解析 `.actr.alt` 名称，也不得把它发给任何 Realm
 Provider。本机 Realm 没有 Realm Profile、没有 Realm Provider，也不使用 Realm 管理请求；
-Actr Host 为每个本机 Realm 保存本地记录。本机 Realm 名只在该安装上可用。本文其余部分只
+Actr Host 为每个本机 Realm 保存本地记录，其中至少含实例运行的包（下载地址或本地文件，加
+SHA-256）。本机 Realm 名只在该安装上可用。本文其余部分只
 适用于 DNS Realm 域名。
 
 ## 3. 定位 Realm Profile
 
-对 Realm 名 `<label>@<domain>`，Actr Host：
+对 Realm 名 `<realm_id>@<domain>`，Actr Host：
 
 1. 按 Actr Authority Discovery 取得并验证 `actr://<domain>` 的 authority descriptor 及其
    `realm_signing_keys` member；
 2. 选出 `rel` 为 `realms`、protocol 为 `actr-realm-profile/1` 的 service link；
 3. 按文档顺序逐条处理：去掉 `href` 末尾的 `/`，以 `Accept: application/json` 发送
-   `GET <href>/<label>`，得到有效 Realm Profile 即停止。
+   `GET <href>/<realm_id>`，得到有效 Realm Profile 即停止。
 
 `realms` 的 href **MUST NOT** 含 query 或 fragment；**MAY** 指向域名自己的托管或 Realm
 Provider，**MAY** 带显式端口。所有 link 都未产出有效 Realm Profile（`404 Not Found`、
@@ -92,6 +93,10 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
     "name": "k7m2q9xh@acme.com",
     "display_name": "Acme Notes",
     "status": "active"
+  },
+  "package": {
+    "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+    "sha256": "<64 hex>"
   },
   "issuer": {
     "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
@@ -129,6 +134,8 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
 | `realm.name` | Realm 名，**MUST** 与正在解析的名称一致。 |
 | `realm.display_name` | 人类可读名称，不是标识符。 |
 | `realm.status` | `active` 或 `retired`。 |
+| `package.href` | 该实例所运行包的 HTTPS 下载地址，可以在任何位置。 |
+| `package.sha256` | 该包全部字节的 SHA-256（小写十六进制）。 |
 | `issuer.url` | Issuer 的注册与验证端点。 |
 | `issuer.keys` | 用于验证 Actor credential 的 Realm issuer 公钥。 |
 | `provider.id` | Realm Provider ID：Realm Provider 的规范化 DNS authority，在 Realm 生命周期内不变。 |
@@ -137,6 +144,8 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
 | `policy` | 该 Realm 的加入策略。 |
 | `issued_at` | Realm Profile 的签署时间（RFC 3339），仅供参考；Realm Profile 不过期。 |
 | `signature` | Realm 签名 key 的 detached 签名。 |
+
+`realm.status` 为 `active` 时 **MUST** 包含 `package`。
 
 Realm Profile **MUST NOT** 包含 secret、私钥、access token、成员列表或用户专属数据。
 Actr Host **MUST** 忽略未知 member。
@@ -164,6 +173,11 @@ Provider 不是信任根。
 使用该 Realm。
 
 ## 6. 使用 Realm
+
+Actr Host 以不带 credential 的 HTTPS GET 下载 `package.href`，**MUST** 核对
+`package.sha256`，并按 [Actor Package](actor-package.zh.md) 验证包签名；任一失败即不运行。
+包 manifest 声明的 Actor 类型即该实例的程序：实例的 Service 是本 Realm 内 Actor 类型与之
+相同的那个 Actor，恰好一个；零个或多于一个都是错误。
 
 Actr Host 只通过已接受 Realm Profile 指定的 Issuer 和 Realm Provider 访问 Realm。该 Realm
 的 Actor credential 以该 Realm 名为 issuer，用 `issuer.keys` 中的 Realm issuer key 验证。
@@ -206,8 +220,8 @@ Realm Provider 由 Actr Host、用户或 key 持有方的策略选定。每一�
 
 ### 7.2 更新
 
-sequence 更高的 Realm Profile 可以更改 Realm issuer key、Realm Provider 端点、
-`display_name` 与 `policy`，**MUST NOT** 更改 `provider.id`。
+sequence 更高的 Realm Profile 可以更改 `package`（升级程序）、Realm issuer key、Realm
+Provider 端点、`display_name` 与 `policy`，**MUST NOT** 更改 `provider.id`。
 
 ### 7.3 由 key 持有方授权
 
@@ -241,7 +255,7 @@ Realm Provider tombstone 并停止服务该 Realm。该 Realm 名永不复用。
 
 某域名的 Realm 签名私钥全部丢失时，已有 Realm 无法再获得新 Realm Profile。域名所有者可以
 发布新的 Realm 签名 key（Actr Host 按身份变化处理，见 Actr Authority Discovery 第 4.4
-节），并以新的 Realm label 创建新的 Realm。把丢失的 key 继续以 `retired` 状态列出，已有
+节），并以新的 RealmId 创建新的 Realm。把丢失的 key 继续以 `retired` 状态列出，已有
 Realm 就能继续使用当前 Realm Profile。
 
 ## 8. Realm 管理请求
@@ -252,7 +266,7 @@ Authority Discovery 第 4.3 节）接受以下 Realm 管理请求：
 
 | `op` | 用途 |
 | --- | --- |
-| `create_realm` | 创建 pending Realm，返回其未签名的首个 Realm Profile。 |
+| `create_realm` | 创建 pending Realm，返回其未签名的首个 Realm Profile（其中 `package` 取自请求）。 |
 | `activate_realm` | 在 `profile` 中提交已签名的首个 Realm Profile；响应一次性携带 Realm 管理 token。 |
 | `reissue_admin_token` | 签发新的 Realm 管理 token，并使旧 token 失效。 |
 
@@ -267,6 +281,7 @@ Authority Discovery 第 4.3 节）接受以下 Realm 管理请求：
 {
   "op": "create_realm",
   "realm": "k7m2q9xh@acme.com",
+  "package": { "href": "https://cdn.notes.example/team-notes-1.4.2.actr", "sha256": "<64 hex>" },
   "provider_id": "provider.example",
   "requester": "<opaque member id>",
   "nonce": "<random>",
@@ -307,10 +322,10 @@ Authority Discovery 第 4.5 节用它登记 publisher。
   Realm Profile 的 Actr Host，Realm Profile sequence 可防止回滚。
 - 只使用 Realm Profile 指定的 Realm Provider，可防止攻击者阻断 Realm Profile 获取后把
   Actr Host 导向未经授权的 Realm Provider。
-- authority descriptor 不列出 Realm，但 Realm 名在分享时会暴露 Realm 域名与 Realm label。
-  Actr Host **SHOULD** 默认生成随机 Realm label，把可读名称放在 `display_name`。
+- authority descriptor 不列出 Realm，但 Realm 名在分享时会暴露 Realm 域名与 RealmId。
+  Actr Host **SHOULD** 默认生成随机 RealmId，把可读名称放在 `display_name`。
 - Realm 名与 ActorId 形似邮件地址。Actr Host **MUST NOT** 把它们渲染为 `mailto:` 链接，应
-  显示为实例地址（[Actr URI](uri.zh.md) 第 7.1 节）。
+  显示为实例地址（[Actr URI](uri.zh.md) 第 5.1 节）。
 - Actr Host 看不到域名所有者已委托 Realm Provider 代持 Realm 签名 key；对这类 Realm，信任根
   显示为 Realm 域名。这是已接受的限制。
 - 泄露的 Realm 签名 key 通过从 `keys` 中移除并重签受影响的 Realm Profile 来吊销（第 6
@@ -326,7 +341,7 @@ Authority Discovery 第 4.5 节用它登记 publisher。
 ## 10. 待完成工作
 
 - 为 `actr.realm/v1` 与 Realm 管理请求定义机器可读的 JSON Schema 与签名 test vector；
-- 定义限定 Realm label 前缀与有效期的创建委派 key。
+- 定义限定 RealmId 前缀与有效期的创建委派 key。
 
 ## 11. 参考资料
 

@@ -8,7 +8,7 @@
 |---|---|---|
 | Publisher | 规范化域名 | 当前谁控制发布入口 |
 | Program Release | `publisher/program@version` + digest | 要运行哪一组不可变字节 |
-| Service Actor | ActorId + Actor credential | 当前在与哪个运行实例通信 |
+| Service | ActorId + Actor credential | 当前在与哪个运行实例通信 |
 
 HTTPS 不能证明程序无恶意；Marketplace 审核不能证明网络中的 Actor 身份；Actor credential 也不能证明本地加载的 Guest 是正确版本。
 
@@ -30,17 +30,17 @@ Actro 不维护另一套全局 Publisher ID 注册中心。
 
 ### 2.2 Publisher Profile
 
-Publisher 域名同时是一个 Actr authority。Publisher Profile 作为 authority descriptor 的可选成员 `publisher` 发布在该域名唯一的 bootstrap 资源中：
+Publisher Profile 作为 authority descriptor 的可选成员 `publisher` 发布在该域名唯一的 bootstrap 资源中：
 
 ```text
 GET https://<publisher>/.well-known/actr
 ```
 
-`publisher` 成员已在 Actr Authority Discovery §4.5 定义；按 authority-discovery 的规定，`/.well-known/actr` 之下不定义子路径，因此 Publisher 不另设 well-known 文件。同一份 descriptor 还可以承载 `realm_signing_keys`（若该域名下也有 Realm）与 `services`（如 `packages`）。
+`publisher` 成员已在 Actr Authority Discovery §4.5 定义；按 authority-discovery 的规定，`/.well-known/actr` 之下不定义子路径，因此 Publisher 不另设 well-known 文件。同一份 descriptor 还可以承载 `realm_signing_keys`（若该域名下也有 Realm）与 `services`。
 
-bootstrap URL 由 Publisher 身份域名直接导出，必须使用标准 HTTPS 443，不能从 `actr://` 中另带端口。Publisher Profile 验证成功后，它声明的 `program_resolver`、CDN 和其他服务 endpoint 可以使用显式端口。
+bootstrap URL 由 Publisher 身份域名直接导出，必须使用标准 HTTPS 443。
 
-获取 descriptor 时遵循 authority-discovery 的 redirect 规则：最多 5 次、每跳必须 HTTPS，redirect 目标不成为新的 authority，仍须用原 Publisher 域名验证 `authority` 绑定。`publisher` 成员的有效性只取决于其自身签名与固定的 root/key history，不取决于从哪个 origin 取得；需要迁移 resolver 时，由旧 Publisher Profile 签名委派新的 resolver 或通过 root rotation 完成。
+获取 descriptor 时遵循 authority-discovery 的 redirect 规则：最多 5 次、每跳必须 HTTPS，redirect 目标不成为新的 authority，仍须用原 Publisher 域名验证 `authority` 绑定。`publisher` 成员的有效性只取决于其自身签名与固定的 root/key history，不取决于从哪个 origin 取得。
 
 `publisher` 成员字段使用 snake_case，至少包含：
 
@@ -49,7 +49,6 @@ bootstrap URL 由 Publisher 身份域名直接导出，必须使用标准 HTTPS 
 - 当前和历史 Publisher Profile 签名 key（`profile_signing_keys`）；
 - 当前和历史 package signing keys；
 - key id、算法、有效期与撤销状态；
-- `program_resolver`：必填的 Program resolver 基址，没有默认值；
 - 安全联系地址；
 - 可选 Marketplace/透明日志声明。
 
@@ -68,57 +67,20 @@ offline root 是强烈推荐的 Publisher 运维方式，但是否要求硬件/�
 
 域名控制只决定未来发布入口，不得静默改写历史：
 
-- 已安装 `coordinate + digest + signing key` 可继续离线运行；
+- 已安装 `Program Release + digest + signing key` 可继续离线运行；
 - 新 key 与历史 key 无可验证轮换链时，视为 Publisher ownership change；
 - 已安装版本不得因当前域名返回不同包而变化；
 - 新安装或更新必须显示身份变化；
 - 高风险策略可以要求 Marketplace/组织管理员再次批准。
 
-## 3. Coordinate 到 package 的确定性解析
+## 3. 包从哪来
 
-Publisher Profile 的 `program_resolver`（必填）决定解析基址，release 描述位于：
+平台不负责「按程序名找包」。包只有两个来源：
 
-```text
-<program_resolver><program>/<version>/release.json
-```
+- **打开实例**：Realm Profile 的 `package` 给出下载地址与 SHA-256（[Actr Realm Profile](../../../actr/protocols/realm-profile.zh.md)）；
+- **新建实例**：用户在 Program Catalog、Marketplace、本地文件或一个包地址中选定。发现程序、查询新版本属于 Marketplace 与 Publisher 自己的渠道。
 
-例如 `https://notes.example/actrium/programs/team-notes/1.4.2/release.json`。resolver 可以是任意 HTTPS Origin 与路径，也可以使用非标准端口；它由已验证的 Publisher Profile 声明，不使用任何 well-known 默认路径。
-
-`program_resolver` 与 descriptor 的 `packages` relation 分工不同，互不替代：`packages` 把公开 URI Target（如 `actr://notes.example/echo`）解析为入口 Actor Package，是可变的部署映射，位于 descriptor 的未签名部分；`program_resolver` 把 `publisher/program@version` 解析为 release 元数据，位于 Publisher 签名之内，决定可信的发布位置。包内容在两条路径上都按 manifest 签名与 digest 验证。
-
-`release.json` 是小型、可缓存的发布描述，至少包含：
-
-```json
-{
-  "schemaVersion": 1,
-  "publisher": "notes.example",
-  "program": "team-notes",
-  "version": "1.4.2",
-  "packageUrl": "https://cdn.notes.example/actr/team-notes/1.4.2/package.actr",
-  "packageSha256": "<64-hex>",
-  "packageSize": 4829012,
-  "signingKeyId": "ed25519:2026-q2",
-  "publishedAt": "2026-06-01T10:00:00Z",
-  "status": "active",
-  "signature": {
-    "keyId": "ed25519:2026-q2",
-    "algorithm": "Ed25519",
-    "value": "<base64>"
-  }
-}
-```
-
-要求：
-
-- 路径中的 program/version 与响应一致；
-- production 只允许 HTTPS；
-- 可 3xx 跳转到 CDN，但最终 package 必须匹配 Publisher 描述中的 digest；
-- release metadata 需要短缓存和过期时间；
-- release descriptor 必须按 JCS 规范化并由 Publisher Profile 授权的 key 做 detached signature；
-- package 本身可长期 immutable cache；
-- 同一 coordinate 返回不同 digest 时 hard fail。
-
-这保证 `publisher/program@version` 能确定地下载一个合法 `.actr` workload 包，同时允许 Publisher 在可信 Publisher Profile 委派后自主选择 resolver、CDN 和端口。
+无论来源，验证都一样：核对 SHA-256，再用 Publisher Profile 的包签名 key 验证包签名（第 8 节）。下载地址放在哪里都不影响安全。
 
 ## 4. 一个 Program Release，一个 `.actr` 包
 
@@ -126,7 +88,7 @@ Publisher Profile 的 `program_resolver`（必填）决定解析基址，release
 
 Actro Program Release 直接复用 Actr `.actr` 包：
 
-- 可执行主体是 Primary Service workload；
+- 可执行主体是 Service workload；
 - Keel Guest 作为签名包资源；
 - Front–Service proto/contract 作为签名包资源；
 - 图标、静态资源、默认配置进入资源区；
@@ -216,7 +178,7 @@ v1 不引入「没有 Service 的页面应用」特例。工具链为 UI-only �
 - 同样经过包签名、资源限制和 Service 生命周期；
 - Publisher 不能用它绕过 Host API 或注入 native code。
 
-因此所有 app Tab 仍统一 Attach 一个 Primary Service，差别只在业务 Service 是否包含自定义逻辑。
+因此所有 app Tab 仍统一 Attach 一个 Service，差别只在它是否包含自定义逻辑。
 
 ## 6. Actro Manifest 扩展
 
@@ -307,9 +269,7 @@ Privacy Declaration 是静态 allowlist 和安装说明，不是运行时隐私�
 ## 8. 下载与验证流水线
 
 ```text
-URI coordinate
-  → Publisher Profile
-  → Release metadata
+Realm Profile package / 用户选定的包
   → HTTPS download
   → package digest
   → package signature/key history
@@ -326,19 +286,18 @@ URI coordinate
 
 1. 校验 Publisher DNS/IDNA；
 2. TLS 和 hostname；
-3. Publisher Profile；
-4. release coordinate；
-5. 下载大小上限；
-6. package SHA-256；
-7. Ed25519 key id 和签名；
-8. ZIP path、文件数、压缩比和解压总量；
-9. manifest 的 publisher/program/version；
-10. binary kind/target；
-11. 每个 resource/proto/lock hash；
-12. Guest 静态依赖和 capability manifest；
-13. Service WASM imports；
-14. Host API、Keel API 与 contract 兼容性；
-15. 本地/组织安全策略。
+3. 下载大小上限；
+4. package SHA-256；
+5. manifest 声明的 publisher 的 Publisher Profile；
+6. Ed25519 key id 和签名；
+7. ZIP path、文件数、压缩比和解压总量；
+8. manifest 的 publisher/program/version；
+9. binary kind/target；
+10. 每个 resource/proto/lock hash；
+11. Guest 静态依赖和 capability manifest；
+12. Service WASM imports；
+13. Host API、Keel API 与 contract 兼容性；
+14. 本地/组织安全策略。
 
 任何一步失败都不得把部分内容交给 Keel 或 Service runtime。
 
@@ -362,7 +321,7 @@ Actro 本地以以下联合键保存：
 规则：
 
 - 第一次接受后固定 digest；
-- 后续同 coordinate 不同 digest = `PACKAGE_EQUIVOCATION`；
+- 同一 Program Release 出现不同 digest = `PACKAGE_EQUIVOCATION`；
 - 不能用「Publisher 更新了文件」覆盖缓存；
 - 更新必须使用新 SemVer；
 - Service 实例固定其 package digest；
@@ -377,7 +336,7 @@ Actro 本地以以下联合键保存：
 
 - 当前域名控制证明；
 - 传输机密性与完整性；
-- Publisher Profile 和 release metadata 的来源；
+- Publisher Profile 的来源；
 - 标准代理/CDN/缓存能力。
 
 ### Package 签名与 digest 提供
@@ -399,7 +358,7 @@ Marketplace 可以：
 - 记录 Publisher 验证；
 - 静态/动态审核；
 - 风险评级；
-- 记录已见 coordinate/digest；
+- 记录已见 Program Release/digest；
 - 发布撤销和恶意软件情报；
 - 提供缓存或镜像。
 
@@ -424,7 +383,7 @@ Marketplace 不可以：
 
 撤销记录必须包含：
 
-- coordinate/digest/key；
+- Program Release/digest/key；
 - 原因；
 - 发布时间；
 - 发布者或市场签名；
@@ -440,13 +399,12 @@ Program Catalog 可以提示新版本，但 Service 不自动原地升级。
 v1 升级：
 
 1. 安装新 Program Release；
-2. 创建新 Service Actor，获得新 ActorId；
+2. 在同一 Realm 内创建新 Service，获得新 ActorId；
 3. 旧 Service 生成迁移快照；
 4. 显式交接 Workspace lease；
 5. 新 Service 导入并验证；
-6. 用户确认切换；
-7. 新 Tab URI 使用新 ActorId；
-8. 旧 Service 保留回滚窗口后归档。
+6. 用户确认切换，随后发布 `package` 指向新包的 Realm Profile；
+7. 旧 Service 保留回滚窗口后归档；回滚即再发布一份指回旧包、`sequence` 更高的 Realm Profile。
 
 这样避免 ActorId 中版本与实际 workload 不一致，也让失败回滚可解释。
 
@@ -455,7 +413,7 @@ v1 升级：
 支持：
 
 - 本地 `.actr` 文件；
-- `actr-dev://` HTTPS Origin；
+- localhost、回环地址或显式信任的私有 CA 上的包地址；
 - 本地开发 signing key；
 - 热更新 Guest；
 - 未发布 Program Catalog entry。

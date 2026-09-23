@@ -16,9 +16,9 @@ Actro 要把 Actor 程序变成普通用户可以理解、安装、创建、打�
 
 - 前台只写 Keel Guest；
 - 不需要自己实现窗口、路由、Actor 注册、信令、权限弹窗和跨平台 Actr Host；
-- 前台永远通过一个类型化 Primary Service capability 访问业务；
+- 前台永远通过该实例 Service 的类型化 capability 访问业务；
 - 后台 Service 可以使用 Actor 模型组合更复杂的服务；
-- 一个精确坐标可以被 HTTPS 获取、验证、缓存和复现。
+- 一个精确版本的包可以经 HTTPS 下载、验证、缓存和复现。
 
 ## 2. 当前问题
 
@@ -79,11 +79,11 @@ Realm 所有者即应用实例的创建者，管理该实例 Realm 的成员身�
 
 ### 4.1 新建实例
 
-> 作为用户，我输入或点击一个没有 `service` 参数的 `actr://` 地址，Actro 应先验证程序、展示权限、Workspace 与 Realm 域名选择，在所选域名下新建一个 Realm 并在其中创建 Service（默认创建本机 Realm），然后把地址改写为可重连该 Service 的地址。
+> 作为用户，我在程序库里选一个程序点「创建实例」，Actro 应先验证程序、展示权限、Workspace 与 Realm 域名选择，在所选域名下新建一个 Realm 并在其中创建 Service（默认创建本机 Realm），然后在地址栏显示这个新实例的地址。
 
 ### 4.2 连接已有实例
 
-> 作为用户，我打开带 `service=<ActorId>` 的地址时，Actro 只能连接该实例；如果它离线或我无权访问，必须明确报错，不能另建一个「看起来一样」的实例。
+> 作为用户，我打开一个实例的链接时，Actro 只能连接该实例；如果它离线或我无权访问，必须明确报错，不能另建一个「看起来一样」的实例。
 
 ### 4.3 关闭与恢复
 
@@ -112,7 +112,7 @@ Realm 所有者即应用实例的创建者，管理该实例 Realm 的成员身�
 所有普通应用 Tab 都遵守同一条主链：
 
 ```text
-Tab → Front Actor → Primary Service Actor → Workspace
+Tab → Front Actor → Service → Workspace
 ```
 
 UI-only 程序也使用平台提供的最小 Service，而不是再创造第二套「纯页面应用」模型。
@@ -126,10 +126,9 @@ UI-only 程序也使用平台提供的最小 Service，而不是再创造第二�
 
 ### G-03：让地址可读、可复制、可恢复
 
-- Program coordinate 负责「运行什么」。
-- Service ActorId 负责「连接哪个实例」。
-- Realm 名负责「去哪里验证和寻址」。
-- URL 不携带秘密。
+- Realm 链接 `actr://<Realm 域名>/<realm_id>` 回答「哪个实例」，也就是去哪里验证和寻址；
+- 运行什么由该实例的 Realm Profile 所指的包决定，不写在地址里；
+- 地址不携带秘密。
 
 ### G-04：复用 Web 的成熟安全基础设施
 
@@ -137,7 +136,7 @@ UI-only 程序也使用平台提供的最小 Service，而不是再创造第二�
 
 ### G-05：保持 Actor 模型的组合能力
 
-Front 只看到一个 Primary Service，不代表后台只能有一个 Actor。Primary Service 可以作为 façade/supervisor 管理 worker、媒体、索引、同步等辅助 Actor。
+Front 只看到该实例的 Service，不代表后台只能有一个 Actor。Service 可以在同一 Realm 内管理 worker、媒体、索引、同步等其他 Actor。
 
 ### G-06：提供端到端应用保障
 
@@ -167,11 +166,11 @@ v1 不做：
 
 ### 7.1 明确优于猜测
 
-URL 有 `service` 就连接，无 `service` 就创建；失败时不改变意图。
+打开链接只连接；新建只在程序库里显式进行；失败时不改变意图。
 
 ### 7.2 地址不等于权限
 
-ActorId 是定位与身份，访问权由 Actor credential、应用权限和会话授权决定。
+地址是定位与身份，访问权由 Realm membership、应用权限和会话授权决定。
 
 ### 7.3 状态归 Service
 
@@ -199,9 +198,9 @@ Tab、Front Actor、Guest 都可以重建；Workspace 绑定、业务状态与�
 
 - macOS/Windows 桌面端完整闭环；
 - iOS/Android 前台运行与恢复闭环；
-- `actr://` 创建和连接两种意图；
+- Realm 链接的打开与分享（含 https 形式）；程序库中新建实例；
 - Program Catalog 与 Service Inventory；
-- 域名 Publisher 解析、HTTPS 下载、签名和 digest 校验；
+- 域名 Publisher、HTTPS 下载、签名和 digest 校验；
 - 固定 Native Front Host + Keel JS Guest；
 - 本地 Service 创建、停止、启动、连接、回收站和彻底清除；
 - Workspace 绑定；
@@ -224,11 +223,11 @@ Tab、Front Actor、Guest 都可以重建；Workspace 绑定、业务状态与�
 
 v1 达成的标志不是「能显示一个 Keel 页面」，而是以下闭环同时成立：
 
-1. 用户从可信坐标安装程序。
+1. 用户安装经签名验证的程序。
 2. 用户创建 Workspace-bound Service。
-3. 地址栏原位获得带 ActorId 的连接地址。
+3. 地址栏原位显示新实例的地址。
 4. Front 只能经声明契约调用该 Service。
-5. 关闭、重启 Actro 后仍以同一 Service ActorId 恢复。
+5. 关闭、重启 Actro 后仍以同一地址、同一 Service 身份恢复。
 6. 同一精确版本离线运行时仍可验证。
 7. Service 不在线、无权限、Realm 不可达和包不兼容时都有不同且可操作的错误。
 8. Guest 越权、超时、内存超限或崩溃不导致其他 Tab 的业务状态损坏。

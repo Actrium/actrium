@@ -3,7 +3,7 @@
 本文描述当前实现的单 Realm、单节点、SQLite profile。目标契约下一个实例承载多个
 Realm，配置中与之相关的差异在对应小节标注，完整差异见
 [架构契约](REALM_V1_ARCHITECTURE.zh.md)第 9 节。字段的可运行模板以
-[`config.example.toml`](../config.example.toml)为准；配置结构使用
+[`actrix.example.toml`](../config/actrix.example.toml)为准；配置结构使用
 `deny_unknown_fields`，旧字段或拼错字段会导致启动失败。
 
 ## 验证与启动
@@ -118,7 +118,7 @@ renewal_token_secret = "<generate-with-openssl-rand-base64-48>"
 
 单节点使用固定 `worker_id`，范围是 `0..31`。未来若出现并发 Issuer，必须由部署
 系统为每个活动节点分配不同 worker ID；v1 不实现自动租约。renewal secret 的
-Base64 解码结果至少 32 字节，并须跨重启稳定，否则 Service Actor 无法保持实例身份。
+Base64 解码结果至少 32 字节，并须跨重启稳定，否则 Service 无法保持实例身份。
 
 ## Signaling
 

@@ -4,7 +4,7 @@
 
 核心规则：
 
-> Service Actor 绑定 Workspace，Front Actor 只通过 Service ActorId 连接；Front 不需要知道 Workspace 的路径、Workspace Provider credential 或锁。
+> Service 绑定 Workspace，Front Actor 只连接 Service；Front 不需要知道 Workspace 的路径、Workspace Provider credential 或锁。
 
 这不是增加抽象，而是把本地文件、云盘、数据库和远程仓库统一为 Service 可持有的 capability。
 
@@ -181,7 +181,7 @@ Deleted 是彻底清除后的终态，不可恢复。恢复窗口只属于 Trash
 ```text
 CreationIntent
 ├── idempotency_key
-├── source_uri
+├── package_source
 ├── program_release + digest
 ├── realm_name
 ├── workspace_selection
@@ -199,7 +199,6 @@ Prepared
 → IdentityAllocated
 → StorageCommitted
 → ServiceStarted
-→ URIRewritten
 → FrontAttached
 → Completed
 ```
@@ -209,7 +208,6 @@ Prepared
 - 每一阶段可重入；
 - `result_actor_id` 一旦写入不得换 ID；
 - `StorageCommitted` 后即使 UI 崩溃，实例也出现在 Inventory；
-- URI 改写失败可以从 result 恢复；
 - 失败不会留一个可复用的半身份。
 
 ## 7. Service 存储
@@ -242,7 +240,7 @@ actro-data/
 以下内容只进入 OS Keychain/Keystore/Credential Locker：
 
 - Realm 客户端 key；
-- Service Actor private key；
+- Service private key；
 - renewal token（Actor credential 续期用）；
 - Workspace Provider credential；
 - TURN/signaling ticket（通常仅内存）；
@@ -259,8 +257,8 @@ program_release
   publisher, program, version, digest, key_id, manifest, trust_state
 
 service
-  actor_id, actor_id_hash, publisher, program, version, digest,
-  realm_name, workspace_id, runtime_location,
+  realm_name, actor_id, actor_id_hash, publisher, program, version, digest,
+  workspace_id, runtime_location,
   lifecycle_state, desired_state, reachability, health,
   attachment_state, placement, created_at, last_opened_at
 
@@ -272,7 +270,7 @@ permission_grant
   subject, capability, scope, decision, granted_at, expires_at
 
 tab_session
-  tab_id, uri, service_actor_id, front_actor_id, state,
+  tab_id, realm_link, service_actor_id, front_actor_id, state,
   structure_digest, application_state_digest, application_color, ready
 
 privacy_mark_cache
@@ -288,7 +286,7 @@ privacy_aggregate
   mark, weakest_actor_ref, evidence_root, generated_at, expires_at
 
 creation_intent
-  intent_id, uri, stage, result_actor_id, timestamps
+  intent_id, package_source, stage, result_actor_id, timestamps
 
 realm_domain
   domain, signing_keys, signing_keys_sequence, authority_descriptor_digest
@@ -298,9 +296,9 @@ realm
   issuer_keys, membership_ref, client_key_ref
 ```
 
-Service 表以完整 ActorId 为业务主键；`actor_id_hash` 只用于索引和目录。
+实例以 Realm 名为业务主键（升级时 Realm 名不变），当前 Service 的 ActorId 作为字段记录；`actor_id_hash` 只用于索引和目录。
 
-`realm_domain` 记录每个已信任的 Realm 域名及其 Realm 签名 key（来自 `https://<domain>/.well-known/actr` 的 `realm_signing_keys` 成员，已在 Actr Authority Discovery §4.4 定义；`signing_keys` 为曾接受并固定的 key，`signing_keys_sequence` 为已接受的 `sequence`），随 Realm Profile 一同刷新，以便被移除的 key 使其签过的 Realm Profile 失效；`realm` 记录每个实例 Realm，`profile_sequence` 与 `provider_id` 用于拒绝回滚或 `provider.id` 改变的 Realm Profile（本机 Realm 无 Realm Profile，两者为空），`client_key_ref` 指向该 Realm 独立的 Realm 客户端 key（不跨 Realm 复用）。两者都不使用数值 realm_id，它只是 Realm Provider 内部句柄。
+`realm_domain` 记录每个已信任的 Realm 域名及其 Realm 签名 key（来自 `https://<domain>/.well-known/actr` 的 `realm_signing_keys` 成员，已在 Actr Authority Discovery §4.4 定义；`signing_keys` 为曾接受并固定的 key，`signing_keys_sequence` 为已接受的 `sequence`），随 Realm Profile 一同刷新，以便被移除的 key 使其签过的 Realm Profile 失效；`realm` 记录每个实例 Realm，`profile_sequence` 与 `provider_id` 用于拒绝回滚或 `provider.id` 改变的 Realm Profile（本机 Realm 无 Realm Profile，两者为空），`client_key_ref` 指向该 Realm 独立的 Realm 客户端 key（不跨 Realm 复用）。两者都不使用数值 Realm 句柄，它只是 Realm Provider 内部的。
 
 `ApplicationAssurance` 是当前切面的派生结论，不是 Service 的永久属性。缓存过期、Tab 重建、状态或图变化后必须重算；展示还须 `Ready`。原始 attestation token 和完整远端拓扑优先保存在短期加密缓存或内存中，不能因便于 UI 展示而长期明文落库。
 
@@ -308,7 +306,7 @@ Service 表以完整 ActorId 为业务主键；`actor_id_hash` 只用于索引�
 
 ### Program Catalog 可同步
 
-- coordinate；
+- Program Release；
 - digest；
 - 收藏；
 - Marketplace metadata；
@@ -381,7 +379,7 @@ Snapshot 分两层：
 
 Manifest 应声明 snapshot schema version。恢复必须验证：
 
-- Program coordinate/digest；
+- Program Release/digest；
 - snapshot schema；
 - Workspace fingerprint；
 - ActorId；
@@ -408,6 +406,7 @@ Old Service ActorId + v1 Workspace
   → import/migrate
   → Workspace lease handoff
   → user verification
+  → Realm Profile 的 package 改指 v2 包
   → Old archived
 ```
 
@@ -417,11 +416,9 @@ Old Service ActorId + v1 Workspace
 - package digest 仍可审计；
 - 可回滚；
 - 新旧 contract 可以并存；
-- URI 不会声称旧 ActorId 已变成新类型。
+- 旧 ActorId 不会被说成已变成新类型。
 
-新 Service Actor 创建在原实例的同一 Realm 内：实例没有变，Realm 成员与应用权限延续，只有 ActorId 按上述规则变化。
-
-缺点是 ActorId 变化；Actro 可以更新本地收藏和当前 Tab。本地已保存迁移记录时，旧链接可以提示「实例已迁移」；其他设备只能看到旧实例 offline/archived，除非旧 Service 在回滚期继续提供签名迁移提示。Realm 级 alias/redirect 是后续能力，不在 v1 静默实现。
+新 Service 创建在原实例的同一 Realm 内：实例没有变，Realm 链接、Realm 成员与应用权限都延续，只有 Service 的 ActorId 变化。其他设备打开同一 Realm 链接时，按新的 Realm Profile 取得新包，并按其 Actor 类型找到新 Service。
 
 ## 12. Service 迁移设备
 
@@ -434,7 +431,7 @@ Old Service ActorId + v1 Workspace
 5. Realm 更新 presence；
 6. 新宿主启动；
 7. 旧宿主销毁密钥副本；
-8. Front 用原 URI 重连。
+8. Front 用原 Realm 链接重连。
 
 Workspace 如果本来是旧设备本地目录，必须单独迁移或保持远程可访问。ActorId 可迁移不意味着 Workspace 自动可迁移。
 

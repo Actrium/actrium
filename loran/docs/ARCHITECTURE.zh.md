@@ -6,7 +6,7 @@
 ## 边界
 
 目标契约：一个 Loran 实例是共享 Realm Provider，承载来自多个 Realm 域名的多个 Realm；Realm 对应
-一次应用实例部署，以 Realm 名 `<label>@<domain>`（如 `k7m2q9xh@acme.com`）标识，以
+一次应用实例部署，以 Realm 名 `<realm_id>@<domain>`（如 `k7m2q9xh@acme.com`）标识，以
 该 Realm 域名的 Realm 签名 key 为长期信任根。v1 是单节点、SQLite、单一 Realm Provider，
 不提供 HA 或跨 Realm federation。管理权限分实例运营者、Realm 管理请求与单 Realm 的 Realm
 管理 token 三类。
@@ -40,9 +40,9 @@ Realm Provider、audience 与 endpoint scope。
 
 - 每个 Realm 的 Realm issuer key（Ed25519）签发短期 Actor credential；Realm issuer key 由
   Realm 签名 key 签名的 Realm Profile 委派，Loran 未经委托不持有第三方域名的 Realm 签名 key。
-- ActorId 表示实例身份，目标形式为 `<serial_hex>.<label>@<domain>`，不含程序类型；
-  程序类型由注册与 Actor credential 携带。当前实现仍使用数值 realm_id 并内嵌程序类型。
-- 稳定 Service Actor 通过 renewal possession proof 在重启后保留 ID。
+- ActorId 表示实例身份，目标形式为 `<serial_hex>.<realm_id>@<domain>`，不含程序类型；
+  程序类型由注册与 Actor credential 携带。当前实现仍使用数值 Realm 句柄（代码中的 `realm_id`）并内嵌程序类型。
+- Service 通过 renewal possession proof 在重启后保留 ID。
 - 程序身份规范写作 `publisher/program@version`。
 - Publisher 是规范化 DNS 域名。当前实现通过
   `https://<publisher>/.well-known/actr/publisher.json` 发现；目标契约改为 authority
@@ -68,8 +68,8 @@ SQLite 持久化：
 - 连接 ACL、Publisher Profile/key/package metadata；
 - 配置 override 与审计需要的 nonce。
 
-Workspace 不属于 Loran。一个 Service Actor 至多绑定一个 Workspace，同一 Workspace 可按
-写入并发策略被多个 Service Actor 使用；关闭或删除 Actor 不删除目录；Workspace 加密密钥属于用户。这些规则由 Actro 实现。
+Workspace 不属于 Loran。一个 Service 至多绑定一个 Workspace，同一 Workspace 可按
+写入并发策略被多个 Service 使用；关闭或删除 Actor 不删除目录；Workspace 加密密钥属于用户。这些规则由 Actro 实现。
 
 ## 请求流
 

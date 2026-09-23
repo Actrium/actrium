@@ -10,9 +10,8 @@ HA 或跨 Realm federation。当前代码仍按早先的单 Realm 契约实现�
 
 Realm 对应一次应用实例部署，而不是一个应用（程序），也不是组织级成员域。同一个程序
 `notes.example/team-notes` 被 A 组织部署一次、被 B 组织部署一次，就是两个 Realm。
-在 Actrium 中，Create Intent 创建 Primary Service 实例时同时创建一个新 Realm；该实例
-的 Primary Service、它编排的 Auxiliary Actors 以及 Attach 到它的 Front 都在这个
-Realm 内。Realm membership 与 Realm 客户端准入、ActorId、Actor credential 签发与续期、连接 ACL、撤销与审计
+在 Actrium 中，新建一个实例就同时创建一个新 Realm；该实例的 Service、Realm 内的其他
+Actor 以及 Attach 到它的 Front 都在这个 Realm 内。Realm membership 与 Realm 客户端准入、ActorId、Actor credential 签发与续期、连接 ACL、撤销与审计
 都属于该 Realm。
 
 由此 Realm 的数量按部署次数增长，远多于应用数量，也远多于基础设施节点数量。Realm
@@ -24,7 +23,7 @@ Realm 以 Realm 域名命名；没有域名就不分配 Realm（本机 Realm 除
 不要求域名指向 Loran，也不要求域名承载任何基础设施。
 
 ```text
-Realm 名 = <label>@<domain>        例：k7m2q9xh@acme.com、crm@acme.com
+Realm 名 = <realm_id>@<domain>        例：k7m2q9xh@acme.com、crm@acme.com
 ```
 
 - `domain` 是规范化 DNS 域名：小写 IDNA A-label，无 scheme、端口、userinfo 或 path，
@@ -34,7 +33,7 @@ Realm 名 = <label>@<domain>        例：k7m2q9xh@acme.com、crm@acme.com
   解析）。`installation-id` 是安装时随机生成的 128 位值（base32 小写 26 字符）。本机
   Realm 由 Actro 内嵌实现，只有本地记录，没有 Realm Provider、Realm Profile 与 Realm 管理请求；Loran 只
   承载 DNS 域名下的 Realm。
-- `label` 使用 DNS label 规则：`[a-z0-9-]`，1..63 字符，不以 `-` 开头或结尾；在域名内
+- RealmId（`realm_id`）使用 DNS label 的字符规则：`[a-z0-9-]`，1..63 字符，不以 `-` 开头或结尾；在域名内
   唯一，创建后不可修改；默认由客户端随机生成（base32 小写短串，不含程序名），可读名称
   放在 Realm Profile 的 `display_name`。
 - 已退役 Realm 的名字永不复用：域名所有者不得复用，Realm Provider 在本地以 Realm
@@ -49,7 +48,7 @@ Realm 名 = <label>@<domain>        例：k7m2q9xh@acme.com、crm@acme.com
 | | Publisher | Realm |
 | --- | --- | --- |
 | 命名对象 | 程序（谁发布了这个包） | 部署（谁运营这个实例） |
-| 标识 | `publisher` 域名 | Realm 名 `<label>@<domain>` |
+| 标识 | `publisher` 域名 | Realm 名 `<realm_id>@<domain>` |
 | 长期信任根 | Publisher Profile 签名 key | Realm 签名 key |
 
 同一个包可以运行在 `notes@acme.com`，也可以运行在 `notes@foo.org`。
@@ -68,8 +67,8 @@ TLS/mTLS gRPC 客户端配置放入独立安全边界。
 
 只需要独占部署的场景（如企业自建）可配置 `max_realms = 1`；默认不限制。
 
-Workspace 不属于 Realm 基础设施的数据模型。一个 Service Actor 至多绑定一个
-Workspace，同一 Workspace 可按写入并发策略被多个 Service Actor 使用；删除 Actor 不删除 Workspace；Workspace 密钥属于用户。这些规则由 Actro
+Workspace 不属于 Realm 基础设施的数据模型。一个 Service 至多绑定一个
+Workspace，同一 Workspace 可按写入并发策略被多个 Service 使用；删除 Actor 不删除 Workspace；Workspace 密钥属于用户。这些规则由 Actro
 实现，Loran 不取得目录所有权。
 
 ## 2. 信任根
@@ -122,11 +121,11 @@ Actro/Rill 等 Actr Host 可以持有该能力，但不得把它暴露给用户�
 创建 Realm 不需要按 Realm 或按域名做 challenge 验证；授权来自 Realm 签名 key 持有方：
 
 1. 调用方（Realm 签名 key 持有方的签名工具、实例运营者或 supervisor）以 3.2 的 Realm 管理
-   请求提交 `create_realm`；
+   请求提交 `create_realm`，其中携带该实例要运行的包 `package`（下载地址与 SHA-256）；
 2. Loran 获取该域名的 authority descriptor（见 5.1）并验证 `realm_signing_keys`，再用
    其中的 key 验证请求签名；通过后创建 `pending` Realm，在 Issuer Signer 中生成该 Realm
-   的 Realm issuer key，在响应中返回待签 Realm Profile payload（Realm issuer key、端点、
-   `provider.id`）；
+   的 Realm issuer key，在响应中返回待签 Realm Profile payload（`package`、Realm issuer
+   key、端点、`provider.id`）；
 3. 调用方用 Realm 签名 key 签名 Realm Profile，**总是**以 `activate_realm` 请求（同一格式，
    携带签名 Realm Profile）提交给 Loran；
 4. Loran 验证 Realm Profile 签名，并确认其中的 Realm issuer key 与 Realm Provider 端点正是
@@ -147,7 +146,7 @@ Realm Provider 域名下的 Realm 丢失 `create_realm` 响应）只能用 `reis
 只有 `active` Realm 才签发 Actor credential、接受 signaling 连接和分配 TURN。
 
 `pending` Realm 有 TTL，过期清理。因为创建请求必须经 Realm 签名 key 持有方授权，他人无法
-在本 Realm Provider 上抢注某个 Realm 域名下的 Realm label。
+在本 Realm Provider 上抢注某个 Realm 域名下的 RealmId。
 
 谁来授权：
 
@@ -185,6 +184,7 @@ Actr 管理信封（Actr management envelope），只有 `op` 与操作字段不
 {
   "op": "create_realm",
   "realm": "k7m2q9xh@acme.com",
+  "package": { "href": "https://cdn.notes.example/team-notes-1.4.2.actr", "sha256": "<64 hex>" },
   "requester": "<可选，持有方的成员标识>",
   "provider_id": "provider.example",
   "nonce": "<random>",
@@ -267,7 +267,7 @@ realm-management 等）与该域名的 `realm_signing_keys`、`realms`，是同�
 ActorId 是 Actor 实例身份，不是用户、Workspace、程序或逻辑服务名，目标形式只含两部分：
 
 ```text
-<serial_hex>.<label>@<domain>        例：2af01.k7m2q9xh@acme.com
+<serial_hex>.<realm_id>@<domain>        例：2af01.k7m2q9xh@acme.com
 ```
 
 - `serial_hex`：该 Realm 的 Issuer 分配的 54-bit Snowflake serial，小写十六进制；
@@ -278,7 +278,7 @@ ActorId 是 Actor 实例身份，不是用户、Workspace、程序或逻辑服�
 发现与版本校验都使用注册与 Actor credential 中的类型，不读取 ActorId。legacy 形式
 `<serial_hex>@<realm_id>/<type>` 导入时必须显式补足 Realm 名并重写，不做推断。
 
-Loran 不从 `label` 推断任何语义，也不在对外接口中泄露同一域名下其他 Realm 是否存在。
+Loran 不从 RealmId 推断任何语义，也不在对外接口中泄露同一域名下其他 Realm 是否存在。
 
 每个客户端安装在每个 Realm 使用独立的 Realm 客户端 key，不跨 Realm 复用；Realm 客户端
 注册按 Realm 分别进行，Loran 无法据 Realm 客户端 key 关联同一客户端加入的不同 Realm。
@@ -288,7 +288,7 @@ Realm 客户端 key，这就是 Realm membership。此后每次申请 Actor cred
 key 注册，已签发的短期 Actor credential 到期失效（或按既有撤销机制提前失效）。renewal token
 属于 Actor credential 续期，同样绑定该 Realm 客户端 key。
 
-Loran 内部使用数值 `realm_id`（u32）作为数据库主键和索引句柄。它只在单个 Realm
+Loran 内部使用数值 Realm 句柄（u32）作为数据库主键和索引句柄；当前代码字段名为 `realm_id`，代码轮改名为 `realm_handle`，把 `realm_id` 让给 RealmId。它只在单个 Realm
 Provider 内有意义，不是身份：不得出现在对外 Actor credential、Realm Profile、ActorId 或
 跨 Realm Provider 的比较中。
 
@@ -296,12 +296,14 @@ Worker ID 为显式配置的 0..31 值，不再由 PID/hostname 的 5-bit hash �
 默认 0；未来并发 Issuer 必须由部署租约分配不同 worker ID。SQLite 的
 `issued_actor_identity` 永久登记本实例已签发的 `(Realm, serial)`；进程重启或时钟
 回拨导致 Snowflake 候选碰撞时只会继续分配，绝不覆盖原身份。跨 package version
-升级视为新 Actor，稳定业务入口应使用 Service alias/ActorId 记录层表达；升级产生的新
-Service Actor 仍在同一 Realm 内。
+升级视为新 Actor：持有方发布 `package` 已更新、sequence 更高的 Realm Profile，新的
+Service 仍在同一 Realm 内，Realm 链接不变。
 
-Service Actor 可用 renewal possession proof 在重启后保持 ActorId；Tab Actor 的
-新建策略属于 Actro。Tab 与 Service 不由基础设施强制 1:1，同一 Service Actor
-允许多个 Tab/窗口连接和重连。
+Service 可用 renewal possession proof 在重启后保持 ActorId；Tab Actor 的新建策略属于
+Actro。Tab 与 Service 不由基础设施强制 1:1，同一 Service 允许多个 Tab/窗口连接和重连。
+
+实例的 Service 就是本 Realm 内 Actor 类型与 Realm Profile 所指包相同的 Actor。Front 通过
+Signaling 的发现在本 Realm 内按该类型找到它；Actor Registry 不另设入口角色。
 
 ## 5. Realm 签名 key 与 Realm Profile
 
@@ -341,7 +343,7 @@ Realm 签名 key 轮换时，新 key 由旧 key 签名，形成 Realm 签名 key
 每个 Realm 一份，位置为：
 
 ```text
-GET <realms href>/<label>
+GET <realms href>/<realm_id>
 ```
 
 `realms` 的 `href` 可以指向 Realm 域名自己的静态存放位置（例如
@@ -394,15 +396,15 @@ Provider 主密钥经 HKDF 以 Realm 名和 Realm Provider ID 派生。第三方
 | Discovery 越界 | Discovery 与 RouteCandidates 只返回同 Realm 的 Actor；v1 不做跨 Realm 发现 |
 | 管理越权 | Realm 管理请求只作用于签名 key 所属 Realm 域名；Realm 管理 token 作用域在服务端逐请求检查；列表接口只返回作用域内的 Realm |
 | 未激活或已挂起的 Realm 被使用 | 只有 `active` Realm 签发 Actor credential、接受连接与分配 TURN |
-| 删除后残留 | 退役在单一事务中撤销 Actor credential、renewal token、presence、Actor Registry 记录与连接 ACL，退役 Realm issuer key，并写入以 Realm 名为键的 Realm Provider tombstone；`realm_id` 由 AUTOINCREMENT 保证不复用 |
+| 删除后残留 | 退役在单一事务中撤销 Actor credential、renewal token、presence、Actor Registry 记录与连接 ACL，退役 Realm issuer key，并写入以 Realm 名为键的 Realm Provider tombstone；数值 Realm 句柄由 AUTOINCREMENT 保证不复用 |
 | 资源挤占 | 按 Realm 域名与按 Realm 配额 |
 | 进程失陷影响全部 Realm | 首版接受 all-in-one 部署的此项风险；生产建议把 Issuer Signer 放入独立安全边界，使主进程失陷不泄露 Realm issuer key 私钥 |
 
 跨 Realm 混淆必须有专门的回归测试：两个 Realm 使用相同 Actor 类型、相同 Actor serial
 候选时，Actor credential、presence、TURN、连接 ACL 与管理接口均不得互通。
 
-v1 的连接 ACL 只作用于同一 Realm 内的 Actor 类型。ACL 数据模型保留 `source_realm_id`
-维度供后续跨 Realm 规则使用；v1 管理接口拒绝非空的 `source_realm_id`。实例内的应用权限
+v1 的连接 ACL 只作用于同一 Realm 内的 Actor 类型。ACL 数据模型保留 `source_realm_handle`
+维度供后续跨 Realm 规则使用；v1 管理接口拒绝非空的 `source_realm_handle`。实例内的应用权限
 （读写、管理、分享）由应用决定，不属于 Loran。
 
 ## 7. Publisher 发现
@@ -411,12 +413,12 @@ v1 的连接 ACL 只作用于同一 Realm 内的 Actor 类型。ACL 数据模型
 `publisher`，schema 为 `actr.publisher/v1`，字段使用 snake_case，内容以产品规范
 （`docs/product/actrium-v1` 05 §2.2、12 §2）为准：`domain` 必须等于 descriptor
 `authority` 的主机名，Publisher Profile 签名 key 与 package signing key 分离，带轮换链、
-`sequence`、有效期与必填的 `program_resolver`。成员的有效性只取决于自身签名与已固定的
+`sequence` 与有效期。成员的有效性只取决于自身签名与已固定的
 key history。
 
 Loran 获取 descriptor 的重定向与 SSRF 规则与 3.1 相同。`register_publisher` 把一个
-publisher 登记到本 Realm Provider 的 Publisher Registry 与包服务（此后本 Realm Provider
-才为该 publisher 解析与分发包）。它复用 3.2 的 Actr 管理信封：以 `publisher` 字段取代
+publisher 登记到本 Realm Provider 的 Publisher Registry（此后本 Realm Provider 才为该
+publisher 托管包）。它复用 3.2 的 Actr 管理信封：以 `publisher` 字段取代
 `realm`，由 Publisher Profile 中 `active` 的 Publisher Profile 签名 key 签名，同样绑定 `provider_id`、5 分钟有效期与 nonce；公开文档中
 不放 challenge。Loran 验证签名 key 属于当前 `publisher` 成员后登记该 publisher，并持久化
 已接受的 Publisher Profile 与 `sequence`；key 轮换通过发布新 Publisher Profile 完成，Loran 周期刷新后归档
@@ -427,9 +429,14 @@ publisher 登记到本 Realm Provider 的 Publisher Registry 与包服务（此�
 禁用重定向。这是预发布结构，与目标契约不兼容，目标移除（见第 9 节）；目标 schema 名
 `actr.publisher/v1` 由新结构占用。
 
-程序身份写作 `publisher/program@version`。合法包可以由任意 Publisher Profile 允许的 HTTPS
-origin/CDN 分发；消费端必须验证 manifest、二进制 digest、publisher key 签名和 key
-revocation 状态。
+程序身份写作 `publisher/program@version`。实例运行哪个包由 Realm Profile 的 `package`
+（下载地址与 SHA-256）给出，包可以放在任何 HTTPS 位置；消费端必须核对 SHA-256，并验证
+manifest、publisher key 签名和 key revocation 状态。
+
+包托管（目标契约）：`loran-packages` 只是按内容寻址托管 `.actr` 文件的静态下载服务，
+`package.href` 可以指向它，也可以指向 Publisher 自己的 CDN。它不再把 Target 解析为包：
+Package Resolution、`packages` relation 与 `program_resolver` 已从协议中删除。当前代码
+仍实现 Target 解析，随代码轮移除。
 
 ## 8. 数据与升级
 
@@ -440,14 +447,14 @@ revocation 状态。
 
 - `realm_domain`：`domain`、已接受的 authority descriptor digest、`realm_signing_keys`
   的 `sequence` 与 key 集合、最近校验时间；
-- `realm`：内部 `realm_id`、`name`（完整 Realm 名）、状态（`pending` | `active` |
+- `realm`：数值 Realm 句柄 `realm_handle`、`name`（完整 Realm 名）、状态（`pending` | `active` |
   `suspended` | `retired`）、已接受的 Realm Profile digest 与 `sequence`、Realm issuer key id、
   pending 到期时间、请求方（`requester` 或 Realm Provider 账号）、Realm 管理 token
   哈希及其绑定的 Realm Provider 账号（Realm Provider 域名下的 Realm）；`name` 唯一，Realm
   Provider tombstone 与活跃 Realm 共用该约束；
 - Realm 管理请求的 `nonce` 记录，保留到对应请求过期；
 - 其余按 Realm 分区的表（连接 ACL、已签发身份登记、Actor Registry、renewal state）以
-  `realm_id` 为外键。
+  `realm_handle` 为外键。
 
 Actor Registry 把持久元数据与在线状态分开：注册在 SQLite 写入完成后才成功；
 Loran 重启恢复的记录可继续提供 ServiceSpec，但在原 Actor 认证重连前不能进入
@@ -495,14 +502,16 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   注册请求登记，移除 `/.well-known/actr/publisher.json`（Publisher Registry 当前
   实现的 `PUBLISHER_DESCRIPTOR_PATH`）与 `verification_challenge`，重定向处理与 Realm 相同
   （逐跳 SSRF 检查）；
-- ActorId 目标格式 `<serial_hex>.<label>@<domain>`：proto `ActrId.realm` 由 u32 改为字符串
+- ActorId 目标格式 `<serial_hex>.<realm_id>@<domain>`：proto `ActrId.realm` 由 u32 改为字符串
   Realm 名，并从 `ActrId` 移出 `type`；`RegisterOk` 与 Actor credential 显式携带 Actor
   类型；连接 ACL（`AclRule`）与发现改用注册/Actor credential 中的类型匹配；
-- Actor credential issuer 从当前的 realm_id 派生字符串改为 Realm 名，Realm Profile 不再有
+- Actor credential issuer 从当前由数值 Realm 句柄派生的字符串改为 Realm 名，Realm Profile 不再有
   issuer 标识字段；
 - 实现 Realm 管理 token 及其一次性交付与重签、按 Realm 域名与按 Realm 配额、由
   退役 Realm Profile 触发的 Realm 退役事务与 Realm Provider tombstone；
 - TURN secret 改为按 Realm 名 HKDF 派生；
+- Realm Profile 与 `create_realm` 携带 `package`；`loran-packages` 移除 Target 解析，只保留
+  包托管；
 - 补跨 Realm 混淆回归测试；
 - 控制面 `CreateRealm`/`DeleteRealm`/`ListRealms` 的语义与本契约对齐：创建需 Realm
   签名 key 签名；`DeleteRealm` 只能作为实例运营者的本地挂起/清理，不能替代退役
@@ -514,7 +523,7 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
 - Realm federation、跨 Realm 发现与调用、跨 Realm ActorId 迁移；
 - 第三方 Realm Provider 之间的 signaling/TURN 委托协议；
 - 未经域名所有者委托代持其 Realm 签名 key；
-- 由 Realm 签名 key 签发的受限创建委派 key（限定 Realm label 前缀、配额与有效期）；
+- 由 Realm 签名 key 签发的受限创建委派 key（限定 RealmId 前缀、配额与有效期）；
 - Realm 域名级 SSO 或成员目录；
 - 更换 Realm Provider（Realm 与 Realm Provider 永久绑定，这是模型而非首版限制）；
 - Workspace 生命周期或 Workspace 密钥托管；
