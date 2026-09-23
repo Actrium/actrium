@@ -21,7 +21,7 @@ pub use crate::config::authority::AuthorityConfig;
 pub use crate::config::bind::BindConfig;
 pub use crate::config::control::{AdminUiConfig, ControlConfig, ControlHead};
 pub use crate::config::issuer::IssuerServiceConfig;
-pub use crate::config::packages::{PackageTargetConfig, PackagesConfig};
+pub use crate::config::packages::PackagesConfig;
 pub use crate::config::services::ServicesConfig;
 pub use crate::config::signaling::SignalingConfig;
 pub use crate::config::turn::TurnConfig;
@@ -268,7 +268,7 @@ pub struct ActrixConfig {
     /// Defines bind addresses and port configuration for various network services.
     pub bind: BindConfig,
 
-    /// Public Actr authority discovery and deploy-time target mappings.
+    /// Public Actr authority discovery.
     #[serde(default)]
     pub authority: AuthorityConfig,
 

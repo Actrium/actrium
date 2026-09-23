@@ -31,7 +31,7 @@ impl Default for PublisherRegistryConfig {
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ServicesConfig {
-    /// Optional Actor package target resolver and artifact distributor.
+    /// Optional content-addressed `.actr` artifact hosting.
     #[serde(default)]
     pub packages: Option<PackagesConfig>,
 

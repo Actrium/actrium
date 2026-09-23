@@ -434,10 +434,9 @@ publisher 托管包）。它复用 3.2 的 Actr 管理信封：以 `publisher` �
 （下载地址与 SHA-256）给出，包可以放在任何 HTTPS 位置；消费端必须核对 SHA-256，并验证
 manifest、publisher key 签名和 key revocation 状态。
 
-包托管（目标契约）：`loran-packages` 只是按内容寻址托管 `.actr` 文件的静态下载服务，
-`package.href` 可以指向它，也可以指向 Publisher 自己的 CDN。它不再把 Target 解析为包：
-Package Resolution、`packages` relation 与 `program_resolver` 已从协议中删除。当前代码
-仍实现 Target 解析，随代码轮移除。
+包托管：`loran-packages` 只是按内容寻址托管 `.actr` 文件的静态下载服务，
+`package.href` 可以指向它，也可以指向 Publisher 自己的 CDN。它不把 Target 解析为包：
+Package Resolution、`packages` relation 与 `program_resolver` 已从协议和代码中删除。
 
 ## 8. 数据与升级
 
@@ -511,8 +510,8 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
 - 实现 Realm 管理 token 及其一次性交付与重签、按 Realm 域名与按 Realm 配额、由
   退役 Realm Profile 触发的 Realm 退役事务与 Realm Provider tombstone；
 - TURN secret 改为按 Realm 名 HKDF 派生；
-- Realm Profile 与 `create_realm` 携带 `package`；`loran-packages` 移除 Target 解析，只保留
-  包托管；
+- Realm Profile 与 `create_realm` 携带 `package`（`loran-packages` 已移除 Target 解析，只保留
+  包托管）；
 - 补跨 Realm 混淆回归测试；
 - 控制面 `CreateRealm`/`DeleteRealm`/`ListRealms` 的语义与本契约对齐：创建需 Realm
   签名 key 签名；`DeleteRealm` 只能作为实例运营者的本地挂起/清理，不能替代退役
