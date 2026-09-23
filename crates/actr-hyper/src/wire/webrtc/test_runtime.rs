@@ -51,6 +51,10 @@ struct FaultKey {
 struct ScopedFaultState {
     outgoing: Mutex<PacketRule>,
     incoming: Mutex<PacketRule>,
+    /// Set when a newer generation of the same (local, remote) pair goes live,
+    /// so this scope stops counting in `active_rule_count` while its rule and
+    /// hit metrics stay inspectable.
+    retired: AtomicBool,
     outgoing_sequence: AtomicU64,
     incoming_sequence: AtomicU64,
     outgoing_hits: AtomicUsize,
@@ -68,6 +72,7 @@ impl Default for ScopedFaultState {
         Self {
             outgoing: Mutex::new(PacketRule::Pass),
             incoming: Mutex::new(PacketRule::Pass),
+            retired: AtomicBool::new(false),
             outgoing_sequence: AtomicU64::new(0),
             incoming_sequence: AtomicU64::new(0),
             outgoing_hits: AtomicUsize::new(0),
@@ -307,13 +312,14 @@ impl DirectedRtcFaultRegistry {
             .expect("RTC fault registry lock poisoned")
             .values()
             .filter(|state| {
-                !matches!(
-                    *state.outgoing.lock().expect("RTC fault lock poisoned"),
-                    PacketRule::Pass
-                ) || !matches!(
-                    *state.incoming.lock().expect("RTC fault lock poisoned"),
-                    PacketRule::Pass
-                )
+                !state.retired.load(Ordering::Acquire)
+                    && (!matches!(
+                        *state.outgoing.lock().expect("RTC fault lock poisoned"),
+                        PacketRule::Pass
+                    ) || !matches!(
+                        *state.incoming.lock().expect("RTC fault lock poisoned"),
+                        PacketRule::Pass
+                    ))
             })
             .count()
     }
@@ -338,13 +344,26 @@ impl DirectedRtcFaultRegistry {
             remote,
             generation,
         };
-        let state = self
-            .scopes
-            .lock()
-            .expect("RTC fault registry lock poisoned")
-            .entry(key)
-            .or_default()
-            .clone();
+        let state = {
+            let mut scopes = self
+                .scopes
+                .lock()
+                .expect("RTC fault registry lock poisoned");
+            // A new generation for a (local, remote) pair retires every older
+            // generation of that pair: mark them so they stop counting in
+            // `active_rule_count`, while their rule and hit metrics stay
+            // inspectable. This is what makes a torn-down generation stop
+            // contributing to `fault_leases` without any caller action.
+            for (other_key, other_state) in scopes.iter_mut() {
+                if other_key.local == key.local
+                    && other_key.remote == key.remote
+                    && other_key.generation != generation
+                {
+                    other_state.retired.store(true, Ordering::Relaxed);
+                }
+            }
+            scopes.entry(key).or_default().clone()
+        };
         *state
             .bind_addresses
             .lock()
@@ -806,6 +825,36 @@ mod directed_tests {
                 version: "1.0.0".to_string(),
             },
         }
+    }
+
+    #[test]
+    fn a_newer_generation_retires_the_older_scope_automatically() {
+        let registry = DirectedRtcFaultRegistry::default();
+        let a = actor(1);
+        let b = actor(2);
+        let _a1 = registry.scoped_runtime(Arc::new(TokioRuntime), a.clone(), b.clone(), 1, vec![]);
+        let _b1 = registry.scoped_runtime(Arc::new(TokioRuntime), b.clone(), a.clone(), 1, vec![]);
+        assert!(registry.set_link_rule(
+            (&a, 1),
+            (&b, 1),
+            LinkDirection::AToB,
+            PacketRule::Blackhole
+        ));
+        assert!(
+            registry.active_rule_count() > 0,
+            "an installed generation-1 fault must count as active"
+        );
+
+        // The connection moves to generation 2 on both directions; building
+        // it must retire both generation-1 scopes without any caller action
+        // (trap 2 hardening).
+        let _a2 = registry.scoped_runtime(Arc::new(TokioRuntime), a.clone(), b.clone(), 2, vec![]);
+        let _b2 = registry.scoped_runtime(Arc::new(TokioRuntime), b.clone(), a.clone(), 2, vec![]);
+        assert_eq!(
+            registry.active_rule_count(),
+            0,
+            "the retired generation-1 scopes must not keep counting as active"
+        );
     }
 
     #[test]

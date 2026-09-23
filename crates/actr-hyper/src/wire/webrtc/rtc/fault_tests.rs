@@ -616,3 +616,39 @@ async fn runtime_override_flows_into_peer_connection_build() {
         "PC build should spawn driver tasks through the probe"
     );
 }
+
+#[test]
+fn set_rule_with_deliver_removes_the_entry_instead_of_leaking_a_lease() {
+    let faults = DirectedSignalingFaultRegistry::default();
+    let (a, b) = (test_actor_id(41), test_actor_id(42));
+    faults.set_rule(
+        a.clone(),
+        b.clone(),
+        SignalingMessageClass::RoleAssignment,
+        SignalingFaultRule::Drop,
+    );
+    assert_eq!(faults.active_rule_count(), 1, "installed rule is active");
+
+    // Healing via set_rule(Deliver) must remove the entry instead of inserting
+    // a counted Deliver entry (trap 1 hardening).
+    faults.set_rule(
+        a.clone(),
+        b.clone(),
+        SignalingMessageClass::RoleAssignment,
+        SignalingFaultRule::Deliver,
+    );
+    assert_eq!(
+        faults.active_rule_count(),
+        0,
+        "set_rule(Deliver) must remove the entry, leaving no active lease"
+    );
+
+    // Setting Deliver on an absent key is a no-op too.
+    faults.set_rule(
+        b.clone(),
+        a.clone(),
+        SignalingMessageClass::RoleAssignment,
+        SignalingFaultRule::Deliver,
+    );
+    assert_eq!(faults.active_rule_count(), 0);
+}

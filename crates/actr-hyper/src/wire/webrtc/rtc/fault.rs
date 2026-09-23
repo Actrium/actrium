@@ -601,11 +601,20 @@ impl DirectedSignalingFaultRegistry {
         class: SignalingMessageClass,
         rule: SignalingFaultRule,
     ) {
-        self.state
+        let key = SignalingFaultKey { from, to, class };
+        let mut rules = self
+            .state
             .rules
             .lock()
-            .expect("signaling fault registry lock poisoned")
-            .insert(SignalingFaultKey { from, to, class }, rule);
+            .expect("signaling fault registry lock poisoned");
+        // `Deliver` is the absence-of-fault default, so storing it is
+        // semantically identical to no entry: heal by removing the rule
+        // instead of leaking a counted active lease.
+        if rule == SignalingFaultRule::Deliver {
+            rules.remove(&key);
+        } else {
+            rules.insert(key, rule);
+        }
     }
 
     /// Apply a rule only to the Nth message of one directed class stream.
@@ -618,17 +627,20 @@ impl DirectedSignalingFaultRegistry {
         rule: SignalingFaultRule,
     ) {
         assert!(ordinal > 0, "signaling ordinals are one-based");
-        self.state
+        let selector = SignalingNthFaultKey {
+            key: SignalingFaultKey { from, to, class },
+            ordinal,
+        };
+        let mut nth_rules = self
+            .state
             .nth_rules
             .lock()
-            .expect("signaling nth-rule lock poisoned")
-            .insert(
-                SignalingNthFaultKey {
-                    key: SignalingFaultKey { from, to, class },
-                    ordinal,
-                },
-                rule,
-            );
+            .expect("signaling nth-rule lock poisoned");
+        if rule == SignalingFaultRule::Deliver {
+            nth_rules.remove(&selector);
+        } else {
+            nth_rules.insert(selector, rule);
+        }
     }
 
     /// Apply a rule only to a named restart exchange/request.
@@ -640,17 +652,20 @@ impl DirectedSignalingFaultRegistry {
         exchange_id: impl Into<String>,
         rule: SignalingFaultRule,
     ) {
-        self.state
+        let selector = SignalingExchangeFaultKey {
+            key: SignalingFaultKey { from, to, class },
+            exchange_id: exchange_id.into(),
+        };
+        let mut exchange_rules = self
+            .state
             .exchange_rules
             .lock()
-            .expect("signaling exchange-rule lock poisoned")
-            .insert(
-                SignalingExchangeFaultKey {
-                    key: SignalingFaultKey { from, to, class },
-                    exchange_id: exchange_id.into(),
-                },
-                rule,
-            );
+            .expect("signaling exchange-rule lock poisoned");
+        if rule == SignalingFaultRule::Deliver {
+            exchange_rules.remove(&selector);
+        } else {
+            exchange_rules.insert(selector, rule);
+        }
     }
 
     pub fn clear_rule(&self, from: &ActrId, to: &ActrId, class: SignalingMessageClass) {
