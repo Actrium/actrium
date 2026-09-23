@@ -608,11 +608,12 @@ impl SwiftGenerator {
     fn try_build_workspace_actrframework_swift_plugin(&self) -> Result<Option<PathBuf>> {
         #[cfg(target_os = "macos")]
         {
-            let plugin_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-                .ancestors()
-                .map(|path| path.join("tools/actr/protoc-gen/swift"))
-                .find(|path| path.is_dir())
-                .unwrap_or_else(|| PathBuf::from("tools/actr/protoc-gen/swift"));
+            let Some(plugin_root) =
+                super::find_workspace_plugin_dir("tools/actr/protoc-gen/swift")?
+            else {
+                return Ok(None);
+            };
+
             let package_swift = plugin_root.join("Package.swift");
             if !package_swift.is_file() {
                 return Ok(None);
