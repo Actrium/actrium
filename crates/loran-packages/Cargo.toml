@@ -5,11 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Actr package target resolution and content-addressed artifact distribution"
+description = "Content-addressed .actr artifact hosting for Loran"
 readme = "README.md"
 
 [dependencies]
-actr-protocol = { workspace = true }
 axum = { workspace = true }
 hex = { workspace = true }
 serde = { workspace = true }

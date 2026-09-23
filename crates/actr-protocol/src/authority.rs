@@ -1,11 +1,10 @@
-//! Public authority discovery and package-target resolution data types.
+//! Public authority discovery data types.
 
 use crate::uri::ActrUri;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub const AUTHORITY_DESCRIPTOR_VERSION: u32 = 1;
-pub const PACKAGES_PROTOCOL: &str = "actr-packages/1";
 pub const ICE_CONFIG_PROTOCOL: &str = "actr-ice-config/1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -13,6 +12,9 @@ pub struct AuthorityDescriptor {
     pub version: u32,
     pub authority: String,
     pub services: Vec<ServiceLink>,
+    /// Path prefixes under `https://<domain>` that are Realm links.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub links: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,6 +54,8 @@ pub enum AuthorityDescriptorError {
     InvalidRelation(String),
     #[error("required service relation '{0}' is missing")]
     MissingService(String),
+    #[error("invalid Realm link prefix '{0}'")]
+    InvalidLink(String),
 }
 
 const CORE_RELATIONS: &[&str] = &[
@@ -60,7 +64,8 @@ const CORE_RELATIONS: &[&str] = &[
     "discovery",
     "ice-config",
     "contracts",
-    "packages",
+    "realms",
+    "realm-management",
 ];
 
 fn is_absolute_uri(value: &str) -> bool {
@@ -75,6 +80,31 @@ fn is_absolute_uri(value: &str) -> bool {
         })
 }
 
+/// Parses an `authority` member, which must be `actr://<domain>` with no
+/// port, path, trailing slash, query, fragment, or user information.
+pub fn parse_authority_member(value: &str) -> Result<ActrUri, AuthorityDescriptorError> {
+    let invalid = |reason: &str| AuthorityDescriptorError::InvalidUri(format!("{value}: {reason}"));
+    let domain = value
+        .strip_prefix("actr://")
+        .ok_or_else(|| invalid("expected actr://<domain>"))?;
+    if domain.is_empty() || domain.contains(['@', '/', '?', '#', ':']) {
+        return Err(invalid("expected actr://<domain> without port or path"));
+    }
+    value
+        .parse::<ActrUri>()
+        .map_err(|error| invalid(&error.to_string()))
+}
+
+/// A Realm link prefix starts and ends with `/` and has at least one segment.
+fn is_link_prefix(value: &str) -> bool {
+    value.len() > 1
+        && value.starts_with('/')
+        && value.ends_with('/')
+        && value[1..value.len() - 1]
+            .split('/')
+            .all(|segment| !segment.is_empty() && !segment.contains(['?', '#']))
+}
+
 impl AuthorityDescriptor {
     pub fn validate_for(&self, requested: &ActrUri) -> Result<(), AuthorityDescriptorError> {
         if self.version != AUTHORITY_DESCRIPTOR_VERSION {
@@ -84,14 +114,7 @@ impl AuthorityDescriptor {
             return Err(AuthorityDescriptorError::MissingServices);
         }
 
-        let described = self.authority.parse::<ActrUri>().map_err(|error| {
-            AuthorityDescriptorError::InvalidUri(format!("{}: {error}", self.authority))
-        })?;
-        if described.target().is_some() {
-            return Err(AuthorityDescriptorError::InvalidUri(
-                "authority member must not contain a target".to_string(),
-            ));
-        }
+        let described = parse_authority_member(&self.authority)?;
         if described.authority_uri() != requested.authority_uri() {
             return Err(AuthorityDescriptorError::AuthorityMismatch {
                 expected: requested.authority_uri(),
@@ -109,6 +132,13 @@ impl AuthorityDescriptor {
                 ));
             }
         }
+
+        let links = self.links.as_deref().unwrap_or_default();
+        for (index, link) in links.iter().enumerate() {
+            if !is_link_prefix(link) || links[..index].contains(link) {
+                return Err(AuthorityDescriptorError::InvalidLink(link.clone()));
+            }
+        }
         Ok(())
     }
 
@@ -123,24 +153,6 @@ impl AuthorityDescriptor {
         self.service(relation)
             .ok_or_else(|| AuthorityDescriptorError::MissingService(relation.to_string()))
     }
-}
-
-/// Response from an `actr-packages/1` target resolver.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PackageResolution {
-    pub version: u32,
-    pub target: String,
-    pub package: ResolvedPackage,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ResolvedPackage {
-    pub href: String,
-    pub media_type: String,
-    pub sha256: String,
-    pub size: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub profile: Option<String>,
 }
 
 /// Public, non-credential ICE information. Authorization-bearing deployments
@@ -169,11 +181,10 @@ mod tests {
             version: 1,
             authority: authority.to_string(),
             services: vec![
-                ServiceLink::new("packages", "https://packages.example/actr")
-                    .with_protocol(PACKAGES_PROTOCOL),
                 ServiceLink::new("signaling", "wss://signal.example/actr")
                     .with_protocol("actr-signaling/1"),
             ],
+            links: None,
         }
     }
 
@@ -192,19 +203,121 @@ mod tests {
     }
 
     #[test]
-    fn finds_package_service_without_interpreting_target() {
+    fn finds_service_by_relation() {
         let descriptor = descriptor("actr://example.com");
-        let service = descriptor.require_service("packages").unwrap();
-        assert_eq!(service.protocol.as_deref(), Some(PACKAGES_PROTOCOL));
-        assert_eq!(service.href, "https://packages.example/actr");
+        let service = descriptor.require_service("signaling").unwrap();
+        assert_eq!(service.protocol.as_deref(), Some("actr-signaling/1"));
+        assert!(matches!(
+            descriptor.require_service("contracts"),
+            Err(AuthorityDescriptorError::MissingService(_))
+        ));
     }
 
     #[test]
-    fn rejects_target_in_authority_member() {
+    fn rejects_retired_packages_relation() {
+        let uri = "actr://example.com".parse::<ActrUri>().unwrap();
+        let mut descriptor = descriptor("actr://example.com");
+        descriptor.services.push(ServiceLink::new(
+            "packages",
+            "https://packages.example/actr",
+        ));
+        assert!(matches!(
+            descriptor.validate_for(&uri),
+            Err(AuthorityDescriptorError::InvalidRelation(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_noncanonical_authority_member() {
         let uri = "actr://example.com/echo".parse::<ActrUri>().unwrap();
-        let error = descriptor("actr://example.com/not-an-authority")
-            .validate_for(&uri)
-            .unwrap_err();
-        assert!(matches!(error, AuthorityDescriptorError::InvalidUri(_)));
+        for authority in [
+            "actr://example.com/not-an-authority",
+            "actr://example.com/",
+            "actr://example.com:443",
+            "actr://example.com:8443",
+            "actr://user@example.com",
+            "actr://",
+            "https://example.com",
+        ] {
+            let error = descriptor(authority).validate_for(&uri).unwrap_err();
+            assert!(
+                matches!(error, AuthorityDescriptorError::InvalidUri(_)),
+                "{authority}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn validates_realm_link_prefixes() {
+        let uri = "actr://example.com".parse::<ActrUri>().unwrap();
+        let mut descriptor = descriptor("actr://example.com");
+        descriptor.links = Some(vec!["/i/".to_string(), "/apps/realms/".to_string()]);
+        descriptor.validate_for(&uri).unwrap();
+
+        for link in ["/", "i/", "/i", "//", "/i//", "/i?x/", "/i#x/"] {
+            descriptor.links = Some(vec![link.to_string()]);
+            assert!(
+                matches!(
+                    descriptor.validate_for(&uri),
+                    Err(AuthorityDescriptorError::InvalidLink(_))
+                ),
+                "{link}"
+            );
+        }
+
+        descriptor.links = Some(vec!["/i/".to_string(), "/i/".to_string()]);
+        assert!(matches!(
+            descriptor.validate_for(&uri),
+            Err(AuthorityDescriptorError::InvalidLink(_))
+        ));
+    }
+
+    #[test]
+    fn accepts_realm_relations() {
+        let uri = "actr://example.com".parse::<ActrUri>().unwrap();
+        let mut descriptor = descriptor("actr://example.com");
+        descriptor.services.push(
+            ServiceLink::new("realms", "https://realms.example/actr")
+                .with_protocol("actr-realm-profile/1"),
+        );
+        descriptor.services.push(
+            ServiceLink::new("realm-management", "https://realms.example/actr/manage")
+                .with_protocol("actr-realm-management/1"),
+        );
+        descriptor.validate_for(&uri).unwrap();
+    }
+
+    #[test]
+    fn ignores_unknown_members() {
+        let parsed: AuthorityDescriptor = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "authority": "actr://example.com",
+            "services": [{
+                "rel": "signaling",
+                "href": "wss://signal.example/actr",
+                "x-extra": true
+            }],
+            "realm_signing_keys": { "keys": [] },
+            "publisher": { "name": "Example" },
+            "x-future": 1
+        }))
+        .unwrap();
+        let uri = "actr://example.com".parse::<ActrUri>().unwrap();
+        assert_eq!(parsed.validate_for(&uri), Ok(()));
+    }
+
+    #[test]
+    fn links_member_is_optional_on_the_wire() {
+        let json = serde_json::to_value(descriptor("actr://example.com")).unwrap();
+        assert!(json.get("links").is_none());
+
+        let parsed: AuthorityDescriptor = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "authority": "actr://example.com",
+            "services": [{ "rel": "signaling", "href": "wss://signal.example/actr" }],
+            "links": ["/i/"]
+        }))
+        .unwrap();
+        assert_eq!(parsed.links.as_deref(), Some(&["/i/".to_string()][..]));
     }
 }

@@ -43,11 +43,11 @@ location_tag = "single-node"
 # Generate: openssl rand -hex 32
 actrix_shared_key = "<generate-with-openssl-rand-hex-32>"
 
-# Public Actr authority discovery. Production mode requires TLS, and this URI
-# must match the advertised bind.http domain and port exactly.
+# Public Actr authority discovery. Production mode requires TLS. This URI is
+# actr://<domain> without a port, and must match the bind.http domain.
 [authority]
 enabled = false
-# uri = "actr://localhost:8080"
+# uri = "actr://localhost"
 
 # Recording pipeline (logging + tracing)
 [recording]
@@ -213,15 +213,12 @@ renewal_token_secret = "<generate-distinct-renewal-token-secret-openssl-rand-bas
 # Default: 86400 (24 hours)
 # nonce_retain_secs = 86400
 
-# Actor package Target resolution and .actr downloads are an independent
-# service. They may run here even when this process does not serve the
-# authority discovery document.
+# Content-addressed .actr hosting is an independent static download service.
+# Each file is served at /actr/packages/artifact?sha256=<digest>, which a
+# Realm Profile package.href may point to. It may run here even when this
+# process does not serve the authority discovery document.
 # [services.packages]
-#
-# [[services.packages.targets]]
-# target = "apps/echo"
-# artifact = "/srv/actr/packages/echo-ui-1.0.0.actr"
-# profile = "keel.guest/1"
+# artifacts = ["/srv/actr/packages/echo-ui-1.0.0.actr"]
 
 # Signaling Service Configuration (optional)
 # Service enablement is controlled by the bitmask (enable field)
