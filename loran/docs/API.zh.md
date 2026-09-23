@@ -45,7 +45,7 @@ descriptor（`https://<domain>/.well-known/actr` 中的 `realm_signing_keys` 成
 注册能力，不得下发给 Rill Guest。签发的 Actor credential claims 固定包含：
 
 - `protocol_version = 1`
-- `issuer`：当前实现为由数值 Realm 句柄派生的字符串；目标契约为 Realm 名，例如
+- `issuer`：当前实现为由数值 `realm_id` 派生的字符串；目标契约为 Realm 名，例如
   `k7m2q9xh@acme.com`
 - `provider`：当前实现为固定常量；目标契约为 Realm Provider 的规范化 DNS authority，例如
   `provider.example`
@@ -109,7 +109,7 @@ ActorId 的字符串形式，当前实现为：
 `<serial_hex>.<realm_id>@<domain>`
 
 例如 `2af01.k7m2q9xh@acme.com`。程序类型 `publisher/program@version` 不在 ActorId 中，
-由注册与 Actor credential 携带；数值 Realm 句柄只在 Realm Provider 内部使用。
+由注册与 Actor credential 携带；当前代码的数值 `realm_id` 只在 Loran 内部使用，目标契约中移除。
 
 可下载 package 的 publisher 必须是规范 DNS 域名；linked/local workload 可以使用
 Actr Host 管理的非 DNS publisher 值，但不能借此进入 Publisher Registry。
@@ -133,7 +133,7 @@ Realm secret，但不提供硬删除或替换另一个 Realm；替换属于停�
 
 目标契约：每实例承载多个 Realm。创建需经 Realm 签名 key 持有方授权，并经 Realm Profile
 验证后才从 `pending` 转为 `active`；退役由持有方发布退役 Realm Profile 触发，Loran 在单一
-事务中撤销该 Realm 的状态并写入以 Realm 名为键的 Realm Provider tombstone，Realm 名与数值 Realm 句柄均不复用。
+事务中撤销该 Realm 的状态并写入以 Realm 名为键的 Realm Provider tombstone，Realm 名不复用。
 
 ## Schema migration
 

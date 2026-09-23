@@ -70,7 +70,7 @@ TLS/mTLS；Management 即使共享 listener 也必须经过独立认证中间件
 | 被篡改的 Realm Profile 把 Realm 改指其他 Realm Provider | `provider.id` 在 Realm 生命周期内不可变，客户端与 Loran 拒绝 `provider.id` 不同的新 Realm Profile；Loran 周期性重新获取 Realm Profile，发现 `provider.id` 或 Realm issuer key 不属于本 Realm Provider 时本地挂起 |
 | Realm 退役后仍被本 Realm Provider 使用 | 周期性重新获取 Realm Profile；`status = retired` 时执行退役事务，不再签发 Actor credential |
 | 大量 pending Realm 或单个 Realm 域名挤占资源 | pending Realm 有 TTL；按 Realm 域名限制 Realm 数，按 Realm 限制连接、注册、signaling 消息与 TURN allocation/带宽 |
-| Realm 删除后残留状态混入新 Realm | 退役在单一事务中撤销 Actor credential、renewal token、presence、Actor Registry 记录与连接 ACL，退役 Realm issuer key；数值 Realm 句柄与 Realm 名均不复用 |
+| Realm 删除后残留状态混入新 Realm | 退役在单一事务中撤销 Actor credential、renewal token、presence、Actor Registry 记录与连接 ACL，退役 Realm issuer key；Realm 名不复用 |
 | 共享 Realm Provider 或实例管理员关联同一客户端 | 每个客户端安装在每个 Realm 使用独立的 Realm 客户端 key，不跨 Realm 复用，无法据 Realm 客户端 key 关联同一客户端加入的不同 Realm |
 | TURN secret 在 Realm 之间串用 | TURN secret 由主密钥按 Realm 名与 Realm Provider ID 经 HKDF 派生；username 绑定 Realm 名与 ActorId |
 | Snowflake 重启/时钟回拨碰撞 | 显式 worker ID；SQLite 永久已签发身份登记以主键拒绝复用并重试 |
