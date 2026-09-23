@@ -8,6 +8,13 @@
 //! - **Same stream = FIFO run-to-completion**: chunks of one stream are
 //!   delivered to the callback strictly in arrival order, one at a time. The
 //!   previous chunk's callback future fully resolves before the next starts.
+//!   A callback therefore must never block waiting for a *later* chunk of the
+//!   same stream (e.g. an end-of-stream handler polling for stragglers): the
+//!   later chunk's callback is queued behind it, so both stall forever — a
+//!   self-deadlock. Finalize out-of-band instead: a separate RPC from the
+//!   sender after the last chunk (the `EndTransfer` pattern in
+//!   `examples/actr/rust/data-stream/receiver/src/file_transfer_service.rs`),
+//!   or a detached task watching shared reassembly state.
 //! - **Different streams = independent workers**: each stream has its own
 //!   worker, so a slow callback on stream A never blocks stream B's callback
 //!   *execution*. Enqueue runs in a shared per-class receive task, so under
@@ -80,6 +87,11 @@ const SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_secs(5);
 /// - Only passes sender ActrId (to know where data comes from)
 /// - Doesn't pass Context (avoids confusing RPC and Stream semantics)
 /// - If reverse signaling needed, user should send via OutboundGate
+///
+/// # Contract
+/// Runs on the stream's serial worker (see module docs): must not await a
+/// later chunk of the same stream — that chunk's callback is queued behind
+/// this one, so both stall forever.
 pub(crate) type DataChunkCallback =
     Arc<dyn Fn(DataChunk, ActrId) -> BoxFuture<'static, ActorResult<()>> + Send + Sync>;
 
