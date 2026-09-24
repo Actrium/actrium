@@ -17,7 +17,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-#[cfg(feature = "test-utils")]
 use actr_protocol::TurnCredential;
 use futures_util::FutureExt;
 use webrtc::error::Error as RtcError;
