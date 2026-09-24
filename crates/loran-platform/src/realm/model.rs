@@ -113,12 +113,17 @@ impl Realm {
         .await
     }
 
-    /// Insert this realm as a new active Realm.
+    /// Insert this realm as a new pending or active Realm.
     ///
     /// `max_realms` bounds the number of pending and active Realms. A name that
     /// exists, retired or not, is rejected: Realm names are never reused.
     pub async fn insert(mut self, max_realms: Option<u32>) -> Result<Self, RealmError> {
         validate_name(&self.name)?;
+        if self.status == RealmStatus::Retired {
+            return Err(RealmError::ValidationError(
+                "a new realm cannot be retired".to_string(),
+            ));
+        }
         if self.secret_current.trim().is_empty() {
             return Err(RealmError::ValidationError(
                 "realm secret hash must not be empty".to_string(),
@@ -132,7 +137,7 @@ impl Realm {
                 name, status, enabled, expires_at, created_at,
                 secret_current, secret_previous_hash, secret_previous_valid_until
              )
-             SELECT ?1, 'active', ?2, ?3, ?4, ?5, ?6, ?7
+             SELECT ?1, ?9, ?2, ?3, ?4, ?5, ?6, ?7
              WHERE ?8 IS NULL
                 OR (SELECT COUNT(*) FROM realm WHERE status != 'retired') < ?8",
         )
@@ -144,6 +149,7 @@ impl Realm {
         .bind(prev_hash)
         .bind(prev_valid_until)
         .bind(max_realms.map(i64::from))
+        .bind(self.status.to_string())
         .execute(get_database().get_pool())
         .await;
 
@@ -158,7 +164,6 @@ impl Realm {
                 ))),
             },
             Ok(_) => {
-                self.status = RealmStatus::Active;
                 self.created_at = now as u64;
                 self.updated_at = None;
                 Ok(self)
@@ -294,46 +299,7 @@ impl Realm {
     /// realm are removed; the issued identity ledger and revocation list stay.
     pub async fn retire(name: &str) -> Result<Self, RealmError> {
         let mut tx = get_database().get_pool().begin().await?;
-        let now = Utc::now().timestamp();
-
-        let retired = sqlx::query(
-            "UPDATE realm SET status = 'retired', enabled = 0, updated_at = ?,
-                pending_expires_at = NULL, admin_token_hash = NULL
-             WHERE name = ? AND status != 'retired'",
-        )
-        .bind(now)
-        .bind(name)
-        .execute(&mut *tx)
-        .await?;
-        if retired.rows_affected() == 0 {
-            let exists: Option<String> =
-                sqlx::query_scalar("SELECT name FROM realm WHERE name = ?")
-                    .bind(name)
-                    .fetch_optional(&mut *tx)
-                    .await?;
-            return Err(match exists {
-                Some(_) => RealmError::Retired,
-                None => RealmError::NotFound,
-            });
-        }
-
-        sqlx::query("DELETE FROM actoracl WHERE realm = ?1 OR source_realm = ?1")
-            .bind(name)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM pending_registration WHERE realm = ?")
-            .bind(name)
-            .execute(&mut *tx)
-            .await?;
-        // ActorId text is `<serial_hex>.<realm>`; the serial has no dot.
-        sqlx::query(
-            "DELETE FROM issuer_renewal_token
-             WHERE substr(actor_id, instr(actor_id, '.') + 1) = ?",
-        )
-        .bind(name)
-        .execute(&mut *tx)
-        .await?;
-
+        retire_in(&mut tx, name, Utc::now().timestamp()).await?;
         tx.commit().await?;
         Self::get(name).await?.ok_or(RealmError::NotFound)
     }
@@ -350,6 +316,52 @@ impl Realm {
     pub fn is_active(&self) -> bool {
         self.status == RealmStatus::Active && self.enabled && !self.is_expired()
     }
+}
+
+/// The retirement of [`Realm::retire`] inside a caller's transaction.
+pub(crate) async fn retire_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    name: &str,
+    now: i64,
+) -> Result<(), RealmError> {
+    let retired = sqlx::query(
+        "UPDATE realm SET status = 'retired', enabled = 0, updated_at = ?,
+                pending_expires_at = NULL, admin_token_hash = NULL
+             WHERE name = ? AND status != 'retired'",
+    )
+    .bind(now)
+    .bind(name)
+    .execute(&mut **tx)
+    .await?;
+    if retired.rows_affected() == 0 {
+        let exists: Option<String> = sqlx::query_scalar("SELECT name FROM realm WHERE name = ?")
+            .bind(name)
+            .fetch_optional(&mut **tx)
+            .await?;
+        return Err(match exists {
+            Some(_) => RealmError::Retired,
+            None => RealmError::NotFound,
+        });
+    }
+
+    sqlx::query("DELETE FROM actoracl WHERE realm = ?1 OR source_realm = ?1")
+        .bind(name)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query("DELETE FROM pending_registration WHERE realm = ?")
+        .bind(name)
+        .execute(&mut **tx)
+        .await?;
+    // ActorId text is `<serial_hex>.<realm>`; the serial has no dot.
+    sqlx::query(
+        "DELETE FROM issuer_renewal_token
+             WHERE substr(actor_id, instr(actor_id, '.') + 1) = ?",
+    )
+    .bind(name)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
 }
 
 fn validate_name(name: &str) -> Result<(), RealmError> {
