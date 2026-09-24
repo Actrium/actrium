@@ -43,8 +43,26 @@ relation 指向本 Realm Provider 时提供 Realm Profile。
   生成、不过期），`sequence = 1`，由该 key 对去掉 `signature` 的成员按 JCS 自签名；descriptor 的
   key id 与之相同。
 
-这两个 relation 的端点尚未实现（Realm Profile 托管与 Realm 管理请求随后续阶段提供）。
 Realm 签名 key 尚未就绪时 descriptor 返回 `503`。`[authority] links` 配置 `links` 成员。
+
+`GET /actr/realms/{domain}/{realm_id}`（`HEAD` 同）原样返回 Realm `<realm_id>@<domain>` 已接受的
+Realm Profile（`application/json`，带 `Access-Control-Allow-Origin: *` 与
+`Cache-Control: public, max-age=300`）。`active` 与 `retired` Realm 都提供；未知、`pending`
+或尚无 Realm Profile 的 Realm 返回 `404`。Realm Provider 域名下的 Realm 由 Loran 用
+`realm-signing:<provider>` 签发 Realm Profile：`issuer.url = <origin>/issuer`，`issuer.keys`
+为 Signer 中该 Realm 的 `issuer:<realm>` key，`provider.signaling` 的
+`control_plane_id = <provider>/v1`、`ticket_audience = actr.signaling`，TURN 条目的
+`credential_audience = actr.turn`，`policy.membership = invite-only`；每份都先按 Actr Host
+的规则（`RealmProfile::verify` 与 `check_successor`）验证再保存。`realm-management` 端点尚未
+实现。
+
+其他域名的 Realm 若有已接受的 Realm Profile，Loran 每 `[realm] profile_refresh_secs`（默认
+3600，取值限定在 60–86400）刷新一次：经逐跳 SSRF 检查的抓取器（仅 HTTPS、最多 5 次重定向、
+拒绝非公网地址并钉住解析结果、64 KiB、缓存含失败、按主机限流）取该域名的 authority
+descriptor，按 key pin 接受 `realm_signing_keys`（成员自签名；首次接受即 pin；此后须由已 pin
+的 `active` key 签名、`sequence` 不回退、不引入新 key——轮换链尚未支持），再从其 `realms`
+位置取更高 sequence 的 Realm Profile；退役 Realm Profile 触发退役事务。已接受 Realm Profile
+的签名 key 被移除时丢弃该基线，改用由仍列出的 key 签名的 Realm Profile，取不到则停用该 Realm。
 
 ## Issuer
 
@@ -137,16 +155,23 @@ Realm 以 Realm 名寻址，`@` 编码为 `%40`：
 
 - `GET /admin/api/realms`、`POST /admin/api/realms`：列出；创建（body
   `{"realm": "k7m2q9xh@acme.com", "enabled": true, "expires_at": 0}`，响应一次性返回 Realm
-  secret），新 Realm 为 `active`；
+  secret），新 Realm 为 `active`。Realm Provider 域名下的 Realm 还须带
+  `"package": {"href": "https://…", "sha256": "<64 hex>"}`（可选 `display_name`）：先建为
+  `pending`，Loran 签发首份 Realm Profile 后转为 `active`，签发失败则丢弃该 `pending` 行；其他
+  域名不接受这两个字段；
+- `GET /admin/api/realms/{realm}/profile`：已接受的 Realm Profile（原样 JSON），没有则 `404`；
 - `GET`/`PUT /admin/api/realms/{realm}`：读取；`PUT` 只收 `enabled` 与 `expires_at`，
   `enabled = false` 即停用、`true` 即恢复，Realm 名不可修改；
 - `POST /admin/api/realms/{realm}/secret/rotate`：轮换 Realm secret；
 - `POST /admin/api/realms/{realm}/retire`：退役。单一事务中删除该 Realm 的连接 ACL、待连接
   注册与 renewal token，保留已签发身份登记与撤销表；`realm` 行以 `retired` 状态永久保留，
-  作为 Realm Provider tombstone，Realm 名不复用。没有硬删除。
+  作为 Realm Provider tombstone，Realm 名不复用。没有硬删除。Realm Provider 域名下的 Realm 由
+  Loran 签发退役 Realm Profile 并在同一事务中退役；其他域名的 Realm 若已有 key 持有方签名的
+  Realm Profile，运营者不能退役（只能停用），退役只由持有方发布的退役 Realm Profile 触发。
 
 gRPC `NodeAdminService` 对应 `CreateRealm`/`GetRealm`/`UpdateRealm`/`ListRealms`/
-`RetireRealm`，同样按 Realm 名寻址。
+`RetireRealm`，同样按 Realm 名寻址；`CreateRealm` 不能新建 Realm Provider 域名下的 Realm（没有
+`package`）。
 
 目标契约：创建需经 Realm 签名 key 持有方授权，并经 Realm Profile
 验证后才从 `pending` 转为 `active`；退役由持有方发布退役 Realm Profile 触发，Loran 在单一

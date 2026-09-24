@@ -182,6 +182,9 @@ Realm 不在 TOML 中声明。
 Profile 验证后激活，收到退役 Realm Profile 时退役并写入 Realm Provider tombstone。按 Realm
 域名与按 Realm 的配额属于待实现配置。
 
+`[realm] profile_refresh_secs`（默认 3600，限定在 60–86400）是 Loran 刷新其他域名
+`realm_signing_keys` 与 Realm Profile 的间隔（API.zh.md「Realm discovery」）。
+
 Realm Provider ID 取 `[authority] uri`（`actr://<domain>`，不带端口）的规范化 DNS 域名。
 启用 Issuer、Signaling 或 TURN 时 `uri` 必填，缺失或非法即配置校验失败；它写入 Actor
 credential 与 TURN username 的 `provider`，并由 Signaling、TURN 校验。`[authority] enabled`
