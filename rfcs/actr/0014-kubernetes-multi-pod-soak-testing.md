@@ -66,6 +66,7 @@ The terms below have one fixed meaning in this RFC:
 | **Soak Dashboard** | The UI/API and persistent run store. It owns manual test runs and embeds the SoakController. |
 | **SoakController** | The deterministic planner/executor that expands a seed into actions, calls endpoints, collects evidence, and invokes the Result Evaluator. |
 | **Endpoint Control API** | Test-namespace HTTP adapter exposed by each Actr Soak Endpoint. It accepts only predefined, authenticated actions and observations. |
+| **`soak-kubectl`** | Helper script bundled in the Dashboard and Controller images. It invokes the in-cluster `kubectl` with the projected ServiceAccount token and fixed API-server settings for namespaced Kubernetes evidence/actions; it is not a separate collector service. |
 | **Seed** | The recorded random seed from which the event plan and action order are reproduced. |
 | **Event plan** | The concrete, timestamped actions generated from a seed, including business probes and injected events. |
 | **Lifecycle event** | A logical mobile fact such as Background, Foreground, Available, or Unavailable delivered through `NetworkEventHandle`; it is not a real device operation. |
@@ -344,7 +345,9 @@ Observation plane:
 Endpoint Manager Snapshot + Hook + Fault + business metrics
   -> authenticated Endpoint API -> embedded Dashboard SoakController / Result Evaluator
 Loran, Kubernetes, procfs, and log evidence
-  -> Collector / soak-kubectl -> Dashboard
+  -> Collector -> Dashboard
+Kubernetes objects, events, and Pod logs
+  -> Dashboard's `soak-kubectl` helper -> embedded SoakController
 ```
 
 CI is a deployment plane, not a business-control plane. It builds/pushes images,
@@ -1182,8 +1185,8 @@ Endpoint Control API, observations, and metrics: TCP 9090
 ```
 
 The `/metrics` and `/v1/metrics` routes are served by the same HTTP listener
-as the Endpoint Control API. Metrics requests use the Endpoint bearer token
-when configured; this deployment has no separate Endpoint metrics port.
+as the Endpoint Control API. Metrics requests require the Endpoint bearer
+token in Kubernetes; this deployment has no separate Endpoint metrics port.
 
 The service suite is called Loran in this RFC. The current actr-soak deployment
 retains the Kubernetes Service resource names `actrix` and `actrix-turn-relay`
@@ -1202,7 +1205,8 @@ address and are outside this in-cluster relay profile.
 
 ```text
 Dashboard / embedded SoakController -> `actr-N`: TCP 9090
-                              (control, observations, `/metrics`; bearer token when enabled)
+                              (control, observations, `/metrics`; bearer token required)
+Kubelet/node probe source CIDRs -> `actr-N`: TCP 9090 (`/livez`, `/readyz`)
 Dashboard -> Kubernetes API:  TCP 443/6443 (Pods, Events, logs, and metrics
                               reads; approved lifecycle verbs only)
 Collector/Prometheus -> Loran: TCP metrics port (Loran metrics scrape)
@@ -1214,6 +1218,13 @@ All Pods -> kube-dns:         TCP/UDP 53
 artifact-uploader (or inline Dashboard worker) -> approved S3/MinIO object store: TCP 443 or configured port
 Other traffic:                denied
 ```
+
+The deployment MUST substitute `KUBELET_PROBE_CIDRS` with the node source
+CIDRs seen by the target CNI, or configure that CNI's explicit host-to-Pod
+health-probe exception. The CI preflight MUST verify `/livez` and `/readyz`
+while default-deny policies are active. NetworkPolicy cannot restrict these
+flows by HTTP path, so the Endpoint bearer token remains mandatory for every
+route except those two kubelet probes.
 
 The matrix MUST list every flow the design depends on; a missing allow rule
 fails the harness, not the SUT, and is classified INVALID_INFRASTRUCTURE. The
