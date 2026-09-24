@@ -127,6 +127,9 @@ pub(crate) mod request_scope;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod context;
 
+// Service lookup rules for opening an instance
+pub mod service_lookup;
+
 // Runtime workload abstraction (native-only, WASM/dynclib host)
 #[cfg(not(target_arch = "wasm32"))]
 pub mod workload;

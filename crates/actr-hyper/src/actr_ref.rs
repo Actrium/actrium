@@ -217,6 +217,16 @@ impl ActrRef {
         Ok(results)
     }
 
+    /// Find the Service for `package_type` in this Realm.
+    ///
+    /// See [`RuntimeContext::discover_service`].
+    pub async fn discover_service(&self, package_type: &ActrType) -> ActorResult<ActrId> {
+        self.app_context()
+            .await
+            .discover_service(package_type)
+            .await
+    }
+
     /// Create an application-side runtime context bound to this running actor.
     ///
     /// When `SessionState` is available, the context is built from the
