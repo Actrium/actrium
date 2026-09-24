@@ -1195,6 +1195,7 @@ Ports follow the actual image configuration. Suggested values:
 
 ```text
 Loran HTTP/Signaling: TCP 8080
+Soak Dashboard UI/API: TCP 9080
 Loran STUN/TURN: UDP 3478
 TURN relay range: dedicated UDP range
 Endpoint Control API, observations, and metrics: TCP 9090
@@ -1287,12 +1288,16 @@ The optional Controller CLI Job uses the dedicated
 `actr-soak-controller-client` ServiceAccount with
 `automountServiceAccountToken: false` and no Role or RoleBinding. It submits
 and observes runs only through the Dashboard API, so it needs no Kubernetes
-API permissions and cannot perform Pod lifecycle actions. A separate
-short-lived Secret supplied by the operator/caller for that Job provides its
-Dashboard API credential; the caller removes the Secret when the Job ends.
-The Dashboard MUST scope that credential to submitting one run and reading
-only that run's status/result. It is distinct from the Endpoint Control API
-bearer token and does not grant access to endpoint credentials.
+API permissions and cannot perform Pod lifecycle actions. Before creating the
+Job-specific Secret, the operator calls `POST /api/v1/cli-credentials` with a
+separately provisioned Dashboard administrator credential; the issuance API
+returns an opaque token once, permits one `POST /api/v1/runs`, then binds to
+that returned `run_id` and permits status/result reads for that run only. The
+Dashboard expires it at the run deadline plus the cleanup margin and revokes
+it when the run becomes terminal; the caller deletes the Secret when the Job
+exits. The administrator credential is never mounted in the Job. The run
+credential is distinct from the Endpoint Control API bearer token and does not
+grant access to endpoint credentials.
 
 It MUST NOT receive `cluster-admin`, cross-namespace write access, or arbitrary
 Secret-list permission.
