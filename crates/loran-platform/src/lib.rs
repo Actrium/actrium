@@ -7,6 +7,7 @@ pub mod aid;
 pub mod error;
 pub mod metrics;
 pub mod monitoring;
+pub mod net;
 pub mod realm;
 pub mod recording;
 pub mod storage;
