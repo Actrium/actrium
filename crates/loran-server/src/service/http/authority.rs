@@ -254,12 +254,10 @@ async fn authority_composition(
 async fn get_descriptor(State(state): State<Arc<AuthorityState>>) -> Response {
     let mut descriptor = state.descriptor.clone();
     if let Some(realm_keys) = &state.realm_keys {
-        match realm_keys.member().await {
-            Ok(member) => descriptor.realm_signing_keys = Some(member.clone()),
-            Err(error) => {
-                platform::recording::warn!("realm_signing_keys unavailable: {error:#}");
-                return StatusCode::SERVICE_UNAVAILABLE.into_response();
-            }
+        // Only the startup task talks to the Signer; a public request never does.
+        match realm_keys.member.get() {
+            Some(member) => descriptor.realm_signing_keys = Some(member.clone()),
+            None => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
         }
     }
     (
