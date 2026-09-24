@@ -222,13 +222,11 @@ fn keygen(args: &KeygenArgs) -> Result<Value> {
         private_key: BASE64.encode(key.to_bytes()),
         public_key: public_key.clone(),
     };
-    std::fs::write(&args.output, serde_json::to_string_pretty(&file)?)
-        .with_context(|| format!("Failed to write key file: {}", args.output.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&args.output, std::fs::Permissions::from_mode(0o600))?;
-    }
+    write_private(
+        &args.output,
+        serde_json::to_string_pretty(&file)?.as_bytes(),
+    )
+    .with_context(|| format!("Failed to write key file: {}", args.output.display()))?;
     eprintln!(
         "Realm signing key written to {}; publish the member below as \
          `realm_signing_keys` in the domain's /.well-known/actr",
@@ -253,6 +251,23 @@ fn keygen(args: &KeygenArgs) -> Result<Value> {
     let mut member = serde_json::to_value(member)?;
     sign_document(&mut member, &args.key_id, &key);
     Ok(member)
+}
+
+/// Write `contents` to a file only its owner can read, from its creation on.
+fn write_private(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut file = options.open(path)?;
+    // An existing file keeps its mode on open.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    file.write_all(contents)
 }
 
 fn new_request(op: ManagementOp, realm: &str, provider: &str) -> ManagementRequest {
@@ -401,10 +416,17 @@ mod tests {
         assert!(
             keygen(&KeygenArgs {
                 key_id: "rs-1".into(),
-                output: key_path,
+                output: key_path.clone(),
                 force: false,
             })
             .is_err()
         );
+        // Only its owner can read it.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = std::fs::metadata(&key_path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
     }
 }
