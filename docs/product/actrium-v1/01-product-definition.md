@@ -2,234 +2,233 @@
 
 ## 1. Product vision
 
-Actrium To... Actor The program becomes a product form that ordinary users can understand, install, create, open and restore.
+Actrium turns Actor programs into a product that ordinary users can understand, install, create, open and restore.
 
-Users see familiar browsers:
+Users see a familiar browser:
 
-- There's an address bar.Tab(a) History, collection, library and security tips;
-- An address can create an example of a new program or can return to an existing example;
-- The program can be local or can connect to the remote end;
-- Close Tab (a) Do not miss working conditions;
-- The installation procedure does not allow it to execute its own code at will.
+- an address bar, tabs, history, favorites, a program library and security prompts;
+- an address can create a new program instance or return to an existing one;
+- a program can run locally or connect to a remote one;
+- closing a tab does not accidentally lose working state;
+- installing a program does not mean allowing it to run arbitrary native code.
 
-The developers see the bound little program platform:
+Developers see a constrained small-app platform:
 
-- Only for front desk. Keel Guest;
-- You don't need to do it yourself.Actor Registration, correspondence, access window and cross-platform Actr Host;
-- The front desk is always a type. Primary Service capability (a) Visiting operations;
-- Backstage. Service Available Actor Modelling of more complex services;
-- A precise coordinates can be used. HTTPS Access, validation, cache and recurrence.
+- the front end is written only as a Keel Guest;
+- there is no need to implement windows, routing, Actor registration, signaling, permission dialogs or a cross-platform Actr Host;
+- the front end always reaches business logic through the instance's Service, via typed capabilities;
+- the background Service can use the Actor model to compose more complex services;
+- an exact-version package can be downloaded over HTTPS, verified, cached and reproduced.
 
 ## 2. Current issues
 
-If you don't freeze the model first,Actrium It is easy to carry both browsers, plugin systems, remote desktops, raw application containers and Actor Multiple semantics such as debuggers, which eventually leads to the following problems:
+Without first freezing the model, Actrium can easily end up carrying the semantics of a browser, a plugin system, a remote desktop, a native application container and an Actor debugger all at once, which eventually leads to the following problems:
 
-- Tab, pages, plugins,Actor, Service and Workspace (b) Life cycle coverage;
-- The front desk code is both clear. Keel Bridge, and it could be bypassed by direct access to the original module or Actor Networks;
-- “Open Application”Sometimes examples are created, services are found, and fixed services are connected, and address columns are not explained;
-- Status Type Service (a) Be treated as a non-state copy that can be balanced by type of load;
-- Marketplace, Publisher, Realm The letter was mixed with a central source of trust;
-- Use HTTPS Downloaded the package, but no version was unchangeable.digest Fixed and offline verification;
-- Close Tab, refresh, crash restoration may be created, replaced or cleared by error Service.
+- the lifecycles of Tab, page, plugin, Actor, Service and Workspace overlap with each other;
+- front-end code can go through the Keel Bridge, but might also bypass it and access native modules or the Actor network directly;
+- "opening a program" sometimes creates an instance, sometimes discovers a service, and sometimes connects to a fixed service, and the address bar cannot explain which;
+- a stateful Service gets treated as a stateless replica that can be load-balanced by type;
+- Marketplace, Publisher, Realm and signaling get merged into one centralized source of trust;
+- a package downloaded over HTTPS lacks version immutability, a fixed digest and offline verification;
+- closing a tab, refreshing, or crashing can wrongly create, replace or clear a Service.
 
-Ben. PRD The aim is to eliminate these ambiguities with a small number of stable non-variant variables.
+The purpose of this PRD is to remove these ambiguities with a small number of stable invariants.
 
 ## 3. Target users
 
-### 3.1 End-user
+### 3.1 End users
 
-Lightweight to run agentor Workspace Tools, but not intended to understand Actor, Realm, the user of the message and the details of the time of operation.
-
-Core tasks:
-
-- (a) Install a programme from the market or locally;
-- Selection Workspace And create an example;
-- Work will continue later from history, collection or exemplification library;
-- There are examples of connections on another device;
-- Know clearly who the program comes from, which Realm (and domain) the instance belongs to, and which permissions have been granted.
-
-### 3.2 Program Developer
-
-Develop a native UI, Actor Backend and Workspace State of procedure.
+Users who need to run lightweight agents, small programs or Workspace tools, but don't want to understand Actor, Realm, signaling or runtime details.
 
 Core tasks:
 
-- Only Keel Guest API Writing across the platform ' s front desk;
-- Use Protobuf/Contract description Front–Service API;
-- Build Service workload;
-- Declaration of components, competences, resource quotas and Workspace (a) Modes;
-- Release unchangeable with your own domain name `.actr` Packages;
-- Quick debugging in local development mode.
+- install a program from the marketplace or locally;
+- choose a Workspace and create an instance;
+- later resume work from history, favorites or the instance library;
+- connect to an existing instance from another device;
+- clearly know who the program comes from, which Realm (and domain) the instance belongs to, and which permissions have been granted.
+
+### 3.2 Program developers
+
+Develop a program with a native UI, an Actor backend and Workspace state.
+
+Core tasks:
+
+- write a cross-platform front end using only the Keel Guest API;
+- describe the Front–Service API with Protobuf/contracts;
+- build the Service workload;
+- declare components, permissions, resource quotas and the Workspace mode;
+- publish an immutable `.actr` package under their own domain;
+- debug quickly in local development mode.
 
 ### 3.3 Publisher
 
-Publish programs through a domain and maintain Publisher signing keys, versions and revocation information. Realms are created per instance, so a Publisher cannot designate a particular Realm in advance.
+Publishes programs through a domain name and maintains the Publisher signing key, versions and revocation information. Realms are created per instance, so a Publisher cannot designate a particular Realm in advance.
 
-### 3.4 Realm Signing Key Holder and Realm Owner
+### 3.4 Realm signing key holder and Realm owner
 
-The owner of a Realm domain is the Realm signing key holder: it publishes the Realm signing keys in the authority descriptor, authorizes Realm creation under that domain after authenticating requesters under its own policy, decides which Realm Provider to use and is responsible for Realm signing key rotation; it may also delegate custody of the keys to a Realm Provider. No domain, no Realm (except local Realms).
+The owner of a Realm domain is the Realm signing key holder: it publishes the Realm signing key in the authority descriptor, authorizes Realm creation under that domain after authenticating requesters under its own policy, decides which Realm Provider to use, and is responsible for rotating the Realm signing key; it may also delegate custody of the key to a Realm Provider. No domain, no Realm (except the local Realm).
 
-The Realm owner is the creator of an application instance and manages that instance's Realm membership, Actor admission, connection ACL, Realm invitations, client revocation and audit.
+The Realm owner is the creator of the application instance and manages that Realm's membership, Actor admission, connection ACL, Realm invitations, client revocation and audit.
 
-### 3.5 Marketplace Operator
+### 3.5 Marketplace operator
 
-Provide information on process discovery, classification, audit, risk labelling and revocation, but does not own any Publisher name.
+Provides program discovery, categorization, review, risk labeling and revocation information, but does not own Publisher naming rights.
 
-## 4. Core user story
+## 4. Core user stories
 
-### 4.1 New instance
+### 4.1 Create an instance
 
-> As a user, when I type or click an `actr://` address without a `service` parameter, Actrium should first validate the program, show permissions and the Workspace and Realm domain choices, create a new Realm under the chosen domain (a local Realm by default) with a Service inside it, and then rewrite the address into one that reconnects to that Service.
+> As a user, I pick a program in the program library and click "Create instance". Actrium should first verify the program and show its permissions, then let me choose a Workspace and a Realm domain, create a new Realm under the chosen domain (a local Realm by default) with a Service inside it, and then show the new instance's address in the address bar.
 
-### 4.2 Connection already exists
+### 4.2 Connect to an existing instance
 
-> As a user, I opened the tape. `service=<ActorId>` The address is on the page of the article.Actrium Only the example can be connected; if it is offline or I have no access, it must be clearly reported and no other one can be built“It looks the same.”Example.
+> As a user, when I open a link to an instance, Actrium can only connect to that instance; if it is offline or I don't have access, it must report a clear error, not create another instance that "looks the same".
 
-### 4.3 Close & & Restore
+### 4.3 Close and restore
 
-> As a user, I close Tab Only for closing the current desk session.Service with Workspace Continued unless I visibly stop, archive, move to the wastebin or be completely removed in the case management.
+> As a user, closing a Tab only ends the current front-end session. The Service and Workspace continue to exist unless I explicitly stop, archive, move to trash, or permanently delete them in instance management.
 
-### 4.4 Install and Validate
+### 4.4 Install and verify
 
-> As a user, I install `publisher/program@version` , you can confirm Publisher Domain name, exact version, package digest; the same version installed will not become another byte in the backstage.
+> As a user, when I install `publisher/program@version`, I can confirm the Publisher domain, the exact version, the package digest, the permissions and the marketplace risk status; an already-installed version will never silently turn into a different set of bytes in the background.
 
 ### 4.5 Local development
 
-> As a developer, I can come from the locals. `.actr` File or development HTTPS Origin Load unpublished programs, but Actrium It must be clearly marked.“Development sources”and forbids it to pretend to be a validated domain name Publisher.
+> As a developer, I can load an unpublished program from a local `.actr` file or a development HTTPS origin, but Actrium must clearly mark it as a "development source" and prevent it from impersonating a verified-domain Publisher.
 
-### 4.6 Realm With Network
+### 4.6 Realm and network
 
-> As a user, I don't need to fill in signaling and TURN addresses; Actrium selects endpoints and short-lived credentials from a Realm Profile signed by a trusted Realm signing key, while showing me the current instance's Realm, its domain and connection status.
+> As a user, I don't need to manually fill in signaling and TURN addresses; Actrium selects endpoints and short-lived credentials based on a Realm Profile signed by a trusted Realm signing key, while showing me the current instance's Realm, its domain and connection status.
 
-### 4.7 More Actor Privacy status
+### 4.7 Multi-Actor privacy state
 
-> As a user, when the application is multiple Actor When you combine, the green I see must represent the control of the whole map export on the current pre-position; the yellow of any node is unknown and the red of any uncontrolled; the green cannot be shown when the cut is not ready.
+> As a user, when a program is composed of multiple Actors, the green I see must mean that on the current ready cut, the egress of the whole graph is controlled; if any node is unknown it is yellow, if any node is confirmed uncontrolled it is red; when the cut is not ready, green must not be shown.
 
-## 5. Product objectives
+## 5. Product goals
 
-### G-01: to form a uniform application model
+### G-01: Form one unified application model
 
-All General Applications Tab And they all follow the same main chain:
+Every ordinary application Tab follows the same main chain:
 
 ```text
-Tab → Front Actor → Primary Service Actor → Workspace
+Tab → Front Actor → Service → Workspace
 ```
 
-UI-only Procedures are also provided at the minimum provided by the Platform ServiceInstead of creating a second set.“Apply Pure Pages”Models.
+UI-only programs also use the minimal Service the platform provides, instead of inventing a second "pure page app" model.
 
-### G-02: Put Publisher Code restricted to auditable boundaries
+### G-02: Confine Publisher code to an auditable boundary
 
-- Publisher No replacement Front Native Host.
-- Front Only carry Keel Guest.
-- Guest Defaults no arbitrary network, file,Actor discovery Or original modular capacity.
-- All capabilities are stated, authorized by the user and Actr Host The three-way cross.
+- A Publisher may not replace the Front Native Host.
+- The Front may only carry a Keel Guest.
+- By default, the Guest has no arbitrary network, file, Actor discovery, or native-module capability.
+- Every capability is the intersection of what is declared, what the user authorizes, and what the Actr Host implements.
 
-### G-03: To make the address readable, replicable, recoverable
+### G-03: Make addresses readable, copyable and recoverable
 
-- Program coordinate Responsible“Run what?”.
-- Service ActorId Responsible“Which instance to connect to”.
-- The Realm name decides where to verify and address.
-- URL Don't carry secrets.
+- The Realm link `actr://<Realm domain>/<realm_id>` answers "which instance", i.e. where to verify and address it;
+- what runs is decided by the package the instance's Realm Profile points to, and is not written into the address;
+- the address carries no secrets.
 
-### G-04: Reuse Web and the security infrastructure
+### G-04: Reuse the mature security infrastructure of the Web
 
-Reuse DNS, IDNA, TLS, HTTPSTransparency of certificates, caches,CDN, standard port and business agent; both signed and digest Completing HTTPS Inadequate for offline caches, mirrors and versions.
+Reuse DNS, IDNA, TLS, HTTPS, certificate transparency, caching, CDNs, standard ports and enterprise proxies; supplement HTTPS with package signing and digests to cover what HTTPS lacks for offline caching, mirroring and version immutability.
 
-### G-05: Hold on Actor Combination capacity of models
+### G-05: Preserve the Actor model's compositional power
 
-The Front sees only one Primary Service, but the backend may contain multiple Actors. The Primary Service can act as an interface and supervisor for worker, media, indexing, synchronization, and other supporting Actors.
+The Front only sees the instance's Service; that doesn't mean the background can only have one Actor. The Service can orchestrate other Actors within the same Realm — workers, media, indexing, sync and so on.
 
-### G-06: Provide end-to-end application security
+### G-06: Provide end-to-end application assurance
 
-- The conclusions are assembled along the lines of an effective and unincorporated `dependency map ' ;Front (a) Positioning only;
-- WASM the Declaration,imports, capacity and actual export Actr Host (a) Cross-certification;
-- Just... `Ready` And all of them. `CONTROLLED` The green is the only way to show it.
-- A clear distinction between yellow and red; no green display on hang-up;
-- New configuration only for new data; state change connection,Capability And the data sheet.
+- Conclusions are aggregated along the unrooted effective-dependency graph; the Front only locates it;
+- the Actr Host cross-verifies WASM's declarations, imports, effective capabilities and actual egress;
+- green is shown only when the state is `Ready` and every node is `CONTROLLED`;
+- yellow and red are clearly distinguished; a suspended assurance must never show green;
+- a new configuration applies only to new data; a state change propagates to the channel, the Actor Grant and the data plane.
 
-## 6. Non-target
+## 6. Non-goals
 
-v1 Do not:
+v1 does not do:
 
-- Any Web Browser Compatibility or Complete Web API;
-- Publisher Custom Front Primary plugin, dynamic library or Host Module Achieved;
-- Guest Direct access is arbitrary ActorId Or find any kind of Actor;
-- Service Transparent load balance of examples;
-- (b) Multi-person real-time collaboration agreements;
-- In situ no sense replaces running Service workload;
-- Automatic cross-Realm (cross-instance) federation and global Actor search;
-- Domain-level SSO or member directory;
-- Open Anonymous TURN;
-- Only by Marketplace System clearance is granted when the marking is reviewed;
-- Commitments on mobile platforms 24×7 Local Backstage Service Online.
+- an arbitrary web-browser compatibility layer or a complete Web API;
+- Publisher-supplied custom Front native plugins, dynamic libraries, or Host Module implementations;
+- letting the Guest directly access an arbitrary ActorId or discover any Actor by type;
+- transparent load balancing across Service instances;
+- a multi-party real-time collaboration protocol;
+- in-place, unnoticed replacement of a running Service workload;
+- automatic cross-Realm (cross-instance) federation or global Actor search;
+- domain-level SSO or a member directory;
+- open anonymous TURN;
+- granting system permissions on Marketplace review labels alone;
+- promising that a mobile platform will keep a local background Service online 24×7.
 
 ## 7. Product principles
 
-### 7.1 Clearer than guess.
+### 7.1 Explicit over guessed
 
-URL Yes. `service` Connected, none. `service` Just create; do not change intent when it fails.
+Opening a link only connects; creating is only ever an explicit action in the program library; a failure never silently changes the intent.
 
-### 7.2 Address does not equal permissions
+### 7.2 An address is not a permission
 
-An ActorId is a location and identity; access is decided by the Realm credential, application permissions and session authorization.
+An address is for locating and identifying; access is decided by Realm membership, application permissions and session authorization.
 
-### 7.3 Status Service
+### 7.3 State belongs to the Service
 
-Tab, Front Actor, Guest It's all re-established;Workspace Tie, state of operations and case permissions Service.
+The Tab, the Front Actor and the Guest can all be rebuilt; the Workspace binding, business state and instance permissions belong to the Service.
 
-### 7.4 The exact version is unchangeable
+### 7.4 An exact version is immutable
 
-`publisher/program@version` ♪ Once I'm in the middle of Actrium Accept, you must be permanently the same. package digest.
+Once Actrium accepts `publisher/program@version`, it must permanently correspond to the same package digest.
 
-### 7.5 Default Minimum Capabilities
+### 7.5 Minimal capability by default
 
-Capabilities that are undeclared, unauthorized or not implemented by the Actr Host are unavailable.
+Any capability that is undeclared, unauthorized, or not implemented by the Actr Host is unavailable.
 
-### 7.6 Platform limit visible
+### 7.6 Platform limits are shown explicitly
 
-The facts of moving end backstage limit, dross strength of the same process, out-of-line cancellation of information must be shown and cannot be masked in abstracto.
+Facts such as mobile background limits, same-process sandbox strength, and stale offline revocation information must be shown, not hidden behind abstract terms.
 
-### 7.7 Privacy depends on the weakest, not on the average.
+### 7.7 Privacy depends on the weakest link, not the average
 
-One controlled node cannot offset another unknown or uncontrolled node; there is no evidence to follow. Green only proves that the current level of readiness may be controlled, does not claim that the program is "absolutely free of loopholes" or that there was a whole world in which the whole picture existed.
+A controlled node cannot offset another unknown or uncontrolled node; lacking evidence cannot be treated as passing. Green only proves that egress may be controlled on the current ready cut; it does not claim the program is "absolutely free of vulnerabilities", nor does it imply there was ever a single moment when the whole graph existed together.
 
-## 8. v1 Scope
+## 8. v1 scope
 
 ### 8.1 Must deliver
 
-- macOS/Windows (a) Full closed ring of the desktop end;
-- iOS/Android The front desk runs and restores the closed loop;
-- `actr://` (a) Both intents to create and connect;
-- Program Catalog with Service Inventory;
-- Domain Name Publisher Query, parse.HTTPS Download, sign and digest Validation;
-- Fixed Native Front Host + Keel JS Guest;
-- Local Service Create, stop, start, connect, recycle and clear;
-- Workspace (a) Tie;
-- Realm signing keys, per-instance Realms and their Realm Profiles, identity, signaling and TURN short-lived credentials;
-- `ActorAssurance` / `ApplicationAssurance`, no root-dependent maps, the weakest items to be gathered `Ready` (a) Demonstration;
-- (a) Competence, quotas, audits and error pages;
-- Local development sources.
+- a complete closed loop on macOS/Windows desktop;
+- a foreground run-and-restore closed loop on iOS/Android;
+- opening and sharing Realm links (including the https form); creating instances from the program library;
+- the Program Catalog and the Service Inventory;
+- domain-based Publishers, HTTPS download, signature and digest verification;
+- a fixed Native Front Host + Keel JS Guest;
+- local Service create, stop, start, connect, trash and permanent deletion;
+- Workspace binding;
+- the Realm signing key, per-instance Realms and their Realm Profiles, identity, signaling and short-lived TURN credentials;
+- `ActorAssurance` / `ApplicationAssurance`, the unrooted dependency graph, weakest-link aggregation and `Ready` display;
+- permissions, quotas, audit and error pages;
+- local development sources.
 
-### 8.2 It can be postponed.
+### 8.2 Can be deferred
 
-- Marketplace (b) Trading capacity;
-- Service (b) Trans-equipment migration;
-- Shared attachment;
-- More Realm (b) The Confederation;
-- Forced independence OS Process Front;
-- Keel Native WASM Guest;
-- Version transparency log and recapable builder certificate.
+- Marketplace transaction capability;
+- cross-device Service migration;
+- shared attachment;
+- multi-Realm federation;
+- forcing an independent OS process for the Front;
+- the Keel Native WASM Guest;
+- a version transparency log and reproducible-build proofs.
 
-## 9. Successful definition
+## 9. Definition of success
 
-v1 It's not the sign that's made.“Can show one Keel Page”The following closed rings are established at the same time:
+v1's mark of success is not "can show a Keel page" — success means the following closed loop holds all at once:
 
-1. User installs program from a trusted coordinates.
-2. User Create Workspace-bound Service.
-3. Addressbar In situs Accessed ActorId the address of the connection.
-4. Front Only callable by a declared contract Service.
-5. Close, restart Actrium And then it's the same. Service ActorId Restore.
-6. The same exact version is still valid when running offline.
-7. Service Not online, not authorized,Realm There are different and operational errors when the incompatibility and the package are not compatible.
-8. Guest Excess of authority, time, memory or breakdown does not result in other Tab Business status is damaged.
-9. No green displays may continue to be displayed when a member of any chart becomes unknown, uncontrolled or guaranteed to hang, and the corresponding data flow is restricted.
+1. The user installs a signature-verified program.
+2. The user creates a Workspace-bound Service.
+3. The address bar shows the new instance's address in place.
+4. The Front can only call that Service through the declared contract.
+5. After closing and restarting Actrium, the same address restores the same Service identity.
+6. The same exact version can still be verified when run offline.
+7. Service offline, no permission, Realm unreachable, and package incompatibility each produce a distinct, actionable error.
+8. A Guest overstepping its bounds, timing out, exceeding memory, or crashing does not corrupt the business state of other Tabs.
+9. When any graph member becomes unknown, uncontrolled, or its assurance is suspended, green must stop being shown and the corresponding data flow must be restricted.

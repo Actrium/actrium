@@ -1,60 +1,47 @@
-# 12. Reference protocols, sample and terminology
+# 12. Reference protocols, samples, and terminology
 
-> This document gives us a discussionable view. v1 wire shape. Field name and endpoint path Yes. P0 schema The freeze may be adjusted before it is frozen; the borders of the object, identity and the synonym of security may not be changed.
+> This document gives a discussable v1 wire shape. Field names and endpoint paths may still be
+> adjusted before the P0 schema freezes; object boundaries, identity, and security semantics must
+> not change.
 
-## 1. URI Sample
+## 1. Realm link samples
 
-### Create
-
-```text
-actr://notes.example/team-notes@1.4.2
-```
-
-Create under a given domain (creates a new Realm; without `domain` the instance gets a local Realm):
+Syntax: see [Actr URI](../../../actr/protocols/uri.md).
 
 ```text
-actr://notes.example/team-notes@1.4.2?domain=acme.com
+actr://acme.com/k7m2q9xh                         ; open instance k7m2q9xh@acme.com
+actr://acme.com/notes/today?filter=assigned      ; an explicit readable RealmId, with a page path and query
+https://acme.com/i/k7m2q9xh                      ; https form, acme.com declares links: ["/i/"]
+actr://acme.com/2af01.k7m2q9xh                   ; an Actor within the instance (ActorId 2af01.k7m2q9xh@acme.com)
+actr://<installation-id>.actr.alt/h3x8p2wq       ; a local Realm, not shareable
 ```
 
-A Create URI does not carry a `label`. By default Actrium generates the new Realm's `label` at random (a short lowercase base32 string with no program name), and the human-readable name goes into the Realm Profile's `display_name`; by default the example above yields a Realm name such as `k7m2q9xh@acme.com`. The user may explicitly choose a readable `label` on the confirmation page; `notes` in the Attach example below is such an explicitly chosen name.
+By default Actrium generates the RealmId at random (a short lowercase base32 string, without the
+program name); the readable name goes into the Realm Profile's `display_name`. The user can
+explicitly switch to a readable RealmId on the create-confirmation page, as with `notes` in the
+example above.
 
-### Create + Guest route
+An Actor within an instance is identified by an ActorId, e.g. `2af01.k7m2q9xh@acme.com`: dropping
+`2af01.` gives the Realm name. Its link form is `actr://acme.com/2af01.k7m2q9xh`; this kind of
+link stops working once a program upgrade replaces the Actor, so instance links are the default
+for sharing. The program identity `publisher/program@version` is carried by the package manifest
+and the Actor credential.
 
-```text
-actr://notes.example/team-notes@1.4.2/today?filter=assigned
-```
-
-### Attach
-
-```text
-actr://notes.example/team-notes@1.4.2/today?service=2af01.notes%40acme.com
-```
-
-The decoded v1 ActorId:
-
-```text
-2af01.notes@acme.com
-```
-
-Here `notes@acme.com` is the Realm name: the Realm with Realm label `notes` under the Realm domain `acme.com`, i.e. one application instance. The ActorId only says which Actor in which Realm; the program identity `publisher/program@version` is carried by registration and the Actor credential, not by the ActorId.
-
-The current Actr legacy form `2af01@42/notes.example:team-notes:1.4.2` lacks a Realm name and embeds the program type; it can only be rewritten by an explicit import flow and cannot be used as a portable Attach URI. The earlier draft `2af01@42~dns:team.example/...` is withdrawn.
-
-### Development
-
-```text
-actr-dev://localhost:7443/team-notes@0.0.0-dev
-```
+Legacy forms (`actr://notes.example/team-notes@1.4.2?service=…`, or `2af01@42/notes.example:team-notes:1.4.2`
+with only a numeric `realm_id`) are always rejected and can only be imported through an explicit
+migration tool.
 
 ## 2. Publisher Profile
 
-The Publisher Profile is the optional `publisher` member of the authority descriptor (defined in Actr Authority Discovery §4.5), served from the Publisher domain's single bootstrap resource:
+The Publisher Profile is the optional `publisher` member of the authority descriptor (already
+defined in Actr Authority Discovery §4.5); its entry point is the Publisher domain's single
+bootstrap resource:
 
 ```text
 https://notes.example/.well-known/actr
 ```
 
-Example (the `publisher` member uses snake_case; `domain` must equal the host of `authority`; `program_resolver` is required and has no default):
+Sample (the `publisher` member uses snake_case; `domain` must match the `authority` hostname):
 
 ```json
 {
@@ -62,16 +49,14 @@ Example (the `publisher` member uses snake_case; `domain` must equal the host of
   "authority": "actr://notes.example",
   "services": [
     {
-      "rel": "packages",
-      "href": "https://packages.notes.example/actr/packages",
-      "protocol": "actr-packages/1"
+      "rel": "contracts",
+      "href": "https://notes.example/actr/contracts"
     }
   ],
   "publisher": {
     "schema": "actr.publisher/v1",
     "sequence": 17,
     "domain": "notes.example",
-    "program_resolver": "https://notes.example/actrium/programs/",
     "profile_signing_keys": [
       {
         "id": "publisher-root-1",
@@ -110,44 +95,31 @@ Example (the `publisher` member uses snake_case; `domain` must equal the host of
 }
 ```
 
-The `publisher.signature` object itself is excluded from the payload; the rest of the `publisher` member is canonicalized with RFC 8785 JCS and verified as a detached Ed25519 signature. `sequence` must increase monotonically. The parts of the descriptor outside `publisher` are unsigned and play no part in Publisher trust decisions.
+The `publisher.signature` object itself does not enter the payload; the rest of the `publisher`
+member's JSON is normalized per RFC 8785 JCS and verified as a detached Ed25519 signature.
+`sequence` must increase monotonically. The parts of the descriptor outside `publisher` are
+unsigned and play no part in Publisher trust decisions.
 
-## 3. Release metadata
+## 3. Package download
 
-Entry:
-
-```text
-https://notes.example/actrium/programs/team-notes/1.4.2/release.json
-```
-
-Example:
+Which package an instance runs is written into its Realm Profile's `package` (sample in §6.2):
 
 ```json
-{
-  "schemaVersion": 1,
-  "publisher": "notes.example",
-  "program": "team-notes",
-  "version": "1.4.2",
-  "packageUrl": "https://cdn.notes.example/actr/team-notes/1.4.2/package.actr",
-  "packageSha256": "f6d4...64hex",
-  "packageSize": 4829012,
-  "signingKeyId": "ed25519:2026-q2",
-  "publishedAt": "2026-06-01T10:00:00Z",
-  "status": "active",
-  "metadataExpiresAt": "2026-08-01T00:00:00Z",
-  "signature": {
-    "keyId": "ed25519:2026-q2",
-    "algorithm": "Ed25519",
-    "value": "<base64>"
-  }
+"package": {
+  "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+  "sha256": "<64 hex>"
 }
 ```
 
-Release It's... `signature` Also excluded. JCS payload Outside and by Publisher Profile Authorized. signing key Verify.
+Actrium downloads `href` per [Realm Profile protocol](../../../actr/protocols/realm-profile.md) §6
+(an HTTPS GET without credentials), checks `sha256`, and then verifies the manifest signature with
+the package signing key from the Publisher Profile (§2); the Actor type the manifest declares is
+the instance's program. The download address can be anywhere (a Publisher CDN, Loran package
+hosting, object storage) — it is not a trust source.
 
 ## 4. `.actr` Manifest
 
-Indications:
+Illustrative:
 
 ```toml
 publisher = "notes.example"
@@ -181,7 +153,7 @@ contract_manifest = "ui/capability-manifest.json"
 contract_digest = "sha256:<digest>"
 
 [actrium.service]
-primary_contract = "proto/primary-service.proto"
+contract = "proto/service.proto"
 protocol_fingerprint = "sha256:<digest>"
 
 [actrium.service.workspace]
@@ -208,7 +180,7 @@ data_classes = ["private"]
 
 [actrium.permissions.front]
 capabilities = [
-  "primary-service",
+  "service",
   "host:clipboard.write",
   "host:notifications"
 ]
@@ -257,8 +229,8 @@ path = "assets/icon.png"
 hash = "<sha256>"
 
 [[proto_files]]
-name = "primary-service.proto"
-path = "proto/primary-service.proto"
+name = "service.proto"
+path = "proto/service.proto"
 hash = "<sha256>"
 
 [lock_file]
@@ -266,9 +238,11 @@ path = "manifest.lock.toml"
 hash = "<sha256>"
 ```
 
-Official schema It's a decision to make. Actr Foundation manifest Keep back-compatibility and ensure that `[actrium]` Fields are also located manifest signature Coverage.
+The formal schema still needs to decide how to keep backward compatibility with the Actr base
+manifest, and to ensure `[actrium]` fields also fall within the scope the manifest signature
+covers.
 
-Native Capsule workload Additional requirements
+A Native Capsule workload additionally needs:
 
 ```toml
 [actrium.native_capsule]
@@ -282,7 +256,8 @@ dynamic_libraries = "sealed"
 ipc = ["actr.capability.v1"]
 ```
 
-Concurrent process `NativeCdylib` Do not use the profileAnd I can't judge him for that. `CONTROLLED`.
+An in-process `NativeCdylib` does not use this profile, and must not be rated `CONTROLLED` on that
+basis.
 
 ## 5. Keel Capability Manifest
 
@@ -295,11 +270,11 @@ Concurrent process `NativeCdylib` Do not use the profileAnd I can't judge him fo
     "react",
     "react/jsx-runtime",
     "keel/guest",
-    "host:primary-service",
+    "host:service",
     "host:clipboard"
   ],
   "hostModules": {
-    "primary-service": {
+    "service": {
       "rpc": [
         "notes.v1.NoteService.List",
         "notes.v1.NoteService.Get",
@@ -326,19 +301,21 @@ Concurrent process `NativeCdylib` Do not use the profileAnd I can't judge him fo
 }
 ```
 
-Actrium This document cannot be trusted; the results of the installation must be consistent with it.
+Actrium must not trust this file alone; the result of static installation analysis must agree with
+it.
 
-## 6. Realm Signing Keys and Realm Profile
+## 6. Realm signing key and Realm Profile
 
-### 6.1 Realm signing keys: authority descriptor extension
+### 6.1 Realm signing key: authority descriptor extension
 
-A domain publishes its Realm signing keys in the descriptor of that domain (the Actr authority without a port):
+A domain's Realm signing key is published in that domain's descriptor:
 
 ```text
 https://acme.com/.well-known/actr
 ```
 
-Sample (the `realm_signing_keys` member and the `realms` relation are defined in Actr Authority Discovery §4.3–4.4):
+Sample (the `realm_signing_keys` member and the `realms` relation are already defined in Actr
+Authority Discovery §4.3–4.4):
 
 ```json
 {
@@ -361,6 +338,7 @@ Sample (the `realm_signing_keys` member and the `realms` relation are defined in
       "protocol": "actr-realm-profile/1"
     }
   ],
+  "links": ["/i/"],
   "realm_signing_keys": {
     "sequence": 3,
     "keys": [
@@ -394,11 +372,24 @@ Sample (the `realm_signing_keys` member and the `realms` relation are defined in
 }
 ```
 
-`realm_signing_keys.keys` is the long-term trust root of every Realm under the domain; each entry in `rotations` is signed by its `from` key over the JCS form of `{from, to, public_key, sequence}`, where `sequence` is the member `sequence` that introduced it; removing a key from `keys` revokes every Realm Profile it signed; `realm_signing_keys.signature` is made by an `active` key over the JCS canonical form of the member with `signature` removed, covering `sequence`. The rest of the descriptor is unsigned and does not list Realms. The signaling, ice-config and other entries in `services` serve the authority itself and have nothing to do with the Realms under the domain; a Realm is reached only through the Realm Provider named in its Realm Profile, and clients must not use any other Realm Provider when the Realm Profile is unavailable, invalid or retired. The Realm Provider's own descriptor (`https://provider.example/.well-known/actr`) advertises its Realm management request endpoint with a `realm-management` link (protocol `actr-realm-management/1`).
+`realm_signing_keys.keys` is the long-term trust root for every Realm under that domain;
+`rotations` holds one entry per rotation, each signed by the `from` key over the JCS form of
+`{from, to, public_key, sequence}`, where `sequence` is the member `sequence` at which that
+rotation was introduced. Removing a key from `keys` revokes every Realm Profile it signed.
+`realm_signing_keys.signature` is signed by some `active` key over the JCS-normalized result of
+that member with `signature` removed, covering `sequence`. The rest of the descriptor is unsigned
+and does not list a Realm inventory. `links` declares that `https://acme.com/i/<realm_id>…` is the
+https form of a Realm link (Actr Authority Discovery §4.6); the prefix is chosen by the domain and
+has no default. The signaling, ice-config, and similar entries under `services` serve that
+authority itself and have nothing to do with the Realms under that domain; accessing a Realm only
+ever uses the Realm Provider named in its own Realm Profile, and no other Realm Provider may be
+used when that Realm Profile is unavailable, invalid, or retired. A Realm Provider's own descriptor
+(`https://provider.example/.well-known/actr`) separately publishes its management-request endpoint
+via a `realm-management` link (protocol `actr-realm-management/1`).
 
 ### 6.2 Realm Profile
 
-The entry point is the `realms` relation `href` plus the `label`:
+The entry point is the `realms` relation's `href` plus the `realm_id`:
 
 ```text
 https://realms.provider.example/acme.com/k7m2q9xh
@@ -414,6 +405,10 @@ Sample:
     "name": "k7m2q9xh@acme.com",
     "display_name": "Acme Notes",
     "status": "active"
+  },
+  "package": {
+    "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
+    "sha256": "<64 hex>"
   },
   "issuer": {
     "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
@@ -464,20 +459,31 @@ Sample:
 }
 ```
 
-`signature` is made by an `active` key from `realm_signing_keys`, and the Actor credential issuer is `realm.name`; the storage location does not affect validity, and an existing Realm Profile signed by a key that is later retired stays valid until a higher `sequence` supersedes it. Realm Profiles do not expire; rollback protection relies only on `sequence`. `provider.id` is the Realm Provider's normalized DNS authority and is immutable for the Realm's lifetime. Multiple signaling endpoints sharing a `control_plane_id` are replicas or failover entries of the same Realm Provider presence/control plane, not v1 federation. Rotating Realm issuer keys or changing endpoints within the same Realm Provider publishes a Realm Profile with a higher `sequence`; retirement publishes a new Realm Profile with `status` set to `retired`, which stays valid forever.
+`signature` is signed by an `active` key from `realm_signing_keys`; an Actor credential's issuer is
+exactly `realm.name`, and where the Realm Profile is stored does not affect its validity. An
+existing Realm Profile signed by a key that was later retired remains valid until superseded by a
+higher `sequence`. A Realm Profile carries no expiry; rollback protection relies solely on
+`sequence`. `provider.id` is the Realm Provider's normalized DNS authority and is immutable for the
+life of the Realm. Multiple signaling endpoints sharing a `control_plane_id` are replicas or
+failover entry points of the same Realm Provider presence/control plane, not v1 federation.
+`package` gives the package the instance runs (§3); upgrading the program means publishing a Realm
+Profile with a different `package` and a higher `sequence`. Rotating the Realm issuer key or
+changing endpoints under the same Realm Provider likewise means publishing a Realm Profile with a
+higher `sequence`; retiring publishes a new Realm Profile with `status` set to `retired`, valid
+forever after.
 
 ## 7. Service Inventory Record
 
 ```json
 {
-  "actorId": "2af01.notes@acme.com",
+  "realm": "notes@acme.com",
+  "serviceActorId": "2af01.notes@acme.com",
   "program": {
     "publisher": "notes.example",
     "name": "team-notes",
     "version": "1.4.2",
     "packageDigest": "sha256:..."
   },
-  "realm": "notes@acme.com",
   "workspaceId": "ws_01...",
   "runtime": {
     "placement": "local",
@@ -496,7 +502,7 @@ Sample:
 }
 ```
 
-Other Organiser actor private key, Workspace credential or signaling/TURN token.
+Does not include the Actor private key, a Workspace credential, or a signaling/TURN token.
 
 ## 8. Permission Grant
 
@@ -522,7 +528,7 @@ Other Organiser actor private key, Workspace credential or signaling/TURN token.
 
 ## 9. Front Launch Context
 
-Guest Read only:
+Read-only for the Guest:
 
 ```json
 {
@@ -553,13 +559,13 @@ Not provided:
 - Front/Service credential;
 - session id/secret;
 - Workspace path;
-- Actor arbitrary call API;
+- an arbitrary Actor-call API;
 - Realm secret;
 - signaling/TURN endpoint credential.
 
-### 9.1 Privacy Context
+### 9.1 Privacy state context
 
-Guest Only the minimalized user can be seen in summary:
+The Guest sees only a minimized, user-facing summary:
 
 ```json
 {
@@ -574,26 +580,19 @@ Guest Only the minimalized user can be seen in summary:
 }
 ```
 
-Guest Not obtained Actor Figure, original evidence, attestation token Or hidden. ActorId. See the full object [13](13-privacy-state-and-aggregation.md); semantics [docs/security](../../architecture/security/actrium/README.zh.md).
+The Guest does not get the Actor graph, raw evidence, an attestation token, or a hidden ActorId.
+For the full object see [13](13-privacy-state-and-aggregation.md); for semantics see
+[docs/security](../../architecture/security/actrium/README.zh.md).
 
-## 10. System protocol error code
+## 10. System protocol error codes
 
 ### URI
 
 ```text
 URI_SCHEME_INVALID
-URI_PUBLISHER_INVALID
-URI_PORT_NOT_ALLOWED
-URI_PROGRAM_INVALID
-URI_VERSION_REQUIRED
-URI_VERSION_INVALID
-URI_RESERVED_DUPLICATE
-URI_ACTOR_ID_INVALID
-URI_ACTOR_TYPE_MISMATCH
 URI_DOMAIN_INVALID
-URI_DOMAIN_NOT_ALLOWED
-URI_REALM_REQUIRED
-URI_REALM_MISMATCH
+URI_LABEL_INVALID
+URI_LEGACY_FORM
 URI_LOCAL_REALM_FOREIGN
 ```
 
@@ -604,8 +603,6 @@ PUBLISHER_PROFILE_INVALID
 PUBLISHER_PROFILE_EXPIRED
 PUBLISHER_PROFILE_ROLLBACK
 PUBLISHER_IDENTITY_CHANGED
-RELEASE_NOT_FOUND
-RELEASE_SIGNATURE_INVALID
 PACKAGE_DOWNLOAD_FAILED
 PACKAGE_DIGEST_MISMATCH
 PACKAGE_EQUIVOCATION
@@ -648,6 +645,7 @@ SERVICE_SUSPENDED
 SERVICE_OFFLINE
 SERVICE_UNREACHABLE
 SERVICE_NOT_FOUND
+SERVICE_ACTOR_TYPE_MISMATCH
 SERVICE_MIGRATING
 SERVICE_TRASHED
 SERVICE_DELETED
@@ -709,7 +707,7 @@ NATIVE_NOT_MEASURABLE
 CHANNEL_INVALID
 ```
 
-## 11. Status Count
+## 11. State enumerations
 
 ### Program Release
 
@@ -818,9 +816,10 @@ closed
 
 ## 12. Glossary
 
-Terms used in these documents are defined in one place, the [glossary](../../GLOSSARY.zh.md); they are not repeated here.
+The terms used in this document are defined in one place, the [glossary](../../GLOSSARY.zh.md);
+they are not repeated here.
 
-## 13. Norms and practice references
+## 13. Specification and implementation references
 
 ### Actrium
 
