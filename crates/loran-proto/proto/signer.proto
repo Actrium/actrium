@@ -17,6 +17,9 @@ service Signer {
   // Retrieve the verifying key for the given key_id
   rpc GetVerifyingKey(GetVerifyingKeyRequest) returns (GetVerifyingKeyResponse);
 
+  // Return the non-expiring key with the given name, generating it if missing
+  rpc EnsureNamedKey(EnsureNamedKeyRequest) returns (EnsureNamedKeyResponse);
+
   // Health check
   rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
 }
@@ -88,6 +91,26 @@ message GetVerifyingKeyResponse {
 
   // Tolerance period (seconds)
   required uint64 tolerance_seconds = 4;
+}
+
+// ============================================================================
+// Named key messages
+// ============================================================================
+
+message EnsureNamedKeyRequest {
+  // Key name, e.g. "realm-signing:provider.example"
+  required string name = 1;
+
+  // nonce-auth credential
+  required admin.v1.NonceCredential credential = 2;
+}
+
+message EnsureNamedKeyResponse {
+  // Key ID used for Sign
+  required uint32 key_id = 1;
+
+  // Verifying key (Base64-encoded Ed25519 verifying key, 32 bytes)
+  required string verifying_key = 2;
 }
 
 // ============================================================================

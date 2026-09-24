@@ -1,11 +1,11 @@
 //! Signer gRPC client
 
 use crate::error::SignerError;
-use crate::types::sign_request_payload;
+use crate::types::{ensure_named_key_payload, sign_request_payload};
 use actrix_proto::admin::v1::NonceCredential;
 use actrix_proto::signer::v1::{
-    GenerateSigningKeyRequest, GetVerifyingKeyRequest, HealthCheckRequest, SignRequest,
-    signer_client::SignerClient,
+    EnsureNamedKeyRequest, GenerateSigningKeyRequest, GetVerifyingKeyRequest, HealthCheckRequest,
+    SignRequest, signer_client::SignerClient,
 };
 use base64::prelude::*;
 use ed25519_dalek::VerifyingKey;
@@ -295,6 +295,40 @@ impl GrpcClient {
             .map_err(|e| SignerError::Internal(format!("Invalid verifying key: {e}")))?;
 
         Ok((key_array, resp.expires_at, resp.tolerance_seconds))
+    }
+
+    /// Return the non-expiring key named `name`, generating it if missing.
+    ///
+    /// Returns (key_id, verifying_key_bytes [u8;32])
+    pub async fn ensure_named_key(&mut self, name: &str) -> Result<(u32, [u8; 32]), SignerError> {
+        let nonce_credential = CredentialBuilder::new(self.actrix_shared_key.as_bytes())
+            .sign(ensure_named_key_payload(name).as_bytes())?;
+        let credential = NonceCredential {
+            timestamp: nonce_credential.timestamp,
+            nonce: nonce_credential.nonce,
+            signature: nonce_credential.signature,
+        };
+
+        let request = tonic::Request::new(EnsureNamedKeyRequest {
+            name: name.to_string(),
+            credential,
+        });
+        let resp = self
+            .client
+            .ensure_named_key(request)
+            .await
+            .map_err(|e| SignerError::Internal(format!("gRPC EnsureNamedKey failed: {e}")))?
+            .into_inner();
+
+        let key_array: [u8; 32] = BASE64_STANDARD
+            .decode(&resp.verifying_key)
+            .map_err(|e| SignerError::Internal(format!("Invalid verifying key base64: {e}")))?
+            .try_into()
+            .map_err(|_| SignerError::Internal("Verifying key must be 32 bytes".to_string()))?;
+        VerifyingKey::from_bytes(&key_array)
+            .map_err(|e| SignerError::Internal(format!("Invalid verifying key: {e}")))?;
+
+        Ok((resp.key_id, key_array))
     }
 
     /// Health check

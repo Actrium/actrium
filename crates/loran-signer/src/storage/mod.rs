@@ -107,6 +107,16 @@ impl KeyStorage {
         }
     }
 
+    /// Return the non-expiring key named `name`, generating it if missing
+    pub async fn ensure_named_key(&self, name: &str) -> SignerResult<KeyPair> {
+        match self {
+            Self::Sqlite(b) => b.ensure_named_key(name).await,
+
+            #[cfg(feature = "backend-postgres")]
+            Self::Postgres(b) => b.ensure_named_key(name).await,
+        }
+    }
+
     /// Look up the verifying public key by key_id
     pub async fn get_public_key(&self, key_id: u32) -> SignerResult<Option<String>> {
         match self {

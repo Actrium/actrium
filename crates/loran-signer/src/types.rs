@@ -18,6 +18,11 @@ pub fn sign_request_payload(key_id: u32, message: &[u8]) -> String {
     )
 }
 
+/// Build the nonce-auth payload for an EnsureNamedKey request.
+pub fn ensure_named_key_payload(name: &str) -> String {
+    format!("{SIGN_REQUEST_AUTH_VERSION}:ensure_named_key:{name}")
+}
+
 /// Key pair structure (internal use, stores public key reference)
 #[derive(Debug, Clone)]
 pub struct KeyPair {

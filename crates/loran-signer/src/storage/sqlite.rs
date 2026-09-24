@@ -18,7 +18,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Current on-disk schema version for `signer_keys.db`, stored in
 /// `PRAGMA user_version`.
-const SIGNER_SCHEMA_VERSION: i64 = 1;
+const SIGNER_SCHEMA_VERSION: i64 = 2;
 
 /// SQLite storage backend.
 #[derive(Clone)]
@@ -38,6 +38,30 @@ impl std::fmt::Debug for SqliteBackend {
 }
 
 impl SqliteBackend {
+    /// Generate an Ed25519 key pair, returning the Base64 verifying key and
+    /// the stored (encrypted when enabled) signing key.
+    fn new_key_material(&self) -> SignerResult<(String, String)> {
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let verifying_key_b64 = BASE64_STANDARD.encode(signing_key.verifying_key().as_bytes());
+        let signing_key_b64 = BASE64_STANDARD.encode(signing_key.as_bytes());
+        Ok((verifying_key_b64, self.encryptor.encrypt(&signing_key_b64)?))
+    }
+
+    async fn named_key(&self, name: &str) -> SignerResult<Option<KeyPair>> {
+        let row = sqlx::query_as::<_, (i64, String)>(
+            "SELECT k.key_id, k.public_key FROM key_names n JOIN keys k ON k.key_id = n.key_id \
+             WHERE n.name = ?",
+        )
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| SignerError::Internal(format!("Failed to query named key {name}: {e}")))?;
+        Ok(row.map(|(key_id, verifying_key)| KeyPair {
+            key_id: key_id as u32,
+            verifying_key,
+        }))
+    }
+
     /// Create a new SQLite backend instance
     ///
     /// # Arguments
@@ -130,6 +154,20 @@ impl KeyStorageBackend for SqliteBackend {
             .await
             .map_err(|e| SignerError::Internal(format!("Failed to create index: {e}")))?;
 
+        // Named keys (schema v2): stable names such as `realm-signing:<domain>`
+        // for keys that never expire.
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS key_names (
+                name TEXT PRIMARY KEY,
+                key_id INTEGER NOT NULL UNIQUE REFERENCES keys(key_id)
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| SignerError::Internal(format!("Failed to create key_names table: {e}")))?;
+
         // Stamp the schema version once the DDL is in place. Skip the write when
         // the database is already at the current version so a healthy startup
         // performs no header write.
@@ -147,16 +185,7 @@ impl KeyStorageBackend for SqliteBackend {
     }
 
     async fn generate_and_store_key(&self) -> SignerResult<KeyPair> {
-        // Generate an Ed25519 key pair
-        let signing_key = SigningKey::generate(&mut OsRng);
-        let verifying_key = signing_key.verifying_key();
-
-        // Encode as Base64
-        let verifying_key_b64 = BASE64_STANDARD.encode(verifying_key.as_bytes());
-        let signing_key_b64 = BASE64_STANDARD.encode(signing_key.as_bytes());
-
-        // Encrypt the signing key (if enabled)
-        let encrypted_signing_key = self.encryptor.encrypt(&signing_key_b64)?;
+        let (verifying_key_b64, encrypted_signing_key) = self.new_key_material()?;
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -189,6 +218,55 @@ impl KeyStorageBackend for SqliteBackend {
 
         Ok(KeyPair {
             key_id,
+            verifying_key: verifying_key_b64,
+        })
+    }
+
+    async fn ensure_named_key(&self, name: &str) -> SignerResult<KeyPair> {
+        if let Some(key_pair) = self.named_key(name).await? {
+            return Ok(key_pair);
+        }
+        let (verifying_key_b64, encrypted_signing_key) = self.new_key_material()?;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        let internal =
+            |e: sqlx::Error| SignerError::Internal(format!("Failed to store named key: {e}"));
+        let mut tx = self.pool.begin().await.map_err(internal)?;
+        let key_id = sqlx::query(
+            "INSERT INTO keys (public_key, secret_key, created_at, expires_at) VALUES (?1, ?2, ?3, 0)",
+        )
+        .bind(&verifying_key_b64)
+        .bind(&encrypted_signing_key)
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .map_err(internal)?
+        .last_insert_rowid();
+        let inserted = sqlx::query(
+            "INSERT INTO key_names (name, key_id) VALUES (?1, ?2) ON CONFLICT(name) DO NOTHING",
+        )
+        .bind(name)
+        .bind(key_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(internal)?
+        .rows_affected();
+        if inserted == 0 {
+            // Another caller named a key first; drop ours and return theirs.
+            tx.rollback().await.map_err(internal)?;
+            return self
+                .named_key(name)
+                .await?
+                .ok_or_else(|| SignerError::Internal(format!("Named key {name} vanished")));
+        }
+        tx.commit().await.map_err(internal)?;
+
+        crate::recording::info!("Generated named key {} with key_id: {}", name, key_id);
+        Ok(KeyPair {
+            key_id: key_id as u32,
             verifying_key: verifying_key_b64,
         })
     }
@@ -389,6 +467,42 @@ mod tests {
             verifying_key.verify(message, &sig).is_ok(),
             "Signature must be valid"
         );
+    }
+
+    #[tokio::test]
+    async fn named_key_is_stable_and_never_expires() {
+        let temp_dir = tempdir().unwrap();
+        let backend = create_test_backend(temp_dir.path()).await;
+
+        let first = backend
+            .ensure_named_key("realm-signing:a.example")
+            .await
+            .unwrap();
+        let again = backend
+            .ensure_named_key("realm-signing:a.example")
+            .await
+            .unwrap();
+        let other = backend
+            .ensure_named_key("realm-signing:b.example")
+            .await
+            .unwrap();
+        assert_eq!(first.key_id, again.key_id);
+        assert_eq!(first.verifying_key, again.verifying_key);
+        assert_ne!(first.key_id, other.key_id);
+
+        let record = backend.get_key_record(first.key_id).await.unwrap().unwrap();
+        assert_eq!(record.expires_at, 0);
+        assert_eq!(backend.sign(first.key_id, b"m").await.unwrap().len(), 64);
+
+        // Survives a reopen of the same database.
+        drop(backend);
+        let backend = create_test_backend(temp_dir.path()).await;
+        let reopened = backend
+            .ensure_named_key("realm-signing:a.example")
+            .await
+            .unwrap();
+        assert_eq!(reopened.key_id, first.key_id);
+        assert_eq!(backend.get_key_count().await.unwrap(), 2);
     }
 
     #[tokio::test]

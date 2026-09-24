@@ -1,6 +1,10 @@
 //! Signer gRPC service implementation
 
-use crate::{error::SignerError, storage::KeyStorage, types::sign_request_payload};
+use crate::{
+    error::SignerError,
+    storage::KeyStorage,
+    types::{ensure_named_key_payload, sign_request_payload},
+};
 use nonce_auth::{CredentialVerifier, NonceError, storage::NonceStorage};
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
@@ -218,6 +222,36 @@ impl Signer for SignerGrpcService {
             verifying_key: key_record.public_key,
             expires_at: key_record.expires_at,
             tolerance_seconds: self.tolerance_seconds,
+        }))
+    }
+
+    /// Return the non-expiring key with the given name, generating it if missing
+    async fn ensure_named_key(
+        &self,
+        request: Request<EnsureNamedKeyRequest>,
+    ) -> Result<Response<EnsureNamedKeyResponse>, Status> {
+        let req = request.into_inner();
+        self.verify_credential(&req.credential, &ensure_named_key_payload(&req.name))
+            .await
+            .map_err(Status::from)?;
+        if req.name.is_empty() {
+            return Err(Status::invalid_argument("key name is empty"));
+        }
+
+        let key_pair = self
+            .storage
+            .ensure_named_key(&req.name)
+            .await
+            .map_err(Status::from)?;
+        crate::recording::info!(
+            "Named key '{}' resolved to key_id: {}",
+            req.name,
+            key_pair.key_id
+        );
+
+        Ok(Response::new(EnsureNamedKeyResponse {
+            key_id: key_pair.key_id,
+            verifying_key: key_pair.verifying_key,
         }))
     }
 

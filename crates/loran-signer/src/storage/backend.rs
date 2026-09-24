@@ -27,6 +27,12 @@ pub trait KeyStorageBackend: Send + Sync {
     /// Key pair structure containing key_id and verifying_key (Base64-encoded 32-byte verifying public key)
     async fn generate_and_store_key(&self) -> SignerResult<KeyPair>;
 
+    /// Return the key named `name`, generating and storing it if missing
+    ///
+    /// Named keys never expire. Concurrent calls for the same name return the
+    /// same key.
+    async fn ensure_named_key(&self, name: &str) -> SignerResult<KeyPair>;
+
     /// Query the verifying public key by key_id
     ///
     /// # Arguments

@@ -133,6 +133,21 @@ impl PostgresBackend {
         Ok(backend)
     }
 
+    async fn named_key(&self, name: &str) -> SignerResult<Option<KeyPair>> {
+        let row = sqlx::query_as::<_, (i32, String)>(
+            "SELECT k.key_id, k.public_key FROM key_names n JOIN keys k ON k.key_id = n.key_id \
+             WHERE n.name = $1",
+        )
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| SignerError::Internal(format!("Failed to query named key {name}: {e}")))?;
+        Ok(row.map(|(key_id, verifying_key)| KeyPair {
+            key_id: key_id as u32,
+            verifying_key,
+        }))
+    }
+
     /// Prepare a plaintext Base64 signing key for the `secret_key` column.
     fn store_secret(&self, signing_key_b64: &str) -> SignerResult<String> {
         wrap_secret(&self.encryptor, signing_key_b64)
@@ -235,6 +250,20 @@ impl KeyStorageBackend for PostgresBackend {
         .await
         .map_err(|e| SignerError::Internal(format!("Failed to create index: {e}")))?;
 
+        // Named keys: stable names such as `realm-signing:<domain>` for keys
+        // that never expire.
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS key_names (
+                name TEXT PRIMARY KEY,
+                key_id INTEGER NOT NULL UNIQUE REFERENCES keys(key_id)
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| SignerError::Internal(format!("Failed to create key_names table: {e}")))?;
+
         crate::recording::debug!("PostgreSQL tables and indexes initialized");
 
         // When a KEK is configured, fail closed: convert any legacy plaintext (v0)
@@ -301,6 +330,57 @@ impl KeyStorageBackend for PostgresBackend {
 
         Ok(KeyPair {
             key_id,
+            verifying_key: verifying_key_b64,
+        })
+    }
+
+    async fn ensure_named_key(&self, name: &str) -> SignerResult<KeyPair> {
+        if let Some(key_pair) = self.named_key(name).await? {
+            return Ok(key_pair);
+        }
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let verifying_key_b64 = BASE64_STANDARD.encode(signing_key.verifying_key().as_bytes());
+        let stored_secret = self.store_secret(&BASE64_STANDARD.encode(signing_key.as_bytes()))?;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        let internal =
+            |e: sqlx::Error| SignerError::Internal(format!("Failed to store named key: {e}"));
+        let mut tx = self.pool.begin().await.map_err(internal)?;
+        let (key_id,) = sqlx::query_as::<_, (i32,)>(
+            "INSERT INTO keys (public_key, secret_key, created_at, expires_at) \
+             VALUES ($1, $2, $3, 0) RETURNING key_id",
+        )
+        .bind(&verifying_key_b64)
+        .bind(&stored_secret)
+        .bind(now)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(internal)?;
+        let inserted = sqlx::query(
+            "INSERT INTO key_names (name, key_id) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING",
+        )
+        .bind(name)
+        .bind(key_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(internal)?
+        .rows_affected();
+        if inserted == 0 {
+            // Another caller named a key first; drop ours and return theirs.
+            tx.rollback().await.map_err(internal)?;
+            return self
+                .named_key(name)
+                .await?
+                .ok_or_else(|| SignerError::Internal(format!("Named key {name} vanished")));
+        }
+        tx.commit().await.map_err(internal)?;
+
+        crate::recording::info!("Generated named key {} with key_id: {}", name, key_id);
+        Ok(KeyPair {
+            key_id: key_id as u32,
             verifying_key: verifying_key_b64,
         })
     }
