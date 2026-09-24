@@ -69,7 +69,7 @@ struct KeychainPublisherAuthProvider {
 impl actr_hyper::PublisherAuthProvider for KeychainPublisherAuthProvider {
     fn sign(
         &self,
-        realm_id: u32,
+        realm: &str,
         actr_type: &actr_protocol::ActrType,
         target: &str,
         manifest_raw: &[u8],
@@ -90,7 +90,7 @@ impl actr_hyper::PublisherAuthProvider for KeychainPublisherAuthProvider {
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&key_arr);
         actr_hyper::PublisherRegistrationAuth::sign(
             &signing_key,
-            realm_id,
+            realm,
             actr_type,
             target,
             manifest_raw,
@@ -106,7 +106,8 @@ fn keychain_provider_from_env() -> Option<std::sync::Arc<dyn actr_hyper::Publish
     })
 }
 
-fn load_package_public_key() -> Result<Vec<u8>> {    let key_path = public_key_path();
+fn load_package_public_key() -> Result<Vec<u8>> {
+    let key_path = public_key_path();
     let value: Value =
         serde_json::from_reader(std::fs::File::open(&key_path).with_context(|| {
             format!(
@@ -164,8 +165,8 @@ async fn main() -> Result<()> {
         .map(|v| v == "production")
         .unwrap_or(false)
     {
-        let issuer_endpoint =
-            env::var("ISSUER_ENDPOINT").unwrap_or_else(|_| "http://127.0.0.1:8081/issuer".to_string());
+        let issuer_endpoint = env::var("ISSUER_ENDPOINT")
+            .unwrap_or_else(|_| "http://127.0.0.1:8081/issuer".to_string());
         let base_endpoint = issuer_endpoint.trim_end_matches("/issuer").to_string();
         Arc::new(RegistryTrust::new(base_endpoint))
     } else {

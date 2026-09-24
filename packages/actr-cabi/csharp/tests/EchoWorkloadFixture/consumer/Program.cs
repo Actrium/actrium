@@ -22,7 +22,7 @@ try
     if (info.AbiVersion != 1)
         throw new InvalidOperationException("ABI version mismatch: " + info.AbiVersion);
 
-    const string ExpectedSender = "1a2b3c@7/acme/AskService@1.0.0";
+    const string ExpectedSender = "1a2b3c.test@example.com";
     byte[] expectedStreamPayload = Encoding.UTF8.GetBytes("native-stream-payload-v1");
     byte[] expectedRequestPayload = Encoding.UTF8.GetBytes("native-reverse-request-v1");
     byte[] expectedResponsePayload = Encoding.UTF8.GetBytes("csharp-reverse-response-v1");

@@ -8,7 +8,7 @@ fn parses_full_toml_document_as_value_table() {
 name = "demo1"
 
 [network]
-realm_id = 2368266035
+realm = "dev@example.com"
 "#,
         ".actr/config.toml",
     )
@@ -82,11 +82,11 @@ fn apply_key_to_config_parses_bool_and_integer_fields() {
     assert_eq!(config.cache.auto_lock, Some(true));
     assert_eq!(config.ui.non_interactive, Some(true));
 
-    // realm_id accepts both bare number and quoted string.
-    ConfigCommand::apply_key_to_config(&mut config, "network.realm_id", "4242").unwrap();
-    assert_eq!(config.network.realm_id, Some(4242));
-    ConfigCommand::apply_key_to_config(&mut config, "network.realm_id", "\"9999\"").unwrap();
-    assert_eq!(config.network.realm_id, Some(9999));
+    // realm accepts both bare and quoted Realm names.
+    ConfigCommand::apply_key_to_config(&mut config, "network.realm", "dev@example.com").unwrap();
+    assert_eq!(config.network.realm.as_deref(), Some("dev@example.com"));
+    ConfigCommand::apply_key_to_config(&mut config, "network.realm", "\"qa@example.com\"").unwrap();
+    assert_eq!(config.network.realm.as_deref(), Some("qa@example.com"));
 }
 
 #[test]
@@ -99,9 +99,8 @@ fn apply_key_to_config_rejects_unknown_key_and_bad_values() {
         ConfigCommand::apply_key_to_config(&mut config, "cache.auto_lock", "maybe").unwrap_err();
     assert!(format!("{err}").contains("expects a boolean"));
 
-    let err =
-        ConfigCommand::apply_key_to_config(&mut config, "network.realm_id", "abc").unwrap_err();
-    assert!(format!("{err}").contains("expects a positive integer"));
+    let err = ConfigCommand::apply_key_to_config(&mut config, "network.realm", "4242").unwrap_err();
+    assert!(format!("{err}").contains("expects a Realm name"));
 }
 
 #[test]
@@ -134,7 +133,7 @@ fn unset_key_from_config_clears_and_reports_presence() {
 #[test]
 fn merge_values_overlays_tables_and_scalars() {
     let mut base = parse_toml_document_value(
-        "[publisher]\nname = \"old\"\n[network]\nrealm_id = 1\n",
+        "[publisher]\nname = \"old\"\n[network]\nrealm = \"dev@example.com\"\n",
         "base",
     )
     .unwrap();
@@ -155,7 +154,7 @@ fn merge_values_overlays_tables_and_scalars() {
     );
     // Untouched table preserved.
     assert_eq!(
-        ConfigCommand::get_nested_value(&base, "network.realm_id"),
-        Some(&Value::Integer(1))
+        ConfigCommand::get_nested_value(&base, "network.realm"),
+        Some(&Value::String("dev@example.com".into()))
     );
 }

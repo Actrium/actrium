@@ -10,7 +10,7 @@ url = "ws://127.0.0.1:8081/signaling/ws"
 url = "http://127.0.0.1:8081/issuer"
 
 [deployment]
-realm_id = __REALM_ID__
+realm = "__REALM__"
 realm_secret = "__REALM_SECRET__"
 
 [[trust]]

@@ -257,14 +257,14 @@ if ! command -v sqlite3 > /dev/null 2>&1; then
     exit 1
 fi
 
-# Insert realm data (realm_id = 1001, matching actr.toml config)
-REALM_ID=1001
-sqlite3 "$DB_PATH" "INSERT OR IGNORE INTO realm (realm_id, name, status, expires_at, created_at, updated_at) VALUES ($REALM_ID, 'e2e-realm', 'Normal', NULL, strftime('%s','now'), strftime('%s','now'))"
+# Insert realm data (matching actr.toml config)
+REALM=ws-echo@example.com
+sqlite3 "$DB_PATH" "INSERT OR IGNORE INTO realm (name, status, expires_at, created_at, updated_at) VALUES ('$REALM', 'Normal', NULL, strftime('%s','now'), strftime('%s','now'))"
 
 # Verify insertion
-REALM_COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM realm WHERE realm_id = $REALM_ID")
+REALM_COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM realm WHERE name = '$REALM'")
 if [ "$REALM_COUNT" -ge 1 ]; then
-    echo -e "${GREEN}✅ Realm $REALM_ID written to database${NC}"
+    echo -e "${GREEN}✅ Realm $REALM written to database${NC}"
 else
     echo -e "${RED}❌ Realm insertion failed${NC}"
     exit 1

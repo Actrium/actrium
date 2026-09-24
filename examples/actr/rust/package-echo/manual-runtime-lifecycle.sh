@@ -443,8 +443,8 @@ EXPIRES_AT="$((NOW + 86400 * 365))"
 
 sqlite3 "$ACTRIX_DB" <<SQL
 INSERT OR IGNORE INTO realm
-    (id, name, status, enabled, created_at, secret_current)
-VALUES (1001, 'package-echo-realm', 'Active', 1, strftime('%s','now'), '');
+    (name, status, enabled, created_at, secret_current)
+VALUES ('package-echo@example.com', 'Active', 1, strftime('%s','now'), '');
 
 INSERT OR IGNORE INTO publisher
     (name, public_key, key_id, contact, status, created_at, updated_at, verified_at, key_expires_at)

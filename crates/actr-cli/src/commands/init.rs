@@ -42,6 +42,11 @@ pub struct InitCommand {
     /// Publisher for generated actor types (overrides CLI config default: acme)
     #[arg(long)]
     publisher: Option<String>,
+
+    /// Realm name the generated config joins, `<realm_id>@<domain>`
+    /// (for example `dev@example.com`)
+    #[arg(long)]
+    pub realm: Option<String>,
 }
 
 #[async_trait]
@@ -78,6 +83,7 @@ impl InitCommand {
         let signaling_url =
             self.prompt_if_missing("signaling server URL", self.signaling.as_ref())?;
 
+        let realm = self.required_realm()?;
         let echo_role = self.resolve_template_role()?;
 
         // Resolve effective publisher from CLI args and config
@@ -114,7 +120,8 @@ impl InitCommand {
                     "role=both is only supported for the echo template".to_string(),
                 ));
             }
-            self.execute_both(&name, &signaling_url, publisher).await?;
+            self.execute_both(&name, &signaling_url, publisher, &realm)
+                .await?;
             return Ok(());
         }
 
@@ -160,6 +167,7 @@ impl InitCommand {
             is_current_dir: project_dir == Path::new("."),
             echo_role,
             publisher: publisher.to_string(),
+            realm,
             is_both: false,
         };
 
@@ -236,6 +244,19 @@ impl InitCommand {
                 format!("{label} only supports --role app."),
             )),
         }
+    }
+
+    /// The Realm name from `--realm`. There is no default Realm.
+    fn required_realm(&self) -> Result<String> {
+        let realm = self.realm.as_deref().map(str::trim).unwrap_or_default();
+        if realm.is_empty() {
+            return Err(ActrCliError::InvalidProject(
+                "--realm is required, for example --realm dev@example.com".to_string(),
+            ));
+        }
+        actr_protocol::uri::parse_realm_name(realm)
+            .map_err(|e| ActrCliError::InvalidProject(format!("Invalid --realm '{realm}': {e}")))?;
+        Ok(realm.to_string())
     }
 
     /// Resolve the effective publisher, applying precedence:
@@ -336,7 +357,13 @@ impl InitCommand {
     }
 
     /// Execute initialization when role=both: generate echo-app and echo-service projects.
-    async fn execute_both(&self, name: &str, signaling_url: &str, publisher: &str) -> Result<()> {
+    async fn execute_both(
+        &self,
+        name: &str,
+        signaling_url: &str,
+        publisher: &str,
+        realm: &str,
+    ) -> Result<()> {
         let (parent_dir, _ignored_project_name) = self.resolve_project_info(name)?;
 
         // Determine concrete subdirectories for app and service.
@@ -397,6 +424,7 @@ impl InitCommand {
             is_current_dir: false,
             echo_role: Some(EchoRole::App),
             publisher: publisher.to_string(),
+            realm: realm.to_string(),
             is_both: true,
         };
 
@@ -409,6 +437,7 @@ impl InitCommand {
             is_current_dir: false,
             echo_role: Some(EchoRole::Service),
             publisher: publisher.to_string(),
+            realm: realm.to_string(),
             is_both: true,
         };
 

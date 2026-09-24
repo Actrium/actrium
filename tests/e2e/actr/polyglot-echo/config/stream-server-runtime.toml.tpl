@@ -7,7 +7,7 @@ url = "ws://127.0.0.1:__HTTP_PORT__/signaling/ws"
 url = "http://127.0.0.1:__HTTP_PORT__/issuer"
 
 [deployment]
-realm_id = __REALM_ID__
+realm = "__REALM__"
 
 [discovery]
 visible = true

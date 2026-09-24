@@ -62,7 +62,7 @@ url = "ws://127.0.0.1:8080"
 url = "http://127.0.0.1:8080/issuer"
 
 [system.deployment]
-realm_id = 1001
+realm = "dev@example.com"
 "#,
     )
     .unwrap();
@@ -155,7 +155,7 @@ url = "ws://127.0.0.1:8080"
 url = "http://127.0.0.1:8080/issuer"
 
 [system.deployment]
-realm_id = 1001
+realm = "dev@example.com"
 "#,
     )
     .unwrap();
@@ -283,7 +283,7 @@ url = "ws://127.0.0.1:8080"
 url = "http://127.0.0.1:8080/issuer"
 
 [system.deployment]
-realm_id = 1001
+realm = "dev@example.com"
 "#,
     )
     .unwrap();

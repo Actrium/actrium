@@ -10,7 +10,7 @@ source "$SCRIPT_DIR/lib/readiness.sh"
 
 HTTP_PORT=8081
 ICE_PORT=3478
-REALM_ID=""
+REALM=""
 ADMIN_PASSWORD="e2e-test-password"
 PUBLISHER="${PUBLISHER:-e2e.actrium.test}"
 ACTRIX_BIN="${ACTRIX_BIN:-}"
@@ -265,7 +265,7 @@ capture_diagnostics() {
             sqlite3 "$db_path" ".tables" 2>/dev/null || true
             echo "--- Actor registry ---"
             sqlite3 "$db_path" \
-                "SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status, last_heartbeat_at FROM actor_registry;" \
+                "SELECT actor_realm, actor_publisher, actor_device_name, service_name, status, last_heartbeat_at FROM actor_registry;" \
                 2>/dev/null || true
         } >"$diag_dir/signaling-cache.txt" 2>/dev/null || true
     fi
@@ -481,7 +481,7 @@ keychain = "$keychain_path"
 [network]
 signaling_url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
 issuer_endpoint = "http://127.0.0.1:${HTTP_PORT}/issuer"
-realm_id = $REALM_ID
+realm = "$REALM"
 realm_secret = "$REALM_SECRET"
 EOF
 }
@@ -1044,6 +1044,7 @@ scaffold_service_guest() {
             --project-name "DuplexStreamService" \
             --signaling "ws://127.0.0.1:${HTTP_PORT}/signaling/ws" \
             --publisher "$PUBLISHER" \
+            --realm "$REALM" \
             "."
     )
 
@@ -1146,7 +1147,7 @@ render_datastreamapp_config() {
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
         "__PUBLISHER__=$PUBLISHER" \
-        "__REALM_ID__=$REALM_ID" \
+        "__REALM__=$REALM" \
         "__REALM_SECRET__=$REALM_SECRET"
     success "DataStreamApp actr.toml rendered"
 }
@@ -1243,6 +1244,7 @@ scaffold_datastream_app() {
             --project-name "DataStreamApp" \
             --signaling "ws://127.0.0.1:${HTTP_PORT}/signaling/ws" \
             --publisher "$PUBLISHER" \
+            --realm "$REALM" \
             "."
     )
 
@@ -1390,7 +1392,7 @@ url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
 url = "http://127.0.0.1:${HTTP_PORT}/issuer"
 
 [deployment]
-realm_id = ${REALM_ID}
+realm = "${REALM}"
 realm_secret = "${REALM_SECRET}"
 
 [[trust]]
@@ -1459,14 +1461,14 @@ check_service_ready() {
     local timeout="${SERVICE_READY_TIMEOUT_SECONDS:-60}"
     if ! wait_for_service_registration \
         "$db_path" \
-        "$REALM_ID" \
+        "$REALM" \
         "$PUBLISHER" \
         "DuplexStreamService" \
         "$timeout"; then
         echo "Service registrations observed before timeout:" >&2
         if [ -f "$db_path" ]; then
             sqlite3 "$db_path" \
-                "SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status, last_heartbeat_at FROM actor_registry;" \
+                "SELECT actor_realm, actor_publisher, actor_device_name, service_name, status, last_heartbeat_at FROM actor_registry;" \
                 >&2 2>/dev/null || true
         else
             echo "  signaling_cache.db not found at $db_path" >&2
@@ -1476,9 +1478,9 @@ check_service_ready() {
     fi
 
     sqlite3 "$db_path" "
-        SELECT actor_realm_id, actor_publisher, actor_device_name, service_name, status
+        SELECT actor_realm, actor_publisher, actor_device_name, service_name, status
         FROM actor_registry
-        WHERE actor_realm_id = ${REALM_ID}
+        WHERE actor_realm = '${REALM}'
           AND actor_publisher = '${PUBLISHER}'
           AND actor_device_name = 'DuplexStreamService'
           AND service_name = '${PUBLISHER}:DuplexStreamService'

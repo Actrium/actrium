@@ -2,15 +2,15 @@
 
 wait_for_service_registration() {
     local db_path="$1"
-    local realm_id="$2"
+    local realm="$2"
     local publisher="$3"
     local actor_name="$4"
     local timeout_seconds="${5:-60}"
     local poll_interval="${SERVICE_READY_POLL_INTERVAL_SECONDS:-1}"
     local deadline=$((SECONDS + timeout_seconds))
 
-    if [[ ! "$realm_id" =~ ^[0-9]+$ ]]; then
-        echo "Invalid realm id: $realm_id" >&2
+    if [[ ! "$realm" =~ ^[a-z0-9.@-]+$ ]]; then
+        echo "Invalid realm: $realm" >&2
         return 2
     fi
     if [[ ! "$publisher" =~ ^[A-Za-z0-9_.-]+$ ]] || [[ ! "$actor_name" =~ ^[A-Za-z0-9_.-]+$ ]]; then
@@ -25,7 +25,7 @@ wait_for_service_registration() {
                 sqlite3 "$db_path" "
                     SELECT COUNT(*)
                     FROM actor_registry
-                    WHERE actor_realm_id = ${realm_id}
+                    WHERE actor_realm = '${realm}'
                       AND actor_publisher = '${publisher}'
                       AND actor_device_name = '${actor_name}'
                       AND service_name = '${publisher}:${actor_name}'

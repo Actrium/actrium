@@ -11,7 +11,7 @@ turn_urls = ["turn:actrix1.develenv.com:3478"]
 force_relay = true
 
 [system.deployment]
-realm_id = 2368266035
+realm = "demo@example.com"
 
 [system.discovery]
 visible = true

@@ -254,16 +254,16 @@ if [ ! -f "$ACTRIX_DB" ]; then
     exit 1
 fi
 
-# Parse realm_id and realm_secret from server's actr.toml
-REALM_ID=$(grep -E '^\s*realm_id\s*=' "$ECHO_SERVER_DIR/actr.toml" | sed 's/.*=\s*//' | tr -d ' "' | head -1 || true)
+# Parse realm and realm_secret from server's actr.toml
+REALM=$(grep -E '^\s*realm\s*=' "$ECHO_SERVER_DIR/actr.toml" | sed 's/.*=\s*//' | tr -d ' "' | head -1 || true)
 REALM_SECRET=$(grep -E '^\s*realm_secret\s*=' "$ECHO_SERVER_DIR/actr.toml" | sed 's/.*=\s*//' | tr -d ' "' | head -1 || true)
 
-if [ -z "$REALM_ID" ] || [ -z "$REALM_SECRET" ]; then
-    echo -e "${RED}❌ Could not parse realm_id or realm_secret from $ECHO_SERVER_DIR/actr.toml${NC}"
+if [ -z "$REALM" ] || [ -z "$REALM_SECRET" ]; then
+    echo -e "${RED}❌ Could not parse realm or realm_secret from $ECHO_SERVER_DIR/actr.toml${NC}"
     exit 1
 fi
 
-echo "   realm_id     = $REALM_ID"
+echo "   realm        = $REALM"
 echo "   realm_secret = ${REALM_SECRET:0:10}..."
 
 # Hash the realm secret with SHA256 (matches Rust hash_realm_secret: hex(sha256(secret)))
@@ -272,17 +272,17 @@ SECRET_HASH=$(printf '%s' "$REALM_SECRET" | shasum -a 256 | awk '{print $1}')
 echo "   secret_hash  = ${SECRET_HASH:0:16}..."
 
 # Insert realm record (OR IGNORE to avoid duplicates)
-sqlite3 "$ACTRIX_DB" "INSERT OR IGNORE INTO realm (id, name, status, enabled, created_at, secret_current) VALUES ($REALM_ID, 'echo-example', 'Active', 1, strftime('%s','now'), '$SECRET_HASH');"
+sqlite3 "$ACTRIX_DB" "INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('$REALM', 'Active', 1, strftime('%s','now'), '$SECRET_HASH');"
 
 # Parse ACL rules from actr.toml files and insert into actoracl table
 # Server allows: acme/echo-client-app@1.0.0
 # Client allows: acme/EchoService@1.0.0
 # Note: access=1 means allow
 sqlite3 "$ACTRIX_DB" <<EOF
-INSERT OR IGNORE INTO actoracl (realm_id, from_type, to_type, access)
-VALUES ($REALM_ID, 'acme/EchoService@1.0.0', 'acme/echo-client-app@1.0.0', 1);
-INSERT OR IGNORE INTO actoracl (realm_id, from_type, to_type, access)
-VALUES ($REALM_ID, 'acme/echo-client-app@1.0.0', 'acme/EchoService@1.0.0', 1);
+INSERT OR IGNORE INTO actoracl (realm, from_type, to_type, access)
+VALUES ('$REALM', 'acme/EchoService@1.0.0', 'acme/echo-client-app@1.0.0', 1);
+INSERT OR IGNORE INTO actoracl (realm, from_type, to_type, access)
+VALUES ('$REALM', 'acme/echo-client-app@1.0.0', 'acme/EchoService@1.0.0', 1);
 EOF
 
 echo -e "${GREEN}✅ Realm and ACL setup completed (via sqlite3)${NC}"

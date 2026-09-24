@@ -7,7 +7,7 @@ url = "ws://localhost:8081/signaling/ws"
 url = "http://localhost:8081/issuer"
 
 [deployment]
-realm_id = 33554432
+realm = "mutil-actr@example.com"
 realm_secret = "rs_AeEwCl5kEEd4foT3KSH-ZSgIFfrBzvnO"
 
 [discovery]

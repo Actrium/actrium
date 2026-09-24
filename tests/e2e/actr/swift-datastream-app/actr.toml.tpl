@@ -14,8 +14,8 @@ url = "ws://__HOST__:__HTTP_PORT__/signaling/ws"
 url = "http://__HOST__:__HTTP_PORT__/issuer"
 
 [deployment]
-# Replace this with the REALM_ID returned by actrix CreateRealm/Admin UI.
-realm_id = __REALM_ID__
+# Replace this with the Realm name created via the actrix Admin UI.
+realm = "__REALM__"
 realm_secret = "__REALM_SECRET__"
 
 [discovery]
@@ -36,8 +36,8 @@ turn_urls = ["turn:__HOST__:__ICE_PORT__"]
 
 [[acl.rules]]
 permission = "allow"
-type = "__PUBLISHER__:DuplexStreamService:1.0.0"
+type = "__PUBLISHER__/DuplexStreamService@1.0.0"
 
 [[acl.rules]]
 permission = "allow"
-type = "__PUBLISHER__:DataStreamApp:0.1.0"
+type = "__PUBLISHER__/DataStreamApp@0.1.0"

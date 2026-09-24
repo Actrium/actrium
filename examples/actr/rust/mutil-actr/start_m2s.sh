@@ -247,12 +247,12 @@ if [ ! -f "$ACTRIX_DB" ]; then
     exit 1
 fi
 
-# Parse realm_id and realm_secret from server's actr.toml
-REALM_ID=$(grep -E '^\s*realm_id\s*=' "$ECHO_SERVER_DIR/actr.toml" | sed 's/.*=\s*//' | tr -d ' "' | head -1 || true)
+# Parse realm and realm_secret from server's actr.toml
+REALM=$(grep -E '^\s*realm\s*=' "$ECHO_SERVER_DIR/actr.toml" | sed 's/.*=\s*//' | tr -d ' "' | head -1 || true)
 REALM_SECRET=$(grep -E '^\s*realm_secret\s*=' "$ECHO_SERVER_DIR/actr.toml" | sed 's/.*=\s*//' | tr -d ' "' | head -1 || true)
 
-if [ -z "$REALM_ID" ]; then
-    REALM_ID=33554432
+if [ -z "$REALM" ]; then
+    REALM=mutil-actr@example.com
 fi
 if [ -z "$REALM_SECRET" ]; then
     echo -e "${RED}❌ Could not parse realm_secret from $ECHO_SERVER_DIR/actr.toml${NC}"
@@ -260,7 +260,7 @@ if [ -z "$REALM_SECRET" ]; then
 fi
 
 SECRET_HASH=$(printf '%s' "$REALM_SECRET" | shasum -a 256 | awk '{print $1}')
-echo "   realm_id=$REALM_ID secret_hash=${SECRET_HASH:0:16}..."
+echo "   realm=$REALM secret_hash=${SECRET_HASH:0:16}..."
 
 sqlite3 "$ACTRIX_DB" <<EOF
 INSERT OR REPLACE INTO publisher (name, public_key, status, created_at, verified_at) VALUES ('acme', '', 'verified', strftime('%s','now'), strftime('%s','now'));
@@ -270,12 +270,12 @@ INSERT OR REPLACE INTO publisher_package (publisher_id, publisher, name, version
 INSERT OR REPLACE INTO publisher_package (publisher_id, publisher, name, version, type_str, manifest, signature, status, published_at)
   SELECT id, 'acme', 'echo-client-app', '1.0.0', 'acme/echo-client-app@1.0.0', '{}', '', 'active', strftime('%s','now') FROM publisher WHERE name='acme'
   ON CONFLICT(publisher, name, version) DO UPDATE SET status='active';
-INSERT OR REPLACE INTO realm (id, name, status, enabled, created_at, secret_current) VALUES ($REALM_ID, 'MutilActr Realm', 'Active', 1, strftime('%s','now'), '$SECRET_HASH');
-DELETE FROM actoracl WHERE realm_id = $REALM_ID;
-INSERT INTO actoracl (realm_id, source_realm_id, from_type, to_type, access)
-VALUES ($REALM_ID, $REALM_ID, 'acme/echo-client-app@1.0.0', 'acme/EchoService@1.0.0', 1);
-INSERT INTO actoracl (realm_id, source_realm_id, from_type, to_type, access)
-VALUES ($REALM_ID, $REALM_ID, 'acme/EchoService@1.0.0', 'acme/echo-client-app@1.0.0', 1);
+INSERT OR REPLACE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('$REALM', 'Active', 1, strftime('%s','now'), '$SECRET_HASH');
+DELETE FROM actoracl WHERE realm = '$REALM';
+INSERT INTO actoracl (realm, source_realm, from_type, to_type, access)
+VALUES ('$REALM', '$REALM', 'acme/echo-client-app@1.0.0', 'acme/EchoService@1.0.0', 1);
+INSERT INTO actoracl (realm, source_realm, from_type, to_type, access)
+VALUES ('$REALM', '$REALM', 'acme/EchoService@1.0.0', 'acme/echo-client-app@1.0.0', 1);
 EOF
 
 echo -e "${GREEN}✅ Realm and ACL setup completed${NC}"

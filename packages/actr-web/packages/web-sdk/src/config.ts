@@ -20,8 +20,8 @@ export interface SwRuntimeConfig {
   /** Signaling WebSocket URL (e.g. wss://host:port/signaling/ws) */
   signaling_url: string;
 
-  /** Deployment realm ID */
-  realm_id: number;
+  /** Realm name (`<realm_id>@<domain>`) */
+  realm: string;
 
   /** This actor's type (publisher/program@version) */
   client_actr_type: string;

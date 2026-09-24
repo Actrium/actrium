@@ -14,8 +14,8 @@ url = "ws://__HOST__:__HTTP_PORT__/signaling/ws"
 url = "http://__HOST__:__HTTP_PORT__/issuer"
 
 [deployment]
-# Replace this with the REALM_ID returned by actrix CreateRealm/Admin UI.
-realm_id = __REALM_ID__
+# Replace this with the Realm name created via the actrix Admin UI.
+realm = "__REALM__"
 realm_secret = "__REALM_SECRET__"
 
 [discovery]

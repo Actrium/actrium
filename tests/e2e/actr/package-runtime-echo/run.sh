@@ -9,7 +9,7 @@ source "$SCRIPT_DIR/lib/common.sh"
 
 HTTP_PORT=8081
 ICE_PORT=3478
-REALM_ID=""
+REALM=""
 ADMIN_PASSWORD="e2e-test-password"
 PUBLISHER="e2e.actrium.test"
 # The client guest is a realm consumer, not a verified publisher: it keeps a
@@ -229,19 +229,19 @@ warmup_issuer_key() {
 ensure_realm() {
     section "🪪 Creating realm via Admin API"
     local create_file="$RUN_DIR/realm-create.json"
-    local realm_name="package-runtime-echo-${RUN_ID}"
+    local realm="package-runtime-echo-${RUN_ID}@e2e.test"
     curl -fsS \
         -X POST \
         "http://127.0.0.1:${HTTP_PORT}/admin/api/realms" \
         -H "Authorization: Bearer ${ADMIN_TOKEN}" \
         -H 'Content-Type: application/json' \
-        -d "{\"name\":\"${realm_name}\",\"enabled\":true,\"expires_at\":0}" \
+        -d "{\"realm\":\"${realm}\",\"enabled\":true,\"expires_at\":0}" \
         >"$create_file"
 
-    REALM_ID="$(json_field "$create_file" '.realm.realm_id')"
+    REALM="$(json_field "$create_file" '.realm.realm')"
     REALM_SECRET="$(json_field "$create_file" '.realm_secret')"
 
-    [ -n "$REALM_ID" ] || fail "Realm creation returned an empty realm id"
+    [ -n "$REALM" ] || fail "Realm creation returned an empty realm"
     [ -n "$REALM_SECRET" ] || fail "Realm creation returned an empty realm secret"
     # The secret is interpolated into TOML string literals below; URL-safe
     # base64 stays inside that grammar, so reject anything else before it can
@@ -249,7 +249,7 @@ ensure_realm() {
     case "$REALM_SECRET" in
         *[!A-Za-z0-9_-]*) fail "realm_secret has characters outside URL-safe base64" ;;
     esac
-    success "Realm ${REALM_ID} created"
+    success "Realm ${REALM} created"
 }
 
 append_workspace_patch() {
@@ -306,6 +306,7 @@ scaffold_service_guest() {
         --role service \
         --signaling "ws://127.0.0.1:${HTTP_PORT}/signaling/ws" \
         --publisher "$PUBLISHER" \
+        --realm "$REALM" \
         "$TMP_SERVICE_DIR"
 
     append_workspace_patch "$TMP_SERVICE_DIR/Cargo.toml"
@@ -399,7 +400,7 @@ version = 1
 [network]
 signaling_url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
 issuer_endpoint = "http://127.0.0.1:${HTTP_PORT}/issuer"
-realm_id = $REALM_ID
+realm = "$REALM"
 realm_secret = "$REALM_SECRET"
 EOF
     (
@@ -517,7 +518,7 @@ render_client_runtime_config() {
     render_template \
         "$SCRIPT_DIR/config/client-runtime.toml.tpl" \
         "$CLIENT_RUNTIME_PATH" \
-        "__REALM_ID__=$REALM_ID" \
+        "__REALM__=$REALM" \
         "__ECHO_SERVICE_VERSION__=$SERVICE_VERSION" \
         "__REALM_SECRET__=$REALM_SECRET"
 }
@@ -640,7 +641,7 @@ render_server_runtime() {
         "$SCRIPT_DIR/config/server-runtime.toml.tpl" \
         "$SERVER_RUNTIME_PATH" \
         "__PACKAGE_PATH__=$SERVICE_PACKAGE" \
-        "__REALM_ID__=$REALM_ID" \
+        "__REALM__=$REALM" \
         "__REALM_SECRET__=$REALM_SECRET"
 }
 
@@ -799,7 +800,7 @@ mode_path1_with_keychain() {
 
 mode_path2_happy() {
     section "🧪 MODE=path2-happy (unpublished package + runner proof → Path 2 success)"
-    local type_str="${PUBLISHER}:EchoService:${SERVICE_VERSION}"
+    local type_str="${PUBLISHER}/EchoService@${SERVICE_VERSION}"
     assert_no_active_package "$type_str" "$HOST_TARGET"
     local env
     env="$(mk_isolated_env "p2h")"
@@ -814,7 +815,7 @@ mode_path2_happy() {
 
 mode_path2_no_proof() {
     section "🧪 MODE=path2-no-proof (unpublished package, no keychain → Path 2 rejection)"
-    local type_str="${PUBLISHER}:EchoService:${SERVICE_VERSION}"
+    local type_str="${PUBLISHER}/EchoService@${SERVICE_VERSION}"
     assert_no_active_package "$type_str" "$HOST_TARGET"
     local env
     env="$(mk_isolated_env "p2np")"
@@ -835,7 +836,7 @@ mode_path2_no_proof() {
 
 mode_path2_wrong_key() {
     section "🧪 MODE=path2-wrong-key (runner proof signed by unrelated key → rejection)"
-    local type_str="${PUBLISHER}:EchoService:${SERVICE_VERSION}"
+    local type_str="${PUBLISHER}/EchoService@${SERVICE_VERSION}"
     assert_no_active_package "$type_str" "$HOST_TARGET"
 
     local env
@@ -857,7 +858,7 @@ mode_path2_wrong_key() {
 
 mode_rotation() {
     section "🧪 MODE=rotation (retired key passes, revoked key rejects)"
-    local type_str="${PUBLISHER}:EchoService:${SERVICE_VERSION}"
+    local type_str="${PUBLISHER}/EchoService@${SERVICE_VERSION}"
     assert_no_active_package "$type_str" "$HOST_TARGET"
 
     # The manifest's signing_key_id (key A) — needed to find the history_id after rotation.

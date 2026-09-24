@@ -135,16 +135,16 @@ function parseArgs(argv) {
   }
   if (!out.actrToml) throw new Error('missing --actr-toml');
   if (!out.serviceType) throw new Error('missing --service-type');
-  const parts = out.serviceType.split(':');
-  if (parts.length !== 3) {
+  const match = /^([^/]+)\/([^/@]+)@([^/@]+)$/.exec(out.serviceType);
+  if (!match) {
     throw new Error(
       `--service-type must be 'publisher/program@version', got ${out.serviceType}`,
     );
   }
   out.actrType = {
-    publisher: parts[0],
-    name: parts[1],
-    version: parts[2],
+    publisher: match[1],
+    name: match[2],
+    version: match[3],
   };
   return out;
 }

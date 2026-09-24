@@ -67,7 +67,7 @@ ACTRIX_BIN=""
 ADMIN_TOKEN=""
 SERVICE_PACKAGE=""
 SERVICE_VERSION=""
-REALM_ID=""
+REALM=""
 REALM_SECRET=""
 
 trap kotlin_cleanup EXIT INT TERM
@@ -80,6 +80,7 @@ scaffold_echo_service() {
         -l rust --template echo --role service \
         --signaling "ws://127.0.0.1:${HTTP_PORT}/signaling/ws" \
         --publisher "$PUBLISHER" \
+        --realm "$REALM" \
         "$TMP_SERVICE_DIR"
 
     append_workspace_patch "$TMP_SERVICE_DIR/Cargo.toml"

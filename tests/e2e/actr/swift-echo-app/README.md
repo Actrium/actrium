@@ -44,7 +44,7 @@ sequenceDiagram
     CI->>AX: start actrix
     CI->>AX: health check
     CI->>AX: admin login
-    CI->>AX: create realm → realm_id + realm_secret
+    CI->>AX: create realm → realm + realm_secret
     CI->>AX: register publisher + approve
 
     CI->>CLI: actr init --template echo --role service

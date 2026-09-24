@@ -27,7 +27,7 @@ source "$SCRIPT_DIR/../swift-echo-app/lib/readiness.sh"
 
 HTTP_PORT=8081
 ICE_PORT=3478
-REALM_ID=""
+REALM=""
 ADMIN_PASSWORD="e2e-test-password"
 PUBLISHER="actrium"
 ACTRIX_BIN="${ACTRIX_BIN:-}"
@@ -360,7 +360,7 @@ keychain = "$keychain_path"
 [network]
 signaling_url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
 issuer_endpoint = "http://127.0.0.1:${HTTP_PORT}/issuer"
-realm_id = $REALM_ID
+realm = "$REALM"
 realm_secret = "$REALM_SECRET"
 EOF
 }
@@ -419,7 +419,7 @@ scaffold_service_guest() {
     section "🧱 Scaffolding temporary echo service"
     run_actr init -l rust --template echo --role service \
         --signaling "ws://127.0.0.1:${HTTP_PORT}/signaling/ws" \
-        --publisher "$PUBLISHER" "$TMP_SERVICE_DIR"
+        --publisher "$PUBLISHER" --realm "$REALM" "$TMP_SERVICE_DIR"
     pin_workspace_actr_dependencies "$TMP_SERVICE_DIR/Cargo.toml"
     append_workspace_patch "$TMP_SERVICE_DIR/Cargo.toml"
     mkdir -p "$(dirname "$SERVICE_KEYCHAIN")"
@@ -491,7 +491,7 @@ render_echoapp_config() {
         "__ICE_HOST__=$ICE_HOST" \
         "__HTTP_PORT__=$HTTP_PORT" \
         "__ICE_PORT__=$ICE_PORT" \
-        "__REALM_ID__=$REALM_ID" \
+        "__REALM__=$REALM" \
         "__REALM_SECRET__=$REALM_SECRET"
     success "EchoApp actr.toml rendered"
 }
@@ -513,7 +513,7 @@ url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
 url = "http://127.0.0.1:${HTTP_PORT}/issuer"
 
 [deployment]
-realm_id = ${REALM_ID}
+realm = "${REALM}"
 realm_secret = "${REALM_SECRET}"
 
 [[trust]]
@@ -570,7 +570,7 @@ check_service_ready() {
         fail "Signaling health check failed before app launch"
     fi
     if ! wait_for_service_registration "$SQLITE_DIR/signaling_cache.db" \
-            "$REALM_ID" "$PUBLISHER" "EchoService" \
+            "$REALM" "$PUBLISHER" "EchoService" \
             "${SERVICE_READY_TIMEOUT_SECONDS:-60}"; then
         tail -n 120 "$LOG_DIR/server.log" >&2 2>/dev/null || true
         fail "EchoService did not register with signaling within the timeout"

@@ -101,13 +101,13 @@ fi
 
 # ── Step 1: Create realm ──────────────────────────────────────────────────────
 echo ""
-echo "🔑 Step 1: Creating realm 1001..."
+echo "🔑 Step 1: Creating realm package-echo@example.com..."
 
 sqlite3 "$ACTRIX_DB" \
-    "INSERT OR IGNORE INTO realm (id, name, status, enabled, created_at, secret_current) \
-     VALUES (1001, 'package-echo-realm', 'Active', 1, strftime('%s','now'), '');"
+    "INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current) \
+     VALUES ('package-echo@example.com', 'Active', 1, strftime('%s','now'), '');"
 
-echo -e "${GREEN}✅ Realm 1001 ready${NC}"
+echo -e "${GREEN}✅ Realm package-echo@example.com ready${NC}"
 
 # ── Step 2: Register publisher ────────────────────────────────────────
 echo ""

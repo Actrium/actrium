@@ -6,7 +6,7 @@ REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 RUN_ID="${ACTR_E2E_RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
 RUN_ROOT="${ACTR_E2E_RUN_ROOT:-$REPO_ROOT/target/e2e-cache/typescript-stream/$RUN_ID}"
 LOG_DIR="$RUN_ROOT/logs"
-REALM_ID="${ACTR_E2E_REALM_ID:-2368266035}"
+REALM="${ACTR_E2E_REALM:-typescript-stream-${RUN_ID}@e2e.test}"
 REALM_SECRET="${ACTR_E2E_REALM_SECRET:-typescript-stream-e2e-secret}"
 PUBLISHER="demo1"
 
@@ -119,7 +119,7 @@ keychain = "$RUN_ROOT/dev-key.json"
 [network]
 signaling_url = "$SIGNALING_WS"
 issuer_endpoint = "$ISSUER_ENDPOINT"
-realm_id = $REALM_ID
+realm = "$REALM"
 realm_secret = "$REALM_SECRET"
 
 [storage]
@@ -142,7 +142,7 @@ url = "$SIGNALING_WS"
 url = "$ISSUER_ENDPOINT"
 
 [deployment]
-realm_id = $REALM_ID
+realm = "$REALM"
 realm_secret = "$REALM_SECRET"
 
 [[trust]]
@@ -1125,13 +1125,13 @@ PUBLIC_KEY="$(jq -r '.public_key' "$RUN_ROOT/dev-key.json")"
 
 curl -fsS -X POST "$MOCK_HTTP/admin/realms" \
   -H 'content-type: application/json' \
-  -d "{\"id\":$REALM_ID,\"name\":\"typescript-stream-e2e\"}" >/dev/null
-curl -fsS -X POST "$MOCK_HTTP/admin/publisher-registry" \
+  -d "{\"realm\":\"$REALM\"}" >/dev/null
+curl -fsS -X POST "$MOCK_HTTP/admin/publisher" \
   -H 'content-type: application/json' \
   -d "{\"name\":\"$PUBLISHER\",\"pubkey_b64\":\"$PUBLIC_KEY\",\"contact\":\"e2e@local.actr\"}" >/dev/null
 
 log "Generate TypeScript EchoService template"
-(cd "$RUN_ROOT" && "$ACTR_BIN" init echo-service-ts -l typescript --role service --publisher "$PUBLISHER" --signaling "$MOCK_HTTP")
+(cd "$RUN_ROOT" && "$ACTR_BIN" init echo-service-ts -l typescript --role service --publisher "$PUBLISHER" --realm "$REALM" --signaling "$MOCK_HTTP")
 write_cli_config "$TS_ECHO"
 write_ts_echo_project_overrides
 (cd "$TS_ECHO" && run_logged "ts echo deps install" "$ACTR_BIN" deps install)

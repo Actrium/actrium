@@ -346,19 +346,19 @@ warmup_issuer_key() {
 ensure_realm() {
     section "🪪 Creating realm via Admin API"
     local create_file="$RUN_DIR/realm-create.json"
-    local realm_name="${REALM_NAME_PREFIX:-e2e}-${RUN_ID}"
+    local realm="${REALM_NAME_PREFIX:-e2e}-${RUN_ID}@e2e.test"
     curl -fsS \
         -X POST \
         "http://127.0.0.1:${HTTP_PORT}/admin/api/realms" \
         -H "Authorization: Bearer ${ADMIN_TOKEN}" \
         -H 'Content-Type: application/json' \
-        -d "{\"name\":\"${realm_name}\",\"enabled\":true,\"expires_at\":0}" \
+        -d "{\"realm\":\"${realm}\",\"enabled\":true,\"expires_at\":0}" \
         >"$create_file"
 
-    REALM_ID="$(json_field "$create_file" '.realm.realm_id')"
+    REALM="$(json_field "$create_file" '.realm.realm')"
     REALM_SECRET="$(json_field "$create_file" '.realm_secret')"
 
-    [ -n "$REALM_ID" ] || fail "Realm creation returned an empty realm id"
+    [ -n "$REALM" ] || fail "Realm creation returned an empty realm"
     [ -n "$REALM_SECRET" ] || fail "Realm creation returned an empty realm secret"
-    success "Realm ${REALM_ID} created"
+    success "Realm ${REALM} created"
 }

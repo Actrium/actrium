@@ -691,9 +691,9 @@ if [ $KEY_COUNTER -eq $MAX_KEY_WAIT ]; then
     exit 1
 fi
 
-# Extract realm IDs from actr.toml (runtime config) files
-SERVER_REALM=1001
-CLIENT_REALM=$(grep -E 'realm_id\s*=' "$CLIENT_DIR/actr.toml" | head -1 | sed 's/.*=\s*//' | tr -d ' ')
+# Extract Realm names from actr.toml (runtime config) files
+SERVER_REALM=package-echo@example.com
+CLIENT_REALM=$(grep -E '^\s*realm\s*=' "$CLIENT_DIR/actr.toml" | head -1 | sed 's/.*=\s*//' | tr -d ' "')
 
 # Insert realms directly into SQLite (same approach as actrix fullstack tests)
 ACTRIX_DB="$WORKSPACE_ROOT/database/actrix.db"
@@ -704,10 +704,10 @@ if [ ! -f "$ACTRIX_DB" ]; then
     exit 1
 fi
 
-for REALM_ID in $SERVER_REALM $CLIENT_REALM; do
-    echo "  Creating realm $REALM_ID..."
+for REALM in $SERVER_REALM $CLIENT_REALM; do
+    echo "  Creating realm $REALM..."
     sqlite3 "$ACTRIX_DB" \
-        "INSERT OR IGNORE INTO realm (id, name, status, enabled, created_at, secret_current) VALUES ($REALM_ID, 'package-echo-realm', 'Active', 1, strftime('%s','now'), '');"
+        "INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('$REALM', 'Active', 1, strftime('%s','now'), '');"
 done
 
 echo -e "${GREEN}✅ Realms setup completed (realm IDs: $SERVER_REALM, $CLIENT_REALM)${NC}"
@@ -933,7 +933,7 @@ url = "${ACTRIX_WS_URL}/signaling/ws"
 url = "${ACTRIX_HTTP_URL}/issuer"
 
 [deployment]
-realm_id = 1001
+realm = "package-echo@example.com"
 
 [[trust]]
 kind = "registry"

@@ -42,7 +42,7 @@ struct KeychainPublisherAuthProvider {
 impl actr_hyper::PublisherAuthProvider for KeychainPublisherAuthProvider {
     fn sign(
         &self,
-        realm_id: u32,
+        realm: &str,
         actr_type: &actr_protocol::ActrType,
         target: &str,
         manifest_raw: &[u8],
@@ -62,7 +62,7 @@ impl actr_hyper::PublisherAuthProvider for KeychainPublisherAuthProvider {
         .map_err(|e| actr_hyper::HyperError::Runtime(format!("publisher mismatch: {e}")))?;
         actr_hyper::PublisherRegistrationAuth::sign(
             &signing_key,
-            realm_id,
+            realm,
             actr_type,
             target,
             manifest_raw,
@@ -852,7 +852,9 @@ impl RunCommand {
             .url
             .clone()
             .unwrap_or_else(|| "http://localhost:8081/issuer".to_string());
-        let realm_id = raw.deployment.realm_id.unwrap_or(0);
+        let realm = raw.deployment.realm.clone().ok_or_else(|| {
+            ActrCliError::command_error("deployment.realm is required".to_string())
+        })?;
         let visible = raw.discovery.visible.unwrap_or(true);
         let force_relay = raw.webrtc.force_relay;
         let stun_urls = &raw.webrtc.stun_urls;
@@ -974,7 +976,7 @@ impl RunCommand {
         let config_json = serde_json::json!({
             "signaling_url": signaling_url,
             "issuer_endpoint": issuer_endpoint,
-            "realm_id": realm_id,
+            "realm": realm,
             "visible": visible,
             "force_relay": force_relay,
             "stun_urls": stun_urls,

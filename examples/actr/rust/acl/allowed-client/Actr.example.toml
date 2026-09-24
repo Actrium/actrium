@@ -7,7 +7,7 @@ url = "ws://localhost:8081/signaling/ws"
 url = "http://localhost:8081/issuer"
 
 [deployment]
-realm_id = 33554434
+realm = "acl-demo@example.com"
 realm_secret = "rs_AclExampleSecret123456"
 
 [discovery]

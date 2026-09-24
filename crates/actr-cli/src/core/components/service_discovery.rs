@@ -5,7 +5,7 @@ use crate::core::{
 use actr_hyper::IssuerClient;
 use actr_protocol::{
     AIdCredential, ActrId, ActrToSignaling, ActrType, DiscoveryRequest, ErrorResponse,
-    GetServiceSpecRequest, Realm, RegisterAuthMode, RegisterRequest, SIGNALING_ENVELOPE_VERSION,
+    GetServiceSpecRequest, RegisterAuthMode, RegisterRequest, SIGNALING_ENVELOPE_VERSION,
     SignalingEnvelope, actr_to_signaling, discovery_response, get_service_spec_response,
     register_response, signaling_envelope, signaling_to_actr,
 };
@@ -50,8 +50,8 @@ pub struct DiscoveryContext {
     /// Issuer endpoint URL
     pub issuer_endpoint: String,
 
-    /// Realm for temporary actor registration
-    pub realm: Realm,
+    /// Realm name for temporary actor registration
+    pub realm: Option<String>,
 
     /// Optional realm secret for authentication
     pub realm_secret: Option<String>,
@@ -152,8 +152,9 @@ impl NetworkServiceDiscovery {
     }
 
     async fn connect_and_register(&self) -> Result<SignalingState> {
+        let realm = self.required_realm()?;
         let realm_secret = self.required_realm_secret()?.to_string();
-        let register_request = self.build_linked_register_request();
+        let register_request = self.build_linked_register_request(realm);
 
         let issuer_client =
             IssuerClient::new(&self.context.issuer_endpoint).with_realm_secret(realm_secret);
@@ -409,10 +410,21 @@ impl NetworkServiceDiscovery {
             })
     }
 
-    fn build_linked_register_request(&self) -> RegisterRequest {
+    fn required_realm(&self) -> Result<&str> {
+        self.context
+            .realm
+            .as_deref()
+            .map(str::trim)
+            .filter(|realm| !realm.is_empty())
+            .ok_or_else(|| {
+                anyhow!("network.realm is required for CLI service discovery registration")
+            })
+    }
+
+    fn build_linked_register_request(&self, realm: &str) -> RegisterRequest {
         RegisterRequest {
             actr_type: self.context.package_actr_type.clone(),
-            realm: self.context.realm,
+            realm: realm.to_string(),
             service_spec: None,
             service: None,
             acl: None,

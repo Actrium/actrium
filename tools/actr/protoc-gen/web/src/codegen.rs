@@ -98,7 +98,7 @@ fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
     let publisher = &req.publisher;
     let actr_name = &req.actr_name;
     let signaling_url = &req.signaling_url;
-    let realm_id = req.realm_id;
+    let realm = &req.realm;
 
     let edition = req.edition();
     let exports = req.exports_list();
@@ -204,7 +204,7 @@ fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
     ));
     out.push_str("  },\n");
     out.push_str("  deployment: {\n");
-    out.push_str(&format!("    realm_id: {realm_id},\n"));
+    out.push_str(&format!("    realm: '{realm}',\n"));
     if !req.issuer_endpoint.is_empty() {
         out.push_str(&format!(
             "    issuer_endpoint: '{}',\n",
@@ -297,7 +297,7 @@ fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
         out.push_str(&format!("  issuer_endpoint: '{}',\n", req.issuer_endpoint));
     }
     out.push_str("  signaling_url: system.signaling.url,\n");
-    out.push_str("  realm_id: system.deployment.realm_id,\n");
+    out.push_str("  realm: system.deployment.realm,\n");
     out.push_str(&format!("  client_actr_type: '{client_actr_type}',\n"));
     out.push_str(&format!("  target_actr_type: '{target_actr_type}',\n"));
     out.push_str("  service_fingerprint: '',\n");
@@ -322,7 +322,7 @@ fn gen_actr_config(req: &WebCodegenRequest) -> Result<String, String> {
     );
     out.push_str("export const actrConfig: ActorClientConfig = {\n");
     out.push_str("  signalingUrl: system.signaling.url,\n");
-    out.push_str("  realm: String(system.deployment.realm_id),\n");
+    out.push_str("  realm: system.deployment.realm,\n");
     out.push_str("  iceServers: [\n");
     if !req.stun_urls.is_empty() {
         out.push_str("    ...system.webrtc.stun_urls.map((url) => ({ urls: url })),\n");

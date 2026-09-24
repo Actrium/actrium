@@ -180,15 +180,9 @@ fn parse_args() -> Result<DriverArgs> {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("manifest.toml")
     });
     let service_type_str = service_type.ok_or_else(|| anyhow!("missing --service-type"))?;
-    let parts: Vec<&str> = service_type_str.splitn(3, ':').collect();
-    if parts.len() != 3 {
-        bail!("--service-type must be 'publisher/program@version', got {service_type_str}");
-    }
-    let service_type = ActrType {
-        publisher: parts[0].to_string(),
-        name: parts[1].to_string(),
-        version: parts[2].to_string(),
-    };
+    let service_type = ActrType::from_string_repr(&service_type_str).map_err(|_| {
+        anyhow!("--service-type must be 'publisher/program@version', got {service_type_str}")
+    })?;
     let message = message.unwrap_or_else(|| "polyglot-rust".to_string());
 
     Ok(DriverArgs {
