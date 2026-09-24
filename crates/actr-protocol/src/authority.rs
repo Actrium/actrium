@@ -76,6 +76,9 @@ pub struct PublisherProfile {
     pub schema: String,
     pub domain: String,
     pub signature: DetachedSignature,
+    /// Remaining signed members, kept so the profile round-trips intact.
+    #[serde(flatten)]
+    pub other: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -212,10 +215,13 @@ impl RealmSigningKeys {
             ));
         }
         for rotation in self.rotations.as_deref().unwrap_or_default() {
-            if rotation.from.is_empty() || rotation.to.is_empty() {
-                return Err("rotation from/to is empty".into());
+            if rotation.from.is_empty() || rotation.to.is_empty() || rotation.signature.is_empty() {
+                return Err("rotation from/to/signature is empty".into());
             }
-            if !decodes_to(&rotation.signature, 64) {
+            // Rotations whose `from` is not in `keys` are ignored and do not
+            // invalidate the member.
+            let known = self.keys.iter().any(|key| key.id == rotation.from);
+            if known && !decodes_to(&rotation.signature, 64) {
                 return Err(format!(
                     "rotation '{}' -> '{}' signature is not a base64 Ed25519 signature",
                     rotation.from, rotation.to
@@ -397,6 +403,7 @@ mod tests {
             schema: "actr.publisher/v1".to_string(),
             domain: domain.to_string(),
             signature: signature("pub-1"),
+            other: serde_json::Map::new(),
         }
     }
 
@@ -533,7 +540,9 @@ mod tests {
         .unwrap();
         let uri = "actr://example.com".parse::<ActrUri>().unwrap();
         assert_eq!(parsed.validate_for(&uri), Ok(()));
-        assert_eq!(parsed.publisher.unwrap().domain, "example.com");
+        let publisher = parsed.publisher.unwrap();
+        assert_eq!(publisher.domain, "example.com");
+        assert_eq!(serde_json::to_value(&publisher).unwrap()["name"], "Example");
     }
 
     #[test]
@@ -557,6 +566,7 @@ mod tests {
             |keys| keys.signature.value = b64(32),
             |keys| keys.rotations.as_mut().unwrap()[0].to.clear(),
             |keys| keys.rotations.as_mut().unwrap()[0].signature = String::new(),
+            |keys| keys.rotations.as_mut().unwrap()[0].signature = b64(32),
         ];
         for (index, mutate) in cases.into_iter().enumerate() {
             let mut keys = signing_keys();
@@ -576,6 +586,8 @@ mod tests {
     fn rotation_from_unknown_key_is_accepted() {
         let mut keys = signing_keys();
         keys.rotations.as_mut().unwrap()[0].from = "rs-2019-1".to_string();
+        keys.validate().unwrap();
+        keys.rotations.as_mut().unwrap()[0].signature = "x".to_string();
         keys.validate().unwrap();
     }
 
