@@ -75,15 +75,16 @@ export interface NodeInfo {
   services: ServiceStatus[];
 }
 
+export type RealmStatus = "pending" | "active" | "retired";
+
 export interface RealmInfo {
   realm: string;
+  /** false = suspended by the operator */
   enabled: boolean;
   created_at: number;
   updated_at: number | null;
-  use_servers: number[];
-  version: number;
   expires_at: number;
-  status: string;
+  status: RealmStatus;
   secret_rotation_state?: {
     current_hash_preview: string;
     previous_hash_preview?: string;
@@ -228,10 +229,16 @@ export const api = {
       `/realms/${encodeURIComponent(realm)}`,
     ),
 
-  updateRealm: (realm: string, data: { enabled?: boolean }) =>
+  /** `enabled: false` suspends the Realm, `true` resumes it. */
+  updateRealm: (realm: string, data: { enabled?: boolean; expires_at?: number }) =>
     request<RealmMutationResponse>(`/realms/${encodeURIComponent(realm)}`, {
       method: "PUT",
       body: JSON.stringify(data),
+    }),
+
+  retireRealm: (realm: string) =>
+    request<RealmMutationResponse>(`/realms/${encodeURIComponent(realm)}/retire`, {
+      method: "POST",
     }),
 
   rotateRealmSecret: (realm: string) =>

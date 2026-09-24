@@ -1,19 +1,16 @@
 import { useState, type FormEvent, useEffect } from "react";
-import { api, type RealmInfo, type RealmMutationResponse } from "../../lib/api";
+import { api, type RealmMutationResponse } from "../../lib/api";
 import { X, Copy, Download, CheckCircle, AlertTriangle } from "lucide-react";
 
 interface RealmFormProps {
-  realm: RealmInfo | null;
-  onSubmit: (data: { realm: string; enabled: boolean }) => Promise<RealmMutationResponse | void>;
+  onSubmit: (data: { realm: string; enabled: boolean }) => Promise<RealmMutationResponse>;
   onClose: () => void;
   onRefresh?: () => void;
 }
 
-export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProps) {
-  const isEditing = !!realm;
-
-  const [name, setName] = useState(realm?.realm ?? "");
-  const [enabled, setEnabled] = useState(realm?.enabled ?? true);
+/** Creates a Realm. A Realm name is fixed at creation and never reused. */
+export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
+  const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -35,49 +32,21 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose, step, createdRealm]); // Add step dependency
 
-  // If we are in creation mode (no realm prop), force enabled=false initially
-  // The user will choose to activate or keep stored in the second step.
-  // Actually, wait - if we want to support "Activate Realm" button in step 2,
-  // we should probably create it as DISABLED first, then update it?
-  // OR, we create it as ENABLED if they click "Activate", and DISABLED if they click "Store".
-  // But the secret is returned on CREATE. So we must create it first.
-
-  // Let's stick to the plan:
-  // Step 1: Input Realm name. (Remove enabled toggle).
-  // Step 2: Create (initially disabled). Show Secret.
-  // Step 3: User clicks "Activate" -> Update to enabled=true.
-  //         User clicks "Store only" -> Keep enabled=false.
-
+  // The Realm is created suspended so the secret can be saved before it
+  // serves Actors; the second step resumes it.
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
 
     try {
-      if (isEditing) {
-        // Update existing
-        await onSubmit({
-          realm: name,
-          enabled, // Use the state for editing
-        });
-        onClose();
+      const resp = await onSubmit({ realm: name, enabled: false });
+      if (resp.realm_secret) {
+        setCreatedSecret(resp.realm_secret);
+        setCreatedRealm(resp.realm?.realm ?? name);
+        setStep("success");
       } else {
-        // Create new - always create as DISABLED first to ensure we get secret
-        // before activation decision in step 2
-        const resp = await onSubmit({
-          realm: name,
-          enabled: false, // Create disabled initially
-        });
-
-        if (resp && 'realm_secret' in resp && resp.realm_secret) {
-          setCreatedSecret(resp.realm_secret);
-          setCreatedRealm(resp.realm?.realm ?? name);
-          setStep("success");
-          // Update local enabled state to false to match
-          setEnabled(false);
-        } else {
-          onClose();
-        }
+        onClose();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Operation failed");
@@ -93,8 +62,8 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
       await api.updateRealm(createdRealm, { enabled: true });
       if (onRefresh) onRefresh();
       onClose();
-    } catch (err) {
-      setError("Failed to activate realm");
+    } catch {
+      setError("Failed to resume realm");
     } finally {
       setLoading(false);
     }
@@ -176,13 +145,13 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
                 disabled={loading}
                 className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
-                {loading ? "Activating..." : "I have saved the secret, Activate Realm"}
+                {loading ? "Resuming..." : "I have saved the secret, resume Realm"}
               </button>
               <button
                 onClick={onClose}
                 className="text-xs text-gray-500 hover:text-gray-700 hover:underline text-center"
               >
-                Store only (do not activate yet)
+                Keep suspended for now
               </button>
             </div>
           </div>
@@ -196,7 +165,7 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
       <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900">
-            {isEditing ? "Edit Realm" : "Create Realm"}
+            Create Realm
           </h2>
           <button
             onClick={onClose}
@@ -219,45 +188,12 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
               title="<realm_id>@<domain>"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500 font-mono"
               required
-              disabled={isEditing}
-              autoFocus={!isEditing}
+              autoFocus
             />
+            <p className="mt-1 text-xs text-gray-500">
+              The name cannot be changed later, and a retired name is never reused.
+            </p>
           </div>
-
-          {isEditing && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Status
-              </label>
-              <div className="flex rounded-lg border border-gray-200 bg-gray-50 p-1">
-                <button
-                  type="button"
-                  onClick={() => setEnabled(true)}
-                  className={`flex-1 rounded-md py-1 text-sm font-medium transition-colors ${enabled
-                    ? "bg-white text-blue-600 shadow-sm"
-                    : "text-gray-500 hover:text-gray-700"
-                    }`}
-                >
-                  Enabled
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEnabled(false)}
-                  className={`flex-1 rounded-md py-1 text-sm font-medium transition-colors ${!enabled
-                    ? "bg-white text-gray-900 shadow-sm"
-                    : "text-gray-500 hover:text-gray-700"
-                    }`}
-                >
-                  Stored only
-                </button>
-              </div>
-              <p className="mt-1 text-xs text-gray-500">
-                {enabled
-                  ? "Realm is active and can be used by actors immediately."
-                  : "Realm is saved but inactive. Actors cannot join until enabled."}
-              </p>
-            </div>
-          )}
 
           {error && (
             <p className="text-sm text-red-600">{error}</p>
@@ -276,7 +212,7 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
               disabled={loading}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
-              {loading ? "Saving..." : isEditing ? "Update" : "Next"}
+              {loading ? "Saving..." : "Next"}
             </button>
           </div>
         </form>
