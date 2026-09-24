@@ -452,11 +452,12 @@ v4 已以 Realm 名为键：`realm` 表以列 `name`（完整 Realm 名）为主
 
 - `realm_domain`：`domain`、已接受的 authority descriptor digest、`realm_signing_keys`
   的 `sequence` 与 key 集合、最近校验时间；
-- `realm`：以完整 Realm 名（列 `name`）为主键、状态（`pending` | `active` |
-  `suspended` | `retired`）、已接受的 Realm Profile digest 与 `sequence`、Realm issuer key id、
+- `realm`：以完整 Realm 名（列 `name`）为主键、状态（`pending` | `active` | `retired`，
+  实例运营者的本地挂起用独立的 `enabled` 开关）、Realm issuer key id、
   pending 到期时间、请求方（`requester` 或 Realm Provider 账号）、Realm 管理 token
   哈希及其绑定的 Realm Provider 账号（Realm Provider 域名下的 Realm）；Realm Provider tombstone 与活跃 Realm
   共用该主键约束；
+- `realm_profile`：每个 Realm 已接受的最新 Realm Profile 原文及其 digest 与 `sequence`；
 - Realm 管理请求的 `nonce` 记录，保留到对应请求过期；
 - 其余按 Realm 分区的表（连接 ACL、已签发身份登记、Actor Registry、renewal state）以
   `realm` 为键。
@@ -488,7 +489,8 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
 
 当前代码已承载多个 Realm，以下差异仍需跟进：
 
-- 新增 `realm_domain` 表；`realm` 表增加 `pending`/`suspended`/`retired` 状态、Realm Profile digest 与 `sequence`；
+- v5 已建 `realm_domain`、`realm_profile`、`realm_mgmt_nonce` 表与 `realm` 的 pending/管理 token
+  等列，尚无代码写入；`pending` 状态尚无创建路径；
 - 实现 authority descriptor 获取（含逐跳 SSRF 检查的重定向处理、限流与结果缓存）与
   `realm_signing_keys` 验签、Realm 管理请求（`create_realm`、`publish_profile`、
   `reissue_admin_token`、`register_publisher`；`provider_id` 绑定、5 分钟有效期、nonce
@@ -509,9 +511,11 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
 - Realm Profile 与 `create_realm` 携带 `package`（`loran-packages` 已移除 Target 解析，只保留
   包托管）；
 - 补跨 Realm 混淆回归测试；
-- 控制面 `CreateRealm`/`DeleteRealm`/`ListRealms` 的语义与本契约对齐：创建需 Realm
-  签名 key 签名；`DeleteRealm` 只能作为实例运营者的本地挂起/清理，不能替代退役
-  Realm Profile。
+- 控制面 `CreateRealm`/`RetireRealm`/`ListRealms` 的语义与本契约对齐：创建需 Realm
+  签名 key 签名；当前实例运营者可经 `RetireRealm` 与 admin `…/retire` 直接退役，目标契约下
+  退役只由退役 Realm Profile 触发（Realm Provider 域名下的 Realm 由 Loran 代签）；当前退役
+  事务尚未清理 Actor Registry、presence、在线连接与 Realm issuer key，靠 `validate_realm`
+  拒绝已退役 Realm 的新注册与连接。
 
 ## 10. 明确不做
 
