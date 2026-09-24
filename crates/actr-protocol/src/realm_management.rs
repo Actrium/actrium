@@ -121,10 +121,13 @@ impl ManagementRequest {
         };
         let issued_at = parse(&self.issued_at, "issued_at")?;
         let expires_at = parse(&self.expires_at, "expires_at")?;
-        let length = (expires_at - issued_at).num_seconds();
-        if !(0..=MAX_VALIDITY_SECS).contains(&length) {
+        let length = expires_at - issued_at;
+        if length < chrono::Duration::zero()
+            || length > chrono::Duration::seconds(MAX_VALIDITY_SECS)
+        {
             return Err(invalid(format!(
-                "validity window of {length} seconds exceeds {MAX_VALIDITY_SECS}"
+                "validity window of {} ms is not within 0 to {MAX_VALIDITY_SECS} seconds",
+                length.num_milliseconds()
             )));
         }
         if now < issued_at || now > expires_at {
@@ -237,6 +240,19 @@ mod tests {
         let mut long = request();
         long.expires_at = "2100-01-01T00:00:00Z".into();
         assert!(long.check_window(Utc::now()).is_err());
+        // A fraction of a second past five minutes is too long.
+        let mut barely = request();
+        barely.issued_at = "2026-01-01T00:00:00Z".into();
+        barely.expires_at = "2026-01-01T00:05:00.5Z".into();
+        assert!(
+            barely
+                .check_window("2026-01-01T00:01:00Z".parse().unwrap())
+                .is_err()
+        );
+        barely.expires_at = "2026-01-01T00:05:00Z".into();
+        barely
+            .check_window("2026-01-01T00:01:00Z".parse().unwrap())
+            .unwrap();
         let mut expired = request();
         expired.issued_at = "2020-01-01T00:00:00Z".into();
         expired.expires_at = "2020-01-01T00:05:00Z".into();
