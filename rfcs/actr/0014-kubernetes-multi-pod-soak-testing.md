@@ -84,7 +84,7 @@ The proposed operating model is “CI deploys; Dashboard controls the test”:
 
 | Component | Responsibilities | Explicitly does not do |
 | --- | --- | --- |
-| GitHub Actions / CI | Pin the SHA; build and push Loran/endpoint/Dashboard images; deploy the namespace, Secrets, RBAC, NetworkPolicy, Loran, the unwired endpoint pool (`actr-0` ... `actr-N`), and Dashboard; wait for Pod and Dashboard health | Create a test Controller Job, generate a plan, wire Peer edges, inject Faults, or start the soak business loop |
+| GitHub Actions / CI | Pin the SHA; build and push Loran, Endpoint, standalone Controller CLI, and Dashboard images; deploy the namespace, Secrets, RBAC, NetworkPolicy, Loran, the unwired endpoint pool (`actr-0` ... `actr-N`), and Dashboard; wait for Pod and Dashboard health | Start a Controller CLI Job in the deployment workflow, generate a Dashboard run plan, wire Peer edges, inject Faults, or start the soak business loop |
 | `soak-dashboard` | Serve the UI/API; preview and start plans; lease pool subsets and wire/tear down Peer graphs; call endpoint control APIs; inject lifecycle/network/RTC/signaling events; collect metrics, logs, Result Evaluator output, and artifacts | Build images, publish releases, or receive `cluster-admin` |
 | Actr endpoint (`actr-N`) | Run the real Actr RTC endpoint and test workload; establish signaling/ICE/DTLS/SCTP/DataChannel through Loran; expose control and observation APIs | Modify Controller-internal state directly or bypass `PeerGate` to operate a DataChannel |
 
@@ -205,10 +205,10 @@ Complete flow:
 
 ```text
 GitHub Actions / ARC Runner
-  -> fix the main SHA, build, and push Loran, endpoint, and Dashboard images
+  -> fix the main SHA and build/push Loran, Endpoint, standalone Controller CLI, and Dashboard images
   -> create/update the Kubernetes namespace, Secrets, RBAC, and NetworkPolicy
   -> deploy Loran, the unwired endpoint pool (actr-0 ... actr-N), Dashboard, and collectors
-  -> wait for Pod/Dashboard health only; do not start a soak plan
+  -> wait for Pod/Dashboard health only; do not deploy/start a Controller Job or Dashboard soak plan
 
 soak-dashboard (operator/API)
   -> preview or start a run and generate the event plan from a fixed seed
@@ -464,6 +464,7 @@ AI only reads evidence and provides initial attribution.
 | Test Workload | Test Actor/Probe Driver inside `actr-N` | Send RPC, Tell, and DataChunk through `RuntimeContext`; continuously produce bidirectional traffic |
 | Soak Dashboard | Kubernetes Deployment | Serve the UI/BFF, persist run state, and expose authenticated manual control |
 | Soak Controller | Embedded in Dashboard | Generate seed plans, call endpoint control APIs, schedule events, run the Result Evaluator, and archive artifacts |
+| Standalone Controller CLI | Optional one-shot Job/image | Run an explicitly invoked smoke/preflight or replay job; it does not own or start Dashboard-managed pool runs |
 | Pool lease manager | Dashboard module | Lease exclusive pool subsets to runs, queue runs that do not fit, and enforce profile-level concurrency (coverage profiles concurrent, resource profiles exclusive) |
 | RTC/signaling Fault Adapter | Wrap production Runtime and signaling transport | Call `DirectedRtcFaultRegistry` and `DirectedSignalingFaultRegistry` without changing Controller/Session logic |
 | Observation Adapter | Read Manager Snapshot, Hooks, and test counters | Convert results to endpoint JSON, event streams, and Prometheus metrics |
@@ -510,11 +511,13 @@ Implementation repositories and deliverables:
 ```text
 Actrium/actr-soak (standalone repository; Cargo package `actr-soak`)
   src/bin/actr-soak-endpoint.rs
+  src/bin/actr-soak-controller.rs
   src/node_endpoint.rs
   src/node_runtime.rs
   src/endpoint_api.rs
   deploy/k8s/
   deploy/docker/endpoint.Dockerfile
+  deploy/docker/controller.Dockerfile
 
 Actrium/actrium (production dependency, pinned by actr-soak)
   crates/actr-hyper/ (`test-utils` feature supplies the test-only RTC seams)
@@ -1168,10 +1171,13 @@ scope.
 | Loran | StatefulSet, initially one replica | Signaling, STUN, TURN, AIS |
 | Actr Endpoint (`actr-N`) | StatefulSet | Stable ordinal; the Pod IP may change after rebuild; pool members start unwired and Peer edges are established at run start |
 | Soak Dashboard | Deployment | UI/BFF, manual control, embedded Controller, and run-state persistence |
+| Standalone Controller CLI | Optional one-shot Job | Used only for explicitly invoked smoke/preflight or replay runs; Dashboard-managed soak runs use the embedded SoakController |
 | Collector | Sidecar or separate Deployment | Collect Loran and Kubernetes metrics, procfs, and logs; it does not scrape Endpoint Pods. The embedded SoakController alone fetches Endpoint `/metrics` over its authenticated TCP 9090 API. |
 | Artifact uploader | Isolated Job/worker or Dashboard worker | After evaluation and successful redaction, uploads only the run's staged evidence bundle to S3/MinIO with a short-lived run-prefix credential, then records the object location and export status in the Dashboard |
 
 The StatefulSet ordinal is only a role label; it is not a permanent identity.
+The optional Controller Job MUST NOT run concurrently with a Dashboard run on
+the same Endpoint pool.
 
 #### 13.3 Ports and addresses
 
@@ -1365,11 +1371,11 @@ reported as a GitHub check or used to block deployment:
 CI (build/deploy workflow)
   -> checkout a fixed SHA
   -> cargo fmt and build test images
-  -> push endpoint, Loran, and Dashboard images; record digests
+  -> image-build workflow pushes Endpoint, standalone Controller CLI, Dashboard, and Loran images; record digests
   -> create namespace, Secret, RBAC, and NetworkPolicy
   -> deploy Loran, the unwired endpoint pool, soak-dashboard, and collectors
   -> wait for Pod and Dashboard health only
-  -> stop; do not generate a plan, inject events, or start a soak plan
+  -> stop; do not deploy/start a Controller Job, generate a plan, inject events, or start a soak plan
 
 Dashboard (operator/API)
   -> preview and start one run
@@ -1498,7 +1504,8 @@ an action is sampled for a run, that run MUST take the pool exclusively.
 - GitHub Actions ARC Runner;
 - pinned `kubectl`, container build/push capability;
 - GHCR or an internal image registry;
-- Loran, endpoint, Controller, and soak-dashboard images;
+- Loran, Endpoint, and Dashboard images for the shared deployment;
+- standalone Controller CLI image for optional one-shot smoke/preflight or replay Jobs;
 - a Dashboard PVC for run state and evidence;
 - S3/MinIO/PVC artifact storage;
 - DNS, Pod-to-Pod UDP, and STUN/TURN relay ports;
