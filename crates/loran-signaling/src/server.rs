@@ -2411,7 +2411,8 @@ async fn handle_get_service_spec_request(
     Ok(())
 }
 
-/// Handle GetSigningKey request — proxies key lookup via local KeyCache
+/// Handle GetSigningKey request — proxies key lookup via local KeyCache, within the
+/// requester's Realm
 async fn handle_get_signing_key_request(
     source: ActrId,
     req: actr_protocol::GetSigningKeyRequest,
@@ -2426,7 +2427,8 @@ async fn handle_get_signing_key_request(
         key_id
     );
 
-    let response = match AIdCredentialValidator::get_key_bytes(key_id).await {
+    // Only the requester's own Realm's issuer keys are served.
+    let response = match AIdCredentialValidator::get_key_bytes(&source.realm, key_id).await {
         Ok(Some(pubkey_bytes)) => actr_protocol::GetSigningKeyResponse {
             key_id,
             pubkey: pubkey_bytes.into(),
@@ -3293,6 +3295,7 @@ mod tests {
                 }
                 AIdCredentialValidator::init(dir.path()).await.unwrap();
                 AIdCredentialValidator::populate_key(
+                    REALM,
                     KEY_ID,
                     &signing_key().verifying_key(),
                     now() + 3600,

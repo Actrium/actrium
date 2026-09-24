@@ -93,6 +93,7 @@ async fn initialize_signaling_database() -> anyhow::Result<PathBuf> {
                 .as_secs()
                 + 24 * 60 * 60;
             platform::AIdCredentialValidator::populate_key(
+                TEST_REALM,
                 AID_KEY_ID,
                 &aid_signing_key().verifying_key(),
                 key_expires_at,

@@ -211,57 +211,47 @@ async fn create_issuer(env: &TestEnv, cancel: tokio_util::sync::CancellationToke
 }
 
 #[tokio::test]
-async fn expired_key_rotates_before_credential_issuance() {
-    let mut signer_config = SignerServiceConfig::default();
-    signer_config.storage.key_ttl_seconds = 20;
-    let mut env = setup_test_environment(signer_config).await;
+async fn credentials_are_signed_with_the_realm_issuer_key() {
+    let mut env = setup_test_environment(SignerServiceConfig::default()).await;
     let cancel = tokio_util::sync::CancellationToken::new();
     cancel.cancel();
-    eprintln!("key rotation test: creating issuer");
     let issuer = tokio::time::timeout(TEST_STEP_TIMEOUT, create_issuer(&env, cancel.clone()))
         .await
         .expect("issuer creation timed out");
-
-    eprintln!("key rotation test: waiting for key expiry");
-    tokio::time::sleep(Duration::from_secs(22)).await;
-    eprintln!("key rotation test: reading expired key status");
-    let status = tokio::time::timeout(TEST_STEP_TIMEOUT, issuer.get_current_key_status())
-        .await
-        .expect("key status read timed out")
-        .expect("key status");
-    let expired_key_id = status.key_id;
-    assert!(!status.usable, "expired key must report as unusable");
 
     let actor_id = ActrId {
         realm: TEST_REALM.to_string(),
         serial_number: 42,
     };
-    eprintln!("key rotation test: issuing credential after expiry");
     let issued = tokio::time::timeout(
         TEST_STEP_TIMEOUT,
         issuer.issue_credential_for_actor(&actor_id, None),
     )
     .await
     .expect("credential issuance timed out")
-    .expect("issue after expiry");
-    assert_ne!(issued.credential.key_id, expired_key_id);
+    .expect("issue credential");
+    let (realm_key_id, realm_key) = issuer.realm_key(TEST_REALM).await.expect("realm key");
+    assert_eq!(issued.credential.key_id, realm_key_id);
+    assert_eq!(issued.signing_key_id, realm_key_id);
+    assert_eq!(issued.signing_pubkey.as_ref(), realm_key.as_bytes());
 
-    eprintln!("key rotation test: verifying persisted key");
-    let cache = tokio::time::timeout(
-        TEST_STEP_TIMEOUT,
-        KeyCache::new(env.issuer_temp_dir.path().join("signaling_key_cache.db")),
-    )
-    .await
-    .expect("open signaling cache timed out")
-    .expect("open signaling cache");
-    let (verifying_key, _) = tokio::time::timeout(
-        TEST_STEP_TIMEOUT,
-        cache.get_cached_key(issued.credential.key_id),
-    )
-    .await
-    .expect("read signaling cache timed out")
-    .expect("read signaling cache")
-    .expect("rotated key persisted to signaling cache");
+    // The key is cached for its Realm only.
+    let cache = KeyCache::new(env.issuer_temp_dir.path().join("signaling_key_cache.db"))
+        .await
+        .expect("open signaling cache");
+    let (verifying_key, expires_at) = cache
+        .get_cached_key(TEST_REALM, realm_key_id)
+        .await
+        .expect("read signaling cache")
+        .expect("Realm key persisted to signaling cache");
+    assert_eq!(expires_at, 0, "a Realm issuer key does not expire");
+    assert!(
+        cache
+            .get_cached_key("other@example.com", realm_key_id)
+            .await
+            .expect("read signaling cache")
+            .is_none()
+    );
     let claims = AIdCredentialVerifier::verify(&issued.credential, &verifying_key)
         .expect("fresh credential verifies");
     assert_eq!(claims.realm, TEST_REALM);
@@ -270,7 +260,6 @@ async fn expired_key_rotates_before_credential_issuance() {
         "linked-src/source-workload@1.0.0"
     );
 
-    eprintln!("key rotation test: shutting down signer");
     drop(issuer);
     env.shutdown_signer().await;
 }

@@ -929,6 +929,15 @@ impl AdminApiService {
                 }
             };
         }
+        // A Realm created active gets its issuer key now; the others got it
+        // with their first Realm Profile draft. Issuance creates a missing one.
+        if signer.is_none()
+            && let Some(issuer) = &self.aid_issuer
+            && let Err(err) = issuer.realm_key(&realm.name).await
+        {
+            platform::recording::warn!("Realm {} has no issuer key yet: {err}", realm.name);
+        }
+
         // The operator stands in for the Realm Provider account: the Realm
         // admin token comes back with the creation, once.
         let admin_token = match signer {

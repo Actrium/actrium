@@ -11,6 +11,16 @@
 //!
 //! # Key Management Strategy
 //!
+//! ## Realm issuer keys
+//!
+//! Each Realm's credentials are signed with that Realm's issuer key,
+//! `issuer:<realm>` in the Signer ([`AIdIssuer::realm_key`]), the key its Realm
+//! Profile lists under `issuer.keys`. Named keys do not expire. Verifiers cache
+//! it under `(realm, key_id)`.
+//!
+//! The rotating key described below no longer signs credentials; it still
+//! backs `/issuer/current-key` and the operator rotation endpoints.
+//!
 //! ## Security Design
 //!
 //! - The Ed25519 private key never leaves the Signer service.
@@ -122,6 +132,7 @@ use prost::Message as ProstMessage;
 use prost::bytes::Bytes;
 use prost_types::Timestamp;
 use sha1::Sha1;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{Mutex, RwLock};
@@ -331,16 +342,6 @@ fn key_usable_for_minting(expires_at: u64, now: u64) -> bool {
     expires_at == 0 || now.saturating_add(KEY_EXPIRY_SAFETY_MARGIN_SECS) < expires_at
 }
 
-/// Calculate a credential deadline without extending beyond its signing key.
-fn credential_expiry_for_key(now: u64, token_ttl_secs: u64, key_expires_at: u64) -> u64 {
-    let token_expires_at = now.saturating_add(token_ttl_secs);
-    if key_expires_at == 0 {
-        token_expires_at
-    } else {
-        token_expires_at.min(key_expires_at)
-    }
-}
-
 /// AId Token issuer - focused on issuing new Actor Identity Tokens
 pub struct AIdIssuer {
     signer_client: SignerClientWrapper,
@@ -350,6 +351,9 @@ pub struct AIdIssuer {
     /// rotations. Without this, concurrent registrations that all observe an
     /// expired key can each generate a distinct replacement key.
     key_rotation_lock: Arc<Mutex<()>>,
+    /// Each Realm's issuer key (`issuer:<realm>` in the Signer), which signs
+    /// that Realm's credentials: Signer key id and verifying key.
+    realm_keys: RwLock<HashMap<String, (u32, VerifyingKey)>>,
     /// Issuer configuration (public for renewal handler access).
     pub config: IssuerConfig,
 }
@@ -385,6 +389,7 @@ impl AIdIssuer {
             key_storage: Arc::new(key_storage),
             key_cache: Arc::new(RwLock::new(None)),
             key_rotation_lock: Arc::new(Mutex::new(())),
+            realm_keys: RwLock::new(HashMap::new()),
             config,
         };
 
@@ -519,33 +524,11 @@ impl AIdIssuer {
             tolerance_seconds: record.tolerance_seconds,
         };
 
-        let key_id = record.key_id;
-        let expires_at = record.expires_at;
-
         // Synchronous load, blocking wait.
         tokio::task::block_in_place(|| {
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
                 *self.key_cache.write().await = Some(cache);
-                // Persist the verifying key to signaling_key_cache.db,
-                // ensuring it is on disk even if AIdCredentialValidator::init
-                // has not yet been called; a subsequent init will read the key
-                // from the DB.
-                if let Err(e) =
-                    platform::aid::credential::validator::AIdCredentialValidator::persist_key(
-                        &self.config.sqlite_path,
-                        key_id,
-                        &verifying_key,
-                        expires_at,
-                    )
-                    .await
-                {
-                    platform::recording::warn!(
-                        "Failed to write verifying key to key_cache DB (non-fatal, key_id={}): {}",
-                        key_id,
-                        e
-                    );
-                }
             });
         });
 
@@ -556,13 +539,7 @@ impl AIdIssuer {
     async fn refresh_key_from_signer_locked(&self) -> Result<(), AidError> {
         platform::recording::info!("Fetching new key from Signer");
 
-        Self::refresh_key_internal(
-            &self.signer_client,
-            &self.key_storage,
-            &self.key_cache,
-            &self.config,
-        )
-        .await?;
+        Self::refresh_key_internal(&self.signer_client, &self.key_storage, &self.key_cache).await?;
 
         platform::recording::info!("Key refreshed successfully");
         Ok(())
@@ -710,8 +687,7 @@ impl AIdIssuer {
                 // Rotate the key
                 let rotation_result = {
                     let _rotation = key_rotation_lock.lock().await;
-                    Self::refresh_key_internal(&signer_client, &key_storage, &key_cache, &config)
-                        .await
+                    Self::refresh_key_internal(&signer_client, &key_storage, &key_cache).await
                 };
                 match rotation_result {
                     Ok(()) => {
@@ -772,7 +748,6 @@ impl AIdIssuer {
         signer_client: &SignerClientWrapper,
         key_storage: &KeyStorage,
         key_cache: &RwLock<Option<KeyCache>>,
-        config: &IssuerConfig,
     ) -> Result<(), AidError> {
         // Request a new Ed25519 signing key from the Signer (private key held by the Signer).
         let (key_id, verifying_key_bytes, expires_at, tolerance_seconds) = signer_client
@@ -819,27 +794,6 @@ impl AIdIssuer {
             .update_current_key(&record)
             .await
             .map_err(|e| AidError::GenerationFailed(format!("Failed to save key: {e}")))?;
-
-        // Persist the verifying key to signaling_key_cache.db (also updates the in-memory cache).
-        if let Err(e) = platform::aid::credential::validator::AIdCredentialValidator::persist_key(
-            &config.sqlite_path,
-            key_id,
-            &verifying_key,
-            expires_at,
-        )
-        .await
-        {
-            platform::recording::warn!(
-                "Failed to write verifying key to key_cache DB (non-fatal, key_id={}): {}",
-                key_id,
-                e
-            );
-        } else {
-            platform::recording::info!(
-                "verifying key persisted to key_cache DB (key_id={})",
-                key_id
-            );
-        }
 
         Ok(())
     }
@@ -1124,9 +1078,6 @@ impl AIdIssuer {
         request: &RegisterRequest,
         realm_secret_check: Option<&RealmSecretCheck>,
     ) -> Result<register_response::RegisterOk, AidError> {
-        // Ensure a usable key is available.
-        self.ensure_key_loaded().await?;
-
         let nonce_binding = self
             .verify_registration_identity(request, realm_secret_check)
             .await?;
@@ -1161,7 +1112,8 @@ impl AIdIssuer {
             .await?;
 
         // Build IdentityClaims (proto type, plaintext).
-        let (key_id, verifying_key, expr_time) = self.signing_snapshot().await?;
+        let (key_id, verifying_key) = self.realm_key(&actr_id.realm).await?;
+        let expr_time = now_secs().saturating_add(self.config.token_ttl_secs);
         let claims_proto = IdentityClaims {
             realm: actr_id.realm.clone(),
             actor_id: actr_id.to_string_repr(),
@@ -1915,28 +1867,36 @@ impl AIdIssuer {
         ))
     }
 
-    /// Snapshot a signing identity and cap credential lifetime at the signing
-    /// key lifetime. This prevents a credential from outliving its trust key.
-    async fn signing_snapshot(&self) -> Result<(u32, VerifyingKey, u64), AidError> {
-        let now = now_secs();
-        let cache = self.key_cache.read().await;
-        let cache = cache
-            .as_ref()
-            .ok_or_else(|| AidError::GenerationFailed("No key available".to_string()))?;
-        if !key_usable_for_minting(cache.expires_at, now) {
-            return Err(AidError::GenerationFailed(
-                "Signing key expired (or too close to expiry) before credential issuance"
-                    .to_string(),
-            ));
+    /// The Realm's issuer key, `issuer:<realm>` in the Signer, created there
+    /// the first time. Named keys never expire; rotating one goes through a
+    /// new Realm Profile. The verifying key is written to the credential
+    /// validator's cache under the Realm, so it verifies only that Realm's
+    /// credentials.
+    pub async fn realm_key(&self, realm: &str) -> Result<(u32, VerifyingKey), AidError> {
+        if let Some(key) = self.realm_keys.read().await.get(realm) {
+            return Ok(*key);
         }
-        let credential_expires_at =
-            credential_expiry_for_key(now, self.config.token_ttl_secs, cache.expires_at);
-        if credential_expires_at <= now {
-            return Err(AidError::GenerationFailed(
-                "Signing key has no remaining credential lifetime".to_string(),
-            ));
-        }
-        Ok((cache.key_id, cache.verifying_key, credential_expires_at))
+        let (key_id, public_key) = self
+            .signer_client
+            .ensure_named_key(&crate::realm_profile::issuer_key_id(realm))
+            .await
+            .map_err(|e| AidError::GenerationFailed(format!("Signer unavailable: {e}")))?;
+        let verifying_key = VerifyingKey::from_bytes(&public_key).map_err(|e| {
+            AidError::GenerationFailed(format!("Invalid verifying key from Signer: {e}"))
+        })?;
+        platform::aid::credential::validator::AIdCredentialValidator::persist_key(
+            &self.config.sqlite_path,
+            realm,
+            key_id,
+            &verifying_key,
+            0,
+        )
+        .await?;
+        self.realm_keys
+            .write()
+            .await
+            .insert(realm.to_string(), (key_id, verifying_key));
+        Ok((key_id, verifying_key))
     }
 
     /// Compute the renewal token expiry time (Unix timestamp, seconds, i64 for SQLite).
@@ -2511,11 +2471,9 @@ impl AIdIssuer {
         // which are the only callers of this method.
         let actor_type = self.recheck_existing_actor(actor_id, target).await?;
 
-        // Ensure a signing key is available.
-        self.ensure_key_loaded().await?;
-
         // Build IdentityClaims.
-        let (key_id, verifying_key, expr_time) = self.signing_snapshot().await?;
+        let (key_id, verifying_key) = self.realm_key(&actor_id.realm).await?;
+        let expr_time = now_secs().saturating_add(self.config.token_ttl_secs);
         let claims_proto = IdentityClaims {
             realm: actor_id.realm.clone(),
             actor_id: actor_id.to_string_repr(),
@@ -2701,17 +2659,6 @@ mod tests {
         assert!(!key_usable_for_minting(1, now));
     }
 
-    #[test]
-    fn test_credential_expiry_respects_token_ttl_for_non_expiring_key() {
-        assert_eq!(credential_expiry_for_key(1_000, 3_600, 0), 4_600);
-    }
-
-    #[test]
-    fn test_credential_expiry_is_capped_by_key_expiry() {
-        assert_eq!(credential_expiry_for_key(1_000, 3_600, 1_200), 1_200);
-        assert_eq!(credential_expiry_for_key(1_000, 60, 1_200), 1_060);
-    }
-
     /// A Signer pointing at a closed port: connection refused immediately, so
     /// refresh attempts fail fast without a real server.
     fn unreachable_signer_wrapper() -> SignerClientWrapper {
@@ -2758,6 +2705,7 @@ mod tests {
             key_storage: Arc::new(storage),
             key_cache: Arc::new(RwLock::new(None)),
             key_rotation_lock: Arc::new(Mutex::new(())),
+            realm_keys: RwLock::new(HashMap::new()),
             config: test_config(dir),
         }
     }
