@@ -222,7 +222,7 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | Actr 管理信封 | 签名信封 | 本契约早期草稿用语 |
 | Realm 客户端 key | 设备 key、device private key | 本契约早期草稿用语 |
 | renewal token | Realm refresh material | 产品文档早期用语 |
-| Actor credential | Realm credential | 产品文档早期用语 |
+| Actor credential | Realm credential | 产品文档早期用语；当前代码类型名为 proto `AIdCredential` 与 `crates/loran-issuer` 的 `AIdIssuer`、`AIdSerialNumberIssuer` |
 | Actor credential（含 Realm membership 证明） | Realm membership credential | 本契约早期草稿用语：并入 Actor credential，membership 即已注册未撤销的 Realm 客户端 key |
 | Realm Provider | provider | 本契约早期草稿用语（泛词） |
 | `publish_profile` | `activate_realm` | 早期草稿只管首次激活；合并为发布 Realm Profile（首次即激活，之后即更新或退役） |

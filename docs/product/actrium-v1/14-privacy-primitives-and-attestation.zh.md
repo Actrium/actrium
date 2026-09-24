@@ -185,7 +185,7 @@ contract_id = "notes.example/team-notes@1.4.2#privacy"
 package_digest = "sha256:..."
 
 [[actrium.privacy_contract.actor_role]]
-role = "primary-service"
+role = "service"
 actr_type = "notes.example/team-notes-service@1.4.2"
 cardinality = "1"
 required = true
@@ -196,7 +196,7 @@ cardinality = "0..n"
 required_assurance_profile = "confidential-ai-v1"
 
 [[actrium.privacy_contract.edge]]
-source = "primary-service"
+source = "service"
 target = "ai-inference"
 data_classes = ["private"]
 capabilities = ["actor.call:infer.v1"]
