@@ -92,6 +92,7 @@ pub mod handlers;
 mod idempotency;
 pub mod issuer;
 pub mod ratelimit;
+pub mod realm_profile;
 pub mod renewal;
 pub mod signer_client_wrapper;
 mod sn;

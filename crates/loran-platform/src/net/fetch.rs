@@ -22,7 +22,7 @@ pub const MAX_REDIRECTS: usize = 5;
 pub struct FetchError(String);
 
 impl FetchError {
-    fn new(message: impl Into<String>) -> Self {
+    pub fn new(message: impl Into<String>) -> Self {
         Self(message.into())
     }
 }
