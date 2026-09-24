@@ -6,6 +6,8 @@ interface RealmSecretModalProps {
   realm: string;
   secret: string;
   previousValidUntil?: number | null;
+  /** What `secret` is: the Realm secret (default) or the Realm admin token. */
+  kind?: "secret" | "admin-token";
   onClose: () => void;
 }
 
@@ -14,8 +16,10 @@ export function RealmSecretModal({
   realm,
   secret,
   previousValidUntil,
+  kind = "secret",
   onClose,
 }: RealmSecretModalProps) {
+  const adminToken = kind === "admin-token";
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -36,7 +40,7 @@ export function RealmSecretModal({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `realm-${realm}-secret.txt`;
+    a.download = `realm-${realm}-${kind}.txt`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -47,7 +51,7 @@ export function RealmSecretModal({
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
             <Key className="h-5 w-5 text-amber-500" />
-            Secret Rotated
+            {adminToken ? "Admin Token Reissued" : "Secret Rotated"}
           </h2>
           <button
             onClick={onClose}
@@ -62,9 +66,12 @@ export function RealmSecretModal({
             <div className="flex items-start gap-3">
               <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
               <div className="space-y-1">
-                <p className="text-sm font-medium text-amber-900">New secret generated</p>
+                <p className="text-sm font-medium text-amber-900">
+                  {adminToken ? "New Realm admin token generated" : "New secret generated"}
+                </p>
                 <p className="text-xs text-amber-700">
-                  Save this secret immediately. It will not be shown again.
+                  Save it immediately. It will not be shown again.
+                  {adminToken && " The previous admin token no longer works."}
                 </p>
               </div>
             </div>
@@ -77,7 +84,9 @@ export function RealmSecretModal({
             </div>
             
             <div>
-              <label className="text-xs font-medium text-gray-500 uppercase">New Secret</label>
+              <label className="text-xs font-medium text-gray-500 uppercase">
+                {adminToken ? "New Realm Admin Token" : "New Secret"}
+              </label>
               <div className="mt-1 flex items-center gap-2">
                 <code className="flex-1 rounded bg-gray-100 px-3 py-2 text-sm font-mono text-gray-800 border border-gray-200 break-all">
                   {secret}

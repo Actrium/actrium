@@ -22,6 +22,7 @@ export function Realms() {
     realm: string;
     secret: string;
     previousValidUntil?: number | null;
+    kind?: "secret" | "admin-token";
   } | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [rotateConfirm, setRotateConfirm] = useState<{ isOpen: boolean; realm: string | null }>({
@@ -29,6 +30,7 @@ export function Realms() {
     realm: null,
   });
   const [retireConfirm, setRetireConfirm] = useState<string | null>(null);
+  const [reissueConfirm, setReissueConfirm] = useState<string | null>(null);
 
   const ensureRealmWritesEnabled = useCallback(() => {
     if (realmWritesEnabled) {
@@ -74,6 +76,7 @@ export function Realms() {
     setShowForm(false);
     setRotateConfirm({ isOpen: false, realm: null });
     setRetireConfirm(null);
+    setReissueConfirm(null);
   }, [realmWritesEnabled]);
 
   async function handleToggleEnabled(realm: RealmInfo) {
@@ -97,6 +100,23 @@ export function Realms() {
       await fetchRealms();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to retire realm");
+    }
+  }
+
+  async function handleConfirmReissue() {
+    const realm = reissueConfirm;
+    setReissueConfirm(null);
+    if (realm === null || !ensureRealmWritesEnabled()) return;
+
+    try {
+      const resp = await api.reissueRealmAdminToken(realm);
+      setRealmSecretNotice({
+        realm: resp.realm,
+        secret: resp.realm_admin_token,
+        kind: "admin-token",
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reissue Realm admin token");
     }
   }
 
@@ -129,7 +149,7 @@ export function Realms() {
     }
   }
 
-  async function handleCreate(data: { realm: string; enabled: boolean }) {
+  async function handleCreate(data: Parameters<typeof api.createRealm>[0]) {
     if (!ensureRealmWritesEnabled()) {
       throw new Error(REALM_WRITES_DISABLED_MESSAGE);
     }
@@ -214,6 +234,9 @@ export function Realms() {
         writesEnabled={realmWritesEnabled}
         onToggleEnabled={handleToggleEnabled}
         onRotateSecret={handleRotateSecretClick}
+        onReissueAdminToken={(realm) => {
+          if (ensureRealmWritesEnabled()) setReissueConfirm(realm);
+        }}
         onRetire={(realm) => {
           if (ensureRealmWritesEnabled()) setRetireConfirm(realm);
         }}
@@ -249,6 +272,27 @@ export function Realms() {
       />
 
       <ConfirmModal
+        isOpen={reissueConfirm !== null}
+        title="Reissue Realm Admin Token"
+        message={
+          <span>
+            Reissue the Realm admin token of <strong>{reissueConfirm}</strong>?
+            <br />
+            <br />
+            <span className="text-xs text-gray-500 block">
+              The Realm admin token manages only this Realm. The current one stops working at
+              once; the new one is displayed once.
+            </span>
+          </span>
+        }
+        confirmLabel="Reissue Token"
+        cancelLabel="Cancel"
+        isDestructive={false}
+        onConfirm={handleConfirmReissue}
+        onCancel={() => setReissueConfirm(null)}
+      />
+
+      <ConfirmModal
         isOpen={rotateConfirm.isOpen}
         title="Rotate Realm Secret"
         message={
@@ -275,6 +319,7 @@ export function Realms() {
           realm={realmSecretNotice.realm}
           secret={realmSecretNotice.secret}
           previousValidUntil={realmSecretNotice.previousValidUntil}
+          kind={realmSecretNotice.kind}
           onClose={() => setRealmSecretNotice(null)}
         />
       )}

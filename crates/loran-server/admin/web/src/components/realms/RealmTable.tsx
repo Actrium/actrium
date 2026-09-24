@@ -1,12 +1,13 @@
 import type { RealmInfo } from "../../lib/api";
 import { cn } from "../../lib/utils";
-import { Archive, Clock, KeyRound, Pause, Play } from "lucide-react";
+import { Archive, Clock, KeyRound, Pause, Play, UserCog } from "lucide-react";
 
 interface RealmTableProps {
   realms: RealmInfo[];
   writesEnabled: boolean;
   onToggleEnabled: (realm: RealmInfo) => void;
   onRotateSecret: (realm: string) => void;
+  onReissueAdminToken: (realm: string) => void;
   onRetire: (realm: string) => void;
 }
 
@@ -31,6 +32,7 @@ export function RealmTable({
   writesEnabled,
   onToggleEnabled,
   onRotateSecret,
+  onReissueAdminToken,
   onRetire,
 }: RealmTableProps) {
   if (realms.length === 0) {
@@ -102,6 +104,14 @@ export function RealmTable({
                       title={canWrite ? "Rotate secret" : disabledTitle}
                     >
                       <KeyRound className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => onReissueAdminToken(realm.realm)}
+                      disabled={!canWrite || realm.status !== "active"}
+                      className={cn(actionClass, "hover:bg-blue-50 hover:text-blue-600")}
+                      title={canWrite ? "Reissue Realm admin token" : disabledTitle}
+                    >
+                      <UserCog className="h-4 w-4" />
                     </button>
                     <button
                       onClick={() => onRetire(realm.realm)}

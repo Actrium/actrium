@@ -103,6 +103,8 @@ export interface RealmMutationResponse {
   error_message: string | null;
   realm?: RealmInfo | null;
   realm_secret?: string | null;
+  /** Returned once for a Realm under the Provider domain. */
+  realm_admin_token?: string | null;
 }
 
 export interface RealmSecretRotationResponse {
@@ -215,9 +217,12 @@ export const api = {
 
   listRealms: () => request<RealmsResponse>("/realms"),
 
+  /** A Realm under the Provider domain needs the package of its first Realm Profile. */
   createRealm: (data: {
     realm: string;
     enabled?: boolean;
+    display_name?: string;
+    package?: { href: string; sha256: string };
   }) =>
     request<RealmMutationResponse>("/realms", {
       method: "POST",
@@ -245,6 +250,13 @@ export const api = {
     request<RealmSecretRotationResponse>(`/realms/${encodeURIComponent(realm)}/secret/rotate`, {
       method: "POST",
     }),
+
+  /** Replaces the Realm admin token; the old one stops working. */
+  reissueRealmAdminToken: (realm: string) =>
+    request<{ success: boolean; realm: string; realm_admin_token: string }>(
+      `/realms/${encodeURIComponent(realm)}/admin-token/reissue`,
+      { method: "POST" },
+    ),
 
   getConfig: (configType: number, key: string) =>
     request<{

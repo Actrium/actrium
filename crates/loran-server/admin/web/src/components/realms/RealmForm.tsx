@@ -3,14 +3,21 @@ import { api, type RealmMutationResponse } from "../../lib/api";
 import { X, Copy, Download, CheckCircle, AlertTriangle } from "lucide-react";
 
 interface RealmFormProps {
-  onSubmit: (data: { realm: string; enabled: boolean }) => Promise<RealmMutationResponse>;
+  onSubmit: (data: Parameters<typeof api.createRealm>[0]) => Promise<RealmMutationResponse>;
   onClose: () => void;
   onRefresh?: () => void;
 }
 
-/** Creates a Realm. A Realm name is fixed at creation and never reused. */
+/**
+ * Creates a Realm. A Realm name is fixed at creation and never reused. A
+ * Realm under the Provider domain gets a Loran-signed Realm Profile, which
+ * names its package.
+ */
 export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
   const [name, setName] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [packageHref, setPackageHref] = useState("");
+  const [packageSha256, setPackageSha256] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -18,6 +25,7 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
   const [step, setStep] = useState<"input" | "success">("input");
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
   const [createdRealm, setCreatedRealm] = useState<string | null>(null);
+  const [adminToken, setAdminToken] = useState<string | null>(null);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -40,9 +48,15 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
     setLoading(true);
 
     try {
-      const resp = await onSubmit({ realm: name, enabled: false });
+      const resp = await onSubmit({
+        realm: name,
+        enabled: false,
+        ...(displayName ? { display_name: displayName } : {}),
+        ...(packageHref ? { package: { href: packageHref, sha256: packageSha256 } } : {}),
+      });
       if (resp.realm_secret) {
         setCreatedSecret(resp.realm_secret);
+        setAdminToken(resp.realm_admin_token ?? null);
         setCreatedRealm(resp.realm?.realm ?? name);
         setStep("success");
       } else {
@@ -137,6 +151,26 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
                   </button>
                 </div>
               </div>
+              {adminToken && (
+                <div>
+                  <label className="text-xs font-medium text-gray-500 uppercase">
+                    Realm Admin Token
+                  </label>
+                  <code className="mt-1 block rounded bg-gray-100 px-3 py-2 text-sm font-mono text-gray-800 border border-gray-200 break-all">
+                    {adminToken}
+                  </code>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Give it to the Realm&apos;s administrator. It manages only this Realm and is
+                    shown only once.
+                  </p>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(adminToken)}
+                    className="mt-2 flex items-center gap-1.5 rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <Copy className="h-3.5 w-3.5" /> Copy
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="pt-4 border-t border-gray-100 flex flex-col gap-3">
@@ -192,6 +226,42 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
             />
             <p className="mt-1 text-xs text-gray-500">
               The name cannot be changed later, and a retired name is never reused.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Display Name <span className="font-normal text-gray-400">(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Package</label>
+            <input
+              type="url"
+              value={packageHref}
+              onChange={(e) => setPackageHref(e.target.value.trim())}
+              placeholder="https://cdn.example.com/app-1.0.0.actr"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+            />
+            <input
+              type="text"
+              value={packageSha256}
+              onChange={(e) => setPackageSha256(e.target.value.trim().toLowerCase())}
+              placeholder="SHA-256 (64 hex)"
+              pattern="[0-9a-f]{64}"
+              required={packageHref !== ""}
+              className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Required for Realms under this Realm Provider&apos;s domain: it goes into the
+              Realm Profile this instance signs.
             </p>
           </div>
 
