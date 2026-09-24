@@ -5,12 +5,13 @@
 //! Realm signing key listed in the domain's `realm_signing_keys` member.
 
 use crate::authority::{
-    AuthorityDescriptor, DetachedSignature, KeyStatus, RealmSigningKeys, SIGNATURE_ALGORITHM,
+    AuthorityDescriptor, DetachedSignature, KeyStatus, RealmSigningKey, RealmSigningKeys,
+    SIGNATURE_ALGORITHM,
 };
 use crate::uri::ActrUri;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -197,40 +198,11 @@ impl RealmProfile {
             .map_err(|error| invalid(format!("malformed document: {error}")))?;
         profile.check(realm_name).map_err(invalid)?;
 
-        let key = keys
-            .keys
-            .iter()
-            .find(|key| key.id == profile.signature.key_id)
-            .ok_or_else(|| {
-                invalid(format!(
-                    "signature key '{}' is not a listed Realm signing key",
-                    profile.signature.key_id
-                ))
-            })?;
-        let public_key: [u8; 32] = BASE64
-            .decode(&key.public_key)
-            .ok()
-            .and_then(|bytes| bytes.try_into().ok())
-            .ok_or_else(|| RealmProfileError::KeysInvalid(format!("key '{}'", key.id)))?;
-        let verifying_key = VerifyingKey::from_bytes(&public_key).map_err(|error| {
-            RealmProfileError::KeysInvalid(format!("key '{}': {error}", key.id))
-        })?;
-        let signature: [u8; 64] = BASE64
-            .decode(&profile.signature.value)
-            .ok()
-            .and_then(|bytes| bytes.try_into().ok())
-            .ok_or_else(|| invalid("signature value is not a base64 Ed25519 signature".into()))?;
-
         if let Value::Object(members) = &mut value {
             members.remove("signature");
         }
         let signed_payload = jcs(&value);
-        verifying_key
-            .verify(
-                signed_payload.as_bytes(),
-                &Signature::from_bytes(&signature),
-            )
-            .map_err(|_| invalid("signature verification failed".into()))?;
+        verify_signature(keys, &profile.signature, signed_payload.as_bytes())?;
         Ok(Self {
             signed_payload,
             ..profile
@@ -310,6 +282,70 @@ impl RealmProfile {
             ));
         }
         Ok(())
+    }
+}
+
+/// Verify a detached `signature` over `payload` with the listed key it
+/// names, and return that key. Whether the key must be `active` is the
+/// caller's rule.
+pub(crate) fn verify_signature<'k>(
+    keys: &'k RealmSigningKeys,
+    signature: &DetachedSignature,
+    payload: &[u8],
+) -> Result<&'k RealmSigningKey, RealmProfileError> {
+    let invalid = RealmProfileError::Invalid;
+    if signature.algorithm != SIGNATURE_ALGORITHM {
+        return Err(invalid(format!(
+            "unsupported signature algorithm '{}'",
+            signature.algorithm
+        )));
+    }
+    let key = keys
+        .keys
+        .iter()
+        .find(|key| key.id == signature.key_id)
+        .ok_or_else(|| {
+            invalid(format!(
+                "signature key '{}' is not a listed Realm signing key",
+                signature.key_id
+            ))
+        })?;
+    let public_key: [u8; 32] = BASE64
+        .decode(&key.public_key)
+        .ok()
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or_else(|| RealmProfileError::KeysInvalid(format!("key '{}'", key.id)))?;
+    let verifying_key = VerifyingKey::from_bytes(&public_key)
+        .map_err(|error| RealmProfileError::KeysInvalid(format!("key '{}': {error}", key.id)))?;
+    let value: [u8; 64] = BASE64
+        .decode(&signature.value)
+        .ok()
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or_else(|| invalid("signature value is not a base64 Ed25519 signature".into()))?;
+    verifying_key
+        .verify(payload, &Signature::from_bytes(&value))
+        .map_err(|_| invalid("signature verification failed".into()))?;
+    Ok(key)
+}
+
+/// Sign `document`, a JSON object, as Realm Profiles, `realm_signing_keys`
+/// members and Actr management envelopes are signed: `signature` becomes a
+/// detached Ed25519 signature by `key_id` over the RFC 8785 JCS form of the
+/// document without `signature`.
+pub fn sign_document(document: &mut Value, key_id: &str, key: &SigningKey) {
+    if let Value::Object(members) = document {
+        members.remove("signature");
+    }
+    let signature = key.sign(jcs(document).as_bytes());
+    if let Value::Object(members) = document {
+        members.insert(
+            "signature".to_string(),
+            serde_json::json!({
+                "key_id": key_id,
+                "algorithm": SIGNATURE_ALGORITHM,
+                "value": BASE64.encode(signature.to_bytes()),
+            }),
+        );
     }
 }
 
