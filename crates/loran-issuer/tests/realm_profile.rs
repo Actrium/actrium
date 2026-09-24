@@ -263,12 +263,20 @@ impl Domain {
         .unwrap()
     }
 
-    fn profile(&self, name: &str, sequence: u64, status: &str, key_id: &str) -> Vec<u8> {
+    /// A Realm Profile naming `issuer` (see [`issuer_of`]).
+    fn profile(
+        &self,
+        name: &str,
+        sequence: u64,
+        status: &str,
+        key_id: &str,
+        issuer: &Value,
+    ) -> Vec<u8> {
         let mut profile = json!({
             "schema": "actr.realm/v1",
             "sequence": sequence,
             "realm": { "name": name, "display_name": "Acme", "status": status },
-            "issuer": { "url": format!("https://{PROVIDER}/issuer"), "keys": [] },
+            "issuer": issuer,
             "provider": { "id": PROVIDER, "signaling": [], "ice": [] },
             "policy": { "membership": "invite-only" },
             "issued_at": "2026-09-25T00:00:00Z",
@@ -308,6 +316,12 @@ async fn accept(name: &str, document: &[u8], member: &Value) {
     .unwrap();
 }
 
+/// The `issuer` member Loran expects in the Realm's Profile: its Issuer and
+/// the Realm's issuer key.
+async fn issuer_of(profiles: &RealmProfiles, name: &str) -> Value {
+    profiles.draft(name, 0, "", None, false).await.unwrap()["issuer"].clone()
+}
+
 type Documents = HashMap<String, Vec<u8>>;
 
 async fn refresh(profiles: &RealmProfiles, documents: &Documents) {
@@ -333,11 +347,25 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
         ],
     };
     let member = acme.member(1, &["rs-1", "rs-2"]);
-    let (one, two) = ("one@acme.com", "two@acme.com");
+    let (one, two, three) = ("one@acme.com", "two@acme.com", "three@acme.com");
+    let mut issuer = HashMap::new();
+    for name in [one, two, three] {
+        issuer.insert(name, issuer_of(&profiles, name).await);
+    }
     insert(one, RealmStatus::Active).await;
     insert(two, RealmStatus::Active).await;
-    accept(one, &acme.profile(one, 1, "active", "rs-1"), &member).await;
-    accept(two, &acme.profile(two, 5, "active", "rs-1"), &member).await;
+    accept(
+        one,
+        &acme.profile(one, 1, "active", "rs-1", &issuer[one]),
+        &member,
+    )
+    .await;
+    accept(
+        two,
+        &acme.profile(two, 5, "active", "rs-1", &issuer[two]),
+        &member,
+    )
+    .await;
 
     // A newer Profile is taken from the domain's realms location.
     let mut documents = Documents::new();
@@ -347,11 +375,11 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
     );
     documents.insert(
         "https://acme.com/realms/one".into(),
-        acme.profile(one, 2, "active", "rs-1"),
+        acme.profile(one, 2, "active", "rs-1", &issuer[one]),
     );
     documents.insert(
         "https://acme.com/realms/two".into(),
-        acme.profile(two, 4, "active", "rs-1"),
+        acme.profile(two, 4, "active", "rs-1", &issuer[two]),
     );
     refresh(&profiles, &documents).await;
     assert_eq!(
@@ -375,7 +403,7 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
     // A retired Profile retires the Realm.
     documents.insert(
         "https://acme.com/realms/one".into(),
-        acme.profile(one, 3, "retired", "rs-1"),
+        acme.profile(one, 3, "retired", "rs-1", &issuer[one]),
     );
     refresh(&profiles, &documents).await;
     assert_eq!(
@@ -391,7 +419,7 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
     );
     documents.insert(
         "https://acme.com/realms/two".into(),
-        acme.profile(two, 1, "active", "rs-2"),
+        acme.profile(two, 1, "active", "rs-2", &issuer[two]),
     );
     refresh(&profiles, &documents).await;
     let record = RealmProfileRecord::get(two).await.unwrap().unwrap();
@@ -404,7 +432,7 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
     };
     documents.insert(
         "https://acme.com/realms/two".into(),
-        stranger.profile(two, 9, "active", "rs-2"),
+        stranger.profile(two, 9, "active", "rs-2", &issuer[two]),
     );
     documents.insert(
         "https://acme.com/.well-known/actr".into(),
@@ -412,14 +440,17 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
     );
     // Make the accepted Profile unverifiable: sign it with a key the domain
     // no longer lists.
-    let three = "three@acme.com";
     insert(three, RealmStatus::Active).await;
     let old: RealmSigningKeys = serde_json::from_value(member.clone()).unwrap();
-    let profile =
-        RealmProfile::verify(&acme.profile(three, 1, "active", "rs-1"), three, &old).unwrap();
+    let profile = RealmProfile::verify(
+        &acme.profile(three, 1, "active", "rs-1", &issuer[three]),
+        three,
+        &old,
+    )
+    .unwrap();
     RealmProfileRecord::store(
         &profile,
-        std::str::from_utf8(&acme.profile(three, 1, "active", "rs-1")).unwrap(),
+        std::str::from_utf8(&acme.profile(three, 1, "active", "rs-1", &issuer[three])).unwrap(),
         None,
         None,
     )
@@ -431,6 +462,25 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
     assert!(!suspended.enabled);
     // `two` still verifies under rs-2 and keeps serving.
     assert!(Realm::get(two).await.unwrap().unwrap().enabled);
+
+    // A newer Profile that no longer lists the Realm's issuer key stops
+    // issuance: the Realm is suspended.
+    let mut other_issuer = issuer[two].clone();
+    other_issuer["keys"][0]["public_key"] = BASE64.encode([7u8; 32]).into();
+    documents.insert(
+        "https://acme.com/realms/two".into(),
+        acme.profile(two, 2, "active", "rs-2", &other_issuer),
+    );
+    refresh(&profiles, &documents).await;
+    assert_eq!(
+        RealmProfileRecord::get(two)
+            .await
+            .unwrap()
+            .unwrap()
+            .sequence,
+        2
+    );
+    assert!(!Realm::get(two).await.unwrap().unwrap().enabled);
 }
 
 mod management {

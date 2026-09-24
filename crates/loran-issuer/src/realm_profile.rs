@@ -8,7 +8,8 @@
 
 use actr_protocol::realm_profile::{
     IceEndpoint, IssuerKey, RealmIssuer, RealmPackage, RealmPolicy, RealmProfile,
-    RealmProfileError, RealmProvider, SignalingEndpoint, jcs, realm_profile_urls,
+    RealmProfileError, RealmProvider, RealmStatus as ProfileStatus, SignalingEndpoint, jcs,
+    realm_profile_urls,
 };
 use actr_protocol::{
     AuthorityDescriptor, DetachedSignature, KeyStatus, RealmSigningKey, RealmSigningKeys,
@@ -362,10 +363,12 @@ impl RealmProfiles {
                 accepted.check_successor(&profile)?;
                 if profile.sequence > accepted.sequence {
                     store_fetched(&profile, &document, &record.digest).await?;
+                    self.suspend_unless_listed(realm, &profile).await?;
                 }
             }
             (None, Some((profile, document))) if profile.provider.id == self.provider_id() => {
                 store_fetched(&profile, &document, &record.digest).await?;
+                self.suspend_unless_listed(realm, &profile).await?;
             }
             (None, _) => {
                 platform::recording::warn!(
@@ -374,6 +377,36 @@ impl RealmProfiles {
                 Realm::set_enabled(realm, false).await?;
             }
             (Some(_), None) => {}
+        }
+        Ok(())
+    }
+
+    /// Stop issuing for a Realm whose new active Profile no longer lists its
+    /// issuer key as active: the Realm is suspended.
+    async fn suspend_unless_listed(
+        &self,
+        realm: &str,
+        profile: &RealmProfile,
+    ) -> Result<(), ProfileError> {
+        if profile.realm.status != ProfileStatus::Active {
+            return Ok(());
+        }
+        let (_, public_key) = self
+            .signer
+            .ensure_named_key(&issuer_key_id(realm))
+            .await
+            .map_err(|error| ProfileError::Unavailable(format!("Signer: {error}")))?;
+        let public_key = BASE64.encode(public_key);
+        let listed = profile
+            .issuer
+            .keys
+            .iter()
+            .any(|key| key.status == KeyStatus::Active && key.public_key == public_key);
+        if !listed {
+            platform::recording::warn!(
+                "Suspending Realm {realm}: its Realm Profile no longer lists this issuer key"
+            );
+            Realm::set_enabled(realm, false).await?;
         }
         Ok(())
     }
