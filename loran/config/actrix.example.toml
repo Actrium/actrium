@@ -49,6 +49,12 @@ actrix_shared_key = "<generate-with-openssl-rand-hex-32>"
 enabled = false
 # uri = "actr://localhost"
 
+# Realm hosting limits. One Loran instance hosts many Realms.
+[realm]
+# max_realms = 1              # pending + active Realms; unset = no limit
+pending_ttl_secs = 3600       # pending Realm lifetime before removal
+max_pending_per_domain = 10   # pending Realms per Realm domain
+
 # Recording pipeline (logging + tracing)
 [recording]
 # Global sink — default for all channels. Per-channel sink overrides below.

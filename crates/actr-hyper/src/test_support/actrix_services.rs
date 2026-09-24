@@ -64,10 +64,10 @@ async fn initialize_signaling_database() -> anyhow::Result<PathBuf> {
             // not a usable signaling fixture.
             platform::Realm::upsert_managed(
                 TEST_REALM.to_string(),
-                platform::realm::RealmStatus::Active,
                 true,
                 None,
                 platform::realm::hash_realm_secret("actr-rtc-integration-secret"),
+                None,
                 None,
             )
             .await?;

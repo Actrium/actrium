@@ -303,13 +303,22 @@ impl ActorAcl {
     /// # Returns
     ///
     /// Returns true if discovery is allowed, false otherwise.
-    /// Default policy: deny if no rule exists (secure by default)
+    /// Actors in different Realms never see each other, whatever the rules
+    /// say. Within a Realm the default is deny when no rule exists.
     pub async fn can_discover(
         source_realm: &str,
         target_realm: &str,
         from_type: &str,
         to_type: &str,
     ) -> Result<bool, RealmError> {
+        if source_realm != target_realm {
+            crate::recording::debug!(
+                "Cross-Realm discovery denied: source_realm={}, target_realm={}",
+                source_realm,
+                target_realm
+            );
+            return Ok(false);
+        }
         match Self::get_by_types(target_realm, source_realm, from_type, to_type).await? {
             Some(acl) => {
                 crate::recording::debug!(
@@ -501,7 +510,6 @@ mod tests {
         )
         .await?;
         let target_realm = target.name.as_str();
-        let source_realm = "acl-source@example.com";
 
         let wildcard = ActorAcl::new_with_source_realm(
             target_realm.to_string(),
@@ -512,7 +520,7 @@ mod tests {
         );
         let exact = ActorAcl::new_with_source_realm(
             target_realm.to_string(),
-            Some(source_realm.to_string()),
+            Some(target_realm.to_string()),
             "acme:client".to_string(),
             "acme:worker".to_string(),
             true,
@@ -520,18 +528,41 @@ mod tests {
         ActorAcl::replace_for_target(target_realm, "acme:worker", &[wildcard, exact]).await?;
 
         let allowed =
-            ActorAcl::can_discover(source_realm, target_realm, "acme:client", "acme:worker")
-                .await?;
-        assert!(allowed);
-
-        let denied_by_wildcard =
             ActorAcl::can_discover(target_realm, target_realm, "acme:client", "acme:worker")
                 .await?;
-        assert!(!denied_by_wildcard);
+        assert!(allowed, "the source-scoped rule wins over the wildcard");
 
         let denied_other_type =
-            ActorAcl::can_discover(source_realm, target_realm, "acme:other", "acme:worker").await?;
+            ActorAcl::can_discover(target_realm, target_realm, "acme:other", "acme:worker").await?;
         assert!(!denied_other_type);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_cross_realm_is_denied_even_with_a_rule() -> anyhow::Result<()> {
+        setup_test_db().await?;
+
+        let target_realm = "acl-target@example.com";
+        let source_realm = "acl-source@acme.com";
+        for name in [target_realm, source_realm] {
+            Realm::create(name.to_string(), "test-secret-hash".to_string()).await?;
+        }
+        for source in [Some(source_realm.to_string()), None] {
+            let rule = ActorAcl::new_with_source_realm(
+                target_realm.to_string(),
+                source,
+                "acme:client".to_string(),
+                "acme:worker".to_string(),
+                true,
+            );
+            ActorAcl::replace_for_target(target_realm, "acme:worker", &[rule]).await?;
+            let allowed =
+                ActorAcl::can_discover(source_realm, target_realm, "acme:client", "acme:worker")
+                    .await?;
+            assert!(!allowed, "cross-Realm discovery must be denied");
+        }
 
         Ok(())
     }

@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-const ACTRIX_SCHEMA_VERSION: i64 = 4;
+const ACTRIX_SCHEMA_VERSION: i64 = 5;
 
 /// Database manager
 #[derive(Clone)]
@@ -91,13 +91,23 @@ impl Database {
         // Create the Realm table, keyed by Realm name `<realm_id>@<domain>`.
         // Callers validate the name before writing; the CHECK is a backstop.
         // secret_current carries a CHECK so the non-empty invariant is enforced
-        // at the storage layer, not only by the three application entry points.
+        // at the storage layer, not only by the application entry points.
+        //
+        // A retired row is the Realm Provider tombstone: it is never deleted,
+        // so the primary key keeps the name from being reused. `enabled` is the
+        // operator's local suspend switch and is independent of `status`.
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS realm (
-                name TEXT PRIMARY KEY CHECK(name LIKE '%@%'),
-                status TEXT NOT NULL DEFAULT 'Active',
+                name TEXT PRIMARY KEY CHECK(name LIKE '%_@_%'),
+                status TEXT NOT NULL DEFAULT 'active'
+                    CHECK(status IN ('pending', 'active', 'retired')),
                 enabled INTEGER NOT NULL DEFAULT 1,
+                display_name TEXT,
                 expires_at INTEGER,
+                pending_expires_at INTEGER,
+                requester TEXT NOT NULL DEFAULT '',
+                issuer_key_id TEXT,
+                admin_token_hash TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER,
                 secret_current TEXT NOT NULL DEFAULT ''
@@ -109,11 +119,66 @@ impl Database {
         .execute(&mut *tx)
         .await?;
 
-        // One Actrix instance is exactly one Realm in the v1 production profile.
-        // The expression index enforces that invariant under concurrent writers.
+        // A Realm name is immutable, and a retired Realm never comes back.
         sqlx::query(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_realm_singleton
-             ON realm((1))",
+            "CREATE TRIGGER IF NOT EXISTS realm_name_immutable
+             BEFORE UPDATE OF name ON realm
+             WHEN NEW.name != OLD.name
+             BEGIN SELECT RAISE(ABORT, 'realm name is immutable'); END",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "CREATE TRIGGER IF NOT EXISTS realm_retired_is_final
+             BEFORE UPDATE OF status ON realm
+             WHEN OLD.status = 'retired' AND NEW.status != 'retired'
+             BEGIN SELECT RAISE(ABORT, 'retired realm cannot change status'); END",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Accepted `realm_signing_keys` of a Realm domain (the key pin).
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS realm_domain (
+                domain TEXT PRIMARY KEY,
+                keys_json TEXT NOT NULL,
+                keys_sequence INTEGER NOT NULL,
+                keys_digest TEXT NOT NULL,
+                pinned_at INTEGER NOT NULL,
+                checked_at INTEGER NOT NULL
+            )",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Latest accepted Realm Profile of each Realm, stored verbatim.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS realm_profile (
+                realm TEXT PRIMARY KEY,
+                sequence INTEGER NOT NULL,
+                digest TEXT NOT NULL,
+                document TEXT NOT NULL,
+                accepted_at INTEGER NOT NULL,
+                FOREIGN KEY(realm) REFERENCES realm(name) ON DELETE CASCADE
+            )",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Realm management request nonces, kept until the request expires.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS realm_mgmt_nonce (
+                nonce TEXT PRIMARY KEY,
+                expires_at INTEGER NOT NULL
+            )",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_realm_mgmt_nonce_expires
+             ON realm_mgmt_nonce(expires_at)",
         )
         .execute(&mut *tx)
         .await?;
@@ -542,7 +607,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn fresh_database_is_versioned_and_enforces_single_realm() {
+    async fn fresh_database_is_versioned_and_hosts_many_realms() {
         let dir = tempfile::tempdir().unwrap();
         let db = Database::new(dir.path()).await.unwrap();
         let version: i64 = sqlx::query_scalar("PRAGMA user_version")
@@ -551,22 +616,63 @@ mod tests {
             .unwrap();
         assert_eq!(version, ACTRIX_SCHEMA_VERSION);
 
+        for name in ["primary@example.com", "second@example.com"] {
+            sqlx::query(
+                "INSERT INTO realm (name, created_at, secret_current)
+                 VALUES (?, 1, 'hash')",
+            )
+            .bind(name)
+            .execute(db.get_pool())
+            .await
+            .unwrap();
+        }
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM realm")
+            .fetch_one(db.get_pool())
+            .await
+            .unwrap();
+        assert_eq!(count, 2);
+
+        let unknown_status = sqlx::query(
+            "INSERT INTO realm (name, status, created_at, secret_current)
+             VALUES ('third@example.com', 'suspended', 1, 'hash')",
+        )
+        .execute(db.get_pool())
+        .await;
+        assert!(unknown_status.is_err());
+    }
+
+    #[tokio::test]
+    async fn realm_name_is_immutable_and_retirement_is_final() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::new(dir.path()).await.unwrap();
         sqlx::query(
-            "INSERT INTO realm
-             (name, status, enabled, created_at, secret_current)
-             VALUES ('primary@example.com', 'Active', 1, 1, 'hash')",
+            "INSERT INTO realm (name, created_at, secret_current)
+             VALUES ('primary@example.com', 1, 'hash')",
         )
         .execute(db.get_pool())
         .await
         .unwrap();
-        let second = sqlx::query(
-            "INSERT INTO realm
-             (name, status, enabled, created_at, secret_current)
-             VALUES ('second@example.com', 'Active', 1, 2, 'hash')",
+
+        let rename = sqlx::query("UPDATE realm SET name = 'renamed@example.com'")
+            .execute(db.get_pool())
+            .await;
+        assert!(rename.is_err(), "realm name must be immutable");
+
+        sqlx::query("UPDATE realm SET status = 'retired'")
+            .execute(db.get_pool())
+            .await
+            .unwrap();
+        let revive = sqlx::query("UPDATE realm SET status = 'active'")
+            .execute(db.get_pool())
+            .await;
+        assert!(revive.is_err(), "retired realm must stay retired");
+        let reuse = sqlx::query(
+            "INSERT INTO realm (name, created_at, secret_current)
+             VALUES ('primary@example.com', 2, 'hash')",
         )
         .execute(db.get_pool())
         .await;
-        assert!(second.is_err(), "v1 must enforce one Realm per database");
+        assert!(reuse.is_err(), "retired realm name must not be reused");
     }
 
     #[tokio::test]
@@ -576,7 +682,7 @@ mod tests {
 
         let unnamed = sqlx::query(
             "INSERT INTO realm (name, status, enabled, created_at, secret_current)
-             VALUES ('primary', 'Active', 1, 1, 'hash')",
+             VALUES ('primary', 'active', 1, 1, 'hash')",
         )
         .execute(db.get_pool())
         .await;
@@ -584,7 +690,7 @@ mod tests {
 
         sqlx::query(
             "INSERT INTO realm (name, status, enabled, created_at, secret_current)
-             VALUES ('primary@example.com', 'Active', 1, 1, 'hash')",
+             VALUES ('primary@example.com', 'active', 1, 1, 'hash')",
         )
         .execute(db.get_pool())
         .await
@@ -622,7 +728,7 @@ mod tests {
             .unwrap();
         sqlx::query(
             "INSERT INTO realm (name, status, enabled, created_at, secret_current)
-             VALUES ('primary@example.com', 'Active', 1, 1, 'hash')",
+             VALUES ('primary@example.com', 'active', 1, 1, 'hash')",
         )
         .execute(db.get_pool())
         .await

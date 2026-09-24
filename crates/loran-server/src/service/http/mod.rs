@@ -8,12 +8,10 @@ mod control;
 mod issuer;
 pub mod observability;
 mod publisher_registry;
-mod realm_descriptor;
 mod signaling;
 
 pub use authority::build_authority_router;
 pub use control::build_control_router;
 pub use issuer::IssuerService;
 pub use publisher_registry::PublisherRegistryService;
-pub use realm_descriptor::build_realm_descriptor_router;
 pub use signaling::SignalingService;

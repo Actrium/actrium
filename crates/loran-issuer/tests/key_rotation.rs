@@ -143,7 +143,7 @@ async fn setup_test_environment(signer_config: SignerServiceConfig) -> TestEnv {
         let secret_current = platform::realm::hash_realm_secret("key-rotation-seed-realm-secret");
         sqlx::query(
             "INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current)
-             VALUES (?, 'Active', 1, ?, ?)",
+             VALUES (?, 'active', 1, ?, ?)",
         )
         .bind(TEST_REALM)
         .bind(now)

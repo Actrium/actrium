@@ -95,25 +95,14 @@ message ServiceStatus {
 message RealmInfo {
   reserved 1; reserved "realm_id", "name";
   required string realm = 2;                // Realm name <realm_id>@<domain>
-  required bool enabled = 3;                // Enabled status
+  required bool enabled = 3;                // Enabled (false = suspended)
   required int64 created_at = 4;            // Creation timestamp
   optional int64 updated_at = 5;            // Update timestamp
   // Field 6 removed (was use_servers)
   // Field 7 removed (was version, replaced by updated_at)
   required uint64 expires_at = 8;           // Expiration timestamp (Unix timestamp)
-  required string status = 9;               // Realm status (Active, Inactive, Suspended)
+  required string status = 9;               // pending | active | retired
   optional SecretRotationState secret_rotation_state = 10; // Secret rotation state
-}
-
-message ManagedRealmState {
-  reserved 1; reserved "realm_id", "name";
-  required string realm = 2;                // Realm name <realm_id>@<domain>
-  required bool enabled = 3;                // Enabled status
-  required string status = 4;               // Active / Inactive / Suspended
-  optional uint64 expires_at = 5;           // Expiration timestamp (Unix timestamp)
-  required string secret_current_hash = 6;  // Current realm secret hash
-  optional string secret_previous_hash = 7; // Previous realm secret hash during rotation
-  optional uint64 secret_previous_valid_until = 8; // Previous secret grace-window deadline
 }
 
 message SecretRotationState {

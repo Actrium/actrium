@@ -105,8 +105,6 @@ pub use admin::v1::{
     CreateRealmResponse,
     DeleteConfigOverrideRequest,
     DeleteConfigOverrideResponse,
-    DeleteRealmRequest,
-    DeleteRealmResponse,
     // Configuration management
     GetConfigRequest,
     GetConfigResponse,
@@ -119,7 +117,8 @@ pub use admin::v1::{
     ListConfigOverridesResponse,
     ListRealmsRequest,
     ListRealmsResponse,
-    ManagedRealmState,
+    RetireRealmRequest,
+    RetireRealmResponse,
     RotateIssuerSigningKeyRequest,
     RotateIssuerSigningKeyResponse,
     SetConfigOverrideRequest,

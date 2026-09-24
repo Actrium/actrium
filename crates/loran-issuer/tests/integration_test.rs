@@ -307,7 +307,7 @@ async fn seed_realm(realm: &str, secret: Option<&str>) {
 
     sqlx::query(
         "INSERT OR REPLACE INTO realm (name, status, enabled, created_at, secret_current)
-         VALUES (?, 'Active', 1, ?, ?)",
+         VALUES (?, 'active', 1, ?, ?)",
     )
     .bind(realm)
     .bind(now)
@@ -2762,7 +2762,7 @@ async fn test_path2_historical_retired_key_passes() {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-    sqlx::query("INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('test@example.com', 'Active', 1, ?, 'seed-placeholder-secret')")
+    sqlx::query("INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('test@example.com', 'active', 1, ?, 'seed-placeholder-secret')")
         .bind(now)
         .execute(pool)
         .await
@@ -2833,7 +2833,7 @@ async fn test_path2_revoked_key_rejected() {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-    sqlx::query("INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('test@example.com', 'Active', 1, ?, 'seed-placeholder-secret')")
+    sqlx::query("INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('test@example.com', 'active', 1, ?, 'seed-placeholder-secret')")
         .bind(now)
         .execute(pool)
         .await
@@ -2925,7 +2925,7 @@ async fn test_path2_identity_mismatch_rejected() {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-    sqlx::query("INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('test@example.com', 'Active', 1, ?, 'seed-placeholder-secret')")
+    sqlx::query("INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('test@example.com', 'active', 1, ?, 'seed-placeholder-secret')")
         .bind(now)
         .execute(pool)
         .await

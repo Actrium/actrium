@@ -1,9 +1,9 @@
 use actrix_proto::{
     CreateRealmRequest, CreateRealmResponse, DeleteConfigOverrideRequest,
-    DeleteConfigOverrideResponse, DeleteRealmRequest, DeleteRealmResponse, GetConfigRequest,
-    GetConfigResponse, GetNodeInfoRequest, GetNodeInfoResponse, GetRealmRequest, GetRealmResponse,
-    ListConfigOverridesRequest, ListConfigOverridesResponse, ListRealmsRequest, ListRealmsResponse,
-    NodeAdminService, NonceCredential, RotateIssuerSigningKeyRequest,
+    DeleteConfigOverrideResponse, GetConfigRequest, GetConfigResponse, GetNodeInfoRequest,
+    GetNodeInfoResponse, GetRealmRequest, GetRealmResponse, ListConfigOverridesRequest,
+    ListConfigOverridesResponse, ListRealmsRequest, ListRealmsResponse, NodeAdminService,
+    NonceCredential, RetireRealmRequest, RetireRealmResponse, RotateIssuerSigningKeyRequest,
     RotateIssuerSigningKeyResponse, SetConfigOverrideRequest, SetConfigOverrideResponse,
     ShutdownRequest, ShutdownResponse, UpdateConfigRequest, UpdateConfigResponse,
     UpdateRealmRequest, UpdateRealmResponse,
@@ -167,12 +167,12 @@ where
         self.inner.update_realm(request).await
     }
 
-    async fn delete_realm(
+    async fn retire_realm(
         &self,
-        request: Request<DeleteRealmRequest>,
-    ) -> Result<Response<DeleteRealmResponse>, Status> {
+        request: Request<RetireRealmRequest>,
+    ) -> Result<Response<RetireRealmResponse>, Status> {
         self.verify_body(request.get_ref()).await?;
-        self.inner.delete_realm(request).await
+        self.inner.retire_realm(request).await
     }
 
     async fn list_realms(
@@ -271,10 +271,9 @@ impl CredentialPayload for CreateRealmRequest {
 
     fn body_digest(&self) -> String {
         let canon = format!(
-            "realm={}&enabled={}&status={}&expires_at={}&secret_current_hash={}&secret_previous_hash={}&secret_previous_valid_until={}",
+            "realm={}&enabled={}&expires_at={}&secret_current_hash={}&secret_previous_hash={}&secret_previous_valid_until={}",
             self.realm,
             self.enabled,
-            opt_str(self.status.as_deref()),
             self.expires_at,
             opt_str(self.secret_current_hash.as_deref()),
             opt_str(self.secret_previous_hash.as_deref()),
@@ -305,10 +304,9 @@ impl CredentialPayload for UpdateRealmRequest {
 
     fn body_digest(&self) -> String {
         let canon = format!(
-            "realm={}&enabled={}&status={}&expires_at={}&secret_current_hash={}&secret_previous_hash={}&secret_previous_valid_until={}",
+            "realm={}&enabled={}&expires_at={}&secret_current_hash={}&secret_previous_hash={}&secret_previous_valid_until={}",
             self.realm,
             opt_bool(self.enabled),
-            opt_str(self.status.as_deref()),
             opt_u64(self.expires_at),
             opt_str(self.secret_current_hash.as_deref()),
             opt_str(self.secret_previous_hash.as_deref()),
@@ -318,13 +316,13 @@ impl CredentialPayload for UpdateRealmRequest {
     }
 }
 
-impl CredentialPayload for DeleteRealmRequest {
+impl CredentialPayload for RetireRealmRequest {
     fn credential(&self) -> &NonceCredential {
         &self.credential
     }
 
     fn auth_payload(&self, node_id: &str) -> String {
-        format!("delete_realm:{node_id}:{}", self.realm)
+        format!("retire_realm:{node_id}:{}", self.realm)
     }
 }
 
@@ -431,7 +429,7 @@ mod tests {
     /// the superv client must build the identical string for the same logical
     /// fields. Any change to field order/rendering here must be mirrored on the
     /// superv side (see its `realm_body_digest` test, same expected digest).
-    const REALM_CANON: &str = "realm=managed@example.com&enabled=true&status=Active&expires_at=1900000000&secret_current_hash=hash-42&secret_previous_hash=&secret_previous_valid_until=";
+    const REALM_CANON: &str = "realm=managed@example.com&enabled=true&expires_at=1900000000&secret_current_hash=hash-42&secret_previous_hash=&secret_previous_valid_until=";
 
     fn dummy_credential() -> NonceCredential {
         NonceCredential {
@@ -448,7 +446,6 @@ mod tests {
             enabled: true,
             credential: dummy_credential(),
             expires_at: 1_900_000_000,
-            status: Some("Active".to_string()),
             secret_current_hash: Some("hash-42".to_string()),
             secret_previous_hash: None,
             secret_previous_valid_until: None,
@@ -462,7 +459,6 @@ mod tests {
             realm: "managed@example.com".to_string(),
             enabled: Some(true),
             credential: dummy_credential(),
-            status: Some("Active".to_string()),
             expires_at: Some(1_900_000_000),
             secret_current_hash: Some("hash-42".to_string()),
             secret_previous_hash: None,

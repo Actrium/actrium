@@ -1761,66 +1761,60 @@ mod tests {
         assert_eq!(acme_only[0].actor_type.publisher, "acme");
     }
 
-    /// Disabled under the single-Realm v1 production profile: the `realm`
-    /// table carries a singleton unique index (`idx_realm_singleton`) and
-    /// `actoracl.realm` has a FK to `realm(name)`, so seeding three distinct
-    /// cross-realm rows is impossible. The cross-realm ACL *logic* in
-    /// `check_discovery_acl` is retained; re-enable when multi-realm returns.
+    /// Actors in different Realms never discover each other, even when a
+    /// connection ACL rule names the source Realm; within a Realm the full
+    /// Actor type decides.
     #[tokio::test]
     #[serial]
-    #[ignore = "single-Realm v1 schema forbids multi-realm seeding"]
     async fn test_check_discovery_acl_cross_realm_and_full_type() -> anyhow::Result<()> {
         setup_test_db().await?;
 
         let source_realm = "source@example.com";
         let target_realm = "target@example.com";
-        let other_realm = "other@example.com";
-
-        let mut source_realm_entity = RealmEntity {
-            name: source_realm.to_string(),
-            ..Default::default()
-        };
-        let mut target_realm_entity = RealmEntity {
-            name: target_realm.to_string(),
-            ..Default::default()
-        };
-        let mut other_realm_entity = RealmEntity {
-            name: other_realm.to_string(),
-            ..Default::default()
-        };
-        let _ = source_realm_entity.save().await;
-        let _ = target_realm_entity.save().await;
-        let _ = other_realm_entity.save().await;
+        let other_realm = "other@acme.com";
+        for name in [source_realm, target_realm, other_realm] {
+            if RealmEntity::get(name).await?.is_none() {
+                RealmEntity::create(name.to_string(), "hash".to_string()).await?;
+            }
+        }
 
         let _ = ActorAcl::delete_by_target(target_realm, "acme/worker@1.0.0").await?;
-
-        let mut acl = ActorAcl::new_with_source_realm(
-            target_realm.to_string(),
-            Some(source_realm.to_string()),
-            "acme/edge@1.0.0".to_string(),
-            "acme/worker@1.0.0".to_string(),
-            true,
-        );
-        let _ = acl.save().await?;
+        let rules = [
+            ActorAcl::new_with_source_realm(
+                target_realm.to_string(),
+                Some(source_realm.to_string()),
+                "acme/edge@1.0.0".to_string(),
+                "acme/worker@1.0.0".to_string(),
+                true,
+            ),
+            ActorAcl::new(
+                target_realm.to_string(),
+                "acme/edge@1.0.0".to_string(),
+                "acme/worker@1.0.0".to_string(),
+                true,
+            ),
+        ];
+        ActorAcl::replace_for_target(target_realm, "acme/worker@1.0.0", &rules).await?;
 
         let edge = create_actor_type("acme", "edge");
         let worker = create_actor_type("acme", "worker");
         let to_target = create_actor_id(2, target_realm);
 
-        let from_allowed = create_actor_id(1, source_realm);
+        let same_realm = create_actor_id(1, target_realm);
         let allowed =
-            ActorRegistry::check_discovery_acl(&from_allowed, &edge, &to_target, &worker).await?;
+            ActorRegistry::check_discovery_acl(&same_realm, &edge, &to_target, &worker).await?;
         assert!(allowed);
 
-        let from_wrong_realm = create_actor_id(3, other_realm);
-        let denied_wrong_realm =
-            ActorRegistry::check_discovery_acl(&from_wrong_realm, &edge, &to_target, &worker)
-                .await?;
-        assert!(!denied_wrong_realm);
+        for realm in [source_realm, other_realm] {
+            let from_other_realm = create_actor_id(3, realm);
+            let denied =
+                ActorRegistry::check_discovery_acl(&from_other_realm, &edge, &to_target, &worker)
+                    .await?;
+            assert!(!denied, "cross-Realm discovery from {realm} must be denied");
+        }
 
-        let from_wrong_publisher = create_actor_id(4, source_realm);
         let denied_wrong_publisher = ActorRegistry::check_discovery_acl(
-            &from_wrong_publisher,
+            &same_realm,
             &create_actor_type("other", "edge"),
             &to_target,
             &worker,

@@ -1,6 +1,6 @@
 //! Realm Management Module
 //!
-//! Provides single-instance Realm management capabilities, including configuration, access control, and data migration.
+//! Realms hosted by this instance: lifecycle, secrets and connection access control.
 
 // Submodules
 pub mod acl;

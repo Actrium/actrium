@@ -10,22 +10,29 @@ use strum::{Display, EnumString};
 use super::error::RealmError;
 use crate::storage::db::get_database;
 
-/// Realm status enum
+/// Realm lifecycle status.
+///
+/// `pending` waits for its first Realm Profile, `active` serves Actors, and
+/// `retired` is final: the row stays as the Realm Provider tombstone so the
+/// name is never reused. The operator's local suspend switch is `enabled`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, Display, EnumString)]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum RealmStatus {
+    Pending,
     #[default]
     Active,
-    Inactive,
-    Suspended,
+    Retired,
 }
 
-/// Realm is the administrative and cryptographic trust boundary of one Actrix
-/// production instance.
+/// Realm is an administrative and cryptographic trust boundary hosted by
+/// this Actrix instance, identified by its Realm name.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Realm {
-    /// Realm name `<realm_id>@<domain>`, the primary key
+    /// Realm name `<realm_id>@<domain>`, the primary key; never changes
     pub name: String,
     pub status: RealmStatus,
+    /// Operator suspend switch; a suspended Realm serves no Actor
     pub enabled: bool,
     pub expires_at: Option<u64>,
     pub created_at: u64,
@@ -92,141 +99,134 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Realm {
 }
 
 impl Realm {
-    /// Create a new realm in the database.
+    /// Create a new active realm.
     ///
     /// `secret_hash` is the SHA256 hash of the realm secret (must be non-empty).
     /// `name` must be a normalized Realm name `<realm_id>@<domain>`.
     pub async fn create(name: String, secret_hash: String) -> Result<Self, RealmError> {
-        validate_name(&name)?;
-        if secret_hash.trim().is_empty() {
+        Self {
+            name,
+            secret_current: secret_hash,
+            ..Default::default()
+        }
+        .insert(None)
+        .await
+    }
+
+    /// Insert this realm as a new active Realm.
+    ///
+    /// `max_realms` bounds the number of pending and active Realms. A name that
+    /// exists, retired or not, is rejected: Realm names are never reused.
+    pub async fn insert(mut self, max_realms: Option<u32>) -> Result<Self, RealmError> {
+        validate_name(&self.name)?;
+        if self.secret_current.trim().is_empty() {
             return Err(RealmError::ValidationError(
                 "realm secret hash must not be empty".to_string(),
             ));
         }
-
-        let db = get_database();
-        let pool = db.get_pool();
-        if !Self::get_all().await?.is_empty() {
-            return Err(RealmError::ValidationError(
-                "this Actrix instance already has its single realm".to_string(),
-            ));
-        }
         let now = Utc::now().timestamp();
+        let (prev_hash, prev_valid_until) = previous_columns(&self.secret_previous);
 
-        sqlx::query(
-            "INSERT INTO realm (name, status, enabled, created_at, secret_current)
-             VALUES (?, 'Active', 1, ?, ?)",
+        let result = sqlx::query(
+            "INSERT INTO realm (
+                name, status, enabled, expires_at, created_at,
+                secret_current, secret_previous_hash, secret_previous_valid_until
+             )
+             SELECT ?1, 'active', ?2, ?3, ?4, ?5, ?6, ?7
+             WHERE ?8 IS NULL
+                OR (SELECT COUNT(*) FROM realm WHERE status != 'retired') < ?8",
         )
-        .bind(&name)
+        .bind(&self.name)
+        .bind(self.enabled as i32)
+        .bind(self.expires_at.map(|v| v as i64))
         .bind(now)
-        .bind(&secret_hash)
-        .execute(pool)
-        .await?;
+        .bind(&self.secret_current)
+        .bind(prev_hash)
+        .bind(prev_valid_until)
+        .bind(max_realms.map(i64::from))
+        .execute(get_database().get_pool())
+        .await;
 
-        Ok(Self {
-            name,
-            status: RealmStatus::Active,
-            enabled: true,
-            expires_at: None,
-            created_at: now as u64,
-            updated_at: None,
-            secret_current: secret_hash,
-            secret_previous: None,
-        })
+        match result {
+            Ok(done) if done.rows_affected() == 0 => Err(RealmError::ValidationError(format!(
+                "this instance already hosts max_realms = {} realms",
+                max_realms.unwrap_or_default()
+            ))),
+            Ok(_) => {
+                self.status = RealmStatus::Active;
+                self.created_at = now as u64;
+                self.updated_at = None;
+                Ok(self)
+            }
+            Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
+                Err(RealmError::AlreadyExists)
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 
-    /// Upsert a superv-managed realm by name.
+    /// Create or update a superv-managed realm by name.
+    ///
+    /// Only the enabled switch, expiry and secret hashes are synced; a retired
+    /// realm is never touched.
     pub async fn upsert_managed(
         name: String,
-        status: RealmStatus,
         enabled: bool,
         expires_at: Option<u64>,
         secret_current: String,
         secret_previous: Option<(String, u64)>,
+        max_realms: Option<u32>,
     ) -> Result<Self, RealmError> {
-        validate_name(&name)?;
         if secret_current.trim().is_empty() {
             return Err(RealmError::ValidationError(
                 "managed realm secret_current must not be empty".to_string(),
             ));
         }
+        let secret_previous = secret_previous.filter(|(hash, _)| !hash.trim().is_empty());
 
-        let db = get_database();
-        let pool = db.get_pool();
-        if let Some(existing) = Self::get_all().await?.first()
-            && existing.name != name
-        {
-            return Err(RealmError::ValidationError(format!(
-                "this Actrix instance is already bound to realm {}",
-                existing.name
-            )));
-        }
-        let now = Utc::now().timestamp();
-        let (prev_hash, prev_valid_until) = match &secret_previous {
-            Some((hash, valid_until)) if !hash.trim().is_empty() => {
-                (Some(hash.as_str()), Some(*valid_until as i64))
+        let Some(mut realm) = Self::get(&name).await? else {
+            return Self {
+                name,
+                enabled,
+                expires_at,
+                secret_current,
+                secret_previous,
+                ..Default::default()
             }
-            _ => (None, None),
+            .insert(max_realms)
+            .await;
         };
-
-        sqlx::query(
-            "INSERT INTO realm (
-                name, status, enabled, expires_at, created_at, updated_at,
-                secret_current, secret_previous_hash, secret_previous_valid_until
-             )
-             VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
-             ON CONFLICT(name) DO UPDATE SET
-                status = excluded.status,
-                enabled = excluded.enabled,
-                expires_at = excluded.expires_at,
-                updated_at = ?,
-                secret_current = excluded.secret_current,
-                secret_previous_hash = excluded.secret_previous_hash,
-                secret_previous_valid_until = excluded.secret_previous_valid_until",
-        )
-        .bind(&name)
-        .bind(status.to_string())
-        .bind(enabled as i32)
-        .bind(expires_at.map(|v| v as i64))
-        .bind(now)
-        .bind(&secret_current)
-        .bind(prev_hash)
-        .bind(prev_valid_until)
-        .bind(now)
-        .execute(pool)
-        .await?;
-
-        Self::get(&name).await?.ok_or(RealmError::NotFound)
+        realm.enabled = enabled;
+        realm.expires_at = expires_at;
+        realm.secret_current = secret_current;
+        realm.secret_previous = secret_previous;
+        realm.save().await?;
+        Ok(realm)
     }
 
-    /// Save (UPDATE) an existing realm to the database.
+    /// Save the mutable fields of an existing, non-retired realm.
+    ///
+    /// Name and status never change here: the name is immutable and status
+    /// moves only through [`Realm::retire`].
     pub async fn save(&mut self) -> Result<(), RealmError> {
         // Enforce the non-empty secret invariant here as well, so no code path
         // can silently persist an empty secret. This mirrors the storage-layer
-        // CHECK constraint and the validation in `create` / `upsert_managed`.
+        // CHECK constraint and the validation in `insert` / `upsert_managed`.
         if self.secret_current.trim().is_empty() {
             return Err(RealmError::ValidationError(
                 "realm secret_current must not be empty".to_string(),
             ));
         }
 
-        let db = get_database();
-        let pool = db.get_pool();
         let now = Utc::now().timestamp();
-        self.updated_at = Some(now as u64);
+        let (prev_hash, prev_valid_until) = previous_columns(&self.secret_previous);
 
-        let (prev_hash, prev_valid_until) = match &self.secret_previous {
-            Some((hash, valid_until)) => (Some(hash.as_str()), Some(*valid_until as i64)),
-            None => (None, None),
-        };
-
-        sqlx::query(
-            "UPDATE realm SET status = ?, enabled = ?, expires_at = ?,
+        let result = sqlx::query(
+            "UPDATE realm SET enabled = ?, expires_at = ?,
              updated_at = ?, secret_current = ?,
              secret_previous_hash = ?, secret_previous_valid_until = ?
-             WHERE name = ?",
+             WHERE name = ? AND status != 'retired'",
         )
-        .bind(self.status.to_string())
         .bind(self.enabled as i32)
         .bind(self.expires_at.map(|v| v as i64))
         .bind(now)
@@ -234,24 +234,28 @@ impl Realm {
         .bind(prev_hash)
         .bind(prev_valid_until)
         .bind(&self.name)
-        .execute(pool)
+        .execute(get_database().get_pool())
         .await?;
+        if result.rows_affected() == 0 {
+            return Err(match Self::get(&self.name).await? {
+                Some(_) => RealmError::Retired,
+                None => RealmError::NotFound,
+            });
+        }
 
+        self.updated_at = Some(now as u64);
         Ok(())
     }
 
     /// Get a realm by its Realm name.
     pub async fn get(name: &str) -> Result<Option<Self>, RealmError> {
-        let db = get_database();
-        let pool = db.get_pool();
-
         let result = sqlx::query_as::<_, Realm>(
             "SELECT name, status, enabled, expires_at, created_at, updated_at,
                     secret_current, secret_previous_hash, secret_previous_valid_until
              FROM realm WHERE name = ?",
         )
         .bind(name)
-        .fetch_optional(pool)
+        .fetch_optional(get_database().get_pool())
         .await?;
 
         Ok(result)
@@ -259,43 +263,74 @@ impl Realm {
 
     /// Get all realms.
     pub async fn get_all() -> Result<Vec<Self>, RealmError> {
-        let db = get_database();
-        let pool = db.get_pool();
-
         let realms = sqlx::query_as::<_, Realm>(
             "SELECT name, status, enabled, expires_at, created_at, updated_at,
                     secret_current, secret_previous_hash, secret_previous_valid_until
-             FROM realm",
+             FROM realm ORDER BY created_at, name",
         )
-        .fetch_all(pool)
+        .fetch_all(get_database().get_pool())
         .await?;
 
         Ok(realms)
     }
 
-    /// Delete a realm by name.
-    pub async fn delete(name: &str) -> Result<u64, RealmError> {
-        let db = get_database();
-        let pool = db.get_pool();
-
-        let result = sqlx::query("DELETE FROM realm WHERE name = ?")
-            .bind(name)
-            .execute(pool)
-            .await?;
-
-        Ok(result.rows_affected())
+    /// Suspend (`false`) or resume (`true`) a realm. Retired realms are final.
+    pub async fn set_enabled(name: &str, enabled: bool) -> Result<Self, RealmError> {
+        let mut realm = Self::get(name).await?.ok_or(RealmError::NotFound)?;
+        realm.enabled = enabled;
+        realm.save().await?;
+        Ok(realm)
     }
 
-    /// Disable a realm without physically removing it.
-    pub async fn soft_delete(name: &str) -> Result<bool, RealmError> {
-        let Some(mut realm) = Self::get(name).await? else {
-            return Ok(false);
-        };
+    /// Retire a realm in one transaction.
+    ///
+    /// The row stays as the tombstone that keeps the name from being reused.
+    /// Connection ACL rules, pending registrations and renewal tokens of the
+    /// realm are removed; the issued identity ledger and revocation list stay.
+    pub async fn retire(name: &str) -> Result<Self, RealmError> {
+        let mut tx = get_database().get_pool().begin().await?;
+        let now = Utc::now().timestamp();
 
-        realm.enabled = false;
-        realm.status = RealmStatus::Inactive;
-        realm.save().await?;
-        Ok(true)
+        let retired = sqlx::query(
+            "UPDATE realm SET status = 'retired', enabled = 0, updated_at = ?,
+                pending_expires_at = NULL, admin_token_hash = NULL
+             WHERE name = ? AND status != 'retired'",
+        )
+        .bind(now)
+        .bind(name)
+        .execute(&mut *tx)
+        .await?;
+        if retired.rows_affected() == 0 {
+            let exists: Option<String> =
+                sqlx::query_scalar("SELECT name FROM realm WHERE name = ?")
+                    .bind(name)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            return Err(match exists {
+                Some(_) => RealmError::Retired,
+                None => RealmError::NotFound,
+            });
+        }
+
+        sqlx::query("DELETE FROM actoracl WHERE realm = ?1 OR source_realm = ?1")
+            .bind(name)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM pending_registration WHERE realm = ?")
+            .bind(name)
+            .execute(&mut *tx)
+            .await?;
+        // ActorId text is `<serial_hex>.<realm>`; the serial has no dot.
+        sqlx::query(
+            "DELETE FROM issuer_renewal_token
+             WHERE substr(actor_id, instr(actor_id, '.') + 1) = ?",
+        )
+        .bind(name)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Self::get(name).await?.ok_or(RealmError::NotFound)
     }
 
     pub fn is_expired(&self) -> bool {
@@ -313,9 +348,21 @@ impl Realm {
 }
 
 fn validate_name(name: &str) -> Result<(), RealmError> {
-    actr_protocol::uri::parse_realm_name(name)
-        .map(|_| ())
-        .map_err(|e| RealmError::ValidationError(format!("invalid realm name: {e}")))
+    let uri = actr_protocol::uri::parse_realm_name(name)
+        .map_err(|e| RealmError::ValidationError(format!("invalid realm name: {e}")))?;
+    if uri.is_local() {
+        return Err(RealmError::ValidationError(
+            "a local Realm (.actr.alt) is not hosted by a Realm Provider".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn previous_columns(previous: &Option<(String, u64)>) -> (Option<&str>, Option<i64>) {
+    match previous {
+        Some((hash, valid_until)) => (Some(hash.as_str()), Some(*valid_until as i64)),
+        None => (None, None),
+    }
 }
 
 #[cfg(test)]
@@ -325,26 +372,16 @@ mod tests {
     use serial_test::serial;
 
     #[test]
-    fn test_realm_status_display() {
-        assert_eq!(RealmStatus::Active.to_string(), "Active");
-        assert_eq!(RealmStatus::Inactive.to_string(), "Inactive");
-        assert_eq!(RealmStatus::Suspended.to_string(), "Suspended");
-    }
-
-    #[test]
-    fn test_realm_status_parse() {
-        assert_eq!(
-            RealmStatus::from_str("Active").unwrap(),
-            RealmStatus::Active
-        );
-        assert_eq!(
-            RealmStatus::from_str("Inactive").unwrap(),
-            RealmStatus::Inactive
-        );
-        assert_eq!(
-            RealmStatus::from_str("Suspended").unwrap(),
-            RealmStatus::Suspended
-        );
+    fn test_realm_status_text() {
+        for (status, text) in [
+            (RealmStatus::Pending, "pending"),
+            (RealmStatus::Active, "active"),
+            (RealmStatus::Retired, "retired"),
+        ] {
+            assert_eq!(status.to_string(), text);
+            assert_eq!(RealmStatus::from_str(text).unwrap(), status);
+        }
+        assert!(RealmStatus::from_str("suspended").is_err());
     }
 
     #[test]
@@ -375,6 +412,166 @@ mod tests {
         assert!(realm.is_active());
     }
 
+    #[test]
+    fn test_pending_retired_and_disabled_are_not_active() {
+        for realm in [
+            Realm {
+                status: RealmStatus::Pending,
+                ..Default::default()
+            },
+            Realm {
+                status: RealmStatus::Retired,
+                ..Default::default()
+            },
+            Realm {
+                enabled: false,
+                ..Default::default()
+            },
+        ] {
+            assert!(!realm.is_active());
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_many_realms_and_max_realms() -> anyhow::Result<()> {
+        setup_test_db().await?;
+
+        Realm::create("one@example.com".to_string(), "hash".to_string()).await?;
+        Realm::create("two@acme.com".to_string(), "hash".to_string()).await?;
+        assert_eq!(Realm::get_all().await?.len(), 2);
+
+        let third = Realm {
+            name: "three@example.com".to_string(),
+            secret_current: "hash".to_string(),
+            ..Default::default()
+        };
+        let limited = third.clone().insert(Some(2)).await;
+        assert!(matches!(limited, Err(RealmError::ValidationError(_))));
+
+        // Retired realms do not count toward max_realms.
+        Realm::retire("one@example.com").await?;
+        third.insert(Some(2)).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_retired_name_is_never_reused() -> anyhow::Result<()> {
+        setup_test_db().await?;
+
+        Realm::create("gone@example.com".to_string(), "hash".to_string()).await?;
+        let duplicate = Realm::create("gone@example.com".to_string(), "hash".to_string()).await;
+        assert!(matches!(duplicate, Err(RealmError::AlreadyExists)));
+
+        let retired = Realm::retire("gone@example.com").await?;
+        assert_eq!(retired.status, RealmStatus::Retired);
+        assert!(!retired.enabled);
+
+        let reuse = Realm::create("gone@example.com".to_string(), "hash".to_string()).await;
+        assert!(matches!(reuse, Err(RealmError::AlreadyExists)));
+        assert!(matches!(
+            Realm::retire("gone@example.com").await,
+            Err(RealmError::Retired)
+        ));
+        assert!(matches!(
+            Realm::set_enabled("gone@example.com", true).await,
+            Err(RealmError::Retired)
+        ));
+        assert!(matches!(
+            Realm::retire("missing@example.com").await,
+            Err(RealmError::NotFound)
+        ));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_retire_removes_realm_scoped_state() -> anyhow::Result<()> {
+        setup_test_db().await?;
+        let pool = get_database().get_pool();
+
+        for name in ["old@example.com", "keep@example.com"] {
+            Realm::create(name.to_string(), "hash".to_string()).await?;
+            sqlx::query(
+                "INSERT INTO actoracl (realm, source_realm, from_type, to_type, access)
+                 VALUES (?1, ?1, 'acme/a@1', 'acme/b@1', 1)",
+            )
+            .bind(name)
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "INSERT INTO pending_registration (realm, serial_number, created_at)
+                 VALUES (?, 1, 1)",
+            )
+            .bind(name)
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "INSERT INTO issued_actor_identity (realm, serial_number, actor_type, issued_at)
+                 VALUES (?, 1, 'acme/a@1', 1)",
+            )
+            .bind(name)
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "INSERT INTO issuer_renewal_token (actor_id, token_hash, expires_at, created_at)
+                 VALUES (?, ?, 9999999999, 1)",
+            )
+            .bind(format!("1a.{name}"))
+            .bind(name.as_bytes())
+            .execute(pool)
+            .await?;
+        }
+
+        Realm::retire("old@example.com").await?;
+
+        for (table, column) in [
+            ("actoracl", "realm"),
+            ("pending_registration", "realm"),
+            ("issued_actor_identity", "realm"),
+        ] {
+            let rows: Vec<String> =
+                sqlx::query_scalar(&format!("SELECT {column} FROM {table} ORDER BY 1"))
+                    .fetch_all(pool)
+                    .await?;
+            let expected: &[&str] = if table == "issued_actor_identity" {
+                &["keep@example.com", "old@example.com"]
+            } else {
+                &["keep@example.com"]
+            };
+            assert_eq!(rows, expected, "{table}");
+        }
+        let tokens: Vec<String> = sqlx::query_scalar("SELECT actor_id FROM issuer_renewal_token")
+            .fetch_all(pool)
+            .await?;
+        assert_eq!(tokens, ["1a.keep@example.com"]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_suspend_and_resume() -> anyhow::Result<()> {
+        setup_test_db().await?;
+
+        Realm::create("pause@example.com".to_string(), "hash".to_string()).await?;
+        let suspended = Realm::set_enabled("pause@example.com", false).await?;
+        assert!(!suspended.enabled);
+        assert_eq!(suspended.status, RealmStatus::Active);
+        assert!(!suspended.is_active());
+        let resumed = Realm::set_enabled("pause@example.com", true).await?;
+        assert!(resumed.is_active());
+        assert!(matches!(
+            Realm::set_enabled("missing@example.com", false).await,
+            Err(RealmError::NotFound)
+        ));
+
+        Ok(())
+    }
+
     #[tokio::test]
     #[serial]
     async fn test_upsert_managed_updates_by_name() -> anyhow::Result<()> {
@@ -382,10 +579,10 @@ mod tests {
 
         let realm = Realm::upsert_managed(
             "managed-one@example.com".to_string(),
-            RealmStatus::Active,
             true,
             Some(1_900_000_000),
             "hash-current".to_string(),
+            None,
             None,
         )
         .await?;
@@ -394,15 +591,14 @@ mod tests {
 
         let updated = Realm::upsert_managed(
             "managed-one@example.com".to_string(),
-            RealmStatus::Suspended,
             false,
             Some(1_900_000_001),
             "hash-current-2".to_string(),
             Some(("hash-prev".to_string(), 1_800_000_000)),
+            None,
         )
         .await?;
-        assert_eq!(updated.name, "managed-one@example.com");
-        assert_eq!(updated.status, RealmStatus::Suspended);
+        assert_eq!(updated.status, RealmStatus::Active);
         assert!(!updated.enabled);
         assert_eq!(updated.secret_current, "hash-current-2");
         assert_eq!(
@@ -410,16 +606,27 @@ mod tests {
             Some(("hash-prev".to_string(), 1_800_000_000))
         );
 
-        let other = Realm::upsert_managed(
+        // A second realm is allowed; a retired one is never touched again.
+        Realm::upsert_managed(
             "managed-two@example.com".to_string(),
-            RealmStatus::Active,
             true,
             None,
             "hash-other".to_string(),
             None,
+            None,
+        )
+        .await?;
+        Realm::retire("managed-two@example.com").await?;
+        let revived = Realm::upsert_managed(
+            "managed-two@example.com".to_string(),
+            true,
+            None,
+            "hash-other".to_string(),
+            None,
+            None,
         )
         .await;
-        assert!(matches!(other, Err(RealmError::ValidationError(_))));
+        assert!(matches!(revived, Err(RealmError::Retired)));
 
         Ok(())
     }
@@ -429,7 +636,13 @@ mod tests {
     async fn test_create_rejects_invalid_realm_name() -> anyhow::Result<()> {
         setup_test_db().await?;
 
-        for name in ["", "managed", "Managed@example.com", "a@example.com:443"] {
+        for name in [
+            "",
+            "managed",
+            "Managed@example.com",
+            "a@example.com:443",
+            "a@abcdefghijklmnopqrstuvwxyz.actr.alt",
+        ] {
             let result = Realm::create(name.to_string(), "hash".to_string()).await;
             assert!(
                 matches!(result, Err(RealmError::ValidationError(_))),
@@ -438,49 +651,5 @@ mod tests {
         }
 
         Ok(())
-    }
-
-    #[tokio::test]
-    #[serial]
-    async fn test_soft_delete_marks_realm_inactive() -> anyhow::Result<()> {
-        setup_test_db().await?;
-
-        Realm::upsert_managed(
-            "managed-delete@example.com".to_string(),
-            RealmStatus::Active,
-            true,
-            None,
-            "delete-current".to_string(),
-            None,
-        )
-        .await?;
-
-        assert!(Realm::soft_delete("managed-delete@example.com").await?);
-        let realm = Realm::get("managed-delete@example.com")
-            .await?
-            .expect("realm should remain");
-        assert_eq!(realm.status, RealmStatus::Inactive);
-        assert!(!realm.enabled);
-        assert!(!Realm::soft_delete("missing@example.com").await?);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_realm_suspended_not_active() {
-        let realm = Realm {
-            status: RealmStatus::Suspended,
-            ..Default::default()
-        };
-        assert!(!realm.is_active());
-    }
-
-    #[test]
-    fn test_realm_disabled_not_active() {
-        let realm = Realm {
-            enabled: false,
-            ..Default::default()
-        };
-        assert!(!realm.is_active());
     }
 }

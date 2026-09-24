@@ -1,6 +1,6 @@
 use actrix_sdk::testing::{
-    self, CreateRealmRequest, CredentialPayload, DeleteRealmRequest, GetNodeInfoRequest,
-    ListRealmsRequest, NodeAdminServiceClient, ShutdownRequest, UpdateRealmRequest,
+    self, CreateRealmRequest, CredentialPayload, GetNodeInfoRequest, ListRealmsRequest,
+    NodeAdminServiceClient, RetireRealmRequest, ShutdownRequest, UpdateRealmRequest,
 };
 use nonce_auth::CredentialBuilder;
 use platform::storage::db::Database;
@@ -1360,11 +1360,11 @@ fn build_list_realms_credential(shared_secret: &[u8]) -> testing::NonceCredentia
     testing::nonce_auth::to_proto_credential(credential)
 }
 
-fn build_delete_realm_credential(shared_secret: &[u8], realm: &str) -> testing::NonceCredential {
-    let payload = format!("delete_realm:{TEST_CONTROL_NODE_ID}:{realm}");
+fn build_retire_realm_credential(shared_secret: &[u8], realm: &str) -> testing::NonceCredential {
+    let payload = format!("retire_realm:{TEST_CONTROL_NODE_ID}:{realm}");
     let credential = CredentialBuilder::new(shared_secret)
         .sign(payload.as_bytes())
-        .expect("build delete realm credential");
+        .expect("build retire realm credential");
     testing::nonce_auth::to_proto_credential(credential)
 }
 
@@ -2604,7 +2604,7 @@ async fn actrix_admin_ui_and_control_grpc_can_run_together_with_ui_realm_writes_
 
 #[tokio::test]
 #[serial]
-async fn actrix_control_grpc_managed_realm_crud_by_name_and_soft_delete() {
+async fn actrix_control_grpc_managed_realm_crud_by_name_and_retire() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_config_with_control_grpc(tmp.path(), port);
@@ -2618,26 +2618,30 @@ async fn actrix_control_grpc_managed_realm_crud_by_name_and_soft_delete() {
     let mut client = wait_for_control_grpc(&endpoint, &mut child, &log_path).await;
     let shared_secret = hex::decode(TEST_CONTROL_SHARED_SECRET).expect("decode shared secret");
     let realm = "managed-crud@example.com";
+    let other_realm = "managed-other@acme.com";
 
-    let mut create_req = CreateRealmRequest {
-        realm: realm.to_string(),
-        enabled: true,
-        credential: dummy_credential(),
-        expires_at: 1_900_000_000,
-        status: Some("Active".to_string()),
-        secret_current_hash: Some("hash-v1".to_string()),
-        secret_previous_hash: None,
-        secret_previous_valid_until: None,
+    let create = |realm: &str| {
+        let mut req = CreateRealmRequest {
+            realm: realm.to_string(),
+            enabled: true,
+            credential: dummy_credential(),
+            expires_at: 1_900_000_000,
+            secret_current_hash: Some("hash-v1".to_string()),
+            secret_previous_hash: None,
+            secret_previous_valid_until: None,
+        };
+        req.credential = build_signed_credential(&shared_secret, &req);
+        req
     };
-    create_req.credential = build_signed_credential(&shared_secret, &create_req);
     let created = client
-        .create_realm(create_req)
+        .create_realm(create(realm))
         .await
         .expect("managed CreateRealm")
         .into_inner();
     assert!(created.success, "{:?}", created.error_message);
     let created_realm = created.realm.expect("created realm info");
     assert_eq!(created_realm.realm, realm);
+    assert_eq!(created_realm.status, "active");
     assert_eq!(
         created_realm
             .secret_rotation_state
@@ -2646,11 +2650,18 @@ async fn actrix_control_grpc_managed_realm_crud_by_name_and_soft_delete() {
         "hash-v1"
     );
 
+    // One instance hosts many Realms.
+    let other = client
+        .create_realm(create(other_realm))
+        .await
+        .expect("second managed CreateRealm")
+        .into_inner();
+    assert!(other.success, "{:?}", other.error_message);
+
     let mut update_req = UpdateRealmRequest {
         realm: realm.to_string(),
         enabled: Some(false),
         credential: dummy_credential(),
-        status: Some("Suspended".to_string()),
         expires_at: Some(1_900_000_001),
         secret_current_hash: Some("hash-v2".to_string()),
         secret_previous_hash: Some("hash-v1".to_string()),
@@ -2665,18 +2676,19 @@ async fn actrix_control_grpc_managed_realm_crud_by_name_and_soft_delete() {
     assert!(updated.success, "{:?}", updated.error_message);
     let updated_realm = updated.realm.expect("updated realm info");
     assert_eq!(updated_realm.realm, realm);
-    assert!(!updated_realm.enabled);
-    assert_eq!(updated_realm.status, "Suspended");
+    assert!(!updated_realm.enabled, "enabled = false suspends the Realm");
+    assert_eq!(updated_realm.status, "active");
 
-    let deleted = client
-        .delete_realm(DeleteRealmRequest {
+    let retired = client
+        .retire_realm(RetireRealmRequest {
             realm: realm.to_string(),
-            credential: build_delete_realm_credential(&shared_secret, realm),
+            credential: build_retire_realm_credential(&shared_secret, realm),
         })
         .await
-        .expect("managed DeleteRealm")
+        .expect("managed RetireRealm")
         .into_inner();
-    assert!(deleted.success, "{:?}", deleted.error_message);
+    assert!(retired.success, "{:?}", retired.error_message);
+    assert_eq!(retired.realm.expect("retired realm info").status, "retired");
 
     let listed = client
         .list_realms(ListRealmsRequest {
@@ -2685,15 +2697,24 @@ async fn actrix_control_grpc_managed_realm_crud_by_name_and_soft_delete() {
             credential: build_list_realms_credential(&shared_secret),
         })
         .await
-        .expect("ListRealms after soft delete")
+        .expect("ListRealms after retire")
         .into_inner();
     let listed_realm = listed
         .realms
         .iter()
         .find(|info| info.realm == realm)
-        .expect("soft-deleted realm should remain listed");
+        .expect("retired realm should remain listed");
     assert!(!listed_realm.enabled);
-    assert_eq!(listed_realm.status, "Inactive");
+    assert_eq!(listed_realm.status, "retired");
+    assert!(listed.realms.iter().any(|info| info.realm == other_realm));
+
+    // A retired Realm is never updated or recreated.
+    let recreated = client
+        .create_realm(create(realm))
+        .await
+        .expect("CreateRealm on retired name")
+        .into_inner();
+    assert!(!recreated.success, "retired Realm name must not be reused");
 
     graceful_shutdown(child);
 }

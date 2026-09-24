@@ -5,10 +5,10 @@ use actrix_proto::NodeAdminService;
 use actrix_proto::{
     ConfigOverrideEntry as ProtoConfigOverrideEntry, ConfigType, CreateRealmRequest,
     CreateRealmResponse, DeleteConfigOverrideRequest, DeleteConfigOverrideResponse,
-    DeleteRealmRequest, DeleteRealmResponse, GetConfigRequest, GetConfigResponse,
-    GetNodeInfoRequest, GetNodeInfoResponse, GetRealmRequest, GetRealmResponse,
-    ListConfigOverridesRequest, ListConfigOverridesResponse, ListRealmsRequest, ListRealmsResponse,
-    RealmInfo, RotateIssuerSigningKeyRequest, RotateIssuerSigningKeyResponse, ServiceStatus,
+    GetConfigRequest, GetConfigResponse, GetNodeInfoRequest, GetNodeInfoResponse, GetRealmRequest,
+    GetRealmResponse, ListConfigOverridesRequest, ListConfigOverridesResponse, ListRealmsRequest,
+    ListRealmsResponse, RealmInfo, RetireRealmRequest, RetireRealmResponse,
+    RotateIssuerSigningKeyRequest, RotateIssuerSigningKeyResponse, ServiceStatus,
     SetConfigOverrideRequest, SetConfigOverrideResponse, ShutdownRequest, ShutdownResponse,
     SystemMetrics, UpdateConfigRequest, UpdateConfigResponse, UpdateRealmRequest,
     UpdateRealmResponse,
@@ -22,7 +22,7 @@ use platform::config::resolver::{self, ResolvedField};
 use platform::realm::{
     DEFAULT_REALM_SECRET_PREVIOUS_GRACE_SECS, hash_realm_secret, rotate_realm_secret,
 };
-use platform::realm::{Realm, RealmStatus};
+use platform::realm::{Realm, RealmError};
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -805,6 +805,10 @@ impl AdminApiService {
         })
     }
 
+    fn max_realms(&self) -> Option<u32> {
+        self.running_config.as_ref()?.realm.max_realms
+    }
+
     async fn create_local_realm_internal(
         &self,
         req: CreateRealmRequest,
@@ -814,9 +818,15 @@ impl AdminApiService {
 
         // Generate secret at creation time
         let plain_secret = platform::realm::secret::generate_realm_secret();
-        let secret_hash = hash_realm_secret(&plain_secret);
+        let realm = Realm {
+            name: req.realm,
+            enabled: req.enabled,
+            expires_at: (req.expires_at > 0).then_some(req.expires_at),
+            secret_current: hash_realm_secret(&plain_secret),
+            ..Default::default()
+        };
 
-        let mut realm = match Realm::create(req.realm.clone(), secret_hash).await {
+        let realm = match realm.insert(self.max_realms()).await {
             Ok(r) => r,
             Err(err) => {
                 return Ok((
@@ -830,54 +840,15 @@ impl AdminApiService {
             }
         };
 
-        // Apply optional fields
-        realm.enabled = req.enabled;
-        if req.expires_at > 0 {
-            realm.expires_at = Some(req.expires_at);
-        }
-        if let Some(status) = req.status.as_deref() {
-            match parse_realm_status(status) {
-                Ok(status) => realm.status = status,
-                Err(err) => {
-                    return Ok((
-                        CreateRealmResponse {
-                            success: false,
-                            error_message: Some(err),
-                            realm: None,
-                        },
-                        None,
-                    ));
-                }
-            }
-        }
-        if let Err(err) = realm.save().await {
-            // Rollback
-            let _ = Realm::delete(&realm.name).await;
-            return Ok((
-                CreateRealmResponse {
-                    success: false,
-                    error_message: Some(format!("Failed to save realm settings: {err}")),
-                    realm: None,
-                },
-                None,
-            ));
-        }
-
         platform::recording::info!("Realm created: {}", realm.name);
-
-        let realm_info = realm_to_proto(&realm);
 
         Ok((
             CreateRealmResponse {
                 success: true,
                 error_message: None,
-                realm: Some(realm_info),
+                realm: Some(realm_to_proto(&realm)),
             },
-            if expose_plain_secret {
-                Some(plain_secret)
-            } else {
-                None
-            },
+            expose_plain_secret.then_some(plain_secret),
         ))
     }
 
@@ -894,20 +865,6 @@ impl AdminApiService {
                 realm: None,
             });
         };
-
-        let status = match req.status.as_deref() {
-            Some(status) => match parse_realm_status(status) {
-                Ok(status) => status,
-                Err(err) => {
-                    return Ok(CreateRealmResponse {
-                        success: false,
-                        error_message: Some(err),
-                        realm: None,
-                    });
-                }
-            },
-            None => RealmStatus::Active,
-        };
         let secret_previous =
             build_secret_previous(req.secret_previous_hash, req.secret_previous_valid_until);
 
@@ -915,11 +872,11 @@ impl AdminApiService {
 
         match Realm::upsert_managed(
             req.realm,
-            status,
             req.enabled,
             (req.expires_at > 0).then_some(req.expires_at),
             secret_current,
             secret_previous,
+            self.max_realms(),
         )
         .await
         {
@@ -991,18 +948,6 @@ impl AdminApiService {
         if let Some(enabled) = req.enabled {
             realm.enabled = enabled;
         }
-        if let Some(status) = req.status.as_deref() {
-            match parse_realm_status(status) {
-                Ok(status) => realm.status = status,
-                Err(err) => {
-                    return Ok(UpdateRealmResponse {
-                        success: false,
-                        error_message: Some(err),
-                        realm: None,
-                    });
-                }
-            }
-        }
         if let Some(expires_at) = req.expires_at {
             realm.expires_at = (expires_at > 0).then_some(expires_at);
         }
@@ -1036,20 +981,22 @@ impl AdminApiService {
         })
     }
 
-    /// Delete a realm by name.
-    pub async fn delete_realm_direct(&self, realm: &str) -> GrpcResult<DeleteRealmResponse> {
-        match Realm::soft_delete(realm).await {
-            Ok(true) => Ok(DeleteRealmResponse {
+    /// Retire a realm by name. The retired record stays as a tombstone.
+    pub async fn retire_realm_direct(&self, realm: &str) -> GrpcResult<RetireRealmResponse> {
+        platform::recording::info!("RetireRealm request received: realm={}", realm);
+        match Realm::retire(realm).await {
+            Ok(realm) => Ok(RetireRealmResponse {
                 success: true,
                 error_message: None,
+                realm: Some(realm_to_proto(&realm)),
             }),
-            Ok(false) => Ok(DeleteRealmResponse {
+            Err(RealmError::NotFound) => {
+                Err(Status::not_found(format!("Realm not found: {realm}")))
+            }
+            Err(err) => Ok(RetireRealmResponse {
                 success: false,
-                error_message: Some("Realm not found".to_string()),
-            }),
-            Err(err) => Ok(DeleteRealmResponse {
-                success: false,
-                error_message: Some(format!("Failed to delete realm: {err}")),
+                error_message: Some(format!("Failed to retire realm: {err}")),
+                realm: None,
             }),
         }
     }
@@ -1061,7 +1008,13 @@ impl AdminApiService {
     ) -> GrpcResult<RealmSecretRotationResult> {
         let rotated = rotate_realm_secret(realm, Some(DEFAULT_REALM_SECRET_PREVIOUS_GRACE_SECS))
             .await
-            .map_err(|e| Status::internal(format!("Failed to rotate realm secret: {e}")))?;
+            .map_err(|e| match e {
+                RealmError::NotFound => Status::not_found(format!("Realm not found: {realm}")),
+                RealmError::Retired => {
+                    Status::invalid_argument(format!("Realm is retired: {realm}"))
+                }
+                e => Status::internal(format!("Failed to rotate realm secret: {e}")),
+            })?;
 
         Ok(RealmSecretRotationResult {
             realm: realm.to_string(),
@@ -1235,12 +1188,6 @@ fn service_name_to_type_id(name: &str) -> Option<i32> {
         "signer" => Some(5),
         _ => None,
     }
-}
-
-fn parse_realm_status(value: &str) -> std::result::Result<RealmStatus, String> {
-    RealmStatus::from_str(value).map_err(|_| {
-        format!("Invalid realm status '{value}' (expected Active, Inactive, Suspended)")
-    })
 }
 
 fn build_secret_previous(hash: Option<String>, valid_until: Option<u64>) -> Option<(String, u64)> {
@@ -1460,12 +1407,12 @@ impl NodeAdminService for AdminApiService {
             .map(Response::new)
     }
 
-    async fn delete_realm(
+    async fn retire_realm(
         &self,
-        request: Request<DeleteRealmRequest>,
-    ) -> GrpcResult<Response<DeleteRealmResponse>> {
+        request: Request<RetireRealmRequest>,
+    ) -> GrpcResult<Response<RetireRealmResponse>> {
         let req = request.into_inner();
-        self.delete_realm_direct(&req.realm)
+        self.retire_realm_direct(&req.realm)
             .await
             .map(Response::new)
     }

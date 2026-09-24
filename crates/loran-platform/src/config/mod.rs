@@ -9,6 +9,7 @@ pub mod config_store;
 pub mod control;
 pub mod issuer;
 pub mod packages;
+pub mod realm;
 pub mod registry;
 pub mod resolver;
 pub mod services;
@@ -22,6 +23,7 @@ pub use crate::config::bind::BindConfig;
 pub use crate::config::control::{AdminUiConfig, ControlConfig, ControlHead};
 pub use crate::config::issuer::IssuerServiceConfig;
 pub use crate::config::packages::PackagesConfig;
+pub use crate::config::realm::RealmConfig;
 pub use crate::config::services::ServicesConfig;
 pub use crate::config::signaling::SignalingConfig;
 pub use crate::config::turn::TurnConfig;
@@ -271,6 +273,10 @@ pub struct ActrixConfig {
     /// Public Actr authority discovery.
     #[serde(default)]
     pub authority: AuthorityConfig,
+
+    /// Realm hosting limits.
+    #[serde(default)]
+    pub realm: RealmConfig,
 
     /// TURN service-specific configuration
     ///
@@ -595,6 +601,7 @@ impl Default for ActrixConfig {
             pid: Some("logs/actrix.pid".to_string()),
             bind: BindConfig::default(),
             authority: AuthorityConfig::default(),
+            realm: RealmConfig::default(),
             turn: TurnConfig::default(),
             location_tag: "default-location".to_string(),
             control: ControlConfig::default(),

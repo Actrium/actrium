@@ -11,7 +11,7 @@ use super::model::{Realm, RealmStatus};
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RealmValidationError {
-    /// Realm not found, disabled, expired, or in a non-Active status.
+    /// Realm not found, suspended, expired, pending, or retired.
     RealmUnavailable { realm: String, reason: String },
     /// Database error during realm lookup.
     StoreError { realm: String, message: String },
@@ -34,7 +34,7 @@ impl std::error::Error for RealmValidationError {}
 
 /// Realm validation implementations
 impl Realm {
-    /// Validate that a realm is usable (exists, not expired, status is normal)
+    /// Validate that a realm is usable: it exists, is active, enabled and not expired
     ///
     /// Returns Ok(Realm) if the realm is usable.
     /// Returns Err(RealmValidationError) if the realm is unavailable or a database error occurred.
@@ -60,13 +60,13 @@ impl Realm {
 
         if realm.status != RealmStatus::Active {
             return Err(unavailable(format!(
-                "Realm {name} is not in Active status (current: {})",
+                "Realm {name} is not active (current: {})",
                 realm.status
             )));
         }
 
         if !realm.enabled {
-            return Err(unavailable(format!("Realm {name} is disabled")));
+            return Err(unavailable(format!("Realm {name} is suspended")));
         }
 
         Ok(realm)
@@ -117,7 +117,7 @@ mod tests {
         assert!(!realm2.is_active());
 
         let realm3 = Realm {
-            status: RealmStatus::Suspended,
+            status: RealmStatus::Retired,
             ..Default::default()
         };
         assert!(!realm3.is_active());

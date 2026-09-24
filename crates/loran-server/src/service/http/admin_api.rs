@@ -265,7 +265,6 @@ async fn create_realm(
         enabled: body.enabled,
         credential: dummy_credential(),
         expires_at: body.expires_at,
-        status: None,
         secret_current_hash: None,
         secret_previous_hash: None,
         secret_previous_valid_until: None,
@@ -346,9 +345,13 @@ async fn get_realm(
     }
 }
 
+/// `enabled: false` suspends the Realm and `true` resumes it. The Realm name
+/// never changes.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct UpdateRealmBody {
     enabled: Option<bool>,
+    expires_at: Option<u64>,
 }
 
 async fn update_realm(
@@ -364,14 +367,42 @@ async fn update_realm(
         realm,
         enabled: body.enabled,
         credential: dummy_credential(),
-        status: None,
-        expires_at: None,
+        expires_at: body.expires_at,
         secret_current_hash: None,
         secret_previous_hash: None,
         secret_previous_valid_until: None,
     };
 
     match state.service.update_realm_direct(req).await {
+        Ok(resp) => {
+            let status = if resp.success {
+                StatusCode::OK
+            } else {
+                StatusCode::BAD_REQUEST
+            };
+            (
+                status,
+                Json(json!({
+                    "success": resp.success,
+                    "error_message": resp.error_message,
+                    "realm": resp.realm.as_ref().map(realm_info_to_json),
+                })),
+            )
+                .into_response()
+        }
+        Err(status) => grpc_status_to_response(status),
+    }
+}
+
+async fn retire_realm(
+    State(state): State<Arc<AdminApiState>>,
+    Path(realm): Path<String>,
+) -> impl IntoResponse {
+    if !state.realm_writes_enabled {
+        return realm_writes_disabled_response();
+    }
+
+    match state.service.retire_realm_direct(&realm).await {
         Ok(resp) => {
             let status = if resp.success {
                 StatusCode::OK
@@ -806,6 +837,7 @@ pub fn build_admin_api_router(
             "/admin/api/realms/{realm}/secret/rotate",
             post(rotate_realm_secret),
         )
+        .route("/admin/api/realms/{realm}/retire", post(retire_realm))
         .route(
             "/admin/api/config/{config_type}/{config_key}",
             get(get_config),

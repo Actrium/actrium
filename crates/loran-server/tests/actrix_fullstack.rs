@@ -35,6 +35,7 @@ const START_TIMEOUT: Duration = Duration::from_secs(20);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const ACTRIX_SHARED_KEY: &str = "0123456789abcdef0123456789abcdef";
 const TEST_REALM: &str = "test@example.com";
+const SECOND_REALM: &str = "second@acme.com";
 const TEST_REALM_SECRET: &str = "actrix-fullstack-realm-secret";
 const DEFAULT_TOKEN_TTL: u64 = 3600;
 const RENEWAL_TOKEN_SECRET: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
@@ -447,7 +448,7 @@ async fn ensure_realm(sqlite_dir: &Path, realm: &str) {
     let secret_hash = platform::realm::hash_realm_secret(TEST_REALM_SECRET);
     db.execute(&format!(
         "INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current)
-         VALUES ('{realm}', 'Active', 1, strftime('%s','now'), '{secret_hash}')"
+         VALUES ('{realm}', 'active', 1, strftime('%s','now'), '{secret_hash}')"
     ))
     .await
     .expect("insert realm");
@@ -483,6 +484,36 @@ async fn issuer_register_http_with_secret(
     acl: Option<Acl>,
     realm_secret: Option<&str>,
 ) -> register_response::RegisterOk {
+    let result = issuer_register_result(
+        base_url,
+        realm,
+        publisher,
+        name,
+        service_spec,
+        acl,
+        realm_secret,
+    )
+    .await;
+    match result {
+        register_response::Result::Success(ok) => ok,
+        register_response::Result::Error(err) => {
+            panic!(
+                "issuer register failed: code={} message={}",
+                err.code, err.message
+            );
+        }
+    }
+}
+
+async fn issuer_register_result(
+    base_url: &str,
+    realm: &str,
+    publisher: &str,
+    name: &str,
+    service_spec: Option<actr_protocol::ServiceSpec>,
+    acl: Option<Acl>,
+    realm_secret: Option<&str>,
+) -> register_response::Result {
     let register_req = RegisterRequest {
         actr_type: ActrType {
             publisher: publisher.to_string(),
@@ -520,15 +551,7 @@ async fn issuer_register_http_with_secret(
         .expect("issuer register bytes")
         .to_vec();
     let register_rsp = RegisterResponse::decode(&*rsp_bytes).expect("decode register response");
-    match register_rsp.result.expect("result missing") {
-        register_response::Result::Success(ok) => ok,
-        register_response::Result::Error(err) => {
-            panic!(
-                "issuer register failed: code={} message={}",
-                err.code, err.message
-            );
-        }
-    }
+    register_rsp.result.expect("result missing")
 }
 
 fn authenticated_ws_request(
@@ -4010,4 +4033,337 @@ async fn service_unregister_success_is_durable_across_restart() {
 
     let _ = client_w.send(WsMessage::Close(None)).await;
     graceful_shutdown(child2);
+}
+
+/// ACL that would let `acme/<from>` from any Realm reach the registering type.
+fn any_realm_allow_acl(from: &str) -> Acl {
+    Acl {
+        rules: vec![AclRule {
+            permission: Permission::Allow as i32,
+            from_type: ActrType {
+                publisher: "acme".into(),
+                name: from.into(),
+                version: "1.0.0".to_string(),
+            },
+            source_realm: Some(SourceRealm::AnyRealm(true)),
+        }],
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn admin_api_manages_many_realms_by_name() {
+    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let client = reqwest::Client::new();
+    let base = harness.base_url();
+    let realm_url = format!("{base}/admin/api/realms/second%40acme.com");
+
+    let login: Value = client
+        .post(format!("{base}/admin/api/auth/login"))
+        .json(&json!({ "password": "testpassword123" }))
+        .send()
+        .await
+        .expect("admin login request")
+        .json()
+        .await
+        .expect("parse admin login response");
+    let token = login["token"].as_str().expect("admin login token");
+
+    let created = client
+        .post(format!("{base}/admin/api/realms"))
+        .bearer_auth(token)
+        .json(&json!({ "realm": SECOND_REALM }))
+        .send()
+        .await
+        .expect("create second realm");
+    assert_eq!(created.status(), reqwest::StatusCode::CREATED);
+    let created: Value = created.json().await.expect("create realm json");
+    assert_eq!(created["realm"]["status"], "active");
+    let secret = created["realm_secret"]
+        .as_str()
+        .expect("create returns the realm secret")
+        .to_string();
+
+    let listed: Value = client
+        .get(format!("{base}/admin/api/realms"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("list realms")
+        .json()
+        .await
+        .expect("list realms json");
+    let names: HashSet<&str> = listed["realms"]
+        .as_array()
+        .expect("realms array")
+        .iter()
+        .filter_map(|realm| realm["realm"].as_str())
+        .collect();
+    assert_eq!(names, HashSet::from([TEST_REALM, SECOND_REALM]));
+
+    let register = |name: &'static str| {
+        let base = base.clone();
+        let secret = secret.clone();
+        async move {
+            issuer_register_result(&base, SECOND_REALM, "acme", name, None, None, Some(&secret))
+                .await
+        }
+    };
+    assert!(matches!(
+        register("second-ok").await,
+        register_response::Result::Success(_)
+    ));
+
+    // The name is immutable: the update body has no name to change.
+    let rename = client
+        .put(&realm_url)
+        .bearer_auth(token)
+        .json(&json!({ "name": "renamed@acme.com" }))
+        .send()
+        .await
+        .expect("rename attempt");
+    assert!(rename.status().is_client_error());
+
+    let suspended: Value = client
+        .put(&realm_url)
+        .bearer_auth(token)
+        .json(&json!({ "enabled": false }))
+        .send()
+        .await
+        .expect("suspend realm")
+        .json()
+        .await
+        .expect("suspend json");
+    assert_eq!(suspended["realm"]["enabled"], false);
+    match register("second-suspended").await {
+        register_response::Result::Error(err) => assert_eq!(err.code, 403),
+        other => panic!("suspended Realm must not register Actors: {other:?}"),
+    }
+
+    let resumed = client
+        .put(&realm_url)
+        .bearer_auth(token)
+        .json(&json!({ "enabled": true }))
+        .send()
+        .await
+        .expect("resume realm");
+    assert!(resumed.status().is_success());
+    assert!(matches!(
+        register("second-resumed").await,
+        register_response::Result::Success(_)
+    ));
+
+    let retired: Value = client
+        .post(format!("{realm_url}/retire"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("retire realm")
+        .json()
+        .await
+        .expect("retire json");
+    assert_eq!(retired["realm"]["status"], "retired");
+    match register("second-retired").await {
+        register_response::Result::Error(err) => assert_eq!(err.code, 403),
+        other => panic!("retired Realm must not register Actors: {other:?}"),
+    }
+
+    // A retired Realm is final and its name is never reused.
+    for response in [
+        client
+            .put(&realm_url)
+            .bearer_auth(token)
+            .json(&json!({ "enabled": true }))
+            .send()
+            .await
+            .expect("resume retired realm"),
+        client
+            .post(format!("{realm_url}/secret/rotate"))
+            .bearer_auth(token)
+            .send()
+            .await
+            .expect("rotate retired realm secret"),
+        client
+            .post(format!("{base}/admin/api/realms"))
+            .bearer_auth(token)
+            .json(&json!({ "realm": SECOND_REALM }))
+            .send()
+            .await
+            .expect("recreate retired realm"),
+    ] {
+        assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    }
+
+    // The other Realm is untouched.
+    assert!(matches!(
+        issuer_register_result(
+            &base,
+            TEST_REALM,
+            "acme",
+            "first-still-ok",
+            None,
+            None,
+            Some(TEST_REALM_SECRET)
+        )
+        .await,
+        register_response::Result::Success(_)
+    ));
+
+    harness.shutdown();
+}
+
+#[tokio::test]
+#[serial]
+async fn signaling_discovery_cross_realm_isolated() {
+    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    ensure_realm(&harness.data_dir, SECOND_REALM).await;
+
+    // The same service type in both Realms, each open to clients from any Realm.
+    let (_other_w, _other_r, _other_ok) = ws_register_in_realm_with_spec(
+        harness.port,
+        "acme",
+        "svc-cross-realm",
+        SECOND_REALM,
+        Some(any_realm_allow_acl("client")),
+        None,
+    )
+    .await;
+    let (_own_w, _own_r, _own_ok) = ws_register(
+        harness.port,
+        "acme",
+        "svc-cross-realm",
+        Some(any_realm_allow_acl("client")),
+    )
+    .await;
+    let (mut client_write, mut client_read, client_ok) =
+        ws_register(harness.port, "acme", "client", None).await;
+    let (mut second_write, mut second_read, second_ok) =
+        ws_register_in_realm_with_spec(harness.port, "acme", "client", SECOND_REALM, None, None)
+            .await;
+
+    for (write, read, ok) in [
+        (&mut client_write, &mut client_read, &client_ok),
+        (&mut second_write, &mut second_read, &second_ok),
+    ] {
+        let entries = query_discovery_entries(write, read, ok, Some("acme")).await;
+        let services: Vec<_> = entries
+            .iter()
+            .filter(|entry| entry.actr_type.name == "svc-cross-realm")
+            .collect();
+        assert_eq!(
+            services.len(),
+            1,
+            "each Realm sees only its own service: {entries:?}"
+        );
+    }
+
+    let _ = client_write.send(WsMessage::Close(None)).await;
+    let _ = second_write.send(WsMessage::Close(None)).await;
+    harness.shutdown();
+}
+
+#[tokio::test]
+#[serial]
+async fn signaling_route_candidates_cross_realm_isolated() {
+    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    ensure_realm(&harness.data_dir, SECOND_REALM).await;
+
+    let (_other_w, _other_r, _other_ok) = ws_register_in_realm_with_spec(
+        harness.port,
+        "acme",
+        "svc-cross-route",
+        SECOND_REALM,
+        Some(any_realm_allow_acl("client")),
+        None,
+    )
+    .await;
+    let (mut client_write, mut client_read, client_ok) =
+        ws_register(harness.port, "acme", "client", None).await;
+
+    let candidates = query_route_candidates(
+        &mut client_write,
+        &mut client_read,
+        &client_ok,
+        "acme",
+        "svc-cross-route",
+    )
+    .await;
+    assert!(
+        candidates.is_empty(),
+        "route candidates must not include another Realm's Actors: {candidates:?}"
+    );
+
+    let (_own_w, _own_r, own_ok) = ws_register(
+        harness.port,
+        "acme",
+        "svc-cross-route",
+        Some(any_realm_allow_acl("client")),
+    )
+    .await;
+    let candidates = query_route_candidates(
+        &mut client_write,
+        &mut client_read,
+        &client_ok,
+        "acme",
+        "svc-cross-route",
+    )
+    .await;
+    assert_eq!(candidates, vec![own_ok.actr_id.clone()]);
+
+    let _ = client_write.send(WsMessage::Close(None)).await;
+    harness.shutdown();
+}
+
+#[tokio::test]
+#[serial]
+async fn signaling_relay_cross_realm_is_denied() {
+    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let port = harness.port;
+    ensure_realm(&harness.data_dir, SECOND_REALM).await;
+
+    let (_dst_w, _dst_r, dst_ok) = ws_register_in_realm_with_spec(
+        port,
+        "acme",
+        "relay-dst",
+        SECOND_REALM,
+        Some(any_realm_allow_acl("relay-src")),
+        None,
+    )
+    .await;
+    let (mut src_w, mut src_r, src_ok) = ws_register(port, "acme", "relay-src", None).await;
+
+    let relay = ActrRelay {
+        source: src_ok.actr_id.clone(),
+        credential: src_ok.credential.clone(),
+        target: dst_ok.actr_id.clone(),
+        source_type: None,
+        delivery_context: None,
+        payload: Some(actr_relay::Payload::RoleNegotiation(RoleNegotiation {
+            from: src_ok.actr_id.clone(),
+            to: dst_ok.actr_id.clone(),
+        })),
+    };
+    send_envelope(
+        &mut src_w,
+        make_envelope(signaling_envelope::Flow::ActrRelay(relay)),
+    )
+    .await;
+
+    let resp = recv_envelope(&mut src_r).await;
+    match resp.flow {
+        Some(signaling_envelope::Flow::ServerToActr(server_msg)) => match server_msg.payload {
+            Some(signaling_to_actr::Payload::Error(err)) => {
+                assert_eq!(err.code, 403, "cross-Realm relay should be denied");
+                assert!(
+                    err.message.contains("ACL policy denies relay"),
+                    "unexpected relay deny message: {}",
+                    err.message
+                );
+            }
+            other => panic!("expected relay error, got {other:?}"),
+        },
+        other => panic!("unexpected flow {other:?}"),
+    }
+
+    harness.shutdown();
 }

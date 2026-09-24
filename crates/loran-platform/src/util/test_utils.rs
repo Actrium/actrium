@@ -66,6 +66,9 @@ pub mod utils {
             "publisher_package",
             "publisher_challenge",
             "publisher",
+            "realm_profile",
+            "realm_domain",
+            "realm_mgmt_nonce",
             "realm",
         ] {
             sqlx::query(&format!("DELETE FROM {table}"))

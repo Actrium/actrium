@@ -6,9 +6,7 @@
 use super::{HttpRouterService, IceService, http::build_control_router};
 use crate::service::container::ServiceContainer;
 use crate::service::grpc::build_signer_grpc_router;
-use crate::service::http::{
-    IssuerService, PublisherRegistryService, SignalingService, build_realm_descriptor_router,
-};
+use crate::service::http::{IssuerService, PublisherRegistryService, SignalingService};
 use crate::service::ice::{StunService, TurnService};
 use anyhow::Result;
 use axum::Router;
@@ -239,7 +237,6 @@ impl ServiceManager {
         self.bg_cancel = Some(cancel.clone());
 
         let mut app = Router::new();
-        app = app.merge(build_realm_descriptor_router(self.config.clone()));
 
         // Refresh ServiceCollector to reflect currently enabled services.
         // This ensures the admin dashboard shows accurate service status after reload.

@@ -17,7 +17,7 @@ service NodeAdminService {
   rpc CreateRealm(CreateRealmRequest) returns (CreateRealmResponse);
   rpc GetRealm(GetRealmRequest) returns (GetRealmResponse);
   rpc UpdateRealm(UpdateRealmRequest) returns (UpdateRealmResponse);
-  rpc DeleteRealm(DeleteRealmRequest) returns (DeleteRealmResponse);
+  rpc RetireRealm(RetireRealmRequest) returns (RetireRealmResponse);
   rpc ListRealms(ListRealmsRequest) returns (ListRealmsResponse);
 
   // ------------ Node control ------------
@@ -70,15 +70,16 @@ message GetConfigResponse {
 
 // ------------ CreateRealm ------------
 
+// Creates an active Realm, or for superv updates an existing one by name.
 message CreateRealmRequest {
   reserved 1; reserved "realm_id", "name";
   required string realm = 2;                // Realm name <realm_id>@<domain>
-  required bool enabled = 3;                // Enabled status
+  required bool enabled = 3;                // Enabled (false = suspended)
   // Field 4 removed (was use_servers)
   required NonceCredential credential = 5;  // Authentication credential
   // Field 6 removed (was version)
   required uint64 expires_at = 7;           // Expiration timestamp (Unix timestamp)
-  optional string status = 8;               // Active / Inactive / Suspended
+  reserved 8; reserved "status";            // Status is owned by the node
   optional string secret_current_hash = 9;  // Current realm secret hash from superv
   optional string secret_previous_hash = 10; // Previous realm secret hash during rotation
   optional uint64 secret_previous_valid_until = 11; // Previous secret grace-window deadline
@@ -106,12 +107,14 @@ message GetRealmResponse {
 
 // ------------ UpdateRealm ------------
 
+// Updates the mutable fields of a Realm. The name never changes; `enabled`
+// suspends (false) or resumes (true) the Realm.
 message UpdateRealmRequest {
   reserved 1, 2; reserved "realm_id", "name";
   required string realm = 10;               // Realm name
-  optional bool enabled = 3;                // New enabled status (optional update)
+  optional bool enabled = 3;                // Suspend (false) / resume (true)
   required NonceCredential credential = 4;  // Authentication credential
-  optional string status = 5;               // Active / Inactive / Suspended
+  reserved 5; reserved "status";            // Status is owned by the node
   optional uint64 expires_at = 6;           // Expiration timestamp (Unix timestamp)
   optional string secret_current_hash = 7;  // Current realm secret hash from superv
   optional string secret_previous_hash = 8; // Previous realm secret hash during rotation
@@ -124,17 +127,19 @@ message UpdateRealmResponse {
   optional RealmInfo realm = 3;             // Updated realm info
 }
 
-// ------------ DeleteRealm ------------
+// ------------ RetireRealm ------------
 
-message DeleteRealmRequest {
-  reserved 1; reserved "realm_id";
-  required string realm = 3;                // Realm name
+// Retires a Realm. The Realm is never deleted: its retired record keeps the
+// name from being reused.
+message RetireRealmRequest {
+  required string realm = 1;                // Realm name
   required NonceCredential credential = 2;  // Authentication credential
 }
 
-message DeleteRealmResponse {
+message RetireRealmResponse {
   required bool success = 1;                // Operation result
   optional string error_message = 2;        // Error message on failure
+  optional RealmInfo realm = 3;             // Retired realm info
 }
 
 // ------------ ListRealms ------------

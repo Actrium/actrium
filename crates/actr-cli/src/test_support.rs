@@ -596,7 +596,7 @@ fn ensure_realm_exists(sqlite_dir: &Path, realm: &str) -> Result<()> {
                 conn.execute_batch(
                     "CREATE TABLE IF NOT EXISTS realm (
                         name TEXT PRIMARY KEY,
-                        status TEXT NOT NULL DEFAULT 'Active',
+                        status TEXT NOT NULL DEFAULT 'active',
                         enabled INTEGER NOT NULL DEFAULT 1,
                         expires_at INTEGER,
                         created_at INTEGER NOT NULL,
@@ -608,7 +608,7 @@ fn ensure_realm_exists(sqlite_dir: &Path, realm: &str) -> Result<()> {
                 )?;
                 conn.execute(
                     "INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current)
-                     VALUES (?1, 'Active', 1, strftime('%s','now'), ?2)",
+                     VALUES (?1, 'active', 1, strftime('%s','now'), ?2)",
                     rusqlite::params![realm, ""],
                 )
                 .context("failed to ensure local e2e realm exists")?;
