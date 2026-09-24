@@ -802,10 +802,10 @@ async fn get_current_key(State(state): State<IssuerState>) -> Json<Value> {
     }
 }
 
-/// Returns the current Issuer signing public key (key_id + base64 pubkey)
+/// Returns the Issuer's own rotating public key (key_id + base64 pubkey)
 ///
-/// Allows the signaling server or other services to pull the public key on demand for credential
-/// signature verification when the key cache misses.
+/// Actor credentials are signed with each Realm's issuer key, not this one;
+/// verifiers take that key from the Realm Profile or `GetSigningKey`.
 async fn get_signing_pubkey(State(state): State<IssuerState>) -> Json<Value> {
     match state.issuer.get_current_signing_pubkey().await {
         Ok((key_id, pubkey_bytes)) => {
