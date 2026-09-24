@@ -1,25 +1,23 @@
 //! Public Actr authority bootstrap for the Loran service composition.
 
-use actr_protocol::realm_profile::{REALM_PROFILE_PROTOCOL, jcs};
+use actr_protocol::realm_profile::{IceEndpoint, REALM_PROFILE_PROTOCOL, SignalingEndpoint};
 use actr_protocol::{
-    AUTHORITY_DESCRIPTOR_VERSION, AuthorityDescriptor, DetachedSignature, ICE_CONFIG_PROTOCOL,
-    IceConfiguration, IceServer, KeyStatus, RealmSigningKey, RealmSigningKeys, SIGNATURE_ALGORITHM,
-    ServiceLink, parse_authority_member,
+    AUTHORITY_DESCRIPTOR_VERSION, AuthorityDescriptor, ICE_CONFIG_PROTOCOL, IceConfiguration,
+    IceServer, ServiceLink, parse_authority_member,
 };
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Path, State},
     http::{StatusCode, header},
     response::{IntoResponse, Response},
     routing::get,
 };
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD as BASE64;
-use issuer::signer_client_wrapper::{SignerClientWrapper, create_signer_client};
+use issuer::realm_profile::{ProviderEndpoints, RealmProfiles};
+use issuer::signer_client_wrapper::create_signer_client;
 use loran_packages::PackageDistributor;
 use platform::config::ActrixConfig;
-use std::{path::PathBuf, sync::Arc, time::Duration};
-use tokio::sync::OnceCell;
+use platform::realm::{Realm, RealmProfileRecord, RealmStatus};
+use std::{path::PathBuf, sync::Arc};
 use url::Url;
 
 const REALM_MANAGEMENT_PROTOCOL: &str = "actr-realm-management/1";
@@ -28,66 +26,11 @@ struct AuthorityState {
     descriptor: AuthorityDescriptor,
     ice: IceConfiguration,
     /// Present when this Loran is the Realm Provider for its own domain.
-    realm_keys: Option<RealmKeys>,
+    profiles: Option<Arc<RealmProfiles>>,
 }
 
-/// The provider domain's `realm_signing_keys` member, signed once by the
-/// Signer key `realm-signing:<domain>` (generated on first use).
-struct RealmKeys {
-    domain: String,
-    signer: SignerClientWrapper,
-    member: OnceCell<RealmSigningKeys>,
-}
-
-impl RealmKeys {
-    async fn member(&self) -> anyhow::Result<&RealmSigningKeys> {
-        self.member
-            .get_or_try_init(|| async {
-                let key_id = realm_signing_key_id(&self.domain);
-                let (signer_key_id, public_key) = self.signer.ensure_named_key(&key_id).await?;
-                let (mut member, payload) = unsigned_realm_signing_keys(&key_id, &public_key);
-                let signature = self.signer.sign(signer_key_id, payload.as_bytes()).await?;
-                member.signature.value = BASE64.encode(signature);
-                Ok(member)
-            })
-            .await
-    }
-}
-
-/// Signer key name, and descriptor key id, of a domain's Realm signing key.
-fn realm_signing_key_id(domain: &str) -> String {
-    format!("realm-signing:{domain}")
-}
-
-/// A one-key `realm_signing_keys` member with an empty signature value, and
-/// the RFC 8785 JCS payload that the key must sign (the member without
-/// `signature`).
-fn unsigned_realm_signing_keys(key_id: &str, public_key: &[u8; 32]) -> (RealmSigningKeys, String) {
-    let member = RealmSigningKeys {
-        sequence: 1,
-        keys: vec![RealmSigningKey {
-            id: key_id.to_string(),
-            algorithm: SIGNATURE_ALGORITHM.to_string(),
-            public_key: BASE64.encode(public_key),
-            status: KeyStatus::Active,
-        }],
-        rotations: None,
-        signature: DetachedSignature {
-            key_id: key_id.to_string(),
-            algorithm: SIGNATURE_ALGORITHM.to_string(),
-            value: String::new(),
-        },
-    };
-    let mut payload = serde_json::to_value(&member).expect("member serializes");
-    if let Some(members) = payload.as_object_mut() {
-        members.remove("signature");
-    }
-    (member, jcs(&payload))
-}
-
-async fn authority_composition(
-    config: &ActrixConfig,
-) -> anyhow::Result<(Option<AuthorityState>, Option<PackageDistributor>)> {
+/// Advertised HTTP origin and signaling URL of this instance.
+fn advertised(config: &ActrixConfig) -> anyhow::Result<(String, String)> {
     let http = config
         .bind
         .http
@@ -95,19 +38,111 @@ async fn authority_composition(
         .ok_or_else(|| anyhow::anyhow!("bind.http is required"))?;
     let port = http.effective_advertised_port();
     let default_port = (http.is_tls() && port == 443) || (!http.is_tls() && port == 80);
-    let origin = if default_port {
-        format!("{}://{}", http.scheme(), http.domain_name)
+    let authority = if default_port {
+        http.domain_name.clone()
     } else {
-        format!("{}://{}:{port}", http.scheme(), http.domain_name)
+        format!("{}:{port}", http.domain_name)
     };
+    let origin = format!("{}://{authority}", http.scheme());
     Url::parse(&origin).map_err(|error| anyhow::anyhow!("invalid advertised origin: {error}"))?;
+    let signaling = format!("{}://{authority}/signaling/ws", http.ws_scheme());
+    Ok((origin, signaling))
+}
 
-    let signaling_origin = if default_port {
-        format!("{}://{}", http.ws_scheme(), http.domain_name)
-    } else {
-        format!("{}://{}:{port}", http.ws_scheme(), http.domain_name)
+fn ice_servers(config: &ActrixConfig) -> Vec<IceServer> {
+    let mut ice_servers = Vec::new();
+    if config.is_ice_enabled() {
+        let ice = &config.bind.ice;
+        let address = if ice.advertised_ip.contains(':') {
+            format!("[{}]", ice.advertised_ip)
+        } else {
+            ice.advertised_ip.clone()
+        };
+        if config.is_stun_enabled() {
+            ice_servers.push(IceServer {
+                urls: vec![format!("stun:{address}:{}", ice.advertised_port)],
+                username: None,
+                credential: None,
+            });
+        }
+        if config.is_turn_enabled() {
+            ice_servers.push(IceServer {
+                urls: vec![format!("turn:{address}:{}", ice.advertised_port)],
+                username: None,
+                credential: None,
+            });
+        }
+    }
+    ice_servers
+}
+
+/// Realm Profiles of this Loran as Realm Provider for its own domain: the
+/// authority is enabled and the Issuer has a Signer.
+pub async fn build_realm_profiles(
+    config: &ActrixConfig,
+) -> anyhow::Result<Option<Arc<RealmProfiles>>> {
+    if !config.authority.enabled || !config.is_issuer_enabled() {
+        return Ok(None);
+    }
+    let Some(signer_config) = config
+        .services
+        .issuer
+        .as_ref()
+        .and_then(|issuer| issuer.get_signer_client_config(config))
+    else {
+        return Ok(None);
     };
-    let signaling_href = format!("{signaling_origin}/signaling/ws");
+    let provider_id = config
+        .authority
+        .provider_id()
+        .map_err(|error| anyhow::anyhow!(error))?;
+    let (origin, signaling_href) = advertised(config)?;
+
+    let mut signaling = Vec::new();
+    if config.is_signaling_enabled() {
+        signaling.push(SignalingEndpoint {
+            url: signaling_href,
+            priority: 0,
+            control_plane_id: format!("{provider_id}/v1"),
+            ticket_audience: "actr.signaling".to_string(),
+        });
+    }
+    let ice = ice_servers(config)
+        .into_iter()
+        .map(|server| IceEndpoint {
+            credential_audience: server
+                .urls
+                .iter()
+                .any(|url| url.starts_with("turn"))
+                .then(|| "actr.turn".to_string()),
+            urls: server.urls,
+        })
+        .collect();
+    let signer = create_signer_client(&signer_config, &config.actrix_shared_key)
+        .await
+        .map_err(|error| anyhow::anyhow!("Signer client: {error}"))?;
+    Ok(Some(Arc::new(RealmProfiles::new(
+        ProviderEndpoints {
+            provider_id,
+            issuer_url: format!("{origin}/issuer"),
+            signaling,
+            ice,
+            realms_base: format!("{origin}/actr/realms/"),
+        },
+        signer,
+    ))))
+}
+
+async fn authority_composition(
+    config: &ActrixConfig,
+    profiles: Option<Arc<RealmProfiles>>,
+) -> anyhow::Result<(Option<AuthorityState>, Option<PackageDistributor>)> {
+    let http = config
+        .bind
+        .http
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("bind.http is required"))?;
+    let (origin, signaling_href) = advertised(config)?;
 
     let packages = config
         .services
@@ -153,20 +188,10 @@ async fn authority_composition(
         services
             .push(ServiceLink::new("discovery", &signaling_href).with_protocol("actr-discovery/1"));
     }
-    // The Issuer makes this Loran the Realm Provider for its own domain.
-    let realm_signer = if config.is_issuer_enabled() {
-        config
-            .services
-            .issuer
-            .as_ref()
-            .and_then(|issuer| issuer.get_signer_client_config(config))
-    } else {
-        None
-    };
     if config.is_issuer_enabled() {
         services.push(ServiceLink::new("identity", format!("{origin}/issuer")));
     }
-    if realm_signer.is_some() {
+    if profiles.is_some() {
         let domain = parsed_authority.domain();
         services.push(
             ServiceLink::new("realms", format!("{origin}/actr/realms/{domain}"))
@@ -190,30 +215,6 @@ async fn authority_composition(
         anyhow::bail!("an enabled authority must advertise at least one service");
     }
 
-    let mut ice_servers = Vec::new();
-    if config.is_ice_enabled() {
-        let ice = &config.bind.ice;
-        let address = if ice.advertised_ip.contains(':') {
-            format!("[{}]", ice.advertised_ip)
-        } else {
-            ice.advertised_ip.clone()
-        };
-        if config.is_stun_enabled() {
-            ice_servers.push(IceServer {
-                urls: vec![format!("stun:{address}:{}", ice.advertised_port)],
-                username: None,
-                credential: None,
-            });
-        }
-        if config.is_turn_enabled() {
-            ice_servers.push(IceServer {
-                urls: vec![format!("turn:{address}:{}", ice.advertised_port)],
-                username: None,
-                credential: None,
-            });
-        }
-    }
-
     let links = &config.authority.links;
     let descriptor = AuthorityDescriptor {
         version: AUTHORITY_DESCRIPTOR_VERSION,
@@ -227,25 +228,14 @@ async fn authority_composition(
         .validate_for(&parsed_authority)
         .map_err(|error| anyhow::anyhow!("invalid authority descriptor: {error}"))?;
 
-    let realm_keys = match realm_signer {
-        Some(signer_config) => Some(RealmKeys {
-            domain: parsed_authority.domain().to_string(),
-            signer: create_signer_client(&signer_config, &config.actrix_shared_key)
-                .await
-                .map_err(|error| anyhow::anyhow!("Signer client: {error}"))?,
-            member: OnceCell::new(),
-        }),
-        None => None,
-    };
-
     Ok((
         Some(AuthorityState {
             descriptor,
             ice: IceConfiguration {
                 version: 1,
-                ice_servers,
+                ice_servers: ice_servers(config),
             },
-            realm_keys,
+            profiles,
         }),
         packages,
     ))
@@ -253,9 +243,9 @@ async fn authority_composition(
 
 async fn get_descriptor(State(state): State<Arc<AuthorityState>>) -> Response {
     let mut descriptor = state.descriptor.clone();
-    if let Some(realm_keys) = &state.realm_keys {
-        // Only the startup task talks to the Signer; a public request never does.
-        match realm_keys.member.get() {
+    if let Some(profiles) = &state.profiles {
+        // Only the background task talks to the Signer; a public request never does.
+        match profiles.signing_keys() {
             Some(member) => descriptor.realm_signing_keys = Some(member.clone()),
             None => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
         }
@@ -277,11 +267,42 @@ async fn get_ice_config(State(state): State<Arc<AuthorityState>>) -> impl IntoRe
     )
 }
 
+/// `GET /actr/realms/{domain}/{realm_id}`: the accepted Realm Profile of an
+/// active or retired Realm, served as signed. Unknown and pending Realms are
+/// `404`.
+async fn get_realm_profile(Path((domain, realm_id)): Path<(String, String)>) -> Response {
+    let name = format!("{realm_id}@{domain}");
+    let found = match Realm::get(&name).await {
+        Ok(Some(realm)) if realm.status != RealmStatus::Pending => {
+            RealmProfileRecord::get(&name).await
+        }
+        Ok(_) => Ok(None),
+        Err(error) => Err(error),
+    };
+    let cors = (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+    match found {
+        Ok(Some(record)) => (
+            [
+                (header::CONTENT_TYPE, "application/json"),
+                (header::CACHE_CONTROL, "public, max-age=300"),
+                cors,
+            ],
+            record.document,
+        )
+            .into_response(),
+        Ok(None) => ([cors], StatusCode::NOT_FOUND).into_response(),
+        Err(error) => {
+            platform::recording::warn!("Realm Profile {name}: {error}");
+            ([cors], StatusCode::INTERNAL_SERVER_ERROR).into_response()
+        }
+    }
+}
+
 pub async fn build_authority_router(
     config: &ActrixConfig,
-    cancel: tokio_util::sync::CancellationToken,
+    profiles: Option<Arc<RealmProfiles>>,
 ) -> anyhow::Result<Router> {
-    let (state, packages) = authority_composition(config).await?;
+    let (state, packages) = authority_composition(config, profiles).await?;
     let mut router = Router::new();
     if let Some(packages) = packages {
         platform::recording::info!("Adding Actr package hosting routes");
@@ -295,32 +316,14 @@ pub async fn build_authority_router(
             "Adding Actr authority discovery routes for {}",
             state.descriptor.authority
         );
-        let state = Arc::new(state);
-        if state.realm_keys.is_some() {
-            // Generate the Realm signing key at startup; the Signer listener
-            // may come up after this router, so retry until it answers.
-            let state = state.clone();
-            tokio::spawn(async move {
-                let realm_keys = state.realm_keys.as_ref().expect("checked above");
-                while let Err(error) = realm_keys.member().await {
-                    platform::recording::warn!("Realm signing key not ready: {error:#}");
-                    tokio::select! {
-                        _ = cancel.cancelled() => return,
-                        _ = tokio::time::sleep(Duration::from_secs(2)) => {}
-                    }
-                }
-                platform::recording::info!(
-                    "Realm signing key ready: {}",
-                    realm_signing_key_id(&realm_keys.domain)
-                );
-            });
+        let serves_profiles = state.profiles.is_some();
+        let mut routes = Router::new()
+            .route("/.well-known/actr", get(get_descriptor))
+            .route("/actr/ice-config", get(get_ice_config));
+        if serves_profiles {
+            routes = routes.route("/actr/realms/{domain}/{realm_id}", get(get_realm_profile));
         }
-        router = router.merge(
-            Router::new()
-                .route("/.well-known/actr", get(get_descriptor))
-                .route("/actr/ice-config", get(get_ice_config))
-                .with_state(state),
-        );
+        router = router.merge(routes.with_state(Arc::new(state)));
     }
     Ok(router)
 }
@@ -367,7 +370,7 @@ mod tests {
 
     /// Request path of the single artifact hosted by `config`.
     async fn artifact_uri(config: &ActrixConfig) -> String {
-        let (_, packages) = authority_composition(config).await.unwrap();
+        let (_, packages) = authority_composition(config, None).await.unwrap();
         let packages = packages.unwrap();
         let href = packages.artifact_hrefs().next().unwrap();
         href[url::Position::BeforePath..].to_string()
@@ -380,7 +383,7 @@ mod tests {
         std::fs::write(&artifact, b"actor package").unwrap();
         let config = test_config(&artifact);
 
-        let (state, packages) = authority_composition(&config).await.unwrap();
+        let (state, packages) = authority_composition(&config, None).await.unwrap();
         let state = state.unwrap();
         let packages = packages.unwrap();
         assert_eq!(state.descriptor.authority, "actr://localhost");
@@ -412,7 +415,7 @@ mod tests {
         ] {
             let mut config = test_config(&artifact);
             config.authority.uri = Some(uri.to_string());
-            let error = authority_composition(&config)
+            let error = authority_composition(&config, None)
                 .await
                 .err()
                 .unwrap()
@@ -429,9 +432,7 @@ mod tests {
         let mut config = test_config(&artifact);
         config.authority.enabled = false;
         config.authority.uri = None;
-        let app = build_authority_router(&config, Default::default())
-            .await
-            .unwrap();
+        let app = build_authority_router(&config, None).await.unwrap();
 
         let response = app
             .clone()
@@ -466,7 +467,7 @@ mod tests {
             },
             ..ActrixConfig::default()
         };
-        let error = authority_composition(&config).await.err().unwrap();
+        let error = authority_composition(&config, None).await.err().unwrap();
         assert!(error.to_string().contains("requires TLS"));
     }
 
@@ -477,9 +478,7 @@ mod tests {
         let artifact_bytes = b"complete actor package";
         std::fs::write(&artifact, artifact_bytes).unwrap();
         let config = test_config(&artifact);
-        let app = build_authority_router(&config, Default::default())
-            .await
-            .unwrap();
+        let app = build_authority_router(&config, None).await.unwrap();
 
         let response = app
             .clone()
@@ -544,7 +543,11 @@ mod tests {
         let mut config = provider_config(&artifact);
         config.authority.links = vec!["/i/".to_string()];
 
-        let (state, _) = authority_composition(&config).await.unwrap();
+        let profiles = build_realm_profiles(&config).await.unwrap();
+        assert!(profiles.is_some());
+        let (state, _) = authority_composition(&config, profiles.clone())
+            .await
+            .unwrap();
         let state = state.unwrap();
         let realms = state.descriptor.require_service("realms").unwrap();
         assert_eq!(realms.href, "http://localhost:8081/actr/realms/localhost");
@@ -562,25 +565,38 @@ mod tests {
             Some("actr-realm-management/1")
         );
         assert_eq!(state.descriptor.links, Some(vec!["/i/".to_string()]));
-        assert_eq!(state.realm_keys.unwrap().domain, "localhost");
+        assert_eq!(state.profiles.unwrap().provider_id(), "localhost");
 
         // Without a Signer this Loran is not a Realm Provider.
-        let (state, _) = authority_composition(&test_config(&artifact))
+        let (state, _) = authority_composition(&test_config(&artifact), None)
             .await
             .unwrap();
         let state = state.unwrap();
         assert!(state.descriptor.service("realms").is_none());
         assert!(state.descriptor.service("realm-management").is_none());
-        assert!(state.realm_keys.is_none());
+        assert!(state.profiles.is_none());
+        assert!(
+            build_realm_profiles(&test_config(&artifact))
+                .await
+                .unwrap()
+                .is_none()
+        );
 
         config.authority.links = vec!["/".to_string()];
-        let error = authority_composition(&config).await.err().unwrap();
+        let error = authority_composition(&config, profiles)
+            .await
+            .err()
+            .unwrap();
         assert!(error.to_string().contains("Realm link prefix"), "{error}");
     }
 
     #[test]
     fn realm_signing_keys_member_is_self_signed_over_jcs() {
+        use actr_protocol::realm_profile::jcs;
+        use base64::Engine as _;
+        use base64::engine::general_purpose::STANDARD as BASE64;
         use ed25519_dalek::{Signer as _, Verifier as _};
+        use issuer::realm_profile::{realm_signing_key_id, unsigned_realm_signing_keys};
 
         let key = ed25519_dalek::SigningKey::from_bytes(&[3u8; 32]);
         let key_id = realm_signing_key_id("provider.example");
@@ -625,7 +641,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let artifact = directory.path().join("echo.actr");
         std::fs::write(&artifact, b"actor package").unwrap();
-        let app = build_authority_router(&test_config(&artifact), Default::default())
+        let app = build_authority_router(&test_config(&artifact), None)
             .await
             .unwrap();
 
@@ -668,10 +684,8 @@ mod tests {
             .as_mut()
             .unwrap()
             .endpoint = "http://127.0.0.1:1".to_string();
-        let cancel = tokio_util::sync::CancellationToken::new();
-        let app = build_authority_router(&config, cancel.clone())
-            .await
-            .unwrap();
+        let profiles = build_realm_profiles(&config).await.unwrap();
+        let app = build_authority_router(&config, profiles).await.unwrap();
 
         let response = app
             .oneshot(
@@ -682,6 +696,5 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        cancel.cancel();
     }
 }

@@ -353,6 +353,16 @@ impl ServiceManager {
             None
         };
 
+        // As Realm Provider for its own domain, Loran signs Realm Profiles and
+        // refreshes those of other domains in the background.
+        let realm_profiles = crate::service::http::build_realm_profiles(&self.config).await?;
+        if let Some(profiles) = &realm_profiles {
+            profiles.spawn(
+                Duration::from_secs(self.config.realm.profile_refresh_secs()),
+                cancel.clone(),
+            );
+        }
+
         // Control plane always present.
         // Pass existing JWT secret so admin sessions survive reloads.
         let (control_router, jwt_secret) = build_control_router(
@@ -364,6 +374,7 @@ impl ServiceManager {
             config_store,
             self.metrics_store.clone(),
             issuer_state.as_ref().map(|state| state.issuer.clone()),
+            realm_profiles.clone(),
         )
         .await?;
         self.jwt_secret = Some(jwt_secret);
@@ -378,7 +389,7 @@ impl ServiceManager {
         // separate from the individual signaling, identity, and package roles
         // even when Loran serves them from the same process.
         app = app.merge(
-            crate::service::http::build_authority_router(&self.config, cancel.clone()).await?,
+            crate::service::http::build_authority_router(&self.config, realm_profiles).await?,
         );
 
         // Business services based on enable bitmask

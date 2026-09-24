@@ -14,6 +14,7 @@ use actrix_proto::{
     UpdateRealmResponse,
 };
 use chrono::Utc;
+use issuer::realm_profile::{ProfileChange, ProfileError, RealmProfiles};
 use platform::ServiceCollector;
 use platform::config::ActrixConfig;
 use platform::config::config_store::{ConfigOverride, ConfigOverrideStore};
@@ -22,7 +23,7 @@ use platform::config::resolver::{self, ResolvedField};
 use platform::realm::{
     DEFAULT_REALM_SECRET_PREVIOUS_GRACE_SECS, hash_realm_secret, rotate_realm_secret,
 };
-use platform::realm::{Realm, RealmError};
+use platform::realm::{Realm, RealmError, RealmProfileRecord, RealmStatus};
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -85,6 +86,9 @@ pub struct AdminApiService {
     /// Shared issuer (present when Issuer is enabled on this node). The same
     /// Arc backs the public /issuer router, so rotation here affects live traffic.
     aid_issuer: Option<Arc<issuer::AIdIssuer>>,
+    /// Signs Realm Profiles when this Loran is the Realm Provider for its own
+    /// domain.
+    realm_profiles: Option<Arc<RealmProfiles>>,
 }
 
 impl AdminApiService {
@@ -112,6 +116,7 @@ impl AdminApiService {
             toml_content: None,
             config_path: None,
             aid_issuer: None,
+            realm_profiles: None,
         })
     }
 
@@ -187,6 +192,19 @@ impl AdminApiService {
     }
 
     /// Get the override store reference.
+    /// Attach the Realm Profile signer of this Realm Provider.
+    pub fn with_realm_profiles(mut self, profiles: Arc<RealmProfiles>) -> Self {
+        self.realm_profiles = Some(profiles);
+        self
+    }
+
+    /// Realm Profiles of `realm`'s domain are signed here.
+    fn signs_profiles_for(&self, realm: &str) -> Option<&Arc<RealmProfiles>> {
+        self.realm_profiles
+            .as_ref()
+            .filter(|profiles| profiles.holds_key_for(realm))
+    }
+
     pub fn override_store(&self) -> Option<&Arc<ConfigOverrideStore>> {
         self.override_store.as_ref()
     }
@@ -812,33 +830,79 @@ impl AdminApiService {
     async fn create_local_realm_internal(
         &self,
         req: CreateRealmRequest,
-        expose_plain_secret: bool,
+        profile: ProfileChange,
     ) -> GrpcResult<(CreateRealmResponse, Option<String>)> {
         platform::recording::info!("Create local realm request received: realm={}", req.realm);
+        let failed = |message: String| {
+            Ok((
+                CreateRealmResponse {
+                    success: false,
+                    error_message: Some(message),
+                    realm: None,
+                },
+                None,
+            ))
+        };
+
+        // A Realm under a domain whose Realm signing key Loran holds starts
+        // pending and becomes active with its first Loran-signed Profile.
+        let signer = self.signs_profiles_for(&req.realm);
+        match signer {
+            Some(profiles) => {
+                if profile.package.is_none() {
+                    return failed(format!(
+                        "Realms under {} need package {{href, sha256}} for their Realm Profile",
+                        profiles.provider_id()
+                    ));
+                }
+                if profiles.signing_keys().is_none() {
+                    return Err(Status::unavailable("Realm signing key is not ready"));
+                }
+            }
+            None if profile.package.is_some() || profile.display_name.is_some() => {
+                return failed(
+                    "package and display_name belong to a Loran-signed Realm Profile, \
+                     which only Realms under the Provider domain have"
+                        .to_string(),
+                );
+            }
+            None => {}
+        }
 
         // Generate secret at creation time
         let plain_secret = platform::realm::secret::generate_realm_secret();
         let realm = Realm {
             name: req.realm,
+            status: if signer.is_some() {
+                RealmStatus::Pending
+            } else {
+                RealmStatus::Active
+            },
             enabled: req.enabled,
             expires_at: (req.expires_at > 0).then_some(req.expires_at),
             secret_current: hash_realm_secret(&plain_secret),
             ..Default::default()
         };
 
-        let realm = match realm.insert(self.max_realms()).await {
+        let mut realm = match realm.insert(self.max_realms()).await {
             Ok(r) => r,
-            Err(err) => {
-                return Ok((
-                    CreateRealmResponse {
-                        success: false,
-                        error_message: Some(format!("Failed to create realm: {err}")),
-                        realm: None,
-                    },
-                    None,
-                ));
-            }
+            Err(err) => return failed(format!("Failed to create realm: {err}")),
         };
+        if let Some(profiles) = signer {
+            realm = match profiles.issue(&realm.name, profile).await {
+                Ok(realm) => realm,
+                Err(err) => {
+                    // Never served, so the name is free again.
+                    if let Err(discard) = Realm::discard_pending(&realm.name).await {
+                        platform::recording::warn!(
+                            "Pending realm {} not discarded: {discard}",
+                            realm.name
+                        );
+                    }
+                    return failed(format!("Realm Profile not signed: {err}"));
+                }
+            };
+        }
 
         platform::recording::info!("Realm created: {}", realm.name);
 
@@ -848,7 +912,7 @@ impl AdminApiService {
                 error_message: None,
                 realm: Some(realm_to_proto(&realm)),
             },
-            expose_plain_secret.then_some(plain_secret),
+            Some(plain_secret),
         ))
     }
 
@@ -869,6 +933,20 @@ impl AdminApiService {
             build_secret_previous(req.secret_previous_hash, req.secret_previous_valid_until);
 
         platform::recording::info!("Create managed realm request received: realm={}", req.realm);
+
+        if self.signs_profiles_for(&req.realm).is_some()
+            && Realm::get(&req.realm).await.ok().flatten().is_none()
+        {
+            return Ok(CreateRealmResponse {
+                success: false,
+                error_message: Some(
+                    "a Realm under the Provider domain needs a Realm Profile package; \
+                     create it through the admin API"
+                        .to_string(),
+                ),
+                realm: None,
+            });
+        }
 
         match Realm::upsert_managed(
             req.realm,
@@ -894,11 +972,16 @@ impl AdminApiService {
     }
 
     /// Create a realm and return the plaintext realm secret once.
+    ///
+    /// `profile` carries the package and display name of the first Realm
+    /// Profile, required and allowed only for Realms under the Provider
+    /// domain.
     pub async fn create_realm_with_secret_direct(
         &self,
         req: CreateRealmRequest,
+        profile: ProfileChange,
     ) -> GrpcResult<(CreateRealmResponse, Option<String>)> {
-        self.create_local_realm_internal(req, true).await
+        self.create_local_realm_internal(req, profile).await
     }
 
     /// Create a realm (gRPC path, does not expose plaintext secret in response).
@@ -982,9 +1065,38 @@ impl AdminApiService {
     }
 
     /// Retire a realm by name. The retired record stays as a tombstone.
+    ///
+    /// Under the Provider domain Loran signs the retired Realm Profile. A
+    /// Realm with a Profile signed by another domain's key holder retires
+    /// only when that holder publishes a retired Profile; the operator can
+    /// suspend it instead.
     pub async fn retire_realm_direct(&self, realm: &str) -> GrpcResult<RetireRealmResponse> {
         platform::recording::info!("RetireRealm request received: realm={}", realm);
-        match Realm::retire(realm).await {
+        let retired = match self.signs_profiles_for(realm) {
+            Some(profiles) => profiles
+                .issue(
+                    realm,
+                    ProfileChange {
+                        retire: true,
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(|err| match err {
+                    ProfileError::Realm(err) => err,
+                    err => RealmError::ValidationError(err.to_string()),
+                }),
+            None => match RealmProfileRecord::get(realm).await {
+                Ok(Some(_)) => Err(RealmError::ValidationError(
+                    "only the Realm signing key holder retires this Realm, by publishing a \
+                     retired Realm Profile; suspend it instead"
+                        .to_string(),
+                )),
+                Ok(None) => Realm::retire(realm).await,
+                Err(err) => Err(err),
+            },
+        };
+        match retired {
             Ok(realm) => Ok(RetireRealmResponse {
                 success: true,
                 error_message: None,
@@ -999,6 +1111,14 @@ impl AdminApiService {
                 realm: None,
             }),
         }
+    }
+
+    /// The accepted Realm Profile document of `realm`, as signed.
+    pub async fn get_realm_profile_direct(&self, realm: &str) -> GrpcResult<Option<String>> {
+        RealmProfileRecord::get(realm)
+            .await
+            .map(|record| record.map(|record| record.document))
+            .map_err(|e| Status::internal(format!("Failed to load Realm Profile: {e}")))
     }
 
     /// Rotate realm secret and return plaintext once.

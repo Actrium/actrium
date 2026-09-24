@@ -1390,6 +1390,140 @@ async fn authority_descriptor_publishes_signed_realm_signing_keys() {
 
 #[tokio::test]
 #[serial]
+async fn provider_domain_realm_profiles_are_signed_served_and_retired() {
+    use actr_protocol::realm_profile::{RealmProfile, RealmStatus};
+
+    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let client = reqwest::Client::new();
+    let base = harness.base_url();
+    let name = "k7m2q9xh@localhost";
+    let public_url = format!("{base}/actr/realms/localhost/k7m2q9xh");
+
+    // The Realm signing key is generated at startup, possibly after health.
+    let mut descriptor = client.get(format!("{base}/.well-known/actr")).send().await;
+    for _ in 0..50 {
+        if descriptor
+            .as_ref()
+            .is_ok_and(|response| response.status() == reqwest::StatusCode::OK)
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        descriptor = client.get(format!("{base}/.well-known/actr")).send().await;
+    }
+    let descriptor: actr_protocol::AuthorityDescriptor = descriptor
+        .expect("descriptor request")
+        .json()
+        .await
+        .expect("descriptor json");
+    let keys = descriptor.realm_signing_keys.expect("realm_signing_keys");
+
+    let login: Value = client
+        .post(format!("{base}/admin/api/auth/login"))
+        .json(&json!({ "password": "testpassword123" }))
+        .send()
+        .await
+        .expect("admin login request")
+        .json()
+        .await
+        .expect("parse admin login response");
+    let token = login["token"].as_str().expect("admin login token");
+    let create = |body: Value| {
+        client
+            .post(format!("{base}/admin/api/realms"))
+            .bearer_auth(token)
+            .json(&body)
+            .send()
+    };
+    let package = json!({
+        "href": "https://cdn.example/notes-1.0.actr",
+        "sha256": "ab".repeat(32),
+    });
+
+    // Under the Provider domain the first Profile needs a package; other
+    // domains get no Loran-signed Profile.
+    let missing = create(json!({ "realm": name })).await.expect("create");
+    assert_eq!(missing.status(), reqwest::StatusCode::BAD_REQUEST);
+    let foreign = create(json!({ "realm": SECOND_REALM, "package": package }))
+        .await
+        .expect("create");
+    assert_eq!(foreign.status(), reqwest::StatusCode::BAD_REQUEST);
+
+    let created = create(json!({ "realm": name, "package": package, "display_name": "Notes" }))
+        .await
+        .expect("create");
+    assert_eq!(created.status(), reqwest::StatusCode::CREATED);
+    let created: Value = created.json().await.expect("create json");
+    assert_eq!(created["realm"]["status"], "active");
+
+    let response = client.get(&public_url).send().await.expect("profile");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert_eq!(response.headers()["access-control-allow-origin"], "*");
+    assert!(response.headers().contains_key("cache-control"));
+    let body = response.bytes().await.expect("profile body");
+    let first = RealmProfile::verify(&body, name, &keys).expect("verifies");
+    assert_eq!(first.sequence, 1);
+    assert_eq!(first.realm.display_name, "Notes");
+    assert_eq!(first.provider.id, "localhost");
+    assert_eq!(
+        first.package.as_ref().expect("package").sha256,
+        "ab".repeat(32)
+    );
+
+    let admin: Value = client
+        .get(format!(
+            "{base}/admin/api/realms/k7m2q9xh%40localhost/profile"
+        ))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("admin profile")
+        .json()
+        .await
+        .expect("admin profile json");
+    assert_eq!(admin["profile"]["sequence"], 1);
+
+    // Unknown Realms and Realms without a Profile are not found.
+    let created = create(json!({ "realm": SECOND_REALM }))
+        .await
+        .expect("create");
+    assert_eq!(created.status(), reqwest::StatusCode::CREATED);
+    for path in ["localhost/missing", "acme.com/second"] {
+        let response = client
+            .get(format!("{base}/actr/realms/{path}"))
+            .send()
+            .await
+            .expect("profile");
+        assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND, "{path}");
+    }
+
+    // Retiring signs a retired Profile, which stays served.
+    let retired = client
+        .post(format!(
+            "{base}/admin/api/realms/k7m2q9xh%40localhost/retire"
+        ))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("retire");
+    assert_eq!(retired.status(), reqwest::StatusCode::OK);
+    let body = client
+        .get(&public_url)
+        .send()
+        .await
+        .expect("profile")
+        .bytes()
+        .await
+        .expect("profile body");
+    let last = RealmProfile::verify(&body, name, &keys).expect("verifies");
+    first.check_successor(&last).expect("successor");
+    assert_eq!(last.realm.status, RealmStatus::Retired);
+
+    harness.shutdown();
+}
+
+#[tokio::test]
+#[serial]
 async fn issuer_does_not_expose_public_key_rotation() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
     let client = reqwest::Client::new();

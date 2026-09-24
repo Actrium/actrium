@@ -1,3 +1,4 @@
+use actr_protocol::realm_profile::RealmPackage;
 use actrix_sdk::control::{
     AdminApiService, ConfigType, CreateRealmRequest, NonceCredential, RealmInfo, UpdateRealmRequest,
 };
@@ -9,6 +10,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post, put},
 };
+use issuer::realm_profile::ProfileChange;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use platform::config::AdminUiConfig;
 use platform::monitoring::MetricsStore;
@@ -246,6 +248,12 @@ struct CreateRealmBody {
     enabled: bool,
     #[serde(default)]
     expires_at: u64,
+    /// Package and display name of the first Realm Profile; the package is
+    /// required for Realms under the Provider domain.
+    #[serde(default)]
+    package: Option<RealmPackage>,
+    #[serde(default)]
+    display_name: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -270,7 +278,16 @@ async fn create_realm(
         secret_previous_valid_until: None,
     };
 
-    match state.service.create_realm_with_secret_direct(req).await {
+    let profile = ProfileChange {
+        package: body.package,
+        display_name: body.display_name,
+        retire: false,
+    };
+    match state
+        .service
+        .create_realm_with_secret_direct(req, profile)
+        .await
+    {
         Ok((resp, realm_secret)) => {
             let status = if resp.success {
                 StatusCode::CREATED
@@ -419,6 +436,32 @@ async fn retire_realm(
             )
                 .into_response()
         }
+        Err(status) => grpc_status_to_response(status),
+    }
+}
+
+/// The accepted Realm Profile, as signed.
+async fn get_realm_profile(
+    State(state): State<Arc<AdminApiState>>,
+    Path(realm): Path<String>,
+) -> impl IntoResponse {
+    match state.service.get_realm_profile_direct(&realm).await {
+        Ok(Some(document)) => {
+            let profile: Value = serde_json::from_str(&document).unwrap_or(Value::Null);
+            (
+                StatusCode::OK,
+                Json(json!({ "success": true, "profile": profile })),
+            )
+                .into_response()
+        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "success": false,
+                "error_message": format!("Realm {realm} has no Realm Profile"),
+            })),
+        )
+            .into_response(),
         Err(status) => grpc_status_to_response(status),
     }
 }
@@ -838,6 +881,7 @@ pub fn build_admin_api_router(
             post(rotate_realm_secret),
         )
         .route("/admin/api/realms/{realm}/retire", post(retire_realm))
+        .route("/admin/api/realms/{realm}/profile", get(get_realm_profile))
         .route(
             "/admin/api/config/{config_type}/{config_key}",
             get(get_config),

@@ -2,6 +2,7 @@ use super::admin_api::{AdminApiState, build_admin_api_router};
 use actrix_sdk::control::{AdminApiService, AuthService, NodeAdminServiceServer};
 use anyhow::Result;
 use axum::{Json, Router, routing::get};
+use issuer::realm_profile::RealmProfiles;
 use platform::{
     ServiceCollector, config::ActrixConfig, config::config_store::ConfigOverrideStore,
     monitoring::MetricsStore, storage::nonce::SqliteNonceStorage,
@@ -21,7 +22,8 @@ use tokio::sync::broadcast;
 ///
 /// `aid_issuer` is the issuer backing the public `/issuer` router when Issuer is
 /// enabled, so the control plane can trigger authenticated key rotation on
-/// the live issuer.
+/// the live issuer. `realm_profiles` signs Realm Profiles when this Loran is
+/// the Realm Provider for its own domain.
 ///
 /// Returns `(Router, jwt_secret)` — the caller should persist the secret
 /// for subsequent reloads.
@@ -35,6 +37,7 @@ pub async fn build_control_router(
     config_store: Arc<ConfigOverrideStore>,
     metrics_store: MetricsStore,
     aid_issuer: Option<Arc<issuer::AIdIssuer>>,
+    realm_profiles: Option<Arc<RealmProfiles>>,
 ) -> Result<(Router, Vec<u8>)> {
     let mut router = Router::new();
     // Discard any carried-over secret that is empty or too short: an empty key
@@ -54,6 +57,7 @@ pub async fn build_control_router(
             config_store.clone(),
             metrics_store,
             aid_issuer.clone(),
+            realm_profiles.clone(),
         )
         .await?;
         router = router.merge(admin_router);
@@ -68,6 +72,7 @@ pub async fn build_control_router(
             config_store,
             !admin_ui_enabled,
             aid_issuer,
+            realm_profiles,
         )
         .await?;
         router = router.merge(grpc_router);
@@ -90,6 +95,7 @@ async fn build_admin_ui_router(
     config_store: Arc<ConfigOverrideStore>,
     metrics_store: MetricsStore,
     aid_issuer: Option<Arc<issuer::AIdIssuer>>,
+    realm_profiles: Option<Arc<RealmProfiles>>,
 ) -> Result<(Router, Vec<u8>)> {
     // Read raw TOML content for L1 detection
     let toml_content = tokio::fs::read_to_string(&config_path)
@@ -113,6 +119,9 @@ async fn build_admin_ui_router(
 
     if let Some(issuer) = aid_issuer {
         service = service.with_aid_issuer(issuer);
+    }
+    if let Some(profiles) = realm_profiles {
+        service = service.with_realm_profiles(profiles);
     }
 
     let shutdown_tx_for_handler = shutdown_tx.clone();
@@ -182,6 +191,7 @@ async fn build_grpc_api_router(
     config_store: Arc<ConfigOverrideStore>,
     include_admin_index_and_alias: bool,
     aid_issuer: Option<Arc<issuer::AIdIssuer>>,
+    realm_profiles: Option<Arc<RealmProfiles>>,
 ) -> Result<Router> {
     let grpc_cfg = &config.control.grpc_api;
     let shared_secret = Arc::new(
@@ -209,6 +219,9 @@ async fn build_grpc_api_router(
 
     if let Some(issuer) = aid_issuer {
         service = service.with_aid_issuer(issuer);
+    }
+    if let Some(profiles) = realm_profiles {
+        service = service.with_realm_profiles(profiles);
     }
 
     let shutdown_tx_for_handler = shutdown_tx.clone();

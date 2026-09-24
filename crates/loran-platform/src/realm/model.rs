@@ -304,6 +304,16 @@ impl Realm {
         Self::get(name).await?.ok_or(RealmError::NotFound)
     }
 
+    /// Delete a pending realm. It has never been served, so unlike a
+    /// retired one its name is not kept.
+    pub async fn discard_pending(name: &str) -> Result<(), RealmError> {
+        sqlx::query("DELETE FROM realm WHERE name = ? AND status = 'pending'")
+            .bind(name)
+            .execute(get_database().get_pool())
+            .await?;
+        Ok(())
+    }
+
     pub fn is_expired(&self) -> bool {
         if let Some(expires_at) = self.expires_at {
             let now = Utc::now().timestamp() as u64;
