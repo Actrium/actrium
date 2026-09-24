@@ -618,7 +618,7 @@ async fn runtime_override_flows_into_peer_connection_build() {
 }
 
 #[test]
-fn set_rule_with_deliver_removes_the_entry_instead_of_leaking_a_lease() {
+fn deliver_overrides_broader_faults_without_counting_as_an_active_lease() {
     let faults = DirectedSignalingFaultRegistry::default();
     let (a, b) = (test_actor_id(41), test_actor_id(42));
     faults.set_rule(
@@ -629,8 +629,8 @@ fn set_rule_with_deliver_removes_the_entry_instead_of_leaking_a_lease() {
     );
     assert_eq!(faults.active_rule_count(), 1, "installed rule is active");
 
-    // Healing via set_rule(Deliver) must remove the entry instead of inserting
-    // a counted Deliver entry (trap 1 hardening).
+    // A Deliver exception stays in the exact-rule map so it continues to
+    // shadow a broader fault, but it does not count as an active fault lease.
     faults.set_rule(
         a.clone(),
         b.clone(),
@@ -640,7 +640,7 @@ fn set_rule_with_deliver_removes_the_entry_instead_of_leaking_a_lease() {
     assert_eq!(
         faults.active_rule_count(),
         0,
-        "set_rule(Deliver) must remove the entry, leaving no active lease"
+        "Deliver is an override, not an active fault lease"
     );
 
     // Setting Deliver on an absent key is a no-op too.
@@ -651,4 +651,24 @@ fn set_rule_with_deliver_removes_the_entry_instead_of_leaking_a_lease() {
         SignalingFaultRule::Deliver,
     );
     assert_eq!(faults.active_rule_count(), 0);
+
+    faults.set_rule(
+        a.clone(),
+        b.clone(),
+        SignalingMessageClass::Any,
+        SignalingFaultRule::Drop,
+    );
+    faults.set_rule(
+        a.clone(),
+        b.clone(),
+        SignalingMessageClass::RoleAssignment,
+        SignalingFaultRule::Deliver,
+    );
+    assert_eq!(faults.active_rule_count(), 1);
+    let decision = faults.rule_for_test(
+        &a,
+        &b,
+        &SignalingMessage::RoleAssignment { is_offerer: true },
+    );
+    assert_eq!(decision, SignalingFaultRule::Deliver);
 }

@@ -3064,6 +3064,7 @@ impl Inner {
                 buffer_config.validate().map_err(|error| {
                     ActrError::Internal(format!("invalid RTC resource configuration: {error}"))
                 })?;
+                let rtc_local_id = rtc::signaling::SharedLocalId::new(actor_id.clone());
                 let runtime_config = rtc::runtime::RtcRuntimeConfig::desktop_default()
                     .with_buffer_config(buffer_config.clone());
                 let ice_servers: Vec<webrtc::peer_connection::RTCIceServer> = self
@@ -3123,7 +3124,7 @@ impl Inner {
                 #[cfg(feature = "test-utils")]
                 let factory = match self.test_faults.as_ref() {
                     Some(faults) => {
-                        factory.with_directed_faults(actor_id.clone(), faults.rtc.clone())
+                        factory.with_directed_faults(rtc_local_id.clone(), faults.rtc.clone())
                     }
                     None => factory,
                 };
@@ -3210,7 +3211,6 @@ impl Inner {
                     });
                     task_handles.push(turn_refresh_handle);
                 }
-                let rtc_local_id = rtc::signaling::SharedLocalId::new(actor_id.clone());
                 let rtc_transport = rtc::signaling::ws_transport::RtcSignalingTransport::new(
                     self.signaling_client.clone(),
                     rtc_local_id.clone(),
@@ -3225,32 +3225,29 @@ impl Inner {
                 rtc_manager.set_signaling_dispatch_chains(rtc_router.dispatch_chains());
                 let router_shutdown = self.shutdown_token.child_token();
                 #[cfg(feature = "test-utils")]
-                let router_handle = match self.test_faults.as_ref() {
-                    Some(faults) => {
-                        let transport = rtc::fault::DirectedSignalingTransport::new(
-                            Arc::new(rtc_transport),
-                            actor_id.clone(),
-                            faults.signaling.clone(),
-                        );
-                        tokio::spawn(async move {
-                            tokio::select! {
-                                _ = router_shutdown.cancelled() => {}
-                                _ = rtc_router.run(transport, signaling_rx) => {}
-                            }
-                        })
-                    }
-                    None => tokio::spawn(async move {
-                        tokio::select! {
-                            _ = router_shutdown.cancelled() => {}
-                            _ = rtc_router.run(rtc_transport, signaling_rx) => {}
-                        }
-                    }),
-                };
-                #[cfg(not(feature = "test-utils"))]
+                let router_test_faults = self
+                    .test_faults
+                    .as_ref()
+                    .map(|faults| faults.signaling.clone());
+                #[cfg(feature = "test-utils")]
+                let router_local_id = rtc_local_id.clone();
                 let router_handle = tokio::spawn(async move {
+                    let run_router = async move {
+                        #[cfg(feature = "test-utils")]
+                        if let Some(faults) = router_test_faults {
+                            let transport = rtc::fault::DirectedSignalingTransport::new(
+                                Arc::new(rtc_transport),
+                                router_local_id,
+                                faults,
+                            );
+                            rtc_router.run(transport, signaling_rx).await;
+                            return;
+                        }
+                        rtc_router.run(rtc_transport, signaling_rx).await;
+                    };
                     tokio::select! {
                         _ = router_shutdown.cancelled() => {}
-                        _ = rtc_router.run(rtc_transport, signaling_rx) => {}
+                        _ = run_router => {}
                     }
                 });
                 task_handles.push(router_handle);

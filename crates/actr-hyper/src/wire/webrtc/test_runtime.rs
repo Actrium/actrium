@@ -51,10 +51,10 @@ struct FaultKey {
 struct ScopedFaultState {
     outgoing: Mutex<PacketRule>,
     incoming: Mutex<PacketRule>,
-    /// Set when a newer generation of the same (local, remote) pair goes live,
-    /// so this scope stops counting in `active_rule_count` while its rule and
-    /// hit metrics stay inspectable.
-    retired: AtomicBool,
+    /// Number of live Runtime/socket leases using this generation. A fault
+    /// stops counting only after the builder and every wrapped socket release
+    /// their shared lease.
+    active_leases: AtomicUsize,
     outgoing_sequence: AtomicU64,
     incoming_sequence: AtomicU64,
     outgoing_hits: AtomicUsize,
@@ -72,7 +72,7 @@ impl Default for ScopedFaultState {
         Self {
             outgoing: Mutex::new(PacketRule::Pass),
             incoming: Mutex::new(PacketRule::Pass),
-            retired: AtomicBool::new(false),
+            active_leases: AtomicUsize::new(0),
             outgoing_sequence: AtomicU64::new(0),
             incoming_sequence: AtomicU64::new(0),
             outgoing_hits: AtomicUsize::new(0),
@@ -287,16 +287,23 @@ impl DirectedRtcFaultRegistry {
         true
     }
 
-    /// Remove retired generations for a logical local→remote controller.
+    /// Prune inactive generations for a logical local→remote controller.
+    /// Older scopes whose Runtime or wrapped sockets are still live remain
+    /// observable and counted until their final lease is released.
     pub fn retain_generation(&self, local: &ActrId, remote: &ActrId, generation: u64) {
         self.scopes
             .lock()
             .expect("RTC fault registry lock poisoned")
-            .retain(|key, _| {
-                key.local != *local || key.remote != *remote || key.generation == generation
+            .retain(|key, state| {
+                key.local != *local
+                    || key.remote != *remote
+                    || key.generation == generation
+                    || state.active_leases.load(Ordering::Acquire) > 0
             });
     }
 
+    /// Number of retained generation scopes, including inactive scopes kept
+    /// for post-teardown metric inspection.
     pub fn scope_count(&self) -> usize {
         self.scopes
             .lock()
@@ -304,15 +311,16 @@ impl DirectedRtcFaultRegistry {
             .len()
     }
 
-    /// Number of generation scopes with a currently active non-Pass rule.
-    /// Retained scopes for retired generations are excluded from this count.
+    /// Number of live generation scopes with a currently active non-Pass rule.
+    /// A scope remains live while its builder or any wrapped socket holds a
+    /// lease, regardless of whether a newer generation has started building.
     pub fn active_rule_count(&self) -> usize {
         self.scopes
             .lock()
             .expect("RTC fault registry lock poisoned")
             .values()
             .filter(|state| {
-                !state.retired.load(Ordering::Acquire)
+                state.active_leases.load(Ordering::Acquire) > 0
                     && (!matches!(
                         *state.outgoing.lock().expect("RTC fault lock poisoned"),
                         PacketRule::Pass
@@ -344,31 +352,60 @@ impl DirectedRtcFaultRegistry {
             remote,
             generation,
         };
-        let state = {
+        let (state, lease) = {
             let mut scopes = self
                 .scopes
                 .lock()
                 .expect("RTC fault registry lock poisoned");
-            // A new generation for a (local, remote) pair retires every older
-            // generation of that pair: mark them so they stop counting in
-            // `active_rule_count`, while their rule and hit metrics stay
-            // inspectable. This is what makes a torn-down generation stop
-            // contributing to `fault_leases` without any caller action.
-            for (other_key, other_state) in scopes.iter_mut() {
-                if other_key.local == key.local
-                    && other_key.remote == key.remote
-                    && other_key.generation != generation
-                {
-                    other_state.retired.store(true, Ordering::Relaxed);
+            let state = match scopes.get(&key).cloned() {
+                Some(state) => {
+                    let previous = state.active_leases.fetch_add(1, Ordering::AcqRel);
+                    if previous == 0 {
+                        // The generation key has been reused after its prior
+                        // sockets were fully released. Give this lifetime a
+                        // fresh state so an old rule cannot silently reappear.
+                        state.active_leases.fetch_sub(1, Ordering::AcqRel);
+                        let replacement = Arc::new(ScopedFaultState::default());
+                        replacement.active_leases.store(1, Ordering::Release);
+                        scopes.insert(key.clone(), replacement.clone());
+                        replacement
+                    } else {
+                        state
+                    }
                 }
-            }
-            scopes.entry(key).or_default().clone()
+                None => {
+                    let state = Arc::new(ScopedFaultState::default());
+                    state.active_leases.store(1, Ordering::Release);
+                    scopes.insert(key.clone(), state.clone());
+                    state
+                }
+            };
+            let lease = Arc::new(ScopedFaultLease {
+                state: state.clone(),
+            });
+            (state, lease)
         };
         *state
             .bind_addresses
             .lock()
             .expect("RTC bind-address lock poisoned") = bind_addresses;
-        Arc::new(ScopedFaultRuntime { inner, state })
+        Arc::new(ScopedFaultRuntime {
+            inner,
+            state,
+            _lease: lease,
+        })
+    }
+}
+
+#[derive(Debug)]
+struct ScopedFaultLease {
+    state: Arc<ScopedFaultState>,
+}
+
+impl Drop for ScopedFaultLease {
+    fn drop(&mut self) {
+        let previous = self.state.active_leases.fetch_sub(1, Ordering::AcqRel);
+        debug_assert!(previous > 0, "RTC fault lease count underflowed");
     }
 }
 
@@ -376,6 +413,7 @@ impl DirectedRtcFaultRegistry {
 struct ScopedFaultRuntime {
     inner: Arc<dyn Runtime>,
     state: Arc<ScopedFaultState>,
+    _lease: Arc<ScopedFaultLease>,
 }
 
 impl Runtime for ScopedFaultRuntime {
@@ -398,6 +436,7 @@ impl Runtime for ScopedFaultRuntime {
         Ok(Arc::new(ScopedFaultUdpSocket {
             inner,
             state: self.state.clone(),
+            _lease: self._lease.clone(),
         }))
     }
 
@@ -408,6 +447,7 @@ impl Runtime for ScopedFaultRuntime {
         Ok(Arc::new(ScopedFaultTcpListener {
             inner: self.inner.wrap_tcp_listener(listener)?,
             state: self.state.clone(),
+            _lease: self._lease.clone(),
         }))
     }
 
@@ -420,6 +460,7 @@ impl Runtime for ScopedFaultRuntime {
             Ok(Arc::new(ScopedFaultTcpStream {
                 inner,
                 state: self.state.clone(),
+                _lease: self._lease.clone(),
             }) as Arc<dyn AsyncTcpStream>)
         })
     }
@@ -456,6 +497,7 @@ impl Runtime for ScopedFaultRuntime {
 struct ScopedFaultUdpSocket {
     inner: Arc<dyn AsyncUdpSocket>,
     state: Arc<ScopedFaultState>,
+    _lease: Arc<ScopedFaultLease>,
 }
 
 impl ScopedFaultState {
@@ -591,6 +633,7 @@ impl AsyncUdpSocket for ScopedFaultUdpSocket {
 struct ScopedFaultTcpListener {
     inner: Arc<dyn AsyncTcpListener>,
     state: Arc<ScopedFaultState>,
+    _lease: Arc<ScopedFaultLease>,
 }
 
 impl AsyncTcpListener for ScopedFaultTcpListener {
@@ -604,6 +647,7 @@ impl AsyncTcpListener for ScopedFaultTcpListener {
                 Arc::new(ScopedFaultTcpStream {
                     inner,
                     state: self.state.clone(),
+                    _lease: self._lease.clone(),
                 }) as Arc<dyn AsyncTcpStream>,
                 remote,
             ))
@@ -619,6 +663,7 @@ impl AsyncTcpListener for ScopedFaultTcpListener {
 struct ScopedFaultTcpStream {
     inner: Arc<dyn AsyncTcpStream>,
     state: Arc<ScopedFaultState>,
+    _lease: Arc<ScopedFaultLease>,
 }
 
 impl AsyncTcpStream for ScopedFaultTcpStream {
@@ -828,7 +873,7 @@ mod directed_tests {
     }
 
     #[test]
-    fn a_newer_generation_retires_the_older_scope_automatically() {
+    fn active_fault_leases_follow_runtime_lifetime_across_generations() {
         let registry = DirectedRtcFaultRegistry::default();
         let a = actor(1);
         let b = actor(2);
@@ -845,15 +890,20 @@ mod directed_tests {
             "an installed generation-1 fault must count as active"
         );
 
-        // The connection moves to generation 2 on both directions; building
-        // it must retire both generation-1 scopes without any caller action
-        // (trap 2 hardening).
+        // Beginning a newer build does not retire the older scope while its
+        // Runtime lease is still live.
         let _a2 = registry.scoped_runtime(Arc::new(TokioRuntime), a.clone(), b.clone(), 2, vec![]);
         let _b2 = registry.scoped_runtime(Arc::new(TokioRuntime), b.clone(), a.clone(), 2, vec![]);
         assert_eq!(
             registry.active_rule_count(),
+            2,
+            "a newer build must not hide a still-live older generation fault"
+        );
+        drop((_a1, _b1));
+        assert_eq!(
+            registry.active_rule_count(),
             0,
-            "the retired generation-1 scopes must not keep counting as active"
+            "the fault lease ends after the old generation releases its Runtime"
         );
     }
 

@@ -643,6 +643,42 @@ fn manufacturer_auth_fields(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn package_registration_context(
+    verified: &VerifiedPackage,
+    realm_id: u32,
+    service_spec: Option<actr_protocol::ServiceSpec>,
+    acl: Option<actr_protocol::Acl>,
+    manufacturer_auth: Option<&ManufacturerRegistrationAuth>,
+    resign: Option<Arc<dyn ManufacturerAuthProvider>>,
+) -> crate::lifecycle::credential_manager::RegistrationContext {
+    let manifest = &verified.manifest;
+    let (manufacturer_auth_signature, manufacturer_auth_signed_at, manufacturer_auth_nonce) =
+        manufacturer_auth_fields(manufacturer_auth);
+    crate::lifecycle::credential_manager::RegistrationContext::Package {
+        request: RegisterRequest {
+            actr_type: ActrType {
+                manufacturer: manifest.manufacturer.clone(),
+                name: manifest.name.clone(),
+                version: manifest.version.clone(),
+            },
+            realm: Realm { realm_id },
+            service_spec,
+            acl,
+            service: None,
+            ws_address: None,
+            manifest_raw: Some(verified.manifest_raw.clone().into()),
+            mfr_signature: Some(verified.sig_raw.clone().into()),
+            target: Some(manifest.binary.target.clone()),
+            auth_mode: Some(RegisterAuthMode::Package as i32),
+            manufacturer_auth_signature,
+            manufacturer_auth_signed_at,
+            manufacturer_auth_nonce,
+        },
+        resign,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 impl ManufacturerRegistrationAuth {
     pub fn sign(
         signing_key: &ed25519_dalek::SigningKey,
@@ -1222,23 +1258,62 @@ impl Node<Attached> {
     }
 
     /// Adopt an already-issued registration payload (`test-utils` builds
-    /// only). Consumes `Node<Attached>` and returns `Node<Registered>`
-    /// without contacting AIS: `start()` uses the injected `RegisterOk`
-    /// verbatim (identity, AId credential, TURN credential, heartbeat
-    /// advice, and AIS signing key), so callers that pre-issue
-    /// deterministic per-endpoint credentials out-of-band can pin the node
-    /// identity exactly like the test-support harness does.
+    /// only). Package attachments retain package-mode registration inputs for
+    /// credential hard rebind; linked attachments continue to use linked-mode
+    /// registration. This convenience wrapper supports published package
+    /// credentials without a manufacturer proof. Use the fallible variant to
+    /// return service-spec derivation errors or the re-signing variant for
+    /// unpublished packages.
     #[cfg(feature = "test-utils")]
     pub fn with_preregistered_credential(
-        mut self,
+        self,
         register_ok: actr_protocol::register_response::RegisterOk,
     ) -> Node<Registered> {
+        self.try_with_preregistered_credential(register_ok)
+            .expect("failed to derive package registration context")
+    }
+
+    /// Fallible variant of `with_preregistered_credential` for test harnesses
+    /// that need to surface package service-spec derivation errors.
+    #[cfg(feature = "test-utils")]
+    pub fn try_with_preregistered_credential(
+        self,
+        register_ok: actr_protocol::register_response::RegisterOk,
+    ) -> HyperResult<Node<Registered>> {
+        self.try_with_preregistered_credential_and_resign(register_ok, None)
+    }
+
+    /// Fallible pre-registration path for package credentials that require a
+    /// fresh manufacturer proof on hard rebind.
+    #[cfg(feature = "test-utils")]
+    pub fn try_with_preregistered_credential_and_resign(
+        mut self,
+        register_ok: actr_protocol::register_response::RegisterOk,
+        resign: Option<Arc<dyn ManufacturerAuthProvider>>,
+    ) -> HyperResult<Node<Registered>> {
         let attachment = self
             .attachment
             .as_mut()
             .expect("Node<Attached> without attachment");
+        if let Some(verified) = attachment.verified.as_ref() {
+            let service_spec = crate::service_spec::calculate_service_spec_from_package(
+                &attachment.package_bytes,
+                &verified.manifest,
+            )?;
+            let registration_context = package_registration_context(
+                verified,
+                attachment.node.config.realm.realm_id,
+                service_spec,
+                attachment.node.config.acl.clone(),
+                None,
+                resign,
+            );
+            attachment
+                .node
+                .set_preregistered_registration_context(registration_context);
+        }
         attachment.node.set_preregistered_credential(register_ok);
-        Node {
+        Ok(Node {
             hyper: self.hyper,
             attachment: self.attachment,
             pending_runtime_config: None,
@@ -1247,7 +1322,7 @@ impl Node<Attached> {
             #[cfg(feature = "test-utils")]
             pending_test_faults: None,
             _state: std::marker::PhantomData,
-        }
+        })
     }
 
     /// Register with AIS and optionally attach manufacturer authorization for
@@ -1330,38 +1405,16 @@ impl Node<Attached> {
             ),
             _ => None,
         };
-        let (manufacturer_auth_signature, manufacturer_auth_signed_at, manufacturer_auth_nonce) =
-            manufacturer_auth_fields(manufacturer_auth.as_ref());
-
-        let registration_context = if let Some(verified) = attachment.verified.as_ref() {
-            let manifest = &verified.manifest;
-            Some(
-                crate::lifecycle::credential_manager::RegistrationContext::Package {
-                    request: RegisterRequest {
-                        actr_type: ActrType {
-                            manufacturer: manifest.manufacturer.clone(),
-                            name: manifest.name.clone(),
-                            version: manifest.version.clone(),
-                        },
-                        realm: Realm { realm_id },
-                        service_spec: service_spec.clone(),
-                        acl: acl.clone(),
-                        service: None,
-                        ws_address: None,
-                        manifest_raw: Some(verified.manifest_raw.clone().into()),
-                        mfr_signature: Some(verified.sig_raw.clone().into()),
-                        target: Some(manifest.binary.target.clone()),
-                        auth_mode: Some(RegisterAuthMode::Package as i32),
-                        manufacturer_auth_signature,
-                        manufacturer_auth_signed_at,
-                        manufacturer_auth_nonce,
-                    },
-                    resign,
-                },
+        let registration_context = attachment.verified.as_ref().map(|verified| {
+            package_registration_context(
+                verified,
+                realm_id,
+                service_spec.clone(),
+                acl.clone(),
+                manufacturer_auth.as_ref(),
+                resign.clone(),
             )
-        } else {
-            None
-        };
+        });
 
         let register_ok = if let Some(verified) = attachment.verified.as_ref() {
             let verified = verified.clone();
