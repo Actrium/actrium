@@ -341,11 +341,10 @@ actr-N control adapter -> test-only Fault Registry
   -> PeerConnectionFactory Runtime/UDP Socket seam
 
 Observation plane:
-Manager Snapshot + Hook + Fault Metrics
-  + endpoint business metrics
-  + Prometheus text metrics (`/metrics` on the Endpoint HTTP listener, TCP 9090)
-  + Loran metrics
-  + Kubernetes/cAdvisor/procfs metrics
+Endpoint Manager Snapshot + Hook + Fault + business metrics
+  -> authenticated Endpoint API -> embedded Dashboard SoakController / Result Evaluator
+Loran, Kubernetes, procfs, and log evidence
+  -> Collector / soak-kubectl -> Dashboard
 ```
 
 CI is a deployment plane, not a business-control plane. It builds/pushes images,
@@ -466,7 +465,7 @@ AI only reads evidence and provides initial attribution.
 | RTC/signaling Fault Adapter | Wrap production Runtime and signaling transport | Call `DirectedRtcFaultRegistry` and `DirectedSignalingFaultRegistry` without changing Controller/Session logic |
 | Observation Adapter | Read Manager Snapshot, Hooks, and test counters | Convert results to endpoint JSON, event streams, and Prometheus metrics |
 | Loran | Kubernetes StatefulSet | Provide real Signaling, STUN, TURN, and AIS; Endpoints use Service DNS |
-| Collector | Sidecar or separate Deployment | Collect endpoint, Loran, Kubernetes, procfs, and log data |
+| Collector | Sidecar or separate Deployment | Collect Loran and Kubernetes metrics, procfs, and logs. The embedded SoakController alone fetches Endpoint metrics through the authenticated Endpoint API on TCP 9090; the Collector does not scrape Endpoint Pods. |
 | Result Evaluator | Planned deterministic Controller module | Check business correctness, recovery deadlines, Peer isolation, generation fencing, and resource trends |
 | CI deploy workflow | GitHub Actions | Build/push immutable images, deploy the namespace and the endpoint pool, and wait for health; it MUST NOT start the test plan |
 
@@ -543,11 +542,11 @@ shell, `eval`, or arbitrary memory mutation.
 | POST | `/v1/peers` | Wire a Peer edge to a target endpoint (run-scoped, idempotent) |
 | DELETE | `/v1/peers` | Tear down Peer wiring installed by a run |
 | GET | `/v1/events` | Hook, state edges, Fault hits, and signaling trace |
-| GET | `/metrics` | Prometheus text metrics on the same Endpoint HTTP listener as the control API (TCP 9090); bearer token applies when enabled |
+| GET | `/metrics` | Prometheus text metrics on the same Endpoint HTTP listener as the control API (TCP 9090); bearer token required in Kubernetes |
 | GET | `/v1/metrics` | Optional JSON metric snapshot |
 | GET | `/v1/resources` | Process resource snapshot (RSS, FDs, sockets) |
 | GET | `/v1/diagnostics` | Endpoint diagnostics snapshot |
-| GET | `/v1/redaction-inventory` | Transient credential literals for the authenticated Dashboard redaction gate; never persist the response |
+| GET | `/v1/redaction-inventory?run_id=...` | Bearer-authenticated Dashboard-only response with transient literals for the inventory window opened by `/v1/actions/run-start`; reject any other run ID and never persist the response |
 | GET | `/v1/runtime-thresholds` | Recovery timing values read from the linked Endpoint build so plan generation does not copy stale constants |
 | POST | `/v1/observations/data-chunk` | Record a DataChunk receipt observation |
 | POST | `/v1/probes/rpc` | Send a probe through the formal RPC business path |
@@ -560,13 +559,24 @@ shell, `eval`, or arbitrary memory mutation.
 | POST | `/v1/faults/rtc/rollback` | Roll back a prepared RTC Fault transaction |
 | POST | `/v1/faults/signaling` | Install, update, or heal a signaling Fault |
 | POST | `/v1/actions/cleanup` | Call the production cleanup entry point |
-| POST | `/v1/actions/run-start` | Begin a new run-scoped credential-redaction inventory and retain this run's credential rotations in endpoint memory |
+| POST | `/v1/actions/run-start` | Begin a run-scoped credential-redaction inventory for credentials used or renewed during this run; retain only this run's literals in endpoint memory |
+| POST | `/v1/actions/run-end` | Close this run's credential-redaction inventory and clear its in-memory credential literals after the redaction gate |
 | POST | `/v1/actions/force-reconnect` | Call the production force-reconnect entry point |
 | POST | `/v1/actions/turn-relay` | Opt this Endpoint into relay-only ICE policy for a run; default remains disabled |
 | POST | `/v1/actions/turn-credential-rotation` | Trigger normal AIS credential renewal and report safe revision/expiry evidence |
 
 Every write request carries `run_id`, `action_id`, `deadline_ms`, and
 `expected_generation`; the endpoint control API makes `action_id` idempotent.
+In a Kubernetes deployment, the Dashboard MUST configure a bearer token and
+the Endpoint API MUST reject unauthenticated requests on every route except
+`/livez` and `/readyz`. The redaction-inventory route additionally MUST require
+that bearer token and the `run_id` whose inventory window was opened by
+`/v1/actions/run-start`. It returns only that run's credentials and MUST reject
+absent, different, or closed run IDs. The inventory window remains open through
+artifact collection and the redaction scan, even after business execution has
+finished. The Dashboard calls `/v1/actions/run-end` after the scan/export
+decision; the Endpoint then clears the run's credential literals from memory.
+Only the Dashboard receives the bearer token.
 
 Peer-wiring writes are run-scoped: a run MUST tear down every edge it wired
 before its leased subset returns to the pool, and the SoakController MUST NOT
@@ -632,10 +642,13 @@ production path from a logical network fact to ICE/recovery.
 
 - The endpoint control API binds only to a test Service or Pod network;
 - NetworkPolicy permits only the Dashboard to access the endpoint control port;
-- use a per-run short-lived token or mTLS;
+- Kubernetes deployments MUST set a non-empty bearer token; `/livez` and `/readyz` are the only unauthenticated routes. mTLS MAY be added as defense in depth;
 - the endpoint process has no cluster-admin credentials;
 - reject shell, arbitrary URLs, dynamic Rust code, or arbitrary protobuf types;
-- redact logs and do not output TURN passwords, AId tokens, private keys, or complete business payloads;
+- never emit credential literals in ordinary Endpoint responses, metrics,
+  logs, or artifacts; the sole exception is the authenticated, run-scoped
+  redaction inventory returned directly to the Dashboard and cleared after
+  scanning. Never expose private keys or complete business payloads;
 - production images do not contain the endpoint control API, `test-utils`, or the Fault Registry.
 
 ### 7. Event and Fault design
@@ -689,9 +702,15 @@ run's Peer graph:
 
 The relay switch, credential rotation, selected-path evidence, and reset
 outcome are recorded with the run's action IDs. TURN passwords and AId
-credentials are never returned in action responses, metrics, artifacts, or
-logs. Credential rotation is a run-scoped endpoint operation and does not
-restart the shared Actrix process.
+credentials are never returned in ordinary action responses, metrics,
+artifacts, or logs. The sole exception is the bearer-authenticated
+`/v1/redaction-inventory?run_id=...` response to the Dashboard, scoped to the
+inventory window opened for that run through `/v1/actions/run-start`. The
+Endpoint rejects other run IDs; the Dashboard holds the returned literals in
+memory only for scanning and never persists or exports them. After the scan,
+the Dashboard calls `/v1/actions/run-end` and discards its in-memory copy.
+Credential rotation is a run-scoped endpoint operation and does not restart
+the shared Loran process.
 
 #### 7.3 `DirectedRtcFaultRegistry`
 
@@ -858,7 +877,7 @@ historical failure rate:
 | Loran restart | 1% (exclusive profiles only; concurrent profiles sample normal business instead) |
 | External network Fault | 0% (deferred until its Kubernetes/CNI adapter exists; sample normal business instead) |
 
-The final 1% slot is an Actrix restart only for exclusive profiles; concurrent
+The final 1% slot is a Loran restart only for exclusive profiles; concurrent
 profiles use it for normal business so a shared Loran action cannot disturb a
 disjoint lease.
 
@@ -1146,7 +1165,7 @@ scope.
 | Loran | StatefulSet, initially one replica | Signaling, STUN, TURN, AIS |
 | Actr Endpoint (`actr-N`) | StatefulSet | Stable ordinal; the Pod IP may change after rebuild; pool members start unwired and Peer edges are established at run start |
 | Soak Dashboard | Deployment | UI/BFF, manual control, embedded Controller, and run-state persistence |
-| Collector | Sidecar or separate Deployment | Metrics, procfs, and logs |
+| Collector | Sidecar or separate Deployment | Collect Loran and Kubernetes metrics, procfs, and logs; it does not scrape Endpoint Pods. The embedded SoakController alone fetches Endpoint `/metrics` over its authenticated TCP 9090 API. |
 | Artifact uploader | Isolated Job/worker or Dashboard worker | After evaluation and successful redaction, uploads only the run's staged evidence bundle to S3/MinIO with a short-lived run-prefix credential, then records the object location and export status in the Dashboard |
 
 The StatefulSet ordinal is only a role label; it is not a permanent identity.
@@ -1166,11 +1185,16 @@ The `/metrics` and `/v1/metrics` routes are served by the same HTTP listener
 as the Endpoint Control API. Metrics requests use the Endpoint bearer token
 when configured; this deployment has no separate Endpoint metrics port.
 
+The service suite is called Loran in this RFC. The current actr-soak deployment
+retains the Kubernetes Service resource names `actrix` and `actrix-turn-relay`
+for compatibility; both names route to Loran and do not identify a separate
+service. Outside these literal Kubernetes resource names, this RFC refers to
+the service suite as Loran.
 The in-cluster `actrix` Service advertises its stable ClusterIP. The deployment
 also creates an `actrix-turn-relay` ClusterIP Service with same-port UDP
 mappings for the configured relay allocation range (`49152-49407` in the
 current test deployment), so relay candidates are routable through kube-proxy.
-Actrix configuration and Service ports MUST use the same range. External TURN
+Loran configuration and Service ports MUST use the same range. External TURN
 clients require a separately exposed LoadBalancer/MetalLB or node-reachable
 address and are outside this in-cluster relay profile.
 
@@ -1181,7 +1205,7 @@ Dashboard / embedded SoakController -> `actr-N`: TCP 9090
                               (control, observations, `/metrics`; bearer token when enabled)
 Dashboard -> Kubernetes API:  TCP 443/6443 (Pods, Events, logs, and metrics
                               reads; approved lifecycle verbs only)
-Collector/Prometheus -> Loran:   TCP metrics port (Loran metrics scrape)
+Collector/Prometheus -> Loran: TCP metrics port (Loran metrics scrape)
 `actr-N` -> Loran:           TCP HTTP/Signaling, UDP STUN/TURN 3478
 `actr-N` <-> Loran:          TURN relay UDP range (relayed media to and from
                               relay allocations; required by the relay profile)
@@ -1236,7 +1260,7 @@ baseline:
 Loran:     2 CPU / 2 GiB
 Endpoint:   2 CPU / 2 GiB
 Dashboard (embedded Controller): 1 CPU / 512 MiB
-Collector:  0.5 CPU / 512 MiB
+Collector (Loran/Kubernetes/procfs/logs; no Endpoint scrape): 0.5 CPU / 512 MiB
 ```
 
 Long runs MUST set requests, limits, node selection, Pod anti-affinity, and a
@@ -1291,10 +1315,13 @@ upload, export, or Claude Code input is assembled. It scans logs, snapshots,
 and evidence JSON for TURN usernames/passwords, AId credentials, renewal
 tokens, endpoint control tokens, private keys, credential-bearing URLs, and
 complete business payloads. The authenticated Endpoint API supplies the
-current run's credential literals directly to the Dashboard in memory; the
-gate records only the inventory count in `redaction.json`, never the literals
-or a reversible encoding. Fixed patterns plus this transient inventory make
-the scan deterministic, with no model involvement.
+current run's credential literals directly to the Dashboard in memory while
+the run-start inventory window is open. The Dashboard requests them with the
+active `run_id`, scans the evidence, then calls `/v1/actions/run-end` and drops
+its in-memory copy whether the scan passes or fails. The gate records only the
+inventory count in `redaction.json`, never the literals or a reversible
+encoding. Fixed patterns plus this transient inventory make the scan
+deterministic, with no model involvement.
 The gate is part of artifact-upload acceptance:
 
 - artifacts MUST NOT leave the namespace or PVC before the gate passes, and
@@ -1497,10 +1524,11 @@ Code OIDC.
 - relay-only is disabled by default; an enabled run renews TURN credentials,
   proves both ends of every selected Peer path are relayed, and resets the
   policy before pool handoff;
-- the credential redaction inventory is collected from every leased Endpoint,
-  includes each observed TURN/AId/renewal credential revision, and is held only
-  in memory until the deterministic redaction gate passes; the artifact records
-  only the inventory count;
+- the credential redaction inventory is collected from every leased Endpoint
+  through its bearer-authenticated, run-scoped route, includes each observed
+  TURN/AId/renewal credential revision, and is held only in memory through the
+  deterministic redaction scan; `/v1/actions/run-end` clears it afterward, and
+  the artifact records only the inventory count;
 - multi-Pod A-to-B Fault can be committed consistently on both sides;
 - Pod/Loran restart can be executed and replayed;
 - one Peer failure does not block another Peer;
