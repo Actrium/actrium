@@ -66,7 +66,7 @@ The terms below have one fixed meaning in this RFC:
 | **Soak Dashboard** | The UI/API and persistent run store. It owns manual test runs and embeds the SoakController. |
 | **SoakController** | The deterministic planner/executor that expands a seed into actions, calls endpoints, collects evidence, and invokes the Result Evaluator. |
 | **Endpoint Control API** | Test-namespace HTTP adapter exposed by each Actr Soak Endpoint. It accepts only predefined, authenticated actions and observations. |
-| **`soak-kubectl`** | Helper script bundled in the Dashboard and Controller images. It invokes the in-cluster `kubectl` with the projected ServiceAccount token and fixed API-server settings for namespaced Kubernetes evidence/actions; it is not a separate collector service. |
+| **`soak-kubectl`** | Helper script bundled only in the Dashboard image. It invokes the in-cluster `kubectl` with the Dashboard's projected ServiceAccount token and fixed API-server settings for namespaced Kubernetes evidence/actions; it is not a separate collector service. The Controller CLI Job is a Dashboard API client and does not invoke kubectl. |
 | **Seed** | The recorded random seed from which the event plan and action order are reproduced. |
 | **Event plan** | The concrete, timestamped actions generated from a seed, including business probes and injected events. |
 | **Lifecycle event** | A logical mobile fact such as Background, Foreground, Available, or Unavailable delivered through `NetworkEventHandle`; it is not a real device operation. |
@@ -464,7 +464,7 @@ AI only reads evidence and provides initial attribution.
 | Test Workload | Test Actor/Probe Driver inside `actr-N` | Send RPC, Tell, and DataChunk through `RuntimeContext`; continuously produce bidirectional traffic |
 | Soak Dashboard | Kubernetes Deployment | Serve the UI/BFF, persist run state, and expose authenticated manual control |
 | Soak Controller | Embedded in Dashboard | Generate seed plans, call endpoint control APIs, schedule events, run the Result Evaluator, and archive artifacts |
-| Standalone Controller CLI | Optional one-shot Job/image | Run an explicitly invoked smoke/preflight or replay job; it does not own or start Dashboard-managed pool runs |
+| Standalone Controller CLI | Optional one-shot Job/image | Submit an explicitly invoked smoke/preflight or replay request through the authenticated Dashboard run API and report that run's status; it does not call Endpoint APIs, access the Kubernetes API, or execute a run itself |
 | Pool lease manager | Dashboard module | Lease exclusive pool subsets to runs, queue runs that do not fit, and enforce profile-level concurrency (coverage profiles concurrent, resource profiles exclusive) |
 | RTC/signaling Fault Adapter | Wrap production Runtime and signaling transport | Call `DirectedRtcFaultRegistry` and `DirectedSignalingFaultRegistry` without changing Controller/Session logic |
 | Observation Adapter | Read Manager Snapshot, Hooks, and test counters | Convert results to endpoint JSON, event streams, and Prometheus metrics |
@@ -582,7 +582,10 @@ absent, different, or closed run IDs. The inventory window remains open through
 artifact collection and the redaction scan, even after business execution has
 finished. The Dashboard calls `/v1/actions/run-end` after the scan/export
 decision; the Endpoint then clears the run's credential literals from memory.
-Only the Dashboard receives the bearer token.
+Only the Dashboard receives the Endpoint Control API bearer token. A
+standalone Controller CLI Job receives a separate, short-lived Dashboard API
+credential scoped to submitting and observing its one requested run; it never
+receives or forwards the Endpoint token.
 
 Peer-wiring writes are run-scoped: a run MUST tear down every edge it wired
 before its leased subset returns to the pool, and the SoakController MUST NOT
@@ -1171,13 +1174,20 @@ scope.
 | Loran | StatefulSet, initially one replica | Signaling, STUN, TURN, AIS |
 | Actr Endpoint (`actr-N`) | StatefulSet | Stable ordinal; the Pod IP may change after rebuild; pool members start unwired and Peer edges are established at run start |
 | Soak Dashboard | Deployment | UI/BFF, manual control, embedded Controller, and run-state persistence |
-| Standalone Controller CLI | Optional one-shot Job | Used only for explicitly invoked smoke/preflight or replay runs; Dashboard-managed soak runs use the embedded SoakController |
+| Standalone Controller CLI | Optional one-shot Job | Dashboard API client for an explicitly invoked smoke/preflight or replay request; it uses `POST /api/v1/runs` and polls `GET /api/v1/runs/{run_id}`. The Dashboard's embedded SoakController executes the admitted run. |
 | Collector | Sidecar or separate Deployment | Collect Loran and Kubernetes metrics, procfs, and logs; it does not scrape Endpoint Pods. The embedded SoakController alone fetches Endpoint `/metrics` over its authenticated TCP 9090 API. |
 | Artifact uploader | Isolated Job/worker or Dashboard worker | After evaluation and successful redaction, uploads only the run's staged evidence bundle to S3/MinIO with a short-lived run-prefix credential, then records the object location and export status in the Dashboard |
 
 The StatefulSet ordinal is only a role label; it is not a permanent identity.
-The optional Controller Job MUST NOT run concurrently with a Dashboard run on
-the same Endpoint pool.
+The Controller CLI Job MUST submit every cluster-backed request through the
+Dashboard API; it MUST NOT invoke the local direct-Endpoint `run` path against
+the shared pool. The Dashboard's pool lease manager admits the request,
+queues it when the required subset is unavailable, and prevents overlapping
+leases. Coverage runs may execute concurrently only on disjoint leased
+subsets; resource-sensitive runs hold the entire pool. Thus the CLI cannot
+bypass the same admission and exclusivity rules used by the Dashboard UI. If
+submission is rejected or the Dashboard is unavailable, the Job MUST fail
+closed and MUST NOT fall back to direct Endpoint access.
 
 #### 13.3 Ports and addresses
 
@@ -1210,6 +1220,7 @@ address and are outside this in-cluster relay profile.
 #### 13.4 NetworkPolicy
 
 ```text
+Controller CLI Job -> Dashboard: TCP 9080 (authenticated run submission/status)
 Dashboard / embedded SoakController -> `actr-N`: TCP 9090
                               (control, observations, `/metrics`; bearer token required)
 Kubelet/node probe source CIDRs -> `actr-N`: TCP 9090 (`/livez`, `/readyz`)
@@ -1243,6 +1254,11 @@ object-store hostname directly. Its storage credential MUST be scoped to the
 soak artifact prefix. If a centralized log service is used, list its explicit
 destination and port instead of opening general egress.
 
+The Controller CLI Job's only cluster egress is to the Dashboard Service on
+TCP 9080 and kube-dns; NetworkPolicy MUST deny its direct access to Endpoint
+Pods and the Kubernetes API. The Dashboard Service policy MUST allow this
+authenticated client flow.
+
 The pool model relies on the endpoint-to-endpoint UDP allowance; it MUST NOT
 be narrowed per run, because any pool member may be wired to any other by a
 plan.
@@ -1266,6 +1282,17 @@ Pod deletion is the only write operation granted to the Dashboard and is the
 mechanism for graceful/forced Endpoint or Loran restart. It receives no
 permission to create, patch, or update Deployments/StatefulSets, Jobs, Secrets,
 or RBAC; CI uses a separate deployment identity.
+
+The optional Controller CLI Job uses the dedicated
+`actr-soak-controller-client` ServiceAccount with
+`automountServiceAccountToken: false` and no Role or RoleBinding. It submits
+and observes runs only through the Dashboard API, so it needs no Kubernetes
+API permissions and cannot perform Pod lifecycle actions. A separate
+short-lived Secret supplied by the operator/caller for that Job provides its
+Dashboard API credential; the caller removes the Secret when the Job ends.
+The Dashboard MUST scope that credential to submitting one run and reading
+only that run's status/result. It is distinct from the Endpoint Control API
+bearer token and does not grant access to endpoint credentials.
 
 It MUST NOT receive `cluster-admin`, cross-namespace write access, or arbitrary
 Secret-list permission.
@@ -1387,6 +1414,13 @@ Dashboard (operator/API)
   -> run the deterministic redaction gate, then export the redacted bundle to S3/MinIO
   -> pass the quiescence gate and return the leased subset to the pool
   -> operator reviews the Dashboard result and opens the stored bundle for analysis
+
+Controller CLI client Job (explicit operator request)
+  -> POST /api/v1/runs with its short-lived, run-scoped Dashboard API credential
+  -> poll GET /api/v1/runs/{run_id} for the terminal status and result
+  -> Dashboard queues or admits the request through the same pool lease manager
+  -> embedded SoakController executes it and owns all Endpoint/Kubernetes access
+  -> CLI reports the result and exits; it holds no Endpoint token or Kubernetes API token
 ```
 
 Nightly profile:
@@ -1528,6 +1562,7 @@ Code OIDC.
 | K8s CPU contention creates false failure | Dedicated nodes, requests/limits, resource classification |
 | Pod deletion loses evidence | Centralized artifact/log storage |
 | API becomes a production attack surface | Test-only image, NetworkPolicy, short-lived token, no shell |
+| Controller CLI bypasses leases or gains cluster access | Dashboard API submission only; run-scoped Dashboard credential, no Endpoint token, no Kubernetes RBAC, and NetworkPolicy blocks direct access |
 | Random failure cannot be replayed | Fixed seed, `plan.json`, image digest, `reproduce.sh` |
 | AI misclassifies a failure | Deterministic Result Evaluator and gate |
 | Loran address changes after rebuild | Stable advertised address or re-render and re-register |
