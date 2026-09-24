@@ -1,369 +1,120 @@
-# 04. `actr://` URI And parsing norms
+# 04. Realm links and the address bar
 
-## 1. Design objectives
+## 1. Purpose
 
-`actr://` It must be accompanied by:
+An application instance is a Realm, and its address is the Realm link. This chapter only covers
+how Actrium displays, opens, saves, and shares that address; the link syntax, the https form, and
+the opening procedure are defined in [Actr URI](../../../actr/protocols/uri.md) and are not
+repeated here.
 
-- People can see it. Publisher, Program with Version;
-- The machine can be precise. Create and Attach;
-- Instance URIs of Realms under a domain can serve as address bar, history, bookmark and cross-device sharing links; URIs of local Realms are explicitly installation-internal addresses;
-- URI (b) No secrets;
-- Assigned ActorId Do not introduce service discovery or LB;
-- The same meaning after normativeization is only a stable expression.
+- What appears in the address bar, history, favorites, and shares is always the instance address;
+  opening it returns to the same instance;
+- The address carries no secret; knowing it does not grant the right to enter;
+- Where the program is downloaded from is decided by the Realm Profile, not written into the
+  address.
 
-## 2. Basic Syntax:
-
-```text
-actr://<publisher>/<program>@<version>[/<guest-route>][?<query>][#<fragment>]
-```
-
-Example:
+## 2. Link forms
 
 ```text
-actr://notes.example/team-notes@1.4.2
-actr://notes.example/team-notes@1.4.2/today
+actr://acme.com/k7m2q9xh
+actr://acme.com/k7m2q9xh/today?view=week#item-3
+https://acme.com/i/k7m2q9xh/today?view=week        ; acme.com declares links: ["/i/"]
 ```
 
-Simplified ABNF:
-
-```abnf
-actr-uri       = "actr://" publisher "/" program "@" version
-                 [ "/" guest-route ] [ "?" query ] [ "#" fragment ]
-publisher      = reg-name
-program        = ALPHA *( ALPHA / DIGIT / "-" / "_" / "." )
-version        = semver
-guest-route    = *pchar *( "/" *pchar )
-```
-
-Official registration scheme The time should be taken to follow URI scheme Registration regulation and by RFC 3986 It's... authority, path, query, fragment The rule is deciphered as a baseline.
-
-## 3. Publisher
-
-### 3.1 Rule of identity
-
-Official `actr://` URI Medium Publisher:
-
-- It must be. DNS Domain names;
-- Convert to IDNA A-label (b) Post-lower-case regularization;
-- Not permitted userinfo;
-- Not permitted IP literal;
-- Do not contain ports;
-- Do not automatically add or delete `www`;
-- Maximum length to follow DNS Name limits;
-- Unicode Displays that a homogeneity risk hint must be provided.
-
-```text
-Example.COM       → example.com
-<!-- language-allow: literal Unicode hostname required to demonstrate IDNA normalization -->
-bücher.example    → xn--bcher-kva.example
-example.com       ≠ www.example.com
-```
-
-### 3.2 Why? Publisher Do not Port
-
-Ports don't break. TLS Certificate authentication of host name, but changes the semantic of product identity:
-
-```text
-example.com:8443 ≠ example.com:9443
-```
-
-Include Port Publisher This would cause:
-
-- The same organization was decomposed into a large number of publishers;
-- Market weight, rights memory and domain name validation are more complex;
-- (a) Users are difficult to identify;
-- (b) The link is more easily blocked by proxy and firewalls;
-- loopback♪ I'm not gonna get away with it ♪ SSRF risks leak into the official names.
-
-Therefore:
-
-- Publisher ID Use domain names only;
-- Domain bootstrap for Publishers and Realm domains is fixed to HTTPS 443; a Realm domain is an Actr authority without a port, and its bootstrap is the authority descriptor at `https://<domain>/.well-known/actr`;
-- The Realm Profile is fetched from the HTTPS location declared by the core relation `realms` in the authority descriptor (defined in Actr Authority Discovery §4.3), which may use an explicit port;
-- The authority descriptor's `services` serve the authority itself and have nothing to do with the Realms under the domain; a Realm always follows the delegation in its Realm Profile;
-- Realm Profile Validation of the assignment package resolver, CDN, Issuer, WSS, STUN/TURN endpoint Visible ports are available;
-- Non-standard port is the transfer configuration, not Publisher Part of the name.
-
-## 4. Program with Version
-
-### 4.1 Program
-
-- On a single. Publisher (a) The sole of the following;
-- (b) Case sensitivity prohibits ambiguity in publication and regulates the use of lowercase forms;
-- The length of the recommendation is not greater 64 Bytes;
-- Bans path separator, percentage number and control character.
-
-### 4.2 Version
-
-- Official URI Precision must be used SemVer;
-- Not permitted `latest`, `stable`, range expression or default version;
-- prerelease Allowed, but must be written in full;
-- build metadata I'm sure I'm gonna have to get in. ActrType Harmonization in the norms;v1 It is recommended that this be prohibited in order to avoid a trade-off in value judgements.
-
-Legal:
-
-```text
-actr://example.com/editor@1.2.3
-actr://example.com/editor@2.0.0-beta.4
-```
-
-Illegal:
-
-```text
-actr://example.com/editor
-actr://example.com/editor@latest
-actr://example.com/editor@^1.2
-```
-
-Program Catalog Available“Use the recommended version”button, but first the exact version must be resolved and then written to the address bar.
-
-## 5. Create URI
-
-No, I don't. `service` Query Parameters URI Organisation Create Intent:
-
-```text
-actr://notes.example/team-notes@1.4.2
-```
-
-Semantics:
-
-- Download/Read Precision Program Release;
-- Select a Realm domain, defaulting to a local Realm;
-- Create a new Realm under that domain (`label` generated by Actrium, editable by the user); the instance is never placed in an existing Realm;
-- Create a new Service in the new Realm;
-- Select or Create Workspace;
-- Replace address in situ after success with Attach URI.
-
-A Create URI may specify a domain with the `domain` parameter:
-
-```text
-actr://notes.example/team-notes@1.4.2?domain=team.example
-```
-
-- The value is a normalized DNS domain with the same rules as a Publisher: lowercase IDNA A-label, no port, userinfo or IP literal;
-- When omitted, a local Realm is created; the local pseudo-domain `*.actr.alt` cannot be written in a URI;
-- The Realm domain must already be trusted or be trusted for the first time on the confirmation page; when the Realm domain equals or is under the Realm Provider ID (normalized A-labels, compared on label boundaries), the confirmation page shows that Realm Provider as the trust root, otherwise the Realm domain;
-- `label` is not part of the URI; it is decided on the confirmation page.
-
-Create URI is an operational intent, not a permanent address of an existing resource. URI Equivalent to“New Template”.
-
-## 6. Attach URI
-
-- Yeah. `service` It's... URI Organisation Attach Intent:
-
-```text
-actr://notes.example/team-notes@1.4.2/today
-  ?service=2af01.notes%40team.example
-```
-
-Line in one line:
-
-```text
-actr://notes.example/team-notes@1.4.2/today?service=2af01.notes%40team.example
-```
-
-### 6.1 `service`
-
-- Value is Actr Normative `ActorId` String UTF-8 percent-encoding;
-- Must fully include the Actor serial and the Realm name (`<serial>.<label>@<domain>`); no numeric `realm_id` and no Actor type;
-- During the Attach handshake, the Actor type in the peer's Actor credential must exactly equal the URI's publisher/program/version;
-- One is not allowed. query Multiple `service`;
-- (a) Empty values are not allowed;
-- Not allowed Actor Type, aliases, market ID Or local database ID Alternative.
-
-### 6.2 `realm`
-
-A v1 ActorId must itself carry the Realm name, so an Attach URI needs no second locating parameter. Actrium derives the Realm from `service`:
-
-```text
-2af01.notes@team.example
-```
-
-`realm` is used in one case only: when importing a current Actr legacy ActorId (which carries only a numeric `realm_id`), it explicitly supplies the full Realm name, e.g. `?realm=notes%40team.example`. Create URIs no longer use `realm`; they use `domain`, and a Create URI containing `realm` is rejected.
-
-After a legacy Attach resolves successfully it must be upgraded to a v1 ActorId carrying the Realm name, and `realm` is removed from the normalized URI. `realm` and `service` must not remain two potentially contradictory sources of location.
-
-A local Realm ActorId looks like `2af01.h3x8p2wq@<installation-id>.actr.alt`. It can be reconnected precisely on this machine but cannot be resolved by other devices; Actrium must disable "Copy portable link" rather than forge a domain.
-
-### 6.3 Attach The hard rules
-
-Attach Other Organiser
-
-- No substitution by type may be found;
-- Do not create local examples;
-- No automatic downgrading of the version;
-- Don't change. Realm;
-- It's not to be ignored. ActorType or contract mismatch.
-
-## 7. Guest route, query with fragment
-
-### 7.1 Path
-
-Program/version After path Yes. Guest Frontline route:
-
-```text
-/today/note/123
-```
-
-It's not involved. Service Choice, and it doesn't change. Workspace.
-
-### 7.2 Reserved query
-
-v1 Reservations:
-
-- `service`
-- `domain` (Create only)
-- `realm` (legacy Attach import only)
-
-Other query Fields as read-only after removing the reserved field launch parameters For Guest.Program Business fields may not be named as reserved fields.
-
-### 7.3 Fragment
-
-Fragment For Only Guest , do not participate:
-
-- Program (a) Parsing;
-- Service (b) Positioning;
-- Realm (b) Selection;
-- (a) Competence;
-- (a) The package version;
-- Actor Identification.
-
-Actrium Not allowed in fragment Upload bearer invite. Invitation and authorization through independence Realm/Service Process complete.
-
-## 8. Normative
-
-Actrium Before preserving history, collections and copying links, the following must be done:
-
-1. scheme (a) Lowercase;
-2. Convert the Publisher and Realm domains (the `domain` parameter and the part of the ActorId after `@`) to lowercase IDNA A-labels;
-3. Remove Default Empty path;
-4. Program Use the standard case in the release record;
-5. Version Use criteria SemVer Strings;
-6. ActorId First parseAgain. Actr Standard formatter Output and percent-encode;
-7. Put `service` first in the query; only Create URIs allow `domain`, only legacy Attach URIs allow `realm` (removed after import); sort remaining fields stably by key/value;
-8. No change. Guest path meaningful case;
-9. (b) Reject the repetition of the reservation parameters;
-10. Control character after decoded,NUL And illegal. UTF-8.
-
-## 9. Parsing algorithm
-
-```text
-parse(uri):
-  1. Authentication scheme
-  2. Authentication authority Just... publisher host
-  3. Normative publisher
-  4. Parsing program@exact-version
-  5. Parsing guest route
-  6. Ripping and Heavy reserved query
-  7. If service Missing:
-       reject realm; normalize optional domain (default: local Realm)
-       → CreateIntent (the new Realm is created after confirmation)
-  8. If service Exists:
-       reject domain
-       parse ActorId, extract Realm name (label, domain)
-       domain (not .actr.alt):
-         fetch https://<domain>/.well-known/actr (authority descriptor)
-         verify the realm_signing_keys member's signature and rotation
-           chain with the pinned Realm signing key; reject sequence rollback;
-           if the signing key of an accepted Realm Profile has been removed
-           from keys, discard that Realm Profile and its sequence baseline and
-           fall back to the last accepted Realm Profile signed by a still-listed
-           key; if none, refetch as if none had been accepted
-         fetch the Realm Profile via the realms relation, verify it
-           with the Realm signing key
-         assert profile.realm.name == ActorId Realm name
-         assert profile.sequence does not roll back (else REALM_PROFILE_ROLLBACK)
-         assert provider.id matches the accepted Realm Profile (else REALM_PROVIDER_MISMATCH)
-         assert profile.status != retired
-         any failure → fail closed: reject Attach and
-           MUST NOT use any Realm Provider other than the Realm Profile's
-       local pseudo-domain <installation-id>.actr.alt (no Realm Profile):
-         assert installation-id == this installation and a local record exists
-       → AttachIntent (the Attach handshake then asserts the peer credential's Actor type == coordinate)
-  9. fragment As Guest Status Save
-```
-
-Steps 1–7 and the syntactic part of step 8 only produce intent objects; they do not download packages or create a Service. Fetching the authority descriptor and Realm Profile in step 8 is the network part of Realm resolution and likewise must run only after user confirmation and policy checks; results may be cached.
-
-The `realm_signing_keys` member and the `realms` relation are defined in Actr Authority Discovery §4.3–4.4. Protocol object fields are snake_case (e.g. `realm_signing_keys`, `display_name`).
-
-If the Realm Profile cannot be fetched, fails verification or is retired, Actrium must fail closed: it connects to no Actor of that Realm and must not use any Realm Provider other than the Realm Profile's to talk to that Realm.
-
-## 10. After Created URI Rewrite
-
-Created transaction returned successfully ActorId After:
-
-```text
-replaceState(
-  actr://publisher/program@version/path
-  ?service=<new-actor-id>
-)
-```
-
-Must use replace, not push:
-
-- Back (a) Should not return to the confirmation page that will be created again;
-- Refresh It has to connect to new Service;
-- History Only the address of the final instance is recorded.
-
-If the Service was created but rewriting the URI failed, Actrium must recover the result from the Create Intent by its `idempotency_key` and must not create again.
-
-## 11. Development URI
-
-Use of independent development sources scheme:
-
-```text
-actr-dev://localhost:7443/team-notes@0.0.0-dev
-```
-
-Rules:
-
-- Registration only in visible development mode;
-- authority Yes. HTTPS Origin, can contain ports;
-- Allow localhost, loopback And the private one of the visible trust. CA;
-- Do Not Write verified Program Catalog;
-- Clear. UI Always Show“Development sources”;
-- Give risk tips before exporting or sharing;
-- `actr-dev://` No official permission. Marketplace Accepted.
-
-Official `actr://` Not supported HTTP fallback.
-
-## 12. External Call
-
-From web pages, 2D code, mail or other App It's... URI:
-
-- We have to show you how it's done. Publisher, Program, Version and Create/Attach (a) Intention;
-- Create Intent It must be confirmed;
-- Attach may open directly per user settings, but first-time trust in a Realm domain or Publisher still requires confirmation;
-- Trigger the limit when multiple examples are created in a short time from the same source;
-- External URI (b) Not to carry pre-authorization of authority;
-- Unknown query Only Guest Visible after startup without prejudice to the installation or permission page.
-
-## 13. URI error codes
-
-URI resolution and Attach use the codes below. The complete list is in [12 §10](12-reference-spec.md); this table is its URI-related subset.
+- `acme.com` is the Realm domain, and also the trust root the user sees; `k7m2q9xh` is the
+  RealmId;
+- The path, query, and fragment after the RealmId are handed to the app unchanged, for
+  positioning within the page; they do not affect which instance is opened;
+- When the first segment is written as `<serial>.<realm_id>` (e.g.
+  `actr://acme.com/2af01.k7m2q9xh`), it points at a specific Actor in that instance: the opening
+  procedure is the same, except it connects to that Actor directly instead of looking it up by
+  type, and that Actor's type must match the package. This kind of link stops working once a
+  program upgrade replaces the Actor, so instance links are the default for sharing;
+- The https form only holds when the Realm domain's `/.well-known/actr` declares the prefix via
+  `links`; on a device without Actrium, the same address opens the web page served by that
+  domain, and the page carries an "Open in Actrium" affordance;
+- A local Realm's address looks like `actr://<installation-id>.actr.alt/h3x8p2wq`, is valid only
+  on this installation, and has no https form.
+
+## 3. Opening
+
+Actrium opens links per Actr URI §4: obtain and verify the Realm Profile → download and verify
+the package per its `package` field → start the front end → connect to the instance's Service.
+
+Product-level requirements:
+
+- **Confirm first, then go online**: for a link from a web page, a QR code, an email, or another
+  app, show the Realm domain and `display_name` first, and only show the program (Publisher,
+  program name, version) after download and verification; first-time trust of a Realm domain must
+  be confirmed. When the Realm domain equals or belongs to the Realm Provider ID, the trust root
+  is displayed as that Realm Provider.
+- **Fail closed**: if the Realm Profile cannot be fetched, fails verification, or is retired, or
+  the package's SHA-256 or signature does not match, opening stops; Actrium does not fall back to
+  another Realm Provider, does not swap packages, and does not create a new instance.
+- **No membership yet**: enter the join flow (e.g., a Realm invitation) instead of failing
+  silently.
+- The user may choose "open in browser" for an https link; when navigating within a page on the
+  same domain, Actrium does not force a takeover.
+- A link cannot pre-grant any permission; unknown query parameters are handed to the app only and
+  do not affect the install or permission screens.
+
+## 4. Address bar, history, favorites, and copy link
+
+- The address bar shows the normalized `actr://` address (normalization rules in Actr URI §6),
+  with the Realm domain highlighted;
+- After a new instance is created successfully, the address bar switches to the new instance's
+  address with a replace (not a push): back does not return to the create-confirmation page,
+  refresh connects to the new instance, and history holds only the final address;
+- What gets favorited is the instance, not the program;
+- "Copy link": copies the https form when the Realm domain declares `links`, otherwise copies the
+  `actr://` form;
+- A local Realm disables "copy link"; it must not forge a domain.
+
+Creating a new instance is not itself a link; it is a local operation inside Actrium — see
+[User experience](03-user-experience.md) §5.
+
+## 5. Development sources
+
+In development mode, creating a new instance may use a package address on localhost, a loopback
+address, or an explicitly trusted private CA. Such instances:
+
+- always show "development source";
+- do not enter the verified Program Catalog and are not accepted by the official Marketplace;
+- show a risk notice before export or sharing.
+
+Official addresses do not support HTTP fallback.
+
+## 6. Legacy forms
+
+The following forms are always rejected and can only be imported through an explicit migration
+tool:
+
+- `actr://<publisher>/<program>@<version>[?service=<ActorId>]` (the Create/Attach URI of the
+  earlier product draft);
+- a legacy ActorId containing only a numeric `realm_id`;
+- `actr://<realm>:<publisher>+<name>@<version>` (an early prototype).
+
+## 7. Error codes
+
+See [12 §10](12-reference-spec.md) for the full list. Those related to links:
 
 | Code | Meaning |
 |---|---|
-| `URI_SCHEME_INVALID` | Unsupported scheme |
-| `URI_PUBLISHER_INVALID` | The Publisher is not a valid registered domain |
-| `URI_PORT_NOT_ALLOWED` | A formal Publisher carries a port |
-| `URI_PROGRAM_INVALID` | Invalid Program syntax |
-| `URI_VERSION_REQUIRED` | Exact version missing |
-| `URI_VERSION_INVALID` | The version is not an allowed SemVer |
-| `URI_RESERVED_DUPLICATE` | A reserved parameter is repeated |
-| `URI_ACTOR_ID_INVALID` | The Service ActorId cannot be parsed |
-| `URI_ACTOR_TYPE_MISMATCH` | The Actor type in the peer credential does not match the Program coordinate |
-| `URI_DOMAIN_INVALID` | `domain` is not a valid normalized domain (port, IP literal, etc.) |
-| `URI_DOMAIN_NOT_ALLOWED` | `domain` in an Attach URI, or `realm` in a Create URI |
-| `URI_REALM_REQUIRED` | Legacy ActorId lacks a Realm name and cannot be imported |
-| `URI_REALM_MISMATCH` | Legacy `realm`, Realm Profile and the ActorId's Realm name disagree |
-| `URI_LOCAL_REALM_FOREIGN` | A local Realm ActorId does not belong to this installation |
-| `REALM_KEYS_INVALID` | The authority descriptor lacks `realm_signing_keys`, or its signature or rotation chain is invalid, or its `sequence` rolled back |
-| `REALM_PROFILE_UNAVAILABLE` | No `realms` link produced a valid Realm Profile; fail closed, no other Realm Provider is used |
-| `REALM_PROFILE_INVALID` | The Realm Profile signature is invalid (including a signing key that has been removed) or it does not match the ActorId's Realm name; fail closed |
-| `REALM_PROFILE_ROLLBACK` | The Realm Profile's `sequence` is lower than the accepted one; fail closed |
-| `REALM_PROVIDER_MISMATCH` | A new Realm Profile's `provider.id` differs from the accepted Realm Profile (a Realm is bound to its Realm Provider for life); fail closed |
-| `REALM_RETIRED` | The Realm Profile of the ActorId's Realm is retired |
+| `URI_SCHEME_INVALID` | Not a supported scheme |
+| `URI_DOMAIN_INVALID` | Realm domain is invalid (contains a port, an IP literal, etc.) |
+| `URI_LABEL_INVALID` | RealmId is invalid |
+| `URI_LEGACY_FORM` | Legacy form; needs the migration tool to import |
+| `URI_LOCAL_REALM_FOREIGN` | Local Realm address does not belong to this installation |
+| `REALM_KEYS_INVALID` | The domain's `realm_signing_keys` is missing, its signature or rotation chain is invalid, or `sequence` rolls back |
+| `REALM_PROFILE_UNAVAILABLE` | Could not fetch a valid Realm Profile |
+| `REALM_PROFILE_INVALID` | Realm Profile signature is invalid or the Realm name does not match |
+| `REALM_PROFILE_ROLLBACK` | The Realm Profile's `sequence` rolls back |
+| `REALM_PROVIDER_MISMATCH` | `provider.id` differs from the one already accepted |
+| `REALM_RETIRED` | The Realm is retired |
+| `PACKAGE_DIGEST_MISMATCH` | The downloaded package does not match `package.sha256` |
+| `PACKAGE_SIGNATURE_INVALID` | Package signature verification failed |
+| `SERVICE_NOT_FOUND` | There is not exactly one Actor in the Realm whose type matches the package |
+| `SERVICE_ACTOR_TYPE_MISMATCH` | The Actor an Actor link points to has a type that does not match the package |
 
-Error codes are for logs, tests and developer tools; user-facing text must state an actionable reason.
+Error codes are for logs, tests, and developer tools; user-facing copy must explain what the user
+can do.

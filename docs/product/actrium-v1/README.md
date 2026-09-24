@@ -1,145 +1,148 @@
-# Actrium v1 Product demand statement
+# Actrium v1 Product Requirements
 
-> Status: Draft target design (P.S.)Target State Draft)<br>
-> Document version:0.1<br>
-> Date:2026-07-29<br>
-> Scope of application:Actrium, Actr, Keel Next stage of product and protocol design<br>
-> Principle: Define the ideal model before adjusting the existing realization; this paper is not premised on historical compatibility
+> Status: Target State Draft<br>
+> Document version: 0.1<br>
+> Date: 2026-07-29<br>
+> Scope: the next stage of product and protocol design for Actrium, Actr and Keel<br>
+> Principle: define the ideal model first, then adjust the existing implementation; this document does not assume compatibility with the current implementation
 
-## 1. Definition of a sentence
+## 1. One-sentence definition
 
-Actrium Yes. Actrium The world.“Program Browser”: User in resident app Tab Running by Keel Guest Description of original interface, each resident app Tab A trusted one. Front Actor Carrying and adopting a clear Service Actor Status of access procedures,Workspace with Actor Network.
+Actrium is the "program browser" of the Actrium world: users run native UI described by a Keel Guest inside a resident app Tab; each resident app Tab is hosted by a trusted Front Actor, which accesses the program's state, Workspace and Actor network through that instance's Service.
 
 ## 2. Overall conclusion
 
-The revised set is well-directed, unified and technically feasible:
+This revision direction is coherent, unified and technically feasible:
 
 ```text
 Tab
 └── Front Actor
-    ├── Actrium Fixed Native Workload
+    ├── Actrium's fixed Native Workload
     │   ├── Keel Host
     │   ├── Capability Broker
     │   └── Actr Client
-    ├── Publisher Provided Keel Guest
-    └── Primary Service Actor ── Workspace
+    ├── Keel Guest provided by the Publisher
+    └── Service ── Workspace
 ```
 
-Its main value is not to draw fewer layers, but to make each layer assume only one responsibility:
+Its main value is not drawing fewer layers, but giving each layer exactly one responsibility:
 
-- Tab is an interactive user session.
-- Front Actor Yes, it is. Actrium Controlled front-office secure borders.
-- Keel Guest is the only pre-office code that the program developer can customise.
-- Service Actor There are examples of state-of-the-state programs, too. Front Enter Actor The only main entrance to the world.
-- Workspace By Service Hold on,Front Do not touch path, key or bottom storage.
-- An `ActorId` has the form `<serial>.<label>@<domain>`; it carries its own Realm name, identifies the Service instance exactly and contains no program type; once an `ActorId` is known, it must not be load-balanced.
-- `publisher/program@version` Accurately identify the unchangeable version of the program.
-- A Realm corresponds to one application instance and governs that instance's identity, admission and network entry; the domain is only used to name Realms; signaling and TURN are shared infrastructure delegated by the Realm.
+- Tab is the user's interaction session.
+- Front Actor is the front-end security boundary controlled by Actrium.
+- Keel Guest is the only front-end code the program developer can customize.
+- Each instance has one Service, which holds state; Front only connects to it.
+- Workspace is held by the Service; Front never touches paths, keys or the underlying storage.
+- An application instance is a Realm, addressed by a Realm link `actr://<Realm domain>/<realm_id>`; where the program is downloaded from is written in the Realm Profile.
+- `ActorId` has the form `<serial>.<realm_id>@<domain>`, carries its own Realm name and contains no program type; once an `ActorId` is known it must not be load-balanced.
+- `publisher/program@version` exactly identifies an immutable program version.
+- A Realm corresponds to one application instance and governs that instance's identity, admission and network entry; a domain is only used to name Realms; signaling and TURN are shared infrastructure delegated by the Realm.
 
-But it relies on three basic capabilities that must be completed first:
+But it depends on three foundational capabilities that must be completed first:
 
-1. **Persistent, resolvable ActorId**: a Service Actor must keep the same `ActorId` across restarts, network loss, credential renewal or migration, and the Realm name must be derivable from the ID. Today's Actr hard rebind may change the ID, and the ID only carries a numeric Realm internal to the Realm Provider, so it cannot directly serve as long-term, shareable URL semantics.
-2. **Domain-name Publisher**: Actr's publisher semantics and length limits must change so that a normalized DNS domain becomes the program publisher's identity.
-3. **It's really closed. Front Host**: Actrium It must be. Keel . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . capability, white list of components, resource quotas and identified sandbox backend limits Guest;cannotsat affix URL Just give it to me. Keel Load.
+1. **A persistent, resolvable ActorId**: a Service must keep the same `ActorId` across restarts, network loss, credential renewal or migration, and the Realm name must be derivable from the ID. Today's Actr hard rebind can change the ID, and the ID only carries a numeric Realm internal to the Realm Provider, so it cannot directly serve as long-term, shareable URL semantics.
+2. **Domain-name Publisher**: Actr's publisher semantics and length limits need to change so that a normalized DNS domain becomes the program publisher's identity.
+3. **A truly closed Front Host**: Actrium must complete package verification before Keel runs, and must constrain the Guest with capabilities, a component allowlist, resource quotas and a fixed sandbox backend; it must not hand a remote URL directly to Keel to load.
 
-## 3. Core decision-making for freezing
+## 3. Frozen core decisions
 
-| Numbering | Decision-making |
+| No. | Decision |
 |---|---|
-| D-001 | Every application in a hold on load, running or front desk Tab Just run one. Front Actor; being Shell Abandoned but retained dormant Tab I don't think so. live Actor. |
-| D-002 | Every one. Front Actor The state of operation happens to bind one. Primary Service Actor. Create/Temporary zero is allowed during the connection. |
-| D-003 | “1:1”Yes. live Front The only binding of the angles, not the one. Service And history Tab (b) Permanent double-fire;Service Alive and can be replaced. Front Reconnection. |
-| D-004 | v1 Default use of monogamous interactive sessions; same Service URL Focus now when this machine is open again. Tab. Sharing sessions is a follow-up and visible capability. |
-| D-005 | Service Tie zero or one. Workspace;required more Actor Procedure by Primary Service In the back. |
-| D-006 | Front workload By Actrium It's a natural.Publisher Can not replace Actr Host;Publisher Only if you're available. Keel Guestresources, statements and Service workload. |
-| D-007 | v1 Third parties Front Guest Open only Keel JS Guestand fixed-use with hard timeout and stack caps QuickJS Backend. |
-| D-008 | One. Actrium Program Release It's a signature. `.actr` Package:Service workload Is the subject of enforceability,Keel Guest It is a package of resources protected by a signature. |
-| D-009 | `actr://publisher/program@version` indicating creation;adding `service=<ActorId>` is only connected, and cannot be built by sneaking up. |
-| D-010 | Publisher Identity is a standardized domain name, without port; credible Publisher Profile Actual HTTPS, WSS, STUN, TURN End points can be used in a visible manner. |
-| D-011 | Marketplace It's a source of information, not a source of information. Publisher Name authority; domain name and package signature are the source chain. |
-| D-012 | A v1 ActorId must contain a verifiable Realm name (`<label>@<domain>`, e.g. `notes@acme.com`), and no program type; it is a public address and cryptographic identity, not a bearer token: knowing the URL does not grant the right to connect. |
-| D-013 | A Realm is a logical trust domain corresponding to one application instance and may delegate multiple signaling/TURN services; a Realm is not the same thing as a physical signaling process, and one Realm Provider hosts many Realms; a Realm is bound to one Realm Provider when it is created and can never switch. |
-| D-014 | Service Examples fixed to exact version and package digest;v1 Upgrade Creates new by Visible Migration Actor, instead of replacing it. workload. |
-| D-015 | Realm credential Prove it. Actor keyand claims, does not automatically prove that the other side is actually running the official Actrium Host;Service We have to. Front Consider it independent of the letter client. |
-| D-016 | A Workspace's requirement, provisioning, access and allowed Workspace Providers (`providers`) are independent dimensions and must not be merged into one enum. |
-| D-017 | Remove as Restoreable Trashed And irrecoverable. Purged/Deleted;deleting Workspace Always acting independently. |
-| D-018 | Domain bootstrap for Publishers and Realm domains always uses HTTPS 443 (the `https://<domain>/.well-known/actr` authority descriptor); a Realm Profile comes from the HTTPS location declared by the core relation `realms` (ports allowed); actual endpoints delegated by a verified Realm Profile may carry ports. The `realm_signing_keys` member and the `realms` relation are defined in Actr Authority Discovery §4.3–4.4; when a Realm Profile cannot be fetched or verified, clients must not use any Realm Provider other than the Realm Profile's. |
-| D-019 | Application safeguards are aggregated on a no root-effective basis; access is effective and `Ready` , displays the weakest item of the colour to take all nodes from.Front Just locate, not Tugan. |
-| D-020 | `ActorAssurance` The issue is issued by the certifier.`issuer ≠ subject`.Host assessable GuestEvidence may be provided and no self-signed final conclusions may be made. |
-| D-021 | The top floor is green only. / Yellow / Red; the cut is not a fourth colour when it is not ready. Unknown is not a confirmed leak, but must never be green. |
-| D-022 | WASM Yes. import / Effectiveness / Export closed-convey measures; third-party co-processing Native No green. Compliance. out-of-process Native Capsule It's possible to raise it. |
-| D-023 | Conclusions must be linked to the data face: hang up to Africa `LocalContinue` Members may not process applied data; the new configuration only works on new data. |
-| D-024 | User interfaces are three colours, internalally maintained identity, provenance, confinement, compute, channel, storage, egress and output Wait for the multidimensional facts to be mapped `CONTROLLED / UNKNOWN / UNCONTROLLED`. |
-| D-025 | Actr ♪ Every network ♪ Actor edge (b) Must be encrypted, authenticated, protected from integrity and protected from re-entry;signaling, TURN & Normal relay Not held payload key. |
-| D-026 | “Encryption of the whole process”This means transmission and static storage encryption, which is only available policy The data shall not be declared secret during the ordinary calculation period. |
-| D-027 | Confidential Computing Protection data in use, WASM/Native confinement Constraints workload Exports; the two are cross-cutting and non-replacement. |
-| D-028 | Remote certification is used Attester, Verifier, Relying Party (b) Division of labour;Evidence Not a trust conclusion. The final authorization is local. data policy Decision. |
-| D-029 | private/secret Decrypt key only if required attestation Enclosed to pass Evidence Binding interim implementation environment key. |
-| D-030 | Use GPU/NPU It's... Actor It has to be done. CPU, Guest, driverequipment, equipment,firmware, IOMMU/link/memory ; when any of the specified links cannot be proved compute confidentiality Yes unknown. |
-| D-031 | Green binding current readiness face (`ApplicationStateDigest` + `ApplicationAssurance` + `Ready`No, it's not. Program The whole version, not a short one. transport session. |
-| D-032 | Program Privacy Contract Still. Actor The static upper boundary of graphs and capabilities is limited to candidate maps and does not produce greens directly. |
-| D-033 | Initial diagrams must be evaluated before release of protected data or decryption key; conclusions bound to the current `ActorStateDigest`, `structureDigest`The government has also been involved in the development of the project. |
-| D-034 | `ActorStateDigest` Locally hangs and abolishes old powers when changes occur; members who do not depend on the change nodes can `LocalContinue`, but not green applications. |
-| D-035 | The colour is not weakened and automatically recovers; the weakness is maintained and the risk acceptance is requested (no colour changes); the user cannot overwhelm the channel when it is not valid or when the platform is touched by a hard bottom line. |
-| D-036 | Lettered Verifier You can put it inside. Actor Subchart Envelope As Certified Privacy Domainand through Assured Actor Edge Provided scopeand cancellations aggregate;symbol invalid. |
-| D-037 | Audit log is visible storage/audit sink, must declare fields, data categories, targets, read subjects and retention;LLM/GPU Attestation It can't prove it. Server No separate logs are kept. |
+| D-001 | Every app Tab that is loading, running or foreground-suspended runs exactly one Front Actor; a dormant Tab that has been discarded by the Shell but retained can have no live Actor. |
+| D-002 | Every Front Actor, while running, is bound to exactly that instance's Service. It may be temporarily zero during creation/connection. |
+| D-003 | "1:1" is the sole binding from the live Front's point of view, not a permanent bijection between a Service and historical Tabs; a Service lives independently and can be reconnected by a new Front. |
+| D-004 | v1 defaults to an exclusive interactive session; opening the same instance's link again on this device focuses the existing Tab first. Shared sessions are a later, explicit capability. |
+| D-005 | A Service binds zero or one Workspace; a program that needs multiple Actors has them orchestrated by the Service within the same Realm. |
+| D-006 | The Front workload is provided natively by Actrium; the Publisher cannot replace the Actr Host. The Publisher can only provide the Keel Guest, resources, declarations and the Service workload. |
+| D-007 | In v1, third-party Front Guests only support the Keel JS Guest, and it is fixed to a QuickJS backend with a hard timeout and heap cap. |
+| D-008 | An Actrium Program Release is one signed `.actr` package: the Service workload is the executable body, and the Keel Guest is a signature-protected package resource. |
+| D-009 | A link only points to an instance: `actr://<Realm domain>/<realm_id>`, which may also be written as an https form when the Realm domain declares `links`; opening a link only connects to that instance and must not silently create a new one on failure. Creating an instance is a local operation inside Actrium, not a link. |
+| D-010 | Publisher identity is a normalized domain, without a port; the Publisher Profile is only used to verify package signatures — the download location is not part of Publisher identity and can be anywhere. |
+| D-011 | Marketplace is a source of discovery, review and revocation information, not a Publisher naming authority; the domain and the package signature are the provenance chain. |
+| D-012 | A v1 ActorId must contain a verifiable Realm name (`<realm_id>@<domain>`, e.g. `notes@acme.com`); the program type is not in the ActorId. It is a public address and cryptographic identity, not a bearer token: knowing the address does not grant the right to connect. |
+| D-013 | A Realm is a logical trust domain corresponding to one application instance, and may delegate multiple signaling/TURN services; a Realm is not the same thing as a physical signaling process — one Realm Provider hosts many Realms; a Realm is bound to a Realm Provider when it is created and can never switch afterward. |
+| D-014 | A Service instance is pinned to an exact version and package digest; v1 upgrades create a new Actor through an explicit migration, rather than replacing the workload in place. |
+| D-015 | An Actor credential proves the Actor key, identity and claims; it does not prove what code the other side is actually running. How an application authorizes on that basis is up to the application; see [Application development guidance](app-development-guidance.md). |
+| D-016 | A Workspace's requirement, provisioning, access and allowed Workspace Providers (`providers`) are independent dimensions and must not be merged into a single enum. |
+| D-017 | Deletion is split into recoverable Trashed and unrecoverable Purged/Deleted; deleting the Workspace is always a separate action. |
+| D-018 | Publisher and Realm domain bootstrap always uses HTTPS 443 (i.e. `https://<domain>/.well-known/actr`); the Realm Profile comes from the HTTPS location declared by `realms`, and it gives the instance's running package and the Realm Provider endpoints (which may carry ports). When the Realm Profile cannot be fetched or fails verification, no Realm Provider other than the Realm Profile's own may be used. |
+| D-019 | Application assurance is aggregated over a rootless effective-dependency graph; when the channel is valid and `Ready`, the displayed color takes the weakest of all node conclusions. Front only locates, it is not the graph root. |
+| D-020 | `ActorAssurance` is issued by a verifier, `issuer ≠ subject`. The Actr Host may evaluate the Guest and provide evidence, but must not self-sign its own final conclusion. |
+| D-021 | The top level has only green / yellow / red; when a facet is not ready, the display shows "cannot be established," not a fourth color. Unknown is not a confirmed leak, but it must never be displayed as green. |
+| D-022 | WASM can be measured via imports / effective capabilities / egress closure; a third-party same-process Native cannot be green — only a compliant out-of-process Native Capsule can be raised. |
+| D-023 | Conclusions must be linked to the data plane: a member that is suspended and not `LocalContinue` must not process application data; a new configuration only applies to new data. |
+| D-024 | The user interface has only three colors; internally it keeps multidimensional facts — identity, provenance, confinement, compute, channel, storage, egress and output — mapped to `CONTROLLED / UNKNOWN / UNCONTROLLED`. |
+| D-025 | Every network Actor edge of Actr must be encrypted, authenticated, integrity-protected and replay-resistant; signaling, TURN and ordinary relays must not hold the payload key. |
+| D-026 | "End-to-end encryption" means encryption in transit and at rest; plaintext appears only within an execution boundary that policy accepts and can prove — it must not be claimed that data stays ciphertext throughout ordinary computation. |
+| D-027 | Confidential Computing protects data in use; WASM/Native confinement constrains workload egress; the two are orthogonal and do not substitute for each other. |
+| D-028 | Remote attestation uses the Attester, Verifier, Relying Party division of labor; Evidence is not a trust conclusion — final authorization is decided by local data policy. |
+| D-029 | The decryption key for private/secret data may only be sealed to an ephemeral execution-environment key bound to Evidence after the required attestation passes. |
+| D-030 | An Actor using a GPU/NPU must produce a combined attestation of CPU, guest, driver, device, firmware, IOMMU/link/memory; when any plaintext-visible link cannot be proven, compute confidentiality is unknown. |
+| D-031 | Green is bound to the current ready facet (`ApplicationStateDigest` + `ApplicationAssurance` + `Ready`); it is not the whole Program across all versions, nor a transient transport session. |
+| D-032 | The Program Privacy Contract remains a static upper bound on the Actor graph grammar and capabilities; it only constrains the candidate graph and does not directly produce green. |
+| D-033 | The initial graph must complete evaluation before releasing protected data or a decryption key; the conclusion is bound to the current `ActorStateDigest`, `structureDigest`, policy and evidence. |
+| D-034 | When `ActorStateDigest` changes, old power is locally suspended and revoked; members that do not depend on the changed node may `LocalContinue`, but must not display application green. |
+| D-035 | Color can auto-recover when it has not weakened; when it weakens, blocking is maintained and risk acceptance is requested (this does not change the color); the user cannot override an invalid channel or a platform hard floor. |
+| D-036 | A trusted Verifier may package an internal Actor subgraph as a Certified Privacy Domain and provide it through an Assured Actor Edge with scope, validity and revocation; a self-signed declaration is invalid. |
+| D-037 | Audit logs are an explicit storage/audit sink and must declare fields, data class, target, reading party and retention; LLM/GPU attestation by itself cannot prove that the server keeps no separate log. |
 
-## 4. Document Navigator
+## 4. Document navigation
 
-The recommendations are read in order:
+Recommended reading order:
 
-1. [Product definition](01-product-definition.md): Why, for whom, what, what, what.
-2. [Area model](02-domain-model.md): Tab, Front, Service, Workspace, Program, Realm Relationship.
-3. [User Experience](03-user-experience.md): Restore from address bar to library, experiential library and error.
-4. [URI And parsing norms](04-uri-and-resolution.md): `actr://` Syntax:/Connect semantics and regularizes.
-5. [Packages and HTTPS Distribution](05-program-package-and-distribution.md)Domain name Publisher, `.actr` Packages, markets and updates.
-6. [Run-time with Front–Service Agreements](06-runtime-and-protocol.md): Native Host, Keel Guest, the capacity boundary conversation agreement.
-7. [Realm♪ By letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter, by letter,TURN And identity.](07-realm-network-and-identity.md): chain of trust, network discovery and port policy.
-8. [WorkspaceLife cycle and local storage](08-workspace-lifecycle-and-storage.md): Attribution, creation, reconnection, deletion and migration.
-9. [Security and privacy](09-security-and-privacy.md)Threat model, access, sandbox and secret management.
-10. [Demand and acceptance criteria](10-requirements-and-acceptance.md): Functional needs, non-functional needs and end-to-end acceptance.
-11. [Delivery plan and feasibility](11-delivery-plan.md): Basic adaptation, phasing, risk and conditions of exit.
-12. [Reference protocol and sample](12-reference-spec.md): Manifest, Publisher/Realm Profile# And the handshake news and the terminology. #
-13. [Actrium Privacy tags and diagrams are assembled](13-privacy-state-and-aggregation.md): to bring the current security model to Tab / Front / Actr Host.
-14. [Privacy, remote certification and credible algorithms](14-privacy-primitives-and-attestation.md): All-process encryption,WASM/CC Division of labour,RATSKey Releases and CPU/GPU/NPU Group certification.
+1. [Product definition](01-product-definition.md): why, for whom, what, and what not.
+2. [Domain model](02-domain-model.md): the relationships among Tab, Front, Service, Workspace, Program and Realm.
+3. [User experience](03-user-experience.md): from the address bar to the Program Catalog, the Service Inventory and error recovery.
+4. [Realm links and the address bar](04-uri-and-resolution.md): how an instance address is shown, opened, saved and shared.
+5. [Program package and HTTPS distribution](05-program-package-and-distribution.md): the domain-name Publisher, the `.actr` package, the marketplace and updates.
+6. [Runtime and the Front–Service protocol](06-runtime-and-protocol.md): the Native Host, the Keel Guest, capability boundaries and the session protocol.
+7. [Realm, signaling, TURN and identity](07-realm-network-and-identity.md): the trust chain, network discovery and port policy.
+8. [Workspace, lifecycle and local storage](08-workspace-lifecycle-and-storage.md): state ownership, creation, reconnection, deletion and migration.
+9. [Security and privacy](09-security-and-privacy.md): the threat model, permissions, sandboxing and secret management.
+10. [Requirements and acceptance criteria](10-requirements-and-acceptance.md): functional requirements, non-functional requirements and end-to-end acceptance.
+11. [Delivery plan and feasibility](11-delivery-plan.md): foundational work, phasing, risks and exit criteria.
+12. [Reference protocol and samples](12-reference-spec.md): the manifest, Publisher/Realm Profile, handshake messages and terminology.
+13. [Actrium privacy marks and graph aggregation](13-privacy-state-and-aggregation.md): grounding the current security model in Tab / Front / Actr Host.
+14. [Privacy primitives, remote attestation and trusted compute](14-privacy-primitives-and-attestation.md): end-to-end encryption, the WASM/CC division of labor, RATS, key release and combined CPU/GPU/NPU attestation.
 
-## 5. Normative Use of Terms
+There is also non-normative [application development guidance](app-development-guidance.md): authorization and trust advice for writing a Service; it is not a platform rule.
 
-This paper uses the following intensity:
+## 5. Normative language
 
-- **I have to. / MUST**: Missing can destroy product models, secure borders or interoperability.
-- **I think so. / SHOULD**: Default should be satisfied and the reason and the alternative must be recorded in case of deviation.
-- **Yes. / MAY**: Compatibility or subsequent expansion.
+This document uses the following levels of strength:
 
-Example: JSON/TOML/Protocol fields for freezing product syntax; official wire schema Still need to be here. Actr/Actrium It's... schema Version in the warehouse.
+- **MUST**: its absence would break the product model, a security boundary, or interoperability.
+- **SHOULD**: should be satisfied by default; any deviation must record the reason and the alternative measure.
+- **MAY**: a compatible implementation or a future extension.
 
-### 5.1 Document Effectiveness
+Example JSON/TOML/protocol fields are used to freeze product semantics; the formal wire schema still needs to be versioned in the Actr/Actrium schema repositories.
 
-In the event of a conflict, the following order of interpretation is given:
+### 5.1 Document precedence
 
-1. **Semantics of security and privacy**: [docs/security](../../architecture/security/actrium/README.zh.md);
-2. Ben. README (a) Decision-making on products not in conflict with the preceding article;
-3. [Demand and acceptance criteria](10-requirements-and-acceptance.md)Medium MUST/FR/NFR;
-4. URI, distribution, running time,Realm, Workspace and product topics not covered by this chapter;
-5. [Reference Agreements](12-reference-spec.md)in the
-6. Product narrative, user processes and delivery plans.
+When there is a conflict, interpret it in the following order:
 
-`01` with `03` Mainly to help understand products;`04`—`09`, `12`—`14` Yes, I'm waiting. P0 Draft norms on freezing;`10` (a) is the baseline for acceptance and inspection;`11` It's a plan, not a plan. wire contract.
+1. **Security and privacy semantics**: [docs/security](../../architecture/security/actrium/README.zh.md);
+2. product decisions in this README that do not conflict with the item above;
+3. the MUST/FR/NFR items in [Requirements and acceptance criteria](10-requirements-and-acceptance.md);
+4. product topics on links, distribution, runtime, Realm and Workspace not covered by this chapter;
+5. the illustrative fields in the [reference protocol](12-reference-spec.md);
+6. product narrative, user flows and the delivery plan.
+
+`01` and `03` mainly help with understanding the product; `04`–`09` and `12`–`14` are draft specifications awaiting P0 freeze; `10` is the acceptance baseline; `11` is a plan, not a wire contract.
 
 ## 6. Factual basis
 
-This design is based on the following publicly available feasibility but is not bound by its historical structure:
+This design uses the following public implementations as a feasibility basis, without being bound by their historical structure:
 
-- [Actrium/actr](https://github.com/Actrium/actr): Actor model, precise `ActrId` addressing, Realm/connection ACL, signaling, WebRTC, signed `.actr` packages and WASM workloads.
-- [Actrium/keel](https://github.com/Actrium/keel): Keel Host/Guest, Bridge, JS Sandboxes, contracts and raw components rendered.
-- [Actrium Overview of the current structure](../../architecture/actrium/overview.md): Multiplatforms Shell, share running time with Actr SDK Borders.
+- [Actrium/actr](https://github.com/Actrium/actr): the Actor model, exact `ActrId` addressing, Realm/connection ACLs, signaling, WebRTC, signed `.actr` packages and WASM workloads.
+- [Actrium/keel](https://github.com/Actrium/keel): the Keel Host/Guest, the bridge, the JS sandbox, contracts and native component rendering.
+- [Actrium's current architecture overview](../../architecture/actrium/overview.md): the multi-platform Shell, the shared runtime and the Actr SDK boundary.
 
-Key facts that have been verified include:
+Key verified facts include:
 
-- Actr's current `ActrId` text form is `<serial_hex>@<realm_id>/<publisher>:<program>:<version>`; the target format is `<serial>.<label>@<domain>`: the Realm name replaces the numeric realm_id, and the program type moves into registration and the Actor credential.
-- Actr Supported `Dest::Peer(ActrId)` Accurately locate and press `ActrType` It was found that the two could be clearly divided.
-- `.actr` Existing Ed25519 manifest Signature,SHA-256 File binding and resources; relying on lock-down workload/The build process is optional.
-- Keel It's... Host/Guest Border and White List module mechanism suitable for carrying FrontBut it's... `Engine.loadBundle(URL)` It is not a credible distribution system in itself.
-- Most Keel "native" sandboxes are still language-runtime isolation inside one OS process and cannot be claimed as browser-grade process isolation.
+- Actr's current `ActrId` text form is `<serial_hex>@<realm_id>/<publisher>/<program>@<version>`; the target format is `<serial>.<realm_id>@<domain>`: the Realm name replaces the numeric realm_id, and the program type moves into registration and the Actor credential.
+- Actr already supports exact addressing via `Dest::Peer(ActrId)` and discovery by `ActrType`; the two can be cleanly separated.
+- `.actr` already has Ed25519 manifest signatures, SHA-256 file binding and resources; dependency locking is optional depending on the workload/build pipeline.
+- Keel's Host/Guest boundary and allowlisted-module mechanism are suitable for carrying Front, but its `Engine.loadBundle(URL)` is not by itself a trusted distribution system.
+- Most of Keel's "native" sandboxing is still language-runtime isolation within the same OS process, and cannot be claimed as browser-grade process isolation.
 
-These documents use the canonical names Loran, Publisher Registry, Issuer and publisher throughout; historical names found in code and older documents are listed in one place, the "历史名称对照" (historical names) section of the [glossary](../../GLOSSARY.zh.md).
+This document consistently uses the canonical names Loran, Publisher Registry, Issuer and publisher; historical names found in code and older documents are collected in the [glossary's "Historical name mapping"](../../GLOSSARY.zh.md).

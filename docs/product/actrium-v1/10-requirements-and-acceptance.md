@@ -1,633 +1,624 @@
-# 10. Demand and acceptance criteria
+# 10. Requirements and acceptance criteria
 
-## 1. Functional Needs
+## 1. Functional requirements
 
-### 1.1 Shell with Tab
+### 1.1 Shell and Tab
 
-| ID | Requirements |
+| ID | Requirement |
 |---|---|
-| FR-SH-001 | Every one. resident app Tab Yes. loading/running/suspended It has to be just one time. live Front Actor;Shell Pages & & & dormant Tab I don't think so. Front. |
-| FR-SH-002 | Front Actor After startup, you must bind and only one. Primary Service Actor. |
-| FR-SH-003 | Refreshing must be rebuilt. Front ♪ And connects to the same Service,No new Service. |
-| FR-SH-004 | Close Tab It has to be withdrawn. session And destroy it. Front, may not be stopped or deleted Service. |
-| FR-SH-005 | Backstage. Tab I have to. pause Keel Engine;restoration must resume Or reconstructed Attach. |
-| FR-SH-006 | This machine opens again the same exclusive Service Default Focus Already Tab. |
-| FR-SH-007 | The address bar must be shown separately Publisher, examples,Realm And connect to security. |
-| FR-SH-008 | Guest Navigation must pass. `host:navigate`We can't change it. Shell History, cross-examples capability Or put it on. secret Writing URI. |
+| FR-SH-001 | Every resident app Tab MUST have exactly one live Front Actor while loading/running/suspended; Shell pages and dormant Tabs may have no Front. |
+| FR-SH-002 | A Front Actor MUST bind to exactly one Service once it finishes starting up. |
+| FR-SH-003 | A refresh MUST rebuild the Front and reconnect to the same Service; it MUST NOT create a new Service. |
+| FR-SH-004 | Closing a Tab MUST revoke the session and destroy the Front; it MUST NOT stop or delete the Service. |
+| FR-SH-005 | A backgrounded Tab MUST pause the Keel Engine; resuming MUST either resume it or rebuild it and Attach. |
+| FR-SH-006 | Reopening the same exclusive Service on this device by default focuses the existing Tab. |
+| FR-SH-007 | The address bar MUST separately show the Publisher, the instance, the Realm and the connection's security state. |
+| FR-SH-008 | Guest navigation MUST go through `host:navigate`; it must not directly change Shell history, inherit capabilities across instances, or write a secret into the URI. |
 
 ### 1.2 URI
 
-| ID | Requirements |
+| ID | Requirement |
 |---|---|
-| FR-URI-001 | Must support `actr://publisher/program@exact-version`. |
-| FR-URI-002 | None `service` Must Parsing As Create Intent. |
-| FR-URI-003 | Yes. `service` Must Parsing As Attach Intent. |
-| FR-URI-004 | Attach I'm not going to fail. LB, downgraded or create alternative examples. |
-| FR-URI-005 | The Actor type in the `service` Actor's credential must exactly match the URI coordinate (the ActorId itself carries no type). |
-| FR-URI-006 | It's a must to be created. replace For the tape. `service` It's... URI. |
-| FR-URI-007 | A portable Attach URI must carry a resolvable Realm name (`<label>@<domain>`, where domain is a DNS domain). |
-| FR-URI-008 | URI Not to include credential, session secret, Workspace secret or bearer invite. |
-| FR-URI-009 | Official Publisher authority Do not contain ports; develop sources for use `actr-dev://`. |
-| FR-URI-010 | Parser Must be implemented IDNA, repeats the reservation parameters, illegal coding and control character checks. |
-| FR-URI-011 | A Create URI must select the Realm domain with the `domain` parameter and create a local Realm when it is omitted; the `realm` parameter is only allowed for legacy Attach import. |
+| FR-URI-001 | Realm links of the form `actr://<Realm domain>/<realm_id>[/<page path>][?…][#…]` MUST be supported; everything after the RealmId is passed to the application as-is. |
+| FR-URI-002 | Opening a Realm link MUST fetch and verify the Realm Profile, download and verify the package per its `package` field, then locate the Service by the package's Actor type within that Realm and Attach. |
+| FR-URI-003 | An Attach failure MUST NOT trigger load balancing, downgrading to another version, switching Realm, or creating a substitute instance. |
+| FR-URI-004 | The Service's Actor type MUST match the Actor type declared by the package the Realm Profile points to. |
+| FR-URI-005 | A Realm link MUST NOT contain a credential, session secret, Workspace secret or bearer invite. |
+| FR-URI-006 | A Realm link MUST NOT contain a port; development origins are distinguished only through the package address (localhost, loopback addresses or a private CA). |
+| FR-URI-007 | An https form MAY only be produced according to the `links` declaration in the Realm domain's authority descriptor; it MUST NOT be inferred from the path's appearance. |
+| FR-URI-008 | The parser MUST implement IDNA, illegal-encoding and control-character checks. |
+| FR-URI-009 | Creating an instance is a local Actrium operation and is not triggered by a link; on success the address bar shows that instance's Realm link. |
 
 ### 1.3 Program Catalog and distribution
 
-| ID | Requirements |
+| ID | Requirement |
 |---|---|
-| FR-PKG-001 | Program Catalog with Service Inventory We have to split up. |
-| FR-PKG-002 | A coordinate must be resolved through the `program_resolver` declared by the `publisher` member of the Publisher authority descriptor (`/.well-known/actr`). |
-| FR-PKG-003 | Every precision coordinate It has to be fixed. package digest. |
-| FR-PKG-004 | `.actr` Validation required Publisher key, manifest signature And all the files. hash. |
-| FR-PKG-005 | I must refuse. zip traversal, the number of documents exceeding the limit, the total amount of depressives and the compressed bomb. |
-| FR-PKG-006 | Third parties package Not to include Front Host/native plugin. |
-| FR-PKG-007 | Guest Must Valid Local bytes Load, no choice Keel Direct Trust Far URL. |
-| FR-PKG-008 | Same coordinate Different. digest I have to. hard fail. |
-| FR-PKG-009 | Still being Service Reference package digest No Cache Cleaning. |
-| FR-PKG-010 | Marketplace metadata Not covered Publisher package identity. |
-| FR-PKG-011 | We must support local `.actr` and clearly marked development sources. |
-| FR-PKG-012 | Must support Advisory/Block new/Quarantine/Critical block Dismissed level. |
-| FR-PKG-013 | Publisher bootstrap It has to be fixed. HTTPS 443;Publisher Profile with Release There must be a regular signature, serial number/Time limits and rollback protection. |
-| FR-PKG-014 | Official distribution tools must be supported build, validate, signPublication metadata, press the web coordinate Read back to verify. |
+| FR-PKG-001 | The Program Catalog and the Service Inventory MUST be kept separate. |
+| FR-PKG-002 | A package MUST come from the Realm Profile's `package` field or a source the user selected, and its SHA-256 MUST be checked. |
+| FR-PKG-003 | Every Program Release MUST pin a fixed package digest. |
+| FR-PKG-004 | A `.actr` file MUST have its Publisher key, manifest signature and every file's hash verified. |
+| FR-PKG-005 | Zip traversal, an excessive file count, an excessive total extracted size and zip bombs MUST be rejected. |
+| FR-PKG-006 | A third-party package MUST NOT contain a Front Host/native plugin. |
+| FR-PKG-007 | The Guest MUST load from verified local bytes; Keel MUST NOT trust a remote URL directly. |
+| FR-PKG-008 | A different digest appearing for the same Program Release MUST hard fail. |
+| FR-PKG-009 | A package digest still referenced by a Service MUST NOT be cache-cleaned. |
+| FR-PKG-010 | Marketplace metadata MUST NOT override the Publisher's package identity. |
+| FR-PKG-011 | Local `.actr` files and clearly marked development sources MUST be supported. |
+| FR-PKG-012 | Advisory/Block-new/Quarantine/Critical-block revocation levels MUST be supported. |
+| FR-PKG-013 | Publisher bootstrap MUST be pinned to HTTPS 443; the Publisher Profile MUST have a normalized signature, a sequence number/freshness, and rollback protection. |
+| FR-PKG-014 | The official publishing tool MUST support build, validate and sign, and MUST read back the SHA-256 and signature of the published package to verify it. |
 
 ### 1.4 Front/Keel
 
-| ID | Requirements |
+| ID | Requirement |
 |---|---|
-| FR-FRONT-001 | Front Host It has to be. Actrium and Publisher Cannot be replaced. |
-| FR-FRONT-002 | v1 Official Guest Support only Keel JS Guest. |
-| FR-FRONT-003 | It has to be fixed. QuickJS & Enable hard timeout with heap cap. |
-| FR-FRONT-004 | Guest Modules,capabilityComponent and RemoteRef It must be white. |
-| FR-FRONT-005 | Guest Default not available fetch/socket/filesystem/native module. |
-| FR-FRONT-006 | Guest Only get fixed target It's... PrimaryService capability. |
-| FR-FRONT-007 | All Guest RPC/input/output/event I have to. schema validate. |
-| FR-FRONT-008 | Image The resource component shall not be exported into an undeclared network. |
-| FR-FRONT-009 | Engine close/crash We have to clean it up. timer, callback, listener and capability. |
-| FR-FRONT-010 | UI We have to. v1 Description same-process sandboxNo claims OS process isolation. |
+| FR-FRONT-001 | Front Host MUST ship with Actrium and MUST NOT be replaceable by a Publisher. |
+| FR-FRONT-002 | v1's official Guest supports only the Keel JS Guest. |
+| FR-FRONT-003 | QuickJS MUST be pinned, with a hard timeout and a heap cap enabled. |
+| FR-FRONT-004 | Guest modules, capabilities, components and RemoteRefs MUST be allowlisted. |
+| FR-FRONT-005 | The Guest MUST NOT get default fetch/socket/filesystem/native modules. |
+| FR-FRONT-006 | The Guest only gets a Service capability with a fixed target. |
+| FR-FRONT-007 | All Guest RPC/input/output/event data MUST be schema-validated. |
+| FR-FRONT-008 | Image and resource components MUST NOT form an undeclared network egress. |
+| FR-FRONT-009 | Engine close/crash MUST clean up timers, callbacks, listeners and capabilities. |
+| FR-FRONT-010 | The UI MUST describe v1 as a same-process sandbox and MUST NOT claim OS process isolation. |
 
-### 1.5 Service with Workspace
+### 1.5 Service and Workspace
 
-| ID | Requirements |
+| ID | Requirement |
 |---|---|
-| FR-SVC-001 | Local New must be created for a lasting Service ActorId. |
-| FR-SVC-002 | Service Re-launch, renew,signaling Toggle must be kept after ActorId. |
-| FR-SVC-003 | Service It has to be fixed. Program Release digest. |
-| FR-SVC-004 | Service It has to be independent. ActrType It's... per-instance store. |
-| FR-SVC-005 | Workspace I have to. Service Host broker Hold on,Front No path to be obtained/credential. |
-| FR-SVC-006 | v1 Default Workspace Writing mode is exclusive writer. |
-| FR-SVC-007 | The creation of the business must be something like a mere one and the collapse can be restored. |
-| FR-SVC-008 | Stop, Archive, Delete Service with Delete Workspace Must be different. |
-| FR-SVC-009 | Third parties Service Default must be limited WASM Component workload. |
-| FR-SVC-010 | Service It's a little more like a little bit of a little bit of a support. Actor, but Front Still tied. Primary Service. |
-| FR-SVC-011 | v1 Version upgrade must be new Actor + Visible migration. |
-| FR-SVC-012 | Service After the clean-up, ActorId Reuse is not permitted. |
-| FR-SVC-013 | A Workspace must declare requirement, provisioning, access and allowed Workspace Providers (`providers`) separately. |
-| FR-SVC-014 | The migration to the wastebin must retain and recover identity and case data; the removal must be de-identified and not recoverable. |
-| FR-SVC-015 | Life cycle, accessibility, health,placement with attachment Status must be recorded in field segments. |
-| FR-SVC-016 | v1 Create Intent Only locally supported current device Actr Host creation;remote management must be awarded by another host management capability. |
+| FR-SVC-001 | A local Create MUST create a persistent Service ActorId. |
+| FR-SVC-002 | The Service MUST keep its ActorId across restarts, credential renewal and signaling switchover. |
+| FR-SVC-003 | The Service MUST pin a fixed Program Release digest. |
+| FR-SVC-004 | The Service MUST have a per-instance store independent of the ActrType. |
+| FR-SVC-005 | The Workspace MUST be held by a broker in the Service Host; the Front MUST NOT obtain its path/credential. |
+| FR-SVC-006 | v1's default Workspace write mode is exclusive writer. |
+| FR-SVC-007 | The creation transaction MUST be idempotent and crash-recoverable. |
+| FR-SVC-008 | Stop, Archive, Delete Service and Delete Workspace MUST be distinct operations. |
+| FR-SVC-009 | A third-party Service MUST default to a confined WASM Component workload. |
+| FR-SVC-010 | A Service may orchestrate other Actors within the Realm, but the Front binds only to the Service. |
+| FR-SVC-011 | A v1 version upgrade MUST go through a new Actor plus an explicit migration. |
+| FR-SVC-012 | Once a Service is purged, its ActorId MUST NOT be reused. |
+| FR-SVC-013 | A Workspace MUST separately declare its requirement, provisioning, access, and allowed Workspace Providers (`providers`). |
+| FR-SVC-014 | Moving to trash MUST preserve identity and instance data and remain recoverable; purging MUST revoke identity and be unrecoverable. |
+| FR-SVC-015 | Lifecycle, reachability, health, placement and attachment state MUST be recorded as separate fields. |
+| FR-SVC-016 | v1 only creates a new instance on the current device's supported local Actr Host; remote management MUST require a separate management capability granted by that host. |
 
-### 1.6 RealmIdentities and networks
+### 1.6 Realm, identity and network
 
-| ID | Requirements |
+| ID | Requirement |
 |---|---|
-| FR-NET-001 | Actrium must embed a signaling client and local Realm support, and must not hard-code a single global server. |
-| FR-NET-002 | A domain's Realm signing keys (the `realm_signing_keys` member of the authority descriptor, defined in Actr Authority Discovery §4.4) must be fetched over HTTPS; a Realm Profile must be signed by a trusted Realm signing key, and its validity does not depend on where it was fetched from. |
-| FR-NET-003 | One. Realm There must be more than one assignment signaling/TURN endpoint. |
-| FR-NET-004 | In v1 the Front and the Primary Service must be in the same Realm, i.e. the Realm of the same application instance; type discovery only happens within that Realm. |
-| FR-NET-005 | Actor credential We have to tie it down. ActorId, Actor key, ActorType, Realm and the duration. |
-| FR-NET-006 | Service identity It's got to be supported by the long-term. key reclaim Same ActorId. |
-| FR-NET-007 | signaling credential No longer to be put in URL query. |
-| FR-NET-008 | TURN Short term, limited audience, Rotation credential. |
-| FR-NET-009 | Actr Realm with TURN auth realm Must use different types/Named. |
-| FR-NET-010 | Endpoints may use non-standard ports but must come from a trusted Realm Profile or Publisher Profile. |
-| FR-NET-011 | Service offline It must be distinguishable and not degenerate to the same type of discovery. |
-| FR-NET-012 | v1 Multiple signaling endpoint It's the same thing. Realm Control side. failover, do not support hidden cross-control federation. |
-| FR-NET-013 | A local Realm ActorId must use the local pseudo-domain `<installation-id>.actr.alt` and must not be copied as a cross-device portable link. |
-| FR-NET-014 | Service I can't just do it. Front Self-reported. ActorType, Actr Host Version or digest High-risk delegation of authority; independence must be validated when required attestation. |
-| FR-NET-015 | Realm domain bootstrap (`https://<domain>/.well-known/actr`) must always use HTTPS 443, and rollback is prevented by the Realm signing key rotation chain plus the Realm Profile sequence number (Realm Profiles do not expire). |
-| FR-NET-016 | Actrium must provide flows for trusting a domain, joining an instance Realm by Realm invitation, re-authentication, client revocation, leaving and handling Realm signing key changes. |
-| FR-NET-017 | A Create Intent must create a new Realm under the chosen domain; `label` is unique within the domain, immutable after creation and never reused after retirement. |
-| FR-NET-018 | When a Service is upgraded to a new Program Release, the new Service Actor must be created in the same Realm; migrating to another Realm must produce a new ActorId. |
-| FR-NET-019 | When a Realm Profile cannot be fetched, fails verification or is retired, Actrium must not talk to that Realm through any Realm Provider other than the Realm Profile's (including the services in the authority descriptor). |
-| FR-NET-020 | The Realm domain targeted by Create must already be trusted, or first trust must be completed on the Create confirmation page; no domain, no Realm (except local Realms); creation must be authorized by the Realm signing key holder of that Realm domain : when the Realm domain equals or is under the Realm Provider ID, that Realm Provider authenticates the user with a Realm Provider account and the confirmation page shows it as the trust root; for any other Realm domain, the holder's signing service signs an Actr management envelope and the page shows the Realm domain as the trust root. |
+| FR-NET-001 | Actrium MUST embed a signaling client and support the local Realm, and MUST NOT hard-code a single global server. |
+| FR-NET-002 | A domain's Realm signing key (the `realm_signing_keys` member of its authority descriptor, already defined in Actr Authority Discovery §4.4) MUST be fetched over HTTPS; the Realm Profile MUST be signed by a trusted Realm signing key, and its validity does not depend on where it was fetched from. |
+| FR-NET-003 | A Realm MUST be able to delegate multiple signaling/TURN endpoints. |
+| FR-NET-004 | In v1 the Front and the Service MUST be in the same Realm, i.e. the same application instance's Realm; type discovery only happens within that Realm. |
+| FR-NET-005 | An Actor credential MUST be bound to the ActorId, the Actor key, the Actor type, the Realm and its validity period. |
+| FR-NET-006 | Service identity MUST support reclaiming the same ActorId with the long-term key. |
+| FR-NET-007 | A signaling credential MUST NOT be placed in a long-lived URL query. |
+| FR-NET-008 | TURN MUST use a short-lived, audience-restricted, rotatable credential. |
+| FR-NET-009 | The Actr Realm and the TURN auth realm MUST use different types/naming. |
+| FR-NET-010 | An endpoint MAY use a non-standard port, but it MUST come from a trusted Realm Profile or Publisher Profile. |
+| FR-NET-011 | Service offline MUST be a distinguishable state; it must not degrade into the same-type discovery path. |
+| FR-NET-012 | In v1, multiple signaling endpoints may only serve as failover within the same Realm's control plane; implicit cross-control-plane federation is not supported. |
+| FR-NET-013 | A local Realm's ActorId MUST use the local pseudo-domain `<installation-id>.actr.alt`, which is forbidden to be copied as a cross-device link. |
+| FR-NET-015 | A Realm domain's bootstrap (`https://<domain>/.well-known/actr`) MUST be pinned to HTTPS 443, and rollback MUST be prevented by the Realm signing key rotation chain plus the Realm Profile's sequence number (a Realm Profile does not expire). |
+| FR-NET-016 | Actrium MUST provide flows for trusting a domain, joining an instance's Realm via a Realm invitation, re-authentication, client revocation, leaving, and handling Realm signing key changes. |
+| FR-NET-017 | Creating an instance MUST create a new Realm under the chosen domain; the RealmId is unique within the domain, immutable after creation, and never reused after retirement. |
+| FR-NET-018 | When a Service is upgraded to a new Program Release, the Realm MUST publish a Realm Profile whose `package` points to the new package, and the new Service MUST be created in the same Realm; migrating to a different Realm MUST produce a new ActorId. |
+| FR-NET-019 | When the Realm Profile cannot be fetched, fails verification, or is retired, Actrium MUST NOT use any Realm Provider other than the one specified in the Realm Profile to communicate with that Realm (including services listed in the authority descriptor's `services`). |
+| FR-NET-020 | The Realm domain chosen for creating an instance MUST already be trusted, or first trust MUST be established on the creation confirmation page; no domain means no Realm is assigned (except the local Realm); creation MUST be authorized by the holder of that Realm domain's Realm signing key: when the Realm domain equals or belongs to the Realm Provider ID, that Realm Provider authenticates the user with a Realm Provider account and the confirmation page shows it as the trust root; for any other Realm domain, the holder's signing service signs an Actr management envelope and the confirmation page shows that Realm domain as the trust root. |
 
-### 1.7 PermissionSecurity and privacy
+### 1.7 Permissions, security and privacy
 
-| ID | Requirements |
+| ID | Requirement |
 |---|---|
-| FR-SEC-001 | effective capability Must be a declaration,Actr Host Support, User/Manager ' s delegation of authority, platform strategy intersection. |
-| FR-SEC-002 | Permissions grant We have to tie it down. Publisher/Program/Version or digest with scope. |
-| FR-SEC-003 | New or expanded high-risk competencies must be reconfirmed. |
-| FR-SEC-004 | ActorId Must be considered as an open address, not an access token. |
-| FR-SEC-005 | Actor keys, Realm client keys and Workspace Provider credentials must be kept in OS secure storage. |
-| FR-SEC-006 | Logs and crash report No record. secretOperations payload Or complete Workspace Path. |
-| FR-SEC-007 | package/Realm/Network URL Must be implemented SSRF with redirect policy. |
-| FR-SEC-008 | Must support signed emergency blocklistOverdue and audit. |
-| FR-SEC-009 | Wastebin, isolation or clean-up Service No automatic deletions Workspace. |
-| FR-SEC-010 | Telemetry must be closed by default; the user or administrator must minimize sensitive markings after they are enabled. |
-| FR-SEC-011 | Undo grant It must be terminated immediately. capability handleand terminates or reduces the power of active sessions. |
-| FR-SEC-012 | Service Invitations must be one-time, expired, revocable and inapplicable bearer secret Entry instance URI. |
-| FR-SEC-013 | Application permissions must support at least owner/editor/viewer roles and keep Realm membership separate from instance authorization: membership only decides whether one may enter the instance's network (the prerequisite for obtaining an Actor credential, connecting to signaling and the Attach handshake), while roles and permissions inside the instance are still decided by application permissions and session authorization. |
-| FR-SEC-014 | Apply colours must lifecycle, reachability, health and enforcement field. |
-| FR-SEC-015 | Application maps must be non-existent and effectively dependent on the connectivity weight and include all of them `Transfer(ActorId)` Members. |
-| FR-SEC-016 | The passage is valid and `Ready` , the colour must be displayed to take the weakest of all nodes. |
-| FR-SEC-017 | The top floor is green only. / Yellow / Red; no colours to be displayed when cut face is not ready; unknowns not to be greened. |
-| FR-SEC-018 | The person assessed cannot sign out for final `ActorAssurance`;a valid declaration by Actr Host Closed, conclusions issued by the certifying officer. |
-| FR-SEC-019 | `ActorAssurance` You have to sign and tie. `ActorId + ActorStateDigest`The evidence fingerprints, strategies, rules and validity period. |
-| FR-SEC-020 | New Actor The side must be on the other side `ACTIVE` And for the time being AA Only after acceptance can applied data be received. |
-| FR-SEC-021 | package, Actr Host Evidence keys,credential, CapabilityThe strategy or conclusion must be communicated to the weakest and synchronized with the implementation point. |
-| FR-SEC-022 | After the invalid dependency, Actor I'm not going to go to the next one. `structureDigest`. |
-| FR-SEC-023 | Third parties in-process NativeCdylib No way. `CONTROLLED`;no declaration, signature or static scanning may be used to upgrade. |
-| FR-SEC-024 | Attach We have to negotiate strategies.nonceCurrent `ActorStateDigest` with `ApplicationStateDigest`, can't rely on GraphRoot/epoch. |
-| FR-SEC-025 | Complete Actor Figure must be minimally disclosed and sent by default signalingNormal peer Or telemetry. |
-| FR-SEC-026 | Access to protected data opaque HTTPS I have to be right. Actor Clear delegation of authority;TLS It cannot prove its internal privacy. |
-| FR-SEC-027 | Every one of them protected Actor The call must be checked with data generation permission according to current status. |
-| FR-SEC-028 | WASM Only in declarations,importsand potential for/Only when the export is made mandatory. `CONTROLLED`. |
-| FR-SEC-029 | NativeCapsule Independent process only completed before third-party code execution OS sandbox♪ Close the original exit and open it only ♪ brokered IPC ♪ And then you can be rated ♪ `CONTROLLED`. |
-| FR-SEC-030 | The three colors must be kept inside. identity, artifact provenance, workload confinement, compute confidentiality, channel security, storage protection, egress closure and output control Wait for the multidimensional facts. |
-| FR-SEC-031 | Every network Actor edge (a) Must have two-way authentication, confidentiality, integrity, forward confidentiality and re-allocation;signaling, TURN & Normal relay Not held payload key. |
-| FR-SEC-032 | Actor Secure Channel The handshake must be tied to both ends. ActorIdCurrent `ActorStateDigest`, runtime, credentialTemporary keyObjectives Service, policy, attestation result, nonce and role, and two-way authentication transcript. |
-| FR-SEC-033 | transport TLS/DTLS/QUIC Success cannot be generated alone channel security pass;must be completed Actor Identity, examples of operations and session key Tie. |
-| FR-SEC-034 | Workspace, snapshot, backup, cache, index And the temporary documents must be pressed. data class Implementation envelope encryption;ActorId Do not act as a key. |
-| FR-SEC-035 | Data Policy Must be declared by data type and operation required assurance dimensions;n required The dimensions must not make public data unconditional. unknown. |
-| FR-SEC-036 | Remote certificate must be distinguished Attester, Verifier with Relying Party;Evidence/self-assertion It cannot be directly delegated. |
-| FR-SEC-037 | Attestation We have to tie it down. fresh nonce, Actor/runtime, workload/package digest, policy, audience and current ephemeral channel/decryption key. |
-| FR-SEC-038 | policy Request confidential compute I'm not sure if I'm going to be able to do this.private/secret DEK Only appraisal Enclosed to Attestation Overwrite ephemeral key. |
-| FR-SEC-039 | Confidential Computing Only the matching. compute confidentiality claimsNo substitute WASM/Native confinement, egress closure or output control. |
-| FR-SEC-040 | Use GPU/NPU It's... confidential workload It must be combined. CPU TEE, guest, runtime, driver, IOMMU/device assignment, device firmware, CC mode, link and device memory. |
-| FR-SEC-041 | Any visible and explicit accelerator The link is missing. Evidence I'm not sure if I'm going to be able to do this.compute confidentiality I must. indeterminate/unknown. |
-| FR-SEC-042 | Vendors Evidence Required to be signed, formatted, avoidable Verifier adapter Map to canonical claims; a hardware vendor's model name or marketing claim shall not be directly mapped pass. |
-| FR-SEC-043 | Evidence, Attestation Result, Reference Value, Endorsement or TCB Status due/New sensitive data and data must be stopped when they are withdrawn key release, and trigger re-attestation/rekey. |
-| FR-SEC-044 | High-sensitivity output crossing data class It must be visible. declassification/output policy;legal Actor response You can't be a bypass. egress closure The hidden exit. |
-| FR-SEC-045 | Green must bind the current `ApplicationStateDigest`(`structureDigest` + Principal + Merkle Roots) and `Ready`;not to be given Publisher or Program General green marker. |
-| FR-SEC-046 | Program Privacy Contract It's a static declaration. Actor roles/types/profiles, cardinality, edges, data classes, capabilities, terminals, audit sinks and assurance requirements. |
-| FR-SEC-047 | Actr Host Validity available capability It must be. ContractUsers/Organizations policy, Host policy and instance grant "of the people of the country; no capacity to acquire without declaration handle. |
-| FR-SEC-048 | Actual Actor/runtime The figure must be Contract graph grammar examples; all mutation It has to be formed first. candidate graph, the approved data chart cannot be directly altered. |
-| FR-SEC-049 | The initial chart must release protected data or DEK Identities, evidence, strategy and `ApplicationAssurance` Assessment. |
-| FR-SEC-050 | Cannot meet the base profile It's... optional The function must be separated into separate functions. feature profile/capability;no contamination of certified base closed packages after use. |
-| FR-SEC-051 | Lettered Verifier You can issue internal closed sub-maps. scope, policy, evidence rootand cancellation of information Certified Privacy Domain aggregate;upstreamable policy As a single node. |
-| FR-SEC-052 | Actor/Service It's... self-signed privacy declaration No formation. Assured Actor Edge;Verifier trust, certificate scope, endpoint, session and data class Must be all matched. |
-| FR-SEC-053 | All audit logs must be Contract In-Focus audit sinkand declare fields,payload, data class, retention, operator visibility, encryption and export rules. |
-| FR-SEC-054 | `ActorStateDigest` Change must take place locally and abolish old power; those who do not depend can `LocalContinue`, but not green; control side shall not be bound by operational data. |
-| FR-SEC-055 | Colours are not weakened and can be restored automatically when the strategy allows; still required `Ready` It's just green. |
-| FR-SEC-056 | Weak colours must be kept in the process and the reasons for them must be shown, and only when the risk is accepted can the work continue; the risk is accepted without changing the colour. |
-| FR-SEC-057 | Risk acceptance cannot raise the missing certificate to green; the platform ' s hard failure and the ineffective channel cannot be covered by the user. |
-| FR-SEC-058 | The figure remains unchanged but the evidence expires, the person certifying it / TCB / The same is true for the withdrawal of evidence, for the change of strategy or state fingerprints. |
-| FR-SEC-059 | GPU/NPU Attestation It's not to be interpreted as LLM Server No log; only measured log configuration, closed egress/audit capabilities Or credible. Certified Privacy Domain retention claim The blog is a tool for assessing the blog. |
-| FR-SEC-060 | `ActorState.revision` It has to be added and entered by the state authority. `ActorStateDigest`;results rolling cannot reproduce old root, old Capability / The conclusion must not be restored to effect by rollback. |
-| FR-SEC-061 | - I can show you. Actr Endpoint of identity must be pressed Actor Target assessment, not to be declared HTTPS/Domain names round and round Principal Rating; maintaining the export when the target category is not determinable `UNKNOWN`; the authorized interface for the trust pool must be "data exits" |
-| FR-SEC-062 | The local clocks used by the executing party and the rating party for the period, the evidence and the validity of the certificate are not retrievable. |
-| FR-SEC-063 | `EncGraph` The identifier must be set in a restricted area. ASCII Character set;`ApplicationStateDigest` The leaves must be pressed. `ActorId` Sort and Each `ActorId` Just a leaf. |
+| FR-SEC-001 | The effective capability MUST be the intersection of the declaration, what the Actr Host supports, user/administrator authorization, and platform policy. |
+| FR-SEC-002 | A permission grant MUST be bound to a Publisher/Program/version or digest and a scope. |
+| FR-SEC-003 | Adding or expanding a high-risk permission MUST require reconfirmation. |
+| FR-SEC-004 | An ActorId MUST be treated as a public address, not an access token. |
+| FR-SEC-005 | The Actor key, the Realm client key and Workspace Provider credentials MUST go into OS secure storage. |
+| FR-SEC-006 | Logs and crash reports MUST NOT record secrets, business payloads or a full Workspace path. |
+| FR-SEC-007 | Package/Realm/network URLs MUST implement an SSRF and redirect policy. |
+| FR-SEC-008 | A signed emergency blocklist, expiry and audit MUST be supported. |
+| FR-SEC-009 | Trashing, quarantining or purging a Service MUST NOT automatically delete the Workspace. |
+| FR-SEC-010 | Telemetry MUST default to off; once a user or administrator enables it, sensitive identifiers MUST still be minimized. |
+| FR-SEC-011 | Revoking a grant MUST immediately invalidate the corresponding capability handle, and terminate or downgrade active sessions. |
+| FR-SEC-012 | A Service invitation MUST be one-time, expirable and revocable, and MUST NOT enter an instance's URI as a bearer secret. |
+| FR-SEC-013 | Application permissions MUST support at least owner/editor/viewer roles, and MUST keep Realm membership separate from instance authorization: membership only decides whether one can enter that instance's network (a prerequisite for obtaining an Actor credential, connecting to signaling and doing the Attach handshake); roles and permissions inside the instance are still decided by application permissions and session authorization. |
+| FR-SEC-014 | The application color MUST be expressed as separate fields for lifecycle, reachability, health and enforcement. |
+| FR-SEC-015 | The application graph MUST be a rootless connected component of effective dependencies and MUST include every effective `Transfer(ActorId)` member. |
+| FR-SEC-016 | When the channel is valid and `Ready`, the displayed color MUST take the weakest of all node conclusions. |
+| FR-SEC-017 | The top level distinguishes only green / yellow / red; no color MUST be displayed while a facet is not ready; unknown MUST NOT be treated as green. |
+| FR-SEC-018 | The party being assessed MUST NOT self-sign the final `ActorAssurance`; the effective declaration is closed by the Actr Host, and the conclusion is issued by a verifier. |
+| FR-SEC-019 | `ActorAssurance` MUST be signed and bound to the `ActorId + ActorStateDigest`, the evidence fingerprint, the policy, the rules and its validity period. |
+| FR-SEC-020 | A new Actor edge may only receive application data after the peer is `ACTIVE` and its current AA is acceptable. |
+| FR-SEC-021 | Revocation of a package, an Actr Host evidence key, a credential, an Actor Grant, a policy, or a conclusion MUST propagate to the weakest item and be synchronized to enforcement points. |
+| FR-SEC-022 | Only after an ineffective dependency ends does that Actor stop entering the next `structureDigest`. |
+| FR-SEC-023 | A third-party in-process NativeCdylib MUST NOT be `CONTROLLED`; it MUST NOT be upgraded through a declaration, a signature, or static scanning alone. |
+| FR-SEC-024 | Attach MUST negotiate the policy, a nonce, the current `ActorStateDigest` and `ApplicationStateDigest`; it MUST NOT rely on GraphRoot/epoch. |
+| FR-SEC-025 | The full Actor graph MUST be minimally disclosed and MUST NOT be sent by default to signaling, an ordinary peer, or telemetry. |
+| FR-SEC-026 | An opaque HTTPS endpoint that can reach protected data MUST be explicitly authorized as a non-Actor sink; TLS by itself does not prove its internal privacy. |
+| FR-SEC-027 | Every protected Actor call MUST be checked against the current state and data generation for permission. |
+| FR-SEC-028 | WASM can only be `CONTROLLED` when its declaration, imports, effective capabilities and possible/observed egress form an enforceable closure. |
+| FR-SEC-029 | A NativeCapsule can only be rated `CONTROLLED` once it has entered an independent-process OS sandbox before third-party code executes, closed off its original egress, and opened only brokered IPC. |
+| FR-SEC-030 | The three colors MUST internally retain multidimensional facts, including identity, artifact provenance, workload confinement, compute confidentiality, channel security, storage protection, egress closure and output control. |
+| FR-SEC-031 | Every network Actor edge MUST have mutual authentication, confidentiality, integrity, forward secrecy and replay protection; signaling, TURN and ordinary relays MUST NOT hold the payload key. |
+| FR-SEC-032 | An Actor Secure Channel handshake MUST bind both ends' ActorId, current `ActorStateDigest`, runtime, credential, ephemeral key, target Service, policy, attestation result, nonce and role, and mutually authenticate the joint transcript. |
+| FR-SEC-033 | Transport TLS/DTLS/QUIC succeeding alone cannot produce a channel security pass; Actor identity, the running instance and the session key MUST be bound. |
+| FR-SEC-034 | Workspace, snapshot, backup, cache, index and temporary files MUST implement envelope encryption keyed by data class; the ActorId MUST NOT act as the key. |
+| FR-SEC-035 | A Data Policy MUST declare required assurance dimensions by data category and operation; a non-required dimension MUST NOT make public data unconditionally unknown. |
+| FR-SEC-036 | Remote attestation MUST distinguish the Attester, the Verifier and the Relying Party; Evidence/self-assertion MUST NOT directly become an authorization decision. |
+| FR-SEC-037 | Attestation MUST be bound to a fresh nonce, the Actor/runtime, the workload/package digest, the policy, the audience and the current ephemeral channel/decryption key. |
+| FR-SEC-038 | When policy requires confidential compute, a private/secret DEK may only be sealed to the ephemeral key covered by attestation after appraisal passes. |
+| FR-SEC-039 | Confidential Computing can only satisfy the corresponding compute confidentiality claims; it MUST NOT substitute for WASM/Native confinement, egress closure or output control. |
+| FR-SEC-040 | A confidential workload using a GPU/NPU MUST be jointly assessed on the CPU TEE, the guest, the runtime, the driver, IOMMU/device assignment, device firmware, the CC mode, the link, and device memory. |
+| FR-SEC-041 | When any accelerator link that can see plaintext lacks valid evidence, compute confidentiality MUST be indeterminate/unknown. |
+| FR-SEC-042 | A vendor's native evidence MUST be mapped to canonical claims through a signed, versioned, revocable verifier adapter; a vendor's model name or marketing claim MUST NOT be mapped directly to a pass. |
+| FR-SEC-043 | When Evidence, an Attestation Result, a Reference Value, an Endorsement, or a TCB status expires or is revoked, new sensitive-data and key release MUST stop, and re-attestation/rekeying MUST be triggered. |
+| FR-SEC-044 | Highly sensitive output crossing a data class MUST go through an explicit declassification/output policy; a legitimate Actor response MUST NOT become a covert channel that bypasses egress closure. |
+| FR-SEC-045 | Green MUST be bound to the current `ApplicationStateDigest` (`structureDigest` + Principal + Merkle root) and `Ready`; a blanket green label MUST NOT be given to a Publisher or a Program. |
+| FR-SEC-046 | The Program Privacy Contract MUST statically declare the allowed Actor roles/types/profiles, cardinality, edges, data classes, capabilities, terminals, audit sinks and assurance requirements. |
+| FR-SEC-047 | The effective capabilities the Actr Host may grant MUST be the intersection of the Contract, user/organization policy, host policy and the instance grant; an undeclared capability MUST NOT obtain a handle. |
+| FR-SEC-048 | The actual Actor/runtime graph MUST be an instance of the Contract's graph grammar; every mutation MUST first form a candidate graph and MUST NOT directly change an already-approved data graph. |
+| FR-SEC-049 | The initial graph MUST complete identity, evidence, policy and `ApplicationAssurance` evaluation before releasing protected data or a DEK. |
+| FR-SEC-050 | An optional feature that cannot satisfy the base profile MUST be split into its own feature profile/capability; disabling it MUST NOT contaminate the certified base closure. |
+| FR-SEC-051 | A trusted Verifier may issue a Certified Privacy Domain aggregate for an internally closed subgraph, with scope, policy, an evidence root, a validity period and revocation information; upstream MAY treat it as a single node per policy. |
+| FR-SEC-052 | An Actor/Service's self-signed privacy declaration MUST NOT form an Assured Actor Edge; the Verifier's trust, the certificate's scope, the endpoint, the session and the data class MUST all match. |
+| FR-SEC-053 | Every audit log MUST be an explicit audit sink in the Contract, and MUST declare its fields, payload, data class, retention, operator visibility, encryption and export rules. |
+| FR-SEC-054 | A change in `ActorStateDigest` MUST locally suspend and revoke old power; a non-dependent member MAY `LocalContinue`, but MUST NOT display application green; the control plane MUST NOT carry business data. |
+| FR-SEC-055 | When the color has not weakened and policy allows, it MAY auto-recover; it still needs to be `Ready` to display green. |
+| FR-SEC-056 | When the color weakens, blocking MUST be maintained and the reason shown; work may continue only after risk acceptance; risk acceptance does not change the color. |
+| FR-SEC-057 | Risk acceptance MUST NOT raise a missing proof to green; a platform hard failure and an invalid channel MUST NOT be overridden by the user. |
+| FR-SEC-058 | Re-evaluation is also required when the graph structure is unchanged but evidence expires, a verifier/TCB/credential is revoked, or the policy or state fingerprint changes. |
+| FR-SEC-059 | GPU/NPU attestation MUST NOT be interpreted as an LLM server having no logs; only a measured logging configuration, closed egress/audit capabilities, or a trusted Certified Privacy Domain retention claim can assess the logging gap. |
+| FR-SEC-060 | `ActorState.revision` MUST be monotonically incremented by the state authority and enter the `ActorStateDigest`; content rollback MUST NOT reproduce an old state root, and an old Actor Grant/conclusion MUST NOT become valid again through rollback. |
+| FR-SEC-061 | An endpoint that can present Actr identity MUST be assessed against the Actor target; it MUST NOT be declared exempt from cross-Principal scoring as an HTTPS/domain-name sink; when the target category cannot be determined, that egress stays `UNKNOWN`; the authorization interface for a trust sink MUST present as "data leaves the assurance boundary." |
+| FR-SEC-062 | The local clocks used by both the enforcer and the assessor to check deadlines, evidence and credential validity MUST NOT be set back. |
+| FR-SEC-063 | `EncGraph` identifiers MUST fall within a restricted ASCII character set; `ApplicationStateDigest` leaves MUST be sorted by `ActorId`, with exactly one leaf per `ActorId`. |
 
-## 2. Unfunctional requirements
+## 2. Non-functional requirements
 
 ### 2.1 Performance
 
-The following budget does not include the first package Download and user stopover:
+The following budgets exclude the first package download and user dwell time:
 
-| ID | Indicators | v1 Objective |
+| ID | Metric | v1 target |
 |---|---|---|
-| NFR-PERF-001 | Cache Local Service Attach To Interactable | p50 ≤ 800 ms, p95 ≤ 2 s |
-| NFR-PERF-002 | Cached Far Service Attach | Networks when available p50 ≤ 2 s, p95 ≤ 5 s |
+| NFR-PERF-001 | Cached local Service Attach to interactive | p50 ≤ 800 ms, p95 ≤ 2 s |
+| NFR-PERF-002 | Cached remote Service Attach | p50 ≤ 2 s, p95 ≤ 5 s when the network is available |
 | NFR-PERF-003 | Front Guest cold load | p95 ≤ 1.5 s |
-| NFR-PERF-004 | Enter to Original UI Update | p95 ≤ 100 ms, without remote RPC |
-| NFR-PERF-005 | Backstage. Tab pause | ≤ 250 ms |
-| NFR-PERF-006 | Service Reboot. | p95 ≤ 3 s |
+| NFR-PERF-004 | Input to native UI update | p95 ≤ 100 ms, excluding remote RPC |
+| NFR-PERF-005 | Backgrounded Tab pause | ≤ 250 ms |
+| NFR-PERF-006 | Service local restart recovery | p95 ≤ 3 s |
 
 ### 2.2 Resources
 
-Default configurable budget:
+Default, configurable budgets:
 
 | ID | Item | Default |
 |---|---|---|
-| NFR-RES-001 | Keel Guest heap | desktop 64 MiB;mobile 48 MiB |
-| NFR-RES-002 | Guest Single JS turn | 100 ms;the start-up phase can be given separately 1 s Total budget |
+| NFR-RES-001 | Keel Guest heap | desktop 64 MiB; mobile 48 MiB |
+| NFR-RES-002 | A single Guest JS turn | 100 ms; the startup phase may be given a separate 1 s total budget |
 | NFR-RES-003 | Guest render nodes | 10,000 |
-| NFR-RES-004 | Single batch render ops | 5,000 |
-| NFR-RES-005 | Front RPC Side-by-side | 32 |
-| NFR-RES-006 | Default package Download Size | 200 MiB hard cap, can be reduced by enterprise strategy |
-| NFR-RES-007 | archive Number of documents | 10,000 |
-| NFR-RES-008 | archive Total depressure | 500 MiB |
-| NFR-RES-009 | Guest Movement control | Every one. Guest Use Actr Host Disable from the special execution thread/workerNo, no, no. Shell/UI Main |
+| NFR-RES-004 | Render ops per batch | 5,000 |
+| NFR-RES-005 | Front RPC concurrency | 32 |
+| NFR-RES-006 | Default package download size | 200 MiB hard cap, lowerable by enterprise policy |
+| NFR-RES-007 | Archive file count | 10,000 |
+| NFR-RES-008 | Archive total extracted size | 500 MiB |
+| NFR-RES-009 | Guest scheduling | each Guest uses an Actr Host-abortable dedicated execution thread/worker and does not occupy the Shell/UI main thread |
 
-Any increase must be subject to the Platform ' s cap and authority policy.
+Any increase MUST still be bounded by the platform's cap and permission policy.
 
 ### 2.3 Reliability
 
-| ID | Requirements |
+| ID | Requirement |
 |---|---|
-| NFR-REL-001 | No creation can result in two after the collapse of any phase Service. |
-| NFR-REL-002 | Service Restart 10,000 In the secondary identity recovery test ActorId Change to 0. |
-| NFR-REL-003 | Attach The number of times a substitute instance in the failed path is created 0. |
-| NFR-REL-004 | package cache Writing must be atoms, and old versions can still be verified after power cuts. |
-| NFR-REL-005 | Front crash Don't damage it. Service store or Workspace. |
-| NFR-REL-006 | Failing over between signaling endpoints of the same Realm Provider must not change the ActorId. |
-| NFR-REL-007 | lease Network vibrating tests should not produce two that work at the same time. exclusive attachment. |
-| NFR-REL-008 | beta It's... crash-free app session It has to be done. 99.5%, stable It has to be done. 99.9%. |
+| NFR-REL-001 | A crash at any stage of the creation transaction, followed by recovery, MUST NOT produce two Services. |
+| NFR-REL-002 | Across 10,000 Service restart identity-recovery tests, the ActorId change count is 0. |
+| NFR-REL-003 | The count of substitute instances created on an Attach failure path is 0. |
+| NFR-REL-004 | A package cache write MUST be atomic; the old version must still verify after a power loss. |
+| NFR-REL-005 | A Front crash MUST NOT corrupt the Service store or the Workspace. |
+| NFR-REL-006 | A signaling endpoint failover within the same Realm Provider MUST NOT change the ActorId. |
+| NFR-REL-007 | Lease network-jitter tests MUST NOT produce two simultaneously valid exclusive attachments. |
+| NFR-REL-008 | Beta's crash-free app session rate MUST reach 99.5%, and stable's MUST reach 99.9%. |
 
-### 2.4 Clear.
+### 2.4 Security
 
-| ID | Requirements |
+| ID | Requirement |
 |---|---|
-| NFR-SEC-001 | All parser Must be included in the ongoing fuzz. |
-| NFR-SEC-002 | Third parties package/Guest/Service Don't go around. capability allowlist. |
-| NFR-SEC-003 | secret scanner The test is not allowed. URI, logs,crash fixture Found real in it. credential. |
-| NFR-SEC-004 | The high-risk security border is open. beta Independent penetration tests completed. |
-| NFR-SEC-005 | Security updates and emergency blocklist Could not close temporary folder: %s fail closed. |
-| NFR-SEC-006 | The release build must be generated SBOM And sign. provenance. |
-| NFR-SEC-007 | When the conclusions of the nodes become weaker, the associated protected effects must lapse simultaneously before the next implementation.Shell Update p95 ≤ 250 ms. |
-| NFR-SEC-008 | 1,024 Actor, 4,096 edge The smallest increase within is in the reference desktop Go, go, go! p95 ≤ 100 ms;excess must unknown. |
-| NFR-SEC-009 | Diagrams,epoch Competition,Mark Expiry, reliance on revocation, undeclared export and Actr Host The cover-up simulation must be included. property/fault-injection tests. |
-| NFR-SEC-010 | Actor channel, Attestation Result and Evidence Bundle Must have a cross-achievement test vector, reset/Wrong tie./Downgrade negative test. |
-| NFR-SEC-011 | Every one. production Verifier profile It has to be recorded. trust root, covered, uncovered, lowest TCB, freshness* The present document was not edited before being sent to the United Nations translation services. conformance tests. |
-| NFR-SEC-012 | Verifier/Key Broker Not to be used indefinitely when temporarily unavailable Result;grace window I have to. data policy Clear limits. |
-| NFR-SEC-013 | graph mutation Request, old epoch lease Freezing and candidate edge Create must be linear; not present in the simultaneous test mutation Later, before the freeze. payload window. |
-| NFR-SEC-014 | downgrade partial orderIt's not comparable. vector, auto-recovery, user rejection and hard-floor Non-coverable must be included property/fault-injection tests. |
+| NFR-SEC-001 | All parsers MUST be under continuous fuzzing. |
+| NFR-SEC-002 | A third-party package/Guest/Service MUST NOT bypass the capability allowlist. |
+| NFR-SEC-003 | A secret-scanner test MUST NOT find a real credential in the URI, logs, or crash fixtures. |
+| NFR-SEC-004 | High-risk security boundaries complete an independent penetration test before public beta. |
+| NFR-SEC-005 | Security updates and the emergency blocklist fail closed when verification fails. |
+| NFR-SEC-006 | A release build MUST generate an SBOM and signed provenance. |
+| NFR-SEC-007 | After a node's conclusion weakens, the associated protected effects MUST be invalidated in sync before the next execution, with Shell update p95 ≤ 250 ms. |
+| NFR-SEC-008 | Incremental weakest-item aggregation within 1,024 Actors and 4,096 edges completes at p95 ≤ 100 ms on a reference desktop; beyond that it MUST be unknown. |
+| NFR-SEC-009 | Graph cycles, epoch races, Mark expiry, dependency revocation, undeclared egress and Actr Host concealment simulations MUST be covered by property/fault-injection tests. |
+| NFR-SEC-010 | The Actor channel, the Attestation Result and the Evidence Bundle MUST have cross-implementation test vectors and replay/mis-binding/downgrade negative tests. |
+| NFR-SEC-011 | Every production Verifier profile MUST record its trust root, the attack surface it covers, what it does not cover, the minimum TCB, freshness, the revocation source and conformance tests. |
+| NFR-SEC-012 | When the Verifier/Key Broker is temporarily unavailable, an expired Result MUST NOT be reused indefinitely; the grace window MUST be explicitly bounded by data policy. |
+| NFR-SEC-013 | A graph mutation request, freezing the old epoch's lease, and creating a candidate edge MUST be linearized; concurrency tests MUST NOT show a payload window after the mutation but before the freeze. |
+| NFR-SEC-014 | The downgrade partial order, incomparable vectors, auto-recovery, user rejection and the non-overridable hard floor MUST be covered by property/fault-injection tests. |
 
 ### 2.5 Accessibility and internationalization
 
-| ID | Requirements |
+| ID | Requirement |
 |---|---|
-| NFR-A11Y-001 | Shell and system page reached WCAG 2.2 AA Response to platform requirements. |
-| NFR-A11Y-002 | All security states have text/icon, not just by color. |
-| NFR-A11Y-003 | Keyboard, screen reader, dynamic font and high contrast support. |
-| NFR-I18N-001 | The Stable Error Code is separated from the Localized Texts case. |
-| NFR-I18N-002 | IDNA Domain names can be checked simultaneously Unicode with A-label. |
+| NFR-A11Y-001 | Shell and system pages meet WCAG 2.2 AA per platform requirements. |
+| NFR-A11Y-002 | Every security state has text/an icon, not color alone. |
+| NFR-A11Y-003 | Keyboard, screen reader, dynamic font and high-contrast support. |
+| NFR-I18N-001 | Stable error codes are separated from localized copy. |
+| NFR-I18N-002 | An IDNA domain can be checked in both Unicode and A-label form. |
 
-### 2.6 Maintenanceability
+### 2.6 Maintainability
 
-| ID | Requirements |
+| ID | Requirement |
 |---|---|
-| NFR-MNT-001 | URI, manifest, Realm Profile and session protocol Must be adapted. |
-| NFR-MNT-002 | The platforms share the same standardized and validated test vector. |
-| NFR-MNT-003 | Host capability and Safe Component schema Type to be generated from a single source/Test. |
-| NFR-MNT-004 | All the retrofitters must be regenerable. transition And stability. error code. |
+| NFR-MNT-001 | The URI, manifest, Realm Profile and session protocol MUST be versioned. |
+| NFR-MNT-002 | All platforms share the same normalization and validation test vectors. |
+| NFR-MNT-003 | Host capability and Safe Component schemas MUST generate types/tests from a single source. |
+| NFR-MNT-004 | Every state machine MUST have recoverable transitions and stable error codes. |
 
-## 3. End to End Receiving scene
+## 3. End-to-end acceptance scenarios
 
-### AC-001: First created
+### AC-001: First creation
 
-**Given** User not installed `notes.example/team-notes@1.4.2`<br>
-**When** Open None `service` URIand confirm the authority/Workspace<br>
-**Then** Actrium Authentication package, create only one Service♪ Getting a hold of yourself ♪ ActorIdRewriting URI, Attach Show Guest.
+**Given** a user selects the uninstalled `notes.example/team-notes@1.4.2` in the Program Catalog<br>
+**When** they create an instance and confirm permissions/Workspace<br>
+**Then** Actrium verifies the package, creates exactly one Realm and one Service, obtains a persistent ActorId, shows that instance's Realm link in the address bar, Attaches, and displays the Guest.
 
-### AC-002: Refresh without duplicate creation
+### AC-002: Refresh does not duplicate creation
 
-**Given** Create just finished<br>
-**When** User refreshs, crashes and backslides/Forward!<br>
-**Then** Service Inventory It's still just the old one. ActorId.
+**Given** creation has just completed<br>
+**When** the user repeatedly refreshes, recovers from a crash, and goes back/forward<br>
+**Then** the Service Inventory still shows only the original ActorId.
 
-### AC-003: Precise examples offline
+### AC-003: A specific instance is offline
 
-**Given** Attach URI Point offline Service<br>
-**When** Open URI<br>
-**Then** Local Inventory Known stopped Shows the start-up entrance at times; at remote end when no host status certificate is available offline/unreachable; neither creates the same type of example or calls the type of discovery.
+**Given** the Service that a Realm link points to is offline<br>
+**When** the link is opened<br>
+**Then** if the local Inventory knows it is stopped, a start entry point is shown; if there is no remote host-state proof, offline/unreachable is shown; neither path creates a same-type instance or invokes type discovery.
 
-### AC-004: URI type mismatch
+### AC-004: Service type mismatch
 
-**Given** the Actor type in the `service` Actor's credential differs from the URI coordinate<br>
+**Given** the Actor type in the peer Service's credential differs from the Actor type declared by the package the Realm Profile points to<br>
 **When** the Attach handshake runs<br>
-**Then** it fails with `URI_ACTOR_TYPE_MISMATCH` before any Guest executes, and no substitute instance is created.
+**Then** it fails with `SERVICE_ACTOR_TYPE_MISMATCH` before any Guest executes, and no substitute instance is created.
 
-### AC-005: Same version of the variant
+### AC-005: Same version, different package
 
-**Given** Locally Fixed digest A<br>
-**When** Publisher Same coordinate Back digest B<br>
-**Then** Here. `PACKAGE_EQUIVOCATION` Stop installation and running new bytes, keep A For audit.
+**Given** digest A is already pinned locally<br>
+**When** digest B appears for the same Program Release<br>
+**Then** `PACKAGE_EQUIVOCATION` blocks installing and running the new bytes, and A is retained for audit.
 
-### AC-006: Front Guest Exceeding authority
+### AC-006: Front Guest overreach
 
-**Given** Manifest Undeclared network<br>
-**When** Guest Try require Network modules, usage Image headers Or call `host:net`<br>
-**Then** All routes were denied and there were no confidential audit incidents.
+**Given** the manifest does not declare network access<br>
+**When** the Guest tries to require a network module, use Image headers, or call `host:net`<br>
+**Then** every path is rejected, and a secret-free audit event is produced.
 
-### AC-007: Guest - Cut!
+### AC-007: Guest hang
 
-**Given** Guest Execute Infinite Cycle<br>
-**When** More than turn timeout<br>
-**Then** Just... Keel Engine The government has been forced to stop.Service Other Tab Keep it available.
+**Given** the Guest runs an infinite loop<br>
+**When** the turn timeout is exceeded<br>
+**Then** only that Keel Engine is terminated; the Service and other Tabs stay available.
 
-### AC-008: Tab Close
+### AC-008: Tab close
 
-**Given** An active instance<br>
-**When** Close Tab<br>
-**Then** Front/session Destroyed,Service/Workspace/ActorId Reservations and from Inventory Reopen.
+**Given** a running instance<br>
+**When** the Tab is closed<br>
+**Then** the Front/session is destroyed; the Service/Workspace/ActorId are preserved and can be reopened from the Inventory.
 
-### AC-009: Actrium Restart
+### AC-009: Actrium restart
 
-**Given** Local Service Created<br>
-**When** Quit completely and restart Actrium<br>
-**Then** Service Use the same ActorIdrestoring;collection and history URI Still connected.
+**Given** a local Service has been created<br>
+**When** Actrium fully quits and restarts<br>
+**Then** the Service recovers with the same ActorId; Realm links in favorites and history still connect.
 
-### AC-010: Monarchy session
+### AC-010: Exclusive session
 
-**Given** Service Has been one Front Hold exclusive lease<br>
-**When** Second device Attach<br>
-**Then** Service Back occupied; a second cannot be established without authorization active attachment.
+**Given** a Service is already held under an exclusive lease by one Front<br>
+**When** a second device Attaches<br>
+**Then** the Service returns occupied; a second active attachment MUST NOT be established without authorization.
 
 ### AC-011: Signaling endpoint failover
 
-**Given** signaling A Fault,Realm Profile Statement signaling B<br>
-**When** Actor Reconnect<br>
-**Then** Use B and ActorId no change;no declaration endpoint Not to try.
+**Given** signaling A fails and the Realm Profile declares signaling B<br>
+**When** the Actor reconnects<br>
+**Then** B is used and the ActorId is unchanged; an undeclared endpoint is not tried.
 
 ### AC-012: TURN
 
-**Given** P2P Unattainable.<br>
-**When** Use TURN<br>
-**Then** a short-lived audience TURN credential issued by the Realm's Issuer is used, the UI shows relayed, and logs contain no password.
+**Given** P2P is unreachable<br>
+**When** TURN is used<br>
+**Then** a short-lived, audience-restricted TURN credential issued by that Realm's Issuer is used, the UI shows relayed, and logs contain no passwords.
 
-### AC-013: Workspace Conflict
+### AC-013: Workspace conflict
 
-**Given** Workspace Existing exclusive writer Service<br>
-**When** Create Second Writing Service<br>
-**Then** Unequivocal rejection or request for relocation before creation/Read-only, without silent writing.
+**Given** a Workspace already has an exclusive-writer Service<br>
+**When** a second writing Service is created<br>
+**Then** it is either explicitly rejected before creation or required to migrate/go read-only; no silent multi-writer state occurs.
 
-### AC-014: Trash and cleanup
+### AC-014: Trash and purge
 
-**Given** Service Tie External Workspace<br>
-**When** Users move to the wastebin before recovery<br>
-**Then** Service Use the same ActorId The government is not in a position to do so.Workspace content unchanged; user subsequently completely removed without choosing to delete Workspace I'm not sure if I'm going to be able to do this.Actor credential/key/Examples store The blogger says that the government is not in a position to do so.Workspace Still.
+**Given** a Service is bound to an external Workspace<br>
+**When** the user first moves it to trash and then restores it<br>
+**Then** the Service is restored with the same ActorId and the Workspace content is unchanged; when the user later purges it without choosing to delete the Workspace, the Actor credential/key/instance store are deleted and unrecoverable, while the Workspace is still retained.
 
-### AC-015: Upgrade Failed Rollback
+### AC-015: Upgrade failure rollback
 
-**Given** v1 Service and Workspace<br>
-**When** v2 Migration validation failed<br>
-**Then** v1 ActorId, Workspace lease And old Tab I'm not sure if I can get back to you.v2 Don't take over.
+**Given** a v1 Service and Workspace<br>
+**When** v2 migration validation fails<br>
+**Then** the v1 ActorId, Workspace lease and old Tab are recoverable, and v2 does not take over.
 
-### AC-016: transfer of domain name/New key
+### AC-016: Domain transfer/new key
 
-**Given** Installed version by old key Signature<br>
-**When** Publisher Profile New life without a rotation chain key<br>
-**Then** Old Fixed digestOffline run, new installation/Updates to show identity changes and requests confirmation.
+**Given** the installed version is signed by the old key<br>
+**When** the Publisher Profile shows a new key with no rotation chain<br>
+**Then** the old pinned digest can still run offline, and a new install/update shows an identity change and requires confirmation.
 
-### AC-017: Mobile platform suspend
+### AC-017: Mobile-platform suspend
 
-**Given** Local Service System paused in the mobile backstage<br>
-**When** Far-end or local FrontConnection<br>
-**Then** Show suspended/host offlineNo alternative example is reported and no new one is created.
+**Given** a local Service is suspended by the system in the mobile background<br>
+**When** a remote or local Front connects<br>
+**Then** suspended/host-offline is shown; it is not reported as nonexistent, and no substitute instance is created.
 
-### AC-018: Security aborted
+### AC-018: Security revocation
 
-**Given** digest Marked Critical block<br>
-**When** User Open Existing Examples<br>
-**Then** Guest/Service I'm not going to take it.Workspace Export and safety statements are still available.
+**Given** a digest is marked Critical block<br>
+**When** the user opens an existing instance<br>
+**Then** the Guest/Service does not load, while Workspace export and the security explanation remain available.
 
-### AC-019: Local Realm Link
+### AC-019: Local Realm link
 
-**Given** the Service ActorId uses another installation's local pseudo-domain `<installation-id>.actr.alt`<br>
-**When** Current device opens or tries sharing<br>
-**Then** the connection is rejected with `URI_LOCAL_REALM_FOREIGN` and portable share is disabled; it must not be interpreted as a Realm under some DNS domain.
+**Given** a Realm link uses another installation's local pseudo-domain `<installation-id>.actr.alt`<br>
+**When** the current device opens it or tries to share it<br>
+**Then** the connection is rejected with `URI_LOCAL_REALM_FOREIGN` and sharing is disabled; it must not be interpreted as a Realm under some DNS domain.
 
-### AC-020: Front Self-reported official Actr Host
+### AC-021: Realm Profile rollback
 
-**Given** Unsupervised client self-reported correct Front ActorType, Actr Host Version and package digestBut no. runtime attestation<br>
-**When** Service policy When the official running is required<br>
-**Then** Attach is rejected, and application permissions must not be granted automatically on the basis of these self-reported fields alone.
-
-### AC-021: Realm Profile Roll back
-
-**Given** The Realm signing key rotation chain is pinned locally and a Realm Profile with sequence 31 has been accepted<br>
+**Given** the Realm signing key rotation chain is pinned locally, and a Realm Profile with sequence 31 has been accepted<br>
 **When** the endpoint returns a still-valid Realm Profile with sequence 30, or a Realm Profile signed by a new key not authorized by the old Realm signing key<br>
-**Then** it is refused with a stable security error, and the Issuer/signaling endpoints are not switched.
+**Then** it is rejected with a stable security error, and the Issuer/signaling endpoints are not switched.
 
-### AC-022: Invitations are not URL Permissions
+### AC-022: An invitation is not a URL permission
 
-**Given** owner One-time issuance to members editor Invitations<br>
-**When** Reuse of invitation after acceptance by member or only the same example obtained by third party URI<br>
-**Then** replaying the invitation fails; the third party still has no application permissions; the instance URI contains no invitation secret.
+**Given** an owner issues a one-time editor invitation to a member<br>
+**When** the member reuses the invitation after accepting it, or a third party obtains only the same Realm link<br>
+**Then** replaying the invitation fails; the third party still has no application permission; the Realm link contains no invitation secret.
 
-### AC-023: Remote management of borders
+### AC-023: Remote management boundary
 
-**Given** Inventory Far end in Service Only granted AttachNot awarded host management<br>
-**When** User click to start, stop or clear<br>
-**Then** Actrium Shows that remote host authorization is required, that no successful forgery, no local substitution is required Service.
+**Given** a remote Service in the Inventory has only been granted Attach, not host management<br>
+**When** the user clicks start, stop or purge<br>
+**Then** Actrium shows that remote host authorization is required; it does not fake success or create a substitute Service locally.
 
-### AC-024: Necessary support Actor Lost.
+### AC-024: A necessary other Actor is compromised
 
-**Given** Front with Primary Service It's green, but it's a necessary supplement to the application data. Actor Packed Critical Undo<br>
-**When** Undo event reaches any of the Actr Host<br>
-**Then** The node is red, the weakest is red, and relevant Capability revoked; not "majority" Actor "Secret" continues to show green.
+**Given** the Front and Service are both currently green, but a necessary Actor in the Realm that holds application data has its package Critical-revoked<br>
+**When** the revocation event reaches any Actr Host<br>
+**Then** that node turns red, the application's weakest item turns red, and the related Actor Grant is revoked; green MUST NOT continue to be shown on the grounds that "most Actors are secure."
 
 ### AC-025: Unknown evidence is not safe
 
-**Given** Other Actor Both. `CONTROLLED`But a faraway end `ActorAssurance` Expired<br>
-**When** Application rating<br>
-**Then** Yellow as a whole or not available, not green; application data will not be entered by default Actor.
+**Given** every other Actor is `CONTROLLED`, but one remote `ActorAssurance` has expired<br>
+**When** the application is evaluated<br>
+**Then** the overall result is yellow or cannot be established, never green; application data by default no longer flows to that Actor.
 
-### AC-026: optional functional security isolation
+### AC-026: Optional-feature safety isolation
 
-**Given** Optional Index Actor And become `UNKNOWN`<br>
-**When** Actr Host Rejecting the side, withdrawing it. Capability, confirm that protected data are no longer in possession and exchange `structureDigest`<br>
-**Then** index functionality disabled; green cannot be displayed until isolation is completed; map out and reset `Ready` The rest of the picture can be green again.
+**Given** an optional index Actor becomes `UNKNOWN`<br>
+**When** the Actr Host rejects its edge, revokes its capability, confirms it no longer holds protected data, and rolls the `structureDigest`<br>
+**Then** the index feature is disabled; green MUST NOT be shown before isolation completes; once it is removed from the graph and the remaining graph is `Ready` again, the remainder can be green again.
 
-### AC-027: Dynamic dependence first verify
+### AC-027: Verify dynamic dependencies first
 
-**Given** Primary Service Requesting a new one for the first time in operation Actor<br>
-**When** The peer is not currently active AA Or hang up still<br>
-**Then** Application data may not be sent; applications may not be shown as green.
+**Given** a running Service requests a new Actor for the first time<br>
+**When** the peer has no current AA yet, or one is still suspended<br>
+**Then** application data must not be sent, and the application must not be shown as green.
 
-### AC-028: Malicious Service Concealing dependency
+### AC-028: A malicious Service hides a dependency
 
-**Given** Service Not a statement in the self-report. Actor<br>
-**When** It's being activated by the controlled capacity. `Transfer(Actor)`<br>
-**Then** The border remains unsettled and re-evaluated; self-reporting does not cover actual and effective reliance.
+**Given** a Service does not declare a downstream Actor in its self-reported material<br>
+**When** it initiates `Transfer(Actor)` through a controlled capability<br>
+**Then** that edge still enters the rootless graph and is re-evaluated; self-reporting cannot override an actual effective dependency.
 
-### AC-029: Safety map encyclopedia or limit
+### AC-029: The security graph has a cycle or exceeds the limit
 
-**Given** Support Actor Form call rings or map above strategy ceiling<br>
-**When** Gather<br>
-**Then** Ring heavy and stable with no-directed connectivity; over-limit return `GRAPH_LIMIT_EXCEEDED`Can't cut it and turn green.
+**Given** Actors in the Realm form a call cycle, or the graph exceeds the policy limit<br>
+**When** aggregation runs<br>
+**Then** a cycle is deduplicated as an undirected connected component and evaluated stably; exceeding the limit returns `GRAPH_LIMIT_EXCEEDED` and must not be truncated and shown green.
 
-### AC-030: Health and safety are at the top of the line
+### AC-030: Health and security are orthogonal
 
-**Given** Actor It's functional, but it's a third party. in-process Native, and the other one WASM Actor The crashes, but the exit locks still work.<br>
-**When** UI Show Status<br>
-**Then** The former shows healthy + Yellow, the latter shows failed + Green (if it's still on the other side) Ready) may not be merged into a vague state.
+**Given** an Actor is functioning normally but is a third-party in-process Native, while another WASM Actor has crashed but its egress closure is still valid<br>
+**When** the UI shows status<br>
+**Then** the former shows healthy + yellow, the latter shows failed + green (if that facet is still `Ready`); they must not be merged into one vague state.
 
-### AC-031External: HTTPS It's not automatic.
+### AC-031: External HTTPS is not automatically safe
 
-**Given** Greened applications Workspace Content to a permitted domain name HTTPS API♪ But it's time API No proof of strict strategy.<br>
-**When** Assessment of Africa Actor Reconnaissance<br>
-**Then** It can only serve as a terminal for which the strategy is clearly authorized; if the strategy requires the validation of its follow-up, the item is `UNKNOWN`.TLS Hostname authentication cannot upgrade the application to green.
+**Given** a green application sends Workspace content to an HTTPS API on an allowed domain, but that API has no proof satisfying strict policy<br>
+**When** that non-Actor sink is evaluated<br>
+**Then** it can only serve as a terminal sink explicitly authorized by policy; if policy requires verifying its further processing, that item is `UNKNOWN`. TLS hostname verification cannot promote the application to green.
 
-### AC-032: Native Capsule Constraints
+### AC-032: Native Capsule constraints
 
-**Given** Same native workload Separate by NativeCdylib and NativeCapsule Run<br>
-**When** Capsule Independent before code execution OS sandbox, proscribe socket/Any File/Subprocesses and open only Host typed IPC<br>
-**Then** NativeCdylib No way. `CONTROLLED`;Capsule It's practical. sandbox Evidence assessment. When any platform is not bound to enter into force Capsule I have to. fail closed Or keep unknown.
+**Given** the same native workload is run separately as a NativeCdylib and a NativeCapsule<br>
+**When** the Capsule has entered an independent OS sandbox before executing code, forbidding sockets/arbitrary files/subprocesses and opening only typed Host IPC<br>
+**Then** the NativeCdylib MUST NOT be `CONTROLLED`; the Capsule may be rated per the actual sandbox evidence. Whenever any platform constraint has not taken effect, the Capsule MUST fail closed or stay unknown.
 
-### AC-033: TURN The message cannot be decrypted.
+### AC-033: TURN and signaling cannot decrypt
 
-**Given** Actor A with Actor B I'll have to do it in bad faith. signaling and TURN relay Communications<br>
-**When** relay Record, replay or replace consultation messages<br>
-**Then** relay Only minimally connected metadata can be observed. payload key or express; identity/handshake transcript When matching Actor edge Building failed.
+**Given** Actor A and Actor B can only communicate through a malicious signaling server and a TURN relay<br>
+**When** the relay records, replays or substitutes negotiation messages<br>
+**Then** the relay can only observe minimized connection metadata, and cannot obtain the payload key or plaintext; when the identity/handshake transcript does not match, the Actor edge fails to establish.
 
-### AC-034: CC No substitute Workload Constraints
+### AC-034: CC does not substitute for workload constraints
 
-**Given** Service ♪ Runs right through ♪ Attestation It's... confidential VM ♪ of the but ♪ workload Export with undeclared network<br>
-**When** Calculate Assurance Vector<br>
-**Then** compute confidentiality Yes. pass, but egress Yes `UNCONTROLLED`, applied in red; not due to hardware TEE You're a badass. workload Green.
+**Given** a Service correctly runs inside a confidential VM that passes attestation, but its workload has an undeclared network egress<br>
+**When** the Assurance Vector is computed<br>
+**Then** compute confidentiality can pass, but egress is `UNCONTROLLED` and the application is red; the hardware TEE must not label a malicious workload green.
 
-### AC-035: Prove that the current session is mislinked
+### AC-035: Attestation mis-bound to the current session
 
-**Given** The assailants have another set of compliance. TEE New legal. Attestation Result<br>
-**When** It's the one that... Result For the current Actor/runtime, policy, nonce or ephemeral key Different Connections<br>
-**Then** Relying Party Here. subject/channel binding mismatch Reject, Do Not Send private/secret payload.
+**Given** an attacker holds a fresh, legitimate Attestation Result from another compliant TEE<br>
+**When** they use that Result for a connection with a different Actor/runtime, policy, nonce or ephemeral key<br>
+**Then** the Relying Party rejects it for subject/channel binding mismatch, and does not send private/secret payload.
 
-### AC-036: Release key after certificate of pass
+### AC-036: Key released only after attestation passes
 
-**Given** secret Workspace Will be at a remote end confidential Actor Processing<br>
-**When** workload/guest image/TCB appraisal Not yet adopted or adopted ephemeral key Not entered Evidence<br>
-**Then** Key Broker Not Released DEK;only after adoption DEK Cover it to the proven. keyNormal Actr Host Not specified DEK.
+**Given** a secret Workspace will be processed in a remote confidential Actor<br>
+**When** workload/guest-image/TCB appraisal has not yet passed, or the ephemeral key has not entered Evidence<br>
+**Then** the Key Broker does not release the DEK; once it passes, the DEK is only sealed to the attested key, and an ordinary Actr Host does not get the plaintext DEK.
 
-### AC-037: CPU with NPU Group Certificate
+### AC-037: Combined CPU and NPU attestation
 
-**Given** confidential VM Pass. CPU TEE Prove it, but... Agent - Put the word on it. tensor Send to Unproven firmware, device memory Or a secure link. GPU/NPU<br>
-**When** secret policy Request compute confidentiality<br>
-**Then** compute confidentiality Yes unknown, edge Do Not Receive secret; only complete composite attestation Satisfy policy I'll be back in a minute.
+**Given** a confidential VM passes CPU TEE attestation, but the agent sends plaintext tensors to a GPU/NPU whose firmware, device memory or secure link cannot be attested<br>
+**When** the secret policy requires compute confidentiality<br>
+**Then** compute confidentiality is unknown, and the edge does not receive the secret; it is only restored once a full composite attestation satisfies policy.
 
-### AC-038: Policy Evidence by data category
+### AC-038: Policy requires evidence by data category
 
-**Given** Same WASM Actor No, I don't. CC Evidence, but identity, provenance, channel and egress closure Average pass<br>
-**When** It's handled first. public Data, re-request processing requests CC It's... secret Data<br>
-**Then** public Operation can be green;secret Fuck as yellow or red. Actor The single static level of the decision-making is covered by two types of decision-making.
+**Given** the same WASM Actor has no CC Evidence, but identity, provenance, channel and egress closure all pass<br>
+**When** it first processes public data and then requests processing of secret data that requires CC<br>
+**Then** the public operation can be green; the secret operation is yellow or red; a single static rating for the Actor cannot cover both decisions.
 
-### AC-039: Proof of expiry and revocation
+### AC-039: Attestation expiry and revocation
 
-**Given** Running confidential Actor It's... Attestation Result due, or vendor TCB advisory Undo its reference value<br>
-**When** Next time. private/secret Operation or undo event arrival<br>
-**Then** Stop New payload and key release, trigger re-attestation/rekey; old cannot be used indefinitely Result.
+**Given** a running confidential Actor's Attestation Result expires, or a vendor's TCB advisory revokes its reference value<br>
+**When** the next private/secret operation runs, or the revocation event arrives<br>
+**Then** new payload and key release stop, and re-attestation/rekeying is triggered; the old Result must not be relied on indefinitely.
 
-### AC-040: Legal response cannot be stolen Secret
+### AC-040: A legitimate response cannot smuggle a secret
 
-**Given** workload Only To Front Legitimate return of the typified result Actor edge♪ And try to put ♪ secret Encoding public Fields<br>
-**When** output schema/data class Over and out. declassification capability<br>
-**Then** Actr Host Reject output and will output control Mark as fail;the channel is legal and does not cover the data classification strategy.
+**Given** the workload only has a legitimate Actor edge returning a typed result to the Front, but tries to encode a secret into a public field<br>
+**When** the output schema/data class crosses a boundary without a declassification capability<br>
+**Then** the Actr Host rejects the output and marks output control as fail; a legitimate channel does not override the data-classification policy.
 
-### AC-041: Apply the example of the initial green label
+### AC-041: An application instance's initial green label
 
-**Given** New Application Instance Established Primary Service ActorId, Program/Workspace digest And initial candidate graph<br>
-**When** All Actor/Edge/Storage/Compute Evidence Meet current policy<br>
-**Then** Actr Host Yes. `Ready` It's... `ApplicationAssurance` Show green and release protected data only after green lease. Conclusions `structureDigest` With the current state root, no. GraphRoot.
+**Given** a new application instance has determined its Service ActorId, Program/Workspace digest and initial candidate graph<br>
+**When** all Actor/Edge/Storage/Compute Evidence satisfies the current policy<br>
+**Then** only after the Actr Host's `ApplicationAssurance` for `Ready` is green does it display green and release a lease on protected data. The conclusion is bound to the `structureDigest` and the current state root, not a GraphRoot.
 
-### AC-042: Declaration is the limit of power
+### AC-042: A declaration is the boundary of capability
 
-**Given** Program Privacy Contract Not stated Actor roleNetwork origin or audit sink<br>
-**When** workload Try to create a corresponding match while running edge or application capability<br>
-**Then** Actr Host Creating handle/Reject before sending data; no connection should be created before marking application as yellow/Red.
+**Given** the Program Privacy Contract does not declare a given Actor role, network origin or audit sink<br>
+**When** the workload tries at runtime to establish the corresponding edge or request the capability<br>
+**Then** the Actr Host rejects it before creating a handle/sending data; a connection must not be established first and the application then marked yellow/red.
 
-### AC-043: Auto-recovery of compliance
+### AC-043: Auto-recovery under compliant scale-out
 
-**Given** Contract Allow `ai-inference` role It's... cardinality Yes `0..n`, and requires each example to be satisfied `confidential-ai-v1`<br>
-**When** Scheduler Requesting three different entries. ActorIdAnd... assurance Not weaker than baseline The reasoning. Actor<br>
-**Then** Hangs the change node and re-evaluates; the colour is not weakened and the user is automatically restored and asked no questions. Creates undeclared role We have to fail. We can't rely on them. `LocalContinue`, but not until the application is green `Ready`.
+**Given** the Contract allows cardinality `0..n` for the `ai-inference` role and requires every instance to satisfy `confidential-ai-v1`<br>
+**When** the scheduler requests joining three inference Actors with distinct ActorIds whose assurance is no weaker than baseline<br>
+**Then** the changed nodes are suspended and re-evaluated; if the color has not weakened, it auto-recovers without asking the user. Creating an undeclared role MUST fail. A non-dependent member may `LocalContinue`, but must not display application green until `Ready`.
 
-### AC-044: Trustable Actor Edge Encapsulating Internal Subgraph
+### AC-044: A trusted Actor Edge encapsulates an internal subgraph
 
-**Given** External reasoning services do not disclose internal Actor Figure, but local policy Trusted. Verifier Signed Certified Privacy Domain aggregate<br>
-**When** aggregate It's... endpoint, profile, data class, evidence root, life and current session Match All<br>
-**Then** Upstream you can put that on. domain Gathering as a node and drawing conclusions to the weakest; if only self-signed or scope If it doesn't match, then it's `UNKNOWN` or `UNCONTROLLED`.
+**Given** an external inference service does not disclose its internal Actor graph, but provides a Certified Privacy Domain aggregate signed by a Verifier trusted by local policy<br>
+**When** the aggregate's endpoint, profile, data class, evidence root, validity period and current session all match<br>
+**Then** upstream may aggregate that domain as a single node and take the weakest of its conclusions; if it is only self-signed or the scope does not match, it is `UNKNOWN` or `UNCONTROLLED`.
 
-### AC-045: Server Audit Log Recognizing
+### AC-045: A server's audit log is recognizable
 
-**Given** LLM Server It's... NVIDIA/Ascend Category accelerator Attestation Yes, but it may be retained at the upper level of service prompt/response Audit log<br>
-**When** audit sink Declarations and measured config + sealed egress Or credible. Certified Privacy Domain Proof that only permitted fields,retention And read the subject<br>
-**Then** Login entry maps and can be evaluated; only accelerator EvidenceNo proof of internal retention, or if an additional undeclared explicit log is required `UNKNOWN` or `UNCONTROLLED`.
+**Given** an LLM server's NVIDIA/Ascend-class accelerator attestation passes, but its upper-level service may retain a prompt/response audit log<br>
+**When** the audit sink is declared and proven, by a measured config plus sealed egress or a trusted Certified Privacy Domain, to record only permitted fields, retention and readers<br>
+**Then** the logging gap enters the graph and can be evaluated; whenever only accelerator Evidence exists, internal retention cannot be proven, or an additional undeclared plaintext log exists, it MUST be `UNKNOWN` or `UNCONTROLLED`.
 
-### AC-046: no change in the chart but certification of revocation
+### AC-046: Graph unchanged but attestation revoked
 
-**Given** The case chart is unchanged and has green markers, but later vendor Undo Current TCB reference value<br>
-**When** Undo arrival Actr Host / Authenticator<br>
-**Then** The relevant powers are abolished and re-evaluated before the next protected operation; the old conclusions cannot be followed because the structure remains unchanged.
+**Given** an instance's graph structure is unchanged and already green, but a vendor then revokes the current TCB reference value<br>
+**When** the revocation reaches the Actr Host / verifier<br>
+**Then** the related power is revoked and re-evaluated before the next protected operation; the old conclusion must not be relied on just because the structure is unchanged.
 
-### AC-047: Structural change and downgraded security
+### AC-047: Structural change with a security downgrade
 
-**Given** Green Marker Example Requesting Original confidential LLM Actor Replace with Not provided compute Attestation Convergence between Actor<br>
-**When** Actr Host Create candidate graph<br>
-**Then** (a) The change node is hung;compute confidentiality From pass Reduce to indeterminate, UI Show Replace Actor And affected data, which can continue under yellow only after risk is accepted. Colours remain yellow.
+**Given** a green instance requests replacing an existing confidential LLM Actor with a same-interface Actor that provides no compute attestation<br>
+**When** the Actr Host builds the candidate graph<br>
+**Then** the changed node is suspended; compute confidentiality drops from pass to indeterminate; the UI shows the replacement Actor and the affected data; work can continue under yellow only after risk acceptance. The color stays yellow.
 
-### AC-048: Structural changes but no change or enhancement of security
+### AC-048: Structural change with security unchanged or improved
 
-**Given** Green cut-off for one. `CONTROLLED` Actor Replace With identity, confinement, compute, storage, egress It's not weaker than the original. Actor<br>
-**When** The evidence assessment for the new state was adopted and `Ready`<br>
-**Then** Automatically restores and does not bomb user authorization; changes are written into local audits.
+**Given** a green facet replaces a `CONTROLLED` Actor with one whose identity, confinement, compute, storage and egress are no weaker than the original<br>
+**When** the new state's evidence evaluation passes and it is `Ready`<br>
+**Then** it auto-recovers without a user prompt; the change is written to the local audit log. Old data is still constrained by the generation it was obtained under.
 
-### AC-049: User cannot overwrite hard failure
+### AC-049: A user cannot override a hard failure
 
-**Given** candidate Actor It's... workload digest Inconsistent with the certificate or undeclared terminal egress<br>
-**When** User tries to accept risk<br>
-**Then** Actr Host Still block and do not provide a button to wash the item green; users agree that hard failure or unknown cannot be raised to green.
+**Given** a candidate Actor's workload digest is inconsistent with its attestation, or it has an undeclared terminal egress<br>
+**When** the user tries to accept the risk<br>
+**Then** the Actr Host still blocks it and provides no button to wash that item green; user consent cannot raise a hard failure or an unknown to green.
 
-### AC-050: Freeze unblocked control
+### AC-050: Freezing does not block the attestation control plane
 
-**Given** graph mutation Freezing application face<br>
-**When** Actr Host Access Attestation, Reference Values And Shell Show downgrade diff<br>
-**Then** The minimum control surface can be communicated, but the node is suspended and the relying party cannot process the applied data; old state payload Can't pass.
+**Given** a graph mutation has frozen the application data plane<br>
+**When** the Actr Host fetches attestation and reference values and shows the Shell a degraded diff<br>
+**Then** the minimal control plane can still communicate, but the suspended node and its dependents must not process application data; the old state's payload cannot pass through.
 
-### AC-051: Create makes a new Realm
+### AC-051: Creating an instance creates a new Realm
 
-**Given** the user has trusted the domain `team.example`<br>
-**When** they open `actr://notes.example/team-notes@1.4.2?domain=team.example` and confirm creation<br>
-**Then** a new Realm is created under `team.example` (e.g. `k7m2q9xh@team.example`) and the Service ActorId carries that Realm name; creating again yields another Realm rather than reusing the first.
+**Given** the user has already trusted the domain `team.example`<br>
+**When** they select `notes.example/team-notes@1.4.2`, create an instance with `team.example` as the Realm domain, and confirm<br>
+**Then** a new Realm is created under `team.example` (e.g. `k7m2q9xh@team.example`) whose Realm Profile `package` points to the selected package, and the address bar shows `actr://team.example/k7m2q9xh`; creating again yields another Realm rather than reusing the first.
 
-### AC-052: Realm bound to its Realm Provider
+### AC-052: A Realm is bound to its Realm Provider
 
-**Given** a Realm's Realm Profile has been accepted, and a later Realm Profile arrives with a valid Realm signing key signature and a higher `sequence` but a different `provider.id`<br>
+**Given** a Realm's Realm Profile has already been accepted, and a later Realm Profile arrives with a valid Realm signing key signature and a higher `sequence` but a different `provider.id`<br>
 **When** the Service and Front reconnect<br>
-**Then** the Realm Profile is rejected with `REALM_PROVIDER_MISMATCH` and the new Realm Provider is not contacted; a higher-`sequence` Realm Profile that rotates Realm issuer keys within the same Realm Provider takes effect normally, and the Realm name and ActorId stay the same.
+**Then** that Realm Profile is rejected with `REALM_PROVIDER_MISMATCH`, and the new Realm Provider is not contacted; a higher-`sequence` Realm Profile that rotates the Realm issuer key within the same Realm Provider takes effect normally, with the Realm name and ActorId unchanged.
 
-### AC-053: Retired Realm
+### AC-053: A retired Realm
 
 **Given** the domain owner has published a Realm Profile with `status = retired`<br>
-**When** an instance URI under that Realm is opened<br>
-**Then** the connection is refused with a stable error, and the same `label` cannot be reused for a new Realm.
+**When** that Realm's Realm link is opened<br>
+**Then** the connection is rejected with a stable error, and the same RealmId cannot be reused for a new Realm.
 
 ### AC-054: No fallback when the Realm Profile is unavailable
 
-**Given** the instance Realm's Realm Profile cannot be fetched or fails signature verification, while the domain's authority descriptor declares signaling and other services in `services`<br>
-**When** the user opens that instance URI<br>
+**Given** the instance Realm's Realm Profile cannot be fetched or fails signature verification, while that domain's authority descriptor declares services such as signaling in `services`<br>
+**When** the user opens that instance's Realm link<br>
 **Then** a Realm-unreachable or security error is shown; neither those services nor any other Realm Provider is contacted, and no substitute instance is created.
 
 ### AC-055: Create transaction failure and retry
 
-**Given** the user confirms Create under a Realm domain<br>
-**When** the Realm signing key holder is unreachable or the Realm Provider fails to activate the Realm, and the user then retries with the same `idempotency_key`<br>
-**Then** no Service Actor is produced on failure; the retry continues the same pending Realm (same `label`; the Realm Provider identifies it by `(realm, requester)`) instead of creating another Realm; expired pending Realms are cleaned up automatically.
+**Given** the user confirms creating an instance under a Realm domain<br>
+**When** the Realm signing key holder is unreachable, or the Realm Provider fails to activate the Realm, and the user then retries with the same `idempotency_key`<br>
+**Then** no Service is produced on failure; the retry continues the same pending Realm (same RealmId; the Realm Provider identifies it by `(realm, requester)`) instead of creating a new Realm; an expired pending Realm is cleaned up automatically.
 
 ## 4. Compatibility acceptance matrix
 
-Each published candidate should be covered at least:
+Every release candidate covers at least:
 
-| Dimensions | Group |
+| Dimension | Combinations |
 |---|---|
 | Platform | macOS, Windows, iOS, Android |
 | Service | local, remote |
 | Network | loopback, direct WebRTC, TURN, offline, Realm Provider failover |
 | Package | cached, first download, revoked, digest conflict, dev |
-| Workspace | requirement: none/optional/required;provisioning: managed/user-selected;access: read-only/read-write;local/remote/locked Workspace Provider |
+| Workspace | requirement: none/optional/required; provisioning: managed/user-selected; access: read-only/read-write; local/remote/locked Workspace Provider |
 | Lifecycle | create, refresh, close, crash, restart, suspend, trash, restore, purge, migrate |
-| Privacy | Ready ♪ Cracking the face, generational ♪LocalContinue, Program Privacy Contract, WASM Statement/Undeclared exports, exports,NativeCdylib, NativeCapsuleExpiration AA♪ Red-aided nodes, concealment of dependence,Assured Actor Edge, LLM Audit remittances,opaque HTTPSThe graph./Maximum limits, access,CC♪ The key is released, ♪CPU+GPU/NPU Group certification, output control, de-dispersion |
+| Privacy | the Ready facet, generation intersection, LocalContinue, Program Privacy Contract, WASM declared/undeclared egress, NativeCdylib, NativeCapsule, expired AA, another node being red, a hidden dependency, Assured Actor Edge, LLM audit sink, opaque HTTPS, graph cycle/limit, channel binding, CC, key release, combined CPU+GPU/NPU attestation, output control, revocation propagation |
 
-### 4.1 Platform capacity commitments
+### 4.1 Platform capability commitments
 
-| Capacity | macOS | Windows | iOS | Android |
+| Capability | macOS | Windows | iOS | Android |
 |---|---|---|---|---|
-| Local Create/Attach | Complete | Complete | Front desk available | Front desk available |
-| Local long-term online Actr Host | Supported, controlled by user back-office strategy | Supported, controlled by user back-office strategy | No promises. | Only foreground service Commitment to conditionality |
-| Far Attach | Support | Support | Support | Support |
-| Backstage. Guest | pause/Recoverable | pause/Recoverable | System decisions, recoverable | System decisions, recoverable |
-| local-folder Workspace | Support | Support | security-scoped provider | SAF/provider |
-| Far Actr Host Management | Yes. management capability Time | Yes. management capability Time | Yes. management capability Time | Yes. management capability Time |
+| Local Create/Attach | Full | Full | Foreground only | Foreground only |
+| Local long-running Actr Host | Supported, subject to user background policy | Supported, subject to user background policy | Not committed | Committed only under a foreground service |
+| Remote Attach | Supported | Supported | Supported | Supported |
+| Background Guest | pause/reclaimable | pause/reclaimable | decided by the system, reclaimable | decided by the system, reclaimable |
+| local-folder Workspace | Supported | Supported | security-scoped provider | SAF/provider |
+| Remote Actr Host management | when a management capability is held | when a management capability is held | when a management capability is held | when a management capability is held |
 
-Linux/General server host, cloud automatic movement, browser Web Version & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & & / Realm federation Not Actrium v1 Client commitments; they can be independent Actr Host Subsequent definition.
+A Linux/general server host, cloud auto-scheduling, a browser web version, and cross-Realm federation are not part of the Actrium v1 client's commitments; they may be defined later as an independent Actr Host.
 
-## 5. Product indicators
+## 5. Product metrics
 
 ### 5.1 Core funnel
 
 ```text
-URI/Program opened
+Link/program opened
 → package verified
 → user approved
 → Service created or attached
@@ -635,75 +626,75 @@ URI/Program opened
 → reopened successfully
 ```
 
-Concerns:
+Tracked:
 
-- (a) The first-time creation completion rate;
-- Attach Success rate;
-- Re-launching the recovery success rate;
-- package (a) The reasons for the failure to verify;
-- Realm/Network failure distribution;
-- Guest/Service crash-free session;
-- (a) Rate of denial of authority;
-- Workspace Conflict rate;
-- Error Create Duplicate Service Number (target) 0).
+- first-creation completion rate;
+- Attach success rate;
+- restart-recovery success rate;
+- package verification failure reasons;
+- Realm/network failure distribution;
+- Guest/Service crash-free session rate;
+- permission denial rate;
+- Workspace conflict rate;
+- number of erroneously duplicated Services created (target 0).
 
 ### 5.2 Privacy
 
-Indicator default not to collect:
+Not collected by metrics by default:
 
-- Complete ActorId;
-- Workspace Synchronising folder/Path/(a) Content;
-- Guest route/query;
+- the full ActorId;
+- the Workspace name/path/content;
+- the Guest route/query;
 - RPC payload;
-- User input.
+- user input.
 
-Telemetry is default. Release indicators are obtained first and foremost by local aggregation, voluntary diagnostics and quality experiments without operational markings.
+Telemetry defaults to off. Release metrics are obtained primarily through local aggregation, voluntary diagnostics, and quality experiments that carry no business identifiers.
 
-### 5.3 Capabilities calibration
+### 5.3 Performance measurement methodology
 
-- Use of each platform for publication reference hardwareFixed package fixture and re-emergible networks profile;
-- At least for each one. 30 Colder./Hot running, report. p50, p95(a) Sample numbers and failure rates;
-- “Interactive”Define Guest First Screen commit Completed, entered handler Registered and registered Primary Service contract (b) Available;
-- Remote indicators reported separately direct with TURNNo, no, no, no. DNS, login or user-authorized time in Attach;
-- Release report to retain original anonymous measurements and build digest, so that it can be compared.
+- use each platform's published reference hardware, a fixed package fixture, and a reproducible network profile;
+- at least 30 cold/warm runs per item, reporting p50, p95, sample count and failure rate;
+- "interactive" is defined as the Guest's first-screen commit completing, the input handler being registered, and the Service contract being callable;
+- remote metrics report direct and TURN separately, without mixing DNS, login or user-authorization time into Attach;
+- release reports retain the raw anonymized measurements and build digests, to allow regression comparison.
 
-## 6. Release threshold
+## 6. Release gates
 
 ### Developer Preview
 
-- URI/Create/Attach (b) Local closed rings;
+- URI/Create/Attach closed loop, locally;
 - fixed QuickJS;
 - signed package;
 - Service same-ID restart;
-- Basic Workspace broker.
+- basic Workspace broker.
 
 ### Public Beta
 
-- (a) Full platform;
-- Networking Realm, P2P/TURN;
-- (a) Jurisdiction and withdrawal;
-- Fault injection,fuzz(c) Osmosis tests;
-- Program/Service Management UI;
-- Move and delete protection.
+- all platforms;
+- networked Realm, P2P/TURN;
+- permissions and revocation;
+- fault injection, fuzzing, penetration testing;
+- Program/Service management UI;
+- migration and delete protection.
 
 ### v1 Stable
 
-- All MUST (a) Need to pass;
-- AC-001 to AC-055 Automation or repetitivability;
-- (a) The high-risk audit of security is zero;
-- crash-free and the recovery target meets the release threshold;
-- Publication of the version of the agreement and the compatibility commitments;
-- Transport, cancellation,key compromise And the data is restored. runbook Done.
+- every MUST requirement passes;
+- every AC scenario is automated or reproducibly verifiable;
+- zero outstanding high-risk security audit items;
+- crash-free and recovery metrics meet the release threshold;
+- the protocol version and compatibility commitments are published;
+- operations, revocation, key-compromise and data-recovery runbooks are complete.
 
-## 7. Key target tracking
+## 7. Key goal tracking
 
-| Product objectives | Main requirements | Acceptance and inspection | Delivery phase |
+| Product goal | Main requirements | Acceptance | Delivery phase |
 |---|---|---|---|
-| Create/Attach It's a no-show. | FR-URI-002—007, FR-SVC-007 | AC-001—004 | P0, P2-B, P3-A |
-| Tab/Front/Service Unified Model | FR-SH-001—006, FR-FRONT-001 | AC-002, AC-008—010 | P2-A, P3-A |
-| Accuracy, duration Actor Identity | FR-SVC-001—003, FR-NET-005—006 | AC-009, AC-011, AC-019 | P1-A |
-| Publisher Supply chain with bag | FR-PKG-002—014 | AC-005, AC-016, AC-021 | P1-B |
-| Realm/Letters are authorized but limited. | FR-NET-001—020, FR-URI-011 | AC-011, AC-012, AC-020—023, AC-051—055 | P1-A, P3-B |
-| Workspace Not UI/Remove Error | FR-SVC-005—016, FR-SEC-009 | AC-013—015, AC-023 | P2-B |
-| Guest It's operational but not transboundary. | FR-FRONT-002—010, NFR-SEC-001—004 | AC-006, AC-007 | P2-A, P4 |
-| Apply the example of a re-evaluation of the privacy snapshot and dynamic map | FR-SEC-014—059, NFR-SEC-007—014 | AC-024—050 | P0, P1-A, P2, P3-A, P4 |
+| Unambiguous create and open | FR-URI-001—009, FR-SVC-007 | AC-001—004 | P0, P2-B, P3-A |
+| Unified Tab/Front/Service model | FR-SH-001—006, FR-FRONT-001 | AC-002, AC-008—010 | P2-A, P3-A |
+| Precise, persistent Actor identity | FR-SVC-001—003, FR-NET-005—006 | AC-009, AC-011, AC-019 | P1-A |
+| Publisher and package supply chain | FR-PKG-002—014 | AC-005, AC-016, AC-021 | P1-B |
+| Realm/signaling authoritative but bounded | FR-NET-001—020 | AC-011, AC-012, AC-021—023, AC-051—055 | P1-A, P3-B |
+| Workspace not harmed by the UI/deletion | FR-SVC-005—016, FR-SEC-009 | AC-013—015, AC-023 | P2-B |
+| Guest can run but not overreach | FR-FRONT-002—010, NFR-SEC-001—004 | AC-006, AC-007 | P2-A, P4 |
+| Application-instance privacy snapshot and dynamic graph re-evaluation | FR-SEC-014—059, NFR-SEC-007—014 | AC-024—050 | P0, P1-A, P2, P3-A, P4 |

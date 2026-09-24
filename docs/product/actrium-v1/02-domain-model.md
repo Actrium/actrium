@@ -1,31 +1,31 @@
-# 02. Area model
+# 02. Domain model
 
 ## 1. Overview
 
 ```mermaid
 flowchart LR
-    P["Program Release<br/>publisher/program@version"] -->|Provision| G["Keel Guest"]
-    P -->|Provision| W["Service Workload"]
-    T["Tab"] -->|Possession 1| F["Front Actor"]
-    F -->|Load| G
-    F -->|Precise binding 1| S["Primary Service Actor"]
-    S -->|Run| W
-    S -->|Tie 0..1| WS["Workspace"]
-    S -->|Organization| A["Auxiliary Actors"]
-    S -->|belong to| R["Realm"]
-    F -->|belong to| R
-    R -->|named in| NS["Domain<br/>domain / installation-id.actr.alt"]
-    F -.Privacy Convergence.-> PRIV["Application Privacy Closure"]
-    PRIV -.Overwrite.-> S
-    PRIV -.Overwrite.-> A
-    PRIV -.Overwrite.-> WS
+    P["Program Release<br/>publisher/program@version"] -->|Provides| G["Keel Guest"]
+    P -->|Provides| W["Service Workload"]
+    T["Tab"] -->|Owns 1| F["Front Actor"]
+    F -->|Loads| G
+    F -->|Binds exactly 1| S["Service"]
+    S -->|Runs| W
+    S -->|Binds 0..1| WS["Workspace"]
+    S -->|May orchestrate| A["Other Actors in the Realm"]
+    S -->|Belongs to| R["Realm"]
+    F -->|Belongs to| R
+    R -->|Named under| NS["Domain<br/>domain / installation-id.actr.alt"]
+    F -.Privacy aggregation.-> PRIV["Application Privacy Closure"]
+    PRIV -.Covers.-> S
+    PRIV -.Covers.-> A
+    PRIV -.Covers.-> WS
 ```
 
 ## 2. Seven core objects
 
 ### 2.1 Program
 
-Program stable name, does not contain examples of installation status and operation.
+The stable name of a program; it does not include install state or a running instance.
 
 ```text
 ProgramId = publisher/program
@@ -37,70 +37,70 @@ Example:
 notes.example/team-notes
 ```
 
-`publisher` It's a regularity. DNS Domain names;`program` is a program name unique under that Publisher.
+`publisher` is a normalized DNS domain; `program` is a name unique under that Publisher.
 
 ### 2.2 Program Release
 
-Unchangeable version of the procedure:
+An immutable version of a program:
 
 ```text
 ProgramReleaseId = publisher/program@version
 ```
 
-It has to be analyzed to a fixed `.actr` package digest.Program Release Description:
+It must resolve to a fixed `.actr` package digest. A Program Release describes:
 
-- Service workload;
-- Keel Guest (a) Entry points;
-- Front–Service (a) Contracts;
-- Capacity and components to apply;
-- Keel/Actrium/Actr ABI Compatibility scope;
-- (a) Resource quotas;
-- Workspace (a) Modes;
-- Publisher Can not open message
+- the Service workload;
+- the Keel Guest entry point;
+- the Front–Service contract;
+- the requested capabilities and components;
+- the Keel/Actrium/Actr ABI compatibility range;
+- resource quotas;
+- the Workspace mode;
+- Publisher signing information.
 
-### 2.3 Service Actor
+### 2.3 Service
 
-A real, addressable and state-of-the-art example of a procedure:
+The instance's Service: exactly one per Realm, created together with the Realm:
 
-- Last `ActorId`;
-- Fixed Run Some Program Release digest;
-- Hold Workspace capability;
-- Holds case profiles and access controls;
-- Life cycle independent of Tab;
-- It can be run locally or at a remote end;
-- It may orchestrate other Actors while exposing one primary interface to the Front.
+- has a durable `ActorId`;
+- always runs the package the Realm Profile's `package` points to;
+- holds the Workspace capability;
+- holds the instance's configuration and access control;
+- its lifecycle is independent of Tab;
+- can run locally or remotely;
+- may orchestrate other Actors, but exposes a single primary façade to the Front.
 
-Service No, it's not.“Program Type”Nor is it a freely replaceable load-balanced candidate.
+Service is not a "program type", nor a load-balancing candidate that can be freely swapped.
 
 ### 2.4 Front Actor
 
-One. resident app Tab Corresponding short life cycle interactions Actor:
+The short-lived interactive Actor for one resident app Tab:
 
-- workload By Actrium (b) Fixed;
-- Inline Keel Host, Actr client, capability broker and life-cycle management;
-- Load certified Keel Guest;
-- Only binds Service ♪ I'm limited ♪ capability;
-- Tab (a) Rebuilding after closure, collapse or system recovery;
-- ActorId It can be session-level and does not assume a permanent business identity.
+- its workload is fixed by Actrium;
+- contains the Keel Host, the Actr client, the capability broker, and lifecycle management;
+- loads a verified Keel Guest;
+- holds only the restricted capability bound to the Service;
+- can be rebuilt after the Tab closes, crashes, or is reclaimed by the system;
+- its ActorId can be session-scoped; it carries no durable business identity.
 
 ### 2.5 Tab
 
-Actrium Shell .Tab Saves local browsing status, e.g.:
+The user-interaction container in Actrium Shell. A Tab holds local browsing state, such as:
 
-- Local `tab_id`;
-- Current Normalization `actr://` URI;
-- Page route;
-- Back/Forwarding the bar;
-- Displays titles, icons;
-- suspend/restore Metadata.
+- a local `tab_id`;
+- the current normalized Realm link (`actr://` URI);
+- the in-page route;
+- the back/forward stack;
+- the display title and icon;
+- suspend/restore metadata.
 
-Tab Do Not Save Workspace Key, no business data.
+A Tab does not hold Workspace keys and owns no business data.
 
-Tab record It can continue after memory recovery. It is at this time dormant TabNo, I don't. live Front Actor;by same when reactivated URI Rebuild New Front Actor.
+A Tab record can outlive memory reclamation. It is then a dormant Tab with no live Front Actor; reactivating it rebuilds a new Front Actor from the same Realm link.
 
 ### 2.6 Workspace
 
-The durable data boundary of a Service. It is not a simple file path but a capability hosted by the Actr Host:
+The Service's durable data boundary. It is not a simple file path but a capability hosted by the Actr Host:
 
 ```text
 WorkspaceBinding
@@ -113,84 +113,84 @@ WorkspaceBinding
 └── backup/migration metadata
 ```
 
-`credential_ref` Point to system secure storage. Not allowed to be present. URL, general database or Guest launch context Medium.
+`credential_ref` points into system secure storage; it must never appear in a URL, an ordinary database, or the Guest launch context.
 
 ### 2.7 Realm
 
-The trust and governance domain of one application instance. When a Create Intent creates a Primary Service instance, it also creates a new Realm under the selected domain; the instance's Primary Service, the Auxiliary Actors it orchestrates, and the Fronts attached to it all belong to that Realm. A Realm does not follow the Program, and it is not an organization-level membership domain.
+The trust and governance domain of one application instance. Creating an instance creates a new Realm under the chosen Realm domain; the instance's Service, the other Actors it orchestrates, and the Fronts that Attach to it all belong to this Realm. A Realm does not follow the Program, and it is not an organization-level membership domain.
 
 ```text
-Realm name = <label>@<domain>                      # networked, e.g. k7m2q9xh@acme.com
-           | <label>@<installation-id>.actr.alt    # local
+Realm name = <realm_id>@<domain>                      # networked, e.g. k7m2q9xh@acme.com
+           | <realm_id>@<installation-id>.actr.alt    # local
 ```
 
-- The domain belongs to its owner and is used only as a naturally unique, ownership-verifiable name; it hosts no infrastructure. A local Realm uses the pseudo-domain `<installation-id>.actr.alt` (generated at random at installation, never resolved through DNS), which belongs to that Actrium installation;
-- The domain's Realm signing keys are the long-term trust root for every Realm under it and sign each Realm Profile;
-- `label` is unique within the domain, immutable after creation, and never reused after retirement;
-- One Realm Provider (signaling, TURN, Issuer) hosts many Realms; a Realm is bound to one Realm Provider when it is created and can never switch.
+- The Realm domain belongs to its owner and serves only as a naturally unique, ownership-verifiable name; it carries no infrastructure. A local Realm uses the pseudo-domain `<installation-id>.actr.alt` (generated at random at install time, never resolved via DNS), belonging to that Actrium installation;
+- the domain's Realm signing key is the long-term trust root for every Realm under that domain, and signs each Realm Profile individually; the Realm Profile's `package` records the package this instance runs (download location and SHA-256);
+- the RealmId is unique within the domain, immutable after creation, and never reused after retirement;
+- one Realm Provider (Signaling, TURN, Issuer) hosts a large number of Realms; a Realm is bound to one Realm Provider at creation and can never switch afterward.
 
-A Publisher domain names a program (who published it); a Realm domain names a deployment (who operates it). The same Program Release can run in `notes@acme.com` and in `notes@foo.org`.
+A Publisher domain names a program (who publishes it); a Realm domain names a deployment (who operates it). The same Program Release can run at `notes@acme.com` and also at `notes@foo.org`.
 
-## 3. “Tab–Service 1:1”Accurate definition of
+## 3. The precise definition of "Tab–Service 1:1"
 
-### 3.1 Product is not variable
+### 3.1 Product invariants
 
-At any time of operation:
+At any point in runtime:
 
-- One in the middle of a loading/running/suspended It's... resident Tab Just happens to have one. Front Actor;
-- One by Shell Abandoned but kept in Tab strip It's... dormant Tab No, I don't. live Front Actor;
-- One. Front Actor One at most. Primary Service Actor;
-- After starting, one Front ActorWe have to tie one to the right one. Primary Service Actor;
-- One. Service Not yet. Front;
-- Service And history Front Not a permanent double.
+- a resident Tab in loading/running/suspended state has exactly one Front Actor;
+- a dormant Tab that Shell has discarded but kept in the Tab strip has no live Front Actor;
+- a Front Actor is bound to at most one Service;
+- once startup completes, a Front Actor must be bound to exactly one Service;
+- a Service can temporarily have no Front;
+- a Service and its historical Fronts are not a permanent bijection.
 
-Formalized means:
+Formally:
 
 ```text
 Tab 1 ── 0..1 Live Front Actor
-Live Front Actor 1 ── 1 Primary Service Actor
-Primary Service Actor 1 ── 0..1 Active Front Lease(v1 exclusive)
-Primary Service Actor 1 ── 0..1 Workspace
+Live Front Actor 1 ── 1 Service
+Service 1 ── 0..1 Active Front Lease (v1 exclusive)
+Service 1 ── 0..1 Workspace
 ```
 
-The same. Service You can be multiple in time. Front Actor reconnect; this is not the running-time base at the same time.v1 Default Session Policy is `exclusive`, only one interactive at the same time Front Main lease.
+The same Service can be reconnected to by multiple Front Actors over time; this is not the runtime cardinality at a single moment. v1's default session policy is `exclusive`: only one interactive Front holds the primary lease at any given time.
 
-### 3.2 Why not define a strict double-fire across the board?
+### 3.2 Why we do not define a strict global bijection
 
-If Service It's always just one specific thing. Front Actor, and it immediately creates a contradiction:
+If a Service could only ever belong to one specific Front Actor, contradictions would appear immediately:
 
-- Close Tab Back Service Whether it is necessary to delete;
-- Actrium Restart New Front Actor How to connect;
-- Front Whether the crash caused Workspace (a) Loss of ownership;
-- The following video shows the event:
-- The same example is why it is necessary to change identity after moving to new equipment.
+- whether the Service must be deleted when the Tab closes;
+- how a new Front Actor connects after Actrium restarts;
+- whether a Front crash leaves the Workspace without an owner;
+- why reopening from a favorite could not resume the original instance;
+- why the same instance would have to change identity after migrating to a new device.
 
-So the simplest model is not“Two life-cycles tied to death.”and instead:
+So the simplest model is not "the two lifecycles locked together", but:
 
-> Front Always face one. Service;Service Independent presence and acceptance of a new mandate Front Session.
+> A Front always faces exactly one Service; the Service exists independently and accepts new, authorized Front sessions.
 
-### 3.3 Monopoly and sharing
+### 3.3 Exclusive vs. shared
 
-Program Manifest Declaration:
+The Program Manifest declares:
 
 ```toml
 [actrium.session]
 attachment_policy = "exclusive"
 ```
 
-v1 Promises only `exclusive`:
+v1 only commits to `exclusive`:
 
-- The machine is open for the same Service , open the same URI Focus already. Tab;
-- The other device is requested to connect.Service (b) May refuse, wait for the expiration of the lease or trigger a user-confirmed takeover;
-- There's a limit to the network after it's broken. lease grace period, to prevent the instant break-through from being miscalculated as release.
+- when the same Service is already open locally, opening the same Realm link focuses the existing Tab;
+- when another device requests a connection, the Service may refuse, wait for the lease to expire, or trigger a user-confirmed takeover;
+- after a network interruption there is a bounded lease grace period, to keep a transient disconnect from being mistaken for release.
 
-`shared` It is a follow-up capability that requires additional definition of multi-session privileges, simultaneous writing, focus and collaborative status, and inaction v1 Invisible behavior.
+`shared` is a future capability that requires additionally defining multi-session permissions, concurrent writes, focus, and collaboration state; it is not implicit v1 behavior.
 
-## 4. Identity, type and example
+## 4. Identity, type, and instance
 
-### 4.1 Program coordinate with ActrType
+### 4.1 Program Release and Actor type
 
-Program Release with Service `ActrType` One to one:
+A Program Release corresponds one-to-one with a Service's Actor type (`ActrType` in code):
 
 ```text
 publisher/program@version
@@ -202,158 +202,156 @@ ActrType {
 }
 ```
 
-Actr currently applies the shorter `Name` constraint to both publisher and name. The target design must validate Publishers with full DNS/IDNA rules and support A-label domains of up to 253 bytes.
+Actr currently shares a shorter `Name` constraint between publisher and name. The target design must change Publisher validation to full DNS/IDNA rules and support A-label domains up to 253 bytes.
 
 ### 4.2 ActorId
 
-Service ActorId It is essential to meet:
+A Service's ActorId must satisfy:
 
 - `serial + Realm name` is globally distinguishable as a whole;
-- It carries a verifiable, resolvable Realm name;
-- Yes. Realm (a) Permanent and sole;
-- Realm We must not use them. ID (b) To allocate another example;
-- On the basis of normal renewal,hard re-auth, the change of letters, the re-launching of processes and the relocation of operational positions remain the same;
-- with Actor (b) Long-term key binding;
-- You can interpret it as the current online address or you can report it clearly. offline;
-- The ActorType is not part of the ID: it is carried by registration and the Actor credential, and must equal the Program Release.
+- it carries a verifiable, resolvable Realm name on its own;
+- it is permanently unique within the Realm;
+- the Realm must never assign a used ID to another instance;
+- it stays unchanged across normal credential renewal, hard re-auth, signaling switchover, process restart, and migration of where it runs;
+- it is bound to the Actor's long-term key;
+- it can resolve to a current online address, or explicitly report offline;
+- the Actor type is not part of the ID: it is carried by registration and the Actor credential, and must match the Program Release.
 
-Current Actr It's... legacy The text is in the form of:
+Actr's current legacy text form is:
 
 ```text
-<serial_hex>@<realm_id>/<publisher>:<program>:<version>
+<serial_hex>@<realm_id>/<publisher>/<program>@<version>
 ```
 
-It only carries a numeric `realm_id`, lacks a resolvable Realm name, and embeds the program type in the identity. v1 must rework the ActorId data model and standard formatter so the Realm can be resolved from the ActorId itself and the type moves out of the identity:
+It carries only Loran's internal numeric `realm_id`, lacks a resolvable Realm name, and embeds the program type in the identity. v1 must rework the ActorId data model and the standard formatter so the Realm can be resolved from the ActorId itself, and move the type out of the identity:
 
 ```text
-<serial>.<label>@<domain>
+<serial>.<realm_id>@<domain>
 e.g. 2af01.notes@acme.com
 ```
 
-A local Realm looks like `2af01.h3x8p2wq@<installation-id>.actr.alt`. The numeric `realm_id` is only a internal handle of the Realm Provider and never appears in the ActorId. The final wire/text encoding is frozen by an Actr ADR, but it must not fall back to "give only a realm_id and let Actrium privately guess the Realm"; importing a legacy ActorId must explicitly supply the Realm name and rewrite it.
+For a local Realm, for example, `2af01.h3x8p2wq@<installation-id>.actr.alt`. The numeric `realm_id` is only an internal handle of the Realm Provider and never enters the ActorId. The final wire/text encoding is frozen by an Actr ADR, but it must not fall back to the semantics of "just give a realm_id and let Actrium privately guess the Realm"; importing a legacy ActorId must explicitly supply the Realm name and rewrite it.
 
-At the same time, the semantics of its life cycle must be derived from“Current registration address”Upgrade to“Durable logic of renewable rent Actor Identity”.
+At the same time, its lifecycle semantics must be upgraded from "this registration's address" to "a renewable, durable logical Actor identity".
 
-### 4.3 ActorId It's not a secret.
+### 4.3 ActorId is not a secret
 
-ActorId The connection must also be verified:
+Neither the ActorId nor the Realm link is a secret; neither alone grants access. A connection must also verify:
 
-- Realm Issued Actor credential;
-- application permissions of Service owners and members;
-- Front Session challenge;
-- Program coordinate, package digest and agreements fingerprint;
-- attachment lease.
+- the Actor credential issued by the Realm;
+- the application permissions of the Service's owner/members;
+- the Front's session challenge;
+- the package digest and protocol fingerprint;
+- the attachment lease.
 
-### 4.4 No increase in public ServiceInstanceId
+### 4.4 No added public ServiceInstanceId
 
-Target model no longer oriented URL Add a public layer“Logical Service Key”. If ActrId If we can't stabilize, we should fix it. ActrIdInstead of keeping all the upper levels long:
+The target model does not add another public "logical service key" layer to the URL. If the ActorId cannot be made stable, the fix belongs in the ActorId, not something every upper layer has to maintain indefinitely:
 
 ```text
 ServiceInstanceId → current ActorId
 ```
 
-Actrium Local databases can have pure storage. `record_id`But it's not a network identity, and it's not shared. URL Medium.
+Actrium's local database may have a `record_id` for pure storage purposes, but it is not a network identity and never appears in a shared URL.
 
-## 5. Status Attribution
+## 5. State ownership
 
-| Status | Author of authority | Annotations |
+| State | Authoritative owner | Notes |
 |---|---|---|
-| Tab Arrange, move forward./Back | Actrium Shell | It's synchronous. The loss should not disrupt the business. |
-| Guest UI Temporary state | Front Actor / Keel Guest | suspend But a snapshot. Once the crash is over, it's allowed to rebuild. |
-| Current binding Service ActorId | Tab Session | From Regularization URI |
-| Business status | Service Actor | Not on it. Front |
-| Workspace Contents | Workspace Provider | By Service capability Visits |
-| Workspace Tie | Service Actor | Front No re-tabling. |
-| Program Release metadata | Program Catalog | Here. coordinate + digest As Primary Key |
-| Actor Long-term private key | Secure Storage | Not normal SQLite |
-| Realm domain trust (Realm signing key pin) | Actrium Realm Manager | Pinned after first confirmation; updated only via a signed rotation chain |
-| Realm client key | Secure Storage | Separate per Realm (i.e. per instance); registered with the Realm Provider it constitutes Realm membership; revocable |
-| Permissions granted | Actrium Permission Store | Tie publisher/program/major/digest/Workspace Scope |
-| ActorAssurance | Authenticator (%1)issuer ≠ subject) | For accuracy `ActorStateDigest` Nodal conclusion |
-| ApplicationAssurance | Applied assessor | Consemination conclusions of current no root map cut-off; presentation required Ready |
+| Tab arrangement, back/forward | Actrium Shell | Can be synced; loss must not break business state |
+| Guest UI transient state | Front Actor / Keel Guest | Can be snapshotted on suspend; may be rebuilt after a crash |
+| Current instance (Realm name) | Tab Session | Derived from the normalized Realm link |
+| Business state | Service | Never held in the Front |
+| Workspace content | Workspace Provider | Accessed via the Service's capability |
+| Workspace binding | Service | Cannot be rebound by the Front |
+| Program Release metadata | Program Catalog | Keyed by Program Release + digest |
+| Actor long-term private key | Secure storage | Never enters ordinary SQLite |
+| Realm domain trust (Realm signing key pin) | Actrium Realm Manager | Fixed after first confirmation; updated only via the signed rotation chain |
+| Realm client key | Secure storage | Independent per Realm (i.e. per instance); registering it with the Realm Provider constitutes Realm membership; revocable |
+| Permission grants | Actrium Permission Store | Scoped to publisher/program/major/digest/Workspace |
+| ActorAssurance | Verifier (issuer ≠ subject) | A node-level conclusion for an exact `ActorStateDigest` |
+| ApplicationAssurance | Application assessor | The aggregated conclusion for the rootless graph's current cut; display also requires Ready |
 
-## 6. Create, detect and accurately connect
+## 6. Create, open, and discover
 
-The three acts must be separated:
+Three actions must be kept separate:
 
-### 6.1 Create
+### 6.1 Create instance
 
-None `service` It's... URI Yes. Create Intent.Actrium:
+Creating an instance is a local Actrium operation; it is never triggered by a link:
 
-1. Parse and validate the Program Release;
-2. Select a Realm domain (default: a local Realm), generate a random `label` (the user may explicitly choose a readable one) and select a Workspace;
-3. Create a new Realm under that Realm domain: for a local Realm Actrium only creates a local record, with no Realm Profile and no Realm management request; for any other Realm Actrium obtains its Realm Profile and Realm membership, and creation must be authorized by the Realm signing key holder of that Realm domain: for a Realm under a Realm Provider's domain, that Realm Provider authenticates the user with a Realm Provider account and signs; for any other Realm, the holder's signing service signs the Actr management envelope and the Realm Profile;
-4. Create a new Service Actor in that Realm and obtain its durable ActorId;
-5. Use the... ID Create Front Sessions;
-6. In-place Rewrite URI.
+1. the user picks a package from the Program Catalog, Marketplace, a local file, or a package address; Actrium checks the digest and verifies the package signature;
+2. choose a Realm domain (a local Realm is created by default), generate a random RealmId (the user may explicitly change it to a readable name), and choose a Workspace;
+3. create a new Realm under that Realm domain: a local Realm only creates a local record on the device; any other Realm requires authorization from the holder of that Realm domain's Realm signing key, and its Realm Profile's `package` records the chosen package's address and SHA-256;
+4. create the Service inside that Realm and obtain its durable ActorId;
+5. use it to create the Front session; the address bar shows the instance's Realm link.
 
-Steps 3–4 form one transaction keyed by `idempotency_key` and run strictly in order: obtain the holder's authorization → the Realm Provider creates a pending Realm → sign the Realm Profile and submit it with `publish_profile` → the Realm becomes active → create the Service Actor and obtain its ActorId. If any step fails, no Service Actor is created; the Realm Provider cleans up expired pending Realms automatically; the random Realm label is generated once in the Create Intent and reused on retries with the same `idempotency_key`; the Realm Provider treats `(realm, requester)` as the idempotency key and continues the same pending Realm instead of creating another, returning a conflict for a different requester using the same name or for an existing active Realm or Realm Provider tombstone (the Actr management envelope's nonce only prevents byte-for-byte replay). For a local Realm only the local record and the Service Actor are created.
+Steps 3–4 form one transaction keyed by `idempotency_key`, executed strictly in order: obtain the holder's authorization → the Realm Provider creates a pending Realm → sign the Realm Profile and submit it with `publish_profile` (a Realm under a Realm Provider's own domain skips this step) → the Realm becomes active → create the Service and obtain its ActorId. If any step fails, no Service is created; the Realm Provider automatically cleans up expired pending Realms; the random RealmId is generated only once and reused on retries with the same `idempotency_key`; the Realm Provider's idempotency key is `(realm, requester)`, which continues the same pending Realm instead of creating another; a different requester using the same name, or a hit on an existing active Realm or a Realm Provider tombstone, returns a conflict. For a local Realm there are only two steps: the local record and the Service.
 
-Create never places a new instance into an existing Realm. When a Service upgrades to a new Program Release, the new Service Actor is created in the same Realm as the original instance; members and application permissions carry over, and the ActorId changes according to the migration rules.
+A new instance always means a new Realm. When a Service is upgraded to a new Program Release, the new Service is created inside the same Realm; membership and application permissions carry over, and the ActorId changes according to the migration rules. Only after the switch is confirmed does the Realm publish a Realm Profile whose `package` points to the new package.
 
-### 6.2 Type found
+### 6.2 Open instance
 
-Discovery by `ActrType` suits auxiliary services or management operations within the instance, scoped to this Realm (the instance's own Actors); v1 has no cross-Realm discovery. It is not used to replace a Workspace-bound Service the user has already designated.
+Opening a Realm link `actr://<domain>/<realm_id>[…]`: obtain and verify the Realm Profile, download and verify the package per `package`, then find the Service inside that Realm by the package's Actor type and Attach:
 
-### 6.3 Exact Connection
+- no load balancing, no switching to another Realm;
+- never creates a new instance because of offline;
+- there must be exactly one Actor of the package's type in that Realm; zero or more than one is an error, and it never picks among them;
+- an Actor link connects directly to the Actor it names, and is rejected if its type does not match the package;
+- if the Realm domain is not yet trusted, ask the user to confirm it; if the user has not yet joined that Realm, go through the Realm invitation/join flow.
 
-Yes. `service` It's... URI We have to go. `Dest::Peer(ActorId)`:
+Discovery by Actor type is scoped to this Realm; v1 does no cross-Realm discovery.
 
-- Do not do LB;
-- No candidate of the same type;
-- Not because offline The project will be a new one.
-- Program/Version Reject when matching;
-- If the ActorId's Realm domain is not yet trusted, ask the user to confirm trust in that Realm domain; if the user has not joined the Realm, go through the Realm invitation/join flow.
+## 7. Service façade
 
-## 7. Primary Service Interface
-
-To keep it. Front Very simple.Guest Only:
+To keep the Front minimal, the Guest only gets:
 
 ```typescript
-primaryService.call(route, request)
-primaryService.tell(route, event)
-primaryService.on(eventName, handler)
+service.call(route, request)
+service.tell(route, event)
+service.on(eventName, handler)
 ```
 
-Guest Not directly obtained:
+The Guest does not directly get:
 
 - `discover(ActrType)`;
 - `call(ActorId)`;
-- Letter/TURN Configuration;
-- Workspace handle;
-- Service credential;
-- Any socket.
+- Signaling/TURN configuration;
+- a Workspace handle;
+- the Service credential;
+- any socket.
 
-If the program needs multiple background Actors, the Primary Service discovers, creates and orchestrates them within its own permission boundary; these Actors belong to the same Realm. Cross-instance (cross-Realm) calls are handled by the Service backend, which obtains a client identity in the target Realm according to that Realm's join policy.
+If a program needs multiple background Actors, the Service performs discovery, creation, and orchestration within its own permission boundary; these Actors belong to the same Realm as it. Cross-instance (cross-Realm) calls are made by the Service backend, which obtains a client identity under the target Realm's join policy.
 
-## 8. System Program
+## 8. System programs
 
-Actrium Shell address bar,Tab strip, access to bullet windows and security information belongs to ShellNot normal. Tab Content.
+Actrium Shell's address bar, Tab strip, permission prompts, and security information belong to the Shell; they are not ordinary Tab content.
 
-History, collection,Program Catalog, Service Inventory The visible pages should be either:
+Visible pages such as History, Favorites, Program Catalog, and Service Inventory should take one of the following two forms:
 
-1. As Shell Native management panel, not in normal applications Tab(a) The contract or other contract; or
-2. As Actrium Own-owned, signed systems ProgramStill in compliance Front–Service Models.
+1. as a native Shell management panel, never inside a normal application Tab; or
+2. as an Actrium-owned, signed system Program, still following the Front–Service model.
 
-Do not expose a third party hidden form for the system page Guest Permissions. System-level capabilities must be signed at different levels and visible Host policy Granted.
+System pages must not expose an implicit set of Guest permissions unavailable to third parties. System-level capabilities must be granted by a different signing tier and an explicit Host policy.
 
-## 9. Apply Graphics
+## 9. Application graph
 
-Front Just tie it down. Primary Service, but the guarantee must cover Front From the one you own.**No root.**Effective reliance on connectivity.Front and Primary Service It's just a location entrance, not a Tugan.
+The Front is directly bound only to the Service, but assurance must cover the **rootless** connected component of valid dependencies that the Front belongs to. Both the Front and the Service are only entry points for locating it, not roots of the graph.
 
 ```text
-Front ──Positioning──▶ CC(U(Valid. Transfer(ActorId)))
+Front ──locates──▶ CC(U(valid Transfer(ActorId)))
 ```
 
-It's not. Publisher Static list, but valid statement. Actor Dependence. The channel is not valid, it is blocked and no rating is given. Displays the colours to take the weakest entries from each node and must `Ready`.
+The graph is not a static Publisher list but the Actor dependencies in the effective declaration. An invalid channel blocks; it is not scored. The displayed color takes the weakest of each node's items, and requires `Ready`.
 
 Key constraints:
 
-- Actor There's no substitute for health. `ActorAssurance`;
-- Actor Self-reporting cannot replace the findings of the certifying officer, nor can it sign out;
-- Any Node `UNKNOWN`, application of maximum yellow;
-- Any Node `UNCONTROLLED`, applied in red;
-- (a) A member hangs up and shall not exhibit green;
-- Members who do not depend on the change node `LocalContinue`;
-- The new configuration will only be used for new data;
-- Full semantics [docs/security](../../architecture/security/actrium/README.zh.md) with [13](13-privacy-state-and-aggregation.md).
+- Actor health status cannot substitute for `ActorAssurance`;
+- an Actor's self-report cannot substitute for a verifier's conclusion, nor can it self-sign;
+- if any node is `UNKNOWN`, the application is at most yellow;
+- if any node is `UNCONTROLLED`, the application is red;
+- if any member is suspended, green must not be shown;
+- a member that does not depend on the changed node may `LocalContinue`;
+- a new configuration applies only to new data;
+- full semantics are in [docs/security](../../architecture/security/actrium/README.zh.md) and [13](13-privacy-state-and-aggregation.md).
+</content>
