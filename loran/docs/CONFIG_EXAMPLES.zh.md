@@ -25,6 +25,10 @@ sqlite_path = "/var/lib/actrix"
 location_tag = "single-node"
 actrix_shared_key = "<独立随机值>"
 
+[authority]
+enabled = true
+uri = "actr://realm.example.com"
+
 [bind.http]
 domain_name = "realm.example.com"
 advertised_ip = "203.0.113.10"
@@ -106,6 +110,10 @@ enable = 31
 sqlite_path = "database"
 location_tag = "local"
 actrix_shared_key = "0123456789abcdef0123456789abcdef"
+
+[authority]
+enabled = true
+uri = "actr://localhost"
 
 [bind.http]
 domain_name = "localhost"
