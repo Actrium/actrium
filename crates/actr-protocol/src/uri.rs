@@ -270,11 +270,17 @@ impl FromStr for ActrUri {
 /// `actr://<realm>:<publisher>+<name>@<version>` and
 /// `actr://<publisher>/<program>@<version>`.
 fn is_legacy(raw_domain: &str, raw_path: &str) -> bool {
+    // Both forms end in `@<version>`; a version starts with a digit.
+    let versioned = |value: &str| {
+        value
+            .split_once('@')
+            .is_some_and(|(_, version)| version.starts_with(|c: char| c.is_ascii_digit()))
+    };
     let prototype = raw_domain
         .split_once(':')
         .and_then(|(_, rest)| rest.split_once('+'))
-        .is_some_and(|(_, rest)| rest.contains('@'));
-    let product_draft = raw_path.split('/').next().is_some_and(|s| s.contains('@'));
+        .is_some_and(|(_, rest)| versioned(rest));
+    let product_draft = raw_path.split('/').next().is_some_and(versioned);
     prototype || product_draft
 }
 
@@ -565,6 +571,7 @@ mod tests {
             "actr://acme.com/k7m2q9xh/%ZZ",
             "actr://acme.com/k7m2q9xh/\u{4e2d}",
             "actr://acme.com/k7m2q9xh?a b",
+            "actr://acme.com/2af01.k7m2q9xh@acme.com",
         ] {
             assert_eq!(code(value), "URI_LABEL_INVALID", "{value}");
         }
