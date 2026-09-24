@@ -310,8 +310,28 @@ fn normalize_domain(raw: &str) -> Result<String, ActrUriError> {
     Ok(domain)
 }
 
+/// Parses a Realm name `<realm_id>@<domain>`.
+///
+/// The name must already be in normalized form: a lowercase IDNA A-label
+/// domain and no percent-encoding. The result names the Realm and nothing else.
+pub fn parse_realm_name(name: &str) -> Result<ActrUri, ActrUriError> {
+    let invalid = || ActrUriError::InvalidLabel(format!("'{name}' is not <realm_id>@<domain>"));
+    let (realm_id, domain) = name.split_once('@').ok_or_else(invalid)?;
+    let uri: ActrUri = format!("actr://{domain}/{realm_id}").parse()?;
+    if uri.domain() != domain
+        || uri.realm_id() != Some(realm_id)
+        || uri.serial().is_some()
+        || !uri.path().is_empty()
+        || uri.query().is_some()
+        || uri.fragment().is_some()
+    {
+        return Err(invalid());
+    }
+    Ok(uri)
+}
+
 /// RealmId: 1 to 63 lowercase letters, digits, or `-`, not starting or ending with `-`.
-fn is_realm_id(value: &str) -> bool {
+pub fn is_realm_id(value: &str) -> bool {
     (1..=63).contains(&value.len())
         && !value.starts_with('-')
         && !value.ends_with('-')
@@ -579,6 +599,41 @@ mod tests {
             code(&format!("actr://acme.com/{}", "a".repeat(64))),
             "URI_LABEL_INVALID"
         );
+    }
+
+    #[test]
+    fn parses_realm_name() {
+        let uri = parse_realm_name("k7m2q9xh@acme.com").unwrap();
+        assert_eq!(uri.realm_name().as_deref(), Some("k7m2q9xh@acme.com"));
+        let local = "h3x8p2wq@abcdefghijklmnopqrstuvwxyz.actr.alt";
+        assert!(parse_realm_name(local).unwrap().is_local());
+        for name in [
+            "k7m2q9xh",
+            "@acme.com",
+            "k7m2q9xh@",
+            "K7m2q9xh@acme.com",
+            "k7m2q9xh@ACME.com",
+            "k7m2q9xh@acme.com:443",
+            "k7m2q9xh@acme.com/x",
+            "k7m2q9xh@acme.com?x",
+            "k7m%32q9xh@acme.com",
+            "2af01.k7m2q9xh@acme.com",
+            "a@b@acme.com",
+            "k7m2q9xh@\u{4f8b}\u{5b50}.\u{4e2d}\u{56fd}",
+            "k7m2q9xh@short.actr.alt",
+        ] {
+            assert!(parse_realm_name(name).is_err(), "{name}");
+        }
+    }
+
+    #[test]
+    fn realm_id_rules() {
+        assert!(is_realm_id("k7m2q9xh"));
+        assert!(is_realm_id("a-1"));
+        for value in ["", "-a", "a-", "A", "a.b", "a_b"] {
+            assert!(!is_realm_id(value), "{value}");
+        }
+        assert!(!is_realm_id(&"a".repeat(64)));
     }
 
     #[test]

@@ -257,6 +257,50 @@ impl std::fmt::Display for ActrType {
     }
 }
 
+/// Largest Actor serial: serials are at most 54 bits.
+const MAX_ACTOR_SERIAL: u64 = (1 << 54) - 1;
+
+/// Formats an ActorId `<serial_hex>.<realm_id>@<domain>` from a Realm name and
+/// an Actor serial.
+pub fn format_actor_id(realm: &str, serial_number: u64) -> String {
+    format!("{serial_number:x}.{realm}")
+}
+
+/// Parses an ActorId `<serial_hex>.<realm_id>@<domain>` into its Realm name and
+/// Actor serial.
+///
+/// The serial is lowercase hexadecimal without leading zeros and at most 54
+/// bits, so the text form is canonical. The legacy
+/// `<serial_hex>@<realm_id>/<type>` form is rejected.
+pub fn parse_actor_id(s: &str) -> Result<(String, u64), ActrIdError> {
+    let expected = "expected <serial_hex>.<realm_id>@<domain>";
+    let (local, _) = s
+        .split_once('@')
+        .ok_or_else(|| ActrIdError::InvalidFormat(format!("{s} ({expected})")))?;
+    if s[local.len() + 1..].starts_with(|c: char| c.is_ascii_digit()) && s.contains('/') {
+        return Err(ActrIdError::InvalidFormat(format!(
+            "{s} (the numeric <serial_hex>@<realm_id>/<type> form is no longer supported; {expected})"
+        )));
+    }
+    let (serial, realm) = s
+        .split_once('.')
+        .filter(|(serial, _)| !serial.contains('@'))
+        .ok_or_else(|| ActrIdError::InvalidFormat(format!("{s} ({expected})")))?;
+    let serial_number = (!serial.is_empty()
+        && serial.len() <= 14
+        && (serial == "0" || !serial.starts_with('0'))
+        && serial
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
+    .then(|| u64::from_str_radix(serial, 16).ok())
+    .flatten()
+    .filter(|serial| *serial <= MAX_ACTOR_SERIAL)
+    .ok_or_else(|| ActrIdError::InvalidComponent(format!("Invalid Actor serial: {serial}")))?;
+    crate::uri::parse_realm_name(realm)
+        .map_err(|error| ActrIdError::InvalidComponent(error.to_string()))?;
+    Ok((realm.to_string(), serial_number))
+}
+
 impl ActrId {
     /// Convert to `"<serial_hex>@<realm_id>/<publisher>/<program>@<version>"`.
     pub fn to_string_repr(&self) -> String {
@@ -328,6 +372,57 @@ mod tests {
         assert_eq!(parsed.r#type.publisher, original.r#type.publisher);
         assert_eq!(parsed.r#type.name, original.r#type.name);
         assert_eq!(parsed.r#type.version, original.r#type.version);
+    }
+
+    #[test]
+    fn actor_id_text_vectors() {
+        assert_eq!(
+            format_actor_id("k7m2q9xh@acme.com", 0x2af01),
+            "2af01.k7m2q9xh@acme.com"
+        );
+        assert_eq!(
+            parse_actor_id("2af01.k7m2q9xh@acme.com").unwrap(),
+            ("k7m2q9xh@acme.com".to_string(), 0x2af01)
+        );
+        let local = "h3x8p2wq@abcdefghijklmnopqrstuvwxyz.actr.alt";
+        assert_eq!(
+            parse_actor_id(&format!("0.{local}")).unwrap(),
+            (local.to_string(), 0)
+        );
+        assert_eq!(
+            parse_actor_id("3fffffffffffff.k7m2q9xh@acme.com")
+                .unwrap()
+                .1,
+            (1 << 54) - 1
+        );
+    }
+
+    #[test]
+    fn actor_id_text_rejects_invalid() {
+        for value in [
+            "k7m2q9xh@acme.com",
+            "2af01k7m2q9xh",
+            ".k7m2q9xh@acme.com",
+            "2af01.@acme.com",
+            "2AF01.k7m2q9xh@acme.com",
+            "0x2af01.k7m2q9xh@acme.com",
+            "-2af01.k7m2q9xh@acme.com",
+            "+2af01.k7m2q9xh@acme.com",
+            "02af01.k7m2q9xh@acme.com",
+            "40000000000000.k7m2q9xh@acme.com",
+            "2af01.K7m2q9xh@acme.com",
+            "2af01.k7m2q9xh@ACME.com",
+            "2af01.k7m2q9xh@acme.com@acme.com",
+            "2af01.k7m.q9xh@acme.com",
+            "2af01.k7m2q9xh@acme.com/x",
+        ] {
+            assert!(parse_actor_id(value).is_err(), "{value}");
+        }
+        let legacy = parse_actor_id("1a2b3c@101/apps.example.com/echo@1.0.0");
+        assert!(
+            matches!(&legacy, Err(ActrIdError::InvalidFormat(message)) if message.contains("no longer supported")),
+            "{legacy:?}"
+        );
     }
 
     #[test]

@@ -140,24 +140,9 @@ impl RealmProfileError {
     }
 }
 
-/// Splits a Realm name `<realm_id>@<domain>` into its normalized parts.
-/// Local Realms have no Realm Profile and are rejected.
+/// Parses a Realm name that can have a Realm Profile. Local Realms have none.
 fn parse_realm_name(name: &str) -> Result<ActrUri, String> {
-    let (realm_id, domain) = name
-        .split_once('@')
-        .ok_or_else(|| format!("'{name}' is not <realm_id>@<domain>"))?;
-    let uri: ActrUri = format!("actr://{domain}/{realm_id}")
-        .parse()
-        .map_err(|error| format!("'{name}': {error}"))?;
-    // A Realm name is not a URI: percent-encoding is not decoded.
-    if uri.realm_id() != Some(realm_id)
-        || uri.serial().is_some()
-        || !uri.path().is_empty()
-        || uri.query().is_some()
-        || uri.fragment().is_some()
-    {
-        return Err(format!("'{name}' is not <realm_id>@<domain>"));
-    }
+    let uri = crate::uri::parse_realm_name(name).map_err(|error| error.to_string())?;
     if uri.is_local() {
         return Err(format!("local Realm '{name}' has no Realm Profile"));
     }
@@ -599,14 +584,13 @@ mod tests {
             "a.b@acme.com",
             "%6b7m2q9xh@acme.com",
             "k7m2q9xh@acme.com:443",
+            "k7m2q9xh@ACME.com",
         ] {
             let error = RealmProfile::verify(&document, name, &keys_ok).unwrap_err();
             assert_eq!(error.code(), "REALM_PROFILE_INVALID", "{name}");
         }
         let local = format!("h3x8p2wq@{}.actr.alt", "a".repeat(26));
         assert!(RealmProfile::verify(&document, &local, &keys_ok).is_err());
-        // Uppercase domain in the resolved name normalizes to the profile's name.
-        assert!(RealmProfile::verify(&document, "k7m2q9xh@ACME.com", &keys_ok).is_ok());
 
         let mut broken = keys_ok.clone();
         broken.keys[0].public_key = "not base64".into();
