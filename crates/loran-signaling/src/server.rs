@@ -844,12 +844,19 @@ async fn handle_client_envelope(
                     .await
             }
             Some(signaling_envelope::Flow::ActrToServer(actr_to_server)) => {
-                if !in_connection_realm(client_id, server, &[&actr_to_server.source]).await {
-                    return reject_outside_connection_realm(
+                if !is_connection_actor(client_id, server, &actr_to_server.source).await {
+                    platform::recording::warn!(
+                        "Rejecting envelope whose source is not the connection's Actor: client_id={}, source={}",
+                        client_id,
+                        actr_to_server.source.to_string_repr()
+                    );
+                    return send_error_response(
                         client_id,
                         &actr_to_server.source,
+                        403,
+                        "Envelope source is not this connection's Actor",
                         server,
-                        &envelope.envelope_id,
+                        Some(&envelope.envelope_id),
                     )
                     .await;
                 }
@@ -898,6 +905,18 @@ async fn handle_client_envelope(
     }
     .instrument(span)
     .await
+}
+
+/// Whether `source` is the Actor the connection authenticated as.
+async fn is_connection_actor(
+    client_id: &str,
+    server: &SignalingServerHandle,
+    source: &ActrId,
+) -> bool {
+    let clients = server.clients.read().await;
+    clients
+        .get(client_id)
+        .is_some_and(|c| c.actor_id.as_ref() == Some(source))
 }
 
 /// Whether every Actor an envelope names belongs to the connection's Realm.
@@ -3535,7 +3554,7 @@ mod tests {
 
         #[tokio::test]
         #[serial]
-        async fn envelopes_naming_another_realm_are_rejected() {
+        async fn envelopes_naming_another_actor_or_realm_are_rejected() {
             setup().await;
             let server = create_test_server_handle();
             let mut source = connect(&server, 1, "source").await;
@@ -3561,6 +3580,14 @@ mod tests {
                 signaling_envelope::Flow::ActrToServer(ActrToSignaling {
                     source: elsewhere.clone(),
                     credential: credential(&source.id, edge()),
+                    payload: Some(actr_to_signaling::Payload::DiscoveryRequest(
+                        actr_protocol::DiscoveryRequest::default(),
+                    )),
+                }),
+                // Another Actor of the same Realm, with its own valid credential.
+                signaling_envelope::Flow::ActrToServer(ActrToSignaling {
+                    source: target.id.clone(),
+                    credential: credential(&target.id, worker()),
                     payload: Some(actr_to_signaling::Payload::DiscoveryRequest(
                         actr_protocol::DiscoveryRequest::default(),
                     )),

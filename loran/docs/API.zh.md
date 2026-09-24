@@ -130,8 +130,8 @@ Realm）或本 Realm 名；写成其他 Realm 名或不合法的 Realm 名时注
 
 `GET /signaling/ws` 升级到 WebSocket。身份只从原生 upgrade headers 或上述浏览器
 子协议项读取；连接身份、Actor credential 中的 Actor 与每条 envelope 的 source 必须完全一致。
-单帧最大 1 MiB，并执行连接/消息速率限制。连接绑定其身份所属的 Realm：envelope 的
-`source`（及 relay 的 `target`）不属于该 Realm 时返回 `403`。Actor Registry 与 presence 按
+单帧最大 1 MiB，并执行连接/消息速率限制。连接绑定其身份所属的 Actor 与 Realm：envelope 的
+`source` 不是该 Actor、或 relay 的 `target` 不属于该 Realm 时返回 `403`。Actor Registry 与 presence 按
 Realm 分区，发现、路由候选、ServiceSpec 查询与上线通知只涉及同 Realm 的 Actor；
 `GetSigningKey` 只返回本 Realm 的 issuer key。目标契约：速率限制同时按 Realm 计。
 

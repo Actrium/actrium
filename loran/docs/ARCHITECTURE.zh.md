@@ -107,7 +107,7 @@ Workspace 不属于 Loran。一个 Service 至多绑定一个 Workspace，同一
 
 1. 客户端在 WebSocket upgrade headers 或受约束 subprotocol transport 中传身份。
 2. 服务验证 Actor credential 的签名、期限、issuer/Realm Provider/audience 与连接 Actor。
-3. envelope source 必须与连接身份一致；目标契约下还须与连接绑定的 Realm 一致。
+3. envelope source 必须与连接身份一致，relay 的 target 须属于连接绑定的 Realm。
 4. 连接 ACL 默认拒绝；通过后才能发现或转发信令；发现只返回同 Realm 的 Actor。
 
 ### Publisher 与包
