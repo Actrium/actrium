@@ -87,7 +87,7 @@ pub enum ActrIdError {
 }
 
 impl ActrType {
-    /// Canonical program identity used by registries and `actr://` URLs:
+    /// Canonical program identity used by registries:
     /// `publisher/program@version`.
     pub fn to_program_identity(&self) -> String {
         format!("{}/{}@{}", self.publisher, self.name, self.version)

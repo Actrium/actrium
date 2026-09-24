@@ -1,406 +1,587 @@
 //! `actr:` URI parsing and normalization.
 //!
-//! The public URI identifies an authority and an opaque target. Runtime Actor
-//! identities (realm, publisher, type, version, and instance) are resolved
-//! later and are deliberately not encoded into fixed URI positions.
+//! An `actr:` URI is a Realm link (`actr/protocols/uri.md`):
+//!
+//! ```text
+//! actr://<domain>[/<realm_id>|/<serial>.<realm_id>[/path]][?query][#fragment]
+//! ```
+//!
+//! The first path segment names a Realm (`<realm_id>@<domain>`) or an Actor
+//! (`<serial>.<realm_id>@<domain>`). The rest of the path, the query, and the
+//! fragment belong to the application and carry no protocol meaning.
 
-use serde::{Deserialize, Serialize};
-use std::fmt::{Display, Formatter};
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::fmt::{Display, Formatter, Write as _};
+use std::net::Ipv4Addr;
 use std::str::FromStr;
 use thiserror::Error;
 
-/// Actor-RTC URI parse error.
+/// Pseudo-domain suffix of a local Realm: `<installation-id>.actr.alt`.
+pub const LOCAL_REALM_SUFFIX: &str = ".actr.alt";
+
+/// `actr:` URI error. Each variant maps to one URI error code; see [`ActrUriError::code`].
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ActrUriError {
     #[error("invalid URI scheme, expected 'actr' but got '{0}'")]
     InvalidScheme(String),
 
-    #[error("missing Actr authority in URI")]
-    MissingAuthority,
+    #[error("invalid Realm domain: {0}")]
+    InvalidDomain(String),
 
-    #[error("userinfo is not permitted in an Actr URI")]
-    UserInfoNotAllowed,
+    #[error("invalid RealmId or ActorId: {0}")]
+    InvalidLabel(String),
 
-    #[error("query and fragment components are not permitted in an Actr URI")]
-    ExtraComponentNotAllowed,
+    #[error("invalid path, query, or fragment: {0}")]
+    InvalidPath(String),
 
-    #[error("invalid target reference: {0}")]
-    InvalidTarget(String),
+    #[error("legacy actr URI form is not supported: {0}")]
+    LegacyForm(String),
 
-    #[error("URI parse error: {0}")]
-    ParseError(String),
+    #[error("local Realm '{0}' does not belong to this installation")]
+    LocalRealmForeign(String),
 }
 
-/// A normalized public Actr URI.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+impl ActrUriError {
+    /// Stable error code for logs, tests, and developer tools.
+    ///
+    /// The URI error codes have no separate entry for a malformed path, query,
+    /// or fragment, so those report `URI_LABEL_INVALID`.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::InvalidScheme(_) => "URI_SCHEME_INVALID",
+            Self::InvalidDomain(_) => "URI_DOMAIN_INVALID",
+            Self::InvalidLabel(_) | Self::InvalidPath(_) => "URI_LABEL_INVALID",
+            Self::LegacyForm(_) => "URI_LEGACY_FORM",
+            Self::LocalRealmForeign(_) => "URI_LOCAL_REALM_FOREIGN",
+        }
+    }
+}
+
+/// A normalized `actr:` URI.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ActrUri {
-    /// Canonical `host[:port]` authority. An explicit default port 443 is removed.
-    authority: String,
-    /// Opaque normalized target reference without a leading slash.
-    target: Option<String>,
+    /// Lowercase IDNA A-label domain, or `<installation-id>.actr.alt`.
+    domain: String,
+    /// RealmId from the first path segment.
+    realm_id: Option<String>,
+    /// Actor serial when the first path segment is `<serial>.<realm_id>`.
+    serial: Option<String>,
+    /// Remaining path after the first segment: empty or `/segment...`.
+    path: String,
+    query: Option<String>,
+    fragment: Option<String>,
 }
 
 impl ActrUri {
-    /// Construct and validate an Actr URI from its public components.
-    pub fn new(authority: impl AsRef<str>, target: Option<&str>) -> Result<Self, ActrUriError> {
-        let mut value = format!("actr://{}", authority.as_ref());
-        if let Some(target) = target {
-            value.push('/');
-            value.push_str(target);
-        }
-        value.parse()
+    /// Construct the domain-only URI `actr://<domain>`.
+    pub fn from_domain(domain: &str) -> Result<Self, ActrUriError> {
+        Ok(Self {
+            domain: normalize_domain(domain)?,
+            realm_id: None,
+            serial: None,
+            path: String::new(),
+            query: None,
+            fragment: None,
+        })
     }
 
     pub fn scheme(&self) -> &'static str {
         "actr"
     }
 
-    pub fn authority(&self) -> &str {
-        &self.authority
+    /// Realm domain.
+    pub fn domain(&self) -> &str {
+        &self.domain
     }
 
-    pub fn target(&self) -> Option<&str> {
-        self.target.as_deref()
+    pub fn realm_id(&self) -> Option<&str> {
+        self.realm_id.as_deref()
     }
 
-    /// Canonical authority-only URI used to bind an authority descriptor.
+    pub fn serial(&self) -> Option<&str> {
+        self.serial.as_deref()
+    }
+
+    /// Path after the first segment: empty or starting with `/`.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    pub fn query(&self) -> Option<&str> {
+        self.query.as_deref()
+    }
+
+    pub fn fragment(&self) -> Option<&str> {
+        self.fragment.as_deref()
+    }
+
+    /// Realm name `<realm_id>@<domain>`, when the URI names a Realm or an Actor.
+    pub fn realm_name(&self) -> Option<String> {
+        let realm_id = self.realm_id.as_ref()?;
+        Some(format!("{realm_id}@{}", self.domain))
+    }
+
+    /// ActorId `<serial>.<realm_id>@<domain>`, when the URI names an Actor.
+    pub fn actor_id(&self) -> Option<String> {
+        let serial = self.serial.as_ref()?;
+        let realm_id = self.realm_id.as_ref()?;
+        Some(format!("{serial}.{realm_id}@{}", self.domain))
+    }
+
+    /// Whether the domain is a local Realm pseudo-domain `<installation-id>.actr.alt`.
+    pub fn is_local(&self) -> bool {
+        self.domain.ends_with(LOCAL_REALM_SUFFIX)
+    }
+
+    /// Reject a local Realm that belongs to another installation.
+    pub fn check_local(&self, installation_id: &str) -> Result<(), ActrUriError> {
+        if self.is_local() && self.domain != format!("{installation_id}{LOCAL_REALM_SUFFIX}") {
+            return Err(ActrUriError::LocalRealmForeign(self.domain.clone()));
+        }
+        Ok(())
+    }
+
+    /// Canonical domain-only URI `actr://<domain>`, used to bind an authority descriptor.
     pub fn authority_uri(&self) -> String {
-        format!("actr://{}", self.authority)
+        format!("actr://{}", self.domain)
     }
 
-    /// HTTPS discovery URL for this authority.
-    pub fn discovery_url(&self) -> String {
-        format!("https://{}/.well-known/actr", self.authority)
+    /// HTTPS discovery URL of the domain. A local Realm has none.
+    pub fn discovery_url(&self) -> Option<String> {
+        (!self.is_local()).then(|| format!("https://{}/.well-known/actr", self.domain))
+    }
+
+    /// https form of a Realm link under a declared `links` prefix.
+    ///
+    /// Returns `None` for a local Realm, a domain-only URI, or an invalid prefix.
+    pub fn to_https(&self, prefix: &str) -> Option<String> {
+        if self.is_local() || self.realm_id.is_none() || !is_link_prefix(prefix) {
+            return None;
+        }
+        let uri = self.to_string();
+        let rest = &uri["actr://".len() + self.domain.len() + 1..];
+        Some(format!("https://{}{prefix}{rest}", self.domain))
+    }
+
+    /// Convert an https address to a Realm link using the domain's declared
+    /// `links` prefixes, longest prefix first.
+    ///
+    /// Returns `None` when no prefix matches or the result is not a Realm link;
+    /// such an address is an ordinary web page.
+    pub fn from_https(url: &str, links: &[String]) -> Option<Self> {
+        let (scheme, rest) = url.split_once("://")?;
+        if !scheme.eq_ignore_ascii_case("https") {
+            return None;
+        }
+        let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+        let (host, rest) = rest.split_at(end);
+        let path_end = rest.find(['?', '#']).unwrap_or(rest.len());
+        let (path, suffix) = rest.split_at(path_end);
+        let prefix = links
+            .iter()
+            .filter(|prefix| is_link_prefix(prefix) && path.starts_with(prefix.as_str()))
+            .max_by_key(|prefix| prefix.len())?;
+        let uri = format!("actr://{host}/{}{suffix}", &path[prefix.len()..])
+            .parse::<Self>()
+            .ok()?;
+        (uri.realm_id.is_some() && !uri.is_local()).then_some(uri)
     }
 }
 
 impl Display for ActrUri {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "actr://{}", self.authority)?;
-        if let Some(target) = &self.target {
-            write!(f, "/{target}")?;
+        write!(f, "actr://{}", self.domain)?;
+        if let Some(realm_id) = &self.realm_id {
+            f.write_char('/')?;
+            if let Some(serial) = &self.serial {
+                write!(f, "{serial}.")?;
+            }
+            f.write_str(realm_id)?;
+        }
+        f.write_str(&self.path)?;
+        if let Some(query) = &self.query {
+            write!(f, "?{query}")?;
+        }
+        if let Some(fragment) = &self.fragment {
+            write!(f, "#{fragment}")?;
         }
         Ok(())
     }
-}
-
-fn is_unreserved(octet: u8) -> bool {
-    octet.is_ascii_alphanumeric() || matches!(octet, b'-' | b'.' | b'_' | b'~')
-}
-
-fn is_target_ascii(octet: u8) -> bool {
-    is_unreserved(octet)
-        || matches!(
-            octet,
-            b'!' | b'$'
-                | b'&'
-                | b'\''
-                | b'('
-                | b')'
-                | b'*'
-                | b'+'
-                | b','
-                | b';'
-                | b'='
-                | b':'
-                | b'@'
-        )
-}
-
-fn normalize_raw_target(value: &str) -> Result<String, ActrUriError> {
-    if value.is_empty() {
-        return Ok(String::new());
-    }
-
-    let mut normalized_segments = Vec::new();
-    for segment in value.split('/') {
-        if segment.is_empty() {
-            return Err(ActrUriError::InvalidTarget(
-                "empty path segments are not permitted".to_string(),
-            ));
-        }
-
-        let mut decoded = Vec::with_capacity(segment.len());
-        let mut normalized = String::with_capacity(segment.len());
-        let bytes = segment.as_bytes();
-        let mut index = 0;
-        while index < bytes.len() {
-            if bytes[index] == b'%' {
-                if index + 2 >= bytes.len() {
-                    return Err(ActrUriError::InvalidTarget(
-                        "incomplete percent-encoding".to_string(),
-                    ));
-                }
-                let hex = std::str::from_utf8(&bytes[index + 1..index + 3]).map_err(|_| {
-                    ActrUriError::InvalidTarget("invalid percent-encoding".to_string())
-                })?;
-                let octet = u8::from_str_radix(hex, 16).map_err(|_| {
-                    ActrUriError::InvalidTarget("invalid percent-encoding".to_string())
-                })?;
-                decoded.push(octet);
-                if is_unreserved(octet) {
-                    normalized.push(char::from(octet));
-                } else {
-                    use std::fmt::Write as _;
-                    write!(&mut normalized, "%{octet:02X}")
-                        .expect("writing to a String cannot fail");
-                }
-                index += 3;
-            } else {
-                if !bytes[index].is_ascii() || !is_target_ascii(bytes[index]) {
-                    return Err(ActrUriError::InvalidTarget(
-                        "characters outside the target grammar must be percent-encoded".to_string(),
-                    ));
-                }
-                decoded.push(bytes[index]);
-                normalized.push(char::from(bytes[index]));
-                index += 1;
-            }
-        }
-
-        if decoded == b"." || decoded == b".." {
-            return Err(ActrUriError::InvalidTarget(
-                "dot segments are not permitted".to_string(),
-            ));
-        }
-        normalized_segments.push(normalized);
-    }
-    Ok(normalized_segments.join("/"))
-}
-
-fn normalize_port(raw: &str) -> Result<Option<u16>, ActrUriError> {
-    if raw.is_empty() {
-        return Err(ActrUriError::ParseError("empty port".to_string()));
-    }
-    let port = raw
-        .parse::<u16>()
-        .map_err(|_| ActrUriError::ParseError(format!("invalid port '{raw}'")))?;
-    Ok((port != 443).then_some(port))
-}
-
-fn normalize_authority(raw: &str) -> Result<String, ActrUriError> {
-    if raw.is_empty() {
-        return Err(ActrUriError::MissingAuthority);
-    }
-    if raw.contains('@') {
-        return Err(ActrUriError::UserInfoNotAllowed);
-    }
-    if !raw.is_ascii()
-        || raw
-            .bytes()
-            .any(|byte| byte.is_ascii_control() || byte == b' ')
-    {
-        return Err(ActrUriError::ParseError(
-            "authority must use its ASCII form".to_string(),
-        ));
-    }
-
-    if let Some(bracketed) = raw.strip_prefix('[') {
-        let close = bracketed
-            .find(']')
-            .ok_or_else(|| ActrUriError::ParseError("unterminated IPv6 literal".to_string()))?;
-        let address = bracketed[..close]
-            .parse::<Ipv6Addr>()
-            .map_err(|error| ActrUriError::ParseError(error.to_string()))?;
-        let suffix = &bracketed[close + 1..];
-        let port = if suffix.is_empty() {
-            None
-        } else {
-            normalize_port(suffix.strip_prefix(':').ok_or_else(|| {
-                ActrUriError::ParseError("invalid text after IPv6 literal".to_string())
-            })?)?
-        };
-        return Ok(port.map_or_else(
-            || format!("[{address}]"),
-            |port| format!("[{address}]:{port}"),
-        ));
-    }
-
-    let (host, port) = match raw.rsplit_once(':') {
-        Some((host, port)) => (host, normalize_port(port)?),
-        None => (raw, None),
-    };
-    if host.is_empty() || host.contains(':') {
-        return Err(ActrUriError::ParseError("invalid host".to_string()));
-    }
-
-    let host = if let Ok(address) = host.parse::<Ipv4Addr>() {
-        address.to_string()
-    } else {
-        if host
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || byte == b'.')
-        {
-            return Err(ActrUriError::ParseError("invalid IPv4 address".to_string()));
-        }
-        if host.len() > 253
-            || host.split('.').any(|label| {
-                label.is_empty()
-                    || label.len() > 63
-                    || label.starts_with('-')
-                    || label.ends_with('-')
-                    || !label
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-            })
-        {
-            return Err(ActrUriError::ParseError("invalid DNS host".to_string()));
-        }
-        host.to_ascii_lowercase()
-    };
-
-    Ok(port.map_or_else(|| host.clone(), |port| format!("{host}:{port}")))
 }
 
 impl FromStr for ActrUri {
     type Err = ActrUriError;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        let (scheme, remainder) = input.split_once("://").ok_or_else(|| {
-            ActrUriError::InvalidScheme(input.split(':').next().unwrap_or_default().to_string())
-        })?;
+        let (scheme, rest) = input.split_once(':').unwrap_or((input, ""));
         if !scheme.eq_ignore_ascii_case("actr") {
             return Err(ActrUriError::InvalidScheme(scheme.to_string()));
         }
-        if remainder.contains('?') || remainder.contains('#') {
-            return Err(ActrUriError::ExtraComponentNotAllowed);
+        let rest = rest
+            .strip_prefix("//")
+            .ok_or_else(|| ActrUriError::InvalidDomain("expected actr://<domain>".to_string()))?;
+        let (rest, fragment) = rest
+            .split_once('#')
+            .map_or((rest, None), |(rest, fragment)| (rest, Some(fragment)));
+        let (rest, query) = rest
+            .split_once('?')
+            .map_or((rest, None), |(rest, query)| (rest, Some(query)));
+        let (raw_domain, raw_path) = rest.split_once('/').unwrap_or((rest, ""));
+
+        if is_legacy(raw_domain, raw_path) {
+            return Err(ActrUriError::LegacyForm(input.to_string()));
         }
-        let (raw_authority, raw_target) = remainder
-            .split_once('/')
-            .map_or((remainder, ""), |(authority, target)| (authority, target));
-        let authority = normalize_authority(raw_authority)?;
-        let target = normalize_raw_target(raw_target)?;
+        let query = query.map(|q| normalize_component(q, true)).transpose()?;
+        let fragment = fragment.map(|f| normalize_component(f, true)).transpose()?;
+        let domain = normalize_domain(raw_domain)?;
 
-        let normalized_target = if target.is_empty() {
-            None
-        } else {
-            Some(target)
+        let mut uri = Self {
+            domain,
+            realm_id: None,
+            serial: None,
+            path: String::new(),
+            query,
+            fragment,
         };
+        if raw_path.is_empty() {
+            return Ok(uri);
+        }
 
-        Ok(Self {
-            authority,
-            target: normalized_target,
-        })
+        let mut segments = raw_path.split('/').map(normalize_segment);
+        let target = segments.next().expect("split yields one segment")?;
+        let (serial, realm_id) = match target.split_once('.') {
+            Some((serial, realm_id)) => (Some(serial), realm_id),
+            None => (None, target.as_str()),
+        };
+        if serial.is_some_and(|serial| !is_serial(serial)) || !is_realm_id(realm_id) {
+            return Err(ActrUriError::InvalidLabel(target));
+        }
+        uri.serial = serial.map(str::to_string);
+        uri.realm_id = Some(realm_id.to_string());
+        for segment in segments {
+            uri.path.push('/');
+            uri.path.push_str(&segment?);
+        }
+        Ok(uri)
     }
 }
 
-/// Builder for a public Actr URI.
-#[derive(Debug, Default)]
-pub struct ActrUriBuilder {
-    authority: Option<String>,
-    target: Option<String>,
+/// Early forms named in the URI spec's legacy section:
+/// `actr://<realm>:<publisher>+<name>@<version>` and
+/// `actr://<publisher>/<program>@<version>`.
+fn is_legacy(raw_domain: &str, raw_path: &str) -> bool {
+    let prototype = raw_domain
+        .split_once(':')
+        .and_then(|(_, rest)| rest.split_once('+'))
+        .is_some_and(|(_, rest)| rest.contains('@'));
+    let product_draft = raw_path.split('/').next().is_some_and(|s| s.contains('@'));
+    prototype || product_draft
 }
 
-impl ActrUriBuilder {
-    pub fn new() -> Self {
-        Self::default()
+fn normalize_domain(raw: &str) -> Result<String, ActrUriError> {
+    let invalid = |reason: &str| ActrUriError::InvalidDomain(format!("'{raw}': {reason}"));
+    if raw.is_empty() {
+        return Err(invalid("missing domain"));
     }
+    if raw.contains('@') {
+        return Err(invalid("userinfo is not permitted"));
+    }
+    if raw.contains([':', '[', ']']) {
+        return Err(invalid("port and IP literal are not permitted"));
+    }
+    let domain = idna::domain_to_ascii_strict(raw).map_err(|_| invalid("not a valid DNS name"))?;
+    let last = domain.rsplit('.').next().unwrap_or_default();
+    if domain.parse::<Ipv4Addr>().is_ok() || last.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(invalid("IP literal is not permitted"));
+    }
+    if domain == LOCAL_REALM_SUFFIX[1..] || domain.ends_with(LOCAL_REALM_SUFFIX) {
+        let id = domain.strip_suffix(LOCAL_REALM_SUFFIX).unwrap_or_default();
+        let valid = id.len() == 26 && id.bytes().all(|b| matches!(b, b'a'..=b'z' | b'2'..=b'7'));
+        if !valid {
+            return Err(invalid("expected <installation-id>.actr.alt"));
+        }
+    }
+    Ok(domain)
+}
 
-    pub fn authority(mut self, authority: impl Into<String>) -> Self {
-        self.authority = Some(authority.into());
-        self
-    }
+/// RealmId: 1 to 63 lowercase letters, digits, or `-`, not starting or ending with `-`.
+fn is_realm_id(value: &str) -> bool {
+    (1..=63).contains(&value.len())
+        && !value.starts_with('-')
+        && !value.ends_with('-')
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
 
-    pub fn target(mut self, target: impl Into<String>) -> Self {
-        self.target = Some(target.into());
-        self
-    }
+/// Serial: one or more lowercase hexadecimal digits.
+fn is_serial(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
 
-    pub fn build(self) -> Result<ActrUri, ActrUriError> {
-        let authority = self.authority.ok_or(ActrUriError::MissingAuthority)?;
-        ActrUri::new(authority, self.target.as_deref())
+/// A `links` prefix starts and ends with `/` and has at least one segment.
+pub(crate) fn is_link_prefix(value: &str) -> bool {
+    value.len() > 1
+        && value.starts_with('/')
+        && value.ends_with('/')
+        && value[1..value.len() - 1]
+            .split('/')
+            .all(|segment| !segment.is_empty() && !segment.contains(['?', '#']))
+}
+
+fn is_unreserved(octet: u8) -> bool {
+    octet.is_ascii_alphanumeric() || matches!(octet, b'-' | b'.' | b'_' | b'~')
+}
+
+/// RFC 3986 `pchar` without percent-encoding.
+fn is_pchar(octet: u8) -> bool {
+    is_unreserved(octet) || b"!$&'()*+,;=:@".contains(&octet)
+}
+
+fn normalize_segment(segment: &str) -> Result<String, ActrUriError> {
+    let normalized = normalize_component(segment, false)?;
+    if normalized.is_empty() || normalized == "." || normalized == ".." {
+        return Err(ActrUriError::InvalidPath(
+            "empty and dot segments are not permitted".to_string(),
+        ));
     }
+    Ok(normalized)
+}
+
+/// Uppercase percent-encoding hex digits and decode unreserved characters.
+/// Query and fragment also allow `/` and `?`.
+fn normalize_component(value: &str, query: bool) -> Result<String, ActrUriError> {
+    let invalid = |reason: &str| ActrUriError::InvalidPath(format!("'{value}': {reason}"));
+    let bytes = value.as_bytes();
+    let mut normalized = String::with_capacity(value.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let octet = bytes[index];
+        if octet == b'%' {
+            let octet = value
+                .get(index + 1..index + 3)
+                .filter(|hex| hex.bytes().all(|b| b.is_ascii_hexdigit()))
+                .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+                .ok_or_else(|| invalid("invalid percent-encoding"))?;
+            if is_unreserved(octet) {
+                normalized.push(char::from(octet));
+            } else {
+                write!(normalized, "%{octet:02X}").expect("writing to a String cannot fail");
+            }
+            index += 3;
+        } else if is_pchar(octet) || (query && matches!(octet, b'/' | b'?')) {
+            normalized.push(char::from(octet));
+            index += 1;
+        } else {
+            return Err(invalid(
+                "characters outside RFC 3986 must be percent-encoded",
+            ));
+        }
+    }
+    Ok(normalized)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn parse(value: &str) -> ActrUri {
+        value.parse().unwrap()
+    }
+
+    fn code(value: &str) -> &'static str {
+        value.parse::<ActrUri>().unwrap_err().code()
+    }
+
     #[test]
-    fn parses_authority_and_opaque_target() {
-        let uri = "actr://Example.COM:8443/apps/echo%2Fstable"
-            .parse::<ActrUri>()
-            .unwrap();
-        assert_eq!(uri.authority(), "example.com:8443");
-        assert_eq!(uri.target(), Some("apps/echo%2Fstable"));
+    fn parses_realm_link() {
+        let uri = parse("actr://acme.com/k7m2q9xh");
+        assert_eq!(uri.domain(), "acme.com");
+        assert_eq!(uri.realm_id(), Some("k7m2q9xh"));
+        assert_eq!(uri.serial(), None);
+        assert_eq!(uri.realm_name().as_deref(), Some("k7m2q9xh@acme.com"));
+        assert_eq!(uri.actor_id(), None);
+        assert_eq!(uri.to_string(), "actr://acme.com/k7m2q9xh");
+    }
+
+    #[test]
+    fn passes_page_path_query_and_fragment_through() {
+        let uri = parse("actr://acme.com/k7m2q9xh/today?view=week#item-3");
+        assert_eq!(uri.realm_name().as_deref(), Some("k7m2q9xh@acme.com"));
+        assert_eq!(uri.path(), "/today");
+        assert_eq!(uri.query(), Some("view=week"));
+        assert_eq!(uri.fragment(), Some("item-3"));
         assert_eq!(
             uri.to_string(),
-            "actr://example.com:8443/apps/echo%2Fstable"
+            "actr://acme.com/k7m2q9xh/today?view=week#item-3"
         );
     }
 
     #[test]
-    fn authority_uri_has_no_target() {
-        let uri = "actr://example.com/echo".parse::<ActrUri>().unwrap();
-        assert_eq!(uri.authority_uri(), "actr://example.com");
-        assert_eq!(uri.discovery_url(), "https://example.com/.well-known/actr");
+    fn parses_actor_link() {
+        let uri = parse("actr://acme.com/2af01.k7m2q9xh");
+        assert_eq!(uri.serial(), Some("2af01"));
+        assert_eq!(uri.realm_name().as_deref(), Some("k7m2q9xh@acme.com"));
+        assert_eq!(uri.actor_id().as_deref(), Some("2af01.k7m2q9xh@acme.com"));
+        assert_eq!(uri.to_string(), "actr://acme.com/2af01.k7m2q9xh");
     }
 
     #[test]
-    fn strips_default_discovery_port() {
-        let uri = "ACTR://EXAMPLE.COM:443/echo".parse::<ActrUri>().unwrap();
-        assert_eq!(uri.to_string(), "actr://example.com/echo");
-    }
-
-    #[test]
-    fn normalizes_ip_authorities() {
-        let uri = "actr://[2001:0db8:0:0:0:0:0:1]:8443/echo"
-            .parse::<ActrUri>()
-            .unwrap();
-        assert_eq!(uri.authority(), "[2001:db8::1]:8443");
-        assert!("actr://999.1.1.1/echo".parse::<ActrUri>().is_err());
-        assert!("actr://example..com/echo".parse::<ActrUri>().is_err());
-    }
-
-    #[test]
-    fn builder_uses_public_components() {
-        let uri = ActrUriBuilder::new()
-            .authority("example.com")
-            .target("echo")
-            .build()
-            .unwrap();
-        assert_eq!(uri.to_string(), "actr://example.com/echo");
-    }
-
-    #[test]
-    fn rejects_internal_identity_shaped_authority() {
-        let result = "actr://101:acme+echo@1.0.0".parse::<ActrUri>();
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn rejects_userinfo_query_fragment_and_invalid_paths() {
-        assert!(matches!(
-            "actr://user@example.com/echo".parse::<ActrUri>(),
-            Err(ActrUriError::UserInfoNotAllowed)
-        ));
-        assert!(matches!(
-            "actr://example.com/echo?token=x".parse::<ActrUri>(),
-            Err(ActrUriError::ExtraComponentNotAllowed)
-        ));
-        assert!("actr://example.com/a//b".parse::<ActrUri>().is_err());
-        assert!("actr://example.com/a/%2e%2e/b".parse::<ActrUri>().is_err());
-        assert!("actr://example.com/a/%ZZ/b".parse::<ActrUri>().is_err());
-    }
-
-    #[test]
-    fn preserves_target_case() {
-        let uri = "actr://EXAMPLE.com/Apps/Echo".parse::<ActrUri>().unwrap();
-        assert_eq!(uri.to_string(), "actr://example.com/Apps/Echo");
-    }
-
-    #[test]
-    fn normalizes_percent_encoding_without_changing_target_semantics() {
-        let uri = "actr://example.com/%65cho/%e4%b8%ad"
-            .parse::<ActrUri>()
-            .unwrap();
-        assert_eq!(uri.to_string(), "actr://example.com/echo/%E4%B8%AD");
-        assert!(
-            "actr://example.com/echo/\u{4e2d}"
-                .parse::<ActrUri>()
-                .is_err()
+    fn domain_only_uri_names_no_realm() {
+        let uri = parse("actr://acme.com/");
+        assert_eq!(uri.realm_id(), None);
+        assert_eq!(uri.to_string(), "actr://acme.com");
+        assert_eq!(uri.authority_uri(), "actr://acme.com");
+        assert_eq!(
+            uri.discovery_url().as_deref(),
+            Some("https://acme.com/.well-known/actr")
         );
+        assert_eq!(ActrUri::from_domain("ACME.com").unwrap(), uri);
+    }
+
+    #[test]
+    fn normalizes_scheme_domain_and_percent_encoding() {
+        let uri = parse("ACTR://ACME.Com/k7m2q9xh/%7euser/%e4%b8%ad?q=%2f#%41");
+        assert_eq!(
+            uri.to_string(),
+            "actr://acme.com/k7m2q9xh/~user/%E4%B8%AD?q=%2F#A"
+        );
+        assert_eq!(
+            parse("actr://例子.中国/k7m2q9xh").domain(),
+            "xn--fsqu00a.xn--fiqs8s"
+        );
+    }
+
+    #[test]
+    fn page_path_is_case_sensitive() {
+        assert_ne!(
+            parse("actr://acme.com/k7m2q9xh/Today"),
+            parse("actr://acme.com/k7m2q9xh/today")
+        );
+    }
+
+    #[test]
+    fn local_realm() {
+        let id = "abcdefghijklmnopqrstuvwxyz";
+        let uri = parse(&format!("actr://{id}.actr.alt/h3x8p2wq"));
+        assert!(uri.is_local());
+        assert_eq!(uri.discovery_url(), None);
+        assert_eq!(uri.to_https("/i/"), None);
+        uri.check_local(id).unwrap();
+        let error = uri.check_local("bcdefghijklmnopqrstuvwxyza").unwrap_err();
+        assert_eq!(error.code(), "URI_LOCAL_REALM_FOREIGN");
+        assert!(!parse("actr://acme.com/k7m2q9xh").is_local());
+        parse("actr://acme.com/k7m2q9xh").check_local(id).unwrap();
+    }
+
+    #[test]
+    fn https_form_uses_declared_prefix() {
+        let links = vec!["/i/".to_string()];
+        let uri = ActrUri::from_https("https://acme.com/i/k7m2q9xh/today?view=week", &links);
+        assert_eq!(
+            uri.as_ref().map(ToString::to_string).as_deref(),
+            Some("actr://acme.com/k7m2q9xh/today?view=week")
+        );
+        assert_eq!(
+            uri.unwrap().to_https("/i/").as_deref(),
+            Some("https://acme.com/i/k7m2q9xh/today?view=week")
+        );
+    }
+
+    #[test]
+    fn https_form_prefers_longest_prefix() {
+        let links = vec!["/i/".to_string(), "/i/x/".to_string()];
+        let uri = ActrUri::from_https("https://acme.com/i/x/k7m2q9xh", &links).unwrap();
+        assert_eq!(uri.to_string(), "actr://acme.com/k7m2q9xh");
+    }
+
+    #[test]
+    fn undeclared_https_is_an_ordinary_page() {
+        let links = vec!["/i/".to_string()];
+        for url in [
+            "https://acme.com/k7m2q9xh",
+            "https://acme.com/i/",
+            "https://acme.com/i/Bad_Id",
+            "https://acme.com:8443/i/k7m2q9xh",
+            "http://acme.com/i/k7m2q9xh",
+            "https://abcdefghijklmnopqrstuvwxyz.actr.alt/i/h3x8p2wq",
+        ] {
+            assert_eq!(ActrUri::from_https(url, &links), None, "{url}");
+        }
+        assert_eq!(
+            ActrUri::from_https("https://acme.com/i/k7m2q9xh", &[]),
+            None
+        );
+        assert_eq!(parse("actr://acme.com").to_https("/i/"), None);
+        assert_eq!(parse("actr://acme.com/k7m2q9xh").to_https("/"), None);
+    }
+
+    #[test]
+    fn rejects_invalid_scheme() {
+        assert_eq!(code("https://acme.com/k7m2q9xh"), "URI_SCHEME_INVALID");
+        assert_eq!(code("actro://acme.com"), "URI_SCHEME_INVALID");
+    }
+
+    #[test]
+    fn rejects_invalid_domain() {
+        for value in [
+            "actr:acme.com",
+            "actr://",
+            "actr://acme.com:443/k7m2q9xh",
+            "actr://acme.com:8443",
+            "actr://user@acme.com/k7m2q9xh",
+            "actr://192.168.1.1/k7m2q9xh",
+            "actr://[2001:db8::1]/k7m2q9xh",
+            "actr://acme..com",
+            "actr://-acme.com",
+            "actr://acme.com.",
+            "actr://actr.alt",
+            "actr://short.actr.alt/h3x8p2wq",
+            "actr://abcdefghijklmnopqrstuvwxy1.actr.alt/h3x8p2wq",
+        ] {
+            assert_eq!(code(value), "URI_DOMAIN_INVALID", "{value}");
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_label() {
+        for value in [
+            "actr://acme.com/K7m2q9xh",
+            "actr://acme.com/-k7m",
+            "actr://acme.com/k7m-",
+            "actr://acme.com/k7_m",
+            "actr://acme.com/2AF01.k7m2q9xh",
+            "actr://acme.com/2ag01.k7m2q9xh",
+            "actr://acme.com/.k7m2q9xh",
+            "actr://acme.com/2af01.",
+            "actr://acme.com/1.2.k7m",
+            "actr://acme.com/k7m2q9xh/a//b",
+            "actr://acme.com/k7m2q9xh/",
+            "actr://acme.com/k7m2q9xh/%2e%2e/b",
+            "actr://acme.com/k7m2q9xh/./b",
+            "actr://acme.com/k7m2q9xh/%ZZ",
+            "actr://acme.com/k7m2q9xh/\u{4e2d}",
+            "actr://acme.com/k7m2q9xh?a b",
+        ] {
+            assert_eq!(code(value), "URI_LABEL_INVALID", "{value}");
+        }
+        assert_eq!(
+            code(&format!("actr://acme.com/{}", "a".repeat(64))),
+            "URI_LABEL_INVALID"
+        );
+    }
+
+    #[test]
+    fn rejects_legacy_forms() {
+        for value in [
+            "actr://101:acme+echo@1.0.0",
+            "actr://acme.com/notes@1.2.0",
+            "actr://acme.com/notes@1.2.0?service=2af01.k7m2q9xh@acme.com",
+        ] {
+            assert_eq!(code(value), "URI_LEGACY_FORM", "{value}");
+        }
     }
 }

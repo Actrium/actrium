@@ -346,6 +346,7 @@ dependencies = [
  "chrono",
  "glob",
  "hex",
+ "idna",
  "prost",
  "prost-build",
  "prost-types",

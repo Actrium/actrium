@@ -1,6 +1,6 @@
 //! Public authority discovery data types.
 
-use crate::uri::ActrUri;
+use crate::uri::{ActrUri, is_link_prefix};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -87,22 +87,14 @@ pub fn parse_authority_member(value: &str) -> Result<ActrUri, AuthorityDescripto
     let domain = value
         .strip_prefix("actr://")
         .ok_or_else(|| invalid("expected actr://<domain>"))?;
-    if domain.is_empty() || domain.contains(['@', '/', '?', '#', ':']) {
+    if domain.contains(['@', '/', '?', '#', ':']) {
         return Err(invalid("expected actr://<domain> without port or path"));
     }
-    value
-        .parse::<ActrUri>()
-        .map_err(|error| invalid(&error.to_string()))
-}
-
-/// A Realm link prefix starts and ends with `/` and has at least one segment.
-fn is_link_prefix(value: &str) -> bool {
-    value.len() > 1
-        && value.starts_with('/')
-        && value.ends_with('/')
-        && value[1..value.len() - 1]
-            .split('/')
-            .all(|segment| !segment.is_empty() && !segment.contains(['?', '#']))
+    let uri = ActrUri::from_domain(domain).map_err(|error| invalid(&error.to_string()))?;
+    if uri.is_local() {
+        return Err(invalid("a local Realm domain has no authority descriptor"));
+    }
+    Ok(uri)
 }
 
 impl AuthorityDescriptor {
@@ -236,6 +228,7 @@ mod tests {
             "actr://example.com:443",
             "actr://example.com:8443",
             "actr://user@example.com",
+            "actr://abcdefghijklmnopqrstuvwxyz.actr.alt",
             "actr://",
             "https://example.com",
         ] {

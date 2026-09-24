@@ -66,7 +66,7 @@ fn authority_composition(
     // the default HTTPS port; an explicit bind.http port only appears in the
     // advertised service endpoints.
     let expected_authority =
-        actr_protocol::uri::ActrUri::new(&http.domain_name, None).map_err(|error| {
+        actr_protocol::uri::ActrUri::from_domain(&http.domain_name).map_err(|error| {
             anyhow::anyhow!("bind.http does not form a valid Actr authority: {error}")
         })?;
     if expected_authority.authority_uri() != parsed_authority.authority_uri() {
