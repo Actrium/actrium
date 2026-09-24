@@ -435,6 +435,25 @@ pub async fn gc_expired_tokens() -> Result<u64, sqlx::Error> {
     Ok(result.rows_affected())
 }
 
+/// Extend an actor's pending registration metadata to the retention of its
+/// current renewal token, matching what `/issuer/register` stored.
+pub async fn refresh_pending_registration(
+    actor_id: &ActrId,
+    renewal_expires_at: i64,
+) -> Result<u64, sqlx::Error> {
+    let pool = platform::storage::db::get_database().get_pool();
+    let result = sqlx::query(
+        "UPDATE pending_registration SET expires_at = ?1
+         WHERE realm_id = ?2 AND serial_number = ?3",
+    )
+    .bind(renewal_expires_at.saturating_add(REISSUE_BINDING_GRACE_SECS))
+    .bind(actor_id.realm.realm_id as i64)
+    .bind(actor_id.serial_number as i64)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 // -------- rotation logic -----------------------------------------------------
 
 /// Outcome of a renewal token rotation attempt.

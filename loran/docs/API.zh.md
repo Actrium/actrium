@@ -137,8 +137,9 @@ Realm secret，但不提供硬删除或替换另一个 Realm；替换属于停�
 
 ## Schema migration
 
-当前 schema 为 v2（`PRAGMA user_version = 2`）。运行时只自动初始化空数据库；其他版本必须
-停机按序执行离线工具（未版本化库先 v1，再 v2）：
+当前 schema 为 v3（`PRAGMA user_version = 3`），在 v2 上新增 Issuer 幂等日志表
+`issuer_control_attempt`。运行时只自动初始化空数据库；其他版本拒绝启动。v2 → v3 不提供
+迁移工具，需停机后重建数据库。下面两个历史工具只覆盖到 v2（未版本化库先 v1，再 v2）：
 
 ```bash
 python3 scripts/loran/migrate_schema_v1.py /path/to/actrix.db   # 未版本化 → v1

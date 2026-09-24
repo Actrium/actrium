@@ -224,22 +224,39 @@ impl ActorAcl {
         to_type: &str,
         rules: &[Self],
     ) -> Result<(), RealmError> {
-        let db = get_database();
-        let pool = db.get_pool();
+        let pool = get_database().get_pool();
         let mut transaction = pool.begin().await?;
+        Self::replace_for_target_in_transaction(&mut transaction, realm_id, to_type, rules).await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// Replace a target type's ACL inside a caller-owned SQLite transaction.
+    ///
+    /// This lets registration commit the ACL policy and pending signaling
+    /// metadata as one all-or-nothing state change.
+    pub async fn replace_for_target_in_transaction(
+        transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        realm_id: u32,
+        to_type: &str,
+        rules: &[Self],
+    ) -> Result<(), RealmError> {
+        if rules
+            .iter()
+            .any(|rule| rule.realm_id != realm_id || rule.to_type != to_type)
+        {
+            return Err(RealmError::ValidationError(
+                "ACL replacement contains a rule outside its target scope".to_string(),
+            ));
+        }
 
         sqlx::query("DELETE FROM actoracl WHERE realm_id = ? AND to_type = ?")
             .bind(realm_id)
             .bind(to_type)
-            .execute(&mut *transaction)
+            .execute(&mut **transaction)
             .await?;
 
         for rule in rules {
-            if rule.realm_id != realm_id || rule.to_type != to_type {
-                return Err(RealmError::ValidationError(
-                    "ACL replacement contains a rule outside its target scope".to_string(),
-                ));
-            }
             sqlx::query(
                 "INSERT INTO actoracl
                     (realm_id, source_realm_id, from_type, to_type, access)
@@ -251,11 +268,10 @@ impl ActorAcl {
             .bind(&rule.from_type)
             .bind(&rule.to_type)
             .bind(if rule.access { 1 } else { 0 })
-            .execute(&mut *transaction)
+            .execute(&mut **transaction)
             .await?;
         }
 
-        transaction.commit().await?;
         Ok(())
     }
 
@@ -514,6 +530,114 @@ mod tests {
         let denied_other_type =
             ActorAcl::can_discover(source_realm, target_realm, "acme:other", "acme:worker").await?;
         assert!(!denied_other_type);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_replace_for_target_replaces_only_the_selected_type() -> anyhow::Result<()> {
+        setup_test_db().await?;
+
+        let realm = Realm::create(
+            "acl_replace_realm".to_string(),
+            "test-secret-hash".to_string(),
+        )
+        .await?;
+        let realm_id = realm.id;
+        let target = "acme:worker";
+        let untouched_target = "acme:other";
+
+        let mut old = ActorAcl::new(
+            realm_id,
+            "acme:old-client".to_string(),
+            target.to_string(),
+            true,
+        );
+        old.save().await?;
+        let mut untouched = ActorAcl::new(
+            realm_id,
+            "acme:client".to_string(),
+            untouched_target.to_string(),
+            true,
+        );
+        untouched.save().await?;
+
+        let replacements = vec![
+            ActorAcl::new(
+                realm_id,
+                "acme:new-client".to_string(),
+                target.to_string(),
+                true,
+            ),
+            ActorAcl::new_with_source_realm(
+                realm_id,
+                None,
+                "acme:federated-client".to_string(),
+                target.to_string(),
+                false,
+            ),
+        ];
+        ActorAcl::replace_for_target(realm_id, target, &replacements).await?;
+
+        let rules = ActorAcl::get_by_realm(realm_id).await?;
+        assert_eq!(
+            rules.iter().filter(|rule| rule.to_type == target).count(),
+            2
+        );
+        assert!(
+            rules
+                .iter()
+                .all(|rule| rule.to_type != target || rule.from_type != "acme:old-client")
+        );
+        assert!(
+            rules
+                .iter()
+                .any(|rule| rule.to_type == untouched_target && rule.from_type == "acme:client")
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_replace_for_target_in_transaction_rolls_back_with_caller() -> anyhow::Result<()> {
+        setup_test_db().await?;
+
+        let realm = Realm::create(
+            "acl_rollback_realm".to_string(),
+            "test-secret-hash".to_string(),
+        )
+        .await?;
+        let realm_id = realm.id;
+        let target = "acme:worker";
+        let mut old = ActorAcl::new(
+            realm_id,
+            "acme:old-client".to_string(),
+            target.to_string(),
+            true,
+        );
+        old.save().await?;
+
+        let replacement = [ActorAcl::new(
+            realm_id,
+            "acme:new-client".to_string(),
+            target.to_string(),
+            true,
+        )];
+        let mut transaction = get_database().get_pool().begin().await?;
+        ActorAcl::replace_for_target_in_transaction(
+            &mut transaction,
+            realm_id,
+            target,
+            &replacement,
+        )
+        .await?;
+        transaction.rollback().await?;
+
+        let rules = ActorAcl::get_by_realm(realm_id).await?;
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].from_type, "acme:old-client");
 
         Ok(())
     }

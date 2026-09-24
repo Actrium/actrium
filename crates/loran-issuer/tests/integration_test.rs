@@ -3,8 +3,9 @@
 //! Starts a temporary Signer gRPC service within the test process to verify the Issuer issuance and validation chain.
 
 use actr_protocol::{
-    ActrType, Realm, RegisterAuthMode, RegisterRequest, RegisterResponse, ReissueCredentialRequest,
-    RenewCredentialRequest, RenewCredentialResponse, register_response, renew_credential_response,
+    Acl, AclRule, ActrType, Realm, RegisterAuthMode, RegisterRequest, RegisterResponse,
+    ReissueCredentialRequest, RenewCredentialRequest, RenewCredentialResponse, acl_rule,
+    register_response, renew_credential_response,
 };
 use axum::{
     Router,
@@ -521,6 +522,163 @@ async fn test_register_route_linked_with_realm_secret_succeeds() {
             panic!("linked /register with realm secret should succeed: {err:?}")
         }
     }
+}
+
+#[tokio::test]
+#[serial]
+async fn test_register_pending_failure_rolls_back_acl() {
+    let mut env = setup_test_environment().await;
+    let realm_secret = "linked-register-atomic-secret";
+    let realm_id = 22033;
+    seed_realm(realm_id, "linked-register-atomic", Some(realm_secret)).await;
+    let app = create_test_router(&env).await;
+    let pool = platform::storage::db::get_database().get_pool();
+
+    let mut request = linked_register_request();
+    request.realm = Realm { realm_id };
+    request.ws_address = Some("wss://example.invalid/actor".to_string());
+    request.acl = Some(Acl {
+        rules: vec![AclRule {
+            permission: acl_rule::Permission::Allow as i32,
+            from_type: ActrType {
+                publisher: "new-client".to_string(),
+                name: "caller".to_string(),
+                version: "1.0.0".to_string(),
+            },
+            source_realm: Some(acl_rule::SourceRealm::RealmId(realm_id)),
+        }],
+    });
+    let target_type = request.actr_type.to_string_repr();
+
+    sqlx::query("DELETE FROM actoracl WHERE realm_id = ?1 AND to_type = ?2")
+        .bind(realm_id)
+        .bind(&target_type)
+        .execute(pool)
+        .await
+        .expect("clear target ACL");
+    sqlx::query(
+        "INSERT INTO actoracl
+            (realm_id, source_realm_id, from_type, to_type, access)
+         VALUES (?1, ?1, 'old-client/caller@1.0.0', ?2, 0)",
+    )
+    .bind(realm_id)
+    .bind(&target_type)
+    .execute(pool)
+    .await
+    .expect("seed old ACL");
+
+    let pending_before: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM pending_registration WHERE realm_id = ?1")
+            .bind(realm_id)
+            .fetch_one(pool)
+            .await
+            .expect("count pending registrations before");
+
+    sqlx::query("DROP TRIGGER IF EXISTS test_fail_pending_registration")
+        .execute(pool)
+        .await
+        .expect("drop stale test trigger");
+    sqlx::query(
+        "CREATE TRIGGER test_fail_pending_registration
+         BEFORE INSERT ON pending_registration
+         BEGIN
+             SELECT RAISE(FAIL, 'forced pending registration failure');
+         END",
+    )
+    .execute(pool)
+    .await
+    .expect("create pending failure trigger");
+
+    let response = post_register(app, request, Some(realm_secret)).await;
+    sqlx::query("DROP TRIGGER IF EXISTS test_fail_pending_registration")
+        .execute(pool)
+        .await
+        .expect("drop pending failure trigger");
+
+    match response.result.expect("register result") {
+        register_response::Result::Error(error) => assert_eq!(error.code, 500),
+        register_response::Result::Success(_) => panic!("forced pending failure must not succeed"),
+    }
+
+    let acl_rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT from_type, access FROM actoracl
+         WHERE realm_id = ?1 AND to_type = ?2",
+    )
+    .bind(realm_id)
+    .bind(&target_type)
+    .fetch_all(pool)
+    .await
+    .expect("read target ACL after rollback");
+    assert_eq!(
+        acl_rows,
+        vec![("old-client/caller@1.0.0".to_string(), 0)],
+        "previous type-level ACL must remain intact"
+    );
+
+    let pending_after: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM pending_registration WHERE realm_id = ?1")
+            .bind(realm_id)
+            .fetch_one(pool)
+            .await
+            .expect("count pending registrations after");
+    assert_eq!(pending_after, pending_before);
+
+    env.shutdown_signer().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn test_register_sets_pending_retention_and_drops_expired_rows() {
+    let mut env = setup_test_environment().await;
+    let realm_secret = "linked-register-retention-secret";
+    let realm_id = 22034;
+    seed_realm(realm_id, "linked-register-retention", Some(realm_secret)).await;
+    let app = create_test_router(&env).await;
+    let pool = platform::storage::db::get_database().get_pool();
+
+    sqlx::query(
+        "INSERT INTO pending_registration
+            (realm_id, serial_number, ws_address, created_at, expires_at)
+         VALUES (?1, 1, 'wss://example.invalid/stale', 1, 2)",
+    )
+    .bind(realm_id)
+    .execute(pool)
+    .await
+    .expect("seed expired pending registration");
+
+    let mut request = linked_register_request();
+    request.realm = Realm { realm_id };
+    request.ws_address = Some("wss://example.invalid/actor".to_string());
+    let ok = match post_register(app, request, Some(realm_secret))
+        .await
+        .result
+        .expect("register result")
+    {
+        register_response::Result::Success(ok) => ok,
+        register_response::Result::Error(error) => panic!("register failed: {error:?}"),
+    };
+
+    let rows: Vec<(i64, Option<i64>)> = sqlx::query_as(
+        "SELECT serial_number, expires_at FROM pending_registration WHERE realm_id = ?1",
+    )
+    .bind(realm_id)
+    .fetch_all(pool)
+    .await
+    .expect("read pending registrations");
+    let renewal_expires_at = ok
+        .renewal_token_expires_at
+        .expect("renewal token expiry")
+        .seconds;
+    assert_eq!(
+        rows,
+        vec![(
+            ok.actr_id.serial_number as i64,
+            Some(renewal_expires_at + issuer::renewal::REISSUE_BINDING_GRACE_SECS)
+        )],
+        "expired pending rows must be dropped and the new row must carry a retention"
+    );
+
+    env.shutdown_signer().await;
 }
 
 #[tokio::test]
@@ -3527,7 +3685,8 @@ async fn test_reissue_proof_rejected_after_replay_window() {
 
 /// A nonce is public authorization context, not a bearer credential for cached
 /// reissue responses. Exact retries must work; modified credentials must not.
-#[tokio::test]
+// Reloading the signing key from storage uses `block_in_place`.
+#[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_reissue_cache_requires_original_authenticated_request() {
     let fx = path2_fixture("cache.example.com", "CacheBinding", "wasm32-wasip1").await;
@@ -3602,7 +3761,8 @@ async fn test_reissue_cache_requires_original_authenticated_request() {
 
 /// Path 2 has no package row, but is still publisher-authenticated. Exercise
 /// the real renewal endpoint, legacy NULL auth modes, and publisher deletion.
-#[tokio::test]
+// Reloading the signing key from storage uses `block_in_place`.
+#[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_unpublished_renewal_enforces_publisher_status() {
     let fx = path2_fixture("renew.example.com", "UnpublishedRenew", "wasm32-wasip1").await;

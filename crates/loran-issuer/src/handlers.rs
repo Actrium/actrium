@@ -1,6 +1,6 @@
 //! Issuer (Actor Identity Service) HTTP Handler
 
-use crate::{issuer::AIdIssuer, ratelimit::ip_rate_limiter};
+use crate::{idempotency::ControlAttemptStore, issuer::AIdIssuer, ratelimit::ip_rate_limiter};
 use actr_protocol::{
     ErrorResponse, RegisterRequest, RegisterResponse, ReissueCredentialRequest,
     RenewCredentialRequest, RenewCredentialResponse, register_response, renew_credential_response,
@@ -26,24 +26,27 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct IssuerState {
     pub issuer: Arc<AIdIssuer>,
+    #[allow(dead_code)]
+    idempotency: Arc<ControlAttemptStore>,
     /// Service-level counters for metrics collection.
     pub counters: Option<Arc<ServiceCounters>>,
 }
 
 impl IssuerState {
     pub fn new(issuer: AIdIssuer) -> Self {
-        Self {
-            issuer: Arc::new(issuer),
-            counters: None,
-        }
+        Self::from_shared_issuer(Arc::new(issuer))
     }
 
     /// Build state around an issuer that is already shared with another
     /// consumer (e.g. the control plane holding `Arc<AIdIssuer>` for
     /// authenticated key rotation).
     pub fn from_shared_issuer(issuer: Arc<AIdIssuer>) -> Self {
+        let idempotency = Arc::new(ControlAttemptStore::new(
+            &issuer.config.renewal_token_secret,
+        ));
         Self {
             issuer,
+            idempotency,
             counters: None,
         }
     }
@@ -194,91 +197,18 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
                     register_ok.actr_id.r#type.name
                 );
 
-                // Persist ACL rules to database
-                if let Some(ref acl) = request.acl {
-                    use actr_protocol::acl_rule::SourceRealm;
-
-                    let realm_id = register_ok.actr_id.realm.realm_id;
-                    let t = &register_ok.actr_id.r#type;
-                    let my_type = t.to_string_repr();
-
-                    let mut replacement = Vec::with_capacity(acl.rules.len());
-                    for rule in &acl.rules {
-                        let allow =
-                            rule.permission == actr_protocol::acl_rule::Permission::Allow as i32;
-                        let ft = &rule.from_type;
-                        let from_type = ft.to_string_repr();
-                        let source_realm_id = match &rule.source_realm {
-                            Some(SourceRealm::AnyRealm(_)) => None,
-                            Some(SourceRealm::RealmId(id)) => Some(*id),
-                            None => Some(realm_id), // fallback: treat missing as self-realm
-                        };
-
-                        replacement.push(ActorAcl::new_with_source_realm(
-                            realm_id,
-                            source_realm_id,
-                            from_type,
-                            my_type.clone(),
-                            allow,
-                        ));
+                // ACL policy and pending signaling metadata commit together.
+                if let Err(message) = persist_registration_state(&request, register_ok).await {
+                    if let Some(ref ctr) = state.counters {
+                        ctr.record_request(false, start.elapsed().as_secs_f64() * 1000.0)
+                            .await;
                     }
-
-                    if let Err(error) =
-                        ActorAcl::replace_for_target(realm_id, &my_type, &replacement).await
-                    {
-                        platform::recording::error!(
-                            "Failed to atomically persist ACL rules for {}: {}",
-                            my_type,
-                            error
-                        );
-                        return encode_result(RegisterResponse {
-                            result: Some(register_response::Result::Error(ErrorResponse {
-                                code: 500,
-                                message: "Failed to persist registration policy".to_string(),
-                            })),
-                        });
-                    }
-                }
-
-                // Store pending registration (service_spec) for signaling to pick up
-                if request.service_spec.is_some() || request.ws_address.is_some() {
-                    let serial = register_ok.actr_id.serial_number;
-                    let realm = register_ok.actr_id.realm.realm_id;
-                    let spec_blob = request
-                        .service_spec
-                        .as_ref()
-                        .map(prost::Message::encode_to_vec);
-                    let ws_address = request.ws_address.clone();
-                    let db = platform::storage::db::get_database();
-                    let pool = db.get_pool();
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs() as i64;
-                    if let Err(error) = sqlx::query(
-                        "INSERT OR REPLACE INTO pending_registration \
-                         (realm_id, serial_number, service_spec_blob, ws_address, created_at) \
-                         VALUES (?, ?, ?, ?, ?)",
-                    )
-                    .bind(realm as i64)
-                    .bind(serial as i64)
-                    .bind(spec_blob)
-                    .bind(ws_address)
-                    .bind(now)
-                    .execute(pool)
-                    .await
-                    {
-                        platform::recording::error!(
-                            "Failed to persist pending registration metadata: {}",
-                            error
-                        );
-                        return encode_result(RegisterResponse {
-                            result: Some(register_response::Result::Error(ErrorResponse {
-                                code: 500,
-                                message: "Failed to persist registration metadata".to_string(),
-                            })),
-                        });
-                    }
+                    return encode_result(RegisterResponse {
+                        result: Some(register_response::Result::Error(ErrorResponse {
+                            code: 500,
+                            message: message.to_string(),
+                        })),
+                    });
                 }
             }
             if let Some(ref ctr) = state.counters {
@@ -302,6 +232,136 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
     };
 
     encode_result(result)
+}
+
+/// Persist the registration's ACL policy and pending signaling metadata in
+/// one transaction, and drop pending rows whose retention has passed.
+///
+/// On failure returns the client-facing error message.
+async fn persist_registration_state(
+    request: &RegisterRequest,
+    register_ok: &register_response::RegisterOk,
+) -> Result<(), &'static str> {
+    const STATE_ERROR: &str = "Failed to persist registration state";
+
+    let pool = platform::storage::db::get_database().get_pool();
+    let mut tx = pool.begin().await.map_err(|error| {
+        platform::recording::error!("Failed to begin registration transaction: {}", error);
+        STATE_ERROR
+    })?;
+
+    if let Some(ref acl) = request.acl {
+        use actr_protocol::acl_rule::SourceRealm;
+
+        let realm_id = register_ok.actr_id.realm.realm_id;
+        let my_type = register_ok.actr_id.r#type.to_string_repr();
+
+        let replacement = acl
+            .rules
+            .iter()
+            .map(|rule| {
+                let allow = rule.permission == actr_protocol::acl_rule::Permission::Allow as i32;
+                let source_realm_id = match &rule.source_realm {
+                    Some(SourceRealm::AnyRealm(_)) => None,
+                    Some(SourceRealm::RealmId(id)) => Some(*id),
+                    None => Some(realm_id), // fallback: treat missing as self-realm
+                };
+                ActorAcl::new_with_source_realm(
+                    realm_id,
+                    source_realm_id,
+                    rule.from_type.to_string_repr(),
+                    my_type.clone(),
+                    allow,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        ActorAcl::replace_for_target_in_transaction(&mut tx, realm_id, &my_type, &replacement)
+            .await
+            .map_err(|error| {
+                platform::recording::error!(
+                    "Failed to atomically persist ACL rules for {}: {}",
+                    my_type,
+                    error
+                );
+                "Failed to persist registration policy"
+            })?;
+    }
+
+    let now = crate::renewal::now_secs();
+
+    // Store pending registration (service_spec) for signaling to pick up.
+    // It is kept as long as the renewal-token binding that /reissue accepts.
+    if request.service_spec.is_some() || request.ws_address.is_some() {
+        let spec_blob = request
+            .service_spec
+            .as_ref()
+            .map(prost::Message::encode_to_vec);
+        let expires_at = register_ok
+            .renewal_token_expires_at
+            .map(|timestamp| timestamp.seconds)
+            .unwrap_or(now)
+            .saturating_add(crate::renewal::REISSUE_BINDING_GRACE_SECS);
+        sqlx::query(
+            "INSERT OR REPLACE INTO pending_registration \
+             (realm_id, serial_number, service_spec_blob, ws_address, created_at, expires_at) \
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(register_ok.actr_id.realm.realm_id as i64)
+        .bind(register_ok.actr_id.serial_number as i64)
+        .bind(spec_blob)
+        .bind(request.ws_address.clone())
+        .bind(now)
+        .bind(expires_at)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            platform::recording::error!(
+                "Failed to persist pending registration metadata: {}",
+                error
+            );
+            "Failed to persist registration metadata"
+        })?;
+    }
+
+    sqlx::query(
+        "DELETE FROM pending_registration WHERE expires_at IS NOT NULL AND expires_at <= ?",
+    )
+    .bind(now)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| {
+        platform::recording::error!(
+            "Failed to clean expired pending registration metadata: {}",
+            error
+        );
+        "Failed to persist registration metadata"
+    })?;
+
+    tx.commit().await.map_err(|error| {
+        platform::recording::error!("Failed to commit registration state: {}", error);
+        STATE_ERROR
+    })
+}
+
+/// Keep pending signaling metadata alive for as long as the actor holds a
+/// renewal token, so expiry cleanup does not drop a live registration.
+async fn keep_pending_registration(
+    actor_id: &actr_protocol::ActrId,
+    register_ok: &register_response::RegisterOk,
+) {
+    let Some(expires_at) = register_ok.renewal_token_expires_at else {
+        return;
+    };
+    if let Err(error) =
+        crate::renewal::refresh_pending_registration(actor_id, expires_at.seconds).await
+    {
+        platform::recording::warn!(
+            "Failed to extend pending registration for actor {}: {}",
+            actor_id.to_string_repr(),
+            error
+        );
+    }
 }
 
 /// POST /issuer/reissue — re-authenticate and issue credentials for an existing
@@ -434,7 +494,8 @@ async fn reissue_credential(
             .record_request(succeeded, start.elapsed().as_secs_f64() * 1000.0)
             .await;
     }
-    if succeeded {
+    if let Some(register_response::Result::Success(ref register_ok)) = result.result {
+        keep_pending_registration(&request.actr_id, register_ok).await;
         platform::recording::info!(
             "Credential reissued for actor {}",
             request.actr_id.to_string_repr()
@@ -621,6 +682,7 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
 
     register_ok.renewal_token = Some(token);
     register_ok.renewal_token_expires_at = expires_at;
+    keep_pending_registration(actor_id, &register_ok).await;
 
     if let Some(ref ctr) = state.counters {
         ctr.record_request(true, start.elapsed().as_secs_f64() * 1000.0)

@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-const ACTRIX_SCHEMA_VERSION: i64 = 2;
+const ACTRIX_SCHEMA_VERSION: i64 = 3;
 
 /// Database manager
 #[derive(Clone)]
@@ -41,8 +41,8 @@ impl Database {
 
         let db = Self { pool };
 
-        // Schema changes are explicit and fail closed. Existing unversioned
-        // databases must be upgraded by the standalone migration tool.
+        // Schema changes are explicit and fail closed. Databases from another
+        // schema version must be rebuilt.
         db.verify_schema_version().await?;
         db.initialize_schema().await?;
 
@@ -72,7 +72,7 @@ impl Database {
 
         anyhow::bail!(
             "unsupported Actrix database schema version {version}; expected \
-             {ACTRIX_SCHEMA_VERSION}. Stop Actrix and run the standalone migration tool"
+             {ACTRIX_SCHEMA_VERSION}. Stop Actrix and rebuild the database"
         );
     }
 
@@ -432,6 +432,37 @@ impl Database {
         .execute(&mut *tx)
         .await?;
 
+        // Durable idempotency journal for Issuer identity-state writes.
+        // Response bodies contain bearer credentials and are therefore
+        // encrypted by Issuer before being stored in response_ciphertext.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS issuer_control_attempt (
+                operation           TEXT    NOT NULL,
+                attempt_id          BLOB    NOT NULL,
+                actor_id            TEXT    NOT NULL,
+                request_hash        BLOB    NOT NULL,
+                state               INTEGER NOT NULL,
+                lease_id            BLOB,
+                lease_expires_at    INTEGER,
+                response_status     INTEGER,
+                response_ciphertext BLOB,
+                response_expires_at INTEGER,
+                tombstone_expires_at INTEGER NOT NULL,
+                created_at          INTEGER NOT NULL,
+                updated_at          INTEGER NOT NULL,
+                PRIMARY KEY(operation, attempt_id)
+            )",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_issuer_control_attempt_expiry
+             ON issuer_control_attempt(state, tombstone_expires_at)",
+        )
+        .execute(&mut *tx)
+        .await?;
+
         // Explicit actor revocation list. A revoked (realm_id, serial_number)
         // can never be renewed or reissued again, independent of any renewal
         // token it may still hold: /renew and /reissue consult this table before
@@ -582,7 +613,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unversioned_existing_database_requires_offline_migration() {
+    async fn unversioned_existing_database_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
         let db_file = dir.path().join("actrix.db");
         let options = SqliteConnectOptions::from_str(&format!("sqlite:{}", db_file.display()))
@@ -605,6 +636,28 @@ mod tests {
             .expect("legacy database must be rejected");
         let message = error.to_string();
         assert!(message.contains("schema version 0"));
-        assert!(message.contains("standalone migration tool"));
+        assert!(message.contains("rebuild the database"));
+    }
+
+    #[tokio::test]
+    async fn previous_schema_version_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::new(dir.path()).await.unwrap();
+        sqlx::query(&format!(
+            "PRAGMA user_version = {}",
+            ACTRIX_SCHEMA_VERSION - 1
+        ))
+        .execute(db.get_pool())
+        .await
+        .unwrap();
+        db.get_pool().close().await;
+
+        let error = Database::new(dir.path())
+            .await
+            .err()
+            .expect("previous schema version must be rejected");
+        let message = error.to_string();
+        assert!(message.contains(&format!("schema version {}", ACTRIX_SCHEMA_VERSION - 1)));
+        assert!(message.contains("rebuild the database"));
     }
 }
