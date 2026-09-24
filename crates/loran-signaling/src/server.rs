@@ -1531,6 +1531,27 @@ async fn handle_actr_relay(
     if let Some(actr_relay::Payload::RoleNegotiation(RoleNegotiation { from, to, .. })) =
         relay.payload.clone()
     {
+        // The ACL above covers only source -> target, so the negotiation must
+        // name exactly that pair.
+        if from != source || to != target {
+            platform::recording::warn!(
+                "RoleNegotiation does not match relay endpoints: source={}, target={}, from={}, to={}",
+                source.to_string_repr(),
+                target.to_string_repr(),
+                from.to_string_repr(),
+                to.to_string_repr()
+            );
+            send_error_response(
+                client_id,
+                &source,
+                403,
+                "RoleNegotiation must be from the relay source to the relay target",
+                server,
+                Some(request_envelope_id),
+            )
+            .await?;
+            return Ok(());
+        }
         if resolve_client_id_by_actor_id(&to, server).await.is_err() {
             platform::recording::warn!(
                 "⚠️ Role negotiation target Actor {} is unavailable",
@@ -1561,9 +1582,8 @@ async fn handle_actr_relay(
         // credential.
         let empty_credential = AIdCredential::default();
 
-        // Send RoleAssignment to from
-        // `from` is only typed when it is the verified source.
-        let from_type = (from == source).then(|| source_type.clone());
+        // Send RoleAssignment to from; `from` is the verified source.
+        let from_type = Some(source_type.clone());
 
         let new_relay = ActrRelay {
             // source: peer actor, target: receiver of this assignment

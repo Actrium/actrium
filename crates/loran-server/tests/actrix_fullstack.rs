@@ -3465,6 +3465,62 @@ async fn signaling_relay_acl_denied_in_same_realm() {
 
 #[tokio::test]
 #[serial]
+async fn signaling_relay_rejects_role_negotiation_to_another_actor() {
+    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let port = harness.port;
+
+    let allow_acl = Acl {
+        rules: vec![AclRule {
+            permission: Permission::Allow as i32,
+            from_type: ActrType {
+                publisher: "acme".into(),
+                name: "relay-src-pair".into(),
+                version: "1.0.0".to_string(),
+            },
+            source_realm: Some(SourceRealm::Realm(TEST_REALM.to_string())),
+        }],
+    };
+
+    let (_dst_w, _dst_r, dst_ok) =
+        ws_register(port, "acme", "relay-dst-pair", Some(allow_acl)).await;
+    let (_other_w, _other_r, other_ok) = ws_register(port, "acme", "relay-other-pair", None).await;
+    let (mut src_w, mut src_r, src_ok) = ws_register(port, "acme", "relay-src-pair", None).await;
+
+    // The ACL allows source -> target, but the negotiation names another Actor.
+    let relay = ActrRelay {
+        source: src_ok.actr_id.clone(),
+        credential: src_ok.credential.clone(),
+        target: dst_ok.actr_id.clone(),
+        source_type: None,
+        delivery_context: None,
+        payload: Some(actr_relay::Payload::RoleNegotiation(RoleNegotiation {
+            from: src_ok.actr_id.clone(),
+            to: other_ok.actr_id.clone(),
+        })),
+    };
+    send_envelope(
+        &mut src_w,
+        make_envelope(signaling_envelope::Flow::ActrRelay(relay)),
+    )
+    .await;
+
+    let resp = recv_envelope(&mut src_r).await;
+    match resp.flow {
+        Some(signaling_envelope::Flow::ServerToActr(server_msg)) => match server_msg.payload {
+            Some(signaling_to_actr::Payload::Error(err)) => {
+                assert_eq!(err.code, 403);
+                assert!(err.message.contains("RoleNegotiation must be from"));
+            }
+            other => panic!("expected RoleNegotiation error, got {other:?}"),
+        },
+        other => panic!("unexpected flow {other:?}"),
+    }
+
+    harness.shutdown();
+}
+
+#[tokio::test]
+#[serial]
 async fn signaling_relay_forwards_ice_candidate_payload() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
