@@ -236,13 +236,8 @@ impl Deliver for CaptureDeliver {
 fn invocation_context(request_id: &str) -> InvocationContext {
     InvocationContext {
         self_id: actr_protocol::ActrId {
-            realm: actr_protocol::Realm { realm_id: 1 },
+            realm: "test@example.com".to_string(),
             serial_number: 1,
-            r#type: actr_protocol::ActrType {
-                publisher: "test".to_string(),
-                name: "host-state".to_string(),
-                version: "0.1.0".to_string(),
-            },
         },
         caller_id: None,
         request_id: request_id.to_string(),

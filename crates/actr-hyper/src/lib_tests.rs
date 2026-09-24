@@ -133,18 +133,19 @@ fn fake_manifest() -> VerifiedPackage {
 /// Helper: build valid RegisterResponse protobuf bytes with credential data.
 fn fake_register_response_bytes() -> Vec<u8> {
     use actr_protocol::{
-        AIdCredential, ActrId, ActrType, IdentityClaims, Realm, RegisterResponse, TurnCredential,
+        AIdCredential, ActrId, ActrType, IdentityClaims, RegisterResponse, TurnCredential,
         register_response,
     };
 
     let claims = IdentityClaims {
-        realm_id: 1,
+        realm: "test@example.com".to_string(),
         actor_id: "test-actor-id".to_string(),
         expires_at: u64::MAX,
         protocol_version: 1,
-        issuer: "actr:realm:1:authority".to_string(),
+        issuer: "test@example.com".to_string(),
         provider: "actrix-official".to_string(),
         audience: "actr.signaling".to_string(),
+        actor_type: ActrType::default(),
     };
     let claims_bytes = claims.encode_to_vec();
 
@@ -155,18 +156,13 @@ fn fake_register_response_bytes() -> Vec<u8> {
     };
 
     let actr_id = ActrId {
-        realm: Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         serial_number: 42,
-        r#type: ActrType {
-            publisher: "test-publisher".to_string(),
-            name: "TestActor".to_string(),
-            version: "0.1.0".to_string(),
-        },
     };
 
     let turn = TurnCredential {
         protocol_version: 1,
-        realm_id: 1,
+        realm: "test@example.com".to_string(),
         provider: "actrix-official".to_string(),
         audience: "actr.turn".to_string(),
         username: "user".to_string(),
@@ -221,7 +217,7 @@ fn linked_runtime_config(dir: &TempDir) -> actr_config::RuntimeConfig {
             license: None,
         },
         signaling_url: url::Url::parse("ws://localhost:8081/signaling/ws").unwrap(),
-        realm: Realm { realm_id: 7 },
+        realm: "test7@example.com".to_string(),
         issuer_endpoint: "http://localhost:8081/issuer".to_string(),
         realm_secret: Some("test-realm-secret".to_string()),
         visible_in_discovery: true,
@@ -489,7 +485,13 @@ async fn bootstrap_package_uses_manifest_auth() {
 
     let manifest = fake_manifest();
     let result = hyper
-        .bootstrap_credential(&manifest, &server.url(), 1, test_service_spec(), test_acl())
+        .bootstrap_credential(
+            &manifest,
+            &server.url(),
+            "test@example.com",
+            test_service_spec(),
+            test_acl(),
+        )
         .await;
 
     mock.assert_async().await;
@@ -539,7 +541,13 @@ async fn bootstrap_issuer_error_propagates() {
 
     let manifest = fake_manifest();
     let result = hyper
-        .bootstrap_credential(&manifest, &server.url(), 1, test_service_spec(), test_acl())
+        .bootstrap_credential(
+            &manifest,
+            &server.url(),
+            "test@example.com",
+            test_service_spec(),
+            test_acl(),
+        )
         .await;
 
     assert!(
@@ -579,7 +587,13 @@ async fn bootstrap_issuer_rejection_creates_no_database() {
 
     let manifest = fake_manifest();
     let result = hyper
-        .bootstrap_credential(&manifest, &server.url(), 1, test_service_spec(), test_acl())
+        .bootstrap_credential(
+            &manifest,
+            &server.url(),
+            "test@example.com",
+            test_service_spec(),
+            test_acl(),
+        )
         .await;
     assert!(matches!(result, Err(HyperError::IssuerBootstrapFailed(_))));
 
@@ -598,7 +612,7 @@ async fn bootstrap_issuer_rejection_creates_no_database() {
 
 // ── pure helper functions ───────────────────────────────────────────────
 
-use actr_protocol::{ActrType, Realm, RegisterAuthMode};
+use actr_protocol::{ActrType, RegisterAuthMode};
 
 fn runtime_config_with_ws(port: Option<u16>, host: Option<&str>) -> actr_config::RuntimeConfig {
     actr_config::RuntimeConfig {
@@ -614,7 +628,7 @@ fn runtime_config_with_ws(port: Option<u16>, host: Option<&str>) -> actr_config:
             license: None,
         },
         signaling_url: url::Url::parse("ws://127.0.0.1:9/signaling/ws").unwrap(),
-        realm: Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         issuer_endpoint: "http://127.0.0.1:9/issuer".into(),
         realm_secret: None,
         visible_in_discovery: true,

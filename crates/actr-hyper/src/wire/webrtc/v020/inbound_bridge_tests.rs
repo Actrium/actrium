@@ -5,8 +5,8 @@ use super::inbound_bridge::{MailboxSlot, dispatcher_bridge};
 use crate::inbound::DataChunkRegistry;
 use crate::inbound::dispatcher::InboundDispatcher;
 use crate::wire::webrtc::v020::status::LaneKind;
+use actr_protocol::ActrId;
 use actr_protocol::prost::Message as ProstMessage;
-use actr_protocol::{ActrId, ActrType, Realm};
 use actr_runtime_mailbox::{Mailbox, MailboxStats, MessagePriority, MessageRecord, StorageResult};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -16,13 +16,8 @@ use uuid::Uuid;
 
 fn test_id(serial: u64) -> ActrId {
     ActrId {
-        realm: Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         serial_number: serial,
-        r#type: ActrType {
-            publisher: "acme".to_string(),
-            name: "node".to_string(),
-            version: "1.0.0".to_string(),
-        },
     }
 }
 

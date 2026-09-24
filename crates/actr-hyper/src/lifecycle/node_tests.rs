@@ -1285,13 +1285,8 @@ async fn response_send_timeout_submits_recovery_hint_to_current_peer() {
     manager.supervisor().set_signaling_generation(Some(0));
 
     let caller = ActrId {
-        realm: actr_protocol::Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         serial_number: 9001,
-        r#type: ActrType {
-            publisher: "test".to_string(),
-            name: "response-path".to_string(),
-            version: "1.0.0".to_string(),
-        },
     };
     let handle = manager.ensure_controller(caller.clone()).await;
     handle.connect().await.expect("connect command");
@@ -1428,7 +1423,7 @@ fn dedup_test_config(dir: &tempfile::TempDir) -> actr_config::RuntimeConfig {
             license: None,
         },
         signaling_url: url::Url::parse("ws://127.0.0.1:9/signaling/ws").unwrap(),
-        realm: actr_protocol::Realm { realm_id: 7 },
+        realm: "test7@example.com".to_string(),
         issuer_endpoint: "http://127.0.0.1:9/issuer".to_string(),
         realm_secret: None,
         visible_in_discovery: false,
@@ -1536,9 +1531,8 @@ async fn tell_dedup_harness(result: fn() -> ActorResult<FrameworkBytes>) -> Tell
     let workload = Workload::Linked(Arc::new(handle) as Arc<dyn LinkedWorkloadHandle>);
     let config = dedup_test_config(&dir);
     let actor_id = ActrId {
-        realm: config.realm,
+        realm: config.realm.clone(),
         serial_number: 1,
-        r#type: config.package.actr_type.clone(),
     };
 
     let mut inner = Inner::build(
@@ -1790,9 +1784,8 @@ async fn explicit_capture_harness() -> (
     let workload = Workload::Linked(Arc::new(handle) as Arc<dyn LinkedWorkloadHandle>);
     let config = dedup_test_config(&dir);
     let actor_id = ActrId {
-        realm: config.realm,
+        realm: config.realm.clone(),
         serial_number: 1,
-        r#type: config.package.actr_type.clone(),
     };
     let mut inner = Inner::build(
         config,
@@ -1865,9 +1858,8 @@ async fn component_explicit_boundary_non_empty_return_falls_back_to_return() {
     let dir = tempfile::TempDir::new().unwrap();
     let config = dedup_test_config(&dir);
     let actor_id = ActrId {
-        realm: config.realm,
+        realm: config.realm.clone(),
         serial_number: 1,
-        r#type: config.package.actr_type.clone(),
     };
     let workload =
         Workload::Linked(Arc::new(RawComponentReturnHandle) as Arc<dyn LinkedWorkloadHandle>);
@@ -2023,9 +2015,8 @@ async fn explicit_handler_err_routes_through_deliver_and_defers() {
     let dir = tempfile::TempDir::new().unwrap();
     let config = dedup_test_config(&dir);
     let actor_id = ActrId {
-        realm: config.realm,
+        realm: config.realm.clone(),
         serial_number: 1,
-        r#type: config.package.actr_type.clone(),
     };
     let workload = Workload::Linked(Arc::new(ErrNoReplyHandle) as Arc<dyn LinkedWorkloadHandle>);
     let mut inner = Inner::build(
@@ -2116,9 +2107,8 @@ async fn explicit_handler_err_wins_against_late_send_first_write_wins() {
     };
     let config = dedup_test_config(&dir);
     let actor_id = ActrId {
-        realm: config.realm,
+        realm: config.realm.clone(),
         serial_number: 1,
-        r#type: config.package.actr_type.clone(),
     };
     let workload = Workload::Linked(Arc::new(handle) as Arc<dyn LinkedWorkloadHandle>);
     let mut inner = Inner::build(
@@ -2544,9 +2534,8 @@ async fn scope_test_inner(
     let dir = tempfile::TempDir::new().unwrap();
     let config = dedup_test_config(&dir);
     let actor_id = ActrId {
-        realm: config.realm,
+        realm: config.realm.clone(),
         serial_number: 1,
-        r#type: config.package.actr_type.clone(),
     };
     let mut inner = crate::lifecycle::node::Inner::build(
         config,

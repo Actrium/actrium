@@ -291,8 +291,8 @@ impl Mailbox for SqliteMailbox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use actr_protocol::ActrId;
     use actr_protocol::prost::Message as ProstMessage;
-    use actr_protocol::{ActrId, ActrType, Realm};
     use tempfile::tempdir;
 
     async fn setup_mailbox() -> SqliteMailbox {
@@ -303,13 +303,8 @@ mod tests {
 
     fn dummy_actr_id_bytes() -> Vec<u8> {
         let actr_id = ActrId {
-            realm: Realm { realm_id: 1 },
+            realm: "k7m2q9xh@example.com".to_string(),
             serial_number: 1000,
-            r#type: ActrType {
-                publisher: "test".to_string(),
-                name: "TestActor".to_string(),
-                version: "1.0.0".to_string(),
-            },
         };
         let mut buf = Vec::new();
         actr_id.encode(&mut buf).unwrap();

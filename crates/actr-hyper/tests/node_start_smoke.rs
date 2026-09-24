@@ -12,7 +12,7 @@ use actr_framework::{Bytes, Context, Dest, MessageDispatcher, Workload};
 use actr_hyper::test_support::TestSignalingServer;
 use actr_hyper::{ActrRef, Hyper, HyperConfig, Node, StaticTrust};
 use actr_protocol::prost::Message as ProstMessage;
-use actr_protocol::{ActrError, ActrId, ActrType, PayloadType, Realm, RpcEnvelope, RpcRequest};
+use actr_protocol::{ActrError, ActrId, ActrType, PayloadType, RpcEnvelope, RpcRequest};
 use async_trait::async_trait;
 use tempfile::TempDir;
 
@@ -111,7 +111,7 @@ fn runtime_config_with_type(
             license: None,
         },
         signaling_url: url::Url::parse(&server.url()).unwrap(),
-        realm: Realm { realm_id: 7 },
+        realm: "test7@example.com".to_string(),
         issuer_endpoint: format!("http://127.0.0.1:{}/issuer", server.port()),
         realm_secret: None,
         visible_in_discovery: true,

@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use actr_hyper::test_support::{TestSignalingServer, attached_node_has_hook_observer};
 use actr_hyper::{Hyper, HyperConfig, Node, StaticTrust, WorkloadPackage};
-use actr_protocol::{ActrType, Realm};
+use actr_protocol::ActrType;
 use ed25519_dalek::SigningKey;
 use rand::rngs::OsRng;
 use tempfile::TempDir;
@@ -43,7 +43,7 @@ fn test_runtime_config(
             license: None,
         },
         signaling_url: url::Url::parse(&server.url()).unwrap(),
-        realm: Realm { realm_id: 7 },
+        realm: "test7@example.com".to_string(),
         issuer_endpoint: issuer_endpoint(server),
         realm_secret: None,
         visible_in_discovery: true,

@@ -17,6 +17,7 @@ use super::server::InboundWsConn;
 use crate::inbound::DataChunkRegistry;
 use crate::key_cache::IssuerKeyCache;
 use crate::lifecycle::CredentialState;
+use crate::lifecycle::node::PeerTypes;
 use crate::transport::WsSink;
 use crate::transport::correlation::PendingRequestsMap;
 use crate::transport::secure_channel::SecureCell;
@@ -52,6 +53,9 @@ pub(crate) struct WsAuthContext {
     pub(crate) credential_state: CredentialState,
     /// Signaling client (used to fetch public key on cache miss)
     pub(crate) signaling_client: Arc<dyn SignalingClient>,
+    /// Verified peer Actor types; a verified connection records the
+    /// `actor_type` from its credential claims here for the inbound ACL.
+    pub(crate) peer_types: PeerTypes,
 }
 
 /// Registry type: inbound peer ActrId → (write-half, secure cell) of the
@@ -396,6 +400,9 @@ impl WebSocketGate {
                     actor_id = %claims.actor_id,
                     "WS inbound connection identity verification passed"
                 );
+                if let Ok(mut types) = auth_ctx.peer_types.write() {
+                    types.insert(source_actor_id, claims.actor_type);
+                }
             }
             Err(e) => {
                 tracing::warn!(error = ?e, "WS X-Actr-Source-ID decode failed, rejecting connection");

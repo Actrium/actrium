@@ -71,6 +71,14 @@ fn error_response_for_wire(error: &ActrError) -> actr_protocol::ErrorResponse {
     }
 }
 
+/// Verified Actor types of peers, keyed by `ActrId`.
+///
+/// Filled from `ActrRelay.source_type` (written by Signaling from the
+/// sender's verified credential) and from `IdentityClaims.actor_type` on
+/// locally verified WebSocket connections. The inbound ACL reads it; a peer
+/// with no entry has an unknown type and matches no ACL rule.
+pub(crate) type PeerTypes = Arc<std::sync::RwLock<HashMap<ActrId, ActrType>>>;
+
 pub(crate) type MailboxTail = Pin<Box<dyn Future<Output = ()> + Send>>;
 type MailboxDepthCallback = Arc<dyn Fn(usize) + Send + Sync + 'static>;
 
@@ -782,6 +790,9 @@ pub(crate) struct Inner {
     /// The map is keyed by `ActrId`.
     pub(crate) discovered_ws_addresses:
         Arc<tokio::sync::RwLock<std::collections::HashMap<ActrId, String>>>,
+
+    /// Verified Actor types of peers, read by the inbound ACL.
+    pub(crate) peer_types: PeerTypes,
 
     /// Handle to the per-actor serial command runner.
     ///
@@ -1883,8 +1894,18 @@ impl Inner {
         };
 
         // 0.1. ACL Permission Check (before processing message)
-        let acl_allowed = match check_acl_permission(caller_id, actor_id, self.config.acl.as_ref())
-        {
+        let caller_type = caller_id.and_then(|id| {
+            self.peer_types
+                .read()
+                .ok()
+                .and_then(|types| types.get(id).cloned())
+        });
+        let acl_allowed = match check_acl_permission(
+            caller_id,
+            caller_type.as_ref(),
+            actor_id,
+            self.config.acl.as_ref(),
+        ) {
             Ok(allowed) => allowed,
             Err(err_msg) => {
                 return ready_continuation(Err(ActrError::Internal(format!(
@@ -2536,6 +2557,7 @@ impl Inner {
             discovered_ws_addresses: Arc::new(tokio::sync::RwLock::new(
                 std::collections::HashMap::new(),
             )),
+            peer_types: PeerTypes::default(),
             workload_dispatch: Arc::new(workload_dispatch),
             linked_handle,
             package_uses_explicit_reply_boundary,
@@ -2738,7 +2760,7 @@ impl Inner {
 
         let register_request = RegisterRequest {
             actr_type: actr_type.clone(),
-            realm: self.config.realm,
+            realm: self.config.realm.clone(),
             service_spec,
             acl: self.config.acl.clone(),
             service: None,
@@ -3237,6 +3259,7 @@ impl Inner {
                     self.signaling_client.clone(),
                     v020_local_id.clone(),
                     credential_state.clone(),
+                    self.peer_types.clone(),
                 );
                 let v020_router = v020::signaling::router::SignalingRouter::new(
                     v020_manager.clone(),
@@ -3560,6 +3583,7 @@ impl Inner {
                     actor_id: actor_id.clone(),
                     credential_state: credential_state.clone(),
                     signaling_client: self.signaling_client.clone(),
+                    peer_types: self.peer_types.clone(),
                 };
 
                 match WebSocketServer::bind(listen_port).await {

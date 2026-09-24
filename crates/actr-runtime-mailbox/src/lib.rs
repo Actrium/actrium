@@ -11,7 +11,7 @@
 //!
 //! ```rust,no_run
 //! use actr_runtime_mailbox::prelude::*;
-//! use actr_protocol::{ActrId, Realm, ActrType};
+//! use actr_protocol::ActrId;
 //! use actr_protocol::prost::Message as ProstMessage;
 //!
 //! #[tokio::main]
@@ -21,13 +21,8 @@
 //!
 //!     // Create sender ActrId and serialize
 //!     let sender = ActrId {
-//!         realm: Realm { realm_id: 1 },
+//!         realm: "k7m2q9xh@example.com".to_string(),
 //!         serial_number: 1000,
-//!         r#type: ActrType {
-//!             publisher: "example".to_string(),
-//!             name: "TestActor".to_string(),
-//!             version: "1.0.0".to_string(),
-//!         },
 //!     };
 //!     let mut from_bytes = Vec::new();
 //!     sender.encode(&mut from_bytes)?;

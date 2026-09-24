@@ -30,9 +30,7 @@ use actr_hyper::config::WasmRuntimeLimits;
 use actr_hyper::test_support::instantiate_wasm_workload;
 use actr_hyper::wasm::{WasmError, WasmHost};
 use actr_hyper::workload::{HostAbiFn, HostOperation, HostOperationResult, InvocationContext};
-use actr_protocol::{
-    ActrId, ActrType, DataChunk, Realm, RpcEnvelope, prost::Message as ProstMessage,
-};
+use actr_protocol::{ActrId, DataChunk, RpcEnvelope, prost::Message as ProstMessage};
 
 #[derive(Clone, PartialEq, actr_protocol::prost::Message)]
 struct TypedDoubleRequest {
@@ -64,13 +62,8 @@ fn fixture_host() -> &'static WasmHost {
 
 fn test_actr_id() -> ActrId {
     ActrId {
-        realm: Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         serial_number: 1,
-        r#type: ActrType {
-            publisher: "test".to_string(),
-            name: "fixture".to_string(),
-            version: "0.1.0".to_string(),
-        },
     }
 }
 

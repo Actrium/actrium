@@ -57,10 +57,10 @@ impl AuthHandler for CountingAuthenticator {
 
 fn turn_credential(id: &ActrId, expires_at: u64) -> TurnCredential {
     // Username must match the scoped format enforced by `turn::Authenticator`:
-    // `{expires_at}:realm={realm_id}:provider=actrix-official:audience=actr.turn:actor={actr_id}`
+    // `{expires_at}:realm={realm}:provider=actrix-official:audience=actr.turn:actor={actr_id}`
     let username = format!(
         "{expires_at}:realm={}:provider=actrix-official:audience=actr.turn:actor={id}",
-        id.realm.realm_id
+        id.realm
     );
     let mut mac = HmacSha1::new_from_slice(TURN_SHARED_TEST_KEY.as_bytes())
         .expect("HMAC-SHA1 accepts the fixed test key");
@@ -70,7 +70,7 @@ fn turn_credential(id: &ActrId, expires_at: u64) -> TurnCredential {
         password: BASE64_STANDARD.encode(mac.finalize().into_bytes()),
         expires_at,
         protocol_version: 1,
-        realm_id: id.realm.realm_id,
+        realm: id.realm.clone(),
         provider: "actrix-official".to_string(),
         audience: "actr.turn".to_string(),
     }

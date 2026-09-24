@@ -1,6 +1,6 @@
 use super::*;
 use crate::transport::secure_channel::SecureChannelState;
-use actr_protocol::{ActrType, IdentityClaims, Realm};
+use actr_protocol::{ActrType, IdentityClaims};
 use actr_runtime_mailbox::{MailboxStats, MessageRecord, StorageResult};
 use async_trait::async_trait;
 use ed25519_dalek::{Signer, SigningKey};
@@ -11,13 +11,16 @@ use uuid::Uuid;
 
 fn test_actor_id(serial: u64) -> ActrId {
     ActrId {
-        realm: Realm { realm_id: 1 },
+        realm: "test@example.com".to_string(),
         serial_number: serial,
-        r#type: ActrType {
-            publisher: "test".to_string(),
-            name: "node".to_string(),
-            version: "1.0.0".to_string(),
-        },
+    }
+}
+
+fn test_actor_type() -> ActrType {
+    ActrType {
+        publisher: "acme".to_string(),
+        name: "node".to_string(),
+        version: "1.0.0".to_string(),
     }
 }
 
@@ -36,11 +39,12 @@ fn make_valid_credential(
     let claims = IdentityClaims {
         actor_id: actor_id.to_string_repr(),
         expires_at,
-        realm_id: actor_id.realm.realm_id,
+        realm: actor_id.realm.clone(),
         protocol_version: 1,
-        issuer: format!("actr:realm:{}:authority", actor_id.realm.realm_id),
+        issuer: actor_id.realm.clone(),
         provider: "actrix-official".to_string(),
         audience: "actr.signaling".to_string(),
+        actor_type: test_actor_type(),
     };
     let claims_bytes = actr_protocol::prost::Message::encode_to_vec(&claims);
     let signature = sk.sign(&claims_bytes);
@@ -166,6 +170,7 @@ async fn make_auth_ctx(sk: &SigningKey, key_id: u32, local_actor: ActrId) -> WsA
         actor_id: local_actor,
         credential_state: cred_state,
         signaling_client: Arc::new(NullSignaling),
+        peer_types: PeerTypes::default(),
     }
 }
 
@@ -182,6 +187,11 @@ async fn verify_credential_valid_returns_some() {
 
     let result = WebSocketGate::verify_credential(&credential, &source_bytes, &ctx).await;
     assert!(result.is_some(), "valid credential should pass");
+    assert_eq!(
+        ctx.peer_types.read().unwrap().get(&actor),
+        Some(&test_actor_type()),
+        "the verified Actor type is recorded for the inbound ACL"
+    );
 }
 
 /// Signature flipped 1 bit -> verification fails -> None
@@ -317,6 +327,7 @@ async fn verify_credential_unknown_key_id_returns_none() {
         actor_id: test_actor_id(999),
         credential_state: crate::lifecycle::CredentialState::new(local_credential, None, None),
         signaling_client: Arc::new(NullSignaling),
+        peer_types: PeerTypes::default(),
     };
 
     let credential = make_valid_credential(&sk, &actor, future_ts(), 99); // `key_id=99` does not exist.

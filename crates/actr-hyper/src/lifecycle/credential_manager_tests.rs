@@ -1,6 +1,6 @@
 use super::*;
 use actr_protocol::{
-    AIdCredential, ActrId, ActrType, IdentityClaims, Realm, RegisterRequest, RegisterResponse,
+    AIdCredential, ActrId, ActrType, IdentityClaims, RegisterRequest, RegisterResponse,
     ReissueCredentialRequest, RenewCredentialResponse, TurnCredential, register_response,
     renew_credential_response,
 };
@@ -9,13 +9,16 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering as AtomicOrdering};
 
 fn actor(serial: u64) -> ActrId {
     ActrId {
-        realm: Realm { realm_id: 7 },
+        realm: "test7@example.com".to_string(),
         serial_number: serial,
-        r#type: ActrType {
-            publisher: "acme".to_string(),
-            name: "node".to_string(),
-            version: "1.0.0".to_string(),
-        },
+    }
+}
+
+fn test_actr_type() -> ActrType {
+    ActrType {
+        publisher: "acme".to_string(),
+        name: "node".to_string(),
+        version: "1.0.0".to_string(),
     }
 }
 
@@ -33,13 +36,14 @@ fn pending_control_attempts() -> Arc<Mutex<PendingControlAttempts>> {
 
 fn credential_for_actor(actor_id: &ActrId, key_id: u32, expires_at: u64) -> AIdCredential {
     let claims = IdentityClaims {
-        realm_id: actor_id.realm.realm_id,
+        realm: actor_id.realm.clone(),
         actor_id: actor_id.to_string_repr(),
         expires_at,
         protocol_version: 1,
-        issuer: format!("actr:realm:{}:authority", actor_id.realm.realm_id),
+        issuer: actor_id.realm.clone(),
         provider: "actrix-official".to_string(),
         audience: "actr.signaling".to_string(),
+        actor_type: test_actr_type(),
     };
     AIdCredential {
         key_id,
@@ -54,7 +58,7 @@ fn register_ok(serial: u64, key_id: u32) -> register_response::RegisterOk {
         credential: credential(key_id),
         turn_credential: TurnCredential {
             protocol_version: 1,
-            realm_id: 1,
+            realm: "test@example.com".to_string(),
             provider: "actrix-official".to_string(),
             audience: "actr.turn".to_string(),
             username: format!("1000:actor-{serial}"),
@@ -123,7 +127,7 @@ async fn expired_renewal_token_re_registers_fresh_identity() {
         },
         turn_credential: TurnCredential {
             protocol_version: 1,
-            realm_id: 1,
+            realm: "test@example.com".to_string(),
             provider: "actrix-official".to_string(),
             audience: "actr.turn".to_string(),
             username: "10:actor-1".to_string(),
@@ -139,8 +143,8 @@ async fn expired_renewal_token_re_registers_fresh_identity() {
     });
 
     let request = RegisterRequest {
-        actr_type: actor(1).r#type,
-        realm: Realm { realm_id: 7 },
+        actr_type: test_actr_type(),
+        realm: "test7@example.com".to_string(),
         ..Default::default()
     };
 
@@ -185,7 +189,7 @@ async fn soft_renewal_fires_credential_renewed_hook() {
                 credential: credential_for_actor(&actor_id, 9, NEW_EXPIRY as u64),
                 turn_credential: TurnCredential {
                     protocol_version: 1,
-                    realm_id: 1,
+                    realm: "test@example.com".to_string(),
                     provider: "actrix-official".to_string(),
                     audience: "actr.turn".to_string(),
                     username: "4000001000:actor-1".to_string(),
@@ -225,7 +229,7 @@ async fn soft_renewal_fires_credential_renewed_hook() {
         },
         turn_credential: TurnCredential {
             protocol_version: 1,
-            realm_id: 1,
+            realm: "test@example.com".to_string(),
             provider: "actrix-official".to_string(),
             audience: "actr.turn".to_string(),
             username: "4000000000:actor-1".to_string(),
@@ -261,8 +265,8 @@ async fn soft_renewal_fires_credential_renewed_hook() {
         None,
         RegistrationContext::Linked {
             request: RegisterRequest {
-                actr_type: actor_id.r#type.clone(),
-                realm: actor_id.realm,
+                actr_type: test_actr_type(),
+                realm: actor_id.realm.clone(),
                 ..Default::default()
             },
             realm_secret: None,
@@ -306,7 +310,7 @@ async fn credential_only_hard_reissue_fires_credential_renewed_hook() {
         },
         turn_credential: TurnCredential {
             protocol_version: 1,
-            realm_id: 1,
+            realm: "test@example.com".to_string(),
             provider: "actrix-official".to_string(),
             audience: "actr.turn".to_string(),
             username: "10:actor-1".to_string(),
@@ -342,8 +346,8 @@ async fn credential_only_hard_reissue_fires_credential_renewed_hook() {
         None,
         RegistrationContext::Linked {
             request: RegisterRequest {
-                actr_type: actor(1).r#type,
-                realm: Realm { realm_id: 7 },
+                actr_type: test_actr_type(),
+                realm: "test7@example.com".to_string(),
                 ..Default::default()
             },
             realm_secret: None,
@@ -401,7 +405,7 @@ async fn reissue_possession_failure_defers_instead_of_denying() {
         },
         turn_credential: TurnCredential {
             protocol_version: 1,
-            realm_id: 1,
+            realm: "test@example.com".to_string(),
             provider: "actrix-official".to_string(),
             audience: "actr.turn".to_string(),
             username: "10:actor-1".to_string(),
@@ -423,8 +427,8 @@ async fn reissue_possession_failure_defers_instead_of_denying() {
         None,
         RegistrationContext::Linked {
             request: RegisterRequest {
-                actr_type: actor(1).r#type,
-                realm: Realm { realm_id: 7 },
+                actr_type: test_actr_type(),
+                realm: "test7@example.com".to_string(),
                 ..Default::default()
             },
             realm_secret: None,
@@ -478,7 +482,7 @@ async fn reissue_realm_denied_is_terminal() {
         },
         turn_credential: TurnCredential {
             protocol_version: 1,
-            realm_id: 1,
+            realm: "test@example.com".to_string(),
             provider: "actrix-official".to_string(),
             audience: "actr.turn".to_string(),
             username: "10:actor-1".to_string(),
@@ -500,8 +504,8 @@ async fn reissue_realm_denied_is_terminal() {
         None,
         RegistrationContext::Linked {
             request: RegisterRequest {
-                actr_type: actor(1).r#type,
-                realm: Realm { realm_id: 7 },
+                actr_type: test_actr_type(),
+                realm: "test7@example.com".to_string(),
                 ..Default::default()
             },
             realm_secret: None,
@@ -553,7 +557,7 @@ async fn legacy_hard_rebind_fires_credential_renewed_hook() {
         },
         turn_credential: TurnCredential {
             protocol_version: 1,
-            realm_id: 1,
+            realm: "test@example.com".to_string(),
             provider: "actrix-official".to_string(),
             audience: "actr.turn".to_string(),
             username: "10:actor-1".to_string(),
@@ -589,8 +593,8 @@ async fn legacy_hard_rebind_fires_credential_renewed_hook() {
         None,
         RegistrationContext::Linked {
             request: RegisterRequest {
-                actr_type: actor(1).r#type,
-                realm: Realm { realm_id: 7 },
+                actr_type: test_actr_type(),
+                realm: "test7@example.com".to_string(),
                 ..Default::default()
             },
             realm_secret: None,
@@ -642,7 +646,7 @@ async fn package_hard_rebind_re_signs_publisher_proof() {
     impl crate::PublisherAuthProvider for CountingPublisherProvider {
         fn sign(
             &self,
-            _realm_id: u32,
+            _realm: &str,
             _actr_type: &actr_protocol::ActrType,
             _target: &str,
             _manifest_raw: &[u8],
@@ -681,8 +685,8 @@ async fn package_hard_rebind_re_signs_publisher_proof() {
     // Stale publisher proof (nonce 0xAA) saved on the original request — this
     // is exactly what must not be replayed to Issuer.
     let request = RegisterRequest {
-        actr_type: actor(1).r#type,
-        realm: Realm { realm_id: 7 },
+        actr_type: test_actr_type(),
+        realm: "test7@example.com".to_string(),
         manifest_raw: Some(Bytes::from_static(b"manifest-bytes")),
         publisher_signature: Some(Bytes::from_static(b"publisher-sig")),
         target: Some("wasm32-wasip1".to_string()),
@@ -703,7 +707,7 @@ async fn package_hard_rebind_re_signs_publisher_proof() {
         },
         turn_credential: TurnCredential {
             protocol_version: 1,
-            realm_id: 1,
+            realm: "test@example.com".to_string(),
             provider: "actrix-official".to_string(),
             audience: "actr.turn".to_string(),
             username: "10:actor-1".to_string(),
@@ -908,7 +912,7 @@ async fn legacy_hard_rebind_commits_when_issuer_omits_renewal_token() {
             password: "old".to_string(),
             expires_at: 10,
             protocol_version: 1,
-            realm_id: 1,
+            realm: "test@example.com".to_string(),
             provider: "actrix-official".to_string(),
             audience: "actr.turn".to_string(),
         },
@@ -926,8 +930,8 @@ async fn legacy_hard_rebind_commits_when_issuer_omits_renewal_token() {
         None,
         RegistrationContext::Linked {
             request: RegisterRequest {
-                actr_type: actor(1).r#type,
-                realm: Realm { realm_id: 7 },
+                actr_type: test_actr_type(),
+                realm: "test7@example.com".to_string(),
                 ..Default::default()
             },
             realm_secret: None,
@@ -990,7 +994,7 @@ async fn credential_only_hard_reissue_commits_when_issuer_omits_renewal_token() 
             password: "old".to_string(),
             expires_at: 10,
             protocol_version: 1,
-            realm_id: 1,
+            realm: "test@example.com".to_string(),
             provider: "actrix-official".to_string(),
             audience: "actr.turn".to_string(),
         },
@@ -1009,8 +1013,8 @@ async fn credential_only_hard_reissue_commits_when_issuer_omits_renewal_token() 
         None,
         RegistrationContext::Linked {
             request: RegisterRequest {
-                actr_type: actor(1).r#type,
-                realm: Realm { realm_id: 7 },
+                actr_type: test_actr_type(),
+                realm: "test7@example.com".to_string(),
                 ..Default::default()
             },
             realm_secret: None,

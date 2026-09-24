@@ -77,10 +77,6 @@ declare module 'actr:workload/host@0.7.0' {
     message: string,
   ): Promise<void>;
 
-  export type Realm = {
-    realmId: number;
-  };
-
   export type ActrType = {
     publisher: string;
     name: string;
@@ -88,9 +84,8 @@ declare module 'actr:workload/host@0.7.0' {
   };
 
   export type ActrId = {
-    realm: Realm;
+    realm: string;
     serialNumber: bigint;
-    type: ActrType;
   };
 
   export type MetadataEntry = {

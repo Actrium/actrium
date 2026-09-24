@@ -28,8 +28,8 @@ pub struct RegisteredActor {
 /// `RegisterRequest`).
 #[derive(Clone, Debug)]
 pub struct RealmEntry {
-    pub id: u32,
-    pub name: String,
+    /// Realm name, `<realm_id>@<domain>`.
+    pub realm: String,
 }
 
 /// Publisher entry — exposed via `GET /registry/publishers/{name}/verifying-key`.
@@ -94,7 +94,7 @@ pub struct MockState {
     pub next_serial: AtomicU64,
 
     // --- Issuer/Publisher Registry registry -------------------------------------------------
-    pub realms: RwLock<HashMap<u32, RealmEntry>>,
+    pub realms: RwLock<HashMap<String, RealmEntry>>,
     pub publishers: RwLock<HashMap<String, PublisherEntry>>,
     pub packages: RwLock<Vec<PackageEntry>>,
     pub nonces: NonceStore,
@@ -165,11 +165,11 @@ impl MockState {
         &self.builtin_publisher_signing_key
     }
 
-    pub async fn add_realm(&self, id: u32, name: String) {
+    pub async fn add_realm(&self, realm: String) {
         self.realms
             .write()
             .await
-            .insert(id, RealmEntry { id, name });
+            .insert(realm.clone(), RealmEntry { realm });
     }
 
     pub async fn add_publisher(&self, name: String, verifying_key: VerifyingKey) {

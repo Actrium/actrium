@@ -756,7 +756,7 @@ async fn build_reissue_registration(
         RegistrationContext::Package { request, resign } => {
             let mut request = request;
             if let Some(provider) = resign.as_ref() {
-                let realm_id = request.realm.realm_id;
+                let realm = request.realm.clone();
                 let actr_type = request.actr_type.clone();
                 let target = request
                     .target
@@ -777,7 +777,7 @@ async fn build_reissue_registration(
                     })?;
                 let fresh = crate::sign_publisher_proof(
                     Arc::clone(provider),
-                    realm_id,
+                    realm,
                     actr_type,
                     target,
                     manifest_raw,

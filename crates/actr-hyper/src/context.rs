@@ -687,7 +687,7 @@ impl RuntimeContext {
             .await?;
         let realm = match &self.session_state {
             Some(session_state) => session_state.actor_id().await.realm,
-            None => self.self_id.realm,
+            None => self.self_id.realm.clone(),
         };
         Ok(select_service(package_type, &realm, candidates)?)
     }

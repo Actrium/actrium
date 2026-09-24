@@ -365,13 +365,8 @@ mod tests {
 
     fn test_actor_id(serial_number: u64) -> actr_protocol::ActrId {
         actr_protocol::ActrId {
-            realm: actr_protocol::Realm { realm_id: 1 },
+            realm: "test@example.com".to_string(),
             serial_number,
-            r#type: actr_protocol::ActrType {
-                publisher: "acme".to_string(),
-                name: "node".to_string(),
-                version: "1.0.0".to_string(),
-            },
         }
     }
 

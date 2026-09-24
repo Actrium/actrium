@@ -5,7 +5,7 @@
 //! the Actr Host never picks one. An Actor link names the Actor directly, and
 //! that Actor's type must equal the package type.
 
-use actr_protocol::{ActrError, ActrId, ActrType, Realm};
+use actr_protocol::{ActrError, ActrId, ActrType};
 use thiserror::Error;
 
 /// Candidates requested when looking up a Service. Discovery may also return
@@ -54,15 +54,16 @@ impl From<ServiceLookupError> for ActrError {
     }
 }
 
-/// Picks the Service in `realm` from discovery candidates for `package_type`.
+/// Picks the Service in `realm` (a Realm name) from discovery candidates for
+/// `package_type`.
 pub fn select_service(
     package_type: &ActrType,
-    realm: &Realm,
+    realm: &str,
     candidates: Vec<ActrId>,
 ) -> Result<ActrId, ServiceLookupError> {
     let mut candidates = candidates
         .into_iter()
-        .filter(|candidate| candidate.realm == *realm);
+        .filter(|candidate| candidate.realm == realm);
     match (candidates.next(), candidates.next()) {
         (Some(service), None) => Ok(service),
         (None, _) => Err(ServiceLookupError::NotFound(package_type.to_string())),
@@ -71,17 +72,21 @@ pub fn select_service(
 }
 
 /// Checks that the Actor named by an Actor link runs the package type.
+///
+/// `actual_type` is the Actor's verified type (from its credential); an
+/// `ActrId` does not carry a type.
 pub fn check_service_actor(
     package_type: &ActrType,
     actor: &ActrId,
+    actual_type: &ActrType,
 ) -> Result<(), ServiceLookupError> {
-    if actor.r#type == *package_type {
+    if actual_type == package_type {
         Ok(())
     } else {
         Err(ServiceLookupError::ActorTypeMismatch {
             actor: actor.to_string(),
             expected: package_type.to_string(),
-            actual: actor.r#type.to_string(),
+            actual: actual_type.to_string(),
         })
     }
 }
@@ -98,28 +103,27 @@ mod tests {
         }
     }
 
-    const REALM: Realm = Realm { realm_id: 7 };
+    const REALM: &str = "test@example.com";
 
-    fn actor(serial_number: u64, actr_type: ActrType) -> ActrId {
+    fn actor(serial_number: u64) -> ActrId {
         ActrId {
-            realm: REALM,
+            realm: REALM.to_string(),
             serial_number,
-            r#type: actr_type,
         }
     }
 
     #[test]
     fn selects_the_only_candidate() {
-        let service = actor(1, actr_type("1.0.0"));
+        let service = actor(1);
         assert_eq!(
-            select_service(&actr_type("1.0.0"), &REALM, vec![service.clone()]),
+            select_service(&actr_type("1.0.0"), REALM, vec![service.clone()]),
             Ok(service)
         );
     }
 
     #[test]
     fn zero_candidates_is_service_not_found() {
-        let error = select_service(&actr_type("1.0.0"), &REALM, vec![]).unwrap_err();
+        let error = select_service(&actr_type("1.0.0"), REALM, vec![]).unwrap_err();
         assert_eq!(
             error,
             ServiceLookupError::NotFound(actr_type("1.0.0").to_string())
@@ -129,8 +133,8 @@ mod tests {
 
     #[test]
     fn more_than_one_candidate_is_an_error() {
-        let candidates = vec![actor(1, actr_type("1.0.0")), actor(2, actr_type("1.0.0"))];
-        let error = select_service(&actr_type("1.0.0"), &REALM, candidates).unwrap_err();
+        let candidates = vec![actor(1), actor(2)];
+        let error = select_service(&actr_type("1.0.0"), REALM, candidates).unwrap_err();
         assert_eq!(
             error,
             ServiceLookupError::NotUnique(actr_type("1.0.0").to_string())
@@ -141,33 +145,33 @@ mod tests {
     #[test]
     fn ignores_candidates_in_other_realms() {
         let other_realm = |serial_number| ActrId {
-            realm: Realm { realm_id: 8 },
-            ..actor(serial_number, actr_type("1.0.0"))
+            realm: "other@example.com".to_string(),
+            serial_number,
         };
 
-        let service = actor(1, actr_type("1.0.0"));
+        let service = actor(1);
         assert_eq!(
             select_service(
                 &actr_type("1.0.0"),
-                &REALM,
+                REALM,
                 vec![other_realm(2), service.clone(), other_realm(3)]
             ),
             Ok(service)
         );
 
-        let error = select_service(&actr_type("1.0.0"), &REALM, vec![other_realm(2)]).unwrap_err();
+        let error = select_service(&actr_type("1.0.0"), REALM, vec![other_realm(2)]).unwrap_err();
         assert_eq!(error.code(), "SERVICE_NOT_FOUND");
     }
 
     #[test]
     fn actor_link_must_match_package_type() {
         assert_eq!(
-            check_service_actor(&actr_type("1.0.0"), &actor(1, actr_type("1.0.0"))),
+            check_service_actor(&actr_type("1.0.0"), &actor(1), &actr_type("1.0.0")),
             Ok(())
         );
 
         let error =
-            check_service_actor(&actr_type("1.0.0"), &actor(1, actr_type("2.0.0"))).unwrap_err();
+            check_service_actor(&actr_type("1.0.0"), &actor(1), &actr_type("2.0.0")).unwrap_err();
         assert_eq!(error.code(), "SERVICE_ACTOR_TYPE_MISMATCH");
     }
 
@@ -179,7 +183,7 @@ mod tests {
         );
 
         let error: ActrError =
-            check_service_actor(&actr_type("1.0.0"), &actor(1, actr_type("2.0.0")))
+            check_service_actor(&actr_type("1.0.0"), &actor(1), &actr_type("2.0.0"))
                 .unwrap_err()
                 .into();
         assert!(

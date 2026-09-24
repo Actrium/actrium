@@ -1351,6 +1351,7 @@ impl TestHarness {
             signaling_client.clone(),
             shared_local_id,
             credential_state,
+            crate::lifecycle::node::PeerTypes::default(),
         );
         let router_for_task = signaling_router.clone();
         let router_task = if self.v020_matrix_instrumentation {

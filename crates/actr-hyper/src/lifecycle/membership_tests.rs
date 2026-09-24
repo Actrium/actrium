@@ -3,7 +3,7 @@ use crate::lifecycle::credential_manager::{CredentialManager, RegistrationContex
 use crate::lifecycle::session_state::{SessionSnapshot, SessionState};
 use actr_protocol::prost::Message as _;
 use actr_protocol::{
-    AIdCredential, ActrId, ActrType, IdentityClaims, Realm, RegisterRequest, RegisterResponse,
+    AIdCredential, ActrId, ActrType, IdentityClaims, RegisterRequest, RegisterResponse,
     RenewCredentialResponse, TurnCredential, register_response, renew_credential_response,
 };
 use prost::bytes::Bytes;
@@ -12,13 +12,16 @@ use std::time::Duration;
 
 fn actor(serial: u64) -> ActrId {
     ActrId {
-        realm: Realm { realm_id: 7 },
+        realm: "test7@example.com".to_string(),
         serial_number: serial,
-        r#type: ActrType {
-            publisher: "acme".to_string(),
-            name: "node".to_string(),
-            version: "1.0.0".to_string(),
-        },
+    }
+}
+
+fn test_actr_type() -> ActrType {
+    ActrType {
+        publisher: "acme".to_string(),
+        name: "node".to_string(),
+        version: "1.0.0".to_string(),
     }
 }
 
@@ -26,13 +29,14 @@ fn credential_for_actor(actor_id: &ActrId, key_id: u32, expires_at: u64) -> AIdC
     AIdCredential {
         key_id,
         claims: IdentityClaims {
-            realm_id: actor_id.realm.realm_id,
+            realm: actor_id.realm.clone(),
             actor_id: actor_id.to_string_repr(),
             expires_at,
             protocol_version: 1,
-            issuer: format!("actr:realm:{}:authority", actor_id.realm.realm_id),
+            issuer: actor_id.realm.clone(),
             provider: "actrix-official".to_string(),
             audience: "actr.signaling".to_string(),
+            actor_type: test_actr_type(),
         }
         .encode_to_vec()
         .into(),
@@ -46,7 +50,7 @@ fn register_ok(actor_id: &ActrId, key_id: u32) -> register_response::RegisterOk 
         credential: credential_for_actor(actor_id, key_id, 4_000_000_000),
         turn_credential: TurnCredential {
             protocol_version: 1,
-            realm_id: 1,
+            realm: "test@example.com".to_string(),
             provider: "actrix-official".to_string(),
             audience: "actr.turn".to_string(),
             username: "4000000000:actor".to_string(),
@@ -78,7 +82,7 @@ fn session(actor_id: &ActrId, revision: u64, token_usable: bool) -> SessionState
         },
         turn_credential: TurnCredential {
             protocol_version: 1,
-            realm_id: 1,
+            realm: "test@example.com".to_string(),
             provider: "actrix-official".to_string(),
             audience: "actr.turn".to_string(),
             username: "old".to_string(),
@@ -101,8 +105,8 @@ fn session(actor_id: &ActrId, revision: u64, token_usable: bool) -> SessionState
 fn linked_ctx(actor_id: &ActrId) -> RegistrationContext {
     RegistrationContext::Linked {
         request: RegisterRequest {
-            actr_type: actor_id.r#type.clone(),
-            realm: actor_id.realm,
+            actr_type: test_actr_type(),
+            realm: actor_id.realm.clone(),
             ..Default::default()
         },
         realm_secret: None,

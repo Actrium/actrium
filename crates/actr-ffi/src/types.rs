@@ -6,28 +6,6 @@
 
 use actr_hyper::lifecycle as runtime_lifecycle;
 
-/// Security realm identifier
-#[derive(Debug, Clone, PartialEq, Eq, Hash, uniffi::Record)]
-pub struct Realm {
-    pub realm_id: u32,
-}
-
-impl From<actr_protocol::Realm> for Realm {
-    fn from(r: actr_protocol::Realm) -> Self {
-        Self {
-            realm_id: r.realm_id,
-        }
-    }
-}
-
-impl From<Realm> for actr_protocol::Realm {
-    fn from(r: Realm) -> Self {
-        Self {
-            realm_id: r.realm_id,
-        }
-    }
-}
-
 /// Actor type (publisher + name + version)
 #[derive(Debug, Clone, PartialEq, Eq, Hash, uniffi::Record)]
 pub struct ActrType {
@@ -56,20 +34,19 @@ impl From<ActrType> for actr_protocol::ActrType {
     }
 }
 
-/// Actor identifier (realm + serial_number + type)
+/// Actor identifier (Realm name + Actor serial)
 #[derive(Debug, Clone, PartialEq, Eq, Hash, uniffi::Record)]
 pub struct ActrId {
-    pub realm: Realm,
+    /// Realm name, `<realm_id>@<domain>`
+    pub realm: String,
     pub serial_number: u64,
-    pub r#type: ActrType,
 }
 
 impl From<actr_protocol::ActrId> for ActrId {
     fn from(id: actr_protocol::ActrId) -> Self {
         Self {
-            realm: id.realm.into(),
+            realm: id.realm,
             serial_number: id.serial_number,
-            r#type: id.r#type.into(),
         }
     }
 }
@@ -77,9 +54,8 @@ impl From<actr_protocol::ActrId> for ActrId {
 impl From<ActrId> for actr_protocol::ActrId {
     fn from(id: ActrId) -> Self {
         Self {
-            realm: id.realm.into(),
+            realm: id.realm,
             serial_number: id.serial_number,
-            r#type: id.r#type.into(),
         }
     }
 }
