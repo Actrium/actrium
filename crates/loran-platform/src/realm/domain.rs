@@ -3,7 +3,8 @@
 //! Minimal pinning per `actr/protocols/authority-discovery.md` section 4.4:
 //! the member must carry a valid self-signature, the first accepted member is
 //! pinned, and later members must be signed by a pinned `active` key, never
-//! lower the `sequence`, and list only pinned keys. Rotation chains are not
+//! lower the `sequence`, list only pinned keys, and never make a retired key
+//! active again. Rotation chains are not
 //! followed yet, so a member that introduces a new key is rejected.
 
 use actr_protocol::realm_profile::jcs;
@@ -193,15 +194,20 @@ impl RealmDomain {
                 self.domain, keys.sequence, self.keys.sequence
             )));
         }
-        if let Some(key) = keys
-            .keys
-            .iter()
-            .find(|key| pinned(&key.id, &key.public_key).is_none())
-        {
-            return Err(invalid(format!(
-                "{} lists new Realm signing key '{}'; key rotation chains are not supported",
-                self.domain, key.id
-            )));
+        for key in &keys.keys {
+            let Some(accepted) = pinned(&key.id, &key.public_key) else {
+                return Err(invalid(format!(
+                    "{} lists new Realm signing key '{}'; key rotation chains are not supported",
+                    self.domain, key.id
+                )));
+            };
+            // A retired key never signs again, so it never becomes active again.
+            if accepted.status == KeyStatus::Retired && key.status == KeyStatus::Active {
+                return Err(invalid(format!(
+                    "{} reactivates retired Realm signing key '{}'",
+                    self.domain, key.id
+                )));
+            }
         }
         Ok(())
     }
@@ -323,9 +329,12 @@ pub(crate) mod tests {
         // Retiring and removing keys moves forward.
         let next = signed_member(4, &[("rs-2", &two, Active), ("rs-1", &one, Retired)]);
         RealmDomain::accept("acme.com", &next).await?;
-        // A key retired by an accepted member no longer signs members.
+        // A key retired by an accepted member no longer signs members, and
+        // no member can make it active again.
         let by_retired = signed_member(5, &[("rs-1", &one, Active), ("rs-2", &two, Active)]);
         assert!(RealmDomain::accept("acme.com", &by_retired).await.is_err());
+        let reactivated = signed_member(5, &[("rs-2", &two, Active), ("rs-1", &one, Active)]);
+        assert!(RealmDomain::accept("acme.com", &reactivated).await.is_err());
         let revoked = signed_member(5, &[("rs-2", &two, Active)]);
         let accepted = RealmDomain::accept("acme.com", &revoked).await?;
         assert_eq!(accepted.keys.keys.len(), 1);
