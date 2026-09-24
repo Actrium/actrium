@@ -844,10 +844,28 @@ async fn handle_client_envelope(
                     .await
             }
             Some(signaling_envelope::Flow::ActrToServer(actr_to_server)) => {
+                if !in_connection_realm(client_id, server, &[&actr_to_server.source]).await {
+                    return reject_outside_connection_realm(
+                        client_id,
+                        &actr_to_server.source,
+                        server,
+                        &envelope.envelope_id,
+                    )
+                    .await;
+                }
                 handle_actr_to_server(actr_to_server, client_id, server, &envelope.envelope_id)
                     .await
             }
             Some(signaling_envelope::Flow::ActrRelay(ref relay)) => {
+                if !in_connection_realm(client_id, server, &[&relay.source, &relay.target]).await {
+                    return reject_outside_connection_realm(
+                        client_id,
+                        &relay.source,
+                        server,
+                        &envelope.envelope_id,
+                    )
+                    .await;
+                }
                 #[cfg(feature = "opentelemetry")]
                 {
                     handle_actr_relay(
@@ -879,6 +897,44 @@ async fn handle_client_envelope(
         }
     }
     .instrument(span)
+    .await
+}
+
+/// Whether every Actor an envelope names belongs to the connection's Realm.
+///
+/// A connection is bound to the Realm of the identity it authenticated with;
+/// one without an identity belongs to no Realm.
+async fn in_connection_realm(
+    client_id: &str,
+    server: &SignalingServerHandle,
+    actors: &[&ActrId],
+) -> bool {
+    let clients = server.clients.read().await;
+    let Some(connection) = clients.get(client_id).and_then(|c| c.actor_id.as_ref()) else {
+        return false;
+    };
+    actors.iter().all(|actor| actor.realm == connection.realm)
+}
+
+async fn reject_outside_connection_realm(
+    client_id: &str,
+    source: &ActrId,
+    server: &SignalingServerHandle,
+    request_envelope_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    platform::recording::warn!(
+        "Rejecting envelope outside the connection's Realm: client_id={}, source={}",
+        client_id,
+        source.to_string_repr()
+    );
+    send_error_response(
+        client_id,
+        source,
+        403,
+        "Envelope names an Actor outside this connection's Realm",
+        server,
+        Some(request_envelope_id),
+    )
     .await
 }
 
@@ -2085,9 +2141,9 @@ async fn handle_discovery_request(
         req.limit.unwrap_or(64)
     );
 
-    // Query all services from ActorRegistry
+    // Query all services of the requester's Realm from ActorRegistry
     let registry = server.actor_registry.read().await;
-    let services = registry.discover_all(req.publisher.as_deref());
+    let services = registry.discover_all(&source.realm, req.publisher.as_deref());
     let total_count = services.len(); // Save count before moving
 
     // Apply ACL filtering (if ACL is enabled)
@@ -2212,9 +2268,9 @@ async fn handle_route_candidates_request(
         req.target_type.name,
     );
 
-    // Query all instances matching target_type from ActorRegistry
+    // Query all instances of the requester's Realm matching target_type from ActorRegistry
     let registry = server.actor_registry.read().await;
-    let candidates_raw = registry.find_by_actr_type(&req.target_type);
+    let candidates_raw = registry.find_by_actr_type(&source.realm, &req.target_type);
     drop(registry);
 
     // Filter out ghost candidates with no active WebSocket connection.
@@ -2384,9 +2440,8 @@ async fn handle_get_service_spec_request(
         .actor_registry
         .read()
         .await
-        .discover_by_spec_name(service_name)
+        .discover_by_spec_name(&source.realm, service_name)
         .into_iter()
-        .filter(|service| service.actor_id.realm == source.realm)
         .find_map(|service| service.service_spec.clone())
         .map(actr_protocol::get_service_spec_response::Result::Success)
         .unwrap_or_else(|| {
@@ -2789,7 +2844,7 @@ mod tests {
                 .actor_registry
                 .read()
                 .await
-                .discover_by_service_name("test_service")
+                .discover_by_service_name(&actor_id.realm, "test_service")
                 .len(),
             1,
             "stale connection cleanup must not unregister a live replacement"
@@ -2819,7 +2874,7 @@ mod tests {
                 .actor_registry
                 .read()
                 .await
-                .discover_by_service_name("test_service")
+                .discover_by_service_name(&actor_id.realm, "test_service")
                 .len(),
             0,
             "connection cleanup should remove offline services from memory"
@@ -3476,6 +3531,49 @@ mod tests {
             assert_eq!(forwarded.source, source.id);
             assert_eq!(forwarded.source_type, Some(edge()));
             assert_eq!(forwarded.credential, AIdCredential::default());
+        }
+
+        #[tokio::test]
+        #[serial]
+        async fn envelopes_naming_another_realm_are_rejected() {
+            setup().await;
+            let server = create_test_server_handle();
+            let mut source = connect(&server, 1, "source").await;
+            let mut target = connect(&server, 2, "target").await;
+            register(&server, &target.id, worker()).await;
+            // Same serial as the source, another Realm.
+            let elsewhere = ActrId {
+                realm: "other@example.com".to_string(),
+                serial_number: 1,
+            };
+
+            let envelopes = [
+                signaling_envelope::Flow::ActrRelay(relay(
+                    &source.id,
+                    &elsewhere,
+                    credential(&source.id, edge()),
+                )),
+                signaling_envelope::Flow::ActrRelay(relay(
+                    &elsewhere,
+                    &target.id,
+                    credential(&source.id, edge()),
+                )),
+                signaling_envelope::Flow::ActrToServer(ActrToSignaling {
+                    source: elsewhere.clone(),
+                    credential: credential(&source.id, edge()),
+                    payload: Some(actr_to_signaling::Payload::DiscoveryRequest(
+                        actr_protocol::DiscoveryRequest::default(),
+                    )),
+                }),
+            ];
+            for flow in envelopes {
+                let bytes = server.create_new_envelope(flow).encode_to_vec();
+                handle_client_envelope(&bytes, "source", &server)
+                    .await
+                    .unwrap();
+                assert_eq!(error_code(next_flow(&mut source)), 403);
+            }
+            assert!(next_flow(&mut target).is_none());
         }
     }
 }

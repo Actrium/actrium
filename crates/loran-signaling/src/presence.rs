@@ -27,7 +27,7 @@
 //! manager.subscribe(actor_a_id, actor_a_type, user_service_type.clone());
 //!
 //! // When a new user-service instance registers
-//! let subscribers = manager.get_subscribers(&user_service_type);
+//! let subscribers = manager.get_subscribers(&actor_a_id.realm, &user_service_type);
 //! // Push ActrUpEvent to subscribers
 //! ```
 
@@ -37,13 +37,16 @@ use platform::realm::acl::ActorAcl;
 use std::collections::HashMap;
 
 /// Presence subscription manager
+///
+/// Partitioned by Realm: an Actor subscribes to a type within its own Realm
+/// and is only told about Actors of that Realm.
 #[derive(Debug, Default)]
 pub struct PresenceManager {
-    /// Subscription map: target_type -> Vec<(subscriber_actor_id, subscriber_type)>
+    /// Subscription map: (realm, target_type) -> Vec<(subscriber_actor_id, subscriber_type)>
     ///
-    /// Key: the subscribed service type (ActrType)
+    /// Key: the subscriber's Realm and the subscribed service type (ActrType)
     /// Value: list of Actors subscribed to that type, with their verified types
-    subscriptions: HashMap<ActrType, Vec<(ActrId, ActrType)>>,
+    subscriptions: HashMap<(String, ActrType), Vec<(ActrId, ActrType)>>,
 }
 
 impl PresenceManager {
@@ -78,7 +81,10 @@ impl PresenceManager {
             target_type.name
         );
 
-        let subscribers = self.subscriptions.entry(target_type).or_default();
+        let subscribers = self
+            .subscriptions
+            .entry((subscriber.realm.clone(), target_type))
+            .or_default();
 
         // Avoid duplicate subscriptions
         if !subscribers.iter().any(|(id, _)| id == &subscriber) {
@@ -112,7 +118,8 @@ impl PresenceManager {
             target_type.name
         );
 
-        if let Some(subscribers) = self.subscriptions.get_mut(target_type) {
+        let key = (subscriber.realm.clone(), target_type.clone());
+        if let Some(subscribers) = self.subscriptions.get_mut(&key) {
             let original_len = subscribers.len();
             subscribers.retain(|(id, _)| id != subscriber);
 
@@ -125,7 +132,7 @@ impl PresenceManager {
 
                 // If no subscribers remain, remove the entire entry
                 if subscribers.is_empty() {
-                    self.subscriptions.remove(target_type);
+                    self.subscriptions.remove(&key);
                     platform::recording::debug!(
                         "No subscribers left for this type, removing subscription entry"
                     );
@@ -166,7 +173,7 @@ impl PresenceManager {
         let mut removed_count = 0;
 
         // Remove this subscriber from all subscription lists
-        self.subscriptions.retain(|_target_type, subscribers| {
+        self.subscriptions.retain(|_key, subscribers| {
             let original_len = subscribers.len();
             subscribers.retain(|(id, _)| id != subscriber);
             removed_count += original_len - subscribers.len();
@@ -182,9 +189,10 @@ impl PresenceManager {
         removed_count
     }
 
-    /// Get all Actors subscribed to a specific type
+    /// Get all Actors of a Realm subscribed to a specific type
     ///
     /// # Arguments
+    /// - `realm`: the Realm
     /// - `target_type`: the service type
     ///
     /// # Returns
@@ -193,9 +201,9 @@ impl PresenceManager {
     /// # Usage
     /// When a new target_type instance registers, use this method to get
     /// all subscribers that need to be notified
-    pub fn get_subscribers(&self, target_type: &ActrType) -> Vec<&ActrId> {
+    pub fn get_subscribers(&self, realm: &str, target_type: &ActrType) -> Vec<&ActrId> {
         self.subscriptions
-            .get(target_type)
+            .get(&(realm.to_string(), target_type.clone()))
             .map(|subscribers| subscribers.iter().map(|(id, _)| id).collect())
             .unwrap_or_default()
     }
@@ -218,15 +226,15 @@ impl PresenceManager {
     /// Check if a specific Actor is subscribed to a type
     pub fn is_subscribed(&self, subscriber: &ActrId, target_type: &ActrType) -> bool {
         self.subscriptions
-            .get(target_type)
+            .get(&(subscriber.realm.clone(), target_type.clone()))
             .map(|subscribers| subscribers.iter().any(|(id, _)| id == subscriber))
             .unwrap_or(false)
     }
 
     /// Get subscribers with ACL filtering
     ///
-    /// Returns only subscribers that are allowed to discover the target actor
-    /// based on ACL rules
+    /// Returns only subscribers of the target actor's Realm that are allowed
+    /// to discover it based on ACL rules
     ///
     /// # Arguments
     ///
@@ -243,7 +251,7 @@ impl PresenceManager {
     ) -> Vec<ActrId> {
         let subscribers = self
             .subscriptions
-            .get(target_type)
+            .get(&(target_actor_id.realm.clone(), target_type.clone()))
             .map(Vec::as_slice)
             .unwrap_or_default();
         let total_count = subscribers.len(); // Save count before moving
@@ -354,7 +362,7 @@ mod tests {
             target_type.clone(),
         );
 
-        let subscribers = manager.get_subscribers(&target_type);
+        let subscribers = manager.get_subscribers("test@example.com", &target_type);
         assert_eq!(subscribers.len(), 2);
     }
 
@@ -371,7 +379,7 @@ mod tests {
         );
         assert!(manager.unsubscribe(&actor1, &target_type));
 
-        let subscribers = manager.get_subscribers(&target_type);
+        let subscribers = manager.get_subscribers("test@example.com", &target_type);
         assert_eq!(subscribers.len(), 0);
     }
 
@@ -396,8 +404,8 @@ mod tests {
         let removed = manager.unsubscribe_all(&actor1);
         assert_eq!(removed, 2);
 
-        assert_eq!(manager.get_subscribers(&type1).len(), 0);
-        assert_eq!(manager.get_subscribers(&type2).len(), 0);
+        assert_eq!(manager.get_subscribers("test@example.com", &type1).len(), 0);
+        assert_eq!(manager.get_subscribers("test@example.com", &type2).len(), 0);
     }
 
     #[test]
@@ -417,7 +425,7 @@ mod tests {
             target_type.clone(),
         ); // duplicate subscription
 
-        let subscribers = manager.get_subscribers(&target_type);
+        let subscribers = manager.get_subscribers("test@example.com", &target_type);
         assert_eq!(subscribers.len(), 1); // should only have one
     }
 
@@ -448,5 +456,29 @@ mod tests {
         let (type_count, subscriber_count) = manager.stats();
         assert_eq!(type_count, 2); // 2 types
         assert_eq!(subscriber_count, 3); // 3 subscriptions
+    }
+
+    #[test]
+    fn subscriptions_stay_within_the_subscribers_realm() {
+        let mut manager = PresenceManager::new();
+        let target_type = create_test_actor_type("user-service");
+        // Same serial and type, two Realms.
+        let a = create_test_actor_id(1);
+        let b = ActrId {
+            realm: "other@example.com".to_string(),
+            serial_number: 1,
+        };
+        manager.subscribe(
+            a.clone(),
+            create_test_actor_type("test-actor"),
+            target_type.clone(),
+        );
+
+        assert_eq!(manager.get_subscribers(&a.realm, &target_type), vec![&a]);
+        assert!(manager.get_subscribers(&b.realm, &target_type).is_empty());
+        assert!(manager.is_subscribed(&a, &target_type));
+        assert!(!manager.is_subscribed(&b, &target_type));
+        assert!(!manager.unsubscribe(&b, &target_type));
+        assert!(manager.is_subscribed(&a, &target_type));
     }
 }
