@@ -32,6 +32,20 @@ Loran 不再提供 `/.well-known/actr/realm.json`：它与 `actr/protocols/autho
 Realm Profile 位于 `<realms href>/<realm_id>`，由 Realm 签名 key 签名。Loran 仅在 `realms`
 relation 指向本 Realm Provider 时提供 Realm Profile。
 
+当前实现：`[authority] enabled = true` 时 Loran 只为自己的 Realm Provider 域名提供一份
+`/.well-known/actr`（支持 `GET`/`HEAD`，带 `Access-Control-Allow-Origin: *` 与
+`Cache-Control`）。启用 Issuer 且有 Signer 时，descriptor 额外公布：
+
+- `realms` relation：`https://<provider>/actr/realms/<provider>`（protocol `actr-realm-profile/1`）；
+- `realm-management` relation：`https://<provider>/actr/realm-management`（protocol
+  `actr-realm-management/1`）；
+- `realm_signing_keys`：Signer 中名为 `realm-signing:<provider>` 的 Ed25519 key（启动时缺失即
+  生成、不过期），`sequence = 1`，由该 key 对去掉 `signature` 的成员按 JCS 自签名；descriptor 的
+  key id 与之相同。
+
+这两个 relation 的端点尚未实现（Realm Profile 托管与 Realm 管理请求随后续阶段提供）。
+Realm 签名 key 尚未就绪时 descriptor 返回 `503`。`[authority] links` 配置 `links` 成员。
+
 ## Issuer
 
 路由前缀：`/issuer`。
@@ -41,7 +55,7 @@ relation 指向本 Realm Provider 时提供 Realm Profile。
 
 - `protocol_version = 1`
 - `issuer`：Realm 名，例如 `k7m2q9xh@acme.com`
-- `provider`：当前实现为固定常量；目标契约为 Realm Provider 的规范化 DNS authority，例如
+- `provider`：Realm Provider ID，即 `[authority] uri` 的规范化 DNS 域名，例如
   `provider.example`
 - `audience = actr.signaling`
 - `realm`（Realm 名，与 `issuer` 相同）、完整 ActorId 与过期时间

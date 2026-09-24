@@ -179,10 +179,14 @@ Realm 不在 TOML 中声明。
 
 目标契约：一个实例承载多个 Realm，默认不限制数量；需要独占部署时可配置
 `max_realms = 1`（该字段尚未实现）。Realm 经持有方授权的创建请求与 Realm
-Profile 验证后激活，收到退役 Realm Profile 时退役并写入 Realm Provider tombstone。Realm
-Provider ID（Realm Provider 的规范化 DNS authority，取代当前常量）、按 Realm 域名与按
-Realm 的配额同样属于
-待实现配置。
+Profile 验证后激活，收到退役 Realm Profile 时退役并写入 Realm Provider tombstone。按 Realm
+域名与按 Realm 的配额属于待实现配置。
+
+Realm Provider ID 取 `[authority] uri`（`actr://<domain>`，不带端口）的规范化 DNS 域名。
+启用 Issuer、Signaling 或 TURN 时 `uri` 必填，缺失或非法即配置校验失败；它写入 Actor
+credential 与 TURN username 的 `provider`，并由 Signaling、TURN 校验。`[authority] enabled`
+控制是否提供 `/.well-known/actr`（此时域名须与 `bind.http` 一致），`[authority] links`
+是 descriptor 的 Realm 链接前缀（如 `["/i/"]`），默认不输出。
 
 旧 SQLite 必须停机后运行：
 

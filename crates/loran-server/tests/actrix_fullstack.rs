@@ -130,6 +130,7 @@ location_tag = "local,test,fullstack"
 pid = "{pid}"
 
 [authority]
+enabled = true
 uri = "actr://localhost"
 
 [bind]
@@ -1303,6 +1304,86 @@ async fn issuer_register_rejects_non_preprovisioned_realm() {
         }
         other => panic!("expected register error for non-preprovisioned realm, got {other:?}"),
     }
+
+    harness.shutdown();
+}
+
+#[tokio::test]
+#[serial]
+async fn authority_descriptor_publishes_signed_realm_signing_keys() {
+    use ed25519_dalek::Verifier as _;
+
+    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let url = format!("{}/.well-known/actr", harness.base_url());
+    let client = reqwest::Client::new();
+
+    // The Realm signing key is generated at startup, possibly after health.
+    let mut response = client.get(&url).send().await.expect("descriptor request");
+    for _ in 0..50 {
+        if response.status() != reqwest::StatusCode::SERVICE_UNAVAILABLE {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        response = client.get(&url).send().await.expect("descriptor request");
+    }
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert_eq!(response.headers()["access-control-allow-origin"], "*");
+    let body = response.bytes().await.expect("descriptor body");
+    let descriptor: actr_protocol::AuthorityDescriptor =
+        serde_json::from_slice(&body).expect("parse descriptor");
+    let authority = "actr://localhost".parse().expect("authority");
+    descriptor
+        .validate_for(&authority)
+        .expect("valid descriptor");
+
+    let realms = descriptor.require_service("realms").expect("realms");
+    assert!(
+        realms.href.ends_with("/actr/realms/localhost"),
+        "{}",
+        realms.href
+    );
+    let management = descriptor
+        .require_service("realm-management")
+        .expect("realm-management");
+    assert!(management.href.ends_with("/actr/realm-management"));
+
+    // The member is self-signed over its JCS form without `signature`.
+    let keys = descriptor.realm_signing_keys.expect("realm_signing_keys");
+    assert_eq!(keys.keys.len(), 1);
+    assert_eq!(keys.keys[0].id, "realm-signing:localhost");
+    assert_eq!(keys.signature.key_id, "realm-signing:localhost");
+    let mut payload: Value = serde_json::from_slice(&body).expect("json");
+    let payload = payload["realm_signing_keys"]
+        .as_object_mut()
+        .map(|member| {
+            member.remove("signature");
+            actr_protocol::realm_profile::jcs(&Value::Object(member.clone()))
+        })
+        .expect("member object");
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let public_key: [u8; 32] = b64
+        .decode(&keys.keys[0].public_key)
+        .expect("public key")
+        .try_into()
+        .expect("32 bytes");
+    let signature: [u8; 64] = b64
+        .decode(&keys.signature.value)
+        .expect("signature")
+        .try_into()
+        .expect("64 bytes");
+    ed25519_dalek::VerifyingKey::from_bytes(&public_key)
+        .expect("verifying key")
+        .verify(
+            payload.as_bytes(),
+            &ed25519_dalek::Signature::from_bytes(&signature),
+        )
+        .expect("member signature verifies");
+
+    // HEAD returns the same headers and no body.
+    let head = client.head(&url).send().await.expect("HEAD descriptor");
+    assert_eq!(head.status(), reqwest::StatusCode::OK);
+    assert_eq!(head.headers()["access-control-allow-origin"], "*");
+    assert!(head.bytes().await.expect("HEAD body").is_empty());
 
     harness.shutdown();
 }

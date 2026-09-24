@@ -124,6 +124,19 @@ impl SignerClientWrapper {
         .await
     }
 
+    /// Return the non-expiring key named `name`, generating it if missing;
+    /// returns (key_id, verifying_key_bytes[32]). Idempotent, so it retries.
+    pub async fn ensure_named_key(
+        &self,
+        name: &str,
+    ) -> Result<(u32, [u8; 32]), signer::SignerError> {
+        self.call_with_rebuild("ensure_named_key", true, move |client| {
+            let name = name.to_string();
+            Box::pin(async move { client.ensure_named_key(&name).await })
+        })
+        .await
+    }
+
     /// Health check
     pub async fn health_check(&self) -> Result<String, signer::SignerError> {
         self.call_with_rebuild("health_check", true, |client| {
