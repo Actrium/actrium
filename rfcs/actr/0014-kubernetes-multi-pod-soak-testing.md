@@ -179,7 +179,8 @@ recovery. Short integration tests cannot reliably expose leaks or ordering
 races that appear only after repeated recovery, process replacement, or
 multi-peer pressure. Historical examples include [ICE socket exhaustion
 (Actrium/actr#270)](https://github.com/Actrium/actr/issues/270),
-[background/reconnect races (Actrium/actr#363 and #383)](https://github.com/Actrium/actr/issues/363),
+[background/reconnect races (Actrium/actr#363)](https://github.com/Actrium/actr/issues/363)
+and [Actrium/actr#383](https://github.com/Actrium/actr/issues/383),
 [silent peer death (Actrium/actr#583)](https://github.com/Actrium/actr/issues/583),
 [stalled signaling (Actrium/actr#608)](https://github.com/Actrium/actr/issues/608),
 [failed SDP delivery (Actrium/actr#609)](https://github.com/Actrium/actr/issues/609),
@@ -457,7 +458,7 @@ AI only reads evidence and provides initial attribution.
 
 | Module | Implementation | Responsibilities |
 | --- | --- | --- |
-| Actr Endpoint (`actr-N`) | Standalone `Actrium/actr-soak` crate, built with `real-rtc`; links the pinned `Actrium/actrium` `actr-hyper` dependency with its `test-utils` feature | `actr-soak-endpoint` hosts the production ActrNode adapter in `src/node_endpoint.rs` and `src/node_runtime.rs`, holding `NetworkEventHandle`, Fault facades, and Snapshot/Hook observers |
+| Actr Endpoint (`actr-N`) | Standalone `Actrium/actr-soak` crate, built with the `real-rtc` feature; links the pinned `Actrium/actrium` `actr-hyper` dependency with its `test-utils` feature | `actr-soak-endpoint` hosts the production ActrNode adapter in `src/node_endpoint.rs` and starts it through `src/node_runtime.rs`, holding `NetworkEventHandle`, Fault facades, and Snapshot/Hook observers |
 | Test Workload | Test Actor/Probe Driver inside `actr-N` | Send RPC, Tell, and DataChunk through `RuntimeContext`; continuously produce bidirectional traffic |
 | Soak Dashboard | Kubernetes Deployment | Serve the UI/BFF, persist run state, and expose authenticated manual control |
 | Soak Controller | Embedded in Dashboard | Generate seed plans, call endpoint control APIs, schedule events, run the Result Evaluator, and archive artifacts |
@@ -496,6 +497,11 @@ GET /v1/peers, /v1/events, /metrics (same Endpoint HTTP listener, TCP 9090)
   -> Snapshot / Hook / Metrics Adapter
   -> Dashboard's embedded SoakController / Result Evaluator
 ```
+
+The `/metrics` and `/v1/metrics` routes share the Endpoint Control API's TCP
+9090 listener. The embedded SoakController scrapes `/metrics` through that
+listener using the configured Endpoint bearer token; the Endpoint does not
+serve metrics on a separate TCP 9091 port.
 
 Implementation repositories and deliverables:
 
@@ -537,7 +543,7 @@ shell, `eval`, or arbitrary memory mutation.
 | POST | `/v1/peers` | Wire a Peer edge to a target endpoint (run-scoped, idempotent) |
 | DELETE | `/v1/peers` | Tear down Peer wiring installed by a run |
 | GET | `/v1/events` | Hook, state edges, Fault hits, and signaling trace |
-| GET | `/metrics` | Prometheus text metrics on the Endpoint HTTP listener (TCP 9090); bearer token applies when enabled |
+| GET | `/metrics` | Prometheus text metrics on the same Endpoint HTTP listener as the control API (TCP 9090); bearer token applies when enabled |
 | GET | `/v1/metrics` | Optional JSON metric snapshot |
 | GET | `/v1/resources` | Process resource snapshot (RSS, FDs, sockets) |
 | GET | `/v1/diagnostics` | Endpoint diagnostics snapshot |
@@ -1153,9 +1159,12 @@ Ports follow the actual image configuration. Suggested values:
 Loran HTTP/Signaling: TCP 8080
 Loran STUN/TURN: UDP 3478
 TURN relay range: dedicated UDP range
-Endpoint control API: TCP 9090
-Endpoint `/metrics` and `/v1/metrics`: same TCP 9090 listener as the control API
+Endpoint Control API, observations, and metrics: TCP 9090
 ```
+
+The `/metrics` and `/v1/metrics` routes are served by the same HTTP listener
+as the Endpoint Control API. Metrics requests use the Endpoint bearer token
+when configured; this deployment has no separate Endpoint metrics port.
 
 The in-cluster `actrix` Service advertises its stable ClusterIP. The deployment
 also creates an `actrix-turn-relay` ClusterIP Service with same-port UDP
@@ -1168,10 +1177,10 @@ address and are outside this in-cluster relay profile.
 #### 13.4 NetworkPolicy
 
 ```text
-Dashboard -> `actr-N`:        TCP 9090 (Endpoint Control API)
+Dashboard / embedded SoakController -> `actr-N`: TCP 9090
+                              (control, observations, `/metrics`; bearer token when enabled)
 Dashboard -> Kubernetes API:  TCP 443/6443 (Pods, Events, logs, and metrics
                               reads; approved lifecycle verbs only)
-Collector/Prometheus -> `actr-N`: TCP 9090 (`/metrics`; send the Endpoint bearer token when enabled)
 Collector/Prometheus -> Loran:   TCP metrics port (Loran metrics scrape)
 `actr-N` -> Loran:           TCP HTTP/Signaling, UDP STUN/TURN 3478
 `actr-N` <-> Loran:          TURN relay UDP range (relayed media to and from
