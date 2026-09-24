@@ -76,8 +76,6 @@ Realm 名 = <realm_id>@<domain>
 - 已退役 Realm 的 RealmId 永不复用：域名所有者不得复用，Realm Provider 以 Realm Provider tombstone 强制；
 - 域名的 Realm 签名 key 是该域名下所有 Realm 的长期信任根。
 
-当前代码里的数值 `realm_id` 只是 Loran 内部的数据库主键，不是 Realm 身份。目标契约以完整 Realm 名为键，随 ActorId 格式迁移移除它。
-
 ### 2.3 Realm、Publisher 与 Realm Provider
 
 | | Publisher | Realm | Realm Provider |
@@ -173,19 +171,7 @@ Actrium 只凭一个可判定条件区分两条路径：在规范化 A-label 上
 
 ### 3.3 ActorId 如何携带 Realm
 
-当前 Actr ActorId 中的 Realm 只有一个 `u32`：
-
-```text
-2af01@42/notes.example:team-notes:1.4.2
-```
-
-新设备仅凭 `42` 无法知道：
-
-- 去哪个域名取 Realm Profile 和 Realm issuer key；
-- 连哪个信令集群；
-- Realm 42 是否与另一个 Realm Provider 上的 Realm 42 冲突。
-
-Actrium v1 因而要求 ActorId 自带 Realm 名，且只包含 Actor serial 与 Realm 名：
+ActorId 自带 Realm 名，且只包含 Actor serial 与 Realm 名：
 
 ```text
 <serial>.<realm_id>@<domain>
@@ -195,7 +181,7 @@ Actrium v1 因而要求 ActorId 自带 Realm 名，且只包含 Actor serial 与
 
 ActorId 类似进程 ID，只回答「哪个 Realm 里的哪个 Actor」。程序身份（Actor 类型 `publisher/program@version`）不在 ActorId 中，由注册与 Actor credential 携带；连接 ACL 与服务发现使用注册/credential 中的类型。Publisher 改域名或程序升级都不会改变 ActorId 的格式。
 
-早期草案中的 `2af01@42~dns:team.example/...`（数值 realm_id 加 authority）作废。当前只含 `u32` 且内嵌类型的 `ActrId` 视为 legacy，导入时必须显式补足 Realm 名并重写成 v1 标准形式，不能猜测。
+只含 `u32` 且内嵌类型的旧 `ActrId` 视为 legacy，导入时必须显式补足 Realm 名并重写成 v1 标准形式，不能猜测。
 
 ## 4. 信令服务器的权力边界
 

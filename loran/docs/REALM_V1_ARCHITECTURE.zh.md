@@ -265,7 +265,7 @@ realm-management 等）与该域名的 `realm_signing_keys`、`realms`，是同�
 
 ## 4. 身份模型
 
-ActorId 是 Actor 实例身份，不是用户、Workspace、程序或逻辑服务名，目标形式只含两部分：
+ActorId 是 Actor 实例身份，不是用户、Workspace、程序或逻辑服务名，只含两部分：
 
 ```text
 <serial_hex>.<realm_id>@<domain>        例：2af01.k7m2q9xh@acme.com
@@ -289,9 +289,7 @@ Realm 客户端 key，这就是 Realm membership。此后每次申请 Actor cred
 key 注册，已签发的短期 Actor credential 到期失效（或按既有撤销机制提前失效）。renewal token
 属于 Actor credential 续期，同样绑定该 Realm 客户端 key。
 
-当前代码以数值 `realm_id`（u32）作为数据库主键，并把它嵌在 ActorId 与 credential issuer 中。
-目标契约直接以完整 Realm 名（`realm`）为键：它唯一、不可变、退役后不复用，不需要另一个数字；
-数值 `realm_id` 随 ActorId 格式迁移移除。
+数据库直接以完整 Realm 名为键：它唯一、不可变、退役后不复用，不需要另一个数字。
 
 Worker ID 为显式配置的 0..31 值，不再由 PID/hostname 的 5-bit hash 猜测。单节点
 默认 0；未来并发 Issuer 必须由部署租约分配不同 worker ID。SQLite 的
@@ -440,15 +438,20 @@ Package Resolution、`packages` relation 与 `program_resolver` 已从协议和�
 
 ## 8. 数据与升级
 
-当前 schema v3 使用 SQLite `PRAGMA user_version = 3`。Loran 遇到旧版或未知 schema
-直接拒绝启动，不在启动路径中执行「尝试 ALTER 后忽略错误」。v2 → v3 没有离线迁移，
+当前 schema v4 使用 SQLite `PRAGMA user_version = 4`。Loran 遇到旧版或未知 schema
+直接拒绝启动，不在启动路径中执行「尝试 ALTER 后忽略错误」。v2 → v3（新增
+`issuer_control_attempt`）与 v3 → v4（以 Realm 名取代数值 Realm id）都没有离线迁移，
 需停机后重建数据库。
+
+v4 已以 Realm 名为键：`realm` 表以列 `name`（完整 Realm 名）为主键，`actoracl`、
+`pending_registration`、`issued_actor_identity`、`revoked_actor` 以 `realm` 列引用它，后三者按
+`(realm, serial_number)` 建主键；Signaling 的 `actor_registry` 同样按 Realm 名与 serial 建键。
 
 目标表结构：
 
 - `realm_domain`：`domain`、已接受的 authority descriptor digest、`realm_signing_keys`
   的 `sequence` 与 key 集合、最近校验时间；
-- `realm`：以完整 Realm 名 `realm` 为主键、状态（`pending` | `active` |
+- `realm`：以完整 Realm 名（列 `name`）为主键、状态（`pending` | `active` |
   `suspended` | `retired`）、已接受的 Realm Profile digest 与 `sequence`、Realm issuer key id、
   pending 到期时间、请求方（`requester` 或 Realm Provider 账号）、Realm 管理 token
   哈希及其绑定的 Realm Provider 账号（Realm Provider 域名下的 Realm）；Realm Provider tombstone 与活跃 Realm
@@ -486,8 +489,7 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
 
 - 移除 `idx_realm_singleton` 唯一索引与 `Realm::create` 中的单例检查，增加
   `max_realms` 配置；
-- 新增 `realm_domain` 表；`realm` 表改以完整 Realm 名为主键（取代数值 id）并校验 Realm 名语法，
-  增加 `pending`/`suspended`/`retired` 状态、Realm Profile digest 与 `sequence`；
+- 新增 `realm_domain` 表；`realm` 表增加 `pending`/`suspended`/`retired` 状态、Realm Profile digest 与 `sequence`；
 - 实现 authority descriptor 获取（含逐跳 SSRF 检查的重定向处理、限流与结果缓存）与
   `realm_signing_keys` 验签、Realm 管理请求（`create_realm`、`publish_profile`、
   `reissue_admin_token`、`register_publisher`；`provider_id` 绑定、5 分钟有效期、nonce
@@ -503,11 +505,6 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   注册请求登记，移除 `/.well-known/actr/publisher.json`（Publisher Registry 当前
   实现的 `PUBLISHER_DESCRIPTOR_PATH`）与 `verification_challenge`，重定向处理与 Realm 相同
   （逐跳 SSRF 检查）；
-- ActorId 目标格式 `<serial_hex>.<realm_id>@<domain>`：proto `ActrId.realm` 由 u32 改为字符串
-  Realm 名，并从 `ActrId` 移出 `type`；`RegisterOk` 与 Actor credential 显式携带 Actor
-  类型；连接 ACL（`AclRule`）与发现改用注册/Actor credential 中的类型匹配；
-- Actor credential issuer 从当前由数值 `realm_id` 派生的字符串改为 Realm 名，Realm Profile 不再有
-  issuer 标识字段；
 - 实现 Realm 管理 token 及其一次性交付与重签、按 Realm 域名与按 Realm 配额、由
   退役 Realm Profile 触发的 Realm 退役事务与 Realm Provider tombstone；
 - TURN secret 改为按 Realm 名 HKDF 派生；

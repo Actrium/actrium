@@ -39,7 +39,7 @@ Tab
 
 但它依赖三项必须先补齐的基础能力：
 
-1. **持久、可解析的 ActorId**：Service 重启、断网、凭据续期或迁移后必须保留同一 `ActorId`，并能由 ID 得到 Realm 名。当前 Actr 的 hard rebind 可能换 ID，且 ID 只带 Realm Provider 内部的数值 Realm，不能直接作为长期、可分享 URL 语义。
+1. **持久、可解析的 ActorId**：Service 重启、断网、凭据续期或迁移后必须保留同一 `ActorId`，并能由 ID 得到 Realm 名。当前 Actr 的 hard rebind 可能换 ID，不能直接作为长期、可分享 URL 语义。
 2. **域名 Publisher**：Actr 的 publisher 语义与长度限制需要调整，使规范化 DNS 域名成为程序发布者身份。
 3. **真正封闭的 Front Host**：Actrium 必须在 Keel 之前完成包校验，并以 capability、组件白名单、资源配额和确定的沙箱后端限制 Guest；不能把远端 URL 直接交给 Keel 加载。
 
@@ -139,7 +139,6 @@ Tab
 
 已验证的关键事实包括：
 
-- Actr 当前 `ActrId` 文本形式为 `<serial_hex>@<realm_id>/<publisher>/<program>@<version>`；目标格式为 `<serial>.<realm_id>@<domain>`：以 Realm 名取代数值 realm_id，并把程序类型移到注册与 Actor credential 中。
 - Actr 已支持 `Dest::Peer(ActrId)` 精确寻址和按 `ActrType` 发现，两者可以清晰分工。
 - `.actr` 已具备 Ed25519 manifest 签名、SHA-256 文件绑定和资源；依赖锁按 workload/构建流程可选。
 - Keel 的 Host/Guest 边界与白名单模块机制适合承载 Front，但其 `Engine.loadBundle(URL)` 本身不是可信分发系统。

@@ -220,20 +220,14 @@ Service 的 ActorId 必须满足：
 - 可以解析为当前在线地址，也可以明确报告 offline；
 - Actor 类型不是 ID 的组成部分：它由注册与 Actor credential 携带，且必须与 Program Release 相同。
 
-当前 Actr 的 legacy 文本形式是：
-
-```text
-<serial_hex>@<realm_id>/<publisher>/<program>@<version>
-```
-
-它只有 Loran 内部的数值 `realm_id`，缺少可解析的 Realm 名，还把程序类型嵌在身份里。v1 必须改造 ActorId 数据模型与标准 formatter，使 Realm 可从 ActorId 本身解析，并把类型移出身份：
+ActorId 只含 Actor serial 与 Realm 名，Realm 可从 ActorId 本身解析：
 
 ```text
 <serial>.<realm_id>@<domain>
 例：2af01.notes@acme.com
 ```
 
-本机 Realm 例如 `2af01.h3x8p2wq@<installation-id>.actr.alt`。数值 `realm_id` 只是 Realm Provider 内部句柄，不进入 ActorId。最终 wire/text 编码由 Actr ADR 冻结，但不能退回「只给一个 realm_id，再靠 Actrium 私下猜 Realm」的语义；legacy ActorId 导入时必须显式补足 Realm 名并重写。
+本机 Realm 例如 `2af01.h3x8p2wq@<installation-id>.actr.alt`。
 
 同时，其生命周期语义必须从「本次注册地址」升级为「可续租的持久逻辑 Actor 身份」。
 

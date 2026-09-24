@@ -127,7 +127,7 @@ transcript hash (BLAKE3) is what signatures and the KDF consume.
 
 Actr already issues per-Actor Ed25519 credentials through a trusted issuer (Issuer,
 `crates/loran-signaling/`), and `IdentityClaims`/`AIdCredential` already carry
-`realm_id`, `actor_id`, and `expires_at` (`crates/actr-protocol/proto/actr.proto:64-90`).
+`realm`, `actor_id`, `actor_type`, and `expires_at` (`crates/actr-protocol/proto/actr.proto:64-90`).
 A SIGMA-style mutually-authenticated Diffie-Hellman exchange composes cleanly:
 
 - DH ephemerals provide forward secrecy.

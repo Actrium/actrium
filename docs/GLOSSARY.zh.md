@@ -76,7 +76,7 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | 本机 Realm | 域名为本机伪域名 `<installation-id>.actr.alt`（RFC 9476，永不经 DNS 解析）的 Realm：只有本地记录，没有 Realm Profile，不经过 Realm Provider，其他设备无法解析。 |
 | installation-id | Actrium 安装时随机生成的 128 位标识（base32 小写 26 字符），只用于本机伪域名。 |
 | Realm Provider 域名下的 Realm | 在规范化 A-label 上比较，Realm 域名等于其 Realm Profile 的 Realm Provider ID，或以 `"."` 加该 ID 结尾（按 label 边界）的 Realm。只有它：显示 Realm Provider 为信任根；由 Realm Provider 自签 Realm Profile，无需 `publish_profile`；Realm 管理请求用 Realm Provider 账号授权。其他 Realm 一律显示 Realm 域名为信任根，走 Actr 管理信封。 |
-| ActorId | Actor 实例的持久身份，与 Actor 长期 key 绑定，类似进程 ID：`<serial>.<realm_id>@<domain>`，如 `2af01.k7m2q9xh@acme.com`。单个 `@`，左边按 DNS 顺序从具体到一般，去掉 `<serial>.` 即 Realm 名；URI 中 `@` 写作 `%40`。不含程序类型，不是 Workspace、用户或可变服务别名。代码类型名为 `ActrId`；当前实现仍为数值 `realm_id` + Actor serial + 程序类型（见「当前实现专有」）。 |
+| ActorId | Actor 实例的持久身份，与 Actor 长期 key 绑定，类似进程 ID：`<serial>.<realm_id>@<domain>`，如 `2af01.k7m2q9xh@acme.com`。单个 `@`，左边按 DNS 顺序从具体到一般，去掉 `<serial>.` 即 Realm 名；URI 中 `@` 写作 `%40`。不含程序类型，不是 Workspace、用户或可变服务别名。代码类型名为 `ActrId`（字段 `realm` 为 Realm 名、`serial_number` 为 Actor serial）。 |
 | Actor serial | ActorId 中由该 Realm 的 Issuer 分配的序列号，文本形式为小写十六进制（当前实现为 54-bit Snowflake）。 |
 
 ## 5. 信任与 key
@@ -197,7 +197,6 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | --- | --- |
 | Realm descriptor | 当前实现在 `/.well-known/actr/realm.json` 发布的单 Realm 非秘密元数据。目标契约中由 Realm Profile 取代；该路径与 authority discovery「`/.well-known/actr` 下不定义子路径」冲突，将被移除。 |
 | Publisher descriptor | 当前实现中 Publisher Registry 读取的 `/.well-known/actr/publisher.json`：单 key、未签名的预发布结构，与目标契约不兼容；目标契约中由 Publisher Profile 取代，将被移除。 |
-| 数值 `realm_id` | 当前代码中 Loran 的 u32 数据库主键，嵌在当前 ActorId 与 credential issuer 中。目标契约以完整 Realm 名（字段 `realm`）为键，不再需要它；随 ActorId 格式迁移移除。与 RealmId（`@` 左边那段）无关。 |
 
 ## 历史名称对照
 
@@ -214,7 +213,7 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | Publisher Registry | MFR（源自 manufacturer） | 目录 `crates/loran-mfr` → `crates/loran-publisher-registry`；包 `actrix-mfr` → `actrix-publisher-registry`；路由保持 `/registry/*` 与 `/admin/api/publishers`；配置 `[services.mfr]` → `[services.publisher_registry]`；表 `mfr*` → `publisher*`、列 `mfr_id`/`manufacturer` → `publisher_id`/`publisher`（schema v2 离线迁移）；key id 格式 `actr-pub-<16 hex>` 不变 |
 | Actor Registry | service registry | 类型 `ServiceRegistry` → `ActorRegistry`；SQLite 表 `service_registry` → `actor_registry`、列 `actor_manufacturer` → `actor_publisher`（启动时原地改名） |
 | Realm Provider ID（Realm Provider 的 DNS authority） | `actrix-official` | 当前实现中固定的 provider ID 常量 |
-| Realm 名 | 数值 `realm_id`（当前代码）、`actr:realm:<realm_id>:authority` | 当前实现中的 Realm 标识与 credential issuer 字符串 |
+| Realm 名 | 数值 `realm_id`、`actr:realm:<realm_id>:authority` | 2026-09 C3 前的 Realm 标识与 credential issuer；与 RealmId（`@` 左边那段）无关 |
 | Realm 签名 key、`realm_signing_keys` | 命名空间 key、`realm_namespace` | 本契约早期草稿用语 |
 | RealmId（`realm_id`） | Realm label（`label`） | 改名以与 ActorId 等 *Id 风格统一 |
 | RealmId、Realm 名 | `local_name`、Realm 引用、`dns:`/`local:` 前缀 | 本契约早期草稿用语 |
@@ -222,7 +221,7 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | Actr 管理信封 | 签名信封 | 本契约早期草稿用语 |
 | Realm 客户端 key | 设备 key、device private key | 本契约早期草稿用语 |
 | renewal token | Realm refresh material | 产品文档早期用语 |
-| Actor credential | Realm credential | 产品文档早期用语；当前代码类型名为 proto `AIdCredential` 与 `crates/loran-issuer` 的 `AIdIssuer`、`AIdSerialNumberIssuer` |
+| Actor credential | Realm credential | 产品文档早期用语；当前代码类型名为 proto `AIdCredential` 与 `crates/loran-issuer` 的 `AIdIssuer`、`AIdSerialNumberIssuer`，Actor 类型在 claims 中的字段为 `IdentityClaims.actor_type` |
 | Actor credential（含 Realm membership 证明） | Realm membership credential | 本契约早期草稿用语：并入 Actor credential，membership 即已注册未撤销的 Realm 客户端 key |
 | Realm Provider | provider | 本契约早期草稿用语（泛词） |
 | `publish_profile` | `activate_realm` | 早期草稿只管首次激活；合并为发布 Realm Profile（首次即激活，之后即更新或退役） |

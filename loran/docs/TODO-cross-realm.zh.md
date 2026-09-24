@@ -7,8 +7,8 @@
 ## 本次已完成
 
 1. ACL 引入来源 realm 维度（已落地）
-   - 方案：在 `actoracl` 表新增 `source_realm_id`。
-   - 兼容：历史数据自动回填为 `source_realm_id = realm_id`，保留「仅同 realm」语义。
+   - 方案：在 `actoracl` 表新增 `source_realm`。
+   - 兼容：历史数据自动回填为 `source_realm = realm`，保留「仅同 realm」语义。
    - 代码：
      - `crates/platform/src/storage/db.rs`
      - `crates/platform/src/realm/acl.rs`
@@ -42,8 +42,8 @@
 
 1. DB 查询语义修复（`platform/src/realm/acl.rs`）
    - `get_by_types` 使用 `ORDER BY rowid DESC LIMIT 1`，语义是「最新行优先」，与 deny-first 评估不符
-   - `AND source_realm_id = ?` 无法匹配 NULL 行（wildcard `*` 存为 NULL），需改为
-     `AND (source_realm_id IS NULL OR source_realm_id = ?)`
+   - `AND source_realm = ?` 无法匹配 NULL 行（wildcard `*` 存为 NULL），需改为
+     `AND (source_realm IS NULL OR source_realm = ?)`
    - 建议：整个 ACL 查询下沉到 DB 层做 JOIN，消除当前 N+1 逐候选查询的性能问题
 
 2. 消费端依赖意图检查（`ServiceSpec.dependencies`）
@@ -67,5 +67,5 @@
 >
 > 与当前 v1 契约的关系：v1 中 Realm 对应一次应用实例部署，一个 Loran 实例承载多个
 > Realm。同一实例内的不同 Realm 默认互不可见；v1 的连接 ACL 只作用于同一 Realm，管理接口
-> 拒绝非空 `source_realm_id`，该维度仅保留供后续跨 Realm 规则使用。跨实例调用由
+> 拒绝非空 `source_realm`，该维度仅保留供后续跨 Realm 规则使用。跨实例调用由
 > Service 后台在目标 Realm 取得客户端身份完成，而不是靠本文的跨 Realm ACL 放行。

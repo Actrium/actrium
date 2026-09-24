@@ -217,20 +217,14 @@ A Service's ActorId must satisfy:
 - it can resolve to a current online address, or explicitly report offline;
 - the Actor type is not part of the ID: it is carried by registration and the Actor credential, and must match the Program Release.
 
-Actr's current legacy text form is:
-
-```text
-<serial_hex>@<realm_id>/<publisher>/<program>@<version>
-```
-
-It carries only Loran's internal numeric `realm_id`, lacks a resolvable Realm name, and embeds the program type in the identity. v1 must rework the ActorId data model and the standard formatter so the Realm can be resolved from the ActorId itself, and move the type out of the identity:
+An ActorId contains only the Actor serial and the Realm name, so the Realm can be resolved from the ActorId itself:
 
 ```text
 <serial>.<realm_id>@<domain>
 e.g. 2af01.notes@acme.com
 ```
 
-For a local Realm, for example, `2af01.h3x8p2wq@<installation-id>.actr.alt`. The numeric `realm_id` is only an internal handle of the Realm Provider and never enters the ActorId. The final wire/text encoding is frozen by an Actr ADR, but it must not fall back to the semantics of "just give a realm_id and let Actrium privately guess the Realm"; importing a legacy ActorId must explicitly supply the Realm name and rewrite it.
+For a local Realm, for example, `2af01.h3x8p2wq@<installation-id>.actr.alt`.
 
 At the same time, its lifecycle semantics must be upgraded from "this registration's address" to "a renewable, durable logical Actor identity".
 

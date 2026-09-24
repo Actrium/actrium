@@ -29,7 +29,7 @@
 │ Management: Admin UI/API + Realm 生命周期               │
 └────────────────────────┬─────────────────────────────────┘
                          ▼
-                    SQLite schema v3
+                    SQLite schema v4
 ```
 
 这些是逻辑平面，不要求永远同进程。v1 默认 all-in-one 是为了减少部署依赖；Issuer
@@ -40,8 +40,8 @@ Realm Provider、audience 与 endpoint scope。
 
 - 每个 Realm 的 Realm issuer key（Ed25519）签发短期 Actor credential；Realm issuer key 由
   Realm 签名 key 签名的 Realm Profile 委派，Loran 未经委托不持有第三方域名的 Realm 签名 key。
-- ActorId 表示实例身份，目标形式为 `<serial_hex>.<realm_id>@<domain>`，不含程序类型；
-  程序类型由注册与 Actor credential 携带。当前实现仍使用数值 `realm_id` 并内嵌程序类型。
+- ActorId 表示实例身份，形式为 `<serial_hex>.<realm_id>@<domain>`，不含程序类型；
+  程序类型由注册与 Actor credential 携带。Actor credential 的 issuer 即 Realm 名。
 - Service 通过 renewal possession proof 在重启后保留 ID。
 - 程序身份规范写作 `publisher/program@version`。
 - Publisher 是规范化 DNS 域名。当前实现通过
@@ -99,7 +99,7 @@ Workspace 不属于 Loran。一个 Service 至多绑定一个 Workspace，同一
 2. Issuer 验证 Realm（目标契约下须为 `active`）、publisher/package、nonce、连接 ACL 和
    注册模式。
 3. Issuer 从持久的已签发身份登记预留 Snowflake serial。
-4. Issuer Signer 签发 Actor credential（目标契约下携带 Actor 类型）；Issuer 同时生成 scoped
+4. Issuer Signer 签发 Actor credential（携带 Actor 类型）；Issuer 同时生成 scoped
    TURN credential。
 5. Guest 只获得运行所需的最小能力。
 
@@ -132,7 +132,7 @@ relay port range。端口可配置，descriptor 发布实际 endpoint。公网�
 ## 失败策略
 
 - 配置未知字段、占位 secret、明文 admin 密码、生产无 TLS/KEK：拒绝启动。
-- SQLite schema 不是 v3：拒绝启动，需停机后重建数据库。
+- SQLite schema 不是 v4：拒绝启动，需停机后重建数据库。
 - 当前实现：Realm 数量不是恰好一个时，依操作返回 503 或拒绝写入，不猜测默认
   Realm。目标契约：请求所属 Realm 不存在或不是 `active` 时拒绝，不猜测默认 Realm。
 - Actor credential scope、连接 ACL 或 envelope identity 不一致：拒绝。

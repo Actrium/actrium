@@ -76,8 +76,6 @@ Local      = k7m2q9xh@<installation-id>.actr.alt
 - The RealmId of a retired Realm is never reused: the domain owner must not reuse it, and Realm Providers enforce this with Realm Provider tombstones;
 - A domain's Realm signing key is the long-term trust root of every Realm under it.
 
-The numeric `realm_id` in current code is only the Loran-internal database primary key, not the Realm identity. The target contract removes it once the ActorId format migrates, using the full Realm name as the key instead.
-
 ### 2.3 Realm, Publisher and Realm Provider
 
 | | Publisher | Realm | Realm Provider |
@@ -173,19 +171,7 @@ A restricted "creation delegation key" issued by a Realm signing key (limited by
 
 ### 3.3 How an ActorId carries a Realm
 
-In the current Actr ActorId, the Realm is only a `u32`:
-
-```text
-2af01@42/notes.example:team-notes:1.4.2
-```
-
-From `42` alone, a new device cannot know:
-
-- Which domain to fetch the Realm Profile and Realm issuer key from;
-- Which signaling cluster to connect to;
-- Whether Realm 42 collides with Realm 42 on another Realm Provider.
-
-Actrium v1 therefore requires the ActorId to carry its Realm name, containing only the Actor serial and the Realm name:
+An ActorId carries its Realm name, containing only the Actor serial and the Realm name:
 
 ```text
 <serial>.<realm_id>@<domain>
@@ -195,7 +181,7 @@ Actrium v1 therefore requires the ActorId to carry its Realm name, containing on
 
 An ActorId is like a process ID: it only answers "which Actor in which Realm." The program identity (the Actor type `publisher/program@version`) is not in the ActorId; it is carried by registration and the Actor credential, and connection ACLs and service discovery use the type from there. A Publisher changing its domain or a program upgrading never changes the ActorId format.
 
-The earlier draft's `2af01@42~dns:team.example/...` (a numeric realm_id plus authority) is withdrawn. An `ActrId` that only contains a `u32` and embeds the type is treated as legacy; importing it requires explicitly supplying the Realm name and rewriting it into the v1 canonical form, never guessing.
+An old `ActrId` that only contains a `u32` and embeds the type is treated as legacy; importing it requires explicitly supplying the Realm name and rewriting it into the v1 canonical form, never guessing.
 
 ## 4. The power boundaries of the signaling server
 

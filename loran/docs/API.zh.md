@@ -45,13 +45,12 @@ descriptor（`https://<domain>/.well-known/actr` 中的 `realm_signing_keys` 成
 注册能力，不得下发给 Rill Guest。签发的 Actor credential claims 固定包含：
 
 - `protocol_version = 1`
-- `issuer`：当前实现为由数值 `realm_id` 派生的字符串；目标契约为 Realm 名，例如
-  `k7m2q9xh@acme.com`
+- `issuer`：Realm 名，例如 `k7m2q9xh@acme.com`
 - `provider`：当前实现为固定常量；目标契约为 Realm Provider 的规范化 DNS authority，例如
   `provider.example`
 - `audience = actr.signaling`
-- Realm、完整 ActorId 与过期时间；目标契约下另携带 Actor 类型
-  `publisher/program@version`
+- `realm`（Realm 名，与 `issuer` 相同）、完整 ActorId 与过期时间
+- `actor_type`：注册时声明并经验证的 Actor 类型 `publisher/program@version`
 
 ## Signaling
 
@@ -100,16 +99,12 @@ Profile 签名 key 签名的 `register_publisher` 请求（Actr 管理信封）�
 descriptor 结构为预发布格式，与目标不兼容。包的长期真实性由 publisher key、signature
 与 digest 决定，下载 origin/包 registry 不是信任根。
 
-ActorId 的字符串形式，当前实现为：
-
-`<serial-hex>@<realm-id>/<publisher>/<program>@<version>`
-
-目标契约为：
+ActorId 的字符串形式为：
 
 `<serial_hex>.<realm_id>@<domain>`
 
 例如 `2af01.k7m2q9xh@acme.com`。程序类型 `publisher/program@version` 不在 ActorId 中，
-由注册与 Actor credential 携带；当前代码的数值 `realm_id` 只在 Loran 内部使用，目标契约中移除。
+由注册与 Actor credential 携带。
 
 可下载 package 的 publisher 必须是规范 DNS 域名；linked/local workload 可以使用
 Actr Host 管理的非 DNS publisher 值，但不能借此进入 Publisher Registry。
@@ -129,7 +124,9 @@ nonce-auth request message；`Sign` 的认证 payload 同时绑定 protocol、`k
 - 其余 `/admin/api/**` 需要 `Authorization: Bearer <JWT>`
 
 当前实现：每实例只允许一个 Realm。在线 API 可以首次 provision、读取、更新和轮换
-Realm secret，但不提供硬删除或替换另一个 Realm；替换属于停机迁移/重建操作。
+Realm secret，但不提供硬删除或替换另一个 Realm；替换属于停机迁移/重建操作。Realm 以 Realm
+名寻址：`/admin/api/realms/{realm}`（`@` 编码为 `%40`），创建 body 为
+`{"realm": "k7m2q9xh@acme.com", "enabled": true, "expires_at": 0}`。
 
 目标契约：每实例承载多个 Realm。创建需经 Realm 签名 key 持有方授权，并经 Realm Profile
 验证后才从 `pending` 转为 `active`；退役由持有方发布退役 Realm Profile 触发，Loran 在单一
@@ -137,9 +134,10 @@ Realm secret，但不提供硬删除或替换另一个 Realm；替换属于停�
 
 ## Schema migration
 
-当前 schema 为 v3（`PRAGMA user_version = 3`），在 v2 上新增 Issuer 幂等日志表
-`issuer_control_attempt`。运行时只自动初始化空数据库；其他版本拒绝启动。v2 → v3 不提供
-迁移工具，需停机后重建数据库。下面两个历史工具只覆盖到 v2（未版本化库先 v1，再 v2）：
+当前 schema 为 v4（`PRAGMA user_version = 4`）：v3 在 v2 上新增 Issuer 幂等日志表
+`issuer_control_attempt`；v4 以 Realm 名为键（`realm.name` 为主键，其余表以 `realm` 列引用，
+身份登记按 `(realm, serial_number)`）。运行时只自动初始化空数据库；其他版本拒绝启动。v2 → v3
+与 v3 → v4 不提供迁移工具，需停机后重建数据库。下面两个历史工具只覆盖到 v2（未版本化库先 v1，再 v2）：
 
 ```bash
 python3 scripts/loran/migrate_schema_v1.py /path/to/actrix.db   # 未版本化 → v1

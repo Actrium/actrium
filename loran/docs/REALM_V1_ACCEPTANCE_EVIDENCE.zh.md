@@ -17,7 +17,7 @@ Realm（Realm 名 `<realm_id>@<domain>`，见 `REALM_V1_ARCHITECTURE.zh.md`）�
 | 系统管理员是管理根 | Argon2id Admin 登录、受保护 Realm/Publisher/rotation API；Guest 不持有注册能力 | Admin API/config negative tests | 已自动验证；「唯一管理根」部分已被新契约的三类管理权限取代 |
 | Realm Descriptor | `/.well-known/actr/realm.json` 发布唯一 Realm、issuer、Realm Provider 和 endpoint | descriptor/config/full-stack tests | 已自动验证；已被新契约取代（该路径与 authority-discovery 冲突，改为 Realm 签名 key 签名的 Realm Profile） |
 | HTTPS 域名 Publisher | 规范化域名、WebPKI、DNS pinning、禁 redirect/私网地址；Ed25519 key、digest、rotation、revocation | Publisher Registry（`crates/loran-publisher-registry`）publisher/manager/package tests | 已自动验证 |
-| Actor 实例身份 | Realm + Snowflake serial + 出生 `ActrType`（当前实现；目标 ActorId 不含类型）；稳定 Service 通过 renewal possession proof 保持 ID | Issuer（`crates/loran-issuer`）issuer/renewal tests、已签发身份登记持久化 tests | 已自动验证 |
+| Actor 实例身份 | Realm 名 + Snowflake serial（类型在 credential）；稳定 Service 通过 renewal possession proof 保持 ID | Issuer（`crates/loran-issuer`）issuer/renewal tests、已签发身份登记持久化 tests | 已自动验证 |
 | Actor credential 生命周期 | version、issuer、Realm、Realm Provider、audience、Actor、endpoint 和 expiry 绑定；连接 source 再绑定 | Issuer Signer/Issuer/Signaling negative tests；过期、错 Realm、错 source、错连接回归 | 已自动验证 |
 | Issuer/Rendezvous/Relay/Management 平面 | 逻辑边界分离；v1 all-in-one profile 同进程组合；Issuer Signer 可用 TLS/mTLS 拆出 | 配置组合测试、各 crate 测试、架构文档 | 已自动验证 |
 | Service 注册/注销持久性 | 注册先写 SQLite 再激活；重启恢复项仅是离线元数据；原 Actor 重连后激活；注销先原子删除再成功 | `actor_registry_persists_across_restart`、`service_unregister_success_is_durable_across_restart`、Signaling 单元测试 | 已自动验证 |
@@ -61,7 +61,7 @@ python3 -m unittest scripts/loran/tests/test_migrate_schema_v2.py -v
 | Realm Provider 持有 Realm 签名 key 时的自助创建 | Realm Provider 账号 OAuth 2.0 + PKCE 认证、按账号计配额、Realm 管理权绑定账号、登录后重签 Realm 管理 token | 未实现 |
 | Publisher 签名注册 | 读取 descriptor `publisher` 成员，`register_publisher` 请求验签，拒绝非 `active` 的 Publisher Profile 签名 key | 未实现 |
 | 跨 Realm 隔离 | 两个 Realm 使用相同 Actor 类型与相同 serial 候选时，credential、presence、TURN、连接 ACL 与管理接口互不相通 | 未实现 |
-| issuer 与 ActorId 使用 Realm 名 | credential issuer 为 Realm 名；ActorId `<serial_hex>.<realm_id>@<domain>` 文本/wire 格式（不含类型、类型由 credential 携带）的正负向测试 | 未实现 |
+| issuer 与 ActorId 使用 Realm 名 | credential issuer 为 Realm 名；ActorId `<serial_hex>.<realm_id>@<domain>` 文本/wire 格式（不含类型、类型由 credential 携带）的正负向测试 | 已自动验证：actr-protocol `actor_id_text_vectors`、`actor_id_text_rejects_invalid`；validator `check_binds_claims_to_the_requested_realm`；Issuer `test_end_to_end_credential_flow`；直连 WebSocket `verify_credential_realm_or_issuer_mismatch_returns_none` |
 | 管理作用域 | 单 Realm 的 Realm 管理 token 越权访问被拒绝且不泄露其他 Realm 是否存在；重签后旧 token 立即失效 | 未实现 |
 | 按 Realm 派生 TURN secret | 不同 Realm 的 TURN credential 不能互用 | 未实现 |
 | 配额 | 按域名与按 Realm 的配额与 pending TTL | 未实现 |

@@ -204,10 +204,11 @@ let config: ActorConfig = toml::from_str(r#"
 
 // 注册到信令服务
 let request = RegisterRequest {
-    realm: Realm { realm_id: 1 },
+    realm: "k7m2q9xh@example.com".to_string(),
     actr_type: ActrType {
-        publisher: "my-company".to_string(),
+        publisher: "example.com".to_string(),
         name: "my-service".to_string(),
+        version: "1.0.0".to_string(),
     },
     geo_location: Some(config.geo_location),
     // ... 其他字段

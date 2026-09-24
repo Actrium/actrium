@@ -117,8 +117,8 @@ edition = 1
 signaling_url = "ws://localhost:8081/signaling/ws"
 issuer_endpoint = "http://localhost:8080"
 
-[network.realm]
-realm_id = 1
+[system.deployment]
+realm = "echo@example.com"
 
 [network.discovery]
 multicast_address = "239.255.42.99:4242"
