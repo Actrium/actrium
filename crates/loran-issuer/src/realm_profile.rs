@@ -379,7 +379,10 @@ impl RealmProfiles {
                 realm_signing_key_id(profiles.provider_id())
             );
 
-            let fetcher = &platform::net::CachedFetcher::default();
+            // Every round fetches one descriptor per domain and one Profile per
+            // Realm, often from a single host. A per-host limit would leave the
+            // Realms past it unrefreshed, and suspend them when a key is revoked.
+            let fetcher = &platform::net::CachedFetcher::new(Duration::from_secs(300), u32::MAX);
             loop {
                 let fetch = |url: String| async move { fetcher.get(&url).await };
                 if let Err(error) = profiles.refresh(fetch).await {

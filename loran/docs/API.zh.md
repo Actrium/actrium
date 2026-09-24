@@ -58,7 +58,7 @@ Realm Profile（`application/json`，带 `Access-Control-Allow-Origin: *` 与
 
 其他域名的 Realm 若有已接受的 Realm Profile，Loran 每 `[realm] profile_refresh_secs`（默认
 3600，取值限定在 60–86400）刷新一次：经逐跳 SSRF 检查的抓取器（仅 HTTPS、最多 5 次重定向、
-拒绝非公网地址并钉住解析结果、64 KiB、缓存含失败、按主机限流）取该域名的 authority
+拒绝非公网地址并钉住解析结果、64 KiB、结果缓存 5 分钟、含失败）取该域名的 authority
 descriptor，按 key pin 接受 `realm_signing_keys`（成员自签名；首次接受即 pin；此后须由已 pin
 的 `active` key 签名、`sequence` 不回退、不引入新 key——轮换链尚未支持），再从其 `realms`
 位置取更高 sequence 的 Realm Profile；退役 Realm Profile 触发退役事务。已接受 Realm Profile
