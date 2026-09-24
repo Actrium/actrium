@@ -18,6 +18,9 @@ use thiserror::Error;
 pub const REALM_PROFILE_SCHEMA: &str = "actr.realm/v1";
 pub const REALM_PROFILE_PROTOCOL: &str = "actr-realm-profile/1";
 
+/// Largest integer JCS (RFC 8785, via I-JSON) represents exactly.
+const MAX_EXACT_INTEGER: u64 = (1 << 53) - 1;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RealmProfile {
     pub schema: String,
@@ -146,7 +149,9 @@ fn parse_realm_name(name: &str) -> Result<ActrUri, String> {
     let uri: ActrUri = format!("actr://{domain}/{realm_id}")
         .parse()
         .map_err(|error| format!("'{name}': {error}"))?;
-    if uri.serial().is_some()
+    // A Realm name is not a URI: percent-encoding is not decoded.
+    if uri.realm_id() != Some(realm_id)
+        || uri.serial().is_some()
         || !uri.path().is_empty()
         || uri.query().is_some()
         || uri.fragment().is_some()
@@ -160,7 +165,7 @@ fn parse_realm_name(name: &str) -> Result<ActrUri, String> {
 }
 
 /// Realm Profile URLs for `realm_name`, in document order (section 3): each
-/// `realms` link with protocol `actr-realm-profile/1`, trailing `/` removed,
+/// `realms` link with protocol `actr-realm-profile/1`, a trailing `/` removed,
 /// followed by `/<realm_id>`. Links with a query or fragment are skipped.
 pub fn realm_profile_urls(
     descriptor: &AuthorityDescriptor,
@@ -177,7 +182,10 @@ pub fn realm_profile_urls(
                 && link.href.starts_with("https://")
                 && !link.href.contains(['?', '#'])
         })
-        .map(|link| format!("{}/{realm_id}", link.href.trim_end_matches('/')))
+        .map(|link| {
+            let href = link.href.strip_suffix('/').unwrap_or(&link.href);
+            format!("{href}/{realm_id}")
+        })
         .collect())
 }
 
@@ -272,6 +280,10 @@ impl RealmProfile {
         if self.schema != REALM_PROFILE_SCHEMA {
             return Err(format!("unsupported schema '{}'", self.schema));
         }
+        // Beyond this the signed JCS form no longer pins the sequence.
+        if self.sequence > MAX_EXACT_INTEGER {
+            return Err(format!("sequence {} exceeds 2^53 - 1", self.sequence));
+        }
         let expected = parse_realm_name(realm_name)?.realm_name();
         if Some(&self.realm.name) != expected.as_ref() {
             return Err(format!(
@@ -330,11 +342,10 @@ fn write_jcs(value: &Value, out: &mut String) {
             // control characters, with lowercase `\u00xx`.
             out.push_str(&value.to_string());
         }
-        Value::Number(number) => match (number.as_i64(), number.as_u64(), number.as_f64()) {
-            (Some(n), _, _) => out.push_str(&n.to_string()),
-            (_, Some(n), _) => out.push_str(&n.to_string()),
-            (_, _, Some(n)) => out.push_str(&es_number(n)),
-            _ => out.push_str(&number.to_string()),
+        // JCS serializes every number as an IEEE 754 double, integers included.
+        Value::Number(number) => match number.as_f64() {
+            Some(n) => out.push_str(&es_number(n)),
+            None => out.push_str(&number.to_string()),
         },
         Value::Array(items) => {
             out.push('[');
@@ -555,6 +566,7 @@ mod tests {
             ("issued_at", |p| p["issued_at"] = json!("yesterday")),
             ("status", |p| p["realm"]["status"] = json!("pending")),
             ("sequence", |p| p["sequence"] = json!(-1)),
+            ("sequence range", |p| p["sequence"] = json!(1u64 << 53)),
         ];
         for (label, mutate) in cases {
             let mut profile = unsigned(1);
@@ -581,7 +593,13 @@ mod tests {
         let key = signing_key();
         let keys_ok = keys(&[("rs-1", &key, KeyStatus::Active)]);
         let document = sign(unsigned(1), "rs-1", &key);
-        for name in ["k7m2q9xh", "K7M2Q9XH@acme.com", "a.b@acme.com"] {
+        for name in [
+            "k7m2q9xh",
+            "K7M2Q9XH@acme.com",
+            "a.b@acme.com",
+            "%6b7m2q9xh@acme.com",
+            "k7m2q9xh@acme.com:443",
+        ] {
             let error = RealmProfile::verify(&document, name, &keys_ok).unwrap_err();
             assert_eq!(error.code(), "REALM_PROFILE_INVALID", "{name}");
         }
@@ -646,6 +664,8 @@ mod tests {
             services: vec![
                 ServiceLink::new("realms", "https://acme.com/realms/")
                     .with_protocol(REALM_PROFILE_PROTOCOL),
+                ServiceLink::new("realms", "https://acme.com/double//")
+                    .with_protocol(REALM_PROFILE_PROTOCOL),
                 ServiceLink::new("realms", "https://p.example:8443/r?x=1")
                     .with_protocol(REALM_PROFILE_PROTOCOL),
                 ServiceLink::new("realms", "https://other.example/r"),
@@ -660,6 +680,7 @@ mod tests {
             realm_profile_urls(&descriptor, NAME).unwrap(),
             vec![
                 "https://acme.com/realms/k7m2q9xh",
+                "https://acme.com/double//k7m2q9xh",
                 "https://p.example:8443/r/k7m2q9xh"
             ]
         );
@@ -688,6 +709,13 @@ mod tests {
                 "\"string\":\"\u{20ac}$\\u000f\\nA'B\\\"\\\\\\\\\\\"\",",
                 "\"\u{20ac}\":1,\"\u{1f600}\":3,\"\u{fb33}\":4}"
             )
+        );
+        // Integers beyond 2^53 serialize as the nearest double.
+        let large: Value = serde_json::from_str("[9007199254740993, -9007199254740993]").unwrap();
+        assert_eq!(jcs(&large), "[9007199254740992,-9007199254740992]");
+        assert_eq!(
+            jcs(&json!([0, -0, 31, u64::MAX])),
+            "[0,0,31,18446744073709552000]"
         );
         assert_eq!(es_number(-0.5), "-0.5");
         assert_eq!(es_number(1e21), "1e+21");
