@@ -128,6 +128,8 @@ fn authority_composition(
                 authority: parsed_authority.authority_uri(),
                 services,
                 links: None,
+                realm_signing_keys: None,
+                publisher: None,
             },
             ice: IceConfiguration {
                 version: 1,
