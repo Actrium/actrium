@@ -1452,6 +1452,49 @@ mod tests {
     }
 
     #[test]
+    fn test_actors_are_keyed_by_realm_and_serial() {
+        let mut registry = ActorRegistry::new();
+        let other_type = create_actor_type("test", "other");
+        let same_serial_other_realm = create_actor_id(1, "other@example.com");
+        let other_serial_same_realm = create_test_actor_id(2);
+        for (actor_id, actor_type) in [
+            (create_test_actor_id(1), test_type()),
+            (same_serial_other_realm.clone(), other_type.clone()),
+            (other_serial_same_realm.clone(), other_type.clone()),
+        ] {
+            registry
+                .register_service(
+                    actor_id,
+                    actor_type,
+                    "service".to_string(),
+                    vec!["Message".to_string()],
+                    None,
+                )
+                .unwrap();
+        }
+        assert_eq!(registry.discover_by_message_type("Message").len(), 3);
+        assert_eq!(
+            registry.get_actor_type(&create_test_actor_id(1)),
+            Some(&test_type())
+        );
+        assert_eq!(
+            registry.get_actor_type(&same_serial_other_realm),
+            Some(&other_type)
+        );
+
+        registry.unregister_actor(&create_test_actor_id(1));
+        assert_eq!(registry.get_actor_type(&create_test_actor_id(1)), None);
+        assert_eq!(
+            registry.get_actor_type(&same_serial_other_realm),
+            Some(&other_type)
+        );
+        assert_eq!(
+            registry.get_actor_type(&other_serial_same_realm),
+            Some(&other_type)
+        );
+    }
+
+    #[test]
     fn test_service_with_capabilities() {
         let mut registry = ActorRegistry::new();
         let actor_id = create_test_actor_id(1);
