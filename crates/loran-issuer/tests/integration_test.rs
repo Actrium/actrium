@@ -207,6 +207,7 @@ fn default_issuer_config(temp_dir: &TempDir) -> IssuerConfig {
         enable_periodic_rotation: false,
         key_rotation_interval_secs: 86400,
         turn_secret: "test-turn-secret-at-least-32-bytes!".to_string(),
+        provider_id: "provider.example".to_string(),
         sqlite_path: temp_dir.path().to_path_buf(),
     }
 }
@@ -2020,10 +2021,14 @@ async fn test_end_to_end_credential_flow() {
     assert_eq!(register_ok.actr_id.realm, TEST_REALM);
     assert!(register_ok.actr_id.serial_number > 0);
 
-    let (claims, _) =
-        AIdCredentialValidator::check(&register_ok.credential, TEST_REALM, "actr.signaling")
-            .await
-            .expect("Token validation should succeed");
+    let (claims, _) = AIdCredentialValidator::check(
+        &register_ok.credential,
+        TEST_REALM,
+        "provider.example",
+        "actr.signaling",
+    )
+    .await
+    .expect("Token validation should succeed");
     assert_eq!(claims.realm, TEST_REALM);
     assert!(
         !claims.actor_id.is_empty(),
@@ -2047,6 +2052,7 @@ async fn test_end_to_end_credential_flow() {
     let wrong_realm_result = AIdCredentialValidator::check(
         &register_ok.credential,
         "other@example.com",
+        "provider.example",
         "actr.signaling",
     )
     .await;
@@ -2097,10 +2103,14 @@ async fn test_end_to_end_credential_flow() {
             }
         };
 
-        let (claims, _) =
-            AIdCredentialValidator::check(&ok.credential, TEST_REALM, "actr.signaling")
-                .await
-                .unwrap_or_else(|e| panic!("Failed to validate credential {idx}: {e}"));
+        let (claims, _) = AIdCredentialValidator::check(
+            &ok.credential,
+            TEST_REALM,
+            "provider.example",
+            "actr.signaling",
+        )
+        .await
+        .unwrap_or_else(|e| panic!("Failed to validate credential {idx}: {e}"));
         assert_eq!(claims.realm, TEST_REALM);
     }
 }

@@ -196,6 +196,7 @@ fn issuer_config(temp_dir: &TempDir) -> IssuerConfig {
         enable_periodic_rotation: false,
         key_rotation_interval_secs: 86400,
         turn_secret: "test-turn-secret-0123456789abcdef".to_string(),
+        provider_id: "provider.example".to_string(),
         sqlite_path: temp_dir.path().to_path_buf(),
     }
 }

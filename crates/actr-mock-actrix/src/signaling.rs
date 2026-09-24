@@ -327,7 +327,7 @@ pub async fn build_register_ok(
         realm: req.realm.clone(),
         protocol_version: 1,
         issuer: req.realm.clone(),
-        provider: "actrix-official".to_string(),
+        provider: "provider.example".to_string(),
         audience: "actr.signaling".to_string(),
         // Use the full ActrId string representation so WebSocketGate's
         // credential verifier can match it against the X-Actr-Source-ID header.
@@ -348,7 +348,7 @@ pub async fn build_register_ok(
     let turn_credential = TurnCredential {
         protocol_version: 1,
         realm: req.realm.clone(),
-        provider: "actrix-official".to_string(),
+        provider: "provider.example".to_string(),
         audience: "actr.turn".to_string(),
         username: format!("{}:{}", chrono::Utc::now().timestamp() + 86400, serial),
         password: format!("mock-turn-{serial:016x}"),

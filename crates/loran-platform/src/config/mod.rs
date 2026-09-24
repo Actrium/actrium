@@ -948,6 +948,16 @@ impl ActrixConfig {
             validate_secret_hygiene("turn.turn_secret", &self.turn.turn_secret, 32, &mut errors);
         }
 
+        // Issuer, Signaling and TURN bind credentials to the Realm Provider ID.
+        if (self.is_issuer_enabled()
+            || self.is_signaling_enabled()
+            || self.is_turn_enabled()
+            || self.authority.uri.is_some())
+            && let Err(error) = self.authority.provider_id()
+        {
+            errors.push(error);
+        }
+
         // Validate SQLite path
         if self
             .sqlite_path
@@ -1860,6 +1870,13 @@ mod tests {
             dependencies: issuer::IssuerDependencies::default(),
         });
 
+        let errors = config.validate().unwrap_err();
+        assert!(
+            errors.iter().any(|error| error.contains("authority.uri")),
+            "{errors:?}"
+        );
+
+        config.authority.uri = Some("actr://provider.example".to_string());
         let result = config.validate();
         assert!(result.is_ok());
     }

@@ -129,6 +129,10 @@ impl ActrixTestServices {
         let signaling_config = platform::config::ActrixConfig {
             env: "test".to_string(),
             sqlite_path,
+            authority: platform::config::AuthorityConfig {
+                uri: Some("actr://provider.example".to_string()),
+                ..Default::default()
+            },
             ..Default::default()
         };
         let signaling_router = actrix_signaling_service::create_signaling_router_with_config(
@@ -165,8 +169,11 @@ impl ActrixTestServices {
         let turn_socket = Arc::new(UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await?);
         let turn_addr = turn_socket.local_addr()?;
         let authenticator = Arc::new(
-            turn::Authenticator::new(TURN_SHARED_TEST_KEY.to_owned())
-                .map_err(|error| anyhow::anyhow!("Actrix TURN authenticator: {error}"))?,
+            turn::Authenticator::new(
+                TURN_SHARED_TEST_KEY.to_owned(),
+                "provider.example".to_owned(),
+            )
+            .map_err(|error| anyhow::anyhow!("Actrix TURN authenticator: {error}"))?,
         );
         let turn_server = turn::create_turn_server(
             turn_socket,
@@ -217,9 +224,9 @@ impl ActrixTestServices {
             .saturating_add(CREDENTIAL_LIFETIME)
             .as_secs();
         // Username must match the scoped format enforced by `turn::Authenticator`:
-        // `{expires_at}:realm={realm}:provider=actrix-official:audience=actr.turn:actor={actr_id}`
+        // `{expires_at}:realm={realm}:provider=provider.example:audience=actr.turn:actor={actr_id}`
         let username = format!(
-            "{expires_at}:realm={}:provider=actrix-official:audience=actr.turn:actor={actor_id}",
+            "{expires_at}:realm={}:provider=provider.example:audience=actr.turn:actor={actor_id}",
             actor_id.realm
         );
         let mut mac = HmacSha1::new_from_slice(TURN_SHARED_TEST_KEY.as_bytes())
@@ -231,7 +238,7 @@ impl ActrixTestServices {
             expires_at,
             protocol_version: 1,
             realm: actor_id.realm.clone(),
-            provider: "actrix-official".to_string(),
+            provider: "provider.example".to_string(),
             audience: "actr.turn".to_string(),
         }
     }
@@ -251,7 +258,7 @@ impl ActrixTestServices {
             expires_at,
             protocol_version: 1,
             issuer: actor_id.realm.clone(),
-            provider: "actrix-official".to_string(),
+            provider: "provider.example".to_string(),
             audience: "actr.signaling".to_string(),
             actor_type: make_actor_type(),
         }

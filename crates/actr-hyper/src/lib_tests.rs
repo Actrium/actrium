@@ -143,7 +143,7 @@ fn fake_register_response_bytes() -> Vec<u8> {
         expires_at: u64::MAX,
         protocol_version: 1,
         issuer: "test@example.com".to_string(),
-        provider: "actrix-official".to_string(),
+        provider: "provider.example".to_string(),
         audience: "actr.signaling".to_string(),
         actor_type: ActrType::default(),
     };
@@ -163,7 +163,7 @@ fn fake_register_response_bytes() -> Vec<u8> {
     let turn = TurnCredential {
         protocol_version: 1,
         realm: "test@example.com".to_string(),
-        provider: "actrix-official".to_string(),
+        provider: "provider.example".to_string(),
         audience: "actr.turn".to_string(),
         username: "user".to_string(),
         password: "pass".to_string(),

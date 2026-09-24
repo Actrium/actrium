@@ -91,6 +91,7 @@ pub async fn create_signaling_router_with_config_and_counters(
         .map(|sc| sc.server.egress.clone())
         .unwrap_or_default();
     let mut server = SignalingServer::with_egress_config(egress_config);
+    server.provider_id = config.authority.provider_id().map_err(anyhow::Error::msg)?;
 
     // Initialize ActorRegistry persistent cache (for restart recovery)
     let cache_ttl_secs = crate::actor_registry_storage::DEFAULT_SERVICE_TTL_SECS;
@@ -286,6 +287,7 @@ async fn websocket_handler(
         let actor_type = match AIdCredentialValidator::check(
             &credential,
             &actor_id.realm,
+            &state.server.provider_id,
             "actr.signaling",
         )
         .await
@@ -382,6 +384,7 @@ async fn handle_websocket(
         egress_config: state.server.egress_config.clone(),
         target_rate_limiter: state.server.target_rate_limiter.clone(),
         queue_metrics: state.server.queue_metrics.clone(),
+        provider_id: state.server.provider_id.clone(),
     };
 
     // Call SignalingServer's WebSocket handler function

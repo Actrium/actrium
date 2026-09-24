@@ -370,8 +370,8 @@ Profile 不同的新 Realm Profile 一律拒绝。退役 Realm Profile 永久有
 
 ### 5.3 Actor credential 与 TURN 约束
 
-Realm Provider ID 是 Realm Provider 的规范化 DNS authority（例如 `provider.example`）。当前实现把它
-固定为一个常量，目标移除（见第 9 节）。Actor credential 必须同时满足：
+Realm Provider ID 是 Realm Provider 的规范化 DNS authority（例如 `provider.example`），Loran 取
+`[authority] uri` 的域名。Actor credential 必须同时满足：
 
 - `protocol_version = 1`
 - `issuer = <realm-name>`，例如 `k7m2q9xh@acme.com`
@@ -496,7 +496,6 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   `reissue_admin_token`、`register_publisher`；`provider_id` 绑定、5 分钟有效期、nonce
   防重放、含请求方的幂等键）、待签 Realm Profile payload、Realm Profile 验证激活与周期性校验（含
   key 移除后丢弃 Realm Profile）；
-- Realm Provider ID 从当前常量改为 Realm Provider 的规范化 DNS authority；
 - Realm Provider 域名下的 Realm 的 Realm Provider 账号认证（OAuth 2.0 + PKCE）、按账号配额
   与账号绑定的 Realm 管理权；
 - 仅在 authority descriptor 的 `realms` relation 指向本 Realm Provider 时提供

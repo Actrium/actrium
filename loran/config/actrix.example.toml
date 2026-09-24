@@ -43,11 +43,14 @@ location_tag = "single-node"
 # Generate: openssl rand -hex 32
 actrix_shared_key = "<generate-with-openssl-rand-hex-32>"
 
-# Public Actr authority discovery. Production mode requires TLS. This URI is
-# actr://<domain> without a port, and must match the bind.http domain.
+# Public Actr authority. The URI is actr://<domain> without a port; its domain
+# is the Realm Provider ID, required when Issuer, Signaling or TURN is enabled.
+# `enabled` serves /.well-known/actr (production requires TLS; the domain must
+# match bind.http). `links` lists Realm link path prefixes, e.g. ["/i/"].
 [authority]
 enabled = false
-# uri = "actr://localhost"
+uri = "actr://realm.example.com"
+# links = ["/i/"]
 
 # Realm hosting limits. One Loran instance hosts many Realms.
 [realm]

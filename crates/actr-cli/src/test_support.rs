@@ -900,6 +900,9 @@ head = "admin_ui"
 [control.admin_ui]
 password_hash = "$argon2id$v=19$m=65536,t=2,p=1$YWN0cml4LXRlc3Qtc2FsdA$lfmjnm9CjoHQC9U79KOWXJkyWTUA7g5MhgG2DDPqe1E"
 
+[authority]
+uri = "actr://localhost"
+
 [bind.http]
 domain_name = "127.0.0.1"
 advertised_ip = "127.0.0.1"

@@ -40,13 +40,15 @@ impl AIdCredentialValidator {
     /// Verify AIdCredential: Ed25519 signature verification + Realm name check
     ///
     /// `realm` is the Realm name of the requesting ActorId. The claims' `realm`,
-    /// `issuer` and the Realm of `actor_id` must all equal it.
+    /// `issuer` and the Realm of `actor_id` must all equal it; `provider` is
+    /// this Realm Provider's ID.
     ///
     /// # Returns
     /// `Ok((IdentityClaims, false))` — Ed25519 mode has no grace period concept, the second value is always `false`
     pub async fn check(
         credential: &AIdCredential,
         realm: &str,
+        provider: &str,
         audience: &str,
     ) -> Result<(IdentityClaims, bool), AidError> {
         let cache = Self::get_cache()?;
@@ -68,7 +70,7 @@ impl AIdCredentialValidator {
             return Err(AidError::InvalidFormat);
         }
         if claims.protocol_version != 1
-            || claims.provider != "actrix-official"
+            || claims.provider != provider
             || claims.audience != audience
         {
             return Err(AidError::InvalidFormat);
@@ -125,12 +127,14 @@ impl AIdCredentialValidator {
     pub fn check_sync(
         credential: &AIdCredential,
         realm: &str,
+        provider: &str,
         audience: &str,
     ) -> Result<IdentityClaims, AidError> {
         tokio::task::block_in_place(|| {
             let handle =
                 tokio::runtime::Handle::try_current().map_err(|_| AidError::InvalidFormat)?;
-            let (claims, _) = handle.block_on(Self::check(credential, realm, audience))?;
+            let (claims, _) =
+                handle.block_on(Self::check(credential, realm, provider, audience))?;
             Ok(claims)
         })
     }
@@ -145,6 +149,7 @@ mod tests {
 
     const REALM: &str = "k7m2q9xh@example.com";
     const KEY_ID: u32 = 9;
+    const PROVIDER: &str = "provider.example";
 
     fn now() -> u64 {
         std::time::SystemTime::now()
@@ -160,7 +165,7 @@ mod tests {
             expires_at: now() + 3600,
             protocol_version: 1,
             issuer: REALM.to_string(),
-            provider: "actrix-official".to_string(),
+            provider: PROVIDER.to_string(),
             audience: "actr.signaling".to_string(),
             actor_type: ActrType {
                 publisher: "acme.example".to_string(),
@@ -188,10 +193,14 @@ mod tests {
             .await
             .unwrap();
 
-        let (checked, _) =
-            AIdCredentialValidator::check(&sign(&key, &claims()), REALM, "actr.signaling")
-                .await
-                .expect("matching claims are accepted");
+        let (checked, _) = AIdCredentialValidator::check(
+            &sign(&key, &claims()),
+            REALM,
+            PROVIDER,
+            "actr.signaling",
+        )
+        .await
+        .expect("matching claims are accepted");
         assert_eq!(checked.actor_type, claims().actor_type);
 
         let other = "other@example.com";
@@ -212,15 +221,25 @@ mod tests {
                 actor_id: "2af01@1001/acme.example/echo@1.0.0".to_string(),
                 ..claims()
             },
+            IdentityClaims {
+                provider: "other.example".to_string(),
+                ..claims()
+            },
         ];
         for bad in mismatches {
             let result =
-                AIdCredentialValidator::check(&sign(&key, &bad), REALM, "actr.signaling").await;
+                AIdCredentialValidator::check(&sign(&key, &bad), REALM, PROVIDER, "actr.signaling")
+                    .await;
             assert!(result.is_err(), "{bad:?} must be rejected");
         }
 
-        let result =
-            AIdCredentialValidator::check(&sign(&key, &claims()), other, "actr.signaling").await;
+        let result = AIdCredentialValidator::check(
+            &sign(&key, &claims()),
+            other,
+            PROVIDER,
+            "actr.signaling",
+        )
+        .await;
         assert!(
             result.is_err(),
             "credential of another Realm must be rejected"

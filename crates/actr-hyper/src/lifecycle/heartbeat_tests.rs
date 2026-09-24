@@ -50,7 +50,7 @@ fn test_credential_for_actor(actor_id: &ActrId, key_id: u32, expires_at: u64) ->
         expires_at,
         protocol_version: 1,
         issuer: actor_id.realm.clone(),
-        provider: "actrix-official".to_string(),
+        provider: "provider.example".to_string(),
         audience: "actr.signaling".to_string(),
         actor_type: test_actr_type(),
     };
@@ -646,7 +646,7 @@ async fn credential_expiry_does_not_re_register_or_update_webrtc_local_id() {
                 turn_credential: TurnCredential {
                     protocol_version: 1,
                     realm: "test@example.com".to_string(),
-                    provider: "actrix-official".to_string(),
+                    provider: "provider.example".to_string(),
                     audience: "actr.turn".to_string(),
                     username: "1000:actor".to_string(),
                     password: "password".to_string(),
@@ -766,7 +766,7 @@ async fn credential_warning_triggers_credential_manager_renewal() {
                 turn_credential: TurnCredential {
                     protocol_version: 1,
                     realm: "test@example.com".to_string(),
-                    provider: "actrix-official".to_string(),
+                    provider: "provider.example".to_string(),
                     audience: "actr.turn".to_string(),
                     username: "4000001000:actor".to_string(),
                     password: "new-password".to_string(),
@@ -806,7 +806,7 @@ async fn credential_warning_triggers_credential_manager_renewal() {
         turn_credential: TurnCredential {
             protocol_version: 1,
             realm: "test@example.com".to_string(),
-            provider: "actrix-official".to_string(),
+            provider: "provider.example".to_string(),
             audience: "actr.turn".to_string(),
             username: "4000000000:actor".to_string(),
             password: "old-password".to_string(),
@@ -992,7 +992,7 @@ async fn re_registration_sends_realm_secret_to_issuer() {
                 turn_credential: TurnCredential {
                     protocol_version: 1,
                     realm: "test@example.com".to_string(),
-                    provider: "actrix-official".to_string(),
+                    provider: "provider.example".to_string(),
                     audience: "actr.turn".to_string(),
                     username: "turn-user".to_string(),
                     password: "turn-password".to_string(),
@@ -1141,7 +1141,7 @@ async fn connected_heartbeat_403_reports_terminal_realm_denied() {
         turn_credential: TurnCredential {
             protocol_version: 1,
             realm: "test@example.com".to_string(),
-            provider: "actrix-official".to_string(),
+            provider: "provider.example".to_string(),
             audience: "actr.turn".to_string(),
             username: "u".to_string(),
             password: "p".to_string(),

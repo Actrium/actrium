@@ -199,6 +199,7 @@ mod tests {
         config.authority = AuthorityConfig {
             enabled: true,
             uri: Some("actr://localhost".to_string()),
+            ..AuthorityConfig::default()
         };
         config.services.packages = Some(PackagesConfig {
             artifacts: vec![artifact.display().to_string()],
@@ -297,6 +298,7 @@ mod tests {
             authority: AuthorityConfig {
                 enabled: true,
                 uri: Some("actr://localhost".to_string()),
+                ..AuthorityConfig::default()
             },
             ..ActrixConfig::default()
         };

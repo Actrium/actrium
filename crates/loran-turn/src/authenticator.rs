@@ -168,12 +168,14 @@ struct CachedAuthKey {
 /// TURN authenticator (HMAC time-limited credential mode).
 pub struct Authenticator {
     turn_secret: String,
+    /// Realm Provider ID that credential usernames must carry.
+    provider_id: String,
     auth_key_cache: Mutex<LruCache<AuthCacheKey, CachedAuthKey>>,
     admission: AdmissionControl,
 }
 
 impl Authenticator {
-    pub fn new(turn_secret: String) -> Result<Self, Error> {
+    pub fn new(turn_secret: String, provider_id: String) -> Result<Self, Error> {
         if turn_secret.len() < 32 {
             return Err(Error::Other(
                 "TURN secret must be at least 32 bytes".to_string(),
@@ -186,6 +188,7 @@ impl Authenticator {
             NonZeroUsize::new(AUTH_CACHE_CAPACITY).expect("AUTH_CACHE_CAPACITY must be non-zero");
         Ok(Self {
             turn_secret,
+            provider_id,
             auth_key_cache: Mutex::new(LruCache::new(capacity)),
             admission: AdmissionControl::new(),
         })
@@ -263,7 +266,7 @@ impl Authenticator {
             .ok_or_else(|| Error::Other("invalid TURN credential scope".to_string()))?;
         let actor = actr_protocol::ActrId::from_string_repr(actor_id)
             .map_err(|_| Error::Other("invalid TURN credential Actor ID".to_string()))?;
-        if realm != actor.realm || provider != "actrix-official" || audience != "actr.turn" {
+        if realm != actor.realm || provider != self.provider_id || audience != "actr.turn" {
             return Err(Error::Other(
                 "TURN credential scope does not match this Realm/provider".to_string(),
             ));
@@ -422,20 +425,23 @@ mod tests {
     use std::time::Duration;
 
     fn make_auth() -> Authenticator {
-        Authenticator::new("test-secret-at-least-32-bytes-long".to_string())
-            .expect("authenticator should initialize")
+        Authenticator::new(
+            "test-secret-at-least-32-bytes-long".to_string(),
+            "provider.example".to_string(),
+        )
+        .expect("authenticator should initialize")
     }
 
     fn username(expires_at: u64) -> String {
         format!(
-            "{expires_at}:realm=k7m2q9xh@example.com:provider=actrix-official:audience=actr.turn:actor=1.k7m2q9xh@example.com"
+            "{expires_at}:realm=k7m2q9xh@example.com:provider=provider.example:audience=actr.turn:actor=1.k7m2q9xh@example.com"
         )
     }
 
     #[test]
     fn test_authenticator_creation() {
         let _auth = make_auth();
-        assert!(Authenticator::new("short".to_string()).is_err());
+        assert!(Authenticator::new("short".to_string(), "provider.example".to_string()).is_err());
     }
 
     #[test]
@@ -524,12 +530,12 @@ mod tests {
     fn test_auth_handle_rejects_cross_realm_or_audience_scope() {
         let auth = make_auth();
         let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
-        let base = "2000000060:realm=k7m2q9xh@example.com:provider=actrix-official:audience=actr.turn:actor=1.k7m2q9xh@example.com";
+        let base = "2000000060:realm=k7m2q9xh@example.com:provider=provider.example:audience=actr.turn:actor=1.k7m2q9xh@example.com";
 
         for invalid in [
             base.replace("realm=k7m2q9xh@", "realm=other@"),
             base.replace("audience=actr.turn", "audience=actr.signaling"),
-            base.replace("provider=actrix-official", "provider=other"),
+            base.replace("provider=provider.example", "provider=other"),
             base.replace("actor=1.k7m2q9xh@", "actor=1.other@"),
         ] {
             let error = auth
@@ -589,9 +595,16 @@ mod tests {
 
     #[test]
     fn test_auth_cache_is_scoped_to_secret_bearing_instance() {
-        let first = Authenticator::new("first-secret-at-least-32-bytes-long".to_string()).unwrap();
-        let second =
-            Authenticator::new("second-secret-at-least-32-bytes-long".to_string()).unwrap();
+        let first = Authenticator::new(
+            "first-secret-at-least-32-bytes-long".to_string(),
+            "provider.example".to_string(),
+        )
+        .unwrap();
+        let second = Authenticator::new(
+            "second-secret-at-least-32-bytes-long".to_string(),
+            "provider.example".to_string(),
+        )
+        .unwrap();
         let username = username(2_000_000_060);
         let server_realm = "actrix.local";
         let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
@@ -617,7 +630,7 @@ mod tests {
 
         for serial in 1..=(AUTH_CACHE_CAPACITY + 64) {
             let username = format!(
-                "{}:realm=k7m2q9xh@example.com:provider=actrix-official:audience=actr.turn:actor={:x}.k7m2q9xh@example.com",
+                "{}:realm=k7m2q9xh@example.com:provider=provider.example:audience=actr.turn:actor={:x}.k7m2q9xh@example.com",
                 now + 60,
                 serial
             );

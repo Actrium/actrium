@@ -42,7 +42,7 @@ fn make_valid_credential(
         realm: actor_id.realm.clone(),
         protocol_version: 1,
         issuer: actor_id.realm.clone(),
-        provider: "actrix-official".to_string(),
+        provider: "provider.example".to_string(),
         audience: "actr.signaling".to_string(),
         actor_type: test_actor_type(),
     };
@@ -287,7 +287,7 @@ async fn verify_credential_realm_or_issuer_mismatch_returns_none() {
             realm: realm.to_string(),
             protocol_version: 1,
             issuer: issuer.to_string(),
-            provider: "actrix-official".to_string(),
+            provider: "provider.example".to_string(),
             audience: "actr.signaling".to_string(),
             actor_type: test_actor_type(),
         };

@@ -139,6 +139,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,default"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -189,6 +192,9 @@ sqlite_path = "{sqlite}"
 actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,otlp"
 pid = "{pid}"
+
+[authority]
+uri = "actr://localhost"
 
 [bind]
 [bind.http]
@@ -243,6 +249,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,signer-kek"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -294,6 +303,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,custom-pid"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -342,6 +354,9 @@ env = "dev"
 sqlite_path = "{sqlite}"
 actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,no-pid"
+
+[authority]
+uri = "actr://localhost"
 
 [bind]
 [bind.http]
@@ -438,6 +453,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,default"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -497,6 +515,9 @@ pid = "{pid}"
 user = "{user}"
 group = "{group}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -548,6 +569,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,default"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -597,6 +621,9 @@ sqlite_path = "{sqlite}"
 actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,http-bind-ip"
 pid = "{pid}"
+
+[authority]
+uri = "actr://localhost"
 
 [bind]
 [bind.http]
@@ -648,6 +675,9 @@ sqlite_path = "{sqlite}"
 actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,control-grpc"
 pid = "{pid}"
+
+[authority]
+uri = "actr://localhost"
 
 [bind]
 [bind.http]
@@ -706,6 +736,9 @@ sqlite_path = "{sqlite}"
 actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,all-in-one"
 pid = "{pid}"
+
+[authority]
+uri = "actr://localhost"
 
 [bind]
 [bind.http]
@@ -766,6 +799,9 @@ sqlite_path = "{sqlite}"
 actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,ice"
 pid = "{pid}"
+
+[authority]
+uri = "actr://localhost"
 
 [bind]
 [bind.http]
@@ -861,6 +897,9 @@ actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,prod-no-https"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -926,6 +965,9 @@ sqlite_path = "{sqlite}"
 actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,test,https-missing-tls"
 pid = "{pid}"
+
+[authority]
+uri = "actr://localhost"
 
 [bind]
 [bind.http]

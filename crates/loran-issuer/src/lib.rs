@@ -181,6 +181,10 @@ pub async fn create_issuer_state(
         enable_periodic_rotation: false, // disabled by default; can be enabled via config
         key_rotation_interval_secs: 86400, // 24 hours
         turn_secret: global_config.turn.turn_secret.clone(),
+        provider_id: global_config
+            .authority
+            .provider_id()
+            .map_err(anyhow::Error::msg)?,
         sqlite_path: global_config.sqlite_path.clone(),
         renewal_token_ttl_secs: config.server.renewal_token_ttl_secs,
         renewal_rotation_window_secs: config.server.renewal_rotation_window_secs,

@@ -212,7 +212,7 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | publisher | manufacturer | 包清单 `actr-package/1` 与 proto `ActrType` 曾用此字段名；`actr-package/2` 起统一为 `publisher`（proto 字段编号不变），旧键被拒绝并提示改名；Actor 类型字符串旧形式 `publisher:name:version`（曾写作 `manufacturer:name:version`）→ `publisher/program@version`，旧形式被拒绝，已存数据由 schema v2 离线工具改写；CLI 用户配置 `[mfr] manufacturer` → `[publisher] name` |
 | Publisher Registry | MFR（源自 manufacturer） | 目录 `crates/loran-mfr` → `crates/loran-publisher-registry`；包 `actrix-mfr` → `actrix-publisher-registry`；路由保持 `/registry/*` 与 `/admin/api/publishers`；配置 `[services.mfr]` → `[services.publisher_registry]`；表 `mfr*` → `publisher*`、列 `mfr_id`/`manufacturer` → `publisher_id`/`publisher`（schema v2 离线迁移）；key id 格式 `actr-pub-<16 hex>` 不变 |
 | Actor Registry | service registry | 类型 `ServiceRegistry` → `ActorRegistry`；SQLite 表 `service_registry` → `actor_registry`、列 `actor_manufacturer` → `actor_publisher`（启动时原地改名） |
-| Realm Provider ID（Realm Provider 的 DNS authority） | `actrix-official` | 当前实现中固定的 provider ID 常量 |
+| Realm Provider ID（Realm Provider 的 DNS authority） | `actrix-official` | 2026-09 C2.1 前固定的 provider ID 常量；现取 Loran `[authority] uri` 的域名 |
 | Realm 名 | 数值 `realm_id`、`actr:realm:<realm_id>:authority` | 2026-09 C3 前的 Realm 标识与 credential issuer；与 RealmId（`@` 左边那段）无关 |
 | Realm 签名 key、`realm_signing_keys` | 命名空间 key、`realm_namespace` | 本契约早期草稿用语 |
 | RealmId（`realm_id`） | Realm label（`label`） | 改名以与 ActorId 等 *Id 风格统一 |

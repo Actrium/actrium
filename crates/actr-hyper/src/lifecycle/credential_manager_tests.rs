@@ -41,7 +41,7 @@ fn credential_for_actor(actor_id: &ActrId, key_id: u32, expires_at: u64) -> AIdC
         expires_at,
         protocol_version: 1,
         issuer: actor_id.realm.clone(),
-        provider: "actrix-official".to_string(),
+        provider: "provider.example".to_string(),
         audience: "actr.signaling".to_string(),
         actor_type: test_actr_type(),
     };
@@ -59,7 +59,7 @@ fn register_ok(serial: u64, key_id: u32) -> register_response::RegisterOk {
         turn_credential: TurnCredential {
             protocol_version: 1,
             realm: "test@example.com".to_string(),
-            provider: "actrix-official".to_string(),
+            provider: "provider.example".to_string(),
             audience: "actr.turn".to_string(),
             username: format!("1000:actor-{serial}"),
             password: "turn-password".to_string(),
@@ -128,7 +128,7 @@ async fn expired_renewal_token_re_registers_fresh_identity() {
         turn_credential: TurnCredential {
             protocol_version: 1,
             realm: "test@example.com".to_string(),
-            provider: "actrix-official".to_string(),
+            provider: "provider.example".to_string(),
             audience: "actr.turn".to_string(),
             username: "10:actor-1".to_string(),
             password: "old".to_string(),
@@ -190,7 +190,7 @@ async fn soft_renewal_fires_credential_renewed_hook() {
                 turn_credential: TurnCredential {
                     protocol_version: 1,
                     realm: "test@example.com".to_string(),
-                    provider: "actrix-official".to_string(),
+                    provider: "provider.example".to_string(),
                     audience: "actr.turn".to_string(),
                     username: "4000001000:actor-1".to_string(),
                     password: "turn-password".to_string(),
@@ -230,7 +230,7 @@ async fn soft_renewal_fires_credential_renewed_hook() {
         turn_credential: TurnCredential {
             protocol_version: 1,
             realm: "test@example.com".to_string(),
-            provider: "actrix-official".to_string(),
+            provider: "provider.example".to_string(),
             audience: "actr.turn".to_string(),
             username: "4000000000:actor-1".to_string(),
             password: "old".to_string(),
@@ -311,7 +311,7 @@ async fn credential_only_hard_reissue_fires_credential_renewed_hook() {
         turn_credential: TurnCredential {
             protocol_version: 1,
             realm: "test@example.com".to_string(),
-            provider: "actrix-official".to_string(),
+            provider: "provider.example".to_string(),
             audience: "actr.turn".to_string(),
             username: "10:actor-1".to_string(),
             password: "old".to_string(),
@@ -406,7 +406,7 @@ async fn reissue_possession_failure_defers_instead_of_denying() {
         turn_credential: TurnCredential {
             protocol_version: 1,
             realm: "test@example.com".to_string(),
-            provider: "actrix-official".to_string(),
+            provider: "provider.example".to_string(),
             audience: "actr.turn".to_string(),
             username: "10:actor-1".to_string(),
             password: "old".to_string(),
@@ -483,7 +483,7 @@ async fn reissue_realm_denied_is_terminal() {
         turn_credential: TurnCredential {
             protocol_version: 1,
             realm: "test@example.com".to_string(),
-            provider: "actrix-official".to_string(),
+            provider: "provider.example".to_string(),
             audience: "actr.turn".to_string(),
             username: "10:actor-1".to_string(),
             password: "old".to_string(),
@@ -558,7 +558,7 @@ async fn legacy_hard_rebind_fires_credential_renewed_hook() {
         turn_credential: TurnCredential {
             protocol_version: 1,
             realm: "test@example.com".to_string(),
-            provider: "actrix-official".to_string(),
+            provider: "provider.example".to_string(),
             audience: "actr.turn".to_string(),
             username: "10:actor-1".to_string(),
             password: "old".to_string(),
@@ -708,7 +708,7 @@ async fn package_hard_rebind_re_signs_publisher_proof() {
         turn_credential: TurnCredential {
             protocol_version: 1,
             realm: "test@example.com".to_string(),
-            provider: "actrix-official".to_string(),
+            provider: "provider.example".to_string(),
             audience: "actr.turn".to_string(),
             username: "10:actor-1".to_string(),
             password: "old".to_string(),
@@ -913,7 +913,7 @@ async fn legacy_hard_rebind_commits_when_issuer_omits_renewal_token() {
             expires_at: 10,
             protocol_version: 1,
             realm: "test@example.com".to_string(),
-            provider: "actrix-official".to_string(),
+            provider: "provider.example".to_string(),
             audience: "actr.turn".to_string(),
         },
         renewal_token: Bytes::from_static(b"expired-renewal-token-32bytes"),
@@ -995,7 +995,7 @@ async fn credential_only_hard_reissue_commits_when_issuer_omits_renewal_token() 
             expires_at: 10,
             protocol_version: 1,
             realm: "test@example.com".to_string(),
-            provider: "actrix-official".to_string(),
+            provider: "provider.example".to_string(),
             audience: "actr.turn".to_string(),
         },
         renewal_token: Bytes::from_static(b"expired-renewal-token-32bytes"),

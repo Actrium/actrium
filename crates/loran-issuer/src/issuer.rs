@@ -260,6 +260,8 @@ pub struct IssuerConfig {
     pub key_rotation_interval_secs: u64,
     /// TURN shared secret (shared with the TURN server, used to generate time-limited credentials).
     pub turn_secret: String,
+    /// Realm Provider ID bound into credentials and TURN usernames.
+    pub provider_id: String,
     /// SQLite data directory (shared with signaling, used to write the verifying key
     /// so signaling can verify credentials).
     ///
@@ -286,6 +288,7 @@ impl Default for IssuerConfig {
             enable_periodic_rotation: false, // periodic rotation disabled by default
             key_rotation_interval_secs: 86400, // 24 hours
             turn_secret: String::new(),
+            provider_id: String::new(),
             sqlite_path: std::path::PathBuf::from("."),
             renewal_token_ttl_secs: 86400,
             renewal_rotation_window_secs: 21600,
@@ -1165,7 +1168,7 @@ impl AIdIssuer {
             expires_at: expr_time,
             protocol_version: 1,
             issuer: actr_id.realm.clone(),
-            provider: "actrix-official".to_string(),
+            provider: self.config.provider_id.clone(),
             audience: "actr.signaling".to_string(),
             actor_type: request.actr_type.clone(),
         };
@@ -2519,7 +2522,7 @@ impl AIdIssuer {
             expires_at: expr_time,
             protocol_version: 1,
             issuer: actor_id.realm.clone(),
-            provider: "actrix-official".to_string(),
+            provider: self.config.provider_id.clone(),
             audience: "actr.signaling".to_string(),
             actor_type,
         };
@@ -2571,7 +2574,7 @@ impl AIdIssuer {
     ) -> actr_protocol::TurnCredential {
         let realm = actor_id.realm.clone();
         let actor_id = actor_id.to_string_repr();
-        let provider = "actrix-official";
+        let provider = &self.config.provider_id;
         let audience = "actr.turn";
         let username = format!(
             "{expires_at}:realm={realm}:provider={provider}:audience={audience}:actor={actor_id}"
@@ -2588,7 +2591,7 @@ impl AIdIssuer {
             expires_at,
             protocol_version: 1,
             realm,
-            provider: provider.to_string(),
+            provider: provider.clone(),
             audience: audience.to_string(),
         }
     }
@@ -2724,6 +2727,7 @@ mod tests {
             key_storage_file: dir.join("issuer_keys.db"),
             sqlite_path: dir.to_path_buf(),
             renewal_token_secret: vec![0u8; 32],
+            provider_id: "provider.example".to_string(),
             ..Default::default()
         }
     }

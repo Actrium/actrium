@@ -265,6 +265,8 @@ pub struct SignalingServer {
     pub target_rate_limiter: Arc<crate::ratelimit::TargetRateLimiter>,
     /// Signaling queue observability counters (issue #351)
     pub queue_metrics: Arc<SignalingQueueMetrics>,
+    /// Realm Provider ID that Actor credentials must carry
+    pub provider_id: String,
 }
 
 /// Client connection info
@@ -306,6 +308,8 @@ pub struct SignalingServerHandle {
     pub target_rate_limiter: Arc<crate::ratelimit::TargetRateLimiter>,
     /// Signaling queue observability counters (issue #351)
     pub queue_metrics: Arc<SignalingQueueMetrics>,
+    /// Realm Provider ID that Actor credentials must carry
+    pub provider_id: String,
 }
 impl SignalingServerHandle {
     /// Create a SignalingEnvelope
@@ -367,6 +371,7 @@ impl SignalingServer {
             egress_config,
             target_rate_limiter,
             queue_metrics: Arc::new(SignalingQueueMetrics::default()),
+            provider_id: String::new(),
         }
     }
 }
@@ -982,6 +987,7 @@ async fn handle_actr_to_server(
     let (claims, in_tolerance_period) = match AIdCredentialValidator::check(
         &actr_to_server.credential,
         &source.realm,
+        &server.provider_id,
         "actr.signaling",
     )
     .await
@@ -1415,29 +1421,33 @@ async fn handle_actr_relay(
 
     // Validate credential before the ACL check: the source type used by the ACL
     // comes from the verified claims.
-    let claims =
-        match AIdCredentialValidator::check(&relay.credential, &source.realm, "actr.signaling")
-            .await
-        {
-            Ok((claims, _)) => claims,
-            Err(e) => {
-                platform::recording::warn!(
-                    "Actor {} credential validation failed: {}",
-                    source.to_string_repr(),
-                    e
-                );
-                send_error_response(
-                    client_id,
-                    &source,
-                    401,
-                    &format!("Credential validation failed: {e}"),
-                    server,
-                    Some(request_envelope_id),
-                )
-                .await?;
-                return Ok(());
-            }
-        };
+    let claims = match AIdCredentialValidator::check(
+        &relay.credential,
+        &source.realm,
+        &server.provider_id,
+        "actr.signaling",
+    )
+    .await
+    {
+        Ok((claims, _)) => claims,
+        Err(e) => {
+            platform::recording::warn!(
+                "Actor {} credential validation failed: {}",
+                source.to_string_repr(),
+                e
+            );
+            send_error_response(
+                client_id,
+                &source,
+                401,
+                &format!("Credential validation failed: {e}"),
+                server,
+                Some(request_envelope_id),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
 
     // Verify that the actor_id bound to the credential matches relay.source,
     // preventing clients from forging their source identity.
@@ -2665,6 +2675,7 @@ mod tests {
             egress_config: server.egress_config.clone(),
             target_rate_limiter: server.target_rate_limiter.clone(),
             queue_metrics: server.queue_metrics.clone(),
+            provider_id: "provider.example".to_string(),
         }
     }
 
@@ -3314,7 +3325,7 @@ mod tests {
                 expires_at: now() + 3600,
                 protocol_version: 1,
                 issuer: REALM.to_string(),
-                provider: "actrix-official".to_string(),
+                provider: "provider.example".to_string(),
                 audience: "actr.signaling".to_string(),
                 actor_type,
             };

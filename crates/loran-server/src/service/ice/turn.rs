@@ -89,8 +89,14 @@ impl IceService for TurnService {
         // Create TURN server
         let realm = self.config.turn.realm.clone();
         let auth_handler = Arc::new(
-            turn::Authenticator::new(self.config.turn.turn_secret.clone())
-                .map_err(|e| anyhow::anyhow!("Failed to create TURN authenticator: {e}"))?,
+            turn::Authenticator::new(
+                self.config.turn.turn_secret.clone(),
+                self.config
+                    .authority
+                    .provider_id()
+                    .map_err(anyhow::Error::msg)?,
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to create TURN authenticator: {e}"))?,
         );
         let relay_port_range = self
             .config

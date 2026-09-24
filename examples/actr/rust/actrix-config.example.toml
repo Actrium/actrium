@@ -5,6 +5,9 @@ sqlite_path = "database"
 actrix_shared_key = "0123456789abcdef0123456789abcdef"
 location_tag = "local,dev,examples"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"

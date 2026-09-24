@@ -21,7 +21,7 @@ fn scoped_credential() -> (String, String) {
         .as_secs()
         + 300;
     let username = format!(
-        "{expires_at}:realm=k7m2q9xh@example.com:provider=actrix-official:audience=actr.turn:actor=1.k7m2q9xh@example.com"
+        "{expires_at}:realm=k7m2q9xh@example.com:provider=provider.example:audience=actr.turn:actor=1.k7m2q9xh@example.com"
     );
     let mut mac =
         Hmac::<Sha1>::new_from_slice(TURN_SECRET.as_bytes()).expect("HMAC accepts this secret");
@@ -33,7 +33,10 @@ fn scoped_credential() -> (String, String) {
 async fn start_turn_server() -> anyhow::Result<(turn_crate::server::Server, String)> {
     let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
     let address = socket.local_addr()?.to_string();
-    let authenticator = Arc::new(Authenticator::new(TURN_SECRET.to_string())?);
+    let authenticator = Arc::new(Authenticator::new(
+        TURN_SECRET.to_string(),
+        "provider.example".to_string(),
+    )?);
     let server = create_turn_server(
         socket,
         "127.0.0.1",

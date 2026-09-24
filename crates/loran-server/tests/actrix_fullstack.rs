@@ -129,6 +129,9 @@ actrix_shared_key = "{shared}"
 location_tag = "local,test,fullstack"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -210,6 +213,9 @@ sqlite_path = "{sqlite}"
 actrix_shared_key = "{shared}"
 location_tag = "local,test,fullstack,ratelimit"
 pid = "{pid}"
+
+[authority]
+uri = "actr://localhost"
 
 [bind]
 [bind.http]
@@ -305,6 +311,9 @@ actrix_shared_key = "{shared}"
 location_tag = "local,test,fullstack,issuer-dependency"
 pid = "{pid}"
 
+[authority]
+uri = "actr://localhost"
+
 [bind]
 [bind.http]
 domain_name = "localhost"
@@ -383,6 +392,9 @@ sqlite_path = "{sqlite}"
 actrix_shared_key = "{shared}"
 location_tag = "local,test,fullstack,signaling-no-issuer"
 pid = "{pid}"
+
+[authority]
+uri = "actr://localhost"
 
 [bind]
 [bind.http]
@@ -1035,9 +1047,11 @@ async fn actrix_end_to_end_register_and_health() {
     AIdCredentialValidator::init(&harness.data_dir)
         .await
         .expect("validator init");
-    let (claims, _) = AIdCredentialValidator::check(&ok.credential, TEST_REALM, "actr.signaling")
-        .await
-        .expect("validate credential");
+    let (claims, _) =
+        AIdCredentialValidator::check(&ok.credential, TEST_REALM, "localhost", "actr.signaling")
+            .await
+            .expect("validate credential");
+    assert_eq!(claims.provider, "localhost");
     assert_eq!(claims.realm, TEST_REALM);
     assert_eq!(claims.issuer, TEST_REALM);
     assert_eq!(claims.actor_id, ok.actr_id.to_string_repr());
