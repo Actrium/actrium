@@ -1,6 +1,6 @@
 use actr_protocol::acl_rule::{Permission, SourceRealm};
 use actr_protocol::{
-    Acl, AclRule, ActrRelay, ActrType, Realm, RegisterAuthMode, RegisterRequest, RegisterResponse,
+    Acl, AclRule, ActrRelay, ActrType, RegisterAuthMode, RegisterRequest, RegisterResponse,
     RelayDeliveryContext, RelayDeliveryStatus, RoleNegotiation, SIGNALING_ENVELOPE_VERSION,
     acl_rule, actr_relay, peer_to_signaling, register_response, route_candidates_response,
     signaling_envelope, signaling_to_actr,
@@ -34,6 +34,7 @@ type WsRead = futures::stream::SplitStream<WsStream>;
 const START_TIMEOUT: Duration = Duration::from_secs(20);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const ACTRIX_SHARED_KEY: &str = "0123456789abcdef0123456789abcdef";
+const TEST_REALM: &str = "test@example.com";
 const TEST_REALM_SECRET: &str = "actrix-fullstack-realm-secret";
 const DEFAULT_TOKEN_TTL: u64 = 3600;
 const RENEWAL_TOKEN_SECRET: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
@@ -58,7 +59,7 @@ impl ActrixHarness {
         let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, token_ttl);
         let log_path = tmp.path().join("actrix_fullstack.log");
         let data_dir = tmp.path().join("data");
-        ensure_realm(&data_dir, 1001).await;
+        ensure_realm(&data_dir, TEST_REALM).await;
         let mut child = spawn_actrix(&config_path, &log_path);
 
         let base = format!("http://127.0.0.1:{port}");
@@ -70,7 +71,7 @@ impl ActrixHarness {
         .await;
         wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
         wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
-        ensure_realm(&data_dir, 1001).await;
+        ensure_realm(&data_dir, TEST_REALM).await;
 
         Self {
             tmp,
@@ -439,14 +440,14 @@ fn spawn_actrix(config: &Path, log_path: &Path) -> Child {
         .expect("spawn actrix")
 }
 
-async fn ensure_realm(sqlite_dir: &Path, realm_id: u32) {
+async fn ensure_realm(sqlite_dir: &Path, realm: &str) {
     let db = platform::storage::db::Database::new(sqlite_dir)
         .await
         .expect("init db");
     let secret_hash = platform::realm::hash_realm_secret(TEST_REALM_SECRET);
     db.execute(&format!(
-        "INSERT OR IGNORE INTO realm (id, name, status, enabled, created_at, secret_current)
-         VALUES ({realm_id}, 'test-realm', 'Active', 1, strftime('%s','now'), '{secret_hash}')"
+        "INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current)
+         VALUES ('{realm}', 'Active', 1, strftime('%s','now'), '{secret_hash}')"
     ))
     .await
     .expect("insert realm");
@@ -455,7 +456,7 @@ async fn ensure_realm(sqlite_dir: &Path, realm_id: u32) {
 /// Register via Issuer HTTP, returns RegisterOk
 async fn issuer_register_http(
     base_url: &str,
-    realm_id: u32,
+    realm: &str,
     publisher: &str,
     name: &str,
     service_spec: Option<actr_protocol::ServiceSpec>,
@@ -463,7 +464,7 @@ async fn issuer_register_http(
 ) -> register_response::RegisterOk {
     issuer_register_http_with_secret(
         base_url,
-        realm_id,
+        realm,
         publisher,
         name,
         service_spec,
@@ -475,7 +476,7 @@ async fn issuer_register_http(
 
 async fn issuer_register_http_with_secret(
     base_url: &str,
-    realm_id: u32,
+    realm: &str,
     publisher: &str,
     name: &str,
     service_spec: Option<actr_protocol::ServiceSpec>,
@@ -488,7 +489,7 @@ async fn issuer_register_http_with_secret(
             name: name.to_string(),
             version: "1.0.0".to_string(),
         },
-        realm: Realm { realm_id },
+        realm: realm.to_string(),
         service_spec,
         acl,
         service: None,
@@ -609,19 +610,19 @@ async fn ws_register_with_spec(
     acl: Option<Acl>,
     service_spec: Option<actr_protocol::ServiceSpec>,
 ) -> (WsWrite, WsRead, register_response::RegisterOk) {
-    ws_register_in_realm_with_spec(port, publisher, name, 1001, acl, service_spec).await
+    ws_register_in_realm_with_spec(port, publisher, name, TEST_REALM, acl, service_spec).await
 }
 
 async fn ws_register_in_realm_with_spec(
     port: u16,
     publisher: &str,
     name: &str,
-    realm_id: u32,
+    realm: &str,
     acl: Option<Acl>,
     service_spec: Option<actr_protocol::ServiceSpec>,
 ) -> (WsWrite, WsRead, register_response::RegisterOk) {
     let base_url = format!("http://127.0.0.1:{port}");
-    let ok = issuer_register_http(&base_url, realm_id, publisher, name, service_spec, acl).await;
+    let ok = issuer_register_http(&base_url, realm, publisher, name, service_spec, acl).await;
     let (write, read) = connect_ws_authenticated(port, &ok).await;
     (write, read, ok)
 }
@@ -917,7 +918,7 @@ async fn actrix_end_to_end_register_and_health() {
     wait_for_signer_ready(&signer_endpoint, &mut harness.child, &log_path).await;
     wait_for_health(&issuer_health, &mut harness.child, &log_path).await;
     wait_for_health(&signaling_health, &mut harness.child, &log_path).await;
-    ensure_realm(&harness.data_dir, 1001).await;
+    ensure_realm(&harness.data_dir, TEST_REALM).await;
 
     let client = reqwest::Client::new();
 
@@ -970,7 +971,7 @@ async fn actrix_end_to_end_register_and_health() {
             name: "device".to_string(),
             version: "1.0.0".to_string(),
         },
-        realm: Realm { realm_id: 1001 },
+        realm: TEST_REALM.to_string(),
         service_spec: None,
         acl: None,
         service: None,
@@ -1004,17 +1005,20 @@ async fn actrix_end_to_end_register_and_health() {
             panic!("register failed: {:?}", err);
         }
     };
-    assert_eq!(ok.actr_id.realm.realm_id, 1001);
+    assert_eq!(ok.actr_id.realm, TEST_REALM);
 
     // Validate credential through AIdCredentialValidator — reads from the same
     // signaling_key_cache.db that actrix wrote during Issuer key loading.
     AIdCredentialValidator::init(&harness.data_dir)
         .await
         .expect("validator init");
-    let (claims, _) = AIdCredentialValidator::check(&ok.credential, 1001, "actr.signaling")
+    let (claims, _) = AIdCredentialValidator::check(&ok.credential, TEST_REALM, "actr.signaling")
         .await
         .expect("validate credential");
-    assert_eq!(claims.realm_id, 1001);
+    assert_eq!(claims.realm, TEST_REALM);
+    assert_eq!(claims.issuer, TEST_REALM);
+    assert_eq!(claims.actor_id, ok.actr_id.to_string_repr());
+    assert_eq!(claims.actor_type, register_req.actr_type);
 
     // WebSocket signaling ping/pong with valid credential
     let (mut write, mut read) = connect_ws_authenticated(harness.port, &ok).await;
@@ -1226,7 +1230,7 @@ async fn issuer_register_rejects_non_preprovisioned_realm() {
             name: "realm-device".to_string(),
             version: "1.0.0".to_string(),
         },
-        realm: Realm { realm_id: 9999 },
+        realm: "other@example.com".to_string(),
         service_spec: None,
         acl: None,
         service: None,
@@ -1376,7 +1380,9 @@ async fn issuer_register_enforces_realm_secret_when_configured() {
         .expect("admin login should return token");
 
     let rotate: Value = client
-        .post(format!("{base}/admin/api/realms/1001/secret/rotate"))
+        .post(format!(
+            "{base}/admin/api/realms/test%40example.com/secret/rotate"
+        ))
         .bearer_auth(token)
         .send()
         .await
@@ -1394,7 +1400,7 @@ async fn issuer_register_enforces_realm_secret_when_configured() {
             name: "secret-check".to_string(),
             version: "1.0.0".to_string(),
         },
-        realm: Realm { realm_id: 1001 },
+        realm: TEST_REALM.to_string(),
         service_spec: None,
         acl: None,
         service: None,
@@ -1480,7 +1486,7 @@ async fn issuer_register_enforces_realm_secret_when_configured() {
         let rsp = RegisterResponse::decode(&*rsp_bytes).expect("decode");
         match rsp.result.expect("result") {
             register_response::Result::Success(ok) => {
-                assert_eq!(ok.actr_id.realm.realm_id, 1001);
+                assert_eq!(ok.actr_id.realm, TEST_REALM);
                 assert!(ok.actr_id.serial_number > 0);
             }
             other => panic!("expected register success, got {other:?}"),
@@ -1502,7 +1508,7 @@ async fn issuer_health_and_endpoints_degrade_when_signer_dependency_is_unreachab
         "http://127.0.0.1:1",
     );
     let log_path = tmp.path().join("actrix_fullstack_issuer_degraded.log");
-    ensure_realm(&tmp.path().join("data"), 1001).await;
+    ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
@@ -1535,7 +1541,7 @@ async fn issuer_health_and_endpoints_degrade_when_signer_dependency_is_unreachab
             name: "svc".to_string(),
             version: "1.0.0".to_string(),
         },
-        realm: Realm { realm_id: 1001 },
+        realm: TEST_REALM.to_string(),
         service_spec: None,
         acl: None,
         service: None,
@@ -1741,7 +1747,7 @@ async fn signaling_actr_payload_none_and_invalid_realm_are_rejected_safely() {
     );
 
     let mut invalid_realm_source = ok.actr_id.clone();
-    invalid_realm_source.realm.realm_id = 9999;
+    invalid_realm_source.realm = "other@example.com".to_string();
     let invalid_realm_ping = actr_protocol::ActrToSignaling {
         source: invalid_realm_source,
         credential: ok.credential.clone(),
@@ -1809,7 +1815,7 @@ async fn signaling_connection_rate_limit_rejects_second_concurrent_connection() 
     let (config_path, signer_port) =
         write_fullstack_config_with_rate_limits(tmp.path(), port, DEFAULT_TOKEN_TTL, 1, 50, 50);
     let log_path = tmp.path().join("actrix_fullstack_ratelimit_conn.log");
-    ensure_realm(&tmp.path().join("data"), 1001).await;
+    ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
@@ -1824,8 +1830,8 @@ async fn signaling_connection_rate_limit_rejects_second_concurrent_connection() 
 
     // Register two different actors for testing connection rate limiting
     let base_url = format!("http://127.0.0.1:{port}");
-    let ok1 = issuer_register_http(&base_url, 1001, "acme", "rate1", None, None).await;
-    let ok2 = issuer_register_http(&base_url, 1001, "acme", "rate2", None, None).await;
+    let ok1 = issuer_register_http(&base_url, TEST_REALM, "acme", "rate1", None, None).await;
+    let ok2 = issuer_register_http(&base_url, TEST_REALM, "acme", "rate2", None, None).await;
 
     let (_first_write, _first_read) = connect_ws_authenticated(port, &ok1).await;
 
@@ -1854,7 +1860,7 @@ async fn signaling_message_rate_limit_returns_envelope_error() {
     let (config_path, signer_port) =
         write_fullstack_config_with_rate_limits(tmp.path(), port, DEFAULT_TOKEN_TTL, 20, 1, 1);
     let log_path = tmp.path().join("actrix_fullstack_ratelimit_msg.log");
-    ensure_realm(&tmp.path().join("data"), 1001).await;
+    ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
@@ -1919,7 +1925,7 @@ async fn signaling_register_and_discovery_acl_allow() {
     let port = choose_port();
     let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
     let log_path = tmp.path().join("actrix_fullstack.log");
-    ensure_realm(&tmp.path().join("data"), 1001).await;
+    ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
@@ -1931,7 +1937,7 @@ async fn signaling_register_and_discovery_acl_allow() {
     .await;
     wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
-    ensure_realm(&tmp.path().join("data"), 1001).await;
+    ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
 
     // Service registers with ACL allowing client:* to discover
     let acl = Acl {
@@ -1942,7 +1948,7 @@ async fn signaling_register_and_discovery_acl_allow() {
                 name: "client".into(),
                 version: "1.0.0".to_string(),
             },
-            source_realm: Some(SourceRealm::RealmId(1001)),
+            source_realm: Some(SourceRealm::Realm(TEST_REALM.to_string())),
         }],
     };
     let (_ws_service_write, _ws_service_read, _service_ok) =
@@ -1994,7 +2000,7 @@ async fn signaling_discovery_acl_denied() {
     let port = choose_port();
     let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
     let log_path = tmp.path().join("actrix_fullstack.log");
-    ensure_realm(&tmp.path().join("data"), 1001).await;
+    ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
@@ -2006,7 +2012,7 @@ async fn signaling_discovery_acl_denied() {
     .await;
     wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
-    ensure_realm(&tmp.path().join("data"), 1001).await;
+    ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
 
     // Service registers without ACL (default deny)
     let (_ws_service_write, _ws_service_read, _service_ok) =
@@ -2055,7 +2061,7 @@ async fn signaling_rejects_expired_credential() {
     let port = choose_port();
     let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, 1);
     let log_path = tmp.path().join("actrix_fullstack.log");
-    ensure_realm(&tmp.path().join("data"), 1001).await;
+    ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
@@ -2067,7 +2073,7 @@ async fn signaling_rejects_expired_credential() {
     .await;
     wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
-    ensure_realm(&tmp.path().join("data"), 1001).await;
+    ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
 
     // Register actor
     let (mut write, mut read, ok) = ws_register(port, "acme", "shortlived", None).await;
@@ -2111,7 +2117,7 @@ async fn signaling_route_candidates_with_acl() {
     let port = choose_port();
     let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
     let log_path = tmp.path().join("actrix_fullstack.log");
-    ensure_realm(&tmp.path().join("data"), 1001).await;
+    ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
@@ -2123,7 +2129,7 @@ async fn signaling_route_candidates_with_acl() {
     .await;
     wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
-    ensure_realm(&tmp.path().join("data"), 1001).await;
+    ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
 
     // Service registers with ACL allowing client:sdp to discover/route
     let acl = Acl {
@@ -2134,7 +2140,7 @@ async fn signaling_route_candidates_with_acl() {
                 name: "client-sdp".into(),
                 version: "1.0.0".to_string(),
             },
-            source_realm: Some(SourceRealm::RealmId(1001)),
+            source_realm: Some(SourceRealm::Realm(TEST_REALM.to_string())),
         }],
     };
     let (_svc_w, _svc_r, svc_ok) = ws_register(port, "acme", "svc-rtp", Some(acl)).await;
@@ -2202,7 +2208,7 @@ async fn signaling_route_candidates_acl_denied() {
     let port = choose_port();
     let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
     let log_path = tmp.path().join("actrix_fullstack.log");
-    ensure_realm(&tmp.path().join("data"), 1001).await;
+    ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
@@ -2214,7 +2220,7 @@ async fn signaling_route_candidates_acl_denied() {
     .await;
     wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
-    ensure_realm(&tmp.path().join("data"), 1001).await;
+    ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
 
     // Service registers without ACL (default deny)
     let (_svc_w, _svc_r, _svc_ok) = ws_register(port, "acme", "svc-deny-route", None).await;
@@ -2287,7 +2293,7 @@ async fn signaling_route_candidates_respects_limit_and_sorting() {
                 name: "client-route".into(),
                 version: "1.0.0".to_string(),
             },
-            source_realm: Some(SourceRealm::RealmId(1001)),
+            source_realm: Some(SourceRealm::Realm(TEST_REALM.to_string())),
         }],
     };
 
@@ -2413,7 +2419,7 @@ async fn signaling_route_candidates_prefers_exact_fingerprint() {
                 name: "client-fp".into(),
                 version: "1.0.0".to_string(),
             },
-            source_realm: Some(SourceRealm::RealmId(1001)),
+            source_realm: Some(SourceRealm::Realm(TEST_REALM.to_string())),
         }],
     };
 
@@ -2520,7 +2526,7 @@ async fn signaling_get_service_spec_returns_spec() {
     let port = choose_port();
     let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
     let log_path = tmp.path().join("actrix_fullstack.log");
-    ensure_realm(&tmp.path().join("data"), 1001).await;
+    ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
@@ -2532,7 +2538,7 @@ async fn signaling_get_service_spec_returns_spec() {
     .await;
     wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
-    ensure_realm(&tmp.path().join("data"), 1001).await;
+    ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
 
     let spec = make_service_spec(
         "fp-spec",
@@ -2749,10 +2755,10 @@ async fn signaling_subscribe_receives_actr_up_and_unsubscribe_stops() {
                 name: "subscriber".into(),
                 version: "1.0.0".to_string(),
             },
-            source_realm: Some(SourceRealm::RealmId(1001)),
+            source_realm: Some(SourceRealm::Realm(TEST_REALM.to_string())),
         }],
     };
-    let (_svc_w, _svc_r, _svc_ok) =
+    let (_svc_w, _svc_r, svc_ok) =
         ws_register(port, "acme", "svc-presence", Some(presence_acl.clone())).await;
     sleep(Duration::from_millis(200)).await;
 
@@ -2763,7 +2769,7 @@ async fn signaling_subscribe_receives_actr_up_and_unsubscribe_stops() {
         if let Ok(env) = timeout(Duration::from_millis(500), recv_envelope(&mut sub_r)).await {
             if let Some(signaling_envelope::Flow::ServerToActr(server_msg)) = env.flow
                 && let Some(signaling_to_actr::Payload::ActrUpEvent(evt)) = server_msg.payload
-                && evt.actor_id.r#type == target_type
+                && evt.actor_id == svc_ok.actr_id
             {
                 got_up = true;
                 break;
@@ -2824,7 +2830,7 @@ async fn signaling_route_candidates_compatibility_cache_hit() {
                 name: "client-fp-cache".into(),
                 version: "1.0.0".to_string(),
             },
-            source_realm: Some(acl_rule::SourceRealm::RealmId(1001)),
+            source_realm: Some(acl_rule::SourceRealm::Realm(TEST_REALM.to_string())),
             permission: Permission::Allow as i32,
         }],
     };
@@ -2979,7 +2985,7 @@ async fn signaling_concurrent_registration_keeps_unique_route_candidates() {
                 name: "client-concurrent".into(),
                 version: "1.0.0".to_string(),
             },
-            source_realm: Some(SourceRealm::RealmId(1001)),
+            source_realm: Some(SourceRealm::Realm(TEST_REALM.to_string())),
         }],
     };
 
@@ -3075,7 +3081,7 @@ async fn signaling_actr_relay_role_assignment() {
     let port = choose_port();
     let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
     let log_path = tmp.path().join("actrix_fullstack.log");
-    ensure_realm(&tmp.path().join("data"), 1001).await;
+    ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
     let mut child = spawn_actrix(&config_path, &log_path);
 
     let base = format!("http://127.0.0.1:{port}");
@@ -3087,7 +3093,7 @@ async fn signaling_actr_relay_role_assignment() {
     .await;
     wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
-    ensure_realm(&tmp.path().join("data"), 1001).await;
+    ensure_realm(&tmp.path().join("data"), TEST_REALM).await;
 
     // Service registers with ACL allowing client-offer
     let acl = Acl {
@@ -3098,7 +3104,7 @@ async fn signaling_actr_relay_role_assignment() {
                 name: "client-offer".into(),
                 version: "1.0.0".to_string(),
             },
-            source_realm: Some(SourceRealm::RealmId(1001)),
+            source_realm: Some(SourceRealm::Realm(TEST_REALM.to_string())),
         }],
     };
     let (mut svc_w, mut svc_r, svc_ok) = ws_register(port, "acme", "svc-relay", Some(acl)).await;
@@ -3111,11 +3117,11 @@ async fn signaling_actr_relay_role_assignment() {
         source: cli_ok.actr_id.clone(),
         credential: cli_ok.credential.clone(),
         target: svc_ok.actr_id.clone(),
+        source_type: None,
         delivery_context: None,
         payload: Some(actr_relay::Payload::RoleNegotiation(RoleNegotiation {
             from: cli_ok.actr_id.clone(),
             to: svc_ok.actr_id.clone(),
-            realm_id: 1001,
         })),
     };
     send_envelope(
@@ -3167,7 +3173,7 @@ async fn signaling_rejects_register_request_via_ws() {
             name: "dup-client".into(),
             version: "1.0.0".to_string(),
         },
-        realm: Realm { realm_id: 1001 },
+        realm: TEST_REALM.to_string(),
         service_spec: None,
         acl: None,
         service: None,
@@ -3223,7 +3229,7 @@ async fn signaling_unregister_removes_actor_from_route_candidates() {
                 name: "client-unreg".into(),
                 version: "1.0.0".to_string(),
             },
-            source_realm: Some(SourceRealm::RealmId(1001)),
+            source_realm: Some(SourceRealm::Realm(TEST_REALM.to_string())),
         }],
     };
 
@@ -3358,7 +3364,7 @@ async fn signaling_relay_rejects_invalid_credential() {
                 name: "relay-src-auth".into(),
                 version: "1.0.0".to_string(),
             },
-            source_realm: Some(SourceRealm::RealmId(1001)),
+            source_realm: Some(SourceRealm::Realm(TEST_REALM.to_string())),
         }],
     };
 
@@ -3376,11 +3382,11 @@ async fn signaling_relay_rejects_invalid_credential() {
         source: src_ok.actr_id.clone(),
         credential: bad_cred,
         target: dst_ok.actr_id.clone(),
+        source_type: None,
         delivery_context: None,
         payload: Some(actr_relay::Payload::RoleNegotiation(RoleNegotiation {
             from: src_ok.actr_id.clone(),
             to: dst_ok.actr_id.clone(),
-            realm_id: 1001,
         })),
     };
     send_envelope(
@@ -3417,7 +3423,7 @@ async fn signaling_relay_acl_denied_in_same_realm() {
                 name: "relay-src-deny".into(),
                 version: "1.0.0".to_string(),
             },
-            source_realm: Some(SourceRealm::RealmId(1001)),
+            source_realm: Some(SourceRealm::Realm(TEST_REALM.to_string())),
         }],
     };
 
@@ -3429,11 +3435,11 @@ async fn signaling_relay_acl_denied_in_same_realm() {
         source: src_ok.actr_id.clone(),
         credential: src_ok.credential.clone(),
         target: dst_ok.actr_id.clone(),
+        source_type: None,
         delivery_context: None,
         payload: Some(actr_relay::Payload::RoleNegotiation(RoleNegotiation {
             from: src_ok.actr_id.clone(),
             to: dst_ok.actr_id.clone(),
-            realm_id: 1001,
         })),
     };
     send_envelope(
@@ -3471,7 +3477,7 @@ async fn signaling_relay_forwards_ice_candidate_payload() {
                 name: "relay-src-forward".into(),
                 version: "1.0.0".to_string(),
             },
-            source_realm: Some(SourceRealm::RealmId(1001)),
+            source_realm: Some(SourceRealm::Realm(TEST_REALM.to_string())),
         }],
     };
 
@@ -3483,6 +3489,7 @@ async fn signaling_relay_forwards_ice_candidate_payload() {
         source: src_ok.actr_id.clone(),
         credential: src_ok.credential.clone(),
         target: dst_ok.actr_id.clone(),
+        source_type: None,
         delivery_context: None,
         payload: Some(actr_relay::Payload::IceCandidate(
             actr_protocol::IceCandidate {
@@ -3538,7 +3545,7 @@ async fn signaling_relay_to_missing_target_reports_failure_and_source_stays_usab
                 name: "relay-src-missing-target".into(),
                 version: "1.0.0".to_string(),
             },
-            source_realm: Some(SourceRealm::RealmId(1001)),
+            source_realm: Some(SourceRealm::Realm(TEST_REALM.to_string())),
         }],
     };
 
@@ -3554,6 +3561,7 @@ async fn signaling_relay_to_missing_target_reports_failure_and_source_stays_usab
         source: src_ok.actr_id.clone(),
         credential: src_ok.credential.clone(),
         target: missing_target.clone(),
+        source_type: None,
         delivery_context: Some(RelayDeliveryContext {
             controller_lifecycle_id: 7,
             transport_epoch: 11,
@@ -3563,7 +3571,6 @@ async fn signaling_relay_to_missing_target_reports_failure_and_source_stays_usab
         payload: Some(actr_relay::Payload::RoleNegotiation(RoleNegotiation {
             from: src_ok.actr_id.clone(),
             to: missing_target.clone(),
-            realm_id: src_ok.actr_id.realm.realm_id,
         })),
     };
     send_envelope(
@@ -3635,7 +3642,7 @@ async fn signaling_disconnect_removes_actor_from_route_candidates() {
                 name: "client-disconnect".into(),
                 version: "1.0.0".to_string(),
             },
-            source_realm: Some(SourceRealm::RealmId(1001)),
+            source_realm: Some(SourceRealm::Realm(TEST_REALM.to_string())),
         }],
     };
 
@@ -3688,7 +3695,7 @@ async fn signaling_malformed_binary_removes_actor_from_route_candidates() {
                 name: "client-malformed".into(),
                 version: "1.0.0".to_string(),
             },
-            source_realm: Some(SourceRealm::RealmId(1001)),
+            source_realm: Some(SourceRealm::Realm(TEST_REALM.to_string())),
         }],
     };
 
@@ -3739,7 +3746,7 @@ async fn actor_registry_persists_across_restart() {
     let port = choose_port();
     let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
     let log_path = tmp.path().join("actrix_persist.log");
-    ensure_realm(&data_dir, 1001).await;
+    ensure_realm(&data_dir, TEST_REALM).await;
 
     // first run: register a service
     let mut child = spawn_actrix(&config_path, &log_path);
@@ -3752,7 +3759,7 @@ async fn actor_registry_persists_across_restart() {
     .await;
     wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
-    ensure_realm(&data_dir, 1001).await;
+    ensure_realm(&data_dir, TEST_REALM).await;
 
     let acl = Acl {
         rules: vec![AclRule {
@@ -3762,7 +3769,7 @@ async fn actor_registry_persists_across_restart() {
                 name: "client".into(),
                 version: "1.0.0".to_string(),
             },
-            source_realm: Some(SourceRealm::RealmId(1001)),
+            source_realm: Some(SourceRealm::Realm(TEST_REALM.to_string())),
         }],
     };
     let spec = make_service_spec(
@@ -3774,6 +3781,11 @@ async fn actor_registry_persists_across_restart() {
     );
     let (_svc_w, _svc_r, svc_ok) =
         ws_register_with_spec(port, "acme", "svc", Some(acl), Some(spec.clone())).await;
+    let svc_type = ActrType {
+        publisher: "acme".into(),
+        name: "svc".into(),
+        version: "1.0.0".to_string(),
+    };
 
     // Verify discovery before restart
     let (mut cli_w1, mut cli_r1, cli_ok1) = ws_register(port, "acme", "client", None).await;
@@ -3782,7 +3794,7 @@ async fn actor_registry_persists_across_restart() {
     assert!(
         entries_before
             .iter()
-            .any(|entry| entry.actr_type == svc_ok.actr_id.r#type),
+            .any(|entry| entry.actr_type == svc_type),
         "service should be discoverable before restart"
     );
     graceful_shutdown(child);
@@ -3799,7 +3811,7 @@ async fn actor_registry_persists_across_restart() {
     .await;
     wait_for_health(&format!("{base}/issuer/health"), &mut child2, &log_path2).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child2, &log_path2).await;
-    ensure_realm(&data_dir, 1001).await;
+    ensure_realm(&data_dir, TEST_REALM).await;
 
     let (mut cli_w, mut cli_r, cli_ok) = ws_register(port, "acme", "client", None).await;
     let entries_while_offline =
@@ -3807,7 +3819,7 @@ async fn actor_registry_persists_across_restart() {
     assert!(
         !entries_while_offline
             .iter()
-            .any(|entry| entry.actr_type == svc_ok.actr_id.r#type),
+            .any(|entry| entry.actr_type == svc_type),
         "persisted metadata must not advertise a disconnected service"
     );
     let routes_while_offline =
@@ -3830,7 +3842,7 @@ async fn actor_registry_persists_across_restart() {
     assert!(
         entries_after_reconnect
             .iter()
-            .any(|entry| entry.actr_type == svc_ok.actr_id.r#type),
+            .any(|entry| entry.actr_type == svc_type),
         "the original service should become discoverable after reconnect"
     );
     let routes_after_reconnect =
@@ -3855,7 +3867,7 @@ async fn service_unregister_success_is_durable_across_restart() {
     let port = choose_port();
     let (config_path, signer_port) = write_fullstack_config(tmp.path(), port, DEFAULT_TOKEN_TTL);
     let log_path = tmp.path().join("actrix_unregister_persist.log");
-    ensure_realm(&data_dir, 1001).await;
+    ensure_realm(&data_dir, TEST_REALM).await;
 
     let mut child = spawn_actrix(&config_path, &log_path);
     let base = format!("http://127.0.0.1:{port}");
@@ -3867,7 +3879,7 @@ async fn service_unregister_success_is_durable_across_restart() {
     .await;
     wait_for_health(&format!("{base}/issuer/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
-    ensure_realm(&data_dir, 1001).await;
+    ensure_realm(&data_dir, TEST_REALM).await;
 
     let spec = make_service_spec(
         "fp-unregistered",
@@ -3929,7 +3941,7 @@ async fn service_unregister_success_is_durable_across_restart() {
     .await;
     wait_for_health(&format!("{base}/issuer/health"), &mut child2, &log_path2).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child2, &log_path2).await;
-    ensure_realm(&data_dir, 1001).await;
+    ensure_realm(&data_dir, TEST_REALM).await;
 
     let (mut client_w, mut client_r, client_ok) =
         ws_register(port, "acme", "unregister-verifier", None).await;

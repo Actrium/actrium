@@ -7,7 +7,7 @@ interface RealmTableProps {
   writesEnabled: boolean;
   onToggleEnabled: (realm: RealmInfo) => void;
   onEdit: (realm: RealmInfo) => void;
-  onRotateSecret: (realmId: number) => void;
+  onRotateSecret: (realm: string) => void;
 }
 
 export function RealmTable({
@@ -32,8 +32,7 @@ export function RealmTable({
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-gray-200 bg-gray-50">
-            <th className="px-4 py-3 text-left font-medium text-gray-500">ID</th>
-            <th className="px-4 py-3 text-left font-medium text-gray-500">Name</th>
+            <th className="px-4 py-3 text-left font-medium text-gray-500">Realm</th>
             <th className="px-4 py-3 text-left font-medium text-gray-500">Active</th>
             <th className="px-4 py-3 text-left font-medium text-gray-500">Secret State</th>
             <th className="px-4 py-3 text-left font-medium text-gray-500">Version</th>
@@ -46,9 +45,8 @@ export function RealmTable({
             const isRotating = !!validUntil && validUntil * 1000 > Date.now();
             
             return (
-            <tr key={realm.realm_id} className="hover:bg-gray-50 transition-colors">
-              <td className="px-4 py-3 font-mono text-gray-700">{realm.realm_id}</td>
-              <td className="px-4 py-3 text-gray-900">{realm.name}</td>
+            <tr key={realm.realm} className="hover:bg-gray-50 transition-colors">
+              <td className="px-4 py-3 font-mono text-gray-700">{realm.realm}</td>
               <td className="px-4 py-3">
                 <button
                   onClick={() => onToggleEnabled(realm)}
@@ -89,7 +87,7 @@ export function RealmTable({
                     <Pencil className="h-4 w-4" />
                   </button>
                   <button
-                    onClick={() => onRotateSecret(realm.realm_id)}
+                    onClick={() => onRotateSecret(realm.realm)}
                     disabled={!writesEnabled}
                     className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-amber-50 hover:text-amber-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400"
                     title={writesEnabled ? "Rotate secret" : "Managed by superv"}

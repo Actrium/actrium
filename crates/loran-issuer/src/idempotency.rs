@@ -458,7 +458,6 @@ impl ControlAttemptStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actr_protocol::{ActrType, Realm};
 
     async fn setup_db() {
         static DB_DIR: tokio::sync::OnceCell<tempfile::TempDir> =
@@ -476,13 +475,8 @@ mod tests {
 
     fn actor_id() -> ActrId {
         ActrId {
-            realm: Realm { realm_id: 1 },
+            realm: "test@example.com".to_string(),
             serial_number: 42,
-            r#type: ActrType {
-                publisher: "example.com".to_string(),
-                name: "worker".to_string(),
-                version: "1.0.0".to_string(),
-            },
         }
     }
 

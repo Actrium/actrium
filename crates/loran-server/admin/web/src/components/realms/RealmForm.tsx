@@ -4,8 +4,7 @@ import { X, Copy, Download, CheckCircle, AlertTriangle } from "lucide-react";
 
 interface RealmFormProps {
   realm: RealmInfo | null;
-  existingRealmIds?: Set<number>;
-  onSubmit: (data: { realm_id?: number; name: string; enabled: boolean }) => Promise<RealmMutationResponse | void>;
+  onSubmit: (data: { realm: string; enabled: boolean }) => Promise<RealmMutationResponse | void>;
   onClose: () => void;
   onRefresh?: () => void;
 }
@@ -13,11 +12,7 @@ interface RealmFormProps {
 export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProps) {
   const isEditing = !!realm;
 
-  const [realmId] = useState(() => {
-    if (realm?.realm_id) return realm.realm_id.toString();
-    return "";
-  });
-  const [name, setName] = useState(realm?.name ?? "");
+  const [name, setName] = useState(realm?.realm ?? "");
   const [enabled, setEnabled] = useState(realm?.enabled ?? true);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -25,7 +20,7 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
   // Wizard state
   const [step, setStep] = useState<"input" | "success">("input");
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
-  const [createdRealm, setCreatedRealm] = useState<{ id: number; name: string } | null>(null);
+  const [createdRealm, setCreatedRealm] = useState<string | null>(null);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -48,7 +43,7 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
   // But the secret is returned on CREATE. So we must create it first.
 
   // Let's stick to the plan:
-  // Step 1: Input ID & Name. (Remove enabled toggle).
+  // Step 1: Input Realm name. (Remove enabled toggle).
   // Step 2: Create (initially disabled). Show Secret.
   // Step 3: User clicks "Activate" -> Update to enabled=true.
   //         User clicks "Store only" -> Keep enabled=false.
@@ -62,8 +57,7 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
       if (isEditing) {
         // Update existing
         await onSubmit({
-          realm_id: parseInt(realmId, 10),
-          name,
+          realm: name,
           enabled, // Use the state for editing
         });
         onClose();
@@ -71,16 +65,13 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
         // Create new - always create as DISABLED first to ensure we get secret
         // before activation decision in step 2
         const resp = await onSubmit({
-          name,
+          realm: name,
           enabled: false, // Create disabled initially
         });
 
         if (resp && 'realm_secret' in resp && resp.realm_secret) {
           setCreatedSecret(resp.realm_secret);
-          setCreatedRealm({
-            id: resp.realm?.realm_id ?? 0,
-            name: name
-          });
+          setCreatedRealm(resp.realm?.realm ?? name);
           setStep("success");
           // Update local enabled state to false to match
           setEnabled(false);
@@ -99,7 +90,7 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
     if (!createdRealm) return;
     setLoading(true);
     try {
-      await api.updateRealm(createdRealm.id, { enabled: true });
+      await api.updateRealm(createdRealm, { enabled: true });
       if (onRefresh) onRefresh();
       onClose();
     } catch (err) {
@@ -115,7 +106,7 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `realm-${createdRealm.id}-secret.txt`;
+    a.download = `realm-${createdRealm}-secret.txt`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -152,12 +143,8 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
 
             <div className="space-y-3">
               <div>
-                <label className="text-xs font-medium text-gray-500 uppercase">Realm ID</label>
-                <p className="text-sm font-mono text-gray-900">{createdRealm.id}</p>
-              </div>
-              <div>
                 <label className="text-xs font-medium text-gray-500 uppercase">Realm Name</label>
-                <p className="text-sm font-medium text-gray-900">{createdRealm.name}</p>
+                <p className="text-sm font-mono text-gray-900">{createdRealm}</p>
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 uppercase">Realm Secret</label>
@@ -222,27 +209,18 @@ export function RealmForm({ realm, onSubmit, onClose, onRefresh }: RealmFormProp
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Realm ID
-            </label>
-            <input
-              type={isEditing ? "number" : "text"}
-              value={isEditing ? realmId : "Auto-generated by server"}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500 font-mono"
-              disabled
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Name
+              Realm Name
             </label>
             <input
               type="text"
               value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              onChange={(e) => setName(e.target.value.trim())}
+              placeholder="realm-id@example.com"
+              title="<realm_id>@<domain>"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500 font-mono"
               required
-              autoFocus
+              disabled={isEditing}
+              autoFocus={!isEditing}
             />
           </div>
 

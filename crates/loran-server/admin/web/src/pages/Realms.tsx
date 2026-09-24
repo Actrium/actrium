@@ -36,15 +36,15 @@ export function Realms() {
   const [error, setError] = useState("");
   const [realmWritesEnabled, setRealmWritesEnabled] = useState(true);
   const [realmSecretNotice, setRealmSecretNotice] = useState<{
-    realmId: number;
+    realm: string;
     secret: string;
     previousValidUntil?: number | null;
   } | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingRealm, setEditingRealm] = useState<RealmInfo | null>(null);
-  const [rotateConfirm, setRotateConfirm] = useState<{ isOpen: boolean; realmId: number | null }>({
+  const [rotateConfirm, setRotateConfirm] = useState<{ isOpen: boolean; realm: string | null }>({
     isOpen: false,
-    realmId: null,
+    realm: null,
   });
 
   const ensureRealmWritesEnabled = useCallback(() => {
@@ -90,46 +90,46 @@ export function Realms() {
     }
     setShowForm(false);
     setEditingRealm(null);
-    setRotateConfirm({ isOpen: false, realmId: null });
+    setRotateConfirm({ isOpen: false, realm: null });
   }, [realmWritesEnabled]);
 
   async function handleToggleEnabled(realm: RealmInfo) {
     if (!ensureRealmWritesEnabled()) return;
 
     try {
-      await api.updateRealm(realm.realm_id, { enabled: !realm.enabled });
+      await api.updateRealm(realm.realm, { enabled: !realm.enabled });
       await fetchRealms();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update realm");
     }
   }
 
-  async function handleRotateSecretClick(realmId: number) {
+  async function handleRotateSecretClick(realm: string) {
     if (!ensureRealmWritesEnabled()) return;
-    setRotateConfirm({ isOpen: true, realmId });
+    setRotateConfirm({ isOpen: true, realm });
   }
 
   async function handleConfirmRotate() {
     if (!ensureRealmWritesEnabled()) {
-      setRotateConfirm({ isOpen: false, realmId: null });
+      setRotateConfirm({ isOpen: false, realm: null });
       return;
     }
 
-    const realmId = rotateConfirm.realmId;
-    if (realmId === null) return;
+    const realm = rotateConfirm.realm;
+    if (realm === null) return;
 
     try {
-      const resp = await api.rotateRealmSecret(realmId);
+      const resp = await api.rotateRealmSecret(realm);
       setRealmSecretNotice({
-        realmId: resp.realm_id,
+        realm: resp.realm,
         secret: resp.realm_secret,
         previousValidUntil: resp.previous_valid_until,
       });
-      setRotateConfirm({ isOpen: false, realmId: null });
+      setRotateConfirm({ isOpen: false, realm: null });
       await fetchRealms();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to rotate realm secret");
-      setRotateConfirm({ isOpen: false, realmId: null });
+      setRotateConfirm({ isOpen: false, realm: null });
     }
   }
 
@@ -146,8 +146,7 @@ export function Realms() {
   }
 
   async function handleFormSubmit(data: {
-    realm_id?: number;
-    name: string;
+    realm: string;
     enabled: boolean;
   }) {
     if (!ensureRealmWritesEnabled()) {
@@ -156,8 +155,7 @@ export function Realms() {
 
     try {
       if (editingRealm) {
-        await api.updateRealm(editingRealm.realm_id, {
-          name: data.name,
+        await api.updateRealm(editingRealm.realm, {
           enabled: data.enabled,
         });
         handleFormClose();
@@ -272,7 +270,7 @@ export function Realms() {
         title="Rotate Realm Secret"
         message={
           <span>
-            Are you sure you want to rotate the secret for realm <strong>{rotateConfirm.realmId}</strong>?
+            Are you sure you want to rotate the secret for realm <strong>{rotateConfirm.realm}</strong>?
             <br />
             <br />
             <span className="text-xs text-gray-500 block">
@@ -285,13 +283,13 @@ export function Realms() {
         cancelLabel="Cancel"
         isDestructive={false}
         onConfirm={handleConfirmRotate}
-        onCancel={() => setRotateConfirm({ isOpen: false, realmId: null })}
+        onCancel={() => setRotateConfirm({ isOpen: false, realm: null })}
       />
 
       {realmSecretNotice && (
         <RealmSecretModal
           isOpen={!!realmSecretNotice}
-          realmId={realmSecretNotice.realmId}
+          realm={realmSecretNotice.realm}
           secret={realmSecretNotice.secret}
           previousValidUntil={realmSecretNotice.previousValidUntil}
           onClose={() => setRealmSecretNotice(null)}

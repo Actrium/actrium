@@ -198,12 +198,12 @@ impl AdminApiService {
         }
     }
 
-    async fn load_realm(&self, realm_id: u32) -> GrpcResult<Realm> {
-        let realm = Realm::get(realm_id)
+    async fn load_realm(&self, realm: &str) -> GrpcResult<Realm> {
+        let found = Realm::get(realm)
             .await
             .map_err(|e| Status::internal(format!("Failed to load realm: {e}")))?;
 
-        realm.ok_or_else(|| Status::not_found(format!("Realm not found: {realm_id}")))
+        found.ok_or_else(|| Status::not_found(format!("Realm not found: {realm}")))
     }
 
     async fn collect_metrics(&self) -> GrpcResult<SystemMetrics> {
@@ -810,13 +810,13 @@ impl AdminApiService {
         req: CreateRealmRequest,
         expose_plain_secret: bool,
     ) -> GrpcResult<(CreateRealmResponse, Option<String>)> {
-        platform::recording::info!("Create local realm request received: name={}", req.name);
+        platform::recording::info!("Create local realm request received: realm={}", req.realm);
 
         // Generate secret at creation time
         let plain_secret = platform::realm::secret::generate_realm_secret();
         let secret_hash = hash_realm_secret(&plain_secret);
 
-        let mut realm = match Realm::create(req.name.clone(), secret_hash).await {
+        let mut realm = match Realm::create(req.realm.clone(), secret_hash).await {
             Ok(r) => r,
             Err(err) => {
                 return Ok((
@@ -852,7 +852,7 @@ impl AdminApiService {
         }
         if let Err(err) = realm.save().await {
             // Rollback
-            let _ = Realm::delete(realm.id).await;
+            let _ = Realm::delete(&realm.name).await;
             return Ok((
                 CreateRealmResponse {
                     success: false,
@@ -863,7 +863,7 @@ impl AdminApiService {
             ));
         }
 
-        platform::recording::info!("Realm created: id={}, name={}", realm.id, realm.name);
+        platform::recording::info!("Realm created: {}", realm.name);
 
         let realm_info = realm_to_proto(&realm);
 
@@ -885,13 +885,6 @@ impl AdminApiService {
         &self,
         req: CreateRealmRequest,
     ) -> GrpcResult<CreateRealmResponse> {
-        let Some(realm_id) = req.realm_id else {
-            return Ok(CreateRealmResponse {
-                success: false,
-                error_message: Some("realm_id is required for managed CreateRealm".to_string()),
-                realm: None,
-            });
-        };
         let Some(secret_current) = req.secret_current_hash else {
             return Ok(CreateRealmResponse {
                 success: false,
@@ -918,15 +911,10 @@ impl AdminApiService {
         let secret_previous =
             build_secret_previous(req.secret_previous_hash, req.secret_previous_valid_until);
 
-        platform::recording::info!(
-            "Create managed realm request received: id={}, name={}",
-            realm_id,
-            req.name
-        );
+        platform::recording::info!("Create managed realm request received: realm={}", req.realm);
 
         match Realm::upsert_managed(
-            realm_id,
-            req.name,
+            req.realm,
             status,
             req.enabled,
             (req.expires_at > 0).then_some(req.expires_at),
@@ -964,11 +952,11 @@ impl AdminApiService {
         self.create_managed_realm_internal(req).await
     }
 
-    /// Get a single realm by ID.
-    pub async fn get_realm_direct(&self, realm_id: u32) -> GrpcResult<GetRealmResponse> {
-        platform::recording::debug!("GetRealm request received: realm_id={}", realm_id);
+    /// Get a single realm by name.
+    pub async fn get_realm_direct(&self, realm: &str) -> GrpcResult<GetRealmResponse> {
+        platform::recording::debug!("GetRealm request received: realm={}", realm);
 
-        match self.load_realm(realm_id).await {
+        match self.load_realm(realm).await {
             Ok(realm) => Ok(GetRealmResponse {
                 success: true,
                 error_message: None,
@@ -988,7 +976,7 @@ impl AdminApiService {
         &self,
         req: UpdateRealmRequest,
     ) -> GrpcResult<UpdateRealmResponse> {
-        let mut realm = match self.load_realm(req.realm_id).await {
+        let mut realm = match self.load_realm(&req.realm).await {
             Ok(r) => r,
             Err(status) if status.code() == tonic::Code::NotFound => {
                 return Ok(UpdateRealmResponse {
@@ -1000,9 +988,6 @@ impl AdminApiService {
             Err(e) => return Err(e),
         };
 
-        if let Some(name) = req.name {
-            realm.name = name;
-        }
         if let Some(enabled) = req.enabled {
             realm.enabled = enabled;
         }
@@ -1051,9 +1036,9 @@ impl AdminApiService {
         })
     }
 
-    /// Delete a realm by ID.
-    pub async fn delete_realm_direct(&self, realm_id: u32) -> GrpcResult<DeleteRealmResponse> {
-        match Realm::soft_delete(realm_id).await {
+    /// Delete a realm by name.
+    pub async fn delete_realm_direct(&self, realm: &str) -> GrpcResult<DeleteRealmResponse> {
+        match Realm::soft_delete(realm).await {
             Ok(true) => Ok(DeleteRealmResponse {
                 success: true,
                 error_message: None,
@@ -1072,14 +1057,14 @@ impl AdminApiService {
     /// Rotate realm secret and return plaintext once.
     pub async fn rotate_realm_secret_direct(
         &self,
-        realm_id: u32,
+        realm: &str,
     ) -> GrpcResult<RealmSecretRotationResult> {
-        let rotated = rotate_realm_secret(realm_id, Some(DEFAULT_REALM_SECRET_PREVIOUS_GRACE_SECS))
+        let rotated = rotate_realm_secret(realm, Some(DEFAULT_REALM_SECRET_PREVIOUS_GRACE_SECS))
             .await
             .map_err(|e| Status::internal(format!("Failed to rotate realm secret: {e}")))?;
 
         Ok(RealmSecretRotationResult {
-            realm_id,
+            realm: realm.to_string(),
             realm_secret: rotated.new_secret,
             previous_valid_until: rotated.previous_valid_until,
             grace_seconds: DEFAULT_REALM_SECRET_PREVIOUS_GRACE_SECS,
@@ -1218,7 +1203,7 @@ pub struct KeyInfo {
 /// Realm secret rotation result (the plaintext secret is returned only once).
 #[derive(Debug, Clone, Serialize)]
 pub struct RealmSecretRotationResult {
-    pub realm_id: u32,
+    pub realm: String,
     pub realm_secret: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_valid_until: Option<u64>,
@@ -1463,7 +1448,7 @@ impl NodeAdminService for AdminApiService {
         request: Request<GetRealmRequest>,
     ) -> GrpcResult<Response<GetRealmResponse>> {
         let req = request.into_inner();
-        self.get_realm_direct(req.realm_id).await.map(Response::new)
+        self.get_realm_direct(&req.realm).await.map(Response::new)
     }
 
     async fn update_realm(
@@ -1480,7 +1465,7 @@ impl NodeAdminService for AdminApiService {
         request: Request<DeleteRealmRequest>,
     ) -> GrpcResult<Response<DeleteRealmResponse>> {
         let req = request.into_inner();
-        self.delete_realm_direct(req.realm_id)
+        self.delete_realm_direct(&req.realm)
             .await
             .map(Response::new)
     }

@@ -71,8 +71,8 @@ message GetConfigResponse {
 // ------------ CreateRealm ------------
 
 message CreateRealmRequest {
-  optional uint32 realm_id = 1;             // Superv managed mode uses this id; local UI may omit
-  required string name = 2;                 // Realm name
+  reserved 1; reserved "realm_id", "name";
+  required string realm = 2;                // Realm name <realm_id>@<domain>
   required bool enabled = 3;                // Enabled status
   // Field 4 removed (was use_servers)
   required NonceCredential credential = 5;  // Authentication credential
@@ -93,7 +93,8 @@ message CreateRealmResponse {
 // ------------ GetRealm ------------
 
 message GetRealmRequest {
-  required uint32 realm_id = 1;            // Realm identifier
+  reserved 1; reserved "realm_id";
+  required string realm = 3;                // Realm name
   required NonceCredential credential = 2;  // Authentication credential
 }
 
@@ -106,8 +107,8 @@ message GetRealmResponse {
 // ------------ UpdateRealm ------------
 
 message UpdateRealmRequest {
-  required uint32 realm_id = 1;            // Realm identifier
-  optional string name = 2;                 // New name (optional update)
+  reserved 1, 2; reserved "realm_id", "name";
+  required string realm = 10;               // Realm name
   optional bool enabled = 3;                // New enabled status (optional update)
   required NonceCredential credential = 4;  // Authentication credential
   optional string status = 5;               // Active / Inactive / Suspended
@@ -126,7 +127,8 @@ message UpdateRealmResponse {
 // ------------ DeleteRealm ------------
 
 message DeleteRealmRequest {
-  required uint32 realm_id = 1;            // Realm identifier
+  reserved 1; reserved "realm_id";
+  required string realm = 3;                // Realm name
   required NonceCredential credential = 2;  // Authentication credential
 }
 

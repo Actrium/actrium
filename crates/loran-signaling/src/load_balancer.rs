@@ -372,18 +372,18 @@ impl LoadBalancer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actr_protocol::{ActrType, Realm};
+    use actr_protocol::ActrType;
 
     fn create_test_service(serial: u64, name: &str) -> ServiceInfo {
         ServiceInfo {
             actor_id: ActrId {
                 serial_number: serial,
-                r#type: ActrType {
-                    publisher: "test".to_string(),
-                    name: name.to_string(),
-                    version: "1.0.0".to_string(),
-                },
-                realm: Realm { realm_id: 0 },
+                realm: "test@example.com".to_string(),
+            },
+            actor_type: ActrType {
+                publisher: "test".to_string(),
+                name: name.to_string(),
+                version: "1.0.0".to_string(),
             },
             service_name: name.to_string(),
             message_types: vec![],

@@ -21,7 +21,7 @@ fn scoped_credential() -> (String, String) {
         .as_secs()
         + 300;
     let username = format!(
-        "{expires_at}:realm=1001:provider=actrix-official:audience=actr.turn:actor=1@1001/apps.example.com/echo@1.0.0"
+        "{expires_at}:realm=k7m2q9xh@example.com:provider=actrix-official:audience=actr.turn:actor=1.k7m2q9xh@example.com"
     );
     let mut mac =
         Hmac::<Sha1>::new_from_slice(TURN_SECRET.as_bytes()).expect("HMAC accepts this secret");

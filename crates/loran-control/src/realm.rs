@@ -24,8 +24,7 @@ pub fn realm_to_proto(realm: &Realm) -> RealmInfo {
     };
 
     RealmInfo {
-        realm_id: realm.id,
-        name: realm.name.clone(),
+        realm: realm.name.clone(),
         enabled: realm.enabled,
         created_at: realm.created_at as i64,
         updated_at: realm.updated_at.map(|v| v as i64),
@@ -42,8 +41,7 @@ mod tests {
 
     fn realm_with_previous(valid_until: Option<u64>) -> Realm {
         Realm {
-            id: 33554432,
-            name: "test".to_string(),
+            name: "test@example.com".to_string(),
             status: RealmStatus::Active,
             enabled: true,
             expires_at: None,

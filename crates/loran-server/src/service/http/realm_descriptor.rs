@@ -30,7 +30,6 @@ struct RealmDescriptor {
 
 #[derive(Serialize)]
 struct RealmIdentity {
-    id: u32,
     name: String,
 }
 
@@ -142,11 +141,10 @@ async fn realm_descriptor(State(state): State<Arc<DescriptorState>>) -> Response
         schema: "actr.realm/v1",
         protocol_version: 1,
         realm: RealmIdentity {
-            id: realm.id,
             name: realm.name.clone(),
         },
         authority: AuthorityDescriptor {
-            issuer: format!("actr:realm:{}:authority", realm.id),
+            issuer: realm.name.clone(),
             audience: "actr.signaling",
             registration: format!("{origin}/issuer/register"),
             signing_keys: format!("{origin}/issuer/signing-pubkey"),

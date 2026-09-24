@@ -339,17 +339,17 @@ pub async fn mark_token_delivered(
 /// Return whether an actor identity has been explicitly revoked.
 ///
 /// A hit is terminal: the caller must refuse to renew or reissue credentials for
-/// this `(realm_id, serial_number)` regardless of any renewal token it still
+/// this `(realm, serial_number)` regardless of any renewal token it still
 /// holds.
 pub async fn is_actor_revoked(actor_id: &ActrId) -> Result<bool, sqlx::Error> {
     let pool = platform::storage::db::get_database().get_pool();
 
     let found: Option<i64> = sqlx::query_scalar(
         "SELECT 1 FROM revoked_actor
-         WHERE realm_id = ?1 AND serial_number = ?2
+         WHERE realm = ?1 AND serial_number = ?2
          LIMIT 1",
     )
-    .bind(i64::from(actor_id.realm.realm_id))
+    .bind(&actor_id.realm)
     .bind(actor_id.serial_number as i64)
     .fetch_optional(pool)
     .await?;
@@ -358,16 +358,16 @@ pub async fn is_actor_revoked(actor_id: &ActrId) -> Result<bool, sqlx::Error> {
 }
 
 /// Record an actor identity revocation. Idempotent: a repeated call for the same
-/// `(realm_id, serial_number)` keeps the original `revoked_at`/`reason`.
+/// `(realm, serial_number)` keeps the original `revoked_at`/`reason`.
 pub async fn revoke_actor(actor_id: &ActrId, reason: &str) -> Result<(), sqlx::Error> {
     let pool = platform::storage::db::get_database().get_pool();
     let now = now_secs();
 
     sqlx::query(
-        "INSERT OR IGNORE INTO revoked_actor (realm_id, serial_number, revoked_at, reason)
+        "INSERT OR IGNORE INTO revoked_actor (realm, serial_number, revoked_at, reason)
          VALUES (?1, ?2, ?3, ?4)",
     )
-    .bind(i64::from(actor_id.realm.realm_id))
+    .bind(&actor_id.realm)
     .bind(actor_id.serial_number as i64)
     .bind(now)
     .bind(reason)
@@ -444,10 +444,10 @@ pub async fn refresh_pending_registration(
     let pool = platform::storage::db::get_database().get_pool();
     let result = sqlx::query(
         "UPDATE pending_registration SET expires_at = ?1
-         WHERE realm_id = ?2 AND serial_number = ?3",
+         WHERE realm = ?2 AND serial_number = ?3",
     )
     .bind(renewal_expires_at.saturating_add(REISSUE_BINDING_GRACE_SECS))
-    .bind(actor_id.realm.realm_id as i64)
+    .bind(&actor_id.realm)
     .bind(actor_id.serial_number as i64)
     .execute(pool)
     .await?;
@@ -630,13 +630,8 @@ mod tests {
         let secret = b"test-secret-at-least-32-bytes!";
         let old = b"old-renewal-token-32-bytes-xx";
         let actor_id = ActrId {
-            realm: actr_protocol::Realm { realm_id: 1 },
+            realm: "test@example.com".to_string(),
             serial_number: 42,
-            r#type: actr_protocol::ActrType {
-                publisher: "test".to_string(),
-                name: "actor".to_string(),
-                version: "1.0.0".to_string(),
-            },
         };
 
         let s1 = derive_successor_token(secret, old, &actor_id, 1_000_000);
@@ -650,13 +645,8 @@ mod tests {
         let secret = b"test-secret-at-least-32-bytes!";
         let old = b"old-renewal-token-32-bytes-xx";
         let actor_id = ActrId {
-            realm: actr_protocol::Realm { realm_id: 1 },
+            realm: "test@example.com".to_string(),
             serial_number: 42,
-            r#type: actr_protocol::ActrType {
-                publisher: "test".to_string(),
-                name: "actor".to_string(),
-                version: "1.0.0".to_string(),
-            },
         };
 
         let s1 = derive_successor_token(secret, old, &actor_id, 1_000_000);

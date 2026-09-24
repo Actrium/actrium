@@ -4,7 +4,7 @@
 //! cache do not share the process-global validator/database state used by the
 //! broader Issuer HTTP integration suite.
 
-use actr_protocol::{ActrId, ActrType, Realm};
+use actr_protocol::{ActrId, RegisterAuthMode};
 use issuer::{
     issuer::{AIdIssuer, IssuerConfig},
     signer_client_wrapper::create_signer_client,
@@ -21,6 +21,7 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use tonic::transport::Server;
 
 const TEST_STEP_TIMEOUT: Duration = Duration::from_secs(30);
+const TEST_REALM: &str = "key-rotation@example.com";
 
 struct TestEnv {
     issuer_temp_dir: TempDir,
@@ -141,14 +142,27 @@ async fn setup_test_environment(signer_config: SignerServiceConfig) -> TestEnv {
             .as_secs() as i64;
         let secret_current = platform::realm::hash_realm_secret("key-rotation-seed-realm-secret");
         sqlx::query(
-            "INSERT OR REPLACE INTO realm (id, name, status, enabled, created_at, secret_current)
-             VALUES (1001, 'key-rotation-test-realm', 'Active', 1, ?, ?)",
+            "INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current)
+             VALUES (?, 'Active', 1, ?, ?)",
         )
+        .bind(TEST_REALM)
         .bind(now)
         .bind(secret_current)
         .execute(pool)
         .await
         .expect("seed realm");
+        // The identity ledger records the Actor type that renewals sign into claims.
+        sqlx::query(
+            "INSERT OR IGNORE INTO issued_actor_identity
+             (realm, serial_number, actor_type, target, issued_at, auth_mode)
+             VALUES (?, 42, 'linked-src/source-workload@1.0.0', NULL, ?, ?)",
+        )
+        .bind(TEST_REALM)
+        .bind(now)
+        .bind(RegisterAuthMode::Linked as i32)
+        .execute(pool)
+        .await
+        .expect("seed actor identity");
     }
 
     TestEnv {
@@ -218,13 +232,8 @@ async fn expired_key_rotates_before_credential_issuance() {
     assert!(!status.usable, "expired key must report as unusable");
 
     let actor_id = ActrId {
-        realm: Realm { realm_id: 1001 },
+        realm: TEST_REALM.to_string(),
         serial_number: 42,
-        r#type: ActrType {
-            publisher: "linked-src".to_string(),
-            name: "source-workload".to_string(),
-            version: "1.0.0".to_string(),
-        },
     };
     eprintln!("key rotation test: issuing credential after expiry");
     let issued = tokio::time::timeout(
@@ -254,7 +263,11 @@ async fn expired_key_rotates_before_credential_issuance() {
     .expect("rotated key persisted to signaling cache");
     let claims = AIdCredentialVerifier::verify(&issued.credential, &verifying_key)
         .expect("fresh credential verifies");
-    assert_eq!(claims.realm_id, 1001);
+    assert_eq!(claims.realm, TEST_REALM);
+    assert_eq!(
+        claims.actor_type.to_string_repr(),
+        "linked-src/source-workload@1.0.0"
+    );
 
     eprintln!("key rotation test: shutting down signer");
     drop(issuer);

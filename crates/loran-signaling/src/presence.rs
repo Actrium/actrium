@@ -11,11 +11,12 @@
 //! # Usage example
 //! ```ignore
 //! use signaling::presence::PresenceManager;
-//! use actr_protocol::{ActrId, ActrType, Realm};
+//! use actr_protocol::{ActrId, ActrType};
 //!
 //! let mut manager = PresenceManager::new();
 //!
 //! let actor_a_id = ActrId { /* ... */ };
+//! let actor_a_type = ActrType { /* ... */ };
 //! let user_service_type = ActrType {
 //!     publisher: "acme".to_string(),
 //!     name: "user-service".to_string(),
@@ -23,7 +24,7 @@
 //! };
 //!
 //! // Actor A subscribes to online events for the user-service type
-//! manager.subscribe(actor_a_id, user_service_type.clone());
+//! manager.subscribe(actor_a_id, actor_a_type, user_service_type.clone());
 //!
 //! // When a new user-service instance registers
 //! let subscribers = manager.get_subscribers(&user_service_type);
@@ -38,11 +39,11 @@ use std::collections::HashMap;
 /// Presence subscription manager
 #[derive(Debug, Default)]
 pub struct PresenceManager {
-    /// Subscription map: target_type -> Vec<subscriber_actor_id>
+    /// Subscription map: target_type -> Vec<(subscriber_actor_id, subscriber_type)>
     ///
     /// Key: the subscribed service type (ActrType)
-    /// Value: list of Actors subscribed to that type
-    subscriptions: HashMap<ActrType, Vec<ActrId>>,
+    /// Value: list of Actors subscribed to that type, with their verified types
+    subscriptions: HashMap<ActrType, Vec<(ActrId, ActrType)>>,
 }
 
 impl PresenceManager {
@@ -57,13 +58,19 @@ impl PresenceManager {
     ///
     /// # Arguments
     /// - `subscriber`: the subscriber's ActrId
+    /// - `subscriber_type`: the subscriber's verified Actor type
     /// - `target_type`: the service type to subscribe to
     ///
     /// # Example
     /// ```ignore
-    /// manager.subscribe(client_actor_id, user_service_type);
+    /// manager.subscribe(client_actor_id, client_actor_type, user_service_type);
     /// ```
-    pub fn subscribe(&mut self, subscriber: ActrId, target_type: ActrType) {
+    pub fn subscribe(
+        &mut self,
+        subscriber: ActrId,
+        subscriber_type: ActrType,
+        target_type: ActrType,
+    ) {
         platform::recording::info!(
             "Actor {} subscribed to {}/{} online events",
             subscriber.to_string_repr(),
@@ -74,8 +81,8 @@ impl PresenceManager {
         let subscribers = self.subscriptions.entry(target_type).or_default();
 
         // Avoid duplicate subscriptions
-        if !subscribers.iter().any(|id| id == &subscriber) {
-            subscribers.push(subscriber);
+        if !subscribers.iter().any(|(id, _)| id == &subscriber) {
+            subscribers.push((subscriber, subscriber_type));
             platform::recording::debug!(
                 "Subscription successful, current subscriber count: {}",
                 subscribers.len()
@@ -107,7 +114,7 @@ impl PresenceManager {
 
         if let Some(subscribers) = self.subscriptions.get_mut(target_type) {
             let original_len = subscribers.len();
-            subscribers.retain(|id| id != subscriber);
+            subscribers.retain(|(id, _)| id != subscriber);
 
             let removed = subscribers.len() < original_len;
             if removed {
@@ -161,7 +168,7 @@ impl PresenceManager {
         // Remove this subscriber from all subscription lists
         self.subscriptions.retain(|_target_type, subscribers| {
             let original_len = subscribers.len();
-            subscribers.retain(|id| id != subscriber);
+            subscribers.retain(|(id, _)| id != subscriber);
             removed_count += original_len - subscribers.len();
 
             // If the list is empty, return false to remove the entry
@@ -189,7 +196,7 @@ impl PresenceManager {
     pub fn get_subscribers(&self, target_type: &ActrType) -> Vec<&ActrId> {
         self.subscriptions
             .get(target_type)
-            .map(|subscribers| subscribers.iter().collect())
+            .map(|subscribers| subscribers.iter().map(|(id, _)| id).collect())
             .unwrap_or_default()
     }
 
@@ -212,7 +219,7 @@ impl PresenceManager {
     pub fn is_subscribed(&self, subscriber: &ActrId, target_type: &ActrType) -> bool {
         self.subscriptions
             .get(target_type)
-            .map(|subscribers| subscribers.iter().any(|id| id == subscriber))
+            .map(|subscribers| subscribers.iter().any(|(id, _)| id == subscriber))
             .unwrap_or(false)
     }
 
@@ -224,20 +231,35 @@ impl PresenceManager {
     /// # Arguments
     ///
     /// - `target_actor_id`: The actor that came online
+    /// - `target_type`: Its verified Actor type
     ///
     /// # Returns
     ///
     /// List of subscriber ActorIds that passed ACL checks
-    pub async fn get_subscribers_with_acl(&self, target_actor_id: &ActrId) -> Vec<ActrId> {
-        let target_type = &target_actor_id.r#type;
-        let subscribers = self.get_subscribers(target_type);
+    pub async fn get_subscribers_with_acl(
+        &self,
+        target_actor_id: &ActrId,
+        target_type: &ActrType,
+    ) -> Vec<ActrId> {
+        let subscribers = self
+            .subscriptions
+            .get(target_type)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         let total_count = subscribers.len(); // Save count before moving
 
         let mut allowed_subscribers = Vec::new();
 
-        for subscriber_id in subscribers {
+        for (subscriber_id, subscriber_type) in subscribers {
             // ACL check: can subscriber discover target?
-            match Self::check_discovery_acl(subscriber_id, target_actor_id).await {
+            match Self::check_discovery_acl(
+                subscriber_id,
+                subscriber_type,
+                target_actor_id,
+                target_type,
+            )
+            .await
+            {
                 Ok(true) => {
                     allowed_subscribers.push(subscriber_id.clone());
                 }
@@ -273,41 +295,36 @@ impl PresenceManager {
     ///
     /// # Arguments
     ///
-    /// - `from_actor`: Subscriber actor ID
-    /// - `to_actor`: Target actor ID
+    /// - `from_actor` / `from_type`: Subscriber actor ID and its type
+    /// - `to_actor` / `to_type`: Target actor ID and its type
     ///
     /// # Returns
     ///
     /// Returns true if discovery is allowed based on ACL rules
     async fn check_discovery_acl(
         from_actor: &ActrId,
+        from_type: &ActrType,
         to_actor: &ActrId,
+        to_type: &ActrType,
     ) -> Result<bool, RealmError> {
-        // Extract realm and actor types
-        let from_realm = from_actor.realm.realm_id;
-        let to_realm = to_actor.realm.realm_id;
-
-        let from_type = from_actor.r#type.to_string_repr();
-        let to_type = to_actor.r#type.to_string_repr();
-
-        ActorAcl::can_discover(from_realm, to_realm, &from_type, &to_type).await
+        ActorAcl::can_discover(
+            &from_actor.realm,
+            &to_actor.realm,
+            &from_type.to_string_repr(),
+            &to_type.to_string_repr(),
+        )
+        .await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actr_protocol::Realm;
 
     fn create_test_actor_id(serial: u64) -> ActrId {
         ActrId {
             serial_number: serial,
-            r#type: ActrType {
-                publisher: "test".to_string(),
-                name: "test-actor".to_string(),
-                version: "1.0.0".to_string(),
-            },
-            realm: Realm { realm_id: 0 },
+            realm: "test@example.com".to_string(),
         }
     }
 
@@ -326,8 +343,16 @@ mod tests {
         let actor2 = create_test_actor_id(2);
         let target_type = create_test_actor_type("user-service");
 
-        manager.subscribe(actor1.clone(), target_type.clone());
-        manager.subscribe(actor2.clone(), target_type.clone());
+        manager.subscribe(
+            actor1.clone(),
+            create_test_actor_type("test-actor"),
+            target_type.clone(),
+        );
+        manager.subscribe(
+            actor2.clone(),
+            create_test_actor_type("test-actor"),
+            target_type.clone(),
+        );
 
         let subscribers = manager.get_subscribers(&target_type);
         assert_eq!(subscribers.len(), 2);
@@ -339,7 +364,11 @@ mod tests {
         let actor1 = create_test_actor_id(1);
         let target_type = create_test_actor_type("user-service");
 
-        manager.subscribe(actor1.clone(), target_type.clone());
+        manager.subscribe(
+            actor1.clone(),
+            create_test_actor_type("test-actor"),
+            target_type.clone(),
+        );
         assert!(manager.unsubscribe(&actor1, &target_type));
 
         let subscribers = manager.get_subscribers(&target_type);
@@ -353,8 +382,16 @@ mod tests {
         let type1 = create_test_actor_type("user-service");
         let type2 = create_test_actor_type("order-service");
 
-        manager.subscribe(actor1.clone(), type1.clone());
-        manager.subscribe(actor1.clone(), type2.clone());
+        manager.subscribe(
+            actor1.clone(),
+            create_test_actor_type("test-actor"),
+            type1.clone(),
+        );
+        manager.subscribe(
+            actor1.clone(),
+            create_test_actor_type("test-actor"),
+            type2.clone(),
+        );
 
         let removed = manager.unsubscribe_all(&actor1);
         assert_eq!(removed, 2);
@@ -369,8 +406,16 @@ mod tests {
         let actor1 = create_test_actor_id(1);
         let target_type = create_test_actor_type("user-service");
 
-        manager.subscribe(actor1.clone(), target_type.clone());
-        manager.subscribe(actor1.clone(), target_type.clone()); // duplicate subscription
+        manager.subscribe(
+            actor1.clone(),
+            create_test_actor_type("test-actor"),
+            target_type.clone(),
+        );
+        manager.subscribe(
+            actor1.clone(),
+            create_test_actor_type("test-actor"),
+            target_type.clone(),
+        ); // duplicate subscription
 
         let subscribers = manager.get_subscribers(&target_type);
         assert_eq!(subscribers.len(), 1); // should only have one
@@ -384,9 +429,21 @@ mod tests {
         let type1 = create_test_actor_type("user-service");
         let type2 = create_test_actor_type("order-service");
 
-        manager.subscribe(actor1.clone(), type1.clone());
-        manager.subscribe(actor2.clone(), type1.clone());
-        manager.subscribe(actor1.clone(), type2.clone());
+        manager.subscribe(
+            actor1.clone(),
+            create_test_actor_type("test-actor"),
+            type1.clone(),
+        );
+        manager.subscribe(
+            actor2.clone(),
+            create_test_actor_type("test-actor"),
+            type1.clone(),
+        );
+        manager.subscribe(
+            actor1.clone(),
+            create_test_actor_type("test-actor"),
+            type2.clone(),
+        );
 
         let (type_count, subscriber_count) = manager.stats();
         assert_eq!(type_count, 2); // 2 types

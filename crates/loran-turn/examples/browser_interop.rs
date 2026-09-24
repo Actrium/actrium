@@ -18,7 +18,7 @@ use turn::{Authenticator, create_turn_server, shutdown_turn_server};
 use uuid::Uuid;
 
 const REALM: &str = "browser-interop.actrix.test";
-const ACTOR_ID: &str = "1@1001/apps.example.com/browser-interop@1.0.0";
+const ACTOR_ID: &str = "1.k7m2q9xh@example.com";
 
 fn scoped_credential(secret: &str) -> (String, String) {
     let expires_at = SystemTime::now()
@@ -27,7 +27,7 @@ fn scoped_credential(secret: &str) -> (String, String) {
         .as_secs()
         + 600;
     let username = format!(
-        "{expires_at}:realm=1001:provider=actrix-official:audience=actr.turn:actor={ACTOR_ID}"
+        "{expires_at}:realm=k7m2q9xh@example.com:provider=actrix-official:audience=actr.turn:actor={ACTOR_ID}"
     );
     let mut mac =
         Hmac::<Sha1>::new_from_slice(secret.as_bytes()).expect("HMAC accepts this secret");

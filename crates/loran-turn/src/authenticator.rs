@@ -252,7 +252,7 @@ impl Authenticator {
         let scoped_identity = scoped_identity
             .strip_prefix("realm=")
             .ok_or_else(|| Error::Other("invalid TURN credential scope".to_string()))?;
-        let (realm_id, scoped_identity) = scoped_identity
+        let (realm, scoped_identity) = scoped_identity
             .split_once(":provider=")
             .ok_or_else(|| Error::Other("invalid TURN credential scope".to_string()))?;
         let (provider, scoped_identity) = scoped_identity
@@ -261,15 +261,9 @@ impl Authenticator {
         let (audience, actor_id) = scoped_identity
             .split_once(":actor=")
             .ok_or_else(|| Error::Other("invalid TURN credential scope".to_string()))?;
-        let credential_realm_id = realm_id
-            .parse::<u32>()
-            .map_err(|_| Error::Other("invalid TURN credential Realm".to_string()))?;
         let actor = actr_protocol::ActrId::from_string_repr(actor_id)
             .map_err(|_| Error::Other("invalid TURN credential Actor ID".to_string()))?;
-        if credential_realm_id != actor.realm.realm_id
-            || provider != "actrix-official"
-            || audience != "actr.turn"
-        {
+        if realm != actor.realm || provider != "actrix-official" || audience != "actr.turn" {
             return Err(Error::Other(
                 "TURN credential scope does not match this Realm/provider".to_string(),
             ));
@@ -434,7 +428,7 @@ mod tests {
 
     fn username(expires_at: u64) -> String {
         format!(
-            "{expires_at}:realm=1001:provider=actrix-official:audience=actr.turn:actor=1@1001/apps.example.com/svc@1.0.0"
+            "{expires_at}:realm=k7m2q9xh@example.com:provider=actrix-official:audience=actr.turn:actor=1.k7m2q9xh@example.com"
         )
     }
 
@@ -530,13 +524,13 @@ mod tests {
     fn test_auth_handle_rejects_cross_realm_or_audience_scope() {
         let auth = make_auth();
         let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
-        let base = "2000000060:realm=1001:provider=actrix-official:audience=actr.turn:actor=1@1001/apps.example.com/svc@1.0.0";
+        let base = "2000000060:realm=k7m2q9xh@example.com:provider=actrix-official:audience=actr.turn:actor=1.k7m2q9xh@example.com";
 
         for invalid in [
-            base.replace("realm=1001", "realm=1002"),
+            base.replace("realm=k7m2q9xh@", "realm=other@"),
             base.replace("audience=actr.turn", "audience=actr.signaling"),
             base.replace("provider=actrix-official", "provider=other"),
-            base.replace("@1001/", "@1002/"),
+            base.replace("actor=1.k7m2q9xh@", "actor=1.other@"),
         ] {
             let error = auth
                 .auth_handle_at(&invalid, "actrix.local", src_addr, 2_000_000_000)
@@ -623,7 +617,7 @@ mod tests {
 
         for serial in 1..=(AUTH_CACHE_CAPACITY + 64) {
             let username = format!(
-                "{}:realm=1001:provider=actrix-official:audience=actr.turn:actor={}@1001/apps.example.com/svc@1.0.0",
+                "{}:realm=k7m2q9xh@example.com:provider=actrix-official:audience=actr.turn:actor={:x}.k7m2q9xh@example.com",
                 now + 60,
                 serial
             );
@@ -698,7 +692,7 @@ mod tests {
     #[test]
     fn admission_throttles_single_actor_flood() {
         let control = AdmissionControl::new();
-        let actor = "1@1001/apps.example.com/svc@1.0.0";
+        let actor = "1.k7m2q9xh@example.com";
         let now = Instant::now();
 
         let mut admitted = 0usize;
@@ -715,7 +709,7 @@ mod tests {
     fn actor_scope_key_extracts_actor_or_none() {
         assert_eq!(
             Authenticator::actor_scope_key(&username(2_000_000_060)),
-            Some("1@1001/apps.example.com/svc@1.0.0")
+            Some("1.k7m2q9xh@example.com")
         );
         assert_eq!(Authenticator::actor_scope_key("no-actor-here"), None);
     }

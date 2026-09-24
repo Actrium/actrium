@@ -301,7 +301,7 @@ export function Overview2Page() {
                   {/* Connecting lines — center-to-center direction, drawn edge-to-edge */}
                   {/* ACL(134,64) → Realm(78,148): exit ACL ~(115,93), enter Realm ~(96,121) */}
                   <line x1={115} y1={93} x2={96} y2={121} stroke="#86efac" strokeWidth={1} />
-                  <text x={94} y={110} fontSize={6.5} fill="#6ee7b7">realm_id</text>
+                  <text x={94} y={110} fontSize={6.5} fill="#6ee7b7">realm</text>
                   {/* ACL(134,64) → ActorType(242,120): exit ACL ~(180,88), enter ActorType ~(197,96) */}
                   <line x1={180} y1={88} x2={197} y2={96} stroke="#86efac" strokeWidth={1} strokeDasharray="3,3" />
 
@@ -309,7 +309,7 @@ export function Overview2Page() {
                   <ellipse cx={134} cy={64} rx={74} ry={30} fill="#d1fae5" fillOpacity={0.4} stroke="#4ade80" strokeWidth={0.8} />
                   <text x={134} y={56} textAnchor="middle" fontSize={11} fontWeight={700} fill="#166534">ACL</text>
                   <text x={134} y={68} textAnchor="middle" fontSize={7} fill="#475569">Allow / Deny from:</text>
-                  <text x={134} y={78} textAnchor="middle" fontSize={7} fill="#475569">[$realm-id] [$actr-type]</text>
+                  <text x={134} y={78} textAnchor="middle" fontSize={7} fill="#475569">[$realm] [$actr-type]</text>
 
                   {/* Realm ellipse — lower left */}
                   <ellipse cx={78} cy={148} rx={64} ry={28} fill="#dcfce7" fillOpacity={0.5} stroke="#22c55e" strokeWidth={0.8} />

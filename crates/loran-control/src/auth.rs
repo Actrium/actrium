@@ -266,14 +266,13 @@ impl CredentialPayload for CreateRealmRequest {
     }
 
     fn auth_payload(&self, node_id: &str) -> String {
-        format!("create_realm:{node_id}:{}", self.realm_id.unwrap_or(0))
+        format!("create_realm:{node_id}:{}", self.realm)
     }
 
     fn body_digest(&self) -> String {
         let canon = format!(
-            "realm_id={}&name={}&enabled={}&status={}&expires_at={}&secret_current_hash={}&secret_previous_hash={}&secret_previous_valid_until={}",
-            self.realm_id.unwrap_or(0),
-            self.name,
+            "realm={}&enabled={}&status={}&expires_at={}&secret_current_hash={}&secret_previous_hash={}&secret_previous_valid_until={}",
+            self.realm,
             self.enabled,
             opt_str(self.status.as_deref()),
             self.expires_at,
@@ -291,7 +290,7 @@ impl CredentialPayload for GetRealmRequest {
     }
 
     fn auth_payload(&self, node_id: &str) -> String {
-        format!("get_realm:{node_id}:{}", self.realm_id)
+        format!("get_realm:{node_id}:{}", self.realm)
     }
 }
 
@@ -301,14 +300,13 @@ impl CredentialPayload for UpdateRealmRequest {
     }
 
     fn auth_payload(&self, node_id: &str) -> String {
-        format!("update_realm:{node_id}:{}", self.realm_id)
+        format!("update_realm:{node_id}:{}", self.realm)
     }
 
     fn body_digest(&self) -> String {
         let canon = format!(
-            "realm_id={}&name={}&enabled={}&status={}&expires_at={}&secret_current_hash={}&secret_previous_hash={}&secret_previous_valid_until={}",
-            self.realm_id,
-            opt_str(self.name.as_deref()),
+            "realm={}&enabled={}&status={}&expires_at={}&secret_current_hash={}&secret_previous_hash={}&secret_previous_valid_until={}",
+            self.realm,
             opt_bool(self.enabled),
             opt_str(self.status.as_deref()),
             opt_u64(self.expires_at),
@@ -326,7 +324,7 @@ impl CredentialPayload for DeleteRealmRequest {
     }
 
     fn auth_payload(&self, node_id: &str) -> String {
-        format!("delete_realm:{node_id}:{}", self.realm_id)
+        format!("delete_realm:{node_id}:{}", self.realm)
     }
 }
 
@@ -433,7 +431,7 @@ mod tests {
     /// the superv client must build the identical string for the same logical
     /// fields. Any change to field order/rendering here must be mirrored on the
     /// superv side (see its `realm_body_digest` test, same expected digest).
-    const REALM_CANON: &str = "realm_id=42&name=managed&enabled=true&status=Active&expires_at=1900000000&secret_current_hash=hash-42&secret_previous_hash=&secret_previous_valid_until=";
+    const REALM_CANON: &str = "realm=managed@example.com&enabled=true&status=Active&expires_at=1900000000&secret_current_hash=hash-42&secret_previous_hash=&secret_previous_valid_until=";
 
     fn dummy_credential() -> NonceCredential {
         NonceCredential {
@@ -446,8 +444,7 @@ mod tests {
     #[test]
     fn create_realm_body_digest_matches_canonical() {
         let req = CreateRealmRequest {
-            realm_id: Some(42),
-            name: "managed".to_string(),
+            realm: "managed@example.com".to_string(),
             enabled: true,
             credential: dummy_credential(),
             expires_at: 1_900_000_000,
@@ -462,8 +459,7 @@ mod tests {
     #[test]
     fn update_realm_body_digest_matches_canonical() {
         let req = UpdateRealmRequest {
-            realm_id: 42,
-            name: Some("managed".to_string()),
+            realm: "managed@example.com".to_string(),
             enabled: Some(true),
             credential: dummy_credential(),
             status: Some("Active".to_string()),
@@ -490,7 +486,7 @@ mod tests {
     #[test]
     fn read_ops_have_empty_body_digest() {
         let get_realm = GetRealmRequest {
-            realm_id: 42,
+            realm: "managed@example.com".to_string(),
             credential: dummy_credential(),
         };
         assert_eq!(get_realm.body_digest(), "");

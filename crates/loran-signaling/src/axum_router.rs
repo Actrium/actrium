@@ -3,7 +3,7 @@
 //! Provides an Axum Router adapter for SignalingServer
 
 use crate::server::{SignalingServer, SignalingServerHandle};
-use actr_protocol::{AIdCredential, ActrId};
+use actr_protocol::{AIdCredential, ActrId, ActrType, IdentityClaims};
 use anyhow::{Context as _, Result};
 use axum::{
     Router,
@@ -18,6 +18,7 @@ use base64::Engine as _;
 use platform::aid::credential::validator::AIdCredentialValidator;
 use platform::config::ActrixConfig;
 use platform::monitoring::ServiceCounters;
+use prost::Message as _;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::{collections::HashMap, str::FromStr};
@@ -282,8 +283,12 @@ async fn websocket_handler(
             }
         };
 
-        match AIdCredentialValidator::check(&credential, actor_id.realm.realm_id, "actr.signaling")
-            .await
+        let actor_type = match AIdCredentialValidator::check(
+            &credential,
+            &actor_id.realm,
+            "actr.signaling",
+        )
+        .await
         {
             Ok((claims, _in_tolerance)) => {
                 let expected_actor_id = actor_id.to_string_repr();
@@ -296,6 +301,7 @@ async fn websocket_handler(
                     );
                     return axum::http::StatusCode::UNAUTHORIZED.into_response();
                 }
+                claims.actor_type
             }
             Err(e) => {
                 platform::recording::warn!(
@@ -305,15 +311,21 @@ async fn websocket_handler(
                 );
                 return axum::http::StatusCode::UNAUTHORIZED.into_response();
             }
-        }
+        };
 
-        Some((actor_id, credential))
+        Some((actor_id, actor_type, credential))
     } else {
         // The bare router is an in-process integration fixture: it skips
         // credential validation, but still binds a syntactically valid URL
-        // identity so the production relay path can address the connection.
+        // identity (with the Actor type read from the unverified claims) so
+        // the production relay path can address the connection.
         // Production always uses `require_url_auth=true` above.
-        parse_url_identity(&params).ok()
+        parse_url_identity(&params)
+            .ok()
+            .and_then(|(actor_id, credential)| {
+                let claims = IdentityClaims::decode(credential.claims.as_ref()).ok()?;
+                Some((actor_id, claims.actor_type, credential))
+            })
     };
 
     let webrtc_role = params.get("webrtc_role").cloned();
@@ -344,7 +356,7 @@ async fn handle_websocket(
     socket: WebSocket,
     state: SignalingState,
     client_ip: std::net::IpAddr,
-    url_identity: Option<(ActrId, AIdCredential)>,
+    url_identity: Option<(ActrId, ActrType, AIdCredential)>,
     webrtc_role: Option<String>,
 ) {
     platform::recording::info!("📡 New WebSocket connection: IP={}", client_ip);

@@ -241,7 +241,7 @@ async fn list_realms(State(state): State<Arc<AdminApiState>>) -> impl IntoRespon
 
 #[derive(Deserialize)]
 struct CreateRealmBody {
-    name: String,
+    realm: String,
     #[serde(default = "default_true")]
     enabled: bool,
     #[serde(default)]
@@ -261,8 +261,7 @@ async fn create_realm(
     }
 
     let req = CreateRealmRequest {
-        realm_id: None,
-        name: body.name,
+        realm: body.realm,
         enabled: body.enabled,
         credential: dummy_credential(),
         expires_at: body.expires_at,
@@ -298,20 +297,20 @@ async fn create_realm(
 
 async fn rotate_realm_secret(
     State(state): State<Arc<AdminApiState>>,
-    Path(realm_id): Path<u32>,
+    Path(realm): Path<String>,
 ) -> impl IntoResponse {
     if !state.realm_writes_enabled {
         return realm_writes_disabled_response();
     }
 
-    match state.service.rotate_realm_secret_direct(realm_id).await {
+    match state.service.rotate_realm_secret_direct(&realm).await {
         Ok(result) => (
             StatusCode::OK,
             // ADM-09: response carries the rotated realm secret; forbid caching.
             [(header::CACHE_CONTROL, "no-store")],
             Json(json!({
                 "success": true,
-                "realm_id": result.realm_id,
+                "realm": result.realm,
                 "realm_secret": result.realm_secret,
                 "previous_valid_until": result.previous_valid_until,
                 "grace_seconds": result.grace_seconds,
@@ -324,9 +323,9 @@ async fn rotate_realm_secret(
 
 async fn get_realm(
     State(state): State<Arc<AdminApiState>>,
-    Path(realm_id): Path<u32>,
+    Path(realm): Path<String>,
 ) -> impl IntoResponse {
-    match state.service.get_realm_direct(realm_id).await {
+    match state.service.get_realm_direct(&realm).await {
         Ok(resp) => {
             let status = if resp.success {
                 StatusCode::OK
@@ -349,13 +348,12 @@ async fn get_realm(
 
 #[derive(Deserialize)]
 struct UpdateRealmBody {
-    name: Option<String>,
     enabled: Option<bool>,
 }
 
 async fn update_realm(
     State(state): State<Arc<AdminApiState>>,
-    Path(realm_id): Path<u32>,
+    Path(realm): Path<String>,
     Json(body): Json<UpdateRealmBody>,
 ) -> impl IntoResponse {
     if !state.realm_writes_enabled {
@@ -363,8 +361,7 @@ async fn update_realm(
     }
 
     let req = UpdateRealmRequest {
-        realm_id,
-        name: body.name,
+        realm,
         enabled: body.enabled,
         credential: dummy_credential(),
         status: None,
@@ -803,10 +800,10 @@ pub fn build_admin_api_router(
         .route("/admin/api/node/restart", post(restart_node))
         .route("/admin/api/realms", get(list_realms))
         .route("/admin/api/realms", post(create_realm))
-        .route("/admin/api/realms/{id}", get(get_realm))
-        .route("/admin/api/realms/{id}", put(update_realm))
+        .route("/admin/api/realms/{realm}", get(get_realm))
+        .route("/admin/api/realms/{realm}", put(update_realm))
         .route(
-            "/admin/api/realms/{id}/secret/rotate",
+            "/admin/api/realms/{realm}/secret/rotate",
             post(rotate_realm_secret),
         )
         .route(
@@ -975,8 +972,7 @@ fn realm_info_to_json(info: &RealmInfo) -> Value {
     });
 
     json!({
-        "realm_id": info.realm_id,
-        "name": info.name,
+        "realm": info.realm,
         "enabled": info.enabled,
         "created_at": info.created_at,
         "updated_at": info.updated_at,

@@ -94,10 +94,9 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
     };
 
     platform::recording::debug!(
-        "Received register request for realm {}, type {}:{}",
-        request.realm.realm_id,
-        request.actr_type.publisher,
-        request.actr_type.name
+        "Received register request for realm {}, type {}",
+        request.realm,
+        request.actr_type.to_string_repr()
     );
 
     // Validate the identity fields before minting an ActrId or deriving ACL keys.
@@ -116,7 +115,7 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
     }
 
     // Validate that the Realm exists, is in a healthy state, and has not expired
-    if let Err(validation_err) = RealmEntity::validate_realm(request.realm.realm_id).await {
+    if let Err(validation_err) = RealmEntity::validate_realm(&request.realm).await {
         let (code, message) = RealmEntity::map_validation_error(validation_err);
         let error_result = RegisterResponse {
             result: Some(register_response::Result::Error(ErrorResponse {
@@ -134,52 +133,51 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
         .map(str::trim)
         .filter(|v| !v.is_empty());
 
-    let realm_secret_check =
-        match verify_realm_secret(request.realm.realm_id, provided_secret).await {
-            Ok(check @ RealmSecretCheck::ValidCurrent)
-            | Ok(check @ RealmSecretCheck::ValidPrevious) => check,
-            Ok(RealmSecretCheck::NotConfigured) => {
-                let error_result = RegisterResponse {
-                    result: Some(register_response::Result::Error(ErrorResponse {
-                        code: 403,
-                        message: "Realm is not provisioned with a registration secret".to_string(),
-                    })),
-                };
-                return encode_result(error_result);
-            }
-            Ok(RealmSecretCheck::MissingRequired) => {
-                let error_result = RegisterResponse {
-                    result: Some(register_response::Result::Error(ErrorResponse {
-                        code: 403,
-                        message: "Realm secret required".to_string(),
-                    })),
-                };
-                return encode_result(error_result);
-            }
-            Ok(RealmSecretCheck::Invalid) => {
-                let error_result = RegisterResponse {
-                    result: Some(register_response::Result::Error(ErrorResponse {
-                        code: 403,
-                        message: "Invalid realm secret".to_string(),
-                    })),
-                };
-                return encode_result(error_result);
-            }
-            Err(e) => {
-                platform::recording::error!(
-                    "Failed to verify realm secret for realm {}: {}",
-                    request.realm.realm_id,
-                    e
-                );
-                let error_result = RegisterResponse {
-                    result: Some(register_response::Result::Error(ErrorResponse {
-                        code: 500,
-                        message: "Internal error while verifying realm secret".to_string(),
-                    })),
-                };
-                return encode_result(error_result);
-            }
-        };
+    let realm_secret_check = match verify_realm_secret(&request.realm, provided_secret).await {
+        Ok(check @ RealmSecretCheck::ValidCurrent)
+        | Ok(check @ RealmSecretCheck::ValidPrevious) => check,
+        Ok(RealmSecretCheck::NotConfigured) => {
+            let error_result = RegisterResponse {
+                result: Some(register_response::Result::Error(ErrorResponse {
+                    code: 403,
+                    message: "Realm is not provisioned with a registration secret".to_string(),
+                })),
+            };
+            return encode_result(error_result);
+        }
+        Ok(RealmSecretCheck::MissingRequired) => {
+            let error_result = RegisterResponse {
+                result: Some(register_response::Result::Error(ErrorResponse {
+                    code: 403,
+                    message: "Realm secret required".to_string(),
+                })),
+            };
+            return encode_result(error_result);
+        }
+        Ok(RealmSecretCheck::Invalid) => {
+            let error_result = RegisterResponse {
+                result: Some(register_response::Result::Error(ErrorResponse {
+                    code: 403,
+                    message: "Invalid realm secret".to_string(),
+                })),
+            };
+            return encode_result(error_result);
+        }
+        Err(e) => {
+            platform::recording::error!(
+                "Failed to verify realm secret for realm {}: {}",
+                request.realm,
+                e
+            );
+            let error_result = RegisterResponse {
+                result: Some(register_response::Result::Error(ErrorResponse {
+                    code: 500,
+                    message: "Internal error while verifying realm secret".to_string(),
+                })),
+            };
+            return encode_result(error_result);
+        }
+    };
 
     // Invoke the issuer to issue a credential
     let result = match state
@@ -190,11 +188,9 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
         Ok(response) => {
             if let Some(register_response::Result::Success(ref register_ok)) = response.result {
                 platform::recording::debug!(
-                    "Successfully registered ActrId: realm={}, serial_number={}, type={}:{}",
-                    register_ok.actr_id.realm.realm_id,
-                    register_ok.actr_id.serial_number,
-                    register_ok.actr_id.r#type.publisher,
-                    register_ok.actr_id.r#type.name
+                    "Successfully registered ActrId: {}, type={}",
+                    register_ok.actr_id,
+                    request.actr_type.to_string_repr()
                 );
 
                 // ACL policy and pending signaling metadata commit together.
@@ -253,22 +249,22 @@ async fn persist_registration_state(
     if let Some(ref acl) = request.acl {
         use actr_protocol::acl_rule::SourceRealm;
 
-        let realm_id = register_ok.actr_id.realm.realm_id;
-        let my_type = register_ok.actr_id.r#type.to_string_repr();
+        let realm = &register_ok.actr_id.realm;
+        let my_type = request.actr_type.to_string_repr();
 
         let replacement = acl
             .rules
             .iter()
             .map(|rule| {
                 let allow = rule.permission == actr_protocol::acl_rule::Permission::Allow as i32;
-                let source_realm_id = match &rule.source_realm {
+                let source_realm = match &rule.source_realm {
                     Some(SourceRealm::AnyRealm(_)) => None,
-                    Some(SourceRealm::RealmId(id)) => Some(*id),
-                    None => Some(realm_id), // fallback: treat missing as self-realm
+                    Some(SourceRealm::Realm(name)) => Some(name.clone()),
+                    None => Some(realm.clone()), // fallback: treat missing as self-realm
                 };
                 ActorAcl::new_with_source_realm(
-                    realm_id,
-                    source_realm_id,
+                    realm.clone(),
+                    source_realm,
                     rule.from_type.to_string_repr(),
                     my_type.clone(),
                     allow,
@@ -276,7 +272,7 @@ async fn persist_registration_state(
             })
             .collect::<Vec<_>>();
 
-        ActorAcl::replace_for_target_in_transaction(&mut tx, realm_id, &my_type, &replacement)
+        ActorAcl::replace_for_target_in_transaction(&mut tx, realm, &my_type, &replacement)
             .await
             .map_err(|error| {
                 platform::recording::error!(
@@ -304,10 +300,10 @@ async fn persist_registration_state(
             .saturating_add(crate::renewal::REISSUE_BINDING_GRACE_SECS);
         sqlx::query(
             "INSERT OR REPLACE INTO pending_registration \
-             (realm_id, serial_number, service_spec_blob, ws_address, created_at, expires_at) \
+             (realm, serial_number, service_spec_blob, ws_address, created_at, expires_at) \
              VALUES (?, ?, ?, ?, ?, ?)",
         )
-        .bind(register_ok.actr_id.realm.realm_id as i64)
+        .bind(&register_ok.actr_id.realm)
         .bind(register_ok.actr_id.serial_number as i64)
         .bind(spec_blob)
         .bind(request.ws_address.clone())
@@ -396,7 +392,7 @@ async fn reissue_credential(
     }
 
     let registration = &request.registration;
-    if let Err(validation_err) = RealmEntity::validate_realm(registration.realm.realm_id).await {
+    if let Err(validation_err) = RealmEntity::validate_realm(&registration.realm).await {
         let (code, message) = RealmEntity::map_validation_error(validation_err);
         return encode_result(RegisterResponse {
             result: Some(register_response::Result::Error(ErrorResponse {
@@ -411,48 +407,47 @@ async fn reissue_credential(
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
         .filter(|value| !value.is_empty());
-    let realm_secret_check =
-        match verify_realm_secret(registration.realm.realm_id, provided_secret).await {
-            Ok(check @ RealmSecretCheck::ValidCurrent)
-            | Ok(check @ RealmSecretCheck::ValidPrevious) => check,
-            Ok(RealmSecretCheck::NotConfigured) => {
-                return encode_result(RegisterResponse {
-                    result: Some(register_response::Result::Error(ErrorResponse {
-                        code: 403,
-                        message: "Realm is not provisioned with a registration secret".to_string(),
-                    })),
-                });
-            }
-            Ok(RealmSecretCheck::MissingRequired) => {
-                return encode_result(RegisterResponse {
-                    result: Some(register_response::Result::Error(ErrorResponse {
-                        code: 403,
-                        message: "Realm secret required".to_string(),
-                    })),
-                });
-            }
-            Ok(RealmSecretCheck::Invalid) => {
-                return encode_result(RegisterResponse {
-                    result: Some(register_response::Result::Error(ErrorResponse {
-                        code: 403,
-                        message: "Invalid realm secret".to_string(),
-                    })),
-                });
-            }
-            Err(err) => {
-                platform::recording::error!(
-                    "Failed to verify realm secret for credential reissue in realm {}: {}",
-                    registration.realm.realm_id,
-                    err
-                );
-                return encode_result(RegisterResponse {
-                    result: Some(register_response::Result::Error(ErrorResponse {
-                        code: 500,
-                        message: "Internal error while verifying realm secret".to_string(),
-                    })),
-                });
-            }
-        };
+    let realm_secret_check = match verify_realm_secret(&registration.realm, provided_secret).await {
+        Ok(check @ RealmSecretCheck::ValidCurrent)
+        | Ok(check @ RealmSecretCheck::ValidPrevious) => check,
+        Ok(RealmSecretCheck::NotConfigured) => {
+            return encode_result(RegisterResponse {
+                result: Some(register_response::Result::Error(ErrorResponse {
+                    code: 403,
+                    message: "Realm is not provisioned with a registration secret".to_string(),
+                })),
+            });
+        }
+        Ok(RealmSecretCheck::MissingRequired) => {
+            return encode_result(RegisterResponse {
+                result: Some(register_response::Result::Error(ErrorResponse {
+                    code: 403,
+                    message: "Realm secret required".to_string(),
+                })),
+            });
+        }
+        Ok(RealmSecretCheck::Invalid) => {
+            return encode_result(RegisterResponse {
+                result: Some(register_response::Result::Error(ErrorResponse {
+                    code: 403,
+                    message: "Invalid realm secret".to_string(),
+                })),
+            });
+        }
+        Err(err) => {
+            platform::recording::error!(
+                "Failed to verify realm secret for credential reissue in realm {}: {}",
+                registration.realm,
+                err
+            );
+            return encode_result(RegisterResponse {
+                result: Some(register_response::Result::Error(ErrorResponse {
+                    code: 500,
+                    message: "Internal error while verifying realm secret".to_string(),
+                })),
+            });
+        }
+    };
 
     // Replay only an exact previously authenticated package reissue request.
     // The issuer binds the cache key to the signatures and renewal proof too.
@@ -557,7 +552,7 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
     );
 
     // 2. Validate realm state.
-    if let Err(validation_err) = RealmEntity::validate_realm(actor_id.realm.realm_id).await {
+    if let Err(validation_err) = RealmEntity::validate_realm(&actor_id.realm).await {
         let (code, message) = RealmEntity::map_validation_error(validation_err);
         return encode_renew_result(
             status_for_error_code(code),
@@ -620,9 +615,9 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
     // target persisted at registration time to enable per-target revocation
     // recheck. A NULL target (legacy row) degrades to type-only matching.
     let renew_target: Option<String> = match sqlx::query_scalar::<_, Option<String>>(
-        "SELECT target FROM issued_actor_identity WHERE realm_id = ? AND serial_number = ?",
+        "SELECT target FROM issued_actor_identity WHERE realm = ? AND serial_number = ?",
     )
-    .bind(i64::from(actor_id.realm.realm_id))
+    .bind(&actor_id.realm)
     .bind(actor_id.serial_number as i64)
     .fetch_one(platform::storage::db::get_database().get_pool())
     .await
@@ -905,7 +900,7 @@ fn aid_error_to_error_response(err: AidError) -> ErrorResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actr_protocol::{AIdCredential, ActrType, Realm, RegisterAuthMode};
+    use actr_protocol::{AIdCredential, ActrType, RegisterAuthMode};
     use prost::bytes::Bytes as ProstBytes;
 
     #[test]
@@ -917,7 +912,7 @@ mod tests {
             version: "1.0.0".to_string(),
         };
 
-        let realm = Realm { realm_id: 12345 };
+        let realm = "k7m2q9xh@example.com".to_string();
 
         let request = RegisterRequest {
             actr_type,
@@ -941,7 +936,7 @@ mod tests {
 
         // Decode
         let decoded_request = RegisterRequest::decode(buf.as_slice()).unwrap();
-        assert_eq!(decoded_request.realm.realm_id, 12345);
+        assert_eq!(decoded_request.realm, "k7m2q9xh@example.com");
         assert_eq!(decoded_request.actr_type.publisher, "apple");
         assert_eq!(decoded_request.actr_type.name, "iPhone15");
     }
@@ -955,7 +950,7 @@ mod tests {
                 name: "actor".to_string(),
                 version: "1.0.0".to_string(),
             },
-            realm: Realm { realm_id: 456 },
+            realm: "test@example.com".to_string(),
             service: None,
             service_spec: None,
             acl: None,
@@ -974,7 +969,7 @@ mod tests {
         request.encode(&mut buf).unwrap();
         let decoded_request = RegisterRequest::decode(buf.as_slice()).unwrap();
 
-        assert_eq!(decoded_request.realm.realm_id, 456);
+        assert_eq!(decoded_request.realm, "test@example.com");
         assert_eq!(decoded_request.actr_type.publisher, "test");
         assert_eq!(decoded_request.actr_type.name, "actor");
     }
@@ -987,13 +982,8 @@ mod tests {
         // Test a successful RegisterResponse
         let register_ok = RegisterOk {
             actr_id: ActrId {
-                realm: Realm { realm_id: 1 },
+                realm: "test@example.com".to_string(),
                 serial_number: 123456,
-                r#type: ActrType {
-                    publisher: "test".to_string(),
-                    name: "actor".to_string(),
-                    version: "1.0.0".to_string(),
-                },
             },
             credential: AIdCredential {
                 key_id: 42,
@@ -1023,7 +1013,7 @@ mod tests {
 
         assert!(decoded_response.result.is_some());
         if let Some(register_response::Result::Success(resp)) = decoded_response.result {
-            assert_eq!(resp.actr_id.realm.realm_id, 1);
+            assert_eq!(resp.actr_id.realm, "test@example.com");
             assert_eq!(resp.actr_id.serial_number, 123456);
             assert_eq!(resp.credential.key_id, 42);
             assert_eq!(resp.signaling_heartbeat_interval_secs, 30);

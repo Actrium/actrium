@@ -76,27 +76,29 @@ impl ActorRegistryStorage {
 
     /// Initialize database schema
     async fn init_schema(&self) -> Result<()> {
-        // Migration: rename the table of databases created before the Actor
-        // Registry rename. Ignored when the table is new or already migrated.
-        let _ = sqlx::query("ALTER TABLE service_registry RENAME TO actor_registry")
+        // Migration: tables keyed by the retired numeric Realm id cannot be
+        // mapped to Realm names. The table is a cache, so drop them and let
+        // Actors re-register.
+        sqlx::query("DROP TABLE IF EXISTS service_registry")
             .execute(&self.pool)
-            .await;
-
-        // Migration: rename the publisher column of pre-actr-package/2 tables
-        // before the statements below reference it. Ignored when the table is
-        // new or already migrated.
-        let _ = sqlx::query(
-            "ALTER TABLE actor_registry RENAME COLUMN actor_manufacturer TO actor_publisher",
+            .await?;
+        let legacy_realm_column: Option<i64> = sqlx::query_scalar(
+            "SELECT 1 FROM pragma_table_info('actor_registry') WHERE name = 'actor_realm_id'",
         )
-        .execute(&self.pool)
-        .await;
+        .fetch_optional(&self.pool)
+        .await?;
+        if legacy_realm_column.is_some() {
+            sqlx::query("DROP TABLE actor_registry")
+                .execute(&self.pool)
+                .await?;
+        }
 
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS actor_registry (
                 -- ActorId fields
                 actor_serial_number INTEGER NOT NULL,
-                actor_realm_id INTEGER NOT NULL,
+                actor_realm TEXT NOT NULL,
                 actor_publisher TEXT NOT NULL,
                 actor_device_name TEXT NOT NULL,
                 actor_version TEXT NOT NULL,
@@ -137,7 +139,7 @@ impl ActorRegistryStorage {
                 last_heartbeat_at INTEGER NOT NULL,
                 expires_at INTEGER NOT NULL,  -- TTL expiration time
 
-                PRIMARY KEY (actor_serial_number, actor_realm_id, service_name)
+                PRIMARY KEY (actor_serial_number, actor_realm, service_name)
             );
 
             CREATE INDEX IF NOT EXISTS idx_expires_at ON actor_registry(expires_at);
@@ -147,20 +149,6 @@ impl ActorRegistryStorage {
         .execute(&self.pool)
         .await
         .with_context(|| "Failed to create actor_registry table")?;
-
-        // Migration: add ws_address column to legacy actor_registry table
-        let _ = sqlx::query("ALTER TABLE actor_registry ADD COLUMN ws_address TEXT")
-            .execute(&self.pool)
-            .await; // Ignore error if column already exists
-
-        // Migration: add actor_version column to pre-#389 actor_registry tables.
-        // CREATE TABLE IF NOT EXISTS is a no-op on them, leaving INSERT/SELECT to
-        // fail with "no such column: actor_version" (#648).
-        let _ = sqlx::query(
-            "ALTER TABLE actor_registry ADD COLUMN actor_version TEXT NOT NULL DEFAULT ''",
-        )
-        .execute(&self.pool)
-        .await; // Ignore error if column already exists
 
         platform::recording::info!("Database schema initialized");
         Ok(())
@@ -194,14 +182,12 @@ impl ActorRegistryStorage {
             Some(buf)
         });
 
-        // Extract ActorId fields
-        let actor_type = &service.actor_id.r#type;
-        let actor_realm = &service.actor_id.realm;
+        let actor_type = &service.actor_type;
 
         sqlx::query(
             r#"
             INSERT INTO actor_registry (
-                actor_serial_number, actor_realm_id, actor_publisher, actor_device_name,
+                actor_serial_number, actor_realm, actor_publisher, actor_device_name,
                 actor_version,
                 service_name, message_types, capabilities_json, status,
                 service_spec_blob, acl_blob,
@@ -221,7 +207,7 @@ impl ActorRegistryStorage {
                 ?19, ?20,
                 ?21, ?22, ?23
             )
-            ON CONFLICT(actor_serial_number, actor_realm_id, service_name)
+            ON CONFLICT(actor_serial_number, actor_realm, service_name)
             DO UPDATE SET
                 actor_publisher = excluded.actor_publisher,
                 actor_device_name = excluded.actor_device_name,
@@ -245,7 +231,7 @@ impl ActorRegistryStorage {
             "#,
         )
         .bind(service.actor_id.serial_number as i64)
-        .bind(actor_realm.realm_id as i64)
+        .bind(&service.actor_id.realm)
         .bind(&actor_type.publisher)
         .bind(&actor_type.name)
         .bind(&actor_type.version)
@@ -290,13 +276,13 @@ impl ActorRegistryStorage {
             r#"
             UPDATE actor_registry
             SET last_heartbeat_at = ?1, expires_at = ?2
-            WHERE actor_serial_number = ?3 AND actor_realm_id = ?4 AND service_name = ?5
+            WHERE actor_serial_number = ?3 AND actor_realm = ?4 AND service_name = ?5
             "#,
         )
         .bind(now as i64)
         .bind(expires_at as i64)
         .bind(actor_id.serial_number as i64)
-        .bind(actor_id.realm.realm_id as i64)
+        .bind(&actor_id.realm)
         .bind(service_name)
         .execute(&self.pool)
         .await?
@@ -319,11 +305,11 @@ impl ActorRegistryStorage {
         sqlx::query(
             r#"
             DELETE FROM actor_registry
-            WHERE actor_serial_number = ?1 AND actor_realm_id = ?2 AND service_name = ?3
+            WHERE actor_serial_number = ?1 AND actor_realm = ?2 AND service_name = ?3
             "#,
         )
         .bind(actor_id.serial_number as i64)
-        .bind(actor_id.realm.realm_id as i64)
+        .bind(&actor_id.realm)
         .bind(service_name)
         .execute(&self.pool)
         .await?;
@@ -343,7 +329,7 @@ impl ActorRegistryStorage {
         let rows = sqlx::query(
             r#"
             SELECT
-                actor_serial_number, actor_realm_id, actor_publisher, actor_device_name,
+                actor_serial_number, actor_realm, actor_publisher, actor_device_name,
                 actor_version,
                 service_name, message_types, capabilities_json, status,
                 service_spec_blob, acl_blob,
@@ -398,7 +384,7 @@ impl ActorRegistryStorage {
         let rows = sqlx::query(
             r#"
             SELECT
-                actor_serial_number, actor_realm_id, actor_publisher, actor_device_name,
+                actor_serial_number, actor_realm, actor_publisher, actor_device_name,
                 actor_version,
                 service_name, message_types, capabilities_json, status,
                 service_spec_blob, acl_blob,
@@ -409,19 +395,13 @@ impl ActorRegistryStorage {
                 last_heartbeat_at
             FROM actor_registry
             WHERE actor_serial_number = ?1
-              AND actor_realm_id = ?2
-              AND actor_publisher = ?3
-              AND actor_device_name = ?4
-              AND actor_version = ?5
-              AND expires_at > ?6
+              AND actor_realm = ?2
+              AND expires_at > ?3
             ORDER BY service_name
             "#,
         )
         .bind(actor_id.serial_number as i64)
-        .bind(actor_id.realm.realm_id as i64)
-        .bind(&actor_id.r#type.publisher)
-        .bind(&actor_id.r#type.name)
-        .bind(&actor_id.r#type.version)
+        .bind(&actor_id.realm)
         .bind(now as i64)
         .fetch_all(&self.pool)
         .await?;
@@ -475,19 +455,14 @@ impl ActorRegistryStorage {
 
     /// Convert a database row to ServiceInfo
     fn row_to_service_info(&self, row: sqlx::sqlite::SqliteRow) -> Result<ServiceInfo> {
-        let actor_version: String = row.get("actor_version");
-
-        // ActorId
         let actor_id = ActrId {
             serial_number: row.get::<i64, _>("actor_serial_number") as u64,
-            realm: actr_protocol::Realm {
-                realm_id: row.get::<i64, _>("actor_realm_id") as u32,
-            },
-            r#type: actr_protocol::ActrType {
-                publisher: row.get("actor_publisher"),
-                name: row.get("actor_device_name"),
-                version: actor_version,
-            },
+            realm: row.get("actor_realm"),
+        };
+        let actor_type = actr_protocol::ActrType {
+            publisher: row.get("actor_publisher"),
+            name: row.get("actor_device_name"),
+            version: row.get("actor_version"),
         };
 
         // Basic fields
@@ -531,6 +506,7 @@ impl ActorRegistryStorage {
 
         Ok(ServiceInfo {
             actor_id,
+            actor_type,
             service_name,
             message_types,
             capabilities,
@@ -618,23 +594,23 @@ fn current_timestamp() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actr_protocol::{ActrType, Realm};
+    use actr_protocol::ActrType;
 
     fn create_test_actor_id(serial: u64) -> ActrId {
         ActrId {
             serial_number: serial,
-            realm: Realm { realm_id: 1001 },
-            r#type: ActrType {
-                publisher: "test-mfg".to_string(),
-                name: "test-device".to_string(),
-                version: "1.0.0".to_string(),
-            },
+            realm: "test@example.com".to_string(),
         }
     }
 
     fn create_test_service(serial: u64, name: &str) -> ServiceInfo {
         ServiceInfo {
             actor_id: create_test_actor_id(serial),
+            actor_type: ActrType {
+                publisher: "test-mfg".to_string(),
+                name: "test-device".to_string(),
+                version: "1.0.0".to_string(),
+            },
             service_name: name.to_string(),
             message_types: vec!["test.Message".to_string()],
             capabilities: None,
@@ -667,6 +643,7 @@ mod tests {
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].service_name, "test-service");
         assert_eq!(loaded[0].actor_id, service.actor_id);
+        assert_eq!(loaded[0].actor_type, service.actor_type);
 
         let loaded_by_actor = storage
             .load_services_by_actor_id(&service.actor_id)
@@ -677,7 +654,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_load_by_actor_requires_exact_type() {
+    async fn test_load_by_actor_requires_same_realm() {
         let storage = ActorRegistryStorage::new(":memory:", Some(3600))
             .await
             .unwrap();
@@ -685,11 +662,11 @@ mod tests {
         let service = create_test_service(1, "test-service");
         storage.save_service(&service).await.unwrap();
 
-        let mut wrong_version = service.actor_id.clone();
-        wrong_version.r#type.version = "2.0.0".to_string();
+        let mut other_realm = service.actor_id.clone();
+        other_realm.realm = "other@example.com".to_string();
 
         let loaded = storage
-            .load_services_by_actor_id(&wrong_version)
+            .load_services_by_actor_id(&other_realm)
             .await
             .unwrap();
         assert!(loaded.is_empty());
@@ -738,24 +715,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_migrates_legacy_table_missing_actor_version() {
+    async fn test_drops_legacy_table_keyed_by_numeric_realm() {
         let storage = ActorRegistryStorage::new(":memory:", Some(3600))
             .await
             .unwrap();
 
-        // Recreate the pre-#389 schema (22 columns, no actor_version, the
-        // publisher column under its retired name, and the retired table name)
+        // Recreate the schema keyed by the retired numeric Realm id
         sqlx::query("DROP TABLE actor_registry")
             .execute(&storage.pool)
             .await
             .unwrap();
         sqlx::query(
             r#"
-            CREATE TABLE service_registry (
+            CREATE TABLE actor_registry (
                 actor_serial_number INTEGER NOT NULL,
                 actor_realm_id INTEGER NOT NULL,
-                actor_manufacturer TEXT NOT NULL,
+                actor_publisher TEXT NOT NULL,
                 actor_device_name TEXT NOT NULL,
+                actor_version TEXT NOT NULL,
                 service_name TEXT NOT NULL,
                 message_types TEXT NOT NULL,
                 capabilities_json TEXT,
@@ -782,8 +759,7 @@ mod tests {
         .await
         .unwrap();
 
-        // Re-run schema init as if reopening a legacy database: CREATE TABLE
-        // IF NOT EXISTS is a no-op, so the ALTER TABLE migrations must run
+        // Re-run schema init as if reopening a legacy database
         storage.init_schema().await.unwrap();
 
         let service = create_test_service(1, "legacy-service");

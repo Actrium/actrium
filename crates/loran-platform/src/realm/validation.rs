@@ -12,19 +12,19 @@ use super::model::{Realm, RealmStatus};
 #[non_exhaustive]
 pub enum RealmValidationError {
     /// Realm not found, disabled, expired, or in a non-Active status.
-    RealmUnavailable { realm_id: u32, reason: String },
+    RealmUnavailable { realm: String, reason: String },
     /// Database error during realm lookup.
-    StoreError { realm_id: u32, message: String },
+    StoreError { realm: String, message: String },
 }
 
 impl std::fmt::Display for RealmValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::RealmUnavailable { realm_id, reason } => {
-                write!(f, "Realm {realm_id} unavailable: {reason}")
+            Self::RealmUnavailable { realm, reason } => {
+                write!(f, "Realm {realm} unavailable: {reason}")
             }
-            Self::StoreError { realm_id, message } => {
-                write!(f, "Database error for realm {realm_id}: {message}")
+            Self::StoreError { realm, message } => {
+                write!(f, "Database error for realm {realm}: {message}")
             }
         }
     }
@@ -38,43 +38,35 @@ impl Realm {
     ///
     /// Returns Ok(Realm) if the realm is usable.
     /// Returns Err(RealmValidationError) if the realm is unavailable or a database error occurred.
-    pub async fn validate_realm(realm_id: u32) -> Result<Realm, RealmValidationError> {
-        let realm = Self::get(realm_id)
+    pub async fn validate_realm(name: &str) -> Result<Realm, RealmValidationError> {
+        let unavailable = |reason: String| RealmValidationError::RealmUnavailable {
+            realm: name.to_string(),
+            reason,
+        };
+        let realm = Self::get(name)
             .await
             .map_err(|e| RealmValidationError::StoreError {
-                realm_id,
+                realm: name.to_string(),
                 message: format!("Failed to query realm: {e}"),
             })?;
 
         let Some(realm) = realm else {
-            return Err(RealmValidationError::RealmUnavailable {
-                realm_id,
-                reason: format!("Realm {realm_id} not found"),
-            });
+            return Err(unavailable(format!("Realm {name} not found")));
         };
 
         if realm.is_expired() {
-            return Err(RealmValidationError::RealmUnavailable {
-                realm_id,
-                reason: format!("Realm {realm_id} has expired"),
-            });
+            return Err(unavailable(format!("Realm {name} has expired")));
         }
 
         if realm.status != RealmStatus::Active {
-            return Err(RealmValidationError::RealmUnavailable {
-                realm_id,
-                reason: format!(
-                    "Realm {} is not in Active status (current: {})",
-                    realm_id, realm.status
-                ),
-            });
+            return Err(unavailable(format!(
+                "Realm {name} is not in Active status (current: {})",
+                realm.status
+            )));
         }
 
         if !realm.enabled {
-            return Err(RealmValidationError::RealmUnavailable {
-                realm_id,
-                reason: format!("Realm {realm_id} is disabled"),
-            });
+            return Err(unavailable(format!("Realm {name} is disabled")));
         }
 
         Ok(realm)
@@ -134,20 +126,26 @@ mod tests {
     #[test]
     fn test_validation_error_display() {
         let err = RealmValidationError::RealmUnavailable {
-            realm_id: 1,
+            realm: "one@example.com".to_string(),
             reason: "test reason".to_string(),
         };
-        assert_eq!(err.to_string(), "Realm 1 unavailable: test reason");
+        assert_eq!(
+            err.to_string(),
+            "Realm one@example.com unavailable: test reason"
+        );
         assert_eq!(
             Realm::map_validation_error(err),
             (403, "test reason".to_string())
         );
 
         let err2 = RealmValidationError::StoreError {
-            realm_id: 2,
+            realm: "two@example.com".to_string(),
             message: "timeout".to_string(),
         };
-        assert_eq!(err2.to_string(), "Database error for realm 2: timeout");
+        assert_eq!(
+            err2.to_string(),
+            "Database error for realm two@example.com: timeout"
+        );
         assert_eq!(
             Realm::map_validation_error(err2),
             (500, "timeout".to_string())

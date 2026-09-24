@@ -3,7 +3,7 @@ import { X, Copy, Download, AlertTriangle, Key } from "lucide-react";
 
 interface RealmSecretModalProps {
   isOpen: boolean;
-  realmId: number;
+  realm: string;
   secret: string;
   previousValidUntil?: number | null;
   onClose: () => void;
@@ -11,7 +11,7 @@ interface RealmSecretModalProps {
 
 export function RealmSecretModal({
   isOpen,
-  realmId,
+  realm,
   secret,
   previousValidUntil,
   onClose,
@@ -36,7 +36,7 @@ export function RealmSecretModal({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `realm-${realmId}-secret.txt`;
+    a.download = `realm-${realm}-secret.txt`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -72,8 +72,8 @@ export function RealmSecretModal({
 
           <div className="space-y-3">
             <div>
-              <label className="text-xs font-medium text-gray-500 uppercase">Realm ID</label>
-              <p className="text-sm font-mono text-gray-900">{realmId}</p>
+              <label className="text-xs font-medium text-gray-500 uppercase">Realm</label>
+              <p className="text-sm font-mono text-gray-900">{realm}</p>
             </div>
             
             <div>

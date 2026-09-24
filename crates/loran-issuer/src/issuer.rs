@@ -110,7 +110,7 @@ const PUBLISHER_SIGNED_AT_FUTURE_SKEW_SECS: u64 = 60;
 const PUBLISHER_NONCE_TTL_SECS: u64 = 10 * 60;
 
 use actr_protocol::{
-    AIdCredential, ActrId, ActrType, ErrorResponse, IdentityClaims, Realm, RegisterRequest,
+    AIdCredential, ActrId, ActrType, ErrorResponse, IdentityClaims, RegisterRequest,
     RegisterResponse, register_response,
 };
 use base64::prelude::*;
@@ -966,12 +966,11 @@ impl AIdIssuer {
         renewal_proof: Option<&[u8]>,
         realm_secret_check: Option<&RealmSecretCheck>,
     ) -> Result<(register_response::RegisterOk, Option<PublisherAuthBinding>), ReissueFailure> {
-        if actor_id.realm != request.realm || actor_id.r#type != request.actr_type {
+        if actor_id.realm != request.realm {
             platform::recording::warn!(
-                "Credential reissue identity mismatch: actor={}, requested_type={}, requested_realm={}",
+                "Credential reissue Realm mismatch: actor={}, requested_realm={}",
                 actor_id.to_string_repr(),
-                request.actr_type.to_string_repr(),
-                request.realm.realm_id
+                request.realm
             );
             return Err(AidError::InvalidFormat.into());
         }
@@ -986,6 +985,15 @@ impl AIdIssuer {
         let proof = self
             .verify_actor_possession(actor_id, renewal_proof)
             .await?;
+        // The requested type must be the one this identity was issued for.
+        if Self::issued_actor(actor_id).await?.0 != request.actr_type {
+            platform::recording::warn!(
+                "Credential reissue type mismatch: actor={}, requested_type={}",
+                actor_id.to_string_repr(),
+                request.actr_type.to_string_repr()
+            );
+            return Err(AidError::InvalidFormat.into());
+        }
 
         let mut register_ok = self
             .issue_credential_for_actor(actor_id, request.target.as_deref())
@@ -1152,13 +1160,14 @@ impl AIdIssuer {
         // Build IdentityClaims (proto type, plaintext).
         let (key_id, verifying_key, expr_time) = self.signing_snapshot().await?;
         let claims_proto = IdentityClaims {
-            realm_id: actr_id.realm.realm_id,
+            realm: actr_id.realm.clone(),
             actor_id: actr_id.to_string_repr(),
             expires_at: expr_time,
             protocol_version: 1,
-            issuer: format!("actr:realm:{}:authority", actr_id.realm.realm_id),
+            issuer: actr_id.realm.clone(),
             provider: "actrix-official".to_string(),
             audience: "actr.signaling".to_string(),
+            actor_type: request.actr_type.clone(),
         };
 
         // Proto-encode the claims bytes.
@@ -1262,7 +1271,7 @@ impl AIdIssuer {
         if request.actr_type.publisher.contains('.') {
             platform::recording::warn!(
                 "Linked registration rejected: DNS-style publisher namespace is reserved for verified publishers, realm={}, type={}",
-                request.realm.realm_id,
+                request.realm,
                 request.actr_type.to_string_repr()
             );
             return Err(AidError::PublisherNotVerified);
@@ -1273,7 +1282,7 @@ impl AIdIssuer {
             other => {
                 platform::recording::warn!(
                     "Linked registration rejected: realm secret was not verified, realm={}, type={}, secret_check={:?}",
-                    request.realm.realm_id,
+                    request.realm,
                     request.actr_type.to_string_repr(),
                     other
                 );
@@ -1434,7 +1443,7 @@ impl AIdIssuer {
                 &publisher.public_key,
                 publisher_name,
                 &publisher.key_id,
-                request.realm.realm_id,
+                &request.realm,
                 actr_type,
                 target_ref,
                 &manifest_sha256_hex,
@@ -1615,7 +1624,7 @@ impl AIdIssuer {
             &publisher_info.public_key,
             publisher_name,
             &signing_key_id,
-            request.realm.realm_id,
+            &request.realm,
             actr_type,
             manifest_target,
             &manifest_sha256_hex,
@@ -1714,7 +1723,7 @@ impl AIdIssuer {
         publisher_public_key: &str,
         publisher_name: &str,
         signing_key_id: &str,
-        realm_id: u32,
+        realm: &str,
         actr_type: &ActrType,
         target: &str,
         manifest_sha256_hex: &str,
@@ -1736,7 +1745,7 @@ impl AIdIssuer {
 
         let publisher_payload = actr_protocol::build_publisher_register_payload(
             actr_protocol::PublisherRegisterPayload {
-                realm_id,
+                realm,
                 actr_type,
                 target,
                 manifest_sha256_hex,
@@ -1855,7 +1864,7 @@ impl AIdIssuer {
     async fn generate_actr_id(
         &self,
         actr_type: &ActrType,
-        realm: &Realm,
+        realm: &str,
         target: Option<&str>,
         auth_mode: actr_protocol::RegisterAuthMode,
     ) -> Result<ActrId, AidError> {
@@ -1870,13 +1879,13 @@ impl AIdIssuer {
         // restart in the same millisecond, or clock rollback. Never overwrite
         // the earlier identity: advance Snowflake state and retry.
         for _ in 0..1024 {
-            let serial_number = SerialNumber::sn(realm.realm_id).value();
+            let serial_number = SerialNumber::sn().value();
             let reserved = sqlx::query(
                 "INSERT OR IGNORE INTO issued_actor_identity
-                 (realm_id, serial_number, actor_type, target, issued_at, auth_mode)
+                 (realm, serial_number, actor_type, target, issued_at, auth_mode)
                  VALUES (?, ?, ?, ?, ?, ?)",
             )
-            .bind(i64::from(realm.realm_id))
+            .bind(realm)
             .bind(serial_number as i64)
             .bind(&actor_type)
             .bind(target)
@@ -1892,9 +1901,8 @@ impl AIdIssuer {
             .rows_affected();
             if reserved == 1 {
                 return Ok(ActrId {
-                    realm: *realm,
+                    realm: realm.to_string(),
                     serial_number,
-                    r#type: actr_type.clone(),
                 });
             }
         }
@@ -2299,10 +2307,10 @@ impl AIdIssuer {
         if let Some(target) = target.filter(|t| !t.is_empty()) {
             sqlx::query(
                 "UPDATE issued_actor_identity SET target = ?1, auth_mode = ?4
-                 WHERE realm_id = ?2 AND serial_number = ?3",
+                 WHERE realm = ?2 AND serial_number = ?3",
             )
             .bind(target)
-            .bind(i64::from(actor_id.realm.realm_id))
+            .bind(&actor_id.realm)
             .bind(actor_id.serial_number as i64)
             .bind(actr_protocol::RegisterAuthMode::Package as i32)
             .execute(&mut *tx)
@@ -2314,6 +2322,30 @@ impl AIdIssuer {
             .await
             .map_err(|e| AidError::GenerationFailed(format!("reissue cache commit failed: {e}")))?;
         Ok(())
+    }
+
+    /// Load the Actor type and auth mode recorded when `actor_id` was issued.
+    async fn issued_actor(actor_id: &ActrId) -> Result<(ActrType, Option<i32>), AidError> {
+        let row: Option<(String, Option<i32>)> = sqlx::query_as(
+            "SELECT actor_type, auth_mode FROM issued_actor_identity
+             WHERE realm = ? AND serial_number = ?",
+        )
+        .bind(&actor_id.realm)
+        .bind(actor_id.serial_number as i64)
+        .fetch_optional(platform::storage::db::get_database().get_pool())
+        .await
+        .map_err(|e| AidError::GenerationFailed(format!("actor identity lookup failed: {e}")))?;
+        let Some((actor_type, auth_mode)) = row else {
+            platform::recording::warn!(
+                "Credential issuance rejected: actor {} was not issued by this Realm",
+                actor_id.to_string_repr()
+            );
+            return Err(AidError::InvalidFormat);
+        };
+        let actor_type = ActrType::from_string_repr(&actor_type).map_err(|e| {
+            AidError::GenerationFailed(format!("stored actor type is invalid: {e}"))
+        })?;
+        Ok((actor_type, auth_mode))
     }
 
     /// Re-validate that an existing actor may still receive credentials.
@@ -2334,7 +2366,7 @@ impl AIdIssuer {
         &self,
         actor_id: &ActrId,
         target: Option<&str>,
-    ) -> Result<(), AidError> {
+    ) -> Result<ActrType, AidError> {
         // AIS-04: an explicitly revoked identity is terminal, regardless of any
         // still-valid renewal token it may hold.
         if crate::renewal::is_actor_revoked(actor_id)
@@ -2356,7 +2388,7 @@ impl AIdIssuer {
 
         // AIS-03(a): the realm must still be usable (exists, enabled, not
         // expired, Active status).
-        platform::realm::Realm::validate_realm(actor_id.realm.realm_id)
+        platform::realm::Realm::validate_realm(&actor_id.realm)
             .await
             .map_err(|e| match e {
                 platform::realm::RealmValidationError::RealmUnavailable { reason, .. } => {
@@ -2370,8 +2402,10 @@ impl AIdIssuer {
             })?;
 
         // AIS-03(b): recheck package/publisher status for package identities.
+        // The Actor type is the one recorded when the identity was issued.
+        let (actor_type, auth_mode) = Self::issued_actor(actor_id).await?;
         let pool = platform::storage::db::get_database().get_pool().clone();
-        let type_str = actor_id.r#type.to_program_identity();
+        let type_str = actor_type.to_program_identity();
         // Any package row (regardless of lifecycle status) for this type marks a
         // published-package identity. `publisher_package.status` stores 'active' or
         // 'revoked'. When the target is known (persisted at registration time),
@@ -2401,19 +2435,9 @@ impl AIdIssuer {
                 })?
         };
 
-        let auth_mode: Option<i32> = sqlx::query_scalar::<_, Option<i32>>(
-            "SELECT auth_mode FROM issued_actor_identity WHERE realm_id = ? AND serial_number = ?",
-        )
-        .bind(i64::from(actor_id.realm.realm_id))
-        .bind(actor_id.serial_number as i64)
-        .fetch_optional(&pool)
-        .await
-        .map_err(|e| AidError::GenerationFailed(format!("actor auth mode lookup failed: {e}")))?
-        .flatten();
-
         if statuses.is_empty() && auth_mode == Some(actr_protocol::RegisterAuthMode::Linked as i32)
         {
-            return Ok(());
+            return Ok(actor_type);
         }
 
         let has_active = statuses.iter().any(|status| status == "active");
@@ -2427,33 +2451,33 @@ impl AIdIssuer {
         }
 
         // Published and unpublished package identities both require an active publisher.
-        let publisher = actrix_publisher_registry::model::Publisher::get_by_name(
-            &pool,
-            &actor_id.r#type.publisher,
-        )
-        .await
-        .map_err(|e| AidError::GenerationFailed(format!("publisher status lookup failed: {e}")))?;
+        let publisher =
+            actrix_publisher_registry::model::Publisher::get_by_name(&pool, &actor_type.publisher)
+                .await
+                .map_err(|e| {
+                    AidError::GenerationFailed(format!("publisher status lookup failed: {e}"))
+                })?;
         // Pre-upgrade rows have no auth mode. A DNS-style identity is always a
         // package identity; a non-domain identity without a publisher or package
         // is the legacy linked case. Known package identities never take this fallback.
         if auth_mode.is_none()
             && statuses.is_empty()
             && publisher.is_none()
-            && !actor_id.r#type.publisher.contains('.')
+            && !actor_type.publisher.contains('.')
         {
-            return Ok(());
+            return Ok(actor_type);
         }
         match publisher {
             Some(publisher_record)
                 if publisher_record.status
                     == actrix_publisher_registry::model::PublisherStatus::Active =>
             {
-                Ok(())
+                Ok(actor_type)
             }
             Some(publisher_record) => {
                 platform::recording::warn!(
                     "Credential issuance rejected: publisher {} for type {} is not active (status={})",
-                    actor_id.r#type.publisher,
+                    actor_type.publisher,
                     type_str,
                     publisher_record.status
                 );
@@ -2462,7 +2486,7 @@ impl AIdIssuer {
             None => {
                 platform::recording::warn!(
                     "Credential issuance rejected: publisher {} for active package type {} no longer exists",
-                    actor_id.r#type.publisher,
+                    actor_type.publisher,
                     type_str
                 );
                 Err(AidError::PublisherNotVerified)
@@ -2482,7 +2506,7 @@ impl AIdIssuer {
         // Re-validate realm/package/publisher state and the revocation list
         // before signing (AIS-03 / AIS-04). Covers both /renew and /reissue,
         // which are the only callers of this method.
-        self.recheck_existing_actor(actor_id, target).await?;
+        let actor_type = self.recheck_existing_actor(actor_id, target).await?;
 
         // Ensure a signing key is available.
         self.ensure_key_loaded().await?;
@@ -2490,13 +2514,14 @@ impl AIdIssuer {
         // Build IdentityClaims.
         let (key_id, verifying_key, expr_time) = self.signing_snapshot().await?;
         let claims_proto = IdentityClaims {
-            realm_id: actor_id.realm.realm_id,
+            realm: actor_id.realm.clone(),
             actor_id: actor_id.to_string_repr(),
             expires_at: expr_time,
             protocol_version: 1,
-            issuer: format!("actr:realm:{}:authority", actor_id.realm.realm_id),
+            issuer: actor_id.realm.clone(),
             provider: "actrix-official".to_string(),
             audience: "actr.signaling".to_string(),
+            actor_type,
         };
 
         let claims_bytes = claims_proto.encode_to_vec();
@@ -2544,12 +2569,12 @@ impl AIdIssuer {
         actor_id: &ActrId,
         expires_at: u64,
     ) -> actr_protocol::TurnCredential {
-        let realm_id = actor_id.realm.realm_id;
+        let realm = actor_id.realm.clone();
         let actor_id = actor_id.to_string_repr();
         let provider = "actrix-official";
         let audience = "actr.turn";
         let username = format!(
-            "{expires_at}:realm={realm_id}:provider={provider}:audience={audience}:actor={actor_id}"
+            "{expires_at}:realm={realm}:provider={provider}:audience={audience}:actor={actor_id}"
         );
         let mut mac = HmacSha1::new_from_slice(self.config.turn_secret.as_bytes())
             .expect("HMAC-SHA1 accepts any key length");
@@ -2562,7 +2587,7 @@ impl AIdIssuer {
             password,
             expires_at,
             protocol_version: 1,
-            realm_id,
+            realm,
             provider: provider.to_string(),
             audience: audience.to_string(),
         }

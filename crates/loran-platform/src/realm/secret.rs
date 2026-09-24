@@ -82,12 +82,12 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
 ///
 /// Load Realm → current→previous → generate new hash → save
 pub async fn rotate_realm_secret(
-    realm_id: u32,
+    realm: &str,
     previous_grace_secs: Option<u64>,
 ) -> Result<RealmSecretRotation, RealmError> {
     let grace_secs = previous_grace_secs.unwrap_or(DEFAULT_REALM_SECRET_PREVIOUS_GRACE_SECS);
 
-    let mut realm = Realm::get(realm_id).await?.ok_or(RealmError::NotFound)?;
+    let mut realm = Realm::get(realm).await?.ok_or(RealmError::NotFound)?;
 
     let now = Utc::now().timestamp() as u64;
     let previous_valid_until = now.saturating_add(grace_secs);
@@ -113,8 +113,8 @@ pub async fn rotate_realm_secret(
 }
 
 /// Get realm secret state metadata (hash only, no plaintext)
-pub async fn get_realm_secret_state(realm_id: u32) -> Result<RealmSecretState, RealmError> {
-    let realm = Realm::get(realm_id).await?.ok_or(RealmError::NotFound)?;
+pub async fn get_realm_secret_state(realm: &str) -> Result<RealmSecretState, RealmError> {
+    let realm = Realm::get(realm).await?.ok_or(RealmError::NotFound)?;
 
     let current_hash = if realm.secret_current.is_empty() {
         None
@@ -134,12 +134,12 @@ pub async fn get_realm_secret_state(realm_id: u32) -> Result<RealmSecretState, R
     })
 }
 
-/// Verify the request secret by realm id.
+/// Verify the request secret by Realm name.
 pub async fn verify_realm_secret(
-    realm_id: u32,
+    realm: &str,
     provided_secret: Option<&str>,
 ) -> Result<RealmSecretCheck, RealmError> {
-    let realm = Realm::get(realm_id).await?.ok_or(RealmError::NotFound)?;
+    let realm = Realm::get(realm).await?.ok_or(RealmError::NotFound)?;
 
     // Legacy realm with no secret configured: maintain backward compatibility
     if realm.secret_current.is_empty() {
@@ -180,15 +180,15 @@ mod tests {
 
         let secret = generate_realm_secret();
         let hash = hash_realm_secret(&secret);
-        let realm = Realm::create("test-secret-realm".to_string(), hash).await?;
+        let realm = Realm::create("test-secret-realm@example.com".to_string(), hash).await?;
 
-        let result = verify_realm_secret(realm.id, Some(&secret)).await?;
+        let result = verify_realm_secret(&realm.name, Some(&secret)).await?;
         assert_eq!(result, RealmSecretCheck::ValidCurrent);
 
-        let missing = verify_realm_secret(realm.id, None).await?;
+        let missing = verify_realm_secret(&realm.name, None).await?;
         assert_eq!(missing, RealmSecretCheck::MissingRequired);
 
-        let invalid = verify_realm_secret(realm.id, Some("wrong-secret")).await?;
+        let invalid = verify_realm_secret(&realm.name, Some("wrong-secret")).await?;
         assert_eq!(invalid, RealmSecretCheck::Invalid);
 
         Ok(())
@@ -201,14 +201,14 @@ mod tests {
 
         let old_secret = generate_realm_secret();
         let old_hash = hash_realm_secret(&old_secret);
-        let realm = Realm::create("test-rotate-realm".to_string(), old_hash).await?;
+        let realm = Realm::create("test-rotate-realm@example.com".to_string(), old_hash).await?;
 
-        let rotated = rotate_realm_secret(realm.id, Some(60)).await?;
+        let rotated = rotate_realm_secret(&realm.name, Some(60)).await?;
 
-        let new_ok = verify_realm_secret(realm.id, Some(&rotated.new_secret)).await?;
+        let new_ok = verify_realm_secret(&realm.name, Some(&rotated.new_secret)).await?;
         assert_eq!(new_ok, RealmSecretCheck::ValidCurrent);
 
-        let old_ok = verify_realm_secret(realm.id, Some(&old_secret)).await?;
+        let old_ok = verify_realm_secret(&realm.name, Some(&old_secret)).await?;
         assert_eq!(old_ok, RealmSecretCheck::ValidPrevious);
 
         Ok(())
@@ -219,7 +219,7 @@ mod tests {
     async fn test_realm_without_secret_is_rejected() -> anyhow::Result<()> {
         setup_test_db().await?;
 
-        let result = Realm::create("test-no-secret".to_string(), String::new()).await;
+        let result = Realm::create("test-no-secret@example.com".to_string(), String::new()).await;
         assert!(matches!(result, Err(RealmError::ValidationError(_))));
 
         Ok(())

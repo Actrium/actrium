@@ -32,10 +32,10 @@
 
 use actr_protocol::{
     AIdCredential, ActrId, ActrRelay, ActrToSignaling, ActrType, ErrorResponse, PeerToSignaling,
-    Ping, Pong, Realm, RegisterResponse, RelayDeliveryContext, RelayDeliveryResult,
-    RelayDeliveryStatus, RoleAssignment, RoleNegotiation, SIGNALING_ENVELOPE_VERSION,
-    SignalingEnvelope, SignalingToActr, actr_relay, actr_to_signaling, peer_to_signaling,
-    register_response, signaling_envelope, signaling_to_actr,
+    Ping, Pong, RegisterResponse, RelayDeliveryContext, RelayDeliveryResult, RelayDeliveryStatus,
+    RoleAssignment, RoleNegotiation, SIGNALING_ENVELOPE_VERSION, SignalingEnvelope,
+    SignalingToActr, actr_relay, actr_to_signaling, peer_to_signaling, register_response,
+    signaling_envelope, signaling_to_actr,
 };
 use futures_util::{SinkExt, StreamExt};
 use platform::aid::credential::validator::AIdCredentialValidator;
@@ -376,7 +376,7 @@ pub async fn handle_websocket_connection(
     websocket: WebSocket,
     server: SignalingServerHandle,
     client_ip: Option<std::net::IpAddr>,
-    url_identity: Option<(ActrId, AIdCredential)>,
+    url_identity: Option<(ActrId, ActrType, AIdCredential)>,
     webrtc_role: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let client_id = Uuid::new_v4().to_string();
@@ -396,11 +396,13 @@ pub async fn handle_websocket_connection(
     let control_tx = egress.clone();
 
     // Register the client (including the bounded egress handle)
-    let (actor_id, credential) = match url_identity {
-        Some(identity) => (Some(identity.0), Some(identity.1)),
-        None => (None, None),
+    let (actor_id, actor_type, credential) = match url_identity {
+        Some((actor_id, actor_type, credential)) => {
+            (Some(actor_id), Some(actor_type), Some(credential))
+        }
+        None => (None, None, None),
     };
-    let actor_id_for_registry = actor_id.clone();
+    let actor_id_for_registry = actor_id.clone().zip(actor_type);
     let stale_clients = {
         let mut clients_guard = server.clients.write().await;
 
@@ -436,7 +438,7 @@ pub async fn handle_websocket_connection(
     close_stale_clients(stale_clients, &server).await;
 
     // Register actor in actor registry for discovery/routing (only when URL identity is provided)
-    if let Some(actor_id_for_registry) = actor_id_for_registry {
+    if let Some((actor_id_for_registry, actor_type)) = actor_id_for_registry {
         {
             // Load pending service_spec and ws_address from DB (written by Issuer during registration)
             let (service_spec, ws_address) = {
@@ -444,11 +446,11 @@ pub async fn handle_websocket_connection(
                 let pool = db.get_pool();
                 let row: Option<(Option<Vec<u8>>, Option<String>)> = sqlx::query_as(
                     "SELECT service_spec_blob, ws_address FROM pending_registration \
-                     WHERE serial_number = ?1 AND realm_id = ?2 \
+                     WHERE serial_number = ?1 AND realm = ?2 \
                        AND (expires_at IS NULL OR expires_at > unixepoch())",
                 )
                 .bind(actor_id_for_registry.serial_number as i64)
-                .bind(actor_id_for_registry.realm.realm_id as i64)
+                .bind(&actor_id_for_registry.realm)
                 .fetch_optional(pool)
                 .await
                 .ok()
@@ -462,13 +464,11 @@ pub async fn handle_websocket_connection(
                 }
             };
 
-            let service_name = format!(
-                "{}:{}",
-                actor_id_for_registry.r#type.publisher, actor_id_for_registry.r#type.name
-            );
+            let service_name = format!("{}:{}", actor_type.publisher, actor_type.name);
             let mut registry = server.actor_registry.write().await;
             if let Err(e) = registry.register_service_full(
                 actor_id_for_registry.clone(),
+                actor_type.clone(),
                 service_name,
                 vec![],
                 None,
@@ -484,7 +484,7 @@ pub async fn handle_websocket_connection(
             let actor_id_for_presence = actor_id_for_registry.clone();
             let presence = server.presence_manager.read().await;
             let subscribers = presence
-                .get_subscribers_with_acl(&actor_id_for_presence)
+                .get_subscribers_with_acl(&actor_id_for_presence, &actor_type)
                 .await;
             drop(presence);
 
@@ -927,13 +927,8 @@ async fn send_register_error(
 
     // Create temporary ActrId (for response)
     let temp_actor_id = ActrId {
-        realm: Realm { realm_id: 0 },
+        realm: String::new(),
         serial_number: 0,
-        r#type: ActrType {
-            publisher: "temp".to_string(),
-            name: "temp".to_string(),
-            version: "1.0.0".to_string(),
-        },
     };
 
     let flow = signaling_envelope::Flow::ServerToActr(SignalingToActr {
@@ -964,8 +959,7 @@ async fn handle_actr_to_server(
     );
 
     // Validate that Realm exists, is not expired, and is in normal state
-    let realm_id = source.realm.realm_id;
-    if let Err(e) = RealmEntity::validate_realm(realm_id).await {
+    if let Err(e) = RealmEntity::validate_realm(&source.realm).await {
         let (code, msg) = RealmEntity::map_validation_error(e);
         platform::recording::warn!(
             "⚠️  Actor {} realm validation failed: {}",
@@ -985,14 +979,14 @@ async fn handle_actr_to_server(
     }
 
     // Validate credential and get tolerance period status
-    let in_tolerance_period = match AIdCredentialValidator::check(
+    let (claims, in_tolerance_period) = match AIdCredentialValidator::check(
         &actr_to_server.credential,
-        source.realm.realm_id,
+        &source.realm,
         "actr.signaling",
     )
     .await
     {
-        Ok((_claims, in_tolerance)) => in_tolerance,
+        Ok(checked) => checked,
         Err(e) => {
             platform::recording::warn!(
                 "⚠️  Actor {} credential validation failed: {}",
@@ -1013,6 +1007,26 @@ async fn handle_actr_to_server(
         }
     };
 
+    // The credential must belong to the source; its claims carry the source's Actor type.
+    if claims.actor_id != source.to_string_repr() {
+        platform::recording::warn!(
+            "source does not match credential actor_id: source={}, credential={}",
+            source.to_string_repr(),
+            claims.actor_id
+        );
+        send_error_response(
+            client_id,
+            &source,
+            403,
+            "Source identity mismatch: source does not match credential",
+            server,
+            Some(request_envelope_id),
+        )
+        .await?;
+        return Ok(());
+    }
+    let source_type = claims.actor_type;
+
     match actr_to_server.payload {
         Some(actr_to_signaling::Payload::Ping(ping)) => {
             handle_ping(
@@ -1029,18 +1043,41 @@ async fn handle_actr_to_server(
             handle_unregister(source, req, client_id, server, request_envelope_id).await?;
         }
         Some(actr_to_signaling::Payload::DiscoveryRequest(req)) => {
-            handle_discovery_request(source, req, client_id, server, request_envelope_id).await?;
+            handle_discovery_request(
+                source,
+                &source_type,
+                req,
+                client_id,
+                server,
+                request_envelope_id,
+            )
+            .await?;
         }
         Some(actr_to_signaling::Payload::RouteCandidatesRequest(req)) => {
-            handle_route_candidates_request(source, req, client_id, server, request_envelope_id)
-                .await?;
+            handle_route_candidates_request(
+                source,
+                &source_type,
+                req,
+                client_id,
+                server,
+                request_envelope_id,
+            )
+            .await?;
         }
         Some(actr_to_signaling::Payload::GetServiceSpecRequest(req)) => {
             handle_get_service_spec_request(source, req, client_id, server, request_envelope_id)
                 .await?;
         }
         Some(actr_to_signaling::Payload::SubscribeActrUpRequest(req)) => {
-            handle_subscribe_actr_up(source, req, client_id, server, request_envelope_id).await?;
+            handle_subscribe_actr_up(
+                source,
+                source_type,
+                req,
+                client_id,
+                server,
+                request_envelope_id,
+            )
+            .await?;
         }
         Some(actr_to_signaling::Payload::UnsubscribeActrUpRequest(req)) => {
             handle_unsubscribe_actr_up(source, req, client_id, server, request_envelope_id).await?;
@@ -1349,8 +1386,7 @@ async fn handle_actr_relay(
     let target = relay.target.clone();
     let delivery_context = relay.delivery_context;
     // Validate source Actor realm (exists, not expired, and in normal state)
-    let realm_id = source.realm.realm_id;
-    if let Err(e) = RealmEntity::validate_realm(realm_id).await {
+    if let Err(e) = RealmEntity::validate_realm(&source.realm).await {
         let (code, msg) = RealmEntity::map_validation_error(e);
         platform::recording::warn!(
             "⚠️  Actor {} realm validation failed: {}",
@@ -1377,86 +1413,31 @@ async fn handle_actr_relay(
 
     platform::recording::debug!("handle_actr_relay: relay={:?}", relay);
 
-    // ACL check: can source relay to target?
-    use platform::realm::acl::ActorAcl;
-    let source_realm = source.realm.realm_id;
-    let target_realm = target.realm.realm_id;
-
-    // Unified ACL check: same-realm / cross-realm both go through the same rule query.
-    // Source type is trusted (source passed credential validation above is not yet done,
-    // but source identity is bound to the connection); target type MUST be resolved from
-    // the server-known connected actor, never the self-asserted envelope field, otherwise
-    // a forged target type bypasses ACL (SIG-02).
-    let source_type = type_key(&source.r#type);
-    let target_type = {
-        let clients = server.clients.read().await;
-        clients
-            .iter()
-            .find_map(|(_, client)| {
-                client.actor_id.as_ref().and_then(|aid| {
-                    if aid.realm.realm_id == target.realm.realm_id
-                        && aid.serial_number == target.serial_number
-                    {
-                        Some(type_key(&aid.r#type))
-                    } else {
-                        None
-                    }
-                })
-            })
-            // Fallback to the asserted type only for ACL logging when the target is not
-            // currently connected — delivery will fail downstream regardless.
-            .unwrap_or_else(|| type_key(&target.r#type))
-    };
-
-    let can_relay = ActorAcl::can_discover(source_realm, target_realm, &source_type, &target_type)
-        .await
-        .unwrap_or(false);
-
-    if !can_relay {
-        platform::recording::warn!(
-            "⚠️  ACL denied relay: {} -> {}",
-            source.to_string_repr(),
-            target.to_string_repr()
-        );
-        send_error_response(
-            client_id,
-            &source,
-            403,
-            "ACL policy denies relay to target actor",
-            server,
-            Some(request_envelope_id),
-        )
-        .await?;
-        return Ok(());
-    }
-
-    // Validate credential and retain claims for identity verification below.
-    let claims = match AIdCredentialValidator::check(
-        &relay.credential,
-        source.realm.realm_id,
-        "actr.signaling",
-    )
-    .await
-    {
-        Ok((claims, _)) => claims,
-        Err(e) => {
-            platform::recording::warn!(
-                "Actor {} credential validation failed: {}",
-                source.to_string_repr(),
-                e
-            );
-            send_error_response(
-                client_id,
-                &source,
-                401,
-                &format!("Credential validation failed: {e}"),
-                server,
-                Some(request_envelope_id),
-            )
-            .await?;
-            return Ok(());
-        }
-    };
+    // Validate credential before the ACL check: the source type used by the ACL
+    // comes from the verified claims.
+    let claims =
+        match AIdCredentialValidator::check(&relay.credential, &source.realm, "actr.signaling")
+            .await
+        {
+            Ok((claims, _)) => claims,
+            Err(e) => {
+                platform::recording::warn!(
+                    "Actor {} credential validation failed: {}",
+                    source.to_string_repr(),
+                    e
+                );
+                send_error_response(
+                    client_id,
+                    &source,
+                    401,
+                    &format!("Credential validation failed: {e}"),
+                    server,
+                    Some(request_envelope_id),
+                )
+                .await?;
+                return Ok(());
+            }
+        };
 
     // Verify that the actor_id bound to the credential matches relay.source,
     // preventing clients from forging their source identity.
@@ -1472,6 +1453,62 @@ async fn handle_actr_relay(
             &source,
             403,
             "Source identity mismatch: relay.source does not match credential",
+            server,
+            Some(request_envelope_id),
+        )
+        .await?;
+        return Ok(());
+    }
+    let source_type = claims.actor_type;
+
+    // ACL check: can source relay to target? Same-realm / cross-realm both go
+    // through the same rule query. The target type comes from the registry
+    // record of the target, never from the sender (SIG-02).
+    use platform::realm::acl::ActorAcl;
+    let target_type = server
+        .actor_registry
+        .read()
+        .await
+        .get_actor_type(&target)
+        .cloned();
+    let Some(target_type) = target_type else {
+        platform::recording::warn!(
+            "⚠️ Relay target Actor {} is not registered",
+            target.to_string_repr()
+        );
+        send_relay_delivery_result_if_requested(
+            client_id,
+            &source,
+            &target,
+            delivery_context.as_ref(),
+            RelayEgressDisposition::TargetUnavailable,
+            request_envelope_id,
+            server,
+        )
+        .await?;
+        return Ok(());
+    };
+
+    let can_relay = ActorAcl::can_discover(
+        &source.realm,
+        &target.realm,
+        &type_key(&source_type),
+        &type_key(&target_type),
+    )
+    .await
+    .unwrap_or(false);
+
+    if !can_relay {
+        platform::recording::warn!(
+            "⚠️  ACL denied relay: {} -> {}",
+            source.to_string_repr(),
+            target.to_string_repr()
+        );
+        send_error_response(
+            client_id,
+            &source,
+            403,
+            "ACL policy denies relay to target actor",
             server,
             Some(request_envelope_id),
         )
@@ -1525,12 +1562,16 @@ async fn handle_actr_relay(
         let empty_credential = AIdCredential::default();
 
         // Send RoleAssignment to from
+        // `from` is only typed when it is the verified source.
+        let from_type = (from == source).then(|| source_type.clone());
+
         let new_relay = ActrRelay {
             // source: peer actor, target: receiver of this assignment
             source: from.clone(),
             credential: empty_credential.clone(),
             target: to.clone(),
             delivery_context: None,
+            source_type: from_type.clone(),
             payload: Some(actr_relay::Payload::RoleAssignment(RoleAssignment {
                 is_offerer,
                 remote_fixed: None,
@@ -1552,6 +1593,7 @@ async fn handle_actr_relay(
             credential: empty_credential,
             target: to.clone(),
             delivery_context: None,
+            source_type: from_type,
             payload: Some(actr_relay::Payload::RoleAssignment(RoleAssignment {
                 is_offerer: !is_offerer,
                 remote_fixed: None,
@@ -1586,15 +1628,7 @@ async fn handle_actr_relay(
     let target_client_id = {
         let clients_guard = server.clients.read().await;
         clients_guard.iter().find_map(|(id, client)| {
-            client.actor_id.as_ref().and_then(|actor_id| {
-                if actor_id.realm.realm_id == target.realm.realm_id
-                    && actor_id.serial_number == target.serial_number
-                {
-                    Some(id.clone())
-                } else {
-                    None
-                }
-            })
+            (client.actor_id.as_ref() == Some(&target)).then(|| id.clone())
         })
     };
 
@@ -1603,8 +1637,11 @@ async fn handle_actr_relay(
         // a bearer token, and forwarding it would let the peer impersonate the sender.
         // The peer discards this field on receipt, so clearing it has no observable
         // effect on behavior beyond closing the credential-leak vector.
+        // The source type is overwritten with the verified claims value; whatever
+        // the sender put there is discarded.
         let mut relay = relay;
         relay.credential = Default::default();
+        relay.source_type = Some(source_type);
 
         // Reconstruct envelope and forward
         let flow = signaling_envelope::Flow::ActrRelay(relay);
@@ -1648,13 +1685,8 @@ async fn handle_actr_relay(
 }
 
 // Compute ActorId key for sorting, ensuring role assignment is deterministic
-fn actor_order_key(id: &ActrId) -> (u32, u64, String, String) {
-    (
-        id.realm.realm_id,
-        id.serial_number,
-        id.r#type.publisher.clone(),
-        id.r#type.name.clone(),
-    )
+fn actor_order_key(id: &ActrId) -> (&str, u64) {
+    (&id.realm, id.serial_number)
 }
 
 /// Determine whether the initiator is the offerer based on both parties role preferences and ActorId
@@ -1729,11 +1761,7 @@ async fn send_role_assignment(
     let target_client_id = {
         let clients_guard = server.clients.read().await;
         clients_guard.iter().find_map(|(id, client)| {
-            (client.actor_id.as_ref().is_some_and(|aid| {
-                aid.realm.realm_id == target_actor.realm.realm_id
-                    && aid.serial_number == target_actor.serial_number
-            }))
-            .then(|| id.clone())
+            (client.actor_id.as_ref() == Some(target_actor)).then(|| id.clone())
         })
     };
 
@@ -2014,6 +2042,7 @@ async fn cleanup_client(client_id: &str, server: &SignalingServerHandle, mode: C
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_discovery_request(
     source: ActrId,
+    source_type: &ActrType,
     req: actr_protocol::DiscoveryRequest,
     client_id: &str,
     server: &SignalingServerHandle,
@@ -2033,15 +2062,15 @@ async fn handle_discovery_request(
 
     // Apply ACL filtering (if ACL is enabled)
     use platform::realm::acl::ActorAcl;
-    let source_realm = source.realm.realm_id;
-    let source_type = type_key(&source.r#type);
+    let source_realm = &source.realm;
+    let source_type = type_key(source_type);
 
     let mut acl_filtered_services = Vec::new();
 
     // ACL always enabled: filter services based on ACL rules
     for service in services {
-        let target_realm = service.actor_id.realm.realm_id;
-        let target_type = type_key(&service.actor_id.r#type);
+        let target_realm = &service.actor_id.realm;
+        let target_type = type_key(&service.actor_type);
 
         match ActorAcl::can_discover(source_realm, target_realm, &source_type, &target_type).await {
             Ok(true) => acl_filtered_services.push(service),
@@ -2078,7 +2107,7 @@ async fn handle_discovery_request(
         HashMap::new();
 
     for service in acl_filtered_services {
-        let type_key = type_key(&service.actor_id.r#type);
+        let type_key = type_key(&service.actor_type);
 
         // If this type has not been added yet, create a new entry
         type_map.entry(type_key).or_insert_with(|| {
@@ -2096,7 +2125,7 @@ async fn handle_discovery_request(
                 .unwrap_or_else(|| ("unknown".to_string(), None, None, Vec::new()));
 
             actr_protocol::discovery_response::TypeEntry {
-                actr_type: service.actor_id.r#type.clone(),
+                actr_type: service.actor_type.clone(),
                 name: service.service_name.clone(),
                 description,
                 service_fingerprint: fingerprint,
@@ -2140,6 +2169,7 @@ async fn handle_discovery_request(
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_route_candidates_request(
     source: ActrId,
+    source_type: &ActrType,
     req: actr_protocol::RouteCandidatesRequest,
     client_id: &str,
     server: &SignalingServerHandle,
@@ -2200,13 +2230,13 @@ async fn handle_route_candidates_request(
 
     // Apply ACL filtering
     use platform::realm::acl::ActorAcl;
-    let source_realm = source.realm.realm_id;
-    let source_type = type_key(&source.r#type);
+    let source_realm = &source.realm;
+    let source_type = type_key(source_type);
 
     let mut acl_filtered_candidates = Vec::new();
     for candidate in candidates {
-        let target_realm = candidate.actor_id.realm.realm_id;
-        let target_type = type_key(&candidate.actor_id.r#type);
+        let target_realm = &candidate.actor_id.realm;
+        let target_type = type_key(&candidate.actor_type);
 
         match ActorAcl::can_discover(source_realm, target_realm, &source_type, &target_type).await {
             Ok(true) => acl_filtered_candidates.push(candidate),
@@ -2418,6 +2448,7 @@ async fn handle_get_signing_key_request(
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_subscribe_actr_up(
     source: ActrId,
+    source_type: ActrType,
     req: actr_protocol::SubscribeActrUpRequest,
     client_id: &str,
     server: &SignalingServerHandle,
@@ -2432,7 +2463,7 @@ async fn handle_subscribe_actr_up(
 
     // Add subscription to PresenceManager
     let mut presence = server.presence_manager.write().await;
-    presence.subscribe(source.clone(), req.target_type);
+    presence.subscribe(source.clone(), source_type, req.target_type);
     drop(presence);
 
     let response = actr_protocol::SubscribeActrUpResponse {
@@ -2536,19 +2567,21 @@ async fn send_error_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actr_protocol::{ActrType, Realm};
     use std::collections::HashMap;
 
     /// Create test ActrId
     fn create_test_actr_id(serial: u64) -> ActrId {
         ActrId {
             serial_number: serial,
-            realm: Realm { realm_id: 1001 },
-            r#type: ActrType {
-                publisher: "test".to_string(),
-                name: "device".to_string(),
-                version: "1.0.0".to_string(),
-            },
+            realm: "test@example.com".to_string(),
+        }
+    }
+
+    fn create_test_actr_type() -> ActrType {
+        ActrType {
+            publisher: "test".to_string(),
+            name: "device".to_string(),
+            version: "1.0.0".to_string(),
         }
     }
 
@@ -2620,6 +2653,7 @@ mod tests {
             .await
             .register_service(
                 actor_id.clone(),
+                create_test_actr_type(),
                 "test_service".to_string(),
                 vec!["TestMessage".to_string()],
                 None,
@@ -3173,5 +3207,239 @@ mod tests {
             .send_data(WsMessage::Binary(vec![0u8; 8].into()), 8)
             .await
             .unwrap();
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Relay: credential before ACL, source type from claims
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    mod relay {
+        use super::*;
+        use actr_protocol::IdentityClaims;
+        use ed25519_dalek::{Signer, SigningKey};
+        use platform::realm::acl::ActorAcl;
+        use serial_test::serial;
+        use tokio::sync::OnceCell;
+
+        const REALM: &str = "test@example.com";
+        const KEY_ID: u32 = 41;
+
+        fn edge() -> ActrType {
+            ActrType {
+                publisher: "acme".to_string(),
+                name: "edge".to_string(),
+                version: "1.0.0".to_string(),
+            }
+        }
+
+        fn worker() -> ActrType {
+            ActrType {
+                publisher: "acme".to_string(),
+                name: "worker".to_string(),
+                version: "1.0.0".to_string(),
+            }
+        }
+
+        fn signing_key() -> SigningKey {
+            SigningKey::from_bytes(&[41u8; 32])
+        }
+
+        fn now() -> u64 {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        }
+
+        async fn setup() {
+            static INIT: OnceCell<tempfile::TempDir> = OnceCell::const_new();
+            INIT.get_or_init(|| async {
+                let dir = tempfile::tempdir().unwrap();
+                if let Err(e) = platform::storage::db::set_db_path(dir.path()).await {
+                    assert!(e.to_string().contains("already"), "{e}");
+                }
+                AIdCredentialValidator::init(dir.path()).await.unwrap();
+                AIdCredentialValidator::populate_key(
+                    KEY_ID,
+                    &signing_key().verifying_key(),
+                    now() + 3600,
+                )
+                .await
+                .unwrap();
+                if RealmEntity::get(REALM).await.unwrap().is_none() {
+                    RealmEntity::create(REALM.to_string(), "secret-hash".to_string())
+                        .await
+                        .unwrap();
+                }
+                let rule = ActorAcl::new(
+                    REALM.to_string(),
+                    edge().to_string_repr(),
+                    worker().to_string_repr(),
+                    true,
+                );
+                ActorAcl::replace_for_target(REALM, &worker().to_string_repr(), &[rule])
+                    .await
+                    .unwrap();
+                dir
+            })
+            .await;
+        }
+
+        fn credential(actor: &ActrId, actor_type: ActrType) -> AIdCredential {
+            let claims = IdentityClaims {
+                realm: REALM.to_string(),
+                actor_id: actor.to_string_repr(),
+                expires_at: now() + 3600,
+                protocol_version: 1,
+                issuer: REALM.to_string(),
+                provider: "actrix-official".to_string(),
+                audience: "actr.signaling".to_string(),
+                actor_type,
+            };
+            let bytes = claims.encode_to_vec();
+            AIdCredential {
+                key_id: KEY_ID,
+                signature: signing_key().sign(&bytes).to_bytes().to_vec().into(),
+                claims: bytes.into(),
+            }
+        }
+
+        struct Peer {
+            id: ActrId,
+            data_rx: tokio::sync::mpsc::Receiver<QueuedFrame>,
+            _control_rx: tokio::sync::mpsc::Receiver<WsMessage>,
+        }
+
+        async fn connect(server: &SignalingServerHandle, serial: u64, client_id: &str) -> Peer {
+            let id = create_test_actr_id(serial);
+            let (egress, data_rx, control_rx) =
+                create_blocked_egress(EgressQueueConfig::default(), server.queue_metrics.clone());
+            server.clients.write().await.insert(
+                client_id.to_string(),
+                ClientConnection {
+                    id: client_id.to_string(),
+                    actor_id: Some(id.clone()),
+                    credential: None,
+                    egress,
+                    client_ip: None,
+                    webrtc_role: None,
+                },
+            );
+            server
+                .actor_id_index
+                .write()
+                .await
+                .insert(id.clone(), client_id.to_string());
+            Peer {
+                id,
+                data_rx,
+                _control_rx: control_rx,
+            }
+        }
+
+        async fn register(server: &SignalingServerHandle, id: &ActrId, actor_type: ActrType) {
+            server
+                .actor_registry
+                .write()
+                .await
+                .register_service(id.clone(), actor_type, "svc".to_string(), vec![], None)
+                .unwrap();
+        }
+
+        fn next_flow(peer: &mut Peer) -> Option<signaling_envelope::Flow> {
+            let frame = peer.data_rx.try_recv().ok()?;
+            let WsMessage::Binary(bytes) = frame.msg else {
+                panic!("expected a binary frame");
+            };
+            SignalingEnvelope::decode(bytes.as_ref()).unwrap().flow
+        }
+
+        fn error_code(flow: Option<signaling_envelope::Flow>) -> u32 {
+            match flow {
+                Some(signaling_envelope::Flow::ServerToActr(SignalingToActr {
+                    payload: Some(signaling_to_actr::Payload::Error(error)),
+                    ..
+                })) => error.code,
+                other => panic!("expected an error response, got {other:?}"),
+            }
+        }
+
+        fn relay(source: &ActrId, target: &ActrId, credential: AIdCredential) -> ActrRelay {
+            ActrRelay {
+                source: source.clone(),
+                credential,
+                target: target.clone(),
+                delivery_context: None,
+                source_type: Some(worker()),
+                payload: Some(actr_relay::Payload::IceCandidate(
+                    actr_protocol::IceCandidate {
+                        candidate: "candidate".to_string(),
+                        ..Default::default()
+                    },
+                )),
+            }
+        }
+
+        async fn send(server: &SignalingServerHandle, client_id: &str, relay: ActrRelay) {
+            handle_actr_relay(relay, client_id, server, "req")
+                .await
+                .unwrap();
+        }
+
+        #[tokio::test]
+        #[serial]
+        async fn invalid_credential_is_rejected_before_acl() {
+            setup().await;
+            let server = create_test_server_handle();
+            let mut source = connect(&server, 1, "source").await;
+            let target = connect(&server, 2, "target").await;
+            // No ACL rule allows edge -> this type, so an ACL-first path would answer 403.
+            register(&server, &target.id, edge()).await;
+
+            let mut forged = credential(&source.id, edge());
+            forged.signature = vec![0u8; 64].into();
+            send(&server, "source", relay(&source.id, &target.id, forged)).await;
+
+            assert_eq!(error_code(next_flow(&mut source)), 401);
+        }
+
+        #[tokio::test]
+        #[serial]
+        async fn acl_uses_claims_type_and_registry_target_type() {
+            setup().await;
+            let server = create_test_server_handle();
+            let mut source = connect(&server, 1, "source").await;
+            let mut target = connect(&server, 2, "target").await;
+            register(&server, &target.id, edge()).await;
+
+            // The claims say worker; there is no worker -> edge rule.
+            let cred = credential(&source.id, worker());
+            send(&server, "source", relay(&source.id, &target.id, cred)).await;
+
+            assert_eq!(error_code(next_flow(&mut source)), 403);
+            assert!(next_flow(&mut target).is_none());
+        }
+
+        #[tokio::test]
+        #[serial]
+        async fn forwarded_relay_carries_claims_source_type() {
+            setup().await;
+            let server = create_test_server_handle();
+            let mut source = connect(&server, 1, "source").await;
+            let mut target = connect(&server, 2, "target").await;
+            register(&server, &target.id, worker()).await;
+
+            let cred = credential(&source.id, edge());
+            send(&server, "source", relay(&source.id, &target.id, cred)).await;
+
+            assert!(next_flow(&mut source).is_none());
+            let Some(signaling_envelope::Flow::ActrRelay(forwarded)) = next_flow(&mut target)
+            else {
+                panic!("expected the relay to be forwarded");
+            };
+            assert_eq!(forwarded.source, source.id);
+            assert_eq!(forwarded.source_type, Some(edge()));
+            assert_eq!(forwarded.credential, AIdCredential::default());
+        }
     }
 }

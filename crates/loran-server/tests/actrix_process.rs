@@ -1360,8 +1360,8 @@ fn build_list_realms_credential(shared_secret: &[u8]) -> testing::NonceCredentia
     testing::nonce_auth::to_proto_credential(credential)
 }
 
-fn build_delete_realm_credential(shared_secret: &[u8], realm_id: u32) -> testing::NonceCredential {
-    let payload = format!("delete_realm:{TEST_CONTROL_NODE_ID}:{realm_id}");
+fn build_delete_realm_credential(shared_secret: &[u8], realm: &str) -> testing::NonceCredential {
+    let payload = format!("delete_realm:{TEST_CONTROL_NODE_ID}:{realm}");
     let credential = CredentialBuilder::new(shared_secret)
         .sign(payload.as_bytes())
         .expect("build delete realm credential");
@@ -2218,22 +2218,22 @@ async fn actrix_exits_on_incompatible_existing_schema() {
     fs::create_dir_all(&data_dir).expect("create data dir");
 
     // Pre-create a deliberately incompatible schema:
-    // `realm` exists but misses required `name` column, so `idx_realm_name` index creation
-    // will fail on startup.
+    // `actoracl` exists but misses the required `realm` column, so
+    // `idx_actoracl_realm` index creation will fail on startup.
     let db = Database::new(&data_dir)
         .await
         .expect("precreate db with default schema");
-    db.execute("DROP TABLE IF EXISTS realm")
+    db.execute("DROP TABLE IF EXISTS actoracl")
         .await
-        .expect("drop realm table");
+        .expect("drop actoracl table");
     db.execute(
-        "CREATE TABLE realm (
+        "CREATE TABLE actoracl (
             rowid INTEGER PRIMARY KEY AUTOINCREMENT,
             label TEXT NOT NULL
         )",
     )
     .await
-    .expect("create incompatible realm table");
+    .expect("create incompatible actoracl table");
 
     let config_path =
         write_config_with_sqlite_path(tmp.path(), port, &data_dir.display().to_string());
@@ -2250,8 +2250,8 @@ async fn actrix_exits_on_incompatible_existing_schema() {
             let log = fs::read_to_string(&log_path).unwrap_or_default();
             let log_lower = log.to_lowercase();
             assert!(
-                log_lower.contains("name")
-                    || log_lower.contains("idx_realm_name")
+                log_lower.contains("realm")
+                    || log_lower.contains("idx_actoracl_realm")
                     || log_lower.contains("database"),
                 "expected schema/index failure hint in logs, got: {log}"
             );
@@ -2591,7 +2591,7 @@ async fn actrix_admin_ui_and_control_grpc_can_run_together_with_ui_realm_writes_
         .post(format!("http://127.0.0.1:{port}/admin/api/realms"))
         .bearer_auth(token)
         .json(&serde_json::json!({
-            "name": "ui-created-while-managed",
+            "realm": "ui-created-while-managed@example.com",
             "enabled": true
         }))
         .send()
@@ -2604,7 +2604,7 @@ async fn actrix_admin_ui_and_control_grpc_can_run_together_with_ui_realm_writes_
 
 #[tokio::test]
 #[serial]
-async fn actrix_control_grpc_managed_realm_crud_uses_external_id_and_soft_delete() {
+async fn actrix_control_grpc_managed_realm_crud_by_name_and_soft_delete() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let port = choose_port();
     let config_path = write_config_with_control_grpc(tmp.path(), port);
@@ -2617,11 +2617,10 @@ async fn actrix_control_grpc_managed_realm_crud_uses_external_id_and_soft_delete
     let endpoint = format!("http://127.0.0.1:{port}");
     let mut client = wait_for_control_grpc(&endpoint, &mut child, &log_path).await;
     let shared_secret = hex::decode(TEST_CONTROL_SHARED_SECRET).expect("decode shared secret");
-    let realm_id = 42_424;
+    let realm = "managed-crud@example.com";
 
     let mut create_req = CreateRealmRequest {
-        realm_id: Some(realm_id),
-        name: "managed-crud".to_string(),
+        realm: realm.to_string(),
         enabled: true,
         credential: dummy_credential(),
         expires_at: 1_900_000_000,
@@ -2638,8 +2637,7 @@ async fn actrix_control_grpc_managed_realm_crud_uses_external_id_and_soft_delete
         .into_inner();
     assert!(created.success, "{:?}", created.error_message);
     let created_realm = created.realm.expect("created realm info");
-    assert_eq!(created_realm.realm_id, realm_id);
-    assert_eq!(created_realm.name, "managed-crud");
+    assert_eq!(created_realm.realm, realm);
     assert_eq!(
         created_realm
             .secret_rotation_state
@@ -2649,8 +2647,7 @@ async fn actrix_control_grpc_managed_realm_crud_uses_external_id_and_soft_delete
     );
 
     let mut update_req = UpdateRealmRequest {
-        realm_id,
-        name: Some("managed-crud-updated".to_string()),
+        realm: realm.to_string(),
         enabled: Some(false),
         credential: dummy_credential(),
         status: Some("Suspended".to_string()),
@@ -2667,15 +2664,14 @@ async fn actrix_control_grpc_managed_realm_crud_uses_external_id_and_soft_delete
         .into_inner();
     assert!(updated.success, "{:?}", updated.error_message);
     let updated_realm = updated.realm.expect("updated realm info");
-    assert_eq!(updated_realm.realm_id, realm_id);
-    assert_eq!(updated_realm.name, "managed-crud-updated");
+    assert_eq!(updated_realm.realm, realm);
     assert!(!updated_realm.enabled);
     assert_eq!(updated_realm.status, "Suspended");
 
     let deleted = client
         .delete_realm(DeleteRealmRequest {
-            realm_id,
-            credential: build_delete_realm_credential(&shared_secret, realm_id),
+            realm: realm.to_string(),
+            credential: build_delete_realm_credential(&shared_secret, realm),
         })
         .await
         .expect("managed DeleteRealm")
@@ -2691,13 +2687,13 @@ async fn actrix_control_grpc_managed_realm_crud_uses_external_id_and_soft_delete
         .await
         .expect("ListRealms after soft delete")
         .into_inner();
-    let realm = listed
+    let listed_realm = listed
         .realms
         .iter()
-        .find(|realm| realm.realm_id == realm_id)
+        .find(|info| info.realm == realm)
         .expect("soft-deleted realm should remain listed");
-    assert!(!realm.enabled);
-    assert_eq!(realm.status, "Inactive");
+    assert!(!listed_realm.enabled);
+    assert_eq!(listed_realm.status, "Inactive");
 
     graceful_shutdown(child);
 }

@@ -76,8 +76,7 @@ export interface NodeInfo {
 }
 
 export interface RealmInfo {
-  realm_id: number;
-  name: string;
+  realm: string;
   enabled: boolean;
   created_at: number;
   updated_at: number | null;
@@ -107,7 +106,7 @@ export interface RealmMutationResponse {
 
 export interface RealmSecretRotationResponse {
   success: boolean;
-  realm_id: number;
+  realm: string;
   realm_secret: string;
   previous_valid_until: number | null;
   grace_seconds: number;
@@ -216,8 +215,7 @@ export const api = {
   listRealms: () => request<RealmsResponse>("/realms"),
 
   createRealm: (data: {
-    realm_id?: number;
-    name: string;
+    realm: string;
     enabled?: boolean;
   }) =>
     request<RealmMutationResponse>("/realms", {
@@ -225,17 +223,19 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  getRealm: (id: number) =>
-    request<{ success: boolean; realm: RealmInfo | null }>(`/realms/${id}`),
+  getRealm: (realm: string) =>
+    request<{ success: boolean; realm: RealmInfo | null }>(
+      `/realms/${encodeURIComponent(realm)}`,
+    ),
 
-  updateRealm: (id: number, data: { name?: string; enabled?: boolean }) =>
-    request<RealmMutationResponse>(`/realms/${id}`, {
+  updateRealm: (realm: string, data: { enabled?: boolean }) =>
+    request<RealmMutationResponse>(`/realms/${encodeURIComponent(realm)}`, {
       method: "PUT",
       body: JSON.stringify(data),
     }),
 
-  rotateRealmSecret: (id: number) =>
-    request<RealmSecretRotationResponse>(`/realms/${id}/secret/rotate`, {
+  rotateRealmSecret: (realm: string) =>
+    request<RealmSecretRotationResponse>(`/realms/${encodeURIComponent(realm)}/secret/rotate`, {
       method: "POST",
     }),
 
