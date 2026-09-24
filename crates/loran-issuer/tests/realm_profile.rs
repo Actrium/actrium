@@ -291,9 +291,15 @@ async fn accept(name: &str, document: &[u8], member: &Value) {
         .await
         .unwrap();
     let profile = RealmProfile::verify(document, name, &keys).unwrap();
-    RealmProfileRecord::store(&profile, std::str::from_utf8(document).unwrap())
-        .await
-        .unwrap();
+    let previous = RealmProfileRecord::get(name).await.unwrap();
+    RealmProfileRecord::store(
+        &profile,
+        std::str::from_utf8(document).unwrap(),
+        previous.as_ref().map(|record| record.digest.as_str()),
+        None,
+    )
+    .await
+    .unwrap();
 }
 
 type Documents = HashMap<String, Vec<u8>>;
@@ -408,6 +414,8 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
     RealmProfileRecord::store(
         &profile,
         std::str::from_utf8(&acme.profile(three, 1, "active", "rs-1")).unwrap(),
+        None,
+        None,
     )
     .await
     .unwrap();

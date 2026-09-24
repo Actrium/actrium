@@ -8,6 +8,7 @@ use std::str::FromStr;
 use strum::{Display, EnumString};
 
 use super::error::RealmError;
+use crate::config::RealmConfig;
 use crate::storage::db::get_database;
 
 /// Realm lifecycle status.
@@ -41,6 +42,11 @@ pub struct Realm {
     pub secret_current: String,
     /// (hash, valid_until) for previous secret during rotation grace window
     pub secret_previous: Option<(String, u64)>,
+    /// Who asked for the Realm in a `create_realm` request (the idempotency
+    /// key is `(name, requester)`); empty for operator-created Realms.
+    pub requester: String,
+    /// When a pending Realm that has not become active is removed.
+    pub pending_expires_at: Option<u64>,
 }
 
 impl Default for Realm {
@@ -55,6 +61,8 @@ impl Default for Realm {
             updated_at: None,
             secret_current: String::new(),
             secret_previous: None,
+            requester: String::new(),
+            pending_expires_at: None,
         }
     }
 }
@@ -72,6 +80,8 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Realm {
         let secret_previous_hash: Option<String> = row.try_get("secret_previous_hash")?;
         let secret_previous_valid_until: Option<i64> =
             row.try_get("secret_previous_valid_until")?;
+        let requester: String = row.try_get("requester")?;
+        let pending_expires_at: Option<i64> = row.try_get("pending_expires_at")?;
 
         let secret_previous = match (secret_previous_hash, secret_previous_valid_until) {
             (Some(hash), Some(valid_until)) if !hash.is_empty() => Some((hash, valid_until as u64)),
@@ -94,6 +104,8 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Realm {
             updated_at: updated_at.map(|v| v as u64),
             secret_current,
             secret_previous,
+            requester,
+            pending_expires_at: pending_expires_at.map(|v| v as u64),
         })
     }
 }
@@ -117,7 +129,29 @@ impl Realm {
     ///
     /// `max_realms` bounds the number of pending and active Realms. A name that
     /// exists, retired or not, is rejected: Realm names are never reused.
-    pub async fn insert(mut self, max_realms: Option<u32>) -> Result<Self, RealmError> {
+    pub async fn insert(self, max_realms: Option<u32>) -> Result<Self, RealmError> {
+        self.insert_within(max_realms, None).await
+    }
+
+    /// Insert this realm as a pending Realm asked for by a Realm management
+    /// request, within all `[realm]` limits: the instance total, and the
+    /// Realms and pending Realms of its domain.
+    pub async fn insert_requested(self, config: &RealmConfig) -> Result<Self, RealmError> {
+        self.insert_within(
+            config.max_realms,
+            Some((
+                config.max_realms_per_domain,
+                config.max_pending_per_domain(),
+            )),
+        )
+        .await
+    }
+
+    async fn insert_within(
+        mut self,
+        max_realms: Option<u32>,
+        per_domain: Option<(Option<u32>, u32)>,
+    ) -> Result<Self, RealmError> {
         validate_name(&self.name)?;
         if self.status == RealmStatus::Retired {
             return Err(RealmError::ValidationError(
@@ -131,15 +165,27 @@ impl Realm {
         }
         let now = Utc::now().timestamp();
         let (prev_hash, prev_valid_until) = previous_columns(&self.secret_previous);
+        let domain = self.name.rsplit_once('@').map_or("", |(_, domain)| domain);
+        let (max_per_domain, max_pending) = match per_domain {
+            Some((max_per_domain, max_pending)) => (max_per_domain, Some(max_pending)),
+            None => (None, None),
+        };
 
         let result = sqlx::query(
             "INSERT INTO realm (
                 name, status, enabled, expires_at, created_at,
-                secret_current, secret_previous_hash, secret_previous_valid_until
+                secret_current, secret_previous_hash, secret_previous_valid_until,
+                requester, pending_expires_at
              )
-             SELECT ?1, ?9, ?2, ?3, ?4, ?5, ?6, ?7
-             WHERE ?8 IS NULL
-                OR (SELECT COUNT(*) FROM realm WHERE status != 'retired') < ?8",
+             SELECT ?1, ?9, ?2, ?3, ?4, ?5, ?6, ?7, ?10, ?11
+             WHERE (?8 IS NULL
+                    OR (SELECT COUNT(*) FROM realm WHERE status != 'retired') < ?8)
+               AND (?12 IS NULL
+                    OR (SELECT COUNT(*) FROM realm WHERE status != 'retired'
+                        AND substr(name, instr(name, '@') + 1) = ?14) < ?12)
+               AND (?13 IS NULL
+                    OR (SELECT COUNT(*) FROM realm WHERE status = 'pending'
+                        AND substr(name, instr(name, '@') + 1) = ?14) < ?13)",
         )
         .bind(&self.name)
         .bind(self.enabled as i32)
@@ -150,17 +196,22 @@ impl Realm {
         .bind(prev_valid_until)
         .bind(max_realms.map(i64::from))
         .bind(self.status.to_string())
+        .bind(&self.requester)
+        .bind(self.pending_expires_at.map(|v| v as i64))
+        .bind(max_per_domain.map(i64::from))
+        .bind(max_pending.map(i64::from))
+        .bind(domain)
         .execute(get_database().get_pool())
         .await;
 
         match result {
-            // The limit filtered the row out before the primary key was
+            // A limit filtered the row out before the primary key was
             // checked; an existing name still reports as never reusable.
             Ok(done) if done.rows_affected() == 0 => match Self::get(&self.name).await? {
                 Some(_) => Err(RealmError::AlreadyExists),
-                None => Err(RealmError::ValidationError(format!(
-                    "this instance already hosts max_realms = {} realms",
-                    max_realms.unwrap_or_default()
+                None => Err(RealmError::QuotaExceeded(format!(
+                    "no more Realms: max_realms = {:?}, per domain {:?}, pending per domain {:?}",
+                    max_realms, max_per_domain, max_pending
                 ))),
             },
             Ok(_) => {
@@ -261,7 +312,8 @@ impl Realm {
     pub async fn get(name: &str) -> Result<Option<Self>, RealmError> {
         let result = sqlx::query_as::<_, Realm>(
             "SELECT name, status, enabled, expires_at, created_at, updated_at,
-                    secret_current, secret_previous_hash, secret_previous_valid_until
+                    secret_current, secret_previous_hash, secret_previous_valid_until,
+                    requester, pending_expires_at
              FROM realm WHERE name = ?",
         )
         .bind(name)
@@ -275,7 +327,8 @@ impl Realm {
     pub async fn get_all() -> Result<Vec<Self>, RealmError> {
         let realms = sqlx::query_as::<_, Realm>(
             "SELECT name, status, enabled, expires_at, created_at, updated_at,
-                    secret_current, secret_previous_hash, secret_previous_valid_until
+                    secret_current, secret_previous_hash, secret_previous_valid_until,
+                    requester, pending_expires_at
              FROM realm ORDER BY created_at, name",
         )
         .fetch_all(get_database().get_pool())
@@ -474,7 +527,7 @@ mod tests {
             ..Default::default()
         };
         let limited = third.clone().insert(Some(2)).await;
-        assert!(matches!(limited, Err(RealmError::ValidationError(_))));
+        assert!(matches!(limited, Err(RealmError::QuotaExceeded(_))));
         let existing = Realm {
             name: "one@example.com".to_string(),
             secret_current: "hash".to_string(),

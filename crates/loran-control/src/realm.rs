@@ -49,6 +49,7 @@ mod tests {
             updated_at: None,
             secret_current: "cur".to_string(),
             secret_previous: valid_until.map(|v| ("prev".to_string(), v)),
+            ..Default::default()
         }
     }
 

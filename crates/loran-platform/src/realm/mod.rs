@@ -6,6 +6,7 @@
 pub mod acl;
 pub mod domain;
 pub mod error;
+pub mod management;
 pub mod model;
 pub mod profile;
 pub mod secret;

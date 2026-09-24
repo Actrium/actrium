@@ -10,6 +10,17 @@ pub struct RealmConfig {
     /// dedicated single-Realm deployment.
     #[serde(default)]
     pub max_realms: Option<u32>,
+    /// Maximum pending and active Realms per Realm domain created by Realm
+    /// management requests. Unset means no limit.
+    #[serde(default)]
+    pub max_realms_per_domain: Option<u32>,
+    /// Maximum pending Realms per Realm domain. Unset means 10.
+    #[serde(default)]
+    pub max_pending_per_domain: Option<u32>,
+    /// Seconds a pending Realm waits for its first Realm Profile before it
+    /// is removed. Unset means 3600; values are kept within 60..=86400.
+    #[serde(default)]
+    pub pending_ttl_secs: Option<u64>,
     /// Seconds between refreshes of other domains' Realm signing keys and
     /// Realm Profiles. Unset means 3600; values are kept within 60..=86400.
     #[serde(default)]
@@ -17,6 +28,14 @@ pub struct RealmConfig {
 }
 
 impl RealmConfig {
+    pub fn max_pending_per_domain(&self) -> u32 {
+        self.max_pending_per_domain.unwrap_or(10)
+    }
+
+    pub fn pending_ttl_secs(&self) -> u64 {
+        self.pending_ttl_secs.unwrap_or(3600).clamp(60, 86_400)
+    }
+
     pub fn profile_refresh_secs(&self) -> u64 {
         self.profile_refresh_secs.unwrap_or(3600).clamp(60, 86_400)
     }
@@ -32,6 +51,8 @@ mod tests {
         assert_eq!(config, RealmConfig::default());
         assert_eq!(config.max_realms, None);
         assert_eq!(config.profile_refresh_secs(), 3600);
+        assert_eq!(config.max_pending_per_domain(), 10);
+        assert_eq!(config.pending_ttl_secs(), 3600);
 
         let config: RealmConfig = toml::from_str("max_realms = 1").unwrap();
         assert_eq!(config.max_realms, Some(1));

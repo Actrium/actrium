@@ -153,8 +153,9 @@ impl RealmProfiles {
         if current.status == RealmStatus::Retired {
             return Err(RealmError::Retired.into());
         }
-        let previous = RealmProfileRecord::get(realm)
-            .await?
+        let record = RealmProfileRecord::get(realm).await?;
+        let previous = record
+            .as_ref()
             .map(|record| record.verify(keys))
             .transpose()?;
 
@@ -222,7 +223,9 @@ impl RealmProfiles {
         if let Some(previous) = &previous {
             previous.check_successor(&profile)?;
         }
-        Ok(RealmProfileRecord::store(&profile, &document).await?)
+        let digest = record.as_ref().map(|record| record.digest.as_str());
+        let (realm, _) = RealmProfileRecord::store(&profile, &document, digest, None).await?;
+        Ok(realm)
     }
 
     /// Refresh the Realms of other domains that have an accepted Profile:
@@ -340,11 +343,11 @@ impl RealmProfiles {
             (Some(accepted), Some((profile, document))) => {
                 accepted.check_successor(&profile)?;
                 if profile.sequence > accepted.sequence {
-                    store_fetched(&profile, &document).await?;
+                    store_fetched(&profile, &document, &record.digest).await?;
                 }
             }
             (None, Some((profile, document))) if profile.provider.id == self.provider_id() => {
-                store_fetched(&profile, &document).await?;
+                store_fetched(&profile, &document, &record.digest).await?;
             }
             (None, _) => {
                 platform::recording::warn!(
@@ -397,10 +400,14 @@ impl RealmProfiles {
     }
 }
 
-async fn store_fetched(profile: &RealmProfile, document: &[u8]) -> Result<(), ProfileError> {
+async fn store_fetched(
+    profile: &RealmProfile,
+    document: &[u8],
+    previous_digest: &str,
+) -> Result<(), ProfileError> {
     let document = std::str::from_utf8(document)
         .map_err(|_| ProfileError::Invalid("Realm Profile is not UTF-8".to_string()))?;
-    RealmProfileRecord::store(profile, document).await?;
+    RealmProfileRecord::store(profile, document, Some(previous_digest), None).await?;
     Ok(())
 }
 

@@ -40,11 +40,20 @@ impl RealmProfileRecord {
 
     /// Store `profile`, verified from `document`, as the accepted Realm
     /// Profile of its Realm. The caller has checked it against the previous
-    /// one with [`RealmProfile::check_successor`].
+    /// one with [`RealmProfile::check_successor`]; `previous_digest` is that
+    /// record's digest, or `None` when the Realm had none, and the store
+    /// fails with [`RealmError::Conflict`] if another write came first.
     ///
     /// In the same transaction an active Profile activates a pending Realm,
-    /// and a retired Profile retires the Realm.
-    pub async fn store(profile: &RealmProfile, document: &str) -> Result<Realm, RealmError> {
+    /// setting `admin_token_hash` as its Realm admin token, and a retired
+    /// Profile retires the Realm. Returns the Realm and whether this store
+    /// activated it.
+    pub async fn store(
+        profile: &RealmProfile,
+        document: &str,
+        previous_digest: Option<&str>,
+        admin_token_hash: Option<&str>,
+    ) -> Result<(Realm, bool), RealmError> {
         let name = profile.realm.name.as_str();
         let now = Utc::now().timestamp();
         let mut tx = get_database().get_pool().begin().await?;
@@ -59,35 +68,61 @@ impl RealmProfileRecord {
             Some(_) => {}
         }
 
-        sqlx::query(
-            "INSERT INTO realm_profile (realm, sequence, digest, document, accepted_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(realm) DO UPDATE SET
-                sequence = ?2, digest = ?3, document = ?4, accepted_at = ?5",
-        )
-        .bind(name)
-        .bind(profile.sequence as i64)
-        .bind(digest(document.as_bytes()))
-        .bind(document)
-        .bind(now)
-        .execute(&mut *tx)
-        .await?;
+        let digest = digest(document.as_bytes());
+        let written = match previous_digest {
+            Some(previous) => sqlx::query(
+                "UPDATE realm_profile SET sequence = ?, digest = ?, document = ?, accepted_at = ?
+                 WHERE realm = ? AND digest = ?",
+            )
+            .bind(profile.sequence as i64)
+            .bind(&digest)
+            .bind(document)
+            .bind(now)
+            .bind(name)
+            .bind(previous)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected(),
+            None => sqlx::query(
+                "INSERT INTO realm_profile (realm, sequence, digest, document, accepted_at)
+                 VALUES (?, ?, ?, ?, ?) ON CONFLICT(realm) DO NOTHING",
+            )
+            .bind(name)
+            .bind(profile.sequence as i64)
+            .bind(&digest)
+            .bind(document)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected(),
+        };
+        if written == 0 {
+            return Err(RealmError::Conflict(format!(
+                "the Realm Profile of {name} changed concurrently"
+            )));
+        }
 
+        let mut activated = false;
         match profile.realm.status {
             RealmStatus::Retired => retire_in(&mut tx, name, now).await?,
             RealmStatus::Active => {
-                sqlx::query(
-                    "UPDATE realm SET status = 'active', pending_expires_at = NULL, updated_at = ?
+                activated = sqlx::query(
+                    "UPDATE realm SET status = 'active', pending_expires_at = NULL,
+                        admin_token_hash = ?, updated_at = ?
                      WHERE name = ? AND status = 'pending'",
                 )
+                .bind(admin_token_hash)
                 .bind(now)
                 .bind(name)
                 .execute(&mut *tx)
-                .await?;
+                .await?
+                .rows_affected()
+                    == 1;
             }
         }
         tx.commit().await?;
-        Realm::get(name).await?.ok_or(RealmError::NotFound)
+        let realm = Realm::get(name).await?.ok_or(RealmError::NotFound)?;
+        Ok((realm, activated))
     }
 }
 
@@ -157,8 +192,15 @@ mod tests {
 
         let first = document(1, "active", &key);
         let profile = RealmProfile::verify(first.as_bytes(), NAME, &keys)?;
-        let realm = RealmProfileRecord::store(&profile, &first).await?;
+        let (realm, activated) =
+            RealmProfileRecord::store(&profile, &first, None, Some("token-hash")).await?;
         assert_eq!(realm.status, Lifecycle::Active);
+        assert!(activated);
+        // A second write that missed the first one conflicts.
+        assert!(matches!(
+            RealmProfileRecord::store(&profile, &first, None, None).await,
+            Err(RealmError::Conflict(_))
+        ));
 
         let stored = RealmProfileRecord::get(NAME).await?.unwrap();
         assert_eq!(stored.document, first);
@@ -167,7 +209,12 @@ mod tests {
         let retired = document(2, "retired", &key);
         let profile = RealmProfile::verify(retired.as_bytes(), NAME, &keys)?;
         accepted.check_successor(&profile)?;
-        let realm = RealmProfileRecord::store(&profile, &retired).await?;
+        assert!(matches!(
+            RealmProfileRecord::store(&profile, &retired, Some("stale"), None).await,
+            Err(RealmError::Conflict(_))
+        ));
+        let (realm, _) =
+            RealmProfileRecord::store(&profile, &retired, Some(&stored.digest), None).await?;
         assert_eq!(realm.status, Lifecycle::Retired);
         assert_eq!(RealmProfileRecord::get(NAME).await?.unwrap().sequence, 2);
         let acl: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM actoracl")
@@ -179,7 +226,7 @@ mod tests {
         let later = document(3, "active", &key);
         let profile = RealmProfile::verify(later.as_bytes(), NAME, &keys)?;
         assert!(matches!(
-            RealmProfileRecord::store(&profile, &later).await,
+            RealmProfileRecord::store(&profile, &later, None, None).await,
             Err(RealmError::Retired)
         ));
         let stored: Value =
