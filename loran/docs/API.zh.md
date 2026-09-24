@@ -1,8 +1,7 @@
 # Loran Realm v1 API 边界
 
-状态：本文只描述当前实现，不承诺旧 Issuer Signer/Publisher Registry HTTP API 兼容。当前实现仍是一个实例
-一个 Realm；目标契约是一个实例承载多个 Realm（Realm 名 `<realm_id>@<domain>`），与本文
-不同的部分以「目标契约」标注，完整差异见
+状态：本文只描述当前实现，不承诺旧 Issuer Signer/Publisher Registry HTTP API 兼容。一个实例
+承载多个 Realm（Realm 名 `<realm_id>@<domain>`）；与目标契约不同的部分以「目标契约」标注，完整差异见
 [`REALM_V1_ARCHITECTURE.zh.md`](REALM_V1_ARCHITECTURE.zh.md) 第 9 节。历史名称见
 [术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」。
 
@@ -25,17 +24,13 @@
 
 ## Realm discovery
 
-`GET /.well-known/actr/realm.json`
+Loran 不再提供 `/.well-known/actr/realm.json`：它与 `actr/protocols/authority-discovery`
+「`/.well-known/actr` 下不定义子路径」冲突，也无法表达多个 Realm。
 
-当前实现：成功时返回当前实例唯一 Active Realm 的 v1 descriptor，包括 issuer、Realm Provider、
-Signaling/TURN audience 与 endpoint。没有且仅有一个可用 Realm 时返回 `503`，不猜测。
-
-目标契约：移除该路径。它与 `actr/protocols/authority-discovery`「`/.well-known/actr`
-下不定义子路径」冲突，也无法表达多个 Realm。Realm 的发现改为该域名的 authority
-descriptor（`https://<domain>/.well-known/actr` 中的 `realm_signing_keys` 成员与
-`realms` relation，Actr Authority Discovery §4.3–4.4），Realm Profile 位于
-`<realms href>/<realm_id>`，由 Realm 签名 key 签名。Loran 仅在 `realms` relation 指向
-本 Realm Provider 时提供 Realm Profile。
+目标契约：Realm 的发现走该域名的 authority descriptor（`https://<domain>/.well-known/actr`
+中的 `realm_signing_keys` 成员与 `realms` relation，Actr Authority Discovery §4.3–4.4），
+Realm Profile 位于 `<realms href>/<realm_id>`，由 Realm 签名 key 签名。Loran 仅在 `realms`
+relation 指向本 Realm Provider 时提供 Realm Profile。
 
 ## Issuer
 
@@ -123,21 +118,33 @@ nonce-auth request message；`Sign` 的认证 payload 同时绑定 protocol、`k
 - `POST /admin/api/auth/login`
 - 其余 `/admin/api/**` 需要 `Authorization: Bearer <JWT>`
 
-当前实现：每实例只允许一个 Realm。在线 API 可以首次 provision、读取、更新和轮换
-Realm secret，但不提供硬删除或替换另一个 Realm；替换属于停机迁移/重建操作。Realm 以 Realm
-名寻址：`/admin/api/realms/{realm}`（`@` 编码为 `%40`），创建 body 为
-`{"realm": "k7m2q9xh@acme.com", "enabled": true, "expires_at": 0}`。
+当前实现：实例运营者可创建多个 Realm，数量受 `[realm] max_realms` 限制（不计已退役的）。
+Realm 以 Realm 名寻址，`@` 编码为 `%40`：
 
-目标契约：每实例承载多个 Realm。创建需经 Realm 签名 key 持有方授权，并经 Realm Profile
+- `GET /admin/api/realms`、`POST /admin/api/realms`：列出；创建（body
+  `{"realm": "k7m2q9xh@acme.com", "enabled": true, "expires_at": 0}`，响应一次性返回 Realm
+  secret），新 Realm 为 `active`；
+- `GET`/`PUT /admin/api/realms/{realm}`：读取；`PUT` 只收 `enabled` 与 `expires_at`，
+  `enabled = false` 即停用、`true` 即恢复，Realm 名不可修改；
+- `POST /admin/api/realms/{realm}/secret/rotate`：轮换 Realm secret；
+- `POST /admin/api/realms/{realm}/retire`：退役。单一事务中删除该 Realm 的连接 ACL、待连接
+  注册与 renewal token，保留已签发身份登记与撤销表；`realm` 行以 `retired` 状态永久保留，
+  作为 Realm Provider tombstone，Realm 名不复用。没有硬删除。
+
+gRPC `NodeAdminService` 对应 `CreateRealm`/`GetRealm`/`UpdateRealm`/`ListRealms`/
+`RetireRealm`，同样按 Realm 名寻址。
+
+目标契约：创建需经 Realm 签名 key 持有方授权，并经 Realm Profile
 验证后才从 `pending` 转为 `active`；退役由持有方发布退役 Realm Profile 触发，Loran 在单一
 事务中撤销该 Realm 的状态并写入以 Realm 名为键的 Realm Provider tombstone，Realm 名不复用。
 
 ## Schema migration
 
-当前 schema 为 v4（`PRAGMA user_version = 4`）：v3 在 v2 上新增 Issuer 幂等日志表
+当前 schema 为 v5（`PRAGMA user_version = 5`）：v3 在 v2 上新增 Issuer 幂等日志表
 `issuer_control_attempt`；v4 以 Realm 名为键（`realm.name` 为主键，其余表以 `realm` 列引用，
-身份登记按 `(realm, serial_number)`）。运行时只自动初始化空数据库；其他版本拒绝启动。v2 → v3
-与 v3 → v4 不提供迁移工具，需停机后重建数据库。下面两个历史工具只覆盖到 v2（未版本化库先 v1，再 v2）：
+身份登记按 `(realm, serial_number)`）；v5 去掉单 Realm 约束，`realm.status` 改为
+`pending | active | retired`，并新增 `realm_domain`、`realm_profile`、`realm_mgmt_nonce`。
+运行时只自动初始化空数据库；其他版本拒绝启动。v2 之后的升级都不提供迁移工具，需停机后重建数据库。下面两个历史工具只覆盖到 v2（未版本化库先 v1，再 v2）：
 
 ```bash
 python3 scripts/loran/migrate_schema_v1.py /path/to/actrix.db   # 未版本化 → v1

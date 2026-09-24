@@ -438,10 +438,11 @@ Package Resolution、`packages` relation 与 `program_resolver` 已从协议和�
 
 ## 8. 数据与升级
 
-当前 schema v4 使用 SQLite `PRAGMA user_version = 4`。Loran 遇到旧版或未知 schema
+当前 schema v5 使用 SQLite `PRAGMA user_version = 5`。Loran 遇到旧版或未知 schema
 直接拒绝启动，不在启动路径中执行「尝试 ALTER 后忽略错误」。v2 → v3（新增
-`issuer_control_attempt`）与 v3 → v4（以 Realm 名取代数值 Realm id）都没有离线迁移，
-需停机后重建数据库。
+`issuer_control_attempt`）、v3 → v4（以 Realm 名取代数值 Realm id）与 v4 → v5（去掉单
+Realm 约束，`realm.status` 改为 `pending | active | retired`，新增 `realm_domain`、
+`realm_profile`、`realm_mgmt_nonce`）都没有离线迁移，需停机后重建数据库。
 
 v4 已以 Realm 名为键：`realm` 表以列 `name`（完整 Realm 名）为主键，`actoracl`、
 `pending_registration`、`issued_actor_identity`、`revoked_actor` 以 `realm` 列引用它，后三者按
@@ -485,10 +486,8 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
 
 ## 9. 与当前实现的差异
 
-当前代码仍按早先的单 Realm 契约实现，以下差异需要跟进：
+当前代码已承载多个 Realm，以下差异仍需跟进：
 
-- 移除 `idx_realm_singleton` 唯一索引与 `Realm::create` 中的单例检查，增加
-  `max_realms` 配置；
 - 新增 `realm_domain` 表；`realm` 表增加 `pending`/`suspended`/`retired` 状态、Realm Profile digest 与 `sequence`；
 - 实现 authority descriptor 获取（含逐跳 SSRF 检查的重定向处理、限流与结果缓存）与
   `realm_signing_keys` 验签、Realm 管理请求（`create_realm`、`publish_profile`、
@@ -498,9 +497,8 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
 - Realm Provider ID 从当前常量改为 Realm Provider 的规范化 DNS authority；
 - Realm Provider 域名下的 Realm 的 Realm Provider 账号认证（OAuth 2.0 + PKCE）、按账号配额
   与账号绑定的 Realm 管理权；
-- 移除 Loran 自身服务的 `/.well-known/actr/realm.json`（它与 authority-discovery
-  「`/.well-known/actr` 下不定义子路径」冲突）；仅在 authority descriptor 的 `realms`
-  relation 指向本 Realm Provider 时提供 `actr.realm/v1` Realm Profile；
+- 仅在 authority descriptor 的 `realms` relation 指向本 Realm Provider 时提供
+  `actr.realm/v1` Realm Profile；
 - Publisher 验证改为读取 authority descriptor 的 `publisher` 成员并按第 7 节的签名
   注册请求登记，移除 `/.well-known/actr/publisher.json`（Publisher Registry 当前
   实现的 `PUBLISHER_DESCRIPTOR_PATH`）与 `verification_challenge`，重定向处理与 Realm 相同
