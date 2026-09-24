@@ -20,10 +20,11 @@ export interface AppInfo {
 
   actr_url: string; // guest cdn url
   actr_hash_code: string; // guest sha1 code
-  realm_id: string; // toml realm id
+  realm: string; // toml realm name
   server_actor_type: {
     publisher: string; // toml actor publisher
     name: string; // toml actor name
+    version: string; // toml actor version
   };
 
   info: {
