@@ -683,6 +683,112 @@ async fn test_register_sets_pending_retention_and_drops_expired_rows() {
 
 #[tokio::test]
 #[serial]
+async fn test_renew_and_reissue_extend_pending_retention() {
+    let mut env = setup_test_environment().await;
+    let realm_secret = "linked-pending-extend-secret";
+    let realm_id = 22035;
+    seed_realm(realm_id, "linked-pending-extend", Some(realm_secret)).await;
+    let app = create_test_router(&env).await;
+    let pool = platform::storage::db::get_database().get_pool();
+
+    let mut registration = linked_register_request();
+    registration.realm = Realm { realm_id };
+    registration.ws_address = Some("wss://example.invalid/actor".to_string());
+    let registered = match post_register(app.clone(), registration.clone(), Some(realm_secret))
+        .await
+        .result
+        .expect("register result")
+    {
+        register_response::Result::Success(ok) => ok,
+        register_response::Result::Error(error) => panic!("register failed: {error:?}"),
+    };
+    let actr_id = registered.actr_id.clone();
+
+    let shorten_retention = || async {
+        sqlx::query(
+            "UPDATE pending_registration SET expires_at = ?1
+             WHERE realm_id = ?2 AND serial_number = ?3",
+        )
+        .bind(issuer::renewal::now_secs() + 60)
+        .bind(realm_id)
+        .bind(actr_id.serial_number as i64)
+        .execute(pool)
+        .await
+        .expect("shorten pending retention");
+    };
+    let retention = || async {
+        sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT expires_at FROM pending_registration
+             WHERE realm_id = ?1 AND serial_number = ?2",
+        )
+        .bind(realm_id)
+        .bind(actr_id.serial_number as i64)
+        .fetch_one(pool)
+        .await
+        .expect("read pending retention")
+    };
+
+    shorten_retention().await;
+    let renewed = match post_renew(
+        app.clone(),
+        RenewCredentialRequest {
+            actr_id: actr_id.clone(),
+            renewal_token: registered.renewal_token.expect("renewal token"),
+            attempt_id: control_attempt_id(),
+        },
+    )
+    .await
+    .result
+    .expect("renew result")
+    {
+        renew_credential_response::Result::Success(ok) => ok,
+        renew_credential_response::Result::Error(error) => panic!("renew failed: {error:?}"),
+    };
+    assert_eq!(
+        retention().await,
+        Some(
+            renewed
+                .renewal_token_expires_at
+                .expect("renewal token expiry")
+                .seconds
+                + issuer::renewal::REISSUE_BINDING_GRACE_SECS
+        )
+    );
+
+    shorten_retention().await;
+    let reissued = match post_reissue(
+        app,
+        ReissueCredentialRequest {
+            actr_id: actr_id.clone(),
+            registration,
+            renewal_proof: renewed.renewal_token.clone(),
+            attempt_id: control_attempt_id(),
+        },
+        Some(realm_secret),
+    )
+    .await
+    .result
+    .expect("reissue result")
+    {
+        register_response::Result::Success(ok) => ok,
+        register_response::Result::Error(error) => panic!("reissue failed: {error:?}"),
+    };
+    assert_eq!(
+        retention().await,
+        Some(
+            reissued
+                .renewal_token_expires_at
+                .expect("renewal token expiry")
+                .seconds
+                + issuer::renewal::REISSUE_BINDING_GRACE_SECS
+        )
+    );
+
+    env.shutdown_signer().await;
+}
+
+#[tokio::test]
+#[serial]
 async fn test_reissue_route_preserves_linked_actor_id() {
     let mut env = setup_test_environment().await;
     let realm_secret = "linked-reissue-secret";

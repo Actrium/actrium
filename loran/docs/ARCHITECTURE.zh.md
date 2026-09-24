@@ -29,7 +29,7 @@
 │ Management: Admin UI/API + Realm 生命周期               │
 └────────────────────────┬─────────────────────────────────┘
                          ▼
-                    SQLite schema v2
+                    SQLite schema v3
 ```
 
 这些是逻辑平面，不要求永远同进程。v1 默认 all-in-one 是为了减少部署依赖；Issuer
@@ -132,7 +132,7 @@ relay port range。端口可配置，descriptor 发布实际 endpoint。公网�
 ## 失败策略
 
 - 配置未知字段、占位 secret、明文 admin 密码、生产无 TLS/KEK：拒绝启动。
-- SQLite schema 不是 v1：拒绝启动并要求离线迁移。
+- SQLite schema 不是 v3：拒绝启动，需停机后重建数据库。
 - 当前实现：Realm 数量不是恰好一个时，依操作返回 503 或拒绝写入，不猜测默认
   Realm。目标契约：请求所属 Realm 不存在或不是 `active` 时拒绝，不猜测默认 Realm。
 - Actor credential scope、连接 ACL 或 envelope identity 不一致：拒绝。

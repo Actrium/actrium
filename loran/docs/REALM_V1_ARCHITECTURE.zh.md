@@ -440,8 +440,9 @@ Package Resolution、`packages` relation 与 `program_resolver` 已从协议和�
 
 ## 8. 数据与升级
 
-当前 schema v2 使用 SQLite `PRAGMA user_version = 2`。Loran 遇到旧版或未知 schema
-直接拒绝启动，不在启动路径中执行「尝试 ALTER 后忽略错误」。
+当前 schema v3 使用 SQLite `PRAGMA user_version = 3`。Loran 遇到旧版或未知 schema
+直接拒绝启动，不在启动路径中执行「尝试 ALTER 后忽略错误」。v2 → v3 没有离线迁移，
+需停机后重建数据库。
 
 目标表结构：
 
@@ -461,7 +462,7 @@ Loran 重启恢复的记录可继续提供 ServiceSpec，但在原 Actor 认证�
 Discovery 或 RouteCandidates。显式注销则先原子删除该 Actor 的缓存服务，再返回
 成功，因而紧接着重启也不能复活已注销记录。
 
-离线工具按序执行（数据库文件名沿用当前实现；未版本化库先 v1，v1 库直接 v2）：
+历史离线工具只覆盖到 v2，按序执行（数据库文件名沿用当前实现；未版本化库先 v1，v1 库直接 v2）：
 
 ```bash
 python3 scripts/loran/migrate_schema_v1.py /var/lib/actrix/actrix.db --dry-run

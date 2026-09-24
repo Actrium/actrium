@@ -38,7 +38,7 @@ loran-server
 
 ### `loran-platform`
 
-- SQLite `user_version` 必须等于 schema v2；
+- SQLite `user_version` 必须等于 schema v3；
 - 当前实现：数据库层强制每实例最多一个 Realm。目标契约：移除单例约束，改为
   Realm 名唯一（含 Realm Provider tombstone），所有按 Realm 分区的状态以完整 Realm 名
   `realm` 为键；
