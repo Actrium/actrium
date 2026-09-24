@@ -1,35 +1,35 @@
 # 09. Security and privacy
 
-> Privacy and security [docs/security](../../architecture/security/actrium/README.zh.md) is the applicable rule. Actrium Threats, privileges, sandboxes and secret management; colours and maps brought together [13](13-privacy-state-and-aggregation.md).
+> Privacy and security semantics follow [docs/security](../../architecture/security/actrium/README.zh.md). This chapter covers Actrium's threats, permissions, sandboxing and secret management; for color and graph aggregation see [13](13-privacy-state-and-aggregation.md).
 
 ## 1. Security objectives
 
-Actrium It is important to ensure that:
+Actrium must guarantee:
 
-1. User knows which code runs from. Publisher; which unalterable version;
-2. Publisher Guest Could not close temporary folder: %s Front Host;
-3. Guest Only by declaration and authorization. capability;
-4. Front Only business requests can be issued to the bounds. Primary Service;
-5. ActorId It's coded. credential (a) Proof, not an oral statement by the messenger server;
-6. Workspace secret, Actor key and session secret Do Not Enter URI;
-7. Letter/TURN (a) Infrastructure considered to be equipped with metadata and usability rights;
-8. One. Program/Tab/Service (b) Failure or excess of authority of the Party, if possible, does not affect other examples;
-9. The security restrictions and true isolation intensity are expressed to the users in a true way.
-10. Only the current pre-position is full `Ready` And all of them. `CONTROLLED` And then it's green. Green isn't the whole picture, and it doesn't deny the history leak.
-11. Every network Actor edge It's... payload Yeah. signaling, TURN And normal relay Keep it secret and tie it to the real thing. Actor/runtime.
-12. private/secret Expressly only for current policy The government has also been able to provide information on the situation in the country.
+1. The user knows which Publisher the running code comes from, and which immutable version;
+2. A Publisher's Guest cannot replace or extend the trusted Front Host;
+3. The Guest can only use capabilities it has declared and been authorized for;
+4. The Front can only send business requests to its bound Service;
+5. The ActorId is proven by a cryptographic credential, not asserted verbally by a signaling server;
+6. Workspace secrets, Actor keys and session secrets never enter a URI;
+7. Signaling/TURN are treated as infrastructure with metadata and availability power;
+8. The failure or overreach of one Program/Tab/Service should, as far as possible, not affect other instances;
+9. Security limits and the real strength of isolation are represented truthfully to the user.
+10. Green is shown only when, on the current ready facet, the whole graph is `Ready` and every node is `CONTROLLED`. Green is not a simultaneous whole-graph state, and it does not negate historical leaks.
+11. Every network Actor edge's payload is kept confidential from signaling, TURN and ordinary relays, and is bound to the real Actor/runtime.
+12. Private/secret plaintext enters only the execution, storage and compute boundary that the current policy accepts and for which the evidence is fresh.
 
-## 2. Trust borders
+## 2. Trust boundary
 
 ```mermaid
 flowchart LR
     U["User/Admin"]
-    SH["Actrium Shell + Native Host<br/>Lettered"]
-    G["Keel Guest<br/>Untrusted."]
-    SVH["Service Host Broker<br/>Lettered"]
-    SW["Service WASM<br/>Limited"]
+    SH["Actrium Shell + Native Host<br/>Trusted"]
+    G["Keel Guest<br/>Untrusted"]
+    SVH["Service Host Broker<br/>Trusted"]
+    SW["Service WASM<br/>Restricted"]
     WS["Workspace Provider"]
-    R["Realm / Signaling / TURN<br/>External Trust Field"]
+    R["Realm / Signaling / TURN<br/>External trust domain"]
     PUB["Publisher / CDN / Marketplace<br/>External supply chain"]
 
     U --> SH
@@ -41,102 +41,102 @@ flowchart LR
     SH -->|credentials/transport| R
 ```
 
-Lettered Actr Host There are still possible gaps;“Lettered”It is stated that it is within the platform ' s credible calculation base and does not imply that there is no need for an audit.
+A trusted Actr Host can still have vulnerabilities; "trusted" means it sits inside the platform's trusted computing base, not that it needs no auditing.
 
 ## 3. Assets
 
-### High Value
+### High value
 
-- Workspace (a) Content;
-- Actor Long-term private key;
-- Realm membership/refresh material;
-- Service Status and snapshot;
-- Workspace Provider credential;
-- user identity and application permissions;
-- package signing key;
-- Service session secret.
+- Workspace content;
+- Actor long-term private keys;
+- Realm membership and renewal tokens;
+- Service state and snapshots;
+- Workspace Provider credentials;
+- User identity and application permissions;
+- package signing keys;
+- Service session secrets.
 
 ### Sensitive metadata
 
 - ActorId;
-- Program/Service Use of records;
+- Program/Service usage records;
 - Realm membership;
-- Realm names (which reveal the domain and instance name);
-- IP, online time, connection;
-- Workspace Display name and location;
-- (a) The delegation of authority;
+- Realm name (exposes the domain and instance name);
+- IP, online time, connection graph;
+- Workspace display name and location;
+- Permission grants;
 - crash/log.
 
-## 4. Threat Subject
+## 4. Threat actors
 
-- It was malicious or broken. Publisher;
-- It's been tampered with. package/CDN/Mirrors;
-- Malicious. Keel Guest;
-- Malicious. Service workload;
-- It's bad or lost. Marketplace;
-- Malicious. Realm, signaling or TURN Realm Provider;
-- Other processes with equipment;
-- The assailant with the right to do so;
-- Stolen equipment;
-- Malicious Link/Two-dimensional code./Web page call-up;
-- Supply chain and dependence on attack;
-- Domain name transfer,CA or DNS event.
+- A malicious or compromised Publisher;
+- A tampered package/CDN/mirror;
+- A malicious Keel Guest;
+- A malicious Service workload;
+- A malicious or compromised Marketplace;
+- A malicious Realm, signaling or TURN Realm Provider;
+- Another process on the same device;
+- An attacker with local privileges;
+- A stolen device;
+- A malicious link/QR code/web launch;
+- Supply-chain and dependency attacks;
+- Domain transfer, CA or DNS incidents.
 
-## 5. Threats and primary control
+## 5. Threats and primary controls
 
-| Threats | Control |
+| Threat | Control |
 |---|---|
-| Same version of the variant | coordinate→digest Fixed, bag-signed,equivocation hard fail |
-| CDN/CacheView | HTTPS + package digest + Ed25519 |
-| Zip slip/zip bomb | Path denied, number of files/Total/Compression ratio limit, atomic decompression |
-| Guest require Any module | Build and install double white lists,runtime resolver fail-closed |
-| Guest Direct networking | No Default fetch/socket;`host:net` capability + allowlist |
-| Image Invisible networking/Bring your own header | ActriumSafeImage Only asset id Or controlled. URL |
-| Guest Any Actor | Only exposure to fixed PrimaryService capability |
-| Guest Counterfeiting Users/Permissions | Actr Host Attach Uncoverable session metadata |
-| Guest Infinite Cycle | QuickJS interrupt timeout,Closable runtime |
-| Guest Memory depletion | per-Guest heap cap, payload/render limits |
-| Bridge/Component misuse | schemaComponent/props/event/RemoteRef White list |
-| Service Run away. | WASM Component, import allowlist, fuel/memory/I/O quota |
-| Workspace Path Passes | brokered root handle, path regularization,symlink policy |
-| More Service Write simultaneously | exclusive writer lease |
-| URL Batch creation | Confirm,creation intent Quotas, sources and flows |
-| URL Discover Permissions | ActorId Not capability, URI None token |
-| Actor Counterfeit | Realm credential, Actor key proof, challenge |
-| Forged or rolled-back Realm Profile | Realm Profile must be signed by a pinned Realm signing key; first trust via Web PKI or enterprise pin; Realm signing key changes require a valid rotation chain; monotonic `sequence`, immutable `provider.id`, retired Realms rejected; Realm Profiles do not expire and clients refresh them periodically; a Realm Profile that cannot be fetched, fails verification or is retired must not lead to using any Realm Provider other than the Realm Profile's |
-| Client disguised as official Actrium Front | Service Default not trusting client to achieve; controlled scenes are tested separately platform/runtime attestation |
-| Malicious. Actor "Don't leak" self-report. | The person assessed cannot sign out for final `ActorAssurance`;a valid declaration by Actr Host Close |
-| Service Concealing the support. Actor | No root map to find out; no green underage |
-| WASM Declarations differ from actual exports | Comparison manifest, imports; valid declaration and actual side; confirmation of non-declaration of export `UNCONTROLLED` |
-| Concurrent process Native Around broker | Third parties NativeCdylib Hold `UNKNOWN` or confirmed as `UNCONTROLLED`;no greening |
-| signaling/TURN Observation or alteration payload | Actor Secure Envelope♪ Two-way identity and transcript (a) Tie;relay Not held payload key |
-| Legal TLS Ended to Error workload | ActorId/runtime/credential/ephemeral key/attestation result channel binding |
-| Cloud Administrator or Hypervisor Read Agent Express | secret policy Request TEE/CC;release data keys only after remote certification |
-| Legal TEE Proof of being forwarded to malicious example | Evidence Tie nonce, Actor/runtime, workload digest, policy, audience and ephemeral key |
-| Just... CPU TEE, GPU/NPU Still exposed. | CPU+Guest+driver+IOMMU/link+device firmware/memory composite attestation |
-| Hardware vendor self-report ("supports confidential computing") | versioned Verifier adapter, vendor trust root, Reference Values, Endorsements, TCB Undo and Negative Test |
-| CC Intra-negative. workload Active leak | CC No substitute WASM/Native confinement, egress closure with output control |
-| Legal Actor Response to stolen tape secret | data-class schema, declassification capability, output size/Objective/Purpose gate |
-| New Actor Data first and then verify | pending edge Sync gate;Mark Do not send business before passing payload |
-| One down. AA Expired but green as a whole | `Ready` Require current pointer; no green display for expired |
-| I'm not sure I'm gonna be able to do this. | The limit is not to cut and turn green. |
-| Configure the old old rebirth Capability / Old conclusions | `ActorState.revision` Untouch incremental and enters the state root; roll back to get new `ActorStateDigest`Old bindings never match |
-| Put the peer Actor It's a disguise. HTTPS ♪ Round and round ♪ Principal Rating | - I can show you. Actr Endpoint of identity must be pressed Actor Target rating; classification not determinable `UNKNOWN` |
-| Call back local clocks to revive expired evidence, conclusions or documents | Time frame for the operator and the rating / No clocks can be called back for validity checks. |
-| Letters are replayed. | One-time ticket, nonceShort period of validity |
-| The candidate for the letter of the order. | Signing of data for consultation,peer identity handshake |
-| TURN Open Agent | Short-term credential, audienceQuotas, non-hidden |
-| Domain Name Synonym | IDNA Normative,A-label Display, Risk Tip |
-| Domain Name Transfer | key history, digest pin, identity change UI |
-| Local DB Leak | secret Just go in. Keychain/Keystore, DB Minimize |
-| Log leak | redactionNone credential/payload/path, Retention policy |
-| Front Concurrent process sandbox Run away. | Security code,fuzz, helper process Route, risk level |
+| Different package content under the same version | Realm Profile pins the package SHA-256 and package signature; equivocation hard-fails |
+| CDN/cache tampering | HTTPS + package digest + Ed25519 |
+| Zip slip/zip bomb | Path rejection, limits on file count/total size/compression ratio, atomic extraction |
+| Guest requiring an arbitrary module | Dual allowlist at build and install time, fail-closed runtime resolver |
+| Guest connecting to the network directly | No default fetch/socket; `host:net` capability + allowlist |
+| Image implicitly reaching the network/carrying its own headers | ActriumSafeImage uses only an asset id or a controlled URL |
+| Guest calling an arbitrary Actor | Only a fixed Service capability is exposed |
+| Guest forging the user/permissions | Actr Host attaches non-overridable session metadata |
+| Guest infinite loop | QuickJS interrupt timeout, destroyable runtime |
+| Guest memory exhaustion | per-Guest heap cap, payload/render limits |
+| Bridge/component abuse | schema and an allowlist for components/props/events/RemoteRef |
+| Service escape | WASM Component, import allowlist, fuel/memory/I/O quota |
+| Workspace path traversal | brokered root handle, path canonicalization, symlink policy |
+| Multiple Services writing at once | exclusive writer lease |
+| Bulk instance creation | User confirmation, idempotent creation intent, source rate limiting and quota |
+| A link leaking permissions | Neither the Realm link nor the ActorId is a credential; the URI contains no token |
+| Actor impersonation | Actor credential, Actor key proof, challenge |
+| Forging or rolling back the Realm Profile | The Realm Profile must be signed by the pinned Realm signing key; first trust goes through Web PKI or an enterprise pin; a Realm signing key change requires a valid rotation chain; `sequence` is monotonic, `provider.id` is immutable, a retired Realm is rejected; the Realm Profile never expires and the client refreshes it periodically; when the Realm Profile cannot be fetched, fails verification, or is retired, no Realm Provider other than the one it specifies may be used |
+| A client impersonating the official Actrium Front | The Actor credential does not prove the peer's code; the platform offers optional platform/runtime attestation |
+| A malicious Actor self-reporting "no leak" | The subject being assessed must not self-sign the final `ActorAssurance`; the effective declaration is closed by the Actr Host |
+| A Service concealing other Actors in the Realm | The rootless graph must discover inbound edges; a missed assessment must not be green |
+| WASM's declaration differing from its actual exports | Compare the manifest, imports, effective declaration and actual edges; a confirmed undeclared export is `UNCONTROLLED` |
+| Same-process Native bypassing the broker | A third-party NativeCdylib stays `UNKNOWN`, or becomes `UNCONTROLLED` once confirmed; it must not be laundered to green |
+| Signaling/TURN observing or tampering with the payload | Actor Secure Envelope, bidirectional identity and transcript binding; the relay does not hold the payload key |
+| A legitimate TLS termination landing at the wrong workload | Channel binding across ActorId/runtime/credential/ephemeral key/attestation result |
+| A cloud admin or hypervisor reading Agent plaintext | The secret policy requires a TEE/CC; the data key is released only after remote attestation |
+| A legitimate TEE attestation forwarded to a malicious instance | The Evidence is bound to a nonce, the Actor/runtime, workload digest, policy, audience and an ephemeral key |
+| A CPU-only TEE while the GPU/NPU still exposes plaintext | Composite attestation across CPU+Guest+driver+IOMMU/link+device firmware/memory |
+| A vendor self-reporting "confidential computing supported" | A versioned Verifier adapter, vendor trust root, Reference Values, Endorsements, TCB revocation and negative testing |
+| A malicious workload inside CC actively exfiltrating | CC does not replace WASM/Native confinement, egress closure and output control |
+| A legitimate Actor smuggling a secret in its response | data-class schema, declassification capability, gating on output size/destination/purpose |
+| A new Actor receiving data before it is verified | A synchronous gate on the pending edge; no business payload is sent before Mark passes |
+| A downstream ActorAssurance expiring while the whole stays green | `Ready` requires the current pointer; an expired one must not show green |
+| Misjudging privacy after truncating a large graph | Exceeding the limit must not be truncated and then shown green |
+| A configuration rollback reviving a retired old Actor Grant / old conclusion | `ActorState.revision` increases monotonically and enters the state root; a rollback gets a new `ActorStateDigest`, so the old binding never matches again |
+| Disguising a peer Actor as an HTTPS sink to bypass cross-Principal scoring | An endpoint that can present an Actr identity must be assessed as an Actor target; an undecidable category stays `UNKNOWN` |
+| Turning back the local clock to revive expired evidence, conclusions or credentials | Neither the enforcer's nor the assessor's clock, used for deadline/validity checks, may be turned back |
+| Signaling replay | one-time ticket, nonce, short validity |
+| Signaling candidate injection | signed negotiation data, peer identity handshake |
+| TURN open proxy | short-lived credential, audience, quota, non-anonymous |
+| Domain homograph | IDNA normalization, A-label display, risk warning |
+| Domain transfer | key history, digest pin, identity-change UI |
+| Local DB leak | secrets go only into Keychain/Keystore; DB minimization |
+| Log leak | redaction, no credential/payload/path, retention policy |
+| Front same-process sandbox escape | secure coding, fuzzing, helper-process path, risk level |
 
-## 6. Permission Model
+## 6. Permission model
 
-### 6.1 Permission Subject
+### 6.1 Permission subject
 
-Permission to bind at least:
+A permission binds at least:
 
 ```text
 publisher
@@ -149,11 +149,11 @@ publisher
 + principal/client
 ```
 
-Only name can be remembered by using program.
+It cannot be remembered by the program's display name alone.
 
-### 6.2 Decision-making on competence
+### 6.2 Permission decision
 
-Status:
+States:
 
 - `allow-once`
 - `allow-while-open`
@@ -162,22 +162,22 @@ Status:
 - `deny`
 - `admin-managed`
 
-High-risk authority does not provide for permanent silence unless the organizational strategy is clearly managed.
+High-risk permissions offer no permanent silent allow unless explicitly managed by organization policy.
 
-### 6.3 Permission Upgrade
+### 6.3 Permission upgrade
 
-If the new version:
+If a new version:
 
-- Add capability;
-- Expand domain allowlist;
-- (a) From read-only to write-only;
-- (b) Increase resource quotas;
-- Allow Native Service;
-- Change in the scope of data sharing;
+- Adds a capability;
+- Expands the domain allowlist;
+- Changes from read-only to writable;
+- Raises a resource quota;
+- Allows a native Service;
+- Changes the scope of data sharing;
 
-It would have to be reconfirmed that the old version of the mandate could not be inherited.
+then it must be reconfirmed; it cannot inherit the previous version's grant.
 
-### 6.4 Front with Service Separate authorization
+### 6.4 Front and Service authorized separately
 
 For example:
 
@@ -192,238 +192,238 @@ Service:
   actor.call:example.com:indexer@1
 ```
 
-Users can see which capacity is being implemented at the front desk, which is in the front desk. Service Host execution.
+The user can see which capability runs on the local Front and which runs on the Service host.
 
-## 7. Keel Guest Clear.
+## 7. Keel Guest security
 
-### 7.1 Static Control
+### 7.1 Static controls
 
-- package Allow only one declaration Guest entry;
-- bundle parser Inspection import/require;
-- Ban eval, Function constructor Non-physical dynamics import;
-- capability manifest Consistent with the results of the source code analysis;
-- bundle size, source map, character encoding limits;
-- Ban External source URL;
-- Customally modify the drop-off.
+- A package may declare only one Guest entry point;
+- The bundle parser checks imports/requires;
+- `eval`, the `Function` constructor and non-literal dynamic `import` are forbidden;
+- The capability manifest matches the source-code analysis result;
+- Limits on bundle size, source maps and character encoding;
+- External source URLs are forbidden;
+- Self-modifying writes to disk are forbidden.
 
-Static scans are the issuance of diagnostics, not the complete security boundary:`Function`Indirect `eval`, alias Call etc. must be made at the same time by runtime global policy, module loaders and capability (d) Quarantine restrictions.
+Static scanning is a publishing diagnostic, not a complete security boundary: `Function`, indirect `eval`, alias calls and the like must also be constrained by the runtime's global policy, the module loader and capability isolation.
 
-### 7.2 Run-time Control
+### 7.2 Runtime controls
 
-- Fixed QuickJS;
-- No injection. fetch, WebSocket, filesystem, process, native module;
-- Actr Host module dispatch Rejected without a declaration;
+- QuickJS is pinned;
+- No injected `fetch`, `WebSocket`, filesystem, process or native module;
+- Actr Host module dispatch is rejected unless declared;
 - input/output/event schema;
 - deadline, rate limit, payload limit;
-- timer/callback Cleaning;
-- Guest console Structure and speed limit;
-- destroy After All capability token Expiry.
+- timer/callback cleanup;
+- The Guest console is structured and rate-limited;
+- All capability tokens are invalidated after destroy.
 
-### 7.3 Component control
+### 7.3 Component controls
 
-Component props No, it's not.“Normal UI Data”It's automatic.Actrium Must check:
+A component prop is not automatically safe just because it looks like "ordinary UI data". Actrium must check:
 
-- URL and header;
-- Documentation/asset reference;
-- text and binary sizes;
-- z-index/modal/focus (a) Conduct;
-- accessibility;
-- event Frequency;
-- (a) Method calls;
-- platform-specific escape hatch.
+- URLs and headers;
+- File/asset references;
+- Text and binary size;
+- z-index/modal/focus behavior;
+- Accessibility;
+- Event frequency;
+- Method calls;
+- Platform-specific escape hatches.
 
-Default not provided WebViewAny HTML, any original component name or generic reflection.
+No WebView, arbitrary HTML, arbitrary native component names or general reflection is provided by default.
 
-## 8. Sandbox Security phase
+## 8. Sandbox security levels
 
-The security centre shows the actual level:
+The Security Center shows the actual level:
 
-| Level | Application | Segregation |
+| Level | Applies to | Isolation |
 |---|---|---|
-| S1 Same-process sandbox | v1 Keel JS Guest | Independence QuickJS runtime + capability + quota |
-| S2 Worker/runtime isolation | Follow-up | Yeah. terminate worker + Independent memory movement |
-| S3 OS process isolation | Desktop Long-Term Objectives | helper process/AppContainer/XPC |
-| T1 Trusted Native | Actrium First party/Enterprise | Native workloadTrust. |
+| S1 Same-process sandbox | v1 Keel JS Guest | Independent QuickJS runtime + capability + quota |
+| S2 Worker/runtime isolation | Later | Can terminate the worker + independent memory scheduling |
+| S3 OS process isolation | Long-term desktop goal | helper process/AppContainer/XPC |
+| T1 Trusted Native | Actrium first-party/enterprise | Native workload, high trust |
 
-Don't put it in the car. S1 The case is written.“Process level segregation”.QuickJS Yes. C Engine,Actr Host/Bridge/The component layer leaks may still be crossing the language sandbox.
+S1 copy must not be written as "process-level isolation". QuickJS is a C engine; vulnerabilities in the Actr Host/Bridge/component layer can still cross the language sandbox.
 
-## 9. Service workload Clear.
+## 9. Service workload security
 
-Third parties WASM Service:
+Third-party WASM Service:
 
-- Component Model Format validation;
+- Component Model format validation;
 - import allowlist;
-- Ban ambient filesystem/network;
-- Workspace Just give it to me. preopened capability;
-- outbound domain, method, port policy;
+- No ambient filesystem/network;
+- The Workspace grants only a preopened capability;
+- Outbound domain, method, port policy;
 - Actor dependency allowlist;
 - fuel/epoch/wall timeout;
-- memory/table/instance limit;
+- memory/table/instance limits;
 - mailbox/backpressure;
 - snapshot schema;
-- panic/trap (a) Only terminations;
-- Call audit.
+- panic/trap terminates only that instance;
+- Call auditing.
 
-If procedural requirements native Service, the installation page must be displayed at a stand-alone high-risk level, and Marketplace Default rejection.
+If a program requires a native Service, the install page must present it at a separate high-risk level, and the Marketplace rejects it by default.
 
-## 10. Networks and SSRF
+## 10. Network and SSRF
 
-All by package, Realm Profile or by user input URL It is necessary to:
+Every URL produced by a package, Realm Profile or user input must:
 
-- parse (a) Then verify;
-- Only declaration allowed scheme;
-- DNS Pre- and post-examining check loopback, private, link-local, multicast and metadata IP;
-- Protection DNS rebinding;
-- Control redirect Number and cross-domain;
-- Not Forward Sensitive header To New origin;
-- Limit ports;
-- (a) Limit the response size and time;
-- TLS hostname Validation;
-- The exception to corporate private networking is authorized by a visible strategy.
+- Be parsed before validation;
+- Allow only the declared scheme;
+- Check for loopback, private, link-local, multicast and metadata IPs, both before and after DNS resolution;
+- Prevent DNS rebinding;
+- Control the number of redirects and cross-origin transitions;
+- Not forward sensitive headers to a new origin;
+- Restrict the port;
+- Limit response size and time;
+- Verify the TLS hostname;
+- Enterprise private-network exceptions require explicit policy authorization.
 
-Publisher package endpoint Available CDN, but CDN URL Not automatically Guest network allowlist.
+A Publisher's package endpoint may use a CDN, but a CDN URL does not automatically become part of the Guest network allowlist.
 
-## 11. Actor/Session Clear.
+## 11. Actor/Session security
 
-- ActorId I have to. public key and Realm credential (a) Tie;
-- `ActorState` amend number one-to-one incremental; configuration rollback does not repeat old `ActorStateDigest`Old credential/Capability and will not be raised up.
-- credential (b) Short-term, revocable;
-- ServiceLong term key (b) Not being stored securely;
-- signaling ticket One-time;
-- Attach challenge (b) Two-way;
-- session id Unpredictable;
-- session metadata By Actr Host Add;
-- lease The message is rejected after due date;
-- replay/idempotency key (a) The window is clear;
-- `service` URI mismatch Direct failure;
-- Service offline No, no, no. fallback.
+- The ActorId must be bound to a public key and an Actor credential;
+- The `ActorState` revision number increases monotonically; a configuration rollback does not reproduce an old `ActorStateDigest`, and old credentials/Actor Grants do not revive;
+- Credentials are short-lived and revocable;
+- The Service's long-term key never leaves secure storage;
+- The signaling ticket is one-time use;
+- The Attach challenge is mutual;
+- The session id is unpredictable;
+- Session metadata is added by the Actr Host;
+- Messages are rejected once the lease expires;
+- The replay/idempotency-key window is well defined;
+- If a Service's Actor type does not match the package the Realm Profile points to, it fails outright;
+- A Service being offline does not fall back to anything else.
 
-ActorType, Actr Host Version and package digest The client statement is not a valid one. runtime attestation;Service Data rights and operational mandates cannot be relied on in these self-reported fields.
+Platform boundary of fact: an Actor credential proves the Actor key, identity and claims, not that the peer actually runs that code; a client's declared Actor type, Actr Host version and package digest likewise do not constitute runtime attestation. For how applications should respond, see [App development guidance](app-development-guidance.md).
 
-## 12. Workspace Clear.
+## 12. Workspace security
 
-- Front/Guest No path;
-- Service Use brokered handle;
-- Workspace Provider credential (a) Independence;
+- Front/Guest has no path;
+- The Service uses a brokered handle;
+- The Workspace Provider credential is independent;
 - Path canonicalization;
 - symlink/hardlink policy;
-- Atom writing;
+- Atomic writes;
 - quota;
 - exclusive writer lease;
-- (a) High-risk de-recognisations;
-- snapshot Encryption;
-- (b) Protection against double-hostages during migration;
-- Delete Service Default not delete Workspace.
+- High-risk deletion requires reconfirmation;
+- Snapshots are encrypted;
+- Dual-host use is prevented during migration;
+- Deleting a Service does not delete the Workspace by default.
 
 ## 13. Secrets
 
 Secret classification:
 
-| Secret | Storage | Exposure range |
+| Secret | Storage | Exposure scope |
 |---|---|---|
-| Realm client key (generated separately per Realm; how Actrium generates it internally is not specified) | OS secure storage | Identity Manager |
-| Service Actor key | OS secure storage | Service runtime bootstrap |
-| Realm client key | OS secure storage | Realm Manager |
-| signaling ticket | Memory | signaling clientOne time. |
-| TURN credential | Memory | ICE stackShort term |
+| Realm client key (generated independently per Realm; how Actrium generates it internally is not externally specified) | OS secure storage | Identity Manager |
+| Service key | OS secure storage | Service runtime bootstrap |
+| renewal token (renews Actor credentials, bound to the Realm client key) | OS secure storage | Realm Manager |
+| signaling ticket | Memory | signaling client, one-time |
+| TURN credential | Memory | ICE stack, short-lived |
 | Workspace credential | OS secure storage | Workspace broker |
-| session secret | Front/Service Host Memory | Guest Not visible |
+| session secret | Front/Service Host memory | Invisible to the Guest |
 
-It is prohibited:
+Forbidden:
 
 - URI;
 - crash report;
-- General logs;
+- ordinary logs;
 - Guest config;
 - Clipboard;
-- (a) Unencrypted backup;
+- Unencrypted backup;
 - query parameter.
 
-## 14. Log, diagnosis and telemetry
+## 14. Logging, diagnostics and telemetry
 
-### Local diagnosis
+### Local diagnostics
 
-This could include:
+May include:
 
 - Standard error codes;
 - ActorId;
 - package digest;
-- route (a) Name;
+- route name;
 - timing/size;
 - Realm endpoint;
-- P2P/TURN Status.
+- P2P/TURN status.
 
-Default does not contain:
+Excluded by default:
 
 - RPC payload;
 - User text;
-- Workspace Content or complete path;
+- Workspace content or full paths;
 - credential/ticket;
 - authorization header;
 - OAuth token;
 - private key.
 
-### Upload telemetry
+### Uploaded telemetry
 
-- Default closes; uploads only when explicitly enabled by the user or organizer;
-- ActorId Press installation to add salt hash;
-- No, I'm not. publisher Private development URI;
-- No, I'm not. Guest route/query (a) Content;
-- No, I'm not. Workspace (a) Name;
-- crash dump First redaction;
-- (c) Clearly define the duration and use of the reservation.
+- Off by default; uploaded only after the user or an organization admin explicitly enables it;
+- The ActorId is salted and hashed per installation;
+- A publisher's private development URI is not uploaded;
+- Guest route/query content is not uploaded;
+- The Workspace name is not uploaded;
+- Crash dumps are redacted first;
+- Retention period and purpose are stated explicitly.
 
-## 15. Security update and undo
+## 15. Security updates and revocation
 
-- Actrium Host Security update can require restart Front;
-- package (a) Discontinuation of the hierarchy;
+- An Actrium Host security update may require restarting the Front;
+- Package revocation is handled by level;
 - Revoking a Realm issuer key or Realm signing key immediately affects new connections;
-- Created session At the latest. credential/lease Term expires;
-- compromised Publisher key (a) A historical and credible version of the text, judged by the time of signature and the scope of revocation;
-- emergency blocklist (a) Signing, expiry and auditable;
-- quarantine Reservations Workspace Export capability.
+- An established session terminates at the latest when its credential/lease expires;
+- A compromised Publisher key's historically trusted versions are judged by signing time and revocation scope;
+- An emergency blocklist must be signed, expirable and auditable;
+- Quarantine retains the ability to export the Workspace.
 
 ## 16. Privacy commitments
 
-Actrium The user data flow depends on:
+Actrium should not establish a centralized account or sync service by default. Where user data flows depends on:
 
 - Workspace Provider;
-- Service host device;
+- Service host;
 - Realm;
 - signaling/TURN;
 - Publisher API;
 - Marketplace.
 
-Installation pages and security centres must be available“Where will the data go?”, instead of a general privacy switch.
+The install page and the Security Center must provide a layered explanation of "where the data goes", rather than a single overall privacy switch.
 
-A Realm name appears in shared URIs as part of the ActorId and reveals the Realm domain and the Realm label (`label`). By default Actrium generates a fully random `label` for each instance (containing no program name or user input); the human-readable name goes into `display_name` and never enters the ActorId. When the user explicitly chooses a readable `label`, the confirmation page and the pre-sharing UI should warn that it is exposed in links. Realm names and ActorIds look like email addresses (`k7m2q9xh@acme.com`); Actrium must never render them as `mailto:` links and should label them clearly as instance addresses. Each Realm uses a separate Realm client key, never reused across Realms, so different instances cannot correlate the same client by it. When the Realm signing key holder is a Realm Provider, the user signs in with a Realm Provider account to create; the Realm Provider can link the instances created by one account (it signs them anyway), but instance members never see the account.
+The Realm name appearing in a shared Realm link exposes the Realm domain and RealmId (`realm_id`). Actrium generates a fully random RealmId for an instance by default (containing no program name or user input), with the readable name placed in `display_name`, never entering the ActorId; when a user explicitly chooses a readable RealmId, the confirmation page and the pre-share UI should warn that it will be exposed in the link. A Realm name and an ActorId resemble an email address (`k7m2q9xh@acme.com`); Actrium must not render them as a `mailto:` link, and should clearly label them as an instance address. Each Realm uses a separate Realm client key, never reused across Realms, so different instances cannot correlate the same client through it. For a Realm under a Realm Provider domain, the user creates it by signing in with a Realm Provider account; the Realm Provider can correlate instances created by the same account (it is inherently the signer), but the instance's members cannot see the account.
 
 ## 17. Security development requirements
 
-- URI/package/manifest/ActorId parser fuzz;
-- Keel Bridge with Safe Components fuzz;
+- URI/package/manifest/ActorId parser fuzzing;
+- Keel Bridge and Safe Components fuzzing;
 - WASM import validation;
 - archive extraction property tests;
 - session replay/lease tests;
-- Realm signing key rotation chain, Realm Profile `sequence` rollback and Realm issuer key rotation tests;
+- Tests for the Realm signing key rotation chain, Realm Profile `sequence` rollback and Realm issuer key rotation;
 - signaling/TURN credential leakage tests;
 - capability policy differential tests;
-- More Tab Resource segregation failure injection;
-- Third-party penetration tests;
-- Dependency SBOM and the scanning of loopholes;
-- Signature key Operations Manual and incident runbook.
+- Multi-Tab resource isolation fault injection;
+- Third-party penetration testing;
+- Dependency SBOM and vulnerability scanning;
+- Signing-key operations manual and incident runbook.
 
-## 18. Application security
+## 18. Application assurance
 
-Applying privacy is not Publisher Self-reported a Boolean field.Actrium You have to press it. [13](13-privacy-state-and-aggregation.md) and [docs/security](../../architecture/security/actrium/README.zh.md) Processing:
+Application privacy is not a boolean field the Publisher self-reports. Actrium must handle it per [13](13-privacy-state-and-aggregation.md) and [docs/security](../../architecture/security/actrium/README.zh.md):
 
-- No root in the chart, by valid Actor `Transfer` (a) Formation;Front (a) Positioning only;
-- WASM Adoption of the declaration + import / Effectiveness / (b) Export closed-convey measures;
-- Third-party co-operation process Native No green; independence Native Capsule Only satisfaction. OS sandbox It's only possible to upgrade in a closed bag.
-- If the channel is not valid, the channel is blocked and no rating is taken;
-- Show green / Yellow / Red and shaving. `Ready`; hangs shall not be shown green;
-- The new configuration will only be used for new data;
-- (b) The same assessment of the weakest and prohibition of self-signature of final conclusions;
-- Right Complete Actor The image is minimally disclosed, and no pounces are passed on to the top signaling Or default telemetry.
+- The graph is rootless, formed by effective Actor `Transfer`s; the Front only locates it;
+- WASM is measured by declaration + import / effective capability / egress closure;
+- A third-party same-process Native must not be green; an independent Native Capsule can be promoted only if it satisfies an OS sandbox closure;
+- An invalid channel blocks and does not enter the score;
+- Showing green/yellow/red also requires `Ready`; a suspended state must not show green;
+- A new configuration applies only to new data;
+- The same assessment takes the weakest item; self-signing the final conclusion is forbidden;
+- Minimal disclosure is applied to the full Actor graph; the topology is not uploaded to signaling or to default telemetry.
 
-Green means only that the current level of readiness may be controlled, and does not mean that there are absolutely no loopholes in the code.
+Green means only that the export may be controlled on the current ready facet; it does not mean the code is absolutely free of vulnerabilities.

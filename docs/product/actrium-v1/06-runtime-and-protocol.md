@@ -1,28 +1,28 @@
-# 06. Run-time with Front–Service Agreements
+# 06. Runtime and the Front–Service protocol
 
-## 1. Runtime Overview
+## 1. Runtime overview
 
 ```mermaid
 flowchart TB
-    subgraph Shell["Actrium Shell(recipted)"]
+    subgraph Shell["Actrium Shell (trusted)"]
         TRM["Tab Runtime Manager"]
-        PR["Package Resolver / Verified Cache"]
+        PR["Verified Package Cache"]
         PM["Permission Manager"]
         RM["Realm & Identity Manager"]
         SM["Service Manager"]
     end
 
-    subgraph Front["Every one. resident app Tab One. Front Actor"]
+    subgraph Front["One Front Actor per resident app Tab"]
         NW["Actrium Native Linked Workload"]
         RH["Keel Host"]
         CB["Capability Broker"]
-        RG["Keel JS Guest"No letter""]
+        RG["Keel JS Guest (untrusted)"]
         NW --> RH
         RH --> RG
         NW --> CB
     end
 
-    subgraph Service["Primary Service Actor"]
+    subgraph Service["Service"]
         SW["Signed WASM Service Workload"]
         SB["Service Host Broker"]
         WS["Workspace Capability"]
@@ -35,47 +35,46 @@ flowchart TB
     PM --> CB
     RM --> NW
     SM --> Service
-    CB -->|"Typed PrimaryService capability"| SW
+    CB -->|"Typed Service capability"| SW
 ```
 
 ## 2. Front Actor
 
 ### 2.1 Fixed Native workload
 
-Front Use Actr linked/native workload:
+Front uses an Actr linked/native workload:
 
-- with Actrium (a) Build, sign and publish together;
-- Publisher package Not carried;
-- Every one. resident app Tab Create a Logic Front Actor Examples;
-- Responsible Actor Registering, identity, connection, session,Keel Engine and Host capability;
-- Realm credential It's just proof. Actor key, ActorId, ActorType with issuer claims, the actual running code cannot be independently proven;
-- The Service must treat the Front as an untrusted client and independently enforce principal, application permissions, business commands and Workspace authorization.
+- built, signed and published together with Actrium;
+- not carried in the Publisher package;
+- one logical Front Actor instance is created per resident app Tab;
+- responsible for Actor registration, identity, connection, session, the Keel Engine and Host capabilities;
+- an Actor credential can only prove the Actor key, ActorId, Actor type and issuer claims; it cannot by itself prove what code the other end is actually running (see [application development guidance](app-development-guidance.md) for how an application should respond to that).
 
-“Native workload”Here you are. Actr Host Provided by original of platform, not intended Guest Available native code.
+Here, "Native workload" means the Actr Host is provided natively by the platform; it does not mean the Guest can supply native code.
 
-### 2.2 Front Actor Type
+### 2.2 Front Actor type
 
-Front It's... ActorType Yes. Actrium Type of system, e.g.:
+The Front's Actor type is an Actrium system type, for example:
 
 ```text
 actrium/actrium-front@1.0.0
 ```
 
-It describes Host runtimeNot disguised. Program It's... Service ActrType.Attach handshake By Actr Host Additional declarations:
+It describes the Host runtime and does not masquerade as a Program's Service ActrType. As part of the Attach handshake, the Actr Host additionally declares:
 
-- Program Release coordinate;
-- package digest;
-- Guest digest;
-- Front Host API;
-- Keel API;
-- protocol fingerprint;
-- local tab session nonce.
+- the Program Release;
+- the package digest;
+- the Guest digest;
+- the Front Host API;
+- the Keel API;
+- the protocol fingerprint;
+- a local tab session nonce.
 
-These fields are normal Actrium Host From Authenticated package Construct,Guest Unable to overwrite; for remote Service They are still client statements, used only for compatibility consultations, and cannot be a substitute for business authorization or remote attestation.
+These fields are constructed by the Actrium Host from the verified package and cannot be overridden by the Guest; to the remote end they are client-declared values used for compatibility negotiation.
 
-Under control. Realm We can put the platform on. app attestation, issue of signature or business equipment certificate to be included credential♪ If ♪ Service policy Request“Official Actrium runtime”, Attach The certificate must be validated; in the absence of proof, it cannot be assumed ActorType is equal to the actual run time.
+The platform provides optional remote attestation: a managed Realm can fold platform app attestation, distribution signatures, or enterprise device attestation into the credential, for a Service that needs it to verify.
 
-### 2.3 Front Life cycle
+### 2.3 Front lifecycle
 
 ```text
 Allocated
@@ -91,112 +90,112 @@ Allocated
 Any stage → Failed
 ```
 
-It is important to ensure that:
+The following must hold:
 
-- Guest Only Attach and contract (a) Load after success;
-- capability Yes. Guest (a) To be completed before implementation;
-- close/crash Undo it first. session capabilityAgain. Engine;
-- background `pause` Not equal to Service detach;
-- After Memory Recovery Front It can be... URI and Service State re-establishment.
+- the Guest loads only after Attach and the contract succeed;
+- capabilities are set up before the Guest executes;
+- on close/crash, session capabilities are revoked first, then the Engine is destroyed;
+- a background `pause` is not the same as a Service detach;
+- a Front reclaimed from memory can be rebuilt from the Realm link and the Service state.
 
-## 3. Keel v1 Baseline
+## 3. Keel v1 baseline
 
-### 3.1 Open only JS Guest
+### 3.1 JS Guest only
 
-v1 Official Marketplace:
+For the v1 official Marketplace:
 
 - `guest_runtime = "keel-js"`;
-- bundle It's self-inflicted. CommonJS;
-- Allow only React, JSX runtime, Keel Guest SDK and Actrium Declaration `host:*` capability;
-- Prohibition of arbitrary npm/runtime require;
-- Ban evalnon-physical dynamics import and undeclared capability;
-- Build analysis must `fail-on-violation`;
-- Still check again at installation, not trusted Publisher Self-reported.
+- the bundle is self-contained CommonJS;
+- only React, the JSX runtime, the Keel Guest SDK, and `host:*` capabilities declared by Actrium are allowed;
+- arbitrary npm/runtime `require` is prohibited;
+- `eval`, non-literal dynamic `import`, and undeclared capabilities are prohibited;
+- build analysis must `fail-on-violation`;
+- static checks run again at install time; a Publisher's self-report cannot be trusted.
 
-Keel Native WASM Guest Not open for the time being because of its current public construction,UI♪ And the events, ♪pause/destroy and the ability to terminate execution has not yet met the requirement of non-mail release.
+The Keel Native WASM Guest is not yet open, because its current public build, UI, events, pause/destroy, and terminable-execution capabilities do not yet meet the requirements for untrusted publishing.
 
 ### 3.2 Fixed QuickJS
 
-v1 Not permitted Keel AutoSelect JSC/Hermes/QuickJS:
+v1 does not let Keel auto-select among JSC/Hermes/QuickJS:
 
-- Fixed QuickJS Native;
-- It must be achieved and enabled interrupt handler (a) Hard timeout;
-- We have to. per-Guest heap limit ♪ Really bring in every one ♪ QuickJS runtime;
-- Every one. Tab Use independence runtime/context;
-- Every one. Guest Yes. Actr Host Disable from the special execution thread/worker Run on,UI Only through schema And the quota check. render ops;
-- Cleaning up on destruction timer, callback, listener and remote ref;
-- A JS engine change is a security-baseline change and requires a version bump and tests.
+- QuickJS Native is fixed;
+- an interrupt-handler hard timeout must be implemented and enabled;
+- the per-Guest heap limit must actually be passed into every QuickJS runtime;
+- each Tab uses an independent runtime/context;
+- each Guest runs on a dedicated execution thread/worker that the Actr Host can abort; the UI only receives render ops that have passed schema and quota checks;
+- timers, callbacks, listeners and remote refs are cleaned up on destruction;
+- a JS engine change counts as a security-baseline change and requires a version bump and tests.
 
-Fixed QuickJS It's to make the security semantics consistent across the platform. QuickJS Yes. OS Process isolation.
+Fixing QuickJS is meant to make the security semantics consistent across platforms; it does not mean QuickJS provides OS process isolation.
 
-That's the press threshold, not the right one. Actrium Current Internal Keel A given capability for a copy. If the consolidated version is ignored timeoutWrite the dead memory cap, can't report. heap Usage, or only non-stop Shell/UI Main Course Execution Guest, then formal third party Guest Don't go online.
+The above is a publishing bar, not an established capability of Actrium's currently bundled Keel copy. If the integrated version ignores the timeout, hardcodes the memory limit, cannot report heap usage, or can only execute the Guest on a non-abortable Shell/UI main thread, then official third-party Guests must not ship.
 
-### 3.3 Separative caliber
+### 3.3 Isolation claims
 
-v1 (b) Commit to:
+v1 can promise:
 
 - same-process language sandbox;
 - capability isolation;
-- heap/time/render-op quota;
+- heap/time/render-op quotas;
 - Guest JS crash isolation;
-- Do Not Provide Default filesystem/socket/global native module.
+- no default filesystem/socket/global native module.
 
-v1 No:
+v1 does not claim:
 
-- Browser renderer (b) The level of independence process;
-- (a) The nuclear boundary;
-- QuickJS/C++ We can't influence the security breach in the engine. Actr Host;
-- Guest The death of a card will never affect the movement of the process.
+- browser-renderer-level process isolation;
+- a kernel boundary;
+- that QuickJS/C++ engine memory-safety bugs cannot affect the Actr Host;
+- that a Guest hang can never affect same-process scheduling.
 
-High risk Publisher The long-term objectives are:
+The long-term goal for high-risk Publishers is:
 
-- macOS XPC/helper process;
-- Windows AppContainer/helper process;
-- Android isolatedProcess;
-- iOS Independence to the extent feasible extension/helper Or stronger. WASM runtime;
-- May be Actr Host Force terminate It's... worker.
+- a macOS XPC/helper process;
+- a Windows AppContainer/helper process;
+- an Android isolatedProcess;
+- an independent extension/helper on iOS to the extent feasible, or a stronger WASM runtime;
+- a worker the Actr Host can force-terminate.
 
-## 4. Actrium Safe Component Registry
+## 4. Actrium Component Registry
 
-Actrium We can't just use it. Keel `DefaultComponents` Full exposure to untrustworthy. Guest.
+Actrium cannot directly expose the whole of Keel's generic `DefaultComponents` to an untrusted Guest.
 
-Each component shall have:
+Every component must have:
 
-- (a) A white list;
-- props schema;
-- Text, array, hierarchy and render-op (a) Restrictions;
-- URI/asset policy;
-- event schema;
-- RemoteRef (b) A white list of methods;
-- Platform differences statements;
-- accessibility Request.
+- a name allowlist;
+- a props schema;
+- text, array, depth and render-op limits;
+- a URI/asset policy;
+- an event schema;
+- a RemoteRef method allowlist;
+- a platform-difference declaration;
+- accessibility requirements.
 
 Special rules:
 
-- `Image` Default accept only package asset id;
-- Far Image Showdown. `host:net` capability Domain names allowlist;
-- Guest I'm not taking any of this with me. HTTP headers;
+- `Image` by default only accepts a package asset id;
+- a remote `Image` goes through an explicit `host:net` capability and a domain allowlist;
+- the Guest may not attach arbitrary HTTP headers;
 - `WebView` is not in the default Actrium Component Registry;
-- The outside chain,Modal, StatusBar, file selection and system sharing must be visible capability;
-- v1 Default Disable General String RemoteRef, only the typeing method is open.
+- external links, Modal, StatusBar, file selection, and system sharing must go through an explicit capability;
+- v1 disables the generic string RemoteRef by default and only opens typed methods.
 
-## 5. Capability Model
+## 5. Capability model
 
-### 5.1 Front desk stabilization interface
+### 5.1 The front end's stable interface
 
-Short-term based Keel It's... `KeelContractShape`:
+In the near term, based on Keel's `KeelContractShape`:
 
 - version;
 - host modules;
 - rpc;
 - named events;
 - input/output/event schema;
-- binary field marker;
-- capability manifest.
+- a binary field marker;
+- the capability manifest.
 
-It's not. WITIt's not supposed to be here. v1 Document or API & Medium WIT.
+It is not WIT and must not be mislabeled as WIT in v1 documentation or the API.
 
-To make the future compatible. JS/WASM Guest, the semantic of stability is used only:
+To remain compatible with future JS/WASM Guests, the stable semantics use only:
 
 ```text
 request/response RPC
@@ -204,14 +203,14 @@ fire-and-forget tell
 named event
 ```
 
-Do not transboundary function subscriptionAny callback Or generic RemoteRef As long-term public agreement.
+Cross-boundary function subscription, arbitrary callbacks, and a generic RemoteRef are not treated as a long-term public protocol.
 
-### 5.2 Primary Service capability
+### 5.2 Service capability
 
-Guest ♪ Getting the only Actor Entry:
+The only Actor entry point the Guest gets:
 
 ```typescript
-interface PrimaryService {
+interface Service {
   call<Route extends CallRoute>(
     route: Route,
     input: InputOf<Route>
@@ -229,11 +228,11 @@ interface PrimaryService {
 }
 ```
 
-Actr Host Fixed inside target For Current Service ActorId.Guest It's not passed. target ActorId.
+Internally, the Actr Host fixes the target to the current Service's ActorId. The Guest cannot pass a target ActorId.
 
-### 5.3 Other Front capability
+### 5.3 Other Front capabilities
 
-Example:
+Examples:
 
 - `host:assets`
 - `host:clipboard`
@@ -245,36 +244,36 @@ Example:
 - `host:file-import`
 - `host:file-export`
 - `host:share`
-- `host:net`(exceptional capacity, default closure)
+- `host:net` (an exceptional capability, off by default)
 
-Each call must be made by:
+Every call must go through:
 
-1. Contract schema;
-2. Manifest requested;
-3. Permission grant;
+1. the contract schema;
+2. what the manifest requested;
+3. the permission grant;
 4. session scope;
 5. platform policy;
-6. rate/resource limit;
+6. rate/resource limits;
 7. audit policy.
 
-## 6. Service Actor
+## 6. Service
 
-### 6.1 Primary Interface
+### 6.1 The main façade
 
-Primary Service:
+The Service:
 
-- Yes. Front (a) The only operational entry;
-- Authentication Attach session;
-- Hold Workspace;
-- Will Guest (a) Intent to convert to a business order;
-- Responsible for, inter alia, the delegation of authority, audit and co-processing;
-- Callable or Manageable Support Actor.
+- is the Front's only business entry point;
+- validates the Attach session;
+- holds the Workspace;
+- turns Guest intents into business commands;
+- is responsible for idempotency, authorization, audit and concurrency;
+- can call or manage other Actors in the Realm.
 
-The front desk is simplified without limiting the backstage to the backstage:
+Simplifying the front end does not constrain the back-end topology:
 
 ```text
 Front
-  → Primary Service
+  → Service
       ├── Index Actor
       ├── Sync Actor
       ├── Media Actor
@@ -283,49 +282,48 @@ Front
 
 ### 6.2 Service Host broker
 
-Third parties Service workload The full host capacity cannot be obtained directly.Broker Provide:
+A third-party Service workload cannot directly obtain all of the host's capabilities. The Broker provides:
 
-- Actor call/tell/discover (a) Sub-set of statements;
-- Workspace capability;
-- outbound HTTPS allowlist;
+- a declared subset of Actor call/tell/discover;
+- the Workspace capability;
+- an outbound HTTPS allowlist;
 - clock/random/logging;
-- secret reference;
-- database namespace;
+- a secret reference;
+- a database namespace;
 - resource limits;
 - lifecycle snapshot/restore.
 
-Service workload The dependence and network capacity must be package manifest It is stated.
+A Service workload's dependencies and network capabilities must be declared in the package manifest.
 
-### 6.3 Same Realm Request
+### 6.3 Same-Realm requirement
 
-A Realm corresponds to one application instance, so the Front and the Primary Service are naturally in the same Realm; Auxiliary Actors orchestrated by the Primary Service are in that Realm too:
+A Realm corresponds to one application instance, so the Front and the Service are naturally in the same Realm; the other Actors the Service orchestrates are also in that Realm:
 
-- before Attach, the Front obtains Realm membership for that instance (usually by Realm invitation);
+- the Front obtains that instance's Realm membership before Attach (usually by joining through a Realm invitation);
 - the connection ACL decides whether a Front type may connect to a Service type;
-- the Service then performs user/instance-level authorization;
-- type discovery only happens within this Realm (this instance's Actors);
-- cross-instance (cross-Realm) calls are handled by the Service backend: the Service's host obtains a client identity in the target Realm according to that Realm's join policy; the Front never federates directly, and v1 has no federation.
+- type discovery happens only within this Realm (this instance's Actors); the Front also finds the Service by the package's Actor type;
+- cross-instance (cross-Realm) calls are handled by the Service's back end: the Service's host obtains a client identity in the target Realm according to that Realm's join policy; the Front never federates directly, and v1 has no federation.
 
-This significantly reduces the level of trust and wrongs.
+This significantly narrows the trust and error surface.
 
-### 6.4 Native workload Two forms.
+### 6.4 Two forms of Native workload
 
 ```text
 NativeCdylib / InProcess
-  → with Host Same address space
-  → Node of third parties shall be valid CONTROLLED
+  → shares an address space with the Host
+  → a third-party node must not be CONTROLLED
 
 NativeCapsule / OutOfProcess
-  → Every Actor Independent restricted process
+  → an independent restricted process per Actor
   → OS sandbox + brokered typed IPC
-  → You can press the exit when it closes. policy Metrics
+  → egress can be measured against policy once closed
 ```
 
-Native Capsule Processes must not have original Actor transport, socket, Workspace path or credential;Actr Host It's done on its behalf. Actor call, HTTP and Workspace Operation.Sandbox It must be effective before the third-party directive is implemented and prohibits any kind of dynamic library, subprocess,ptrace and share the written memory. See the details of the platform.[Privacy tags and condensation protocols](13-privacy-state-and-aggregation.md).
+A Native Capsule process must not hold the raw Actor transport, sockets, a Workspace path, or credentials; the Actr Host performs Actor calls, HTTP and Workspace operations on its behalf. The sandbox must take effect before any third-party instruction executes, and must forbid arbitrary dynamic libraries, subprocesses, ptrace, and shared writable memory. See [Privacy Marks and Aggregation Protocol](13-privacy-state-and-aggregation.md) for detailed platform conditions.
 
-## 7. Front–Service System Protocol
+## 7. Front–Service system protocol
 
-Operations proto The blog is also available.Actrium Define stabilization system agreements:
+Besides the business proto, Actrium defines a stable system protocol:
 
 ```text
 actrium.session.v1.Attach
@@ -336,7 +334,7 @@ actrium.session.v1.Takeover
 actrium.session.v1.GetStatus
 ```
 
-`ActorAssurance`, No Roots and `ApplicationAssurance` Use `actrium.privacy.v1.*` System protocol, see [13](13-privacy-state-and-aggregation.md)semantics by [docs/security](../../architecture/security/actrium/README.zh.md) Yes.
+`ActorAssurance`, the unrooted graph, and `ApplicationAssurance` use the `actrium.privacy.v1.*` system protocol; see [13](13-privacy-state-and-aggregation.md). The semantics are governed by [docs/security](../../architecture/security/actrium/README.zh.md).
 
 ### 7.1 AttachRequest
 
@@ -383,7 +381,7 @@ actrium.session.v1.GetStatus
     "displayName": "Team Notes",
     "mode": "read-write"
   },
-  "effectiveCapabilities": ["primary-service", "host:clipboard.write"],
+  "effectiveCapabilities": ["service", "host:clipboard.write"],
   "privacy": {
     "actorStateDigest": "…",
     "applicationStateDigest": "…",
@@ -394,44 +392,44 @@ actrium.session.v1.GetStatus
 }
 ```
 
-Guest No contact Actor credential, challenge key Or original. session secret.
+The Guest never touches the Actor credential, challenge key, or raw session secret.
 
-## 8. Attach Verify
+## 8. Attach verification
 
-Service Sequenced examination:
+The Service checks, in order:
 
-1. Sender Realm credential;
-2. caller ActorId with credential claim;
-3. Front Actor type;if policy I'm gonna need to be credible. runtime, check the independent platform/runtime attestation;
-4. challenge/nonce (b) Protection against re-emergence;
-5. target Service ActorId;
-6. Program coordinate(Statement of compatibility);
-7. package digest(declaration of compatibility; none) attestation is not a remote code certificate;
-8. protocol fingerprint;
+1. the sender's Actor credential;
+2. the caller ActorId against the credential claim;
+3. the Front Actor type; if policy requires a trusted runtime, it also verifies a separate platform/runtime attestation;
+4. the challenge/nonce, against replay;
+5. the target Service ActorId;
+6. the Program Release (a compatibility declaration);
+7. the package digest (a compatibility declaration; without attestation it is not proof of the remote code);
+8. the protocol fingerprint;
 9. Principal/Device/Workspace application permissions;
-10. attachment policy;
-11. Current lease;
-12. Strategy, current caller 's request `ActorStateDigest` / AA with nonce;
-13. Resource and speed constraints.
+10. the attachment policy;
+11. the current lease;
+12. the caller-required policy, the current `ActorStateDigest` / AA, and the nonce;
+13. resource and rate limits.
 
-Any identity or digest mismatch Both. hard fail, Do Not Enter“Compatible Mode”.
+Any identity or digest mismatch is a hard fail; it never falls into a "compatibility mode".
 
-Host API or the version of the agreement may be negotiated within the limits of the declaration of the parties; the outcome of the consultation must be fixed to session.
+The Host API or protocol version may be negotiated within the range both sides declare; the negotiated result must be pinned to the session.
 
 ## 9. Session lease
 
-v1 exclusive lease:
+v1's exclusive lease:
 
-- Attach Create short-term renewables after success lease;
-- Heartbeat I'm just going to resume. I'm not going to. Actor (a) Identity;
-- Breaking line in. grace period;
-- `Detach` (a) Active release;
-- Front crash Back lease (a) Due;
-- Takeover The need for competence and conflict strategies;
-- lease id/session secret Save only in Actr Host Memory and security IPCI'm not giving it to you. Guest;
-- Same Expiry session The message must be rejected.
+- a short-lived, renewable lease is created after Attach succeeds;
+- a Heartbeat only renews the session, not the Actor identity;
+- a transient disconnect enters a grace period;
+- `Detach` releases it actively;
+- the lease expires after a Front crash;
+- a Takeover requires permission and a conflict policy;
+- the lease id/session secret are kept only in Actr Host memory and secure IPC, never given to the Guest;
+- messages from the same expired session must be rejected.
 
-## 10. Message Route
+## 10. Message routing
 
 ```text
 Guest call
@@ -446,95 +444,92 @@ Guest call
   → Guest
 ```
 
-Actr Host It has to be attached. GuestOverwrite metadata:
+The Actr Host must attach metadata the Guest cannot override:
 
-- session id;
-- Minimized principal/client id claims;
-- program digest;
-- trace id;
-- deadline;
-- idempotency key(where applicable).
+- the session id;
+- a minimized principal/client id claim;
+- the program digest;
+- a trace id;
+- a deadline;
+- an idempotency key (where applicable).
 
-Service I can't trust you. Guest payload and the self-reported users,Workspace or permission fields.
-Service And you can't just do it. Front Self-reported. Actr Host Version,package digest or ActorType High authority granted.
-
-## 11. Life cycle protocols
+## 11. Lifecycle protocol
 
 ### 11.1 Front background
 
 - Keel `pause`;
-- Suspension is not critical named events;
-- Keep or lower session heartbeat;
-- Not Destroyed Service;
-- OS Enter on Recovery Detach.
+- non-critical named events are paused;
+- the session heartbeat is kept or slowed;
+- the Service is not destroyed;
+- it enters Detach when the OS reclaims it.
 
 ### 11.2 Front resume
 
-- Restore Actor transport;
-- Like lease The blogger adds:`Resume`;
-- Or you'll start over. `Attach`;
+- the Actor transport is restored;
+- if the lease is still valid, `Resume`;
+- otherwise, `Attach` again;
 - Keel `resume`;
-- Send `lifecycle.foreground` named event;
-- Guest Re-raise the state of necessity.
+- a `lifecycle.foreground` named event is sent;
+- the Guest re-fetches the state it needs.
 
 ### 11.3 Service restart
 
-- Use same ActorId and long term key;
-- Restore Workspace binding and the example store;
-- Not accept business until resumption RPC;
-- Original session Default lapses,Front Restart Attach;
-- No change. URI.
+- it uses the same ActorId and long-term key;
+- it restores the Workspace binding and the instance store;
+- it accepts no business RPC before it has restored;
+- the original session is invalidated by default, and the Front re-Attaches;
+- the URI does not change.
 
-## 12. Resource Quota
+## 12. Resource quotas
 
 ### 12.1 Front Guest
 
-At least limit:
+At minimum, limit:
 
 - JS heap;
-- Single execution wall time;
-- Per second callback/timer;
-- render batch op;
-- (a) the depth of the component tree and the number of nodes;
-- Text, Pictures and Binary payload;
-- RPC ♪ And the ♪ ♪ The ♪ deadline;
-- Log rate;
-- Local Guest storage.
+- wall time per execution;
+- callbacks/timers per second;
+- render batch ops;
+- component-tree depth and node count;
+- text, image and binary payloads;
+- RPC concurrency, rate and deadline;
+- log rate;
+- local Guest storage.
 
 ### 12.2 Service workload
 
-At least limit:
+At minimum, limit:
 
 - WASM memory/table;
 - fuel/epoch timeout;
-- mailbox Length;
-- RPC (a) Parallel distribution;
-- data stream Number and bandwidth;
+- mailbox length;
+- RPC concurrency;
+- data stream count and bandwidth;
 - Workspace I/O;
 - outbound network;
 - actor discovery/call;
-- snapshot Size;
-- Log.
+- snapshot size;
+- logging.
 
-Overstretching with a stable error code and a distinction between single call failure,Guest Termination,Service Degrade and stop.
+Exceeding a limit must produce a stable error code, distinguishing a single call failure, a Guest termination, a Service degradation, and an instance stop.
 
-## 13. Crash Isolation
+## 13. Crash and isolation
 
-Product objectives:
+Product goals:
 
-- Guest Syntax:/Run error only terminates the Tab Guest;
-- Guest timeout/heap Overwhelm the destruction of the Keel Engine;
-- Front Actor Failures don't change. Service ActorId;
-- Service workload Failure does not damage other examples store;
-- Multiple in Same Type Service Different uses instance data directory;
-- One. Tab It's... callback, timer, RemoteRef and capability We can't spill to another one. Tab;
-- helper process After the line,Guest crash No impact Shell.
+- a Guest syntax/runtime error only terminates that Tab's Guest;
+- a Guest timeout/heap overrun destroys that Keel Engine;
+- a Front Actor failure does not change the Service ActorId;
+- a Service workload failure does not corrupt other instances' stores;
+- multiple Services of the same type use different instance data directories;
+- one Tab's callbacks, timers, RemoteRefs and capabilities must not leak into another Tab;
+- once the helper process ships, a Guest crash does not affect the Shell.
 
-v1 same-process The achievement of the logical separation targets that must be validated through the injection of failure and are safe UI The honesty is not the same. OS Segregation.
+The v1 same-process implementation must validate these logical-isolation goals through fault injection, and must honestly label in the security UI that this is not equivalent to OS isolation.
 
 ## 14. Observability
 
-Layer by:
+Log by layer:
 
 - URI parse/resolve;
 - package verify;
@@ -542,31 +537,31 @@ Layer by:
 - Keel load/pause/resume/destroy;
 - capability allow/deny;
 - Attach/lease;
-- Actr transport(local/P2P/TURN);
+- Actr transport (local/P2P/TURN);
 - Service lifecycle;
-- Workspace I/O Error.
+- Workspace I/O errors.
 
-Default logs should not contain:
+Default logs must not contain:
 
-- Workspace (a) Content;
-- credential;
-- session secret;
-- (a) A complete file path;
-- Guest User input;
-- Letter-certification instrument.
+- Workspace content;
+- credentials;
+- session secrets;
+- full file paths;
+- Guest user input;
+- the signaling authentication ticket.
 
-ActorId Local diagnosis can show standard forms; irreversible, salt-added markings are used before telemetry is uploaded.
+An ActorId may be shown in its standard form for local diagnostics; before uploading telemetry, use an irreversible identifier salted per installation.
 
-## 15. Evidence and grouping
+## 15. Forensics and graph assembly
 
-Front Host, Service Host, Workspace broker and Actor transport The actual data export incident must be referred to the forensic path:
+The Front Host, Service Host, Workspace broker, and Actor transport must hand actual data-egress events to the forensic path:
 
-- workload kind, digest, imports with runtime instance;
+- workload kind, digest, imports, and the runtime instance;
 - Actor spawn/discover/call/stream/close;
 - capability grant/revoke;
-- Workspace With external networks edge;
-- package, credential, Actr Host key and policy Undo.
+- the Workspace and external-network edge;
+- package, credential, Actr Host key, and policy revocation.
 
-Publisher workload An expected export can be declared, but it cannot be the only source of integrity.Host Yeah. WASM Comparative statements,imports, effective capacity and practical edge, by `structureDigest` With Current `ActorStateDigest` groups; new Actor Current AA Adopted and `ACTIVE` Application data should not be received until now.Front Position the entire unroot map, with the weakest of the nodes; the display must be `Ready`.
+A Publisher workload may declare its expected egress, but that cannot be the sole source of topology integrity. The Actr Host compares WASM's declarations, imports, effective capabilities and actual edges, and assembles the graph by `structureDigest` and the current `ActorStateDigest`; a new Actor must not receive application data until the current AA passes and it is `ACTIVE`. The Front locates the whole unrooted graph and takes the weakest link across nodes; display also requires `Ready`.
 
-The conclusion must be passed on to Shell and session guardGreen. / Yellow / Red and hung must be connected Capability And the data. It can't just be... UI Decoration. New configuration only works on new data.
+A change in the conclusion must propagate to the Shell and the session guard. Green/yellow/red and suspension must drive capabilities and the data plane; they cannot be mere UI decoration. A new configuration applies only to new data.
