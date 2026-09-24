@@ -29,8 +29,12 @@ fn scoped_credential(secret: &str) -> (String, String) {
     let username = format!(
         "{expires_at}:realm=k7m2q9xh@example.com:provider=provider.example:audience=actr.turn:actor={ACTOR_ID}"
     );
-    let mut mac =
-        Hmac::<Sha1>::new_from_slice(secret.as_bytes()).expect("HMAC accepts this secret");
+    let secret = platform::realm::realm_turn_secret(
+        secret.as_bytes(),
+        "k7m2q9xh@example.com",
+        "provider.example",
+    );
+    let mut mac = Hmac::<Sha1>::new_from_slice(&secret).expect("HMAC accepts this secret");
     mac.update(username.as_bytes());
     let password = BASE64_STANDARD.encode(mac.finalize().into_bytes());
     (username, password)

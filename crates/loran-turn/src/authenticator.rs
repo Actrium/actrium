@@ -5,7 +5,9 @@
 //! # Authentication Flow
 //!
 //! 1. Issuer generates a Realm/provider/audience/Actor scoped username, and uses
-//!    `base64(HMAC-SHA1(turn_secret, username))` as the password.
+//!    `base64(HMAC-SHA1(realm_turn_secret, username))` as the password, where
+//!    the Realm's secret is derived from the master `turn_secret` with HKDF
+//!    (`platform::realm::realm_turn_secret`).
 //! 2. The client authenticates with the TURN server using (username, password)
 //! 3. The TURN server computes MD5(username:realm:password) as the long-term credential key
 //! 4. turn_crate uses this key to verify the HMAC-SHA1 message integrity in requests
@@ -210,10 +212,14 @@ impl Authenticator {
 
     /// Compute the HMAC-SHA1 password (base64-encoded)
     ///
-    /// `password = base64(HMAC-SHA1(turn_secret, username))`
-    fn compute_password(&self, username: &str) -> String {
-        let mut mac = HmacSha1::new_from_slice(self.turn_secret.as_bytes())
-            .expect("HMAC-SHA1 accepts any key length");
+    /// `password = base64(HMAC-SHA1(realm_turn_secret, username))`
+    fn compute_password(&self, realm: &str, username: &str) -> String {
+        let secret = platform::realm::realm_turn_secret(
+            self.turn_secret.as_bytes(),
+            realm,
+            &self.provider_id,
+        );
+        let mut mac = HmacSha1::new_from_slice(&secret).expect("HMAC-SHA1 accepts any key length");
         mac.update(username.as_bytes());
         BASE64_STANDARD.encode(mac.finalize().into_bytes())
     }
@@ -288,7 +294,7 @@ impl Authenticator {
             return Ok(cached.integrity_key);
         }
 
-        let password = self.compute_password(username);
+        let password = self.compute_password(realm, username);
 
         // Per-actor admission on the cache-miss path. NOTE: this is a throttle,
         // not an authentication gate — `compute_password` is a server-side HMAC
@@ -591,6 +597,30 @@ mod tests {
             .auth_handle_at(&username, server_realm, src_addr, 2_000_000_001)
             .expect_err("cached credential must be rejected at expiry");
         assert!(error.to_string().contains("expired"));
+    }
+
+    #[test]
+    fn realm_credentials_are_not_interchangeable() {
+        // Same serial, same Actor type, two Realms: each Realm's password is
+        // keyed by its own derived secret.
+        let auth = make_auth();
+        let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
+        let a = username(2_000_000_060);
+        let b = a.replace("k7m2q9xh@example.com", "p3n8w2rt@example.com");
+
+        let a_key = auth
+            .auth_handle_at(&a, "actrix.local", src_addr, 2_000_000_000)
+            .unwrap();
+        let b_key = auth
+            .auth_handle_at(&b, "actrix.local", src_addr, 2_000_000_000)
+            .unwrap();
+        assert_ne!(a_key, b_key);
+
+        // Realm A's secret does not produce Realm B's passwords.
+        assert_ne!(
+            auth.compute_password("k7m2q9xh@example.com", &b),
+            auth.compute_password("p3n8w2rt@example.com", &b)
+        );
     }
 
     #[test]

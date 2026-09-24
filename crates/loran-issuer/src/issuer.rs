@@ -2566,7 +2566,8 @@ impl AIdIssuer {
     /// Generate a time-limited TURN credential (coturn --use-auth-secret compatible format).
     ///
     /// `username = "<expires_at>:realm=<realm>:provider=<provider>:audience=actr.turn:actor=<actor_id>"`
-    /// `password = base64(HMAC-SHA1(turn_secret, username))`
+    /// `password = base64(HMAC-SHA1(realm_turn_secret, username))`, keyed by
+    /// the Realm's secret derived from the master `turn_secret`.
     fn generate_turn_credential(
         &self,
         actor_id: &ActrId,
@@ -2579,8 +2580,12 @@ impl AIdIssuer {
         let username = format!(
             "{expires_at}:realm={realm}:provider={provider}:audience={audience}:actor={actor_id}"
         );
-        let mut mac = HmacSha1::new_from_slice(self.config.turn_secret.as_bytes())
-            .expect("HMAC-SHA1 accepts any key length");
+        let secret = platform::realm::realm_turn_secret(
+            self.config.turn_secret.as_bytes(),
+            &realm,
+            provider,
+        );
+        let mut mac = HmacSha1::new_from_slice(&secret).expect("HMAC-SHA1 accepts any key length");
         mac.update(username.as_bytes());
         let result = mac.finalize();
         let password = BASE64_STANDARD.encode(result.into_bytes());

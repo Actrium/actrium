@@ -604,6 +604,7 @@ dependencies = [
  "ecies",
  "ed25519-dalek",
  "hex",
+ "hkdf",
  "hmac",
  "lazy_static",
  "nonce-auth",

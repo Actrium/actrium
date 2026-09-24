@@ -229,8 +229,13 @@ impl ActrixTestServices {
             "{expires_at}:realm={}:provider=provider.example:audience=actr.turn:actor={actor_id}",
             actor_id.realm
         );
-        let mut mac = HmacSha1::new_from_slice(TURN_SHARED_TEST_KEY.as_bytes())
-            .expect("HMAC accepts an arbitrary key length");
+        let secret = platform::realm::realm_turn_secret(
+            TURN_SHARED_TEST_KEY.as_bytes(),
+            &actor_id.realm,
+            "provider.example",
+        );
+        let mut mac =
+            HmacSha1::new_from_slice(&secret).expect("HMAC accepts an arbitrary key length");
         mac.update(username.as_bytes());
         TurnCredential {
             username,

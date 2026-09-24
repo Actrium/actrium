@@ -66,8 +66,12 @@ fn turn_credential(id: &ActrId, expires_at: u64) -> TurnCredential {
         "{expires_at}:realm={}:provider=provider.example:audience=actr.turn:actor={id}",
         id.realm
     );
-    let mut mac = HmacSha1::new_from_slice(TURN_SHARED_TEST_KEY.as_bytes())
-        .expect("HMAC-SHA1 accepts the fixed test key");
+    let secret = platform::realm::realm_turn_secret(
+        TURN_SHARED_TEST_KEY.as_bytes(),
+        &id.realm,
+        "provider.example",
+    );
+    let mut mac = HmacSha1::new_from_slice(&secret).expect("HMAC-SHA1 accepts any key length");
     mac.update(username.as_bytes());
     TurnCredential {
         username,

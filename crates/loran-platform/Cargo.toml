@@ -31,6 +31,7 @@ rand = "0.8.5"
 ecies = { workspace = true }
 uuid = { workspace = true }
 hex = { workspace = true }
+hkdf = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
 url = { version = "2", features = ["serde"] }
