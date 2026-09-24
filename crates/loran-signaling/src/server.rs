@@ -2368,13 +2368,15 @@ async fn handle_get_service_spec_request(
         service_name
     );
 
-    // Find matching ServiceSpec in ActorRegistry by spec name
+    // Find matching ServiceSpec in ActorRegistry by spec name, only among
+    // services of the requester's own Realm.
     let result = server
         .actor_registry
         .read()
         .await
         .discover_by_spec_name(service_name)
         .into_iter()
+        .filter(|service| service.actor_id.realm == source.realm)
         .find_map(|service| service.service_spec.clone())
         .map(actr_protocol::get_service_spec_response::Result::Success)
         .unwrap_or_else(|| {

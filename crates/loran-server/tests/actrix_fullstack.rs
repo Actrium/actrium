@@ -4316,6 +4316,46 @@ async fn signaling_route_candidates_cross_realm_isolated() {
 
 #[tokio::test]
 #[serial]
+async fn signaling_get_service_spec_cross_realm_isolated() {
+    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    ensure_realm(&harness.data_dir, SECOND_REALM).await;
+
+    let spec = make_service_spec(
+        "fp-cross-realm-spec",
+        "crossrealm.v1",
+        r#"syntax = "proto3";
+            package crossrealm.v1;
+            message Ping { string msg = 1; }"#,
+    );
+    let (_other_w, _other_r, _other_ok) = ws_register_in_realm_with_spec(
+        harness.port,
+        "acme",
+        "svc-cross-spec",
+        SECOND_REALM,
+        Some(any_realm_allow_acl("client")),
+        Some(spec.clone()),
+    )
+    .await;
+    let (mut client_write, mut client_read, client_ok) =
+        ws_register(harness.port, "acme", "client", None).await;
+
+    let result =
+        query_service_spec_result(&mut client_write, &mut client_read, &client_ok, &spec.name)
+            .await;
+    assert!(
+        matches!(
+            result,
+            actr_protocol::get_service_spec_response::Result::Error(ref e) if e.code == 404
+        ),
+        "another Realm's ServiceSpec must not be visible: {result:?}"
+    );
+
+    let _ = client_write.send(WsMessage::Close(None)).await;
+    harness.shutdown();
+}
+
+#[tokio::test]
+#[serial]
 async fn signaling_relay_cross_realm_is_denied() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
