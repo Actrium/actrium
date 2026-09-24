@@ -315,11 +315,11 @@ flowchart LR
 |---|---|
 | `packages/actrium` | 拆出 Tab Runtime Manager、Front Host 与系统 UI |
 | `packages/keel` | 作为上游依赖/同步包，补 strict Guest 安全能力 |
-| `packages/browser-model` | 落 Program/Service/Tab/Realm 共享模型 |
-| `packages/runtime-host` | 落 Front Runtime 与 capability broker |
-| `packages/app-sdk` | 落只面向 Keel Guest 的公共 API |
+| `packages/actrium-browser-model` | 落 Program/Service/Tab/Realm 共享模型 |
+| `packages/actrium-runtime-host` | 落 Front Runtime 与 capability broker |
+| `packages/actrium-app-sdk` | 落只面向 Keel Guest 的公共 API |
 | `crates/actrium-core` | URI、规范化、package/realm model、持久状态规则 |
-| `schemas/` | URI、manifest、session、service、workspace contract |
+| `contracts/` | URI、manifest、session、service、workspace contract |
 | platform apps | Shell、OS lifecycle、secure storage、helper process |
 
 历史 `.actr` URL、远端 app API 和多 Tab legacy runtime：

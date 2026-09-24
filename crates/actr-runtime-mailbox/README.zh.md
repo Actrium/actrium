@@ -1,8 +1,8 @@
-# actr-mailbox
+# actr-runtime-mailbox
 
 🗄️ **Actor-RTC 持久化邮箱层**
 
-`actr-mailbox` 提供 Actor-RTC 框架的消息持久化功能，基于 SQLite 实现，确保消息的可靠存储和检索。
+`actr-runtime-mailbox` 提供 Actor-RTC 框架的消息持久化功能，基于 SQLite 实现，确保消息的可靠存储和检索。
 
 ## 📦 功能特性
 
@@ -16,13 +16,13 @@
 
 ```toml
 [dependencies]
-actr-mailbox = { path = "path/to/actr-mailbox" }
+actr-runtime-mailbox = { path = "path/to/actr-runtime-mailbox" }
 ```
 
 ### 基本使用
 
 ```rust,no_run
-use actr_mailbox::prelude::*;
+use actr_runtime_mailbox::prelude::*;
 use std::time::Duration;
 
 async fn message_processor(mailbox: impl Mailbox) {
@@ -60,16 +60,14 @@ async fn message_processor(mailbox: impl Mailbox) {
 
 ```text
 ┌─────────────────────────────────────────┐
-│              actr-core                  │
+│      actr-hyper    │    loran-server    │
 ├─────────────────────────────────────────┤
-│  actr-sdk  │  actr-mailbox │ actr-runtime│ (此层)
+│        actr-runtime-mailbox (此层)      │
 ├─────────────────────────────────────────┤
-│  actr-protocol │    actr-version         │
-├─────────────────────────────────────────┤
-│  actr-types    │     actr-uri           │
+│              actr-protocol              │
 └─────────────────────────────────────────┘
 ```
 
 ## 📄 许可证
 
-MIT License
+Apache-2.0

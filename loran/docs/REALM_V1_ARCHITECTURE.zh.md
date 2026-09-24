@@ -486,8 +486,8 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
 
 - 移除 `idx_realm_singleton` 唯一索引与 `Realm::create` 中的单例检查，增加
   `max_realms` 配置；
-- 新增 `realm_domain` 表；`realm` 表增加 `name`、`pending`/`suspended`/`retired` 状态、
-  Realm Profile digest 与 `sequence`；
+- 新增 `realm_domain` 表；`realm` 表改以完整 Realm 名为主键（取代数值 id）并校验 Realm 名语法，
+  增加 `pending`/`suspended`/`retired` 状态、Realm Profile digest 与 `sequence`；
 - 实现 authority descriptor 获取（含逐跳 SSRF 检查的重定向处理、限流与结果缓存）与
   `realm_signing_keys` 验签、Realm 管理请求（`create_realm`、`publish_profile`、
   `reissue_admin_token`、`register_publisher`；`provider_id` 绑定、5 分钟有效期、nonce

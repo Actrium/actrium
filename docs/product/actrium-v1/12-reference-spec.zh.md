@@ -133,7 +133,7 @@ contract_manifest = "ui/capability-manifest.json"
 contract_digest = "sha256:<digest>"
 
 [actrium.service]
-primary_contract = "proto/primary-service.proto"
+contract = "proto/service.proto"
 protocol_fingerprint = "sha256:<digest>"
 
 [actrium.service.workspace]
@@ -160,7 +160,7 @@ data_classes = ["private"]
 
 [actrium.permissions.front]
 capabilities = [
-  "primary-service",
+  "service",
   "host:clipboard.write",
   "host:notifications"
 ]
@@ -209,8 +209,8 @@ path = "assets/icon.png"
 hash = "<sha256>"
 
 [[proto_files]]
-name = "primary-service.proto"
-path = "proto/primary-service.proto"
+name = "service.proto"
+path = "proto/service.proto"
 hash = "<sha256>"
 
 [lock_file]
@@ -247,11 +247,11 @@ ipc = ["actr.capability.v1"]
     "react",
     "react/jsx-runtime",
     "keel/guest",
-    "host:primary-service",
+    "host:service",
     "host:clipboard"
   ],
   "hostModules": {
-    "primary-service": {
+    "service": {
       "rpc": [
         "notes.v1.NoteService.List",
         "notes.v1.NoteService.Get",

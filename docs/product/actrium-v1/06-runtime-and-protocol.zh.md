@@ -6,7 +6,7 @@
 flowchart TB
     subgraph Shell["Actrium Shell（受信）"]
         TRM["Tab Runtime Manager"]
-        PR["Package Resolver / Verified Cache"]
+        PR["Verified Package Cache"]
         PM["Permission Manager"]
         RM["Realm & Identity Manager"]
         SM["Service Manager"]
@@ -381,7 +381,7 @@ actrium.session.v1.GetStatus
     "displayName": "Team Notes",
     "mode": "read-write"
   },
-  "effectiveCapabilities": ["primary-service", "host:clipboard.write"],
+  "effectiveCapabilities": ["service", "host:clipboard.write"],
   "privacy": {
     "actorStateDigest": "…",
     "applicationStateDigest": "…",
@@ -565,4 +565,4 @@ Front Host、Service Host、Workspace broker 和 Actor transport 必须把实际
 
 Publisher workload 可以声明预期出口，但不能成为拓扑完整性的唯一来源。Actr Host 对 WASM 比较声明、imports、有效能力与实际边，按 `structureDigest` 与当前 `ActorStateDigest` 组图；新 Actor 在当前 AA 通过且 `ACTIVE` 前不得收到应用数据。Front 定位整张无根图，取各节点最弱项；展示还须 `Ready`。
 
-结论变化必须传到 Shell 和 session guard。绿 / 黄 / 红与挂起必须联动 Capability 和数据面，不能只是 UI 装饰。新配置只作用于新数据。
+结论变化必须传到 Shell 和 session guard。绿 / 黄 / 红与挂起必须联动 capability 和数据面，不能只是 UI 装饰。新配置只作用于新数据。
