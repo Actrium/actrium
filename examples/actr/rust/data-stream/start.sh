@@ -300,7 +300,7 @@ echo "   secret_hash  = ${SECRET_HASH:0:16}..."
 
 # Insert realm and ACL rules (with clean slate for ACL)
 sqlite3 "$ACTRIX_DB" <<EOF
-INSERT OR REPLACE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('$REALM', 'Active', 1, strftime('%s','now'), '$SECRET_HASH');
+INSERT OR REPLACE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('$REALM', 'active', 1, strftime('%s','now'), '$SECRET_HASH');
 DELETE FROM actoracl WHERE realm = '$REALM';
 INSERT INTO actoracl (realm, source_realm, from_type, to_type, access)
 VALUES ('$REALM', '$REALM', 'acme/GenericClient@1.0.0', 'acme/FileTransferService@1.0.0', 1);

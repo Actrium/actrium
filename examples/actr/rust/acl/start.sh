@@ -157,7 +157,7 @@ INSERT OR REPLACE INTO publisher_package (publisher_id, publisher, name, version
 INSERT OR REPLACE INTO publisher_package (publisher_id, publisher, name, version, type_str, manifest, signature, status, published_at)
   SELECT id, 'acme', 'blocked-greeter-client', '1.0.0', 'acme/blocked-greeter-client@1.0.0', '{}', '', 'active', strftime('%s','now') FROM publisher WHERE name='acme'
   ON CONFLICT(publisher, name, version) DO UPDATE SET status='active';
-INSERT OR REPLACE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('$REALM', 'Active', 1, strftime('%s','now'), '$SECRET_HASH');
+INSERT OR REPLACE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('$REALM', 'active', 1, strftime('%s','now'), '$SECRET_HASH');
 DELETE FROM actoracl WHERE realm = '$REALM';
 INSERT INTO actoracl (realm, source_realm, from_type, to_type, access)
 VALUES ('$REALM', '$REALM', 'acme/allowed-greeter-client@1.0.0', 'acme:greeter.GreeterService:1.0.0', 1);

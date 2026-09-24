@@ -272,7 +272,7 @@ SECRET_HASH=$(printf '%s' "$REALM_SECRET" | shasum -a 256 | awk '{print $1}')
 echo "   secret_hash  = ${SECRET_HASH:0:16}..."
 
 # Insert realm record (OR IGNORE to avoid duplicates)
-sqlite3 "$ACTRIX_DB" "INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('$REALM', 'Active', 1, strftime('%s','now'), '$SECRET_HASH');"
+sqlite3 "$ACTRIX_DB" "INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('$REALM', 'active', 1, strftime('%s','now'), '$SECRET_HASH');"
 
 # Parse ACL rules from actr.toml files and insert into actoracl table
 # Server allows: acme/echo-client-app@1.0.0

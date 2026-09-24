@@ -105,7 +105,7 @@ echo "🔑 Step 1: Creating realm package-echo@example.com..."
 
 sqlite3 "$ACTRIX_DB" \
     "INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current) \
-     VALUES ('package-echo@example.com', 'Active', 1, strftime('%s','now'), '');"
+     VALUES ('package-echo@example.com', 'active', 1, strftime('%s','now'), '');"
 
 echo -e "${GREEN}✅ Realm package-echo@example.com ready${NC}"
 

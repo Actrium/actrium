@@ -148,7 +148,7 @@ NOW=$(date +%s)
 for REALM in $SERVER_REALM $CLIENT_REALM; do
     sqlite3 "$ACTRIX_DB" \
         "INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current) \
-         VALUES ('$REALM', 'Active', 1, $NOW, '');"
+         VALUES ('$REALM', 'active', 1, $NOW, '');"
 done
 
 echo -e "${GREEN}✅ Realms ready: $SERVER_REALM, $CLIENT_REALM${NC}"

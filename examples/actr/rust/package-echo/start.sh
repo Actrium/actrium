@@ -707,7 +707,7 @@ fi
 for REALM in $SERVER_REALM $CLIENT_REALM; do
     echo "  Creating realm $REALM..."
     sqlite3 "$ACTRIX_DB" \
-        "INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('$REALM', 'Active', 1, strftime('%s','now'), '');"
+        "INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('$REALM', 'active', 1, strftime('%s','now'), '');"
 done
 
 echo -e "${GREEN}✅ Realms setup completed (realm IDs: $SERVER_REALM, $CLIENT_REALM)${NC}"
