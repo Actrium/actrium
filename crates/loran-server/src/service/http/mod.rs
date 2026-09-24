@@ -8,6 +8,7 @@ mod control;
 mod issuer;
 pub mod observability;
 mod publisher_registry;
+mod realm_management;
 mod signaling;
 
 pub use authority::{build_authority_router, build_realm_profiles};

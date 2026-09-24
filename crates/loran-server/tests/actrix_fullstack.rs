@@ -1483,11 +1483,13 @@ async fn provider_domain_realm_profiles_are_signed_served_and_retired() {
         .expect("admin profile json");
     assert_eq!(admin["profile"]["sequence"], 1);
 
-    // Unknown Realms and Realms without a Profile are not found.
+    // Unknown Realms and Realms without a Profile are not found. Loran as
+    // Realm Provider creates no Realm outside its domain.
     let created = create(json!({ "realm": SECOND_REALM }))
         .await
         .expect("create");
-    assert_eq!(created.status(), reqwest::StatusCode::CREATED);
+    assert_eq!(created.status(), reqwest::StatusCode::BAD_REQUEST);
+    ensure_realm(&harness.data_dir, SECOND_REALM).await;
     for path in ["localhost/missing", "acme.com/second"] {
         let response = client
             .get(format!("{base}/actr/realms/{path}"))
@@ -1518,6 +1520,61 @@ async fn provider_domain_realm_profiles_are_signed_served_and_retired() {
     let last = RealmProfile::verify(&body, name, &keys).expect("verifies");
     first.check_successor(&last).expect("successor");
     assert_eq!(last.realm.status, RealmStatus::Retired);
+
+    harness.shutdown();
+}
+
+#[tokio::test]
+#[serial]
+async fn realm_management_requests_are_checked_before_any_state_changes() {
+    use actr_protocol::realm_management::{ManagementOp, ManagementRequest};
+
+    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let client = reqwest::Client::new();
+    let url = format!("{}/actr/realm-management", harness.base_url());
+    let key = ed25519_dalek::SigningKey::from_bytes(&[5; 32]);
+    let request = |realm: &str, provider: &str, nonce: &str| {
+        let mut request = ManagementRequest::new(ManagementOp::CreateRealm, realm, provider, nonce);
+        request.package = Some(actr_protocol::realm_profile::RealmPackage {
+            href: "https://cdn.example/notes-1.0.actr".to_string(),
+            sha256: "ab".repeat(32),
+        });
+        request.sign("rs-1", &key)
+    };
+
+    for (body, status) in [
+        (json!({ "op": "create_realm" }), 400),
+        (request("a1@acme.test", "other.example", "n-1"), 400),
+        // Realms under the Provider domain are the operator's.
+        (request("a1@localhost", "localhost", "n-2"), 403),
+        // The domain's descriptor cannot be fetched.
+        (request("a1@acme.test", "localhost", "n-3"), 503),
+    ] {
+        let response = client.post(&url).json(&body).send().await.expect("post");
+        assert_eq!(response.status().as_u16(), status, "{body}");
+        assert_eq!(response.headers()["cache-control"], "no-store");
+    }
+    let pool_realms: Value = {
+        let login: Value = client
+            .post(format!("{}/admin/api/auth/login", harness.base_url()))
+            .json(&json!({ "password": "testpassword123" }))
+            .send()
+            .await
+            .expect("login")
+            .json()
+            .await
+            .expect("login json");
+        client
+            .get(format!("{}/admin/api/realms", harness.base_url()))
+            .bearer_auth(login["token"].as_str().expect("token"))
+            .send()
+            .await
+            .expect("list")
+            .json()
+            .await
+            .expect("list json")
+    };
+    assert_eq!(pool_realms["total_count"], 1);
 
     harness.shutdown();
 }
@@ -4285,7 +4342,8 @@ async fn admin_api_manages_many_realms_by_name() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
     let client = reqwest::Client::new();
     let base = harness.base_url();
-    let realm_url = format!("{base}/admin/api/realms/second%40acme.com");
+    const MANAGED: &str = "second@localhost";
+    let realm_url = format!("{base}/admin/api/realms/second%40localhost");
 
     let login: Value = client
         .post(format!("{base}/admin/api/auth/login"))
@@ -4297,21 +4355,36 @@ async fn admin_api_manages_many_realms_by_name() {
         .await
         .expect("parse admin login response");
     let token = login["token"].as_str().expect("admin login token");
+    let package = json!({
+        "href": "https://cdn.example/notes-1.0.actr",
+        "sha256": "ab".repeat(32),
+    });
 
-    let created = client
-        .post(format!("{base}/admin/api/realms"))
-        .bearer_auth(token)
-        .json(&json!({ "realm": SECOND_REALM }))
-        .send()
-        .await
-        .expect("create second realm");
+    // The Realm signing key is generated at startup, possibly after health.
+    let mut created;
+    let mut attempts = 0;
+    loop {
+        created = client
+            .post(format!("{base}/admin/api/realms"))
+            .bearer_auth(token)
+            .json(&json!({ "realm": MANAGED, "package": package }))
+            .send()
+            .await
+            .expect("create second realm");
+        attempts += 1;
+        if created.status() != reqwest::StatusCode::SERVICE_UNAVAILABLE || attempts == 50 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
     assert_eq!(created.status(), reqwest::StatusCode::CREATED);
     let created: Value = created.json().await.expect("create realm json");
     assert_eq!(created["realm"]["status"], "active");
-    let secret = created["realm_secret"]
+    let admin_token = created["realm_admin_token"]
         .as_str()
-        .expect("create returns the realm secret")
+        .expect("create returns the Realm admin token")
         .to_string();
+    assert!(created["realm_secret"].is_string());
 
     let listed: Value = client
         .get(format!("{base}/admin/api/realms"))
@@ -4328,14 +4401,80 @@ async fn admin_api_manages_many_realms_by_name() {
         .iter()
         .filter_map(|realm| realm["realm"].as_str())
         .collect();
-    assert_eq!(names, HashSet::from([TEST_REALM, SECOND_REALM]));
+    assert_eq!(names, HashSet::from([TEST_REALM, MANAGED]));
+
+    // The Realm admin token manages this Realm only; everything else is
+    // not found.
+    let as_realm_admin = |method: reqwest::Method, path: &str| {
+        client
+            .request(method, format!("{base}{path}"))
+            .bearer_auth(&admin_token)
+            .send()
+    };
+    use reqwest::Method;
+    for (method, path, status) in [
+        (Method::GET, "/admin/api/realms/second%40localhost", 200),
+        (
+            Method::GET,
+            "/admin/api/realms/second%40localhost/profile",
+            200,
+        ),
+        (Method::GET, "/admin/api/realms/test%40example.com", 404),
+        (Method::GET, "/admin/api/realms", 404),
+        (Method::PUT, "/admin/api/realms/second%40localhost", 404),
+        (
+            Method::POST,
+            "/admin/api/realms/second%40localhost/retire",
+            404,
+        ),
+        (Method::GET, "/admin/api/node", 404),
+    ] {
+        let response = as_realm_admin(method, path).await.expect("realm admin");
+        assert_eq!(response.status().as_u16(), status, "{path}");
+    }
+    let unknown = client
+        .get(&realm_url)
+        .bearer_auth("rat_unknown")
+        .send()
+        .await
+        .expect("unknown token");
+    assert_eq!(unknown.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    // Reissuing replaces the token.
+    let reissued: Value = client
+        .post(format!("{realm_url}/admin-token/reissue"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("reissue")
+        .json()
+        .await
+        .expect("reissue json");
+    let new_admin_token = reissued["realm_admin_token"]
+        .as_str()
+        .expect("reissued token");
+    let old = as_realm_admin(Method::GET, "/admin/api/realms/second%40localhost")
+        .await
+        .expect("old token");
+    assert_eq!(old.status(), reqwest::StatusCode::UNAUTHORIZED);
+    let rotated = client
+        .post(format!("{realm_url}/secret/rotate"))
+        .bearer_auth(new_admin_token)
+        .send()
+        .await
+        .expect("rotate as realm admin");
+    assert_eq!(rotated.status(), reqwest::StatusCode::OK);
+    let rotated: Value = rotated.json().await.expect("rotate json");
+    let secret = rotated["realm_secret"]
+        .as_str()
+        .expect("rotated secret")
+        .to_string();
 
     let register = |name: &'static str| {
         let base = base.clone();
         let secret = secret.clone();
         async move {
-            issuer_register_result(&base, SECOND_REALM, "acme", name, None, None, Some(&secret))
-                .await
+            issuer_register_result(&base, MANAGED, "acme", name, None, None, Some(&secret)).await
         }
     };
     assert!(matches!(
@@ -4415,7 +4554,7 @@ async fn admin_api_manages_many_realms_by_name() {
         client
             .post(format!("{base}/admin/api/realms"))
             .bearer_auth(token)
-            .json(&json!({ "realm": SECOND_REALM }))
+            .json(&json!({ "realm": MANAGED, "package": package }))
             .send()
             .await
             .expect("recreate retired realm"),

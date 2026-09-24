@@ -82,6 +82,28 @@ pub async fn auth_middleware(
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
 
+    // A Realm admin token manages one Realm; outside it nothing exists.
+    if !token.contains('.') {
+        return match platform::realm::Realm::for_admin_token(token).await {
+            Ok(Some(realm))
+                if realm_admin_scope(request.method(), request.uri().path())
+                    .is_some_and(|scope| scope == realm) =>
+            {
+                next.run(request).await
+            }
+            Ok(Some(_)) => StatusCode::NOT_FOUND.into_response(),
+            Ok(None) => (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "Invalid or expired token"})),
+            )
+                .into_response(),
+            Err(err) => {
+                platform::recording::warn!("Realm admin token lookup failed: {err}");
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            }
+        };
+    }
+
     match jsonwebtoken::decode::<Claims>(token, &key, &validation) {
         Ok(data) => {
             // ADM-07: Reject tokens issued under a superseded password hash.
@@ -104,6 +126,20 @@ pub async fn auth_middleware(
         )
             .into_response(),
     }
+}
+
+/// The Realm whose admin may call `method path`: viewing the Realm and its
+/// Realm Profile, and rotating its Realm secret.
+fn realm_admin_scope(method: &axum::http::Method, path: &str) -> Option<String> {
+    use axum::http::Method;
+    let rest = path.strip_prefix("/admin/api/realms/")?;
+    let (realm, action) = rest.split_once('/').unwrap_or((rest, ""));
+    let allowed = matches!(
+        (method, action),
+        (&Method::GET, "") | (&Method::GET, "profile") | (&Method::POST, "secret/rotate")
+    );
+    // Realm names are lowercase ASCII; only `@` arrives percent-encoded.
+    allowed.then(|| realm.replace("%40", "@"))
 }
 
 // ── Handlers ───────────────────────────────────────────────────
@@ -288,7 +324,7 @@ async fn create_realm(
         .create_realm_with_secret_direct(req, profile)
         .await
     {
-        Ok((resp, realm_secret)) => {
+        Ok((resp, realm_secret, admin_token)) => {
             let status = if resp.success {
                 StatusCode::CREATED
             } else {
@@ -303,10 +339,36 @@ async fn create_realm(
                     "error_message": resp.error_message,
                     "realm": resp.realm.as_ref().map(realm_info_to_json),
                     "realm_secret": realm_secret,
+                    "realm_admin_token": admin_token,
                 })),
             )
                 .into_response()
         }
+        Err(status) => grpc_status_to_response(status),
+    }
+}
+
+/// Replace the Realm admin token of an active Realm; the old one stops
+/// working.
+async fn reissue_realm_admin_token(
+    State(state): State<Arc<AdminApiState>>,
+    Path(realm): Path<String>,
+) -> impl IntoResponse {
+    if !state.realm_writes_enabled {
+        return realm_writes_disabled_response();
+    }
+
+    match state.service.reissue_realm_admin_token_direct(&realm).await {
+        Ok(token) => (
+            StatusCode::OK,
+            [(header::CACHE_CONTROL, "no-store")],
+            Json(json!({
+                "success": true,
+                "realm": realm,
+                "realm_admin_token": token,
+            })),
+        )
+            .into_response(),
         Err(status) => grpc_status_to_response(status),
     }
 }
@@ -882,6 +944,10 @@ pub fn build_admin_api_router(
         )
         .route("/admin/api/realms/{realm}/retire", post(retire_realm))
         .route("/admin/api/realms/{realm}/profile", get(get_realm_profile))
+        .route(
+            "/admin/api/realms/{realm}/admin-token/reissue",
+            post(reissue_realm_admin_token),
+        )
         .route(
             "/admin/api/config/{config_type}/{config_key}",
             get(get_config),

@@ -37,6 +37,9 @@ use std::time::Instant;
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
+/// A created Realm: the response, its plaintext Realm secret, and the Realm
+/// admin token of a Realm under the Provider domain, each returned once.
+pub type CreatedRealm = (CreateRealmResponse, Option<String>, Option<String>);
 type MetricsFuture = Pin<Box<dyn Future<Output = AdminResult<SystemMetrics>> + Send>>;
 type MetricsProvider = Arc<dyn Fn() -> MetricsFuture + Send + Sync>;
 type ShutdownFuture = Pin<Box<dyn Future<Output = AdminResult<()>> + Send>>;
@@ -823,15 +826,22 @@ impl AdminApiService {
         })
     }
 
+    fn realm_config(&self) -> platform::config::RealmConfig {
+        self.running_config
+            .as_ref()
+            .map(|config| config.realm.clone())
+            .unwrap_or_default()
+    }
+
     fn max_realms(&self) -> Option<u32> {
-        self.running_config.as_ref()?.realm.max_realms
+        self.realm_config().max_realms
     }
 
     async fn create_local_realm_internal(
         &self,
         req: CreateRealmRequest,
         profile: ProfileChange,
-    ) -> GrpcResult<(CreateRealmResponse, Option<String>)> {
+    ) -> GrpcResult<CreatedRealm> {
         platform::recording::info!("Create local realm request received: realm={}", req.realm);
         let failed = |message: String| {
             Ok((
@@ -840,6 +850,7 @@ impl AdminApiService {
                     error_message: Some(message),
                     realm: None,
                 },
+                None,
                 None,
             ))
         };
@@ -858,6 +869,17 @@ impl AdminApiService {
                 if profiles.signing_keys().is_none() {
                     return Err(Status::unavailable("Realm signing key is not ready"));
                 }
+            }
+            // Other domains' key holders create their Realms with Realm
+            // management requests.
+            None if self.realm_profiles.is_some() => {
+                return failed(format!(
+                    "this Realm Provider creates Realms only under {}",
+                    self.realm_profiles
+                        .as_ref()
+                        .map(|profiles| profiles.provider_id())
+                        .unwrap_or_default()
+                ));
             }
             None if profile.package.is_some() || profile.display_name.is_some() => {
                 return failed(
@@ -881,6 +903,10 @@ impl AdminApiService {
             enabled: req.enabled,
             expires_at: (req.expires_at > 0).then_some(req.expires_at),
             secret_current: hash_realm_secret(&plain_secret),
+            // Removed if the process stops before the first Profile is signed.
+            pending_expires_at: signer.is_some().then(|| {
+                chrono::Utc::now().timestamp() as u64 + self.realm_config().pending_ttl_secs()
+            }),
             ..Default::default()
         };
 
@@ -903,6 +929,18 @@ impl AdminApiService {
                 }
             };
         }
+        // The operator stands in for the Realm Provider account: the Realm
+        // admin token comes back with the creation, once.
+        let admin_token = match signer {
+            Some(_) => match Realm::reissue_admin_token(&realm.name).await {
+                Ok(token) => Some(token),
+                Err(err) => {
+                    platform::recording::warn!("Realm {} has no admin token: {err}", realm.name);
+                    None
+                }
+            },
+            None => None,
+        };
 
         platform::recording::info!("Realm created: {}", realm.name);
 
@@ -913,6 +951,7 @@ impl AdminApiService {
                 realm: Some(realm_to_proto(&realm)),
             },
             Some(plain_secret),
+            admin_token,
         ))
     }
 
@@ -934,14 +973,14 @@ impl AdminApiService {
 
         platform::recording::info!("Create managed realm request received: realm={}", req.realm);
 
-        if self.signs_profiles_for(&req.realm).is_some()
-            && Realm::get(&req.realm).await.ok().flatten().is_none()
-        {
+        // As Realm Provider, Loran creates Realms only under its Provider
+        // domain, with a Realm Profile package that this request lacks.
+        if self.realm_profiles.is_some() && Realm::get(&req.realm).await.ok().flatten().is_none() {
             return Ok(CreateRealmResponse {
                 success: false,
                 error_message: Some(
-                    "a Realm under the Provider domain needs a Realm Profile package; \
-                     create it through the admin API"
+                    "a new Realm needs a Realm Profile: create Realms under the Provider \
+                     domain through the admin API; other domains use Realm management requests"
                         .to_string(),
                 ),
                 realm: None,
@@ -971,16 +1010,17 @@ impl AdminApiService {
         }
     }
 
-    /// Create a realm and return the plaintext realm secret once.
+    /// Create a realm and return the plaintext realm secret once, with the
+    /// Realm admin token of a Realm under the Provider domain.
     ///
     /// `profile` carries the package and display name of the first Realm
     /// Profile, required and allowed only for Realms under the Provider
-    /// domain.
+    /// domain. As Realm Provider, Loran creates no Realm elsewhere.
     pub async fn create_realm_with_secret_direct(
         &self,
         req: CreateRealmRequest,
         profile: ProfileChange,
-    ) -> GrpcResult<(CreateRealmResponse, Option<String>)> {
+    ) -> GrpcResult<CreatedRealm> {
         self.create_local_realm_internal(req, profile).await
     }
 
@@ -1111,6 +1151,20 @@ impl AdminApiService {
                 realm: None,
             }),
         }
+    }
+
+    /// Issue a new Realm admin token for an active Realm, invalidating the
+    /// previous one.
+    pub async fn reissue_realm_admin_token_direct(&self, realm: &str) -> GrpcResult<String> {
+        Realm::reissue_admin_token(realm)
+            .await
+            .map_err(|err| match err {
+                RealmError::NotFound => Status::not_found(format!("Realm not found: {realm}")),
+                RealmError::Retired | RealmError::ValidationError(_) => {
+                    Status::invalid_argument(err.to_string())
+                }
+                err => Status::internal(format!("Failed to reissue admin token: {err}")),
+            })
     }
 
     /// The accepted Realm Profile document of `realm`, as signed.

@@ -1,5 +1,6 @@
 //! Public Actr authority bootstrap for the Loran service composition.
 
+use actr_protocol::realm_management::REALM_MANAGEMENT_PROTOCOL;
 use actr_protocol::realm_profile::{IceEndpoint, REALM_PROFILE_PROTOCOL, SignalingEndpoint};
 use actr_protocol::{
     AUTHORITY_DESCRIPTOR_VERSION, AuthorityDescriptor, ICE_CONFIG_PROTOCOL, IceConfiguration,
@@ -19,8 +20,6 @@ use platform::config::ActrixConfig;
 use platform::realm::{Realm, RealmProfileRecord, RealmStatus};
 use std::{path::PathBuf, sync::Arc};
 use url::Url;
-
-const REALM_MANAGEMENT_PROTOCOL: &str = "actr-realm-management/1";
 
 struct AuthorityState {
     descriptor: AuthorityDescriptor,
@@ -316,14 +315,20 @@ pub async fn build_authority_router(
             "Adding Actr authority discovery routes for {}",
             state.descriptor.authority
         );
-        let serves_profiles = state.profiles.is_some();
+        let profiles = state.profiles.clone();
         let mut routes = Router::new()
             .route("/.well-known/actr", get(get_descriptor))
             .route("/actr/ice-config", get(get_ice_config));
-        if serves_profiles {
+        if profiles.is_some() {
             routes = routes.route("/actr/realms/{domain}/{realm_id}", get(get_realm_profile));
         }
         router = router.merge(routes.with_state(Arc::new(state)));
+        if let Some(profiles) = profiles {
+            router = router.merge(super::realm_management::router(
+                profiles,
+                config.realm.clone(),
+            ));
+        }
     }
     Ok(router)
 }
