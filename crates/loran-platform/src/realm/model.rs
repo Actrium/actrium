@@ -148,10 +148,15 @@ impl Realm {
         .await;
 
         match result {
-            Ok(done) if done.rows_affected() == 0 => Err(RealmError::ValidationError(format!(
-                "this instance already hosts max_realms = {} realms",
-                max_realms.unwrap_or_default()
-            ))),
+            // The limit filtered the row out before the primary key was
+            // checked; an existing name still reports as never reusable.
+            Ok(done) if done.rows_affected() == 0 => match Self::get(&self.name).await? {
+                Some(_) => Err(RealmError::AlreadyExists),
+                None => Err(RealmError::ValidationError(format!(
+                    "this instance already hosts max_realms = {} realms",
+                    max_realms.unwrap_or_default()
+                ))),
+            },
             Ok(_) => {
                 self.status = RealmStatus::Active;
                 self.created_at = now as u64;
@@ -448,6 +453,15 @@ mod tests {
         };
         let limited = third.clone().insert(Some(2)).await;
         assert!(matches!(limited, Err(RealmError::ValidationError(_))));
+        let existing = Realm {
+            name: "one@example.com".to_string(),
+            secret_current: "hash".to_string(),
+            ..Default::default()
+        };
+        assert!(matches!(
+            existing.insert(Some(2)).await,
+            Err(RealmError::AlreadyExists)
+        ));
 
         // Retired realms do not count toward max_realms.
         Realm::retire("one@example.com").await?;
