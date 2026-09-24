@@ -29,7 +29,7 @@
 //! dispatch.on_start(&ctx).await?;
 //!
 //! // Message dispatch
-//! let response = dispatch.dispatch(&self_id, caller_id.as_ref(), envelope, &ctx).await?;
+//! let response = dispatch.dispatch(&self_id, caller_id.as_ref(), caller_type.as_ref(), envelope, &ctx).await?;
 //!
 //! // Shutdown
 //! dispatch.on_stop(&ctx).await?;

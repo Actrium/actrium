@@ -22,7 +22,7 @@ url = "ws://localhost:8081"
 url = "http://localhost:8081/issuer"
 
 [system.deployment]
-realm_id = 1001
+realm = "k7m2q9xh@example.com"
 
 [system.discovery]
 visible = true

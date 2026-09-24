@@ -10,7 +10,8 @@ use crate::config::{
 use crate::actr_raw::RuntimeRawConfig;
 use crate::error::{ConfigError, Result};
 use crate::{ManifestRawConfig, RawBuildConfig, RawDependency, RawPackageConfig, WebConfig};
-use actr_protocol::{Acl, ActrType, Name, Realm};
+use actr_protocol::uri::parse_realm_name;
+use actr_protocol::{Acl, ActrType, Name};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use url::Url;
@@ -51,16 +52,14 @@ impl ParserV1 {
         };
         let exports = self.parse_exports(export_paths)?;
 
-        // 4. Parse dependencies with a placeholder realm (realm comes from actr.toml at runtime)
-        //    For dependencies with no explicit realm override, they will use realm_id 0 as a
-        //    placeholder; the runtime resolves the actual realm from actr.toml.
-        let placeholder_realm = Realm { realm_id: 0 };
-        let dependencies = self.parse_dependencies(&raw.dependencies, &placeholder_realm)?;
+        // 4. Parse dependencies. The Realm comes from actr.toml at runtime, so a
+        //    dependency without an explicit Realm gets an empty placeholder.
+        let dependencies = self.parse_dependencies(&raw.dependencies, "")?;
 
         // 5. Parse ACL
         let acl = if let Some(acl_value) = raw.acl {
-            // Use realm_id 0 as placeholder since realm is not known at manifest parse time
-            Some(self.parse_acl(acl_value, 0)?)
+            // Empty placeholder: the Realm is not known at manifest parse time
+            Some(self.parse_acl(acl_value, "")?)
         } else {
             None
         };
@@ -126,12 +125,12 @@ impl ParserV1 {
             .ok_or(ConfigError::MissingField("issuer_endpoint.url"))
             .and_then(|url| Url::parse(url).map_err(ConfigError::InvalidUrl))?;
 
-        let self_realm = Realm {
-            realm_id: raw
-                .deployment
-                .realm_id
-                .ok_or(ConfigError::MissingField("deployment.realm_id"))?,
-        };
+        let self_realm = raw
+            .deployment
+            .realm
+            .clone()
+            .ok_or(ConfigError::MissingField("deployment.realm"))?;
+        check_realm_name(&self_realm, "deployment.realm")?;
 
         // Build observability from flat config
         let observability = ObservabilityConfig {
@@ -157,7 +156,7 @@ impl ParserV1 {
 
         // Parse ACL
         let acl = if let Some(acl_value) = raw.acl {
-            Some(self.parse_acl(acl_value, self_realm.realm_id)?)
+            Some(self.parse_acl(acl_value, &self_realm)?)
         } else {
             None
         };
@@ -336,13 +335,13 @@ impl ParserV1 {
     fn parse_dependencies(
         &self,
         deps: &HashMap<String, RawDependency>,
-        self_realm: &Realm,
+        self_realm: &str,
     ) -> Result<Vec<Dependency>> {
         deps.iter()
             .map(|(alias, raw_dep)| match raw_dep {
                 RawDependency::Empty {} => Ok(Dependency {
                     alias: alias.clone(),
-                    realm: *self_realm,
+                    realm: self_realm.to_string(),
                     actr_type: None,
                     service: None,
                 }),
@@ -356,8 +355,12 @@ impl ParserV1 {
                         .as_deref()
                         .map(|s| self.parse_service_ref(s))
                         .transpose()?;
-                    let realm = Realm {
-                        realm_id: realm.unwrap_or(1),
+                    let realm = match realm {
+                        Some(realm) => {
+                            check_realm_name(realm, &format!("dependencies.{alias}.realm"))?;
+                            realm.clone()
+                        }
+                        None => self_realm.to_string(),
                     };
                     Ok(Dependency {
                         alias: alias.clone(),
@@ -423,7 +426,7 @@ impl ParserV1 {
         })
     }
 
-    fn parse_acl(&self, value: toml::Value, self_realm_id: u32) -> Result<Acl> {
+    fn parse_acl(&self, value: toml::Value, self_realm: &str) -> Result<Acl> {
         use actr_protocol::AclRule;
         use actr_protocol::acl_rule::{Permission, SourceRealm};
 
@@ -466,27 +469,20 @@ impl ParserV1 {
                 })?;
             let from_type = self.parse_actr_type(type_str)?;
 
-            // realm (optional): omitted/"self" → self_realm_id, "*" → any, integer → specific
+            // realm (optional): omitted/"self" → own Realm, "*" → any, Realm name → specific
             let source_realm = match rule_table.get("realm") {
-                None => Some(SourceRealm::RealmId(self_realm_id)),
+                None => Some(SourceRealm::Realm(self_realm.to_string())),
                 Some(v) => match v.as_str() {
-                    Some("self") => Some(SourceRealm::RealmId(self_realm_id)),
+                    Some("self") => Some(SourceRealm::Realm(self_realm.to_string())),
                     Some("*") => Some(SourceRealm::AnyRealm(true)),
-                    Some(other) => {
+                    Some(other) if parse_realm_name(other).is_ok() => {
+                        Some(SourceRealm::Realm(other.to_string()))
+                    }
+                    _ => {
                         return Err(ConfigError::InvalidAcl(format!(
-                            "ACL rule {}: invalid realm '{}', expected 'self', '*', or an integer",
-                            idx, other
+                            "ACL rule {idx}: realm must be 'self', '*', or a Realm name <realm_id>@<domain>"
                         )));
                     }
-                    None => match v.as_integer() {
-                        Some(id) => Some(SourceRealm::RealmId(id as u32)),
-                        None => {
-                            return Err(ConfigError::InvalidAcl(format!(
-                                "ACL rule {}: realm must be 'self', '*', or an integer",
-                                idx
-                            )));
-                        }
-                    },
                 },
             };
 
@@ -649,6 +645,13 @@ impl ParserV1 {
 
 // (ActrMode removed) previous execution mode parsing no longer needed.
 
+/// Reject a value that is not a Realm name `<realm_id>@<domain>`.
+fn check_realm_name(realm: &str, field: &str) -> Result<()> {
+    parse_realm_name(realm)
+        .map(|_| ())
+        .map_err(|error| ConfigError::InvalidConfig(format!("{field}: {error}")))
+}
+
 /// Resolve a trust anchor's relative paths against the config dir.
 fn resolve_trust_paths(anchor: TrustAnchor, base_dir: &Path) -> TrustAnchor {
     match anchor {
@@ -720,7 +723,7 @@ publisher = "acme"
 version = "1.0.0"
 
 [dependencies]
-shared = { actr_type = "acme/logging-service@1.0.0", service = "LoggingService:abc123", realm = 9999 }
+shared = { actr_type = "acme/logging-service@1.0.0", service = "LoggingService:abc123", realm = "other@example.com" }
 "#;
 
         let tmpdir = TempDir::new().unwrap();
@@ -733,7 +736,7 @@ shared = { actr_type = "acme/logging-service@1.0.0", service = "LoggingService:a
 
         let dep = config.get_dependency("shared").unwrap();
         assert_eq!(dep.alias, "shared");
-        assert_eq!(dep.realm.realm_id, 9999);
+        assert_eq!(dep.realm, "other@example.com");
         assert_eq!(dep.actr_type.as_ref().unwrap().name, "logging-service");
         assert_eq!(dep.service.as_ref().unwrap().name, "LoggingService");
         assert_eq!(dep.service.as_ref().unwrap().fingerprint, "abc123");
@@ -1047,7 +1050,7 @@ url = "ws://localhost:8081/signaling/ws"
 url = "http://localhost:8081/issuer"
 
 [deployment]
-realm_id = 1
+realm = "k7m2q9xh@example.com"
 
 [observability]
 ca_cert_path = "certs/collector-ca.pem"
@@ -1106,8 +1109,82 @@ url = "ws://localhost:8081/signaling/ws"
 url = "http://localhost:8081/issuer"
 
 [deployment]
-realm_id = 1
+realm = "k7m2q9xh@example.com"
 "#;
+
+    #[test]
+    fn test_runtime_deployment_realm() {
+        let path = Path::new("actr.toml");
+        let config = parse_runtime_str(path, RUNTIME_BASE).unwrap();
+        assert_eq!(config.realm, "k7m2q9xh@example.com");
+
+        let missing = RUNTIME_BASE.replace("realm = \"k7m2q9xh@example.com\"\n", "");
+        assert!(matches!(
+            parse_runtime_str(path, &missing),
+            Err(ConfigError::MissingField("deployment.realm"))
+        ));
+        for realm in ["k7m2q9xh", "K7m2q9xh@example.com", "1001"] {
+            let invalid = RUNTIME_BASE.replace("k7m2q9xh@example.com", realm);
+            assert!(parse_runtime_str(path, &invalid).is_err(), "{realm}");
+        }
+    }
+
+    #[test]
+    fn test_runtime_acl_source_realm() {
+        use actr_protocol::acl_rule::SourceRealm;
+
+        let rules = r#"
+[[acl.rules]]
+permission = "allow"
+type = "acme/a@1.0.0"
+
+[[acl.rules]]
+permission = "allow"
+type = "acme/b@1.0.0"
+realm = "self"
+
+[[acl.rules]]
+permission = "allow"
+type = "acme/c@1.0.0"
+realm = "*"
+
+[[acl.rules]]
+permission = "deny"
+type = "acme/d@1.0.0"
+realm = "other@example.com"
+"#;
+        let config =
+            parse_runtime_str(Path::new("actr.toml"), &format!("{RUNTIME_BASE}{rules}")).unwrap();
+        let realms: Vec<_> = config
+            .acl
+            .unwrap()
+            .rules
+            .into_iter()
+            .map(|rule| rule.source_realm)
+            .collect();
+        assert_eq!(
+            realms,
+            vec![
+                Some(SourceRealm::Realm("k7m2q9xh@example.com".to_string())),
+                Some(SourceRealm::Realm("k7m2q9xh@example.com".to_string())),
+                Some(SourceRealm::AnyRealm(true)),
+                Some(SourceRealm::Realm("other@example.com".to_string())),
+            ]
+        );
+
+        for realm in ["realm = 9999", "realm = \"other\""] {
+            let invalid = format!(
+                "{RUNTIME_BASE}[[acl.rules]]\npermission = \"allow\"\ntype = \"acme/a@1.0.0\"\n{realm}\n"
+            );
+            assert!(
+                matches!(
+                    parse_runtime_str(Path::new("actr.toml"), &invalid),
+                    Err(ConfigError::InvalidAcl(_))
+                ),
+                "{realm}"
+            );
+        }
+    }
 
     #[test]
     fn test_runtime_hyper_storage_root_resolves_from_config_directory() {

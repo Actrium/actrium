@@ -23,7 +23,7 @@
 //! let package = manifest.package.clone();
 //! let runtime = ConfigParser::from_runtime_file("actr.toml", package)?;
 //! println!("Signaling: {}", runtime.signaling_url);
-//! println!("Realm: {}", runtime.realm.realm_id);
+//! println!("Realm: {}", runtime.realm);
 //! # Ok(())
 //! # }
 //! ```

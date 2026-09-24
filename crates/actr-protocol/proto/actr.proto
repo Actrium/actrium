@@ -6,16 +6,11 @@ import "google/protobuf/timestamp.proto";
 
 // ===========================================================================
 // Basic Components
-//   Realm (Security Realm)
 //   ActrType (publisher + name + version)
-//   ActrId (Realm + serial number + type)
+//   ActrId (Realm name + Actor serial)
 //   ServiceSpec (fingerprint + proto bundle + tags)
 //   ActrNode (ActrId + ServiceSpec)
 // ===========================================================================
-message Realm {
-  required uint32 realm_id = 1;
-}
-
 message ActrType {
   required string publisher = 1;
   required string name = 2;
@@ -24,10 +19,14 @@ message ActrType {
   required string version = 3;
 }
 
+// ActorId. Text form: <serial_hex>.<realm_id>@<domain>.
+// The Actor type is not part of the identity; it is carried by the
+// Actor credential (IdentityClaims.actor_type).
 message ActrId {
-  required Realm realm = 1;
-  required uint64 serial_number = 2;
-  required ActrType type = 3;
+  required string realm = 1;          // Realm name <realm_id>@<domain>
+  required uint64 serial_number = 2;  // Actor serial, at most 54 bits
+  reserved 3;
+  reserved "type";
 }
 
 message ServiceSpec {
@@ -63,13 +62,14 @@ message ServiceLocation {
 
 // Actor identity claims, encoded as plaintext protobuf and signed by Issuer with Ed25519.
 message IdentityClaims {
-  required uint32 realm_id   = 1;
-  required string actor_id   = 2;
-  required uint64 expires_at = 3;
-  required uint32 protocol_version = 4;
-  required string issuer     = 5;
-  required string provider   = 6;
-  required string audience   = 7;
+  required string   realm      = 1; // Realm name
+  required string   actor_id   = 2; // <serial_hex>.<realm_id>@<domain>
+  required uint64   expires_at = 3;
+  required uint32   protocol_version = 4;
+  required string   issuer     = 5; // Realm name; equal to realm
+  required string   provider   = 6;
+  required string   audience   = 7;
+  required ActrType actor_type = 8; // Actor type declared and verified at registration
 }
 
 // Time-limited HMAC TURN credential in the format compatible with `coturn --use-auth-secret`.
@@ -78,9 +78,11 @@ message TurnCredential {
   required string password   = 2; // base64(HMAC-SHA1(turn_secret, username))
   required uint64 expires_at = 3;
   required uint32 protocol_version = 4;
-  required uint32 realm_id   = 5;
+  reserved 5;
+  reserved "realm_id";
   required string provider   = 6;
   required string audience   = 7;
+  required string realm      = 8; // Realm name
 }
 
 // Credential structure for ActrId authentication
@@ -101,11 +103,11 @@ message AclRule {
   required Permission permission = 1;
   required ActrType   from_type  = 2;
 
-  // Source realm selector. "self" in config is resolved to realm_id by actor
-  // before registration; "*" in config maps to any_realm = true.
+  // Source Realm selector. "self" in config is resolved to the Actor's own
+  // Realm name before registration; "*" in config maps to any_realm = true.
   oneof source_realm {
-    bool   any_realm = 3; // wildcard: matches any realm
-    uint32 realm_id  = 4; // specific realm
+    bool   any_realm = 3; // wildcard: matches any Realm
+    string realm     = 4; // Realm name
   }
 }
 
@@ -169,7 +171,7 @@ enum RegisterAuthMode {
 // Allocate a new ActrId and register node metadata and API info.
 message RegisterRequest {
   required ActrType actr_type = 1;
-  required Realm realm = 2;
+  required string realm = 2; // Realm name
 
   // API / contract metadata
   optional ServiceSpec service_spec = 3;
@@ -449,7 +451,8 @@ message ActrUpEvent {
 message RoleNegotiation {
   required ActrId from = 1;
   required ActrId to = 2;
-  required uint32 realm_id = 3;
+  reserved 3;
+  reserved "realm_id";
 }
 
 // Signaling server assigns the offerer role to one side

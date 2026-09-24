@@ -25,7 +25,7 @@ use std::str::FromStr;
 /// url = "ws://localhost:8081/signaling/ws"
 ///
 /// [deployment]
-/// realm_id = 33554432
+/// realm = "k7m2q9xh@example.com"
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeRawConfig {
@@ -251,7 +251,7 @@ edition = 1
 url = "ws://localhost:8081/signaling/ws"
 
 [deployment]
-realm_id = 1001
+realm = "k7m2q9xh@example.com"
 "#;
         let config = RuntimeRawConfig::from_str(toml_content).unwrap();
         assert_eq!(config.edition, 1);
@@ -259,7 +259,10 @@ realm_id = 1001
             config.signaling.url.as_deref(),
             Some("ws://localhost:8081/signaling/ws")
         );
-        assert_eq!(config.deployment.realm_id, Some(1001));
+        assert_eq!(
+            config.deployment.realm.as_deref(),
+            Some("k7m2q9xh@example.com")
+        );
     }
 
     #[test]
@@ -274,7 +277,7 @@ url = "ws://localhost:8081/signaling/ws"
 url = "http://localhost:8081/issuer"
 
 [deployment]
-realm_id = 33554432
+realm = "k7m2q9xh@example.com"
 realm_secret = "rs_test123"
 
 [discovery]
@@ -364,7 +367,7 @@ edition = 1
 url = "ws://localhost:8081/signaling/ws"
 
 [deployment]
-realm_id = 1001
+realm = "k7m2q9xh@example.com"
 
 [package]
 path = "dist/service.actr"
@@ -388,7 +391,7 @@ edition = 1
 url = "ws://localhost:8081/signaling/ws"
 
 [deployment]
-realm_id = 1001
+realm = "k7m2q9xh@example.com"
 
 [storage]
 hyper_data_dir = ".hyper"

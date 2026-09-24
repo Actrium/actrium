@@ -132,12 +132,9 @@ impl CliConfig {
             }
         }
 
-        if let Some(realm_id) = self.network.realm_id {
-            if realm_id == 0 {
-                return Err(ConfigError::ValidationError(
-                    "network.realm_id must be a positive integer".to_string(),
-                ));
-            }
+        if let Some(ref realm) = self.network.realm {
+            actr_protocol::uri::parse_realm_name(realm)
+                .map_err(|error| ConfigError::ValidationError(format!("network.realm: {error}")))?;
         }
 
         if let Some(ref secret) = self.network.realm_secret {
@@ -224,8 +221,8 @@ pub struct NetworkConfig {
     /// Issuer endpoint for CLI discovery
     pub issuer_endpoint: Option<String>,
 
-    /// Realm ID for CLI temporary actor registration
-    pub realm_id: Option<u32>,
+    /// Realm name `<realm_id>@<domain>` for CLI temporary actor registration
+    pub realm: Option<String>,
 
     /// Realm secret for authentication (optional)
     pub realm_secret: Option<String>,

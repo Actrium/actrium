@@ -11,7 +11,8 @@ pub const PUBLISHER_REGISTER_DOMAIN: &str = "ACTR-PUBLISHER-REGISTER-V1";
 
 #[derive(Debug, Clone, Copy)]
 pub struct PublisherRegisterPayload<'a> {
-    pub realm_id: u32,
+    /// Realm name `<realm_id>@<domain>`.
+    pub realm: &'a str,
     pub actr_type: &'a ActrType,
     pub target: &'a str,
     pub manifest_sha256_hex: &'a str,
@@ -30,7 +31,7 @@ pub fn build_publisher_register_payload(input: PublisherRegisterPayload<'_>) -> 
          publisher_auth_signed_at={publisher_auth_signed_at}\n\
          publisher_auth_nonce={publisher_auth_nonce}",
         domain = PUBLISHER_REGISTER_DOMAIN,
-        realm = input.realm_id,
+        realm = input.realm,
         actr_type = input.actr_type.to_string_repr(),
         target = input.target,
         manifest_sha256 = input.manifest_sha256_hex,
@@ -52,7 +53,7 @@ mod tests {
         };
 
         let payload = build_publisher_register_payload(PublisherRegisterPayload {
-            realm_id: 7,
+            realm: "k7m2q9xh@example.com",
             actr_type: &actr_type,
             target: "x86_64-unknown-linux-gnu",
             manifest_sha256_hex: "abc123",
@@ -64,7 +65,7 @@ mod tests {
             payload,
             "ACTR-PUBLISHER-REGISTER-V1\n\
              auth_mode=package\n\
-             realm=7\n\
+             realm=k7m2q9xh@example.com\n\
              actr_type=acme/echo@1.2.3\n\
              target=x86_64-unknown-linux-gnu\n\
              manifest_sha256=abc123\n\
