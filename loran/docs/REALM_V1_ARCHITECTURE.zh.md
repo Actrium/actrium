@@ -499,7 +499,7 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   （`provider_id` 绑定、5 分钟有效期、nonce 防重放、`(realm, 请求方)` 幂等、待签 Realm Profile）、
   Realm 管理 token（只存哈希、一次性返回、重签即失效、作用域一个 Realm、越权 `404`）与
   `[realm]` 按域名配额、`pending` TTL 清理。尚未实现：`register_publisher`；Realm 管理 token
-  目前只能查看 Realm 与 Realm Profile、轮换 secret（连接 ACL、membership 待实现）；
+  目前只能查看 Realm 与 Realm Profile、轮换 secret（Realm 列表、连接 ACL、membership 待实现）；
 - Issuer 仍以轮换的全局 key 签发 Actor credential，尚未改用 Realm Profile `issuer.keys` 列出的
   `issuer:<realm>` key；
 - Realm Provider 域名下的 Realm 的 Realm Provider 账号认证（OAuth 2.0 + PKCE）、按账号配额
@@ -510,7 +510,6 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   （逐跳 SSRF 检查）；
 - 按 Realm 的连接、注册、消息与 TURN 配额；
 - TURN secret 改为按 Realm 名 HKDF 派生；
-- `create_realm` 携带 `package`（`loran-packages` 已移除 Target 解析，只保留包托管）；
 - 补跨 Realm 混淆回归测试；
 - 控制面与本契约的剩余差异：Realm Provider 域名下的 Realm 由运营者经 admin API 代办创建（等同
   Realm Provider 账号）；Loran 不是 Realm Provider（未启用 authority 或 Issuer 无 Signer）时，
