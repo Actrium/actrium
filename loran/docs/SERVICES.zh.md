@@ -79,9 +79,9 @@ database 文件。恢复演练应验证：
 
 ## Key rotation 与 revocation
 
-- Realm issuer key：新旧 verifying key 有明确生效/撤销窗口，Actor credential 期限不被
-  tolerance 延长。目标契约下每个 Realm 一把 Realm issuer key，轮换后须由 Realm 签名 key
-  签署新 Realm Profile 委派新 key。
+- Realm issuer key：每个 Realm 一把（Signer 中的 `issuer:<realm>`），不过期；轮换须由
+  Realm 签名 key 签署新 Realm Profile 委派新 key（尚未实现）。Issuer 原有的轮换 key 不再签发
+  Actor credential。
 - Realm 签名 key：由 Realm 签名 key 持有方轮换，不在 Loran 内完成（持有方就是本 Realm
   Provider 时除外）；Loran 周期性重新获取 `realm_signing_keys`，Realm Profile 的签名 key 被
   移除时丢弃该 Realm Profile，找不到有效 Realm Profile 的 Realm 会被挂起。

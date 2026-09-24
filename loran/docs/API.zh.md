@@ -115,12 +115,25 @@ sign-profile | retire | reissue-request`。
 - `realm`（Realm 名，与 `issuer` 相同）、完整 ActorId 与过期时间
 - `actor_type`：注册时声明并经验证的 Actor 类型 `publisher/program@version`
 
+Actor credential 由该 Realm 的 issuer key（Signer 中的 `issuer:<realm>`，即 Realm Profile
+`issuer.keys` 列出的 key）签名，`key_id` 与注册响应的 `signing_key_id` 为该 key 的 Signer key id；
+Signaling 按 `(realm, key_id)` 查验证 key。`/issuer/current-key`、`/issuer/signing-pubkey` 与
+admin 的 Issuer key 轮换仍针对 Issuer 自身的轮换 key，该 key 不再签发 Actor credential。
+
+TURN credential 的 password 为 `base64(HMAC-SHA1(k, username))`，`k` 为该 Realm 的 TURN
+secret：`HKDF-SHA256(turn_secret, salt = "actr.turn", info = "<realm>|<provider>")`。
+
+注册请求的 ACL 规则只作用于本 Realm：`source_realm` 可以不填、为 `any_realm`（v1 只匹配本
+Realm）或本 Realm 名；写成其他 Realm 名或不合法的 Realm 名时注册返回 `400`。
+
 ## Signaling
 
 `GET /signaling/ws` 升级到 WebSocket。身份只从原生 upgrade headers 或上述浏览器
 子协议项读取；连接身份、Actor credential 中的 Actor 与每条 envelope 的 source 必须完全一致。
-单帧最大 1 MiB，并执行连接/消息速率限制。目标契约下，每条 envelope 还须属于连接
-绑定的 Realm，发现只返回同 Realm 的 Actor，速率限制同时按 Realm 计。
+单帧最大 1 MiB，并执行连接/消息速率限制。连接绑定其身份所属的 Realm：envelope 的
+`source`（及 relay 的 `target`）不属于该 Realm 时返回 `403`。Actor Registry 与 presence 按
+Realm 分区，发现、路由候选、ServiceSpec 查询与上线通知只涉及同 Realm 的 Actor；
+`GetSigningKey` 只返回本 Realm 的 issuer key。目标契约：速率限制同时按 Realm 计。
 
 ## Publisher Registry
 

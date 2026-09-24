@@ -500,17 +500,22 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   Realm 管理 token（只存哈希、一次性返回、重签即失效、作用域一个 Realm、越权 `404`）与
   `[realm]` 按域名配额、`pending` TTL 清理。尚未实现：`register_publisher`；Realm 管理 token
   目前只能查看 Realm 与 Realm Profile、轮换 secret（Realm 列表、连接 ACL、membership 待实现）；
-- Issuer 仍以轮换的全局 key 签发 Actor credential，尚未改用 Realm Profile `issuer.keys` 列出的
-  `issuer:<realm>` key；
+- 已实现运行时分区：Actor credential 由该 Realm 的 `issuer:<realm>` key 签发（随首份 Realm
+  Profile 草稿或运营者创建 `active` Realm 时生成，缺失时签发前补建），验证 key 按
+  `(realm, key_id)` 缓存；signaling 连接绑定其身份的 Realm，source/target 不在该 Realm 的
+  envelope 返回 `403`；Actor Registry 与 presence 按 Realm 分区；TURN secret 由主密钥按 Realm
+  HKDF 派生；注册拒绝指向其他 Realm 的 ACL `source_realm`；跨 Realm 混淆回归测试
+  `realms_with_the_same_actor_type_and_serial_are_isolated`。尚未实现：Realm issuer key 的轮换与
+  退役（Signer 中的 key 不标记退役）；Issuer 原有的轮换 key 及其 `/issuer/current-key`、admin
+  轮换入口仍在，已不签发 Actor credential；
 - Realm Provider 域名下的 Realm 的 Realm Provider 账号认证（OAuth 2.0 + PKCE）、按账号配额
   与账号绑定的 Realm 管理权；
 - Publisher 验证改为读取 authority descriptor 的 `publisher` 成员并按第 7 节的签名
   注册请求登记，移除 `/.well-known/actr/publisher.json`（Publisher Registry 当前
   实现的 `PUBLISHER_DESCRIPTOR_PATH`）与 `verification_challenge`，重定向处理与 Realm 相同
   （逐跳 SSRF 检查）；
-- 按 Realm 的连接、注册、消息与 TURN 配额；
-- TURN secret 改为按 Realm 名 HKDF 派生；
-- 补跨 Realm 混淆回归测试；
+- 按 Realm 的连接、注册、消息与 TURN 配额；TURN 认证不检查 Realm 是否 `active`（TURN
+  credential 随 Actor credential 过期）；
 - 控制面与本契约的剩余差异：Realm Provider 域名下的 Realm 由运营者经 admin API 代办创建（等同
   Realm Provider 账号）；Loran 不是 Realm Provider（未启用 authority 或 Issuer 无 Signer）时，
   运营者仍可创建任意域名下没有 Realm Profile 的 `active` Realm，并可经 `RetireRealm` 与

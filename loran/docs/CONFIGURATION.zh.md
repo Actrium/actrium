@@ -79,9 +79,10 @@ turn_secret = "<generate-with-openssl-rand-base64-48>"
 `[turn].realm` 是 TURN 长期凭据算法中的认证域字符串（TURN REALM），与 Actr Realm
 不是一回事，不随 Actr Realm 数量变化。
 
-`turn_secret` 同时供 Issuer 签发和 TURN 验证时效凭证，必须按 Realm Provider 独立、稳定保存。
-目标契约下它作为 Realm Provider 主密钥，每个 Actr Realm 的 TURN secret 由它按 Realm 名
-与 Realm Provider ID 经 HKDF 派生，不在配置中逐个声明。直接替换会使尚未过期的 TURN credential 失效，因此轮换必须作为显式
+`turn_secret` 是 Realm Provider 主密钥，供 Issuer 签发和 TURN 验证时效凭证，必须按 Realm
+Provider 独立、稳定保存。每个 Actr Realm 的 TURN secret 由它按 Realm 名与 Realm Provider ID
+经 HKDF-SHA256 派生（salt `actr.turn`，info `<realm>|<provider>`），不在配置中逐个声明；外部
+coturn 无法直接使用主密钥验证。直接替换会使尚未过期的 TURN credential 失效，因此轮换必须作为显式
 维护操作。relay range 不得包含特权端口，起始值不得大于结束值。
 
 ## Issuer Signer

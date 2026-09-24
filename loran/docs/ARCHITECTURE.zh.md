@@ -52,7 +52,7 @@ Realm Provider、audience 与 endpoint scope。
   digest 和 revocation 状态决定。
 - Signaling 只做已认证 Actor 的 rendezvous，不签发身份，也不是信任根。
 - TURN credential 绑定 Realm、Realm Provider、`actr.turn` audience、Actor 与过期时间；
-  目标契约下 TURN secret 按 Realm 名经 HKDF 派生。
+  TURN secret 由主密钥按 Realm 名与 Realm Provider ID 经 HKDF 派生。
 
 Realm registration capability 只属于 Realm 管理员/可信 Actr Host。用户编写的 Rill Guest
 不得接触 Realm secret、Issuer Signer 私钥或管理 credential。

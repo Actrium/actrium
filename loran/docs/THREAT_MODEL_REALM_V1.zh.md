@@ -1,9 +1,8 @@
 # Loran Realm v1 威胁模型
 
 状态：代码审查基线，不等同于独立安全审计结论。本文按多 Realm 目标契约
-（[REALM_V1_ARCHITECTURE.zh.md](REALM_V1_ARCHITECTURE.zh.md)）描述威胁与控制；当前
-代码仍强制单 Realm，涉及 Realm 签名 key、Realm Profile 激活与多 Realm 分区的控制尚未
-实现，见架构契约第 9 节。
+（[REALM_V1_ARCHITECTURE.zh.md](REALM_V1_ARCHITECTURE.zh.md)）描述威胁与控制；尚未
+实现的控制见架构契约第 9 节。
 
 ## 资产与攻击者
 
