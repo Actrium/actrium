@@ -14,11 +14,12 @@
   两个 header，因此改用 `actr.v1`、`actr.id.<base64url>` 和
   `actr.credential.<base64url-protobuf>` 子协议项；服务器验证全部身份后只协商返回
   `actr.v1`，避免把凭证暴露为页面可读的已选子协议。
-- 当前实现：Realm 管理、Publisher 管理和配置变更只允许系统管理员调用。目标契约：
-  Realm 生命周期还可由 Realm 管理请求管理，单个 Realm 的 secret、连接 ACL、Realm membership
-  与状态可由作用域为该 Realm 的 Realm 管理 token 管理。`create_realm`、`publish_profile`、
-  `reissue_admin_token` 以 `POST` 发往 Loran authority descriptor 中的 `realm-management`
-  service link（Actr Realm Profile 第 8 节）。
+- 当前实现：Publisher 管理和配置变更只允许系统管理员调用。其他域名的 Realm 由 Realm 签名
+  key 持有方以 Realm 管理请求（`create_realm`、`publish_profile`、`reissue_admin_token`）创建、
+  更新与退役，`POST` 到 Loran authority descriptor 中的 `realm-management` service link（Actr
+  Realm Profile 第 8 节，见下文「Realm 管理请求」）；Realm Provider 域名下的 Realm 由系统管理员
+  创建。作用域为单个 Realm 的 Realm 管理 token 可查看该 Realm 及其 Realm Profile、轮换其
+  secret。目标契约：Realm 管理 token 还管理连接 ACL、Realm membership 与状态。
 - Issuer Signer 是内部信任平面；规范入口是同一 HTTP/2 监听器上的 gRPC，
   不是公开 REST 密钥下载服务。
 
@@ -53,8 +54,7 @@ Realm Profile（`application/json`，带 `Access-Control-Allow-Origin: *` 与
 为 Signer 中该 Realm 的 `issuer:<realm>` key，`provider.signaling` 的
 `control_plane_id = <provider>/v1`、`ticket_audience = actr.signaling`，TURN 条目的
 `credential_audience = actr.turn`，`policy.membership = invite-only`；每份都先按 Actr Host
-的规则（`RealmProfile::verify` 与 `check_successor`）验证再保存。`realm-management` 端点尚未
-实现。
+的规则（`RealmProfile::verify` 与 `check_successor`）验证再保存。
 
 其他域名的 Realm 若有已接受的 Realm Profile，Loran 每 `[realm] profile_refresh_secs`（默认
 3600，取值限定在 60–86400）刷新一次：经逐跳 SSRF 检查的抓取器（仅 HTTPS、最多 5 次重定向、
@@ -63,6 +63,42 @@ descriptor，按 key pin 接受 `realm_signing_keys`（成员自签名；首次�
 的 `active` key 签名、`sequence` 不回退、不引入新 key——轮换链尚未支持），再从其 `realms`
 位置取更高 sequence 的 Realm Profile；退役 Realm Profile 触发退役事务。已接受 Realm Profile
 的签名 key 被移除时丢弃该基线，改用由仍列出的 key 签名的 Realm Profile，取不到则停用该 Realm。
+
+## Realm 管理请求
+
+`POST /actr/realm-management`（Loran 作为 Realm Provider 时提供）接受 Actr 管理信封：JSON 对象，
+含 `op`、`realm`、`provider_id`、`nonce`、`issued_at`、`expires_at`（RFC 3339）、可选
+`requester` 与各操作的字段，加上 `signature`（`{"key_id", "algorithm": "Ed25519", "value"}`，
+对去掉 `signature` 的请求按 JCS 规范化后的 detached 签名，与 Realm Profile 相同）：
+
+- `create_realm`：带 `package`（`href` 须为 HTTPS，`sha256` 为 64 位小写十六进制）。建为
+  `pending`，在 Signer 中生成该 Realm 的 `issuer:<realm>` key，响应
+  `{"realm", "status": "pending", "pending_expires_at", "profile"}`，`profile` 是 `sequence = 1`、
+  指明本 Realm Provider 的 Issuer、issuer key 与端点的未签名首份 Realm Profile。以
+  `(realm, requester)` 幂等（`requester` 缺省为空）：同一请求方重试 `pending` Realm 再次返回
+  `profile`，对 `active` Realm 只返回 `{"realm", "status": "active"}`；其他请求方或已退役 Realm
+  返回 `409`。
+- `publish_profile`：`profile` 为持有方签名的 Realm Profile。须能以该域名当前的
+  `realm_signing_keys` 验证、`provider.id` 为本 Realm Provider；`active` Realm Profile 的
+  `issuer` 与 `provider` 须与 Loran 生成的完全一致。首次提交激活 `pending` Realm，响应一次性带
+  `admin_token`；之后只接受通过 `check_successor` 的更高 sequence（相同 Realm Profile 重复提交
+  返回当前状态），不再返回 token；`status = retired` 的 Realm Profile 触发退役事务。
+- `reissue_admin_token`：`active` Realm 换发 Realm 管理 token（`{"realm", "admin_token"}`），
+  旧 token 立即失效。
+
+校验顺序：请求格式、`provider_id` 等于本 Realm Provider ID、有效期不超过 5 分钟且包含当前时间、
+`nonce` 为 1–128 字符、Realm 名规范且不在 Realm Provider 域名（及其子域名）下（否则 `403`，
+这些 Realm 由运营者创建）；然后经 Realm discovery 中的抓取器取
+`https://<domain>/.well-known/actr`，按 key pin 接受其 `realm_signing_keys`，要求签名 key 为其中
+`active` key；最后才记录 `nonce`（有效期内重复即 `400`）。请求按来源地址限流，抓取按目标主机
+限流并缓存 5 分钟（含失败）。`create_realm` 受 `[realm]` 配额约束：`max_realms`、
+`max_realms_per_domain`、`max_pending_per_domain`（超出返回 `429`）；`pending` Realm 在
+`pending_ttl_secs` 后清除，名字可再用。
+
+错误以 `{"error": "…"}` 返回：`400` 请求无效，`403` key 或签名不被接受，`404` Realm 不存在，
+`409` 冲突（幂等键、回滚、已退役），`429` 配额，`503` 取不到 descriptor 或 Signer 不可用。
+响应带 `Cache-Control: no-store`。持有方工具：`actr realm keygen | create-request |
+sign-profile | retire | reissue-request`。
 
 ## Issuer
 
@@ -148,17 +184,23 @@ nonce-auth request message；`Sign` 的认证 payload 同时绑定 protocol、`k
 ## Admin
 
 - `POST /admin/api/auth/login`
-- 其余 `/admin/api/**` 需要 `Authorization: Bearer <JWT>`
+- 其余 `/admin/api/**` 需要 `Authorization: Bearer <JWT>`；Realm 管理 token（`rat_…`）只能用于
+  自己 Realm 的 `GET /admin/api/realms/{realm}`、`GET …/profile` 与 `POST …/secret/rotate`，
+  其他任何路径（含其他 Realm）一律 `404`；未知 token 为 `401`。
 
 当前实现：实例运营者可创建多个 Realm，数量受 `[realm] max_realms` 限制（不计已退役的）。
 Realm 以 Realm 名寻址，`@` 编码为 `%40`：
 
 - `GET /admin/api/realms`、`POST /admin/api/realms`：列出；创建（body
-  `{"realm": "k7m2q9xh@acme.com", "enabled": true, "expires_at": 0}`，响应一次性返回 Realm
-  secret），新 Realm 为 `active`。Realm Provider 域名下的 Realm 还须带
-  `"package": {"href": "https://…", "sha256": "<64 hex>"}`（可选 `display_name`）：先建为
-  `pending`，Loran 签发首份 Realm Profile 后转为 `active`，签发失败则丢弃该 `pending` 行；其他
-  域名不接受这两个字段；
+  `{"realm": "k7m2q9xh@provider.example", "enabled": true, "expires_at": 0, "package": {"href":
+  "https://…", "sha256": "<64 hex>"}}`，可选 `display_name`，响应一次性返回 Realm secret）。Loran
+  是 Realm Provider（启用 authority 与带 Signer 的 Issuer）时只创建其 Realm Provider 域名下的
+  Realm：先建为 `pending`（`pending_ttl_secs` 后过期），Loran 签发首份 Realm Profile 后转为
+  `active`，签发失败则丢弃该 `pending` 行，响应另一次性返回 `realm_admin_token`；其他域名的
+  Realm 由持有方以 Realm 管理请求创建。Loran 不是 Realm Provider 时创建没有 Realm Profile 的
+  `active` Realm，不接受 `package` 与 `display_name`；
+- `POST /admin/api/realms/{realm}/admin-token/reissue`：为 `active` Realm 换发 Realm 管理 token
+  （`realm_admin_token`），旧 token 立即失效；
 - `GET /admin/api/realms/{realm}/profile`：已接受的 Realm Profile（原样 JSON），没有则 `404`；
 - `GET`/`PUT /admin/api/realms/{realm}`：读取；`PUT` 只收 `enabled` 与 `expires_at`，
   `enabled = false` 即停用、`true` 即恢复，Realm 名不可修改；
@@ -170,12 +212,12 @@ Realm 以 Realm 名寻址，`@` 编码为 `%40`：
   Realm Profile，运营者不能退役（只能停用），退役只由持有方发布的退役 Realm Profile 触发。
 
 gRPC `NodeAdminService` 对应 `CreateRealm`/`GetRealm`/`UpdateRealm`/`ListRealms`/
-`RetireRealm`，同样按 Realm 名寻址；`CreateRealm` 不能新建 Realm Provider 域名下的 Realm（没有
-`package`）。
+`RetireRealm`，同样按 Realm 名寻址；Loran 是 Realm Provider 时 `CreateRealm` 不能新建 Realm
+（没有 `package`），只能更新已有 Realm。
 
-目标契约：创建需经 Realm 签名 key 持有方授权，并经 Realm Profile
-验证后才从 `pending` 转为 `active`；退役由持有方发布退役 Realm Profile 触发，Loran 在单一
-事务中撤销该 Realm 的状态并写入以 Realm 名为键的 Realm Provider tombstone，Realm 名不复用。
+目标契约：Realm Provider 域名下的 Realm 由 Realm Provider 账号（OAuth 2.0 + PKCE）以
+bearer 请求创建，而不是由运营者代办；退役事务还撤销 Actor Registry、presence、在线连接与
+Realm issuer key。
 
 ## Schema migration
 

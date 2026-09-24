@@ -495,10 +495,11 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   存储与 `GET /actr/realms/{domain}/{realm_id}`、其他域名 Realm 的周期性刷新（含 key 移除后丢弃
   基线、取不到则停用）、退役 Realm Profile 触发的退役事务。尚未实现：`realm_signing_keys`
   轮换链（引入新 key 的成员一律拒绝）、身份变化的重新确认、Realm 签名 key 本身的轮换；
-  `realm_mgmt_nonce` 与 `realm` 的管理 token 等列尚无代码写入；
-- 实现 Realm 管理请求（`create_realm`、`publish_profile`、`reissue_admin_token`、
-  `register_publisher`；`provider_id` 绑定、5 分钟有效期、nonce 防重放、含请求方的幂等键）与
-  待签 Realm Profile payload；
+- 已实现其他域名的 Realm 管理请求 `create_realm`、`publish_profile`、`reissue_admin_token`
+  （`provider_id` 绑定、5 分钟有效期、nonce 防重放、`(realm, 请求方)` 幂等、待签 Realm Profile）、
+  Realm 管理 token（只存哈希、一次性返回、重签即失效、作用域一个 Realm、越权 `404`）与
+  `[realm]` 按域名配额、`pending` TTL 清理。尚未实现：`register_publisher`；Realm 管理 token
+  目前只能查看 Realm 与 Realm Profile、轮换 secret（连接 ACL、membership 待实现）；
 - Issuer 仍以轮换的全局 key 签发 Actor credential，尚未改用 Realm Profile `issuer.keys` 列出的
   `issuer:<realm>` key；
 - Realm Provider 域名下的 Realm 的 Realm Provider 账号认证（OAuth 2.0 + PKCE）、按账号配额
@@ -507,16 +508,15 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   注册请求登记，移除 `/.well-known/actr/publisher.json`（Publisher Registry 当前
   实现的 `PUBLISHER_DESCRIPTOR_PATH`）与 `verification_challenge`，重定向处理与 Realm 相同
   （逐跳 SSRF 检查）；
-- 实现 Realm 管理 token 及其一次性交付与重签、按 Realm 域名与按 Realm 配额；
+- 按 Realm 的连接、注册、消息与 TURN 配额；
 - TURN secret 改为按 Realm 名 HKDF 派生；
 - `create_realm` 携带 `package`（`loran-packages` 已移除 Target 解析，只保留包托管）；
 - 补跨 Realm 混淆回归测试；
-- 控制面 `CreateRealm`/`RetireRealm`/`ListRealms` 的语义与本契约对齐：创建需 Realm
-  签名 key 签名；运营者经 admin API 创建的其他域名 Realm 仍是没有 Realm Profile 的 `active`
-  Realm，可经 `RetireRealm` 与 admin `…/retire` 直接退役（Realm Provider 域名下的 Realm 由
-  Loran 签发退役 Realm Profile，已有持有方 Realm Profile 的 Realm 运营者不能退役）；当前退役
-  事务尚未清理 Actor Registry、presence、在线连接与 Realm issuer key，靠 `validate_realm`
-  拒绝已退役 Realm 的新注册与连接。
+- 控制面与本契约的剩余差异：Realm Provider 域名下的 Realm 由运营者经 admin API 代办创建（等同
+  Realm Provider 账号）；Loran 不是 Realm Provider（未启用 authority 或 Issuer 无 Signer）时，
+  运营者仍可创建任意域名下没有 Realm Profile 的 `active` Realm，并可经 `RetireRealm` 与
+  admin `…/retire` 直接退役；当前退役事务尚未清理 Actor Registry、presence、在线连接与 Realm
+  issuer key，靠 `validate_realm` 拒绝已退役 Realm 的新注册与连接。
 
 ## 10. 明确不做
 

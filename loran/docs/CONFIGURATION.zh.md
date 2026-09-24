@@ -180,10 +180,17 @@ Realm 不在 TOML 中声明。
 目标契约：一个实例承载多个 Realm，默认不限制数量；需要独占部署时可配置
 `max_realms = 1`（该字段尚未实现）。Realm 经持有方授权的创建请求与 Realm
 Profile 验证后激活，收到退役 Realm Profile 时退役并写入 Realm Provider tombstone。按 Realm
-域名与按 Realm 的配额属于待实现配置。
+的连接、消息与 TURN 配额属于待实现配置。
 
 `[realm] profile_refresh_secs`（默认 3600，限定在 60–86400）是 Loran 刷新其他域名
-`realm_signing_keys` 与 Realm Profile 的间隔（API.zh.md「Realm discovery」）。
+`realm_signing_keys` 与 Realm Profile 的间隔（API.zh.md「Realm discovery」），每轮同时清除过期的
+`pending` Realm。Realm 管理请求（API.zh.md「Realm 管理请求」）的 `create_realm` 另受：
+
+- `max_realms_per_domain`：每个 Realm 域名的 `pending` 与 `active` Realm 数，默认不限；
+- `max_pending_per_domain`：每个 Realm 域名的 `pending` Realm 数，默认 10；
+- `pending_ttl_secs`：`pending` Realm 等待首份 Realm Profile 的时间，默认 3600，限定在
+  60–86400；过期即删除，名字可再用（从未提供服务，不是 tombstone）。运营者创建的 `pending`
+  Realm 同样受此限制。
 
 Realm Provider ID 取 `[authority] uri`（`actr://<domain>`，不带端口）的规范化 DNS 域名。
 启用 Issuer、Signaling 或 TURN 时 `uri` 必填，缺失或非法即配置校验失败；它写入 Actor
