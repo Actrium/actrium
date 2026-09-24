@@ -4360,25 +4360,7 @@ async fn admin_api_manages_many_realms_by_name() {
         "sha256": "ab".repeat(32),
     });
 
-    // The Realm signing key is generated at startup, possibly after health.
-    let mut created;
-    let mut attempts = 0;
-    loop {
-        created = client
-            .post(format!("{base}/admin/api/realms"))
-            .bearer_auth(token)
-            .json(&json!({ "realm": MANAGED, "package": package }))
-            .send()
-            .await
-            .expect("create second realm");
-        attempts += 1;
-        if created.status() != reqwest::StatusCode::SERVICE_UNAVAILABLE || attempts == 50 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
-    assert_eq!(created.status(), reqwest::StatusCode::CREATED);
-    let created: Value = created.json().await.expect("create realm json");
+    let created = create_provider_realm(&client, &base, token, MANAGED).await;
     assert_eq!(created["realm"]["status"], "active");
     let admin_token = created["realm_admin_token"]
         .as_str()
@@ -4763,7 +4745,7 @@ async fn signaling_relay_cross_realm_is_denied() {
             Some(signaling_to_actr::Payload::Error(err)) => {
                 assert_eq!(err.code, 403, "cross-Realm relay should be denied");
                 assert!(
-                    err.message.contains("ACL policy denies relay"),
+                    err.message.contains("outside this connection's Realm"),
                     "unexpected relay deny message: {}",
                     err.message
                 );
@@ -4773,5 +4755,270 @@ async fn signaling_relay_cross_realm_is_denied() {
         other => panic!("unexpected flow {other:?}"),
     }
 
+    harness.shutdown();
+}
+
+/// Create a Realm under the Provider domain through the admin API. The Realm
+/// signing key is generated at startup, possibly after health.
+async fn create_provider_realm(
+    client: &reqwest::Client,
+    base: &str,
+    token: &str,
+    realm: &str,
+) -> Value {
+    let package = json!({
+        "href": "https://cdn.example/notes-1.0.actr",
+        "sha256": "ab".repeat(32),
+    });
+    for _ in 0..50 {
+        let response = client
+            .post(format!("{base}/admin/api/realms"))
+            .bearer_auth(token)
+            .json(&json!({ "realm": realm, "package": package }))
+            .send()
+            .await
+            .expect("create realm");
+        if response.status() != reqwest::StatusCode::SERVICE_UNAVAILABLE {
+            assert_eq!(response.status(), reqwest::StatusCode::CREATED);
+            return response.json().await.expect("create realm json");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    panic!("Realm signing key never became ready");
+}
+
+/// `base64(HMAC-SHA1(key, username))`, the TURN password format.
+fn turn_password(key: &[u8], username: &str) -> String {
+    use hmac::Mac as _;
+    let mut mac = hmac::Hmac::<sha1::Sha1>::new_from_slice(key).expect("HMAC key");
+    mac.update(username.as_bytes());
+    base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes())
+}
+
+/// REALM_V1_ARCHITECTURE §6: two Realms with the same Actor type and the
+/// same serial number share nothing: Actor credentials, discovery, presence,
+/// TURN credentials, connection ACLs and admin APIs stay within each Realm.
+#[tokio::test]
+#[serial]
+async fn realms_with_the_same_actor_type_and_serial_are_isolated() {
+    const ALPHA: &str = "alpha@localhost";
+    const BETA: &str = "beta@localhost";
+    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
+    let port = harness.port;
+    let base = harness.base_url();
+    let client = reqwest::Client::new();
+
+    let login: Value = client
+        .post(format!("{base}/admin/api/auth/login"))
+        .json(&json!({ "password": "testpassword123" }))
+        .send()
+        .await
+        .expect("admin login request")
+        .json()
+        .await
+        .expect("parse admin login response");
+    let token = login["token"].as_str().expect("admin login token");
+    let alpha = create_provider_realm(&client, &base, token, ALPHA).await;
+    let beta = create_provider_realm(&client, &base, token, BETA).await;
+    let secret = |created: &Value| {
+        created["realm_secret"]
+            .as_str()
+            .expect("secret")
+            .to_string()
+    };
+    let (alpha_secret, beta_secret) = (secret(&alpha), secret(&beta));
+
+    // The same service type in both Realms, open to acme/client of its own Realm.
+    let acl = Acl {
+        rules: vec![AclRule {
+            permission: Permission::Allow as i32,
+            from_type: ActrType {
+                publisher: "acme".into(),
+                name: "client".into(),
+                version: "1.0.0".to_string(),
+            },
+            source_realm: None,
+        }],
+    };
+    let register = |realm: &'static str, secret: String, name: &'static str, acl: Option<Acl>| {
+        let base = base.clone();
+        async move {
+            issuer_register_http_with_secret(&base, realm, "acme", name, None, acl, Some(&secret))
+                .await
+        }
+    };
+    let alpha_client = register(ALPHA, alpha_secret.clone(), "client", None).await;
+    let beta_client = register(BETA, beta_secret.clone(), "client", None).await;
+    let alpha_svc = register(ALPHA, alpha_secret.clone(), "svc-same", Some(acl.clone())).await;
+    let beta_svc = register(BETA, beta_secret.clone(), "svc-same", Some(acl.clone())).await;
+
+    // Each Realm signs with its own issuer key.
+    assert_ne!(
+        alpha_client.credential.key_id,
+        beta_client.credential.key_id
+    );
+    assert_ne!(alpha_client.signing_pubkey, beta_client.signing_pubkey);
+    assert_eq!(alpha_client.credential.key_id, alpha_svc.credential.key_id);
+    assert_eq!(alpha_client.signing_key_id, alpha_client.credential.key_id);
+
+    // A credential replayed as the same serial in the other Realm is refused.
+    for (ok, other_realm) in [(&alpha_client, BETA), (&beta_client, ALPHA)] {
+        let mut replayed = ok.clone();
+        replayed.actr_id.realm = other_realm.to_string();
+        let result = connect_async(authenticated_ws_request(port, &replayed)).await;
+        assert!(
+            result.is_err(),
+            "a credential of one Realm must not open a connection in another"
+        );
+    }
+
+    let (mut alpha_w, mut alpha_r) = connect_ws_authenticated(port, &alpha_client).await;
+    let (mut beta_w, mut beta_r) = connect_ws_authenticated(port, &beta_client).await;
+
+    // An envelope for the other Realm is refused on this connection, even
+    // with that Realm's valid credential.
+    let foreign = actr_protocol::ActrToSignaling {
+        source: beta_client.actr_id.clone(),
+        credential: beta_client.credential.clone(),
+        payload: Some(actr_protocol::actr_to_signaling::Payload::DiscoveryRequest(
+            actr_protocol::DiscoveryRequest {
+                publisher: None,
+                limit: Some(64),
+            },
+        )),
+    };
+    send_envelope(
+        &mut alpha_w,
+        make_envelope(signaling_envelope::Flow::ActrToServer(foreign)),
+    )
+    .await;
+    match recv_envelope(&mut alpha_r).await.flow {
+        Some(signaling_envelope::Flow::ServerToActr(server_msg)) => match server_msg.payload {
+            Some(signaling_to_actr::Payload::Error(err)) => assert_eq!(err.code, 403),
+            other => panic!("expected an error, got {other:?}"),
+        },
+        other => panic!("unexpected flow {other:?}"),
+    }
+
+    // Presence: Alpha's client hears only about Alpha's service.
+    let subscribe = actr_protocol::ActrToSignaling {
+        source: alpha_client.actr_id.clone(),
+        credential: alpha_client.credential.clone(),
+        payload: Some(
+            actr_protocol::actr_to_signaling::Payload::SubscribeActrUpRequest(
+                actr_protocol::SubscribeActrUpRequest {
+                    target_type: ActrType {
+                        publisher: "acme".into(),
+                        name: "svc-same".into(),
+                        version: "1.0.0".to_string(),
+                    },
+                },
+            ),
+        ),
+    };
+    send_envelope(
+        &mut alpha_w,
+        make_envelope(signaling_envelope::Flow::ActrToServer(subscribe)),
+    )
+    .await;
+    let _ = recv_envelope(&mut alpha_r).await; // subscribe ack
+    let (_beta_svc_w, _beta_svc_r) = connect_ws_authenticated(port, &beta_svc).await;
+    let (_alpha_svc_w, _alpha_svc_r) = connect_ws_authenticated(port, &alpha_svc).await;
+    let up = tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            if let Some(signaling_envelope::Flow::ServerToActr(server_msg)) =
+                recv_envelope(&mut alpha_r).await.flow
+                && let Some(signaling_to_actr::Payload::ActrUpEvent(event)) = server_msg.payload
+            {
+                return event.actor_id;
+            }
+        }
+    })
+    .await
+    .expect("ActrUp for Alpha's service");
+    assert_eq!(
+        up, alpha_svc.actr_id,
+        "the first ActrUp is Alpha's own service"
+    );
+
+    // Discovery and route candidates stay within the Realm.
+    for (write, read, ok, own_svc) in [
+        (&mut alpha_w, &mut alpha_r, &alpha_client, &alpha_svc),
+        (&mut beta_w, &mut beta_r, &beta_client, &beta_svc),
+    ] {
+        let candidates = query_route_candidates(write, read, ok, "acme", "svc-same").await;
+        assert_eq!(candidates, vec![own_svc.actr_id.clone()]);
+        let entries = query_discovery_entries(write, read, ok, Some("acme")).await;
+        let services = entries
+            .iter()
+            .filter(|entry| entry.actr_type.name == "svc-same")
+            .count();
+        assert_eq!(
+            services, 1,
+            "each Realm sees only its own service: {entries:?}"
+        );
+    }
+
+    // TURN credentials are keyed by each Realm's own derived secret.
+    let master = b"fullstack-turn-secret-0123456789abcdef";
+    for (ok, realm, other) in [(&alpha_svc, ALPHA, BETA), (&beta_svc, BETA, ALPHA)] {
+        let turn = &ok.turn_credential;
+        assert_eq!(turn.realm, realm);
+        let own = platform::realm::realm_turn_secret(master, realm, "localhost");
+        let foreign = platform::realm::realm_turn_secret(master, other, "localhost");
+        assert_eq!(turn.password, turn_password(&own, &turn.username));
+        assert_ne!(turn.password, turn_password(&foreign, &turn.username));
+        assert_ne!(turn.password, turn_password(master, &turn.username));
+    }
+
+    // Connection ACLs cannot name the other Realm.
+    let cross_acl = Acl {
+        rules: vec![AclRule {
+            source_realm: Some(SourceRealm::Realm(BETA.to_string())),
+            ..acl.rules[0].clone()
+        }],
+    };
+    match issuer_register_result(
+        &base,
+        ALPHA,
+        "acme",
+        "svc-cross-acl",
+        None,
+        Some(cross_acl),
+        Some(&alpha_secret),
+    )
+    .await
+    {
+        register_response::Result::Error(err) => assert_eq!(err.code, 400),
+        other => panic!("a cross-Realm ACL rule must be rejected: {other:?}"),
+    }
+
+    // Each Realm admin token manages only its own Realm.
+    let alpha_token = alpha["realm_admin_token"].as_str().expect("admin token");
+    for (path, status) in [
+        ("/admin/api/realms/alpha%40localhost", 200),
+        ("/admin/api/realms/beta%40localhost", 404),
+        ("/admin/api/realms/beta%40localhost/profile", 404),
+    ] {
+        let response = client
+            .get(format!("{base}{path}"))
+            .bearer_auth(alpha_token)
+            .send()
+            .await
+            .expect("realm admin request");
+        assert_eq!(response.status().as_u16(), status, "{path}");
+    }
+    let rotate = client
+        .post(format!(
+            "{base}/admin/api/realms/beta%40localhost/secret/rotate"
+        ))
+        .bearer_auth(alpha_token)
+        .send()
+        .await
+        .expect("rotate other Realm's secret");
+    assert_eq!(rotate.status(), reqwest::StatusCode::NOT_FOUND);
+
+    let _ = alpha_w.send(WsMessage::Close(None)).await;
+    let _ = beta_w.send(WsMessage::Close(None)).await;
     harness.shutdown();
 }

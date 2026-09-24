@@ -503,6 +503,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "sha1",
  "sqlx",
  "strum 0.26.3",
  "tempfile",
