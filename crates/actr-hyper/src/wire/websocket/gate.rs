@@ -396,6 +396,16 @@ impl WebSocketGate {
                     );
                     return None;
                 }
+                // The credential's Realm and issuer are both the source's Realm name.
+                if claims.realm != source_actor_id.realm || claims.issuer != source_actor_id.realm {
+                    tracing::warn!(
+                        realm = %claims.realm,
+                        issuer = %claims.issuer,
+                        source_id = %source_repr,
+                        "WS credential Realm or issuer does not match the source Realm, rejecting connection"
+                    );
+                    return None;
+                }
                 tracing::info!(
                     actor_id = %claims.actor_id,
                     "WS inbound connection identity verification passed"

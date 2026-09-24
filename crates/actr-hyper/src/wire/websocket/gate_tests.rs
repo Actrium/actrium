@@ -269,6 +269,43 @@ async fn verify_credential_actor_id_mismatch_returns_none() {
     );
 }
 
+/// claims.realm or claims.issuer differing from the source Realm -> None
+#[tokio::test]
+async fn verify_credential_realm_or_issuer_mismatch_returns_none() {
+    let sk = signing_key(5);
+    let actor = test_actor_id(200);
+    let ctx = make_auth_ctx(&sk, 1, test_actor_id(999)).await;
+    let source_bytes = actr_protocol::prost::Message::encode_to_vec(&actor);
+
+    for (realm, issuer) in [
+        ("other@example.com", actor.realm.as_str()),
+        (actor.realm.as_str(), "other@example.com"),
+    ] {
+        let claims = IdentityClaims {
+            actor_id: actor.to_string_repr(),
+            expires_at: future_ts(),
+            realm: realm.to_string(),
+            protocol_version: 1,
+            issuer: issuer.to_string(),
+            provider: "actrix-official".to_string(),
+            audience: "actr.signaling".to_string(),
+            actor_type: test_actor_type(),
+        };
+        let claims_bytes = actr_protocol::prost::Message::encode_to_vec(&claims);
+        let credential = AIdCredential {
+            key_id: 1,
+            signature: sk.sign(&claims_bytes).to_bytes().to_vec().into(),
+            claims: claims_bytes.into(),
+        };
+        assert!(
+            WebSocketGate::verify_credential(&credential, &source_bytes, &ctx)
+                .await
+                .is_none(),
+            "realm={realm} issuer={issuer} should be rejected"
+        );
+    }
+}
+
 /// Invalid protobuf bytes in `IdentityClaims` should fail decoding and return `None`.
 #[tokio::test]
 async fn verify_credential_invalid_claims_proto_returns_none() {
