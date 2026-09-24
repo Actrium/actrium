@@ -109,7 +109,7 @@ package.actr
 │   ├── guest.bundle.js
 │   └── capability-manifest.json
 ├── proto/
-│   └── primary-service.proto
+│   └── service.proto
 └── assets/
     ├── icon.png
     └── ...
@@ -210,7 +210,7 @@ contract_manifest = "ui/capability-manifest.json"
 contract_digest = "sha256:..."
 
 [actrium.service]
-primary_contract = "proto/primary-service.proto"
+contract = "proto/service.proto"
 protocol_fingerprint = "sha256:..."
 
 [actrium.service.workspace]
