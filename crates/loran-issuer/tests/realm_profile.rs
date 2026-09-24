@@ -544,10 +544,9 @@ mod management {
             Realm::for_admin_token(&token).await.unwrap().as_deref(),
             Some(name)
         );
-        let again = send(publish(name, "n-5", profile.clone(), &acme))
-            .await
-            .unwrap();
-        assert!(again.get("admin_token").is_none());
+        // Publishing it again conflicts and returns no token.
+        let again = send(publish(name, "n-5", profile.clone(), &acme)).await;
+        assert!(matches!(again, Err(ManagementError::Conflict(_))));
         let active = send(signed(&create(name, "n-6", Some("m-1")), &acme, "rs-1"))
             .await
             .unwrap();

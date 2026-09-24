@@ -81,8 +81,8 @@ descriptor，按 key pin 接受 `realm_signing_keys`（成员自签名；首次�
 - `publish_profile`：`profile` 为持有方签名的 Realm Profile。须能以该域名当前的
   `realm_signing_keys` 验证、`provider.id` 为本 Realm Provider；`active` Realm Profile 的
   `issuer` 与 `provider` 须与 Loran 生成的完全一致。首次提交激活 `pending` Realm，响应一次性带
-  `admin_token`；之后只接受通过 `check_successor` 的更高 sequence（相同 Realm Profile 重复提交
-  返回当前状态），不再返回 token；`status = retired` 的 Realm Profile 触发退役事务。
+  `admin_token`；之后只接受通过 `check_successor` 的更高 sequence（重复提交返回 `409`），不再
+  返回 token；`status = retired` 的 Realm Profile 触发退役事务。
 - `reissue_admin_token`：`active` Realm 换发 Realm 管理 token（`{"realm", "admin_token"}`），
   旧 token 立即失效。
 

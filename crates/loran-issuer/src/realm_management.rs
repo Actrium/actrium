@@ -284,13 +284,12 @@ async fn publish_profile(
         previous
             .check_successor(&profile)
             .map_err(|error| ManagementError::Conflict(error.to_string()))?;
+        // Only a higher sequence is accepted; a repeated publish conflicts.
         if profile.sequence == previous.sequence {
-            // The same Profile again.
-            return Ok(json!({
-                "realm": name,
-                "status": realm.status.to_string(),
-                "sequence": profile.sequence,
-            }));
+            return Err(ManagementError::Conflict(format!(
+                "Realm Profile sequence {} is already accepted",
+                profile.sequence
+            )));
         }
     }
 
