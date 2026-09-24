@@ -5,12 +5,13 @@
 //! the Actr Host never picks one. An Actor link names the Actor directly, and
 //! that Actor's type must equal the package type.
 
-use actr_protocol::{ActrError, ActrId, ActrType};
+use actr_protocol::{ActrError, ActrId, ActrType, Realm};
 use thiserror::Error;
 
-/// Candidates requested when looking up a Service: enough to tell one from
-/// more than one.
-pub const SERVICE_CANDIDATE_COUNT: u32 = 2;
+/// Candidates requested when looking up a Service. Discovery may also return
+/// Actors of other Realms that an ACL rule exposes, so all are requested and
+/// the ones outside the Realm are dropped before counting.
+pub const SERVICE_CANDIDATE_COUNT: u32 = u32::MAX;
 
 /// Service lookup failure.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -53,12 +54,15 @@ impl From<ServiceLookupError> for ActrError {
     }
 }
 
-/// Picks the Service from discovery candidates for `package_type`.
+/// Picks the Service in `realm` from discovery candidates for `package_type`.
 pub fn select_service(
     package_type: &ActrType,
+    realm: &Realm,
     candidates: Vec<ActrId>,
 ) -> Result<ActrId, ServiceLookupError> {
-    let mut candidates = candidates.into_iter();
+    let mut candidates = candidates
+        .into_iter()
+        .filter(|candidate| candidate.realm == *realm);
     match (candidates.next(), candidates.next()) {
         (Some(service), None) => Ok(service),
         (None, _) => Err(ServiceLookupError::NotFound(package_type.to_string())),
@@ -85,7 +89,6 @@ pub fn check_service_actor(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actr_protocol::Realm;
 
     fn actr_type(version: &str) -> ActrType {
         ActrType {
@@ -95,9 +98,11 @@ mod tests {
         }
     }
 
+    const REALM: Realm = Realm { realm_id: 7 };
+
     fn actor(serial_number: u64, actr_type: ActrType) -> ActrId {
         ActrId {
-            realm: Realm { realm_id: 7 },
+            realm: REALM,
             serial_number,
             r#type: actr_type,
         }
@@ -107,14 +112,14 @@ mod tests {
     fn selects_the_only_candidate() {
         let service = actor(1, actr_type("1.0.0"));
         assert_eq!(
-            select_service(&actr_type("1.0.0"), vec![service.clone()]),
+            select_service(&actr_type("1.0.0"), &REALM, vec![service.clone()]),
             Ok(service)
         );
     }
 
     #[test]
     fn zero_candidates_is_service_not_found() {
-        let error = select_service(&actr_type("1.0.0"), vec![]).unwrap_err();
+        let error = select_service(&actr_type("1.0.0"), &REALM, vec![]).unwrap_err();
         assert_eq!(
             error,
             ServiceLookupError::NotFound(actr_type("1.0.0").to_string())
@@ -125,11 +130,32 @@ mod tests {
     #[test]
     fn more_than_one_candidate_is_an_error() {
         let candidates = vec![actor(1, actr_type("1.0.0")), actor(2, actr_type("1.0.0"))];
-        let error = select_service(&actr_type("1.0.0"), candidates).unwrap_err();
+        let error = select_service(&actr_type("1.0.0"), &REALM, candidates).unwrap_err();
         assert_eq!(
             error,
             ServiceLookupError::NotUnique(actr_type("1.0.0").to_string())
         );
+        assert_eq!(error.code(), "SERVICE_NOT_FOUND");
+    }
+
+    #[test]
+    fn ignores_candidates_in_other_realms() {
+        let other_realm = |serial_number| ActrId {
+            realm: Realm { realm_id: 8 },
+            ..actor(serial_number, actr_type("1.0.0"))
+        };
+
+        let service = actor(1, actr_type("1.0.0"));
+        assert_eq!(
+            select_service(
+                &actr_type("1.0.0"),
+                &REALM,
+                vec![other_realm(2), service.clone(), other_realm(3)]
+            ),
+            Ok(service)
+        );
+
+        let error = select_service(&actr_type("1.0.0"), &REALM, vec![other_realm(2)]).unwrap_err();
         assert_eq!(error.code(), "SERVICE_NOT_FOUND");
     }
 

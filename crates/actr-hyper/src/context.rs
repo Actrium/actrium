@@ -685,7 +685,11 @@ impl RuntimeContext {
         let candidates = self
             .discover_candidates(package_type, SERVICE_CANDIDATE_COUNT, false)
             .await?;
-        Ok(select_service(package_type, candidates)?)
+        let realm = match &self.session_state {
+            Some(session_state) => session_state.actor_id().await.realm,
+            None => self.self_id.realm,
+        };
+        Ok(select_service(package_type, &realm, candidates)?)
     }
 
     /// Internal: Send discovery request to signaling server
