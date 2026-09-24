@@ -114,6 +114,15 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
         return encode_result(error_result);
     }
 
+    if let Err(message) = check_acl_source_realms(&request) {
+        return encode_result(RegisterResponse {
+            result: Some(register_response::Result::Error(ErrorResponse {
+                code: 400,
+                message,
+            })),
+        });
+    }
+
     // Validate that the Realm exists, is in a healthy state, and has not expired
     if let Err(validation_err) = RealmEntity::validate_realm(&request.realm).await {
         let (code, message) = RealmEntity::map_validation_error(validation_err);
@@ -228,6 +237,28 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
     };
 
     encode_result(result)
+}
+
+/// Connection ACLs of version 1 act only within the Actor's own Realm: a
+/// rule's `source_realm` may be unset, `any_realm` (which matches only the
+/// own Realm) or the Actor's own Realm name. A rule naming another Realm, or
+/// a malformed Realm name, is rejected.
+fn check_acl_source_realms(request: &RegisterRequest) -> Result<(), String> {
+    use actr_protocol::acl_rule::SourceRealm;
+
+    let rules = request.acl.iter().flat_map(|acl| &acl.rules);
+    for rule in rules {
+        if let Some(SourceRealm::Realm(name)) = &rule.source_realm {
+            actr_protocol::uri::parse_realm_name(name)
+                .map_err(|error| format!("Invalid ACL source_realm: {error}"))?;
+            if *name != request.realm {
+                return Err(format!(
+                    "ACL source_realm {name} is another Realm; cross-Realm rules are not supported"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Persist the registration's ACL policy and pending signaling metadata in
@@ -939,6 +970,54 @@ mod tests {
         assert_eq!(decoded_request.realm, "k7m2q9xh@example.com");
         assert_eq!(decoded_request.actr_type.publisher, "apple");
         assert_eq!(decoded_request.actr_type.name, "iPhone15");
+    }
+
+    #[test]
+    fn acl_rules_may_not_name_another_realm() {
+        use actr_protocol::acl_rule::{Permission, SourceRealm};
+
+        let request = |source_realm: Option<SourceRealm>| RegisterRequest {
+            actr_type: ActrType {
+                publisher: "test".to_string(),
+                name: "actor".to_string(),
+                version: "1.0.0".to_string(),
+            },
+            realm: "k7m2q9xh@example.com".to_string(),
+            acl: Some(actr_protocol::Acl {
+                rules: vec![actr_protocol::AclRule {
+                    permission: Permission::Allow as i32,
+                    from_type: ActrType {
+                        publisher: "test".to_string(),
+                        name: "client".to_string(),
+                        version: "1.0.0".to_string(),
+                    },
+                    source_realm,
+                }],
+            }),
+            ..Default::default()
+        };
+
+        for accepted in [
+            None,
+            Some(SourceRealm::AnyRealm(true)),
+            Some(SourceRealm::Realm("k7m2q9xh@example.com".to_string())),
+        ] {
+            assert!(check_acl_source_realms(&request(accepted)).is_ok());
+        }
+        assert!(check_acl_source_realms(&RegisterRequest::default()).is_ok());
+        for rejected in [
+            "p3n8w2rt@example.com",
+            "k7m2q9xh@other.example",
+            "K7M2Q9XH@example.com",
+            "not a realm",
+            "",
+        ] {
+            assert!(
+                check_acl_source_realms(&request(Some(SourceRealm::Realm(rejected.to_string()))))
+                    .is_err(),
+                "{rejected:?} must be rejected"
+            );
+        }
     }
 
     #[test]
