@@ -1,0 +1,328 @@
+//! Realm management requests (`actr/protocols/realm-profile.md` section 8)
+//! for Realms of other domains: `create_realm`, `publish_profile` and
+//! `reissue_admin_token`, each an Actr management envelope signed by an
+//! `active` Realm signing key of the Realm's domain.
+//!
+//! Realms under the Provider domain are managed with a Realm Provider
+//! account, which this Loran does not offer; the operator creates them.
+
+use actr_protocol::realm_management::{ManagementOp, ManagementRequest};
+use actr_protocol::realm_profile::{RealmPackage, RealmProfile, RealmStatus as ProfileStatus};
+use axum::http::StatusCode;
+use chrono::Utc;
+use platform::config::RealmConfig;
+use platform::net::FetchError;
+use platform::realm::domain::member_from_descriptor;
+use platform::realm::management::{generate_admin_token, use_nonce};
+use platform::realm::secret::{generate_realm_secret, hash_realm_secret};
+use platform::realm::{Realm, RealmDomain, RealmError, RealmProfileRecord, RealmStatus};
+use serde_json::{Value, json};
+use std::future::Future;
+use std::sync::Arc;
+
+use crate::realm_profile::{ProfileError, RealmProfiles};
+
+/// Longest accepted nonce.
+const MAX_NONCE_LEN: usize = 128;
+
+#[derive(Debug, thiserror::Error)]
+pub enum ManagementError {
+    #[error("{0}")]
+    Invalid(String),
+    /// The Realm signing key or the signature is not accepted.
+    #[error("{0}")]
+    Forbidden(String),
+    #[error("{0}")]
+    NotFound(String),
+    #[error("{0}")]
+    Conflict(String),
+    #[error("{0}")]
+    Quota(String),
+    #[error("{0}")]
+    Unavailable(String),
+    #[error("{0}")]
+    Internal(String),
+}
+
+impl ManagementError {
+    pub fn status(&self) -> StatusCode {
+        match self {
+            Self::Invalid(_) => StatusCode::BAD_REQUEST,
+            Self::Forbidden(_) => StatusCode::FORBIDDEN,
+            Self::NotFound(_) => StatusCode::NOT_FOUND,
+            Self::Conflict(_) => StatusCode::CONFLICT,
+            Self::Quota(_) => StatusCode::TOO_MANY_REQUESTS,
+            Self::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+            Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl From<RealmError> for ManagementError {
+    fn from(error: RealmError) -> Self {
+        match error {
+            RealmError::NotFound => Self::NotFound("Realm not found".to_string()),
+            RealmError::Retired | RealmError::AlreadyExists | RealmError::Conflict(_) => {
+                Self::Conflict(error.to_string())
+            }
+            RealmError::QuotaExceeded(_) => Self::Quota(error.to_string()),
+            RealmError::ValidationError(message) => Self::Invalid(message),
+            error => Self::Internal(error.to_string()),
+        }
+    }
+}
+
+impl From<ProfileError> for ManagementError {
+    fn from(error: ProfileError) -> Self {
+        match error {
+            ProfileError::Invalid(message) => Self::Invalid(message),
+            ProfileError::Unavailable(message) => Self::Unavailable(message),
+            ProfileError::Realm(error) => error.into(),
+        }
+    }
+}
+
+/// Handle one Realm management request, `document` as received. `fetch`
+/// gets the Realm domain's authority descriptor; the caller rate-limits and
+/// caches it, since it runs before any signature is checked.
+pub async fn handle<F, Fut>(
+    profiles: &RealmProfiles,
+    config: &RealmConfig,
+    document: &[u8],
+    fetch: F,
+) -> Result<Value, ManagementError>
+where
+    F: FnOnce(String) -> Fut,
+    Fut: Future<Output = Result<Arc<[u8]>, FetchError>>,
+{
+    let invalid = |error: &dyn std::fmt::Display| ManagementError::Invalid(error.to_string());
+    let request = ManagementRequest::parse(document).map_err(|e| invalid(&e))?;
+    let provider_id = profiles.provider_id();
+    if request.provider_id != provider_id {
+        return Err(ManagementError::Invalid(format!(
+            "provider_id '{}' is not this Realm Provider",
+            request.provider_id
+        )));
+    }
+    request.check_window(Utc::now()).map_err(|e| invalid(&e))?;
+    if request.nonce.is_empty() || request.nonce.len() > MAX_NONCE_LEN {
+        return Err(ManagementError::Invalid(format!(
+            "nonce must have 1 to {MAX_NONCE_LEN} characters"
+        )));
+    }
+    let domain = realm_domain(&request.realm)?;
+    if domain == provider_id || domain.ends_with(&format!(".{provider_id}")) {
+        return Err(ManagementError::Forbidden(format!(
+            "Realms under {provider_id} are created by this Realm Provider's operator"
+        )));
+    }
+
+    // The domain's Realm signing keys, accepted under its pin.
+    let descriptor = fetch(format!("https://{domain}/.well-known/actr"))
+        .await
+        .map_err(|error| ManagementError::Unavailable(format!("{domain}: {error}")))?;
+    let member = member_from_descriptor(&domain, &descriptor)
+        .map_err(|error| ManagementError::Forbidden(error.to_string()))?;
+    let keys = RealmDomain::accept(&domain, &member)
+        .await
+        .map_err(|error| ManagementError::Forbidden(error.to_string()))?
+        .keys;
+    request
+        .verify(&keys)
+        .map_err(|error| ManagementError::Forbidden(error.to_string()))?;
+
+    // Only signed requests reach the nonce table.
+    let expires_at = chrono::DateTime::parse_from_rfc3339(&request.expires_at)
+        .map_err(|e| invalid(&e))?
+        .timestamp();
+    if !use_nonce(&request.nonce, expires_at).await? {
+        return Err(ManagementError::Invalid(
+            "nonce was already used".to_string(),
+        ));
+    }
+    Realm::discard_expired_pending().await?;
+
+    match request.op {
+        ManagementOp::CreateRealm => create_realm(profiles, config, &request).await,
+        ManagementOp::PublishProfile => publish_profile(profiles, &request, &keys).await,
+        ManagementOp::ReissueAdminToken => {
+            let token = Realm::reissue_admin_token(&request.realm)
+                .await
+                .map_err(|error| match error {
+                    RealmError::ValidationError(message) => ManagementError::Conflict(message),
+                    error => error.into(),
+                })?;
+            Ok(json!({ "realm": request.realm, "admin_token": token }))
+        }
+    }
+}
+
+/// The domain of a normalized Realm name that has a Realm Profile.
+fn realm_domain(name: &str) -> Result<String, ManagementError> {
+    let uri = actr_protocol::uri::parse_realm_name(name)
+        .map_err(|error| ManagementError::Invalid(format!("realm: {error}")))?;
+    if uri.is_local() || uri.realm_name().as_deref() != Some(name) {
+        return Err(ManagementError::Invalid(format!(
+            "realm '{name}' is not a normalized Realm name with a Realm Provider"
+        )));
+    }
+    Ok(uri.domain().to_string())
+}
+
+fn realm_id(name: &str) -> &str {
+    name.split('@').next().unwrap_or_default()
+}
+
+async fn create_realm(
+    profiles: &RealmProfiles,
+    config: &RealmConfig,
+    request: &ManagementRequest,
+) -> Result<Value, ManagementError> {
+    let name = request.realm.as_str();
+    let package = request
+        .package
+        .clone()
+        .ok_or_else(|| ManagementError::Invalid("create_realm needs package".to_string()))?;
+    check_package(&package)?;
+    let requester = request.requester.clone().unwrap_or_default();
+
+    let created = Realm {
+        name: name.to_string(),
+        status: RealmStatus::Pending,
+        secret_current: hash_realm_secret(&generate_realm_secret()),
+        requester: requester.clone(),
+        pending_expires_at: Some(Utc::now().timestamp() as u64 + config.pending_ttl_secs()),
+        ..Default::default()
+    }
+    .insert_requested(config)
+    .await;
+    let realm = match created {
+        Ok(realm) => realm,
+        // Idempotent on (realm, requester).
+        Err(RealmError::AlreadyExists) => {
+            let existing = Realm::get(name).await?.ok_or_else(|| {
+                ManagementError::Conflict(format!("Realm {name} changed concurrently"))
+            })?;
+            if existing.status == RealmStatus::Retired || existing.requester != requester {
+                return Err(ManagementError::Conflict(format!(
+                    "Realm {name} already exists"
+                )));
+            }
+            if existing.status == RealmStatus::Active {
+                return Ok(json!({ "realm": name, "status": "active" }));
+            }
+            existing
+        }
+        Err(error) => return Err(error.into()),
+    };
+
+    let draft = match profiles
+        .draft(name, 1, realm_id(name), Some(package), false)
+        .await
+    {
+        Ok(draft) => draft,
+        Err(error) => {
+            if let Err(discard) = Realm::discard_pending(name).await {
+                platform::recording::warn!("Pending realm {name} not discarded: {discard}");
+            }
+            return Err(error.into());
+        }
+    };
+    Ok(json!({
+        "realm": name,
+        "status": "pending",
+        "pending_expires_at": realm.pending_expires_at,
+        "profile": draft,
+    }))
+}
+
+async fn publish_profile(
+    profiles: &RealmProfiles,
+    request: &ManagementRequest,
+    keys: &actr_protocol::RealmSigningKeys,
+) -> Result<Value, ManagementError> {
+    let name = request.realm.as_str();
+    let document = request
+        .profile
+        .as_ref()
+        .ok_or_else(|| ManagementError::Invalid("publish_profile needs profile".to_string()))?
+        .to_string();
+    let realm = Realm::get(name)
+        .await?
+        .ok_or_else(|| ManagementError::NotFound(format!("Realm {name} not found")))?;
+    if realm.status == RealmStatus::Retired {
+        return Err(RealmError::Retired.into());
+    }
+
+    let profile = RealmProfile::verify(document.as_bytes(), name, keys)
+        .map_err(|error| ManagementError::Invalid(error.to_string()))?;
+    if profile.provider.id != profiles.provider_id() {
+        return Err(ManagementError::Invalid(format!(
+            "provider.id '{}' is not this Realm Provider",
+            profile.provider.id
+        )));
+    }
+    if profile.realm.status == ProfileStatus::Active {
+        // An active Realm Profile names exactly this Realm Provider's Issuer,
+        // the Realm's issuer key and this Realm Provider's endpoints.
+        let expected = profiles
+            .draft(name, profile.sequence, "", None, false)
+            .await?;
+        let named = |member: &str, value: Value| expected[member] == value;
+        if !named("issuer", json!(profile.issuer)) || !named("provider", json!(profile.provider)) {
+            return Err(ManagementError::Invalid(
+                "the Realm Profile must name this Realm Provider's issuer and endpoints"
+                    .to_string(),
+            ));
+        }
+    }
+
+    // A Profile the domain's current keys no longer verify is no baseline.
+    let record = RealmProfileRecord::get(name).await?;
+    let previous = record.as_ref().and_then(|record| record.verify(keys).ok());
+    if let Some(previous) = &previous {
+        previous
+            .check_successor(&profile)
+            .map_err(|error| ManagementError::Conflict(error.to_string()))?;
+        if profile.sequence == previous.sequence {
+            // The same Profile again.
+            return Ok(json!({
+                "realm": name,
+                "status": realm.status.to_string(),
+                "sequence": profile.sequence,
+            }));
+        }
+    }
+
+    let token = (realm.status == RealmStatus::Pending).then(generate_admin_token);
+    let (stored, activated) = RealmProfileRecord::store(
+        &profile,
+        &document,
+        record.as_ref().map(|record| record.digest.as_str()),
+        token.as_ref().map(|(_, hash)| hash.as_str()),
+    )
+    .await?;
+    let mut reply = json!({
+        "realm": name,
+        "status": stored.status.to_string(),
+        "sequence": profile.sequence,
+    });
+    if activated && let Some((token, _)) = token {
+        reply["admin_token"] = json!(token);
+    }
+    Ok(reply)
+}
+
+fn check_package(package: &RealmPackage) -> Result<(), ManagementError> {
+    let hex = package.sha256.len() == 64
+        && package
+            .sha256
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    if !package.href.starts_with("https://") || !hex {
+        return Err(ManagementError::Invalid(
+            "package needs an https href and a lowercase hex sha256".to_string(),
+        ));
+    }
+    Ok(())
+}

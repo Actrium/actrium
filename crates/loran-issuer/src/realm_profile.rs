@@ -171,6 +171,43 @@ impl RealmProfiles {
             .display_name
             .or_else(|| previous.as_ref().map(|p| p.realm.display_name.clone()))
             .unwrap_or_else(|| realm.split('@').next().unwrap_or_default().to_string());
+        let sequence = previous.as_ref().map_or(1, |p| p.sequence + 1);
+        let mut document = self
+            .draft(realm, sequence, &display_name, package, change.retire)
+            .await?;
+        let signature = self
+            .signer
+            .sign(*signer_key_id, jcs(&document).as_bytes())
+            .await
+            .map_err(|error| ProfileError::Unavailable(format!("Signer: {error}")))?;
+        document["signature"] = json!(DetachedSignature {
+            key_id: keys.signature.key_id.clone(),
+            algorithm: SIGNATURE_ALGORITHM.to_string(),
+            value: BASE64.encode(signature),
+        });
+        let document = document.to_string();
+
+        // Accept it exactly as a Realm Provider or Actr Host would.
+        let profile = RealmProfile::verify(document.as_bytes(), realm, keys)?;
+        if let Some(previous) = &previous {
+            previous.check_successor(&profile)?;
+        }
+        let digest = record.as_ref().map(|record| record.digest.as_str());
+        let (realm, _) = RealmProfileRecord::store(&profile, &document, digest, None).await?;
+        Ok(realm)
+    }
+
+    /// An unsigned Realm Profile of `realm` that names this Realm Provider:
+    /// its Issuer with the Realm's issuer key (generated in the Signer the
+    /// first time) and its endpoints. `package` is required unless `retire`.
+    pub async fn draft(
+        &self,
+        realm: &str,
+        sequence: u64,
+        display_name: &str,
+        package: Option<RealmPackage>,
+        retire: bool,
+    ) -> Result<Value, ProfileError> {
         let issuer_key = issuer_key_id(realm);
         let (_, issuer_public_key) = self
             .signer
@@ -180,11 +217,11 @@ impl RealmProfiles {
 
         let mut document = json!({
             "schema": actr_protocol::realm_profile::REALM_PROFILE_SCHEMA,
-            "sequence": previous.as_ref().map_or(1, |p| p.sequence + 1),
+            "sequence": sequence,
             "realm": {
                 "name": realm,
                 "display_name": display_name,
-                "status": if change.retire { "retired" } else { "active" },
+                "status": if retire { "retired" } else { "active" },
             },
             "issuer": RealmIssuer {
                 url: self.endpoints.issuer_url.clone(),
@@ -206,26 +243,7 @@ impl RealmProfiles {
         if let Some(package) = package {
             document["package"] = json!(package);
         }
-        let signature = self
-            .signer
-            .sign(*signer_key_id, jcs(&document).as_bytes())
-            .await
-            .map_err(|error| ProfileError::Unavailable(format!("Signer: {error}")))?;
-        document["signature"] = json!(DetachedSignature {
-            key_id: keys.signature.key_id.clone(),
-            algorithm: SIGNATURE_ALGORITHM.to_string(),
-            value: BASE64.encode(signature),
-        });
-        let document = document.to_string();
-
-        // Accept it exactly as a Realm Provider or Actr Host would.
-        let profile = RealmProfile::verify(document.as_bytes(), realm, keys)?;
-        if let Some(previous) = &previous {
-            previous.check_successor(&profile)?;
-        }
-        let digest = record.as_ref().map(|record| record.digest.as_str());
-        let (realm, _) = RealmProfileRecord::store(&profile, &document, digest, None).await?;
-        Ok(realm)
+        Ok(document)
     }
 
     /// Refresh the Realms of other domains that have an accepted Profile:
@@ -361,8 +379,8 @@ impl RealmProfiles {
     }
 
     /// Run in the background until `cancel`: generate the Realm signing key
-    /// (retrying while the Signer comes up), then refresh other domains'
-    /// Realms every `interval`.
+    /// (retrying while the Signer comes up), then every `interval` remove
+    /// expired pending Realms and refresh other domains' Realms.
     pub fn spawn(
         self: &Arc<Self>,
         interval: Duration,
@@ -387,6 +405,15 @@ impl RealmProfiles {
             // Realms past it unrefreshed, and suspend them when a key is revoked.
             let fetcher = &platform::net::CachedFetcher::new(Duration::from_secs(300), u32::MAX);
             loop {
+                match Realm::discard_expired_pending().await {
+                    Ok(0) => {}
+                    Ok(count) => {
+                        platform::recording::info!("Removed {count} expired pending Realms")
+                    }
+                    Err(error) => {
+                        platform::recording::warn!("Pending Realm cleanup failed: {error}")
+                    }
+                }
                 let fetch = |url: String| async move { fetcher.get(&url).await };
                 if let Err(error) = profiles.refresh(fetch).await {
                     platform::recording::warn!("Realm Profile refresh failed: {error}");

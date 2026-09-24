@@ -46,7 +46,13 @@ async fn setup() -> (Arc<RealmProfiles>, TempDir) {
     }
     let dir = TempDir::new().unwrap();
     let pool = platform::storage::db::get_database().get_pool();
-    for table in ["actoracl", "realm_profile", "realm_domain", "realm"] {
+    for table in [
+        "actoracl",
+        "realm_profile",
+        "realm_domain",
+        "realm_mgmt_nonce",
+        "realm",
+    ] {
         sqlx::query(&format!("DELETE FROM {table}"))
             .execute(pool)
             .await
@@ -425,4 +431,238 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
     assert!(!suspended.enabled);
     // `two` still verifies under rs-2 and keeps serving.
     assert!(Realm::get(two).await.unwrap().unwrap().enabled);
+}
+
+mod management {
+    use super::*;
+    use actr_protocol::realm_management::{ManagementOp, ManagementRequest};
+    use actr_protocol::realm_profile::sign_document;
+    use issuer::realm_management::{ManagementError, handle};
+    use platform::config::RealmConfig;
+
+    /// `acme.com` lists rs-1 (active) and rs-2 (retired).
+    fn acme() -> (Domain, Vec<u8>) {
+        let acme = Domain {
+            keys: vec![
+                ("rs-1", SigningKey::from_bytes(&[1; 32])),
+                ("rs-2", SigningKey::from_bytes(&[2; 32])),
+            ],
+        };
+        let mut member = acme.member(1, &["rs-1", "rs-2"]);
+        member["keys"][1]["status"] = "retired".into();
+        member.as_object_mut().unwrap().remove("signature");
+        let member = acme.sign(member, "rs-1");
+        let descriptor = acme.descriptor(&member);
+        (acme, descriptor)
+    }
+
+    fn request(op: ManagementOp, realm: &str, nonce: &str) -> ManagementRequest {
+        ManagementRequest::new(op, realm, PROVIDER, nonce)
+    }
+
+    fn signed(request: &ManagementRequest, domain: &Domain, key_id: &str) -> Vec<u8> {
+        let (_, key) = domain.keys.iter().find(|(id, _)| *id == key_id).unwrap();
+        serde_json::to_vec(&request.sign(key_id, key)).unwrap()
+    }
+
+    async fn send(
+        profiles: &RealmProfiles,
+        config: &RealmConfig,
+        descriptor: &[u8],
+        document: &[u8],
+    ) -> Result<Value, ManagementError> {
+        let descriptor: Arc<[u8]> = Arc::from(descriptor);
+        handle(profiles, config, document, |url: String| async move {
+            assert_eq!(url, "https://acme.com/.well-known/actr");
+            Ok(descriptor)
+        })
+        .await
+    }
+
+    fn create(realm: &str, nonce: &str, requester: Option<&str>) -> ManagementRequest {
+        let mut request = request(ManagementOp::CreateRealm, realm, nonce);
+        request.package = Some(package());
+        request.requester = requester.map(str::to_string);
+        request
+    }
+
+    /// The key holder signs `profile` and wraps it in `publish_profile`.
+    fn publish(realm: &str, nonce: &str, mut profile: Value, domain: &Domain) -> Vec<u8> {
+        let (_, key) = &domain.keys[0];
+        sign_document(&mut profile, "rs-1", key);
+        let mut request = request(ManagementOp::PublishProfile, realm, nonce);
+        request.profile = Some(profile);
+        signed(&request, domain, "rs-1")
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn creates_activates_and_retires_other_domains_realms() {
+        let (profiles, _dir) = setup().await;
+        let (acme, descriptor) = acme();
+        let config = RealmConfig::default();
+        let name = "k7m2q9xh@acme.com";
+        let send = |document: Vec<u8>| {
+            let (profiles, config, descriptor) = (&profiles, &config, &descriptor);
+            async move { send(profiles, config, descriptor, &document).await }
+        };
+
+        let created = send(signed(&create(name, "n-1", Some("m-1")), &acme, "rs-1"))
+            .await
+            .unwrap();
+        assert_eq!(created["status"], "pending");
+        let draft = created["profile"].clone();
+        assert_eq!(draft["issuer"]["keys"][0]["id"], format!("issuer:{name}"));
+        assert_eq!(draft["provider"]["id"], PROVIDER);
+        assert_eq!(draft["package"], json!(package()));
+        assert_eq!(
+            Realm::get(name).await.unwrap().unwrap().status,
+            RealmStatus::Pending
+        );
+
+        // Byte-level replay is refused by the nonce; a retry by the same
+        // requester returns the state, another requester conflicts.
+        let replay = send(signed(&create(name, "n-1", Some("m-1")), &acme, "rs-1")).await;
+        assert!(matches!(replay, Err(ManagementError::Invalid(_))));
+        let retry = send(signed(&create(name, "n-2", Some("m-1")), &acme, "rs-1"))
+            .await
+            .unwrap();
+        assert_eq!(retry["status"], "pending");
+        assert_eq!(retry["profile"]["issuer"], draft["issuer"]);
+        let other = send(signed(&create(name, "n-3", Some("m-2")), &acme, "rs-1")).await;
+        assert!(matches!(other, Err(ManagementError::Conflict(_))));
+
+        // The first Profile activates the Realm and returns the admin token once.
+        let mut profile = draft.clone();
+        profile["realm"]["display_name"] = "Team notes".into();
+        let activated = send(publish(name, "n-4", profile.clone(), &acme))
+            .await
+            .unwrap();
+        assert_eq!(activated["status"], "active");
+        let token = activated["admin_token"].as_str().unwrap().to_string();
+        assert_eq!(
+            Realm::for_admin_token(&token).await.unwrap().as_deref(),
+            Some(name)
+        );
+        let again = send(publish(name, "n-5", profile.clone(), &acme))
+            .await
+            .unwrap();
+        assert!(again.get("admin_token").is_none());
+        let active = send(signed(&create(name, "n-6", Some("m-1")), &acme, "rs-1"))
+            .await
+            .unwrap();
+        assert_eq!(active, json!({ "realm": name, "status": "active" }));
+
+        // Updates need a higher sequence and never return a token.
+        let mut second = profile.clone();
+        second["sequence"] = 2.into();
+        let updated = send(publish(name, "n-7", second, &acme)).await.unwrap();
+        assert_eq!(updated["sequence"], 2);
+        assert!(updated.get("admin_token").is_none());
+        let rollback = send(publish(name, "n-8", profile.clone(), &acme)).await;
+        assert!(matches!(rollback, Err(ManagementError::Conflict(_))));
+
+        // Reissuing replaces the token.
+        let reissued = send(signed(
+            &request(ManagementOp::ReissueAdminToken, name, "n-9"),
+            &acme,
+            "rs-1",
+        ))
+        .await
+        .unwrap();
+        let new_token = reissued["admin_token"].as_str().unwrap();
+        assert_eq!(Realm::for_admin_token(&token).await.unwrap(), None);
+        assert!(Realm::for_admin_token(new_token).await.unwrap().is_some());
+
+        // A retired Profile retires the Realm; the name is never reused.
+        let mut retired = profile.clone();
+        retired["sequence"] = 3.into();
+        retired["realm"]["status"] = "retired".into();
+        let done = send(publish(name, "n-10", retired, &acme)).await.unwrap();
+        assert_eq!(done["status"], "retired");
+        assert_eq!(Realm::for_admin_token(new_token).await.unwrap(), None);
+        let recreate = send(signed(&create(name, "n-11", Some("m-1")), &acme, "rs-1")).await;
+        assert!(matches!(recreate, Err(ManagementError::Conflict(_))));
+        let record = RealmProfileRecord::get(name).await.unwrap().unwrap();
+        assert_eq!(record.sequence, 3);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn rejects_unauthorized_or_malformed_requests() {
+        let (profiles, _dir) = setup().await;
+        let (acme, descriptor) = acme();
+        let config = RealmConfig {
+            max_pending_per_domain: Some(1),
+            ..Default::default()
+        };
+        let send = |document: Vec<u8>| {
+            let (profiles, config, descriptor) = (&profiles, &config, &descriptor);
+            async move { send(profiles, config, descriptor, &document).await }
+        };
+        let name = "a1@acme.com";
+
+        let mut elsewhere = create(name, "x-1", None);
+        elsewhere.provider_id = "other.example".into();
+        let mut expired = create(name, "x-2", None);
+        expired.issued_at = "2020-01-01T00:00:00Z".into();
+        expired.expires_at = "2020-01-01T00:05:00Z".into();
+        let stranger = Domain {
+            keys: vec![("rs-1", SigningKey::from_bytes(&[9; 32]))],
+        };
+        for (document, forbidden) in [
+            (signed(&elsewhere, &acme, "rs-1"), false),
+            (signed(&expired, &acme, "rs-1"), false),
+            (
+                serde_json::to_vec(&create(name, "x-3", None)).unwrap(),
+                false,
+            ),
+            (signed(&create(name, "x-4", None), &stranger, "rs-1"), true),
+            // A retired key no longer signs requests.
+            (signed(&create(name, "x-5", None), &acme, "rs-2"), true),
+            // Realms under the Provider domain are the operator's.
+            (
+                signed(
+                    &create(&format!("a1@{PROVIDER}"), "x-6", None),
+                    &acme,
+                    "rs-1",
+                ),
+                true,
+            ),
+        ] {
+            match send(document).await {
+                Err(ManagementError::Forbidden(_)) if forbidden => {}
+                Err(ManagementError::Invalid(_)) if !forbidden => {}
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+        assert!(Realm::get(name).await.unwrap().is_none());
+
+        // The Profile must name this Realm Provider's issuer key.
+        let created = send(signed(&create(name, "x-7", None), &acme, "rs-1"))
+            .await
+            .unwrap();
+        let mut foreign = created["profile"].clone();
+        foreign["issuer"]["keys"][0]["public_key"] = BASE64
+            .encode(SigningKey::from_bytes(&[7; 32]).verifying_key().to_bytes())
+            .into();
+        let refused = send(publish(name, "x-8", foreign, &acme)).await;
+        assert!(matches!(refused, Err(ManagementError::Invalid(_))));
+        assert_eq!(
+            Realm::get(name).await.unwrap().unwrap().status,
+            RealmStatus::Pending
+        );
+
+        // One pending Realm per domain here.
+        let over = send(signed(&create("a2@acme.com", "x-9", None), &acme, "rs-1")).await;
+        assert!(matches!(over, Err(ManagementError::Quota(_))));
+        // A pending Realm cannot have an admin token yet.
+        let early = send(signed(
+            &request(ManagementOp::ReissueAdminToken, name, "x-10"),
+            &acme,
+            "rs-1",
+        ))
+        .await;
+        assert!(matches!(early, Err(ManagementError::Conflict(_))));
+    }
 }
