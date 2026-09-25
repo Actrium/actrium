@@ -912,9 +912,9 @@ impl PublisherRegistryManager {
     ///
     /// `admin_revoke_historical_key` only covers keys already rotated away; this
     /// handles a compromised live key. Afterwards the publisher holds no usable
-    /// key (publish and resolution fail closed) and must call `renew_key` to
-    /// rotate to a fresh key - the rollback blacklist prevents reinstating the
-    /// revoked one. See `Publisher::revoke_active_key` for the exact post-state.
+    /// key (publish and resolution fail closed) and must register a later
+    /// Publisher Profile with a fresh key - the rollback blacklist prevents
+    /// reinstating the revoked one. See `Publisher::revoke_active_key` for the exact post-state.
     pub async fn admin_revoke_active_key(
         &self,
         publisher_id: i64,
