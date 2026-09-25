@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-const ACTRIX_SCHEMA_VERSION: i64 = 6;
+const ACTRIX_SCHEMA_VERSION: i64 = 7;
 
 /// Database manager
 #[derive(Clone)]
@@ -410,26 +410,17 @@ impl Database {
         .await?;
 
         // Issuer renewal token table — only stores SHA-256(token), never the raw token.
-        //
-        // `delivered_at` marks whether the response carrying this successor token
-        // was committed to the reissue response cache (same transaction). NULL
-        // means "consumed but not delivered" — a lost response — and the reissue
-        // replay guard relaxes to the binding grace window for that case so the
-        // client can retry. Non-NULL means the proof is fully spent.
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS issuer_renewal_token (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 actor_id TEXT NOT NULL,
                 token_hash BLOB NOT NULL UNIQUE,
                 expires_at INTEGER NOT NULL,
-                created_at INTEGER NOT NULL,
-                delivered_at INTEGER
+                created_at INTEGER NOT NULL
             )",
         )
         .execute(&mut *tx)
         .await?;
-
-        add_column_if_missing(&mut tx, "issuer_renewal_token", "delivered_at", "INTEGER").await?;
 
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_issuer_renewal_token_actor
@@ -445,31 +436,8 @@ impl Database {
         .execute(&mut *tx)
         .await?;
 
-        // /reissue idempotent response cache. Keyed by an authenticated request hash so a lost-
-        // response retry of the same attempt decrypts and replays the exact
-        // credential Issuer signed on the first attempt instead of re-signing. The
-        // nonce consume, this cache write, and the `delivered_at` mark on the
-        // successor row all commit in one BEGIN IMMEDIATE transaction, so a
-        // response is either durable for replay or none of the side effects land.
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS issuer_reissue_response_cache (
-                nonce_hash BLOB PRIMARY KEY,
-                response_ciphertext BLOB NOT NULL,
-                expires_at INTEGER NOT NULL,
-                created_at INTEGER NOT NULL
-            )",
-        )
-        .execute(&mut *tx)
-        .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_issuer_reissue_response_cache_expires
-             ON issuer_reissue_response_cache(expires_at)",
-        )
-        .execute(&mut *tx)
-        .await?;
-
-        // Durable idempotency journal for Issuer identity-state writes.
+        // Durable idempotency journal for Issuer identity-state writes
+        // (`/renew`, `/reissue`, keyed by the client's attempt_id).
         // Response bodies contain bearer credentials and are therefore
         // encrypted by Issuer before being stored in response_ciphertext.
         sqlx::query(

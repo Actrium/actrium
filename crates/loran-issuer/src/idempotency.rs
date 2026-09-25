@@ -1,16 +1,27 @@
 //! Durable idempotency journal for Issuer control-plane writes.
 //!
+//! `/renew` and `/reissue` carry a client-generated 16-byte `attempt_id`. The
+//! first request with an id claims it; the identity-state change and the
+//! response then commit in one transaction. A retry of the same attempt gets
+//! the exact stored response, a different body under the same id `409`, a
+//! retry after the response retention `410`, and a retry while another worker
+//! holds the attempt `425` with `Retry-After`.
+//!
 //! Successful renew/reissue responses contain bearer renewal tokens and TURN
 //! passwords. The journal therefore encrypts response bytes with an AES-256-GCM
 //! key derived from the configured renewal-token secret before writing SQLite.
 
-use actr_protocol::ActrId;
+use actr_protocol::{ActrId, RegisterResponse, register_response};
 use aes_gcm::{
     Aes256Gcm, Nonce,
     aead::{Aead, KeyInit, Payload},
 };
+use prost::Message;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
+
+use crate::issuer::PreparedReissue;
+use crate::renewal::{PreparedRotation, REISSUE_BINDING_GRACE_SECS, RotationOutcome};
 
 const ATTEMPT_ID_LEN: usize = 16;
 const RESPONSE_CIPHERTEXT_VERSION: u8 = 1;
@@ -19,6 +30,9 @@ const ATTEMPT_LEASE_SECS: i64 = 90;
 const STATE_IN_PROGRESS: i64 = 0;
 const STATE_COMPLETED: i64 = 1;
 const STATE_EXPIRED: i64 = 2;
+/// How long a completed credential attempt stays a tombstone (`410`) after its
+/// response expired: as long as its proof can still be presented to `/reissue`.
+const RESPONSE_TOMBSTONE_TTL_SECS: i64 = REISSUE_BINDING_GRACE_SECS;
 
 #[derive(Clone, Copy)]
 pub(crate) enum Operation {
@@ -65,6 +79,12 @@ pub(crate) enum AttemptError {
     InProgress { retry_after_secs: u64 },
     #[error("control-plane attempt lease was lost")]
     LeaseLost,
+    #[error("renewal token invalid or expired")]
+    TokenRejected,
+    #[error("actor identity possession proof is no longer valid")]
+    PossessionNotProven,
+    #[error("publisher authorization nonce was already consumed")]
+    PublisherNonceRejected,
     #[error("idempotency store error: {0}")]
     Store(String),
     #[error("idempotency response encryption error: {0}")]
@@ -333,6 +353,228 @@ impl ControlAttemptStore {
         Ok(())
     }
 
+    /// Commit a prepared renewal and its response in one transaction.
+    pub(crate) async fn complete_renewal(
+        &self,
+        lease: &AttemptLease,
+        actor_id: &ActrId,
+        prepared: &PreparedRotation,
+        body: &[u8],
+        response_expires_at: i64,
+    ) -> Result<(), AttemptError> {
+        let encrypted = self.encrypt_response(&lease.request_hash, body)?;
+        let now = crate::renewal::now_secs();
+        let actor_id_repr = actor_id.to_string_repr();
+        let pool = platform::storage::db::get_database().get_pool();
+        let mut tx = pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(|error| AttemptError::Store(format!("begin immediate failed: {error}")))?;
+        self.ensure_lease(&mut tx, lease).await?;
+
+        let presented_exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1 FROM issuer_renewal_token
+                WHERE actor_id = ?1 AND token_hash = ?2 AND expires_at > ?3
+             )",
+        )
+        .bind(&actor_id_repr)
+        .bind(&prepared.presented_hash)
+        .bind(now)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|error| AttemptError::Store(format!("token recheck failed: {error}")))?;
+        if presented_exists == 0 {
+            return Err(AttemptError::TokenRejected);
+        }
+
+        let renewal_expires_at = match &prepared.outcome {
+            RotationOutcome::Unchanged { expires_at, .. }
+            | RotationOutcome::Rotated { expires_at, .. } => *expires_at,
+        };
+        if let Some(successor_hash) = prepared.successor_hash.as_ref() {
+            sqlx::query(
+                "INSERT OR IGNORE INTO issuer_renewal_token
+                    (actor_id, token_hash, expires_at, created_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+            )
+            .bind(&actor_id_repr)
+            .bind(successor_hash)
+            .bind(renewal_expires_at)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| AttemptError::Store(format!("successor insert failed: {error}")))?;
+
+            sqlx::query(
+                "DELETE FROM issuer_renewal_token
+                 WHERE actor_id = ?1 AND expires_at <= ?2",
+            )
+            .bind(&actor_id_repr)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| {
+                AttemptError::Store(format!("expired token cleanup failed: {error}"))
+            })?;
+
+            sqlx::query(
+                "DELETE FROM issuer_renewal_token
+                 WHERE actor_id = ?1
+                   AND id NOT IN (
+                       SELECT id FROM issuer_renewal_token
+                       WHERE actor_id = ?1
+                       ORDER BY expires_at DESC, created_at DESC
+                       LIMIT 2
+                   )",
+            )
+            .bind(&actor_id_repr)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| AttemptError::Store(format!("token trim failed: {error}")))?;
+        }
+
+        crate::renewal::refresh_pending_registration(&mut tx, actor_id, renewal_expires_at)
+            .await
+            .map_err(|error| {
+                AttemptError::Store(format!("pending registration refresh failed: {error}"))
+            })?;
+        self.mark_completed(
+            &mut tx,
+            lease,
+            200,
+            &encrypted,
+            response_expires_at,
+            RESPONSE_TOMBSTONE_TTL_SECS,
+            now,
+        )
+        .await?;
+        tx.commit()
+            .await
+            .map_err(|error| AttemptError::Store(format!("commit failed: {error}")))?;
+        Ok(())
+    }
+
+    /// Commit a prepared reissue and its response in one transaction: consume
+    /// the possession proof (its successor row), the publisher-auth nonce, and
+    /// record the package target the reissue was authorized under.
+    pub(crate) async fn complete_reissue(
+        &self,
+        lease: &AttemptLease,
+        actor_id: &ActrId,
+        mut prepared: PreparedReissue,
+    ) -> Result<CachedResponse, AttemptError> {
+        let now = crate::renewal::now_secs();
+        let actor_id_repr = actor_id.to_string_repr();
+        let pool = platform::storage::db::get_database().get_pool();
+        let mut tx = pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(|error| AttemptError::Store(format!("begin immediate failed: {error}")))?;
+        self.ensure_lease(&mut tx, lease).await?;
+
+        let binding_expires_at: Option<i64> = sqlx::query_scalar(
+            "SELECT expires_at FROM issuer_renewal_token
+             WHERE actor_id = ?1 AND token_hash = ?2 AND expires_at + ?3 > ?4
+             LIMIT 1",
+        )
+        .bind(&actor_id_repr)
+        .bind(&prepared.proof_hash)
+        .bind(REISSUE_BINDING_GRACE_SECS)
+        .bind(now)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| AttemptError::Store(format!("possession recheck failed: {error}")))?;
+        if binding_expires_at != Some(prepared.binding_expires_at) {
+            return Err(AttemptError::PossessionNotProven);
+        }
+
+        if let Some(binding) = prepared.publisher_nonce.as_ref() {
+            crate::issuer::AIdIssuer::consume_publisher_auth_nonce(
+                &mut tx,
+                &binding.publisher,
+                &binding.signing_key_id,
+                &binding.nonce,
+                now,
+            )
+            .await
+            .map_err(|error| match error {
+                platform::aid::AidError::PublisherNotVerified => {
+                    AttemptError::PublisherNonceRejected
+                }
+                other => AttemptError::Store(other.to_string()),
+            })?;
+            if let Some(target) = prepared.target.as_deref().filter(|t| !t.is_empty()) {
+                sqlx::query(
+                    "UPDATE issued_actor_identity SET target = ?1, auth_mode = ?2
+                     WHERE realm = ?3 AND serial_number = ?4",
+                )
+                .bind(target)
+                .bind(actr_protocol::RegisterAuthMode::Package as i32)
+                .bind(&actor_id.realm)
+                .bind(actor_id.serial_number as i64)
+                .execute(&mut *tx)
+                .await
+                .map_err(|error| AttemptError::Store(format!("target update failed: {error}")))?;
+            }
+        }
+
+        // The successor row marks the proof as consumed. Another attempt that
+        // presented the same proof and committed first owns it.
+        let inserted = sqlx::query(
+            "INSERT OR IGNORE INTO issuer_renewal_token
+                (actor_id, token_hash, expires_at, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(&actor_id_repr)
+        .bind(&prepared.successor_hash)
+        .bind(prepared.successor_expires_at)
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| AttemptError::Store(format!("successor insert failed: {error}")))?;
+        if inserted.rows_affected() != 1 {
+            return Err(AttemptError::PossessionNotProven);
+        }
+
+        prepared.register_ok.renewal_token = Some(prepared.successor_token.into());
+        prepared.register_ok.renewal_token_expires_at = Some(prost_types::Timestamp {
+            seconds: prepared.successor_expires_at,
+            nanos: 0,
+        });
+        let response_expires_at = register_ok_response_expiry(&prepared.register_ok);
+        let body = RegisterResponse {
+            result: Some(register_response::Result::Success(prepared.register_ok)),
+        }
+        .encode_to_vec();
+        let encrypted = self.encrypt_response(&lease.request_hash, &body)?;
+
+        crate::renewal::refresh_pending_registration(
+            &mut tx,
+            actor_id,
+            prepared.successor_expires_at,
+        )
+        .await
+        .map_err(|error| {
+            AttemptError::Store(format!("pending registration refresh failed: {error}"))
+        })?;
+        self.mark_completed(
+            &mut tx,
+            lease,
+            200,
+            &encrypted,
+            response_expires_at,
+            RESPONSE_TOMBSTONE_TTL_SECS,
+            now,
+        )
+        .await?;
+        tx.commit()
+            .await
+            .map_err(|error| AttemptError::Store(format!("commit failed: {error}")))?;
+
+        Ok(CachedResponse { status: 200, body })
+    }
+
     async fn ensure_lease(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
@@ -453,6 +695,20 @@ impl ControlAttemptStore {
             )
             .map_err(|error| AttemptError::Crypto(error.to_string()))
     }
+}
+
+/// A successful response is replayable until its credential or renewal token
+/// expires, whichever comes first.
+pub(crate) fn register_ok_response_expiry(ok: &register_response::RegisterOk) -> i64 {
+    let credential = ok
+        .credential_expires_at
+        .map(|timestamp| timestamp.seconds)
+        .unwrap_or_default();
+    let renewal = ok
+        .renewal_token_expires_at
+        .map(|timestamp| timestamp.seconds)
+        .unwrap_or(credential);
+    credential.min(renewal)
 }
 
 #[cfg(test)]

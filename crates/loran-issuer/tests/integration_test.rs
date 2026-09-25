@@ -476,6 +476,17 @@ async fn post_reissue(
     request: ReissueCredentialRequest,
     realm_secret: Option<&str>,
 ) -> RegisterResponse {
+    let (status, response) = post_reissue_raw(app, request, realm_secret).await;
+    assert_eq!(status, StatusCode::OK);
+    response
+}
+
+/// Post a reissue request and return the HTTP status with the decoded body.
+async fn post_reissue_raw(
+    app: Router,
+    request: ReissueCredentialRequest,
+    realm_secret: Option<&str>,
+) -> (StatusCode, RegisterResponse) {
     let mut builder = Request::builder()
         .method("POST")
         .uri("/reissue")
@@ -500,8 +511,34 @@ async fn post_reissue(
     let body = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("reissue response body");
-    assert_eq!(status, StatusCode::OK);
-    RegisterResponse::decode(body).expect("decode reissue response")
+    (
+        status,
+        RegisterResponse::decode(body).expect("decode reissue response"),
+    )
+}
+
+/// Register a linked Actor in a fresh Realm and return its registration and
+/// first credentials.
+async fn register_linked_actor(
+    app: &Router,
+    realm: &str,
+    realm_secret: &str,
+) -> (RegisterRequest, register_response::RegisterOk) {
+    seed_realm(realm, Some(realm_secret)).await;
+    let mut registration = linked_register_request();
+    registration.realm = realm.to_string();
+    let initial = post_register(app.clone(), registration.clone(), Some(realm_secret)).await;
+    match initial.result.expect("register result") {
+        register_response::Result::Success(ok) => (registration, ok),
+        register_response::Result::Error(err) => panic!("register failed: {err:?}"),
+    }
+}
+
+fn error_code(response: &RegisterResponse) -> Option<u32> {
+    match &response.result {
+        Some(register_response::Result::Error(err)) => Some(err.code),
+        _ => None,
+    }
 }
 
 #[tokio::test]
@@ -3137,6 +3174,100 @@ type TamperMutation<'a> = &'a dyn Fn(&mut RegisterRequest, &Path2Fixture, u64);
 /// Covers scenario-matrix #2 / #3 / #4 as a single table.
 #[tokio::test]
 #[serial]
+async fn test_renew_route_replays_exact_response_and_single_state_change() {
+    let mut env = setup_test_environment().await;
+    let app = create_test_router(&env).await;
+    let (_, initial_ok) =
+        register_linked_actor(&app, "renew-idempotency@example.com", "renew-replay-secret").await;
+    let actor_id = initial_ok.actr_id.clone();
+    let actor_id_repr = actor_id.to_string_repr();
+    let pool = platform::storage::db::get_database().get_pool();
+
+    // Put the token in its rotation window so the renewal changes state.
+    let now = test_unix_now_secs() as i64;
+    sqlx::query("UPDATE issuer_renewal_token SET expires_at = ?1 WHERE actor_id = ?2")
+        .bind(now + 60)
+        .bind(&actor_id_repr)
+        .execute(pool)
+        .await
+        .expect("move token into rotation window");
+    let request = RenewCredentialRequest {
+        actr_id: actor_id.clone(),
+        renewal_token: initial_ok
+            .renewal_token
+            .clone()
+            .expect("initial renewal token"),
+        attempt_id: control_attempt_id(),
+    };
+
+    let first = post_renew(app.clone(), request.clone()).await;
+    let replay = post_renew(app, request).await;
+    assert_eq!(
+        first.encode_to_vec(),
+        replay.encode_to_vec(),
+        "renew replay must return the stored response"
+    );
+    match first.result.expect("renew result") {
+        renew_credential_response::Result::Success(ok) => {
+            assert_ne!(
+                ok.renewal_token, initial_ok.renewal_token,
+                "token must rotate"
+            );
+        }
+        renew_credential_response::Result::Error(err) => panic!("renew failed: {err:?}"),
+    }
+
+    let attempts: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM issuer_control_attempt
+         WHERE operation = 'renew' AND actor_id = ?1 AND state = 1",
+    )
+    .bind(&actor_id_repr)
+    .fetch_one(pool)
+    .await
+    .expect("count completed renew attempts");
+    assert_eq!(attempts, 1);
+    let tokens: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM issuer_renewal_token WHERE actor_id = ?1")
+            .bind(&actor_id_repr)
+            .fetch_one(pool)
+            .await
+            .expect("count tokens");
+    assert_eq!(
+        tokens, 2,
+        "one rotation: the presented token and its successor"
+    );
+
+    env.shutdown_signer().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn test_renew_attempt_id_body_mismatch_returns_conflict() {
+    let mut env = setup_test_environment().await;
+    let app = create_test_router(&env).await;
+    let (_, initial_ok) =
+        register_linked_actor(&app, "renew-conflict@example.com", "renew-conflict-secret").await;
+    let first = RenewCredentialRequest {
+        actr_id: initial_ok.actr_id.clone(),
+        renewal_token: initial_ok.renewal_token.expect("initial renewal token"),
+        attempt_id: control_attempt_id(),
+    };
+    let _ = post_renew(app.clone(), first.clone()).await;
+
+    let mut conflicting = first;
+    conflicting.renewal_token = prost::bytes::Bytes::from(vec![9; 32]);
+    let (status, response) = post_renew_raw(app, conflicting).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    match response.result.expect("conflict result") {
+        renew_credential_response::Result::Error(error) => assert_eq!(error.code, 409),
+        renew_credential_response::Result::Success(_) => panic!("conflict must not succeed"),
+    }
+
+    env.shutdown_signer().await;
+}
+
+#[tokio::test]
+#[serial]
 async fn test_path2_missing_publisher_field_matrix() {
     let fx = path2_fixture("missfieldpublisher", "MissFieldService", "wasm32-wasip1").await;
     let now = test_unix_now_secs();
@@ -3544,7 +3675,7 @@ async fn test_renew_rejected_after_actor_revoked() {
     let renew_request = RenewCredentialRequest {
         actr_id: ok.actr_id.clone(),
         renewal_token: ok.renewal_token.clone().expect("renewal token"),
-        attempt_id: vec![0xa1; 16].into(),
+        attempt_id: control_attempt_id(),
     };
     let (status, response) = post_renew_raw(app, renew_request).await;
     assert_eq!(
@@ -3592,7 +3723,7 @@ async fn test_reissue_rejected_after_actor_revoked() {
             actr_id: ok.actr_id.clone(),
             registration,
             renewal_proof: ok.renewal_token.clone(),
-            attempt_id: vec![0xb2; 16].into(),
+            attempt_id: control_attempt_id(),
         },
         Some(realm_secret),
     )
@@ -3731,89 +3862,46 @@ async fn test_issue_for_actor_rejected_after_publisher_suspended() {
     );
 }
 
-/// AIS-04 proof invalidation: once a possession proof has been consumed by a
-/// reissue and its short replay window has elapsed, replaying that same proof
-/// must be rejected — a single leaked proof cannot be chained indefinitely.
+/// AIS-04 proof invalidation: a possession proof is good for one reissue. A
+/// lost response is recovered by retrying the same attempt; a new attempt with
+/// the consumed proof is rejected, so a leaked proof cannot be chained.
 #[tokio::test]
 #[serial]
-async fn test_reissue_proof_rejected_after_replay_window() {
+async fn test_reissue_proof_is_consumed_by_one_attempt() {
     let mut env = setup_test_environment().await;
-    let realm_secret = "linked-proof-window-secret";
-    let realm = "linked-proof-window@example.com";
-    seed_realm(realm, Some(realm_secret)).await;
     let app = create_test_router(&env).await;
-
-    let mut registration = linked_register_request();
-    registration.realm = realm.to_string();
-    let initial = post_register(app.clone(), registration.clone(), Some(realm_secret)).await;
-    let initial_ok = match initial.result.expect("register result") {
-        register_response::Result::Success(ok) => ok,
-        register_response::Result::Error(err) => panic!("register failed: {err:?}"),
-    };
+    let realm_secret = "linked-proof-consumed-secret";
+    let (registration, initial_ok) =
+        register_linked_actor(&app, "linked-proof-consumed@example.com", realm_secret).await;
 
     let request = ReissueCredentialRequest {
         actr_id: initial_ok.actr_id.clone(),
         registration,
         renewal_proof: initial_ok.renewal_token.clone(),
-        attempt_id: vec![0xc3; 16].into(),
+        attempt_id: control_attempt_id(),
     };
-
-    // First reissue consumes the proof and mints the deterministic successor.
     let first = post_reissue(app.clone(), request.clone(), Some(realm_secret)).await;
-    let first_ok = match first.result.expect("first reissue result") {
-        register_response::Result::Success(ok) => ok,
-        register_response::Result::Error(err) => panic!("first reissue rejected: {err:?}"),
-    };
-    let successor = first_ok
-        .renewal_token
-        .clone()
-        .expect("first reissue must return a successor token");
+    assert_eq!(error_code(&first), None, "first reissue must succeed");
 
-    // Age the successor row's creation time (the proof's consumption marker) past
-    // the replay window, while leaving the original proof binding inside the
-    // 30-day grace so only the window — not grace — is what closes.
-    let pool = platform::storage::db::get_database().get_pool();
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-    let successor_hash = issuer::renewal::hash_token(&successor);
-    let updated =
-        sqlx::query("UPDATE issuer_renewal_token SET created_at = ?1 WHERE token_hash = ?2")
-            .bind(now - (issuer::renewal::REISSUE_PROOF_REPLAY_WINDOW_SECS + 3600))
-            .bind(&successor_hash)
-            .execute(pool)
-            .await
-            .expect("age successor created_at");
+    let mut new_attempt = request;
+    new_attempt.attempt_id = control_attempt_id();
+    let replay = post_reissue(app, new_attempt, Some(realm_secret)).await;
     assert_eq!(
-        updated.rows_affected(),
-        1,
-        "test must have found and aged exactly the successor row"
+        error_code(&replay),
+        Some(REISSUE_POSSESSION_NOT_PROVEN_CODE),
+        "a consumed proof must not mint another successor"
     );
-
-    // Replaying the ORIGINAL proof after the window closed must fail possession.
-    let replay = post_reissue(app, request, Some(realm_secret)).await;
-    match replay.result.expect("replay reissue result") {
-        register_response::Result::Error(err) => {
-            assert_eq!(
-                err.code, REISSUE_POSSESSION_NOT_PROVEN_CODE,
-                "a proof consumed past its replay window must fail possession"
-            );
-        }
-        register_response::Result::Success(_) => {
-            panic!("a spent proof past its replay window must not mint another successor")
-        }
-    }
 
     env.shutdown_signer().await;
 }
 
-/// A nonce is public authorization context, not a bearer credential for cached
-/// reissue responses. Exact retries must work; modified credentials must not.
+/// Only the exact authenticated request replays a stored reissue response:
+/// the same attempt with any other body is a conflict, and a replay honors
+/// revocations made since.
 // Reloading the signing key from storage uses `block_in_place`.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn test_reissue_cache_requires_original_authenticated_request() {
+async fn test_reissue_replay_requires_the_original_request() {
     let fx = path2_fixture("cache.example.com", "CacheBinding", "wasm32-wasip1").await;
     let app = create_test_router(&fx._env).await;
     let mut registration = base_path2_request(&fx, TEST_REALM);
@@ -3841,7 +3929,7 @@ async fn test_reissue_cache_requires_original_authenticated_request() {
         &first.result,
         Some(register_response::Result::Success(_))
     ));
-    // A new issuer instance must still recognize the durable request binding.
+    // A new issuer instance must still recognize the durable attempt.
     let restarted = create_test_router(&fx._env).await;
     let replay = post_reissue(restarted, request.clone(), Some("seed-realm-secret")).await;
     assert_eq!(first.encode_to_vec(), replay.encode_to_vec());
@@ -3866,22 +3954,154 @@ async fn test_reissue_cache_requires_original_authenticated_request() {
     linked.registration.auth_mode = Some(RegisterAuthMode::Linked as i32);
     mutations.push(linked);
     for changed in mutations {
-        let response = post_reissue(app.clone(), changed, Some("seed-realm-secret")).await;
-        assert!(
-            matches!(response.result, Some(register_response::Result::Error(_))),
-            "a changed request must not retrieve cached credentials"
-        );
+        let (status, response) =
+            post_reissue_raw(app.clone(), changed, Some("seed-realm-secret")).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(error_code(&response), Some(409));
     }
 
-    // Cached credentials must not bypass an actor revocation either.
-    issuer::renewal::revoke_actor(&request.actr_id, "cache regression")
+    // A stored response must not bypass an actor revocation either.
+    issuer::renewal::revoke_actor(&request.actr_id, "replay regression")
         .await
         .unwrap();
     let revoked = post_reissue(app, request, Some("seed-realm-secret")).await;
-    assert!(matches!(
-        revoked.result,
-        Some(register_response::Result::Error(_))
-    ));
+    assert_eq!(error_code(&revoked), Some(403));
+}
+
+#[tokio::test]
+#[serial]
+async fn test_reissue_attempt_id_body_mismatch_returns_conflict() {
+    let mut env = setup_test_environment().await;
+    let app = create_test_router(&env).await;
+    let realm_secret = "reissue-conflict-secret";
+    let (registration, initial_ok) =
+        register_linked_actor(&app, "reissue-conflict@example.com", realm_secret).await;
+    let request = ReissueCredentialRequest {
+        actr_id: initial_ok.actr_id,
+        registration,
+        renewal_proof: initial_ok.renewal_token,
+        attempt_id: control_attempt_id(),
+    };
+    let first = post_reissue(app.clone(), request.clone(), Some(realm_secret)).await;
+    assert_eq!(error_code(&first), None);
+
+    let mut conflicting = request;
+    conflicting.registration.ws_address = Some("wss://conflict.example.invalid".to_string());
+    let (status, response) = post_reissue_raw(app, conflicting, Some(realm_secret)).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(error_code(&response), Some(409));
+
+    env.shutdown_signer().await;
+}
+
+/// Once a stored response reaches its retention horizon, Issuer returns 410
+/// instead of silently treating the replay as a new operation.
+#[tokio::test]
+#[serial]
+async fn test_reissue_replay_after_response_expiry_returns_gone() {
+    let mut env = setup_test_environment().await;
+    let app = create_test_router(&env).await;
+    let realm_secret = "reissue-gone-secret";
+    let (registration, initial_ok) =
+        register_linked_actor(&app, "reissue-gone@example.com", realm_secret).await;
+    let request = ReissueCredentialRequest {
+        actr_id: initial_ok.actr_id.clone(),
+        registration,
+        renewal_proof: initial_ok.renewal_token.clone(),
+        attempt_id: control_attempt_id(),
+    };
+    let first = post_reissue(app.clone(), request.clone(), Some(realm_secret)).await;
+    assert_eq!(error_code(&first), None);
+
+    let pool = platform::storage::db::get_database().get_pool();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let expired = sqlx::query(
+        "UPDATE issuer_control_attempt SET response_expires_at = ?1
+         WHERE operation = 'reissue' AND attempt_id = ?2",
+    )
+    .bind(now - 1)
+    .bind(request.attempt_id.as_ref())
+    .execute(pool)
+    .await
+    .expect("expire stored reissue response");
+    assert_eq!(expired.rows_affected(), 1);
+
+    let (status, response) = post_reissue_raw(app, request, Some(realm_secret)).await;
+    assert_eq!(status, StatusCode::GONE);
+    assert_eq!(error_code(&response), Some(410));
+
+    env.shutdown_signer().await;
+}
+
+/// A second request for an attempt another worker still holds is told to wait.
+#[tokio::test]
+#[serial]
+async fn test_reissue_attempt_in_progress_returns_too_early() {
+    let mut env = setup_test_environment().await;
+    let app = create_test_router(&env).await;
+    let realm_secret = "reissue-in-progress-secret";
+    let (registration, initial_ok) =
+        register_linked_actor(&app, "reissue-in-progress@example.com", realm_secret).await;
+    let request = ReissueCredentialRequest {
+        actr_id: initial_ok.actr_id.clone(),
+        registration,
+        renewal_proof: initial_ok.renewal_token.clone(),
+        attempt_id: control_attempt_id(),
+    };
+
+    // Another worker claimed this attempt a moment ago and still holds it.
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let body_hash = <sha2::Sha256 as sha2::Digest>::digest(request.encode_to_vec()).to_vec();
+    sqlx::query(
+        "INSERT INTO issuer_control_attempt (
+            operation, attempt_id, actor_id, request_hash, state, lease_id,
+            lease_expires_at, tombstone_expires_at, created_at, updated_at
+         ) VALUES ('reissue', ?1, ?2, ?3, 0, ?4, ?5, ?6, ?7, ?7)",
+    )
+    .bind(request.attempt_id.as_ref())
+    .bind(initial_ok.actr_id.to_string_repr())
+    .bind(&body_hash)
+    .bind(vec![7u8; 16])
+    .bind(now + 60)
+    .bind(now + 300)
+    .bind(now)
+    .execute(platform::storage::db::get_database().get_pool())
+    .await
+    .expect("seed in-progress attempt");
+
+    let mut http_request = Request::builder()
+        .method("POST")
+        .uri("/reissue")
+        .header("content-type", "application/protobuf")
+        .header("x-real-ip", "127.0.0.1")
+        .header(REALM_SECRET_HEADER, realm_secret)
+        .body(Body::from(request.encode_to_vec()))
+        .unwrap();
+    http_request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+            [127, 0, 0, 1],
+            12345,
+        ))));
+    let response = app.oneshot(http_request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_EARLY);
+    let retry_after: u64 = response
+        .headers()
+        .get("retry-after")
+        .expect("Retry-After")
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!((1..=60).contains(&retry_after), "retry after {retry_after}");
+
+    env.shutdown_signer().await;
 }
 
 /// Path 2 has no package row, but is still publisher-authenticated. Exercise

@@ -1,6 +1,13 @@
 //! Issuer (Actor Identity Service) HTTP Handler
 
-use crate::{idempotency::ControlAttemptStore, issuer::AIdIssuer, ratelimit::ip_rate_limiter};
+use crate::{
+    idempotency::{
+        AttemptError, AttemptLease, ClaimOutcome, ControlAttemptStore, Operation,
+        register_ok_response_expiry,
+    },
+    issuer::{AIdIssuer, ReissuePreparation},
+    ratelimit::ip_rate_limiter,
+};
 use actr_protocol::{
     ErrorResponse, RegisterRequest, RegisterResponse, ReissueCredentialRequest,
     RenewCredentialRequest, RenewCredentialResponse, register_response, renew_credential_response,
@@ -9,7 +16,10 @@ use axum::{
     Router,
     body::Bytes,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::{
+        HeaderMap, HeaderValue, StatusCode,
+        header::{CONTENT_TYPE, RETRY_AFTER},
+    },
     response::{IntoResponse, Json, Response},
     routing::post,
 };
@@ -27,7 +37,6 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct IssuerState {
     pub issuer: Arc<AIdIssuer>,
-    #[allow(dead_code)]
     idempotency: Arc<ControlAttemptStore>,
     /// Service-level counters for metrics collection.
     pub counters: Option<Arc<ServiceCounters>>,
@@ -382,104 +391,69 @@ async fn persist_registration_state(
     })
 }
 
-/// Keep pending signaling metadata alive for as long as the actor holds a
-/// renewal token, so expiry cleanup does not drop a live registration.
-async fn keep_pending_registration(
-    actor_id: &actr_protocol::ActrId,
-    register_ok: &register_response::RegisterOk,
-) {
-    let Some(expires_at) = register_ok.renewal_token_expires_at else {
-        return;
-    };
-    if let Err(error) =
-        crate::renewal::refresh_pending_registration(actor_id, expires_at.seconds).await
-    {
-        platform::recording::warn!(
-            "Failed to extend pending registration for actor {}: {}",
-            actor_id.to_string_repr(),
-            error
-        );
-    }
-}
-
 /// POST /issuer/reissue — re-authenticate and issue credentials for an existing
 /// stable ActrId without allocating a new serial number.
+///
+/// Outcomes travel in the `RegisterResponse` body with HTTP 200, except the
+/// attempt contract (`409`, `410`, `425`, see [`crate::idempotency`]).
 async fn reissue_credential(
     State(state): State<IssuerState>,
     headers: HeaderMap,
     body: Bytes,
-) -> Bytes {
+) -> Response {
     let start = std::time::Instant::now();
-    let request = match ReissueCredentialRequest::decode(body) {
+    let request = match ReissueCredentialRequest::decode(body.clone()) {
         Ok(request) => request,
         Err(err) => {
             platform::recording::error!("Failed to decode ReissueCredentialRequest: {}", err);
-            return encode_result(RegisterResponse {
-                result: Some(register_response::Result::Error(ErrorResponse {
-                    code: 400,
-                    message: format!("Invalid protobuf: {err}"),
-                })),
-            });
+            return register_error(400, format!("Invalid protobuf: {err}"));
         }
     };
 
     // Validate the identity fields before any signing path (same guard as /register).
     if let Err(err) = request.registration.actr_type.validate() {
-        return encode_result(RegisterResponse {
-            result: Some(register_response::Result::Error(ErrorResponse {
-                code: 400,
-                message: format!("Invalid actor identity: {err}"),
-            })),
-        });
+        return register_error(400, format!("Invalid actor identity: {err}"));
     }
 
     let registration = &request.registration;
-    // Authenticate before saying anything about the Realm.
+    // Authenticate before saying anything about the Realm or the attempt.
     let realm_secret_check = match authenticate_realm(&registration.realm, &headers).await {
         Ok(check) => check,
-        Err(error) => {
-            return encode_result(RegisterResponse {
-                result: Some(register_response::Result::Error(error)),
-            });
-        }
+        Err(error) => return register_error(error.code, error.message),
     };
-    if let Err(validation_err) = RealmEntity::validate_realm(&registration.realm).await {
-        let (code, message) = RealmEntity::map_validation_error(validation_err);
-        return encode_result(RegisterResponse {
-            result: Some(register_response::Result::Error(ErrorResponse {
-                code,
-                message: format!("Realm validation failed: {message}"),
-            })),
-        });
-    }
 
-    // Replay only an exact previously authenticated package reissue request.
-    // The issuer binds the cache key to the signatures and renewal proof too.
-    if let Some(cached) = state
-        .issuer
-        .lookup_reissue_cache(
+    let lease = match state
+        .idempotency
+        .claim(
+            Operation::Reissue,
+            &request.attempt_id,
             &request.actr_id,
-            registration,
-            request.renewal_proof.as_deref(),
+            &body,
         )
         .await
     {
-        let succeeded = matches!(&cached.result, Some(register_response::Result::Success(_)));
-        if let Some(ref counters) = state.counters {
-            counters
-                .record_request(succeeded, start.elapsed().as_secs_f64() * 1000.0)
-                .await;
+        Ok(ClaimOutcome::Acquired(lease)) => lease,
+        Ok(ClaimOutcome::Replay(cached)) => {
+            if let Err(err) = state.issuer.recheck_before_replay(&request.actr_id).await {
+                let (code, message) = aid_error_to_response(err);
+                return register_error(code, message);
+            }
+            return protobuf_response(cached.status, cached.body);
         }
-        platform::recording::info!(
-            "Credential reissue replayed from response cache for actor {}",
-            request.actr_id.to_string_repr()
-        );
-        return encode_result(cached);
+        Err(error) => {
+            return attempt_error_response(error, register_error_body);
+        }
+    };
+
+    if let Err(validation_err) = RealmEntity::validate_realm(&registration.realm).await {
+        let (code, message) = RealmEntity::map_validation_error(validation_err);
+        let body = register_error_body(code, format!("Realm validation failed: {message}"));
+        return complete_attempt(&state, &lease, StatusCode::OK, body, register_error_body).await;
     }
 
-    let result = state
+    let preparation = state
         .issuer
-        .reissue_credential_with_realm_secret_check(
+        .prepare_reissue(
             &request.actr_id,
             registration,
             request.renewal_proof.as_deref(),
@@ -487,91 +461,121 @@ async fn reissue_credential(
         )
         .await;
 
-    let succeeded = matches!(&result.result, Some(register_response::Result::Success(_)));
+    let (response, succeeded) = match preparation {
+        ReissuePreparation::Ready(prepared) => match state
+            .idempotency
+            .complete_reissue(&lease, &request.actr_id, prepared)
+            .await
+        {
+            Ok(cached) => (protobuf_response(cached.status, cached.body), true),
+            Err(error) => {
+                release_attempt(&state, &lease).await;
+                (attempt_error_response(error, register_error_body), false)
+            }
+        },
+        ReissuePreparation::Rejected(response) => {
+            let body = response.encode_to_vec();
+            let response =
+                complete_attempt(&state, &lease, StatusCode::OK, body, register_error_body).await;
+            (response, false)
+        }
+        ReissuePreparation::Retryable(response) => {
+            release_attempt(&state, &lease).await;
+            (protobuf_response(200, response.encode_to_vec()), false)
+        }
+    };
+
     if let Some(ref counters) = state.counters {
         counters
             .record_request(succeeded, start.elapsed().as_secs_f64() * 1000.0)
             .await;
     }
-    if let Some(register_response::Result::Success(ref register_ok)) = result.result {
-        keep_pending_registration(&request.actr_id, register_ok).await;
+    if succeeded {
         platform::recording::info!(
             "Credential reissued for actor {}",
             request.actr_id.to_string_repr()
         );
     }
-
-    encode_result(result)
+    response
 }
 
 /// POST /issuer/renew — renew credentials for an existing ActrId
 ///
 /// Processing flow:
-/// 1. Decode and validate `RenewCredentialRequest`.
-/// 2. Validate realm state.
-/// 3. Validate and rotate renewal token in a transaction.
+/// 1. Decode `RenewCredentialRequest` and claim its attempt.
+/// 2. Validate the token length and the realm state.
+/// 3. Validate the renewal token and prepare its rotation.
 /// 4. Re-issue access and TURN credentials for the original ActrId.
-/// 5. Attach the transaction result renewal token and expiry.
+/// 5. Commit the rotation together with the response.
 async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Response {
     let start = std::time::Instant::now();
 
-    // 1. Decode protobuf request.
-    let request = match RenewCredentialRequest::decode(body) {
+    // 1. Decode protobuf request and claim the attempt.
+    let request = match RenewCredentialRequest::decode(body.clone()) {
         Ok(req) => req,
         Err(err) => {
             platform::recording::error!("Failed to decode RenewCredentialRequest: {}", err);
-            return encode_renew_result(
-                StatusCode::BAD_REQUEST,
-                RenewCredentialResponse {
-                    result: Some(renew_credential_response::Result::Error(ErrorResponse {
-                        code: 400,
-                        message: format!("Invalid protobuf: {err}"),
-                    })),
-                },
-            );
+            return renew_error(400, format!("Invalid protobuf: {err}"));
+        }
+    };
+    let actor_id = &request.actr_id;
+
+    let lease = match state
+        .idempotency
+        .claim(Operation::Renew, &request.attempt_id, actor_id, &body)
+        .await
+    {
+        Ok(ClaimOutcome::Acquired(lease)) => lease,
+        Ok(ClaimOutcome::Replay(cached)) => {
+            if let Err(err) = state.issuer.recheck_before_replay(actor_id).await {
+                let (code, message) = aid_error_to_response(err);
+                return renew_error(code, message);
+            }
+            return protobuf_response(cached.status, cached.body);
+        }
+        Err(error) => {
+            return attempt_error_response(error, renew_error_body);
         }
     };
 
-    // Validate token length (32 bytes expected).
+    // 2. Validate token length (32 bytes expected) and realm state.
     if request.renewal_token.len() != 32 {
         platform::recording::warn!(
             "Renewal token has invalid length: {} bytes",
             request.renewal_token.len()
         );
-        return encode_renew_result(
+        let body = renew_error_body(400, "Invalid renewal token length".to_string());
+        return complete_attempt(
+            &state,
+            &lease,
             StatusCode::BAD_REQUEST,
-            RenewCredentialResponse {
-                result: Some(renew_credential_response::Result::Error(ErrorResponse {
-                    code: 400,
-                    message: "Invalid renewal token length".to_string(),
-                })),
-            },
-        );
+            body,
+            renew_error_body,
+        )
+        .await;
     }
 
-    let actor_id = &request.actr_id;
     platform::recording::debug!(
         "Received renewal request for actor {}",
         actor_id.to_string_repr()
     );
 
-    // 2. Validate realm state.
     if let Err(validation_err) = RealmEntity::validate_realm(&actor_id.realm).await {
         let (code, message) = RealmEntity::map_validation_error(validation_err);
-        return encode_renew_result(
+        let body = renew_error_body(code, format!("Realm validation failed: {message}"));
+        return complete_attempt(
+            &state,
+            &lease,
             status_for_error_code(code),
-            RenewCredentialResponse {
-                result: Some(renew_credential_response::Result::Error(ErrorResponse {
-                    code,
-                    message: format!("Realm validation failed: {message}"),
-                })),
-            },
-        );
+            body,
+            renew_error_body,
+        )
+        .await;
     }
 
-    // 3. Validate and rotate renewal token in one transaction.
+    // 3. Validate the token and prepare its rotation; nothing is written yet.
     let issuer = &state.issuer;
-    let renewal_outcome = match crate::renewal::rotate_renewal_token(
+    let prepared = match crate::renewal::prepare_renewal_token_rotation(
         actor_id,
         &request.renewal_token,
         &issuer.config.renewal_token_secret,
@@ -580,21 +584,21 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
     )
     .await
     {
-        Ok(outcome) => outcome,
+        Ok(prepared) => prepared,
         Err(crate::renewal::RenewalError::TokenRejected) => {
             platform::recording::warn!(
                 "Renewal token rejected for actor {}",
                 actor_id.to_string_repr()
             );
-            return encode_renew_result(
+            let body = renew_error_body(401, "Renewal token invalid or expired".into());
+            return complete_attempt(
+                &state,
+                &lease,
                 StatusCode::UNAUTHORIZED,
-                RenewCredentialResponse {
-                    result: Some(renew_credential_response::Result::Error(ErrorResponse {
-                        code: 401,
-                        message: "Renewal token invalid or expired".to_string(),
-                    })),
-                },
-            );
+                body,
+                renew_error_body,
+            )
+            .await;
         }
         Err(crate::renewal::RenewalError::StoreError(msg)) => {
             platform::recording::error!(
@@ -602,43 +606,16 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
                 actor_id.to_string_repr(),
                 msg
             );
-            return encode_renew_result(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                RenewCredentialResponse {
-                    result: Some(renew_credential_response::Result::Error(ErrorResponse {
-                        code: 500,
-                        message: "Internal renewal store error".to_string(),
-                    })),
-                },
-            );
+            release_attempt(&state, &lease).await;
+            return renew_error(500, "Internal renewal store error".to_string());
         }
     };
 
-    // 4. Re-issue access and TURN credentials for the original ActrId.
-    // /renew does not carry the package target in its request, so look up the
-    // target persisted at registration time to enable per-target revocation
-    // recheck. A NULL target (legacy row) degrades to type-only matching.
-    let renew_target: Option<String> = match sqlx::query_scalar::<_, Option<String>>(
-        "SELECT target FROM issued_actor_identity WHERE realm = ? AND serial_number = ?",
-    )
-    .bind(&actor_id.realm)
-    .bind(actor_id.serial_number as i64)
-    .fetch_one(platform::storage::db::get_database().get_pool())
-    .await
-    {
-        Ok(target) => target,
-        Err(err) => {
-            platform::recording::warn!(
-                "Failed to look up target for actor {}: {}",
-                actor_id.to_string_repr(),
-                err
-            );
-            None
-        }
-    };
-
+    // 4. Re-issue access and TURN credentials for the original ActrId. /renew
+    // carries no package target, so recheck the one recorded for the actor.
+    let target = AIdIssuer::issued_target(actor_id).await;
     let mut register_ok = match issuer
-        .issue_credential_for_actor(actor_id, renew_target.as_deref())
+        .issue_credential_for_actor(actor_id, target.as_deref())
         .await
     {
         Ok(ok) => ok,
@@ -648,40 +625,43 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
                 actor_id.to_string_repr(),
                 err
             );
+            release_attempt(&state, &lease).await;
             let (code, message) = aid_error_to_response(err);
-            return encode_renew_result(
-                status_for_error_code(code),
-                RenewCredentialResponse {
-                    result: Some(renew_credential_response::Result::Error(ErrorResponse {
-                        code,
-                        message,
-                    })),
-                },
-            );
+            return renew_error(code, message);
         }
     };
 
-    // 5. Attach renewal token and expiry.
-    let (token, expires_at) = match renewal_outcome {
-        crate::renewal::RotationOutcome::Unchanged { token, expires_at } => (
-            token,
-            Some(prost_types::Timestamp {
-                seconds: expires_at,
-                nanos: 0,
-            }),
-        ),
-        crate::renewal::RotationOutcome::Rotated { token, expires_at } => (
-            token,
-            Some(prost_types::Timestamp {
-                seconds: expires_at,
-                nanos: 0,
-            }),
-        ),
+    // 5. Attach the renewal token and commit it with the response.
+    let (token, expires_at) = match &prepared.outcome {
+        crate::renewal::RotationOutcome::Unchanged { token, expires_at }
+        | crate::renewal::RotationOutcome::Rotated { token, expires_at } => {
+            (token.clone(), *expires_at)
+        }
     };
-
     register_ok.renewal_token = Some(token);
-    register_ok.renewal_token_expires_at = expires_at;
-    keep_pending_registration(actor_id, &register_ok).await;
+    register_ok.renewal_token_expires_at = Some(prost_types::Timestamp {
+        seconds: expires_at,
+        nanos: 0,
+    });
+
+    let response_expires_at = register_ok_response_expiry(&register_ok);
+    let body = RenewCredentialResponse {
+        result: Some(renew_credential_response::Result::Success(register_ok)),
+    }
+    .encode_to_vec();
+    if let Err(error) = state
+        .idempotency
+        .complete_renewal(&lease, actor_id, &prepared, &body, response_expires_at)
+        .await
+    {
+        platform::recording::error!(
+            "Failed to commit credential renewal for actor {}: {}",
+            actor_id.to_string_repr(),
+            error
+        );
+        release_attempt(&state, &lease).await;
+        return attempt_error_response(error, renew_error_body);
+    }
 
     if let Some(ref ctr) = state.counters {
         ctr.record_request(true, start.elapsed().as_secs_f64() * 1000.0)
@@ -690,12 +670,7 @@ async fn renew_credential(State(state): State<IssuerState>, body: Bytes) -> Resp
 
     platform::recording::info!("Credential renewed for actor {}", actor_id.to_string_repr());
 
-    encode_renew_result(
-        StatusCode::OK,
-        RenewCredentialResponse {
-            result: Some(renew_credential_response::Result::Success(register_ok)),
-        },
-    )
+    protobuf_response(StatusCode::OK.as_u16(), body)
 }
 
 /// Health check endpoint
@@ -754,25 +729,145 @@ fn encode_result(result: RegisterResponse) -> Bytes {
     Bytes::from(buf)
 }
 
-/// Encode a RenewCredentialResponse as protobuf bytes and set the matching HTTP status.
-fn encode_renew_result(status: StatusCode, result: RenewCredentialResponse) -> Response {
-    let mut buf = Vec::new();
-    let body = if let Err(err) = result.encode(&mut buf) {
-        platform::recording::error!("Failed to encode RenewCredentialResponse: {}", err);
-        let error_result = RenewCredentialResponse {
-            result: Some(renew_credential_response::Result::Error(ErrorResponse {
-                code: 500,
-                message: format!("Failed to encode response: {err}"),
-            })),
-        };
-        let mut fallback_buf = Vec::new();
-        let _ = error_result.encode(&mut fallback_buf);
-        Bytes::from(fallback_buf)
-    } else {
-        Bytes::from(buf)
-    };
+fn protobuf_response(status: u16, body: Vec<u8>) -> Response {
+    let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    (
+        status,
+        [(CONTENT_TYPE, "application/x-protobuf")],
+        Bytes::from(body),
+    )
+        .into_response()
+}
 
-    (status, [("content-type", "application/x-protobuf")], body).into_response()
+fn register_error_body(code: u32, message: String) -> Vec<u8> {
+    RegisterResponse {
+        result: Some(register_response::Result::Error(ErrorResponse {
+            code,
+            message,
+        })),
+    }
+    .encode_to_vec()
+}
+
+fn renew_error_body(code: u32, message: String) -> Vec<u8> {
+    RenewCredentialResponse {
+        result: Some(renew_credential_response::Result::Error(ErrorResponse {
+            code,
+            message,
+        })),
+    }
+    .encode_to_vec()
+}
+
+/// `/reissue` reports errors in the body with HTTP 200.
+fn register_error(code: u32, message: String) -> Response {
+    protobuf_response(200, register_error_body(code, message))
+}
+
+/// `/renew` reports errors in the body and as the HTTP status.
+fn renew_error(code: u32, message: String) -> Response {
+    protobuf_response(
+        status_for_error_code(code).as_u16(),
+        renew_error_body(code, message),
+    )
+}
+
+/// How long a rejection stays the answer to its attempt.
+const REJECTED_ATTEMPT_RESPONSE_TTL_SECS: i64 = 5 * 60;
+
+/// Keep a stable rejection as the attempt's response and return it.
+/// `error_body` builds the route's error message should that fail.
+async fn complete_attempt(
+    state: &IssuerState,
+    lease: &AttemptLease,
+    status: StatusCode,
+    body: Vec<u8>,
+    error_body: fn(u32, String) -> Vec<u8>,
+) -> Response {
+    let expires_at = crate::renewal::now_secs().saturating_add(REJECTED_ATTEMPT_RESPONSE_TTL_SECS);
+    match state
+        .idempotency
+        .complete_response(lease, status.as_u16(), &body, expires_at)
+        .await
+    {
+        Ok(()) => protobuf_response(status.as_u16(), body),
+        Err(error) => {
+            release_attempt(state, lease).await;
+            attempt_error_response(error, error_body)
+        }
+    }
+}
+
+/// Let the same attempt be retried after a failure that changed nothing.
+async fn release_attempt(state: &IssuerState, lease: &AttemptLease) {
+    if let Err(error) = state.idempotency.release(lease).await {
+        platform::recording::warn!("Failed to release control attempt: {}", error);
+    }
+}
+
+/// Map an attempt failure to its HTTP status, with the error in a body built
+/// by `error_body` (the route's response message).
+fn attempt_error_response(error: AttemptError, error_body: fn(u32, String) -> Vec<u8>) -> Response {
+    let (status, message, retry_after_secs) = match &error {
+        AttemptError::InvalidAttemptId => (
+            StatusCode::BAD_REQUEST,
+            "attempt_id must contain exactly 16 UUID bytes",
+            None,
+        ),
+        AttemptError::Conflict => (
+            StatusCode::CONFLICT,
+            "attempt_id was already used with a different request",
+            None,
+        ),
+        AttemptError::Expired => (
+            StatusCode::GONE,
+            "idempotency result retention has expired; start a new attempt",
+            None,
+        ),
+        AttemptError::InProgress { retry_after_secs } => (
+            StatusCode::TOO_EARLY,
+            "the same control-plane attempt is still in progress",
+            Some(*retry_after_secs),
+        ),
+        AttemptError::LeaseLost => (
+            StatusCode::TOO_EARLY,
+            "the same control-plane attempt is still in progress",
+            Some(1),
+        ),
+        AttemptError::TokenRejected => (
+            StatusCode::UNAUTHORIZED,
+            "renewal token invalid or expired",
+            None,
+        ),
+        AttemptError::PossessionNotProven => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "actor identity possession not proven",
+            None,
+        ),
+        AttemptError::PublisherNonceRejected => (
+            StatusCode::FORBIDDEN,
+            "publisher authorization nonce already consumed",
+            None,
+        ),
+        AttemptError::Store(_) | AttemptError::Crypto(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal control-attempt store error",
+            None,
+        ),
+    };
+    if status.is_server_error() {
+        platform::recording::error!("Control-attempt failure: {}", error);
+    }
+    let mut response = protobuf_response(
+        status.as_u16(),
+        error_body(u32::from(status.as_u16()), message.to_string()),
+    );
+    if let Some(seconds) = retry_after_secs
+        && let Ok(value) = HeaderValue::from_str(&seconds.to_string())
+    {
+        response.headers_mut().insert(RETRY_AFTER, value);
+    }
+    response
 }
 
 fn status_for_error_code(code: u32) -> StatusCode {

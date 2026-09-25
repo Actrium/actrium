@@ -67,9 +67,6 @@
 #![deny(clippy::disallowed_macros)]
 
 pub mod handlers;
-// The attempt journal backs the /renew and /reissue attempt_id contract; the
-// handlers adopt it in a follow-up change.
-#[allow(dead_code)]
 mod idempotency;
 pub mod issuer;
 pub mod ratelimit;

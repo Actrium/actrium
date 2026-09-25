@@ -72,9 +72,6 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
-use aes_gcm::{Aes256Gcm, Key, Nonce};
-use rand::RngCore;
-
 type HmacSha1 = Hmac<Sha1>;
 
 /// Wire code carried in `RegisterResponse::Error` when a `/reissue` caller fails
@@ -131,37 +128,52 @@ impl From<AidError> for ReissueFailure {
     }
 }
 
-/// A possession proof that matched an issuer-recorded binding.
-///
-/// Carries the recorded expiry alongside the proof because both are inputs to
-/// the deterministic successor derivation — that is what makes a reissue retry
-/// reproduce the original token instead of minting a competing one.
+/// A possession proof that matched an issuer-recorded binding and has not
+/// been consumed yet.
 struct VerifiedPossession {
-    token: Vec<u8>,
+    proof_hash: Vec<u8>,
     binding_expires_at: i64,
+    /// The token derived from the proof and its recorded expiry; its row, once
+    /// written, marks the proof as consumed.
+    successor: Vec<u8>,
 }
 
 /// A verified publisher-auth nonce and its scoping identity, returned from
 /// [`verify_publisher_auth`] so the caller can consume (INSERT) the nonce at
-/// the right point in the flow rather than inside the verify step. Deferring
-/// consumption to the response-commit transaction is what makes `/reissue`
-/// idempotent on a lost response (P1-8): if that transaction does not commit,
-/// the nonce is never burned and the client can retry with the same attempt.
-struct PublisherAuthBinding {
-    publisher: String,
-    signing_key_id: String,
-    nonce: Vec<u8>,
+/// the right point in the flow rather than inside the verify step. `/reissue`
+/// consumes it in the transaction that commits the attempt, so a request that
+/// never completed leaves the nonce unconsumed and the attempt retriable.
+pub(crate) struct PublisherAuthBinding {
+    pub(crate) publisher: String,
+    pub(crate) signing_key_id: String,
+    pub(crate) nonce: Vec<u8>,
 }
 
-/// How long a cached `/reissue` response stays replayable. Matches
-/// [`PUBLISHER_NONCE_TTL_SECS`]: the cache is the replay guard for that
-/// window, and once both lapse a retry falls through to re-signing under the
-/// P1-7 binding-grace window (not the 5-minute replay window).
-const REISSUE_RESPONSE_CACHE_TTL_SECS: i64 = 10 * 60;
+/// Reissue work prepared without writing identity state. The attempt journal
+/// commits it together with the response
+/// (`ControlAttemptStore::complete_reissue`).
+pub(crate) struct PreparedReissue {
+    /// Signed credentials; the renewal token is attached on commit.
+    pub(crate) register_ok: register_response::RegisterOk,
+    pub(crate) successor_token: Vec<u8>,
+    pub(crate) successor_hash: Vec<u8>,
+    pub(crate) successor_expires_at: i64,
+    pub(crate) proof_hash: Vec<u8>,
+    pub(crate) binding_expires_at: i64,
+    /// Package-auth reissue only: the nonce to consume and the target to record.
+    pub(crate) publisher_nonce: Option<PublisherAuthBinding>,
+    pub(crate) target: Option<String>,
+}
 
-/// Ciphertext format version byte prepended to `nonce(12) || ciphertext` in
-/// [`issuer_reissue_response_cache`]. Bumping it invalidates all cached responses.
-const REISSUE_CIPHERTEXT_VERSION: u8 = 1;
+/// Result of preparing a reissue.
+pub(crate) enum ReissuePreparation {
+    Ready(PreparedReissue),
+    /// A stable rejection, kept as the attempt's response.
+    Rejected(RegisterResponse),
+    /// An infrastructure failure; the attempt is released so the same body can
+    /// be retried.
+    Retryable(RegisterResponse),
+}
 
 impl ReissueFailure {
     /// Map to the `(code, message)` pair carried in `RegisterResponse`.
@@ -309,8 +321,8 @@ impl AIdIssuer {
         }
     }
 
-    /// Re-authenticate a registration context and issue fresh credentials for
-    /// an existing actor identity.
+    /// Re-authenticate a registration context and prepare fresh credentials
+    /// for an existing actor identity, without writing identity state.
     ///
     /// This is deliberately separate from registration: callers must provide an
     /// `ActrId` whose realm and type exactly match the authenticated registration
@@ -321,17 +333,15 @@ impl AIdIssuer {
     /// Registration authentication alone only proves the caller may run this
     /// package/type in this realm — it must never be enough to mint
     /// credentials for an arbitrary serial number.
-    /// Failures are mapped into the `Error` variant of [`RegisterResponse`] here
-    /// so the handler has a single non-fallible path; this never returns `Err`.
-    pub async fn reissue_credential_with_realm_secret_check(
+    pub(crate) async fn prepare_reissue(
         &self,
         actor_id: &ActrId,
         request: &RegisterRequest,
         renewal_proof: Option<&[u8]>,
         realm_secret_check: Option<RealmSecretCheck>,
-    ) -> RegisterResponse {
+    ) -> ReissuePreparation {
         match self
-            .reissue_credential_inner(
+            .prepare_reissue_inner(
                 actor_id,
                 request,
                 renewal_proof,
@@ -339,69 +349,31 @@ impl AIdIssuer {
             )
             .await
         {
-            Ok((register_ok, nonce_binding)) => {
-                // Successor hash = SHA-256 of the raw successor token returned
-                // in the response. Used to mark the row delivered (P1-7).
-                let successor_hash = register_ok
-                    .renewal_token
-                    .as_ref()
-                    .map(|t| crate::renewal::hash_token(t.as_ref()))
-                    .unwrap_or_default();
-                let response = RegisterResponse {
-                    result: Some(register_response::Result::Success(register_ok)),
-                };
-                // Package-auth reissue: atomically burn the nonce, cache the
-                // encrypted response, and mark the successor delivered. If this
-                // transaction fails, the nonce was never burned (retriable) and
-                // the successor row stays delivered_at = NULL (P1-7 grace
-                // window admits the retry) — return a 500 so the client retries
-                // instead of getting a non-idempotent success.
-                if let Some(binding) = nonce_binding {
-                    if let Err(err) = self
-                        .commit_reissue_response(
-                            &binding,
-                            actor_id,
-                            &successor_hash,
-                            &response,
-                            request.target.as_deref(),
-                            &Self::reissue_request_hash(actor_id, request, renewal_proof),
-                        )
-                        .await
-                    {
-                        platform::recording::error!(
-                            "reissue response cache commit failed for actor {}: {}",
-                            actor_id.to_string_repr(),
-                            err
-                        );
-                        return RegisterResponse {
-                            result: Some(register_response::Result::Error(ErrorResponse {
-                                code: 500,
-                                message: "Failed to persist reissue response".to_string(),
-                            })),
-                        };
-                    }
-                }
-                response
-            }
+            Ok(prepared) => ReissuePreparation::Ready(prepared),
             Err(err) => {
                 let (code, message) = err.to_response();
-                RegisterResponse {
+                let response = RegisterResponse {
                     result: Some(register_response::Result::Error(ErrorResponse {
                         code,
                         message,
                     })),
+                };
+                if code >= 500 {
+                    ReissuePreparation::Retryable(response)
+                } else {
+                    ReissuePreparation::Rejected(response)
                 }
             }
         }
     }
 
-    async fn reissue_credential_inner(
+    async fn prepare_reissue_inner(
         &self,
         actor_id: &ActrId,
         request: &RegisterRequest,
         renewal_proof: Option<&[u8]>,
         realm_secret_check: Option<&RealmSecretCheck>,
-    ) -> Result<(register_response::RegisterOk, Option<PublisherAuthBinding>), ReissueFailure> {
+    ) -> Result<PreparedReissue, ReissueFailure> {
         if actor_id.realm != request.realm {
             platform::recording::warn!(
                 "Credential reissue Realm mismatch: actor={}, requested_realm={}",
@@ -411,11 +383,9 @@ impl AIdIssuer {
             return Err(AidError::InvalidFormat.into());
         }
 
-        // P1-8: verify the publisher-auth nonce without consuming it. The
-        // nonce is burned later in [`commit_reissue_response`] inside the same
-        // transaction that caches the response, so a lost response leaves the
-        // nonce unconsumed and the attempt retriable.
-        let nonce_binding = self
+        // The publisher-auth nonce is only checked here; it is consumed when
+        // the attempt commits.
+        let publisher_nonce = self
             .verify_registration_identity(request, realm_secret_check)
             .await?;
         let proof = self
@@ -431,14 +401,27 @@ impl AIdIssuer {
             return Err(AidError::InvalidFormat.into());
         }
 
-        let mut register_ok = self
+        let register_ok = self
             .issue_credential_for_actor(actor_id, request.target.as_deref())
             .await?;
-        let (renewal_token, renewal_token_expires_at) =
-            self.issue_reissue_renewal_token(actor_id, &proof).await?;
-        register_ok.renewal_token = Some(renewal_token);
-        register_ok.renewal_token_expires_at = Some(renewal_token_expires_at);
-        Ok((register_ok, nonce_binding))
+
+        // Reissue accepts proofs that already expired (anything inside the
+        // binding grace window), so anchoring the successor on the proof's
+        // expiry alone could mint an already-dead token.
+        let anchor = proof.binding_expires_at.max(crate::renewal::now_secs());
+        Ok(PreparedReissue {
+            register_ok,
+            successor_hash: crate::renewal::hash_token(&proof.successor),
+            successor_token: proof.successor,
+            successor_expires_at: crate::renewal::successor_expires_at(
+                anchor,
+                self.config.renewal_token_ttl_secs,
+            ),
+            proof_hash: proof.proof_hash,
+            binding_expires_at: proof.binding_expires_at,
+            publisher_nonce,
+            target: request.target.clone(),
+        })
     }
 
     /// Verify that the reissue caller actually owns `actor_id`.
@@ -493,61 +476,38 @@ impl AIdIssuer {
             return Err(ReissueFailure::PossessionNotProven);
         };
 
-        // AIS-04 + P1-7: enforce the reissue proof replay window, now
-        // distinguishing "delivered" from "consumed but not delivered".
-        //
-        // A successful reissue derives a deterministic successor from this proof;
-        // that successor's row is the consumption marker. The `delivered_at`
-        // column (set in the same transaction that caches the response) tells
-        // the two cases apart:
-        //
-        // - `delivered_at` is `Some`: the response was committed to the cache
-        //   and (presumably) sent. A replay reaching here means the cache
-        //   expired — the proof is fully spent, so refuse to mint again. A
-        //   legitimate retry would have hit the response cache in the handler
-        //   before reaching this point.
-        // - `delivered_at` is `None`: the successor row exists (a signing
-        //   attempt consumed the proof) but the response-cache transaction did
-        //   not commit — a lost response. Keep the original 5-minute replay
-        //   window for this case: it is tight enough to stop a leaked proof
-        //   from being chained, but wide enough for a client to retry after a
-        //   transient failure. (The 30-day binding grace above already governs
-        //   whether the proof is still resolvable at all.)
+        // A proof is good for one reissue. The successor derived from it (the
+        // same one `/renew` rotates to) marks it as consumed; a lost response
+        // is recovered by retrying the same attempt, which replays the stored
+        // response instead of reaching here. This keeps a leaked proof from
+        // being chained into further successors.
         let successor = crate::renewal::derive_successor_token(
             &self.config.renewal_token_secret,
             proof,
             actor_id,
             binding_expires_at,
         );
-        let successor_hash = crate::renewal::hash_token(&successor);
-        if let Some((consumed_at, delivered_at)) =
-            crate::renewal::find_token_consumption_state(actor_id, &successor_hash)
-                .await
-                .map_err(|e| {
-                    AidError::GenerationFailed(format!("reissue consumption lookup failed: {e}"))
-                })?
-        {
-            let now = crate::renewal::now_secs();
-            let spent = match delivered_at {
-                Some(_) => true,
-                None => {
-                    now.saturating_sub(consumed_at)
-                        > crate::renewal::REISSUE_PROOF_REPLAY_WINDOW_SECS
-                }
-            };
-            if spent {
-                platform::recording::warn!(
-                    "Credential reissue rejected: possession proof already consumed for actor {}; delivered={:?}; refusing to chain a spent proof",
-                    actor_id.to_string_repr(),
-                    delivered_at.is_some()
-                );
-                return Err(ReissueFailure::PossessionNotProven);
-            }
+        let consumed: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM issuer_renewal_token WHERE token_hash = ?1)",
+        )
+        .bind(crate::renewal::hash_token(&successor))
+        .fetch_one(platform::storage::db::get_database().get_pool())
+        .await
+        .map_err(|e| {
+            AidError::GenerationFailed(format!("reissue consumption lookup failed: {e}"))
+        })?;
+        if consumed {
+            platform::recording::warn!(
+                "Credential reissue rejected: possession proof already consumed for actor {}",
+                actor_id.to_string_repr()
+            );
+            return Err(ReissueFailure::PossessionNotProven);
         }
 
         Ok(VerifiedPossession {
-            token: proof.to_vec(),
+            proof_hash,
             binding_expires_at,
+            successor,
         })
     }
 
@@ -561,12 +521,17 @@ impl AIdIssuer {
             .verify_registration_identity(request, realm_secret_check)
             .await?;
         // Fresh registration burns the publisher-auth nonce immediately after
-        // verification (no response cache on this path), matching the pre-P1-8
-        // timing so a replayed /register is still rejected within the nonce TTL.
+        // verification, so a replayed /register is rejected within the nonce TTL.
         if let Some(binding) = nonce_binding {
-            let now = Self::unix_now_secs()?;
+            let now = i64::try_from(Self::unix_now_secs()?)
+                .map_err(|_| AidError::InvalidTimestamp("current time exceeds i64".to_string()))?;
+            let mut conn = platform::storage::db::get_database()
+                .get_pool()
+                .acquire()
+                .await
+                .map_err(|e| AidError::GenerationFailed(format!("database unavailable: {e}")))?;
             Self::consume_publisher_auth_nonce(
-                platform::storage::db::get_database().get_pool(),
+                &mut conn,
                 &binding.publisher,
                 &binding.signing_key_id,
                 &binding.nonce,
@@ -650,8 +615,8 @@ impl AIdIssuer {
     ///
     /// Returns the publisher-auth nonce binding when the package-auth path was
     /// taken, so the caller can burn the nonce at the correct point in its flow
-    /// (immediately for `/register`, in the response-cache transaction for
-    /// `/reissue`). `None` for the Linked path (no single-use nonce).
+    /// (immediately for `/register`, in the transaction that commits the
+    /// `/reissue` attempt). `None` for the Linked path (no single-use nonce).
     async fn verify_registration_identity(
         &self,
         request: &RegisterRequest,
@@ -1143,12 +1108,12 @@ impl AIdIssuer {
     /// realm, actr_type, target, and manifest hash to the publisher's signing
     /// key. `signing_key_id` scopes the nonce and is recorded for audit.
     ///
-    /// P1-8: the nonce is **not** burned here. Verification only checks that an
+    /// The nonce is **not** burned here. Verification only checks that an
     /// unexpired row does not already exist for this nonce. The caller is
     /// responsible for consuming the nonce (INSERT) at the correct point:
     /// `/register` burns it immediately after this call returns; `/reissue`
-    /// defers the burn to the response-cache transaction so a lost response
-    /// leaves the nonce unconsumed and the attempt retriable. The returned
+    /// defers the burn to the transaction that commits the attempt, so a
+    /// request that never completed leaves the attempt retriable. The returned
     /// [`PublisherAuthBinding`] carries the identity needed for that
     /// deferred INSERT.
     #[allow(clippy::too_many_arguments)]
@@ -1213,11 +1178,10 @@ impl AIdIssuer {
             return Err(AidError::PublisherNotVerified);
         }
 
-        // P1-8: check-only — reject an already-consumed (still-unexpired) nonce
+        // Check-only — reject an already-consumed (still-unexpired) nonce
         // without burning it. Consumption is deferred to the caller's commit
-        // transaction. An expired nonce row is treated as unused: the GC in the
-        // commit transaction reclaims it, and the P1-7 binding-grace window
-        // governs long-lived retries instead of the 5-minute replay window.
+        // transaction. An expired nonce row is treated as unused: the GC in
+        // `consume_publisher_auth_nonce` reclaims it.
         let now_i64 = i64::try_from(now)
             .map_err(|_| AidError::InvalidTimestamp("current time exceeds i64".to_string()))?;
         let already_consumed: bool = sqlx::query_scalar(
@@ -1247,20 +1211,20 @@ impl AIdIssuer {
         })
     }
 
-    async fn consume_publisher_auth_nonce(
-        pool: &sqlx::SqlitePool,
+    /// Consume a publisher-auth nonce; `PublisherNotVerified` if it already was.
+    pub(crate) async fn consume_publisher_auth_nonce(
+        conn: &mut sqlx::SqliteConnection,
         publisher: &str,
         signing_key_id: &str,
         publisher_auth_nonce: &[u8],
-        now: u64,
+        now: i64,
     ) -> Result<(), AidError> {
-        let now_i64 = i64::try_from(now)
-            .map_err(|_| AidError::InvalidTimestamp("current time exceeds i64".to_string()))?;
+        let now_i64 = now;
         let expires_at = now_i64.saturating_add(PUBLISHER_NONCE_TTL_SECS as i64);
 
         sqlx::query("DELETE FROM issuer_publisher_auth_nonce WHERE expires_at < ?")
             .bind(now_i64)
-            .execute(pool)
+            .execute(&mut *conn)
             .await
             .map_err(|e| {
                 AidError::GenerationFailed(format!("publisher nonce cleanup failed: {e}"))
@@ -1275,7 +1239,7 @@ impl AIdIssuer {
         .bind(publisher_auth_nonce)
         .bind(now_i64)
         .bind(expires_at)
-        .execute(pool)
+        .execute(&mut *conn)
         .await;
 
         match result {
@@ -1430,340 +1394,35 @@ impl AIdIssuer {
         ))
     }
 
-    /// Issue the renewal token that accompanies a credential reissue.
-    ///
-    /// Unlike [`Self::issue_fresh_renewal_token`], the successor is derived
-    /// deterministically from the presented possession proof rather than drawn
-    /// from the CSPRNG. That is what makes `/issuer/reissue` safe to retry: a
-    /// client whose response was lost replays the same proof and re-derives the
-    /// same successor, so the binding it is still holding is never displaced by
-    /// a competing token. A fast replay reuses the still-live row unchanged; a
-    /// replay after that one-day successor expired (while the original proof is
-    /// still inside the reissue grace) refreshes the row's expiry rather than
-    /// failing — so identity recovery survives any number of lost responses.
-    async fn issue_reissue_renewal_token(
-        &self,
-        actor_id: &ActrId,
-        proof: &VerifiedPossession,
-    ) -> Result<(Bytes, Timestamp), AidError> {
-        if self.config.renewal_token_secret.is_empty() {
-            return Err(AidError::GenerationFailed(
-                "renewal_token_secret is required".to_string(),
-            ));
-        }
-
-        let token = crate::renewal::derive_successor_token(
-            &self.config.renewal_token_secret,
-            &proof.token,
-            actor_id,
-            proof.binding_expires_at,
-        );
-        let token_hash = crate::renewal::hash_token(&token);
-
-        // Reissue accepts proofs that already expired (anything inside the
-        // binding grace window), so anchoring the successor on the proof's
-        // expiry alone could mint an already-dead token. Take whichever of the
-        // proof expiry and now is later; only the first attempt's value is
-        // ever persisted.
-        let anchor = proof.binding_expires_at.max(crate::renewal::now_secs());
-        let expires_at =
-            crate::renewal::successor_expires_at(anchor, self.config.renewal_token_ttl_secs);
-
-        // Upsert rather than `INSERT OR IGNORE`: if the first response was lost
-        // and this one-day successor already expired while the original proof is
-        // still inside the reissue grace, the deterministic row is refreshed to
-        // a live expiry. `INSERT OR IGNORE` would keep the dead row and the
-        // unexpired read-back below would return `None`, producing a spurious
-        // 500 that permanently blocks identity recovery. A still-live row is
-        // left untouched so a fast replay still observes the first expiry.
-        crate::renewal::upsert_reissue_successor_token(actor_id, &token_hash, expires_at)
-            .await
-            .map_err(|e| {
-                AidError::GenerationFailed(format!("Failed to persist renewal token: {e}"))
-            })?;
-
-        // Read the expiry back instead of returning the value just computed:
-        // on a fast replay the row was left untouched, and the caller must
-        // observe the expiry Issuer actually recorded for it.
-        let stored = crate::renewal::find_unexpired_token(actor_id, &token_hash)
-            .await
-            .map_err(|e| {
-                AidError::GenerationFailed(format!("Failed to read back renewal token: {e}"))
-            })?
-            .ok_or_else(|| {
-                AidError::GenerationFailed(
-                    "renewal token missing immediately after insert".to_string(),
-                )
-            })?;
-
-        // Deliberately no trim here. The proof must stay resolvable while its
-        // replay window is open, otherwise a lost-response retry of this same
-        // attempt would be rejected — the exact failure this endpoint exists to
-        // prevent. The persisted successor row (this row) also doubles as the
-        // proof's consumption marker: once its `created_at` is older than
-        // [`crate::renewal::REISSUE_PROOF_REPLAY_WINDOW_SECS`],
-        // `verify_actor_possession` refuses to accept the original proof again,
-        // so a spent proof can no longer be chained. Growth stays bounded
-        // because a replay inserts nothing and `gc_expired_tokens` reclaims rows
-        // past the grace.
-
-        Ok((
-            Bytes::from(token),
-            Timestamp {
-                seconds: stored.expires_at,
-                nanos: 0,
-            },
-        ))
-    }
-
-    // -------- /reissue idempotency (P1-8) ---------------------------------
-
-    /// Bind cache access to the exact previously authenticated identity,
-    /// registration (including signatures), and possession proof. Length prefixes
-    /// keep the protobuf messages unambiguous. The domain separates these keys
-    /// from legacy nonce-only entries, which must never be replayed.
-    fn reissue_request_hash(
-        actor_id: &ActrId,
-        request: &RegisterRequest,
-        renewal_proof: Option<&[u8]>,
-    ) -> Vec<u8> {
-        use sha2::{Digest, Sha256};
-        let mut hash = Sha256::new();
-        hash.update(b"actrix/issuer/reissue-request/v2");
-        for part in [
-            actor_id.encode_to_vec(),
-            request.encode_to_vec(),
-            renewal_proof.unwrap_or_default().to_vec(),
-        ] {
-            hash.update((part.len() as u64).to_be_bytes());
-            hash.update(part);
-        }
-        hash.finalize().to_vec()
-    }
-
-    /// Replay only an exact authenticated retry, while honoring current actor,
-    /// realm, package, and publisher revocations. The consumed proof and nonce
-    /// must not be consumed again on this path.
-    pub async fn lookup_reissue_cache(
-        &self,
-        actor_id: &ActrId,
-        request: &RegisterRequest,
-        renewal_proof: Option<&[u8]>,
-    ) -> Option<RegisterResponse> {
-        let nonce = request.publisher_auth_nonce.as_ref()?;
-        if !matches!(nonce.len(), 16 | 32) || renewal_proof?.len() != 32 {
-            return None;
-        }
-        let pool = platform::storage::db::get_database().get_pool();
-        let request_hash = Self::reissue_request_hash(actor_id, request, renewal_proof);
-        let now = crate::renewal::now_secs();
-
-        // Retain the historical column name to avoid a destructive cache migration.
-        let ciphertext: Vec<u8> = sqlx::query_scalar(
-            "SELECT response_ciphertext FROM issuer_reissue_response_cache
-             WHERE nonce_hash = ?1 AND expires_at > ?2",
+    /// The package target recorded for `actor_id`: from registration, or the
+    /// last package-auth reissue. A NULL target (legacy row) degrades the
+    /// package recheck to type-only matching.
+    pub(crate) async fn issued_target(actor_id: &ActrId) -> Option<String> {
+        sqlx::query_scalar::<_, Option<String>>(
+            "SELECT target FROM issued_actor_identity WHERE realm = ? AND serial_number = ?",
         )
-        .bind(&request_hash)
-        .bind(now)
-        .fetch_optional(pool)
+        .bind(&actor_id.realm)
+        .bind(actor_id.serial_number as i64)
+        .fetch_one(platform::storage::db::get_database().get_pool())
         .await
-        .ok()??;
-
-        self.recheck_existing_actor(actor_id, request.target.as_deref())
-            .await
-            .ok()?;
-        let plaintext = self.decrypt_reissue_response(&ciphertext).ok()?;
-        RegisterResponse::decode(plaintext.as_slice()).ok()
+        .unwrap_or_else(|err| {
+            platform::recording::warn!(
+                "Failed to look up target for actor {}: {}",
+                actor_id.to_string_repr(),
+                err
+            );
+            None
+        })
     }
 
-    /// Derive the AES-256-GCM key for the reissue response cache from the
-    /// renewal token secret via a domain-separated SHA-256 label. This key
-    /// cannot collide with the HMAC successor derivation in
-    /// [`crate::renewal::derive_successor_token`], which uses a different
-    /// label over the same secret.
-    fn reissue_cache_key(&self) -> [u8; 32] {
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(b"actrix/issuer/reissue-response-cache/v1");
-        hasher.update(&self.config.renewal_token_secret);
-        hasher.finalize().into()
-    }
-
-    /// Encrypt a response with AES-256-GCM. Layout: `version(1) || nonce(12)
-    /// || ciphertext`. The version byte lets the format evolve without
-    /// ambiguously failing decryption on old rows.
-    fn encrypt_reissue_response(&self, plaintext: &[u8]) -> Result<Vec<u8>, AidError> {
-        use aes_gcm::aead::{Aead, KeyInit, Payload};
-        let key = self.reissue_cache_key();
-        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
-        let mut nonce_bytes = [0u8; 12];
-        rand::thread_rng().fill_bytes(&mut nonce_bytes);
-        let ciphertext = cipher
-            .encrypt(
-                Nonce::from_slice(&nonce_bytes),
-                Payload {
-                    msg: plaintext,
-                    aad: b"actrix/issuer/reissue-response/v1",
-                },
-            )
-            .map_err(|e| {
-                AidError::GenerationFailed(format!("reissue response encryption failed: {e}"))
-            })?;
-        let mut stored = Vec::with_capacity(1 + nonce_bytes.len() + ciphertext.len());
-        stored.push(REISSUE_CIPHERTEXT_VERSION);
-        stored.extend_from_slice(&nonce_bytes);
-        stored.extend_from_slice(&ciphertext);
-        Ok(stored)
-    }
-
-    /// Decrypt a cached response previously produced by
-    /// [`encrypt_reissue_response`].
-    fn decrypt_reissue_response(&self, stored: &[u8]) -> Result<Vec<u8>, AidError> {
-        use aes_gcm::aead::{Aead, KeyInit, Payload};
-        if stored.len() <= 13 {
-            return Err(AidError::GenerationFailed(
-                "reissue cache entry too short".to_string(),
-            ));
-        }
-        if stored[0] != REISSUE_CIPHERTEXT_VERSION {
-            return Err(AidError::GenerationFailed(format!(
-                "reissue cache ciphertext version mismatch: {}",
-                stored[0]
-            )));
-        }
-        let key = self.reissue_cache_key();
-        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
-        cipher
-            .decrypt(
-                Nonce::from_slice(&stored[1..13]),
-                Payload {
-                    msg: &stored[13..],
-                    aad: b"actrix/issuer/reissue-response/v1",
-                },
-            )
-            .map_err(|e| {
-                AidError::GenerationFailed(format!("reissue response decryption failed: {e}"))
-            })
-    }
-
-    /// Atomically consume the publisher-auth nonce, cache the encrypted
-    /// response, and mark the successor row delivered — all in one `BEGIN
-    /// IMMEDIATE` transaction (P1-8).
-    ///
-    /// A retry of the same attempt hits [`lookup_reissue_cache`] and replays
-    /// the cached response without re-signing. If this transaction never
-    /// committed (a lost response), the nonce was never burned and the P1-7
-    /// grace window lets the client retry instead of being locked out by the
-    /// 5-minute replay window.
-    async fn commit_reissue_response(
-        &self,
-        binding: &PublisherAuthBinding,
-        actor_id: &ActrId,
-        successor_hash: &[u8],
-        response: &RegisterResponse,
-        target: Option<&str>,
-        request_hash: &[u8],
-    ) -> Result<(), AidError> {
-        let pool = platform::storage::db::get_database().get_pool();
-        let now = crate::renewal::now_secs();
-        let nonce_expires = now.saturating_add(PUBLISHER_NONCE_TTL_SECS as i64);
-        let cache_expires = now.saturating_add(REISSUE_RESPONSE_CACHE_TTL_SECS);
-
-        let response_bytes = response.encode_to_vec();
-        let ciphertext = self.encrypt_reissue_response(&response_bytes)?;
-
-        let mut tx = pool
-            .begin()
+    /// Recheck, before a stored response is replayed, that `actor_id` may
+    /// still receive credentials: a replay never hands out what the Issuer
+    /// would refuse now.
+    pub(crate) async fn recheck_before_replay(&self, actor_id: &ActrId) -> Result<(), AidError> {
+        let target = Self::issued_target(actor_id).await;
+        self.recheck_existing_actor(actor_id, target.as_deref())
             .await
-            .map_err(|e| AidError::GenerationFailed(format!("reissue cache begin failed: {e}")))?;
-
-        // GC expired nonce and cache rows so the unique-constraint INSERT
-        // below is not blocked by a stale row for the same nonce.
-        sqlx::query("DELETE FROM issuer_publisher_auth_nonce WHERE expires_at < ?")
-            .bind(now)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| AidError::GenerationFailed(format!("nonce GC failed: {e}")))?;
-        sqlx::query("DELETE FROM issuer_reissue_response_cache WHERE expires_at < ?")
-            .bind(now)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| AidError::GenerationFailed(format!("reissue cache GC failed: {e}")))?;
-
-        // Consume the nonce (replay guard). A unique violation means a
-        // concurrent request or an unexpired replay.
-        let result = sqlx::query(
-            "INSERT INTO issuer_publisher_auth_nonce
-                (publisher, key_id, nonce, created_at, expires_at)
-             VALUES (?, ?, ?, ?, ?)",
-        )
-        .bind(&binding.publisher)
-        .bind(&binding.signing_key_id)
-        .bind(&binding.nonce)
-        .bind(now)
-        .bind(nonce_expires)
-        .execute(&mut *tx)
-        .await;
-        match result {
-            Ok(_) => {}
-            Err(sqlx::Error::Database(err)) if err.is_unique_violation() => {
-                platform::recording::warn!(
-                    "publisher_auth_nonce replay detected during commit: publisher={}, key_id={}",
-                    binding.publisher,
-                    binding.signing_key_id
-                );
-                return Err(AidError::PublisherNotVerified);
-            }
-            Err(err) => {
-                return Err(AidError::GenerationFailed(format!(
-                    "publisher nonce consume failed: {err}"
-                )));
-            }
-        }
-
-        // Cache only the exact request that passed authentication and possession checks.
-        sqlx::query(
-            "INSERT INTO issuer_reissue_response_cache
-                (nonce_hash, response_ciphertext, expires_at, created_at)
-             VALUES (?, ?, ?, ?)",
-        )
-        .bind(request_hash)
-        .bind(&ciphertext)
-        .bind(cache_expires)
-        .bind(now)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| AidError::GenerationFailed(format!("reissue cache insert failed: {e}")))?;
-
-        // Mark the successor row as delivered (P1-7).
-        crate::renewal::mark_token_delivered(&mut tx, actor_id, successor_hash, now)
-            .await
-            .map_err(|e| AidError::GenerationFailed(format!("delivered_at mark failed: {e}")))?;
-
-        // Persist the package target this reissue was authorized under (P1-6).
-        // `verify_publisher_auth` bound the signature to this target, so a
-        // legitimate migration to a new (still-active) target updates the actor's
-        // binding; without this, /renew would keep rechecking the stale
-        // registration-time target. Only package-auth reissue reaches here, so
-        // target is non-empty; Linked reissue (no nonce) skips this entirely.
-        if let Some(target) = target.filter(|t| !t.is_empty()) {
-            sqlx::query(
-                "UPDATE issued_actor_identity SET target = ?1, auth_mode = ?4
-                 WHERE realm = ?2 AND serial_number = ?3",
-            )
-            .bind(target)
-            .bind(&actor_id.realm)
-            .bind(actor_id.serial_number as i64)
-            .bind(actr_protocol::RegisterAuthMode::Package as i32)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| AidError::GenerationFailed(format!("target persist failed: {e}")))?;
-        }
-
-        tx.commit()
-            .await
-            .map_err(|e| AidError::GenerationFailed(format!("reissue cache commit failed: {e}")))?;
-        Ok(())
+            .map(|_| ())
     }
 
     /// Load the Actor type and auth mode recorded when `actor_id` was issued.
