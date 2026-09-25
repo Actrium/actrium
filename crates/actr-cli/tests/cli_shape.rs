@@ -109,7 +109,7 @@ fn registry_group_has_discover_publish_fingerprint() {
 }
 
 #[test]
-fn realm_group_exposes_the_signing_tool() {
+fn realm_group_exposes_the_signing_and_membership_tools() {
     let mut subs = subcommand_names("realm");
     subs.sort();
     assert_eq!(
@@ -117,10 +117,20 @@ fn realm_group_exposes_the_signing_tool() {
         [
             "create-request",
             "draft-request",
+            "invite",
+            "join",
             "keygen",
+            "leave",
+            "members",
+            "register-publisher",
             "reissue-request",
+            "remove-member",
             "retire",
-            "sign-profile"
+            "revoke-client",
+            "revoke-invite",
+            "set-role",
+            "sign-profile",
+            "transfer-owner",
         ]
     );
 }
