@@ -210,8 +210,9 @@ Publisher Profile 使用 snake_case member 名与 `"schema": "actr.publisher/v1"
   的 HTTP 缓存语义影响。
 
 登记 publisher 的 Realm Provider 使用 `register_publisher` 请求：采用
-[Actr Realm Profile](realm-profile.zh.md) 第 8 节的 Actr 管理信封，由 `active` 的
-Publisher Profile 签名 key 签名，而不是在公开 descriptor 中放置 challenge。
+[Actr Realm Profile](realm-profile.zh.md) 第 8 节的 Actr 管理信封，以 `publisher` member
+（规范化 Publisher ID）取代 `realm`，由 `active` 的 Publisher Profile 签名 key 签名，而不是
+在公开 descriptor 中放置 challenge。
 
 ### 4.6 `links`
 

@@ -247,7 +247,8 @@ descriptor level:
 
 A Realm Provider that registers publishers does so through a
 `register_publisher` request in the Actr management envelope of
-[Actr Realm Profile](realm-profile.md), Section 8, signed by an active
+[Actr Realm Profile](realm-profile.md), Section 8, with a `publisher` member
+(the normalized Publisher ID) in place of `realm`, signed by an active
 Publisher Profile signing key, not through a challenge placed in the public
 descriptor.
 
