@@ -2428,3 +2428,44 @@ async fn register_publisher_refuses_a_package_key_that_is_not_a_curve_point() {
         "{result:?}"
     );
 }
+
+#[tokio::test]
+async fn admin_delete_removes_a_publisher_with_publish_nonces_atomically() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    // The production schema, with foreign keys enforced.
+    let dir = tempfile::tempdir().unwrap();
+    let database = platform::storage::db::Database::new(dir.path())
+        .await
+        .unwrap();
+    let manager = PublisherRegistryManager::new(database.get_pool().clone());
+    let root = SigningKey::generate(&mut OsRng);
+    let roots = [("root-1", &root, "active")];
+    let domain = "delete.example";
+    let (key_a, key_b) = (
+        SigningKey::generate(&mut OsRng),
+        SigningKey::generate(&mut OsRng),
+    );
+    register(
+        &manager,
+        &signed_profile(domain, 1, &roots, &[(&key_a, "active")]),
+    )
+    .await
+    .unwrap();
+    let record = register(
+        &manager,
+        &signed_profile(domain, 2, &roots, &[(&key_b, "active")]),
+    )
+    .await
+    .unwrap();
+    manager.request_nonce(domain).await.unwrap();
+
+    manager.admin_delete(record.id).await.unwrap();
+    assert!(
+        Publisher::get_by_name(manager.pool(), domain)
+            .await
+            .unwrap()
+            .is_none()
+    );
+}

@@ -326,19 +326,25 @@ impl Publisher {
         Ok(())
     }
 
+    /// Delete the publisher and every row that references it, all or
+    /// nothing.
     pub async fn delete(pool: &SqlitePool, id: i64) -> Result<(), PublisherRegistryError> {
-        sqlx::query("DELETE FROM publisher_key_history WHERE publisher_id = ?")
-            .bind(id)
-            .execute(pool)
-            .await?;
-        sqlx::query("DELETE FROM publisher_package WHERE publisher_id = ?")
-            .bind(id)
-            .execute(pool)
-            .await?;
+        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+        for table in [
+            "publisher_key_history",
+            "publisher_package",
+            "publisher_publish_nonce",
+        ] {
+            sqlx::query(&format!("DELETE FROM {table} WHERE publisher_id = ?"))
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+        }
         sqlx::query("DELETE FROM publisher WHERE id = ?")
             .bind(id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
+        tx.commit().await?;
         Ok(())
     }
 }
