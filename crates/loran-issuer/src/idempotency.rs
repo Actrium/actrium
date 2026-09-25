@@ -456,10 +456,11 @@ impl ControlAttemptStore {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    async fn setup_db() {
+    /// The crate's test database, shared by every unit test in the process
+    pub(crate) async fn setup_db() {
         static DB_DIR: tokio::sync::OnceCell<tempfile::TempDir> =
             tokio::sync::OnceCell::const_new();
         DB_DIR

@@ -158,14 +158,16 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
                 );
 
                 // ACL policy and pending signaling metadata commit together.
-                if let Err(message) = persist_registration_state(&request, register_ok).await {
+                if let Err((code, message)) =
+                    persist_registration_state(&request, register_ok).await
+                {
                     if let Some(ref ctr) = state.counters {
                         ctr.record_request(false, start.elapsed().as_secs_f64() * 1000.0)
                             .await;
                     }
                     return encode_result(RegisterResponse {
                         result: Some(register_response::Result::Error(ErrorResponse {
-                            code: 500,
+                            code,
                             message: message.to_string(),
                         })),
                     });
@@ -252,12 +254,16 @@ fn check_acl_source_realms(request: &RegisterRequest) -> Result<(), String> {
 /// Persist the registration's ACL policy and pending signaling metadata in
 /// one transaction, and drop pending rows whose retention has passed.
 ///
-/// On failure returns the client-facing error message.
+/// Nothing is kept when the Realm retired after the request was
+/// authenticated: retirement removes these rows, and a registration that
+/// raced it must not bring them back.
+///
+/// On failure returns the client-facing error code and message.
 async fn persist_registration_state(
     request: &RegisterRequest,
     register_ok: &register_response::RegisterOk,
-) -> Result<(), &'static str> {
-    const STATE_ERROR: &str = "Failed to persist registration state";
+) -> Result<(), (u32, &'static str)> {
+    const STATE_ERROR: (u32, &str) = (500, "Failed to persist registration state");
 
     let pool = platform::storage::db::get_database().get_pool();
     let mut tx = pool.begin().await.map_err(|error| {
@@ -299,7 +305,7 @@ async fn persist_registration_state(
                     my_type,
                     error
                 );
-                "Failed to persist registration policy"
+                (500, "Failed to persist registration policy")
             })?;
     }
 
@@ -335,7 +341,7 @@ async fn persist_registration_state(
                 "Failed to persist pending registration metadata: {}",
                 error
             );
-            "Failed to persist registration metadata"
+            (500, "Failed to persist registration metadata")
         })?;
     }
 
@@ -350,8 +356,25 @@ async fn persist_registration_state(
             "Failed to clean expired pending registration metadata: {}",
             error
         );
-        "Failed to persist registration metadata"
+        (500, "Failed to persist registration metadata")
     })?;
+
+    // Checked after the writes above, which hold the write lock: a
+    // retirement either committed before them and shows here, or commits
+    // after this transaction and removes its rows.
+    let retired: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM realm WHERE name = ? AND status = 'retired')",
+    )
+    .bind(&register_ok.actr_id.realm)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|error| {
+        platform::recording::error!("Failed to read Realm state: {}", error);
+        STATE_ERROR
+    })?;
+    if retired {
+        return Err((403, "Realm is retired"));
+    }
 
     tx.commit().await.map_err(|error| {
         platform::recording::error!("Failed to commit registration state: {}", error);
@@ -855,6 +878,60 @@ mod tests {
         assert_eq!(decoded_request.realm, "k7m2q9xh@example.com");
         assert_eq!(decoded_request.actr_type.publisher, "apple");
         assert_eq!(decoded_request.actr_type.name, "iPhone15");
+    }
+
+    #[tokio::test]
+    async fn registration_state_is_not_kept_for_a_realm_retired_meanwhile() {
+        use actr_protocol::{AclRule, acl_rule::Permission};
+
+        crate::idempotency::tests::setup_db().await;
+        let realm = "raced@example.com";
+        RealmEntity::create(realm.to_string(), "secret-hash".to_string())
+            .await
+            .unwrap();
+        // The request was authenticated; then the Realm retires.
+        RealmEntity::retire(realm).await.unwrap();
+
+        let actr_type = ActrType {
+            publisher: "acme".to_string(),
+            name: "worker".to_string(),
+            version: "1.0.0".to_string(),
+        };
+        let request = RegisterRequest {
+            actr_type: actr_type.clone(),
+            realm: realm.to_string(),
+            acl: Some(actr_protocol::Acl {
+                rules: vec![AclRule {
+                    permission: Permission::Allow as i32,
+                    from_type: actr_type,
+                    source_realm: None,
+                }],
+            }),
+            ws_address: Some("ws://127.0.0.1:1".to_string()),
+            ..Default::default()
+        };
+        let register_ok = register_response::RegisterOk {
+            actr_id: actr_protocol::ActrId {
+                realm: realm.to_string(),
+                serial_number: 7,
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(
+            persist_registration_state(&request, &register_ok).await,
+            Err((403, "Realm is retired"))
+        );
+        let pool = platform::storage::db::get_database().get_pool();
+        for table in ["actoracl", "pending_registration"] {
+            let rows: i64 =
+                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE realm = ?"))
+                    .bind(realm)
+                    .fetch_one(pool)
+                    .await
+                    .unwrap();
+            assert_eq!(rows, 0, "{table}");
+        }
     }
 
     #[test]
