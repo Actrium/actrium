@@ -1692,6 +1692,11 @@ fn standalone_discover_skips_project_config_requirement() {
         &ed25519_dalek::SigningKey::from_bytes(&[1; 32]),
     );
     std::fs::write(&key_path, serde_json::to_string(&key_file).unwrap()).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
     let output = run_actr(
         &[
             "registry",
