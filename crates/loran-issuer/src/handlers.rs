@@ -16,7 +16,8 @@ use axum::{
 use platform::aid::AidError;
 use platform::monitoring::ServiceCounters;
 use platform::realm::{
-    REALM_SECRET_HEADER, Realm as RealmEntity, RealmSecretCheck, acl::ActorAcl, verify_realm_secret,
+    REALM_SECRET_HEADER, Realm as RealmEntity, RealmError, RealmSecretCheck, acl::ActorAcl,
+    verify_realm_secret,
 };
 use prost::Message;
 use serde_json::{Value, json};
@@ -120,6 +121,16 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
         });
     }
 
+    // Authenticate before saying anything about the Realm.
+    let realm_secret_check = match authenticate_realm(&request.realm, &headers).await {
+        Ok(check) => check,
+        Err(error) => {
+            return encode_result(RegisterResponse {
+                result: Some(register_response::Result::Error(error)),
+            });
+        }
+    };
+
     // Validate that the Realm exists, is in a healthy state, and has not expired
     if let Err(validation_err) = RealmEntity::validate_realm(&request.realm).await {
         let (code, message) = RealmEntity::map_validation_error(validation_err);
@@ -131,59 +142,6 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
         };
         return encode_result(error_result);
     }
-
-    // Registration is fail-closed: every provisioned Realm must have a secret.
-    let provided_secret = headers
-        .get(REALM_SECRET_HEADER)
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|v| !v.is_empty());
-
-    let realm_secret_check = match verify_realm_secret(&request.realm, provided_secret).await {
-        Ok(check @ RealmSecretCheck::ValidCurrent)
-        | Ok(check @ RealmSecretCheck::ValidPrevious) => check,
-        Ok(RealmSecretCheck::NotConfigured) => {
-            let error_result = RegisterResponse {
-                result: Some(register_response::Result::Error(ErrorResponse {
-                    code: 403,
-                    message: "Realm is not provisioned with a registration secret".to_string(),
-                })),
-            };
-            return encode_result(error_result);
-        }
-        Ok(RealmSecretCheck::MissingRequired) => {
-            let error_result = RegisterResponse {
-                result: Some(register_response::Result::Error(ErrorResponse {
-                    code: 403,
-                    message: "Realm secret required".to_string(),
-                })),
-            };
-            return encode_result(error_result);
-        }
-        Ok(RealmSecretCheck::Invalid) => {
-            let error_result = RegisterResponse {
-                result: Some(register_response::Result::Error(ErrorResponse {
-                    code: 403,
-                    message: "Invalid realm secret".to_string(),
-                })),
-            };
-            return encode_result(error_result);
-        }
-        Err(e) => {
-            platform::recording::error!(
-                "Failed to verify realm secret for realm {}: {}",
-                request.realm,
-                e
-            );
-            let error_result = RegisterResponse {
-                result: Some(register_response::Result::Error(ErrorResponse {
-                    code: 500,
-                    message: "Internal error while verifying realm secret".to_string(),
-                })),
-            };
-            return encode_result(error_result);
-        }
-    };
 
     // Invoke the issuer to issue a credential
     let result = match state
@@ -234,6 +192,39 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
     };
 
     encode_result(result)
+}
+
+/// The one answer to a caller that has not proven it holds the Realm secret,
+/// whatever the reason: unknown, pending, suspended or retired Realm, missing
+/// or wrong secret.
+const REALM_AUTHENTICATION_FAILED: &str = "Realm secret not accepted";
+
+/// Check the Realm secret in `headers` before anything about the Realm is
+/// revealed. Every failure short of an internal error gets the same `403`.
+async fn authenticate_realm(
+    realm: &str,
+    headers: &HeaderMap,
+) -> Result<RealmSecretCheck, ErrorResponse> {
+    let provided_secret = headers
+        .get(REALM_SECRET_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+
+    match verify_realm_secret(realm, provided_secret).await {
+        Ok(check @ (RealmSecretCheck::ValidCurrent | RealmSecretCheck::ValidPrevious)) => Ok(check),
+        Ok(_) | Err(RealmError::NotFound) => Err(ErrorResponse {
+            code: 403,
+            message: REALM_AUTHENTICATION_FAILED.to_string(),
+        }),
+        Err(e) => {
+            platform::recording::error!("Failed to verify realm secret for realm {}: {}", realm, e);
+            Err(ErrorResponse {
+                code: 500,
+                message: "Internal error while verifying realm secret".to_string(),
+            })
+        }
+    }
 }
 
 /// Connection ACLs of version 1 act only within the Actor's own Realm: a
@@ -420,6 +411,15 @@ async fn reissue_credential(
     }
 
     let registration = &request.registration;
+    // Authenticate before saying anything about the Realm.
+    let realm_secret_check = match authenticate_realm(&registration.realm, &headers).await {
+        Ok(check) => check,
+        Err(error) => {
+            return encode_result(RegisterResponse {
+                result: Some(register_response::Result::Error(error)),
+            });
+        }
+    };
     if let Err(validation_err) = RealmEntity::validate_realm(&registration.realm).await {
         let (code, message) = RealmEntity::map_validation_error(validation_err);
         return encode_result(RegisterResponse {
@@ -429,53 +429,6 @@ async fn reissue_credential(
             })),
         });
     }
-
-    let provided_secret = headers
-        .get(REALM_SECRET_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let realm_secret_check = match verify_realm_secret(&registration.realm, provided_secret).await {
-        Ok(check @ RealmSecretCheck::ValidCurrent)
-        | Ok(check @ RealmSecretCheck::ValidPrevious) => check,
-        Ok(RealmSecretCheck::NotConfigured) => {
-            return encode_result(RegisterResponse {
-                result: Some(register_response::Result::Error(ErrorResponse {
-                    code: 403,
-                    message: "Realm is not provisioned with a registration secret".to_string(),
-                })),
-            });
-        }
-        Ok(RealmSecretCheck::MissingRequired) => {
-            return encode_result(RegisterResponse {
-                result: Some(register_response::Result::Error(ErrorResponse {
-                    code: 403,
-                    message: "Realm secret required".to_string(),
-                })),
-            });
-        }
-        Ok(RealmSecretCheck::Invalid) => {
-            return encode_result(RegisterResponse {
-                result: Some(register_response::Result::Error(ErrorResponse {
-                    code: 403,
-                    message: "Invalid realm secret".to_string(),
-                })),
-            });
-        }
-        Err(err) => {
-            platform::recording::error!(
-                "Failed to verify realm secret for credential reissue in realm {}: {}",
-                registration.realm,
-                err
-            );
-            return encode_result(RegisterResponse {
-                result: Some(register_response::Result::Error(ErrorResponse {
-                    code: 500,
-                    message: "Internal error while verifying realm secret".to_string(),
-                })),
-            });
-        }
-    };
 
     // Replay only an exact previously authenticated package reissue request.
     // The issuer binds the cache key to the signatures and renewal proof too.

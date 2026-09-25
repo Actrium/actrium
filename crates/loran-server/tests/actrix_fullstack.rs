@@ -1296,11 +1296,8 @@ async fn issuer_register_rejects_non_preprovisioned_realm() {
     match register_rsp.result.expect("result missing") {
         register_response::Result::Error(err) => {
             assert_eq!(err.code, 403, "non-preprovisioned realm should be denied");
-            assert!(
-                err.message.contains("Realm validation failed"),
-                "unexpected error message: {}",
-                err.message
-            );
+            // Unauthenticated callers learn nothing about the Realm.
+            assert_eq!(err.message, "Realm secret not accepted");
         }
         other => panic!("expected register error for non-preprovisioned realm, got {other:?}"),
     }

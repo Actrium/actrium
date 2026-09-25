@@ -3,7 +3,7 @@
 //! Starts a temporary Signer gRPC service within the test process to verify the Issuer issuance and validation chain.
 
 use actr_protocol::{
-    Acl, AclRule, ActrType, RegisterAuthMode, RegisterRequest, RegisterResponse,
+    Acl, AclRule, ActrType, ErrorResponse, RegisterAuthMode, RegisterRequest, RegisterResponse,
     ReissueCredentialRequest, RenewCredentialRequest, RenewCredentialResponse, acl_rule,
     register_response, renew_credential_response,
 };
@@ -526,6 +526,53 @@ async fn test_register_route_linked_with_realm_secret_succeeds() {
             panic!("linked /register with realm secret should succeed: {err:?}")
         }
     }
+}
+
+async fn register_error(env: &TestEnv, realm: &str, secret: Option<&str>) -> ErrorResponse {
+    let mut request = linked_register_request();
+    request.realm = realm.to_string();
+    let app = create_test_router(env).await;
+    match post_register(app, request, secret)
+        .await
+        .result
+        .expect("result")
+    {
+        register_response::Result::Error(err) => err,
+        register_response::Result::Success(ok) => panic!("registered {ok:?}"),
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn test_register_does_not_reveal_realm_state_before_authentication() {
+    let env = setup_test_environment().await;
+    let secret = "realm-state-secret";
+    let suspended = "state-suspended@example.com";
+    let retired = "state-retired@example.com";
+    seed_realm(suspended, Some(secret)).await;
+    seed_realm(retired, Some(secret)).await;
+    platform::realm::Realm::set_enabled(suspended, false)
+        .await
+        .expect("suspend");
+    platform::realm::Realm::retire(retired)
+        .await
+        .expect("retire");
+
+    // Without the secret, every Realm looks the same.
+    for realm in ["state-unknown@example.com", suspended, retired] {
+        for provided in [None, Some("wrong-secret")] {
+            let err = register_error(&env, realm, provided).await;
+            assert_eq!(
+                (err.code, err.message.as_str()),
+                (403, "Realm secret not accepted"),
+                "{realm} {provided:?}"
+            );
+        }
+    }
+    // With it, the caller learns why.
+    let err = register_error(&env, suspended, Some(secret)).await;
+    assert_eq!(err.code, 403);
+    assert!(err.message.contains("suspended"), "{}", err.message);
 }
 
 #[tokio::test]

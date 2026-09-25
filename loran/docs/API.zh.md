@@ -108,7 +108,10 @@ sign-profile | retire | reissue-request`。
 路由前缀：`/issuer`。
 
 注册、续签与 signing-key 查询使用 protobuf body。Realm secret 是管理员或受信 Actr Host 的
-注册能力，不得下发给 Rill Guest。签发的 Actor credential claims 固定包含：
+注册能力，不得下发给 Rill Guest。`/issuer/register` 与 `/issuer/reissue` 先校验 Realm secret：
+Realm 不存在、处于 pending/停用/退役，或 secret 缺失、错误，一律返回 `403`「Realm secret not
+accepted」，不透露 Realm 状态；secret 通过后才报告 Realm 不可用的原因。签发的 Actor
+credential claims 固定包含：
 
 - `protocol_version = 1`
 - `issuer`：Realm 名，例如 `k7m2q9xh@acme.com`
