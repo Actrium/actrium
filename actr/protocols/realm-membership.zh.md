@@ -179,7 +179,9 @@ Realm 客户端 key 是 Actr Host 的能力，**MUST NOT** 交给 Guest workload
 - 每个 Realm 使用独立的 Realm 客户端 key，不同 Realm 无法据 key 关联同一客户端；`label` 由客户端自定，
   Actr Host **SHOULD** 默认使用不含个人信息的名称。
 - 邀请是 bearer secret：泄露的未用邀请可被他人兑换。签发方 **SHOULD** 选短有效期，发现泄露时撤销；
-  owner 在 `list_members` 中能看到每个成员及其客户端，可移除误入者。
+  owner 在 `list_members` 中能看到每个成员及其客户端，可移除误入者。工具 **SHOULD NOT** 让邀请出现在
+  其他本机用户可见之处，例如命令行参数。
+- Realm 客户端 key 的私钥只在该客户端保存。Actr Host **SHOULD** 拒绝加载本机其他用户可读的 key 文件。
 - owner 邀请的持有方与运营者能恢复 owner，因此它们处于 Realm 的信任边界内，这与它们本就能签发 Realm Profile、
   停用 Realm（Realm Provider 还持有 Realm issuer key）一致。
 - owner 恢复撤销 owner 原有的全部客户端 key 与它们签发的未用邀请，被盗的 owner key 因此无法与恢复者反复争夺。

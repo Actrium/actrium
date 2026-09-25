@@ -231,6 +231,11 @@ key 与它签发的未用邀请；绑定到它的 Actor 停用：不再续期、
 立即断开，不能重连。renewal token 保留：同一成员的另一把 key 可凭它 `/reissue` 取回 ActorId 并改绑。
 改角色只改记录，在下一份 credential 生效。
 
+成员工具：`actr realm join | invite | members | revoke-invite | revoke-client | remove-member |
+set-role | transfer-owner | leave`。`join` 从 stdin（`-`）或参数读邀请，写出 0600 的 Realm 客户端 key
+文件；有 Realm Profile 的 Realm 由已验证的 Realm Profile 得到 Issuer 与 Realm Provider，没有的用
+`--issuer`（`--provider` 缺省为其 `host[:port]`）。其余命令用 `--key` 指定的 key 文件签名。
+
 ## Signaling
 
 `GET /signaling/ws` 升级到 WebSocket。身份只从原生 upgrade headers 或上述浏览器

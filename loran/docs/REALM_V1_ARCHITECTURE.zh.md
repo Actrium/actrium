@@ -564,11 +564,15 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   Service 程序只由 owner 注册；撤销 key 即时停用其 Actor（Signaling 断开并拒绝重连、TURN 关闭
   allocation 并拒绝认证）；运营者 `…/owner-invite` 与只读 `…/members`。共享 Realm 注册 secret、Realm
   管理 token 及其 admin 路由与认证已删除。Actr Host 以 `deployment.realm_client_key`（`actr realm join`
-  写出的 key 文件，含 `realm`、`provider_id`、`issuer`、`key_id` 与密钥，权限 0600）为每个
+  写出的 key 文件，含 `realm`、`provider_id`、`issuer`、`key_id` 与密钥，权限 0600；Unix 上组或其他用户
+  可访问的 key 文件被拒绝加载，提示 `chmod 600`，Android、iOS 除外）为每个
   `/register`、`/reissue`、`/renew` 请求新签证明；`actr realm` 提供 `join`、`invite`、`members`、
-  `revoke-invite`、`revoke-client`、`remove-member`、`set-role`、`transfer-owner`、`leave`；
-  e2e `package-runtime-echo` 走 owner 邀请 → 邀请 editor → 移除后拒签的全流程。尚未实现：`actr realm join`
-  从 `realms` 位置取 Realm Profile 并验证邀请内嵌的 Realm Profile（现只用 `--issuer`，内嵌的不使用）；Web（sw-host）
+  `revoke-invite`、`revoke-client`、`remove-member`、`set-role`、`transfer-owner`、`leave`（请求有连接与总
+  超时、不跟随重定向）。`join` 不给 `--issuer` 时取 `https://<domain>/.well-known/actr` 的
+  `realm_signing_keys`，从 `realms` 位置取 Realm Profile 并验证，用其 `issuer.url` 与 `provider.id`；邀请内嵌的
+  Realm Profile 只在同样验证通过时使用，两份都有效时取 sequence 高者（须为合法后继）；`--issuer` 留给没有
+  Realm Profile 的 Realm。脚本以 stdin（`-`）传邀请。Admin Web 有每个 Realm 的只读成员列表。
+  e2e `package-runtime-echo` 走 owner 邀请 → 邀请 editor → 移除后拒签的全流程。尚未实现：Web（sw-host）
   客户端的 Realm 客户端 key；Actr Host 下载 Realm 包后核对 `package.type`；Service 侧即时得知成员变化
   （现以 credential 到期为界）；
 - 已实现运行时分区：Actor credential 由该 Realm 的当前 issuer key 签发（首把为 Signer 中的

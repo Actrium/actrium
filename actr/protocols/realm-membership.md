@@ -250,7 +250,11 @@ to Guest workloads.
 - An invite is a bearer secret: a leaked unused invite can be redeemed by
   someone else. Issuers **SHOULD** choose short validity and revoke on
   suspected leaks; the owner sees every member and its clients in
-  `list_members` and can remove anyone who got in by mistake.
+  `list_members` and can remove anyone who got in by mistake. Tools **SHOULD
+  NOT** expose an invite where other local users can see it, such as a
+  command-line argument.
+- A Realm client key's private key stays on its client. Actr Hosts **SHOULD**
+  refuse to load a key file that other local users can read.
 - The holder of the Realm signing key and the operator can recover ownership
   through owner invites, so they sit inside the Realm's trust boundary, which
   is consistent with their existing power to sign Realm Profiles or suspend the

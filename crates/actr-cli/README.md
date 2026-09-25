@@ -44,7 +44,8 @@ Groups are named after **what the subcommand operates on**:
 - `pkg` — a local `.actr` package file (sign, verify, keygen)
 - `registry` — the remote registry / Issuer (discover, publish, fingerprint)
 - `dlq` — the Dead Letter Queue
-- `realm` — a Realm signing key (keygen, and signed Realm management requests)
+- `realm` — a Realm signing key (keygen, and signed Realm management requests),
+  and a member's Realm client key (join, invite, members, …)
 
 **Do not** group by workflow phase (`build`, `release`, `ops`, etc.) — those
 names rot as the workflow evolves.
