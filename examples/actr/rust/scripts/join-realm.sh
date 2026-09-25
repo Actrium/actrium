@@ -45,11 +45,12 @@ print("ri_" + text)
 PY
 )"
 
-"$ACTR_CMD" realm join "$OWNER_INVITE" --issuer "$ISSUER" --output "$OWNER_KEY" \
-    --label "$(basename "$(dirname "$OWNER_KEY")")" --force >/dev/null
+# Invites go through stdin: a command-line argument is visible in `ps`.
+"$ACTR_CMD" realm join - --issuer "$ISSUER" --output "$OWNER_KEY" \
+    --label "$(basename "$(dirname "$OWNER_KEY")")" --force <<<"$OWNER_INVITE" >/dev/null
 
 for CLIENT_KEY in "$@"; do
     INVITE="$("$ACTR_CMD" realm invite --key "$OWNER_KEY" --role editor | python3 -c 'import json, sys; print(json.load(sys.stdin)["invite"])')"
-    "$ACTR_CMD" realm join "$INVITE" --issuer "$ISSUER" --output "$CLIENT_KEY" \
-        --label "$(basename "$(dirname "$CLIENT_KEY")")" --force >/dev/null
+    "$ACTR_CMD" realm join - --issuer "$ISSUER" --output "$CLIENT_KEY" \
+        --label "$(basename "$(dirname "$CLIENT_KEY")")" --force <<<"$INVITE" >/dev/null
 done

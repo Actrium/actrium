@@ -352,16 +352,19 @@ ensure_realm() {
     local issuer="http://127.0.0.1:${HTTP_PORT}/issuer"
     REALM_OWNER_KEY="$RUN_DIR/keys/owner.json"
     REALM_CLIENT_KEY="$RUN_DIR/keys/client.json"
-    run_actr realm join "$owner_invite" --issuer "$issuer" \
-        --output "$REALM_OWNER_KEY" --label server >"$RUN_DIR/join-owner.json"
+    # Invites go through stdin: a command-line argument is visible in `ps`.
+    run_actr realm join - --issuer "$issuer" \
+        --output "$REALM_OWNER_KEY" --label server \
+        <<<"$owner_invite" >"$RUN_DIR/join-owner.json"
     [ "$(json_field "$RUN_DIR/join-owner.json" '.role')" = "owner" ] ||
         fail "The owner invite did not make an owner"
 
     run_actr realm invite --key "$REALM_OWNER_KEY" --role editor >"$RUN_DIR/client-invite.json"
     local client_invite
     client_invite="$(json_field "$RUN_DIR/client-invite.json" '.invite')"
-    run_actr realm join "$client_invite" --issuer "$issuer" \
-        --output "$REALM_CLIENT_KEY" --label client >"$RUN_DIR/join-client.json"
+    run_actr realm join - --issuer "$issuer" \
+        --output "$REALM_CLIENT_KEY" --label client \
+        <<<"$client_invite" >"$RUN_DIR/join-client.json"
     REALM_CLIENT_MEMBER_ID="$(json_field "$RUN_DIR/join-client.json" '.member_id')"
     [ "$(json_field "$RUN_DIR/join-client.json" '.role')" = "editor" ] ||
         fail "The client did not join as an editor"
