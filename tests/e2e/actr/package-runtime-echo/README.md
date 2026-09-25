@@ -4,7 +4,7 @@ This scenario validates the local package runtime flow end-to-end:
 
 1. Start a local `actrix` node from the scenario config.
 2. Use the Admin API to create a dedicated realm and capture its `realm_secret`.
-3. Use the Admin API to create and approve the `actrium` publisher used by both packages.
+3. Seed the publisher row used by the server package into the run's SQLite database (production publishers register with a signed `register_publisher` request).
 4. Generate a temporary Rust echo service with `actr init/install/gen`.
 5. Build and publish the signed server package.
 6. Build a local client guest package and run the client host.
