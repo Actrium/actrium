@@ -856,6 +856,13 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				// ActrArchive.c includes <archive.h>; the macOS SDK does not ship
+				// libarchive headers, so pull them from the Homebrew keg.
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					/opt/homebrew/opt/libarchive/include,
+					/usr/local/opt/libarchive/include,
+				);
 				INFOPLIST_FILE = Actrium/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -898,6 +905,13 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				// ActrArchive.c includes <archive.h>; the macOS SDK does not ship
+				// libarchive headers, so pull them from the Homebrew keg.
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					/opt/homebrew/opt/libarchive/include,
+					/usr/local/opt/libarchive/include,
+				);
 				INFOPLIST_FILE = Actrium/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
