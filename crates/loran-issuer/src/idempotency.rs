@@ -404,7 +404,8 @@ impl ControlAttemptStore {
         };
         if !rotated {
             // A `/reissue` that consumed the token meanwhile turns it into
-            // a consumed token; the retry gets the successor instead.
+            // a consumed token. Not a token failure: `425` makes the client
+            // retry, and the retry gets the successor instead.
             let consumed: i64 = sqlx::query_scalar(
                 "SELECT EXISTS(
                     SELECT 1 FROM issuer_renewal_token WHERE actor_id = ?1 AND token_hash = ?2
@@ -416,7 +417,7 @@ impl ControlAttemptStore {
             .await
             .map_err(|error| AttemptError::Store(format!("successor recheck failed: {error}")))?;
             if consumed != 0 {
-                return Err(AttemptError::TokenRejected);
+                return Err(AttemptError::LeaseLost);
             }
         } else {
             sqlx::query(
@@ -886,6 +887,83 @@ pub(crate) mod tests {
             store.complete_reissue(&reissue, &actor, prepared).await,
             Err(AttemptError::LeaseLost)
         ));
+    }
+
+    /// A renewal that keeps its token, committing after a `/reissue`
+    /// consumed that token, is retried rather than refused: the retry gets
+    /// the successor.
+    #[tokio::test]
+    async fn a_kept_token_consumed_meanwhile_is_retried() {
+        setup_db().await;
+        let realm = "attempt-consumed@example.com";
+        platform::realm::Realm::create(realm.to_string(), "secret-hash".to_string())
+            .await
+            .unwrap();
+        let actor = ActrId {
+            realm: realm.to_string(),
+            serial_number: 12,
+        };
+        sqlx::query(
+            "INSERT INTO issued_actor_identity (realm, serial_number, actor_type, issued_at)
+             VALUES (?, 12, 'acme/worker@1.0.0', 1)",
+        )
+        .bind(realm)
+        .execute(platform::storage::db::get_database().get_pool())
+        .await
+        .unwrap();
+        let secret = [7u8; 32];
+        let token = [8u8; 32];
+        let now = crate::renewal::now_secs();
+        let expires_at = now + 7200;
+        crate::renewal::insert_renewal_token(&actor, &crate::renewal::hash_token(&token), expires_at)
+            .await
+            .unwrap();
+        let store = ControlAttemptStore::new(&secret);
+        let attempt_id = [40u8; 16];
+
+        let renew = acquired(
+            store
+                .claim(Operation::Renew, &attempt_id, &actor, b"renew")
+                .await
+                .unwrap(),
+        );
+        let kept =
+            crate::renewal::prepare_renewal_token_rotation(&actor, &token, &secret, 3600, 86_400)
+                .await
+                .unwrap();
+        assert!(matches!(kept.outcome, RotationOutcome::Unchanged { .. }));
+
+        // A `/reissue` consumes the token meanwhile.
+        let successor = crate::renewal::derive_successor_token(&secret, &token, &actor, expires_at);
+        crate::renewal::insert_renewal_token(
+            &actor,
+            &crate::renewal::hash_token(&successor),
+            now + 86_400,
+        )
+        .await
+        .unwrap();
+
+        let error = store
+            .complete_renewal(&renew, &actor, None, &kept, b"response", now + 60)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, AttemptError::LeaseLost), "{error:?}");
+
+        store.release(&renew).await.unwrap();
+        acquired(
+            store
+                .claim(Operation::Renew, &attempt_id, &actor, b"renew")
+                .await
+                .unwrap(),
+        );
+        let retried =
+            crate::renewal::prepare_renewal_token_rotation(&actor, &token, &secret, 3600, 86_400)
+                .await
+                .unwrap();
+        match retried.outcome {
+            RotationOutcome::Rotated { token, .. } => assert_eq!(token.as_ref(), successor),
+            RotationOutcome::Unchanged { .. } => panic!("the retry keeps a consumed token"),
+        }
     }
 
     /// A revocation or a Realm suspension that lands after the first check
