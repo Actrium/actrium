@@ -289,7 +289,8 @@ creation_intent
   intent_id, package_source, stage, result_actor_id, timestamps
 
 realm_domain
-  domain, signing_keys, signing_keys_sequence, authority_descriptor_digest
+  domain, signing_keys, signing_keys_sequence, signing_keys_digest,
+  authority_descriptor_digest
 
 realm
   realm_name, profile_digest, profile_sequence, provider_id,
@@ -298,7 +299,7 @@ realm
 
 An instance uses the Realm name as its business primary key (unchanged across upgrades); the current Service's ActorId is recorded as a field; `actor_id_hash` is only used for indexing and directories.
 
-`realm_domain` records each trusted Realm domain and its Realm signing keys (the `realm_signing_keys` member from `https://<domain>/.well-known/actr`, defined in Actr Authority Discovery §4.4; `signing_keys` are the keys that have been accepted and pinned, and `signing_keys_sequence` is the accepted `sequence`), refreshed together with the Realm Profile so that removing a key invalidates the Realm Profiles it signed; `realm` records each instance Realm, with `profile_sequence` and `provider_id` used to reject a rolled-back Realm Profile or one whose `provider.id` has changed (a local Realm has no Realm Profile, so both are empty), and `client_key_ref` points at that Realm's own Realm client key (never reused across Realms). Both are keyed by the full Realm name.
+`realm_domain` records each trusted Realm domain and its Realm signing keys (the `realm_signing_keys` member from `https://<domain>/.well-known/actr`, defined in Actr Authority Discovery §4.4; `signing_keys` holds every key the domain has ever had accepted with its last state — `id`, public key and `active`, `retired` or removed; removed keys are kept too, so an `id` cannot change its public key and a removed key is never accepted again; `signing_keys_sequence` is the accepted `sequence` and `signing_keys_digest` the digest of the accepted member, which tells whether a member with the same `sequence` has the same content; after the user re-confirms an identity change these records are cleared and the new member becomes the baseline), refreshed together with the Realm Profile so that removing a key invalidates the Realm Profiles it signed; `realm` records each instance Realm, with `profile_sequence` and `provider_id` used to reject a rolled-back Realm Profile or one whose `provider.id` has changed (a local Realm has no Realm Profile, so both are empty), and `client_key_ref` points at that Realm's own Realm client key (never reused across Realms). Both are keyed by the full Realm name.
 
 `ApplicationAssurance` is a derived conclusion for the current facet, not a permanent property of the Service. It must be recomputed after cache expiry, Tab recreation, or a state or graph change; display also requires `Ready`. Raw attestation tokens and the full remote topology are preferably kept in a short-lived encrypted cache or in memory, and must not be persisted to disk in plaintext long-term just for the UI's convenience.
 
