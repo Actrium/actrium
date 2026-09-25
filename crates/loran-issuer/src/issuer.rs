@@ -825,39 +825,47 @@ impl AIdIssuer {
                 }
             };
 
-            // Verify possession against the publisher's CURRENT signing key: a
+            // Verify possession against an active signing key (the current
+            // one, or the second one while the publisher rotates): a
             // publisher that has rotated its key must still be able to launch
-            // instances of an already-published package, and control of the
-            // current key is the strongest possession proof available. This can
-            // differ from `package_signing_key_id`, which is the (possibly
-            // retired) key that signed the stored manifest.
-            let publisher = manager
-                .resolve_by_name(publisher_name)
+            // instances of an already-published package, and control of an
+            // active key is the strongest possession proof available. This
+            // can differ from `package_signing_key_id`, which is the
+            // (possibly retired) key that signed the stored manifest.
+            let publishing_keys = manager
+                .active_keys(publisher_name)
                 .await
                 .map_err(Self::map_publisher_verification_error)?;
 
             let manifest_sha256_hex = hex::encode(request_manifest_hash);
-            let binding = Self::verify_publisher_auth(
-                &pool,
-                &publisher.public_key,
-                publisher_name,
-                &publisher.key_id,
-                &request.realm,
-                actr_type,
-                target_ref,
-                &manifest_sha256_hex,
-                publisher_auth_signature.as_ref(),
-                publisher_auth_signed_at,
-                publisher_auth_nonce.as_ref(),
-            )
-            .await?;
+            let mut result = Err(AidError::PublisherNotVerified);
+            for (key_id, public_key) in &publishing_keys {
+                result = Self::verify_publisher_auth(
+                    &pool,
+                    public_key,
+                    publisher_name,
+                    key_id,
+                    &request.realm,
+                    actr_type,
+                    target_ref,
+                    &manifest_sha256_hex,
+                    publisher_auth_signature.as_ref(),
+                    publisher_auth_signed_at,
+                    publisher_auth_nonce.as_ref(),
+                )
+                .await;
+                if !matches!(result, Err(AidError::PublisherNotVerified)) {
+                    break;
+                }
+            }
+            let binding = result?;
 
             platform::recording::debug!(
                 "Publisher Registry table lookup passed, type_str={}, target={}, package_signing_key_id={}, publisher_key_id={}",
                 type_str,
                 target_ref,
                 package_signing_key_id,
-                publisher.key_id
+                binding.signing_key_id
             );
             return Ok(Some(binding));
         }

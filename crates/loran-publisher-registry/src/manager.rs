@@ -7,7 +7,7 @@ use crate::{
     reserved::canonical_publisher_domain,
 };
 use actr_protocol::realm_profile::jcs;
-use actr_protocol::{KeyStatus, PublisherKeys, PublisherProfile};
+use actr_protocol::{KeyPinOutcome, KeyPins, KeyStatus, PublisherKeys, PublisherProfile};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::SqlitePool;
@@ -154,14 +154,40 @@ impl PublisherRegistryManager {
             )));
         }
 
-        let key_expires_at = publisher_record
-            .key_expires_at
-            .ok_or(PublisherRegistryError::CertificateExpired)?;
-        if chrono::Utc::now().timestamp() >= key_expires_at {
+        if publisher_record
+            .publishing_keys(chrono::Utc::now().timestamp())
+            .is_empty()
+        {
             return Err(PublisherRegistryError::CertificateExpired);
         }
 
         Ok(())
+    }
+
+    /// The `(key_id, public_key)` pairs of `name`'s active package signing
+    /// keys: the current one and, while it rotates, the second one. Natural
+    /// expiry ends their authority to publish, not to prove possession.
+    pub async fn active_keys(
+        &self,
+        name: &str,
+    ) -> Result<Vec<(String, String)>, PublisherRegistryError> {
+        let record = Publisher::get_by_name(&self.pool, name)
+            .await?
+            .ok_or(PublisherRegistryError::NotFound)?;
+        if record.status != PublisherStatus::Active {
+            return Err(PublisherRegistryError::InvalidStatus(format!(
+                "Publisher '{name}' is not active"
+            )));
+        }
+        let mut keys = Vec::new();
+        if !record.key_id.is_empty() {
+            keys.push((record.key_id, record.public_key));
+        }
+        keys.extend(record.next_key_id.zip(record.next_public_key));
+        if keys.is_empty() {
+            return Err(PublisherRegistryError::CertificateExpired);
+        }
+        Ok(keys)
     }
 
     // ========== Publish Nonce Challenge-Response ==========
@@ -196,14 +222,16 @@ impl PublisherRegistryManager {
     /// of a registered publisher (`register_publisher`,
     /// `actr/protocols/authority-discovery.md` section 4.5).
     ///
-    /// The first accepted profile pins its `profile_signing_keys`. A later
-    /// profile must be signed by a pinned `active` key, list only pinned keys,
-    /// never make a retired key active again, and never lower `sequence`; the
-    /// same `sequence` must be the same profile. Rotation chains are not
-    /// followed yet. The profile's one `active` package signing key, which
-    /// must be within its `not_before`/`not_after`, becomes the publisher's
-    /// current key; a replaced key is archived as retired and a key used
-    /// before is never reinstated.
+    /// The profile's `profile_signing_keys` go through the acceptance
+    /// procedure of section 4.4 against the pins of the accepted profile:
+    /// the first profile pins them, later ones may retire, remove or, along
+    /// a rotation chain, introduce keys; an identity change is refused.
+    ///
+    /// The profile lists one or two `active` package signing keys, each
+    /// within its `not_before`/`not_after`; all of them publish. The current
+    /// key stays current while it is active; a key that is no longer active
+    /// is archived as retired; a key the profile no longer lists is revoked,
+    /// and a key used before is never reinstated.
     pub async fn register_publisher(
         &self,
         publisher: &str,
@@ -216,18 +244,6 @@ impl PublisherRegistryManager {
                 "'{publisher}' is not the normalized domain of this Publisher Profile"
             )));
         }
-        let mut active = keys
-            .keys
-            .iter()
-            .filter(|key| key.status == KeyStatus::Active);
-        let (Some(package_key), None) = (active.next(), active.next()) else {
-            return Err(invalid(
-                "a Publisher Profile must list exactly one active package signing key".into(),
-            ));
-        };
-        crypto::validate_public_key(&package_key.public_key)
-            .map_err(|error| invalid(format!("package signing key: {error}")))?;
-        let key_id = crypto::compute_key_id_from_b64(&package_key.public_key)?;
         let now = chrono::Utc::now().timestamp();
         let time = |value: &Option<String>, member: &str| {
             value
@@ -239,14 +255,31 @@ impl PublisherRegistryManager {
                 })
                 .transpose()
         };
-        let not_before = time(&package_key.not_before, "not_before")?;
-        let key_expires_at =
-            time(&package_key.not_after, "not_after")?.unwrap_or(now + DEFAULT_KEY_LIFETIME_SECS);
-        if not_before.is_some_and(|not_before| now < not_before) || now >= key_expires_at {
-            return Err(invalid(format!(
-                "package signing key '{}' is outside its validity period",
-                package_key.id
-            )));
+        // (key_id, public_key, expires_at) of each active package signing key.
+        let mut active = Vec::new();
+        for key in keys
+            .keys
+            .iter()
+            .filter(|key| key.status == KeyStatus::Active)
+        {
+            crypto::validate_public_key(&key.public_key)
+                .map_err(|error| invalid(format!("package signing key: {error}")))?;
+            let key_id = crypto::compute_key_id_from_b64(&key.public_key)?;
+            let not_before = time(&key.not_before, "not_before")?;
+            let expires_at =
+                time(&key.not_after, "not_after")?.unwrap_or(now + DEFAULT_KEY_LIFETIME_SECS);
+            if not_before.is_some_and(|not_before| now < not_before) || now >= expires_at {
+                return Err(invalid(format!(
+                    "package signing key '{}' is outside its validity period",
+                    key.id
+                )));
+            }
+            active.push((key_id, key.public_key.clone(), expires_at));
+        }
+        if active.is_empty() {
+            return Err(invalid(
+                "a Publisher Profile must list an active package signing key".into(),
+            ));
         }
         let document = serde_json::to_value(profile)
             .map_err(|error| invalid(format!("Publisher Profile: {error}")))?;
@@ -261,15 +294,62 @@ impl PublisherRegistryManager {
             .bind(publisher)
             .fetch_optional(&mut *tx)
             .await?;
+        if let Some(record) = &existing {
+            if record.status != PublisherStatus::Active {
+                return Err(PublisherRegistryError::InvalidStatus(format!(
+                    "Publisher '{publisher}' is {}",
+                    record.status
+                )));
+            }
+            if record.profile_json == profile_json {
+                return Ok(record.clone());
+            }
+        }
+        let pinned = existing
+            .as_ref()
+            .and_then(|record| record.profile_pins.as_deref())
+            .map(serde_json::from_str::<KeyPins>)
+            .transpose()
+            .map_err(|error| invalid(format!("stored key pins: {error}")))?;
+        let rejected = |message: String| PublisherRegistryError::VerificationFailed(message);
+        let pins = match profile
+            .accept(publisher, chrono::Utc::now(), pinned.as_ref())
+            .map_err(|error| rejected(error.to_string()))?
+        {
+            (_, KeyPinOutcome::Accepted(pins)) => pins,
+            (_, KeyPinOutcome::IdentityChange(_)) => {
+                return Err(rejected(
+                    "the Publisher Profile is not signed by a key chained to a pinned key".into(),
+                ));
+            }
+        };
+        let pins_json =
+            serde_json::to_string(&pins).map_err(|error| invalid(format!("key pins: {error}")))?;
+
+        // The current key stays current while it is active.
+        let held = existing.as_ref().map_or(Vec::new(), |record| {
+            let mut held = vec![record.key_id.clone()];
+            held.extend(record.next_key_id.clone());
+            held
+        });
+        if let Some(position) = active.iter().position(|(id, ..)| held.first() == Some(id)) {
+            active.swap(0, position);
+        } else if let Some(position) = active.iter().position(|(id, ..)| held.contains(id)) {
+            active.swap(0, position);
+        }
+        let (key_id, public_key, key_expires_at) = active[0].clone();
+        let next = active.get(1).cloned();
+
         let Some(record) = existing else {
             sqlx::query(
                 "INSERT INTO publisher
                     (name, public_key, key_id, profile_json, contact, status,
-                     created_at, updated_at, verified_at, key_expires_at)
-                 VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)",
+                     created_at, updated_at, verified_at, key_expires_at,
+                     next_public_key, next_key_id, next_key_expires_at, profile_pins)
+                 VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(publisher)
-            .bind(&package_key.public_key)
+            .bind(&public_key)
             .bind(&key_id)
             .bind(&profile_json)
             .bind(contact)
@@ -277,6 +357,10 @@ impl PublisherRegistryManager {
             .bind(now)
             .bind(now)
             .bind(key_expires_at)
+            .bind(next.as_ref().map(|(_, key, _)| key))
+            .bind(next.as_ref().map(|(id, ..)| id))
+            .bind(next.as_ref().map(|(.., expires)| expires))
+            .bind(&pins_json)
             .execute(&mut *tx)
             .await?;
             tx.commit().await?;
@@ -286,49 +370,77 @@ impl PublisherRegistryManager {
                 .ok_or(PublisherRegistryError::NotFound);
         };
 
-        if record.status != PublisherStatus::Active {
-            return Err(PublisherRegistryError::InvalidStatus(format!(
-                "Publisher '{publisher}' is {}",
-                record.status
-            )));
-        }
-        if record.profile_json == profile_json {
-            return Ok(record);
-        }
-        check_successor(&record.profile_json, profile, keys)?;
-
-        if record.key_id != key_id {
-            // A key archived or revoked before never becomes current again.
-            if PublisherKeyHistory::key_id_ever_used(&mut *tx, record.id, &key_id).await? {
+        // A key archived or revoked before never becomes active again.
+        for (id, ..) in &active {
+            if !held.contains(id)
+                && PublisherKeyHistory::key_id_ever_used(&mut *tx, record.id, id).await?
+            {
                 return Err(invalid(
                     "a previously used publisher key must not be reinstated".into(),
                 ));
             }
-            if !record.key_id.is_empty() {
-                sqlx::query(
-                    "INSERT INTO publisher_key_history
-                     (publisher_id, key_id, public_key, status, created_at, retired_at)
-                     VALUES (?, ?, ?, 'retired', ?, ?)",
-                )
-                .bind(record.id)
-                .bind(&record.key_id)
-                .bind(&record.public_key)
-                .bind(record.verified_at.unwrap_or(record.created_at))
-                .bind(now)
-                .execute(&mut *tx)
-                .await?;
+        }
+        // Keys that stop being active: retired while the profile still lists
+        // them, revoked once it does not.
+        let leaving = std::iter::once((&record.key_id, &record.public_key)).chain(
+            record
+                .next_key_id
+                .as_ref()
+                .zip(record.next_public_key.as_ref()),
+        );
+        for (old_id, old_key) in leaving {
+            if old_id.is_empty() || active.iter().any(|(id, ..)| id == old_id) {
+                continue;
+            }
+            let listed = keys.keys.iter().any(|key| &key.public_key == old_key);
+            sqlx::query(
+                "INSERT INTO publisher_key_history
+                 (publisher_id, key_id, public_key, status, created_at, retired_at)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(record.id)
+            .bind(old_id)
+            .bind(old_key)
+            .bind(if listed { "retired" } else { "revoked" })
+            .bind(record.verified_at.unwrap_or(record.created_at))
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+        }
+        // A retired key the profile no longer lists is revoked.
+        for history in sqlx::query_as::<_, PublisherKeyHistory>(
+            "SELECT * FROM publisher_key_history WHERE publisher_id = ? AND status = 'retired'",
+        )
+        .bind(record.id)
+        .fetch_all(&mut *tx)
+        .await?
+        {
+            if !keys
+                .keys
+                .iter()
+                .any(|key| key.public_key == history.public_key)
+            {
+                sqlx::query("UPDATE publisher_key_history SET status = 'revoked' WHERE id = ?")
+                    .bind(history.id)
+                    .execute(&mut *tx)
+                    .await?;
             }
         }
         let updated = sqlx::query(
             "UPDATE publisher
-             SET public_key = ?, key_id = ?, key_expires_at = ?, profile_json = ?,
-                 contact = ?, updated_at = ?
+             SET public_key = ?, key_id = ?, key_expires_at = ?, next_public_key = ?,
+                 next_key_id = ?, next_key_expires_at = ?, profile_json = ?,
+                 profile_pins = ?, contact = ?, updated_at = ?
              WHERE id = ? AND status = 'active' AND profile_json = ?",
         )
-        .bind(&package_key.public_key)
+        .bind(&public_key)
         .bind(&key_id)
         .bind(key_expires_at)
+        .bind(next.as_ref().map(|(_, key, _)| key))
+        .bind(next.as_ref().map(|(id, ..)| id))
+        .bind(next.as_ref().map(|(.., expires)| expires))
         .bind(&profile_json)
+        .bind(&pins_json)
         .bind(contact)
         .bind(now)
         .bind(record.id)
@@ -491,6 +603,31 @@ impl PublisherRegistryManager {
         if publisher_record.key_id == key_id {
             return self.resolve_by_name(name).await;
         }
+        // The second active key while the publisher rotates.
+        if publisher_record.next_key_id.as_deref() == Some(key_id)
+            && let (Some(public_key), Some(expires_at)) = (
+                publisher_record.next_public_key.clone(),
+                publisher_record.next_key_expires_at,
+            )
+        {
+            let profile = accepted_profile(&publisher_record.profile_json);
+            return Ok(PublisherPublicInfo {
+                id: publisher_record.id,
+                key_id: key_id.to_string(),
+                certificate: PublisherCertificate {
+                    key_id: key_id.to_string(),
+                    publisher: publisher_record.name.clone(),
+                    public_key: public_key.clone(),
+                    issued_at: publisher_record
+                        .updated_at
+                        .unwrap_or(publisher_record.created_at),
+                    expires_at,
+                },
+                name: publisher_record.name,
+                public_key,
+                profile,
+            });
+        }
 
         let history = PublisherKeyHistory::get_by_key_id(&self.pool, publisher_record.id, key_id)
             .await?
@@ -623,7 +760,8 @@ impl PublisherRegistryManager {
         // --- Challenge-Response nonce verification ---
         // Flow: find_pending → verify nonce_sig over the full signable request body
         //       → verify manifest_sig → atomic consume.
-        let nonce_entry = match (&req.nonce, &req.nonce_sig) {
+        let (nonce_entry, (signing_key_id, signing_public_key)) = match (&req.nonce, &req.nonce_sig)
+        {
             (Some(nonce_b64), Some(nonce_sig_b64)) => {
                 use base64::Engine as _;
                 use sha2::{Digest, Sha256};
@@ -655,20 +793,25 @@ impl PublisherRegistryManager {
                 let nonce_hex = hex::encode(&nonce_bytes);
                 let payload = build_publish_auth_payload(&req.publisher, &nonce_hex, &body_sha256);
 
-                let valid = crypto::verify_signature(
-                    payload.as_bytes(),
-                    nonce_sig_b64,
-                    &publisher_record.public_key,
-                )?;
-                if !valid {
+                // Any key that may publish; it must also sign the manifest.
+                let mut signer = None;
+                for (key_id, public_key) in
+                    publisher_record.publishing_keys(chrono::Utc::now().timestamp())
+                {
+                    if crypto::verify_signature(payload.as_bytes(), nonce_sig_b64, public_key)? {
+                        signer = Some((key_id.to_string(), public_key.to_string()));
+                        break;
+                    }
+                }
+                let Some(signer) = signer else {
                     platform::recording::warn!(
                         "publish nonce signature invalid: publisher={}",
                         req.publisher
                     );
                     return Err(PublisherRegistryError::Unauthorized);
-                }
+                };
 
-                entry
+                (entry, signer)
             }
             _ => {
                 platform::recording::warn!(
@@ -680,11 +823,8 @@ impl PublisherRegistryManager {
         };
 
         // Step 3: Verify manifest signature
-        let valid = crypto::verify_signature(
-            req.manifest.as_bytes(),
-            &req.signature,
-            &publisher_record.public_key,
-        )?;
+        let valid =
+            crypto::verify_signature(req.manifest.as_bytes(), &req.signature, &signing_public_key)?;
         if !valid {
             return Err(PublisherRegistryError::InvalidSignature);
         }
@@ -750,16 +890,16 @@ impl PublisherRegistryManager {
         }
 
         // If a modern manifest declares its signing key, it must identify the
-        // current publish-authority key. The database field remains
+        // key that signed this request. The database field remains
         // authoritative so legacy manifests without this field stay publishable.
         if let Some(manifest_key_id) = manifest_toml
             .get("signing_key_id")
             .and_then(|value| value.as_str())
-            && manifest_key_id != publisher_record.key_id
+            && manifest_key_id != signing_key_id
         {
             return Err(PublisherRegistryError::InvalidRequest(format!(
-                "manifest signing_key_id '{}' != current Publisher key '{}'",
-                manifest_key_id, publisher_record.key_id
+                "manifest signing_key_id '{}' != signing Publisher key '{}'",
+                manifest_key_id, signing_key_id
             )));
         }
 
@@ -792,7 +932,7 @@ impl PublisherRegistryManager {
             &req.target,
             &req.manifest,
             &req.signature,
-            &publisher_record.key_id,
+            &signing_key_id,
             proto_files_str.as_deref(),
         )
         .await?;
@@ -943,59 +1083,6 @@ fn accepted_profile(profile_json: &str) -> Option<Value> {
     serde_json::from_str::<Value>(profile_json)
         .ok()
         .filter(|profile| profile.get("signature").is_some())
-}
-
-/// Check `candidate` against the accepted profile `accepted_json` (see
-/// [`PublisherRegistryManager::register_publisher`]).
-fn check_successor(
-    accepted_json: &str,
-    candidate: &PublisherProfile,
-    keys: &PublisherKeys,
-) -> Result<(), PublisherRegistryError> {
-    let Some(accepted) = accepted_profile(accepted_json) else {
-        return Ok(());
-    };
-    let rejected = |message: String| PublisherRegistryError::VerificationFailed(message);
-    let accepted: PublisherKeys = serde_json::from_value(accepted)
-        .map_err(|error| rejected(format!("accepted Publisher Profile: {error}")))?;
-    let pinned = |id: &str, public_key: &str| {
-        accepted
-            .profile_signing_keys
-            .iter()
-            .find(|key| key.id == id && key.public_key == public_key)
-    };
-    let signer = keys
-        .profile_signing_keys
-        .iter()
-        .find(|key| key.id == candidate.signature.key_id)
-        .and_then(|key| pinned(&key.id, &key.public_key));
-    if signer.is_none_or(|key| key.status != KeyStatus::Active) {
-        return Err(rejected(
-            "the Publisher Profile is not signed by a pinned active key".into(),
-        ));
-    }
-    // The same sequence with other content was ruled out by the caller.
-    if keys.sequence <= accepted.sequence {
-        return Err(rejected(format!(
-            "Publisher Profile sequence {} does not follow {}",
-            keys.sequence, accepted.sequence
-        )));
-    }
-    for key in &keys.profile_signing_keys {
-        let Some(pinned) = pinned(&key.id, &key.public_key) else {
-            return Err(rejected(format!(
-                "the Publisher Profile lists new signing key '{}'; key rotation chains are not supported",
-                key.id
-            )));
-        };
-        if pinned.status == KeyStatus::Retired && key.status == KeyStatus::Active {
-            return Err(rejected(format!(
-                "the Publisher Profile reactivates retired signing key '{}'",
-                key.id
-            )));
-        }
-    }
-    Ok(())
 }
 
 /// Public API for Issuer integration: check if a type_str is a valid, active package.

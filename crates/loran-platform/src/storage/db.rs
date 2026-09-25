@@ -325,7 +325,11 @@ impl Database {
                 verified_at  INTEGER,
                 suspended_at INTEGER,
                 revoked_at   INTEGER,
-                key_expires_at  INTEGER
+                key_expires_at  INTEGER,
+                next_public_key TEXT,
+                next_key_id  TEXT,
+                next_key_expires_at INTEGER,
+                profile_pins TEXT
             )",
         )
         .execute(&mut *tx)

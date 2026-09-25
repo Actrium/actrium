@@ -57,6 +57,13 @@ pub struct Publisher {
     pub revoked_at: Option<i64>,
     /// Signing key expiration (unix timestamp). Set on activate(), checked on publish.
     pub key_expires_at: Option<i64>,
+    /// A second `active` package signing key while the publisher rotates
+    /// (`actor-package.md` section 6.8); it publishes too.
+    pub next_public_key: Option<String>,
+    pub next_key_id: Option<String>,
+    pub next_key_expires_at: Option<i64>,
+    /// Pins of the Publisher Profile signing keys (`KeyPins` JSON).
+    pub profile_pins: Option<String>,
 }
 
 impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Publisher {
@@ -78,11 +85,30 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Publisher {
             suspended_at: row.try_get("suspended_at")?,
             revoked_at: row.try_get("revoked_at")?,
             key_expires_at: row.try_get("key_expires_at").unwrap_or(None),
+            next_public_key: row.try_get("next_public_key")?,
+            next_key_id: row.try_get("next_key_id")?,
+            next_key_expires_at: row.try_get("next_key_expires_at")?,
+            profile_pins: row.try_get("profile_pins")?,
         })
     }
 }
 
 impl Publisher {
+    /// The keys that may publish at `now`, as `(key_id, public_key)`: the
+    /// current key and the second active key, each before its expiry.
+    pub fn publishing_keys(&self, now: i64) -> Vec<(&str, &str)> {
+        let mut keys = Vec::new();
+        if !self.key_id.is_empty() && self.key_expires_at.is_some_and(|at| now < at) {
+            keys.push((self.key_id.as_str(), self.public_key.as_str()));
+        }
+        if let (Some(key_id), Some(public_key)) = (&self.next_key_id, &self.next_public_key)
+            && self.next_key_expires_at.is_some_and(|at| now < at)
+        {
+            keys.push((key_id.as_str(), public_key.as_str()));
+        }
+        keys
+    }
+
     /// A pending record; production records come from
     /// `PublisherRegistryManager::register_publisher`.
     #[cfg(test)]
@@ -190,7 +216,8 @@ impl Publisher {
         Ok(())
     }
 
-    /// Emergency-revoke the CURRENTLY ACTIVE signing key (private key compromised).
+    /// Emergency-revoke the CURRENTLY ACTIVE signing keys (private key
+    /// compromised): the current key and, while rotating, the second one.
     ///
     /// `PublisherKeyHistory::revoke` only touches keys that were already rotated away;
     /// this closes the gap where the live key itself is compromised and must be
@@ -239,23 +266,28 @@ impl Publisher {
         // rejected by all future verification, not merely retired. The UNIQUE
         // (publisher_id, key_id) index cannot conflict here because the current key has
         // never been archived while it was in use.
-        sqlx::query(
-            "INSERT INTO publisher_key_history
-             (publisher_id, key_id, public_key, status, created_at, retired_at)
-             VALUES (?, ?, ?, 'revoked', ?, ?)",
-        )
-        .bind(self.id)
-        .bind(&self.key_id)
-        .bind(&self.public_key)
-        .bind(created_at)
-        .bind(now)
-        .execute(&mut *tx)
-        .await?;
+        let live = std::iter::once((&self.key_id, &self.public_key))
+            .chain(self.next_key_id.as_ref().zip(self.next_public_key.as_ref()));
+        for (key_id, public_key) in live {
+            sqlx::query(
+                "INSERT INTO publisher_key_history
+                 (publisher_id, key_id, public_key, status, created_at, retired_at)
+                 VALUES (?, ?, ?, 'revoked', ?, ?)",
+            )
+            .bind(self.id)
+            .bind(key_id)
+            .bind(public_key)
+            .bind(created_at)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+        }
 
         // Blank the live key material and expiry so no resolution path can serve
         // it and publish fails closed until the publisher renews to a fresh key.
         sqlx::query(
             "UPDATE publisher SET public_key = '', key_id = '', key_expires_at = NULL,
+                 next_public_key = NULL, next_key_id = NULL, next_key_expires_at = NULL,
                  updated_at = ? WHERE id = ?",
         )
         .bind(now)
@@ -268,6 +300,9 @@ impl Publisher {
         self.public_key = String::new();
         self.key_id = String::new();
         self.key_expires_at = None;
+        self.next_public_key = None;
+        self.next_key_id = None;
+        self.next_key_expires_at = None;
         self.updated_at = Some(now);
         Ok(())
     }

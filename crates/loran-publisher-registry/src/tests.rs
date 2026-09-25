@@ -70,7 +70,11 @@ async fn setup_test_pool() -> SqlitePool {
             verified_at INTEGER,
             suspended_at INTEGER,
             revoked_at INTEGER,
-            key_expires_at INTEGER
+            key_expires_at INTEGER,
+            next_public_key TEXT,
+            next_key_id TEXT,
+            next_key_expires_at INTEGER,
+            profile_pins TEXT
         )",
     )
     .execute(&pool)
@@ -1438,38 +1442,186 @@ async fn register_publisher_pins_the_first_profile() {
         Err(PublisherRegistryError::VerificationFailed(_))
     ));
 
-    // It must be signed by a pinned active key and list no new signing key.
+    // It must be signed by a pinned active key.
     let stranger = SigningKey::generate(&mut OsRng);
-    for profile in [
-        signed_profile(
-            "apps.example.com",
-            2,
-            &[("root-1", &stranger, "active")],
-            &[(&package, "active")],
-        ),
-        signed_profile(
-            "apps.example.com",
-            2,
-            &[("root-1", &root, "active"), ("root-2", &stranger, "active")],
-            &[(&package, "active")],
-        ),
-    ] {
-        assert!(matches!(
-            register(&manager, &profile).await,
-            Err(PublisherRegistryError::VerificationFailed(_))
-        ));
-    }
-
-    // Exactly one active package signing key is required.
-    let two = signed_profile(
+    let forged = signed_profile(
         "apps.example.com",
         2,
-        &roots,
-        &[(&package, "active"), (&stranger, "active")],
+        &[("root-1", &stranger, "active")],
+        &[(&package, "active")],
     );
     assert!(matches!(
-        register(&manager, &two).await,
-        Err(PublisherRegistryError::InvalidRequest(_))
+        register(&manager, &forged).await,
+        Err(PublisherRegistryError::VerificationFailed(_))
+    ));
+    // A new signing key listed without a rotation chain is not pinned, so it
+    // cannot sign the next profile.
+    let unchained = signed_profile(
+        "apps.example.com",
+        2,
+        &[("root-1", &root, "active"), ("root-2", &stranger, "active")],
+        &[(&package, "active")],
+    );
+    register(&manager, &unchained).await.unwrap();
+    let by_unchained = signed_profile(
+        "apps.example.com",
+        3,
+        &[("root-2", &stranger, "active"), ("root-1", &root, "active")],
+        &[(&package, "active")],
+    );
+    assert!(matches!(
+        register(&manager, &by_unchained).await,
+        Err(PublisherRegistryError::VerificationFailed(_))
+    ));
+
+    // At most two active package signing keys.
+    let third = SigningKey::generate(&mut OsRng);
+    let crowded = signed_profile(
+        "apps.example.com",
+        3,
+        &roots,
+        &[
+            (&package, "active"),
+            (&stranger, "active"),
+            (&third, "active"),
+        ],
+    );
+    assert!(
+        crowded
+            .verify("apps.example.com", chrono::Utc::now())
+            .is_err()
+    );
+}
+
+/// Publish `version` of `svc` signed by `key`.
+async fn publish_with(
+    manager: &PublisherRegistryManager,
+    publisher: &Publisher,
+    version: &str,
+    key: &ed25519_dalek::SigningKey,
+) -> Result<ActrPackage, PublisherRegistryError> {
+    use base64::Engine as _;
+    use ed25519_dalek::Signer;
+    let manifest = test_manifest(&publisher.name, "svc", version, "wasm32-wasip1");
+    let signature =
+        base64::engine::general_purpose::STANDARD.encode(key.sign(manifest.as_bytes()).to_bytes());
+    let (nonce, nonce_sig) = make_publish_nonce(
+        manager.pool(),
+        publisher.id,
+        &publisher.name,
+        "svc",
+        version,
+        "wasm32-wasip1",
+        &manifest,
+        &signature,
+        None,
+        key,
+    )
+    .await;
+    manager
+        .publish_package(PublishRequest {
+            publisher: publisher.name.clone(),
+            name: "svc".to_string(),
+            version: version.to_string(),
+            target: "wasm32-wasip1".to_string(),
+            manifest,
+            signature,
+            proto_files: None,
+            nonce: Some(nonce),
+            nonce_sig: Some(nonce_sig),
+        })
+        .await
+}
+
+#[tokio::test]
+async fn two_active_package_keys_overlap_during_rotation() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let manager = PublisherRegistryManager::new(setup_test_pool().await);
+    let root = SigningKey::generate(&mut OsRng);
+    let roots = [("root-1", &root, "active")];
+    let old = SigningKey::generate(&mut OsRng);
+    let new = SigningKey::generate(&mut OsRng);
+    let old_id = crypto::compute_key_id(old.verifying_key().as_bytes());
+    let new_id = crypto::compute_key_id(new.verifying_key().as_bytes());
+    register(
+        &manager,
+        &signed_profile("overlap.example", 1, &roots, &[(&old, "active")]),
+    )
+    .await
+    .unwrap();
+
+    // Pre-publish: both keys publish, the old one stays current.
+    let record = register(
+        &manager,
+        &signed_profile(
+            "overlap.example",
+            2,
+            &roots,
+            &[(&new, "active"), (&old, "active")],
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(record.key_id, old_id);
+    assert_eq!(record.next_key_id.as_deref(), Some(new_id.as_str()));
+    let by_old = publish_with(&manager, &record, "1.0.0", &old)
+        .await
+        .unwrap();
+    assert_eq!(by_old.signing_key_id.as_deref(), Some(old_id.as_str()));
+    let by_new = publish_with(&manager, &record, "1.1.0", &new)
+        .await
+        .unwrap();
+    assert_eq!(by_new.signing_key_id.as_deref(), Some(new_id.as_str()));
+    manager
+        .verify_published_package_signing_key(&by_new)
+        .await
+        .unwrap();
+    let stranger = SigningKey::generate(&mut OsRng);
+    assert!(matches!(
+        publish_with(&manager, &record, "1.2.0", &stranger).await,
+        Err(PublisherRegistryError::Unauthorized)
+    ));
+
+    // Switch: the old key is retired and only verifies what it signed.
+    let record = register(
+        &manager,
+        &signed_profile(
+            "overlap.example",
+            3,
+            &roots,
+            &[(&new, "active"), (&old, "retired")],
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(record.key_id, new_id);
+    assert_eq!(record.next_key_id, None);
+    assert!(
+        publish_with(&manager, &record, "2.0.0", &old)
+            .await
+            .is_err()
+    );
+    publish_with(&manager, &record, "2.0.0", &new)
+        .await
+        .unwrap();
+    manager
+        .verify_published_package_signing_key(&by_old)
+        .await
+        .unwrap();
+
+    // Removing it revokes it: its packages no longer verify.
+    let record = register(
+        &manager,
+        &signed_profile("overlap.example", 4, &roots, &[(&new, "active")]),
+    )
+    .await
+    .unwrap();
+    assert_eq!(record.key_id, new_id);
+    assert!(matches!(
+        manager.verify_published_package_signing_key(&by_old).await,
+        Err(PublisherRegistryError::KeyRevoked(_))
     ));
 }
 
@@ -2420,6 +2572,7 @@ async fn register_publisher_refuses_a_package_key_that_is_not_a_curve_point() {
     document["keys"][0]["public_key"] = base64::engine::general_purpose::STANDARD
         .encode(not_a_point)
         .into();
+    document["keys"][0]["id"] = actr_protocol::package_key_id(&not_a_point).into();
     actr_protocol::realm_profile::sign_document(&mut document, "root-1", &root);
     let profile: actr_protocol::PublisherProfile = serde_json::from_value(document).unwrap();
     let result = register(&manager, &profile).await;
