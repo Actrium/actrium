@@ -350,23 +350,26 @@ async fn send(issuer: &str, document: &Value) -> std::result::Result<Value, Send
         .map_err(SendError::Unknown)
 }
 
-/// The key of a key file for `realm` at `issuer` that an interrupted `join`
-/// left at `path`, if any.
+/// The key of a key file for `realm` at `issuer` and `provider` that an
+/// interrupted `join` left at `path`, if any.
 fn interrupted_join_key(
     path: &std::path::Path,
     realm: &str,
     issuer: &str,
+    provider: &str,
 ) -> Result<Option<SigningKey>> {
+    let ours = |file: &RealmClientKeyFile| {
+        file.realm == realm && file.issuer == issuer && file.provider_id == provider
+    };
     let Ok(text) = std::fs::read_to_string(path) else {
         return Ok(None);
     };
-    match RealmClientKeyFile::parse(&text) {
-        Ok((file, _)) if file.realm == realm && file.issuer == issuer => {
-            // Reused only if it is still readable by its owner alone.
-            Ok(Some(RealmClientKeyFile::read(path)?.1))
-        }
-        _ => Ok(None),
+    if !RealmClientKeyFile::parse(&text).is_ok_and(|(file, _)| ours(&file)) {
+        return Ok(None);
     }
+    // Reused only if it is still readable by its owner alone.
+    let (file, key) = RealmClientKeyFile::read(path)?;
+    Ok(ours(&file).then_some(key))
 }
 
 /// Redeem the invite. The key file is written before the request is sent,
@@ -412,7 +415,7 @@ where
     };
 
     let reused = if args.output.exists() && !args.force {
-        let key = interrupted_join_key(&args.output, &invite.realm, &issuer)?;
+        let key = interrupted_join_key(&args.output, &invite.realm, &issuer, &provider)?;
         if key.is_none() {
             bail!(
                 "Key file already exists: {}\nUse --force to overwrite.",
@@ -707,6 +710,15 @@ mod tests {
         let retry = sent.recv().await.unwrap();
         assert_eq!(retry["public_key"], file.public_key);
         assert_eq!(retry["invite"], first["invite"]);
+
+        // A rerun naming another Realm Provider does not reuse it: the key
+        // file would name one Realm Provider and the join another.
+        let other = JoinArgs {
+            provider: Some("q.example".into()),
+            ..args.clone()
+        };
+        let error = join(&other).await.unwrap_err();
+        assert!(error.to_string().contains("already exists"), "{error:#}");
     }
 
     #[tokio::test]
