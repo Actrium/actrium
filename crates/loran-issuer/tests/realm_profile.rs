@@ -545,6 +545,80 @@ mod management {
         signed(&request, domain, "rs-1")
     }
 
+    /// `acme.com`'s descriptor with a Publisher Profile signed by `root`
+    /// (`root-1`) whose package signing key is `package`.
+    fn publisher_descriptor(root: &SigningKey, package: &SigningKey) -> Vec<u8> {
+        let key = |id: &str, key: &SigningKey| {
+            json!({
+                "id": id, "algorithm": "Ed25519", "status": "active",
+                "public_key": BASE64.encode(key.verifying_key().to_bytes()),
+            })
+        };
+        let now = chrono::Utc::now();
+        let mut profile = json!({
+            "schema": "actr.publisher/v1",
+            "sequence": 1,
+            "domain": "acme.com",
+            "profile_signing_keys": [key("root-1", root)],
+            "keys": [key("package-1", package)],
+            "profile_issued_at": (now - chrono::Duration::hours(1)).to_rfc3339(),
+            "profile_expires_at": (now + chrono::Duration::days(30)).to_rfc3339(),
+        });
+        sign_document(&mut profile, "root-1", root);
+        serde_json::to_vec(&json!({
+            "version": 1,
+            "authority": "actr://acme.com",
+            "services": [{ "rel": "contracts", "href": "https://acme.com/contracts" }],
+            "publisher": profile,
+        }))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn registers_publishers_from_their_publisher_profile() {
+        let (profiles, _dir) = setup().await;
+        let config = RealmConfig::default();
+        let root = SigningKey::from_bytes(&[5; 32]);
+        let package = SigningKey::from_bytes(&[6; 32]);
+        let descriptor = publisher_descriptor(&root, &package);
+        let register = |nonce: &str, key: &SigningKey| {
+            let mut request = request(ManagementOp::RegisterPublisher, "", nonce);
+            request.publisher = "acme.com".into();
+            serde_json::to_vec(&request.sign("root-1", key)).unwrap()
+        };
+
+        // Signed by a key the Publisher Profile does not list.
+        let stranger = SigningKey::from_bytes(&[7; 32]);
+        let refused = send(&profiles, &config, &descriptor, &register("p-1", &stranger)).await;
+        assert!(matches!(refused, Err(ManagementError::Forbidden(_))));
+
+        let reply = send(&profiles, &config, &descriptor, &register("p-2", &root))
+            .await
+            .unwrap();
+        assert_eq!(
+            reply,
+            json!({ "publisher": "acme.com", "status": "active", "sequence": 1 })
+        );
+        let pool = platform::storage::db::get_database().get_pool().clone();
+        let registered = actrix_publisher_registry::PublisherRegistryManager::new(pool)
+            .resolve_by_name("acme.com")
+            .await
+            .unwrap();
+        assert_eq!(
+            registered.public_key,
+            BASE64.encode(package.verifying_key().to_bytes())
+        );
+
+        // The nonce refuses a replay.
+        let replay = send(&profiles, &config, &descriptor, &register("p-2", &root)).await;
+        assert!(matches!(replay, Err(ManagementError::Invalid(_))));
+        // A descriptor without a publisher member registers nothing.
+        let (_, realm_only) = acme();
+        let missing = send(&profiles, &config, &realm_only, &register("p-3", &root)).await;
+        assert!(matches!(missing, Err(ManagementError::Forbidden(_))));
+    }
+
     #[tokio::test]
     #[serial]
     async fn creates_activates_and_retires_other_domains_realms() {

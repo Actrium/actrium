@@ -1541,6 +1541,12 @@ async fn realm_management_requests_are_checked_before_any_state_changes() {
         });
         request.sign("rs-1", &key)
     };
+    let register = |publisher: &str, nonce: &str| {
+        let mut request =
+            ManagementRequest::new(ManagementOp::RegisterPublisher, "", "localhost", nonce);
+        request.publisher = publisher.to_string();
+        request.sign("root-1", &key)
+    };
 
     for (body, status) in [
         (json!({ "op": "create_realm" }), 400),
@@ -1549,32 +1555,51 @@ async fn realm_management_requests_are_checked_before_any_state_changes() {
         (request("a1@localhost", "localhost", "n-2"), 403),
         // The domain's descriptor cannot be fetched.
         (request("a1@acme.test", "localhost", "n-3"), 503),
+        // register_publisher names a normalized publisher domain.
+        (register("Acme.Test", "n-4"), 400),
+        (register("acme.test", "n-5"), 503),
     ] {
         let response = client.post(&url).json(&body).send().await.expect("post");
         assert_eq!(response.status().as_u16(), status, "{body}");
         assert_eq!(response.headers()["cache-control"], "no-store");
     }
-    let pool_realms: Value = {
-        let login: Value = client
-            .post(format!("{}/admin/api/auth/login", harness.base_url()))
-            .json(&json!({ "password": "testpassword123" }))
-            .send()
-            .await
-            .expect("login")
-            .json()
-            .await
-            .expect("login json");
-        client
-            .get(format!("{}/admin/api/realms", harness.base_url()))
-            .bearer_auth(login["token"].as_str().expect("token"))
-            .send()
-            .await
-            .expect("list")
-            .json()
-            .await
-            .expect("list json")
-    };
+    let login: Value = client
+        .post(format!("{}/admin/api/auth/login", harness.base_url()))
+        .json(&json!({ "password": "testpassword123" }))
+        .send()
+        .await
+        .expect("login")
+        .json()
+        .await
+        .expect("login json");
+    let token = login["token"].as_str().expect("token");
+    let pool_realms: Value = client
+        .get(format!("{}/admin/api/realms", harness.base_url()))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("list")
+        .json()
+        .await
+        .expect("list json");
     assert_eq!(pool_realms["total_count"], 1);
+
+    // Publishers register only through register_publisher.
+    let applications = client
+        .post(format!(
+            "{}/admin/api/publishers/applications",
+            harness.base_url()
+        ))
+        .bearer_auth(token)
+        .json(&json!({ "publisher": "acme.test" }))
+        .send()
+        .await
+        .expect("applications");
+    assert!(
+        matches!(applications.status().as_u16(), 404 | 405),
+        "{}",
+        applications.status()
+    );
 
     harness.shutdown();
 }

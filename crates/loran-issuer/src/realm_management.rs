@@ -3,11 +3,18 @@
 //! `reissue_admin_token`, each an Actr management envelope signed by an
 //! `active` Realm signing key of the Realm's domain.
 //!
+//! The same envelope carries `register_publisher`
+//! (`actr/protocols/authority-discovery.md` section 4.5), signed by an
+//! `active` Publisher Profile signing key of the publisher's domain.
+//!
 //! Realms under the Provider domain are managed with a Realm Provider
 //! account, which this Loran does not offer; the operator creates them.
 
 use actr_protocol::realm_management::{ManagementOp, ManagementRequest};
 use actr_protocol::realm_profile::{RealmPackage, RealmProfile, RealmStatus as ProfileStatus};
+use actr_protocol::uri::ActrUri;
+use actr_protocol::{AuthorityDescriptor, PublisherProfile};
+use actrix_publisher_registry::{PublisherRegistryError, PublisherRegistryManager};
 use axum::http::StatusCode;
 use chrono::Utc;
 use platform::config::RealmConfig;
@@ -72,6 +79,19 @@ impl From<RealmError> for ManagementError {
     }
 }
 
+impl From<PublisherRegistryError> for ManagementError {
+    fn from(error: PublisherRegistryError) -> Self {
+        match error {
+            PublisherRegistryError::InvalidRequest(_)
+            | PublisherRegistryError::InvalidName(_)
+            | PublisherRegistryError::ReservedName(_) => Self::Invalid(error.to_string()),
+            PublisherRegistryError::VerificationFailed(_) => Self::Forbidden(error.to_string()),
+            PublisherRegistryError::InvalidStatus(_) => Self::Conflict(error.to_string()),
+            error => Self::Internal(error.to_string()),
+        }
+    }
+}
+
 impl From<ProfileError> for ManagementError {
     fn from(error: ProfileError) -> Self {
         match error {
@@ -110,6 +130,9 @@ where
             "nonce must have 1 to {MAX_NONCE_LEN} characters"
         )));
     }
+    if request.op == ManagementOp::RegisterPublisher {
+        return register_publisher(&request, fetch).await;
+    }
     let domain = realm_domain(&request.realm)?;
     if domain == provider_id || domain.ends_with(&format!(".{provider_id}")) {
         return Err(ManagementError::Forbidden(format!(
@@ -131,15 +154,7 @@ where
         .verify(&keys.keys)
         .map_err(|error| ManagementError::Forbidden(error.to_string()))?;
 
-    // Only signed requests reach the nonce table.
-    let expires_at = chrono::DateTime::parse_from_rfc3339(&request.expires_at)
-        .map_err(|e| invalid(&e))?
-        .timestamp();
-    if !use_nonce(&request.nonce, expires_at).await? {
-        return Err(ManagementError::Invalid(
-            "nonce was already used".to_string(),
-        ));
-    }
+    use_request_nonce(&request).await?;
     Realm::discard_expired_pending().await?;
 
     match request.op {
@@ -154,10 +169,80 @@ where
                 })?;
             Ok(json!({ "realm": request.realm, "admin_token": token }))
         }
-        ManagementOp::RegisterPublisher => Err(ManagementError::Invalid(
-            "register_publisher is not supported yet".to_string(),
-        )),
+        ManagementOp::RegisterPublisher => unreachable!("handled above"),
     }
+}
+
+/// Record the nonce of a signed request; only signed requests reach the
+/// nonce table.
+async fn use_request_nonce(request: &ManagementRequest) -> Result<(), ManagementError> {
+    let expires_at = chrono::DateTime::parse_from_rfc3339(&request.expires_at)
+        .map_err(|error| ManagementError::Invalid(error.to_string()))?
+        .timestamp();
+    if !use_nonce(&request.nonce, expires_at).await? {
+        return Err(ManagementError::Invalid(
+            "nonce was already used".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// `register_publisher`: register the publisher from the Publisher Profile in
+/// its domain's authority descriptor. The request must be signed by an
+/// `active` `profile_signing_keys` entry of that profile.
+async fn register_publisher<F, Fut>(
+    request: &ManagementRequest,
+    fetch: F,
+) -> Result<Value, ManagementError>
+where
+    F: FnOnce(String) -> Fut,
+    Fut: Future<Output = Result<Arc<[u8]>, FetchError>>,
+{
+    let domain = request.publisher.as_str();
+    let normalized = actrix_publisher_registry::reserved::canonical_publisher_domain(domain)
+        .map_err(|error| ManagementError::Invalid(format!("publisher: {error}")))?;
+    if normalized != domain || !request.realm.is_empty() {
+        return Err(ManagementError::Invalid(
+            "register_publisher names a normalized publisher domain and no realm".to_string(),
+        ));
+    }
+
+    let descriptor = fetch(format!("https://{domain}/.well-known/actr"))
+        .await
+        .map_err(|error| ManagementError::Unavailable(format!("{domain}: {error}")))?;
+    let forbidden = |error: &dyn std::fmt::Display| ManagementError::Forbidden(error.to_string());
+    let profile = publisher_from_descriptor(domain, &descriptor).map_err(|e| forbidden(&e))?;
+    let keys = profile
+        .verify(domain, Utc::now())
+        .map_err(|e| forbidden(&e))?;
+    request
+        .verify(&keys.profile_signing_keys)
+        .map_err(|e| forbidden(&e))?;
+    use_request_nonce(request).await?;
+
+    let pool = platform::storage::db::get_database().get_pool().clone();
+    let publisher = PublisherRegistryManager::new(pool)
+        .register_publisher(domain, &profile, &keys)
+        .await?;
+    Ok(json!({
+        "publisher": publisher.name,
+        "status": publisher.status.to_string(),
+        "sequence": keys.sequence,
+    }))
+}
+
+/// The `publisher` member of `domain`'s authority descriptor, which must be
+/// valid for `actr://<domain>`.
+fn publisher_from_descriptor(domain: &str, document: &[u8]) -> Result<PublisherProfile, String> {
+    let descriptor: AuthorityDescriptor = serde_json::from_slice(document)
+        .map_err(|error| format!("malformed descriptor: {error}"))?;
+    let authority = ActrUri::from_domain(domain).map_err(|error| error.to_string())?;
+    descriptor
+        .validate_for(&authority)
+        .map_err(|error| error.to_string())?;
+    descriptor
+        .publisher
+        .ok_or_else(|| format!("{domain} publishes no publisher member"))
 }
 
 /// The domain of a normalized Realm name that has a Realm Profile.
