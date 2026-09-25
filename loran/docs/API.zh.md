@@ -275,7 +275,8 @@ Realm 以 Realm 名寻址，`@` 编码为 `%40`：
   列入 Realm Profile（Realm Provider 域名下的 Realm 由 Loran 立即签新 Realm Profile；其他域名
   的 Realm 由持有方经 `draft_profile` 取得并发布），列出它的 Realm Profile 被接受满 24 小时后
   Loran 改用它签发，旧 key 以 `retired` 列出直到最后一个 credential 过期再过 5 分钟，然后移除并
-  在 Signer 中退役。Realm 不是 `active`、已有待切换的 key 或仍列着 3 把 key 时返回 `400`，
+  在 Signer 中退役。并发轮换只有一个能列出新 key，另一个（以及与 Realm 退役竞态的轮换）把刚在
+  Signer 中生成的 key 当即退役，不留孤儿 key。Realm 不是 `active`、已有待切换的 key 或仍列着 3 把 key 时返回 `400`，
   Loran 不是 Realm Provider 时返回 `503`。Realm Provider 域名下的 Realm 每 90 天自动轮换；
 - `POST /admin/api/realms/{realm}/retire`：退役。单一事务中删除该 Realm 的连接 ACL、待连接
   注册与 renewal token，保留已签发身份登记与撤销表；`realm` 行以 `retired` 状态永久保留，

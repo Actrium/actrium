@@ -98,12 +98,14 @@ impl RealmIssuerKey {
     }
 
     /// Insert a new key. Fails with [`RealmError::Conflict`] when `realm`
-    /// already has a key in this state (other than `retired`).
+    /// already has a key in this state (other than `retired`), and with
+    /// [`RealmError::Retired`] once the Realm is retired or gone.
     pub async fn insert(&self) -> Result<(), RealmError> {
-        sqlx::query(
+        let inserted = sqlx::query(
             "INSERT INTO realm_issuer_key
                 (realm, key_id, signer_name, public_key, state, created_at, current_since)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
+             WHERE EXISTS (SELECT 1 FROM realm WHERE name = ?1 AND status != 'retired')",
         )
         .bind(&self.realm)
         .bind(self.key_id as i64)
@@ -121,7 +123,11 @@ impl RealmIssuerKey {
                 self.state.as_str()
             )),
             error => error.into(),
-        })?;
+        })?
+        .rows_affected();
+        if inserted == 0 {
+            return Err(RealmError::Retired);
+        }
         Ok(())
     }
 

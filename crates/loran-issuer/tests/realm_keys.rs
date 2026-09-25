@@ -369,3 +369,73 @@ async fn retiring_a_realm_retires_its_issuer_key() {
     drop(issuer);
     env.shutdown_signer().await;
 }
+
+/// A rotation that loses the race for the Realm's single next key, or that
+/// races the Realm's retirement, retires the key it created in the Signer.
+#[tokio::test]
+async fn an_issuer_key_that_loses_a_race_is_retired() {
+    const REALM: &str = "rotation-race@example.com";
+    let mut env = setup_test_environment(SignerServiceConfig::default()).await;
+    let now = chrono::Utc::now().timestamp();
+    sqlx::query(
+        "INSERT INTO realm (name, status, enabled, created_at, secret_current)
+         VALUES (?, 'active', 1, ?, 'hash')",
+    )
+    .bind(REALM)
+    .bind(now)
+    .execute(platform::storage::db::get_database().get_pool())
+    .await
+    .expect("seed realm");
+    let signer = create_signer_client(&env.signer_config, &env.shared_key)
+        .await
+        .expect("create Signer client");
+    let next_key = |name: String, key_id: u32, public: [u8; 32]| platform::realm::RealmIssuerKey {
+        realm: REALM.to_string(),
+        key_id,
+        signer_name: name,
+        public_key: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, public),
+        state: platform::realm::IssuerKeyState::Next,
+        created_at: now,
+        published_at: None,
+        current_since: None,
+        remove_after: None,
+    };
+
+    let mut keys = Vec::new();
+    for n in 0..3 {
+        let name = format!("issuer:{REALM}/{n}");
+        let (key_id, public) = signer.ensure_named_key(&name).await.expect("new key");
+        keys.push(next_key(name, key_id, public));
+    }
+    issuer::realm_profile::list_issuer_key(&signer, &keys[0])
+        .await
+        .expect("the first next key is listed");
+    signer
+        .sign(keys[0].key_id, b"m")
+        .await
+        .expect("listed key signs");
+
+    assert!(
+        issuer::realm_profile::list_issuer_key(&signer, &keys[1])
+            .await
+            .is_err()
+    );
+    assert!(signer.sign(keys[1].key_id, b"m").await.is_err());
+
+    platform::realm::Realm::retire(REALM)
+        .await
+        .expect("retire realm");
+    sqlx::query("DELETE FROM realm_issuer_key WHERE realm = ?")
+        .bind(REALM)
+        .execute(platform::storage::db::get_database().get_pool())
+        .await
+        .expect("drop the listed next key");
+    assert!(
+        issuer::realm_profile::list_issuer_key(&signer, &keys[2])
+            .await
+            .is_err()
+    );
+    assert!(signer.sign(keys[2].key_id, b"m").await.is_err());
+
+    env.shutdown_signer().await;
+}

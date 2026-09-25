@@ -92,6 +92,26 @@ pub async fn current_issuer_key(
     }
 }
 
+/// Record `key`, just created in the Signer, as one of its Realm's issuer
+/// keys. When a concurrent rotation or the Realm's retirement wins the race,
+/// the key is retired in the Signer instead of being left behind.
+pub async fn list_issuer_key(
+    signer: &SignerClientWrapper,
+    key: &RealmIssuerKey,
+) -> Result<(), ProfileError> {
+    let Err(error) = key.insert().await else {
+        return Ok(());
+    };
+    if let Err(retire_error) = signer.retire_named_key(&key.signer_name).await {
+        platform::recording::warn!(
+            "Realm {}: unlisted issuer key {} was not retired: {retire_error}",
+            key.realm,
+            key.signer_name
+        );
+    }
+    Err(error.into())
+}
+
 /// The Realm Provider endpoints a Loran-signed Realm Profile names.
 #[derive(Debug, Clone)]
 pub struct ProviderEndpoints {
@@ -501,7 +521,7 @@ impl RealmProfiles {
             .ensure_named_key(&name)
             .await
             .map_err(|error| ProfileError::Unavailable(format!("Signer: {error}")))?;
-        RealmIssuerKey {
+        let key = RealmIssuerKey {
             realm: realm.to_string(),
             key_id,
             signer_name: name,
@@ -511,9 +531,8 @@ impl RealmProfiles {
             published_at: None,
             current_since: None,
             remove_after: None,
-        }
-        .insert()
-        .await?;
+        };
+        list_issuer_key(&self.signer, &key).await?;
         platform::recording::info!("Realm {realm}: new issuer key {key_id} listed");
         self.republish(realm).await?;
         Ok(key_id)
