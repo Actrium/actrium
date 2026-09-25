@@ -80,7 +80,7 @@ export function IdentityReview({ kind, disabled = false }: { kind: IdentityKind;
       <div className="flex gap-2">
         <input
           value={name}
-          onChange={e => setName(e.target.value)}
+          onChange={e => { setName(e.target.value); setView(null); }}
           placeholder={LABELS[kind].placeholder}
           className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-mono"
         />
