@@ -17,11 +17,21 @@ fn vectors() -> Value {
 }
 
 fn pins_of(vectors: &Value, name: &str) -> KeyPins {
-    let (_, outcome) = RealmSigningKeys::accept(&vectors["members"][name]["member"], None).unwrap();
-    match outcome {
-        KeyPinOutcome::Accepted(pins) => pins,
-        other => panic!("{name}: {other:?}"),
+    accepted_in_order(vectors, &[name])
+}
+
+/// The pins after accepting `names` in order, the first over HTTPS.
+fn accepted_in_order(vectors: &Value, names: &[&str]) -> KeyPins {
+    let mut pins = None;
+    for name in names {
+        let member = &vectors["members"][name]["member"];
+        let (_, outcome) = RealmSigningKeys::accept(member, pins.as_ref()).unwrap();
+        match outcome {
+            KeyPinOutcome::Accepted(accepted) => pins = Some(accepted),
+            other => panic!("{name}: {other:?}"),
+        }
     }
+    pins.expect("at least one member")
 }
 
 #[test]
@@ -51,7 +61,11 @@ fn members_serialize_to_their_jcs_form() {
     }
 
     let keys = &vectors["keys"];
-    let rotations = [("m2", "rs-a->rs-b"), ("retired_signer", "rs-a->rs-x")];
+    let rotations = [
+        ("m2", "rs-a->rs-b"),
+        ("retired_signer", "rs-a->rs-x"),
+        ("stale_rotation", "rs-b->rs-x"),
+    ];
     for (member, label) in rotations {
         let parsed: RealmSigningKeys =
             serde_json::from_value(vectors["members"][member]["member"].clone()).unwrap();
@@ -69,9 +83,16 @@ fn cases_give_the_expected_result() {
     let vectors = vectors();
     for case in vectors["cases"].as_array().unwrap() {
         let name = case["name"].as_str().unwrap();
-        let pinned = case["pinned"]
-            .as_str()
-            .map(|pinned| pins_of(&vectors, pinned));
+        // `pinned`: null, a member, or members accepted in that order.
+        let pinned = match &case["pinned"] {
+            Value::Null => None,
+            Value::String(name) => Some(pins_of(&vectors, name)),
+            Value::Array(names) => {
+                let names: Vec<&str> = names.iter().map(|name| name.as_str().unwrap()).collect();
+                Some(accepted_in_order(&vectors, &names))
+            }
+            other => panic!("{name}: pinned {other}"),
+        };
         let member = &vectors["members"][case["member"].as_str().unwrap()]["member"];
         let result = RealmSigningKeys::accept(member, pinned.as_ref());
         match (case["result"].as_str().unwrap(), result) {
