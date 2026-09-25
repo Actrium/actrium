@@ -3170,8 +3170,6 @@ async fn test_renew_rotation_deletes_expired_token_rows() {
 type FieldBlank<'a> = &'a dyn Fn(&mut RegisterRequest);
 type TamperMutation<'a> = &'a dyn Fn(&mut RegisterRequest, &Path2Fixture, u64);
 
-/// Group A: any one of the publisher triple missing → rejected (PublisherNotVerified).
-/// Covers scenario-matrix #2 / #3 / #4 as a single table.
 #[tokio::test]
 #[serial]
 async fn test_renew_route_replays_exact_response_and_single_state_change() {
@@ -3266,6 +3264,8 @@ async fn test_renew_attempt_id_body_mismatch_returns_conflict() {
     env.shutdown_signer().await;
 }
 
+/// Group A: any one of the publisher triple missing → rejected (PublisherNotVerified).
+/// Covers scenario-matrix #2 / #3 / #4 as a single table.
 #[tokio::test]
 #[serial]
 async fn test_path2_missing_publisher_field_matrix() {
