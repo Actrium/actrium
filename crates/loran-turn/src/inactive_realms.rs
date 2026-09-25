@@ -5,11 +5,14 @@
 //! suspended, expired or retired). The set is loaded from the Realm database,
 //! updated as soon as a Realm's state change is announced, and reloaded every
 //! [`RELOAD_INTERVAL`] because expiry is not announced.
+//! [`InactiveRealms::deactivated`] wakes when a Realm joins the set, so the
+//! TURN service can close that Realm's allocations.
 
 use platform::realm::Realm;
 use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use tokio::sync::Notify;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::task::JoinHandle;
 
@@ -28,7 +31,7 @@ impl Drop for WatchGuard {
 
 /// The Realms that are not served; empty until [`InactiveRealms::watch`].
 #[derive(Debug, Clone, Default)]
-pub struct InactiveRealms(Arc<RwLock<HashSet<String>>>);
+pub struct InactiveRealms(Arc<RwLock<HashSet<String>>>, Arc<Notify>);
 
 impl InactiveRealms {
     /// Whether credentials of `realm` are refused
@@ -37,6 +40,12 @@ impl InactiveRealms {
             .read()
             .expect("inactive realms poisoned")
             .contains(realm)
+    }
+
+    /// Wait until a Realm becomes inactive (returns at once if one did since
+    /// the last call).
+    pub async fn deactivated(&self) {
+        self.1.notified().await;
     }
 
     /// Load the set now, then keep it current in a background task that
@@ -63,12 +72,17 @@ impl InactiveRealms {
     async fn reload_all(&self) {
         match Realm::get_all().await {
             Ok(realms) => {
-                let inactive = realms
+                let inactive: HashSet<String> = realms
                     .into_iter()
                     .filter(|realm| !realm.is_active())
                     .map(|realm| realm.name)
                     .collect();
-                *self.0.write().expect("inactive realms poisoned") = inactive;
+                let mut current = self.0.write().expect("inactive realms poisoned");
+                let deactivated = !inactive.is_subset(&current);
+                *current = inactive;
+                if deactivated {
+                    self.1.notify_one();
+                }
             }
             Err(e) => platform::recording::warn!("Failed to load Realm states for TURN: {}", e),
         }
@@ -79,7 +93,9 @@ impl InactiveRealms {
             Ok(realm) => {
                 let mut inactive = self.0.write().expect("inactive realms poisoned");
                 if realm.is_some_and(|realm| !realm.is_active()) {
-                    inactive.insert(name.to_string());
+                    if inactive.insert(name.to_string()) {
+                        self.1.notify_one();
+                    }
                 } else {
                     inactive.remove(name);
                 }

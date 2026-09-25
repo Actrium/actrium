@@ -122,6 +122,45 @@ pub async fn create_turn_server(
     Ok(server)
 }
 
+/// The Realm a scoped TURN username
+/// (`<expires>:realm=<realm>:provider=…`) belongs to
+fn username_realm(username: &str) -> Option<&str> {
+    let (_, scoped) = username.split_once(":realm=")?;
+    Some(scoped.split_once(":provider=")?.0)
+}
+
+/// Close the allocations whose credential belongs to a Realm `closed`
+/// selects; returns how many usernames were closed. Credentials are refused
+/// once a Realm is not served; this also ends the allocations it already has.
+pub async fn close_realm_allocations(
+    server: &Server,
+    closed: impl Fn(&str) -> bool,
+) -> error::Result<usize> {
+    let infos =
+        server
+            .get_allocations_info(None)
+            .await
+            .map_err(|e| TurnError::AllocationFailed {
+                reason: format!("list allocations: {e}"),
+            })?;
+    let mut usernames: Vec<String> = infos
+        .into_values()
+        .map(|info| info.username)
+        .filter(|username| username_realm(username).is_some_and(&closed))
+        .collect();
+    usernames.sort();
+    usernames.dedup();
+    for username in &usernames {
+        server
+            .delete_allocations_by_username(username.clone())
+            .await
+            .map_err(|e| TurnError::AllocationFailed {
+                reason: format!("close allocations: {e}"),
+            })?;
+    }
+    Ok(usernames.len())
+}
+
 // Shutdown the TURN server
 pub async fn shutdown_turn_server(server: &Server) -> error::Result<()> {
     platform::recording::info!("Shutting down TURN server");

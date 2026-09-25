@@ -100,7 +100,7 @@ impl IceService for TurnService {
                     .map_err(anyhow::Error::msg)?,
             )
             .map_err(|e| anyhow::anyhow!("Failed to create TURN authenticator: {e}"))?
-            .with_inactive_realms(inactive_realms),
+            .with_inactive_realms(inactive_realms.clone()),
         );
         let relay_port_range = self
             .config
@@ -144,9 +144,37 @@ impl IceService for TurnService {
             }
         };
 
+        // A Realm that stops being served loses its allocations too, not
+        // only their refreshes.
+        let turn_server = Arc::new(turn_server);
+        let closer = {
+            let server = turn_server.clone();
+            tokio::spawn(async move {
+                loop {
+                    inactive_realms.deactivated().await;
+                    match turn::close_realm_allocations(&server, |realm| {
+                        inactive_realms.contains(realm)
+                    })
+                    .await
+                    {
+                        Ok(0) => {}
+                        Ok(closed) => platform::recording::info!(
+                            "Closed the TURN allocations of {} credentials of inactive Realms",
+                            closed
+                        ),
+                        Err(e) => platform::recording::warn!(
+                            "Failed to close TURN allocations of inactive Realms: {}",
+                            e
+                        ),
+                    }
+                }
+            })
+        };
+
         // Wait for shutdown signal
         let _ = shutdown_rx.recv().await;
         platform::recording::info!("TURN service received shutdown signal");
+        closer.abort();
 
         // Shut down TURN server
         if let Err(e) = turn::shutdown_turn_server(&turn_server).await {

@@ -36,10 +36,17 @@ async fn follows_suspension_resumption_and_retirement() {
         .await
         .expect("create realm");
     assert!(!inactive.contains("late@example.com"));
+    // The Realm loaded at start already counts as deactivated.
+    tokio::time::timeout(Duration::from_secs(2), inactive.deactivated())
+        .await
+        .expect("deactivation announced");
     Realm::set_enabled("late@example.com", false)
         .await
         .expect("suspend realm");
     eventually(&inactive, "late@example.com", true).await;
+    tokio::time::timeout(Duration::from_secs(2), inactive.deactivated())
+        .await
+        .expect("suspension announced");
     Realm::set_enabled("late@example.com", true)
         .await
         .expect("resume realm");
