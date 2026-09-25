@@ -87,6 +87,7 @@ impl From<PublisherRegistryError> for ManagementError {
             | PublisherRegistryError::ReservedName(_) => Self::Invalid(error.to_string()),
             PublisherRegistryError::VerificationFailed(_) => Self::Forbidden(error.to_string()),
             PublisherRegistryError::InvalidStatus(_) => Self::Conflict(error.to_string()),
+            PublisherRegistryError::QuotaExceeded(_) => Self::Quota(error.to_string()),
             error => Self::Internal(error.to_string()),
         }
     }
@@ -131,7 +132,7 @@ where
         )));
     }
     if request.op == ManagementOp::RegisterPublisher {
-        return register_publisher(&request, fetch).await;
+        return register_publisher(&request, config.max_publishers(), fetch).await;
     }
     let domain = realm_domain(&request.realm)?;
     if domain == provider_id || domain.ends_with(&format!(".{provider_id}")) {
@@ -229,6 +230,7 @@ async fn use_request_nonce(request: &ManagementRequest) -> Result<(), Management
 /// `active` `profile_signing_keys` entry of that profile.
 async fn register_publisher<F, Fut>(
     request: &ManagementRequest,
+    max_publishers: u32,
     fetch: F,
 ) -> Result<Value, ManagementError>
 where
@@ -259,6 +261,7 @@ where
 
     let pool = platform::storage::db::get_database().get_pool().clone();
     let publisher = PublisherRegistryManager::new(pool)
+        .with_max_publishers(max_publishers)
         .register_publisher(domain, &profile, &keys)
         .await?;
     Ok(json!({

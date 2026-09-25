@@ -109,7 +109,8 @@ v1 不承诺 HA。单节点容量取决于：
 - auth/Actor credential cache 上限；
 - SQLite 写入延迟、WAL/磁盘空间；
 - Publisher Profile 外联超时与大小上限；
-- 承载的 Realm 数（`[realm] max_realms`/`max_realms_per_domain`）、authority
+- 承载的 Realm 数（`[realm] max_realms`/`max_realms_per_domain`）、已登记 Publisher 数
+  （`[realm] max_publishers`）、authority
   descriptor/Realm Profile 周期性校验的外联量；按 Realm 的连接/消息/TURN 配额尚未实现。
 
 在目标硬件和网络上压测后再设置限流。提高上限不能以移除边界或关闭默认拒绝为代价。

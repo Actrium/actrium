@@ -2622,3 +2622,25 @@ async fn admin_delete_removes_a_publisher_with_publish_nonces_atomically() {
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn register_publisher_stops_at_max_publishers() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let manager = PublisherRegistryManager::new(setup_test_pool().await).with_max_publishers(1);
+    let root = SigningKey::generate(&mut OsRng);
+    let roots = [("root-1", &root, "active")];
+    let key = SigningKey::generate(&mut OsRng);
+    let first = signed_profile("first.example", 1, &roots, &[(&key, "active")]);
+    register(&manager, &first).await.unwrap();
+
+    let second = signed_profile("second.example", 1, &roots, &[(&key, "active")]);
+    assert!(matches!(
+        register(&manager, &second).await,
+        Err(PublisherRegistryError::QuotaExceeded(_))
+    ));
+    // A registered publisher still updates its profile.
+    let update = signed_profile("first.example", 2, &roots, &[(&key, "active")]);
+    register(&manager, &update).await.unwrap();
+}

@@ -55,6 +55,7 @@ uri = "actr://realm.example.com"
 # Realm hosting limits. One Loran instance hosts many Realms.
 [realm]
 # max_realms = 1              # pending + active Realms; unset = no limit
+# max_publishers = 1000       # publishers register_publisher may register
 
 # Recording pipeline (logging + tracing)
 [recording]

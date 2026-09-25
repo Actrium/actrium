@@ -123,6 +123,8 @@ pub struct PublisherRegistryManager {
     /// How long (seconds) to retain expired/used nonce records for auditing.
     /// Default: 86400 (24 hours).
     nonce_retain_secs: i64,
+    /// Most publishers `register_publisher` registers; `None`: no limit.
+    max_publishers: Option<u32>,
 }
 
 impl PublisherRegistryManager {
@@ -130,7 +132,14 @@ impl PublisherRegistryManager {
         Self {
             pool,
             nonce_retain_secs: 86400, // 24 hours
+            max_publishers: None,
         }
+    }
+
+    /// Refuse to register a new publisher once `max` are registered.
+    pub fn with_max_publishers(mut self, max: u32) -> Self {
+        self.max_publishers = Some(max);
+        self
     }
 
     /// Set nonce retention duration in seconds (for cleanup of expired/used nonces).
@@ -341,6 +350,16 @@ impl PublisherRegistryManager {
         let next = active.get(1).cloned();
 
         let Some(record) = existing else {
+            if let Some(max) = self.max_publishers {
+                let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM publisher")
+                    .fetch_one(&mut *tx)
+                    .await?;
+                if count >= i64::from(max) {
+                    return Err(PublisherRegistryError::QuotaExceeded(format!(
+                        "no more publishers: max_publishers = {max}"
+                    )));
+                }
+            }
             sqlx::query(
                 "INSERT INTO publisher
                     (name, public_key, key_id, profile_json, contact, status,

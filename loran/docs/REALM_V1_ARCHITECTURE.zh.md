@@ -260,7 +260,8 @@ realm-management 等）与该域名的 `realm_signing_keys`、`realms`，是同�
 
 按 Realm 域名与按 Realm 设配额：Realm 域名可创建的 Realm 数（Realm Provider 域名下的 Realm
 再按 Realm Provider 账号计）、连接数、注册
-速率、signaling 消息速率、TURN allocation 数与带宽。
+速率、signaling 消息速率、TURN allocation 数与带宽。`register_publisher` 可登记的 Publisher
+总数另受 `[realm] max_publishers` 限制（默认 1000，超出 `429`）。
 
 ## 4. 身份模型
 

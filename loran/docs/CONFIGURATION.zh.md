@@ -192,6 +192,9 @@ Provider 域名下的 Realm 由系统管理员经 Admin API 代办创建；收�
   60–86400；过期即删除，名字可再用（从未提供服务，不是 tombstone）。运营者创建的 `pending`
   Realm 同样受此限制。
 
+`register_publisher` 受 `[realm] max_publishers` 约束：已登记的 Publisher 总数（不论状态），默认
+1000，达到后新登记返回 `429`，已登记的 Publisher 仍可更新其 Publisher Profile。
+
 Realm Provider ID 取 `[authority] uri`（`actr://<domain>`，不带端口）的规范化 DNS 域名。
 启用 Issuer、Signaling 或 TURN 时 `uri` 必填，缺失或非法即配置校验失败；它写入 Actor
 credential 与 TURN username 的 `provider`，并由 Signaling、TURN 校验。`[authority] enabled`

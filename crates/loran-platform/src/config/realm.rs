@@ -25,6 +25,10 @@ pub struct RealmConfig {
     /// Realm Profiles. Unset means 3600; values are kept within 60..=86400.
     #[serde(default)]
     pub profile_refresh_secs: Option<u64>,
+    /// Maximum number of publishers `register_publisher` requests may
+    /// register, whatever their status. Unset means 1000.
+    #[serde(default)]
+    pub max_publishers: Option<u32>,
 }
 
 impl RealmConfig {
@@ -38,6 +42,10 @@ impl RealmConfig {
 
     pub fn profile_refresh_secs(&self) -> u64 {
         self.profile_refresh_secs.unwrap_or(3600).clamp(60, 86_400)
+    }
+
+    pub fn max_publishers(&self) -> u32 {
+        self.max_publishers.unwrap_or(1000)
     }
 }
 
@@ -53,6 +61,7 @@ mod tests {
         assert_eq!(config.profile_refresh_secs(), 3600);
         assert_eq!(config.max_pending_per_domain(), 10);
         assert_eq!(config.pending_ttl_secs(), 3600);
+        assert_eq!(config.max_publishers(), 1000);
 
         let config: RealmConfig = toml::from_str("max_realms = 1").unwrap();
         assert_eq!(config.max_realms, Some(1));

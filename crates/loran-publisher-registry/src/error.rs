@@ -36,6 +36,8 @@ pub enum PublisherRegistryError {
     CertificateExpired,
     #[error("invalid request: {0}")]
     InvalidRequest(String),
+    #[error("quota exceeded: {0}")]
+    QuotaExceeded(String),
 }
 
 impl IntoResponse for PublisherRegistryError {
@@ -62,6 +64,9 @@ impl IntoResponse for PublisherRegistryError {
             }
             PublisherRegistryError::KeyRevoked(_) | PublisherRegistryError::CertificateExpired => {
                 (StatusCode::FORBIDDEN, self.to_string())
+            }
+            PublisherRegistryError::QuotaExceeded(_) => {
+                (StatusCode::TOO_MANY_REQUESTS, self.to_string())
             }
             _ => (
                 StatusCode::INTERNAL_SERVER_ERROR,

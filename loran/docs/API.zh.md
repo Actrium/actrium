@@ -219,7 +219,9 @@ key（`not_after` 为其发布期限，缺省一年；登记时须已过 `not_be
 `active` key 都可发布与证明持有（轮换重叠期）；原当前 key 只要仍 `active` 就保持为当前 key，否则
 另一把成为当前 key。不再 `active` 的 key 归档为 retired，仍可验证旧包；Publisher Profile 不再列出
 的 retired key 转为 revoked，其签过的包不再通过验证；用过的 key 不能再成为 `active`。响应 `{"publisher", "status", "sequence"}`；`400` 请求无效，
-`403` Publisher Profile 或签名不被接受，`409` Publisher 已停用或并发修改，`503` 取不到 descriptor。
+`403` Publisher Profile 或签名不被接受，`409` Publisher 已停用或并发修改，`429` 已登记的
+Publisher 数（不论状态）达到 `[realm] max_publishers`（默认 1000；已登记者更新 Publisher Profile
+不受限），`503` 取不到 descriptor。
 公开文档中不放 challenge，也没有 `/.well-known/actr/publisher.json`。
 
 管理路由前缀：`/admin/api/publishers`，受 Admin JWT 保护：列表、状态、停用/恢复、删除、key
