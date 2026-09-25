@@ -1,6 +1,6 @@
 import type { RealmInfo } from "../../lib/api";
 import { cn } from "../../lib/utils";
-import { Archive, Pause, Play, UserPlus } from "lucide-react";
+import { Archive, Pause, Play, UserPlus, Users } from "lucide-react";
 
 interface RealmTableProps {
   realms: RealmInfo[];
@@ -8,6 +8,7 @@ interface RealmTableProps {
   onToggleEnabled: (realm: RealmInfo) => void;
   onIssueOwnerInvite: (realm: string) => void;
   onRetire: (realm: string) => void;
+  onShowMembers: (realm: string) => void;
 }
 
 function statusLabel(realm: RealmInfo): { text: string; className: string } {
@@ -32,6 +33,7 @@ export function RealmTable({
   onToggleEnabled,
   onIssueOwnerInvite,
   onRetire,
+  onShowMembers,
 }: RealmTableProps) {
   if (realms.length === 0) {
     return (
@@ -74,6 +76,13 @@ export function RealmTable({
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-1">
+                    <button
+                      onClick={() => onShowMembers(realm.realm)}
+                      className={cn(actionClass, "hover:bg-gray-100 hover:text-gray-600")}
+                      title="Members"
+                    >
+                      <Users className="h-4 w-4" />
+                    </button>
                     <button
                       onClick={() => onToggleEnabled(realm)}
                       disabled={!canWrite}

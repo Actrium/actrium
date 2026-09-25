@@ -111,6 +111,33 @@ export interface OwnerInviteResponse {
   expires_at: string;
 }
 
+/** A member's client: its Realm client key, without the key itself. */
+export interface RealmClientInfo {
+  key_id: string;
+  label: string | null;
+  /** RFC 3339. */
+  registered_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface RealmMemberInfo {
+  member_id: string;
+  role: "owner" | "editor" | "viewer";
+  status: "active" | "removed";
+  /** RFC 3339. */
+  created_at: string;
+  removed_at: string | null;
+  clients: RealmClientInfo[];
+}
+
+export interface RealmMembersResponse {
+  success: boolean;
+  members: RealmMemberInfo[];
+  /** Open invites, without their secrets. */
+  invites: { invite_id: string; expires_at: string }[];
+}
+
 export interface ResolvedField {
   key: string;
   value_type: string;
@@ -244,6 +271,10 @@ export const api = {
     request<OwnerInviteResponse>(`/realms/${encodeURIComponent(realm)}/owner-invite`, {
       method: "POST",
     }),
+
+  /** Members, clients and open invites of a Realm, read-only. */
+  listRealmMembers: (realm: string) =>
+    request<RealmMembersResponse>(`/realms/${encodeURIComponent(realm)}/members`),
 
   getConfig: (configType: number, key: string) =>
     request<{

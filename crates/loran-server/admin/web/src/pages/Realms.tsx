@@ -9,6 +9,7 @@ import { ServicePageLayout } from "../components/layout/ServicePageLayout";
 
 import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { OwnerInviteModal } from "../components/realms/OwnerInviteModal";
+import { RealmMembersModal } from "../components/realms/RealmMembersModal";
 import { IdentityReview } from "../components/identity/IdentityReview";
 
 const REALM_WRITES_DISABLED_MESSAGE =
@@ -27,6 +28,7 @@ export function Realms() {
   const [showForm, setShowForm] = useState(false);
   const [retireConfirm, setRetireConfirm] = useState<string | null>(null);
   const [inviteConfirm, setInviteConfirm] = useState<string | null>(null);
+  const [membersRealm, setMembersRealm] = useState<string | null>(null);
 
   const ensureRealmWritesEnabled = useCallback(() => {
     if (realmWritesEnabled) {
@@ -200,6 +202,7 @@ export function Realms() {
         onRetire={(realm) => {
           if (ensureRealmWritesEnabled()) setRetireConfirm(realm);
         }}
+        onShowMembers={setMembersRealm}
       />
 
       <IdentityReview kind="realm-domains" disabled={!realmWritesEnabled} />
@@ -253,6 +256,10 @@ export function Realms() {
         onConfirm={handleConfirmInvite}
         onCancel={() => setInviteConfirm(null)}
       />
+
+      {membersRealm && (
+        <RealmMembersModal realm={membersRealm} onClose={() => setMembersRealm(null)} />
+      )}
 
       {ownerInvite && (
         <OwnerInviteModal
