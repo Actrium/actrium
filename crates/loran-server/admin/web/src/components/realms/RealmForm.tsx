@@ -18,14 +18,15 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
   const [displayName, setDisplayName] = useState("");
   const [packageHref, setPackageHref] = useState("");
   const [packageSha256, setPackageSha256] = useState("");
+  const [packageType, setPackageType] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   // Wizard state
   const [step, setStep] = useState<"input" | "success">("input");
-  const [createdSecret, setCreatedSecret] = useState<string | null>(null);
+  const [ownerInvite, setOwnerInvite] = useState<string | null>(null);
+  const [inviteExpiresAt, setInviteExpiresAt] = useState<string | null>(null);
   const [createdRealm, setCreatedRealm] = useState<string | null>(null);
-  const [adminToken, setAdminToken] = useState<string | null>(null);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -40,8 +41,8 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose, step, createdRealm]); // Add step dependency
 
-  // The Realm is created suspended so the secret can be saved before it
-  // serves Actors; the second step resumes it.
+  // The Realm is created suspended so the owner invite can be saved before
+  // it serves Actors; the second step resumes it.
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
@@ -52,11 +53,13 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
         realm: name,
         enabled: false,
         ...(displayName ? { display_name: displayName } : {}),
-        ...(packageHref ? { package: { href: packageHref, sha256: packageSha256 } } : {}),
+        ...(packageHref
+          ? { package: { href: packageHref, sha256: packageSha256, type: packageType } }
+          : {}),
       });
-      if (resp.realm_secret) {
-        setCreatedSecret(resp.realm_secret);
-        setAdminToken(resp.realm_admin_token ?? null);
+      if (resp.owner_invite) {
+        setOwnerInvite(resp.owner_invite);
+        setInviteExpiresAt(resp.owner_invite_expires_at ?? null);
         setCreatedRealm(resp.realm?.realm ?? name);
         setStep("success");
       } else {
@@ -84,23 +87,23 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
   }
 
   function handleDownload() {
-    if (!createdSecret || !createdRealm) return;
-    const blob = new Blob([createdSecret], { type: "text/plain" });
+    if (!ownerInvite || !createdRealm) return;
+    const blob = new Blob([ownerInvite], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `realm-${createdRealm}-secret.txt`;
+    a.download = `realm-${createdRealm}-owner-invite.txt`;
     a.click();
     URL.revokeObjectURL(url);
   }
 
   function handleCopy() {
-    if (createdSecret) {
-      navigator.clipboard.writeText(createdSecret);
+    if (ownerInvite) {
+      navigator.clipboard.writeText(ownerInvite);
     }
   }
 
-  if (step === "success" && createdSecret && createdRealm) {
+  if (step === "success" && ownerInvite && createdRealm) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
         <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
@@ -116,9 +119,10 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
               <div className="flex items-start gap-3">
                 <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
                 <div className="space-y-1">
-                  <p className="text-sm font-medium text-amber-900">Save this secret now</p>
+                  <p className="text-sm font-medium text-amber-900">Save the owner invite now</p>
                   <p className="text-xs text-amber-700">
-                    This secret will only be shown once. It is required for actors to join this realm.
+                    It is shown only once. Hand it to the Realm&apos;s owner, who redeems it with a
+                    new client and then invites the other members.
                   </p>
                 </div>
               </div>
@@ -130,12 +134,17 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
                 <p className="text-sm font-mono text-gray-900">{createdRealm}</p>
               </div>
               <div>
-                <label className="text-xs font-medium text-gray-500 uppercase">Realm Secret</label>
+                <label className="text-xs font-medium text-gray-500 uppercase">Owner Invite</label>
                 <div className="mt-1 flex items-center gap-2">
                   <code className="flex-1 rounded bg-gray-100 px-3 py-2 text-sm font-mono text-gray-800 border border-gray-200 break-all">
-                    {createdSecret}
+                    {ownerInvite}
                   </code>
                 </div>
+                {inviteExpiresAt && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Expires {new Date(inviteExpiresAt).toLocaleString()}.
+                  </p>
+                )}
                 <div className="flex gap-2 mt-2">
                   <button
                     onClick={handleCopy}
@@ -151,26 +160,6 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
                   </button>
                 </div>
               </div>
-              {adminToken && (
-                <div>
-                  <label className="text-xs font-medium text-gray-500 uppercase">
-                    Realm Admin Token
-                  </label>
-                  <code className="mt-1 block rounded bg-gray-100 px-3 py-2 text-sm font-mono text-gray-800 border border-gray-200 break-all">
-                    {adminToken}
-                  </code>
-                  <p className="mt-1 text-xs text-gray-500">
-                    Give it to the Realm&apos;s administrator. It manages only this Realm and is
-                    shown only once.
-                  </p>
-                  <button
-                    onClick={() => navigator.clipboard.writeText(adminToken)}
-                    className="mt-2 flex items-center gap-1.5 rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-                  >
-                    <Copy className="h-3.5 w-3.5" /> Copy
-                  </button>
-                </div>
-              )}
             </div>
 
             <div className="pt-4 border-t border-gray-100 flex flex-col gap-3">
@@ -179,7 +168,7 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
                 disabled={loading}
                 className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
-                {loading ? "Resuming..." : "I have saved the secret, resume Realm"}
+                {loading ? "Resuming..." : "I have saved the invite, resume Realm"}
               </button>
               <button
                 onClick={onClose}
@@ -259,9 +248,19 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
               required={packageHref !== ""}
               className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
             />
+            <input
+              type="text"
+              value={packageType}
+              onChange={(e) => setPackageType(e.target.value.trim())}
+              placeholder="publisher.example/app@1.0.0"
+              title="Actor type of the package manifest"
+              required={packageHref !== ""}
+              className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+            />
             <p className="mt-1 text-xs text-gray-500">
               Required for Realms under this Realm Provider&apos;s domain: it goes into the
-              Realm Profile this instance signs.
+              Realm Profile this instance signs. The type is the package manifest&apos;s
+              <code> publisher/program@version</code>.
             </p>
           </div>
 

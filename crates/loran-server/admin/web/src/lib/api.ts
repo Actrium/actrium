@@ -85,11 +85,6 @@ export interface RealmInfo {
   updated_at: number | null;
   expires_at: number;
   status: RealmStatus;
-  secret_rotation_state?: {
-    current_hash_preview: string;
-    previous_hash_preview?: string;
-    previous_valid_until?: number;
-  } | null;
 }
 
 export interface RealmsResponse {
@@ -102,17 +97,18 @@ export interface RealmMutationResponse {
   success: boolean;
   error_message: string | null;
   realm?: RealmInfo | null;
-  realm_secret?: string | null;
-  /** Returned once for a Realm under the Provider domain. */
-  realm_admin_token?: string | null;
+  /** The owner invite of a created Realm, returned once. */
+  owner_invite?: string | null;
+  /** RFC 3339. */
+  owner_invite_expires_at?: string | null;
 }
 
-export interface RealmSecretRotationResponse {
+export interface OwnerInviteResponse {
   success: boolean;
   realm: string;
-  realm_secret: string;
-  previous_valid_until: number | null;
-  grace_seconds: number;
+  owner_invite: string;
+  /** RFC 3339. */
+  expires_at: string;
 }
 
 export interface ResolvedField {
@@ -219,7 +215,7 @@ export const api = {
     realm: string;
     enabled?: boolean;
     display_name?: string;
-    package?: { href: string; sha256: string };
+    package?: { href: string; sha256: string; type: string };
   }) =>
     request<RealmMutationResponse>("/realms", {
       method: "POST",
@@ -243,17 +239,11 @@ export const api = {
       method: "POST",
     }),
 
-  rotateRealmSecret: (realm: string) =>
-    request<RealmSecretRotationResponse>(`/realms/${encodeURIComponent(realm)}/secret/rotate`, {
+  /** A new owner invite (owner recovery); unused earlier ones stop working. */
+  issueOwnerInvite: (realm: string) =>
+    request<OwnerInviteResponse>(`/realms/${encodeURIComponent(realm)}/owner-invite`, {
       method: "POST",
     }),
-
-  /** Replaces the Realm admin token; the old one stops working. */
-  reissueRealmAdminToken: (realm: string) =>
-    request<{ success: boolean; realm: string; realm_admin_token: string }>(
-      `/realms/${encodeURIComponent(realm)}/admin-token/reissue`,
-      { method: "POST" },
-    ),
 
   getConfig: (configType: number, key: string) =>
     request<{

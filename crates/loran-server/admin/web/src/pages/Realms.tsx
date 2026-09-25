@@ -8,7 +8,7 @@ import { ServicePageLayout } from "../components/layout/ServicePageLayout";
 /* ── Realms page ─────────────────────────────────────────────── */
 
 import { ConfirmModal } from "../components/ui/ConfirmModal";
-import { RealmSecretModal } from "../components/realms/RealmSecretModal";
+import { OwnerInviteModal } from "../components/realms/OwnerInviteModal";
 import { IdentityReview } from "../components/identity/IdentityReview";
 
 const REALM_WRITES_DISABLED_MESSAGE =
@@ -19,19 +19,14 @@ export function Realms() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [realmWritesEnabled, setRealmWritesEnabled] = useState(true);
-  const [realmSecretNotice, setRealmSecretNotice] = useState<{
+  const [ownerInvite, setOwnerInvite] = useState<{
     realm: string;
-    secret: string;
-    previousValidUntil?: number | null;
-    kind?: "secret" | "admin-token";
+    invite: string;
+    expiresAt: string;
   } | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [rotateConfirm, setRotateConfirm] = useState<{ isOpen: boolean; realm: string | null }>({
-    isOpen: false,
-    realm: null,
-  });
   const [retireConfirm, setRetireConfirm] = useState<string | null>(null);
-  const [reissueConfirm, setReissueConfirm] = useState<string | null>(null);
+  const [inviteConfirm, setInviteConfirm] = useState<string | null>(null);
 
   const ensureRealmWritesEnabled = useCallback(() => {
     if (realmWritesEnabled) {
@@ -75,9 +70,8 @@ export function Realms() {
       return;
     }
     setShowForm(false);
-    setRotateConfirm({ isOpen: false, realm: null });
     setRetireConfirm(null);
-    setReissueConfirm(null);
+    setInviteConfirm(null);
   }, [realmWritesEnabled]);
 
   async function handleToggleEnabled(realm: RealmInfo) {
@@ -104,49 +98,16 @@ export function Realms() {
     }
   }
 
-  async function handleConfirmReissue() {
-    const realm = reissueConfirm;
-    setReissueConfirm(null);
+  async function handleConfirmInvite() {
+    const realm = inviteConfirm;
+    setInviteConfirm(null);
     if (realm === null || !ensureRealmWritesEnabled()) return;
 
     try {
-      const resp = await api.reissueRealmAdminToken(realm);
-      setRealmSecretNotice({
-        realm: resp.realm,
-        secret: resp.realm_admin_token,
-        kind: "admin-token",
-      });
+      const resp = await api.issueOwnerInvite(realm);
+      setOwnerInvite({ realm: resp.realm, invite: resp.owner_invite, expiresAt: resp.expires_at });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to reissue Realm admin token");
-    }
-  }
-
-  async function handleRotateSecretClick(realm: string) {
-    if (!ensureRealmWritesEnabled()) return;
-    setRotateConfirm({ isOpen: true, realm });
-  }
-
-  async function handleConfirmRotate() {
-    if (!ensureRealmWritesEnabled()) {
-      setRotateConfirm({ isOpen: false, realm: null });
-      return;
-    }
-
-    const realm = rotateConfirm.realm;
-    if (realm === null) return;
-
-    try {
-      const resp = await api.rotateRealmSecret(realm);
-      setRealmSecretNotice({
-        realm: resp.realm,
-        secret: resp.realm_secret,
-        previousValidUntil: resp.previous_valid_until,
-      });
-      setRotateConfirm({ isOpen: false, realm: null });
-      await fetchRealms();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to rotate realm secret");
-      setRotateConfirm({ isOpen: false, realm: null });
+      setError(err instanceof Error ? err.message : "Failed to issue an owner invite");
     }
   }
 
@@ -186,9 +147,9 @@ export function Realms() {
         <p className="text-xs text-gray-500 mb-4">
           One Actrix instance hosts many Realms. A Realm is one deployed application instance,
           named <code>&lt;realm_id&gt;@&lt;domain&gt;</code>. Realms share this instance&apos;s
-          services but never see each other&apos;s Actors. The Realm registration secret is an
-          administrator/host capability: Issuer verifies it on every registration, and guest
-          workloads must never receive it directly.
+          services but never see each other&apos;s Actors. Members join with one-time invites
+          and register a Realm client key per client; Issuer checks that key on every
+          registration, and guest workloads never receive it.
         </p>
 
         <div className="mt-5 space-y-2 text-xs text-gray-500 border-t border-gray-100 pt-4">
@@ -203,9 +164,10 @@ export function Realms() {
               discovery and relay require an explicit ACL rule.
             </li>
             <li>
-              <strong className="text-gray-600">Realm secret</strong> — every realm has a secret
-              issued at creation. Actors must present it at registration; Issuer verifies the
-              hash before issuing credentials. Secrets can be rotated with a 4h dual-validity window.
+              <strong className="text-gray-600">Owner invite</strong> — creating a Realm returns
+              its owner invite once. The owner redeems it and invites the members. If the owner
+              loses all clients, issue a new owner invite here (Realms under this Realm Provider&apos;s
+              domain, or without a Realm Profile); redeeming it revokes the old owner clients.
             </li>
             <li>
               <strong className="text-gray-600">Lifecycle</strong> — suspending a Realm blocks all
@@ -228,15 +190,12 @@ export function Realms() {
         </div>
       )}
 
-      {/* realmSecretNotice block removed in favor of modal */}
-
       <RealmTable
         realms={realms}
         writesEnabled={realmWritesEnabled}
         onToggleEnabled={handleToggleEnabled}
-        onRotateSecret={handleRotateSecretClick}
-        onReissueAdminToken={(realm) => {
-          if (ensureRealmWritesEnabled()) setReissueConfirm(realm);
+        onIssueOwnerInvite={(realm) => {
+          if (ensureRealmWritesEnabled()) setInviteConfirm(realm);
         }}
         onRetire={(realm) => {
           if (ensureRealmWritesEnabled()) setRetireConfirm(realm);
@@ -275,55 +234,32 @@ export function Realms() {
       />
 
       <ConfirmModal
-        isOpen={reissueConfirm !== null}
-        title="Reissue Realm Admin Token"
+        isOpen={inviteConfirm !== null}
+        title="Issue Owner Invite"
         message={
           <span>
-            Reissue the Realm admin token of <strong>{reissueConfirm}</strong>?
+            Issue a new owner invite for <strong>{inviteConfirm}</strong>?
             <br />
             <br />
             <span className="text-xs text-gray-500 block">
-              The Realm admin token manages only this Realm. The current one stops working at
-              once; the new one is displayed once.
+              Use it when the owner lost all clients. Earlier unused owner invites stop working;
+              redeeming this one revokes the current owner&apos;s clients. It is displayed once.
             </span>
           </span>
         }
-        confirmLabel="Reissue Token"
+        confirmLabel="Issue Invite"
         cancelLabel="Cancel"
         isDestructive={false}
-        onConfirm={handleConfirmReissue}
-        onCancel={() => setReissueConfirm(null)}
+        onConfirm={handleConfirmInvite}
+        onCancel={() => setInviteConfirm(null)}
       />
 
-      <ConfirmModal
-        isOpen={rotateConfirm.isOpen}
-        title="Rotate Realm Secret"
-        message={
-          <span>
-            Are you sure you want to rotate the secret for realm <strong>{rotateConfirm.realm}</strong>?
-            <br />
-            <br />
-            <span className="text-xs text-gray-500 block">
-              The old secret will remain valid for 4 hours to allow graceful rotation.
-              After confirmation, the new secret will be displayed once.
-            </span>
-          </span>
-        }
-        confirmLabel="Rotate Secret"
-        cancelLabel="Cancel"
-        isDestructive={false}
-        onConfirm={handleConfirmRotate}
-        onCancel={() => setRotateConfirm({ isOpen: false, realm: null })}
-      />
-
-      {realmSecretNotice && (
-        <RealmSecretModal
-          isOpen={!!realmSecretNotice}
-          realm={realmSecretNotice.realm}
-          secret={realmSecretNotice.secret}
-          previousValidUntil={realmSecretNotice.previousValidUntil}
-          kind={realmSecretNotice.kind}
-          onClose={() => setRealmSecretNotice(null)}
+      {ownerInvite && (
+        <OwnerInviteModal
+          realm={ownerInvite.realm}
+          invite={ownerInvite.invite}
+          expiresAt={ownerInvite.expiresAt}
+          onClose={() => setOwnerInvite(null)}
         />
       )}
     </ServicePageLayout>

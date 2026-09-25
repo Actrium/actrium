@@ -1,13 +1,12 @@
 import type { RealmInfo } from "../../lib/api";
 import { cn } from "../../lib/utils";
-import { Archive, Clock, KeyRound, Pause, Play, UserCog } from "lucide-react";
+import { Archive, Pause, Play, UserPlus } from "lucide-react";
 
 interface RealmTableProps {
   realms: RealmInfo[];
   writesEnabled: boolean;
   onToggleEnabled: (realm: RealmInfo) => void;
-  onRotateSecret: (realm: string) => void;
-  onReissueAdminToken: (realm: string) => void;
+  onIssueOwnerInvite: (realm: string) => void;
   onRetire: (realm: string) => void;
 }
 
@@ -31,8 +30,7 @@ export function RealmTable({
   realms,
   writesEnabled,
   onToggleEnabled,
-  onRotateSecret,
-  onReissueAdminToken,
+  onIssueOwnerInvite,
   onRetire,
 }: RealmTableProps) {
   if (realms.length === 0) {
@@ -52,7 +50,6 @@ export function RealmTable({
           <tr className="border-b border-gray-200 bg-gray-50">
             <th className="px-4 py-3 text-left font-medium text-gray-500">Realm</th>
             <th className="px-4 py-3 text-left font-medium text-gray-500">Status</th>
-            <th className="px-4 py-3 text-left font-medium text-gray-500">Secret State</th>
             <th className="px-4 py-3 text-left font-medium text-gray-500">Created</th>
             <th className="px-4 py-3 text-right font-medium text-gray-500">Actions</th>
           </tr>
@@ -60,8 +57,6 @@ export function RealmTable({
         <tbody className="divide-y divide-gray-100">
           {realms.map((realm) => {
             const retired = realm.status === "retired";
-            const validUntil = realm.secret_rotation_state?.previous_valid_until;
-            const isRotating = !retired && !!validUntil && validUntil * 1000 > Date.now();
             const status = statusLabel(realm);
             const disabledTitle = retired ? "Retired" : "Managed by superv";
             const canWrite = writesEnabled && !retired;
@@ -73,16 +68,6 @@ export function RealmTable({
                   <span className={cn("rounded border px-2 py-0.5 text-xs font-medium", status.className)}>
                     {status.text}
                   </span>
-                </td>
-                <td className="px-4 py-3">
-                  {isRotating ? (
-                    <div className="flex items-center gap-1.5 text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded border border-amber-100 w-fit" title={`Old secret valid until ${new Date((validUntil || 0) * 1000).toLocaleString()}`}>
-                      <Clock className="h-3 w-3" />
-                      <span className="font-medium">Rotating</span>
-                    </div>
-                  ) : (
-                    <span className="text-xs text-gray-400">{retired ? "—" : "Stable"}</span>
-                  )}
                 </td>
                 <td className="px-4 py-3 text-xs text-gray-500">
                   {new Date(realm.created_at * 1000).toLocaleDateString()}
@@ -98,20 +83,12 @@ export function RealmTable({
                       {realm.enabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                     </button>
                     <button
-                      onClick={() => onRotateSecret(realm.realm)}
-                      disabled={!canWrite}
-                      className={cn(actionClass, "hover:bg-amber-50 hover:text-amber-600")}
-                      title={canWrite ? "Rotate secret" : disabledTitle}
-                    >
-                      <KeyRound className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => onReissueAdminToken(realm.realm)}
+                      onClick={() => onIssueOwnerInvite(realm.realm)}
                       disabled={!canWrite || realm.status !== "active"}
                       className={cn(actionClass, "hover:bg-blue-50 hover:text-blue-600")}
-                      title={canWrite ? "Reissue Realm admin token" : disabledTitle}
+                      title={canWrite ? "Issue owner invite" : disabledTitle}
                     >
-                      <UserCog className="h-4 w-4" />
+                      <UserPlus className="h-4 w-4" />
                     </button>
                     <button
                       onClick={() => onRetire(realm.realm)}
