@@ -535,7 +535,9 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
 - 已实现 Realm issuer key 轮换（Realm Profile §6.1，见 5.3）：预发布 24 小时、切换、旧 key
   在最后 credential 过期 +5 分钟后移除并在 Signer 中退役；Realm Provider 域名下的 Realm 每 90 天
   自动轮换；运营者入口 `POST /admin/api/realms/{realm}/issuer-key/rotate`，持有方工具
-  `actr realm draft-request`。尚未实现：泄露时的立即移除入口（目前只能退役 Realm）、验证者遇到
+  `actr realm draft-request`；并发轮换或与 Realm 退役竞态时未能列出的新 key 当即在 Signer 中
+  退役。Issuer Signer 的 key 均为具名 key、不按时间过期（旧的过期 key 机制及
+  `tolerance_seconds`、`key_ttl_seconds` 已删除）。尚未实现：泄露时的立即移除入口（目前只能退役 Realm）、验证者遇到
   未知 `key_id` 时按 Realm 限流刷新（Loran 内的验证者与 Issuer 同进程共享 key 缓存，不需要）；
 - Realm Provider 域名下的 Realm 的 Realm Provider 账号认证（OAuth 2.0 + PKCE）、按账号配额
   与账号绑定的 Realm 管理权；
@@ -543,8 +545,12 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   `/.well-known/actr/publisher.json` 与 challenge 已移除；Publisher Profile 签名 key 按 key pin
   跟随轮换链；包签名 key id 由公钥推导，轮换重叠期两把 `active` key 均可发布。尚未实现：
   Publisher Profile 身份变化的重新确认、Publisher Profile 的周期刷新（过期或 key 移除后不自动
-  停用该 publisher）；
-- 按 Realm 的连接、注册、消息与 TURN 配额（TURN 认证已拒绝不可用 Realm 的 credential）；
+  停用该 publisher）；已登记 Publisher 总数受 `[realm] max_publishers` 限制（默认 1000）；
+- 已实现 `/renew`、`/reissue` 加固：`/renew` 先只读校验 renewal token 再报告 Realm 状态；后继已
+  生成的 token 只在 5 分钟内可 `/renew`，且只换回该后继；两者的提交事务内重查 Actor 撤销、Realm
+  状态、包撤销与 publisher 停用；Realm 退役同时删除其 attempt 记录；
+- 按 Realm 的连接、注册、消息与 TURN 配额（TURN 认证已拒绝不可用 Realm 的 credential，Realm
+  停用、过期或退役时关闭其已建立的 allocation）；
 - 控制面与本契约的剩余差异：Realm Provider 域名下的 Realm 由运营者经 admin API 代办创建（等同
   Realm Provider 账号）；Loran 不是 Realm Provider（未启用 authority 或 Issuer 无 Signer）时，
   运营者仍可创建任意域名下没有 Realm Profile 的 `active` Realm，并可经 `RetireRealm` 与
