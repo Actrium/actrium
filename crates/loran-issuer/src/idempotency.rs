@@ -1062,7 +1062,7 @@ pub(crate) mod tests {
 
             // Nothing refuses the actor before the change.
             crate::issuer::AIdIssuer::recheck_actor_on(
-                &mut *pool.acquire().await.unwrap(),
+                &mut pool.acquire().await.unwrap(),
                 &actor,
                 None,
             )
