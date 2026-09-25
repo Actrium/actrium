@@ -19,6 +19,21 @@ use thiserror::Error;
 pub const REALM_PROFILE_SCHEMA: &str = "actr.realm/v1";
 pub const REALM_PROFILE_PROTOCOL: &str = "actr-realm-profile/1";
 
+/// Most keys `issuer.keys` lists.
+pub const MAX_ISSUER_KEYS: usize = 3;
+
+/// The credential `key_id` a Realm Profile issuer key id names: its decimal
+/// form without leading zeros.
+pub fn parse_issuer_key_id(id: &str) -> Option<u32> {
+    if id.is_empty()
+        || (id.len() > 1 && id.starts_with('0'))
+        || !id.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    id.parse().ok()
+}
+
 /// Largest integer JCS (RFC 8785, via I-JSON) represents exactly.
 const MAX_EXACT_INTEGER: u64 = (1 << 53) - 1;
 
@@ -209,6 +224,15 @@ impl RealmProfile {
         })
     }
 
+    /// The Realm issuer key that verifies credentials with header `key_id`
+    /// (section 6.1), `active` or `retired`.
+    pub fn issuer_key(&self, key_id: u32) -> Option<&IssuerKey> {
+        self.issuer
+            .keys
+            .iter()
+            .find(|key| parse_issuer_key_id(&key.id) == Some(key_id))
+    }
+
     /// Checks a verified `candidate` against the accepted Realm Profile of the
     /// same Realm (section 5, check 3). Both must come from [`Self::verify`].
     pub fn check_successor(&self, candidate: &Self) -> Result<(), RealmProfileError> {
@@ -275,6 +299,29 @@ impl RealmProfile {
         }
         chrono::DateTime::parse_from_rfc3339(&self.issued_at)
             .map_err(|error| format!("issued_at: {error}"))?;
+        let keys = &self.issuer.keys;
+        if keys.is_empty() || keys.len() > MAX_ISSUER_KEYS {
+            return Err(format!("issuer.keys must list 1 to {MAX_ISSUER_KEYS} keys"));
+        }
+        for (index, key) in keys.iter().enumerate() {
+            if parse_issuer_key_id(&key.id).is_none()
+                || keys[..index].iter().any(|k| k.id == key.id)
+            {
+                return Err(format!(
+                    "issuer key id '{}' is not a unique decimal credential key_id",
+                    key.id
+                ));
+            }
+            let valid_key = BASE64
+                .decode(&key.public_key)
+                .is_ok_and(|bytes| bytes.len() == 32);
+            if key.algorithm != SIGNATURE_ALGORITHM || !valid_key {
+                return Err(format!(
+                    "issuer key '{}' is not a base64 Ed25519 key",
+                    key.id
+                ));
+            }
+        }
         if self.signature.algorithm != SIGNATURE_ALGORITHM {
             return Err(format!(
                 "unsupported signature algorithm '{}'",
@@ -469,7 +516,7 @@ mod tests {
             "issuer": {
                 "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
                 "keys": [{
-                    "id": "issuer-2026-2", "algorithm": "Ed25519",
+                    "id": "7", "algorithm": "Ed25519",
                     "public_key": BASE64.encode([1u8; 32]), "status": "active"
                 }]
             },
@@ -587,6 +634,30 @@ mod tests {
             ("status", |p| p["realm"]["status"] = json!("pending")),
             ("sequence", |p| p["sequence"] = json!(-1)),
             ("sequence range", |p| p["sequence"] = json!(1u64 << 53)),
+            ("issuer key id", |p| {
+                p["issuer"]["keys"][0]["id"] = json!("issuer-7")
+            }),
+            ("issuer key id zero", |p| {
+                p["issuer"]["keys"][0]["id"] = json!("07")
+            }),
+            ("issuer key id range", |p| {
+                p["issuer"]["keys"][0]["id"] = json!("4294967296")
+            }),
+            ("issuer keys empty", |p| p["issuer"]["keys"] = json!([])),
+            ("issuer keys", |p| {
+                let key = p["issuer"]["keys"][0].clone();
+                let keys: Vec<Value> = (1..=4)
+                    .map(|id| {
+                        let mut key = key.clone();
+                        key["id"] = json!(id.to_string());
+                        key
+                    })
+                    .collect();
+                p["issuer"]["keys"] = json!(keys);
+            }),
+            ("issuer key", |p| {
+                p["issuer"]["keys"][0]["public_key"] = json!("short")
+            }),
         ];
         for (label, mutate) in cases {
             let mut profile = unsigned(1);
@@ -595,6 +666,26 @@ mod tests {
                 RealmProfile::verify(&sign(profile, "rs-1", &key), NAME, &keys).unwrap_err();
             assert_eq!(error.code(), "REALM_PROFILE_INVALID", "{label}: {error}");
         }
+    }
+
+    #[test]
+    fn finds_issuer_keys_by_credential_key_id() {
+        let key = signing_key();
+        let keys = keys(&[("rs-1", &key, KeyStatus::Active)]);
+        let mut profile = unsigned(1);
+        let mut old = profile["issuer"]["keys"][0].clone();
+        old["id"] = json!("4294967295");
+        old["status"] = json!("retired");
+        profile["issuer"]["keys"].as_array_mut().unwrap().push(old);
+        let profile = RealmProfile::verify(&sign(profile, "rs-1", &key), NAME, &keys).unwrap();
+        assert_eq!(profile.issuer_key(7).unwrap().status, KeyStatus::Active);
+        assert_eq!(
+            profile.issuer_key(u32::MAX).unwrap().status,
+            KeyStatus::Retired
+        );
+        assert!(profile.issuer_key(70).is_none());
+        assert_eq!(parse_issuer_key_id("0"), Some(0));
+        assert_eq!(parse_issuer_key_id("+7"), None);
     }
 
     #[test]

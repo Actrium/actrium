@@ -171,7 +171,307 @@ fn check_signature(signature: &DetachedSignature) -> Result<(), String> {
     Ok(())
 }
 
+/// Most `keys` and most `rotations` a signed key list may carry.
+pub const MAX_SIGNING_KEYS: usize = 8;
+
+/// Last known status of a pinned signing key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PinnedStatus {
+    Active,
+    Retired,
+    /// No longer listed: revoked, and never accepted again.
+    Removed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PinnedKey {
+    pub id: String,
+    /// Base64 Ed25519 public key.
+    pub public_key: String,
+    pub status: PinnedStatus,
+}
+
+/// What a client or Realm Provider keeps for one domain's signing keys
+/// (`actr/protocols/authority-discovery.md` section 4.4): every key it ever
+/// accepted with its last status, and the accepted `sequence`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeyPins {
+    pub sequence: u64,
+    /// SHA-256 hex of the accepted document's signed JCS payload, which an
+    /// equal `sequence` must repeat.
+    pub digest: String,
+    pub keys: Vec<PinnedKey>,
+}
+
+/// Result of [`KeyPins::accept`] for a document that is not rejected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeyPinOutcome {
+    /// The new pins.
+    Accepted(KeyPins),
+    /// The signing key does not chain to a pinned key. The pins are the
+    /// document's own keys, to use once trust is confirmed again.
+    IdentityChange(KeyPins),
+}
+
+/// A signed list of signing keys: a `realm_signing_keys` member, or the
+/// `profile_signing_keys` of a Publisher Profile.
+#[derive(Debug, Clone, Copy)]
+pub struct SignedKeyList<'a> {
+    pub sequence: u64,
+    pub keys: &'a [RealmSigningKey],
+    pub rotations: &'a [KeyRotation],
+    pub signature: &'a DetachedSignature,
+    /// RFC 8785 JCS form of the document without `signature`.
+    pub payload: &'a str,
+}
+
+fn decode_key(public_key: &str) -> Result<ed25519_dalek::VerifyingKey, String> {
+    let bytes: [u8; 32] = BASE64
+        .decode(public_key)
+        .ok()
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or("public_key is not a base64 Ed25519 key")?;
+    ed25519_dalek::VerifyingKey::from_bytes(&bytes).map_err(|error| error.to_string())
+}
+
+fn verify_detached(public_key: &str, payload: &[u8], signature: &str) -> Result<(), String> {
+    use ed25519_dalek::Verifier as _;
+    let signature: [u8; 64] = BASE64
+        .decode(signature)
+        .ok()
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or("signature is not a base64 Ed25519 signature")?;
+    decode_key(public_key)?
+        .verify(payload, &ed25519_dalek::Signature::from_bytes(&signature))
+        .map_err(|_| "signature verification failed".to_string())
+}
+
+/// The JCS payload a rotation's `from` key signs.
+pub fn rotation_payload(rotation: &KeyRotation, public_key: &str) -> String {
+    crate::realm_profile::jcs(&serde_json::json!({
+        "from": rotation.from,
+        "to": rotation.to,
+        "public_key": public_key,
+        "sequence": rotation.sequence,
+    }))
+}
+
+impl KeyPins {
+    /// Pins of a document accepted without a prior pin.
+    fn first(list: &SignedKeyList<'_>) -> Self {
+        Self {
+            sequence: list.sequence,
+            digest: payload_digest(list.payload),
+            keys: list
+                .keys
+                .iter()
+                .map(|key| PinnedKey {
+                    id: key.id.clone(),
+                    public_key: key.public_key.clone(),
+                    status: match key.status {
+                        KeyStatus::Active => PinnedStatus::Active,
+                        KeyStatus::Retired => PinnedStatus::Retired,
+                    },
+                })
+                .collect(),
+        }
+    }
+
+    fn get(&self, id: &str) -> Option<&PinnedKey> {
+        self.keys.iter().find(|key| key.id == id)
+    }
+
+    /// The pinned keys still listed, with their last status.
+    pub fn signing_keys(&self) -> Vec<RealmSigningKey> {
+        self.keys
+            .iter()
+            .filter_map(|key| {
+                let status = match key.status {
+                    PinnedStatus::Active => KeyStatus::Active,
+                    PinnedStatus::Retired => KeyStatus::Retired,
+                    PinnedStatus::Removed => return None,
+                };
+                Some(RealmSigningKey {
+                    id: key.id.clone(),
+                    algorithm: SIGNATURE_ALGORITHM.to_string(),
+                    public_key: key.public_key.clone(),
+                    status,
+                })
+            })
+            .collect()
+    }
+
+    /// Run the acceptance procedure of `authority-discovery.md` section 4.4
+    /// on `list`, structurally valid, against `pinned` (`None` for a first
+    /// accept over HTTPS or an enterprise pin). `Err` means the document is
+    /// rejected and `pinned` stays as it is.
+    pub fn accept(
+        pinned: Option<&KeyPins>,
+        list: &SignedKeyList<'_>,
+    ) -> Result<KeyPinOutcome, String> {
+        let listed = |id: &str| list.keys.iter().find(|key| key.id == id);
+
+        // 1. Signed by an active listed key.
+        let signer = listed(&list.signature.key_id)
+            .filter(|key| key.status == KeyStatus::Active)
+            .ok_or_else(|| format!("'{}' is not an active key", list.signature.key_id))?;
+        verify_detached(
+            &signer.public_key,
+            list.payload.as_bytes(),
+            &list.signature.value,
+        )?;
+
+        // 2. A pinned id keeps its key, a retired key stays retired, and a
+        // removed key never comes back.
+        if let Some(pinned) = pinned {
+            for key in list.keys {
+                let Some(saved) = pinned.get(&key.id) else {
+                    continue;
+                };
+                if saved.public_key != key.public_key {
+                    return Err(format!(
+                        "key '{}' is listed with another public key",
+                        key.id
+                    ));
+                }
+                match (saved.status, key.status) {
+                    (PinnedStatus::Removed, _) => {
+                        return Err(format!("removed key '{}' is listed again", key.id));
+                    }
+                    (PinnedStatus::Retired, KeyStatus::Active) => {
+                        return Err(format!("retired key '{}' is active again", key.id));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // 3. Every rotation between listed keys verifies.
+        for rotation in list.rotations {
+            if let (Some(from), Some(to)) = (listed(&rotation.from), listed(&rotation.to)) {
+                verify_detached(
+                    &from.public_key,
+                    rotation_payload(rotation, &to.public_key).as_bytes(),
+                    &rotation.signature,
+                )
+                .map_err(|error| format!("rotation '{}' -> '{}': {error}", from.id, to.id))?;
+            }
+        }
+
+        let Some(pinned) = pinned else {
+            return Ok(KeyPinOutcome::Accepted(Self::first(list)));
+        };
+
+        // 4. Trusted keys: pinned and still listed, plus keys a rotation from
+        // a trusted, not retired key introduces after the accepted sequence.
+        let mut trusted: Vec<&str> = list
+            .keys
+            .iter()
+            .filter(|key| pinned.get(&key.id).is_some())
+            .map(|key| key.id.as_str())
+            .collect();
+        loop {
+            let introduced = list.rotations.iter().find(|rotation| {
+                rotation.sequence > pinned.sequence
+                    && trusted.contains(&rotation.from.as_str())
+                    && !trusted.contains(&rotation.to.as_str())
+                    && pinned.get(&rotation.to).is_none()
+                    && listed(&rotation.to).is_some()
+                    && pinned
+                        .get(&rotation.from)
+                        .is_none_or(|from| from.status != PinnedStatus::Retired)
+            });
+            match introduced {
+                Some(rotation) => trusted.push(&rotation.to),
+                None => break,
+            }
+        }
+
+        // 6. A signing key outside the chain is an identity change.
+        if !trusted.contains(&signer.id.as_str()) {
+            return Ok(KeyPinOutcome::IdentityChange(Self::first(list)));
+        }
+
+        // 5. No rollback; an equal sequence repeats the accepted document.
+        let digest = payload_digest(list.payload);
+        if list.sequence < pinned.sequence
+            || (list.sequence == pinned.sequence && digest != pinned.digest)
+        {
+            return Err(format!(
+                "sequence {} rolls back accepted sequence {}",
+                list.sequence, pinned.sequence
+            ));
+        }
+        let mut keys: Vec<PinnedKey> = pinned
+            .keys
+            .iter()
+            .map(|saved| PinnedKey {
+                status: match listed(&saved.id) {
+                    Some(key) if key.status == KeyStatus::Active => PinnedStatus::Active,
+                    Some(_) => PinnedStatus::Retired,
+                    None => PinnedStatus::Removed,
+                },
+                ..saved.clone()
+            })
+            .collect();
+        for id in trusted {
+            if pinned.get(id).is_none()
+                && let Some(key) = listed(id)
+            {
+                keys.push(PinnedKey {
+                    id: key.id.clone(),
+                    public_key: key.public_key.clone(),
+                    status: match key.status {
+                        KeyStatus::Active => PinnedStatus::Active,
+                        KeyStatus::Retired => PinnedStatus::Retired,
+                    },
+                });
+            }
+        }
+        Ok(KeyPinOutcome::Accepted(Self {
+            sequence: list.sequence,
+            digest,
+            keys,
+        }))
+    }
+}
+
+fn payload_digest(payload: &str) -> String {
+    use sha2::Digest as _;
+    hex::encode(sha2::Sha256::digest(payload.as_bytes()))
+}
+
 impl RealmSigningKeys {
+    /// Parse and check `member`, a `realm_signing_keys` member as received,
+    /// and run [`KeyPins::accept`] on it.
+    pub fn accept(
+        member: &Value,
+        pinned: Option<&KeyPins>,
+    ) -> Result<(Self, KeyPinOutcome), AuthorityDescriptorError> {
+        let invalid = AuthorityDescriptorError::InvalidRealmSigningKeys;
+        let keys: Self = serde_json::from_value(member.clone())
+            .map_err(|error| invalid(format!("malformed member: {error}")))?;
+        keys.validate()?;
+        let mut payload = member.clone();
+        if let Value::Object(members) = &mut payload {
+            members.remove("signature");
+        }
+        let payload = jcs(&payload);
+        let outcome = KeyPins::accept(
+            pinned,
+            &SignedKeyList {
+                sequence: keys.sequence,
+                keys: &keys.keys,
+                rotations: keys.rotations.as_deref().unwrap_or_default(),
+                signature: &keys.signature,
+                payload: &payload,
+            },
+        )
+        .map_err(invalid)?;
+        Ok((keys, outcome))
+    }
+
     /// Structural checks only; signature verification and key pinning are
     /// left to the caller.
     pub fn validate(&self) -> Result<(), AuthorityDescriptorError> {
@@ -182,6 +482,16 @@ impl RealmSigningKeys {
     fn check(&self) -> Result<(), String> {
         if self.keys.is_empty() {
             return Err("keys is empty".into());
+        }
+        if self.keys.len() > MAX_SIGNING_KEYS
+            || self
+                .rotations
+                .as_ref()
+                .is_some_and(|r| r.len() > MAX_SIGNING_KEYS)
+        {
+            return Err(format!(
+                "keys and rotations are limited to {MAX_SIGNING_KEYS} entries each"
+            ));
         }
         for (index, key) in self.keys.iter().enumerate() {
             if key.id.is_empty() {
@@ -263,6 +573,38 @@ impl PublisherProfile {
         domain: &str,
         now: DateTime<Utc>,
     ) -> Result<PublisherKeys, AuthorityDescriptorError> {
+        self.verified(domain, now).map(|(keys, _)| keys)
+    }
+
+    /// [`Self::verify`], then [`KeyPins::accept`] on its
+    /// `profile_signing_keys` and `rotations` against `pinned`, with the
+    /// profile `sequence` as the member sequence (section 4.5).
+    pub fn accept(
+        &self,
+        domain: &str,
+        now: DateTime<Utc>,
+        pinned: Option<&KeyPins>,
+    ) -> Result<(PublisherKeys, KeyPinOutcome), AuthorityDescriptorError> {
+        let (keys, payload) = self.verified(domain, now)?;
+        let outcome = KeyPins::accept(
+            pinned,
+            &SignedKeyList {
+                sequence: keys.sequence,
+                keys: &keys.profile_signing_keys,
+                rotations: keys.rotations.as_deref().unwrap_or_default(),
+                signature: &self.signature,
+                payload: &payload,
+            },
+        )
+        .map_err(AuthorityDescriptorError::InvalidPublisher)?;
+        Ok((keys, outcome))
+    }
+
+    fn verified(
+        &self,
+        domain: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(PublisherKeys, String), AuthorityDescriptorError> {
         self.validate_for(domain)?;
         let invalid = AuthorityDescriptorError::InvalidPublisher;
         let mut payload = serde_json::to_value(self).map_err(|error| invalid(error.to_string()))?;
@@ -272,10 +614,11 @@ impl PublisherProfile {
         let keys: PublisherKeys = serde_json::from_value(payload.clone())
             .map_err(|error| invalid(format!("malformed Publisher Profile: {error}")))?;
         keys.check(now).map_err(invalid)?;
+        let payload = jcs(&payload);
         let key = verify_signature(
             &keys.profile_signing_keys,
             &self.signature,
-            jcs(&payload).as_bytes(),
+            payload.as_bytes(),
         )
         .map_err(|error| invalid(error.to_string()))?;
         if key.status != KeyStatus::Active {
@@ -284,8 +627,19 @@ impl PublisherProfile {
                 key.id
             )));
         }
-        Ok(keys)
+        Ok((keys, payload))
     }
+}
+
+/// Most package signing keys a Publisher Profile lists as `active`.
+pub const MAX_ACTIVE_PACKAGE_KEYS: usize = 2;
+
+/// Package signing key id: `actr-pub-` and the first 16 lowercase hex
+/// characters of the SHA-256 of the raw 32-byte public key.
+pub fn package_key_id(public_key: &[u8]) -> String {
+    use sha2::Digest as _;
+    let digest = hex::encode(sha2::Sha256::digest(public_key));
+    format!("actr-pub-{}", &digest[..16])
 }
 
 /// A package signing key listed in a Publisher Profile's `keys`.
@@ -312,6 +666,9 @@ pub struct PublisherKeys {
     pub profile_signing_keys: Vec<RealmSigningKey>,
     /// Package signing keys.
     pub keys: Vec<PackageSigningKey>,
+    /// Rotation chain of `profile_signing_keys`.
+    #[serde(default)]
+    pub rotations: Option<Vec<KeyRotation>>,
     /// RFC 3339.
     pub profile_issued_at: String,
     /// RFC 3339.
@@ -322,6 +679,39 @@ impl PublisherKeys {
     fn check(&self, now: DateTime<Utc>) -> Result<(), String> {
         if self.profile_signing_keys.is_empty() {
             return Err("profile_signing_keys is empty".into());
+        }
+        if self.profile_signing_keys.len() > MAX_SIGNING_KEYS
+            || self.keys.len() > MAX_SIGNING_KEYS
+            || self
+                .rotations
+                .as_ref()
+                .is_some_and(|r| r.len() > MAX_SIGNING_KEYS)
+        {
+            return Err(format!(
+                "profile_signing_keys, keys and rotations are limited to {MAX_SIGNING_KEYS} entries each"
+            ));
+        }
+        let active = self
+            .keys
+            .iter()
+            .filter(|key| key.status == KeyStatus::Active)
+            .count();
+        if active > MAX_ACTIVE_PACKAGE_KEYS {
+            return Err(format!(
+                "at most {MAX_ACTIVE_PACKAGE_KEYS} package signing keys may be active"
+            ));
+        }
+        for key in &self.keys {
+            let expected = BASE64
+                .decode(&key.public_key)
+                .map(|bytes| package_key_id(&bytes))
+                .unwrap_or_default();
+            if key.id != expected {
+                return Err(format!(
+                    "package signing key id '{}' is not derived from its public key",
+                    key.id
+                ));
+            }
         }
         let listed = self
             .profile_signing_keys
@@ -786,7 +1176,11 @@ mod tests {
                 .iter()
                 .map(|(id, key, status)| key_json(id, key, *status))
                 .collect::<Vec<_>>(),
-            "keys": [key_json("package-1", &package_key, KeyStatus::Active)],
+            "keys": [key_json(
+                &package_key_id(package_key.verifying_key().as_bytes()),
+                &package_key,
+                KeyStatus::Active,
+            )],
             "security_contact": "mailto:security@example.com",
             "profile_issued_at": "2026-01-01T00:00:00Z",
             "profile_expires_at": "2027-01-01T00:00:00Z",
@@ -802,7 +1196,7 @@ mod tests {
         let profile = signed_publisher("example.com", &[("root-1", &root, KeyStatus::Active)]);
         let keys = profile.verify("example.com", now).unwrap();
         assert_eq!(keys.sequence, 1);
-        assert_eq!(keys.keys[0].id, "package-1");
+        assert!(keys.keys[0].id.starts_with("actr-pub-"));
 
         let rejected = |profile: &PublisherProfile, now: DateTime<Utc>| {
             assert!(matches!(
@@ -826,5 +1220,125 @@ mod tests {
         twice["keys"][0]["id"] = "root-1".into();
         crate::realm_profile::sign_document(&mut twice, "root-1", &root);
         rejected(&serde_json::from_value(twice).unwrap(), now);
+        // A package key id that is not derived from its public key.
+        let mut renamed = serde_json::to_value(&profile).unwrap();
+        renamed["keys"][0]["id"] = "package-1".into();
+        crate::realm_profile::sign_document(&mut renamed, "root-1", &root);
+        rejected(&serde_json::from_value(renamed).unwrap(), now);
+    }
+
+    /// A Publisher Profile for example.com at `sequence` with `package_keys`
+    /// and `rotations`, signed by `signer`.
+    fn publisher_with(
+        sequence: u64,
+        roots: &[(&str, &ed25519_dalek::SigningKey, KeyStatus)],
+        signer: (&str, &ed25519_dalek::SigningKey),
+        package_keys: &[(&ed25519_dalek::SigningKey, KeyStatus)],
+        rotations: Value,
+    ) -> PublisherProfile {
+        let key_json = |id: &str, key: &ed25519_dalek::SigningKey, status: KeyStatus| {
+            serde_json::json!({
+                "id": id,
+                "algorithm": "Ed25519",
+                "public_key": BASE64.encode(key.verifying_key().to_bytes()),
+                "status": status,
+            })
+        };
+        let mut document = serde_json::json!({
+            "schema": "actr.publisher/v1",
+            "sequence": sequence,
+            "domain": "example.com",
+            "profile_signing_keys": roots
+                .iter()
+                .map(|(id, key, status)| key_json(id, key, *status))
+                .collect::<Vec<_>>(),
+            "keys": package_keys
+                .iter()
+                .map(|(key, status)| {
+                    key_json(&package_key_id(key.verifying_key().as_bytes()), key, *status)
+                })
+                .collect::<Vec<_>>(),
+            "profile_issued_at": "2026-01-01T00:00:00Z",
+            "profile_expires_at": "2027-01-01T00:00:00Z",
+        });
+        if !rotations.is_null() {
+            document["rotations"] = rotations;
+        }
+        crate::realm_profile::sign_document(&mut document, signer.0, signer.1);
+        serde_json::from_value(document).unwrap()
+    }
+
+    #[test]
+    fn publisher_profile_signing_keys_rotate_along_a_chain() {
+        use ed25519_dalek::Signer as _;
+        let now: DateTime<Utc> = "2026-06-01T00:00:00Z".parse().unwrap();
+        let old = ed25519_dalek::SigningKey::from_bytes(&[1; 32]);
+        let new = ed25519_dalek::SigningKey::from_bytes(&[2; 32]);
+        let package = ed25519_dalek::SigningKey::from_bytes(&[9; 32]);
+        let next_package = ed25519_dalek::SigningKey::from_bytes(&[10; 32]);
+        use KeyStatus::{Active, Retired};
+
+        let first = publisher_with(
+            1,
+            &[("root-1", &old, Active)],
+            ("root-1", &old),
+            &[(&package, Active)],
+            Value::Null,
+        );
+        let (_, outcome) = first.accept("example.com", now, None).unwrap();
+        let KeyPinOutcome::Accepted(pins) = outcome else {
+            panic!("first profile not accepted");
+        };
+
+        // root-1 -> root-2 at sequence 2, signed by the new key, while two
+        // package signing keys overlap.
+        let rotation = KeyRotation {
+            from: "root-1".into(),
+            to: "root-2".into(),
+            sequence: 2,
+            signature: String::new(),
+        };
+        let new_public = BASE64.encode(new.verifying_key().to_bytes());
+        let signature = old.sign(rotation_payload(&rotation, &new_public).as_bytes());
+        let rotations = serde_json::json!([{
+            "from": "root-1", "to": "root-2", "sequence": 2,
+            "signature": BASE64.encode(signature.to_bytes()),
+        }]);
+        let second = publisher_with(
+            2,
+            &[("root-2", &new, Active), ("root-1", &old, Retired)],
+            ("root-2", &new),
+            &[(&package, Active), (&next_package, Active)],
+            rotations.clone(),
+        );
+        let (keys, outcome) = second.accept("example.com", now, Some(&pins)).unwrap();
+        assert_eq!(keys.keys.len(), 2);
+        assert!(matches!(outcome, KeyPinOutcome::Accepted(_)));
+
+        // Without the rotation the new key is an identity change.
+        let unchained = publisher_with(
+            2,
+            &[("root-2", &new, Active), ("root-1", &old, Retired)],
+            ("root-2", &new),
+            &[(&package, Active)],
+            Value::Null,
+        );
+        let (_, outcome) = unchained.accept("example.com", now, Some(&pins)).unwrap();
+        assert!(matches!(outcome, KeyPinOutcome::IdentityChange(_)));
+
+        // A third active package signing key is not allowed.
+        let third = ed25519_dalek::SigningKey::from_bytes(&[11; 32]);
+        let crowded = publisher_with(
+            2,
+            &[("root-2", &new, Active), ("root-1", &old, Retired)],
+            ("root-2", &new),
+            &[
+                (&package, Active),
+                (&next_package, Active),
+                (&third, Active),
+            ],
+            rotations,
+        );
+        assert!(crowded.accept("example.com", now, Some(&pins)).is_err());
     }
 }
