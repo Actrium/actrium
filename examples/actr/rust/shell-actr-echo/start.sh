@@ -254,25 +254,20 @@ if [ ! -f "$ACTRIX_DB" ]; then
     exit 1
 fi
 
-# Parse realm and realm_secret from server's actr.toml
+# Parse realm from server's actr.toml
 REALM=$(grep -E '^\s*realm\s*=' "$ECHO_SERVER_DIR/actr.toml" | sed 's/.*=\s*//' | tr -d ' "' | head -1 || true)
-REALM_SECRET=$(grep -E '^\s*realm_secret\s*=' "$ECHO_SERVER_DIR/actr.toml" | sed 's/.*=\s*//' | tr -d ' "' | head -1 || true)
 
-if [ -z "$REALM" ] || [ -z "$REALM_SECRET" ]; then
-    echo -e "${RED}❌ Could not parse realm or realm_secret from $ECHO_SERVER_DIR/actr.toml${NC}"
+if [ -z "$REALM" ]; then
+    echo -e "${RED}❌ Could not parse realm from $ECHO_SERVER_DIR/actr.toml${NC}"
     exit 1
 fi
 
 echo "   realm        = $REALM"
-echo "   realm_secret = ${REALM_SECRET:0:10}..."
 
-# Hash the realm secret with SHA256 (matches Rust hash_realm_secret: hex(sha256(secret)))
-SECRET_HASH=$(printf '%s' "$REALM_SECRET" | shasum -a 256 | awk '{print $1}')
 
-echo "   secret_hash  = ${SECRET_HASH:0:16}..."
 
 # Insert realm record (OR IGNORE to avoid duplicates)
-sqlite3 "$ACTRIX_DB" "INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('$REALM', 'active', 1, strftime('%s','now'), '$SECRET_HASH');"
+sqlite3 "$ACTRIX_DB" "INSERT OR IGNORE INTO realm (name, status, enabled, created_at) VALUES ('$REALM', 'active', 1, strftime('%s','now'));"
 
 # Parse ACL rules from actr.toml files and insert into actoracl table
 # Server allows: acme/echo-client-app@1.0.0
@@ -286,6 +281,13 @@ VALUES ('$REALM', 'acme/echo-client-app@1.0.0', 'acme/EchoService@1.0.0', 1);
 EOF
 
 echo -e "${GREEN}✅ Realm and ACL setup completed (via sqlite3)${NC}"
+
+# Join the Realm: each actr.toml names its key file (`realm_client_key`).
+ACTR_CMD="${ACTR_GEN_CMD:-actr}" "$WORKSPACE_ROOT/scripts/join-realm.sh" \
+    "$ACTRIX_DB" "$REALM" "http://localhost:8081/issuer" \
+    "$ECHO_SERVER_DIR/realm-client.json" "$ECHO_CLIENT_DIR/realm-client.json"
+echo -e "${GREEN}✅ Joined Realm $REALM${NC}"
+
 
 # Step 2.5: Build server binary (client code not generated yet)
 echo ""

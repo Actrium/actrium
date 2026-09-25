@@ -14,7 +14,10 @@ url = "http://124.71.231.251:9080/issuer"
 
 [deployment]
 realm = "demo@example.com"
-realm_secret = "rs_m5bEk-i1R9mCOpj3ej1_eN80f6ukR7OS"
+# Realm client key written by `actr realm join <invite> --issuer <url>
+# --output demo/src/main/assets/realm-client.json`; the app copies it next to
+# this file.
+realm_client_key = "realm-client.json"
 
 [discovery]
 visible = true

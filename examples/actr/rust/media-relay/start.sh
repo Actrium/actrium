@@ -212,12 +212,8 @@ if [ ! -f "$ACTRIX_DB" ]; then
 fi
 
 REALM=$(grep -E '^realm\s*=' "$ACTR_B_DIR/actr.toml" | sed 's/.*= *//' | tr -d ' "' | head -1 || true)
-REALM_SECRET=$(grep -E '^realm_secret' "$ACTR_B_DIR/actr.toml" | sed 's/.*= *"\(.*\)".*/\1/' | head -1 || true)
 if [ -z "$REALM" ]; then REALM=media-relay@example.com; fi
-if [ -z "$REALM_SECRET" ]; then echo -e "${RED}❌ Could not parse realm_secret${NC}"; exit 1; fi
 
-SECRET_HASH=$(printf '%s' "$REALM_SECRET" | shasum -a 256 | awk '{print $1}')
-echo "   realm=$REALM secret_hash=${SECRET_HASH:0:16}..."
 
 sqlite3 "$ACTRIX_DB" <<EOF
 INSERT OR REPLACE INTO publisher (name, public_key, status, created_at, verified_at) VALUES ('actr-example', '', 'verified', strftime('%s','now'), strftime('%s','now'));
@@ -227,7 +223,7 @@ INSERT OR REPLACE INTO publisher_package (publisher_id, publisher, name, version
 INSERT OR REPLACE INTO publisher_package (publisher_id, publisher, name, version, type_str, manifest, signature, status, published_at)
   SELECT id, 'actr-example', 'RelayClient', '1.0.0', 'actr-example/RelayClient@1.0.0', '{}', '', 'active', strftime('%s','now') FROM publisher WHERE name='actr-example'
   ON CONFLICT(publisher, name, version) DO UPDATE SET status='active';
-INSERT OR REPLACE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('$REALM', 'active', 1, strftime('%s','now'), '$SECRET_HASH');
+INSERT OR IGNORE INTO realm (name, status, enabled, created_at) VALUES ('$REALM', 'active', 1, strftime('%s','now'));
 DELETE FROM actoracl WHERE realm = '$REALM';
 INSERT INTO actoracl (realm, source_realm, from_type, to_type, access)
 VALUES ('$REALM', '$REALM', 'actr-example/RelayClient@1.0.0', 'actr-example/RelayService@1.0.0', 1);
@@ -236,6 +232,13 @@ VALUES ('$REALM', '$REALM', 'actr-example/RelayService@1.0.0', 'actr-example/Rel
 EOF
 
 echo -e "${GREEN}✅ Realm and ACL setup completed${NC}"
+
+# Join the Realm: each actr.toml names its key file (`realm_client_key`).
+ACTR_CMD="${ACTR_GEN_CMD:-actr}" "$WORKSPACE_ROOT/scripts/join-realm.sh" \
+    "$ACTRIX_DB" "$REALM" "http://localhost:8081/issuer" \
+    "$ACTR_B_DIR/realm-client.json" "$ACTR_A_DIR/realm-client.json"
+echo -e "${GREEN}✅ Joined Realm $REALM${NC}"
+
 
 # Step 2.5: Build actr-b (receiver) binary
 echo ""
