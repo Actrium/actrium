@@ -132,6 +132,22 @@ secret：`HKDF-SHA256(turn_secret, salt = "actr.turn", info = "<realm>|<provider
 不可用（pending、停用、过期或已退役）Realm 的 credential，缓存命中也不例外：Realm 状态变更即时
 生效，过期最迟 10 秒后生效；已建立的 allocation 不再能 refresh，到期即释放。
 
+`/issuer/renew` 与 `/issuer/reissue` 带客户端生成的 16 字节 `attempt_id`（UUID），网络失败时
+客户端用完全相同的请求体重试。同一 attempt 的第一个请求占用它，身份状态变化（renewal token
+轮换；reissue 消耗持有证明与 publisher nonce）与响应在同一事务提交，响应加密后存于
+`issuer_control_attempt`。之后用同一 `attempt_id`：
+
+- 请求体相同：返回首次的响应原文（成功响应保留到 credential 或 renewal token 到期，拒绝保留
+  5 分钟）；返回前仍重查 Actor 撤销与 Realm、包、publisher 状态，已不允许则返回该错误；
+- 请求体不同：`409`；
+- 超过响应保留期：`410`，客户端应以新 `attempt_id` 重来；
+- 另一个请求仍在处理：`425`，带 `Retry-After`（秒）；
+- `attempt_id` 不是 16 字节：`400`。
+
+这些以 HTTP 状态返回；`/reissue` 的其他结果仍放在 `RegisterResponse` body 中、HTTP 200。
+`/reissue` 先校验 Realm secret 再看 `attempt_id`。一个持有证明只能成功 reissue 一次：此后用它
+发起的新 attempt 返回 `422`（持有证明不成立），丢失响应只能靠同一 attempt 重试取回。
+
 注册请求的 ACL 规则只作用于本 Realm：`source_realm` 可以不填、为 `any_realm`（v1 只匹配本
 Realm）或本 Realm 名；写成其他 Realm 名或不合法的 Realm 名时注册返回 `400`。
 
@@ -255,11 +271,12 @@ bearer 请求自助创建（目前由运营者代办）。
 
 ## Schema migration
 
-当前 schema 为 v6（`PRAGMA user_version = 6`）：v3 在 v2 上新增 Issuer 幂等日志表
+当前 schema 为 v7（`PRAGMA user_version = 7`）：v3 在 v2 上新增 Issuer 幂等日志表
 `issuer_control_attempt`；v4 以 Realm 名为键（`realm.name` 为主键，其余表以 `realm` 列引用，
 身份登记按 `(realm, serial_number)`）；v5 去掉单 Realm 约束，`realm.status` 改为
 `pending | active | retired`，并新增 `realm_domain`、`realm_profile`、`realm_mgmt_nonce`；v6 删除
-`publisher_challenge`，`publisher.descriptor_json` 改为 `profile_json`（已接受的 Publisher Profile）。
+`publisher_challenge`，`publisher.descriptor_json` 改为 `profile_json`（已接受的 Publisher Profile）；v7 删除
+`issuer_reissue_response_cache` 与 `issuer_renewal_token.delivered_at`（由 `issuer_control_attempt` 取代）。
 运行时只自动初始化空数据库；其他版本拒绝启动。v2 之后的升级都不提供迁移工具，需停机后重建数据库。下面两个历史工具只覆盖到 v2（未版本化库先 v1，再 v2）：
 
 ```bash

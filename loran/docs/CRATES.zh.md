@@ -38,7 +38,7 @@ loran-server
 
 ### `loran-platform`
 
-- SQLite `user_version` 必须等于 schema v6；
+- SQLite `user_version` 必须等于 schema v7；
 - 一个实例承载多个 Realm，`realm.name`（完整 Realm 名）唯一且不可变，退役行即 Realm
   Provider tombstone、名字不复用；所有按 Realm 分区的状态以完整 Realm 名 `realm` 为键；
 - Actor credential validation 检查 protocol version、issuer（即 Realm 名）、Realm Provider、

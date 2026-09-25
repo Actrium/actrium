@@ -208,7 +208,7 @@ python3 scripts/loran/migrate_schema_v2.py /var/lib/actrix/actrix.db --dry-run
 python3 scripts/loran/migrate_schema_v2.py /var/lib/actrix/actrix.db
 ```
 
-v2 之后没有离线迁移工具：升到当前 schema v6 需要停机后重建数据库（见「Realm provision
+v2 之后没有离线迁移工具：升到当前 schema v7 需要停机后重建数据库（见「Realm provision
 与数据」）。
 
 详见[架构契约](REALM_V1_ARCHITECTURE.zh.md)和

@@ -437,12 +437,14 @@ Package Resolution、`packages` relation 与 `program_resolver` 已从协议和�
 
 ## 8. 数据与升级
 
-当前 schema v6 使用 SQLite `PRAGMA user_version = 6`。Loran 遇到旧版或未知 schema
+当前 schema v7 使用 SQLite `PRAGMA user_version = 7`。Loran 遇到旧版或未知 schema
 直接拒绝启动，不在启动路径中执行「尝试 ALTER 后忽略错误」。v2 → v3（新增
 `issuer_control_attempt`）、v3 → v4（以 Realm 名取代数值 Realm id）与 v4 → v5（去掉单
 Realm 约束，`realm.status` 改为 `pending | active | retired`，新增 `realm_domain`、
 `realm_profile`、`realm_mgmt_nonce`）与 v5 → v6（删除 `publisher_challenge`，
-`publisher.descriptor_json` 改为 `profile_json`）都没有离线迁移，需停机后重建数据库。
+`publisher.descriptor_json` 改为 `profile_json`）与 v6 → v7（删除
+`issuer_reissue_response_cache` 与 `issuer_renewal_token.delivered_at`）都没有离线迁移，需停机后
+重建数据库。
 
 v4 已以 Realm 名为键：`realm` 表以列 `name`（完整 Realm 名）为主键，`actoracl`、
 `pending_registration`、`issued_actor_identity`、`revoked_actor` 以 `realm` 列引用它，后三者按
