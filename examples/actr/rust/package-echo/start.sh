@@ -670,10 +670,23 @@ fi
 for REALM in $SERVER_REALM $CLIENT_REALM; do
     echo "  Creating realm $REALM..."
     sqlite3 "$ACTRIX_DB" \
-        "INSERT OR IGNORE INTO realm (name, status, enabled, created_at, secret_current) VALUES ('$REALM', 'active', 1, strftime('%s','now'), '');"
+        "INSERT OR IGNORE INTO realm (name, status, enabled, created_at) VALUES ('$REALM', 'active', 1, strftime('%s','now'));"
 done
 
 echo -e "${GREEN}✅ Realms setup completed (realm IDs: $SERVER_REALM, $CLIENT_REALM)${NC}"
+
+# Join the Realm: the server host as the owner, the client hosts as editors.
+# Each actr.toml names its key file (`deployment.realm_client_key`).
+ACTR_CLI_BIN="$WORKSPACE_TARGET_DIR/debug/actr"
+if [ ! -x "$ACTR_CLI_BIN" ]; then
+    echo "Building actr CLI..."
+    cargo build --manifest-path "$ACTR_CLI_MANIFEST" --bin actr --features wasm-engine 2>&1 | tail -3
+fi
+SERVER_REALM_CLIENT_KEY="$LOG_DIR/server-realm-client.json"
+ACTR_CMD="$ACTR_CLI_BIN" "$WORKSPACE_ROOT/scripts/join-realm.sh" \
+    "$ACTRIX_DB" "$SERVER_REALM" "${ACTRIX_HTTP_URL}/issuer" "$SERVER_REALM_CLIENT_KEY" \
+    "$CLIENT_DIR/realm-client.json" "$CLIENT_GUEST_DIR/realm-client.json"
+echo -e "${GREEN}✅ Joined Realm $SERVER_REALM${NC}"
 
 # ── Step 2.6: Register publisher identity ────────────────────────
 
@@ -897,6 +910,7 @@ url = "${ACTRIX_HTTP_URL}/issuer"
 
 [deployment]
 realm = "package-echo@example.com"
+realm_client_key = "$SERVER_REALM_CLIENT_KEY"
 
 [[trust]]
 kind = "registry"

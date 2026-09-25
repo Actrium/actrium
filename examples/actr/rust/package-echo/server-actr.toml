@@ -11,6 +11,8 @@ url = "http://localhost:8081/issuer"
 
 [deployment]
 realm = "package-echo@example.com"
+# Written by `actr realm join` next to the config (manual-runtime-lifecycle.sh runs it).
+realm_client_key = "realm-client.json"
 
 
 [discovery]

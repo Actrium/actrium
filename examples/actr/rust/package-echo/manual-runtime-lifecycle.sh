@@ -418,8 +418,8 @@ EXPIRES_AT="$((NOW + 86400 * 365))"
 
 sqlite3 "$ACTRIX_DB" <<SQL
 INSERT OR IGNORE INTO realm
-    (name, status, enabled, created_at, secret_current)
-VALUES ('package-echo@example.com', 'active', 1, strftime('%s','now'), '');
+    (name, status, enabled, created_at)
+VALUES ('package-echo@example.com', 'active', 1, strftime('%s','now'));
 
 INSERT OR IGNORE INTO publisher
     (name, public_key, key_id, contact, status, created_at, updated_at, verified_at, key_expires_at)
@@ -437,6 +437,11 @@ UPDATE publisher
        revoked_at     = NULL
  WHERE name = 'actrium';
 SQL
+
+# Join the Realm as its owner; the config names the key file next to it.
+ACTR_CMD="$ACTR_CLI_BIN" "$WORKSPACE_ROOT/scripts/join-realm.sh" \
+    "$ACTRIX_DB" "package-echo@example.com" "http://localhost:8081/issuer" \
+    "$ARTIFACT_DIR/realm-client.json"
 
 "$ACTR_CLI_BIN" pkg publish \
     --package "$ACTR_PACKAGE" \
