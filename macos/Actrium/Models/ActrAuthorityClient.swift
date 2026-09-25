@@ -14,6 +14,7 @@ enum ActrAuthorityError: LocalizedError {
     case packageTooLarge(UInt64)
     case packageSizeMismatch(expected: UInt64, actual: UInt64)
     case packageDigestMismatch
+    case unsupportedProfile(String?)
 
     var errorDescription: String? {
         switch self {
@@ -37,6 +38,8 @@ enum ActrAuthorityError: LocalizedError {
             return "Actor package size mismatch: expected \(expected), received \(actual)"
         case .packageDigestMismatch:
             return "Actor package SHA-256 verification failed"
+        case .unsupportedProfile(let profile):
+            return "Unsupported Actor package profile: \(profile ?? "none declared")"
         }
     }
 }
@@ -189,6 +192,9 @@ final class ActrAuthorityClient {
     private static let descriptorLimit = 64 * 1024
     private static let resolutionLimit = 64 * 1024
     private static let packageLimit: UInt64 = 256 * 1024 * 1024
+    /// The only workload profile this host can execute (keel guest).
+    /// Mirrors actr_pack::KEEL_GUEST_PROFILE_V1 in crates/actr-pack.
+    private static let supportedProfile = "keel.guest/1"
 
     private let session: URLSession
     private let cacheDirectory: URL
@@ -250,6 +256,12 @@ final class ActrAuthorityClient {
         }
         guard resolution.package.mediaType == "application/zip" else {
             throw ActrAuthorityError.invalidResponse("unsupported package media type")
+        }
+        // Reject packages whose runtime profile this host cannot run. Without
+        // this gate an unknown profile degrades to an empty contract downstream
+        // (actrium-core ffi.rs maps it to nil) which the host treats as compat.
+        guard resolution.package.profile == Self.supportedProfile else {
+            throw ActrAuthorityError.unsupportedProfile(resolution.package.profile)
         }
         guard resolution.package.size <= Self.packageLimit else {
             throw ActrAuthorityError.packageTooLarge(resolution.package.size)

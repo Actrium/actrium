@@ -250,6 +250,75 @@ struct ActrAuthorityClientTests {
         }
     }
 
+    @Test(arguments: ["unknown/9", nil] as [String?])
+    func rejectsUnsupportedProfile(profile: String?) async throws {
+        let authority = "localhost:8081"
+        let packageData = Data("pkg".utf8)
+        let digest = SHA256.hash(data: packageData).map { String(format: "%02x", $0) }.joined()
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ActrMockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer {
+            ActrMockURLProtocol.handler = nil
+            session.invalidateAndCancel()
+        }
+        ActrMockURLProtocol.handler = { request in
+            let url = try #require(request.url)
+            let body: Data
+            switch url.path(percentEncoded: true) {
+            case "/.well-known/actr":
+                body = try JSONSerialization.data(withJSONObject: [
+                    "version": 1,
+                    "authority": "actr://\(authority)",
+                    "services": [[
+                        "rel": "packages",
+                        "href": "http://\(authority)/actr/packages",
+                        "protocol": "actr-packages/1",
+                    ]],
+                ])
+            case "/actr/packages/resolve":
+                var package: [String: Any] = [
+                    "href": "http://\(authority)/actr/packages/artifact",
+                    "media_type": "application/zip",
+                    "sha256": digest,
+                    "size": packageData.count,
+                ]
+                if let profile {
+                    package["profile"] = profile
+                }
+                body = try JSONSerialization.data(withJSONObject: [
+                    "version": 1,
+                    "target": "echo",
+                    "package": package,
+                ])
+            case "/actr/packages/artifact":
+                Issue.record("Artifact endpoint must not be reached for an unsupported profile")
+                throw URLError(.cannotDecodeContentData)
+            default:
+                throw URLError(.fileDoesNotExist)
+            }
+            let response = try #require(HTTPURLResponse(
+                url: url, statusCode: 200, httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "application/json"]
+            ))
+            return (response, body)
+        }
+
+        do {
+            _ = try await ActrAuthorityClient(session: session).resolveAndDownload(
+                try #require(URL(string: "actr://\(authority)/echo"))
+            )
+            Issue.record("Expected unsupported profile rejection")
+        } catch let error as ActrAuthorityError {
+            guard case .unsupportedProfile(let actual) = error else {
+                Issue.record("Unexpected error: \(error)")
+                return
+            }
+            #expect(actual == profile)
+        }
+    }
+
     @Test(arguments: ["https://cdn.example/package", "http://[::1]:8081/package", "http://remote.example/package"])
     func validatesRedirectBeforeFollowing(destination: String) throws {
         let session = URLSession(configuration: .ephemeral)
