@@ -9,7 +9,8 @@
 一次应用实例部署，以 Realm 名 `<realm_id>@<domain>`（如 `k7m2q9xh@acme.com`）标识，以
 该 Realm 域名的 Realm 签名 key 为长期信任根。v1 是单节点、SQLite、单一 Realm Provider，
 不提供 HA 或跨 Realm federation。管理权限分实例运营者、Realm 签名 key 持有方发起的 Realm
-管理请求、作用域为单个 Realm 的 Realm 管理 token 三类；尚未落地的部分见
+管理请求、作用域为单个 Realm 的 Realm 管理 token 三类（计划由 owner 用 Realm 客户端 key 签名的
+membership 请求取代 Realm 管理 token，见架构契约 4.1）；尚未落地的部分见
 [`REALM_V1_ARCHITECTURE.zh.md`](REALM_V1_ARCHITECTURE.zh.md) 第 9 节。
 历史名称见[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」。
 
@@ -49,8 +50,9 @@ Realm Provider、audience 与 endpoint scope。
 - TURN credential 绑定 Realm、Realm Provider、`actr.turn` audience、Actor 与过期时间；
   TURN secret 由主密钥按 Realm 名与 Realm Provider ID 经 HKDF 派生。
 
-Realm registration capability 只属于 Realm 管理员/可信 Actr Host。用户编写的 Rill Guest
-不得接触 Realm secret、Issuer Signer 私钥或管理 credential。
+Realm registration capability 只属于 Realm 管理员/可信 Actr Host（计划改为每个客户端的 Realm
+客户端 key，见架构契约 4.1）。用户编写的 Rill Guest 不得接触 Realm secret、Realm 客户端 key、
+Issuer Signer 私钥或管理 credential。
 
 ## 数据所有权
 
@@ -76,8 +78,8 @@ Workspace 不属于 Loran。一个 Service 至多绑定一个 Workspace，同一
 3. 调用方签名 Realm Profile，以 `publish_profile` 提交；Loran 验证 Realm Profile 指向自己
    后转为 `active`，在响应中一次性返回 Realm 管理 token，此后才签发 Actor credential。
    Realm Provider 域名下的 Realm 由 Loran 自签、首份 Realm Profile 在 `create_realm` 响应中
-   直接返回，无需 `publish_profile` 这一步；目前由实例运营者经 Admin API 代办创建（等同
-   Realm Provider 账号，见架构契约第 9 节），Realm 管理 token 同样在创建响应中一次性返回。
+   直接返回，无需 `publish_profile` 这一步；v1 只由实例运营者经 Admin API 创建（Realm Provider
+   账号自助创建属后续能力），Realm 管理 token 同样在创建响应中一次性返回。
    非 Realm Provider 部署（未启用 authority 或 Issuer 无 Signer）仍允许运营者直接创建任意
    域名下没有 Realm Profile 的 `active` Realm。
 4. 数据库以 Realm 名（含域名）为主键，`realm_name_immutable`/`realm_retired_is_final`

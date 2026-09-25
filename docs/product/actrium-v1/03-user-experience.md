@@ -130,7 +130,8 @@ sequenceDiagram
     A->>M: Create(idempotency_key, package, workspace, domain, realm_id, display_name)
     M->>M: Obtain authorization from the Realm signing key holder
     M->>M: Realm Provider creates a pending Realm
-    M->>M: Sign the Realm Profile (including package) and submit it for activation; Realm becomes active, obtain Realm membership
+    M->>M: Sign the Realm Profile (including package) and submit it for activation; Realm becomes active
+    M->>M: Redeem the owner invite and become the Realm's owner (obtain Realm membership)
     M->>S: Persist identity within the new Realm and start the Service
     S-->>M: stable ActorId
     M-->>A: Service record + ActorId
@@ -148,7 +149,8 @@ Every new instance creates a new Realm. The confirmation page shows:
 
 - Realm domain: creates a local Realm by default; any trusted Realm domain can be chosen. Without a domain, no Realm is allocated (except the local Realm); a user without their own domain uses a Realm that a Realm Provider allocates under its own domain;
 - `realm_id`: by default Actrium generates a fully random short string (e.g. `k7m2q9xh`, lowercase base32) containing no program name or user input; a readable name goes into `display_name`, shown to the user, appearing only locally and in the Realm Profile, never in the ActorId; the user may also explicitly choose a readable `realm_id` (e.g. `notes`), and the confirmation page warns that a readable name will be exposed in shared links;
-- Creation must be authorized by the Realm signing key holder of that Realm domain. When the Realm domain equals or belongs to the Realm Provider ID, the confirmation page states that the trust root is that Realm Provider, and the user signs in with their Realm Provider account (OAuth 2.0 + PKCE; Actrium keeps the session after the first sign-in); Realm admin rights are bound to that account, so signing in again restores them after switching devices or losing the client. For any other Realm domain, the holder's signing service authenticates the current user under its own policy and signs the Actr management envelope and the Realm Profile, and the confirmation page shows that Realm domain as the trust root (delegated custody is invisible to the user);
+- Creation must be authorized by the Realm signing key holder of that Realm domain: the holder's signing service authenticates the current user under its own policy and signs the Actr management envelope and the Realm Profile; after activation it hands the one-time owner invite back to Actrium, which redeems it at once, so the creator is the Realm's only owner; the confirmation page shows that Realm domain as the trust root (delegated custody is invisible to the user);
+- When the Realm domain equals or belongs to the Realm Provider ID, v1 offers no self-service creation: the user asks that Realm Provider's operator, who creates the Realm and hands the owner invite to the user out of band; the user chooses "Join with an invitation" on the identity page, and after redeeming it Actrium creates the Service and Front in that Realm; the confirmation page states that the trust root is that Realm Provider. Self-service creation with a Realm Provider account is a later capability;
 - If authorization is refused or the holder is unreachable, a clear error is shown, with no fallback to another Realm domain.
 
 If the Realm domain is not yet trusted, first-time trust must be completed on the confirmation page.
@@ -187,7 +189,7 @@ Creation proceeds in the order "holder authorization → pending Realm → sign 
 
 - If any step before the Realm becomes active fails, no Service is created and no half-finished instance appears in the Inventory; the page states which step failed (authorization refused, Realm Provider unreachable, Realm Profile publication failed) and offers a retry;
 - The default random RealmId is generated once when creation begins and persisted with it; a retry never regenerates it;
-- A retry reuses the same `idempotency_key`, continuing the same pending Realm and the same RealmId, without creating a duplicate; if the Realm was already activated but the response was lost, the retry only returns its state, and the Realm admin token is recovered with `reissue_admin_token`;
+- A retry reuses the same `idempotency_key`, continuing the same pending Realm and the same RealmId, without creating a duplicate; if the Realm was already activated but the response was lost, the retry only returns its state, and the owner invite is reissued with `reissue_owner_invite`;
 - If the user abandons it, the Realm Provider automatically cleans up the pending Realm on expiry.
 
 ## 6. Connecting to an existing instance
@@ -298,7 +300,7 @@ Sharing an instance shares only the address; it does not automatically grant acc
 
 - The recipient still needs to join that instance's Realm;
 - Application permissions must allow it;
-- The invitation is completed through that Realm's and Service's own independent authorization flow;
+- The invitation is a one-time Realm invitation issued by the owner (see Section 15);
 - The bearer token never enters the URI's query or fragment;
 - The instance address exposes the Realm domain and RealmId; warn about this before sharing a private instance, with an extra warning if the instance uses a readable RealmId.
 
@@ -367,6 +369,9 @@ Error pages must distinguish:
 | Domain untrusted | The instance's Realm domain is not yet trusted | View the Realm domain and key fingerprint, confirm trust |
 | Domain authorization failed | The Realm signing key holder refused authorization or was unreachable, so the instance cannot be created under that Realm domain | Contact that domain's admin, or use the local Realm or another Realm domain |
 | Realm not joined | The Realm domain is trusted, but the instance's Realm has not been joined | Join with a Realm invitation, or request one |
+| Invite expired / used / revoked | The Realm invitation has expired, has been used or has been revoked (each shown separately) | Ask the owner for a new invitation |
+| Invite realm mismatch | The invitation belongs to another instance's Realm | Check which instance to join and use its invitation |
+| Client revoked / Removed from Realm | This client has been revoked, or this member has been removed from the instance's Realm | Ask the owner for a new invitation; local data is kept |
 | Realm retired | This instance's Realm has been retired | View archive information; do not create a replacement instance |
 | Service offline | The exact instance is not online | Retry, view the instance; offer start only when locally known to be stopped |
 | Permission denied | Found, but not authorized to Attach | Request authorization |
@@ -411,12 +416,14 @@ Developer mode does not change the trust rules for production addresses and prod
 A Realm corresponds to a single instance, so the identity page is organized in two layers: trusted Realm domains, and joined Realms (instances). It supports at least:
 
 - Trusting a Realm domain: on first encountering a Realm domain, fetch that domain's Realm signing key over HTTPS from its authority descriptor (`https://<domain>/.well-known/actr`), show the domain and key fingerprint, and pin it after confirmation by the user or organization policy;
-- Joining a Realm: join an instance's Realm with a one-time Realm invitation, completing sign-in, client registration and obtaining Realm membership; Actrium performs each Realm's client registration automatically, without requiring the user to configure it per Realm; each Realm uses a separate Realm client key, never reused across Realms, so different instances cannot correlate the same client through it;
+- Joining a Realm: paste or scan a one-time Realm invitation to join an instance's Realm, completing client registration and obtaining Realm membership; Actrium performs each Realm's client registration automatically, without requiring the user to configure it per Realm; each Realm uses a separate Realm client key, never reused across Realms, so different instances cannot correlate the same client through it;
 - Re-authentication: when a credential expires or the admin requires it, pause new Attach attempts, keep local data and guide the user to recover;
-- Client revocation: list clients, last activity time and hosted Services; after revocation, that client's Realm client key registration becomes invalid and it can no longer obtain Actor credentials;
-- Leaving a Realm: means losing access to that instance; first explain the affected Services, Workspaces and sharing relationships, and never silently migrate to the local Realm;
+- Adding a client: on a joined client, issue an "add a client" invitation for yourself and redeem it on the new client;
+- Client revocation: list clients, last activity time and hosted Services; a member can revoke its own clients and the owner can revoke any member's clients; after revocation, that client's Realm client key registration becomes invalid, it can no longer obtain Actor credentials, and its Actors are disconnected from signaling and TURN at once; revoking the client that hosts the Service takes the instance offline, so warn first;
+- Member management (owner only): list members and roles, issue and revoke invitations, change roles, remove members (which also revokes all their clients), and transfer ownership to another member;
+- Leaving a Realm: means losing access to that instance, and all of this member's clients are revoked with it; first explain the affected Services, Workspaces and sharing relationships, and never silently migrate to the local Realm; the owner must transfer ownership first;
 - Realm signing key change: show the signed rotation chain; without a valid rotation chain, treat it as an identity change and reconfirm trust;
-- Recovery: after a device is lost, only encrypted backups or data on a remote host can be recovered; there is no promise to recover an Actor private key that was never backed up.
+- Recovery: after a device is lost, only encrypted backups or data on a remote host can be recovered; there is no promise to recover an Actor private key that was never backed up; a member revokes the lost client from another client, or asks the owner for an "add a client" invitation; when the owner has lost all its clients, it asks the Realm signing key holder or the Realm Provider's operator for a new owner invite, and redeeming it revokes all previous clients.
 
 Trusting a Realm domain does not join any Realm within it; joining a Realm only establishes a Realm client identity — actual Attach is still governed by application permissions. Realm-domain-level SSO/directory is a later capability; v1 does not include it.
 
@@ -430,14 +437,16 @@ The minimum application-permission roles for a Service are:
 | editor | Attach and modify business state per the contract |
 | viewer | Read-only Attach; availability depends on the program's contract |
 
+Each instance has exactly one owner, its creator; the owner can transfer ownership to another member (the previous owner becomes an editor by default), and v1 does not support several owners. The Realm Provider keeps each member's role with the member record and writes it into the Actor credential; the Service reads it from the Front's credential and enforces it.
+
 Sharing flow:
 
-1. The owner picks a member/organization principal, a role and an expiry;
-2. The Service or that instance Realm's Issuer generates a one-time Realm invitation carrying the Realm name, optionally embedding the Realm Profile;
+1. The owner picks a role (editor or viewer) and an expiry;
+2. That instance Realm's Issuer generates a one-time Realm invitation (text `ri_…`) carrying the Realm name, optionally embedding the Realm Profile;
 3. The invitation travels over an independent secure channel, never written into the `actr://` URI;
-4. The recipient trusts the domain (if not yet trusted), joins the Realm, and accepts the invitation;
-5. Application permissions record the principal and role, and the invitation is immediately invalidated;
-6. The owner can revoke application permissions; the next call must fail, and active sessions are terminated or downgraded immediately per policy.
+4. The recipient trusts the domain (if not yet trusted) and redeems the invitation to join the Realm as a member with that role;
+5. The invitation is immediately invalidated; the owner can revoke an unused invitation before it is redeemed;
+6. The owner can change a member's role or remove the member: removal immediately stops that member from obtaining Actor credentials and connecting to signaling and TURN, and the Service ends already established sessions at the latest when their credential expires; a role change takes effect in the member's next credential.
 
 Merely copying the instance address does not change application permissions. Expired, already-used, revoked and Realm-mismatched invitations must produce distinct errors.
 

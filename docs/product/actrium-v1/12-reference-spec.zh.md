@@ -511,7 +511,7 @@ Guest 只读：
 - session id/secret；
 - Workspace path；
 - Actor arbitrary call API；
-- Realm secret；
+- Realm 客户端 key；
 - signaling/TURN endpoint credential。
 
 ### 9.1 隐私状态上下文

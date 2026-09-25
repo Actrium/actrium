@@ -21,6 +21,11 @@
   Realm Profile 第 8 节，见下文「Realm 管理请求」）；Realm Provider 域名下的 Realm 由系统管理员
   创建。作用域为单个 Realm 的 Realm 管理 token 可查看该 Realm 及其 Realm Profile、轮换其
   secret；管理连接 ACL、Realm membership 与状态尚未实现，见架构契约第 9 节。
+- 计划（架构契约 3.5、4.1 与第 9 节，协议 `actr/protocols/realm-membership`）：共享 Realm secret 与
+  Realm 管理 token 删除；成员凭一次性 Realm 邀请加入，每个客户端登记 Realm 客户端 key，
+  `POST /issuer/membership` 接受由其签名的 membership 请求，注册、重签与续期改带
+  `x-actr-client-proof`；激活与运营者创建改为返回 owner 邀请，`reissue_admin_token` 改为
+  `reissue_owner_invite`。下文描述的是当前实现。
 - Issuer Signer 是内部信任平面；规范入口是同一 HTTP/2 监听器上的 gRPC，
   不是公开 REST 密钥下载服务。
 
@@ -297,8 +302,8 @@ gRPC `NodeAdminService` 对应 `CreateRealm`/`GetRealm`/`UpdateRealm`/`ListRealm
 `RetireRealm`，同样按 Realm 名寻址；Loran 是 Realm Provider 时 `CreateRealm` 不能新建 Realm
 （没有 `package`），只能更新已有 Realm。
 
-尚未实现：Realm Provider 域名下的 Realm 由 Realm Provider 账号（OAuth 2.0 + PKCE）以
-bearer 请求自助创建（目前由运营者代办）。
+Realm Provider 域名下的 Realm 在 v1 只由运营者创建；由用户以 Realm Provider 账号自助创建属于
+后续能力。
 
 ### 身份变化的重新确认
 

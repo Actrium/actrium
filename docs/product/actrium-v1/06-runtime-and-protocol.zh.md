@@ -406,7 +406,7 @@ Service 按顺序检查：
 6. Program Release（兼容性声明）；
 7. package digest（兼容性声明；无 attestation 时不是远端代码证明）；
 8. protocol fingerprint；
-9. Principal/Device/Workspace 应用权限；
+9. 应用权限：Front credential 中的成员 id、Realm 客户端 key id 与角色（owner/editor/viewer），以及 Workspace 范围；
 10. attachment policy；
 11. 当前 lease；
 12. 调用方要求的策略、当前 `ActorStateDigest` / AA 与 nonce；
@@ -422,6 +422,7 @@ v1 exclusive lease：
 
 - Attach 成功后创建短期可续约 lease；
 - Heartbeat 只续会话，不续 Actor 身份；
+- 会话不超过 Front credential 的有效期：Front 续期 credential 后在 lease 续约时出示新 credential，Service 据此重读角色，否则在旧 credential 到期时结束会话；
 - 瞬时断线进入 grace period；
 - `Detach` 主动释放；
 - Front crash 后 lease 到期；

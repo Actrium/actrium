@@ -137,7 +137,7 @@ Version 1 defines these core relations:
 | Relation | Purpose |
 | --- | --- |
 | `signaling` | Establish Actor connectivity and exchange session negotiation messages. |
-| `identity` | Resolve identities, keys, and authentication metadata. When this authority acts as a Realm Provider, its `href` is also the OAuth 2.0 authorization server identifier (issuer identifier, RFC 8414) for Realm Provider account sign-in ([Actr Realm Profile](realm-profile.md), Section 7.3). |
+| `identity` | Resolve identities, keys, and authentication metadata. |
 | `discovery` | After an Actor starts, discover available Actor instances by dependency, contract, and capability. |
 | `ice-config` | Obtain ICE server configuration and, after authorization, short-lived TURN credentials as defined by [Actr ICE Configuration](ice-configuration.md). |
 | `contracts` | Obtain public Actor contract and interface descriptions. |

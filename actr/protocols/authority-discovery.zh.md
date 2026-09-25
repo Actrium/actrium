@@ -124,7 +124,7 @@ request 时使用的 authority 一致。redirect 不改变此绑定关系。
 | Relation | 用途 |
 | --- | --- |
 | `signaling` | 建立 Actor 连通性并交换 session negotiation 消息。 |
-| `identity` | 解析 identity、key 和 authentication metadata。该 authority 作为 Realm Provider 时，其 `href` 也是 Realm Provider 账号登录所用的 OAuth 2.0 授权服务器标识（issuer identifier，RFC 8414）（[Actr Realm Profile](realm-profile.zh.md) 第 7.3 节）。 |
+| `identity` | 解析 identity、key 和 authentication metadata。 |
 | `discovery` | Actor 启动后，按依赖、contract 和 capability 发现可用的 Actor instance。 |
 | `ice-config` | 按 [Actr ICE Configuration](ice-configuration.zh.md) 获取 ICE server 配置，并在授权后取得短期 TURN credential。 |
 | `contracts` | 获取公开的 Actor contract 和 interface description。 |

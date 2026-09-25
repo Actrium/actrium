@@ -566,7 +566,7 @@ Not provided:
 - session id/secret;
 - Workspace path;
 - an arbitrary Actor-call API;
-- Realm secret;
+- Realm client key;
 - signaling/TURN endpoint credential.
 
 ### 9.1 Privacy state context
