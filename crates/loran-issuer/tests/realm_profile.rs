@@ -52,6 +52,10 @@ async fn setup() -> (Arc<RealmProfiles>, TempDir) {
         "realm_domain",
         "realm_mgmt_nonce",
         "realm",
+        "publisher_key_history",
+        "publisher_package",
+        "publisher_publish_nonce",
+        "publisher",
     ] {
         sqlx::query(&format!("DELETE FROM {table}"))
             .execute(pool)
@@ -617,6 +621,56 @@ mod management {
         let (_, realm_only) = acme();
         let missing = send(&profiles, &config, &realm_only, &register("p-3", &root)).await;
         assert!(matches!(missing, Err(ManagementError::Forbidden(_))));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn register_publisher_accepts_only_publisher_profile_signing_keys() {
+        let (profiles, _dir) = setup().await;
+        let config = RealmConfig::default();
+        let root = SigningKey::from_bytes(&[5; 32]);
+        // One descriptor carrying both the Realm signing keys (rs-1) and the
+        // Publisher Profile (root-1).
+        let (acme, realm_only) = acme();
+        let mut descriptor: Value = serde_json::from_slice(&realm_only).unwrap();
+        let publisher: Value = serde_json::from_slice(&publisher_descriptor(
+            &root,
+            &SigningKey::from_bytes(&[6; 32]),
+        ))
+        .unwrap();
+        descriptor["publisher"] = publisher["publisher"].clone();
+        let descriptor = serde_json::to_vec(&descriptor).unwrap();
+        let register = |nonce: &str| {
+            let mut request = request(ManagementOp::RegisterPublisher, "", nonce);
+            request.publisher = "acme.com".into();
+            request
+        };
+
+        // A Realm signing key of the same domain does not register it.
+        let by_realm_key = send(
+            &profiles,
+            &config,
+            &descriptor,
+            &signed(&register("q-1"), &acme, "rs-1"),
+        )
+        .await;
+        assert!(
+            matches!(by_realm_key, Err(ManagementError::Forbidden(_))),
+            "{by_realm_key:?}"
+        );
+        // Naming a realm too is refused.
+        let mut with_realm = register("q-2");
+        with_realm.realm = "a1@acme.com".into();
+        let with_realm = serde_json::to_vec(&with_realm.sign("root-1", &root)).unwrap();
+        assert!(matches!(
+            send(&profiles, &config, &descriptor, &with_realm).await,
+            Err(ManagementError::Invalid(_))
+        ));
+        // Refused requests leave their nonce unused.
+        let document = serde_json::to_vec(&register("q-1").sign("root-1", &root)).unwrap();
+        send(&profiles, &config, &descriptor, &document)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
