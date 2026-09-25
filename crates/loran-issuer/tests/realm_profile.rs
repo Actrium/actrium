@@ -401,6 +401,22 @@ async fn rotates_the_issuer_keys_of_provider_domain_realms() {
         KeyStatus::Retired
     );
 
+    // An issuance that read the old key before the switch may cache it
+    // again without expiry; its removal still ends it.
+    let old_key = ed25519_dalek::VerifyingKey::from_bytes(
+        &BASE64.decode(&old.public_key).unwrap().try_into().unwrap(),
+    )
+    .unwrap();
+    platform::aid::credential::validator::AIdCredentialValidator::persist_key(
+        _dir.path(),
+        &name,
+        old.key_id,
+        &old_key,
+        0,
+    )
+    .await
+    .unwrap();
+
     // Removed once its last credential (1 hour) and the skew have passed.
     profiles.maintain_issuer_keys(switch + 3600).await.unwrap();
     assert_eq!(latest().await.issuer.keys.len(), 2);
@@ -412,6 +428,15 @@ async fn rotates_the_issuer_keys_of_provider_domain_realms() {
     assert_eq!(profile.sequence, 4);
     assert!(profile.issuer_key(old.key_id).is_none());
     assert_eq!(RealmIssuerKey::list(&name).await.unwrap().len(), 1);
+    let cache = platform::aid::KeyCache::new(_dir.path().join("signaling_key_cache.db"))
+        .await
+        .unwrap();
+    let (_, expires_at) = cache
+        .get_cached_key(&name, old.key_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(expires_at as i64, switch + 3600 + 300);
 
     // The next rotation starts on its own after 90 days.
     let due = switch + issuer::realm_profile::ROTATION_INTERVAL_SECS;

@@ -557,7 +557,12 @@ impl RealmProfiles {
                     );
                     changed = true;
                 }
-                IssuerKeyState::Retired if key.remove_after.is_some_and(|at| at <= now) => {
+                IssuerKeyState::Retired
+                    if let Some(remove_after) = key.remove_after.filter(|at| *at <= now) =>
+                {
+                    // An issuance that read this key before the switch may
+                    // have cached it again without expiry.
+                    self.cache_key(realm, key, remove_after as u64).await?;
                     self.signer
                         .retire_named_key(&key.signer_name)
                         .await
