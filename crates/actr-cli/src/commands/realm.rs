@@ -8,9 +8,11 @@
 //!   - `retire`          — sign the retired successor of a Realm Profile
 //!   - `reissue-request` — sign a `reissue_admin_token` request
 //!   - `draft-request`   — sign a `draft_profile` request
+//!   - `register-publisher` — sign a `register_publisher` request and send it
 //!
 //! Requests are printed as JSON, to be sent with `POST` to the Realm
-//! Provider's `realm-management` endpoint.
+//! Provider's `realm-management` endpoint; `register-publisher` sends its
+//! own (`actr/protocols/authority-discovery.md` section 4.5).
 
 use actr_protocol::realm_management::{ManagementOp, ManagementRequest};
 use actr_protocol::realm_profile::{RealmPackage, sign_document};
@@ -52,6 +54,9 @@ pub enum RealmCommand {
     /// Realm Provider's current issuer keys; sign its reply with
     /// `sign-profile`.
     DraftRequest(ReissueRequestArgs),
+    /// Sign a `register_publisher` request with a Publisher Profile signing
+    /// key and send it to the Realm Provider's `realm-management` endpoint.
+    RegisterPublisher(RegisterPublisherArgs),
 }
 
 #[derive(Args, Debug)]
@@ -132,6 +137,28 @@ pub struct ReissueRequestArgs {
     pub provider: String,
 }
 
+#[derive(Args, Debug)]
+pub struct RegisterPublisherArgs {
+    /// Key file, in the `actr realm keygen` format, of an `active`
+    /// `profile_signing_keys` entry of the Publisher Profile
+    #[arg(long, value_name = "FILE")]
+    pub key: PathBuf,
+    /// Publisher ID: the normalized domain whose `/.well-known/actr` carries
+    /// the Publisher Profile
+    #[arg(long, value_name = "DOMAIN")]
+    pub publisher: String,
+    /// Realm Provider ID of the receiving Realm Provider
+    #[arg(long, value_name = "ID")]
+    pub provider: String,
+    /// `realm-management` endpoint to send to, instead of the one listed in
+    /// `https://<provider>/.well-known/actr`
+    #[arg(long, value_name = "URL")]
+    pub endpoint: Option<String>,
+    /// Print the signed request instead of sending it
+    #[arg(long)]
+    pub print: bool,
+}
+
 /// A Realm signing key file.
 #[derive(Serialize, Deserialize)]
 pub struct RealmKeyFile {
@@ -195,6 +222,7 @@ impl Command for RealmArgs {
                 new_request(ManagementOp::DraftProfile, &args.realm, &args.provider)
                     .sign(&key_id, &key)
             }
+            RealmCommand::RegisterPublisher(args) => register_publisher(args).await?,
         };
         Ok(CommandResult::Success(serde_json::to_string_pretty(
             &output,
@@ -283,6 +311,53 @@ fn write_private(path: &Path, contents: &[u8]) -> std::io::Result<()> {
 fn new_request(op: ManagementOp, realm: &str, provider: &str) -> ManagementRequest {
     let nonce = hex::encode(rand::random::<[u8; 16]>());
     ManagementRequest::new(op, realm, provider, &nonce)
+}
+
+fn register_publisher_request(args: &RegisterPublisherArgs) -> Result<Value> {
+    let (key_id, key) = RealmKeyFile::load(&args.key)?;
+    let mut request = new_request(ManagementOp::RegisterPublisher, "", &args.provider);
+    request.publisher = args.publisher.clone();
+    Ok(request.sign(&key_id, &key))
+}
+
+/// Sign `register_publisher` and send it; returns the Realm Provider's reply.
+async fn register_publisher(args: &RegisterPublisherArgs) -> Result<Value> {
+    let request = register_publisher_request(args)?;
+    if args.print {
+        return Ok(request);
+    }
+    let client = reqwest::Client::new();
+    let endpoint = match &args.endpoint {
+        Some(endpoint) => endpoint.clone(),
+        None => realm_management_endpoint(&client, &args.provider).await?,
+    };
+    let response = client
+        .post(&endpoint)
+        .json(&request)
+        .send()
+        .await
+        .with_context(|| format!("Failed to send register_publisher to {endpoint}"))?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        bail!("register_publisher refused (HTTP {status}): {body}");
+    }
+    serde_json::from_str(&body).context("register_publisher reply is not JSON")
+}
+
+/// The `realm-management` link of the Realm Provider's authority descriptor.
+async fn realm_management_endpoint(client: &reqwest::Client, provider: &str) -> Result<String> {
+    let url = format!("https://{provider}/.well-known/actr");
+    let descriptor: actr_protocol::AuthorityDescriptor = client
+        .get(&url)
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .with_context(|| format!("Failed to fetch {url}"))?
+        .json()
+        .await
+        .with_context(|| format!("{url} is not an authority descriptor"))?;
+    Ok(descriptor.require_service("realm-management")?.href.clone())
 }
 
 /// The Realm Profile in `path`, or the `profile` member of a `create_realm`
@@ -441,5 +516,65 @@ mod tests {
             let mode = std::fs::metadata(&key_path).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o600);
         }
+    }
+
+    #[tokio::test]
+    async fn register_publisher_sends_a_request_the_realm_provider_verifies() {
+        use axum::{Json, Router, routing::post};
+
+        let dir = tempfile::tempdir().unwrap();
+        let key_path = dir.path().join("publisher-key.json");
+        let member = keygen(&KeygenArgs {
+            key_id: "root-1".into(),
+            output: key_path.clone(),
+            force: false,
+        })
+        .unwrap();
+        let keys: RealmSigningKeys = serde_json::from_value(member).unwrap();
+
+        // A realm-management endpoint that verifies and echoes the request.
+        let verifying_keys = keys.keys.clone();
+        let app = Router::new().route(
+            "/actr/realm-management",
+            post(move |body: axum::body::Bytes| async move {
+                let request = ManagementRequest::parse(&body).unwrap();
+                request.verify(&verifying_keys).unwrap();
+                Json(serde_json::json!({
+                    "op": request.op,
+                    "publisher": request.publisher,
+                    "realm": request.realm,
+                    "provider_id": request.provider_id,
+                }))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let mut args = RegisterPublisherArgs {
+            key: key_path,
+            publisher: "apps.acme.com".into(),
+            provider: "p.example".into(),
+            endpoint: Some(format!("http://{address}/actr/realm-management")),
+            print: false,
+        };
+        let reply = register_publisher(&args).await.unwrap();
+        assert_eq!(
+            reply,
+            serde_json::json!({
+                "op": "register_publisher",
+                "publisher": "apps.acme.com",
+                "realm": "",
+                "provider_id": "p.example",
+            })
+        );
+
+        // --print only prints the signed request.
+        args.endpoint = Some("http://127.0.0.1:9/unreachable".into());
+        args.print = true;
+        let printed = register_publisher(&args).await.unwrap();
+        let request = ManagementRequest::parse(printed.to_string().as_bytes()).unwrap();
+        request.verify(&keys.keys).unwrap();
+        assert_eq!(request.op, ManagementOp::RegisterPublisher);
     }
 }

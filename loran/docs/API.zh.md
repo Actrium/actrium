@@ -108,7 +108,10 @@ descriptor，按 key pin 接受 `realm_signing_keys`（Actr Authority Discovery 
 错误以 `{"error": "…"}` 返回：`400` 请求无效，`403` key 或签名不被接受，`404` Realm 不存在，
 `409` 冲突（幂等键、回滚、已退役），`429` 配额，`503` 取不到 descriptor 或 Signer 不可用。
 响应带 `Cache-Control: no-store`。持有方工具：`actr realm keygen | create-request |
-sign-profile | retire | reissue-request | draft-request`。
+sign-profile | retire | reissue-request | draft-request`；Publisher 用 `actr realm register-publisher`
+以 Publisher Profile 签名 key（`keygen` 格式的 key 文件）签署 `register_publisher` 并发往
+`https://<provider_id>/.well-known/actr` 所列的 `realm-management` 端点（`--endpoint` 可指定，
+`--print` 只打印不发送）。
 
 ## Issuer
 
