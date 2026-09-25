@@ -28,7 +28,7 @@ pub enum SignerExpose {
 ///
 /// Service enable/disable is controlled by the bitmask in ActrixConfig.enable.
 /// The ENABLE_SIGNER bit (bit 4) must be set to enable this service.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct SignerServiceConfig {
     /// Storage configuration.
@@ -85,22 +85,6 @@ pub struct SignerServiceConfig {
     /// Path to the server private key used for mTLS.
     #[serde(default)]
     pub mtls_key: Option<String>,
-}
-
-impl Default for SignerServiceConfig {
-    fn default() -> Self {
-        Self {
-            storage: Default::default(),
-            kek: None,
-            kek_env: None,
-            kek_file: None,
-            expose: SignerExpose::default(),
-            require_mtls: false,
-            mtls_ca_cert: None,
-            mtls_cert: None,
-            mtls_key: None,
-        }
-    }
 }
 
 impl SignerServiceConfig {
