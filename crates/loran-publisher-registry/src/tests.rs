@@ -2342,3 +2342,51 @@ async fn concurrent_register_publisher_requests_do_not_fail_internally() {
         }
     }
 }
+
+#[tokio::test]
+async fn register_publisher_refuses_a_package_key_outside_its_validity() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    let manager = PublisherRegistryManager::new(setup_test_pool().await);
+    let root = SigningKey::generate(&mut OsRng);
+    let now = chrono::Utc::now();
+    let with_window = |not_before: Option<String>, not_after: Option<String>| {
+        let profile = signed_profile(
+            "window.example",
+            1,
+            &[("root-1", &root, "active")],
+            &[(&SigningKey::generate(&mut OsRng), "active")],
+        );
+        let mut document = serde_json::to_value(&profile).unwrap();
+        document["keys"][0]["not_before"] = not_before.into();
+        document["keys"][0]["not_after"] = not_after.into();
+        actr_protocol::realm_profile::sign_document(&mut document, "root-1", &root);
+        serde_json::from_value::<actr_protocol::PublisherProfile>(document).unwrap()
+    };
+    let at = |offset: chrono::Duration| Some((now + offset).to_rfc3339());
+
+    for (not_before, not_after) in [
+        // Not valid yet.
+        (at(chrono::Duration::days(1)), None),
+        // Already expired.
+        (None, at(-chrono::Duration::days(1))),
+        // Not RFC 3339.
+        (Some("tomorrow".to_string()), None),
+    ] {
+        let profile = with_window(not_before.clone(), not_after.clone());
+        assert!(
+            matches!(
+                register(&manager, &profile).await,
+                Err(PublisherRegistryError::InvalidRequest(_))
+            ),
+            "{not_before:?} {not_after:?}"
+        );
+    }
+    let valid = with_window(
+        at(-chrono::Duration::days(1)),
+        at(chrono::Duration::days(30)),
+    );
+    let record = register(&manager, &valid).await.unwrap();
+    assert!(record.key_expires_at.unwrap() > now.timestamp());
+}

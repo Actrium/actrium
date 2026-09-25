@@ -200,9 +200,10 @@ impl PublisherRegistryManager {
     /// profile must be signed by a pinned `active` key, list only pinned keys,
     /// never make a retired key active again, and never lower `sequence`; the
     /// same `sequence` must be the same profile. Rotation chains are not
-    /// followed yet. The profile's one `active` package signing key becomes
-    /// the publisher's current key; a replaced key is archived as retired and
-    /// a key used before is never reinstated.
+    /// followed yet. The profile's one `active` package signing key, which
+    /// must be within its `not_before`/`not_after`, becomes the publisher's
+    /// current key; a replaced key is archived as retired and a key used
+    /// before is never reinstated.
     pub async fn register_publisher(
         &self,
         publisher: &str,
@@ -227,12 +228,25 @@ impl PublisherRegistryManager {
         crypto::validate_public_key(&package_key.public_key)?;
         let key_id = crypto::compute_key_id_from_b64(&package_key.public_key)?;
         let now = chrono::Utc::now().timestamp();
-        let key_expires_at = match &package_key.not_after {
-            Some(not_after) => chrono::DateTime::parse_from_rfc3339(not_after)
-                .map_err(|error| invalid(format!("not_after: {error}")))?
-                .timestamp(),
-            None => now + DEFAULT_KEY_LIFETIME_SECS,
+        let time = |value: &Option<String>, member: &str| {
+            value
+                .as_deref()
+                .map(|value| {
+                    chrono::DateTime::parse_from_rfc3339(value)
+                        .map(|time| time.timestamp())
+                        .map_err(|error| invalid(format!("{member}: {error}")))
+                })
+                .transpose()
         };
+        let not_before = time(&package_key.not_before, "not_before")?;
+        let key_expires_at =
+            time(&package_key.not_after, "not_after")?.unwrap_or(now + DEFAULT_KEY_LIFETIME_SECS);
+        if not_before.is_some_and(|not_before| now < not_before) || now >= key_expires_at {
+            return Err(invalid(format!(
+                "package signing key '{}' is outside its validity period",
+                package_key.id
+            )));
+        }
         let document = serde_json::to_value(profile)
             .map_err(|error| invalid(format!("Publisher Profile: {error}")))?;
         let profile_json = jcs(&document);

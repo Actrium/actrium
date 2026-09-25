@@ -177,7 +177,7 @@ Profile，`docs/product/actrium-v1` 12 §2），要求 `domain` 等于该域名�
 （pin）其 `profile_signing_keys`；此后须由已 pin 的 `active` key 签名、只列已 pin 的 key、不让
 `retired` key 重新 `active`、`sequence` 只增（相同 Publisher Profile 重复登记不变），轮换链尚未支持。
 Publisher Profile 的 `keys` 须恰有一把 `active` 包签名 key，它成为该 Publisher 的当前 key（key id
-按上文规则由公钥算出，`not_after` 为其发布期限，缺省一年）；被替换的 key 归档为 retired，仍可验证
+按上文规则由公钥算出，`not_after` 为其发布期限，缺省一年；登记时须已过 `not_before`、未到 `not_after`）；被替换的 key 归档为 retired，仍可验证
 旧包，用过的 key 不能再成为当前 key。响应 `{"publisher", "status", "sequence"}`；`400` 请求无效，
 `403` Publisher Profile 或签名不被接受，`409` Publisher 已停用或并发修改，`503` 取不到 descriptor。
 公开文档中不放 challenge，也没有 `/.well-known/actr/publisher.json`。
