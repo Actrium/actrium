@@ -10,12 +10,13 @@
 //!
 //! # Signing keys
 //!
-//! Each Realm's credentials are signed with that Realm's issuer key,
-//! `issuer:<realm>` in the Signer ([`AIdIssuer::realm_key`]), the key its Realm
-//! Profile lists under `issuer.keys`. Named keys do not expire; the private key
-//! never leaves the Signer, which signs through its Sign RPC. Verifiers cache
-//! the verifying key under `(realm, key_id)`. When a Realm is retired its key
-//! is retired in the Signer and never signs again.
+//! Each Realm's credentials are signed with that Realm's current issuer key
+//! in the Signer ([`AIdIssuer::realm_key`]; the first is `issuer:<realm>`),
+//! one of the keys its Realm Profile lists under `issuer.keys`. The keys
+//! rotate as `realm-profile.md` section 6.1 describes; the private keys never
+//! leave the Signer, which signs through its Sign RPC. Verifiers cache the
+//! verifying keys under `(realm, key_id)`. When a Realm is retired its keys
+//! are retired in the Signer and never sign again.
 //!
 //! # Example
 //!
@@ -243,8 +244,8 @@ fn now_secs() -> u64 {
 /// AId Token issuer - focused on issuing new Actor Identity Tokens
 pub struct AIdIssuer {
     signer_client: SignerClientWrapper,
-    /// Each Realm's issuer key (`issuer:<realm>` in the Signer), which signs
-    /// that Realm's credentials: Signer key id and verifying key.
+    /// Each Realm's current issuer key, which signs that Realm's
+    /// credentials: Signer key id and verifying key.
     realm_keys: Arc<RwLock<HashMap<String, (u32, VerifyingKey)>>>,
     /// Issuer configuration (public for renewal handler access).
     pub config: IssuerConfig,

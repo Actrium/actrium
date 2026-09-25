@@ -30,8 +30,9 @@
 //!
 //! ## Signing Keys
 //!
-//! Credentials are signed by the Signer with the Realm's issuer key,
-//! `issuer:<realm>`, created on first use and retired with the Realm.
+//! Credentials are signed by the Signer with the Realm's current issuer key
+//! (the first is `issuer:<realm>`, created on first use). The keys rotate as
+//! `realm-profile.md` section 6.1 describes and are retired with the Realm.
 //!
 //! # Usage Example
 //!
