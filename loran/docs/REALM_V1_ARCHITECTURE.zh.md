@@ -563,8 +563,14 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   `/reissue`、`/renew` 的 `x-actr-client-proof`（含 `body_sha256`），credential 带成员、key 与角色，
   Service 程序只由 owner 注册；撤销 key 即时停用其 Actor（Signaling 断开并拒绝重连、TURN 关闭
   allocation 并拒绝认证）；运营者 `…/owner-invite` 与只读 `…/members`。共享 Realm 注册 secret、Realm
-  管理 token 及其 admin 路由与认证已删除。尚未实现：客户端侧（Actr Host 用 Realm 客户端 key 签证明、
-  `actr realm join` 等命令、e2e 与示例）；Service 侧即时得知成员变化（现以 credential 到期为界）；
+  管理 token 及其 admin 路由与认证已删除。Actr Host 以 `deployment.realm_client_key`（`actr realm join`
+  写出的 key 文件，含 `realm`、`provider_id`、`issuer`、`key_id` 与密钥，权限 0600）为每个
+  `/register`、`/reissue`、`/renew` 请求新签证明；`actr realm` 提供 `join`、`invite`、`members`、
+  `revoke-invite`、`revoke-client`、`remove-member`、`set-role`、`transfer-owner`、`leave`；
+  e2e `package-runtime-echo` 走 owner 邀请 → 邀请 editor → 移除后拒签的全流程。尚未实现：`actr realm join`
+  从 `realms` 位置取 Realm Profile（现为邀请内嵌的 Realm Profile 或 `--issuer`）；Web（sw-host）
+  客户端的 Realm 客户端 key；Actr Host 下载 Realm 包后核对 `package.type`；Service 侧即时得知成员变化
+  （现以 credential 到期为界）；
 - 已实现运行时分区：Actor credential 由该 Realm 的当前 issuer key 签发（首把为 Signer 中的
   `issuer:<realm>`，随首份 Realm Profile 草稿或运营者创建 `active` Realm 时生成，缺失时签发前
   补建），验证 key 按 `(realm, key_id)` 缓存；signaling 连接绑定其身份的 Realm，source/target 不在该 Realm 的
