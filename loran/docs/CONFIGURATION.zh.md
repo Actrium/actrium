@@ -1,7 +1,6 @@
 # Loran Realm v1 配置
 
-本文描述当前实现的单 Realm、单节点、SQLite profile。目标契约下一个实例承载多个
-Realm，配置中与之相关的差异在对应小节标注，完整差异见
+本文描述当前实现的单节点、SQLite profile：一个实例承载多个 Realm。尚未实现的部分见
 [架构契约](REALM_V1_ARCHITECTURE.zh.md)第 9 节。字段的可运行模板以
 [`actrix.example.toml`](../config/actrix.example.toml)为准；配置结构使用
 `deny_unknown_fields`，旧字段或拼错字段会导致启动失败。
@@ -62,8 +61,8 @@ advertised_ip = "203.0.113.10"
 advertised_port = 3478
 ```
 
-HTTP 与 ICE 端口均可配置，并会精确出现在 Realm descriptor 中（目标契约：出现在
-待签 Realm Profile 的 Realm Provider 端点中）。防火墙必须放行
+HTTP 与 ICE 端口均可配置，并会精确出现在待签 Realm Profile 的 Realm Provider 端点中。
+防火墙必须放行
 HTTP/TCP、ICE/UDP 以及 TURN relay port range。`advertised_ip` 必须是客户端可达
 地址，不能用监听通配地址代替。
 
@@ -143,7 +142,8 @@ nonce_retain_secs = 86400
 ```
 
 该值决定已使用或过期发布 nonce 的审计保留期，不改变 nonce 的一次性语义。
-Publisher ID 是域名；当前实现通过 HTTPS descriptor 验证域名控制权，目标契约见架构契约第 7 节。
+Publisher ID 是域名，通过 HTTPS descriptor 验证域名控制权并以 `register_publisher` 登记，
+见架构契约第 7 节。
 
 ## 管理面
 
@@ -157,9 +157,10 @@ session_expiry_secs = 86400
 enabled = false
 ```
 
-Admin UI 密码只接受 Argon2id PHC hash，明文密码字段不存在。当前实现推荐只启用 Admin
-UI，由系统管理员 provision 唯一 Realm；目标契约下 Realm 由经 Realm 签名 key 持有方授权的
-Realm 管理请求创建，Admin UI 用于实例运营。`grpc_api` 是 supervisor 集成接口；启用后
+Admin UI 密码只接受 Argon2id PHC hash，明文密码字段不存在。v1 推荐只启用 Admin UI：
+系统管理员经它创建、停用/恢复、退役 Realm 并代办 Realm Provider 域名下的 Realm；其他域名
+的 Realm 由经 Realm 签名 key 持有方授权的 Realm 管理请求创建。`grpc_api` 是 supervisor
+集成接口；启用后
 需要独立的 hex shared secret，并会改变 Realm 写入归属，不属于首版默认部署。
 
 ## Recording 与监控
@@ -173,15 +174,12 @@ operations 分成独立 channel。secret、Actor credential、Authorization、We
 
 ## Realm provision 与数据
 
-Realm 不在 TOML 中声明。
-
-当前实现：空 schema 启动后，由系统管理员通过受保护管理面创建唯一 Realm。数据库
-唯一约束阻止第二个 Realm；运行时不提供硬删除/替换。
-
-目标契约：一个实例承载多个 Realm，默认不限制数量；需要独占部署时可配置
-`max_realms = 1`（该字段尚未实现）。Realm 经持有方授权的创建请求与 Realm
-Profile 验证后激活，收到退役 Realm Profile 时退役并写入 Realm Provider tombstone。按 Realm
-的连接、消息与 TURN 配额属于待实现配置。
+Realm 不在 TOML 中声明。一个实例承载多个 Realm，默认不限制数量；需要独占部署时可配置
+`[realm] max_realms = 1`。空 schema 启动后没有任何 Realm；Realm 经 Realm 签名 key 持有方
+授权的创建请求（`create_realm` + `publish_profile`）与 Realm Profile 验证后激活，Realm
+Provider 域名下的 Realm 由系统管理员经 Admin API 代办创建；收到退役 Realm Profile 或经
+`…/retire` 时退役，写入 Realm Provider tombstone，运行时不提供硬删除。按 Realm 的连接、
+消息与 TURN 配额尚未实现，见架构契约第 9 节。
 
 `[realm] profile_refresh_secs`（默认 3600，限定在 60–86400）是 Loran 刷新其他域名
 `realm_signing_keys` 与 Realm Profile 的间隔（API.zh.md「Realm discovery」），每轮同时清除过期的
@@ -205,10 +203,13 @@ credential 与 TURN username 的 `provider`，并由 Signaling、TURN 校验。`
 # 未版本化库：先升到 v1
 python3 scripts/loran/migrate_schema_v1.py /var/lib/actrix/actrix.db --dry-run
 python3 scripts/loran/migrate_schema_v1.py /var/lib/actrix/actrix.db
-# v1 库：升到当前 v2
+# v1 库：升到 v2
 python3 scripts/loran/migrate_schema_v2.py /var/lib/actrix/actrix.db --dry-run
 python3 scripts/loran/migrate_schema_v2.py /var/lib/actrix/actrix.db
 ```
+
+v2 之后没有离线迁移工具：升到当前 schema v6 需要停机后重建数据库（见「Realm provision
+与数据」）。
 
 详见[架构契约](REALM_V1_ARCHITECTURE.zh.md)和
 [威胁模型](THREAT_MODEL_REALM_V1.zh.md)。

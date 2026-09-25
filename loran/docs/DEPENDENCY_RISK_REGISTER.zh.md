@@ -4,8 +4,8 @@
 
 ## 范围与原则
 
-本登记只覆盖 Loran 默认单节点、SQLite profile（当前实现单 Realm；多 Realm 目标契约
-不引入新的运行时依赖类别，实现时需复评 authority descriptor 获取与 JCS 规范化依赖） 及其内嵌 Admin UI。仓库中
+本登记只覆盖 Loran 默认单节点、SQLite profile（一个实例承载多个 Realm）及其内嵌
+Admin UI。仓库中
 示例、其他语言 binding 和实验目录的告警由各自 owner 处理，不能被本文替代。
 
 - `Cargo.lock` 的 Rust 审计不允许 advisory ignore；

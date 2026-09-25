@@ -38,22 +38,21 @@ loran-server
 
 ### `loran-platform`
 
-- SQLite `user_version` 必须等于 schema v4；
-- 当前实现：数据库层强制每实例最多一个 Realm。目标契约：移除单例约束，改为
-  Realm 名唯一（含 Realm Provider tombstone），所有按 Realm 分区的状态以完整 Realm 名
-  `realm` 为键；
-- Actor credential validation 检查 protocol version、issuer、Realm Provider、audience、Realm、
-  Actor 和过期时间；目标契约下 issuer 即 Realm 名，且 Realm 必须为 `active`；
+- SQLite `user_version` 必须等于 schema v6；
+- 一个实例承载多个 Realm，`realm.name`（完整 Realm 名）唯一且不可变，退役行即 Realm
+  Provider tombstone、名字不复用；所有按 Realm 分区的状态以完整 Realm 名 `realm` 为键；
+- Actor credential validation 检查 protocol version、issuer（即 Realm 名）、Realm Provider、
+  audience、Realm、Actor 和过期时间，且 Realm 必须为 `active`；
 - 配置未知字段和生产不安全值 fail closed。
 
 ### `loran-issuer`（Issuer）
 
-- ActorId 是实例身份；目标契约下不含程序类型，类型由注册与 Actor credential 携带；
-- Actor serial 由显式 worker ID 的 Snowflake 候选生成，并在 SQLite 已签发身份登记中永久预留；
+- ActorId 是实例身份，不含程序类型，类型由注册与 Actor credential 携带；
+- Actor serial 由显式 worker ID 的 Snowflake 候选生成，并在 SQLite 已签发身份登记中按 Realm
+  分区永久预留，只为 `active` Realm 签发；
 - package workload 必须有 publisher/package proof，linked workload 必须有授权证明；
 - renewal 需要 possession proof，不能仅凭 ActorId 续签；
-- Realm registration capability 不得下发给 Guest；
-- 目标契约：已签发身份登记按 Realm 分区，只为 `active` Realm 签发。
+- Realm registration capability 不得下发给 Guest。
 
 ### `loran-signer`（Issuer Signer）
 
@@ -80,8 +79,10 @@ loran-server
 ### `loran-publisher-registry`（Publisher Registry）
 
 - 公开身份只叫 publisher，ID 是规范化 DNS 域名；
-- 当前实现：well-known descriptor 请求拒绝重定向、私网目标、超限 body 与 DNS rebinding，
-  key rotation 需要 publisher 重新证明域名控制；目标契约见 REALM_V1_ARCHITECTURE 第 7 节；
+- publisher 经 `register_publisher`（Actr 管理信封，由 Publisher Profile 中 `active` 的签名
+  key 签名）登记；获取 authority descriptor 拒绝重定向超限、私网目标、超限 body 与 DNS
+  rebinding；key rotation 通过再次发送 `register_publisher` 完成，见 REALM_V1_ARCHITECTURE
+  第 7 节；
 - 发布 nonce 一次性使用；
 - package origin 不成为信任根。
 

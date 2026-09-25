@@ -1,7 +1,7 @@
 # Loran Realm v1 架构契约
 
-状态：首版目标契约。一个 Loran 实例作为共享 Realm Provider 承载多个 Realm；首版不承诺
-HA 或跨 Realm federation。当前代码仍按早先的单 Realm 契约实现，差异见第 9 节。
+状态：v1 架构契约，与当前代码一致。一个 Loran 实例作为共享 Realm Provider 承载多个
+Realm；首版不承诺 HA 或跨 Realm federation。尚未落地的部分集中列在第 9 节。
 历史名称（旧产品名、旧服务名）集中见[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」。
 
 ## 1. Realm 模型
@@ -417,17 +417,15 @@ key history。
 
 Loran 获取 descriptor 的重定向与 SSRF 规则与 3.1 相同。`register_publisher` 把一个
 publisher 登记到本 Realm Provider 的 Publisher Registry（此后本 Realm Provider 才为该
-publisher 托管包）。它复用 3.2 的 Actr 管理信封：以 `publisher` 字段取代
-`realm`，由 Publisher Profile 中 `active` 的 Publisher Profile 签名 key 签名，同样绑定 `provider_id`、5 分钟有效期与 nonce；公开文档中
-不放 challenge。Loran 验证签名 key 属于当前 `publisher` 成员后登记该 publisher，并持久化
-已接受的 Publisher Profile 与 `sequence`；key 轮换通过发布新 Publisher Profile 完成，Loran 周期刷新后归档
-旧 key、启用新 key。旧 key 默认只用于历史包验签；泄露时由实例运营者显式 revoke。
-
-当前实现：`register_publisher` 与 Realm 管理请求共用 `POST /actr/realm-management`。首个
-Publisher Profile 固定其 `profile_signing_keys`；之后只接受由已固定 `active` key 签名、只列已固定
-key、`sequence` 更高的 Publisher Profile（轮换链尚未支持）。Publisher Profile 须恰有一把
-`active` 包签名 key，作为该 publisher 的当前 key；被替换的 key 归档为 retired。Loran 不周期刷新
-Publisher Profile，key 轮换由 publisher 再次发送 `register_publisher` 完成（见第 9 节）。
+publisher 托管包），与 Realm 管理请求共用同一端点 `POST /actr/realm-management`。它复用
+3.2 的 Actr 管理信封：以 `publisher` 字段取代 `realm`，由 Publisher Profile 中 `active` 的
+Publisher Profile 签名 key 签名，同样绑定 `provider_id`、5 分钟有效期与 nonce；公开文档中
+不放 challenge。首个 Publisher Profile 固定其 `profile_signing_keys`；之后只接受由已固定
+`active` key 签名、只列已固定 key、`sequence` 更高的 Publisher Profile（轮换链尚未支持，见
+第 9 节）。Publisher Profile 须恰有一把 `active` 包签名 key，作为该 publisher 的当前 key；
+被替换的 key 归档为 retired，默认只用于历史包验签，泄露时由实例运营者显式 revoke。Loran
+不周期刷新 Publisher Profile，key 轮换由 publisher 再次发送 `register_publisher` 完成（见
+第 9 节）。
 
 程序身份写作 `publisher/program@version`。实例运行哪个包由 Realm Profile 的 `package`
 （下载地址与 SHA-256）给出，包可以放在任何 HTTPS 位置；消费端必须核对 SHA-256，并验证
@@ -450,7 +448,7 @@ v4 已以 Realm 名为键：`realm` 表以列 `name`（完整 Realm 名）为主
 `pending_registration`、`issued_actor_identity`、`revoked_actor` 以 `realm` 列引用它，后三者按
 `(realm, serial_number)` 建主键；Signaling 的 `actor_registry` 同样按 Realm 名与 serial 建键。
 
-目标表结构：
+表结构：
 
 - `realm_domain`：`domain`、已接受的 authority descriptor digest、`realm_signing_keys`
   的 `sequence` 与 key 集合、最近校验时间；

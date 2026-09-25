@@ -68,7 +68,7 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 
 | 术语 | 定义 |
 | --- | --- |
-| Realm | 一个应用实例的信任与治理域：Actor 身份、Realm membership、Realm 客户端准入、连接 ACL 与 Realm Provider 委派都以它为边界。创建一个应用实例即创建一个新 Realm（跟实例走，不跟应用走）。Realm 不是应用（程序），不是 Loran 实例，不是一台信令服务器，也不是消息明文端点或应用保障权威；目标契约下一个 Loran 实例承载多个 Realm（当前实现仍恰好一个）。 |
+| Realm | 一个应用实例的信任与治理域：Actor 身份、Realm membership、Realm 客户端准入、连接 ACL 与 Realm Provider 委派都以它为边界。创建一个应用实例即创建一个新 Realm（跟实例走，不跟应用走）。Realm 不是应用（程序），不是 Loran 实例，不是一台信令服务器，也不是消息明文端点或应用保障权威；一个 Loran 实例承载多个 Realm。 |
 | Realm 域名 | Realm 名中的域名部分：普通 DNS 域名，不含端口。域名只是天然唯一的命名空间根，不分类；没有域名就不分配 Realm。一个 Realm 域名下可以有多个 Realm。唯一例外是本机 Realm。 |
 | Realm 名 | Realm 的完整名字 `<realm_id>@<domain>`，如 `k7m2q9xh@acme.com`。形似邮件地址但不是，不得渲染为 mailto。 |
 | RealmId（`realm_id`） | Realm 名中 `@` 之前的部分，在所属域名内唯一，是分配得出的标识（字符规则同 DNS label：1–63 个小写字母、数字或 `-`）。默认随机生成，创建时可显式选择可读的 RealmId；创建后不可修改，退役后永不复用。完整身份始终是 Realm 名。 |
@@ -189,14 +189,6 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 
 安全模型已废弃、不再作为规范用语的旧词：GraphRoot 作为图安全根、逐消息权限、动态 Capability 交集、Waiver 改色、四值 Claim Verdict 作为顶层颜色。
 
-## 11. 当前实现专有
-
-以下只存在于当前实现，目标契约中移除或取代。
-
-| 术语 | 定义 |
-| --- | --- |
-| Realm descriptor | 当前实现在 `/.well-known/actr/realm.json` 发布的单 Realm 非秘密元数据。目标契约中由 Realm Profile 取代；该路径与 authority discovery「`/.well-known/actr` 下不定义子路径」冲突，将被移除。 |
-
 ## 历史名称对照
 
 正文统一使用左列规范名；右列历史名只出现在本表、数据库迁移代码、旧文档，以及仍沿用
@@ -212,6 +204,7 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 | Publisher Registry | MFR（源自 manufacturer） | 目录 `crates/loran-mfr` → `crates/loran-publisher-registry`；包 `actrix-mfr` → `actrix-publisher-registry`；路由保持 `/registry/*` 与 `/admin/api/publishers`；配置 `[services.mfr]` → `[services.publisher_registry]`；表 `mfr*` → `publisher*`、列 `mfr_id`/`manufacturer` → `publisher_id`/`publisher`（schema v2 离线迁移）；key id 格式 `actr-pub-<16 hex>` 不变 |
 | Actor Registry | service registry | 类型 `ServiceRegistry` → `ActorRegistry`；SQLite 表 `service_registry` → `actor_registry`、列 `actor_manufacturer` → `actor_publisher`（启动时原地改名） |
 | Realm Provider ID（Realm Provider 的 DNS authority） | `actrix-official` | 2026-09 C2.1 前固定的 provider ID 常量；现取 Loran `[authority] uri` 的域名 |
+| Realm Profile | Realm descriptor（`/.well-known/actr/realm.json`） | 2026-09 C2.2 前 Loran 在该路径发布的单 Realm 非秘密元数据；与 authority discovery「`/.well-known/actr` 下不定义子路径」冲突，已移除，改由 Realm 签名 key 签名的 Realm Profile（`GET /actr/realms/{domain}/{realm_id}`）取代 |
 | Realm 名 | 数值 `realm_id`、`actr:realm:<realm_id>:authority` | 2026-09 C3 前的 Realm 标识与 credential issuer；与 RealmId（`@` 左边那段）无关 |
 | Realm 签名 key、`realm_signing_keys` | 命名空间 key、`realm_namespace` | 本契约早期草稿用语 |
 | RealmId（`realm_id`） | Realm label（`label`） | 改名以与 ActorId 等 *Id 风格统一 |

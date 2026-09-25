@@ -5,16 +5,13 @@
 
 ## 边界
 
-目标契约：一个 Loran 实例是共享 Realm Provider，承载来自多个 Realm 域名的多个 Realm；Realm 对应
+一个 Loran 实例是共享 Realm Provider，承载来自多个 Realm 域名的多个 Realm；Realm 对应
 一次应用实例部署，以 Realm 名 `<realm_id>@<domain>`（如 `k7m2q9xh@acme.com`）标识，以
 该 Realm 域名的 Realm 签名 key 为长期信任根。v1 是单节点、SQLite、单一 Realm Provider，
-不提供 HA 或跨 Realm federation。管理权限分实例运营者、Realm 管理请求与单 Realm 的 Realm
-管理 token 三类。
-历史名称见[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」。
-
-当前实现：代码仍强制一个实例一个 Realm，系统管理员是唯一 Realm 管理根。本页的
-「当前实现」描述以代码为准，差异清单见
+不提供 HA 或跨 Realm federation。管理权限分实例运营者、Realm 签名 key 持有方发起的 Realm
+管理请求、作用域为单个 Realm 的 Realm 管理 token 三类；尚未落地的部分见
 [`REALM_V1_ARCHITECTURE.zh.md`](REALM_V1_ARCHITECTURE.zh.md) 第 9 节。
+历史名称见[术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」。
 
 ```text
 受信 Actr Host（Actrium/Rill）
@@ -26,10 +23,10 @@
 │       ├────────► Rendezvous: Signaling                   │
 │       └────────► Relay: STUN / TURN                      │
 │ Distribution: Publisher Registry                         │
-│ Management: Admin UI/API + Realm 生命周期               │
+│ Management: Admin UI/API + Realm 管理请求 + Realm 生命周期 │
 └────────────────────────┬─────────────────────────────────┘
                          ▼
-                    SQLite schema v4
+                    SQLite schema v6
 ```
 
 这些是逻辑平面，不要求永远同进程。v1 默认 all-in-one 是为了减少部署依赖；Issuer
@@ -59,8 +56,7 @@ Realm registration capability 只属于 Realm 管理员/可信 Actr Host。用�
 
 SQLite 持久化：
 
-- Realm 与 Realm secret（当前实现：唯一 Realm；目标：多个 Realm 及其 Realm 名、
-  Realm Profile 与状态）；
+- Realm 与 Realm secret：多个 Realm 及其 Realm 名、Realm Profile 与状态；
 - Issuer Signer key material（生产时由 KEK 加密，`ACTRIX_SIGNER_KEK`）；
 - 已签发 Actor 身份登记与 renewal 状态；
 - 连接 ACL、Publisher Profile/key/package metadata；
@@ -71,30 +67,26 @@ Workspace 不属于 Loran。一个 Service 至多绑定一个 Workspace，同一
 
 ## 请求流
 
-### Realm 创建（目标契约）
+### Realm 创建
 
-1. 调用方提交经 Realm 签名 key 持有方授权的 `create_realm` 请求（Actr 管理信封；Realm Provider
-   域名下的 Realm 则为 Realm Provider 账号的 bearer token）。
+1. 调用方提交经 Realm 签名 key 持有方授权的 `create_realm` 请求（Actr 管理信封）。
 2. Loran 按 authority-discovery 获取 `https://<domain>/.well-known/actr` 中的
    `realm_signing_keys` 并验签，创建 `pending` Realm，在 Issuer Signer 生成 Realm
    issuer key，返回待签 Realm Profile payload。
 3. 调用方签名 Realm Profile，以 `publish_profile` 提交；Loran 验证 Realm Profile 指向自己
    后转为 `active`，在响应中一次性返回 Realm 管理 token，此后才签发 Actor credential。
-   Realm Provider 域名下的 Realm 由 Loran 自签、无需此步，个人以 Realm Provider 账号认证，
-   Realm 管理 token 在 `create_realm` 响应中返回。
-
-### Realm provision（当前实现）
-
-1. 空 schema 启动，但没有 Active Realm。
-2. 系统管理员通过受保护管理面创建唯一 Realm。
-3. 数据库唯一约束拒绝第二个 Realm。
-4. `/.well-known/actr/realm.json` 开始发布非秘密 descriptor。该路径与
-   authority-discovery「`/.well-known/actr` 下不定义子路径」冲突，目标契约中移除。
+   Realm Provider 域名下的 Realm 由 Loran 自签、首份 Realm Profile 在 `create_realm` 响应中
+   直接返回，无需 `publish_profile` 这一步；目前由实例运营者经 Admin API 代办创建（等同
+   Realm Provider 账号，见架构契约第 9 节），Realm 管理 token 同样在创建响应中一次性返回。
+   非 Realm Provider 部署（未启用 authority 或 Issuer 无 Signer）仍允许运营者直接创建任意
+   域名下没有 Realm Profile 的 `active` Realm。
+4. 数据库以 Realm 名（含域名）为主键，`realm_name_immutable`/`realm_retired_is_final`
+   触发器保证名字不可变、退役行不复活；`[realm]` 配置按域名与 pending 数量设配额。
 
 ### Actor 注册
 
 1. 可信 Actr Host 提交 Realm capability 与 package/linked workload 身份证明。
-2. Issuer 验证 Realm（目标契约下须为 `active`）、publisher/package、nonce、连接 ACL 和
+2. Issuer 验证 Realm（须为 `active`）、publisher/package、nonce、连接 ACL 和
    注册模式。
 3. Issuer 从持久的已签发身份登记预留 Snowflake serial。
 4. Issuer Signer 签发 Actor credential（携带 Actor 类型）；Issuer 同时生成 scoped
@@ -128,9 +120,9 @@ relay port range。端口可配置，descriptor 发布实际 endpoint。公网�
 ## 失败策略
 
 - 配置未知字段、占位 secret、明文 admin 密码、生产无 TLS/KEK：拒绝启动。
-- SQLite schema 不是 v4：拒绝启动，需停机后重建数据库。
-- 当前实现：Realm 数量不是恰好一个时，依操作返回 503 或拒绝写入，不猜测默认
-  Realm。目标契约：请求所属 Realm 不存在或不是 `active` 时拒绝，不猜测默认 Realm。
+- SQLite schema 不是 v6：拒绝启动，需停机后重建数据库。
+- 请求所属 Realm 不存在或不是 `active`：拒绝，不猜测默认 Realm；Realm 签名 key 生成完成前
+  `GET /.well-known/actr` 返回 503。
 - Actor credential scope、连接 ACL 或 envelope identity 不一致：拒绝。
 - Publisher DNS 指向非公网或发生重绑定：拒绝。
 - Actor serial 候选碰撞：继续分配，不覆盖旧身份。

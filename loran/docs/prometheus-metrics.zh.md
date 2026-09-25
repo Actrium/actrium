@@ -26,8 +26,8 @@ Registry 目前没有独立 ring series；其 HTTP/安全事件仍进入全局�
 - 新指标沿用代码中的 `actrix_` 前缀；
 - Issuer Signer 的 label 统一为 `signer`；
 - Realm、ActorId、Publisher、Actor credential、nonce 或 secret 不得成为高基数/敏感 label；
-  目标契约下一个实例承载大量 Realm，Realm 名与域名尤其不得作为 label，按
-  Realm 的状态、配额与挂起情况只以聚合计数暴露；
+  一个实例承载多个 Realm，Realm 名与域名尤其不得作为 label，按 Realm 的状态、配额与
+  挂起情况只以聚合计数暴露；
 - path label 必须模板化，不能包含用户输入或 ID；
 - 认证失败只记录有限枚举 reason。
 

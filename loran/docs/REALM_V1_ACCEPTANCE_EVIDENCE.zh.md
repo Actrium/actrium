@@ -3,19 +3,19 @@
 状态：实现与自动验证清单，不是独立安全认证。评审者必须在报告中记录实际审查的
 commit；本文件引用的 PR 状态会继续变化。
 
-说明：下表证据针对当前实现（一个实例一个 Realm）。架构契约已改为一个实例承载多个
-Realm（Realm 名 `<realm_id>@<domain>`，见 `REALM_V1_ARCHITECTURE.zh.md`）。标注「已被新契约取代」
-的行保留为当前代码的证据，但不再是 v1 目标；新契约的验收项列在「多 Realm 契约待验收」
-一节，尚无自动证据。
+说明：下表证据针对当前实现——一个 Loran 实例承载多个 Realm（Realm 名
+`<realm_id>@<domain>`，见 `REALM_V1_ARCHITECTURE.zh.md`）。历史的单 Realm per instance
+约束与 `/.well-known/actr/realm.json` 已被移除，行保留在下表作历史对照。尚未实现的项在
+「多 Realm 契约验收」一节标注。
 
 ## 目标到证据的映射
 
 | 目标 | 实现边界 | 自动证据 | 状态 |
 |---|---|---|---|
-| 单 Realm per instance | `crates/loran-platform/src/storage/db.rs` 的 singleton Realm 约束；Admin API 不提供在线硬删除/替换 | platform Realm/schema tests；full-stack 非预置 Realm 拒绝测试 | 已自动验证；已被新契约取代 |
+| 一个实例承载多个 Realm | `crates/loran-platform/src/storage/db.rs`：`realm.name` 主键、`status` CHECK、`realm_name_immutable`/`realm_retired_is_final` 触发器；`Realm::insert`/`insert_requested` 按 `max_realms`/`max_realms_per_domain` 原子计数 | `fresh_database_is_versioned_and_hosts_many_realms`、`test_many_realms_and_max_realms`、`test_retired_name_is_never_reused`、`test_retire_removes_realm_scoped_state` | 已自动验证（取代历史的 singleton Realm 约束） |
 | 单节点、SQLite 优先 | v1 默认只依赖 SQLite；worker ID 由管理员显式配置；不声明 HA | 配置验证、MSRV 全构建、SQLite schema gate/migration tests | 已自动验证 |
-| 系统管理员是管理根 | Argon2id Admin 登录、受保护 Realm/Publisher/rotation API；Guest 不持有注册能力 | Admin API/config negative tests | 已自动验证；「唯一管理根」部分已被新契约的三类管理权限取代 |
-| Realm Descriptor | `/.well-known/actr/realm.json` 发布唯一 Realm、issuer、Realm Provider 和 endpoint | descriptor/config/full-stack tests | 已自动验证；已被新契约取代（该路径与 authority-discovery 冲突，改为 Realm 签名 key 签名的 Realm Profile） |
+| 系统管理员是管理根 | Argon2id Admin 登录、受保护 Realm/Publisher/rotation API；Guest 不持有注册能力 | Admin API/config negative tests | 已自动验证；管理根现分实例运营者、Realm 管理请求、Realm 管理 token 三类权限，见下方「Realm 签名 key 授权创建」「管理作用域」 |
+| Realm Profile（取代历史 Realm Descriptor） | `realm_signing_keys` 成员 pin 与验签（`crates/loran-platform/src/realm/domain.rs`）、`realm_profile` 存储与签发（`profile.rs`、`crates/loran-issuer/src/realm_profile.rs`）、`GET /actr/realms/{domain}/{realm_id}` | `pins_first_member_and_checks_successors`、`verifies_member_self_signature`、`stores_profiles_and_retires_with_the_retired_one`、fullstack `authority_descriptor_publishes_signed_realm_signing_keys`、`provider_domain_realm_profiles_are_signed_served_and_retired` | 已自动验证（历史 `/.well-known/actr/realm.json` 已移除） |
 | HTTPS 域名 Publisher | 规范化域名、WebPKI、DNS pinning、禁 redirect/私网地址；Ed25519 key、digest、rotation、revocation | Publisher Registry（`crates/loran-publisher-registry`）publisher/manager/package tests | 已自动验证 |
 | Actor 实例身份 | Realm 名 + Snowflake serial（类型在 credential）；稳定 Service 通过 renewal possession proof 保持 ID | Issuer（`crates/loran-issuer`）issuer/renewal tests、已签发身份登记持久化 tests | 已自动验证 |
 | Actor credential 生命周期 | version、issuer、Realm、Realm Provider、audience、Actor、endpoint 和 expiry 绑定；连接 source 再绑定 | Issuer Signer/Issuer/Signaling negative tests；过期、错 Realm、错 source、错连接回归 | 已自动验证 |
@@ -47,24 +47,23 @@ python3 -m unittest scripts/loran/tests/test_migrate_schema_v2.py -v
 浏览器 relay-only fixture、外部 TURN/STUN 矩阵和原始证据保存方法见
 `TURN_STUN_INTEROP_TESTING.zh.md`。
 
-## 多 Realm 契约待验收
+## 多 Realm 契约验收
 
-以下目标来自架构契约第 3、5、6 节，代码尚未实现，均无自动证据：
+以下目标来自架构契约第 3、5、6 节；除标注「未实现」外均已落地并有自动证据：
 
 | 目标 | 需要的证据 | 状态 |
 |---|---|---|
-| 一个实例承载多个 Realm | 移除单例约束后的 schema tests；Realm 名唯一与 Realm Provider tombstone 不复用 | 未实现 |
-| Realm 签名 key 授权创建 | 未签名、签名 key 不在 `realm_signing_keys` 轮换链中、他人域名的创建请求均被拒绝 | 未实现 |
-| Realm Profile 激活与持续校验 | 只有委派到本 Realm Provider 的 Realm Profile 才激活；`provider.id` 改变、签名 key 被移除或 `sequence` 回滚时丢弃相应 Realm Profile 并挂起；退役 Realm Profile 触发退役事务 | 未实现 |
-| authority descriptor 获取安全 | 重定向超过 5 次、非 HTTPS 跳转、`authority` 绑定不符被拒绝；每跳 SSRF/DNS rebinding、超限 body 负向测试 | 未实现 |
-| Realm 管理请求 | `provider_id` 不符、过期、超过 5 分钟有效期、nonce 重放的请求被拒绝；同一请求方重复创建返回原 pending Realm，不同请求方同名或命中 active Realm/Realm Provider tombstone 返回冲突；`publish_profile` 首次提交验证签名 Realm Profile 后返回一次性 Realm 管理 token，之后只接受 sequence 更高的版本 | 未实现 |
-| Realm Provider 持有 Realm 签名 key 时的自助创建 | Realm Provider 账号 OAuth 2.0 + PKCE 认证、按账号计配额、Realm 管理权绑定账号、登录后重签 Realm 管理 token | 未实现 |
-| Publisher 签名注册 | 读取 descriptor `publisher` 成员，`register_publisher` 请求验签，拒绝非 `active` 的 Publisher Profile 签名 key | 未实现 |
-| 跨 Realm 隔离 | 两个 Realm 使用相同 Actor 类型与相同 serial 候选时，credential、presence、TURN、连接 ACL 与管理接口互不相通 | 未实现 |
-| issuer 与 ActorId 使用 Realm 名 | credential issuer 为 Realm 名；ActorId `<serial_hex>.<realm_id>@<domain>` 文本/wire 格式（不含类型、类型由 credential 携带）的正负向测试 | 已自动验证：actr-protocol `actor_id_text_vectors`、`actor_id_text_rejects_invalid`；validator `check_binds_claims_to_the_requested_realm`；Issuer `test_end_to_end_credential_flow`；直连 WebSocket `verify_credential_realm_or_issuer_mismatch_returns_none` |
-| 管理作用域 | 单 Realm 的 Realm 管理 token 越权访问被拒绝且不泄露其他 Realm 是否存在；重签后旧 token 立即失效 | 未实现 |
-| 按 Realm 派生 TURN secret | 不同 Realm 的 TURN credential 不能互用 | 未实现 |
-| 配额 | 按域名与按 Realm 的配额与 pending TTL | 未实现 |
+| Realm 签名 key 授权创建 | 未签名、签名 key 不在 `realm_signing_keys` pin 中、他人域名的创建请求均被拒绝 | 已自动验证：`crates/loran-platform/src/realm/domain.rs` `verifies_member_self_signature`、`reads_member_from_a_valid_descriptor_only`、`pins_first_member_and_checks_successors`；issuer `rejects_unauthorized_or_malformed_requests`。轮换链未支持，见架构契约第 9 节 |
+| Realm Profile 激活与持续校验 | 只有委派到本 Realm Provider 的 Realm Profile 才激活；`provider.id` 改变、签名 key 被移除或 `sequence` 回滚时丢弃相应 Realm Profile 并挂起；退役 Realm Profile 触发退役事务 | 已自动验证：platform `stores_profiles_and_retires_with_the_retired_one`；issuer `signs_verifiable_profiles_for_the_provider_domain`、`refreshes_other_domains_profiles_under_the_key_pin`；fullstack `provider_domain_realm_profiles_are_signed_served_and_retired` |
+| authority descriptor 获取安全 | 重定向超过 5 次、非 HTTPS 跳转、`authority` 绑定不符被拒绝；每跳 SSRF/DNS rebinding、超限 body 负向测试 | 已自动验证：`crates/loran-platform/src/net/fetch.rs` `rejects_private_addresses`、`rejects_unsafe_urls_before_connecting`、`follows_checked_redirects_and_limits_documents`、`caches_results_and_limits_each_host` |
+| Realm 管理请求 | `provider_id` 不符、过期、超过 5 分钟有效期、nonce 重放的请求被拒绝；同一请求方重复创建返回原 pending Realm，不同请求方同名或命中 active Realm/Realm Provider tombstone 返回冲突；`publish_profile` 首次提交验证签名 Realm Profile 后返回一次性 Realm 管理 token，之后只接受 sequence 更高的版本 | 已自动验证：actr-protocol `signed_request_round_trips_and_verifies`、`rejects_unsigned_requests_and_bad_windows`；issuer `creates_activates_and_retires_other_domains_realms`、`rejects_unauthorized_or_malformed_requests`；fullstack `realm_management_requests_are_checked_before_any_state_changes` |
+| Realm Provider 持有 Realm 签名 key 时的自助创建 | Realm Provider 账号 OAuth 2.0 + PKCE 认证、按账号计配额、Realm 管理权绑定账号、登录后重签 Realm 管理 token | 未实现：目前 Realm Provider 域名下的 Realm 由实例运营者经 Admin API 代办创建，见架构契约第 9 节 |
+| Publisher 签名注册 | 读取 descriptor `publisher` 成员，`register_publisher` 请求验签，拒绝非 `active` 的 Publisher Profile 签名 key | 已自动验证：actr-protocol `register_publisher_names_the_publisher_instead_of_a_realm`；publisher-registry `register_publisher_pins_the_first_profile`、`register_publisher_never_reinstates_a_used_key`；issuer `registers_publishers_from_their_publisher_profile`。周期刷新未实现，见架构契约第 9 节 |
+| 跨 Realm 隔离 | 两个 Realm 使用相同 Actor 类型与相同 serial 候选时，credential、presence、TURN、连接 ACL 与管理接口互不相通 | 已自动验证：fullstack `realms_with_the_same_actor_type_and_serial_are_isolated`、`signaling_discovery_cross_realm_isolated`、`signaling_route_candidates_cross_realm_isolated`、`signaling_get_service_spec_cross_realm_isolated`、`signaling_relay_cross_realm_is_denied`；turn `realm_credentials_are_not_interchangeable` |
+| issuer 与 ActorId 使用 Realm 名 | credential issuer 为 Realm 名；ActorId `<serial_hex>.<realm_id>@<domain>` 文本/wire 格式（不含类型、类型由 credential 携带）的正负向测试 | 已自动验证：actr-protocol `actor_id_text_vectors`、`actor_id_text_rejects_invalid`；validator `check_binds_claims_to_the_requested_realm`；Issuer `test_end_to_end_credential_flow`、`credentials_are_signed_with_the_realm_issuer_key`；直连 WebSocket `verify_credential_realm_or_issuer_mismatch_returns_none` |
+| 管理作用域 | Realm 管理 token 越权访问被拒绝且不泄露其他 Realm 是否存在；重签后旧 token 立即失效 | 已自动验证：platform `admin_token_is_stored_hashed_and_reissue_replaces_it`；fullstack `admin_api_manages_many_realms_by_name` |
+| 按 Realm 派生 TURN secret | 不同 Realm 的 TURN credential 不能互用 | 已自动验证：platform `each_realm_and_provider_gets_its_own_secret`；turn `realm_credentials_are_not_interchangeable` |
+| 配额 | 按域名与按 Realm 的配额与 pending TTL | 已自动验证：platform `requested_realms_stay_within_domain_quotas`、`expired_pending_realms_are_discarded`；issuer `rejects_unauthorized_or_malformed_requests`（pending 配额 429）。按连接/消息/TURN 配额尚未实现，见架构契约第 9 节 |
 
 ## 尚不能由作者自证关闭的门槛
 

@@ -1,7 +1,7 @@
 # Loran Realm v1 API 边界
 
 状态：本文只描述当前实现，不承诺旧 Issuer Signer/Publisher Registry HTTP API 兼容。一个实例
-承载多个 Realm（Realm 名 `<realm_id>@<domain>`）；与目标契约不同的部分以「目标契约」标注，完整差异见
+承载多个 Realm（Realm 名 `<realm_id>@<domain>`）；尚未实现的部分见
 [`REALM_V1_ARCHITECTURE.zh.md`](REALM_V1_ARCHITECTURE.zh.md) 第 9 节。历史名称见
 [术语表](../../docs/GLOSSARY.zh.md)「历史名称对照」。
 
@@ -14,27 +14,26 @@
   两个 header，因此改用 `actr.v1`、`actr.id.<base64url>` 和
   `actr.credential.<base64url-protobuf>` 子协议项；服务器验证全部身份后只协商返回
   `actr.v1`，避免把凭证暴露为页面可读的已选子协议。
-- 当前实现：Publisher 由 Publisher Profile 签名 key 持有方以 `register_publisher` 登记，Publisher
+- Publisher 由 Publisher Profile 签名 key 持有方以 `register_publisher` 登记，Publisher
   管理（停用、撤销 key）和配置变更只允许系统管理员调用。其他域名的 Realm 由 Realm 签名
   key 持有方以 Realm 管理请求（`create_realm`、`publish_profile`、`reissue_admin_token`）创建、
   更新与退役，`POST` 到 Loran authority descriptor 中的 `realm-management` service link（Actr
   Realm Profile 第 8 节，见下文「Realm 管理请求」）；Realm Provider 域名下的 Realm 由系统管理员
   创建。作用域为单个 Realm 的 Realm 管理 token 可查看该 Realm 及其 Realm Profile、轮换其
-  secret。目标契约：Realm 管理 token 还管理连接 ACL、Realm membership 与状态。
+  secret；管理连接 ACL、Realm membership 与状态尚未实现，见架构契约第 9 节。
 - Issuer Signer 是内部信任平面；规范入口是同一 HTTP/2 监听器上的 gRPC，
   不是公开 REST 密钥下载服务。
 
 ## Realm discovery
 
 Loran 不再提供 `/.well-known/actr/realm.json`：它与 `actr/protocols/authority-discovery`
-「`/.well-known/actr` 下不定义子路径」冲突，也无法表达多个 Realm。
+「`/.well-known/actr` 下不定义子路径」冲突，也无法表达多个 Realm。Realm 的发现走该域名的
+authority descriptor（`https://<domain>/.well-known/actr` 中的 `realm_signing_keys` 成员与
+`realms` relation，Actr Authority Discovery §4.3–4.4），Realm Profile 位于
+`<realms href>/<realm_id>`，由 Realm 签名 key 签名。Loran 仅在 `realms` relation 指向本 Realm
+Provider 时提供 Realm Profile。
 
-目标契约：Realm 的发现走该域名的 authority descriptor（`https://<domain>/.well-known/actr`
-中的 `realm_signing_keys` 成员与 `realms` relation，Actr Authority Discovery §4.3–4.4），
-Realm Profile 位于 `<realms href>/<realm_id>`，由 Realm 签名 key 签名。Loran 仅在 `realms`
-relation 指向本 Realm Provider 时提供 Realm Profile。
-
-当前实现：`[authority] enabled = true` 时 Loran 只为自己的 Realm Provider 域名提供一份
+`[authority] enabled = true` 时 Loran 只为自己的 Realm Provider 域名提供一份
 `/.well-known/actr`（支持 `GET`/`HEAD`，带 `Access-Control-Allow-Origin: *` 与
 `Cache-Control`）。启用 Issuer 且有 Signer 时，descriptor 额外公布：
 
@@ -137,7 +136,8 @@ Realm）或本 Realm 名；写成其他 Realm 名或不合法的 Realm 名时注
 单帧最大 1 MiB，并执行连接/消息速率限制。连接绑定其身份所属的 Actor 与 Realm：envelope 的
 `source` 不是该 Actor、或 relay 的 `target` 不属于该 Realm 时返回 `403`。Actor Registry 与 presence 按
 Realm 分区，发现、路由候选、ServiceSpec 查询与上线通知只涉及同 Realm 的 Actor；
-`GetSigningKey` 只返回本 Realm 的 issuer key。目标契约：速率限制同时按 Realm 计。
+`GetSigningKey` 只返回本 Realm 的 issuer key。按 Realm 分别计的速率限制尚未实现，见架构
+契约第 9 节。
 
 ## Publisher Registry
 
@@ -214,7 +214,7 @@ nonce-auth request message；`Sign` 的认证 payload 同时绑定 protocol、`k
   自己 Realm 的 `GET /admin/api/realms/{realm}`、`GET …/profile` 与 `POST …/secret/rotate`，
   其他任何路径（含其他 Realm）一律 `404`；未知 token 为 `401`。
 
-当前实现：实例运营者可创建多个 Realm，数量受 `[realm] max_realms` 限制（不计已退役的）。
+实例运营者可创建多个 Realm，数量受 `[realm] max_realms` 限制（不计已退役的）。
 Realm 以 Realm 名寻址，`@` 编码为 `%40`：
 
 - `GET /admin/api/realms`、`POST /admin/api/realms`：列出；创建（body
@@ -241,9 +241,9 @@ gRPC `NodeAdminService` 对应 `CreateRealm`/`GetRealm`/`UpdateRealm`/`ListRealm
 `RetireRealm`，同样按 Realm 名寻址；Loran 是 Realm Provider 时 `CreateRealm` 不能新建 Realm
 （没有 `package`），只能更新已有 Realm。
 
-目标契约：Realm Provider 域名下的 Realm 由 Realm Provider 账号（OAuth 2.0 + PKCE）以
-bearer 请求创建，而不是由运营者代办；退役事务还撤销 Actor Registry、presence、在线连接与
-Realm issuer key。
+尚未实现：Realm Provider 域名下的 Realm 由 Realm Provider 账号（OAuth 2.0 + PKCE）以
+bearer 请求自助创建（目前由运营者代办）；退役事务清理 Actor Registry、presence、在线连接
+与 Realm issuer key（见架构契约第 9 节）。
 
 ## Schema migration
 
@@ -262,9 +262,9 @@ python3 scripts/loran/migrate_schema_v2.py /path/to/actrix.db   # v1 → v2
 两个脚本都先创建备份、在单个排他事务中执行，并支持 `--dry-run`。v1 工具拒绝多 Realm 或
 无法安全映射的旧 publisher 数据；v2 工具改名历史表/列/索引（`mfr*` → `publisher*`、
 `ais*` → `issuer*`、`manufacturer` → `publisher`），并把已存 Actor 类型字符串从
-`publisher:name:version` 改写为 `publisher/program@version`。目标契约下，旧
-Realm 须由实例运营者显式映射到 Realm 名，并由对应 Realm 域名的 Realm 签名 key 签署 Realm
-Profile 后才能激活。
+`publisher:name:version` 改写为 `publisher/program@version`。v2 之后没有自动迁移工具：
+升级到多 Realm schema 需要停机重建数据库，旧 Realm 须由实例运营者显式映射到 Realm 名，
+并由对应 Realm 域名的 Realm 签名 key 签署 Realm Profile 后才能激活。
 
 完整信任边界与发布门槛见
 [`REALM_V1_ARCHITECTURE.zh.md`](REALM_V1_ARCHITECTURE.zh.md) 和

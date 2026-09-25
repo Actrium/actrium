@@ -7,11 +7,13 @@
 
 Issuer Signer 是 Issuer 的最小私钥边界：
 
-1. 生成 Ed25519 signing key（目标契约下每个 Realm 一把 Realm issuer key，全部 Realm 共用
-   同一 Issuer Signer）；
+1. 生成 Ed25519 signing key：每个 Realm 一把 Realm issuer key（`issuer:<realm>`）、每个
+   Realm Provider 域名一把 Realm 签名 key（`realm-signing:<domain>`），全部 Realm 共用同一
+   Issuer Signer；
 2. 在服务端保存私钥，只返回 verifying key；
 3. 对 Issuer 提交的精确消息签名；
-4. 按 `expires_at` 停止签名，并支持 key rotation/revocation 审计。
+4. 按 `expires_at` 停止签名（命名 key `expires_at = 0` 永不过期，供 Realm issuer key/Realm
+   签名 key 使用），并支持 key rotation/revocation 审计。
 
 Issuer Signer 不负责 Actor 路由、Realm 管理、Publisher 下载，也不提供「获取私钥」接口。
 
@@ -23,6 +25,7 @@ Loran all-in-one profile 将 Issuer Signer gRPC 挂载在主 HTTP/2 监听器：
 /signer.v1.Signer/GenerateSigningKey
 /signer.v1.Signer/Sign
 /signer.v1.Signer/GetVerifyingKey
+/signer.v1.Signer/EnsureNamedKey
 /signer.v1.Signer/HealthCheck
 ```
 
