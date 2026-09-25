@@ -12,6 +12,7 @@
 //! 3. The TURN server computes MD5(username:realm:password) as the long-term credential key
 //! 4. turn_crate uses this key to verify the HMAC-SHA1 message integrity in requests
 
+use crate::inactive_realms::InactiveRealms;
 use base64::prelude::*;
 use hmac::{Hmac, Mac};
 use lru::LruCache;
@@ -174,6 +175,8 @@ pub struct Authenticator {
     provider_id: String,
     auth_key_cache: Mutex<LruCache<AuthCacheKey, CachedAuthKey>>,
     admission: AdmissionControl,
+    /// Realms whose credentials are refused
+    inactive_realms: InactiveRealms,
 }
 
 impl Authenticator {
@@ -193,7 +196,14 @@ impl Authenticator {
             provider_id,
             auth_key_cache: Mutex::new(LruCache::new(capacity)),
             admission: AdmissionControl::new(),
+            inactive_realms: InactiveRealms::default(),
         })
+    }
+
+    /// Refuse credentials of the Realms in `inactive_realms`
+    pub fn with_inactive_realms(mut self, inactive_realms: InactiveRealms) -> Self {
+        self.inactive_realms = inactive_realms;
+        self
     }
 
     /// Get cache statistics (for monitoring and debugging)
@@ -275,6 +285,13 @@ impl Authenticator {
         if realm != actor.realm || provider != self.provider_id || audience != "actr.turn" {
             return Err(Error::Other(
                 "TURN credential scope does not match this Realm/provider".to_string(),
+            ));
+        }
+        // Checked before the cache, so a cached key never outlives the Realm.
+        if self.inactive_realms.contains(realm) {
+            platform::recording::warn!("TURN credential refused: Realm {} is not active", realm);
+            return Err(Error::Other(
+                "TURN credential Realm is not active".to_string(),
             ));
         }
 
@@ -530,6 +547,22 @@ mod tests {
         let result = auth.auth_handle(&username, "actrix.local", src_addr);
         assert!(result.is_ok(), "valid credential should succeed");
         assert_eq!(result.unwrap().len(), 16, "should return 16-byte MD5 key");
+    }
+
+    #[test]
+    fn test_auth_handle_refuses_inactive_realm_even_when_cached() {
+        let inactive = InactiveRealms::default();
+        let auth = make_auth().with_inactive_realms(inactive.clone());
+        let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
+        let username = username(2_000_000_060);
+
+        auth.auth_handle_at(&username, "actrix.local", src_addr, 2_000_000_000)
+            .expect("active Realm authenticates");
+        inactive.insert("k7m2q9xh@example.com");
+        let error = auth
+            .auth_handle_at(&username, "actrix.local", src_addr, 2_000_000_000)
+            .expect_err("inactive Realm is refused");
+        assert!(error.to_string().contains("not active"), "{error}");
     }
 
     #[test]

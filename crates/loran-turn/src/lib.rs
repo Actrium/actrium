@@ -6,11 +6,13 @@
 // TURN server implementation modules
 mod authenticator;
 pub mod error;
+mod inactive_realms;
 mod relay_filter;
 
 // Re-export types for convenience
 pub use authenticator::Authenticator;
 pub use error::{ErrorSeverity, TurnError};
+pub use inactive_realms::{InactiveRealms, WatchGuard};
 pub use relay_filter::is_forbidden_relay_peer;
 
 use std::net::IpAddr;

@@ -86,8 +86,11 @@ impl IceService for TurnService {
 
         self.socket = Some(socket.clone());
 
-        // Create TURN server
+        // Create TURN server. Credentials of Realms that are not served are
+        // refused.
         let realm = self.config.turn.realm.clone();
+        let inactive_realms = turn::InactiveRealms::default();
+        let _realm_watch = inactive_realms.watch().await;
         let auth_handler = Arc::new(
             turn::Authenticator::new(
                 self.config.turn.turn_secret.clone(),
@@ -96,7 +99,8 @@ impl IceService for TurnService {
                     .provider_id()
                     .map_err(anyhow::Error::msg)?,
             )
-            .map_err(|e| anyhow::anyhow!("Failed to create TURN authenticator: {e}"))?,
+            .map_err(|e| anyhow::anyhow!("Failed to create TURN authenticator: {e}"))?
+            .with_inactive_realms(inactive_realms),
         );
         let relay_port_range = self
             .config

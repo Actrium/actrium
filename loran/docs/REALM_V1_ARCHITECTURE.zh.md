@@ -515,8 +515,7 @@ v2 工具把历史表/列/索引改为 `publisher*`、`issuer*` 命名，并把�
   `/.well-known/actr/publisher.json` 与 challenge 已移除。尚未实现：Publisher Profile 签名 key 的
   轮换链与身份变化的重新确认、Publisher Profile 的周期刷新（过期或 key 移除后不自动停用该
   publisher）；
-- 按 Realm 的连接、注册、消息与 TURN 配额；TURN 认证不检查 Realm 是否 `active`（TURN
-  credential 随 Actor credential 过期）；
+- 按 Realm 的连接、注册、消息与 TURN 配额（TURN 认证已拒绝不可用 Realm 的 credential）；
 - 控制面与本契约的剩余差异：Realm Provider 域名下的 Realm 由运营者经 admin API 代办创建（等同
   Realm Provider 账号）；Loran 不是 Realm Provider（未启用 authority 或 Issuer 无 Signer）时，
   运营者仍可创建任意域名下没有 Realm Profile 的 `active` Realm，并可经 `RetireRealm` 与

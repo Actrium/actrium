@@ -125,7 +125,9 @@ Signaling 按 `(realm, key_id)` 查验证 key。Issuer 没有全局签名 key；
 （`realm_keys`）。
 
 TURN credential 的 password 为 `base64(HMAC-SHA1(k, username))`，`k` 为该 Realm 的 TURN
-secret：`HKDF-SHA256(turn_secret, salt = "actr.turn", info = "<realm>|<provider>")`。
+secret：`HKDF-SHA256(turn_secret, salt = "actr.turn", info = "<realm>|<provider>")`。TURN 拒绝
+不可用（pending、停用、过期或已退役）Realm 的 credential，缓存命中也不例外：Realm 状态变更即时
+生效，过期最迟 10 秒后生效；已建立的 allocation 不再能 refresh，到期即释放。
 
 注册请求的 ACL 规则只作用于本 Realm：`source_realm` 可以不填、为 `any_realm`（v1 只匹配本
 Realm）或本 Realm 名；写成其他 Realm 名或不合法的 Realm 名时注册返回 `400`。
