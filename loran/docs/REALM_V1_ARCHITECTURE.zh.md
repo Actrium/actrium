@@ -316,7 +316,8 @@ Signaling 的发现在本 Realm 内按该类型找到它；Actor Registry 不另
   `x-actr-client-proof`（`op` 为对应入口、含请求体 SHA-256 的 Actr 管理信封）。Issuer 只对已登记、
   未撤销、属于 active 成员的 key 签发；续期须用该 Actor 当前绑定的 key，重签可用同一成员的任一未撤销
   key 并把 Actor 改绑过去；注册时，Actor 类型的 publisher 与程序名等于 Realm Profile `package.type` 的
-  （即 Service 及其升级版本）只接受 owner 的客户端；提交事务内重查 key 与成员状态。
+  （即 Service 及其升级版本）只接受 owner 的客户端；提交事务内重查 key 与成员状态，续期另查 Actor 仍绑定
+  这把 key（同成员的重签可能已把它改绑）。
   `issued_actor_identity` 记录每个 Actor 的成员与当前绑定的 key。
 - 撤销 key（客户端撤销、移除成员、离开、owner 恢复）：同一事务内撤销 key 及它签发的未用邀请；
   绑定到它的 Actor 停用而不作废：不写 `revoked_actor`，renewal token 也保留，因为同一成员的另一把

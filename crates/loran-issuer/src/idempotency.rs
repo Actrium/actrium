@@ -398,6 +398,15 @@ impl ControlAttemptStore {
         crate::issuer::AIdIssuer::recheck_actor_on(&mut tx, actor_id, target, signer)
             .await
             .map_err(AttemptError::Refused)?;
+        // Only the bound key renews; a reissue may have moved the Actor.
+        let bound = platform::realm::membership::actor_binding_on(&mut tx, actor_id)
+            .await
+            .map_err(|error| AttemptError::Store(format!("binding recheck failed: {error}")))?;
+        if bound.is_none_or(|binding| binding.client_key_id != signer.key_id) {
+            return Err(AttemptError::Refused(platform::aid::AidError::Membership(
+                "client_unknown: the Actor is not bound to this Realm client key".to_string(),
+            )));
+        }
 
         let (renewal_expires_at, rotated) = match &prepared.outcome {
             RotationOutcome::Unchanged { expires_at, .. } => (*expires_at, false),
@@ -1163,6 +1172,88 @@ pub(crate) mod tests {
                 Err(AttemptError::Refused(_))
             ));
         }
+    }
+
+    /// A reissue that moved the Actor to another key of its member while a
+    /// renewal by the old key was prepared stops that renewal at commit: only
+    /// the bound key renews, so revoking the old key later leaves no
+    /// credential of it behind.
+    #[tokio::test]
+    async fn a_renewal_by_a_key_the_actor_moved_from_does_not_commit() {
+        setup_db().await;
+        let secret = [7u8; 32];
+        let store = ControlAttemptStore::new(&secret);
+        let realm = "attempt-moved@example.com";
+        platform::realm::Realm::create(realm.to_string())
+            .await
+            .unwrap();
+        let signer = crate::test_support::owner_of(realm, 1).await;
+        let actor = ActrId {
+            realm: realm.to_string(),
+            serial_number: 13,
+        };
+        let pool = platform::storage::db::get_database().get_pool();
+        sqlx::query(
+            "INSERT INTO issued_actor_identity
+                (realm, serial_number, actor_type, member_id, client_key_id, issued_at)
+             VALUES (?, 13, 'acme/worker@1.0.0', ?, ?, 1)",
+        )
+        .bind(realm)
+        .bind(&signer.member_id)
+        .bind(&signer.key_id)
+        .execute(pool)
+        .await
+        .unwrap();
+        let token = [70u8; 32];
+        let now = crate::renewal::now_secs();
+        crate::renewal::insert_renewal_token(&actor, &crate::renewal::hash_token(&token), now + 60)
+            .await
+            .unwrap();
+        let renew = acquired(
+            store
+                .claim(Operation::Renew, &[71; 16], &actor, b"renew")
+                .await
+                .unwrap(),
+        );
+        let rotation =
+            crate::renewal::prepare_renewal_token_rotation(&actor, &token, &secret, 3600, 86_400)
+                .await
+                .unwrap();
+
+        // Meanwhile a reissue moves the Actor to another key of the member.
+        sqlx::query(
+            "INSERT INTO realm_client_key (realm, key_id, public_key, member_id, registered_at)
+             VALUES (?, 'bbbbbbbbbbbbbbbb', ?, ?, 1)",
+        )
+        .bind(realm)
+        .bind([2u8; 32].as_slice())
+        .bind(&signer.member_id)
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE issued_actor_identity SET client_key_id = 'bbbbbbbbbbbbbbbb'
+             WHERE realm = ? AND serial_number = 13",
+        )
+        .bind(realm)
+        .execute(pool)
+        .await
+        .unwrap();
+
+        assert!(matches!(
+            store
+                .complete_renewal(
+                    &renew,
+                    &actor,
+                    None,
+                    &rotation,
+                    b"response",
+                    now + 60,
+                    &signer
+                )
+                .await,
+            Err(AttemptError::Refused(_))
+        ));
     }
 
     #[tokio::test]
