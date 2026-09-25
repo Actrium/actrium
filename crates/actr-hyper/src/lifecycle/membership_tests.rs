@@ -37,6 +37,9 @@ fn credential_for_actor(actor_id: &ActrId, key_id: u32, expires_at: u64) -> AIdC
             provider: "provider.example".to_string(),
             audience: "actr.signaling".to_string(),
             actor_type: test_actr_type(),
+            member: "member-1".to_string(),
+            client_key: "0000000000000000".to_string(),
+            role: actr_protocol::MemberRole::Owner as i32,
         }
         .encode_to_vec()
         .into(),

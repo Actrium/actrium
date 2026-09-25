@@ -77,6 +77,33 @@ pub struct RealmPackage {
     pub href: String,
     /// Lowercase hex SHA-256 of the whole package.
     pub sha256: String,
+    /// Actor type of the package manifest, `publisher/program@version`.
+    pub r#type: String,
+}
+
+impl RealmPackage {
+    /// Check `href`, `sha256` and `type`.
+    pub fn check(&self) -> Result<(), String> {
+        if !self.href.starts_with("https://") {
+            return Err(format!("package.href '{}' is not HTTPS", self.href));
+        }
+        if self.sha256.len() != 64
+            || !self
+                .sha256
+                .bytes()
+                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        {
+            return Err("package.sha256 is not lowercase hex SHA-256".into());
+        }
+        self.actr_type()?;
+        Ok(())
+    }
+
+    /// The parsed `type`.
+    pub fn actr_type(&self) -> Result<crate::ActrType, String> {
+        crate::ActrType::from_program_identity(&self.r#type)
+            .map_err(|error| format!("package.type: {error}"))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -274,19 +301,7 @@ impl RealmProfile {
         }
         match (&self.package, self.realm.status) {
             (None, RealmStatus::Active) => return Err("active Realm has no package".into()),
-            (Some(package), _) => {
-                if !package.href.starts_with("https://") {
-                    return Err(format!("package.href '{}' is not HTTPS", package.href));
-                }
-                if package.sha256.len() != 64
-                    || !package
-                        .sha256
-                        .bytes()
-                        .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
-                {
-                    return Err("package.sha256 is not lowercase hex SHA-256".into());
-                }
-            }
+            (Some(package), _) => package.check()?,
             (None, RealmStatus::Retired) => {}
         }
         let provider = ActrUri::from_domain(&self.provider.id)
@@ -511,7 +526,8 @@ mod tests {
             "realm": { "name": NAME, "display_name": "Acme Notes", "status": "active" },
             "package": {
                 "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
-                "sha256": "ab".repeat(32)
+                "sha256": "ab".repeat(32),
+                "type": "notes.example/team-notes@1.4.2"
             },
             "issuer": {
                 "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
@@ -626,6 +642,10 @@ mod tests {
             }),
             ("href", |p| {
                 p["package"]["href"] = json!("http://cdn.example/x")
+            }),
+            ("type", |p| p["package"]["type"] = json!("team-notes@1.4.2")),
+            ("type publisher", |p| {
+                p["package"]["type"] = json!("local/team-notes@1.4.2")
             }),
             ("provider", |p| {
                 p["provider"]["id"] = json!("Provider.example")

@@ -263,13 +263,14 @@ to Guest workloads.
 - An Actor credential's lifetime bounds how long a revocation takes to reach
   places outside the Realm Provider; Realm Providers **SHOULD** keep it short.
 
-## 8. Future work
+## 8. Test vectors and schema
 
 - `contracts/actr/test-vectors/realm-membership.json`: `key_id`, `invite_id`,
   invite text encoding, `join` / `create_invite` / `transfer_owner` envelopes
   and signatures, `x-actr-client-proof` (with `body_sha256`), and negative
   cases;
-- JSON Schemas for requests, responses and invites.
+- `contracts/actr/realm-membership.schema.json`: JSON Schema for invites,
+  requests, responses and the client proof.
 
 ## 9. References
 

@@ -1531,6 +1531,7 @@ async fn realm_management_requests_are_checked_before_any_state_changes() {
         request.package = Some(actr_protocol::realm_profile::RealmPackage {
             href: "https://cdn.example/notes-1.0.actr".to_string(),
             sha256: "ab".repeat(32),
+            r#type: "acme.com/notes@1.0.0".to_string(),
         });
         request.sign("rs-1", &key)
     };

@@ -146,6 +146,9 @@ fn fake_register_response_bytes() -> Vec<u8> {
         provider: "provider.example".to_string(),
         audience: "actr.signaling".to_string(),
         actor_type: ActrType::default(),
+        member: "member-1".to_string(),
+        client_key: "0000000000000000".to_string(),
+        role: actr_protocol::MemberRole::Owner as i32,
     };
     let claims_bytes = claims.encode_to_vec();
 

@@ -45,6 +45,9 @@ fn make_valid_credential(
         provider: "provider.example".to_string(),
         audience: "actr.signaling".to_string(),
         actor_type: test_actor_type(),
+        member: "member-1".to_string(),
+        client_key: "0000000000000000".to_string(),
+        role: actr_protocol::MemberRole::Owner as i32,
     };
     let claims_bytes = actr_protocol::prost::Message::encode_to_vec(&claims);
     let signature = sk.sign(&claims_bytes);
@@ -289,6 +292,9 @@ async fn verify_credential_realm_or_issuer_mismatch_returns_none() {
             provider: "provider.example".to_string(),
             audience: "actr.signaling".to_string(),
             actor_type: test_actor_type(),
+            member: "member-1".to_string(),
+            client_key: "0000000000000000".to_string(),
+            role: actr_protocol::MemberRole::Owner as i32,
         };
         let claims_bytes = actr_protocol::prost::Message::encode_to_vec(&claims);
         let credential = AIdCredential {

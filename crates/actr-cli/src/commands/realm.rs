@@ -6,7 +6,7 @@
 //!   - `create-request`  — sign a `create_realm` request
 //!   - `sign-profile`    — sign a Realm Profile into a `publish_profile` request
 //!   - `retire`          — sign the retired successor of a Realm Profile
-//!   - `reissue-request` — sign a `reissue_admin_token` request
+//!   - `reissue-request` — sign a `reissue_owner_invite` request
 //!   - `draft-request`   — sign a `draft_profile` request
 //!   - `register-publisher` — sign a `register_publisher` request and send it
 //!
@@ -48,7 +48,7 @@ pub enum RealmCommand {
     /// Sign the retired successor of the current Realm Profile into a
     /// `publish_profile` request.
     Retire(RetireArgs),
-    /// Sign a `reissue_admin_token` request.
+    /// Sign a `reissue_owner_invite` request.
     ReissueRequest(ReissueRequestArgs),
     /// Sign a `draft_profile` request for the next Realm Profile, with the
     /// Realm Provider's current issuer keys; sign its reply with
@@ -89,6 +89,9 @@ pub struct CreateRequestArgs {
     /// Lowercase hex SHA-256 of the package
     #[arg(long, value_name = "HEX")]
     pub package_sha256: String,
+    /// Actor type of the package manifest, `publisher/program@version`
+    #[arg(long, value_name = "TYPE")]
+    pub package_type: String,
     /// Opaque id of whom the request is signed for
     #[arg(long, value_name = "ID")]
     pub requester: Option<String>,
@@ -106,12 +109,15 @@ pub struct SignProfileArgs {
     /// New display name
     #[arg(long, value_name = "NAME")]
     pub display_name: Option<String>,
-    /// New package URL (with --package-sha256)
-    #[arg(long, value_name = "URL", requires = "package_sha256")]
+    /// New package URL (with --package-sha256 and --package-type)
+    #[arg(long, value_name = "URL", requires_all = ["package_sha256", "package_type"])]
     pub package_href: Option<String>,
     /// New package SHA-256 (with --package-href)
     #[arg(long, value_name = "HEX", requires = "package_href")]
     pub package_sha256: Option<String>,
+    /// New package Actor type `publisher/program@version` (with --package-href)
+    #[arg(long, value_name = "TYPE", requires = "package_href")]
+    pub package_type: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -196,15 +202,17 @@ impl Command for RealmArgs {
                 request.package = Some(RealmPackage {
                     href: args.package_href.clone(),
                     sha256: args.package_sha256.clone(),
+                    r#type: args.package_type.clone(),
                 });
                 request.requester = args.requester.clone();
                 request.sign(&key_id, &key)
             }
             RealmCommand::SignProfile(args) => {
-                let package = match (&args.package_href, &args.package_sha256) {
-                    (Some(href), Some(sha256)) => Some(RealmPackage {
+                let package = match (&args.package_href, &args.package_sha256, &args.package_type) {
+                    (Some(href), Some(sha256), Some(r#type)) => Some(RealmPackage {
                         href: href.clone(),
                         sha256: sha256.clone(),
+                        r#type: r#type.clone(),
                     }),
                     _ => None,
                 };
@@ -214,8 +222,12 @@ impl Command for RealmArgs {
             RealmCommand::Retire(args) => retire(&args.key, read_profile(&args.profile)?)?,
             RealmCommand::ReissueRequest(args) => {
                 let (key_id, key) = RealmKeyFile::load(&args.key)?;
-                new_request(ManagementOp::ReissueAdminToken, &args.realm, &args.provider)
-                    .sign(&key_id, &key)
+                new_request(
+                    ManagementOp::ReissueOwnerInvite,
+                    &args.realm,
+                    &args.provider,
+                )
+                .sign(&key_id, &key)
             }
             RealmCommand::DraftRequest(args) => {
                 let (key_id, key) = RealmKeyFile::load(&args.key)?;
@@ -445,7 +457,10 @@ mod tests {
             "schema": "actr.realm/v1",
             "sequence": 1,
             "realm": { "name": "k7m2q9xh@acme.com", "display_name": "k7m2q9xh", "status": "active" },
-            "package": { "href": "https://cdn.example/a.actr", "sha256": "ab".repeat(32) },
+            "package": {
+                "href": "https://cdn.example/a.actr", "sha256": "ab".repeat(32),
+                "type": "acme.com/notes@1.0.0",
+            },
             "issuer": { "url": "https://p.example/issuer", "keys": [{
                 "id": "7", "algorithm": "Ed25519", "status": "active",
                 "public_key": BASE64.encode([2u8; 32]),

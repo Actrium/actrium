@@ -162,7 +162,7 @@ where
     match request.op {
         ManagementOp::CreateRealm => create_realm(profiles, config, &request).await,
         ManagementOp::PublishProfile => publish_profile(profiles, &request, &keys).await,
-        ManagementOp::ReissueAdminToken => {
+        ManagementOp::ReissueOwnerInvite => {
             let token = Realm::reissue_admin_token(&request.realm)
                 .await
                 .map_err(|error| match error {

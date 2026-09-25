@@ -26,7 +26,7 @@ pub const MAX_VALIDITY_SECS: i64 = 300;
 pub enum ManagementOp {
     CreateRealm,
     PublishProfile,
-    ReissueAdminToken,
+    ReissueOwnerInvite,
     RegisterPublisher,
     DraftProfile,
 }
@@ -125,26 +125,7 @@ impl ManagementRequest {
     /// Check the validity window: at most five minutes long and containing
     /// `now`.
     pub fn check_window(&self, now: DateTime<Utc>) -> Result<(), ManagementRequestError> {
-        let parse = |value: &str, member: &str| {
-            DateTime::parse_from_rfc3339(value)
-                .map(|time| time.with_timezone(&Utc))
-                .map_err(|error| invalid(format!("{member}: {error}")))
-        };
-        let issued_at = parse(&self.issued_at, "issued_at")?;
-        let expires_at = parse(&self.expires_at, "expires_at")?;
-        let length = expires_at - issued_at;
-        if length < chrono::Duration::zero()
-            || length > chrono::Duration::seconds(MAX_VALIDITY_SECS)
-        {
-            return Err(invalid(format!(
-                "validity window of {} ms is not within 0 to {MAX_VALIDITY_SECS} seconds",
-                length.num_milliseconds()
-            )));
-        }
-        if now < issued_at || now > expires_at {
-            return Err(invalid("request is outside its validity window"));
-        }
-        Ok(())
+        check_window(&self.issued_at, &self.expires_at, now).map_err(ManagementRequestError)
     }
 
     /// Verify the signature of a request from [`Self::parse`] with an
@@ -163,6 +144,30 @@ impl ManagementRequest {
         }
         Ok(())
     }
+}
+
+/// Check an Actr management envelope's validity window, `issued_at` to
+/// `expires_at` (RFC 3339): at most [`MAX_VALIDITY_SECS`] long and
+/// containing `now`.
+pub fn check_window(issued_at: &str, expires_at: &str, now: DateTime<Utc>) -> Result<(), String> {
+    let parse = |value: &str, member: &str| {
+        DateTime::parse_from_rfc3339(value)
+            .map(|time| time.with_timezone(&Utc))
+            .map_err(|error| format!("{member}: {error}"))
+    };
+    let issued_at = parse(issued_at, "issued_at")?;
+    let expires_at = parse(expires_at, "expires_at")?;
+    let length = expires_at - issued_at;
+    if length < chrono::Duration::zero() || length > chrono::Duration::seconds(MAX_VALIDITY_SECS) {
+        return Err(format!(
+            "validity window of {} ms is not within 0 to {MAX_VALIDITY_SECS} seconds",
+            length.num_milliseconds()
+        ));
+    }
+    if now < issued_at || now > expires_at {
+        return Err("request is outside its validity window".to_string());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -193,6 +198,7 @@ mod tests {
         request.package = Some(RealmPackage {
             href: "https://cdn.example/a.actr".into(),
             sha256: "ab".repeat(32),
+            r#type: "acme.com/notes@1.0.0".into(),
         });
         request
     }

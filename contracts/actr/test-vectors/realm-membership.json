@@ -1,0 +1,254 @@
+{
+  "description": "Test vectors for Realm membership (actr/protocols/realm-membership.md). Keys are Ed25519 from the listed 32-byte seeds (RFC 8032); key_id is the first 16 hex characters of SHA-256 of the public key. An invite secret's secret_hash is the SHA-256 of its base64url-decoded bytes and invite_id its first 16 hex characters; 'text' is 'ri_' and the base64url (no padding) of the invite JSON. 'jcs' is the RFC 8785 form of a request or client proof without 'signature', which 'signature.value' signs. A client proof header is the base64url (no padding) of the signed proof JSON. Checks run at 'now' for 'provider_id'. Every 'negative' entry must be rejected.",
+  "provider_id": "provider.example",
+  "now": "2026-09-25T12:01:00Z",
+  "keys": {
+    "owner": {
+      "seed": "1111111111111111111111111111111111111111111111111111111111111111",
+      "public_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
+      "key_id": "10ba682c8ad13513"
+    },
+    "alice": {
+      "seed": "2222222222222222222222222222222222222222222222222222222222222222",
+      "public_key": "oJql9HpnWYAv+VX43C0qFKXJnSO+l/hkEn/5ODRVpPA=",
+      "key_id": "1325b850c2871916"
+    }
+  },
+  "invites": [
+    {
+      "secret": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "secret_hash": "630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd",
+      "invite_id": "630dcd2966c43366",
+      "invite": {
+        "schema": "actr.realm-invite/v1",
+        "realm": "k7m2q9xh@acme.com",
+        "secret": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+      },
+      "text": "ri_eyJzY2hlbWEiOiJhY3RyLnJlYWxtLWludml0ZS92MSIsInJlYWxtIjoiazdtMnE5eGhAYWNtZS5jb20iLCJzZWNyZXQiOiJBQUVDQXdRRkJnY0lDUW9MREEwT0R4QVJFaE1VRlJZWEdCa2FHeHdkSGg4In0"
+    }
+  ],
+  "requests": {
+    "join": {
+      "key": "alice",
+      "request": {
+        "op": "join",
+        "realm": "k7m2q9xh@acme.com",
+        "provider_id": "provider.example",
+        "invite": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "public_key": "oJql9HpnWYAv+VX43C0qFKXJnSO+l/hkEn/5ODRVpPA=",
+        "label": "laptop",
+        "nonce": "n-join",
+        "issued_at": "2026-09-25T12:00:00Z",
+        "expires_at": "2026-09-25T12:05:00Z",
+        "signature": {
+          "key_id": "1325b850c2871916",
+          "algorithm": "Ed25519",
+          "value": "KSX97EV32gYvgLf3oMAzRooyBMOB+p/0Wc+/S5AlPeaVVMT4/Xj4gIYuBHSxpPOP3WhPi4aaOnzGMljqg1pmBw=="
+        }
+      },
+      "jcs": "{\"expires_at\":\"2026-09-25T12:05:00Z\",\"invite\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"issued_at\":\"2026-09-25T12:00:00Z\",\"label\":\"laptop\",\"nonce\":\"n-join\",\"op\":\"join\",\"provider_id\":\"provider.example\",\"public_key\":\"oJql9HpnWYAv+VX43C0qFKXJnSO+l/hkEn/5ODRVpPA=\",\"realm\":\"k7m2q9xh@acme.com\"}"
+    },
+    "create_invite": {
+      "key": "owner",
+      "request": {
+        "op": "create_invite",
+        "realm": "k7m2q9xh@acme.com",
+        "provider_id": "provider.example",
+        "role": "editor",
+        "invite_expires_at": "2026-10-02T00:00:00Z",
+        "nonce": "n-create_invite",
+        "issued_at": "2026-09-25T12:00:00Z",
+        "expires_at": "2026-09-25T12:05:00Z",
+        "signature": {
+          "key_id": "10ba682c8ad13513",
+          "algorithm": "Ed25519",
+          "value": "MKRay08pPZ53jLRx7YqxMIsy4dvYbJG3gAGwHQHYkZBNx2uWM29qDmbnMfZDtiyOcs/qdgVgHHzjqj+6olB2AA=="
+        }
+      },
+      "jcs": "{\"expires_at\":\"2026-09-25T12:05:00Z\",\"invite_expires_at\":\"2026-10-02T00:00:00Z\",\"issued_at\":\"2026-09-25T12:00:00Z\",\"nonce\":\"n-create_invite\",\"op\":\"create_invite\",\"provider_id\":\"provider.example\",\"realm\":\"k7m2q9xh@acme.com\",\"role\":\"editor\"}"
+    },
+    "transfer_owner": {
+      "key": "owner",
+      "request": {
+        "op": "transfer_owner",
+        "realm": "k7m2q9xh@acme.com",
+        "provider_id": "provider.example",
+        "member_id": "0123456789abcdef",
+        "previous_owner_role": "viewer",
+        "nonce": "n-transfer_owner",
+        "issued_at": "2026-09-25T12:00:00Z",
+        "expires_at": "2026-09-25T12:05:00Z",
+        "signature": {
+          "key_id": "10ba682c8ad13513",
+          "algorithm": "Ed25519",
+          "value": "bPN1e2Did3ThntqfIScs6oIJaUtrm0HiyvGZeVY//09RAFTzSvpScdv5c86nSRBFC9CnJ3ZIdY4uVkyxUHkZAQ=="
+        }
+      },
+      "jcs": "{\"expires_at\":\"2026-09-25T12:05:00Z\",\"issued_at\":\"2026-09-25T12:00:00Z\",\"member_id\":\"0123456789abcdef\",\"nonce\":\"n-transfer_owner\",\"op\":\"transfer_owner\",\"previous_owner_role\":\"viewer\",\"provider_id\":\"provider.example\",\"realm\":\"k7m2q9xh@acme.com\"}"
+    }
+  },
+  "client_proofs": {
+    "register": {
+      "key": "alice",
+      "body_hex": "0a116b376d32713978684061636d652e636f6d",
+      "proof": {
+        "op": "register",
+        "realm": "k7m2q9xh@acme.com",
+        "provider_id": "provider.example",
+        "body_sha256": "181964f1795ea42df16baace3c76c0dca55393f49a9822926fa24993367bd186",
+        "nonce": "n-proof",
+        "issued_at": "2026-09-25T12:00:00Z",
+        "expires_at": "2026-09-25T12:05:00Z",
+        "signature": {
+          "key_id": "1325b850c2871916",
+          "algorithm": "Ed25519",
+          "value": "Oojorldard/0QscLGp9pP0dBs770agGEzop46z0Ca5HmLkYLgEWYJW5VfKF8TOWmDPgPbzCwwt9hBeFUe4IhBw=="
+        }
+      },
+      "jcs": "{\"body_sha256\":\"181964f1795ea42df16baace3c76c0dca55393f49a9822926fa24993367bd186\",\"expires_at\":\"2026-09-25T12:05:00Z\",\"issued_at\":\"2026-09-25T12:00:00Z\",\"nonce\":\"n-proof\",\"op\":\"register\",\"provider_id\":\"provider.example\",\"realm\":\"k7m2q9xh@acme.com\"}",
+      "header": "eyJvcCI6InJlZ2lzdGVyIiwicmVhbG0iOiJrN20ycTl4aEBhY21lLmNvbSIsInByb3ZpZGVyX2lkIjoicHJvdmlkZXIuZXhhbXBsZSIsImJvZHlfc2hhMjU2IjoiMTgxOTY0ZjE3OTVlYTQyZGYxNmJhYWNlM2M3NmMwZGNhNTUzOTNmNDlhOTgyMjkyNmZhMjQ5OTMzNjdiZDE4NiIsIm5vbmNlIjoibi1wcm9vZiIsImlzc3VlZF9hdCI6IjIwMjYtMDktMjVUMTI6MDA6MDBaIiwiZXhwaXJlc19hdCI6IjIwMjYtMDktMjVUMTI6MDU6MDBaIiwic2lnbmF0dXJlIjp7ImtleV9pZCI6IjEzMjViODUwYzI4NzE5MTYiLCJhbGdvcml0aG0iOiJFZDI1NTE5IiwidmFsdWUiOiJPb2pvcmxkYXJkLzBRc2NMR3A5cFAwZEJzNzcwYWdHRXpvcDQ2ejBDYTVIbUxrWUxnRVdZSlc1VmZLRjhUT1dtRFBnUGJ6Q3d3dDloQmVGVWU0SWhCdz09In19"
+    }
+  },
+  "negative": [
+    {
+      "name": "key_id_mismatch",
+      "kind": "join",
+      "request": {
+        "op": "join",
+        "realm": "k7m2q9xh@acme.com",
+        "provider_id": "provider.example",
+        "invite": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "public_key": "oJql9HpnWYAv+VX43C0qFKXJnSO+l/hkEn/5ODRVpPA=",
+        "nonce": "n-join",
+        "issued_at": "2026-09-25T12:00:00Z",
+        "expires_at": "2026-09-25T12:05:00Z",
+        "signature": {
+          "key_id": "10ba682c8ad13513",
+          "algorithm": "Ed25519",
+          "value": "TGzoLNuTgq9qb5HIcNsFD0JXQBHH8Etk1ouyZ1M0b1opgD82hPtsXw4a6elbjRJbxzUTb8+ZQrgQ5Fod3DOMDw=="
+        }
+      }
+    },
+    {
+      "name": "provider_id",
+      "kind": "request",
+      "key": "owner",
+      "request": {
+        "op": "create_invite",
+        "realm": "k7m2q9xh@acme.com",
+        "provider_id": "other.example",
+        "role": "viewer",
+        "invite_expires_at": "2026-10-02T00:00:00Z",
+        "nonce": "n-create_invite",
+        "issued_at": "2026-09-25T12:00:00Z",
+        "expires_at": "2026-09-25T12:05:00Z",
+        "signature": {
+          "key_id": "10ba682c8ad13513",
+          "algorithm": "Ed25519",
+          "value": "vCQ8EvsvxG1XbYnhTDwJ7tK15XalAacf/+EJSs7TJmYGDbHcFzajwCikN1RhqBjXawpyLVaa6GC5z3I/OCgvAQ=="
+        }
+      }
+    },
+    {
+      "name": "window_over_five_minutes",
+      "kind": "request",
+      "key": "alice",
+      "request": {
+        "op": "leave",
+        "realm": "k7m2q9xh@acme.com",
+        "provider_id": "provider.example",
+        "nonce": "n-leave",
+        "issued_at": "2026-09-25T12:00:00Z",
+        "expires_at": "2026-09-25T12:05:01Z",
+        "signature": {
+          "key_id": "1325b850c2871916",
+          "algorithm": "Ed25519",
+          "value": "1N4k4jdFvE8dVDksCvKvcx5eZDOjcgciTCUjsn8DjJTYfby+hUJQ3uhcy2Z7TgAC4Ipj5/ABPRFedDEvDNKNBA=="
+        }
+      }
+    },
+    {
+      "name": "signature_bit_flipped",
+      "kind": "request",
+      "key": "owner",
+      "request": {
+        "op": "create_invite",
+        "realm": "k7m2q9xh@acme.com",
+        "provider_id": "provider.example",
+        "role": "editor",
+        "invite_expires_at": "2026-10-02T00:00:00Z",
+        "nonce": "n-create_invite",
+        "issued_at": "2026-09-25T12:00:00Z",
+        "expires_at": "2026-09-25T12:05:00Z",
+        "signature": {
+          "key_id": "10ba682c8ad13513",
+          "algorithm": "Ed25519",
+          "value": "MaRay08pPZ53jLRx7YqxMIsy4dvYbJG3gAGwHQHYkZBNx2uWM29qDmbnMfZDtiyOcs/qdgVgHHzjqj+6olB2AA=="
+        }
+      }
+    },
+    {
+      "name": "body_sha256",
+      "kind": "proof",
+      "key": "alice",
+      "op": "register",
+      "body_hex": "0a116b376d32713978684061636d652e636f6d",
+      "proof": {
+        "op": "register",
+        "realm": "k7m2q9xh@acme.com",
+        "provider_id": "provider.example",
+        "body_sha256": "d9298a10d1b0735837dc4bd85dac641b0f3cef27a47e5d53a54f2f3f5b2fcffa",
+        "nonce": "n-proof",
+        "issued_at": "2026-09-25T12:00:00Z",
+        "expires_at": "2026-09-25T12:05:00Z",
+        "signature": {
+          "key_id": "1325b850c2871916",
+          "algorithm": "Ed25519",
+          "value": "JSPc3Zx2pbXOP80kGJVxJfboT28Upvr9LfneCdKGBbo5dXgbJa8XhJsa3oIMk7EJTC+eooyuK5yibmBzqmAfDA=="
+        }
+      }
+    },
+    {
+      "name": "op_differs_from_path",
+      "kind": "proof",
+      "key": "alice",
+      "op": "renew",
+      "body_hex": "0a116b376d32713978684061636d652e636f6d",
+      "proof": {
+        "op": "register",
+        "realm": "k7m2q9xh@acme.com",
+        "provider_id": "provider.example",
+        "body_sha256": "181964f1795ea42df16baace3c76c0dca55393f49a9822926fa24993367bd186",
+        "nonce": "n-proof",
+        "issued_at": "2026-09-25T12:00:00Z",
+        "expires_at": "2026-09-25T12:05:00Z",
+        "signature": {
+          "key_id": "1325b850c2871916",
+          "algorithm": "Ed25519",
+          "value": "Oojorldard/0QscLGp9pP0dBs770agGEzop46z0Ca5HmLkYLgEWYJW5VfKF8TOWmDPgPbzCwwt9hBeFUe4IhBw=="
+        }
+      }
+    },
+    {
+      "name": "proof_signature_bit_flipped",
+      "kind": "proof",
+      "key": "alice",
+      "op": "register",
+      "body_hex": "0a116b376d32713978684061636d652e636f6d",
+      "proof": {
+        "op": "register",
+        "realm": "k7m2q9xh@acme.com",
+        "provider_id": "provider.example",
+        "body_sha256": "181964f1795ea42df16baace3c76c0dca55393f49a9822926fa24993367bd186",
+        "nonce": "n-proof",
+        "issued_at": "2026-09-25T12:00:00Z",
+        "expires_at": "2026-09-25T12:05:00Z",
+        "signature": {
+          "key_id": "1325b850c2871916",
+          "algorithm": "Ed25519",
+          "value": "O4jorldard/0QscLGp9pP0dBs770agGEzop46z0Ca5HmLkYLgEWYJW5VfKF8TOWmDPgPbzCwwt9hBeFUe4IhBw=="
+        }
+      }
+    }
+  ]
+}

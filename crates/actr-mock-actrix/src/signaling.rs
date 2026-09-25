@@ -334,6 +334,9 @@ pub async fn build_register_ok(
         actor_id: actr_id.to_string_repr(),
         expires_at: chrono::Utc::now().timestamp() as u64 + 86400,
         actor_type: req.actr_type.clone(),
+        member: "member-1".to_string(),
+        client_key: "0000000000000000".to_string(),
+        role: actr_protocol::MemberRole::Owner as i32,
     };
     let claims_bytes = claims.encode_to_vec();
     let signature = state.issuer_signing_key().sign(&claims_bytes);

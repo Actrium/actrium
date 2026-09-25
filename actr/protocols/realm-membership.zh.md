@@ -187,11 +187,11 @@ Realm 客户端 key 是 Actr Host 的能力，**MUST NOT** 交给 Guest workload
 - Actor credential 有效期是撤销在 Realm Provider 之外生效的上限；Realm Provider **SHOULD** 保持较短的
   credential 有效期。
 
-## 8. 待完成工作
+## 8. 测试向量与 Schema
 
 - `contracts/actr/test-vectors/realm-membership.json`：`key_id`、`invite_id`、邀请文本编解码、`join` /
   `create_invite` / `transfer_owner` 信封与签名、`x-actr-client-proof`（含 `body_sha256`）及负例；
-- 请求、响应与邀请的 JSON Schema。
+- `contracts/actr/realm-membership.schema.json`：邀请、请求、响应与客户端证明的 JSON Schema。
 
 ## 9. 参考资料
 

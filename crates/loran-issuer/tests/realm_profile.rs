@@ -30,6 +30,7 @@ fn package() -> RealmPackage {
     RealmPackage {
         href: "https://cdn.example/notes-1.0.actr".to_string(),
         sha256: "ab".repeat(32),
+        r#type: "acme.com/notes@1.0.0".to_string(),
     }
 }
 
@@ -1013,7 +1014,7 @@ mod management {
 
         // Reissuing replaces the token.
         let reissued = send(signed(
-            &request(ManagementOp::ReissueAdminToken, name, "n-9"),
+            &request(ManagementOp::ReissueOwnerInvite, name, "n-9"),
             &acme,
             "rs-1",
         ))
@@ -1108,7 +1109,7 @@ mod management {
         assert!(matches!(over, Err(ManagementError::Quota(_))));
         // A pending Realm cannot have an admin token yet.
         let early = send(signed(
-            &request(ManagementOp::ReissueAdminToken, name, "x-10"),
+            &request(ManagementOp::ReissueOwnerInvite, name, "x-10"),
             &acme,
             "rs-1",
         ))

@@ -572,6 +572,9 @@ impl AIdIssuer {
             provider: self.config.provider_id.clone(),
             audience: "actr.signaling".to_string(),
             actor_type: request.actr_type.clone(),
+            member: "member-1".to_string(),
+            client_key: "0000000000000000".to_string(),
+            role: actr_protocol::MemberRole::Owner as i32,
         };
 
         // Proto-encode the claims bytes.
@@ -1662,6 +1665,9 @@ impl AIdIssuer {
             provider: self.config.provider_id.clone(),
             audience: "actr.signaling".to_string(),
             actor_type,
+            member: "member-1".to_string(),
+            client_key: "0000000000000000".to_string(),
+            role: actr_protocol::MemberRole::Owner as i32,
         };
 
         let claims_bytes = claims_proto.encode_to_vec();

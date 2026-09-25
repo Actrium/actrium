@@ -70,6 +70,17 @@ message IdentityClaims {
   required string   provider   = 6;
   required string   audience   = 7;
   required ActrType actor_type = 8; // Actor type declared and verified at registration
+  required string   member     = 9;  // Realm member id
+  required string   client_key = 10; // Realm client key id the credential was requested with
+  required MemberRole role     = 11; // Member role when the credential was signed
+}
+
+// Realm member role (`actr/protocols/realm-membership.md`).
+enum MemberRole {
+  MEMBER_ROLE_UNSPECIFIED = 0;
+  MEMBER_ROLE_OWNER = 1;
+  MEMBER_ROLE_EDITOR = 2;
+  MEMBER_ROLE_VIEWER = 3;
 }
 
 // Time-limited HMAC TURN credential in the format compatible with `coturn --use-auth-secret`.
