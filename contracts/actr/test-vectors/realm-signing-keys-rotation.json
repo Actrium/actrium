@@ -1,0 +1,298 @@
+{
+  "description": "Test vectors for realm_signing_keys rotation (actr/protocols/authority-discovery.md section 4.4). Keys are Ed25519 from the listed 32-byte seeds (RFC 8032). 'jcs' is the RFC 8785 form of the member without 'signature', which 'signature.value' signs. 'pinned' names the member a client accepted before, or null for first accept over HTTPS. Results: accept, reject (member ignored, accepted state kept), identity_change (re-confirm trust). 'pinned_after' lists the kept keys that are not removed, and 'sequence' the accepted member sequence, after an accept.",
+  "domain": "acme.example",
+  "keys": {
+    "rs-a": {
+      "seed": "0101010101010101010101010101010101010101010101010101010101010101",
+      "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w="
+    },
+    "rs-b": {
+      "seed": "0202020202020202020202020202020202020202020202020202020202020202",
+      "public_key": "gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q="
+    },
+    "rs-x": {
+      "seed": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+      "public_key": "2b8hSHSKhcidparY7gsPwtEF/TnUGkx5ZTY1TwrikAw="
+    }
+  },
+  "rotation_payloads": {
+    "rs-a->rs-b": "{\"from\":\"rs-a\",\"public_key\":\"gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=\",\"sequence\":2,\"to\":\"rs-b\"}",
+    "rs-a->rs-x": "{\"from\":\"rs-a\",\"public_key\":\"2b8hSHSKhcidparY7gsPwtEF/TnUGkx5ZTY1TwrikAw=\",\"sequence\":5,\"to\":\"rs-x\"}"
+  },
+  "members": {
+    "m1": {
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-a\",\"public_key\":\"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=\",\"status\":\"active\"}],\"sequence\":1}",
+      "member": {
+        "sequence": 1,
+        "keys": [
+          {
+            "id": "rs-a",
+            "algorithm": "Ed25519",
+            "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+            "status": "active"
+          }
+        ],
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "srqr147D4MEh4ZaUk2nTH/Gq6PNZt4+UdKQbSEXxRNnAzyzO0EO3L2dRJsICebI3kv64MGsgYICgExy3D67qDw=="
+        }
+      }
+    },
+    "m2": {
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-a\",\"public_key\":\"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=\",\"status\":\"active\"},{\"algorithm\":\"Ed25519\",\"id\":\"rs-b\",\"public_key\":\"gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=\",\"status\":\"active\"}],\"rotations\":[{\"from\":\"rs-a\",\"sequence\":2,\"signature\":\"ZBAuax/1/sewKmIL6ZhnPE7qBIEOEP8GkjclBfm78iEOlbMTllpFXTGGbgdoMDqsC38TLV+Q8vKm4eziXQqbDQ==\",\"to\":\"rs-b\"}],\"sequence\":2}",
+      "member": {
+        "sequence": 2,
+        "keys": [
+          {
+            "id": "rs-a",
+            "algorithm": "Ed25519",
+            "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+            "status": "active"
+          },
+          {
+            "id": "rs-b",
+            "algorithm": "Ed25519",
+            "public_key": "gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+            "status": "active"
+          }
+        ],
+        "rotations": [
+          {
+            "from": "rs-a",
+            "to": "rs-b",
+            "sequence": 2,
+            "signature": "ZBAuax/1/sewKmIL6ZhnPE7qBIEOEP8GkjclBfm78iEOlbMTllpFXTGGbgdoMDqsC38TLV+Q8vKm4eziXQqbDQ=="
+          }
+        ],
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "OHQedaw6th8CWM0S/eHWT9cQW8XEQZiwPkVl0Gx5g4WWA1C3iE0AV41encYee2UegjpoC2VmQ0uxmxOi+PQ5Aw=="
+        }
+      }
+    },
+    "m3": {
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-b\",\"public_key\":\"gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=\",\"status\":\"active\"},{\"algorithm\":\"Ed25519\",\"id\":\"rs-a\",\"public_key\":\"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=\",\"status\":\"retired\"}],\"rotations\":[{\"from\":\"rs-a\",\"sequence\":2,\"signature\":\"ZBAuax/1/sewKmIL6ZhnPE7qBIEOEP8GkjclBfm78iEOlbMTllpFXTGGbgdoMDqsC38TLV+Q8vKm4eziXQqbDQ==\",\"to\":\"rs-b\"}],\"sequence\":3}",
+      "member": {
+        "sequence": 3,
+        "keys": [
+          {
+            "id": "rs-b",
+            "algorithm": "Ed25519",
+            "public_key": "gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+            "status": "active"
+          },
+          {
+            "id": "rs-a",
+            "algorithm": "Ed25519",
+            "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+            "status": "retired"
+          }
+        ],
+        "rotations": [
+          {
+            "from": "rs-a",
+            "to": "rs-b",
+            "sequence": 2,
+            "signature": "ZBAuax/1/sewKmIL6ZhnPE7qBIEOEP8GkjclBfm78iEOlbMTllpFXTGGbgdoMDqsC38TLV+Q8vKm4eziXQqbDQ=="
+          }
+        ],
+        "signature": {
+          "key_id": "rs-b",
+          "algorithm": "Ed25519",
+          "value": "gLJbiTEMN+bRx3zs8IpO9okKPg5xlwZ3U6C14BfCLQKIR2F13dYH01Cy88eRTEB1eKQ3I+g+oRxPmFjqNvAuCg=="
+        }
+      }
+    },
+    "m4": {
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-b\",\"public_key\":\"gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=\",\"status\":\"active\"}],\"sequence\":4}",
+      "member": {
+        "sequence": 4,
+        "keys": [
+          {
+            "id": "rs-b",
+            "algorithm": "Ed25519",
+            "public_key": "gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+            "status": "active"
+          }
+        ],
+        "signature": {
+          "key_id": "rs-b",
+          "algorithm": "Ed25519",
+          "value": "5YYj0A057VhtFitLVwn2ApQ8KQnO8e2Ic34m8WP1jnyaYPQV3hfVhvt0J4HU4txrTC2JUgO2FLoduGMRJaX6DA=="
+        }
+      }
+    },
+    "bad_rotation": {
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-b\",\"public_key\":\"gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=\",\"status\":\"active\"},{\"algorithm\":\"Ed25519\",\"id\":\"rs-a\",\"public_key\":\"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=\",\"status\":\"retired\"}],\"rotations\":[{\"from\":\"rs-a\",\"sequence\":2,\"signature\":\"LIAazuRMI8+TpjJrxMX3e1V2r4L/QeqHqorBNIchXqIWxTVN6Ru/yCG+4txVHaeoYqq3cQIhUzZxYxW2dlThAg==\",\"to\":\"rs-b\"}],\"sequence\":3}",
+      "member": {
+        "sequence": 3,
+        "keys": [
+          {
+            "id": "rs-b",
+            "algorithm": "Ed25519",
+            "public_key": "gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+            "status": "active"
+          },
+          {
+            "id": "rs-a",
+            "algorithm": "Ed25519",
+            "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+            "status": "retired"
+          }
+        ],
+        "rotations": [
+          {
+            "from": "rs-a",
+            "to": "rs-b",
+            "sequence": 2,
+            "signature": "LIAazuRMI8+TpjJrxMX3e1V2r4L/QeqHqorBNIchXqIWxTVN6Ru/yCG+4txVHaeoYqq3cQIhUzZxYxW2dlThAg=="
+          }
+        ],
+        "signature": {
+          "key_id": "rs-b",
+          "algorithm": "Ed25519",
+          "value": "JsNGct5TZ+Ev+X/sFARr3TPFI45AZs9DOAINEHXkfsTk+Iz2dwHlAxswTpwnOP28bM4Cl5BV+7rZh6WfDF0pDg=="
+        }
+      }
+    },
+    "retired_signer": {
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-a\",\"public_key\":\"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=\",\"status\":\"active\"},{\"algorithm\":\"Ed25519\",\"id\":\"rs-x\",\"public_key\":\"2b8hSHSKhcidparY7gsPwtEF/TnUGkx5ZTY1TwrikAw=\",\"status\":\"active\"}],\"rotations\":[{\"from\":\"rs-a\",\"sequence\":5,\"signature\":\"dmDO6YpNyXJuoZYJ+TbTUv/4Jh8QBqL9360b99nMKNRsQKj1xNbvmjgBWGjNcjdypFeMvUAw47Tb0y+LW5SlDg==\",\"to\":\"rs-x\"}],\"sequence\":5}",
+      "member": {
+        "sequence": 5,
+        "keys": [
+          {
+            "id": "rs-a",
+            "algorithm": "Ed25519",
+            "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+            "status": "active"
+          },
+          {
+            "id": "rs-x",
+            "algorithm": "Ed25519",
+            "public_key": "2b8hSHSKhcidparY7gsPwtEF/TnUGkx5ZTY1TwrikAw=",
+            "status": "active"
+          }
+        ],
+        "rotations": [
+          {
+            "from": "rs-a",
+            "to": "rs-x",
+            "sequence": 5,
+            "signature": "dmDO6YpNyXJuoZYJ+TbTUv/4Jh8QBqL9360b99nMKNRsQKj1xNbvmjgBWGjNcjdypFeMvUAw47Tb0y+LW5SlDg=="
+          }
+        ],
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "LnF+vHKMHMIML5qJIozPmgw1EBnu8pQLRq+yA61lcHnS31Fe0DfiDhLTtRkCLPS4iVeMsy1t7Kn/+LZWdavwDQ=="
+        }
+      }
+    },
+    "swapped_key": {
+      "jcs": "{\"keys\":[{\"algorithm\":\"Ed25519\",\"id\":\"rs-a\",\"public_key\":\"2b8hSHSKhcidparY7gsPwtEF/TnUGkx5ZTY1TwrikAw=\",\"status\":\"active\"}],\"sequence\":5}",
+      "member": {
+        "sequence": 5,
+        "keys": [
+          {
+            "id": "rs-a",
+            "algorithm": "Ed25519",
+            "public_key": "2b8hSHSKhcidparY7gsPwtEF/TnUGkx5ZTY1TwrikAw=",
+            "status": "active"
+          }
+        ],
+        "signature": {
+          "key_id": "rs-a",
+          "algorithm": "Ed25519",
+          "value": "Pg72p3ogHQDK+5ICf3Vy1TbE+IeNzXIksTTczr7Hb9GR4ubpGzgal+HvzTvBSYEOfL+AgYA1Sv4PqqAi79qHDg=="
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "first accept pins rs-a",
+      "pinned": null,
+      "member": "m1",
+      "result": "accept",
+      "sequence": 1,
+      "pinned_after": [
+        "rs-a"
+      ]
+    },
+    {
+      "name": "pre-publish rs-b, signed by pinned rs-a",
+      "pinned": "m1",
+      "member": "m2",
+      "result": "accept",
+      "sequence": 2,
+      "pinned_after": [
+        "rs-a",
+        "rs-b"
+      ]
+    },
+    {
+      "name": "switch to rs-b after seeing the pre-publish",
+      "pinned": "m2",
+      "member": "m3",
+      "result": "accept",
+      "sequence": 3,
+      "pinned_after": [
+        "rs-a",
+        "rs-b"
+      ]
+    },
+    {
+      "name": "client that missed sequence 2 follows rotation rs-a -> rs-b",
+      "pinned": "m1",
+      "member": "m3",
+      "result": "accept",
+      "sequence": 3,
+      "pinned_after": [
+        "rs-a",
+        "rs-b"
+      ]
+    },
+    {
+      "name": "remove retired rs-a",
+      "pinned": "m3",
+      "member": "m4",
+      "result": "accept",
+      "sequence": 4,
+      "pinned_after": [
+        "rs-b"
+      ]
+    },
+    {
+      "name": "client pinned only to rs-a cannot follow once rs-a is removed",
+      "pinned": "m1",
+      "member": "m4",
+      "result": "identity_change"
+    },
+    {
+      "name": "rollback to a lower sequence",
+      "pinned": "m3",
+      "member": "m2",
+      "result": "reject"
+    },
+    {
+      "name": "rotation with an invalid signature",
+      "pinned": "m1",
+      "member": "bad_rotation",
+      "result": "reject"
+    },
+    {
+      "name": "retired key signs a new member and rotation",
+      "pinned": "m3",
+      "member": "retired_signer",
+      "result": "reject"
+    },
+    {
+      "name": "pinned id listed with another public key",
+      "pinned": "m1",
+      "member": "swapped_key",
+      "result": "reject"
+    }
+  ]
+}
