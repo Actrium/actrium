@@ -915,9 +915,13 @@ pub(crate) mod tests {
         let token = [8u8; 32];
         let now = crate::renewal::now_secs();
         let expires_at = now + 7200;
-        crate::renewal::insert_renewal_token(&actor, &crate::renewal::hash_token(&token), expires_at)
-            .await
-            .unwrap();
+        crate::renewal::insert_renewal_token(
+            &actor,
+            &crate::renewal::hash_token(&token),
+            expires_at,
+        )
+        .await
+        .unwrap();
         let store = ControlAttemptStore::new(&secret);
         let attempt_id = [40u8; 16];
 
@@ -966,15 +970,16 @@ pub(crate) mod tests {
         }
     }
 
-    /// A revocation or a Realm suspension that lands after the first check
-    /// still stops a renewal or reissue at commit.
+    /// A revocation, Realm suspension, package revocation or publisher
+    /// suspension that lands after the first check still stops a renewal or
+    /// reissue at commit.
     #[tokio::test]
     async fn work_prepared_before_a_revocation_does_not_commit() {
         setup_db().await;
         let secret = [7u8; 32];
         let store = ControlAttemptStore::new(&secret);
-        for (n, revoke) in [true, false].into_iter().enumerate() {
-            let token = [60 + n as u8; 32];
+        for n in 0..4u8 {
+            let token = [60 + n; 32];
             let realm = format!("attempt-refused-{n}@example.com");
             platform::realm::Realm::create(realm.clone(), "secret-hash".to_string())
                 .await
@@ -983,6 +988,39 @@ pub(crate) mod tests {
                 realm: realm.clone(),
                 serial_number: 11,
             };
+            let pool = platform::storage::db::get_database().get_pool();
+            let publisher = format!("pub{n}.example");
+            let publisher_id = sqlx::query(
+                "INSERT INTO publisher (name, status, created_at) VALUES (?, 'active', 1)",
+            )
+            .bind(&publisher)
+            .execute(pool)
+            .await
+            .unwrap()
+            .last_insert_rowid();
+            let actor_type = format!("{publisher}/worker@1.0.0");
+            sqlx::query(
+                "INSERT INTO publisher_package (publisher_id, publisher, name, version,
+                    type_str, target, manifest, signature, published_at)
+                 VALUES (?, ?, 'worker', '1.0.0', ?, 'wasm32-wasip1', '', '', 1)",
+            )
+            .bind(publisher_id)
+            .bind(&publisher)
+            .bind(&actor_type)
+            .execute(pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO issued_actor_identity
+                    (realm, serial_number, actor_type, target, auth_mode, issued_at)
+                 VALUES (?, 11, ?, 'wasm32-wasip1', ?, 1)",
+            )
+            .bind(&realm)
+            .bind(&actor_type)
+            .bind(actr_protocol::RegisterAuthMode::Package as i32)
+            .execute(pool)
+            .await
+            .unwrap();
             let now = crate::renewal::now_secs();
             crate::renewal::insert_renewal_token(
                 &actor,
@@ -994,7 +1032,7 @@ pub(crate) mod tests {
 
             let renew = acquired(
                 store
-                    .claim(Operation::Renew, &[20 + n as u8; 16], &actor, b"renew")
+                    .claim(Operation::Renew, &[20 + n; 16], &actor, b"renew")
                     .await
                     .unwrap(),
             );
@@ -1005,7 +1043,7 @@ pub(crate) mod tests {
             .unwrap();
             let reissue = acquired(
                 store
-                    .claim(Operation::Reissue, &[30 + n as u8; 16], &actor, b"reissue")
+                    .claim(Operation::Reissue, &[30 + n; 16], &actor, b"reissue")
                     .await
                     .unwrap(),
             );
@@ -1022,12 +1060,39 @@ pub(crate) mod tests {
                 target: None,
             };
 
-            if revoke {
-                crate::renewal::revoke_actor(&actor, "test").await.unwrap();
-            } else {
-                platform::realm::Realm::set_enabled(&realm, false)
+            // Nothing refuses the actor before the change.
+            crate::issuer::AIdIssuer::recheck_actor_on(
+                &mut *pool.acquire().await.unwrap(),
+                &actor,
+                None,
+            )
+            .await
+            .unwrap();
+            match n {
+                0 => {
+                    crate::renewal::revoke_actor(&actor, "test").await.unwrap();
+                }
+                1 => {
+                    platform::realm::Realm::set_enabled(&realm, false)
+                        .await
+                        .unwrap();
+                }
+                2 => {
+                    sqlx::query(
+                        "UPDATE publisher_package SET status = 'revoked' WHERE publisher = ?",
+                    )
+                    .bind(&publisher)
+                    .execute(pool)
                     .await
                     .unwrap();
+                }
+                _ => {
+                    sqlx::query("UPDATE publisher SET status = 'suspended' WHERE name = ?")
+                        .bind(&publisher)
+                        .execute(pool)
+                        .await
+                        .unwrap();
+                }
             }
 
             assert!(matches!(
