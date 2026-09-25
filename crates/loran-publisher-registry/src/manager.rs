@@ -238,7 +238,10 @@ impl PublisherRegistryManager {
         let profile_json = jcs(&document);
         let contact = document["security_contact"].as_str();
 
-        let mut tx = self.pool.begin().await?;
+        // IMMEDIATE takes the write lock before the read, so concurrent
+        // registrations of one publisher run one after another instead of
+        // failing on a stale WAL snapshot.
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let existing = sqlx::query_as::<_, Publisher>("SELECT * FROM publisher WHERE name = ?")
             .bind(publisher)
             .fetch_optional(&mut *tx)

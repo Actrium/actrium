@@ -2279,3 +2279,66 @@ hash = "sha256:abc123"
         "manifest missing version should be rejected: {result:?}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_register_publisher_requests_do_not_fail_internally() {
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
+
+    // A file database in WAL mode with several connections, as in production.
+    let dir = tempfile::tempdir().unwrap();
+    let database = platform::storage::db::Database::new(dir.path())
+        .await
+        .unwrap();
+    let manager = std::sync::Arc::new(PublisherRegistryManager::new(database.get_pool().clone()));
+    let root = SigningKey::generate(&mut OsRng);
+    let roots = [("root-1", &root, "active")];
+    let domain = "race.example";
+    let first = signed_profile(
+        domain,
+        1,
+        &roots,
+        &[(&SigningKey::generate(&mut OsRng), "active")],
+    );
+    let later: Vec<_> = (2..10)
+        .map(|sequence| {
+            signed_profile(
+                domain,
+                sequence,
+                &roots,
+                &[(&SigningKey::generate(&mut OsRng), "active")],
+            )
+        })
+        .collect();
+
+    // The first registration, sent many times at once.
+    let tasks: Vec<_> = (0..8)
+        .map(|_| {
+            let (manager, profile) = (manager.clone(), first.clone());
+            tokio::spawn(async move { register(&manager, &profile).await })
+        })
+        .collect();
+    for task in tasks {
+        task.await
+            .unwrap()
+            .expect("the same first profile registers");
+    }
+
+    // Later profiles at once: each either wins or is refused as not
+    // following the accepted one, never an internal error.
+    let tasks: Vec<_> = later
+        .into_iter()
+        .map(|profile| {
+            let manager = manager.clone();
+            tokio::spawn(async move { register(&manager, &profile).await })
+        })
+        .collect();
+    for task in tasks {
+        match task.await.unwrap() {
+            Ok(_)
+            | Err(PublisherRegistryError::VerificationFailed(_))
+            | Err(PublisherRegistryError::InvalidStatus(_)) => {}
+            Err(error) => panic!("unexpected error: {error:?}"),
+        }
+    }
+}
